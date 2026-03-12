@@ -1,0 +1,43 @@
+#version 450
+
+//
+// Vertical Gaussian Blur Compute Shader
+// 水之流  自上而下  平滑而過
+// Water flows top to bottom — smooth passage
+//
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler2D blurInput;
+layout(binding = 1, rgba16f) writeonly uniform image2D blurOutput;
+
+// 13-tap Gaussian weights (same as horizontal)
+const float weights[7] = float[](
+    0.1964825501511404,
+    0.17466632073498735,
+    0.12098536225957167,
+    0.06559061621449423,
+    0.02780790087584548,
+    0.009216223487917058,
+    0.002388819771686085
+);
+
+void main() {
+    ivec2 size = imageSize(blurOutput);
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec2 texelSize = 1.0 / vec2(textureSize(blurInput, 0));
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+
+    vec3 result = texture(blurInput, uv).rgb * weights[0];
+
+    for (int i = 1; i < 7; ++i) {
+        vec2 offset = vec2(0.0, float(i) * texelSize.y);
+        result += texture(blurInput, uv + offset).rgb * weights[i];
+        result += texture(blurInput, uv - offset).rgb * weights[i];
+    }
+
+    imageStore(blurOutput, coord, vec4(result, 1.0));
+}

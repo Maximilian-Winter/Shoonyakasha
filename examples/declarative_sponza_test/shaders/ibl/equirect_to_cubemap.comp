@@ -1,0 +1,63 @@
+#version 450
+
+//
+// Equirectangular to Cubemap Conversion
+// 四象之始  環形化方
+// Beginning of the Four Symbols — circle becomes square
+//
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler2D equirectMap;
+layout(binding = 1, rgba16f) writeonly uniform image2D outputFace;
+
+layout(push_constant) uniform PushConstants {
+    uint faceIndex;  // 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z
+    uint faceSize;
+} pc;
+
+const float PI = 3.14159265359;
+
+// Get direction vector for cubemap face at UV coordinate
+vec3 getCubeDirection(uint face, vec2 uv) {
+    // Convert UV [0,1] to [-1,1]
+    vec2 st = uv * 2.0 - 1.0;
+
+    vec3 dir;
+    switch(face) {
+        case 0: dir = vec3( 1.0, -st.y, -st.x); break;  // +X
+        case 1: dir = vec3(-1.0, -st.y,  st.x); break;  // -X
+        case 2: dir = vec3( st.x,  1.0,  st.y); break;  // +Y
+        case 3: dir = vec3( st.x, -1.0, -st.y); break;  // -Y
+        case 4: dir = vec3( st.x, -st.y,  1.0); break;  // +Z
+        case 5: dir = vec3(-st.x, -st.y, -1.0); break;  // -Z
+    }
+    return normalize(dir);
+}
+
+// Convert 3D direction to equirectangular UV
+vec2 directionToEquirect(vec3 dir) {
+    // Spherical coordinates
+    float phi = atan(dir.z, dir.x);              // [-PI, PI]
+    float theta = asin(clamp(dir.y, -1.0, 1.0)); // [-PI/2, PI/2]
+
+    // Map to [0, 1]
+    vec2 uv;
+    uv.x = (phi / (2.0 * PI)) + 0.5;   // [0, 1]
+    uv.y = (theta / PI) + 0.5;          // [0, 1]
+
+    return uv;
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+
+    if (coord.x >= int(pc.faceSize) || coord.y >= int(pc.faceSize)) return;
+
+    vec2 uv = (vec2(coord) + 0.5) / float(pc.faceSize);
+    vec3 dir = getCubeDirection(pc.faceIndex, uv);
+    vec2 equirectUV = directionToEquirect(dir);
+
+    vec3 color = texture(equirectMap, equirectUV).rgb;
+    imageStore(outputFace, coord, vec4(color, 1.0));
+}

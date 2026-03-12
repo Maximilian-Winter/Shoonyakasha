@@ -1,0 +1,95 @@
+#version 450
+
+//
+// GPU Particle Simulation Compute Shader
+// 朱雀之焰  萬粒並行
+// The Vermilion Bird's flame — ten thousand particles in parallel
+//
+
+layout(local_size_x = 256) in;
+
+struct Particle {
+    vec4 position;   // xyz = position, w = life
+    vec4 velocity;   // xyz = velocity, w = mass
+};
+
+layout(std430, binding = 0) readonly buffer ParticlesIn {
+    Particle particlesIn[];
+};
+
+layout(std430, binding = 1) writeonly buffer ParticlesOut {
+    Particle particlesOut[];
+};
+
+layout(binding = 2) uniform SimParams {
+    float deltaTime;
+    float gravity;
+    uint  particleCount;
+    float boundaryRadius;
+    vec4  attractorPos;
+} params;
+
+layout(push_constant) uniform PushConstants {
+    uint frameNumber;
+} pc;
+
+// Simple hash for pseudo-random
+float hash(uint seed) {
+    seed = (seed ^ 61u) ^ (seed >> 16u);
+    seed *= 9u;
+    seed = seed ^ (seed >> 4u);
+    seed *= 0x27d4eb2du;
+    seed = seed ^ (seed >> 15u);
+    return float(seed) / float(0xFFFFFFFFu);
+}
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= params.particleCount) return;
+
+    Particle p = particlesIn[index];
+
+    // Gravity
+    p.velocity.y -= params.gravity * params.deltaTime;
+
+    // Attractor force
+    vec3 toAttractor = params.attractorPos.xyz - p.position.xyz;
+    float dist = max(length(toAttractor), 0.1);
+    float attractForce = params.attractorPos.w / (dist * dist);
+    p.velocity.xyz += normalize(toAttractor) * attractForce * params.deltaTime;
+
+    // Damping
+    p.velocity.xyz *= 0.999;
+
+    // Integrate position
+    p.position.xyz += p.velocity.xyz * params.deltaTime;
+
+    // Decrease life
+    p.position.w -= params.deltaTime * 0.1;
+
+    // Boundary reflection
+    if (length(p.position.xyz) > params.boundaryRadius) {
+        p.position.xyz = normalize(p.position.xyz) * params.boundaryRadius;
+        vec3 normal = normalize(p.position.xyz);
+        p.velocity.xyz = reflect(p.velocity.xyz, normal) * 0.8;
+    }
+
+    // Respawn dead particles
+    if (p.position.w <= 0.0) {
+        uint seed = index * 1023u + pc.frameNumber * 7919u;
+        p.position.xyz = vec3(
+            (hash(seed) - 0.5) * 2.0,
+            (hash(seed + 1u) - 0.5) * 2.0,
+            (hash(seed + 2u) - 0.5) * 2.0
+        );
+        p.velocity.xyz = vec3(
+            (hash(seed + 3u) - 0.5) * 4.0,
+            hash(seed + 4u) * 6.0,
+            (hash(seed + 5u) - 0.5) * 4.0
+        );
+        p.position.w = 1.0 + hash(seed + 6u) * 4.0;  // life: 1-5 seconds
+        p.velocity.w = 0.5 + hash(seed + 7u) * 1.5;   // mass
+    }
+
+    particlesOut[index] = p;
+}

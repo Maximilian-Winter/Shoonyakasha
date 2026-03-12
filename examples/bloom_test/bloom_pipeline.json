@@ -1,0 +1,237 @@
+{
+  "version": 2,
+  "name": "BloomPipeline",
+
+  "samplers": {
+    "linearClamp": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "addressMode": "clamp_to_edge"
+    }
+  },
+
+  "descriptorSetLayouts": {
+    "forwardSet": {
+      "bindings": [
+        { "binding": 0, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "count": 1, "name": "camera" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": ["fragment"], "count": 1, "name": "diffuseTexture" }
+      ]
+    },
+    "brightExtractSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["compute"], "count": 1, "name": "sceneColor",
+          "autoBindResource": "sceneColor", "autoBindSampler": "linearClamp" },
+        { "binding": 1, "type": "storage_image", "stages": ["compute"], "count": 1, "name": "bloomBrightPass",
+          "autoBindResource": "bloomBrightPass" },
+        { "binding": 2, "type": "uniform_buffer", "stages": ["compute"], "count": 1, "name": "bloomParams" }
+      ]
+    },
+    "blurHorizontalSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["compute"], "count": 1, "name": "bloomBrightPass",
+          "autoBindResource": "bloomBrightPass", "autoBindSampler": "linearClamp" },
+        { "binding": 1, "type": "storage_image", "stages": ["compute"], "count": 1, "name": "bloomBlurH",
+          "autoBindResource": "bloomBlurH" }
+      ]
+    },
+    "blurVerticalSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["compute"], "count": 1, "name": "bloomBlurH",
+          "autoBindResource": "bloomBlurH", "autoBindSampler": "linearClamp" },
+        { "binding": 1, "type": "storage_image", "stages": ["compute"], "count": 1, "name": "bloomBlurV",
+          "autoBindResource": "bloomBlurV" }
+      ]
+    },
+    "compositeSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "count": 1, "name": "sceneColor",
+          "autoBindResource": "sceneColor", "autoBindSampler": "linearClamp" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": ["fragment"], "count": 1, "name": "bloomBlurV",
+          "autoBindResource": "bloomBlurV", "autoBindSampler": "linearClamp" }
+      ]
+    }
+  },
+
+  "resources": [
+    { "name": "swapchain", "kind": "image", "imported": true },
+    {
+      "name": "sceneColor",
+      "kind": "image",
+      "image": { "format": "R16G16B16A16_SFLOAT" }
+    },
+    {
+      "name": "sceneDepth",
+      "kind": "image",
+      "image": { "format": "D32_SFLOAT" }
+    },
+    {
+      "name": "bloomBrightPass",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "bloomBlurH",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "bloomBlurV",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    }
+  ],
+
+  "passes": [
+    {
+      "name": "ForwardPass",
+      "type": "graphics",
+      "queue": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "pipeline": {
+        "vertexShader": "shaders/forward.vert.spv",
+        "fragmentShader": "shaders/forward.frag.spv",
+        "vertexInput": "none",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none"
+      },
+      "descriptorSets": ["forwardSet"],
+      "pushConstants": [
+        {
+          "stages": ["fragment"],
+          "size": 4,
+          "offset": 0,
+          "bindings": [
+            { "name": "elapsedTime", "offset": 0, "type": "float" }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "sceneColor",
+          "usage": "color_write",
+          "clear": [0.01, 0.01, 0.02, 1.0]
+        },
+        {
+          "resource": "sceneDepth",
+          "usage": "depth_write",
+          "clear": { "depth": 1.0, "stencil": 0 }
+        }
+      ]
+    },
+    {
+      "name": "BrightExtract",
+      "type": "compute",
+      "queue": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [16, 16, 1],
+        "dispatch": {
+          "x": { "resource": "bloomBrightPass", "dimension": "width", "divisor": 16 },
+          "y": { "resource": "bloomBrightPass", "dimension": "height", "divisor": 16 },
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/bright_extract.comp.spv"
+      },
+      "descriptorSets": ["brightExtractSet"],
+      "inputs": [
+        { "resource": "sceneColor", "usage": "shader_read" }
+      ],
+      "outputs": [
+        { "resource": "bloomBrightPass", "usage": "storage_image_write" }
+      ]
+    },
+    {
+      "name": "BlurHorizontal",
+      "type": "compute",
+      "queue": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [16, 16, 1],
+        "dispatch": {
+          "x": { "resource": "bloomBlurH", "dimension": "width", "divisor": 16 },
+          "y": { "resource": "bloomBlurH", "dimension": "height", "divisor": 16 },
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/blur_horizontal.comp.spv"
+      },
+      "descriptorSets": ["blurHorizontalSet"],
+      "inputs": [
+        { "resource": "bloomBrightPass", "usage": "shader_read" }
+      ],
+      "outputs": [
+        { "resource": "bloomBlurH", "usage": "storage_image_write" }
+      ]
+    },
+    {
+      "name": "BlurVertical",
+      "type": "compute",
+      "queue": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [16, 16, 1],
+        "dispatch": {
+          "x": { "resource": "bloomBlurV", "dimension": "width", "divisor": 16 },
+          "y": { "resource": "bloomBlurV", "dimension": "height", "divisor": 16 },
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/blur_vertical.comp.spv"
+      },
+      "descriptorSets": ["blurVerticalSet"],
+      "inputs": [
+        { "resource": "bloomBlurH", "usage": "shader_read" }
+      ],
+      "outputs": [
+        { "resource": "bloomBlurV", "usage": "storage_image_write" }
+      ]
+    },
+    {
+      "name": "Composite",
+      "type": "graphics",
+      "queue": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/bloom_composite.frag.spv",
+        "vertexInput": "none",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none"
+      },
+      "descriptorSets": ["compositeSet"],
+      "inputs": [
+        { "resource": "sceneColor", "usage": "shader_read" },
+        { "resource": "bloomBlurV", "usage": "shader_read" }
+      ],
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_write",
+          "clear": [0.0, 0.0, 0.0, 1.0]
+        }
+      ]
+    }
+  ]
+}
