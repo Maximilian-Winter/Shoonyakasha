@@ -1,0 +1,101 @@
+{
+  "version": 2,
+  "name": "ParticlePipeline",
+
+  "descriptorSetLayouts": {
+    "particleComputeSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["compute"], "count": 1, "name": "particlesIn",
+          "autoBindBuffer": "particlesIn" },
+        { "binding": 1, "type": "storage_buffer", "stages": ["compute"], "count": 1, "name": "particlesOut",
+          "autoBindBuffer": "particlesOut" },
+        { "binding": 2, "type": "uniform_buffer", "stages": ["compute"], "count": 1, "name": "simParams",
+          "autoBindBuffer": "simParams" }
+      ]
+    },
+    "particleRenderSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["vertex"], "count": 1, "name": "particles",
+          "autoBindBuffer": "particlesOut" },
+        { "binding": 1, "type": "uniform_buffer", "stages": ["vertex"], "count": 1, "name": "camera",
+          "autoBindBuffer": "camera" }
+      ]
+    }
+  },
+
+  "resources": [
+    { "name": "swapchain", "kind": "image", "imported": true },
+    {
+      "name": "sceneDepth",
+      "kind": "image",
+      "image": { "format": "D32_SFLOAT" }
+    }
+  ],
+
+  "passes": [
+    {
+      "name": "ParticleSimulate",
+      "type": "compute",
+      "queue": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [256, 1, 1],
+        "dispatch": {
+          "x": { "parameter": "particleCount", "divisor": 256 },
+          "y": 1,
+          "z": 1
+        },
+        "bindDescriptorSets": true
+      },
+      "pipeline": {
+        "computeShader": "shaders/particle_sim.comp.spv"
+      },
+      "descriptorSets": ["particleComputeSet"],
+      "pushConstants": [
+        {
+          "stages": ["compute"],
+          "size": 4,
+          "offset": 0,
+          "bindings": [
+            { "name": "frameNumber", "offset": 0, "type": "uint" }
+          ]
+        }
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "ParticleRender",
+      "type": "graphics",
+      "queue": "graphics",
+      "execution": {
+        "type": "draw",
+        "vertexCount": { "parameter": "particleCount" },
+        "instanceCount": 1,
+        "bindDescriptorSets": true
+      },
+      "pipeline": {
+        "vertexShader": "shaders/particle.vert.spv",
+        "fragmentShader": "shaders/particle.frag.spv",
+        "topology": "point_list",
+        "depthTest": true,
+        "depthWrite": true,
+        "vertexInput": "none",
+        "cullMode": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": ["particleRenderSet"],
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_write",
+          "clear": [0.01, 0.01, 0.02, 1.0]
+        },
+        {
+          "resource": "sceneDepth",
+          "usage": "depth_write",
+          "clear": { "depth": 1.0, "stencil": 0 }
+        }
+      ]
+    }
+  ]
+}

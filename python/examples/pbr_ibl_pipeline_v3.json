@@ -1,0 +1,345 @@
+{
+  "version": 3,
+  "name": "DeclarativePBRIBLPipeline",
+
+  "bufferLayouts": {
+    "CameraUBO": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "view",      "type": "mat4", "source": "scene.camera.view" },
+        { "name": "proj",      "type": "mat4", "source": "scene.camera.projection" },
+        { "name": "invView",   "type": "mat4", "source": "scene.camera.invView" },
+        { "name": "invProj",   "type": "mat4", "source": "scene.camera.invProj" },
+        { "name": "position",  "type": "vec4", "source": "scene.camera.positionVec4" },
+        { "name": "params",    "type": "vec4", "source": "scene.camera.nearFarFovAspect" }
+      ]
+    },
+    "LightsUBO": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "lightCount",            "type": "uint",  "source": "scene.lights.count" },
+        { "name": "padding1",              "type": "float", "source": "const.0" },
+        { "name": "padding2",              "type": "float", "source": "const.0" },
+        { "name": "padding3",              "type": "float", "source": "const.0" },
+        { "name": "lightsPositionType",    "type": "vec4",  "arrayCount": 16, "source": "scene.lights[i].positionType" },
+        { "name": "lightsColorIntensity",  "type": "vec4",  "arrayCount": 16, "source": "scene.lights[i].colorIntensity" },
+        { "name": "lightsDirectionRange",  "type": "vec4",  "arrayCount": 16, "source": "scene.lights[i].directionRange" },
+        { "name": "lightsAttenuation",     "type": "vec4",  "arrayCount": 16, "source": "scene.lights[i].attenuation" }
+      ]
+    },
+    "MaterialPushConstants": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": ["vertex", "fragment"]
+      },
+      "fields": [
+        { "name": "model", "type": "mat4", "source": "entity.transform.worldMatrix" },
+        { "name": "baseColorFactor", "type": "vec4", "source": "entity.material.params.baseColorFactor" },
+        { "name": "metallicFactor", "type": "float", "source": "entity.material.params.metallicFactor" },
+        { "name": "roughnessFactor", "type": "float", "source": "entity.material.params.roughnessFactor" },
+        { "name": "hasNormalMap", "type": "float", "source": "entity.material.textures.normalMap.exists" },
+        { "name": "hasMetalRoughMap", "type": "float", "source": "entity.material.textures.metallicRoughnessMap.exists" },
+        { "name": "alphaCutoff", "type": "float", "source": "entity.material.alphaCutoff" },
+        { "name": "padding1", "type": "float", "source": "const.0" }
+      ]
+    },
+    "particleSSBO": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 50000,
+      "fields": [
+        { "name": "position", "type": "vec4" },
+        { "name": "velocity", "type": "vec4" }
+      ],
+      "source": {
+        "type": "initializer",
+        "seed": 42,
+        "fields": {
+          "position": {
+            "randomRange": {
+              "min": [-12.0, 0.0, -5.0, 2.0],
+              "max": [12.0, 8.0, 5.0, 5.0]
+            }
+          },
+          "velocity": {
+            "randomRange": {
+              "min": [-0.5, 0.5, -0.5, 0.8],
+              "max": [0.5, 1.5, 0.5, 1.2]
+            }
+          }
+        }
+      },
+      "target": {
+        "name": "particles.currentState",
+        "readback": {
+          "frequency": "every_n_frames",
+          "n": 120,
+          "callback": true
+        }
+      },
+      "memory": {
+        "location": "device_local",
+        "transferDirection": "gpu_to_cpu"
+      }
+    },
+    "particleSimParams": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "deltaTime",      "type": "float", "source": "scene.time.delta" },
+        { "name": "gravity",        "type": "float", "source": "scene.custom.particles.gravity" },
+        { "name": "particleCount",  "type": "uint",  "source": "scene.custom.particles.count" },
+        { "name": "boundaryRadius", "type": "float", "source": "scene.custom.particles.boundaryRadius" },
+        { "name": "attractorPos",   "type": "vec4",  "source": "scene.custom.particles.attractorPos" },
+        { "name": "wind",           "type": "vec4",  "source": "scene.custom.particles.wind" },
+        { "name": "damping",        "type": "float", "source": "scene.custom.particles.damping" },
+        { "name": "spawnHeight",    "type": "float", "source": "scene.custom.particles.spawnHeight" },
+        { "name": "padding1",       "type": "float", "source": "const.0" },
+        { "name": "padding2",       "type": "float", "source": "const.0" }
+      ]
+    }
+  },
+
+  "entityDataBindings": {
+    "pbrOpaque": {
+      "perDraw": { "layoutRef": "MaterialPushConstants" },
+      "material": { "layoutRef": "materialSet" }
+    },
+    "pbrTransparent": {
+      "perDraw": { "layoutRef": "MaterialPushConstants" },
+      "material": { "layoutRef": "materialSet" }
+    }
+  },
+
+  "samplers": {
+    "nearestClamp": {
+      "magFilter": "nearest",
+      "minFilter": "nearest",
+      "addressMode": "clamp_to_edge"
+    },
+    "linearClamp": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "mipmapMode": "linear",
+      "addressMode": "clamp_to_edge"
+    }
+  },
+
+  "descriptorSetLayouts": {
+    "cameraSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": ["vertex", "fragment"],
+          "name": "CameraUBO",
+          "autoBindBuffer": "CameraUBO"
+        }
+      ]
+    },
+    "materialSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "albedoMap" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": ["fragment"], "name": "normalMap" },
+        { "binding": 2, "type": "combined_image_sampler", "stages": ["fragment"], "name": "metallicRoughnessMap" }
+      ]
+    },
+    "gbufferReadSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "gPosition", "autoBindResource": "gPosition", "autoBindSampler": "nearestClamp" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": ["fragment"], "name": "gNormal", "autoBindResource": "gNormal", "autoBindSampler": "nearestClamp" },
+        { "binding": 2, "type": "combined_image_sampler", "stages": ["fragment"], "name": "gAlbedo", "autoBindResource": "gAlbedo", "autoBindSampler": "nearestClamp" },
+        { "binding": 3, "type": "combined_image_sampler", "stages": ["fragment"], "name": "gMetallicRoughness", "autoBindResource": "gMetallicRoughness", "autoBindSampler": "nearestClamp" }
+      ]
+    },
+    "iblSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "irradianceMap" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": ["fragment"], "name": "prefilterMap" },
+        { "binding": 2, "type": "combined_image_sampler", "stages": ["fragment"], "name": "brdfLUT" }
+      ]
+    },
+    "lightsSet": {
+      "bindings": [
+        { "binding": 0, "type": "uniform_buffer", "stages": ["fragment"], "name": "LightsUBO", "autoBindBuffer": "LightsUBO" }
+      ]
+    },
+    "tonemapInputSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "hdrColor", "autoBindResource": "litColorHDR", "autoBindSampler": "linearClamp" }
+      ]
+    },
+    "particleComputeSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["compute"], "name": "particles", "autoBindBuffer": "particleSSBO" },
+        { "binding": 1, "type": "uniform_buffer", "stages": ["compute"], "name": "simParams", "autoBindBuffer": "particleSimParams" }
+      ]
+    },
+    "particleRenderSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["vertex"], "name": "particles", "autoBindBuffer": "particleSSBO" }
+      ]
+    }
+  },
+
+  "resources": [
+    { "name": "swapchain", "kind": "image", "imported": true },
+    { "name": "gPosition", "kind": "image", "image": { "format": "R16G16B16A16_SFLOAT" } },
+    { "name": "gNormal", "kind": "image", "image": { "format": "R16G16B16A16_SFLOAT" } },
+    { "name": "gAlbedo", "kind": "image", "image": { "format": "R8G8B8A8_SRGB" } },
+    { "name": "gMetallicRoughness", "kind": "image", "image": { "format": "R8G8_UNORM" } },
+    { "name": "gDepth", "kind": "image", "image": { "format": "D32_SFLOAT" } },
+    { "name": "litColorHDR", "kind": "image", "image": { "format": "R16G16B16A16_SFLOAT" } }
+  ],
+
+  "passes": [
+    {
+      "name": "GBufferPass",
+      "type": "graphics",
+      "execution": {
+        "type": "opaque_geometry",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "pbrOpaque"
+      },
+      "outputs": [
+        { "resource": "gPosition", "usage": "color_write", "clear": [0.0, 0.0, 0.0, 0.0] },
+        { "resource": "gNormal", "usage": "color_write", "clear": [0.5, 0.5, 1.0, 0.0] },
+        { "resource": "gAlbedo", "usage": "color_write", "clear": [0.0, 0.0, 0.0, 0.0] },
+        { "resource": "gMetallicRoughness", "usage": "color_write", "clear": [0.0, 0.5, 0.0, 0.0] },
+        { "resource": "gDepth", "usage": "depth_write", "clear": { "depth": 1.0, "stencil": 0 } }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/pbr_gbuffer.vert.spv",
+        "fragmentShader": "shaders/pbr_gbuffer.frag.spv",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": ["cameraSet", "materialSet"],
+      "pushConstants": [{ "stages": ["vertex", "fragment"], "size": 104, "offset": 0 }]
+    },
+    {
+      "name": "ParticleSimulate",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [256, 1, 1],
+        "dispatch": {
+          "x": { "parameter": "particleCount", "divisor": 256 },
+          "y": 1,
+          "z": 1
+        },
+        "bindDescriptorSets": true
+      },
+      "pipeline": {
+        "computeShader": "shaders/particle_sim.comp.spv"
+      },
+      "descriptorSets": ["particleComputeSet"],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IBLLightingPass",
+      "type": "graphics",
+      "execution": { "type": "fullscreen" },
+      "inputs": [
+        { "resource": "gPosition", "usage": "shader_read" },
+        { "resource": "gNormal", "usage": "shader_read" },
+        { "resource": "gAlbedo", "usage": "shader_read" },
+        { "resource": "gMetallicRoughness", "usage": "shader_read" }
+      ],
+      "outputs": [
+        { "resource": "litColorHDR", "usage": "color_write", "clear": [0.0, 0.0, 0.0, 1.0] }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/pbr_ibl_lighting.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": ["gbufferReadSet", "iblSet", "cameraSet", "lightsSet"]
+    },
+    {
+      "name": "ForwardTransparencyPass",
+      "type": "graphics",
+      "execution": {
+        "type": "transparent_geometry",
+        "sortMode": "back_to_front",
+        "entityDataBinding": "pbrTransparent"
+      },
+      "inputs": [
+        { "resource": "gDepth", "usage": "depth_read" }
+      ],
+      "outputs": [
+        { "resource": "litColorHDR", "usage": "color_blend" },
+        { "resource": "gDepth", "usage": "depth_read" }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/forward_transparent.vert.spv",
+        "fragmentShader": "shaders/forward_transparent.frag.spv",
+        "depthTest": true,
+        "depthWrite": false,
+        "cullMode": "none",
+        "blending": "alpha"
+      },
+      "descriptorSets": ["cameraSet", "materialSet", "iblSet", "lightsSet"],
+      "pushConstants": [{ "stages": ["vertex", "fragment"], "size": 104, "offset": 0 }]
+    },
+    {
+      "name": "ParticleRender",
+      "type": "graphics",
+      "execution": {
+        "type": "draw",
+        "vertexCount": { "parameter": "particleCount" },
+        "instanceCount": 1,
+        "bindDescriptorSets": true
+      },
+      "inputs": [
+        { "resource": "gDepth", "usage": "depth_read" }
+      ],
+      "outputs": [
+        { "resource": "litColorHDR", "usage": "color_blend" },
+        { "resource": "gDepth", "usage": "depth_read" }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/particle.vert.spv",
+        "fragmentShader": "shaders/particle.frag.spv",
+        "topology": "point_list",
+        "depthTest": true,
+        "depthWrite": false,
+        "vertexInput": "none",
+        "cullMode": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": ["cameraSet", "particleRenderSet"]
+    },
+    {
+      "name": "TonemapPass",
+      "type": "graphics",
+      "execution": { "type": "fullscreen" },
+      "inputs": [
+        { "resource": "litColorHDR", "usage": "shader_read" }
+      ],
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_write", "clear": [0.0, 0.0, 0.0, 1.0] }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/tonemap.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": ["tonemapInputSet"]
+    }
+  ]
+}

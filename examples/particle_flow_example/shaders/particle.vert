@@ -1,0 +1,68 @@
+#version 450
+//
+// Particle Flow — Vertex Shader
+//
+// Each point is a luminous orb — bigger, bolder, speed-reactive
+// Reads particle data from SSBO via gl_VertexIndex (no vertex buffers)
+// Passes particle identity and elapsed time for dynamic color shifting
+//
+
+struct Particle {
+    vec4 position;   // xyz = position, w = life
+    vec4 velocity;   // xyz = velocity, w = mass
+};
+
+// set 0 = cameraSet (reuses existing dot-path CameraUBO)
+layout(set = 0, binding = 0) uniform CameraUBO {
+    mat4 view;
+    mat4 proj;
+    mat4 invView;
+    mat4 invProj;
+    vec4 position;    // xyz = camera world position
+    vec4 params;      // x = near, y = far, z = fov, w = aspect
+} camera;
+
+// set 1 = particleRenderSet (SSBO)
+layout(std430, set = 1, binding = 0) readonly buffer ParticleBuffer {
+    Particle particles[];
+};
+
+// set 2 = particleTimeSet (per-frame time data)
+layout(set = 2, binding = 0) uniform RenderParams {
+    float elapsedTime;
+    float deltaTime;
+    float pad0;
+    float pad1;
+} renderParams;
+
+layout(location = 0) out float outLife;
+layout(location = 1) out float outSpeed;
+layout(location = 2) flat out int outParticleID;
+layout(location = 3) out float outElapsedTime;
+layout(location = 4) out vec3 outWorldPos;
+
+void main() {
+    Particle p = particles[gl_VertexIndex];
+
+    // Transform to clip space
+    vec4 viewPos = camera.view * vec4(p.position.xyz, 1.0);
+    gl_Position = camera.proj * viewPos;
+
+    // Point size: large, speed-responsive, depth-scaled
+    float lifeFactor = clamp(p.position.w * 0.3, 0.1, 1.0);
+    float speed = length(p.velocity.xyz);
+    float speedSize = 1.0 + clamp(speed / 5.0, 0.0, 1.5);
+    float depthFactor = 1.0 / max(abs(viewPos.z), 0.1);
+
+    // Gentle pulsation per particle — each at its own phase
+    float pulse = 1.0 + 0.15 * sin(renderParams.elapsedTime * 3.0 + float(gl_VertexIndex) * 0.01);
+
+    gl_PointSize = clamp(80.0 * lifeFactor * speedSize * depthFactor * pulse, 4.0, 64.0);
+
+    // Pass to fragment shader
+    outLife = p.position.w;
+    outSpeed = speed;
+    outParticleID = gl_VertexIndex;
+    outElapsedTime = renderParams.elapsedTime;
+    outWorldPos = p.position.xyz;
+}

@@ -1,0 +1,138 @@
+#version 450
+//
+// Sponza Particle Simulation — Warm Embers
+//
+// 粒子如火花 — Particles like sparks of wisdom
+// Born from the void, dancing in light, dissolving back into emptiness
+//
+// Single SSBO in-place update — each particle is independent
+//
+
+layout(local_size_x = 256) in;
+
+struct Particle {
+    vec4 position;   // xyz = world position, w = life (seconds)
+    vec4 velocity;   // xyz = velocity m/s, w = mass
+};
+
+// In-place read-modify-write (no ping-pong needed)
+layout(std430, binding = 0) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+layout(std140, binding = 1) uniform SimParams {
+    float deltaTime;
+    float gravity;
+    uint  particleCount;
+    float boundaryRadius;
+    vec4  attractorPos;    // xyz = position, w = strength
+    vec4  wind;            // xyz = direction*speed, w = turbulence
+    float damping;
+    float spawnHeight;
+    float padding1;
+    float padding2;
+} params;
+
+// ═══════════════════════════════════════════════════════════════
+// Hash function for GPU pseudo-random numbers
+// ═══════════════════════════════════════════════════════════════
+float hash(uint seed) {
+    seed = (seed ^ 61u) ^ (seed >> 16u);
+    seed *= 9u;
+    seed = seed ^ (seed >> 4u);
+    seed *= 0x27d4eb2du;
+    seed = seed ^ (seed >> 15u);
+    return float(seed) / float(0xFFFFFFFFu);
+}
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= params.particleCount) return;
+
+    Particle p = particles[index];
+
+    // ── Gravity (gentle downward pull) ──
+    p.velocity.y -= params.gravity * params.deltaTime;
+
+    // ── Attractor force (warm point light in atrium center) ──
+    vec3 toAttractor = params.attractorPos.xyz - p.position.xyz;
+    float dist = max(length(toAttractor), 0.5);
+    float attractForce = params.attractorPos.w / (dist * dist);
+    p.velocity.xyz += normalize(toAttractor) * attractForce * params.deltaTime;
+
+    // ── Wind with turbulence ──
+    uint seed = index * 1021u + uint(abs(p.position.x * 50.0 + p.position.z * 70.0));
+    vec3 turbulence = vec3(
+        hash(seed) - 0.5,
+        hash(seed + 1u) - 0.5,
+        hash(seed + 2u) - 0.5
+    ) * params.wind.w;
+    p.velocity.xyz += (params.wind.xyz + turbulence) * params.deltaTime;
+
+    // ── Buoyancy (embers rise) ──
+    float buoyancy = 0.8 / max(p.velocity.w, 0.5);  // Lighter = more buoyant
+    p.velocity.y += buoyancy * params.deltaTime;
+
+    // ── Damping (air resistance) ──
+    p.velocity.xyz *= params.damping;
+
+    // ── Integrate position ──
+    p.position.xyz += p.velocity.xyz * params.deltaTime;
+
+    // ── Decrease life ──
+    p.position.w -= params.deltaTime;
+
+    // ── Box boundary (Sponza atrium) ──
+    const vec3 boundsMin = vec3(-14.0, 0.0, -6.0);
+    const vec3 boundsMax = vec3(14.0, 12.0, 6.0);
+    const float restitution = 0.3;  // Embers lose energy on bounce
+
+    if (p.position.x < boundsMin.x) {
+        p.position.x = boundsMin.x;
+        p.velocity.x = abs(p.velocity.x) * restitution;
+    } else if (p.position.x > boundsMax.x) {
+        p.position.x = boundsMax.x;
+        p.velocity.x = -abs(p.velocity.x) * restitution;
+    }
+
+    if (p.position.y < boundsMin.y) {
+        p.position.y = boundsMin.y;
+        p.velocity.y = abs(p.velocity.y) * restitution;
+    } else if (p.position.y > boundsMax.y) {
+        p.position.y = boundsMax.y;
+        p.velocity.y = -abs(p.velocity.y) * restitution;
+    }
+
+    if (p.position.z < boundsMin.z) {
+        p.position.z = boundsMin.z;
+        p.velocity.z = abs(p.velocity.z) * restitution;
+    } else if (p.position.z > boundsMax.z) {
+        p.position.z = boundsMax.z;
+        p.velocity.z = -abs(p.velocity.z) * restitution;
+    }
+
+    // ── Respawn dead particles ──
+    if (p.position.w <= 0.0) {
+        seed = index * 1023u + uint(gl_GlobalInvocationID.x * 31u);
+
+        // Respawn near floor, scattered across atrium
+        p.position.xyz = vec3(
+            (hash(seed) - 0.5) * 24.0,            // x: -12 to +12
+            params.spawnHeight + hash(seed + 1u),  // y: near floor with slight variation
+            (hash(seed + 2u) - 0.5) * 10.0         // z: -5 to +5
+        );
+
+        // Initial upward velocity — embers rise
+        p.velocity.xyz = vec3(
+            (hash(seed + 3u) - 0.5) * 1.0,     // x drift
+            1.5 + hash(seed + 4u) * 2.0,        // y: 1.5-3.5 m/s upward
+            (hash(seed + 5u) - 0.5) * 1.0       // z drift
+        );
+
+        p.position.w = 2.0 + hash(seed + 6u) * 3.0;   // life: 2-5 seconds
+        p.velocity.w = 0.8 + hash(seed + 7u) * 0.4;   // mass: 0.8-1.2
+    }
+
+    // Write back in-place
+    particles[index] = p;
+}

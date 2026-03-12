@@ -1,0 +1,1058 @@
+//
+// Shoonyakasha Engine - Frame Graph Export
+//
+// 青龍司生  生發而有序
+// The Azure Dragon governs growth — making the invisible visible
+//
+
+#include "Vulkan/FrameGraph/FrameGraphExport.h"
+#include "Vulkan/FrameGraph/FrameGraph.h"
+
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <algorithm>
+#include <unordered_set>
+
+namespace Shoonyakasha {
+namespace FrameGraph {
+
+// ═══════════════════════════════════════════════════════════════
+// Internal Helpers
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+// Escape string for DOT labels
+std::string escapeDotString(const std::string& str) {
+    std::string result;
+    result.reserve(str.size() * 2);
+    for (char c : str) {
+        switch (c) {
+            case '"':  result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': break;
+            default:   result += c; break;
+        }
+    }
+    return result;
+}
+
+// Escape string for JSON
+std::string escapeJsonString(const std::string& str) {
+    std::string result;
+    result.reserve(str.size() * 2);
+    for (char c : str) {
+        switch (c) {
+            case '"':  result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 32) {
+                    // Control characters
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                    result += buf;
+                } else {
+                    result += c;
+                }
+                break;
+        }
+    }
+    return result;
+}
+
+// Get color for queue type
+std::string getQueueColor(QueueType queue) {
+    switch (queue) {
+        case QueueType::Graphics: return "lightblue";
+        case QueueType::Compute:  return "lightgreen";
+        default:                  return "lightgray";
+    }
+}
+
+std::string getQueueBorderColor(QueueType queue) {
+    switch (queue) {
+        case QueueType::Graphics: return "blue";
+        case QueueType::Compute:  return "green";
+        default:                  return "gray";
+    }
+}
+
+// Get color for resource kind
+std::string getResourceColor(ResourceKind kind) {
+    switch (kind) {
+        case ResourceKind::Image:  return "lightyellow";
+        case ResourceKind::Buffer: return "lightcyan";
+        default:                   return "white";
+    }
+}
+
+// Format bytes to human readable
+std::string formatBytes(VkDeviceSize bytes) {
+    if (bytes == 0) return "unknown";
+
+    const char* units[] = { "B", "KB", "MB", "GB" };
+    int unitIndex = 0;
+    double size = static_cast<double>(bytes);
+
+    while (size >= 1024.0 && unitIndex < 3) {
+        size /= 1024.0;
+        unitIndex++;
+    }
+
+    std::ostringstream oss;
+    if (unitIndex == 0) {
+        oss << static_cast<uint64_t>(size) << " " << units[unitIndex];
+    } else {
+        oss << std::fixed << std::setprecision(1) << size << " " << units[unitIndex];
+    }
+    return oss.str();
+}
+
+// Check if pass is in filter (empty filter = include all)
+bool passInFilter(const std::string& passName, const std::vector<std::string>& filter) {
+    if (filter.empty()) return true;
+    return std::find(filter.begin(), filter.end(), passName) != filter.end();
+}
+
+bool resourceInFilter(const std::string& resourceName, const std::vector<std::string>& filter) {
+    if (filter.empty()) return true;
+    return std::find(filter.begin(), filter.end(), resourceName) != filter.end();
+}
+
+// Build pass name -> QueueType lookup from builder
+std::unordered_map<std::string, QueueType> buildPassQueueMap(const FrameGraphBuilder& builder) {
+    std::unordered_map<std::string, QueueType> map;
+    const auto& passes = builder.getPassDeclarations();
+    for (const auto& pass : passes) {
+        map[pass.name] = pass.queueType;
+    }
+    return map;
+}
+
+// Build resource name -> ResourceDeclaration lookup
+std::unordered_map<std::string, ResourceDeclaration> buildResourceMap(const FrameGraphBuilder& builder) {
+    std::unordered_map<std::string, ResourceDeclaration> map;
+    const auto& resources = builder.getResourceDeclarations();
+    for (const auto& res : resources) {
+        map[res.name] = res;
+    }
+    return map;
+}
+
+} // anonymous namespace
+
+// ═══════════════════════════════════════════════════════════════
+// DOT Export Implementation
+// ═══════════════════════════════════════════════════════════════
+
+std::string exportToDot(
+    const FrameGraphBuilder& builder,
+    const AnalysisResult& analysis,
+    const ExportOptions& options
+) {
+    std::ostringstream dot;
+
+    // Header
+    dot << "digraph FrameGraph {\n";
+    dot << "  // Generated by Shoonyakasha Frame Graph Analyzer\n";
+    dot << "  // 圖之以形  明之以道\n\n";
+
+    // Graph attributes
+    dot << "  rankdir=" << options.graphRankDir << ";\n";
+    dot << "  compound=true;\n";
+    dot << "  fontname=\"Helvetica\";\n";
+    dot << "  node [fontname=\"Helvetica\"];\n";
+    dot << "  edge [fontname=\"Helvetica\"];\n\n";
+
+    // Build lookup maps
+    auto passQueueMap = buildPassQueueMap(builder);
+    auto resourceMap = buildResourceMap(builder);
+
+    // Collect culled and live pass names
+    std::unordered_set<std::string> culledSet(
+        analysis.cullingReport.culledPasses.begin(),
+        analysis.cullingReport.culledPasses.end()
+    );
+    std::unordered_set<std::string> liveSet(
+        analysis.cullingReport.livePasses.begin(),
+        analysis.cullingReport.livePasses.end()
+    );
+
+    // ── Queue Batch Clusters ──
+    if (options.clusterByBatch && !analysis.queueBatches.empty()) {
+        int batchIdx = 0;
+        for (const auto& batch : analysis.queueBatches) {
+            dot << "  subgraph cluster_batch_" << batchIdx++ << " {\n";
+            dot << "    label=\"" << batch.queueType << " Queue\";\n";
+            dot << "    style=rounded;\n";
+            dot << "    color=" << getQueueBorderColor(
+                batch.queueType == "graphics" ? QueueType::Graphics : QueueType::Compute
+            ) << ";\n";
+            dot << "    bgcolor=\"#f8f8f8\";\n";
+
+            for (const auto& passName : batch.passes) {
+                if (!passInFilter(passName, options.filterPasses)) continue;
+
+                bool isCulled = culledSet.count(passName) > 0;
+                if (isCulled && !options.showCulledPasses) continue;
+
+                auto queueIt = passQueueMap.find(passName);
+                QueueType queue = (queueIt != passQueueMap.end()) ? queueIt->second : QueueType::Graphics;
+
+                std::string fillColor = isCulled ? "lightgray" : getQueueColor(queue);
+                std::string borderColor = isCulled ? "gray" : getQueueBorderColor(queue);
+                std::string style = isCulled ? "dashed,filled" : "filled";
+
+                std::string label = passName;
+                if (isCulled) {
+                    auto reasonIt = analysis.cullingReport.cullReasons.find(passName);
+                    if (reasonIt != analysis.cullingReport.cullReasons.end()) {
+                        label += "\\n(CULLED: " + escapeDotString(reasonIt->second) + ")";
+                    } else {
+                        label += "\\n(CULLED)";
+                    }
+                }
+
+                dot << "    \"" << passName << "\" [shape=" << options.passNodeShape
+                    << ", style=\"" << style << "\", fillcolor=\"" << fillColor
+                    << "\", color=\"" << borderColor << "\", label=\"" << label << "\"];\n";
+            }
+
+            dot << "  }\n\n";
+        }
+    } else {
+        // No batching - just output all passes
+        dot << "  // Pass Nodes\n";
+
+        const auto& passes = builder.getPassDeclarations();
+        for (const auto& pass : passes) {
+            if (!passInFilter(pass.name, options.filterPasses)) continue;
+
+            bool isCulled = culledSet.count(pass.name) > 0;
+            if (isCulled && !options.showCulledPasses) continue;
+
+            std::string fillColor = isCulled ? "lightgray" :
+                (options.colorByQueue ? getQueueColor(pass.queueType) : "white");
+            std::string borderColor = isCulled ? "gray" :
+                (options.colorByQueue ? getQueueBorderColor(pass.queueType) : "black");
+            std::string style = isCulled ? "dashed,filled" : "filled";
+
+            std::string label = pass.name;
+            if (isCulled) {
+                auto reasonIt = analysis.cullingReport.cullReasons.find(pass.name);
+                if (reasonIt != analysis.cullingReport.cullReasons.end()) {
+                    label += "\\n(CULLED: " + escapeDotString(reasonIt->second) + ")";
+                } else {
+                    label += "\\n(CULLED)";
+                }
+            }
+
+            dot << "  \"" << pass.name << "\" [shape=" << options.passNodeShape
+                << ", style=\"" << style << "\", fillcolor=\"" << fillColor
+                << "\", color=\"" << borderColor << "\", label=\"" << label << "\"];\n";
+        }
+        dot << "\n";
+    }
+
+    // ── Resource Nodes (if showResourceNodes) ──
+    if (options.showResourceNodes) {
+        dot << "  // Resource Nodes\n";
+
+        const auto& resources = builder.getResourceDeclarations();
+        for (const auto& res : resources) {
+            if (!resourceInFilter(res.name, options.filterResources)) continue;
+
+            std::string fillColor = getResourceColor(res.kind);
+            std::string label = res.name;
+
+            // Add format info for images
+            if (res.kind == ResourceKind::Image && res.imageDesc.format != VK_FORMAT_UNDEFINED) {
+                label += "\\n" + FrameGraphAnalyzer::formatToString(res.imageDesc.format);
+            }
+
+            // Mark imported resources
+            if (res.imported) {
+                label += "\\n(imported)";
+            }
+
+            dot << "  \"res_" << res.name << "\" [shape=" << options.resourceNodeShape
+                << ", style=filled, fillcolor=\"" << fillColor
+                << "\", label=\"" << label << "\"];\n";
+        }
+        dot << "\n";
+    }
+
+    // ── Dependency Edges ──
+    dot << "  // Dependencies\n";
+
+    if (options.showResourceNodes) {
+        // Full graph: Pass -> Resource -> Pass
+        for (const auto& edge : analysis.dependencyEdges) {
+            if (!passInFilter(edge.fromPass, options.filterPasses)) continue;
+            if (!passInFilter(edge.toPass, options.filterPasses)) continue;
+            if (!resourceInFilter(edge.resourceName, options.filterResources)) continue;
+
+            // Check if passes are culled
+            bool fromCulled = culledSet.count(edge.fromPass) > 0;
+            bool toCulled = culledSet.count(edge.toPass) > 0;
+
+            if ((fromCulled || toCulled) && !options.showCulledPasses) continue;
+
+            std::string edgeColor = (fromCulled || toCulled) ? "gray" : "black";
+            std::string edgeStyle = (fromCulled || toCulled) ? "dashed" : "solid";
+
+            // Producer -> Resource
+            dot << "  \"" << edge.fromPass << "\" -> \"res_" << edge.resourceName
+                << "\" [label=\"write\", color=\"" << edgeColor << "\", style=\"" << edgeStyle << "\"];\n";
+
+            // Resource -> Consumer
+            dot << "  \"res_" << edge.resourceName << "\" -> \"" << edge.toPass
+                << "\" [label=\"read\", color=\"" << edgeColor << "\", style=\"" << edgeStyle << "\"];\n";
+        }
+    } else {
+        // Pass-centric: Pass -> Pass (labeled with resource)
+        for (const auto& edge : analysis.dependencyEdges) {
+            if (!passInFilter(edge.fromPass, options.filterPasses)) continue;
+            if (!passInFilter(edge.toPass, options.filterPasses)) continue;
+
+            bool fromCulled = culledSet.count(edge.fromPass) > 0;
+            bool toCulled = culledSet.count(edge.toPass) > 0;
+
+            if ((fromCulled || toCulled) && !options.showCulledPasses) continue;
+
+            std::string edgeColor = (fromCulled || toCulled) ? "gray" :
+                (edge.isCrossQueue ? "red" : "black");
+            std::string edgeStyle = (fromCulled || toCulled) ? "dashed" : "solid";
+
+            dot << "  \"" << edge.fromPass << "\" -> \"" << edge.toPass
+                << "\" [label=\"" << edge.resourceName << "\", color=\"" << edgeColor
+                << "\", style=\"" << edgeStyle << "\"";
+
+            if (edge.isCrossQueue) {
+                dot << ", penwidth=2";
+            }
+
+            dot << "];\n";
+        }
+    }
+
+    // ── Barrier Annotations ──
+    if (options.showBarriers && !options.showResourceNodes) {
+        dot << "\n  // Barrier Annotations\n";
+
+        // Group barriers by resource for cleaner output
+        std::unordered_map<std::string, std::vector<const BarrierAnalysis*>> barriersByResource;
+        for (const auto& barrier : analysis.barriers) {
+            barriersByResource[barrier.resourceName].push_back(&barrier);
+        }
+
+        // Add barrier info as edge labels or separate edges
+        for (const auto& barrier : analysis.barriers) {
+            if (!resourceInFilter(barrier.resourceName, options.filterResources)) continue;
+            if (!passInFilter(barrier.passName, options.filterPasses)) continue;
+
+            // Find the producer pass for this resource
+            std::string producerPass;
+            for (const auto& edge : analysis.dependencyEdges) {
+                if (edge.resourceName == barrier.resourceName && edge.toPass == barrier.passName) {
+                    producerPass = edge.fromPass;
+                    break;
+                }
+            }
+
+            if (!producerPass.empty()) {
+                std::string barrierLabel = barrier.oldLayoutStr + " -> " + barrier.newLayoutStr;
+
+                std::string color = barrier.isRedundant ? "orange" : "red";
+
+                dot << "  \"" << producerPass << "\" -> \"" << barrier.passName
+                    << "\" [style=dotted, color=\"" << color << "\", "
+                    << "label=\"" << escapeDotString(barrierLabel) << "\", fontsize=8, constraint=false];\n";
+            }
+        }
+    }
+
+    // Footer
+    dot << "}\n";
+
+    return dot.str();
+}
+
+bool exportToDotFile(
+    const std::string& filePath,
+    const FrameGraphBuilder& builder,
+    const AnalysisResult& analysis,
+    const ExportOptions& options
+) {
+    std::ofstream file(filePath);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    file << exportToDot(builder, analysis, options);
+    return file.good();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// JSON Export Implementation
+// ═══════════════════════════════════════════════════════════════
+
+std::string exportToJson(
+    const FrameGraphBuilder& builder,
+    const AnalysisResult& analysis,
+    const ExportOptions& options
+) {
+    std::ostringstream json;
+    const std::string indent = options.prettyPrint ? "  " : "";
+    const std::string nl = options.prettyPrint ? "\n" : "";
+
+    auto quote = [](const std::string& s) { return "\"" + escapeJsonString(s) + "\""; };
+
+    json << "{" << nl;
+
+    // ── Statistics ──
+    if (options.includeStatistics) {
+        json << indent << "\"statistics\": {" << nl;
+        json << indent << indent << "\"totalPasses\": " << analysis.statistics.totalPasses << "," << nl;
+        json << indent << indent << "\"livePasses\": " << analysis.statistics.livePasses << "," << nl;
+        json << indent << indent << "\"culledPasses\": " << analysis.statistics.culledPasses << "," << nl;
+        json << indent << indent << "\"graphicsPasses\": " << analysis.statistics.graphicsPasses << "," << nl;
+        json << indent << indent << "\"computePasses\": " << analysis.statistics.computePasses << "," << nl;
+        json << indent << indent << "\"transferPasses\": " << analysis.statistics.transferPasses << "," << nl;
+        json << indent << indent << "\"totalResources\": " << analysis.statistics.totalResources << "," << nl;
+        json << indent << indent << "\"imageResources\": " << analysis.statistics.imageResources << "," << nl;
+        json << indent << indent << "\"bufferResources\": " << analysis.statistics.bufferResources << "," << nl;
+        json << indent << indent << "\"importedResources\": " << analysis.statistics.importedResources << "," << nl;
+        json << indent << indent << "\"totalBarriers\": " << analysis.statistics.totalBarriers << "," << nl;
+        json << indent << indent << "\"redundantBarriers\": " << analysis.statistics.redundantBarriers << "," << nl;
+        json << indent << indent << "\"estimatedMemoryBytes\": " << analysis.statistics.estimatedMemoryUsage << "," << nl;
+        json << indent << indent << "\"potentialSavingsBytes\": " << analysis.statistics.potentialMemorySavings << nl;
+        json << indent << "}," << nl;
+    }
+
+    // ── Findings ──
+    json << indent << "\"findings\": [" << nl;
+    for (size_t i = 0; i < analysis.findings.size(); ++i) {
+        const auto& f = analysis.findings[i];
+        json << indent << indent << "{" << nl;
+        json << indent << indent << indent << "\"severity\": " << quote(FrameGraphAnalyzer::severityToString(f.severity)) << "," << nl;
+        json << indent << indent << indent << "\"category\": " << quote(f.category) << "," << nl;
+        json << indent << indent << indent << "\"passName\": " << quote(f.passName) << "," << nl;
+        json << indent << indent << indent << "\"resourceName\": " << quote(f.resourceName) << "," << nl;
+        json << indent << indent << indent << "\"message\": " << quote(f.message) << "," << nl;
+        json << indent << indent << indent << "\"suggestion\": " << quote(f.suggestion) << nl;
+        json << indent << indent << "}" << (i + 1 < analysis.findings.size() ? "," : "") << nl;
+    }
+    json << indent << "]," << nl;
+
+    // ── Culling Report ──
+    json << indent << "\"cullingReport\": {" << nl;
+    json << indent << indent << "\"culledPasses\": [";
+    for (size_t i = 0; i < analysis.cullingReport.culledPasses.size(); ++i) {
+        json << quote(analysis.cullingReport.culledPasses[i]);
+        if (i + 1 < analysis.cullingReport.culledPasses.size()) json << ", ";
+    }
+    json << "]," << nl;
+
+    json << indent << indent << "\"livePasses\": [";
+    for (size_t i = 0; i < analysis.cullingReport.livePasses.size(); ++i) {
+        json << quote(analysis.cullingReport.livePasses[i]);
+        if (i + 1 < analysis.cullingReport.livePasses.size()) json << ", ";
+    }
+    json << "]," << nl;
+
+    json << indent << indent << "\"cullReasons\": {" << nl;
+    size_t reasonIdx = 0;
+    for (const auto& [pass, reason] : analysis.cullingReport.cullReasons) {
+        json << indent << indent << indent << quote(pass) << ": " << quote(reason);
+        if (++reasonIdx < analysis.cullingReport.cullReasons.size()) json << ",";
+        json << nl;
+    }
+    json << indent << indent << "}" << nl;
+    json << indent << "}," << nl;
+
+    // ── Barriers ──
+    if (options.includeBarrierDetails) {
+        json << indent << "\"barriers\": [" << nl;
+        for (size_t i = 0; i < analysis.barriers.size(); ++i) {
+            const auto& b = analysis.barriers[i];
+            json << indent << indent << "{" << nl;
+            json << indent << indent << indent << "\"resourceName\": " << quote(b.resourceName) << "," << nl;
+            json << indent << indent << indent << "\"passName\": " << quote(b.passName) << "," << nl;
+            json << indent << indent << indent << "\"oldLayout\": " << quote(b.oldLayoutStr) << "," << nl;
+            json << indent << indent << indent << "\"newLayout\": " << quote(b.newLayoutStr) << "," << nl;
+            json << indent << indent << indent << "\"srcStage\": " << quote(b.srcStageStr) << "," << nl;
+            json << indent << indent << indent << "\"dstStage\": " << quote(b.dstStageStr) << "," << nl;
+            json << indent << indent << indent << "\"srcAccess\": " << quote(b.srcAccessStr) << "," << nl;
+            json << indent << indent << indent << "\"dstAccess\": " << quote(b.dstAccessStr) << "," << nl;
+            json << indent << indent << indent << "\"isQueueTransfer\": " << (b.isQueueOwnershipTransfer ? "true" : "false") << "," << nl;
+            json << indent << indent << indent << "\"isRedundant\": " << (b.isRedundant ? "true" : "false") << nl;
+            json << indent << indent << "}" << (i + 1 < analysis.barriers.size() ? "," : "") << nl;
+        }
+        json << indent << "]," << nl;
+    }
+
+    // ── Resource Lifetimes ──
+    if (options.includeLifetimeDetails) {
+        json << indent << "\"resourceLifetimes\": [" << nl;
+        for (size_t i = 0; i < analysis.resourceLifetimes.size(); ++i) {
+            const auto& r = analysis.resourceLifetimes[i];
+            json << indent << indent << "{" << nl;
+            json << indent << indent << indent << "\"name\": " << quote(r.name) << "," << nl;
+            json << indent << indent << indent << "\"kind\": " << quote(FrameGraphAnalyzer::resourceKindToString(r.kind)) << "," << nl;
+            json << indent << indent << indent << "\"imported\": " << (r.imported ? "true" : "false") << "," << nl;
+            json << indent << indent << indent << "\"firstUsagePass\": " << quote(r.firstUsagePassName) << "," << nl;
+            json << indent << indent << indent << "\"lastUsagePass\": " << quote(r.lastUsagePassName) << "," << nl;
+            json << indent << indent << indent << "\"estimatedSizeBytes\": " << r.estimatedSize << "," << nl;
+            json << indent << indent << indent << "\"couldBeTransient\": " << (r.couldBeTransient ? "true" : "false") << "," << nl;
+            json << indent << indent << indent << "\"aliasableWith\": [";
+            for (size_t j = 0; j < r.aliasableWith.size(); ++j) {
+                json << quote(r.aliasableWith[j]);
+                if (j + 1 < r.aliasableWith.size()) json << ", ";
+            }
+            json << "]" << nl;
+            json << indent << indent << "}" << (i + 1 < analysis.resourceLifetimes.size() ? "," : "") << nl;
+        }
+        json << indent << "]," << nl;
+    }
+
+    // ── Dependency Edges ──
+    json << indent << "\"dependencies\": [" << nl;
+    for (size_t i = 0; i < analysis.dependencyEdges.size(); ++i) {
+        const auto& e = analysis.dependencyEdges[i];
+        json << indent << indent << "{" << nl;
+        json << indent << indent << indent << "\"fromPass\": " << quote(e.fromPass) << "," << nl;
+        json << indent << indent << indent << "\"toPass\": " << quote(e.toPass) << "," << nl;
+        json << indent << indent << indent << "\"resourceName\": " << quote(e.resourceName) << "," << nl;
+        json << indent << indent << indent << "\"accessType\": " << quote(e.accessType) << "," << nl;
+        json << indent << indent << indent << "\"isCrossQueue\": " << (e.isCrossQueue ? "true" : "false") << nl;
+        json << indent << indent << "}" << (i + 1 < analysis.dependencyEdges.size() ? "," : "") << nl;
+    }
+    json << indent << "]" << nl;
+
+    json << "}" << nl;
+
+    return json.str();
+}
+
+bool exportToJsonFile(
+    const std::string& filePath,
+    const FrameGraphBuilder& builder,
+    const AnalysisResult& analysis,
+    const ExportOptions& options
+) {
+    std::ofstream file(filePath);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    file << exportToJson(builder, analysis, options);
+    return file.good();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Text Report Implementations
+// ═══════════════════════════════════════════════════════════════
+
+std::string generateTextSummary(
+    const AnalysisResult& analysis,
+    const ExportOptions& options
+) {
+    std::ostringstream out;
+    const auto& stats = analysis.statistics;
+
+    out << "Frame Graph Analysis Summary\n";
+    out << "\n\n";
+
+    // Quick stats
+    out << "Passes:     " << stats.totalPasses << " total, "
+        << stats.livePasses << " live, "
+        << stats.culledPasses << " culled\n";
+
+    out << "Resources:  " << stats.totalResources << " total";
+    if (stats.importedResources > 0) {
+        out << ", " << stats.importedResources << " imported";
+    }
+    if (stats.transientCandidates > 0) {
+        out << ", " << stats.transientCandidates << " transient candidates";
+    }
+    out << "\n";
+
+    out << "Barriers:   " << stats.totalBarriers << " total";
+    if (stats.redundantBarriers > 0) {
+        out << ", " << stats.redundantBarriers << " redundant";
+    }
+    out << "\n";
+
+    if (stats.estimatedMemoryUsage > 0) {
+        out << "Memory:     ~" << formatBytes(stats.estimatedMemoryUsage);
+        if (stats.potentialMemorySavings > 0) {
+            out << " (potential savings: " << formatBytes(stats.potentialMemorySavings) << ")";
+        }
+        out << "\n";
+    }
+
+    out << "\n";
+
+    // Findings by severity
+    auto errors = analysis.getErrors();
+    auto warnings = analysis.getWarnings();
+    auto suggestions = analysis.getSuggestions();
+
+    if (!errors.empty()) {
+        out << "❌ ERRORS (" << errors.size() << "):\n";
+        for (const auto& f : errors) {
+            out << "   • " << f.message;
+            if (!f.passName.empty()) out << " [" << f.passName << "]";
+            out << "\n";
+            if (!f.suggestion.empty() && options.showOptimizationHints) {
+                out << "     → " << f.suggestion << "\n";
+            }
+        }
+        out << "\n";
+    }
+
+    if (!warnings.empty()) {
+        out << "⚠ Warnings (" << warnings.size() << "):\n";
+        for (const auto& f : warnings) {
+            out << "   • " << f.message;
+            if (!f.passName.empty()) out << " [" << f.passName << "]";
+            out << "\n";
+            if (!f.suggestion.empty() && options.showOptimizationHints) {
+                out << "     → " << f.suggestion << "\n";
+            }
+        }
+        out << "\n";
+    }
+
+    if (!suggestions.empty() && options.showOptimizationHints) {
+        out << "💡 Suggestions (" << suggestions.size() << "):\n";
+        for (const auto& f : suggestions) {
+            out << "   • " << f.message << "\n";
+            if (!f.suggestion.empty()) {
+                out << "     → " << f.suggestion << "\n";
+            }
+        }
+        out << "\n";
+    }
+
+    // Execution order
+    if (options.showExecutionOrder && !analysis.cullingReport.livePasses.empty()) {
+        out << "Execution Order:\n";
+        for (size_t i = 0; i < analysis.cullingReport.livePasses.size(); ++i) {
+            out << "   " << (i + 1) << ". " << analysis.cullingReport.livePasses[i] << "\n";
+        }
+        out << "\n";
+    }
+
+    return out.str();
+}
+
+std::string generateCullingReport(
+    const CullingReport& culling,
+    const ExportOptions& options
+) {
+    std::ostringstream out;
+
+    out << "Dead Pass Culling Report\n";
+    out << "\n\n";
+
+    out << "Total Declared: " << culling.totalDeclared() << "\n";
+    out << "Live Passes:    " << culling.liveCount() << "\n";
+    out << "Culled Passes:  " << culling.cullCount() << "\n\n";
+
+    if (culling.hasCulledPasses()) {
+        out << "Culled Passes and Reasons:\n";
+        out << "────────────────────────────────────────\n";
+
+        for (const auto& passName : culling.culledPasses) {
+            out << "  ✗ " << passName << "\n";
+
+            auto reasonIt = culling.cullReasons.find(passName);
+            if (reasonIt != culling.cullReasons.end()) {
+                out << "    Reason: " << reasonIt->second << "\n";
+            }
+
+            // Show cascade effects
+            auto cascadeIt = culling.cascadeEffects.find(passName);
+            if (cascadeIt != culling.cascadeEffects.end() && !cascadeIt->second.empty()) {
+                out << "    Cascade: Also caused culling of: ";
+                for (size_t i = 0; i < cascadeIt->second.size(); ++i) {
+                    out << cascadeIt->second[i];
+                    if (i + 1 < cascadeIt->second.size()) out << ", ";
+                }
+                out << "\n";
+            }
+            out << "\n";
+        }
+    } else {
+        out << "No passes were culled.\n\n";
+    }
+
+    out << "Live Passes (Execution Order):\n";
+    out << "────────────────────────────────────────\n";
+    for (size_t i = 0; i < culling.livePasses.size(); ++i) {
+        out << "  " << (i + 1) << ". " << culling.livePasses[i] << "\n";
+    }
+
+    return out.str();
+}
+
+std::string generateBarrierReport(
+    const std::vector<BarrierAnalysis>& barriers,
+    const ExportOptions& options
+) {
+    std::ostringstream out;
+
+    out << "Barrier Analysis Report\n";
+    out << "\n\n";
+
+    out << "Total Barriers: " << barriers.size() << "\n";
+
+    // Count redundant
+    size_t redundantCount = 0;
+    size_t queueTransferCount = 0;
+    for (const auto& b : barriers) {
+        if (b.isRedundant) redundantCount++;
+        if (b.isQueueOwnershipTransfer) queueTransferCount++;
+    }
+
+    if (redundantCount > 0) {
+        out << "Redundant:      " << redundantCount << " (could be optimized)\n";
+    }
+    if (queueTransferCount > 0) {
+        out << "Queue Transfers: " << queueTransferCount << "\n";
+    }
+    out << "\n";
+
+    out << "Barrier Details:\n";
+    out << "────────────────────────────────────────\n";
+
+    for (const auto& b : barriers) {
+        out << "  Resource: " << b.resourceName << "\n";
+        out << "  Pass:     " << b.passName << "\n";
+        out << "  Layout:   " << b.oldLayoutStr << " → " << b.newLayoutStr << "\n";
+        out << "  Stages:   " << b.srcStageStr << " → " << b.dstStageStr << "\n";
+        out << "  Access:   " << b.srcAccessStr << " → " << b.dstAccessStr << "\n";
+
+        if (b.isQueueOwnershipTransfer) {
+            out << "  Queue:    " << b.srcQueueType << " → " << b.dstQueueType << " (ownership transfer)\n";
+        }
+
+        if (b.isRedundant) {
+            out << "  ⚠ REDUNDANT (same layout transition)\n";
+        }
+
+        if (b.couldBeMerged) {
+            out << "  💡 Could be merged with adjacent barrier\n";
+        }
+
+        if (!b.optimizationHint.empty() && options.showOptimizationHints) {
+            out << "  💡 " << b.optimizationHint << "\n";
+        }
+
+        out << "\n";
+    }
+
+    return out.str();
+}
+
+std::string generateResourceLifetimeReport(
+    const std::vector<ResourceLifetime>& lifetimes,
+    const ExportOptions& options
+) {
+    std::ostringstream out;
+
+    out << "Resource Lifetime Report\n";
+    out << "\n\n";
+
+    // Group by transient eligibility
+    std::vector<const ResourceLifetime*> transientCandidates;
+    std::vector<const ResourceLifetime*> aliasableCandidates;
+    VkDeviceSize totalMemory = 0;
+    VkDeviceSize potentialSavings = 0;
+
+    for (const auto& r : lifetimes) {
+        if (r.couldBeTransient) transientCandidates.push_back(&r);
+        if (!r.aliasableWith.empty()) aliasableCandidates.push_back(&r);
+        totalMemory += r.estimatedSize;
+    }
+
+    out << "Total Resources: " << lifetimes.size() << "\n";
+    out << "Estimated Total Memory: " << formatBytes(totalMemory) << "\n";
+    out << "Transient Candidates: " << transientCandidates.size() << "\n";
+    out << "Aliasable Resources: " << aliasableCandidates.size() << "\n\n";
+
+    out << "Resource Details:\n";
+    out << "────────────────────────────────────────\n";
+
+    for (const auto& r : lifetimes) {
+        out << "  " << r.name;
+        if (r.imported) out << " (imported)";
+        out << "\n";
+
+        out << "    Kind: " << FrameGraphAnalyzer::resourceKindToString(r.kind) << "\n";
+
+        if (r.kind == ResourceKind::Image && r.format != VK_FORMAT_UNDEFINED) {
+            out << "    Format: " << FrameGraphAnalyzer::formatToString(r.format) << "\n";
+            if (r.extent.width > 0 && r.extent.height > 0) {
+                out << "    Size: " << r.extent.width << "x" << r.extent.height << "\n";
+            }
+        }
+
+        if (r.estimatedSize > 0) {
+            out << "    Memory: " << formatBytes(r.estimatedSize) << "\n";
+        }
+
+        out << "    Lifetime: " << r.firstUsagePassName << " → " << r.lastUsagePassName << "\n";
+        out << "    Used by: ";
+        for (size_t i = 0; i < r.usedByPasses.size(); ++i) {
+            out << r.usedByPasses[i];
+            if (i + 1 < r.usedByPasses.size()) out << ", ";
+        }
+        out << "\n";
+
+        if (r.couldBeTransient) {
+            out << "    💡 Transient memory eligible\n";
+        }
+
+        if (!r.aliasableWith.empty()) {
+            out << "    💡 Could share memory with: ";
+            for (size_t i = 0; i < r.aliasableWith.size(); ++i) {
+                out << r.aliasableWith[i];
+                if (i + 1 < r.aliasableWith.size()) out << ", ";
+            }
+            out << "\n";
+        }
+
+        out << "\n";
+    }
+
+    return out.str();
+}
+
+std::string generateMarkdownReport(
+    const FrameGraphBuilder& builder,
+    const AnalysisResult& analysis,
+    const ExportOptions& options
+) {
+    std::ostringstream out;
+
+    out << "# Frame Graph Analysis Report\n\n";
+    out << "*Generated by Shoonyakasha Frame Graph Analyzer*\n\n";
+
+    // ── Summary ──
+    out << "## Summary\n\n";
+
+    const auto& stats = analysis.statistics;
+    out << "| Metric | Value |\n";
+    out << "|--------|-------|\n";
+    out << "| Total Passes | " << stats.totalPasses << " |\n";
+    out << "| Live Passes | " << stats.livePasses << " |\n";
+    out << "| Culled Passes | " << stats.culledPasses << " |\n";
+    out << "| Total Resources | " << stats.totalResources << " |\n";
+    out << "| Imported Resources | " << stats.importedResources << " |\n";
+    out << "| Total Barriers | " << stats.totalBarriers << " |\n";
+    if (stats.redundantBarriers > 0) {
+        out << "| Redundant Barriers | " << stats.redundantBarriers << " |\n";
+    }
+    if (stats.estimatedMemoryUsage > 0) {
+        out << "| Estimated Memory | " << formatBytes(stats.estimatedMemoryUsage) << " |\n";
+    }
+    if (stats.potentialMemorySavings > 0) {
+        out << "| Potential Savings | " << formatBytes(stats.potentialMemorySavings) << " |\n";
+    }
+    out << "\n";
+
+    // ── Findings ──
+    auto errors = analysis.getErrors();
+    auto warnings = analysis.getWarnings();
+    auto suggestions = analysis.getSuggestions();
+
+    if (!errors.empty() || !warnings.empty() || !suggestions.empty()) {
+        out << "## Findings\n\n";
+
+        if (!errors.empty()) {
+            out << "### ❌ Errors\n\n";
+            for (const auto& f : errors) {
+                out << "- **" << f.message << "**";
+                if (!f.passName.empty()) out << " (Pass: `" << f.passName << "`)";
+                out << "\n";
+                if (!f.suggestion.empty()) {
+                    out << "  - *Suggestion:* " << f.suggestion << "\n";
+                }
+            }
+            out << "\n";
+        }
+
+        if (!warnings.empty()) {
+            out << "### ⚠️ Warnings\n\n";
+            for (const auto& f : warnings) {
+                out << "- " << f.message;
+                if (!f.passName.empty()) out << " (Pass: `" << f.passName << "`)";
+                out << "\n";
+                if (!f.suggestion.empty()) {
+                    out << "  - *Suggestion:* " << f.suggestion << "\n";
+                }
+            }
+            out << "\n";
+        }
+
+        if (!suggestions.empty() && options.showOptimizationHints) {
+            out << "### 💡 Suggestions\n\n";
+            for (const auto& f : suggestions) {
+                out << "- " << f.message << "\n";
+                if (!f.suggestion.empty()) {
+                    out << "  - " << f.suggestion << "\n";
+                }
+            }
+            out << "\n";
+        }
+    }
+
+    // ── Culling Report ──
+    if (analysis.cullingReport.hasCulledPasses()) {
+        out << "## Culled Passes\n\n";
+        out << "| Pass | Reason |\n";
+        out << "|------|--------|\n";
+        for (const auto& passName : analysis.cullingReport.culledPasses) {
+            out << "| `" << passName << "` | ";
+            auto reasonIt = analysis.cullingReport.cullReasons.find(passName);
+            if (reasonIt != analysis.cullingReport.cullReasons.end()) {
+                out << reasonIt->second;
+            }
+            out << " |\n";
+        }
+        out << "\n";
+    }
+
+    // ── Execution Order ──
+    if (options.showExecutionOrder && !analysis.cullingReport.livePasses.empty()) {
+        out << "## Execution Order\n\n";
+        for (size_t i = 0; i < analysis.cullingReport.livePasses.size(); ++i) {
+            out << (i + 1) << ". `" << analysis.cullingReport.livePasses[i] << "`\n";
+        }
+        out << "\n";
+    }
+
+    // ── Barriers ──
+    if (!analysis.barriers.empty()) {
+        out << "## Barriers\n\n";
+        out << "| Resource | Pass | Old Layout | New Layout |\n";
+        out << "|----------|------|------------|------------|\n";
+        for (const auto& b : analysis.barriers) {
+            out << "| `" << b.resourceName << "` | `" << b.passName << "` | ";
+            out << b.oldLayoutStr << " | " << b.newLayoutStr << " |";
+            if (b.isRedundant) out << " ⚠️ Redundant";
+            out << "\n";
+        }
+        out << "\n";
+    }
+
+    // ── Resource Lifetimes ──
+    if (options.showResourceDetails && !analysis.resourceLifetimes.empty()) {
+        out << "## Resource Lifetimes\n\n";
+        out << "| Resource | Kind | First Use | Last Use | Memory |\n";
+        out << "|----------|------|-----------|----------|--------|\n";
+        for (const auto& r : analysis.resourceLifetimes) {
+            out << "| `" << r.name << "`";
+            if (r.imported) out << " (imported)";
+            out << " | " << FrameGraphAnalyzer::resourceKindToString(r.kind);
+            out << " | `" << r.firstUsagePassName << "`";
+            out << " | `" << r.lastUsagePassName << "`";
+            out << " | " << (r.estimatedSize > 0 ? formatBytes(r.estimatedSize) : "-") << " |\n";
+        }
+        out << "\n";
+
+        // Aliasing opportunities
+        bool hasAliasing = false;
+        for (const auto& r : analysis.resourceLifetimes) {
+            if (!r.aliasableWith.empty()) {
+                hasAliasing = true;
+                break;
+            }
+        }
+
+        if (hasAliasing) {
+            out << "### Memory Aliasing Opportunities\n\n";
+            for (const auto& r : analysis.resourceLifetimes) {
+                if (!r.aliasableWith.empty()) {
+                    out << "- `" << r.name << "` could share memory with: ";
+                    for (size_t i = 0; i < r.aliasableWith.size(); ++i) {
+                        out << "`" << r.aliasableWith[i] << "`";
+                        if (i + 1 < r.aliasableWith.size()) out << ", ";
+                    }
+                    out << "\n";
+                }
+            }
+            out << "\n";
+        }
+    }
+
+    // ── Dependencies ──
+    if (!analysis.dependencyEdges.empty()) {
+        out << "## Dependencies\n\n";
+        out << "| From | To | Resource | Cross-Queue |\n";
+        out << "|------|-----|----------|-------------|\n";
+        for (const auto& e : analysis.dependencyEdges) {
+            out << "| `" << e.fromPass << "` | `" << e.toPass << "` | `" << e.resourceName << "` | ";
+            out << (e.isCrossQueue ? "Yes" : "No") << " |\n";
+        }
+        out << "\n";
+    }
+
+    out << "---\n";
+    out << "*玄武司察  深潛而見真*\n";
+
+    return out.str();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Logger Helpers
+// ═══════════════════════════════════════════════════════════════
+
+void logAnalysisSummary(
+    const AnalysisResult& analysis,
+    std::function<void(const std::string&)> logFunc
+) {
+    ExportOptions opts;
+    opts.verboseMode = false;
+    opts.showOptimizationHints = true;
+    opts.showExecutionOrder = false;
+
+    std::string summary = generateTextSummary(analysis, opts);
+
+    // Split by newlines and log each line
+    std::istringstream stream(summary);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty()) {
+            logFunc(line);
+        }
+    }
+}
+
+void logFindings(
+    const std::vector<AnalysisFinding>& findings,
+    std::function<void(AnalysisSeverity, const std::string&)> logFunc
+) {
+    for (const auto& f : findings) {
+        std::ostringstream msg;
+        msg << "[" << f.category << "] " << f.message;
+        if (!f.passName.empty()) {
+            msg << " (Pass: " << f.passName << ")";
+        }
+        if (!f.resourceName.empty()) {
+            msg << " (Resource: " << f.resourceName << ")";
+        }
+        logFunc(f.severity, msg.str());
+    }
+}
+
+} // namespace FrameGraph
+} // namespace Shoonyakasha
