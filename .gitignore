@@ -43,3 +43,15 @@
 /python/examples/textures/
 /python/examples/cubemaps_hdrs/
 /.claude
+
+# Compiled Cython/Python extension + generated intermediates (built by
+# python/CMakeLists.txt or `pip install`, never checked in)
+/python/shoonyakasha/_shoonyakasha*.so
+/python/shoonyakasha/_shoonyakasha*.pyd
+/python/shoonyakasha/_shoonyakasha.cpp
+__pycache__/
+*.pyc
+
+# pip/scikit-build-core build output
+/build/
+*.egg-info/
