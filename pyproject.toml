@@ -1,5 +1,9 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "cython>=3.0"]
+# cmake/ninja here are the PyPI packages (prebuilt binaries) - having pip
+# supply them avoids relying on whatever CMake/generator happens to be on
+# PATH (e.g. an IDE-bundled CMake version, or no ninja.exe on Windows at
+# all outside a Visual Studio Developer shell).
+requires = ["scikit-build-core>=0.10", "cython>=3.0", "cmake>=3.21", "ninja"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -38,13 +42,20 @@ Homepage = "https://github.com/Maximilian-Winter/Shoonyakasha"
 # CMake exactly as they do for a normal build. vcpkg.json (repo root)
 # declares these for manifest-mode vcpkg - if you normally build with a
 # vcpkg toolchain file, pass it through the CMAKE_ARGS environment
-# variable before installing and vcpkg will install them automatically:
+# variable before installing and vcpkg will install them automatically
+# (scikit-build-core reads CMAKE_ARGS and appends it to cmake.args below):
 #
-#   CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-#       pip install -e .
+#   macOS/Linux (bash):
+#     CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+#         pip install .
 #
-# (scikit-build-core reads CMAKE_ARGS automatically and appends it to
-# the args below.)
+#   Windows (PowerShell):
+#     $env:CMAKE_ARGS = "-DCMAKE_TOOLCHAIN_FILE=C:\path\to\vcpkg\scripts\buildsystems\vcpkg.cmake"
+#     pip install .
+#
+# On Windows, run that from a "Developer PowerShell for VS" (or plain
+# PowerShell after calling vcvarsall.bat) so cl.exe/link.exe are on PATH -
+# CMake needs a working MSVC compiler regardless of this file.
 
 [tool.scikit-build]
 minimum-version = "0.10"
