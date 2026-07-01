@@ -13,7 +13,7 @@ from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.memory cimport shared_ptr
 from libcpp cimport bool as cbool
-from libc.stdint cimport uint32_t
+from libc.stdint cimport uint8_t, uint32_t
 from cpython.ref cimport PyObject
 
 from ._facade_types cimport (
@@ -212,12 +212,17 @@ cdef extern from "Facade/SceneAPI.h" namespace "Shoonyakasha::Facade":
         void setTextColor(EntityHandle entity, const vec4& color)
         void setTextFontSize(EntityHandle entity, float fontSize)
         void setTextAlign(EntityHandle entity, TextHAlign align)
+        void setTextLayerMask(EntityHandle entity, uint8_t mask)
 
         # Renderable
         cbool isVisible(EntityHandle entity) const
         void setVisible(EntityHandle entity, cbool visible)
         cbool getCastShadows(EntityHandle entity) const
         void setCastShadows(EntityHandle entity, cbool castShadows)
+        uint8_t getRenderLayerMask(EntityHandle entity) const
+        void setRenderLayerMask(EntityHandle entity, uint8_t mask)
+        uint32_t getSortKey(EntityHandle entity) const
+        void setSortKey(EntityHandle entity, uint32_t sortKey)
 
         # Hierarchy
         EntityHandle getParent(EntityHandle entity) const

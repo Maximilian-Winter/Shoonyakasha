@@ -38,7 +38,8 @@ public:
                            baked.bakedFontSize != text.fontSize ||
                            baked.bakedColor != text.color ||
                            baked.bakedAlign != text.hAlign ||
-                           baked.bakedVisible != text.visible;
+                           baked.bakedVisible != text.visible ||
+                           baked.bakedLayerMask != text.renderLayerMask;
             if (!changed) continue;
 
             rebuild(registry, entity, text, baked);
@@ -64,6 +65,7 @@ private:
         baked.bakedColor = text.color;
         baked.bakedAlign = text.hAlign;
         baked.bakedVisible = text.visible;
+        baked.bakedLayerMask = text.renderLayerMask;
 
         if (text.font.empty() || text.text.empty() || !text.visible) return;
 
@@ -107,7 +109,9 @@ private:
                 material.setParam("screenSpace", 1.0f);
                 material.textures["spriteTexture"] = font->atlas;
 
-                registry.emplace<Shoonyakasha::RenderableTagComponent>(glyphEntity).sortKey = text.sortKey;
+                auto& glyphTag = registry.emplace<Shoonyakasha::RenderableTagComponent>(glyphEntity);
+                glyphTag.sortKey = text.sortKey;
+                glyphTag.renderLayerMask = text.renderLayerMask;
                 registry.emplace<Shoonyakasha::Sprite2DComponent>(glyphEntity).screenSpace = true;
 
                 auto& glyphAnchor = registry.emplace<Shoonyakasha::UIAnchorComponent>(glyphEntity);

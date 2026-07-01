@@ -131,11 +131,15 @@ public:
 
     // ── Query API ───────────────────────────────────────────────────
 
-    /// Query entities matching the filter, optionally sorted
-    /// Useful for custom rendering or debugging
+    /// Query entities matching the filter, optionally sorted, and
+    /// restricted to entities whose RenderableTagComponent::renderLayerMask
+    /// intersects renderLayerMask (bitwise AND != 0). Default matches
+    /// every layer, so passes that don't set "renderLayerMask" in JSON see
+    /// no behavior change. Useful for custom rendering or debugging.
     std::vector<RenderableEntity> queryEntities(
         EntityFilter filter,
-        EntitySortMode sortMode
+        EntitySortMode sortMode,
+        uint32_t renderLayerMask = 0xFFFFFFFFu
     ) const;
 
     // ── Statistics ──────────────────────────────────────────────────

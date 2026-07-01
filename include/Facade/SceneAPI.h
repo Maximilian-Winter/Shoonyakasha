@@ -224,6 +224,11 @@ public:
     void setTextFontSize(EntityHandle entity, float fontSize);
     void setTextAlign(EntityHandle entity, TextHAlign align);
 
+    /// Propagated to every glyph entity generated for this label (see
+    /// SceneAPI::setRenderLayerMask - text labels have no
+    /// RenderableTagComponent of their own, only their generated glyphs do).
+    void setTextLayerMask(EntityHandle entity, uint8_t mask);
+
     // ═══════════════════════════════════════════════════════════
     // Renderable Tag Access
     // ═══════════════════════════════════════════════════════════
@@ -233,6 +238,18 @@ public:
 
     bool getCastShadows(EntityHandle entity) const;
     void setCastShadows(EntityHandle entity, bool castShadows);
+
+    /// 8-bit layer mask (bits 0-7). A render pass with a "renderLayerMask"
+    /// in its JSON execution config only renders entities whose mask
+    /// intersects the pass's mask (bitwise AND != 0). Default 0xFF (every
+    /// layer) matches passes that don't set "renderLayerMask" at all.
+    uint8_t getRenderLayerMask(EntityHandle entity) const;
+    void setRenderLayerMask(EntityHandle entity, uint8_t mask);
+
+    /// Draw order hint within a pass using "sortMode": "sort_key" (e.g.
+    /// the sprite_geometry pass) - lower draws first.
+    uint32_t getSortKey(EntityHandle entity) const;
+    void setSortKey(EntityHandle entity, uint32_t sortKey);
 
     // ═══════════════════════════════════════════════════════════
     // Hierarchy Access
