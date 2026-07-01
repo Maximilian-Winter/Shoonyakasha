@@ -216,10 +216,22 @@ struct PipelineDesc {
     bool depthTest  = true;
     bool depthWrite = true;
     std::string cullMode      = "back";           // "none", "front", "back", "front_and_back"
-    std::string blending      = "none";           // "none", "alpha", "additive"
+    std::string blending      = "none";           // "none", "alpha", "additive", "custom"
     std::string topology      = "triangle_list";  // "triangle_list", "triangle_strip", "line_list", "point_list"
     std::string vertexInput   = "default";        // "default" (Vertex type), "none" (fullscreen)
     bool wireframe = false;
+
+    // Only read when blending == "custom" - explicit VkBlendFactor/VkBlendOp
+    // names (snake_case, e.g. "src_alpha", "one_minus_src_alpha", "add").
+    // See docs/guides/json-render-pipeline.md for the full accepted list.
+    // Defaults match the "alpha" preset, so a minimal custom block still
+    // behaves like standard alpha blending.
+    std::string srcColorBlendFactor = "src_alpha";
+    std::string dstColorBlendFactor = "one_minus_src_alpha";
+    std::string colorBlendOp        = "add";
+    std::string srcAlphaBlendFactor = "one";
+    std::string dstAlphaBlendFactor = "zero";
+    std::string alphaBlendOp        = "add";
 };
 
 // ═══════════════════════════════════════════════════════════════

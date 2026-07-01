@@ -1052,6 +1052,15 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                 pass.pipelineDesc.topology        = pipeJson.value("topology", std::string{"triangle_list"});
                 pass.pipelineDesc.vertexInput     = pipeJson.value("vertexInput", std::string{"default"});
                 pass.pipelineDesc.wireframe       = pipeJson.value("wireframe", false);
+
+                // Only meaningful when blending == "custom" - see PipelineDesc
+                // for the accepted VkBlendFactor/VkBlendOp string names.
+                pass.pipelineDesc.srcColorBlendFactor = pipeJson.value("srcColorFactor", std::string{"src_alpha"});
+                pass.pipelineDesc.dstColorBlendFactor = pipeJson.value("dstColorFactor", std::string{"one_minus_src_alpha"});
+                pass.pipelineDesc.colorBlendOp        = pipeJson.value("colorBlendOp", std::string{"add"});
+                pass.pipelineDesc.srcAlphaBlendFactor = pipeJson.value("srcAlphaFactor", std::string{"one"});
+                pass.pipelineDesc.dstAlphaBlendFactor = pipeJson.value("dstAlphaFactor", std::string{"zero"});
+                pass.pipelineDesc.alphaBlendOp        = pipeJson.value("alphaBlendOp", std::string{"add"});
             }
 
             // Parse descriptor set references
@@ -1400,6 +1409,14 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             pipeJson["topology"]   = pd.topology;
             if (pd.vertexInput != "default") pipeJson["vertexInput"] = pd.vertexInput;
             if (pd.wireframe) pipeJson["wireframe"] = true;
+            if (pd.blending == "custom") {
+                pipeJson["srcColorFactor"] = pd.srcColorBlendFactor;
+                pipeJson["dstColorFactor"] = pd.dstColorBlendFactor;
+                pipeJson["colorBlendOp"]   = pd.colorBlendOp;
+                pipeJson["srcAlphaFactor"] = pd.srcAlphaBlendFactor;
+                pipeJson["dstAlphaFactor"] = pd.dstAlphaBlendFactor;
+                pipeJson["alphaBlendOp"]   = pd.alphaBlendOp;
+            }
             passJson["pipeline"] = pipeJson;
         }
 

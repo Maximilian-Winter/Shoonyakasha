@@ -768,10 +768,62 @@ The `pipeline` object in a pass defines the Vulkan pipeline state:
 | `depthTest` | bool | `true` | Enable depth testing |
 | `depthWrite` | bool | `true` | Enable depth writing |
 | `cullMode` | `"none"`, `"front"`, `"back"`, `"front_and_back"` | `"back"` | Face culling mode |
-| `blending` | `"none"`, `"alpha"`, `"additive"` | `"none"` | Color blending mode |
+| `blending` | `"none"`, `"alpha"`, `"additive"`, `"custom"` | `"none"` | Color blending mode |
 | `topology` | `"triangle_list"`, `"triangle_strip"`, `"line_list"`, `"point_list"` | `"triangle_list"` | Primitive topology |
 | `vertexInput` | `"default"`, `"none"`, or custom name | `"default"` | Vertex attribute layout |
 | `wireframe` | bool | `false` | Render in wireframe mode |
+
+### Custom Blending
+
+`"alpha"` (standard non-premultiplied alpha-over) and `"additive"` cover
+most cases, but when you need something else — premultiplied alpha,
+multiply/screen-style blend modes, etc. — set `"blending": "custom"` and
+provide explicit factors/ops:
+
+```json
+"pipeline": {
+  "vertexShader": "shaders/sprite.vert.spv",
+  "fragmentShader": "shaders/sprite.frag.spv",
+  "blending": "custom",
+  "srcColorFactor": "one",
+  "dstColorFactor": "one_minus_src_alpha",
+  "colorBlendOp": "add",
+  "srcAlphaFactor": "one",
+  "dstAlphaFactor": "one_minus_src_alpha",
+  "alphaBlendOp": "add"
+}
+```
+
+(The example above is premultiplied-alpha blending — use it when your
+texture's RGB channels are already multiplied by alpha, which avoids the
+dark fringing that plain `"alpha"` blending can produce at soft edges of
+sprites/text with mipmapping or filtering.)
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `srcColorFactor` | `"src_alpha"` | Source color blend factor |
+| `dstColorFactor` | `"one_minus_src_alpha"` | Destination color blend factor |
+| `colorBlendOp` | `"add"` | Color blend operation |
+| `srcAlphaFactor` | `"one"` | Source alpha blend factor |
+| `dstAlphaFactor` | `"zero"` | Destination alpha blend factor |
+| `alphaBlendOp` | `"add"` | Alpha blend operation |
+
+The defaults above match the `"alpha"` preset, so a `"custom"` block that
+only overrides a couple of fields still behaves sensibly for the rest.
+
+**Blend factors** (`srcColorFactor`/`dstColorFactor`/`srcAlphaFactor`/`dstAlphaFactor`):
+`"zero"`, `"one"`, `"src_color"`, `"one_minus_src_color"`, `"dst_color"`,
+`"one_minus_dst_color"`, `"src_alpha"`, `"one_minus_src_alpha"`,
+`"dst_alpha"`, `"one_minus_dst_alpha"`, `"constant_color"`,
+`"one_minus_constant_color"`, `"constant_alpha"`,
+`"one_minus_constant_alpha"`, `"src_alpha_saturate"`.
+
+**Blend ops** (`colorBlendOp`/`alphaBlendOp`): `"add"`, `"subtract"`,
+`"reverse_subtract"`, `"min"`, `"max"`.
+
+Applies uniformly to every color attachment of the pass — there's no
+per-attachment blend state (a pass with multiple color outputs, e.g. a
+G-buffer pass, gets the same blend state on all of them).
 
 ---
 

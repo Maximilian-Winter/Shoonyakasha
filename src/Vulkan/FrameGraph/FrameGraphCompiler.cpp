@@ -1084,6 +1084,34 @@ VkPrimitiveTopology FrameGraphCompiler::stringToTopology(const std::string& str)
     return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;  // default
 }
 
+VkBlendFactor FrameGraphCompiler::stringToBlendFactor(const std::string& str) {
+    if (str == "zero")                       return VK_BLEND_FACTOR_ZERO;
+    if (str == "one")                        return VK_BLEND_FACTOR_ONE;
+    if (str == "src_color")                  return VK_BLEND_FACTOR_SRC_COLOR;
+    if (str == "one_minus_src_color")        return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+    if (str == "dst_color")                  return VK_BLEND_FACTOR_DST_COLOR;
+    if (str == "one_minus_dst_color")        return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+    if (str == "src_alpha")                  return VK_BLEND_FACTOR_SRC_ALPHA;
+    if (str == "one_minus_src_alpha")        return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    if (str == "dst_alpha")                  return VK_BLEND_FACTOR_DST_ALPHA;
+    if (str == "one_minus_dst_alpha")        return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+    if (str == "constant_color")             return VK_BLEND_FACTOR_CONSTANT_COLOR;
+    if (str == "one_minus_constant_color")   return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+    if (str == "constant_alpha")             return VK_BLEND_FACTOR_CONSTANT_ALPHA;
+    if (str == "one_minus_constant_alpha")   return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+    if (str == "src_alpha_saturate")         return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+    return VK_BLEND_FACTOR_ONE;  // default
+}
+
+VkBlendOp FrameGraphCompiler::stringToBlendOp(const std::string& str) {
+    if (str == "add")              return VK_BLEND_OP_ADD;
+    if (str == "subtract")         return VK_BLEND_OP_SUBTRACT;
+    if (str == "reverse_subtract") return VK_BLEND_OP_REVERSE_SUBTRACT;
+    if (str == "min")              return VK_BLEND_OP_MIN;
+    if (str == "max")              return VK_BLEND_OP_MAX;
+    return VK_BLEND_OP_ADD;  // default
+}
+
 void FrameGraphCompiler::createPipelines(
     VulkanDevice& device,
     std::vector<CompiledPass>& compiledPasses,
@@ -1202,6 +1230,15 @@ void FrameGraphCompiler::createPipelines(
         // Blending
         if (pd.blending == "alpha") builder.withAlphaBlending();
         else if (pd.blending == "additive") builder.withAdditiveBlending();
+        else if (pd.blending == "custom") {
+            builder.withCustomBlending(
+                stringToBlendFactor(pd.srcColorBlendFactor),
+                stringToBlendFactor(pd.dstColorBlendFactor),
+                stringToBlendOp(pd.colorBlendOp),
+                stringToBlendFactor(pd.srcAlphaBlendFactor),
+                stringToBlendFactor(pd.dstAlphaBlendFactor),
+                stringToBlendOp(pd.alphaBlendOp));
+        }
 
         // Count color attachments for MRT support
         uint32_t colorAttachmentCount = 0;

@@ -744,6 +744,8 @@ private:
     static VkImageUsageFlags usageToImageUsageFlags(ResourceUsage usage);
     static VkCullModeFlags stringToCullMode(const std::string& str);
     static VkPrimitiveTopology stringToTopology(const std::string& str);
+    static VkBlendFactor stringToBlendFactor(const std::string& str);
+    static VkBlendOp stringToBlendOp(const std::string& str);
 
     Logger* m_logger = nullptr;
 };
