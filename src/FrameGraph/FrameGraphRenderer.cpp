@@ -64,8 +64,11 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
         // Check if entity has a skeleton (for skinned vs. static filtering)
         bool hasSkeleton = m_registry->all_of<Shoonyakasha::SkeletonComponent>(entity);
 
+        // Check if entity is a 2D sprite/UI element
+        bool isSprite2D = m_registry->all_of<Shoonyakasha::Sprite2DComponent>(entity);
+
         // Apply filter
-        if (!passesFilter(material, tag, filter, hasSkeleton)) continue;
+        if (!passesFilter(material, tag, filter, hasSkeleton, isSprite2D)) continue;
 
         RenderableEntity re;
         re.entity = entity;
@@ -90,6 +93,14 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
             std::sort(result.begin(), result.end(),
                 [](const RenderableEntity& a, const RenderableEntity& b) {
                     return a.distanceToCamera > b.distanceToCamera;
+                });
+            break;
+        case EntitySortMode::SortKey:
+            std::sort(result.begin(), result.end(),
+                [](const RenderableEntity& a, const RenderableEntity& b) {
+                    uint32_t keyA = a.tag ? a.tag->sortKey : 0;
+                    uint32_t keyB = b.tag ? b.tag->sortKey : 0;
+                    return keyA < keyB;
                 });
             break;
         case EntitySortMode::None:

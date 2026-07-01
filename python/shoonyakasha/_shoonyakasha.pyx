@@ -25,6 +25,10 @@ from ._facade_types cimport (
     RigidBodyType, RigidBodyType_Static, RigidBodyType_Kinematic, RigidBodyType_Dynamic,
     ColliderShape, ColliderShape_Box, ColliderShape_Sphere, ColliderShape_Capsule,
     ColliderShape_Mesh, ColliderShape_Plane,
+    UIAnchor, UIAnchor_TopLeft, UIAnchor_TopCenter, UIAnchor_TopRight,
+    UIAnchor_MiddleLeft, UIAnchor_MiddleCenter, UIAnchor_MiddleRight,
+    UIAnchor_BottomLeft, UIAnchor_BottomCenter, UIAnchor_BottomRight,
+    TextHAlign, TextHAlign_Left, TextHAlign_Center, TextHAlign_Right,
     EngineConfig, GltfOptions, ClipInfo, GltfResult as CppGltfResult,
 )
 
@@ -68,6 +72,22 @@ COLLIDER_SPHERE = <int>ColliderShape_Sphere
 COLLIDER_CAPSULE = <int>ColliderShape_Capsule
 COLLIDER_MESH = <int>ColliderShape_Mesh
 COLLIDER_PLANE = <int>ColliderShape_Plane
+
+# UI anchors
+UI_ANCHOR_TOP_LEFT = <int>UIAnchor_TopLeft
+UI_ANCHOR_TOP_CENTER = <int>UIAnchor_TopCenter
+UI_ANCHOR_TOP_RIGHT = <int>UIAnchor_TopRight
+UI_ANCHOR_MIDDLE_LEFT = <int>UIAnchor_MiddleLeft
+UI_ANCHOR_MIDDLE_CENTER = <int>UIAnchor_MiddleCenter
+UI_ANCHOR_MIDDLE_RIGHT = <int>UIAnchor_MiddleRight
+UI_ANCHOR_BOTTOM_LEFT = <int>UIAnchor_BottomLeft
+UI_ANCHOR_BOTTOM_CENTER = <int>UIAnchor_BottomCenter
+UI_ANCHOR_BOTTOM_RIGHT = <int>UIAnchor_BottomRight
+
+# Text alignment
+TEXT_ALIGN_LEFT = <int>TextHAlign_Left
+TEXT_ALIGN_CENTER = <int>TextHAlign_Center
+TEXT_ALIGN_RIGHT = <int>TextHAlign_Right
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -405,6 +425,59 @@ cdef class Scene:
     def has_material_param(self, uint32_t entity, str param):
         cdef string cpp_param = param.encode('utf-8')
         return self._ptr.hasMaterialParam(entity, cpp_param)
+
+    def set_material_texture(self, uint32_t entity, str slot_name, str file_path):
+        cdef string cpp_slot = slot_name.encode('utf-8')
+        cdef string cpp_path = file_path.encode('utf-8')
+        return self._ptr.setMaterialTexture(entity, cpp_slot, cpp_path)
+
+    # ── Sprite / UI ──────────────────────────────────────────
+
+    def set_sprite_texture(self, uint32_t entity, str file_path):
+        cdef string cpp_path = file_path.encode('utf-8')
+        return self._ptr.setSpriteTexture(entity, cpp_path)
+
+    def set_sprite_color(self, uint32_t entity, color):
+        self._ptr.setSpriteColor(entity, _tuple_to_vec4(color))
+
+    def get_sprite_color(self, uint32_t entity):
+        return _vec4_to_tuple(self._ptr.getSpriteColor(entity))
+
+    def set_sprite_uv_rect(self, uint32_t entity, uv_rect):
+        self._ptr.setSpriteUVRect(entity, _tuple_to_vec4(uv_rect))
+
+    def get_sprite_uv_rect(self, uint32_t entity):
+        return _vec4_to_tuple(self._ptr.getSpriteUVRect(entity))
+
+    def is_screen_space_sprite(self, uint32_t entity):
+        return self._ptr.isScreenSpaceSprite(entity)
+
+    def set_ui_anchor(self, uint32_t entity, int anchor, offset_pixels=(0.0, 0.0)):
+        self._ptr.setUIAnchor(entity, <UIAnchor>anchor, _tuple_to_vec2(offset_pixels))
+
+    def get_ui_anchor(self, uint32_t entity):
+        return <int>self._ptr.getUIAnchor(entity)
+
+    def get_ui_anchor_offset(self, uint32_t entity):
+        return _vec2_to_tuple(self._ptr.getUIAnchorOffset(entity))
+
+    # ── Text ─────────────────────────────────────────────────
+
+    def set_text(self, uint32_t entity, str text):
+        cdef string cpp_text = text.encode('utf-8')
+        self._ptr.setText(entity, cpp_text)
+
+    def get_text(self, uint32_t entity):
+        return self._ptr.getText(entity).decode('utf-8')
+
+    def set_text_color(self, uint32_t entity, color):
+        self._ptr.setTextColor(entity, _tuple_to_vec4(color))
+
+    def set_text_font_size(self, uint32_t entity, float font_size):
+        self._ptr.setTextFontSize(entity, font_size)
+
+    def set_text_align(self, uint32_t entity, int align):
+        self._ptr.setTextAlign(entity, <TextHAlign>align)
 
     # ── Renderable ────────────────────────────────────────────
 
@@ -907,6 +980,63 @@ cdef class Engine:
         """
         return <uint32_t>self._ptr.createPointLight(
             _tuple_to_vec3(pos), _tuple_to_vec3(color), intensity, range)
+
+    def create_sprite(self, world_pos, str texture_path, size=(1.0, 1.0),
+                       tint=(1.0, 1.0, 1.0, 1.0)):
+        """Create a world-space sprite (billboard quad in 3D world coordinates).
+
+        Args:
+            world_pos: Position as (x, y, z) tuple
+            texture_path: Path to the sprite's image file
+            size: Sprite size in world units, as (width, height)
+            tint: Tint/multiply color as (r, g, b, a)
+
+        Returns:
+            Entity handle (int)
+        """
+        cdef string cpp_path = texture_path.encode('utf-8')
+        return <uint32_t>self._ptr.createSprite(
+            _tuple_to_vec3(world_pos), cpp_path, _tuple_to_vec2(size), _tuple_to_vec4(tint))
+
+    def create_ui_panel(self, int anchor, offset_pixels, size_pixels,
+                         str texture_path="", color=(1.0, 1.0, 1.0, 1.0)):
+        """Create a screen-space UI panel anchored to a viewport corner/edge/center.
+
+        Args:
+            anchor: One of the UI_ANCHOR_* constants
+            offset_pixels: Offset from the anchor to the panel's center, as (x, y)
+            size_pixels: Panel size in pixels, as (width, height)
+            texture_path: Path to an image file, or "" for a flat-colored panel
+            color: Tint/fill color as (r, g, b, a)
+
+        Returns:
+            Entity handle (int)
+        """
+        cdef string cpp_path = texture_path.encode('utf-8')
+        return <uint32_t>self._ptr.createUIPanel(
+            <UIAnchor>anchor, _tuple_to_vec2(offset_pixels), _tuple_to_vec2(size_pixels),
+            cpp_path, _tuple_to_vec4(color))
+
+    def create_text(self, str text, int anchor, offset_pixels, str font_path,
+                     float font_size=24.0, color=(1.0, 1.0, 1.0, 1.0)):
+        """Create a screen-space text label anchored to a viewport corner/edge/center.
+
+        Args:
+            text: The label's text (ASCII 32-126 supported)
+            anchor: One of the UI_ANCHOR_* constants
+            offset_pixels: Offset from the anchor to the label's reference point, as (x, y)
+            font_path: Path to a .ttf/.otf font file
+            font_size: Baked glyph pixel height
+            color: Text color as (r, g, b, a)
+
+        Returns:
+            Entity handle (int)
+        """
+        cdef string cpp_text = text.encode('utf-8')
+        cdef string cpp_font = font_path.encode('utf-8')
+        return <uint32_t>self._ptr.createText(
+            cpp_text, <UIAnchor>anchor, _tuple_to_vec2(offset_pixels), cpp_font,
+            font_size, _tuple_to_vec4(color))
 
     @property
     def camera_entity(self):

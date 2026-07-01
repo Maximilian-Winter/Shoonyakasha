@@ -53,6 +53,25 @@ enum class ColliderShape : uint8_t {
     Plane   = 4
 };
 
+// Screen-space anchor for UI panels and text labels.
+enum class UIAnchor : uint8_t {
+    TopLeft      = 0,
+    TopCenter    = 1,
+    TopRight     = 2,
+    MiddleLeft   = 3,
+    MiddleCenter = 4,
+    MiddleRight  = 5,
+    BottomLeft   = 6,
+    BottomCenter = 7,
+    BottomRight  = 8
+};
+
+enum class TextHAlign : uint8_t {
+    Left   = 0,
+    Center = 1,
+    Right  = 2
+};
+
 // ═══════════════════════════════════════════════════════════════
 // Callback Aliases
 // ═══════════════════════════════════════════════════════════════

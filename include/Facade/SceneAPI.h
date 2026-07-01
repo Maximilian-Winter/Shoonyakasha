@@ -20,6 +20,7 @@ namespace ECS {
     class Scene;
     class ComponentRegistry;
 }
+class Sprite2DManager;
 
 namespace Facade {
 
@@ -182,6 +183,47 @@ public:
 
     bool hasMaterialParam(EntityHandle entity, const std::string& param) const;
 
+    /// Load an image file and assign it to a named texture slot
+    /// (e.g. "albedoMap", "spriteTexture"). Requires the engine's
+    /// Sprite2DManager to be wired (always true once the engine is running).
+    bool setMaterialTexture(EntityHandle entity, const std::string& slotName,
+                            const std::string& filePath);
+
+    // ═══════════════════════════════════════════════════════════
+    // Sprite / UI Access
+    // ═══════════════════════════════════════════════════════════
+
+    /// Load an image file as this entity's sprite texture ("spriteTexture" slot).
+    bool setSpriteTexture(EntityHandle entity, const std::string& filePath);
+
+    void setSpriteColor(EntityHandle entity, const glm::vec4& color);
+    glm::vec4 getSpriteColor(EntityHandle entity) const;
+
+    /// Sub-rectangle of the texture to display, in normalized UV space
+    /// (u0, v0, u1, v1). Defaults to the full texture (0,0,1,1).
+    void setSpriteUVRect(EntityHandle entity, const glm::vec4& uvRect);
+    glm::vec4 getSpriteUVRect(EntityHandle entity) const;
+
+    bool isScreenSpaceSprite(EntityHandle entity) const;
+
+    /// Anchor a screen-space sprite/UI panel/text label to a viewport
+    /// corner/edge/center. Only meaningful for entities created with
+    /// createUIPanel/createText (screen-space sprites).
+    void setUIAnchor(EntityHandle entity, UIAnchor anchor, const glm::vec2& offsetPixels);
+    UIAnchor getUIAnchor(EntityHandle entity) const;
+    glm::vec2 getUIAnchorOffset(EntityHandle entity) const;
+
+    // ═══════════════════════════════════════════════════════════
+    // Text Access
+    // ═══════════════════════════════════════════════════════════
+
+    void setText(EntityHandle entity, const std::string& text);
+    std::string getText(EntityHandle entity) const;
+
+    void setTextColor(EntityHandle entity, const glm::vec4& color);
+    void setTextFontSize(EntityHandle entity, float fontSize);
+    void setTextAlign(EntityHandle entity, TextHAlign align);
+
     // ═══════════════════════════════════════════════════════════
     // Renderable Tag Access
     // ═══════════════════════════════════════════════════════════
@@ -249,6 +291,14 @@ public:
 
     bool saveToFile(const std::string& path) const;
     bool loadFromFile(const std::string& path);
+
+    // ═══════════════════════════════════════════════════════════
+    // Internal wiring — not part of the stable public API surface.
+    // Called once by EngineAPI during onInit(), after Sprite2DManager
+    // exists, so texture-loading facade calls have somewhere to go.
+    // ═══════════════════════════════════════════════════════════
+
+    void wireSprite2DManager(Sprite2DManager* manager);
 
 private:
     struct Impl;

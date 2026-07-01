@@ -6,6 +6,7 @@
 
 #include <entt/entt.hpp>
 #include "ECS/Core.h"
+#include "ECS/Sprite2DComponents.h"
 
 #include "Facade/EngineAPI.h"
 #include "Facade/SceneAPI.h"
@@ -75,6 +76,7 @@ protected:
 
         // Create sub-APIs now that engine internals are ready
         m_owner->sceneAPI = std::make_unique<SceneAPI>(getScene());
+        m_owner->sceneAPI->wireSprite2DManager(&getSprite2DManager());
 
         // Wire InputAPI via Impl::wire (nested class can access private m_impl)
         m_owner->inputAPI = std::make_unique<InputAPI>();
@@ -132,6 +134,11 @@ public:
     using ApplicationBase::loadGltfScene;
     using ApplicationBase::createDirectionalLight;
     using ApplicationBase::createPointLight;
+    using ApplicationBase::createSprite;
+    using ApplicationBase::createUIPanel;
+    using ApplicationBase::createText;
+    using ApplicationBase::getSprite2DManager;
+    using ApplicationBase::getFontLoader;
     using ApplicationBase::getCameraEntity;
     using ApplicationBase::getDeltaTime;
     using ApplicationBase::getRenderGraph;
@@ -314,6 +321,35 @@ EntityHandle EngineAPI::createPointLight(const glm::vec3& position,
                                           const glm::vec3& color,
                                           float intensity, float range) {
     auto e = m_impl->app->createPointLight(position, color, intensity, range);
+    return toHandle(e);
+}
+
+EntityHandle EngineAPI::createSprite(const glm::vec3& worldPos,
+                                      const std::string& texturePath,
+                                      const glm::vec2& size,
+                                      const glm::vec4& tint) {
+    auto e = m_impl->app->createSprite(worldPos, texturePath, size, tint);
+    return toHandle(e);
+}
+
+EntityHandle EngineAPI::createUIPanel(UIAnchor anchor,
+                                       const glm::vec2& offsetPixels,
+                                       const glm::vec2& sizePixels,
+                                       const std::string& texturePath,
+                                       const glm::vec4& color) {
+    auto engineAnchor = static_cast<UIAnchorComponent::Anchor>(static_cast<uint8_t>(anchor));
+    auto e = m_impl->app->createUIPanel(engineAnchor, offsetPixels, sizePixels, texturePath, color);
+    return toHandle(e);
+}
+
+EntityHandle EngineAPI::createText(const std::string& text,
+                                    UIAnchor anchor,
+                                    const glm::vec2& offsetPixels,
+                                    const std::string& fontPath,
+                                    float fontSize,
+                                    const glm::vec4& color) {
+    auto engineAnchor = static_cast<UIAnchorComponent::Anchor>(static_cast<uint8_t>(anchor));
+    auto e = m_impl->app->createText(text, engineAnchor, offsetPixels, fontPath, fontSize, color);
     return toHandle(e);
 }
 
