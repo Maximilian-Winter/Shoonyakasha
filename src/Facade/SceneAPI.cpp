@@ -623,6 +623,12 @@ void SceneAPI::setTextAlign(EntityHandle entity, TextHAlign align) {
     if (t) t->hAlign = toEngineAlign(align);
 }
 
+void SceneAPI::setTextLayerMask(EntityHandle entity, uint8_t mask) {
+    if (!m_impl->valid(entity)) return;
+    auto* t = m_impl->registry.try_get<Shoonyakasha::Text2DComponent>(toEntt(entity));
+    if (t) t->renderLayerMask = mask;
+}
+
 void SceneAPI::wireSprite2DManager(Sprite2DManager* manager) {
     m_impl->sprite2DManager = manager;
 }
@@ -653,6 +659,30 @@ void SceneAPI::setCastShadows(EntityHandle entity, bool castShadows) {
     if (!m_impl->valid(entity)) return;
     auto* tag = m_impl->registry.try_get<RenderableTagComponent>(toEntt(entity));
     if (tag) tag->castShadows = castShadows;
+}
+
+uint8_t SceneAPI::getRenderLayerMask(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return 0;
+    auto* tag = m_impl->registry.try_get<RenderableTagComponent>(toEntt(entity));
+    return tag ? tag->renderLayerMask : 0;
+}
+
+void SceneAPI::setRenderLayerMask(EntityHandle entity, uint8_t mask) {
+    if (!m_impl->valid(entity)) return;
+    auto* tag = m_impl->registry.try_get<RenderableTagComponent>(toEntt(entity));
+    if (tag) tag->renderLayerMask = mask;
+}
+
+uint32_t SceneAPI::getSortKey(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return 0;
+    auto* tag = m_impl->registry.try_get<RenderableTagComponent>(toEntt(entity));
+    return tag ? tag->sortKey : 0;
+}
+
+void SceneAPI::setSortKey(EntityHandle entity, uint32_t sortKey) {
+    if (!m_impl->valid(entity)) return;
+    auto* tag = m_impl->registry.try_get<RenderableTagComponent>(toEntt(entity));
+    if (tag) tag->sortKey = sortKey;
 }
 
 // ═══════════════════════════════════════════════════════════════
