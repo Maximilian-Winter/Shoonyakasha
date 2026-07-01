@@ -34,10 +34,11 @@ Homepage = "https://github.com/Maximilian-Winter/Shoonyakasha"
 # extension are needed for the package), then packages whatever
 # `cmake --install` produces.
 #
-# Vulkan/nlohmann_json/EnTT/Bullet/glfw3 still need to be findable by
-# CMake exactly as they do for a normal build - e.g. if you normally
-# build with a vcpkg toolchain file, pass it through the CMAKE_ARGS
-# environment variable before installing:
+# Vulkan/nlohmann_json/EnTT/Bullet/glfw3/glm still need to be findable by
+# CMake exactly as they do for a normal build. vcpkg.json (repo root)
+# declares these for manifest-mode vcpkg - if you normally build with a
+# vcpkg toolchain file, pass it through the CMAKE_ARGS environment
+# variable before installing and vcpkg will install them automatically:
 #
 #   CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake" \
 #       pip install -e .
