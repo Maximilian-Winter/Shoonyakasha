@@ -390,6 +390,38 @@ TEST_F(SceneAPIFixture, Renderable_NoTag_NotVisible) {
     EXPECT_FALSE(api->isVisible(entity));
 }
 
+TEST_F(SceneAPIFixture, Renderable_RenderLayerMask_DefaultsToAllLayers) {
+    auto entity = api->createEntity("Mesh");
+    auto e = static_cast<entt::entity>(entity);
+    registry.emplace<RenderableTagComponent>(e);
+
+    EXPECT_EQ(api->getRenderLayerMask(entity), 0xFF);
+}
+
+TEST_F(SceneAPIFixture, Renderable_SetGetRenderLayerMask) {
+    auto entity = api->createEntity("Mesh");
+    auto e = static_cast<entt::entity>(entity);
+    registry.emplace<RenderableTagComponent>(e);
+
+    api->setRenderLayerMask(entity, 0x02);
+    EXPECT_EQ(api->getRenderLayerMask(entity), 0x02);
+}
+
+TEST_F(SceneAPIFixture, Renderable_NoTag_RenderLayerMaskIsZero) {
+    auto entity = api->createEntity("Plain");
+    EXPECT_EQ(api->getRenderLayerMask(entity), 0);
+}
+
+TEST_F(SceneAPIFixture, Renderable_SetGetSortKey) {
+    auto entity = api->createEntity("Mesh");
+    auto e = static_cast<entt::entity>(entity);
+    registry.emplace<RenderableTagComponent>(e);
+
+    EXPECT_EQ(api->getSortKey(entity), 0u);
+    api->setSortKey(entity, 42u);
+    EXPECT_EQ(api->getSortKey(entity), 42u);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Hierarchy Access
 // ═══════════════════════════════════════════════════════════════

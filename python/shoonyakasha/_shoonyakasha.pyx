@@ -11,7 +11,7 @@
 #
 
 from cpython.ref cimport PyObject
-from libc.stdint cimport uint32_t
+from libc.stdint cimport uint8_t, uint32_t
 from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.pair cimport pair
@@ -481,6 +481,10 @@ cdef class Scene:
     def set_text_align(self, uint32_t entity, int align):
         self._ptr.setTextAlign(entity, <TextHAlign>align)
 
+    def set_text_layer_mask(self, uint32_t entity, int mask):
+        """Propagated to every glyph entity generated for this label."""
+        self._ptr.setTextLayerMask(entity, <uint8_t>mask)
+
     # ── Renderable ────────────────────────────────────────────
 
     def is_visible(self, uint32_t entity):
@@ -494,6 +498,21 @@ cdef class Scene:
 
     def set_cast_shadows(self, uint32_t entity, bint cast_shadows):
         self._ptr.setCastShadows(entity, cast_shadows)
+
+    def get_render_layer_mask(self, uint32_t entity):
+        """8-bit layer mask (bits 0-7, default 0xFF = every layer)."""
+        return self._ptr.getRenderLayerMask(entity)
+
+    def set_render_layer_mask(self, uint32_t entity, int mask):
+        """Restrict which "renderLayerMask"-filtered passes draw this entity."""
+        self._ptr.setRenderLayerMask(entity, <uint8_t>mask)
+
+    def get_sort_key(self, uint32_t entity):
+        return self._ptr.getSortKey(entity)
+
+    def set_sort_key(self, uint32_t entity, uint32_t sort_key):
+        """Draw order hint for passes using "sortMode": "sort_key" - lower draws first."""
+        self._ptr.setSortKey(entity, sort_key)
 
     # ── Hierarchy ─────────────────────────────────────────────
 
