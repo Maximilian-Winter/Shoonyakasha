@@ -301,3 +301,54 @@ TEST(SystemManager, Update_AllEnabledSystemsRun) {
     glm::mat4 expectedView = glm::inverse(t.worldMatrix);
     TestHelpers::ExpectMat4Near(cam.viewMatrix, expectedView);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// SystemManager Name Lookup Tests
+// ═══════════════════════════════════════════════════════════════
+
+TEST(SystemManager, FindSystem_ByName_ReturnsSystem) {
+    SystemManager manager;
+    auto* sys = manager.addSystem<CallbackSystem>("MySystem", [](float) { return true; });
+    EXPECT_EQ(manager.findSystem("MySystem"), sys);
+}
+
+TEST(SystemManager, FindSystem_UnknownName_ReturnsNull) {
+    SystemManager manager;
+    manager.addSystem<CallbackSystem>("MySystem", [](float) { return true; });
+    EXPECT_EQ(manager.findSystem("Nonexistent"), nullptr);
+}
+
+TEST(SystemManager, RemoveSystem_ByName_RemovesAndReturnsTrue) {
+    SystemManager manager;
+    manager.addSystem<CallbackSystem>("MySystem", [](float) { return true; });
+    EXPECT_TRUE(manager.removeSystem("MySystem"));
+    EXPECT_EQ(manager.findSystem("MySystem"), nullptr);
+}
+
+TEST(SystemManager, RemoveSystem_UnknownName_ReturnsFalse) {
+    SystemManager manager;
+    EXPECT_FALSE(manager.removeSystem("Nonexistent"));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CallbackSystem Tests
+// ═══════════════════════════════════════════════════════════════
+
+TEST(CallbackSystem, Update_InvokesCallbackWithDeltaTime) {
+    entt::registry reg;
+    float lastDt = -1.0f;
+    CallbackSystem system("Test", [&](float dt) { lastDt = dt; return true; });
+
+    system.update(reg, 0.25f);
+    EXPECT_FLOAT_EQ(lastDt, 0.25f);
+}
+
+TEST(CallbackSystem, PriorityIsSetFromConstructor) {
+    CallbackSystem system("Test", [](float) { return true; }, /*priority=*/42);
+    EXPECT_EQ(system.priority, 42);
+}
+
+TEST(CallbackSystem, NameIsSetFromConstructor) {
+    CallbackSystem system("MyName", [](float) { return true; });
+    EXPECT_EQ(system.name, "MyName");
+}

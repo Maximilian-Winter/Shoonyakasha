@@ -10,6 +10,7 @@
 
 #include "Facade/EngineAPI.h"
 #include "Facade/SceneAPI.h"
+#include "Facade/EcsAPI.h"
 #include "InputAPIImpl.h"
 #include "PhysicsAPIImpl.h"
 #include "FacadeInternal.h"
@@ -46,6 +47,7 @@ struct EngineAPI::Impl {
     std::unique_ptr<SceneAPI>   sceneAPI;
     std::unique_ptr<InputAPI>   inputAPI;
     std::unique_ptr<PhysicsAPI> physicsAPI;
+    std::unique_ptr<EcsAPI>     ecsAPI;
 
     // The actual application (defined below, after Impl)
     class CallbackApp;
@@ -77,6 +79,7 @@ protected:
         // Create sub-APIs now that engine internals are ready
         m_owner->sceneAPI = std::make_unique<SceneAPI>(getScene());
         m_owner->sceneAPI->wireSprite2DManager(&getSprite2DManager());
+        m_owner->ecsAPI = std::make_unique<EcsAPI>(getScene());
 
         // Wire InputAPI via Impl::wire (nested class can access private m_impl)
         m_owner->inputAPI = std::make_unique<InputAPI>();
@@ -291,6 +294,10 @@ InputAPI& EngineAPI::getInput() {
 
 PhysicsAPI& EngineAPI::getPhysics() {
     return *m_impl->physicsAPI;
+}
+
+EcsAPI& EngineAPI::getEcs() {
+    return *m_impl->ecsAPI;
 }
 
 // ═══════════════════════════════════════════════════════════════

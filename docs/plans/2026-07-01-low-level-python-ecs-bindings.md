@@ -1,6 +1,37 @@
 # Low-Level Python ECS Bindings — Design
 
-**Status:** Proposal, not yet implemented.
+**Status:** Implemented (full scope: custom components, custom systems,
+new `engine.ecs` sub-API, auto-disable with a configurable failure
+threshold). Not build-verified — this development sandbox has no Vulkan
+SDK/`glslc`/Cython toolchain; compile and exercise `python/examples/
+ecs_bindings_demo.py` in a real build to confirm.
+
+**Decisions made (were open questions below, kept for context):**
+1. Failure handling: auto-disable after a *customizable* number of
+   consecutive failures (`max_consecutive_failures`, default 5,
+   `<= 0` disables auto-disable entirely) — implemented as
+   `ECS::CallbackSystem` in `include/ECS/Systems.h`.
+2. Surface: new `engine.ecs` sub-API (`Facade::EcsAPI` / Cython `Ecs`),
+   not folded into `engine.scene`.
+3. Scope: full (generic component access + custom systems), in one pass.
+
+**Implementation deviates from the file list originally sketched below in
+one way, for a good reason found while implementing:** `PyComponentBag`
+and the Python-callback system were originally planned as core-engine
+headers (`include/ECS/PyComponentBag.h`, `include/ECS/PyCallbackSystem.h`)
+"guarded" against BUILD_PYTHON=OFF. Turns out no guarding is needed and
+none of that has to touch Python at all: `entt::registry` pools don't
+require the *core engine library* to know a type in advance — only
+whichever translation unit actually calls `registry.emplace<T>()` does.
+So the generic bag (`ScriptComponentBag`) and the generic callback-driven
+system (`CallbackSystem`) are 100% Python-agnostic C++ (`std::shared_ptr
+<void>` / `std::function<bool(float)>`), living in core engine headers
+with zero Python dependency, exactly like every other engine component/
+system. All Python-specific `PyObject*` marshalling is confined to
+`python/shoonyakasha/_ecs_bridge.h`, same separation the existing
+`_callback_bridge.h` already uses for `on_update`/etc. This is a cleaner
+outcome than what's described in "New files" below — see that section's
+note.
 
 ## Context
 
@@ -72,23 +103,30 @@ Investigated directly in the engine source before designing this:
 
 ## Design
 
-### 1. Component storage: `PyComponentBag`
+### 1. Component storage: `ScriptComponentBag`
 
-One new C++ component type, holding **all** of an entity's Python-defined
-components in a name-keyed map:
+One new C++ component type, holding **all** of an entity's script-defined
+components in a name-keyed map — and, as implemented, genuinely
+Python-agnostic (the payload is `std::shared_ptr<void>`, not a `PyRef`
+directly), so this lives in core engine headers with no Python dependency
+at all (see "Implementation deviates..." note above):
 
 ```cpp
-// New: include/ECS/PyComponentBag.h
-struct PyComponentBag {
-    std::unordered_map<std::string, PyRef> components;  // typeName/label -> owned PyObject*
+// include/ECS/ScriptComponentBag.h
+struct ScriptComponentBag {
+    std::unordered_map<std::string, std::shared_ptr<void>> components;
 };
 ```
+
+The Python binding wraps a `PyObject*` into that `shared_ptr<void>` at the
+edge (`python/shoonyakasha/_ecs_bridge.h`'s `wrap_py_object`, incref on
+attach, GIL-safe decref via the shared_ptr's deleter on detach/entity
+destruction) — the engine core never touches `PyRef` or `Python.h` at all.
 
 This mirrors a pattern the codebase already uses for the same reason —
 `MaterialComponentV5::params`/`::textures` are exactly this shape (a
 generic name-keyed bag) instead of one entt component type per material
-property. `PyRef` is `_callback_bridge.h`'s existing ref-counted wrapper,
-reused verbatim.
+property.
 
 **Why one bag instead of trying to give each Python class its own entt
 pool:** entt pools need a concrete C++ type per pool. Faking that per
@@ -99,9 +137,10 @@ usefulness (attach/query/mutate arbitrary Python data per entity) for a
 fraction of the implementation cost, and it's consistent with an idiom the
 engine already uses elsewhere.
 
-**Cost of this choice:** querying "all entities with Python component X" is
-`registry.view<PyComponentBag>()` filtered by key presence — O(entities with
-*any* Python component), not an indexed O(1) archetype lookup. Fine for
+**Cost of this choice:** querying "all entities with a script component X"
+is `registry.view<ScriptComponentBag>()` filtered by key presence —
+O(entities with *any* script component), not an indexed O(1) archetype
+lookup. Fine for
 gameplay/UI-level scripting (hundreds to low thousands of entities); not
 appropriate for per-particle/per-vertex hot loops, which should stay in C++
 components as they do today.
@@ -110,7 +149,8 @@ components as they do today.
 
 No required base class — plain Python objects (dataclasses, plain classes,
 even dicts) work, since attachment is just "put this object in the bag
-under this entity, under this name":
+under this entity, under this name". Entity lifecycle stays on
+`engine.scene` (unchanged) — `engine.ecs` only handles the components:
 
 ```python
 class Health:
@@ -118,7 +158,7 @@ class Health:
         self.hp = hp
         self.max_hp = hp
 
-e = engine.ecs.create_entity()
+e = engine.scene.create_entity()
 engine.ecs.set_component(e, "Health", Health(hp=50))
 
 h = engine.ecs.get_component(e, "Health")   # same object identity, mutate in place
@@ -128,62 +168,52 @@ engine.ecs.remove_component(e, "Health")
 engine.ecs.has_component(e, "Health")       # bool
 ```
 
-`set_component`/`get_component` work for *both* custom Python components
-and (for convenience) as a fallback name-based path to built-in components
-that don't already have a fast typed accessor — but built-ins should
-prefer the typed live-views below for performance and ergonomics.
+**As implemented, built-in components stay entirely on `engine.scene`** —
+`engine.ecs.set_component`/`get_component` are for script-defined
+components only, not a fallback path to `TransformComponent` etc. (see
+"Decided" section: the originally-proposed live-view accessors below were
+dropped as redundant with `SceneAPI`'s existing typed getters/setters).
 
-### 3. Live-view accessors for built-in components
+### 3. ~~Live-view accessors for built-in components~~ (not implemented)
 
-Rather than growing more `get_x`/`set_x` string-keyed pairs
-(`SceneAPI`'s current style), expose small Cython extension types that hold
-`entt::registry*` + `entt::entity` and read/write the real component
-in place through property getters/setters — no copy in, no copy back out:
-
-```python
-t = engine.ecs.transform(e)      # None if entity has no TransformComponent
-t.position = (1.0, 2.0, 3.0)     # writes straight into TransformComponent
-t.position                        # reads straight out
-t.mark_dirty()                    # if needed, mirrors TransformComponent::isDirty
-```
-
-This is genuinely "lower level" than `SceneAPI.set_position(entity, pos)`:
-it's the same underlying field access, but as a reusable view object
-instead of one function per field, and it composes naturally with a
-`view()` query (below) instead of requiring N separate calls per entity.
+Originally proposed: Cython extension types holding `entt::registry*` +
+`entt::entity` for direct in-place field access on built-ins
+(`engine.ecs.transform(e).position = (...)`). Dropped — `SceneAPI` already
+provides typed accessors for every built-in component's fields
+(`get_position`/`set_material_vec3`/etc.), so this would have been a
+second, differently-shaped way to reach the same data. `engine.ecs` stays
+focused on what doesn't exist elsewhere: script components and systems.
 
 ### 4. Queries
 
 ```python
-for e, t in engine.ecs.view_transform():           # entt::view<TransformComponent> under the hood
-    ...
-
-for e in engine.ecs.view_component("Health"):        # PyComponentBag scan, filtered by key
+for e in engine.ecs.find_entities_with_component("Health"):  # ScriptComponentBag scan, filtered by key
     h = engine.ecs.get_component(e, "Health")
     ...
 ```
 
-Built-in typed views (`view_transform`, `view_renderable`, ...) are thin
-wrappers per component type the engine already ships (small, finite list,
-same "one method per type" cost as the live-view accessors — acceptable
-since these are compile-time-known types, unlike custom components).
+(Named `find_entities_with_component` rather than `view_component` in the
+implementation — reads better as "give me a list," which is what it
+returns, rather than implying a live/lazy `entt::view`-style iterator.)
 
 ### 5. Custom systems
 
-A new `ISystem` subclass, `ECS::PyCallbackSystem`, holding a
-`std::function<void(float)>` built from `_callback_bridge.h`'s existing
-`make_update_callback` — **no new bridge machinery needed for this part**.
-The Python callback doesn't take a registry parameter; it closes over
-`engine.ecs` (or whatever object it already has) to query/mutate, exactly
-like `on_update(dt)` does today:
+Implemented as `ECS::CallbackSystem` (`include/ECS/Systems.h`), an
+`ISystem` subclass wrapping `std::function<bool(float)>` — a `bool`
+return rather than `void`, unlike `_callback_bridge.h`'s other callbacks,
+specifically so the auto-disable failure counter (see "Decided" above) has
+something to count. `python/shoonyakasha/_ecs_bridge.h`'s
+`make_system_update_callback` is the one new bridge factory this needed;
+everything else (`PyRef`, the GIL-acquire/release/print-traceback
+pattern) is reused as-is from `_callback_bridge.h`.
 
 ```python
 def health_regen_system(dt):
-    for e in engine.ecs.view_component("Health"):
+    for e in engine.ecs.find_entities_with_component("Health"):
         h = engine.ecs.get_component(e, "Health")
         h.hp = min(h.max_hp, h.hp + 5.0 * dt)
 
-engine.ecs.add_system(health_regen_system, priority=50, name="HealthRegen")
+engine.ecs.add_system("HealthRegen", health_regen_system, priority=50)
 # ...
 engine.ecs.set_system_enabled("HealthRegen", False)
 engine.ecs.remove_system("HealthRegen")
@@ -193,23 +223,23 @@ engine.ecs.remove_system("HealthRegen")
 (`TransformSystem`=0, `CameraSystem`=10, `LifetimeSystem`=100 today — see
 `include/ECS/Scene.h:581`), so e.g. `priority=5` runs after transforms are
 resolved but before the camera system, `priority=150` runs after
-everything built-in. This reuses `SystemManager`'s existing priority-sort
-(`include/ECS/Systems.h:167`) untouched.
+everything built-in. `SystemManager::addSystem` sorts by priority
+*immediately* after construction, before the caller gets a pointer back —
+so `CallbackSystem` takes `priority` as a constructor argument (not
+`->priority = x` set afterward, which is too late to affect that add's
+sort) to guarantee correct placement no matter when a system is
+registered at runtime (not just at startup, unlike the built-in systems).
 
-`add_system` returns/accepts a `name` so systems are individually
-enable/disable/remove-able — `SystemManager` doesn't support lookup-by-name
-today, so this needs a small addition (a `unordered_map<string, ISystem*>`
-alongside the existing vector, or a lookup helper).
+`add_system`/`removeSystem`/`findSystem` by name needed a small addition
+to `SystemManager` (`include/ECS/Systems.h`) — an `ISystem::name` field
+plus linear-scan lookup/removal by name. `addSystem` on `EcsAPI` refuses
+to register a duplicate name (call `remove_system` first to replace one).
 
 Execution timing (confirmed in `ApplicationBase::update()`,
 `src/App/ApplicationBase.cpp:310`): input → `onUpdate` callback → **ECS
 systems (priority order)** → render. So a Python system registered here
 runs in the same phase as `TransformSystem` etc., strictly before
-rendering, and strictly after `on_update`. Existing exception handling
-(catch + `PyErr_Print`) applies per-system-per-frame — an exception in one
-Python system doesn't take down the frame or other systems, but also
-doesn't halt that system's future frames automatically; that's worth a
-follow-up (see below).
+rendering, and strictly after `on_update`.
 
 ### 6. Entity handles
 
@@ -220,22 +250,42 @@ consistent with `SceneAPI` today. An optional object-style `Entity` proxy
 later without needing any new C++/Cython surface, since it'd just wrap the
 functional calls above.
 
-## New files
+## Files (as actually implemented)
 
-- `python/shoonyakasha/_ecs_bridge.h` — `PyComponentBag` C++ definition +
-  `make_system_callback` (thin reuse of `_callback_bridge.h`'s existing
-  factory, just under a clearer name) + component get/set/has helpers
-  operating on `PyComponentBag`. Auto-discovered by CMake's existing glob
-  (`python/CMakeLists.txt:30`) — no build changes needed.
-- `include/ECS/PyComponentBag.h` — the component struct itself, engine-side
-  (only meaningful in builds with `BUILD_PYTHON=ON`; guard accordingly so a
-  pure-C++ build doesn't need Python headers).
-- `include/ECS/PyCallbackSystem.h` — the `ISystem` subclass.
-- `python/shoonyakasha/_ecs_api.pxd` + additions to `_shoonyakasha.pyx` —
-  `EcsAPI`/`Ecs` Cython wrapper class exposing everything in sections 2-5
-  above. Likely reachable as `engine.ecs` alongside today's `engine.scene`.
-- Small addition to `ECS::SystemManager` — name-keyed lookup for
-  enable/disable/remove by name (currently only iterates a plain vector).
+Core engine, zero Python dependency:
+- `include/ECS/ScriptComponentBag.h` — the generic opaque bag
+  (`std::unordered_map<std::string, std::shared_ptr<void>>`), named
+  `ScriptComponentBag` rather than `PyComponentBag` since the type itself
+  has no idea what a Python object is.
+- `include/ECS/Systems.h` — added `ISystem::name`, `SystemManager::
+  findSystem`/`removeSystem` (by name), and `ECS::CallbackSystem` (wraps
+  `std::function<bool(float)>`, tracks consecutive failures, auto-disables
+  past `maxConsecutiveFailures`).
+- `include/Facade/EcsAPI.h` + `src/Facade/EcsAPI.cpp` — new PIMPL Facade
+  sub-API (same shape as `SceneAPI`), wired into `EngineAPI::getEcs()`.
+  Public methods use only `std::shared_ptr<void>`/`std::function`/std
+  types — no entt, no Python, matching every other Facade header's rule.
+
+Python bridge (note: NOT declared in a separate `_ecs_api.pxd` — the
+existing `_engine_api.pxd` explicitly consolidates every Facade class
+into one file because "Cython cannot 'complete' a forward-declared
+cppclass from another .pxd," so `CppEcsAPI` was added there instead):
+- `python/shoonyakasha/_ecs_bridge.h` — `wrap_py_object`/`unwrap_py_object`
+  (PyObject* <-> the generic `shared_ptr<void>` payload) and
+  `make_system_update_callback` (PyObject* callable -> `std::function<bool
+  (float)>`, reusing `_callback_bridge.h`'s `PyRef`).
+- `python/shoonyakasha/_engine_api.pxd` — `CppEcsAPI` declaration,
+  `function_bool_float`, the three bridge function declarations,
+  `CppEngineAPI::getEcs()`.
+- `python/shoonyakasha/_shoonyakasha.pyx` — new `cdef class Ecs`, exposed
+  as `Engine.ecs`, mirroring the `Scene`/`Input`/`Physics` wrapper pattern.
+
+Tests: `tests/ecs/SystemsTest.cpp` (SystemManager name lookup,
+`CallbackSystem` construction) and `tests/facade/EcsAPITest.cpp` (full
+behavioral coverage of components + systems + auto-disable, using the
+`SHOONYAKASHA_TESTING` raw-registry pattern).
+
+Example: `python/examples/ecs_bindings_demo.py`.
 
 ## Non-goals (v1)
 
@@ -252,38 +302,36 @@ functional calls above.
   cost above; fine for the intended use (gameplay/UI scripting), not for
   hot per-frame loops over large entity counts.
 
-## Open questions for you
+## Decided (previously open questions)
 
-1. **Exception behavior for systems.** Keep the existing catch-and-print
-   silent-continue behavior (consistent with `on_update` etc.), or should a
-   Python system that raises get auto-disabled after N consecutive failures
-   so a broken script doesn't spam stderr every frame forever?
-2. **Naming/surface.** `engine.ecs.*` as a new sub-API alongside
-   `engine.scene`, or fold this directly into the existing `Scene`
-   Cython class (`engine.scene.create_entity`, `engine.scene.add_system`,
-   etc.)? The existing `SceneAPI` already owns entity lifecycle
-   (`create_entity`/`destroy_entity`), so there's a reasonable case for one
-   extended class rather than a parallel one.
-3. **Scope for the first implementation pass** — all of sections 2-5, or
-   start with just custom systems (section 5, smallest/lowest-risk, reuses
-   the most existing infrastructure) and add generic component
-   access/live-views in a follow-up?
+1. **Exception behavior:** auto-disable, threshold customizable per system
+   (`max_consecutive_failures` param on `add_system`, default 5). A raised
+   exception is still always caught and its traceback printed (same as
+   every other Python callback in this engine) — auto-disable only stops
+   *future* frames from re-running a system that keeps failing.
+2. **Surface:** new `engine.ecs` sub-API, not folded into `engine.scene`.
+   `engine.scene` keeps owning entity lifecycle and built-in typed
+   accessors; `engine.ecs` is specifically for script-defined components
+   and systems.
+3. **Scope:** full — component access (set/get/has/remove/list/query) and
+   systems (add/remove/enable/failure-tracking), in one pass. Live-view
+   accessors for built-ins (the design's original section 3) were dropped
+   as redundant: `SceneAPI` already has typed get/set for every built-in
+   component's fields (`get_position`/`set_material_vec3`/etc.) — adding a
+   second, different-shaped way to read the same data wasn't worth the
+   duplication. `engine.ecs` is for script components and queries only;
+   built-in components stay on `engine.scene`.
 
-## Suggested implementation order
+## Not done / still open
 
-1. `PyComponentBag` + `PyCallbackSystem` (C++ only, no Python-visible
-   surface yet) + unit tests using the `SHOONYAKASHA_TESTING` pattern
-   (`tests/facade/SceneAPITest.cpp` shows the raw-registry test-mode
-   constructor to reuse).
-2. `SystemManager` name-keyed lookup addition.
-3. `_ecs_bridge.h` + Cython `EcsAPI`: `create_entity`/`destroy_entity`
-   (if not just reusing `SceneAPI`'s), `set_component`/`get_component`/
-   `has_component`/`remove_component`, `add_system`/`remove_system`/
-   `set_system_enabled`.
-4. Live-view accessors for the most-used built-ins first (`transform`,
-   `renderable`), expand as needed.
-5. `view_component`/`view_transform` query helpers.
-6. Example script + docs page under `docs/guides/`.
+- **Docs page.** No `docs/guides/` page written yet for this feature —
+  `python/examples/ecs_bindings_demo.py` is the only usage reference so
+  far.
+- **Live-view accessors for built-ins**, if ever wanted despite the note
+  above (e.g. for perf-sensitive per-frame Python loops over `Transform`
+  fields specifically) — not implemented, per the scope decision.
+- Everything under "Non-goals (v1)" above (serialization, dot-path access,
+  archetype-speed custom-component queries) remains out of scope.
 
 ## Future: `entt::meta`
 
