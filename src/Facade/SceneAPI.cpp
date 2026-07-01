@@ -13,6 +13,8 @@
 #include "ECS/Scene.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/SkeletonComponents.h"
+#include "ECS/Sprite2DComponents.h"
+#include "Resources/Sprite2DManager.h"
 
 using namespace Shoonyakasha::Facade::Internal;
 
@@ -27,6 +29,7 @@ struct SceneAPI::Impl {
     ECS::Scene* scene;       // nullptr in test mode
     entt::registry& registry;
     ECS::ComponentRegistry& componentRegistry;
+    Sprite2DManager* sprite2DManager = nullptr;  // wired post-construction
 
     // Production mode: wraps a full Scene
     explicit Impl(ECS::Scene& s)
@@ -511,6 +514,117 @@ bool SceneAPI::hasMaterialParam(EntityHandle entity, const std::string& param) c
     if (!m_impl->valid(entity)) return false;
     auto* mat = m_impl->registry.try_get<MaterialComponentV5>(toEntt(entity));
     return mat ? mat->hasParam(param) : false;
+}
+
+bool SceneAPI::setMaterialTexture(EntityHandle entity, const std::string& slotName,
+                                   const std::string& filePath) {
+    if (!m_impl->valid(entity) || !m_impl->sprite2DManager) return false;
+    auto* mat = m_impl->registry.try_get<MaterialComponentV5>(toEntt(entity));
+    if (!mat) return false;
+    GPUTexture texture = m_impl->sprite2DManager->loadTexture(filePath);
+    if (!texture.exists) return false;
+    mat->textures[slotName] = texture;
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Sprite / UI Access
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+Shoonyakasha::UIAnchorComponent::Anchor toEngineAnchor(UIAnchor anchor) {
+    return static_cast<Shoonyakasha::UIAnchorComponent::Anchor>(static_cast<uint8_t>(anchor));
+}
+UIAnchor toFacadeAnchor(Shoonyakasha::UIAnchorComponent::Anchor anchor) {
+    return static_cast<UIAnchor>(static_cast<uint8_t>(anchor));
+}
+Shoonyakasha::Text2DComponent::HAlign toEngineAlign(TextHAlign align) {
+    return static_cast<Shoonyakasha::Text2DComponent::HAlign>(static_cast<uint8_t>(align));
+}
+}
+
+bool SceneAPI::setSpriteTexture(EntityHandle entity, const std::string& filePath) {
+    return setMaterialTexture(entity, "spriteTexture", filePath);
+}
+
+void SceneAPI::setSpriteColor(EntityHandle entity, const glm::vec4& color) {
+    setMaterialVec4(entity, "tintColor", color);
+}
+
+glm::vec4 SceneAPI::getSpriteColor(EntityHandle entity) const {
+    return getMaterialVec4(entity, "tintColor", glm::vec4(1.0f));
+}
+
+void SceneAPI::setSpriteUVRect(EntityHandle entity, const glm::vec4& uvRect) {
+    setMaterialVec4(entity, "uvRect", uvRect);
+}
+
+glm::vec4 SceneAPI::getSpriteUVRect(EntityHandle entity) const {
+    return getMaterialVec4(entity, "uvRect", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+}
+
+bool SceneAPI::isScreenSpaceSprite(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return false;
+    auto* sprite = m_impl->registry.try_get<Shoonyakasha::Sprite2DComponent>(toEntt(entity));
+    return sprite ? sprite->screenSpace : false;
+}
+
+void SceneAPI::setUIAnchor(EntityHandle entity, UIAnchor anchor, const glm::vec2& offsetPixels) {
+    if (!m_impl->valid(entity)) return;
+    auto* a = m_impl->registry.try_get<Shoonyakasha::UIAnchorComponent>(toEntt(entity));
+    if (!a) return;
+    a->anchor = toEngineAnchor(anchor);
+    a->offsetPixels = offsetPixels;
+}
+
+UIAnchor SceneAPI::getUIAnchor(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return UIAnchor::TopLeft;
+    auto* a = m_impl->registry.try_get<Shoonyakasha::UIAnchorComponent>(toEntt(entity));
+    return a ? toFacadeAnchor(a->anchor) : UIAnchor::TopLeft;
+}
+
+glm::vec2 SceneAPI::getUIAnchorOffset(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return glm::vec2(0.0f);
+    auto* a = m_impl->registry.try_get<Shoonyakasha::UIAnchorComponent>(toEntt(entity));
+    return a ? a->offsetPixels : glm::vec2(0.0f);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Text Access
+// ═══════════════════════════════════════════════════════════════
+
+void SceneAPI::setText(EntityHandle entity, const std::string& text) {
+    if (!m_impl->valid(entity)) return;
+    auto* t = m_impl->registry.try_get<Shoonyakasha::Text2DComponent>(toEntt(entity));
+    if (t) t->text = text;
+}
+
+std::string SceneAPI::getText(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return "";
+    auto* t = m_impl->registry.try_get<Shoonyakasha::Text2DComponent>(toEntt(entity));
+    return t ? t->text : "";
+}
+
+void SceneAPI::setTextColor(EntityHandle entity, const glm::vec4& color) {
+    if (!m_impl->valid(entity)) return;
+    auto* t = m_impl->registry.try_get<Shoonyakasha::Text2DComponent>(toEntt(entity));
+    if (t) t->color = color;
+}
+
+void SceneAPI::setTextFontSize(EntityHandle entity, float fontSize) {
+    if (!m_impl->valid(entity)) return;
+    auto* t = m_impl->registry.try_get<Shoonyakasha::Text2DComponent>(toEntt(entity));
+    if (t) t->fontSize = fontSize;
+}
+
+void SceneAPI::setTextAlign(EntityHandle entity, TextHAlign align) {
+    if (!m_impl->valid(entity)) return;
+    auto* t = m_impl->registry.try_get<Shoonyakasha::Text2DComponent>(toEntt(entity));
+    if (t) t->hAlign = toEngineAlign(align);
+}
+
+void SceneAPI::wireSprite2DManager(Sprite2DManager* manager) {
+    m_impl->sprite2DManager = manager;
 }
 
 // ═══════════════════════════════════════════════════════════════

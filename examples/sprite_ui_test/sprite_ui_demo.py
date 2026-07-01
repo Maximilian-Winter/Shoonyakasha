@@ -1,0 +1,68 @@
+"""
+Shoonyakasha Sprite/UI Demo
+
+Demonstrates the 2D rendering mechanics: world-space sprites and
+screen-space UI panels, rendered through the "sprite_geometry" pass
+declared in sprite_pipeline.json.
+
+Usage:
+    python sprite_ui_demo.py
+
+Requirements:
+    - Build with -DBUILD_PYTHON=ON
+    - Compile sprite.vert/sprite.frag to shaders/sprite.vert.spv /
+      shaders/sprite.frag.spv (glslc sprite.vert -o shaders/sprite.vert.spv)
+    - Run from this directory (so sprite_pipeline.json and shaders/ resolve)
+    - Have a sprite.png / panel.png image available, or point texture_path
+      at your own art
+"""
+
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
+
+import shoonyakasha as sk
+
+engine = sk.Engine(
+    title="Shoonyakasha Sprite/UI Demo",
+    width=1280, height=720,
+    pipeline_json_path="sprite_pipeline.json",
+)
+
+
+def on_init():
+    scene = engine.scene
+
+    # World-space sprite: billboarded quad placed in 3D space, projected
+    # with the active 3D camera.
+    engine.create_camera(pos=(0.0, 0.0, 5.0), fov=60.0)
+    engine.create_sprite(
+        world_pos=(0.0, 0.0, 0.0),
+        texture_path="sprite.png",
+        size=(1.5, 1.5),
+        tint=(1.0, 1.0, 1.0, 1.0),
+    )
+
+    # Screen-space UI panel anchored to the top-left corner.
+    panel = engine.create_ui_panel(
+        anchor=sk.UI_ANCHOR_TOP_LEFT,
+        offset_pixels=(110, 40),
+        size_pixels=(200, 60),
+        texture_path="",  # flat-colored panel (no texture)
+        color=(0.1, 0.1, 0.15, 0.85),
+    )
+
+    # A second panel anchored to the bottom-right corner, textured.
+    engine.create_ui_panel(
+        anchor=sk.UI_ANCHOR_BOTTOM_RIGHT,
+        offset_pixels=(-90, -50),
+        size_pixels=(160, 80),
+        texture_path="panel.png",
+    )
+
+    print(f"[Python] Created top-left panel entity: {panel}")
+
+
+engine.set_on_init(on_init)
+engine.run()

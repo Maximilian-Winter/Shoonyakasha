@@ -1654,7 +1654,8 @@ void RenderGraph::setupAutoGeometryRenderers() {
             type != "transparent_geometry" &&
             type != "shadow_casters" &&
             type != "skinned_geometry" &&
-            type != "skinned_transparent") continue;
+            type != "skinned_transparent" &&
+            type != "sprite_geometry") continue;
 
         // Auto-register the callback!
         // Capture by value since passDecl reference may be invalidated

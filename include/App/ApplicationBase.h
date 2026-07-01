@@ -14,6 +14,7 @@
 #include "Core/EventSystem.h"
 #include "IBL/IBLGenerator.h"
 #include "Resources/GltfSceneLoader.h"
+#include "ECS/Sprite2DComponents.h"
 
 #include <glm/glm.hpp>
 #include <entt/entt.hpp>
@@ -34,6 +35,7 @@ class VulkanSwapChain;
 class VulkanCommandManager;
 class DescriptorManager;
 class ResourceManager;
+class Sprite2DManager;
 
 namespace FrameGraph { class RenderGraph; class SharedBufferRegistry; }
 namespace ECS {
@@ -154,6 +156,24 @@ protected:
                                    float intensity = 5.f,
                                    float range = 15.f);
 
+    // Create a world-space sprite (billboard-style quad placed in 3D world
+    // coordinates, projected with the active 3D camera).
+    entt::entity createSprite(const glm::vec3& worldPos,
+                               const std::string& texturePath,
+                               const glm::vec2& size = glm::vec2(1.f),
+                               const glm::vec4& tint = glm::vec4(1.f));
+
+    // Create a screen-space UI panel anchored to a viewport corner/edge/center.
+    // If texturePath is empty, the panel renders as a flat-colored rect.
+    entt::entity createUIPanel(UIAnchorComponent::Anchor anchor,
+                                const glm::vec2& offsetPixels,
+                                const glm::vec2& sizePixels,
+                                const std::string& texturePath = "",
+                                const glm::vec4& color = glm::vec4(1.f));
+
+    // Get the Sprite2DManager (shared quad mesh + texture cache for sprites/UI).
+    Sprite2DManager& getSprite2DManager();
+
 private:
     ApplicationConfig m_config;
 
@@ -166,9 +186,11 @@ private:
     std::unique_ptr<DescriptorManager> m_descriptorManager;
     std::unique_ptr<ResourceManager> m_resourceManager;
     std::unique_ptr<GltfSceneLoader> m_gltfLoader;
+    std::unique_ptr<Sprite2DManager> m_sprite2DManager;
     std::unique_ptr<Logger> m_logger;
     std::unique_ptr<EventDispatcher> m_eventDispatcher;
     std::vector<VkCommandBuffer> m_commandBuffers;
+    glm::vec2 m_screenSize{1600.0f, 900.0f};  // Updated each frame; drives UILayoutSystem
 
     // ─── Frame Graph ───────────────────────────────────────────
     std::unique_ptr<FrameGraph::RenderGraph> m_renderGraph;

@@ -40,6 +40,22 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         ColliderShape_Mesh "Shoonyakasha::Facade::ColliderShape::Mesh"
         ColliderShape_Plane "Shoonyakasha::Facade::ColliderShape::Plane"
 
+    cpdef enum UIAnchor "Shoonyakasha::Facade::UIAnchor":
+        UIAnchor_TopLeft "Shoonyakasha::Facade::UIAnchor::TopLeft"
+        UIAnchor_TopCenter "Shoonyakasha::Facade::UIAnchor::TopCenter"
+        UIAnchor_TopRight "Shoonyakasha::Facade::UIAnchor::TopRight"
+        UIAnchor_MiddleLeft "Shoonyakasha::Facade::UIAnchor::MiddleLeft"
+        UIAnchor_MiddleCenter "Shoonyakasha::Facade::UIAnchor::MiddleCenter"
+        UIAnchor_MiddleRight "Shoonyakasha::Facade::UIAnchor::MiddleRight"
+        UIAnchor_BottomLeft "Shoonyakasha::Facade::UIAnchor::BottomLeft"
+        UIAnchor_BottomCenter "Shoonyakasha::Facade::UIAnchor::BottomCenter"
+        UIAnchor_BottomRight "Shoonyakasha::Facade::UIAnchor::BottomRight"
+
+    cpdef enum TextHAlign "Shoonyakasha::Facade::TextHAlign":
+        TextHAlign_Left "Shoonyakasha::Facade::TextHAlign::Left"
+        TextHAlign_Center "Shoonyakasha::Facade::TextHAlign::Center"
+        TextHAlign_Right "Shoonyakasha::Facade::TextHAlign::Right"
+
     # ── Structs ────────────────────────────────────────────────
     cdef cppclass EngineConfig:
         int width

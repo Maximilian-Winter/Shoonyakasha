@@ -12,6 +12,7 @@
 #include "Vulkan/FrameGraph/FrameGraph.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/SkeletonComponents.h"
+#include "ECS/Sprite2DComponents.h"
 #include "ECS/Core.h"
 
 #include <vulkan/vulkan.h>
@@ -39,7 +40,8 @@ enum class EntityFilter {
     Transparent,      // AlphaMode::Blend (excludes skinned)
     ShadowCasters,    // Entities with castShadows = true
     Skinned,          // Skinned entities (has SkeletonComponent) - opaque
-    SkinnedTransparent // Skinned transparent entities
+    SkinnedTransparent, // Skinned transparent entities
+    Sprite2D          // Entities with Sprite2DComponent (sprites/UI panels)
 };
 
 // ============================================================================
@@ -49,7 +51,8 @@ enum class EntityFilter {
 enum class EntitySortMode {
     None,           // No sorting (render in iteration order)
     FrontToBack,    // Closest to camera first (depth prepass, opaque)
-    BackToFront     // Farthest from camera first (transparency)
+    BackToFront,    // Farthest from camera first (transparency)
+    SortKey         // Ascending RenderableTagComponent::sortKey (2D layering)
 };
 
 // ============================================================================
@@ -167,7 +170,8 @@ private:
     bool passesFilter(const MaterialComponentV5& material,
                       const RenderableTagComponent& tag,
                       EntityFilter filter,
-                      bool hasSkeleton) const;
+                      bool hasSkeleton,
+                      bool isSprite2D) const;
 
     /// Calculate distance from entity to camera
     float calculateDistance(const ECS::TransformComponent& transform) const;
@@ -197,12 +201,14 @@ inline EntityFilter FrameGraphRenderer::executionTypeToFilter(const std::string&
     if (type == "shadow_casters") return EntityFilter::ShadowCasters;
     if (type == "skinned_geometry") return EntityFilter::Skinned;
     if (type == "skinned_transparent") return EntityFilter::SkinnedTransparent;
+    if (type == "sprite_geometry") return EntityFilter::Sprite2D;
     return EntityFilter::All;
 }
 
 inline EntitySortMode FrameGraphRenderer::sortModeStringToEnum(const std::string& mode) const {
     if (mode == "front_to_back") return EntitySortMode::FrontToBack;
     if (mode == "back_to_front") return EntitySortMode::BackToFront;
+    if (mode == "sort_key") return EntitySortMode::SortKey;
     return EntitySortMode::None;
 }
 
@@ -210,7 +216,8 @@ inline bool FrameGraphRenderer::passesFilter(
     const MaterialComponentV5& material,
     const RenderableTagComponent& tag,
     EntityFilter filter,
-    bool hasSkeleton) const
+    bool hasSkeleton,
+    bool isSprite2D) const
 {
     if (!tag.shouldRender()) return false;
 
@@ -218,15 +225,17 @@ inline bool FrameGraphRenderer::passesFilter(
         case EntityFilter::All:
             return true;
         case EntityFilter::Opaque:
-            return !hasSkeleton && material.isOpaqueOrMasked();
+            return !hasSkeleton && !isSprite2D && material.isOpaqueOrMasked();
         case EntityFilter::Transparent:
-            return !hasSkeleton && material.isTransparent();
+            return !hasSkeleton && !isSprite2D && material.isTransparent();
         case EntityFilter::ShadowCasters:
-            return tag.castShadows && material.isOpaqueOrMasked();
+            return !isSprite2D && tag.castShadows && material.isOpaqueOrMasked();
         case EntityFilter::Skinned:
             return hasSkeleton && material.isOpaqueOrMasked();
         case EntityFilter::SkinnedTransparent:
             return hasSkeleton && material.isTransparent();
+        case EntityFilter::Sprite2D:
+            return isSprite2D;
     }
     return false;
 }

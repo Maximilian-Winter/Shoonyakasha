@@ -18,7 +18,7 @@ from cpython.ref cimport PyObject
 from ._facade_types cimport (
     EntityHandle, EngineConfig, GltfOptions,
     GltfResult as CppGltfResult,
-    CameraType, LightType,
+    CameraType, LightType, UIAnchor, TextHAlign,
 )
 
 
@@ -175,6 +175,25 @@ cdef extern from "Facade/SceneAPI.h" namespace "Shoonyakasha::Facade":
         void setMaterialVec4(EntityHandle entity, const string& param, const vec4& value)
         vec4 getMaterialVec4(EntityHandle entity, const string& param, const vec4& defaultVal) const
         cbool hasMaterialParam(EntityHandle entity, const string& param) const
+        cbool setMaterialTexture(EntityHandle entity, const string& slotName, const string& filePath)
+
+        # Sprite / UI
+        cbool setSpriteTexture(EntityHandle entity, const string& filePath)
+        void setSpriteColor(EntityHandle entity, const vec4& color)
+        vec4 getSpriteColor(EntityHandle entity) const
+        void setSpriteUVRect(EntityHandle entity, const vec4& uvRect)
+        vec4 getSpriteUVRect(EntityHandle entity) const
+        cbool isScreenSpaceSprite(EntityHandle entity) const
+        void setUIAnchor(EntityHandle entity, UIAnchor anchor, const vec2& offsetPixels)
+        UIAnchor getUIAnchor(EntityHandle entity) const
+        vec2 getUIAnchorOffset(EntityHandle entity) const
+
+        # Text
+        void setText(EntityHandle entity, const string& text)
+        string getText(EntityHandle entity) const
+        void setTextColor(EntityHandle entity, const vec4& color)
+        void setTextFontSize(EntityHandle entity, float fontSize)
+        void setTextAlign(EntityHandle entity, TextHAlign align)
 
         # Renderable
         cbool isVisible(EntityHandle entity) const
@@ -298,6 +317,11 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
                                             const vec3& color, float intensity)
         EntityHandle createPointLight(const vec3& position,
                                       const vec3& color, float intensity, float range)
+        EntityHandle createSprite(const vec3& worldPos, const string& texturePath,
+                                  const vec2& size, const vec4& tint)
+        EntityHandle createUIPanel(UIAnchor anchor, const vec2& offsetPixels,
+                                   const vec2& sizePixels, const string& texturePath,
+                                   const vec4& color)
         EntityHandle getCameraEntity() const
         float getDeltaTime() const
 
