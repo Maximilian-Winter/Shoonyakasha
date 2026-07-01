@@ -97,6 +97,15 @@ public:
                                const std::string& texturePath = "",
                                const glm::vec4& color = glm::vec4(1.f));
 
+    /// Create a screen-space text label anchored to a viewport corner/edge/center.
+    /// fontPath must point to a .ttf/.otf file.
+    EntityHandle createText(const std::string& text,
+                            UIAnchor anchor,
+                            const glm::vec2& offsetPixels,
+                            const std::string& fontPath,
+                            float fontSize = 24.f,
+                            const glm::vec4& color = glm::vec4(1.f));
+
     /// Get the camera entity handle.
     EntityHandle getCameraEntity() const;
 

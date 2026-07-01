@@ -36,6 +36,7 @@ class VulkanCommandManager;
 class DescriptorManager;
 class ResourceManager;
 class Sprite2DManager;
+class FontLoader;
 
 namespace FrameGraph { class RenderGraph; class SharedBufferRegistry; }
 namespace ECS {
@@ -171,8 +172,21 @@ protected:
                                 const std::string& texturePath = "",
                                 const glm::vec4& color = glm::vec4(1.f));
 
+    // Create a screen-space text label anchored to a viewport corner/edge/center.
+    // fontPath must point to a .ttf/.otf file - text is baked into one sprite
+    // entity per glyph via TextRenderSystem.
+    entt::entity createText(const std::string& text,
+                             UIAnchorComponent::Anchor anchor,
+                             const glm::vec2& offsetPixels,
+                             const std::string& fontPath,
+                             float fontSize = 24.f,
+                             const glm::vec4& color = glm::vec4(1.f));
+
     // Get the Sprite2DManager (shared quad mesh + texture cache for sprites/UI).
     Sprite2DManager& getSprite2DManager();
+
+    // Get the FontLoader (TTF baking + glyph atlas cache for text).
+    FontLoader& getFontLoader();
 
 private:
     ApplicationConfig m_config;
@@ -187,6 +201,7 @@ private:
     std::unique_ptr<ResourceManager> m_resourceManager;
     std::unique_ptr<GltfSceneLoader> m_gltfLoader;
     std::unique_ptr<Sprite2DManager> m_sprite2DManager;
+    std::unique_ptr<FontLoader> m_fontLoader;
     std::unique_ptr<Logger> m_logger;
     std::unique_ptr<EventDispatcher> m_eventDispatcher;
     std::vector<VkCommandBuffer> m_commandBuffers;
