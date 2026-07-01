@@ -1,0 +1,169 @@
+{
+  "version": 3,
+  "name": "FullShowcasePipeline",
+
+  "bufferLayouts": {
+    "SpriteSceneUBO": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "viewProjection", "type": "mat4", "source": "scene.camera.viewProjection" },
+        { "name": "resolution",     "type": "vec2", "source": "scene.screen.resolution" },
+        { "name": "padding",        "type": "vec2", "source": "const.0" }
+      ]
+    },
+    "SpritePerDraw": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": ["vertex", "fragment"]
+      },
+      "fields": [
+        { "name": "model",       "type": "mat4",  "source": "entity.transform.worldMatrix" },
+        { "name": "tintColor",   "type": "vec4",  "source": "entity.material.params.tintColor" },
+        { "name": "uvRect",      "type": "vec4",  "source": "entity.material.params.uvRect" },
+        { "name": "screenSpace", "type": "float", "source": "entity.material.params.screenSpace" },
+        { "name": "padding1",    "type": "float", "source": "const.0" },
+        { "name": "padding2",    "type": "float", "source": "const.0" },
+        { "name": "padding3",    "type": "float", "source": "const.0" }
+      ]
+    }
+  },
+
+  "entityDataBindings": {
+    "sprite": {
+      "perDraw": { "layoutRef": "SpritePerDraw" },
+      "material": { "layoutRef": "spriteSet" }
+    }
+  },
+
+  "samplers": {
+    "linearClamp": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "addressMode": "clamp_to_edge"
+    }
+  },
+
+  "descriptorSetLayouts": {
+    "sceneSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": ["vertex", "fragment"],
+          "name": "SpriteSceneUBO",
+          "autoBindBuffer": "SpriteSceneUBO"
+        }
+      ]
+    },
+    "spriteSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "spriteTexture" }
+      ]
+    }
+  },
+
+  "vertexFormats": {
+    "sprite2d": {
+      "attributes": [
+        { "name": "position", "type": "vec3", "location": 0 },
+        { "name": "uv",       "type": "vec2", "location": 1 }
+      ]
+    }
+  },
+
+  "resources": [
+    { "name": "swapchain", "kind": "image", "imported": true }
+  ],
+
+  "passes": [
+    {
+      "name": "AlphaPass",
+      "type": "graphics",
+      "queue": "graphics",
+      "execution": {
+        "type": "sprite_geometry",
+        "sortMode": "sort_key",
+        "entityDataBinding": "sprite",
+        "renderLayerMask": 1
+      },
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_write",
+          "clear": [0.04, 0.04, 0.07, 1.0]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/sprite.vert.spv",
+        "fragmentShader": "shaders/sprite.frag.spv",
+        "vertexInput": "sprite2d",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "blending": "alpha"
+      },
+      "descriptorSets": ["sceneSet", "spriteSet"],
+      "pushConstants": [{ "stages": ["vertex", "fragment"], "size": 112, "offset": 0 }]
+    },
+    {
+      "name": "AdditivePass",
+      "type": "graphics",
+      "queue": "graphics",
+      "execution": {
+        "type": "sprite_geometry",
+        "sortMode": "sort_key",
+        "entityDataBinding": "sprite",
+        "renderLayerMask": 2
+      },
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_blend" }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/sprite.vert.spv",
+        "fragmentShader": "shaders/sprite.frag.spv",
+        "vertexInput": "sprite2d",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": ["sceneSet", "spriteSet"],
+      "pushConstants": [{ "stages": ["vertex", "fragment"], "size": 112, "offset": 0 }]
+    },
+    {
+      "name": "PremultipliedPass",
+      "type": "graphics",
+      "queue": "graphics",
+      "execution": {
+        "type": "sprite_geometry",
+        "sortMode": "sort_key",
+        "entityDataBinding": "sprite",
+        "renderLayerMask": 4
+      },
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_blend" }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/sprite.vert.spv",
+        "fragmentShader": "shaders/sprite.frag.spv",
+        "vertexInput": "sprite2d",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "blending": "custom",
+        "srcColorFactor": "one",
+        "dstColorFactor": "one_minus_src_alpha",
+        "colorBlendOp": "add",
+        "srcAlphaFactor": "one",
+        "dstAlphaFactor": "one_minus_src_alpha",
+        "alphaBlendOp": "add"
+      },
+      "descriptorSets": ["sceneSet", "spriteSet"],
+      "pushConstants": [{ "stages": ["vertex", "fragment"], "size": 112, "offset": 0 }]
+    }
+  ]
+}

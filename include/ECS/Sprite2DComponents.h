@@ -103,6 +103,11 @@ struct Text2DComponent {
     // Mirrors RenderableTagComponent::sortKey for entities that don't
     // otherwise carry a RenderableTagComponent.
     uint32_t sortKey = 0;
+
+    // Propagated to each generated glyph entity's
+    // RenderableTagComponent::renderLayerMask (see that field's docs).
+    // Default 0xFF matches every pass, same as a freshly-created sprite.
+    uint8_t renderLayerMask = 0xFF;
 };
 
 // ============================================================================
@@ -123,6 +128,7 @@ struct TextBakedComponent {
     glm::vec4 bakedColor{1.0f};
     Text2DComponent::HAlign bakedAlign = Text2DComponent::HAlign::Left;
     bool bakedVisible = true;
+    uint8_t bakedLayerMask = 0xFF;
     std::vector<entt::entity> glyphEntities;
 };
 
