@@ -38,12 +38,14 @@ from ._engine_api cimport (
     vec2_x, vec2_y, vec3_x, vec3_y, vec3_z,
     vec4_x, vec4_y, vec4_z, vec4_w, mat4_get,
     function_void, function_float, function_int, function_uint2,
-    function_int_bool, function_float2,
+    function_int_bool, function_float2, function_bool_float,
     make_void_callback, make_update_callback, make_key_callback,
     make_resize_callback, make_key_event_callback,
     make_float2_callback, make_int_bool_callback,
-    CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI,
+    wrap_py_object, unwrap_py_object, make_system_update_callback,
+    CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI,
 )
+from libcpp.memory cimport shared_ptr
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -740,6 +742,142 @@ cdef class Physics:
 
 
 # ═══════════════════════════════════════════════════════════════
+# Ecs — Python wrapper for EcsAPI (low-level ECS: custom components/systems)
+# ═══════════════════════════════════════════════════════════════
+
+cdef class Ecs:
+    """Low-level ECS access: custom Python components and systems.
+
+    Obtained via engine.ecs — do not construct directly.
+
+    Complements engine.scene (entity lifecycle, typed built-in component
+    accessors) with:
+      - Arbitrary Python objects attached to entities as named components
+        (set_component/get_component/has_component/remove_component),
+        stored by reference — mutating the returned object mutates the
+        attached component in place.
+      - Custom per-frame systems (add_system), run by the same
+        SystemManager/priority ordering as built-in systems
+        (TransformSystem=0, CameraSystem=10 by default). A system callback
+        that raises is caught, its traceback printed, and reported as a
+        failure; after max_consecutive_failures such reports in a row the
+        system auto-disables (see is_system_enabled/system_failure_count).
+    """
+
+    cdef CppEcsAPI* _ptr
+    cdef bint _owned
+
+    def __cinit__(self):
+        self._ptr = NULL
+        self._owned = False
+
+    def __dealloc__(self):
+        if self._owned and self._ptr != NULL:
+            del self._ptr
+
+    # ── Script Component Access ───────────────────────────────
+
+    def set_component(self, uint32_t entity, str name, value):
+        """Attach (or replace) a Python object as a named component on an entity.
+
+        The engine holds a reference to `value` for as long as it's
+        attached (until remove_component, overwritten by another
+        set_component, or the entity is destroyed).
+        """
+        cdef string cpp_name = name.encode('utf-8')
+        self._ptr.setComponent(entity, cpp_name, wrap_py_object(<PyObject*>value))
+
+    def get_component(self, uint32_t entity, str name):
+        """Get a previously-attached component's value (None if absent).
+
+        Returns the SAME object that was attached — mutate it in place to
+        update the component.
+        """
+        cdef string cpp_name = name.encode('utf-8')
+        cdef shared_ptr[void] ptr = self._ptr.getComponent(entity, cpp_name)
+        if ptr.get() == NULL:
+            return None
+        return unwrap_py_object(ptr)
+
+    def has_component(self, uint32_t entity, str name):
+        cdef string cpp_name = name.encode('utf-8')
+        return self._ptr.hasComponent(entity, cpp_name)
+
+    def remove_component(self, uint32_t entity, str name):
+        """Detach a component. Returns True if it was present."""
+        cdef string cpp_name = name.encode('utf-8')
+        return self._ptr.removeComponent(entity, cpp_name)
+
+    def get_component_names(self, uint32_t entity):
+        """Names of all script-defined components attached to an entity."""
+        cdef vector[string] names = self._ptr.getComponentNames(entity)
+        return [n.decode('utf-8') for n in names]
+
+    def find_entities_with_component(self, str name):
+        """All entities carrying a component named `name`.
+
+        O(entities with *any* script component) — a scan, not an indexed
+        lookup. Fine for gameplay/UI-level scripting; avoid in hot
+        per-frame loops over large entity counts.
+        """
+        cdef string cpp_name = name.encode('utf-8')
+        cdef vector[EntityHandle] entities = self._ptr.findEntitiesWithComponent(cpp_name)
+        return [<uint32_t>e for e in entities]
+
+    # ── System Management ─────────────────────────────────────
+
+    def add_system(self, str name, callback, int priority=0, int max_consecutive_failures=5):
+        """Register a per-frame system: callback(dt: float).
+
+        Runs every frame through the same priority-ordered SystemManager
+        as built-in systems (lower priority runs first). Fails (returns
+        False) if a system named `name` is already registered — call
+        remove_system first to replace one.
+
+        max_consecutive_failures <= 0 disables auto-disable entirely (the
+        system keeps running — and failing — every frame).
+        """
+        cdef string cpp_name = name.encode('utf-8')
+        return self._ptr.addSystem(
+            cpp_name, make_system_update_callback(<PyObject*>callback),
+            priority, max_consecutive_failures)
+
+    def remove_system(self, str name):
+        """Unregister a system. Returns True if it was found and removed."""
+        cdef string cpp_name = name.encode('utf-8')
+        return self._ptr.removeSystem(cpp_name)
+
+    def has_system(self, str name):
+        cdef string cpp_name = name.encode('utf-8')
+        return self._ptr.hasSystem(cpp_name)
+
+    def set_system_enabled(self, str name, bint enabled):
+        cdef string cpp_name = name.encode('utf-8')
+        return self._ptr.setSystemEnabled(cpp_name, enabled)
+
+    def is_system_enabled(self, str name):
+        cdef string cpp_name = name.encode('utf-8')
+        return self._ptr.isSystemEnabled(cpp_name)
+
+    def get_system_failure_count(self, str name):
+        """Consecutive failures reported so far (0 if healthy or not found)."""
+        cdef string cpp_name = name.encode('utf-8')
+        return self._ptr.getSystemFailureCount(cpp_name)
+
+    def get_system_max_failures(self, str name):
+        cdef string cpp_name = name.encode('utf-8')
+        return self._ptr.getSystemMaxFailures(cpp_name)
+
+    def set_system_max_failures(self, str name, int max_failures):
+        cdef string cpp_name = name.encode('utf-8')
+        self._ptr.setSystemMaxFailures(cpp_name, max_failures)
+
+    def reset_system_failure_count(self, str name):
+        cdef string cpp_name = name.encode('utf-8')
+        self._ptr.resetSystemFailureCount(cpp_name)
+
+
+# ═══════════════════════════════════════════════════════════════
 # Engine — Python wrapper for EngineAPI (the main entry point)
 # ═══════════════════════════════════════════════════════════════
 
@@ -764,6 +902,7 @@ cdef class Engine:
     cdef Scene _scene_wrapper
     cdef Input _input_wrapper
     cdef Physics _physics_wrapper
+    cdef Ecs _ecs_wrapper
 
     # Keep Python references to callbacks to prevent GC
     cdef list _callback_refs
@@ -894,6 +1033,15 @@ cdef class Engine:
             self._physics_wrapper._ptr = &self._ptr.getPhysics()
             self._physics_wrapper._owned = False
         return self._physics_wrapper
+
+    @property
+    def ecs(self):
+        """Access low-level ECS API (custom components/systems)."""
+        if self._ecs_wrapper is None:
+            self._ecs_wrapper = Ecs.__new__(Ecs)
+            self._ecs_wrapper._ptr = &self._ptr.getEcs()
+            self._ecs_wrapper._owned = False
+        return self._ecs_wrapper
 
     # ── Convenience Helpers ───────────────────────────────────
 

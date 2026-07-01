@@ -11,6 +11,8 @@
 #include "Core.h"
 #include <chrono>
 #include <algorithm>
+#include <functional>
+#include <string>
 
 namespace Shoonyakasha {
 namespace ECS {
@@ -27,7 +29,8 @@ public:
     virtual void cleanup(entt::registry& registry) {}
 
     bool enabled = true;
-    int priority = 0; // Lower numbers run first
+    int priority = 0;      // Lower numbers run first
+    std::string name;      // Optional - used for SystemManager::findSystem/removeSystem
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -159,6 +162,63 @@ public:
 };
 
 // ═══════════════════════════════════════════════════════════════
+// Callback System - A system driven by an opaque per-frame callback
+// ═══════════════════════════════════════════════════════════════
+//
+// Generic bridge for any scripting layer (Python today, potentially
+// others later) to register per-frame logic without a new C++ type per
+// script. The callback returns false to report a failure (e.g. it caught
+// a scripting-language exception) - after maxConsecutiveFailures such
+// reports in a row, the system disables itself (enabled = false) so a
+// broken script doesn't spend time running every frame forever. A
+// success resets the counter. maxConsecutiveFailures <= 0 disables
+// auto-disable entirely (the system just keeps reporting failures).
+//
+
+class CallbackSystem : public ISystem {
+public:
+    using UpdateFn = std::function<bool(float)>;  // returns false on failure
+
+    // priority is taken as a constructor argument (rather than set via the
+    // ->priority member after addSystem<T>() returns) because
+    // SystemManager::addSystem sorts by priority immediately after
+    // construction, using whatever priority the object already has.
+    CallbackSystem(std::string systemName, UpdateFn fn, int priorityValue = 0,
+                   int maxConsecutiveFailures = 0)
+        : m_fn(std::move(fn))
+        , m_maxConsecutiveFailures(maxConsecutiveFailures)
+    {
+        name = std::move(systemName);
+        priority = priorityValue;
+    }
+
+    void update(entt::registry& registry, float deltaTime) override {
+        if (!m_fn) return;
+
+        bool ok = m_fn(deltaTime);
+        if (ok) {
+            m_consecutiveFailures = 0;
+            return;
+        }
+
+        ++m_consecutiveFailures;
+        if (m_maxConsecutiveFailures > 0 && m_consecutiveFailures >= m_maxConsecutiveFailures) {
+            enabled = false;
+        }
+    }
+
+    int getConsecutiveFailures() const { return m_consecutiveFailures; }
+    int getMaxConsecutiveFailures() const { return m_maxConsecutiveFailures; }
+    void setMaxConsecutiveFailures(int max) { m_maxConsecutiveFailures = max; }
+    void resetFailureCount() { m_consecutiveFailures = 0; }
+
+private:
+    UpdateFn m_fn;
+    int m_maxConsecutiveFailures;
+    int m_consecutiveFailures = 0;
+};
+
+// ═══════════════════════════════════════════════════════════════
 // System Manager - Orchestrating all systems in harmony
 // ═══════════════════════════════════════════════════════════════
 
@@ -187,6 +247,24 @@ public:
             }
         }
         return nullptr;
+    }
+
+    // Find a system by name (set via ISystem::name). Returns nullptr if not found
+    // or if multiple systems share a name, the first match in current order.
+    ISystem* findSystem(const std::string& systemName) {
+        for (auto& system : m_systems) {
+            if (system->name == systemName) return system.get();
+        }
+        return nullptr;
+    }
+
+    // Remove a system by name. Returns true if a system was found and removed.
+    bool removeSystem(const std::string& systemName) {
+        auto it = std::find_if(m_systems.begin(), m_systems.end(),
+            [&](const std::unique_ptr<ISystem>& s) { return s->name == systemName; });
+        if (it == m_systems.end()) return false;
+        m_systems.erase(it);
+        return true;
     }
 
     void initialize(entt::registry& registry) {
