@@ -33,6 +33,10 @@ file(GLOB_RECURSE ENGINE_HEADERS
 
 add_library(Shoonyakasha STATIC ${ENGINE_SOURCES} ${ENGINE_HEADERS})
 
+# Required to link this static library into the Python extension module
+# (a shared object) on GCC/Clang. No-op on MSVC.
+set_target_properties(Shoonyakasha PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_include_directories(Shoonyakasha
         PUBLIC
         $<INSTALL_INTERFACE:include>

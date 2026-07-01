@@ -1,0 +1,89 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "cython>=3.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "shoonyakasha"
+version = "1.0.0"
+description = "Python bindings for the Shoonyakasha Vulkan game engine"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+authors = [
+    { name = "Shoonyakasha Contributors" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Games/Entertainment",
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+]
+
+[project.urls]
+Homepage = "https://github.com/Maximilian-Winter/Shoonyakasha"
+
+# ═══════════════════════════════════════════════════════════════
+# scikit-build-core: drives the existing top-level CMakeLists.txt
+# ═══════════════════════════════════════════════════════════════
+#
+# This does NOT reimplement the C++ build - it configures/builds the
+# same CMake project you already build manually, with BUILD_PYTHON=ON
+# and BUILD_EXAMPLES/BUILD_TESTS=OFF (only the engine library + Python
+# extension are needed for the package), then packages whatever
+# `cmake --install` produces.
+#
+# Vulkan/nlohmann_json/EnTT/Bullet/glfw3 still need to be findable by
+# CMake exactly as they do for a normal build - e.g. if you normally
+# build with a vcpkg toolchain file, pass it through the CMAKE_ARGS
+# environment variable before installing:
+#
+#   CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+#       pip install -e .
+#
+# (scikit-build-core reads CMAKE_ARGS automatically and appends it to
+# the args below.)
+
+[tool.scikit-build]
+minimum-version = "0.10"
+build-dir = "build"
+cmake.source-dir = "."
+cmake.build-type = "Release"
+cmake.args = [
+    "-DBUILD_PYTHON=ON",
+    "-DBUILD_EXAMPLES=OFF",
+    "-DBUILD_TESTS=OFF",
+]
+
+# Pure-Python package sources (shoonyakasha/__init__.py etc.), merged
+# with whatever CMake install()s into the same "shoonyakasha" directory
+# (the compiled _shoonyakasha extension module - see python/CMakeLists.txt).
+wheel.packages = ["python/shoonyakasha"]
+
+# The existing local dev workflow (plain `cmake --build`, not this pip
+# packaging) drops the compiled extension directly into
+# python/shoonyakasha/ next to __init__.py. Exclude it here so a stale
+# extension from a previous manual build never gets bundled instead of
+# (or alongside) the one this build produces via cmake --install - only
+# the .pyx/.pxd/.h *sources* should come from wheel.packages.
+wheel.exclude = [
+    "shoonyakasha/_shoonyakasha*.so",
+    "shoonyakasha/_shoonyakasha*.pyd",
+]
+
+# The compiled extension's exact filename is platform/ABI-specific and
+# scikit-build-core can't know it in advance, so every wheel it builds
+# is treated as impure/platform-specific (correct - the shipped .so/.pyd
+# is not portable across Python versions/platforms).
+wheel.expand-macos-universal-tags = true
+
+[tool.scikit-build.sdist]
+# Only what's needed to rebuild from source - skip example asset
+# directories the engine's own examples use but the Python package doesn't.
+exclude = [
+    "examples/**/*.gltf",
+    "examples/**/*.bin",
+    "examples/**/textures/**",
+    "python/examples/models/**",
+]
