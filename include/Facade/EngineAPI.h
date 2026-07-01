@@ -19,6 +19,7 @@ namespace Facade {
 class SceneAPI;
 class InputAPI;
 class PhysicsAPI;
+class EcsAPI;
 
 class EngineAPI {
 public:
@@ -56,6 +57,7 @@ public:
     SceneAPI&   getScene();
     InputAPI&   getInput();
     PhysicsAPI& getPhysics();
+    EcsAPI&     getEcs();
 
     // ═══════════════════════════════════════════════════════════
     // Convenience Helpers

@@ -11,6 +11,7 @@
 
 from libcpp.string cimport string
 from libcpp.vector cimport vector
+from libcpp.memory cimport shared_ptr
 from libcpp cimport bool as cbool
 from libc.stdint cimport uint32_t
 from cpython.ref cimport PyObject
@@ -79,6 +80,8 @@ cdef extern from "<functional>" namespace "std":
         pass
     cdef cppclass function_float2 "std::function<void(float, float)>":
         pass
+    cdef cppclass function_bool_float "std::function<bool(float)>":
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -93,6 +96,21 @@ cdef extern from "_callback_bridge.h" namespace "ShoonyakashaBridge":
     function_int_bool make_key_event_callback(PyObject* callable)
     function_float2 make_float2_callback(PyObject* callable)
     function_int_bool make_int_bool_callback(PyObject* callable)
+
+
+# ═══════════════════════════════════════════════════════════════
+# ECS bridge helpers (generic script component payloads + systems)
+# ═══════════════════════════════════════════════════════════════
+
+cdef extern from "_ecs_bridge.h" namespace "ShoonyakashaBridge":
+    shared_ptr[void] wrap_py_object(PyObject* obj)
+    # Declared returning `object` (not PyObject*): unwrap_py_object hands
+    # back a NEW reference, and this is Cython's documented idiom for
+    # "C++ function returns ownership of a PyObject* it created" - Cython
+    # takes over managing that reference automatically. Never call this
+    # with a null/empty shared_ptr (see Ecs.get_component in _shoonyakasha.pyx).
+    object unwrap_py_object(const shared_ptr[void]& ptr)
+    function_bool_float make_system_update_callback(PyObject* callable)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -284,6 +302,34 @@ cdef extern from "Facade/PhysicsAPI.h" namespace "Shoonyakasha::Facade":
 
 
 # ═══════════════════════════════════════════════════════════════
+# EcsAPI — full declaration
+# ═══════════════════════════════════════════════════════════════
+
+cdef extern from "Facade/EcsAPI.h" namespace "Shoonyakasha::Facade":
+    cdef cppclass CppEcsAPI "Shoonyakasha::Facade::EcsAPI":
+
+        # Script Component Access
+        void setComponent(EntityHandle entity, const string& name, shared_ptr[void] data)
+        shared_ptr[void] getComponent(EntityHandle entity, const string& name) const
+        cbool hasComponent(EntityHandle entity, const string& name) const
+        cbool removeComponent(EntityHandle entity, const string& name)
+        vector[string] getComponentNames(EntityHandle entity) const
+        vector[EntityHandle] findEntitiesWithComponent(const string& name) const
+
+        # System Management
+        cbool addSystem(const string& name, function_bool_float fn,
+                        int priority, int maxConsecutiveFailures)
+        cbool removeSystem(const string& name)
+        cbool hasSystem(const string& name) const
+        cbool setSystemEnabled(const string& name, cbool enabled)
+        cbool isSystemEnabled(const string& name) const
+        int getSystemFailureCount(const string& name) const
+        int getSystemMaxFailures(const string& name) const
+        void setSystemMaxFailures(const string& name, int max)
+        void resetSystemFailureCount(const string& name)
+
+
+# ═══════════════════════════════════════════════════════════════
 # EngineAPI — full declaration
 # ═══════════════════════════════════════════════════════════════
 
@@ -308,6 +354,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         CppSceneAPI& getScene()
         CppInputAPI& getInput()
         CppPhysicsAPI& getPhysics()
+        CppEcsAPI& getEcs()
 
         # Convenience helpers
         EntityHandle createCamera(const vec3& pos, float fov, float speed,
