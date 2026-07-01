@@ -87,3 +87,14 @@ foreach(CONFIG_TYPE ${CMAKE_CONFIGURATION_TYPES})
             "${CMAKE_CURRENT_SOURCE_DIR}/shoonyakasha"
     )
 endforeach()
+
+# ── Install (for `pip install .` via scikit-build-core) ───────
+# scikit-build-core stages this install() tree into the wheel, merged
+# with the pure-Python files it copies from wheel.packages (see
+# pyproject.toml) - both target the same "shoonyakasha" package dir, so
+# they combine into one final package. Harmless/unused for a plain local
+# `cmake --build` dev workflow (nothing calls `cmake --install` there).
+install(TARGETS _shoonyakasha
+    LIBRARY DESTINATION shoonyakasha
+    RUNTIME DESTINATION shoonyakasha
+)
