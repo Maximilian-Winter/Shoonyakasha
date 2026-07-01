@@ -136,7 +136,9 @@ public:
     using ApplicationBase::createPointLight;
     using ApplicationBase::createSprite;
     using ApplicationBase::createUIPanel;
+    using ApplicationBase::createText;
     using ApplicationBase::getSprite2DManager;
+    using ApplicationBase::getFontLoader;
     using ApplicationBase::getCameraEntity;
     using ApplicationBase::getDeltaTime;
     using ApplicationBase::getRenderGraph;
@@ -337,6 +339,17 @@ EntityHandle EngineAPI::createUIPanel(UIAnchor anchor,
                                        const glm::vec4& color) {
     auto engineAnchor = static_cast<UIAnchorComponent::Anchor>(static_cast<uint8_t>(anchor));
     auto e = m_impl->app->createUIPanel(engineAnchor, offsetPixels, sizePixels, texturePath, color);
+    return toHandle(e);
+}
+
+EntityHandle EngineAPI::createText(const std::string& text,
+                                    UIAnchor anchor,
+                                    const glm::vec2& offsetPixels,
+                                    const std::string& fontPath,
+                                    float fontSize,
+                                    const glm::vec4& color) {
+    auto engineAnchor = static_cast<UIAnchorComponent::Anchor>(static_cast<uint8_t>(anchor));
+    auto e = m_impl->app->createText(text, engineAnchor, offsetPixels, fontPath, fontSize, color);
     return toHandle(e);
 }
 

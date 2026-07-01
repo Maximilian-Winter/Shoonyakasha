@@ -1017,6 +1017,27 @@ cdef class Engine:
             <UIAnchor>anchor, _tuple_to_vec2(offset_pixels), _tuple_to_vec2(size_pixels),
             cpp_path, _tuple_to_vec4(color))
 
+    def create_text(self, str text, int anchor, offset_pixels, str font_path,
+                     float font_size=24.0, color=(1.0, 1.0, 1.0, 1.0)):
+        """Create a screen-space text label anchored to a viewport corner/edge/center.
+
+        Args:
+            text: The label's text (ASCII 32-126 supported)
+            anchor: One of the UI_ANCHOR_* constants
+            offset_pixels: Offset from the anchor to the label's reference point, as (x, y)
+            font_path: Path to a .ttf/.otf font file
+            font_size: Baked glyph pixel height
+            color: Text color as (r, g, b, a)
+
+        Returns:
+            Entity handle (int)
+        """
+        cdef string cpp_text = text.encode('utf-8')
+        cdef string cpp_font = font_path.encode('utf-8')
+        return <uint32_t>self._ptr.createText(
+            cpp_text, <UIAnchor>anchor, _tuple_to_vec2(offset_pixels), cpp_font,
+            font_size, _tuple_to_vec4(color))
+
     @property
     def camera_entity(self):
         """Get the camera entity handle."""

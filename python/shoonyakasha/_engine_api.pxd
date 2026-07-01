@@ -322,6 +322,9 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         EntityHandle createUIPanel(UIAnchor anchor, const vec2& offsetPixels,
                                    const vec2& sizePixels, const string& texturePath,
                                    const vec4& color)
+        EntityHandle createText(const string& text, UIAnchor anchor,
+                                const vec2& offsetPixels, const string& fontPath,
+                                float fontSize, const vec4& color)
         EntityHandle getCameraEntity() const
         float getDeltaTime() const
 

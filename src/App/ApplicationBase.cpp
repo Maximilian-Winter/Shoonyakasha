@@ -26,7 +26,9 @@
 #include "ECS/RenderComponents.h"
 #include "ECS/Sprite2DComponents.h"
 #include "ECS/UILayoutSystem.h"
+#include "ECS/TextRenderSystem.h"
 #include "Resources/Sprite2DManager.h"
+#include "Resources/FontLoader.h"
 
 #include <GLFW/glfw3.h>
 #include <stdexcept>
@@ -117,6 +119,7 @@ void ApplicationBase::initializeVulkan() {
     m_descriptorManager = std::make_unique<DescriptorManager>(*m_device);
     m_gltfLoader = std::make_unique<GltfSceneLoader>(*m_device);
     m_sprite2DManager = std::make_unique<Sprite2DManager>(*m_device);
+    m_fontLoader = std::make_unique<FontLoader>(*m_device);
 
     m_commandManager = std::make_unique<VulkanCommandManager>(*m_device);
     m_commandBuffers = m_commandManager->createCommandBuffers(m_swapChain->getImageCount());
@@ -142,8 +145,11 @@ void ApplicationBase::initializeECS() {
 }
 
 void ApplicationBase::registerSystems() {
-    // UILayoutSystem must run before TransformSystem so resolved anchor
+    // TextRenderSystem bakes labels into glyph entities (creating
+    // UIAnchorComponent children), so it must run before UILayoutSystem,
+    // which in turn must run before TransformSystem so resolved anchor
     // positions feed into this frame's world matrix computation.
+    m_activeScene->addSystem<ECS::TextRenderSystem>(*m_fontLoader, *m_sprite2DManager)->priority = -2;
     m_activeScene->addSystem<ECS::UILayoutSystem>(&m_screenSize)->priority = -1;
     m_activeScene->addSystem<ECS::TransformSystem>();
     m_activeScene->addSystem<ECS::CameraSystem>();
@@ -574,6 +580,10 @@ Sprite2DManager& ApplicationBase::getSprite2DManager() {
     return *m_sprite2DManager;
 }
 
+FontLoader& ApplicationBase::getFontLoader() {
+    return *m_fontLoader;
+}
+
 entt::entity ApplicationBase::createSprite(const glm::vec3& worldPos,
                                             const std::string& texturePath,
                                             const glm::vec2& size,
@@ -635,6 +645,34 @@ entt::entity ApplicationBase::createUIPanel(UIAnchorComponent::Anchor anchor,
     uiAnchor.offsetPixels = offsetPixels;
 
     m_logger->log(LogLevel::Info, "Created UI panel (%.0fx%.0f)", sizePixels.x, sizePixels.y);
+    return entity;
+}
+
+entt::entity ApplicationBase::createText(const std::string& text,
+                                          UIAnchorComponent::Anchor anchor,
+                                          const glm::vec2& offsetPixels,
+                                          const std::string& fontPath,
+                                          float fontSize,
+                                          const glm::vec4& color) {
+    auto& registry = m_activeScene->getRegistry();
+    auto entity = registry.create();
+
+    // The label entity itself is never drawn (no MeshComponent) - its
+    // TransformComponent + UIAnchorComponent give TextRenderSystem the
+    // base anchor/offset for the glyph entities it generates.
+    registry.emplace<ECS::TransformComponent>(entity);
+
+    auto& textComp = registry.emplace<Text2DComponent>(entity);
+    textComp.text = text;
+    textComp.font = fontPath;
+    textComp.fontSize = fontSize;
+    textComp.color = color;
+
+    auto& uiAnchor = registry.emplace<UIAnchorComponent>(entity);
+    uiAnchor.anchor = anchor;
+    uiAnchor.offsetPixels = offsetPixels;
+
+    m_logger->log(LogLevel::Info, "Created text label: \"%s\"", text.c_str());
     return entity;
 }
 
