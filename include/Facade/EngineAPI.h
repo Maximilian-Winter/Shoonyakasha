@@ -83,6 +83,20 @@ public:
                                   float intensity = 5.f,
                                   float range = 15.f);
 
+    /// Create a world-space sprite (billboard quad in 3D world coordinates).
+    EntityHandle createSprite(const glm::vec3& worldPos,
+                              const std::string& texturePath,
+                              const glm::vec2& size = glm::vec2(1.f),
+                              const glm::vec4& tint = glm::vec4(1.f));
+
+    /// Create a screen-space UI panel anchored to a viewport corner/edge/center.
+    /// If texturePath is empty, the panel renders as a flat-colored rect.
+    EntityHandle createUIPanel(UIAnchor anchor,
+                               const glm::vec2& offsetPixels,
+                               const glm::vec2& sizePixels,
+                               const std::string& texturePath = "",
+                               const glm::vec4& color = glm::vec4(1.f));
+
     /// Get the camera entity handle.
     EntityHandle getCameraEntity() const;
 

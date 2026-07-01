@@ -24,6 +24,9 @@
 #include "ECS/CameraControllerBuilders.h"
 #include "ECS/InputSystem.h"
 #include "ECS/RenderComponents.h"
+#include "ECS/Sprite2DComponents.h"
+#include "ECS/UILayoutSystem.h"
+#include "Resources/Sprite2DManager.h"
 
 #include <GLFW/glfw3.h>
 #include <stdexcept>
@@ -113,6 +116,7 @@ void ApplicationBase::initializeVulkan() {
     m_resourceManager = std::make_unique<ResourceManager>(*m_device, m_config.resourceCacheSize);
     m_descriptorManager = std::make_unique<DescriptorManager>(*m_device);
     m_gltfLoader = std::make_unique<GltfSceneLoader>(*m_device);
+    m_sprite2DManager = std::make_unique<Sprite2DManager>(*m_device);
 
     m_commandManager = std::make_unique<VulkanCommandManager>(*m_device);
     m_commandBuffers = m_commandManager->createCommandBuffers(m_swapChain->getImageCount());
@@ -138,6 +142,9 @@ void ApplicationBase::initializeECS() {
 }
 
 void ApplicationBase::registerSystems() {
+    // UILayoutSystem must run before TransformSystem so resolved anchor
+    // positions feed into this frame's world matrix computation.
+    m_activeScene->addSystem<ECS::UILayoutSystem>(&m_screenSize)->priority = -1;
     m_activeScene->addSystem<ECS::TransformSystem>();
     m_activeScene->addSystem<ECS::CameraSystem>();
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
@@ -319,6 +326,11 @@ void ApplicationBase::update() {
     }
 
     onUpdate(m_deltaTime);
+
+    if (m_swapChain) {
+        VkExtent2D extent = m_swapChain->getSwapChainExtent();
+        m_screenSize = glm::vec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
+    }
 
     m_activeScene->update();
 
@@ -555,6 +567,74 @@ entt::entity ApplicationBase::createPointLight(const glm::vec3& position,
 
     m_logger->log(LogLevel::Info, "Created point light at (%.1f, %.1f, %.1f) range=%.1f",
                   position.x, position.y, position.z, range);
+    return entity;
+}
+
+Sprite2DManager& ApplicationBase::getSprite2DManager() {
+    return *m_sprite2DManager;
+}
+
+entt::entity ApplicationBase::createSprite(const glm::vec3& worldPos,
+                                            const std::string& texturePath,
+                                            const glm::vec2& size,
+                                            const glm::vec4& tint) {
+    auto& registry = m_activeScene->getRegistry();
+    auto entity = registry.create();
+
+    auto& transform = registry.emplace<ECS::TransformComponent>(entity);
+    transform.position = worldPos;
+    transform.scale = glm::vec3(size, 1.0f);
+    transform.isDirty = true;
+
+    registry.emplace<MeshComponent>(entity, m_sprite2DManager->getQuadMesh());
+
+    auto& material = registry.emplace<MaterialComponentV5>(entity);
+    material.alphaMode = AlphaMode::Blend;
+    material.setParam("tintColor", tint);
+    material.setParam("uvRect", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+    material.setParam("screenSpace", 0.0f);
+    if (!texturePath.empty()) {
+        material.textures["spriteTexture"] = m_sprite2DManager->loadTexture(texturePath);
+    }
+
+    registry.emplace<RenderableTagComponent>(entity);
+    registry.emplace<Sprite2DComponent>(entity).screenSpace = false;
+
+    m_logger->log(LogLevel::Info, "Created sprite at (%.1f, %.1f, %.1f)", worldPos.x, worldPos.y, worldPos.z);
+    return entity;
+}
+
+entt::entity ApplicationBase::createUIPanel(UIAnchorComponent::Anchor anchor,
+                                             const glm::vec2& offsetPixels,
+                                             const glm::vec2& sizePixels,
+                                             const std::string& texturePath,
+                                             const glm::vec4& color) {
+    auto& registry = m_activeScene->getRegistry();
+    auto entity = registry.create();
+
+    auto& transform = registry.emplace<ECS::TransformComponent>(entity);
+    transform.scale = glm::vec3(sizePixels, 1.0f);
+    transform.isDirty = true;
+
+    registry.emplace<MeshComponent>(entity, m_sprite2DManager->getQuadMesh());
+
+    auto& material = registry.emplace<MaterialComponentV5>(entity);
+    material.alphaMode = AlphaMode::Blend;
+    material.setParam("tintColor", color);
+    material.setParam("uvRect", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+    material.setParam("screenSpace", 1.0f);
+    if (!texturePath.empty()) {
+        material.textures["spriteTexture"] = m_sprite2DManager->loadTexture(texturePath);
+    }
+
+    registry.emplace<RenderableTagComponent>(entity);
+    registry.emplace<Sprite2DComponent>(entity).screenSpace = true;
+
+    auto& uiAnchor = registry.emplace<UIAnchorComponent>(entity);
+    uiAnchor.anchor = anchor;
+    uiAnchor.offsetPixels = offsetPixels;
+
+    m_logger->log(LogLevel::Info, "Created UI panel (%.0fx%.0f)", sizePixels.x, sizePixels.y);
     return entity;
 }
 
