@@ -129,6 +129,19 @@ PipelineStateBuilder& PipelineStateBuilder::withCustomBlending(VkBlendFactor src
     return *this;
 }
 
+PipelineStateBuilder& PipelineStateBuilder::withCustomBlending(
+    VkBlendFactor srcColor, VkBlendFactor dstColor, VkBlendOp colorOp,
+    VkBlendFactor srcAlpha, VkBlendFactor dstAlpha, VkBlendOp alphaOp) {
+    m_state.blending = true;
+    m_state.srcColorBlendFactor = srcColor;
+    m_state.dstColorBlendFactor = dstColor;
+    m_state.colorBlendOp = colorOp;
+    m_state.srcAlphaBlendFactor = srcAlpha;
+    m_state.dstAlphaBlendFactor = dstAlpha;
+    m_state.alphaBlendOp = alphaOp;
+    return *this;
+}
+
 PipelineStateBuilder& PipelineStateBuilder::withColorAttachmentCount(uint32_t count) {
     m_state.colorAttachmentCount = count;
     return *this;

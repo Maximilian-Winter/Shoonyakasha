@@ -64,6 +64,10 @@ public:
     PipelineStateBuilder& withAlphaBlending();
     PipelineStateBuilder& withAdditiveBlending();
     PipelineStateBuilder& withCustomBlending(VkBlendFactor srcColor, VkBlendFactor dstColor, VkBlendOp op);
+    // Full control over both color and alpha blend factors/ops (e.g. for
+    // premultiplied alpha, where color and alpha factors differ).
+    PipelineStateBuilder& withCustomBlending(VkBlendFactor srcColor, VkBlendFactor dstColor, VkBlendOp colorOp,
+                                              VkBlendFactor srcAlpha, VkBlendFactor dstAlpha, VkBlendOp alphaOp);
     PipelineStateBuilder& withColorAttachmentCount(uint32_t count);
 
     // Multisampling configuration
