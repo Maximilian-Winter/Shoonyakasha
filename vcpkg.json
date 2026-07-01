@@ -1,0 +1,22 @@
+{
+  "name": "shoonyakasha",
+  "version": "1.0.0",
+  "description": "Shoonyakasha - Vulkan-based game engine with a JSON-driven render pipeline and Python bindings",
+  "homepage": "https://github.com/Maximilian-Winter/Shoonyakasha",
+  "dependencies": [
+    "vulkan",
+    "nlohmann-json",
+    "entt",
+    "bullet3",
+    "glfw3",
+    "glm"
+  ],
+  "features": {
+    "tests": {
+      "description": "Dependencies for the engine's test suite (BUILD_TESTS=ON)",
+      "dependencies": [
+        "gtest"
+      ]
+    }
+  }
+}
