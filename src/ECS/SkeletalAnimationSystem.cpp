@@ -139,6 +139,24 @@ void SkeletalAnimationSystem::evaluateAnimation(
 // SSBO Management
 // ============================================================================
 
+SkeletalAnimationSystem::~SkeletalAnimationSystem() {
+    if (m_onSkeletonDestroy) m_onSkeletonDestroy.release();
+}
+
+void SkeletalAnimationSystem::attachTo(entt::registry& registry) {
+    if (m_onSkeletonDestroy) m_onSkeletonDestroy.release();
+    m_onSkeletonDestroy = registry.on_destroy<SkeletonComponent>()
+        .connect<&SkeletalAnimationSystem::onSkeletonDestroyed>(*this);
+}
+
+void SkeletalAnimationSystem::onSkeletonDestroyed(entt::registry& registry, entt::entity entity) {
+    auto& skeleton = registry.get<SkeletonComponent>(entity);
+    if (skeleton.boneSSBO.isValid()) {
+        GPUResourceFactory::destroyBuffer(m_device.getAllocator().getHandle(), skeleton.boneSSBO);
+        skeleton.boneSSBO.reset();
+    }
+}
+
 void SkeletalAnimationSystem::createBoneSSBO(SkeletonComponent& skeleton) {
     if (!skeleton.skeleton) return;
 

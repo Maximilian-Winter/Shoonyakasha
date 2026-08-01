@@ -33,7 +33,16 @@ namespace Shoonyakasha {
 class SkeletalAnimationSystem {
 public:
     explicit SkeletalAnimationSystem(VulkanDevice& device);
-    ~SkeletalAnimationSystem() = default;
+    ~SkeletalAnimationSystem();
+
+    /// Free bone SSBOs automatically when a SkeletonComponent is destroyed.
+    ///
+    /// GPUBuffer is a plain handle with no destructor — its own comment says
+    /// reset() "does NOT free GPU memory" — so every destroyed skinned entity
+    /// leaked one VMA allocation for the lifetime of the allocator. Must be
+    /// called once with the registry the skinned entities live in; the
+    /// connection is released in the destructor.
+    void attachTo(entt::registry& registry);
 
     // ─── Per-Frame Update ───────────────────────────────────────
 
@@ -58,6 +67,10 @@ public:
 
 private:
     VulkanDevice& m_device;
+    entt::connection m_onSkeletonDestroy;   // released in ~SkeletalAnimationSystem
+
+    /// on_destroy<SkeletonComponent> handler — frees the bone SSBO.
+    void onSkeletonDestroyed(entt::registry& registry, entt::entity entity);
 
     /// Advance playback time and handle looping
     void updatePlayback(AnimationPlaybackComponent& playback, float deltaTime);
