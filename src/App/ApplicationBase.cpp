@@ -69,6 +69,7 @@ void ApplicationBase::run() {
         initializeVulkan();
         initializeECS();
         loadIBLTextures();
+        createRenderGraph();   // object only; compiled after onInit
 
         onInit();  // Derived class: load scenes, create entities, etc.
 
@@ -179,13 +180,22 @@ void ApplicationBase::loadIBLTextures() {
     }
 }
 
-void ApplicationBase::initializeRenderGraph() {
-    m_logger->log(LogLevel::Info, "Initializing render graph...");
-
+void ApplicationBase::createRenderGraph() {
+    // Construction only — the RenderGraph object needs nothing but the device and
+    // the command manager, both of which exist before onInit(). Split out from
+    // initializeRenderGraph() so getRenderGraph() is usable from an onInit
+    // callback, which is what the API docs have always told people to do and
+    // which used to dereference a null unique_ptr. Loading, binding and
+    // compiling still happen after onInit, so entities created there are visible
+    // to the graph.
     m_sharedBufferRegistry = std::make_unique<FrameGraph::SharedBufferRegistry>();
 
     m_renderGraph = std::make_unique<FrameGraph::RenderGraph>(*m_device, *m_commandManager);
     m_renderGraph->setSharedBufferRegistry(m_sharedBufferRegistry.get());
+}
+
+void ApplicationBase::initializeRenderGraph() {
+    m_logger->log(LogLevel::Info, "Initializing render graph...");
 
     m_renderGraph->loadFromFile(m_config.pipelineJsonPath);
     m_renderGraph->bindScene(m_activeScene.get(), m_resourceManager.get());
