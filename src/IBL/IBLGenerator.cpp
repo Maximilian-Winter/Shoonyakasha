@@ -8,6 +8,7 @@
 #include "IBL/IBLGenerator.h"
 #include "Vulkan/VulkanBuffer.h"
 #include <stdexcept>
+#include <filesystem>
 #include <iostream>
 #include <cmath>
 #include <algorithm>
@@ -211,11 +212,28 @@ void IBLGenerator::createSamplers() {
 // ═══════════════════════════════════════════════════════════════
 
 VulkanTexture* IBLGenerator::loadHDRTexture(const std::string& path) {
-    int width, height, channels;
+    // Report a missing or unreadable file as such, before stb sees it. The
+    // failure is otherwise indistinguishable from a malformed one, and a wrong
+    // relative path is by far the more common case — the message needs to say
+    // which path was tried and from where.
+    if (!std::filesystem::exists(path)) {
+        throw std::runtime_error(
+            "HDR environment map not found: '" + path + "' (working directory: " +
+            std::filesystem::current_path().string() + ")");
+    }
+
+    int width = 0, height = 0, channels = 0;
     float* pixels = stbi_loadf(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
 
     if (!pixels) {
-        throw std::runtime_error("Failed to load HDR image: " + path);
+        const char* reason = stbi_failure_reason();
+        throw std::runtime_error("Failed to load HDR image '" + path + "': " +
+                                 (reason ? reason : "unknown error"));
+    }
+
+    if (width <= 0 || height <= 0) {
+        stbi_image_free(pixels);
+        throw std::runtime_error("HDR image '" + path + "' has zero extent");
     }
 
     auto* texture = new VulkanTexture(m_device, pixels,
