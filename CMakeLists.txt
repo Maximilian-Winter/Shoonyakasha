@@ -92,6 +92,17 @@ if(BUILD_TESTS)
     target_compile_definitions(Shoonyakasha PRIVATE SHOONYAKASHA_TESTING)
 endif()
 
+# Warnings. Every example target and the test target already build at /W4 or
+# -Wall -Wextra; the engine library itself did not, which left the largest and
+# most error-prone part of the codebase compiling at the compiler default.
+# PRIVATE so consumers are not forced into our warning level.
+# No -Werror yet — turn it on once the existing warnings are cleared.
+if(MSVC)
+    target_compile_options(Shoonyakasha PRIVATE /W4)
+else()
+    target_compile_options(Shoonyakasha PRIVATE -Wall -Wextra)
+endif()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Install / export
 # ─────────────────────────────────────────────────────────────────────────────
@@ -151,6 +162,10 @@ endif()
 # pip install built all nine of them.
 # ─────────────────────────────────────────────────────────────────────────────
 if(BUILD_EXAMPLES)
+    # One shared GLSL -> SPIR-V step for every example, replacing nine private
+    # copies that had drifted apart. Included here so glslc is located once.
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompileShaders.cmake")
+
     add_subdirectory(examples/particle_test)
     add_subdirectory(examples/bloom_test)
     add_subdirectory(examples/declarative_sponza_test)

@@ -352,3 +352,110 @@ TEST(CallbackSystem, NameIsSetFromConstructor) {
     CallbackSystem system("MyName", [](float) { return true; });
     EXPECT_EQ(system.name, "MyName");
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Mutating the system list from inside an update
+//
+// SystemManager::update range-fors over m_systems while addSystem appends and
+// sorts it and removeSystem erases from it. Removing the running system also
+// destroyed the std::function currently executing. EcsAPI exposes both to
+// scripting languages, where "unregister this system when done" is the obvious
+// idiom, so both are deferred to the end of the update.
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+class SelfRemovingSystem : public ECS::ISystem {
+public:
+    SelfRemovingSystem(ECS::SystemManager* mgr, int* runs) : m_mgr(mgr), m_runs(runs) {
+        name = "self_removing";
+    }
+    void update(entt::registry&, float) override {
+        ++(*m_runs);
+        m_mgr->removeSystem("self_removing");
+    }
+private:
+    ECS::SystemManager* m_mgr;
+    int* m_runs;
+};
+
+class SystemAddingSystem : public ECS::ISystem {
+public:
+    SystemAddingSystem(ECS::SystemManager* mgr) : m_mgr(mgr) { name = "adder"; }
+    void update(entt::registry&, float) override {
+        if (m_added) return;
+        m_added = true;
+        m_mgr->addSystem<ECS::TransformSystem>();
+    }
+private:
+    ECS::SystemManager* m_mgr;
+    bool m_added = false;
+};
+
+/// Records whether cleanup() ran before destruction.
+class CleanupTrackingSystem : public ECS::ISystem {
+public:
+    explicit CleanupTrackingSystem(bool* flag) : m_flag(flag) { name = "tracked"; }
+    void update(entt::registry&, float) override {}
+    void cleanup(entt::registry&) override { *m_flag = true; }
+private:
+    bool* m_flag;
+};
+
+} // namespace
+
+TEST(SystemManagerMutation, SystemCanRemoveItselfDuringUpdate) {
+    entt::registry registry;
+    ECS::SystemManager mgr;
+    int runs = 0;
+
+    mgr.addSystem<SelfRemovingSystem>(&mgr, &runs);
+    mgr.initialize(registry);
+
+    EXPECT_NO_FATAL_FAILURE(mgr.update(registry, 0.016f));
+    EXPECT_EQ(runs, 1);
+    EXPECT_EQ(mgr.findSystem("self_removing"), nullptr) << "removal should apply after the update";
+
+    mgr.update(registry, 0.016f);
+    EXPECT_EQ(runs, 1) << "removed system ran again";
+}
+
+TEST(SystemManagerMutation, SystemCanAddAnotherDuringUpdate) {
+    entt::registry registry;
+    ECS::SystemManager mgr;
+
+    mgr.addSystem<SystemAddingSystem>(&mgr);
+    mgr.initialize(registry);
+
+    EXPECT_NO_FATAL_FAILURE(mgr.update(registry, 0.016f));
+    EXPECT_NE(mgr.getSystem<ECS::TransformSystem>(), nullptr);
+}
+
+// removeSystem used to erase the unique_ptr without calling cleanup(), so a
+// system holding EnTT signal connections left its sinks pointing at freed
+// memory.
+TEST(SystemManagerMutation, RemoveSystem_RunsCleanupFirst) {
+    entt::registry registry;
+    ECS::SystemManager mgr;
+    bool cleaned = false;
+
+    mgr.addSystem<CleanupTrackingSystem>(&cleaned);
+    mgr.initialize(registry);
+
+    EXPECT_TRUE(mgr.removeSystem("tracked"));
+    EXPECT_TRUE(cleaned);
+}
+
+TEST(SystemManagerMutation, RemoveSystem_DeferredAlsoRunsCleanup) {
+    entt::registry registry;
+    ECS::SystemManager mgr;
+    bool cleaned = false;
+
+    mgr.addSystem<CleanupTrackingSystem>(&cleaned);
+    mgr.addSystem<SelfRemovingSystem>(&mgr, new int(0));  // drives m_iterating
+    mgr.initialize(registry);
+
+    mgr.update(registry, 0.016f);
+    EXPECT_TRUE(mgr.removeSystem("tracked"));
+    EXPECT_TRUE(cleaned);
+}

@@ -16,6 +16,7 @@ from ._shoonyakasha import (
     Scene,
     Input,
     Physics,
+    Ecs,
     GltfResult,
 
     # Entity handle sentinel
@@ -41,15 +42,35 @@ from ._shoonyakasha import (
     COLLIDER_CAPSULE,
     COLLIDER_MESH,
     COLLIDER_PLANE,
+
+    # UI anchors (create_ui_panel / create_text)
+    UI_ANCHOR_TOP_LEFT,
+    UI_ANCHOR_TOP_CENTER,
+    UI_ANCHOR_TOP_RIGHT,
+    UI_ANCHOR_MIDDLE_LEFT,
+    UI_ANCHOR_MIDDLE_CENTER,
+    UI_ANCHOR_MIDDLE_RIGHT,
+    UI_ANCHOR_BOTTOM_LEFT,
+    UI_ANCHOR_BOTTOM_CENTER,
+    UI_ANCHOR_BOTTOM_RIGHT,
+
+    # Text alignment (create_text)
+    TEXT_ALIGN_LEFT,
+    TEXT_ALIGN_CENTER,
+    TEXT_ALIGN_RIGHT,
 )
 
 __version__ = "1.0.0"
 __all__ = [
-    "Engine", "Scene", "Input", "Physics", "GltfResult",
+    "Engine", "Scene", "Input", "Physics", "Ecs", "GltfResult",
     "NULL_ENTITY",
     "CAMERA_PERSPECTIVE", "CAMERA_ORTHOGRAPHIC",
     "LIGHT_DIRECTIONAL", "LIGHT_POINT", "LIGHT_SPOT",
     "RIGIDBODY_STATIC", "RIGIDBODY_KINEMATIC", "RIGIDBODY_DYNAMIC",
     "COLLIDER_BOX", "COLLIDER_SPHERE", "COLLIDER_CAPSULE",
     "COLLIDER_MESH", "COLLIDER_PLANE",
+    "UI_ANCHOR_TOP_LEFT", "UI_ANCHOR_TOP_CENTER", "UI_ANCHOR_TOP_RIGHT",
+    "UI_ANCHOR_MIDDLE_LEFT", "UI_ANCHOR_MIDDLE_CENTER", "UI_ANCHOR_MIDDLE_RIGHT",
+    "UI_ANCHOR_BOTTOM_LEFT", "UI_ANCHOR_BOTTOM_CENTER", "UI_ANCHOR_BOTTOM_RIGHT",
+    "TEXT_ALIGN_LEFT", "TEXT_ALIGN_CENTER", "TEXT_ALIGN_RIGHT",
 ]

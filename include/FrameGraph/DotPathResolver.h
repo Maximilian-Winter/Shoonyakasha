@@ -109,11 +109,42 @@ struct ResolvedValue {
 
     // ─── Copy raw bytes to buffer ───────────────────────────────
 
-    void copyTo(void* dest) const {
-        std::visit([dest](auto&& v) {
+    /// Write the value at `dest`, never exceeding `capacity` bytes.
+    ///
+    /// `columnStride` handles matrices whose columns are padded on the GPU. glm
+    /// stores columns contiguously — a glm::mat3 is 36 bytes — while std140 and
+    /// std430 place each vec3 column on a 16-byte boundary, so the type occupies
+    /// 48. Copying sizeof(T) in one memcpy put columns 1 and 2 at byte offsets 12
+    /// and 24 instead of 16 and 32, which made every mat3 uniform silently
+    /// wrong. Pass 0 (the default) for a contiguous write.
+    ///
+    /// Returns the number of bytes written.
+    size_t copyTo(void* dest, size_t capacity, uint32_t columnStride = 0) const {
+        return std::visit([dest, capacity, columnStride](auto&& v) -> size_t {
             using T = std::decay_t<decltype(v)>;
-            if constexpr (!std::is_same_v<T, std::monostate> && !std::is_same_v<T, GPUTexture>) {
-                std::memcpy(dest, &v, sizeof(T));
+            if constexpr (std::is_same_v<T, std::monostate> || std::is_same_v<T, GPUTexture>) {
+                return 0;
+            } else {
+                auto* out = static_cast<uint8_t*>(dest);
+
+                if constexpr (std::is_same_v<T, glm::mat3> || std::is_same_v<T, glm::mat4>) {
+                    using Col = typename T::col_type;
+                    const uint32_t cols   = static_cast<uint32_t>(T::length());
+                    const size_t   stride = columnStride ? columnStride : sizeof(Col);
+
+                    size_t written = 0;
+                    for (uint32_t c = 0; c < cols; ++c) {
+                        const size_t at = static_cast<size_t>(c) * stride;
+                        if (at + sizeof(Col) > capacity) break;   // never overrun the field
+                        std::memcpy(out + at, &v[c], sizeof(Col));
+                        written = at + sizeof(Col);
+                    }
+                    return written;
+                } else {
+                    const size_t n = std::min(sizeof(T), capacity);
+                    std::memcpy(out, &v, n);
+                    return n;
+                }
             }
         }, value);
     }
@@ -252,11 +283,17 @@ private:
 struct BufferField {
     std::string name;
     std::string source;         // Dot-path source (may contain [i] for arrays)
-    MaterialParam::Type type;
-    uint32_t offset;            // Byte offset in buffer
-    uint32_t size;              // Size in bytes (single element)
+    MaterialParam::Type type = MaterialParam::Type::Float;
+    uint32_t offset = 0;        // Byte offset in buffer
+    uint32_t size = 0;          // Occupied size of one element, including interior
+                                // padding — a std140 mat3 is 48, not 36
     uint32_t arrayCount = 1;    // Number of array elements (1 = not an array)
     uint32_t arrayStride = 0;   // Stride between array elements (0 = use size)
+    uint32_t columnStride = 0;  // Matrix column stride; 0 = columns are contiguous
+    bool resolvable = true;     // false when the shader type has no ResolvedValue
+                                // representation (uvec4, dvec2, ...). Such a field
+                                // is packed correctly but left zeroed rather than
+                                // being filled with a wrongly-typed value.
 };
 
 struct CompiledBufferLayout {

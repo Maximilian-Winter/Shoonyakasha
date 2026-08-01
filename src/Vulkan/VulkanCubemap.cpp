@@ -23,7 +23,10 @@ VulkanCubemap* VulkanCubemap::createEnvironmentMap(VulkanDevice& device, uint32_
     info.size = size;
     info.mipLevels = calculateMipLevels(size);
     info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    // TRANSFER_SRC as well as DST: the mip chain is built by blitting each level
+    // from the one above it, so every level is both a source and a destination.
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     info.generateMipViews = true;
     return new VulkanCubemap(device, info);
 }

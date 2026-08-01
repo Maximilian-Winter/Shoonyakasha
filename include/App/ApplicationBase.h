@@ -67,6 +67,10 @@ struct ApplicationConfig {
     uint32_t maxFramesInFlight = 2;
     std::string pipelineJsonPath;   // Required — JSON render graph pipeline
 
+    // Vulkan validation layers. On by default; falls back to off with a warning if the
+    // Khronos layer is not installed. Turn off for release builds or profiling runs.
+    bool enableValidation = true;
+
     // Render graph parameters (set before compile — used for SSBO sizing, dispatch counts, etc.)
     std::unordered_map<std::string, uint32_t> renderGraphParameters;
 };
@@ -235,6 +239,12 @@ private:
     void initializeVulkan();
     void initializeECS();
     void loadIBLTextures();
+    /// Construct the RenderGraph object. Runs before onInit() so subclasses and
+    /// facade callbacks can reach getRenderGraph() there.
+    void createRenderGraph();
+
+    /// Load the JSON, bind the scene and compile. Runs after onInit() so that
+    /// entities created there are present.
     void initializeRenderGraph();
     void bindIBLTextures();
     void createSyncObjects();

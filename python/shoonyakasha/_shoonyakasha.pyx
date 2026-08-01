@@ -187,10 +187,25 @@ cdef class Scene:
 
     cdef CppSceneAPI* _ptr
     cdef bint _owned
+    # Strong reference back to the owning Engine.
+    #
+    # _ptr points into the C++ EngineAPI, which Engine.__dealloc__
+    # destroys. Without this, `scene = sk.Engine(...).scene` — or simply
+    # storing engine.scene on an object that outlives the engine — left a
+    # dangling pointer that the next call dereferenced.
+    cdef object _owner
 
     def __cinit__(self):
         self._ptr = NULL
         self._owned = False
+        self._owner = None
+
+    def __init__(self, *args, **kwargs):
+        # Reachable from Python as Scene(); _ptr would be NULL and every
+        # method would dereference it. The docstring said not to, which is
+        # not the same as preventing it.
+        raise TypeError(
+            "Scene cannot be constructed directly; obtain it from engine.scene")
 
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
@@ -603,10 +618,25 @@ cdef class Input:
 
     cdef CppInputAPI* _ptr
     cdef bint _owned
+    # Strong reference back to the owning Engine.
+    #
+    # _ptr points into the C++ EngineAPI, which Engine.__dealloc__
+    # destroys. Without this, `scene = sk.Engine(...).scene` — or simply
+    # storing engine.scene on an object that outlives the engine — left a
+    # dangling pointer that the next call dereferenced.
+    cdef object _owner
 
     def __cinit__(self):
         self._ptr = NULL
         self._owned = False
+        self._owner = None
+
+    def __init__(self, *args, **kwargs):
+        # Reachable from Python as Input(); _ptr would be NULL and every
+        # method would dereference it. The docstring said not to, which is
+        # not the same as preventing it.
+        raise TypeError(
+            "Input cannot be constructed directly; obtain it from engine.input")
 
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
@@ -669,10 +699,25 @@ cdef class Physics:
 
     cdef CppPhysicsAPI* _ptr
     cdef bint _owned
+    # Strong reference back to the owning Engine.
+    #
+    # _ptr points into the C++ EngineAPI, which Engine.__dealloc__
+    # destroys. Without this, `scene = sk.Engine(...).scene` — or simply
+    # storing engine.scene on an object that outlives the engine — left a
+    # dangling pointer that the next call dereferenced.
+    cdef object _owner
 
     def __cinit__(self):
         self._ptr = NULL
         self._owned = False
+        self._owner = None
+
+    def __init__(self, *args, **kwargs):
+        # Reachable from Python as Physics(); _ptr would be NULL and every
+        # method would dereference it. The docstring said not to, which is
+        # not the same as preventing it.
+        raise TypeError(
+            "Physics cannot be constructed directly; obtain it from engine.physics")
 
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
@@ -785,10 +830,25 @@ cdef class Ecs:
 
     cdef CppEcsAPI* _ptr
     cdef bint _owned
+    # Strong reference back to the owning Engine.
+    #
+    # _ptr points into the C++ EngineAPI, which Engine.__dealloc__
+    # destroys. Without this, `scene = sk.Engine(...).scene` — or simply
+    # storing engine.scene on an object that outlives the engine — left a
+    # dangling pointer that the next call dereferenced.
+    cdef object _owner
 
     def __cinit__(self):
         self._ptr = NULL
         self._owned = False
+        self._owner = None
+
+    def __init__(self, *args, **kwargs):
+        # Reachable from Python as Ecs(); _ptr would be NULL and every
+        # method would dereference it. The docstring said not to, which is
+        # not the same as preventing it.
+        raise TypeError(
+            "Ecs cannot be constructed directly; obtain it from engine.ecs")
 
     def __dealloc__(self):
         if self._owned and self._ptr != NULL:
@@ -1033,6 +1093,7 @@ cdef class Engine:
             self._scene_wrapper = Scene.__new__(Scene)
             self._scene_wrapper._ptr = &self._ptr.getScene()
             self._scene_wrapper._owned = False
+            self._scene_wrapper._owner = self
         return self._scene_wrapper
 
     @property
@@ -1042,6 +1103,7 @@ cdef class Engine:
             self._input_wrapper = Input.__new__(Input)
             self._input_wrapper._ptr = &self._ptr.getInput()
             self._input_wrapper._owned = False
+            self._input_wrapper._owner = self
         return self._input_wrapper
 
     @property
@@ -1051,6 +1113,7 @@ cdef class Engine:
             self._physics_wrapper = Physics.__new__(Physics)
             self._physics_wrapper._ptr = &self._ptr.getPhysics()
             self._physics_wrapper._owned = False
+            self._physics_wrapper._owner = self
         return self._physics_wrapper
 
     @property
@@ -1060,6 +1123,7 @@ cdef class Engine:
             self._ecs_wrapper = Ecs.__new__(Ecs)
             self._ecs_wrapper._ptr = &self._ptr.getEcs()
             self._ecs_wrapper._owned = False
+            self._ecs_wrapper._owner = self
         return self._ecs_wrapper
 
     # ── Convenience Helpers ───────────────────────────────────

@@ -1,8 +1,15 @@
 //
-// BufferLayoutCompiler.h - Compiles JSON buffer layouts to executable form
+// BufferLayoutCompiler.h — JSON front-end for buffer layouts.
 //
-// Takes a JSON buffer layout definition and produces a CompiledBufferLayout
-// that can be used with BufferLayoutResolver to fill GPU buffers.
+// Parses a JSON buffer layout definition into a CompiledBufferLayout that
+// BufferLayoutResolver can fill.
+//
+// This class owns no layout arithmetic. The std140 / std430 / scalar rules live
+// in FrameGraph/BufferFieldTypes.h and are shared with
+// FrameGraphCompiler::compileBufferLayouts. It previously carried its own
+// third implementation, which used a size-bucket alignment rule that matched
+// neither std140 nor scalar, applied mat3's 48-byte occupancy only under
+// std140, and gave std430 no distinct behaviour at all.
 //
 // Example JSON input:
 //   {
@@ -20,6 +27,7 @@
 #pragma once
 
 #include "FrameGraph/DotPathResolver.h"
+#include "FrameGraph/BufferFieldTypes.h"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -29,21 +37,14 @@
 namespace Shoonyakasha {
 
 // ============================================================================
-// Packing Rules
-// ============================================================================
-
-enum class PackingRule {
-    Std140,     // OpenGL std140 - UBOs
-    Std430,     // OpenGL std430 - SSBOs
-    Scalar      // VK_EXT_scalar_block_layout - tightly packed
-};
-
-// ============================================================================
 // BufferLayoutCompiler
 // ============================================================================
 
 class BufferLayoutCompiler {
 public:
+    using FieldType   = FrameGraph::BufferFieldType;
+    using PackingRule = FrameGraph::BufferPackingRule;
+
     // ─── Compile a single layout ────────────────────────────────
 
     CompiledBufferLayout compile(const std::string& name, const nlohmann::json& layoutJson) const;
@@ -52,129 +53,89 @@ public:
 
     std::unordered_map<std::string, CompiledBufferLayout> compileAll(const nlohmann::json& bufferLayoutsJson) const;
 
-    // ─── Type Utilities ─────────────────────────────────────────
+    // ─── Type Utilities (thin forwards to the shared packer) ────
 
-    static MaterialParam::Type parseType(const std::string& typeStr);
-    static uint32_t getTypeSize(MaterialParam::Type type);
-    static uint32_t getTypeAlignment(MaterialParam::Type type, PackingRule packing);
-    static PackingRule parsePackingRule(const std::string& packingStr);
+    /// Throws on an unknown type string rather than defaulting to float.
+    static FieldType parseType(const std::string& s) { return FrameGraph::parseFieldType(s); }
 
-private:
-    uint32_t computeOffset(uint32_t currentOffset, MaterialParam::Type type, PackingRule packing) const;
+    /// Unpadded size. mat3 is 36 here and only here — under std140 and std430 it
+    /// occupies 48. Use occupiedSize() for what a field actually owns.
+    static uint32_t nativeSize(FieldType t) { return FrameGraph::nativeSize(t); }
+
+    static uint32_t baseAlignment(FieldType t, PackingRule p) { return FrameGraph::baseAlignment(t, p); }
+    static uint32_t occupiedSize(FieldType t, PackingRule p)  { return FrameGraph::occupiedSize(t, p); }
+    static uint32_t columnStride(FieldType t, PackingRule p)  { return FrameGraph::columnStride(t, p); }
+    static uint32_t arrayStride(FieldType t, PackingRule p)   { return FrameGraph::arrayStride(t, p); }
+
+    /// Throws on an unknown packing string. It used to silently return Scalar,
+    /// which disagreed with the JSON front-end in FrameGraphJson.cpp defaulting
+    /// the same missing key to std140.
+    static PackingRule parsePackingRule(const std::string& s) { return FrameGraph::parsePackingRule(s); }
+
+    /// Map a shader type onto what ResolvedValue can produce. Returns false for
+    /// the types with no CPU-side representation (double, bool, ivecN, uvecN,
+    /// mat2); those fields are packed correctly but left zeroed.
+    static bool toResolverType(FieldType t, MaterialParam::Type& out);
 };
 
 // ============================================================================
 // Implementation (inline for header-only convenience)
 // ============================================================================
 
-inline MaterialParam::Type BufferLayoutCompiler::parseType(const std::string& typeStr) {
-    if (typeStr == "float") return MaterialParam::Type::Float;
-    if (typeStr == "vec2") return MaterialParam::Type::Vec2;
-    if (typeStr == "vec3") return MaterialParam::Type::Vec3;
-    if (typeStr == "vec4") return MaterialParam::Type::Vec4;
-    if (typeStr == "mat3") return MaterialParam::Type::Mat3;
-    if (typeStr == "mat4") return MaterialParam::Type::Mat4;
-    if (typeStr == "int") return MaterialParam::Type::Int;
-    if (typeStr == "uint") return MaterialParam::Type::UInt;
-
-    throw std::runtime_error("Unknown buffer layout type: " + typeStr);
-}
-
-inline uint32_t BufferLayoutCompiler::getTypeSize(MaterialParam::Type type) {
-    switch (type) {
-        case MaterialParam::Type::Float: return 4;
-        case MaterialParam::Type::Vec2:  return 8;
-        case MaterialParam::Type::Vec3:  return 12;
-        case MaterialParam::Type::Vec4:  return 16;
-        case MaterialParam::Type::Mat3:  return 36;  // 3x3 floats
-        case MaterialParam::Type::Mat4:  return 64;  // 4x4 floats
-        case MaterialParam::Type::Int:   return 4;
-        case MaterialParam::Type::UInt:  return 4;
-        default: return 4;
+inline bool BufferLayoutCompiler::toResolverType(FieldType t, MaterialParam::Type& out) {
+    switch (t) {
+        case FieldType::Float: out = MaterialParam::Type::Float; return true;
+        case FieldType::Int:   out = MaterialParam::Type::Int;   return true;
+        case FieldType::UInt:  out = MaterialParam::Type::UInt;  return true;
+        case FieldType::Vec2:  out = MaterialParam::Type::Vec2;  return true;
+        case FieldType::Vec3:  out = MaterialParam::Type::Vec3;  return true;
+        case FieldType::Vec4:  out = MaterialParam::Type::Vec4;  return true;
+        case FieldType::Mat3:  out = MaterialParam::Type::Mat3;  return true;
+        case FieldType::Mat4:  out = MaterialParam::Type::Mat4;  return true;
+        default:               out = MaterialParam::Type::Float; return false;
     }
 }
 
-inline uint32_t BufferLayoutCompiler::getTypeAlignment(MaterialParam::Type type, PackingRule packing) {
-    if (packing == PackingRule::Scalar) {
-        // Scalar packing: everything aligned to its natural size
-        return getTypeSize(type) <= 4 ? 4 : (getTypeSize(type) <= 8 ? 8 : 16);
-    }
-
-    // std140/std430 alignment rules
-    switch (type) {
-        case MaterialParam::Type::Float:
-        case MaterialParam::Type::Int:
-        case MaterialParam::Type::UInt:
-            return 4;
-
-        case MaterialParam::Type::Vec2:
-            return 8;
-
-        case MaterialParam::Type::Vec3:
-        case MaterialParam::Type::Vec4:
-            return 16;  // vec3 is aligned to 16 bytes in std140!
-
-        case MaterialParam::Type::Mat3:
-            // mat3 is stored as 3 vec4s in std140 (each column padded to vec4)
-            return 16;
-
-        case MaterialParam::Type::Mat4:
-            return 16;
-
-        default:
-            return 16;
-    }
-}
-
-inline PackingRule BufferLayoutCompiler::parsePackingRule(const std::string& packingStr) {
-    if (packingStr == "std140") return PackingRule::Std140;
-    if (packingStr == "std430") return PackingRule::Std430;
-    if (packingStr == "scalar") return PackingRule::Scalar;
-
-    // Default to scalar for push constants (most common use case)
-    return PackingRule::Scalar;
-}
-
-inline uint32_t BufferLayoutCompiler::computeOffset(uint32_t currentOffset, MaterialParam::Type type, PackingRule packing) const {
-    uint32_t alignment = getTypeAlignment(type, packing);
-    // Align up to the required alignment
-    return (currentOffset + alignment - 1) & ~(alignment - 1);
-}
-
-inline CompiledBufferLayout BufferLayoutCompiler::compile(const std::string& name, const nlohmann::json& layoutJson) const {
+inline CompiledBufferLayout BufferLayoutCompiler::compile(const std::string& name,
+                                                          const nlohmann::json& layoutJson) const {
     CompiledBufferLayout layout;
     layout.name = name;
 
-    // Parse packing rule
-    std::string packingStr = layoutJson.value("packing", "scalar");
-    PackingRule packing = parsePackingRule(packingStr);
-
-    // Parse fields
-    uint32_t currentOffset = 0;
+    // Missing "packing" defaults to std140 — the over-aligned safe choice, and
+    // the same default FrameGraphJson.cpp uses. This class used to default to
+    // scalar, so the two front-ends disagreed on identical JSON.
+    const PackingRule packing = parsePackingRule(layoutJson.value("packing", std::string{"std140"}));
 
     if (!layoutJson.contains("fields") || !layoutJson["fields"].is_array()) {
         throw std::runtime_error("Buffer layout '" + name + "' must have a 'fields' array");
     }
 
+    uint32_t cursor = 0;
+    uint32_t maxMemberAlignment = 1;
+
     for (const auto& fieldJson : layoutJson["fields"]) {
         BufferField field;
-        field.name = fieldJson.value("name", "");
+        field.name   = fieldJson.value("name", "");
         field.source = fieldJson.value("source", "");
 
-        std::string typeStr = fieldJson.value("type", "float");
-        field.type = parseType(typeStr);
-        field.size = getTypeSize(field.type);
+        const FieldType type = parseType(fieldJson.value("type", std::string{"float"}));
+        field.resolvable = toResolverType(type, field.type);
+        field.arrayCount = fieldJson.value("arrayCount", 1u);
 
-        // Compute aligned offset
-        field.offset = computeOffset(currentOffset, field.type, packing);
+        const uint32_t explicitOffset = fieldJson.value("offset", 0u);
+        const bool hasExplicitOffset  = fieldJson.contains("offset");
 
-        // Handle mat3 specially in std140 (stored as 3 vec4s)
-        uint32_t effectiveSize = field.size;
-        if (field.type == MaterialParam::Type::Mat3 && packing == PackingRule::Std140) {
-            effectiveSize = 48;  // 3 vec4s = 3 * 16 bytes
-        }
+        const auto packed = FrameGraph::packField(
+            type, packing, field.arrayCount,
+            hasExplicitOffset ? &explicitOffset : nullptr,
+            cursor);
 
-        currentOffset = field.offset + effectiveSize;
+        field.offset       = packed.offset;
+        field.size         = packed.size;
+        field.columnStride = packed.columnStride;
+        field.arrayStride  = packed.arrayStride;
+
+        maxMemberAlignment = std::max(maxMemberAlignment, baseAlignment(type, packing));
 
         // Classify sources
         if (DotPathResolver::isScenePath(field.source)) {
@@ -188,10 +149,7 @@ inline CompiledBufferLayout BufferLayoutCompiler::compile(const std::string& nam
         layout.fields.push_back(std::move(field));
     }
 
-    // Final size (aligned to largest alignment for UBO compatibility)
-    uint32_t finalAlignment = (packing == PackingRule::Std140) ? 16 : 4;
-    layout.totalSize = (currentOffset + finalAlignment - 1) & ~(finalAlignment - 1);
-
+    layout.totalSize = FrameGraph::blockSize(cursor, packing, maxMemberAlignment);
     return layout;
 }
 

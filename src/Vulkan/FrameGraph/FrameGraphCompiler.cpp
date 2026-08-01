@@ -6,6 +6,7 @@
 //
 
 #include "Vulkan/FrameGraph/FrameGraph.h"
+#include "GPU/VkFormatUtils.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanRenderPass.h"
 #include "Vulkan/VulkanImage.h"
@@ -412,12 +413,7 @@ void FrameGraphCompiler::createPhysicalResources(
 
             // Determine if this is a depth resource from usage flags or format
             bool isDepthByUsage = (imageUsages[i] & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
-            bool isDepthByFormat = (desc.format == VK_FORMAT_D16_UNORM ||
-                                    desc.format == VK_FORMAT_D32_SFLOAT ||
-                                    desc.format == VK_FORMAT_D16_UNORM_S8_UINT ||
-                                    desc.format == VK_FORMAT_D24_UNORM_S8_UINT ||
-                                    desc.format == VK_FORMAT_D32_SFLOAT_S8_UINT);
-            bool isDepth = isDepthByUsage || isDepthByFormat;
+            bool isDepth = isDepthByUsage || Shoonyakasha::isDepthFormat(desc.format);
 
             VkFormat format = desc.format;
             if (format == VK_FORMAT_UNDEFINED && isDepth) {
@@ -431,8 +427,9 @@ void FrameGraphCompiler::createPhysicalResources(
             );
 
             // Create image view
-            VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-            image->createImageView(aspect);
+            // format is resolved by now (findDepthFormat may have replaced UNDEFINED),
+            // so derive the aspect from it rather than from the usage flags.
+            image->createImageView(Shoonyakasha::formatToAspectMask(format));
 
             PhysicalImage physImg;
             physImg.vkImage = image->getImage();
@@ -567,8 +564,32 @@ void FrameGraphCompiler::createRenderPasses(
     std::vector<CompiledPass>& compiledPasses,
     const std::vector<uint32_t>& executionOrder,
     const std::vector<PassDeclaration>& passes,
-    const std::vector<PhysicalResource>& physResources)
+    const std::vector<PhysicalResource>& physResources,
+    const ImportedImageMap& importedImages)
 {
+    // Which pass writes each presentable resource last.
+    //
+    // A presented image must be in PRESENT_SRC_KHR, and finalLayout otherwise
+    // comes from the pass's declared ResourceUsage — so a pipeline whose final
+    // pass says "color_write" (or "color_blend", which cannot say "present"
+    // without losing its blend semantics) left the swapchain in
+    // COLOR_ATTACHMENT_OPTIMAL and vkQueuePresentKHR complained every frame.
+    //
+    // Derived rather than declared: the swapchain is the imported resource with
+    // one view per swapchain image, so the compiler can identify it without the
+    // JSON author having to remember.
+    std::unordered_map<uint32_t, uint32_t> lastPresentableWriter;  // resource index -> exec index
+    for (uint32_t execIdx : executionOrder) {
+        const auto& decl = passes[compiledPasses[execIdx].declIndex];
+        for (const auto& output : decl.outputs) {
+            if (!output.handle.valid()) continue;
+            auto it = importedImages.find(output.handle.index);
+            if (it != importedImages.end() && it->second.views.size() > 1) {
+                lastPresentableWriter[output.handle.index] = execIdx;
+            }
+        }
+    }
+
     for (uint32_t execIdx : executionOrder) {
         auto& compiled = compiledPasses[execIdx];
         const auto& passDecl = passes[compiled.declIndex];
@@ -628,6 +649,13 @@ void FrameGraphCompiler::createRenderPasses(
                 else if (output.usage == ResourceUsage::ColorAttachmentBlend &&
                          initialLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
                     initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                }
+
+                // The last pass to write a presentable image must leave it in
+                // PRESENT_SRC_KHR regardless of the usage it declared.
+                auto presentIt = lastPresentableWriter.find(output.handle.index);
+                if (presentIt != lastPresentableWriter.end() && presentIt->second == execIdx) {
+                    finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
                 }
 
                 AttachmentDescriptor desc;
@@ -836,9 +864,7 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     uint32_t maxFramesInFlight,
     const std::unordered_map<std::string, std::shared_ptr<VulkanPipeline>>& manualPipelines)
 {
-    if (!m_logger) {
-        m_logger = new Logger("framegraph_compiler.log");
-    }
+    ensureLogger();
 
     CompileResult result;
     result.valid = false;
@@ -919,7 +945,7 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
 
     // Stage 6: Create render passes
     createRenderPasses(device, result.compiledPasses, result.executionOrder,
-                       passes, result.physicalResources);
+                       passes, result.physicalResources, importedImages);
     m_logger->log(LogLevel::Info, "Render passes created");
 
     // Stage 7: Create framebuffers
@@ -1509,94 +1535,73 @@ void FrameGraphCompiler::performAutoBindings(
 // Uses dot-path resolution for automatic data binding
 // ═══════════════════════════════════════════════════════════════
 
-namespace {
-
-/// Get size of a BufferFieldType in bytes
-uint32_t getFieldTypeSize(BufferFieldType type) {
-    switch (type) {
-        case BufferFieldType::Float:  return 4;
-        case BufferFieldType::Double: return 8;
-        case BufferFieldType::Int:    return 4;
-        case BufferFieldType::UInt:   return 4;
-        case BufferFieldType::Bool:   return 4;  // GLSL bool is 4 bytes
-        case BufferFieldType::Vec2:   return 8;
-        case BufferFieldType::Vec3:   return 12;
-        case BufferFieldType::Vec4:   return 16;
-        case BufferFieldType::IVec2:  return 8;
-        case BufferFieldType::IVec3:  return 12;
-        case BufferFieldType::IVec4:  return 16;
-        case BufferFieldType::UVec2:  return 8;
-        case BufferFieldType::UVec3:  return 12;
-        case BufferFieldType::UVec4:  return 16;
-        case BufferFieldType::Mat2:   return 16;
-        case BufferFieldType::Mat3:   return 36;
-        case BufferFieldType::Mat4:   return 64;
-    }
-    return 4;  // Default fallback
-}
-
-/// std140 alignment rules (OpenGL 4.6 spec, section 7.6.2.2)
-/// scalar: N (4 for float/int), vec2: 2N, vec3: 4N, vec4: 4N, matNxM: column vec alignment
-uint32_t getStd140Alignment(BufferFieldType type) {
-    switch (type) {
-        case BufferFieldType::Float:
-        case BufferFieldType::Int:
-        case BufferFieldType::UInt:
-        case BufferFieldType::Bool:   return 4;
-        case BufferFieldType::Double: return 8;
-        case BufferFieldType::Vec2:
-        case BufferFieldType::IVec2:
-        case BufferFieldType::UVec2:  return 8;
-        case BufferFieldType::Vec3:
-        case BufferFieldType::IVec3:
-        case BufferFieldType::UVec3:  return 16;  // vec3 aligned to vec4!
-        case BufferFieldType::Vec4:
-        case BufferFieldType::IVec4:
-        case BufferFieldType::UVec4:  return 16;
-        case BufferFieldType::Mat2:   return 16;  // columns are vec2, but aligned to vec4
-        case BufferFieldType::Mat3:   return 16;  // columns are vec3, aligned to vec4
-        case BufferFieldType::Mat4:   return 16;  // columns are vec4, aligned to vec4
-    }
-    return 4;
-}
-
-/// std140 padded size (accounts for column padding in matrices)
-uint32_t getStd140PaddedSize(BufferFieldType type) {
-    switch (type) {
-        // Scalars and vectors use their natural size
-        case BufferFieldType::Float:
-        case BufferFieldType::Int:
-        case BufferFieldType::UInt:
-        case BufferFieldType::Bool:   return 4;
-        case BufferFieldType::Double: return 8;
-        case BufferFieldType::Vec2:
-        case BufferFieldType::IVec2:
-        case BufferFieldType::UVec2:  return 8;
-        case BufferFieldType::Vec3:
-        case BufferFieldType::IVec3:
-        case BufferFieldType::UVec3:  return 12;  // 12 bytes data (padding handled by next alignment)
-        case BufferFieldType::Vec4:
-        case BufferFieldType::IVec4:
-        case BufferFieldType::UVec4:  return 16;
-        // Matrices: each column padded to vec4 alignment in std140
-        case BufferFieldType::Mat2:   return 2 * 16;  // 2 columns x 16 bytes (vec2 padded to vec4)
-        case BufferFieldType::Mat3:   return 3 * 16;  // 3 columns x 16 bytes (vec3 padded to vec4)
-        case BufferFieldType::Mat4:   return 4 * 16;  // 4 columns x 16 bytes (vec4)
-    }
-    return 4;
-}
-
-} // anonymous namespace
 
 // CompiledBufferLayout is now in Shoonyakasha::FrameGraph namespace
 VkShaderStageFlags CompiledBufferLayout::getShaderStages() const {
     return JsonUtils::stringsToShaderStages(binding.stages);
 }
 
+namespace {
+
+/// Map a shader-side field type onto what the dot-path resolver can produce.
+/// The gap is real: BufferFieldType has 17 members and ResolvedValue's variant
+/// has 8 value alternatives, so double, bool, the integer vectors and mat2 have
+/// no representation. Those fields still pack correctly; they are marked
+/// unresolvable so writeField leaves them zeroed instead of writing a float into
+/// a uvec4 slot, which is what the old `default:` case did silently, per draw.
+bool toResolverType(BufferFieldType t, Shoonyakasha::MaterialParam::Type& out) {
+    using MT = Shoonyakasha::MaterialParam::Type;
+    switch (t) {
+        case BufferFieldType::Float: out = MT::Float; return true;
+        case BufferFieldType::Int:   out = MT::Int;   return true;
+        case BufferFieldType::UInt:  out = MT::UInt;  return true;
+        case BufferFieldType::Vec2:  out = MT::Vec2;  return true;
+        case BufferFieldType::Vec3:  out = MT::Vec3;  return true;
+        case BufferFieldType::Vec4:  out = MT::Vec4;  return true;
+        case BufferFieldType::Mat3:  out = MT::Mat3;  return true;
+        case BufferFieldType::Mat4:  out = MT::Mat4;  return true;
+        default:                     out = MT::Float; return false;
+    }
+}
+
+} // namespace
+
+Shoonyakasha::CompiledBufferLayout CompiledBufferLayout::toResolverLayout() const {
+    Shoonyakasha::CompiledBufferLayout out;
+    out.name             = name;
+    out.totalSize        = totalSize;
+    out.hasSceneSources  = hasSceneSources;
+    out.hasEntitySources = hasEntitySources;
+    out.hasConstSources  = hasConstSources;
+    out.fields.reserve(fields.size());
+
+    for (const auto& f : fields) {
+        Shoonyakasha::BufferField rf;
+        rf.name         = f.name;
+        rf.source       = f.source;
+        rf.offset       = f.offset;
+        rf.size         = f.size;
+        rf.arrayCount   = f.arrayCount;
+        rf.arrayStride  = f.arrayStride;
+        rf.columnStride = f.columnStride;
+        rf.resolvable   = toResolverType(f.type, rf.type);
+        out.fields.push_back(std::move(rf));
+    }
+    return out;
+}
+
+void FrameGraphCompiler::ensureLogger() {
+    if (!m_logger) {
+        m_logger = new Logger("framegraph_compiler.log");
+    }
+}
+
 void FrameGraphCompiler::compileBufferLayouts(
     const std::vector<BufferLayoutDesc>& layoutDescs,
     std::unordered_map<std::string, CompiledBufferLayout>& outLayouts)
 {
+    ensureLogger();
+
     for (const auto& desc : layoutDescs) {
         CompiledBufferLayout compiled;
         compiled.name = desc.name;
@@ -1625,45 +1630,30 @@ void FrameGraphCompiler::compileBufferLayouts(
         // Copy fields first so we can set computed offsets
         compiled.fields = desc.fields;
 
-        // Calculate total size from fields with packing-aware alignment
-        bool useStd140 = (desc.packing == BufferPackingRule::Std140);
-
+        // Packing: one shared implementation of the std140 / std430 / scalar
+        // rules, in FrameGraph/BufferFieldTypes.h. Previously only Std140 was
+        // handled here and Std430, Scalar and PushConstant all fell into a
+        // branch that applied no alignment at all.
         uint32_t currentOffset = 0;
+        uint32_t maxMemberAlignment = 1;
+
         for (auto& field : compiled.fields) {
-            uint32_t arrayMultiplier = (field.arrayCount > 0) ? field.arrayCount : 1;
+            const uint32_t explicitOffset = field.offset;
+            const PackedField packed = packField(
+                field.type, desc.packing, field.arrayCount,
+                field.hasExplicitOffset ? &explicitOffset : nullptr,
+                currentOffset);
 
-            if (useStd140) {
-                uint32_t alignment = getStd140Alignment(field.type);
+            field.offset       = packed.offset;
+            field.size         = packed.size;
+            field.columnStride = packed.columnStride;
+            field.arrayStride  = packed.arrayStride;
 
-                if (arrayMultiplier > 1) {
-                    // std140 rule: array elements are rounded up to vec4 alignment (16 bytes)
-                    alignment = std::max(alignment, 16u);
-                }
-
-                currentOffset = (currentOffset + alignment - 1) & ~(alignment - 1);
-                field.offset = currentOffset;
-
-                uint32_t fieldSize = getStd140PaddedSize(field.type);
-
-                if (arrayMultiplier > 1) {
-                    // Array stride: element size rounded up to 16 bytes (std140 rule)
-                    uint32_t arrayStride = (fieldSize + 15u) & ~15u;
-                    field.arrayStride = arrayStride;
-                    currentOffset += arrayStride * arrayMultiplier;
-                } else {
-                    currentOffset += fieldSize;
-                }
-            } else {
-                // Scalar packing: no alignment padding, use explicit offset or pack tightly
-                if (field.offset != 0) {
-                    currentOffset = field.offset;
-                }
-                field.offset = currentOffset;
-                uint32_t fieldSize = getFieldTypeSize(field.type);
-                currentOffset += fieldSize * arrayMultiplier;
-            }
+            maxMemberAlignment = std::max(maxMemberAlignment,
+                                          baseAlignment(field.type, desc.packing));
         }
-        compiled.totalSize = currentOffset;
+
+        compiled.totalSize = blockSize(currentOffset, desc.packing, maxMemberAlignment);
 
         // Validate push constant size against Vulkan minimum guarantee
         if (desc.usage == BufferUsageType::PushConstant && compiled.totalSize > 128) {
@@ -1678,15 +1668,39 @@ void FrameGraphCompiler::compileBufferLayouts(
         compiled.hasEntitySources = false;
         compiled.hasConstSources = false;
 
+        // Validate every source once, here, at compile time.
+        //
+        // An unresolvable dot-path produces zeros at runtime with no log line at
+        // any severity, no counter and no return value — for an engine whose
+        // premise is that the JSON *is* the pipeline, a typo'd `source` was the
+        // quietest possible failure. DotPathResolver::validatePath existed for
+        // exactly this and had no production caller.
+        Shoonyakasha::DotPathResolver validator;
+
         for (const auto& field : compiled.fields) {
-            if (!field.source.empty()) {
-                if (field.source.starts_with("scene.")) {
-                    compiled.hasSceneSources = true;
-                } else if (field.source.starts_with("entity.")) {
-                    compiled.hasEntitySources = true;
-                } else if (field.source.starts_with("const.")) {
-                    compiled.hasConstSources = true;
-                }
+            if (field.source.empty()) continue;
+
+            if (field.source.starts_with("scene.")) {
+                compiled.hasSceneSources = true;
+            } else if (field.source.starts_with("entity.")) {
+                compiled.hasEntitySources = true;
+            } else if (field.source.starts_with("const.")) {
+                compiled.hasConstSources = true;
+            }
+
+            const std::string problem = validator.validatePath(field.source);
+            if (!problem.empty()) {
+                m_logger->log(LogLevel::Warning,
+                              "  Buffer layout '%s' field '%s': %s. The field will be zeroed every frame.",
+                              desc.name.c_str(), field.name.c_str(), problem.c_str());
+            }
+
+            Shoonyakasha::MaterialParam::Type unusedType;
+            if (!toResolverType(field.type, unusedType)) {
+                m_logger->log(LogLevel::Warning,
+                              "  Buffer layout '%s' field '%s' has a shader type the dot-path "
+                              "resolver cannot produce; it is packed correctly but left zeroed.",
+                              desc.name.c_str(), field.name.c_str());
             }
         }
 
@@ -1695,13 +1709,16 @@ void FrameGraphCompiler::compileBufferLayouts(
                                desc.usage == BufferUsageType::StorageBuffer ? "storage_buffer" : "unknown";
         const char* freqStr = desc.updateFrequency == BufferUpdateFrequency::PerFrame ? ", per_frame" : "";
 
-        outLayouts[desc.name] = std::move(compiled);
-
-        m_logger->log(LogLevel::Info, "  Compiled buffer layout '%s' (%s%s, %u bytes, %zu fields%s%s)",
+        // Log before the move: this used to read `compiled` after std::move.
+        // Report totalSize rather than the raw cursor, since the two differ once
+        // the block is rounded to its final alignment.
+        m_logger->log(LogLevel::Info, "  Compiled buffer layout '%s' (%s%s, %u bytes, %zu fields, %s%s)",
                       desc.name.c_str(), usageStr, freqStr,
-                      currentOffset, desc.fields.size(),
-                      useStd140 ? ", std140" : ", scalar",
+                      compiled.totalSize, desc.fields.size(),
+                      toString(desc.packing),
                       compiled.usesDotPathSources() ? ", dot-path sources" : "");
+
+        outLayouts[desc.name] = std::move(compiled);
     }
 }
 

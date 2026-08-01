@@ -220,8 +220,27 @@ public:
     // Barriers and synchronization - managing the flow of time
     VulkanCommandBuilder& memoryBarrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
                                        VkAccessFlags srcAccess, VkAccessFlags dstAccess);
-    VulkanCommandBuilder& imageBarrier(VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
-                                      VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage);
+    /// Record an image memory barrier.
+    ///
+    /// The access masks and the subresource range are required rather than
+    /// derived. This function used to take neither: it re-derived the access
+    /// masks from a five-case layout table that yielded 0 for everything it did
+    /// not recognise — including COLOR_ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY,
+    /// the canonical render-to-texture transition, whose writes were therefore
+    /// never made available — and it hardcoded aspectMask to COLOR, which is a
+    /// spec violation on any depth image. Callers already know both; the
+    /// frame graph compiler computes exact masks and then had them discarded.
+    ///
+    /// The range is deliberately not defaulted. A default would reinstate the
+    /// hardcoded COLOR/1/1 that this exists to remove; see fullSubresourceRange()
+    /// in GPU/VkFormatUtils.h for the usual argument.
+    VulkanCommandBuilder& imageBarrier(VkImage image,
+                                       VkImageLayout oldLayout, VkImageLayout newLayout,
+                                       VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                                       VkAccessFlags srcAccess, VkAccessFlags dstAccess,
+                                       const VkImageSubresourceRange& subresourceRange,
+                                       uint32_t srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                                       uint32_t dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED);
     VulkanCommandBuilder& bufferBarrier(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size,
                                        VkAccessFlags srcAccess, VkAccessFlags dstAccess,
                                        VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage);

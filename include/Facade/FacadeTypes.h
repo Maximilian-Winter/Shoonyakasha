@@ -97,6 +97,10 @@ struct EngineConfig {
 
     uint32_t maxFramesInFlight = 2;
 
+    // Vulkan validation layers. On by default; falls back to off with a warning if the
+    // Khronos layer is not installed. Turn off for release builds or profiling runs.
+    bool enableValidation = true;
+
     // Render graph parameters (SSBO sizing, dispatch counts, etc.)
     std::vector<std::pair<std::string, uint32_t>> renderGraphParameters;
 };

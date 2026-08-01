@@ -425,24 +425,69 @@ public:
         }
     }
 
+    /// Destroy an entity and, recursively, all of its descendants.
+    ///
+    /// The two subtleties here were both memory corruption:
+    ///
+    ///  1. The child list must be copied before recursing. Destroying a child
+    ///     unlinks it from this parent via removeChild, which is erase-remove on
+    ///     the very vector a range-for was iterating.
+    ///
+    ///  2. The HierarchyComponent pointer must not be held across the recursion.
+    ///     Each registry.destroy erases from the component pool, and EnTT's
+    ///     swap-and-pop can relocate *this* entity's component into the vacated
+    ///     slot, leaving the pointer dangling mid-loop.
+    ///
+    /// Both are silent: they corrupt rather than crash, and any entity with two
+    /// or more children hit them.
     static void destroyEntity(entt::registry& registry, entt::entity entity) {
-        // Remove from parent's children list
-        if (auto* hierarchy = registry.try_get<HierarchyComponent>(entity)) {
-            if (hierarchy->parent != entt::null && registry.valid(hierarchy->parent)) {
-                if (auto* parentHierarchy = registry.try_get<HierarchyComponent>(hierarchy->parent)) {
-                    parentHierarchy->removeChild(entity);
-                }
-            }
+        if (entity == entt::null || !registry.valid(entity)) {
+            return;   // already gone — a parent may have cascaded onto it
+        }
 
-            // Recursively destroy children or reparent them
-            for (auto child : hierarchy->children) {
-                if (registry.valid(child)) {
-                    destroyEntity(registry, child);
-                }
+        std::vector<entt::entity> children;
+        entt::entity parent = entt::null;
+
+        if (auto* hierarchy = registry.try_get<HierarchyComponent>(entity)) {
+            children = hierarchy->children;   // copy: see (1)
+            parent   = hierarchy->parent;
+        }
+
+        // Unlink from the parent before recursing, and re-fetch the parent's
+        // component rather than reusing a pointer taken earlier: see (2).
+        if (parent != entt::null && registry.valid(parent)) {
+            if (auto* parentHierarchy = registry.try_get<HierarchyComponent>(parent)) {
+                parentHierarchy->removeChild(entity);
             }
         }
 
-        registry.destroy(entity);
+        for (auto child : children) {
+            destroyEntity(registry, child);   // guards validity itself
+        }
+
+        if (registry.valid(entity)) {
+            registry.destroy(entity);
+        }
+    }
+
+    /// True if `candidate` is `entity` itself or one of its ancestors.
+    ///
+    /// Walks upward with a step budget so a pre-existing cycle — from a
+    /// hand-edited scene file, say — is reported rather than hanging.
+    static bool isAncestorOf(const entt::registry& registry,
+                             entt::entity candidate,
+                             entt::entity entity,
+                             uint32_t maxDepth = 4096) {
+        if (candidate == entt::null || entity == entt::null) return false;
+
+        entt::entity cursor = entity;
+        for (uint32_t step = 0; step < maxDepth; ++step) {
+            if (cursor == candidate) return true;
+            const auto* h = registry.try_get<HierarchyComponent>(cursor);
+            if (!h || h->parent == entt::null || !registry.valid(h->parent)) return false;
+            cursor = h->parent;
+        }
+        return true;   // hit the budget: treat as reachable rather than recurse forever
     }
 
     static std::vector<entt::entity> findEntitiesWithTag(const entt::registry& registry, const std::string& tag) {

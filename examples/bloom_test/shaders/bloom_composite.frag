@@ -22,8 +22,8 @@ void main() {
     // Simple ACES-inspired tone mapping
     result = result / (result + vec3(1.0));
 
-    // Gamma correction
-    result = pow(result, vec3(1.0 / 2.2));
-
+    // No manual gamma. This pass writes to the swapchain, which is created as
+    // VK_FORMAT_B8G8R8A8_SRGB (VulkanSwapChain::chooseSwapSurfaceFormat), so the
+    // hardware applies the linear -> sRGB encode on write.
     outColor = vec4(result, 1.0);
 }

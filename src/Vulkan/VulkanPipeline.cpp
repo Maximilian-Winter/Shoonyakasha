@@ -290,18 +290,26 @@ void VulkanPipeline::bind(VkCommandBuffer commandBuffer) {
 
 void VulkanPipeline::recreate(VkExtent2D newExtent) {
     m_extent = newExtent;
+
+    // cleanup() destroys the pipeline, the layout AND every shader module, so all
+    // three have to be rebuilt. Recreating only the pipeline left createPipeline()
+    // reading a null layout and an empty stage list — a use-after-free on any
+    // resize or hot-reload path. Everything needed is retained in m_state
+    // (shaderPaths, descriptorSetLayouts, pushConstantRanges).
+    //
+    // The caller is responsible for ensuring the pipeline is not in flight; there
+    // is no vkDeviceWaitIdle here because recreate() is normally invoked from a
+    // swapchain-recreation path that has already idled the device.
     cleanup();
+    createPipelineLayout();
+    loadShaders();
     createPipeline();
 }
 
 void VulkanPipeline::reloadShaders() {
-    // Hot-reload for development workflow - useful for iteration
-    for (auto& [stage, module] : m_shaderModules) {
-        vkDestroyShaderModule(m_device.getLogicalDevice(), module, nullptr);
-    }
-    m_shaderModules.clear();
-
-    loadShaders();
+    // Hot-reload for development workflow — re-reads the SPIR-V from disk.
+    // recreate() does the whole teardown and rebuild, including loadShaders();
+    // destroying the modules here as well double-destroyed them.
     recreate(m_extent);
 }
 

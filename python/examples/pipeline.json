@@ -385,7 +385,7 @@
         { "resource": "bloomBlurred", "usage": "shader_read" }
       ],
       "outputs": [
-        { "resource": "swapchain", "usage": "color_write", "clear": [0.0, 0.0, 0.0, 1.0] }
+        { "resource": "swapchain", "usage": "present", "clear": [0.0, 0.0, 0.0, 1.0] }
       ],
       "pipeline": {
         "vertexShader": "shaders/fullscreen.vert.spv",

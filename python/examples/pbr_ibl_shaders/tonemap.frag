@@ -65,11 +65,9 @@ void main() {
     // Apply ACES filmic tonemapping (best visual quality)
     vec3 mapped = ACESFilm(hdr);
 
-    // Gamma correction (sRGB)
-    // Note: If output format is SRGB, the hardware does this automatically
-    // Use linear output format (R8G8B8A8_UNORM) and do manual gamma here
-    float gamma = 2.2;
-    mapped = pow(mapped, vec3(1.0 / gamma));
-
+    // No manual gamma. This pass writes to the swapchain, which is created as
+    // VK_FORMAT_B8G8R8A8_SRGB (VulkanSwapChain::chooseSwapSurfaceFormat), so the
+    // hardware applies the linear -> sRGB encode on write. Doing it here as well
+    // encoded the image twice and washed out the midtones.
     outColor = vec4(mapped, 1.0);
 }

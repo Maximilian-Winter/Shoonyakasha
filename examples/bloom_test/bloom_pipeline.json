@@ -228,7 +228,7 @@
       "outputs": [
         {
           "resource": "swapchain",
-          "usage": "color_write",
+          "usage": "present",
           "clear": [0.0, 0.0, 0.0, 1.0]
         }
       ]

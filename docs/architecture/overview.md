@@ -32,7 +32,7 @@ ApplicationBase  (lifecycle management, main loop)
     +--- Physics  (Bullet3 via PIMPL wrapper)
     |      PhysicsWorld -> rigid bodies, collision shapes
     |
-    +--- glTF Loader  (tinygltf -> ECS entities)
+    +--- glTF Loader  (cgltf -> ECS entities)
     |      GltfSceneLoader -> MeshComponent, MaterialComponentV5,
     |                         TransformComponent, SkeletonComponent
     |
@@ -173,14 +173,14 @@ Frame synchronization uses double-buffered semaphores and fences (`maxFramesInFl
 | `include/ECS/` | `Core.h`, `Scene.h`, `Systems.h`, `RenderComponents.h`, `SkeletonComponents.h`, `CameraController.h`, `CameraControllerBuilders.h`, `PhysicsSystem.h`, `SkeletalAnimationSystem.h`, `InputSystem.h` | Entity components, systems, scene management. `Core.h` has TransformComponent, CameraComponent, LightComponent, HierarchyComponent. |
 | `include/Vulkan/FrameGraph/` | `FrameGraph.h`, `FrameGraphPass.h`, `FrameGraphResource.h`, `FrameGraphJson.h`, `VertexFormatRegistry.h`, `FrameGraphAnalyzer.h`, `FrameGraphDebugger.h`, `FrameGraphExport.h`, `RenderTargetSaver.h` | RenderGraph (builder, compiler, executor), pass/resource declarations, JSON parsing, analysis/debug/export tools |
 | `include/FrameGraph/` | `DotPathResolver.h`, `BufferLayoutCompiler.h`, `FrameGraphRenderer.h`, `EntityRenderExecutor.h`, `SharedBufferRegistry.h`, `StagingBufferManager.h` | Runtime data binding: dot-path resolution, buffer layout compilation, automatic entity rendering, cross-graph SSBO sharing, CPU-GPU staging |
-| `include/Resources/` | `GltfSceneLoader.h`, `ResourceManager.h`, `AnimationData.h` | glTF scene loading (tinygltf), GPU resource caching, animation clip/channel data |
+| `include/Resources/` | `GltfSceneLoader.h`, `ResourceManager.h`, `AnimationData.h` | glTF scene loading (cgltf), GPU resource caching, animation clip/channel data |
 | `include/IBL/` | `IBLGenerator.h` | HDR environment map processing: irradiance convolution, prefilter mip chain, BRDF LUT generation |
 | `include/GPU/` | `GPUTypes.h`, `GPUResourceFactory.h` | Thin GPU type wrappers (`GPUTexture`, `GPUBuffer`), default texture factory |
 | `src/Facade/` | (implementations) | PIMPL internals for the Facade layer |
 | `python/shoonyakasha/` | `.pyx`, `.pxd`, bridge headers | Cython bindings wrapping the Facade |
 | `python/examples/` | `.py` scripts | Python demo applications |
 | `examples/` | C++ example apps | Standalone applications demonstrating various features |
-| `tests/` | GTest suites | 582 tests (518 core + 64 facade) |
+| `tests/` | GTest suites | the automated test suite |
 
 ---
 

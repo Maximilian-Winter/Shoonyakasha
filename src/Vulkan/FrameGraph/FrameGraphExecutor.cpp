@@ -6,6 +6,7 @@
 //
 
 #include "Vulkan/FrameGraph/FrameGraph.h"
+#include "GPU/VkFormatUtils.h"
 #include "Vulkan/FrameGraph/FrameGraphDebugger.h"
 #include "Vulkan/VulkanCommandBuffer.h"
 #include "Vulkan/VulkanRenderPass.h"
@@ -163,25 +164,13 @@ void FrameGraphExecutor::execute(
             const auto* physImg = std::get_if<PhysicalImage>(
                 &compiled.physicalResources[barrier.resource.index]);
             if (physImg && physImg->vkImage != VK_NULL_HANDLE) {
-                VkImageMemoryBarrier imgBarrier{};
-                imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-                imgBarrier.oldLayout = barrier.oldLayout;
-                imgBarrier.newLayout = barrier.newLayout;
-                imgBarrier.srcQueueFamilyIndex = barrier.srcQueueFamilyIndex;
-                imgBarrier.dstQueueFamilyIndex = barrier.dstQueueFamilyIndex;
-                imgBarrier.image = physImg->vkImage;
-                imgBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                imgBarrier.subresourceRange.baseMipLevel = 0;
-                imgBarrier.subresourceRange.levelCount = 1;
-                imgBarrier.subresourceRange.baseArrayLayer = 0;
-                imgBarrier.subresourceRange.layerCount = 1;
-                imgBarrier.srcAccessMask = barrier.srcAccess;
-                imgBarrier.dstAccessMask = barrier.dstAccess;
-
-                vkCmdPipelineBarrier(commandBuffer,
-                    barrier.srcStage, barrier.dstStage,
-                    0, 0, nullptr, 0, nullptr,
-                    1, &imgBarrier);
+                cmd.imageBarrier(
+                    physImg->vkImage,
+                    barrier.oldLayout, barrier.newLayout,
+                    barrier.srcStage,  barrier.dstStage,
+                    barrier.srcAccess, barrier.dstAccess,
+                    fullSubresourceRange(physImg->format),
+                    barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
             }
         }
 
@@ -202,36 +191,16 @@ void FrameGraphExecutor::execute(
                                                   barrier.newLayout, isQueueTransfer);
                 }
 
-                if (barrier.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED) {
-                    // Queue ownership transfer: use full barrier with queue family indices
-                    VkImageMemoryBarrier imgBarrier{};
-                    imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-                    imgBarrier.oldLayout = barrier.oldLayout;
-                    imgBarrier.newLayout = barrier.newLayout;
-                    imgBarrier.srcQueueFamilyIndex = barrier.srcQueueFamilyIndex;
-                    imgBarrier.dstQueueFamilyIndex = barrier.dstQueueFamilyIndex;
-                    imgBarrier.image = physImg->vkImage;
-                    imgBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                    imgBarrier.subresourceRange.baseMipLevel = 0;
-                    imgBarrier.subresourceRange.levelCount = 1;
-                    imgBarrier.subresourceRange.baseArrayLayer = 0;
-                    imgBarrier.subresourceRange.layerCount = 1;
-                    imgBarrier.srcAccessMask = barrier.srcAccess;
-                    imgBarrier.dstAccessMask = barrier.dstAccess;
-
-                    vkCmdPipelineBarrier(commandBuffer,
-                        barrier.srcStage, barrier.dstStage,
-                        0, 0, nullptr, 0, nullptr,
-                        1, &imgBarrier);
-                } else {
-                    cmd.imageBarrier(
-                        physImg->vkImage,
-                        barrier.oldLayout,
-                        barrier.newLayout,
-                        barrier.srcStage,
-                        barrier.dstStage
-                    );
-                }
+                // One call for both cases: outside a queue transfer the family
+                // indices already hold VK_QUEUE_FAMILY_IGNORED, which is exactly
+                // what the non-transfer branch used to pass by hand.
+                cmd.imageBarrier(
+                    physImg->vkImage,
+                    barrier.oldLayout, barrier.newLayout,
+                    barrier.srcStage,  barrier.dstStage,
+                    barrier.srcAccess, barrier.dstAccess,
+                    fullSubresourceRange(physImg->format),
+                    barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
             }
         }
 
@@ -380,25 +349,13 @@ void FrameGraphExecutor::executePasses(
             const auto* physImg = std::get_if<PhysicalImage>(
                 &compiled.physicalResources[barrier.resource.index]);
             if (physImg && physImg->vkImage != VK_NULL_HANDLE) {
-                VkImageMemoryBarrier imgBarrier{};
-                imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-                imgBarrier.oldLayout = barrier.oldLayout;
-                imgBarrier.newLayout = barrier.newLayout;
-                imgBarrier.srcQueueFamilyIndex = barrier.srcQueueFamilyIndex;
-                imgBarrier.dstQueueFamilyIndex = barrier.dstQueueFamilyIndex;
-                imgBarrier.image = physImg->vkImage;
-                imgBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                imgBarrier.subresourceRange.baseMipLevel = 0;
-                imgBarrier.subresourceRange.levelCount = 1;
-                imgBarrier.subresourceRange.baseArrayLayer = 0;
-                imgBarrier.subresourceRange.layerCount = 1;
-                imgBarrier.srcAccessMask = barrier.srcAccess;
-                imgBarrier.dstAccessMask = barrier.dstAccess;
-
-                vkCmdPipelineBarrier(commandBuffer,
-                    barrier.srcStage, barrier.dstStage,
-                    0, 0, nullptr, 0, nullptr,
-                    1, &imgBarrier);
+                cmd.imageBarrier(
+                    physImg->vkImage,
+                    barrier.oldLayout, barrier.newLayout,
+                    barrier.srcStage,  barrier.dstStage,
+                    barrier.srcAccess, barrier.dstAccess,
+                    fullSubresourceRange(physImg->format),
+                    barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
             }
         }
 
@@ -417,35 +374,16 @@ void FrameGraphExecutor::executePasses(
                                                   barrier.newLayout, isQueueTransfer);
                 }
 
-                if (barrier.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED) {
-                    VkImageMemoryBarrier imgBarrier{};
-                    imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-                    imgBarrier.oldLayout = barrier.oldLayout;
-                    imgBarrier.newLayout = barrier.newLayout;
-                    imgBarrier.srcQueueFamilyIndex = barrier.srcQueueFamilyIndex;
-                    imgBarrier.dstQueueFamilyIndex = barrier.dstQueueFamilyIndex;
-                    imgBarrier.image = physImg->vkImage;
-                    imgBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                    imgBarrier.subresourceRange.baseMipLevel = 0;
-                    imgBarrier.subresourceRange.levelCount = 1;
-                    imgBarrier.subresourceRange.baseArrayLayer = 0;
-                    imgBarrier.subresourceRange.layerCount = 1;
-                    imgBarrier.srcAccessMask = barrier.srcAccess;
-                    imgBarrier.dstAccessMask = barrier.dstAccess;
-
-                    vkCmdPipelineBarrier(commandBuffer,
-                        barrier.srcStage, barrier.dstStage,
-                        0, 0, nullptr, 0, nullptr,
-                        1, &imgBarrier);
-                } else {
-                    cmd.imageBarrier(
-                        physImg->vkImage,
-                        barrier.oldLayout,
-                        barrier.newLayout,
-                        barrier.srcStage,
-                        barrier.dstStage
-                    );
-                }
+                // One call for both cases: outside a queue transfer the family
+                // indices already hold VK_QUEUE_FAMILY_IGNORED, which is exactly
+                // what the non-transfer branch used to pass by hand.
+                cmd.imageBarrier(
+                    physImg->vkImage,
+                    barrier.oldLayout, barrier.newLayout,
+                    barrier.srcStage,  barrier.dstStage,
+                    barrier.srcAccess, barrier.dstAccess,
+                    fullSubresourceRange(physImg->format),
+                    barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
             }
         }
 
@@ -677,9 +615,16 @@ void FrameGraphExecutor::executeAutoCallback(
              exec.type == "transparent_geometry" ||
              exec.type == "shadow_casters" ||
              exec.type == "skinned_geometry" ||
-             exec.type == "skinned_transparent") {
+             exec.type == "skinned_transparent" ||
+             exec.type == "sprite_geometry") {
         // Call scene renderer callback if registered
         // For built-in geometry types, RenderGraph auto-registers the callback
+        //
+        // sprite_geometry was missing from this list. RenderGraph accepts it and
+        // registers a renderer (RenderGraph.cpp), and FrameGraphRenderer maps it
+        // to EntityFilter::Sprite2D — but the chain here had no branch for it, so
+        // the pass ran, recorded no draws, and said nothing. Every sprite, UI
+        // panel and text label rendered to nothing.
         if (passDecl.sceneRendererFn) {
             passDecl.sceneRendererFn(ctx);
         } else {
@@ -687,6 +632,14 @@ void FrameGraphExecutor::executeAutoCallback(
                 "Pass '%s' has execution.type='%s' but no scene renderer registered",
                 passDecl.name.c_str(), exec.type.c_str());
         }
+    }
+    else if (!exec.type.empty() && exec.type != "manual") {
+        // Falling off the end of this chain used to be silent: a pass with a
+        // typo'd or unsupported execution type simply drew nothing, with no
+        // diagnostic anywhere. That is how sprite_geometry went unnoticed.
+        m_logger->logEvery(5.0f, LogLevel::Warning,
+            "Pass '%s' has unrecognised execution.type='%s' — nothing was recorded for it",
+            passDecl.name.c_str(), exec.type.c_str());
     }
 }
 
