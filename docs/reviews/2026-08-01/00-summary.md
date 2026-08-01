@@ -455,24 +455,35 @@ directory that has those assets, it initialises and renders normally.
 The README lists it as the example that demonstrates the Facade API, so this is
 the first example a new user is likely to try.
 
-### Teardown after a failed `run()` segfaults
+### Teardown crashed on every exit — FIXED
 
-**Reproduced identically with and without the remediation work** (verified by
-stashing it and rebuilding), so it is pre-existing.
+**Was pre-existing** (verified by stashing the remediation work and rebuilding).
 
-When `run()` throws during initialisation, `onCleanup()` runs and logs, and the
-process then segfaults during destruction.
+Every example segfaulted at shutdown, on window close as well as after a failed
+`run()`. Invisible in the normal case: the window is already gone and only the
+exit code (139) says anything.
 
-**Confined to the failed-init path.** Normal shutdown — closing the window — was
-subsequently confirmed working. Every example run during this work was ended by a
-timeout rather than by closing the window, which is why the normal path had not
-been exercised; it is fine.
+Three defects, all the same shape — an object holding a raw pointer or
+reference to something declared after it, and so destroyed before it:
 
-So the remaining defect is narrow: destruction after a partially-completed
-initialisation, where some subsystems exist and others do not. Low priority
-given that a failed init is already an error path, but it turns a clear
-"Cannot open frame graph file" message into a crash, which hides the real
-cause from whoever hit it.
+- `RenderGraph` unregisters its targets from `SharedBufferRegistry` in its
+  destructor, but the registry was declared after the graph. Found with a
+  debugger: `~RenderGraph` -> `unregisterBuffer` -> `unordered_map::erase` ->
+  access violation.
+- `VulkanWindow` deleted the `Logger` and `EventDispatcher` it merely borrows
+  (double free), and logged through the `Logger` after `ApplicationBase` had
+  destroyed it — which is why "Destroying Vulkan Window" never appeared in any
+  log.
+- `glfwTerminate()` in `~VulkanWindow` tore down GLFW while `VulkanInstance`,
+  which calls `glfwInit()`, was still alive.
+
+All five examples now exit 0 on window close; `facade_test`'s failed
+initialisation exits 1 with its error message intact.
+
+The general lesson is worth keeping: several classes take borrowed `Logger*` /
+`EventDispatcher*` and there is no convention enforcing that the owner outlives
+them. Declaration order in `ApplicationBase` is now load-bearing and commented
+as such.
 
 ### Validation errors remaining in `bloom_test`
 
