@@ -691,12 +691,16 @@ private:
         const std::vector<PassDeclaration>& passes,
         std::vector<PhysicalResource>& physResources);
 
+    /// Resources that must end the frame in PRESENT_SRC_KHR — i.e. the swapchain.
+    /// Passed to createRenderPasses so the last pass writing one can set its
+    /// attachment finalLayout accordingly, whatever ResourceUsage it declared.
     void createRenderPasses(
         VulkanDevice& device,
         std::vector<CompiledPass>& compiledPasses,
         const std::vector<uint32_t>& executionOrder,
         const std::vector<PassDeclaration>& passes,
-        const std::vector<PhysicalResource>& physResources);
+        const std::vector<PhysicalResource>& physResources,
+        const ImportedImageMap& importedImages);
 
     void createFramebuffers(
         VulkanDevice& device,
