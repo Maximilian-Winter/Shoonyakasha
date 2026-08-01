@@ -160,19 +160,24 @@ void IBLGenerator::createDescriptorLayouts() {
 }
 
 void IBLGenerator::createDescriptorPool() {
-    // Pool sizes for all our descriptor sets
+    // Every recorded dispatch needs its own descriptor set — see the comment in
+    // convertEquirectToCubemap. The prefilter pass is the greediest: 6 faces x one
+    // mip chain, so 6 * mipLevels sets (60 at the default 512px / 10 mips). Sized
+    // well above that so a larger prefilterSize does not silently exhaust the pool.
+    constexpr uint32_t kMaxIBLDescriptorSets = 256;
+
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = 64;  // Enough for multiple passes
+    poolSizes[0].descriptorCount = kMaxIBLDescriptorSets;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[1].descriptorCount = 64;
+    poolSizes[1].descriptorCount = kMaxIBLDescriptorSets;
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = 64;
+    poolInfo.maxSets = kMaxIBLDescriptorSets;
 
     if (vkCreateDescriptorPool(m_device.getLogicalDevice(), &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create IBL descriptor pool!");
@@ -293,15 +298,26 @@ VulkanCubemap* IBLGenerator::convertEquirectToCubemap(VulkanTexture* equirect, u
                                    {m_equirectLayout},
                                    {pushRange});
 
-    // Allocate descriptor set
+    // One descriptor set per dispatch.
+    //
+    // Descriptor sets are read by the shader at *execution* time, not at
+    // vkCmdBindDescriptorSets time. All six dispatches below are recorded into a
+    // single command buffer that is not submitted until the end of this function,
+    // so a single set rewritten inside the loop would hold face 5's views by the
+    // time any of them ran — every dispatch would write through face 5 and faces
+    // 0-4 would be left as undefined memory.
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = m_descriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &m_equirectLayout;
 
-    VkDescriptorSet descriptorSet;
-    vkAllocateDescriptorSets(logicalDevice, &allocInfo, &descriptorSet);
+    std::vector<VkDescriptorSet> descriptorSets(6, VK_NULL_HANDLE);
+    for (auto& set : descriptorSets) {
+        if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, &set) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate IBL equirect descriptor set!");
+        }
+    }
 
     // Record command buffer
     VkCommandBuffer cmd = m_device.beginSingleTimeCommands();
@@ -326,6 +342,8 @@ VulkanCubemap* IBLGenerator::convertEquirectToCubemap(VulkanTexture* equirect, u
         VkDescriptorImageInfo outputInfo{};
         outputInfo.imageView = cubemap->getFaceView(face, 0);
         outputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkDescriptorSet descriptorSet = descriptorSets[face];
 
         std::array<VkWriteDescriptorSet, 2> writes{};
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -375,8 +393,10 @@ VulkanCubemap* IBLGenerator::convertEquirectToCubemap(VulkanTexture* equirect, u
 
     m_device.endSingleTimeCommands(cmd);
 
-    // Free descriptor set
-    vkFreeDescriptorSets(logicalDevice, m_descriptorPool, 1, &descriptorSet);
+    // Free descriptor sets — safe now that endSingleTimeCommands has waited for
+    // the submission to complete.
+    vkFreeDescriptorSets(logicalDevice, m_descriptorPool,
+                         static_cast<uint32_t>(descriptorSets.size()), descriptorSets.data());
 
     return cubemap;
 }
@@ -406,8 +426,14 @@ VulkanCubemap* IBLGenerator::generateIrradianceMap(VulkanCubemap* environment, u
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &m_convolutionLayout;
 
-    VkDescriptorSet descriptorSet;
-    vkAllocateDescriptorSets(logicalDevice, &allocInfo, &descriptorSet);
+    // One set per dispatch — see convertEquirectToCubemap for why a shared set
+    // silently collapses all six faces onto the last one.
+    std::vector<VkDescriptorSet> descriptorSets(6, VK_NULL_HANDLE);
+    for (auto& set : descriptorSets) {
+        if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, &set) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate IBL irradiance descriptor set!");
+        }
+    }
 
     VkCommandBuffer cmd = m_device.beginSingleTimeCommands();
 
@@ -428,6 +454,8 @@ VulkanCubemap* IBLGenerator::generateIrradianceMap(VulkanCubemap* environment, u
         VkDescriptorImageInfo outputInfo{};
         outputInfo.imageView = irradiance->getFaceView(face, 0);
         outputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkDescriptorSet descriptorSet = descriptorSets[face];
 
         std::array<VkWriteDescriptorSet, 2> writes{};
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -473,7 +501,8 @@ VulkanCubemap* IBLGenerator::generateIrradianceMap(VulkanCubemap* environment, u
                                  VK_ACCESS_SHADER_READ_BIT);
 
     m_device.endSingleTimeCommands(cmd);
-    vkFreeDescriptorSets(logicalDevice, m_descriptorPool, 1, &descriptorSet);
+    vkFreeDescriptorSets(logicalDevice, m_descriptorPool,
+                         static_cast<uint32_t>(descriptorSets.size()), descriptorSets.data());
 
     return irradiance;
 }
@@ -504,8 +533,15 @@ VulkanCubemap* IBLGenerator::generatePrefilterMap(VulkanCubemap* environment, ui
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &m_convolutionLayout;
 
-    VkDescriptorSet descriptorSet;
-    vkAllocateDescriptorSets(logicalDevice, &allocInfo, &descriptorSet);
+    // One set per dispatch: 6 faces x mipLevels mips, all recorded into a single
+    // command buffer. See convertEquirectToCubemap for the failure a shared set
+    // produces.
+    std::vector<VkDescriptorSet> descriptorSets(static_cast<size_t>(mipLevels) * 6, VK_NULL_HANDLE);
+    for (auto& set : descriptorSets) {
+        if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, &set) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate IBL prefilter descriptor set!");
+        }
+    }
 
     VkCommandBuffer cmd = m_device.beginSingleTimeCommands();
 
@@ -532,6 +568,8 @@ VulkanCubemap* IBLGenerator::generatePrefilterMap(VulkanCubemap* environment, ui
             VkDescriptorImageInfo outputInfo{};
             outputInfo.imageView = prefilter->getFaceView(face, mip);
             outputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            VkDescriptorSet descriptorSet = descriptorSets[static_cast<size_t>(mip) * 6 + face];
 
             std::array<VkWriteDescriptorSet, 2> writes{};
             writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -578,7 +616,8 @@ VulkanCubemap* IBLGenerator::generatePrefilterMap(VulkanCubemap* environment, ui
                                 VK_ACCESS_SHADER_READ_BIT);
 
     m_device.endSingleTimeCommands(cmd);
-    vkFreeDescriptorSets(logicalDevice, m_descriptorPool, 1, &descriptorSet);
+    vkFreeDescriptorSets(logicalDevice, m_descriptorPool,
+                         static_cast<uint32_t>(descriptorSets.size()), descriptorSets.data());
 
     return prefilter;
 }
