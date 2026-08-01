@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <cmath>
 #include <algorithm>
 
@@ -254,35 +255,49 @@ IBLResources IBLGenerator::generate(const std::string& hdrPath, const IBLGenerat
 
     IBLResources resources{};
 
-    // Step 1: Load HDR equirectangular image
-    std::cout << "[IBL] Loading HDR texture..." << std::endl;
-    VulkanTexture* equirect = loadHDRTexture(hdrPath);
+    // Every step below can throw — a missing compute shader is enough, which is
+    // what happens when an application points at an HDR without shipping
+    // shaders/ibl/. Anything already built would then be orphaned: one failed
+    // generation leaked two images, two samplers and 79 image views, because a
+    // cubemap owns a view per face per mip.
+    //
+    // The caller only ever sees the exception, so cleaning up here is the only
+    // place it can happen.
+    std::unique_ptr<VulkanTexture> equirect;
+    try {
+        // Step 1: Load HDR equirectangular image
+        std::cout << "[IBL] Loading HDR texture..." << std::endl;
+        equirect.reset(loadHDRTexture(hdrPath));
 
-    // Step 2: Convert to cubemap
-    std::cout << "[IBL] Converting equirectangular to cubemap..." << std::endl;
-    resources.environmentMap = convertEquirectToCubemap(equirect, params.environmentSize);
+        // Step 2: Convert to cubemap
+        std::cout << "[IBL] Converting equirectangular to cubemap..." << std::endl;
+        resources.environmentMap = convertEquirectToCubemap(equirect.get(), params.environmentSize);
 
-    // Wait for GPU to finish before destroying the input texture
-    vkDeviceWaitIdle(m_device.getLogicalDevice());
+        // Wait for GPU to finish before destroying the input texture
+        vkDeviceWaitIdle(m_device.getLogicalDevice());
+        equirect.reset();
 
-    // Cleanup equirect texture (no longer needed)
-    delete equirect;
+        // Step 3: Generate irradiance map
+        std::cout << "[IBL] Generating irradiance map..." << std::endl;
+        resources.irradianceMap = generateIrradianceMap(resources.environmentMap,
+                                                         params.irradianceSize,
+                                                         params.irradianceSamples);
 
-    // Step 3: Generate irradiance map
-    std::cout << "[IBL] Generating irradiance map..." << std::endl;
-    resources.irradianceMap = generateIrradianceMap(resources.environmentMap,
-                                                     params.irradianceSize,
-                                                     params.irradianceSamples);
+        // Step 4: Generate prefiltered environment map
+        std::cout << "[IBL] Generating prefiltered environment map..." << std::endl;
+        resources.prefilterMap = generatePrefilterMap(resources.environmentMap,
+                                                       params.prefilterSize,
+                                                       params.prefilterSamples);
 
-    // Step 4: Generate prefiltered environment map
-    std::cout << "[IBL] Generating prefiltered environment map..." << std::endl;
-    resources.prefilterMap = generatePrefilterMap(resources.environmentMap,
-                                                   params.prefilterSize,
-                                                   params.prefilterSamples);
-
-    // Step 5: Generate BRDF LUT
-    std::cout << "[IBL] Generating BRDF LUT..." << std::endl;
-    resources.brdfLUT = generateBRDFLUT(params.brdfLUTSize, params.brdfSamples);
+        // Step 5: Generate BRDF LUT
+        std::cout << "[IBL] Generating BRDF LUT..." << std::endl;
+        resources.brdfLUT = generateBRDFLUT(params.brdfLUTSize, params.brdfSamples);
+    } catch (...) {
+        // The GPU may still be reading what we are about to free.
+        vkDeviceWaitIdle(m_device.getLogicalDevice());
+        resources.destroy();
+        throw;
+    }
 
     std::cout << "[IBL] IBL generation complete!" << std::endl;
     return resources;
@@ -298,7 +313,12 @@ VulkanCubemap* IBLGenerator::convertEquirectToCubemap(VulkanTexture* equirect, u
     std::cout << "[IBL]   Creating environment cubemap " << cubeSize << "x" << cubeSize << "..." << std::endl;
 
     // Create output cubemap
-    auto* cubemap = VulkanCubemap::createEnvironmentMap(m_device, cubeSize);
+    // Owned locally until the whole step succeeds. Everything between here
+    // and the return can throw -- loading a compute shader, allocating a
+    // descriptor set -- and this object is the only reference to a cubemap
+    // holding an image, a sampler and a view per face per mip.
+    std::unique_ptr<VulkanCubemap> cubemap(
+        VulkanCubemap::createEnvironmentMap(m_device, cubeSize));
 
     std::cout << "[IBL]   Creating compute pipeline..." << std::endl;
 
@@ -487,7 +507,7 @@ VulkanCubemap* IBLGenerator::convertEquirectToCubemap(VulkanTexture* equirect, u
     vkFreeDescriptorSets(logicalDevice, m_descriptorPool,
                          static_cast<uint32_t>(descriptorSets.size()), descriptorSets.data());
 
-    return cubemap;
+    return cubemap.release();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -497,7 +517,12 @@ VulkanCubemap* IBLGenerator::convertEquirectToCubemap(VulkanTexture* equirect, u
 VulkanCubemap* IBLGenerator::generateIrradianceMap(VulkanCubemap* environment, uint32_t size, uint32_t samples) {
     VkDevice logicalDevice = m_device.getLogicalDevice();
 
-    auto* irradiance = VulkanCubemap::createIrradianceMap(m_device, size);
+    // Owned locally until the whole step succeeds. Everything between here
+    // and the return can throw -- loading a compute shader, allocating a
+    // descriptor set -- and this object is the only reference to a cubemap
+    // holding an image, a sampler and a view per face per mip.
+    std::unique_ptr<VulkanCubemap> irradiance(
+        VulkanCubemap::createIrradianceMap(m_device, size));
 
     VkPushConstantRange pushRange{};
     pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -593,7 +618,7 @@ VulkanCubemap* IBLGenerator::generateIrradianceMap(VulkanCubemap* environment, u
     vkFreeDescriptorSets(logicalDevice, m_descriptorPool,
                          static_cast<uint32_t>(descriptorSets.size()), descriptorSets.data());
 
-    return irradiance;
+    return irradiance.release();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -603,7 +628,12 @@ VulkanCubemap* IBLGenerator::generateIrradianceMap(VulkanCubemap* environment, u
 VulkanCubemap* IBLGenerator::generatePrefilterMap(VulkanCubemap* environment, uint32_t size, uint32_t samples) {
     VkDevice logicalDevice = m_device.getLogicalDevice();
 
-    auto* prefilter = VulkanCubemap::createPrefilterMap(m_device, size);
+    // Owned locally until the whole step succeeds. Everything between here
+    // and the return can throw -- loading a compute shader, allocating a
+    // descriptor set -- and this object is the only reference to a cubemap
+    // holding an image, a sampler and a view per face per mip.
+    std::unique_ptr<VulkanCubemap> prefilter(
+        VulkanCubemap::createPrefilterMap(m_device, size));
     uint32_t mipLevels = prefilter->getMipLevels();
 
     VkPushConstantRange pushRange{};
@@ -708,7 +738,7 @@ VulkanCubemap* IBLGenerator::generatePrefilterMap(VulkanCubemap* environment, ui
     vkFreeDescriptorSets(logicalDevice, m_descriptorPool,
                          static_cast<uint32_t>(descriptorSets.size()), descriptorSets.data());
 
-    return prefilter;
+    return prefilter.release();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -801,9 +831,11 @@ VulkanTexture* IBLGenerator::generateBRDFLUT(uint32_t size, uint32_t samples) {
 
     // Create texture with computed BRDF data
     // Using R32G32B32A32 since we're providing float* data
-    auto* brdfLUT = new VulkanTexture(m_device, lutData.data(), size, size, 4, VK_FORMAT_R32G32B32A32_SFLOAT);
+    std::unique_ptr<VulkanTexture> brdfLUT(
+        new VulkanTexture(m_device, lutData.data(), size, size, 4,
+                          VK_FORMAT_R32G32B32A32_SFLOAT));
 
-    return brdfLUT;
+    return brdfLUT.release();
 }
 
 uint32_t IBLGenerator::getBytesPerPixel(VkFormat format) {

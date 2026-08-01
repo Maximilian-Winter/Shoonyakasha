@@ -65,3 +65,13 @@ jobs:
       - name: Test
         working-directory: build
         run: ctest --output-on-failure --build-config Release
+
+      # The Python utility modules are pure Python and do not need the compiled
+      # extension, so they run here even though BUILD_PYTHON is OFF. Two of these
+      # tests parse the C++ sources and fail when the vocabulary they restate
+      # drifts — which is the only reason restating it is acceptable.
+      #
+      # Shader-compilation tests skip themselves when glslc is absent; the
+      # runner has the Vulkan SDK installed above, so they run.
+      - name: Test Python utilities
+        run: python -m unittest discover -s tests/python -v

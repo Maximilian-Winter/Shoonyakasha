@@ -14,6 +14,10 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import shoonyakasha as sk
 
+# The C++ examples get this from CMake; the Python side has no build
+# step, so compile here rather than shipping .spv that can drift.
+sk.shaders.compile_dir("pbr_ibl_shaders")
+
 engine = sk.Engine(
     title="Skinned Fox \u2014 Python Demo",
     width=1280,

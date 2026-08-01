@@ -24,6 +24,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import shoonyakasha as sk
 
+# The C++ examples get this from CMake; the Python side has no build
+# step, so compile here rather than shipping .spv that can drift.
+sk.shaders.compile_dir("pbr_ibl_shaders")
+
 print("=" * 60)
 print("  Shoonyakasha Python Demo")
 print("  शून्याकाश — Void-Space Engine")

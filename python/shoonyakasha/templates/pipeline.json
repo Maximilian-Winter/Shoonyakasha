@@ -1,0 +1,244 @@
+{
+  "version": 3,
+  "name": "starter",
+  "vertexFormats": {
+    "standard": {
+      "attributes": [
+        {
+          "name": "position",
+          "type": "vec3",
+          "location": 0
+        },
+        {
+          "name": "color",
+          "type": "vec3",
+          "location": 1
+        },
+        {
+          "name": "texCoord",
+          "type": "vec2",
+          "location": 2
+        },
+        {
+          "name": "normal",
+          "type": "vec3",
+          "location": 3
+        }
+      ]
+    }
+  },
+  "bufferLayouts": {
+    "CameraUBO": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "view",
+          "type": "mat4",
+          "source": "scene.camera.view"
+        },
+        {
+          "name": "proj",
+          "type": "mat4",
+          "source": "scene.camera.projection"
+        },
+        {
+          "name": "invView",
+          "type": "mat4",
+          "source": "scene.camera.invView"
+        },
+        {
+          "name": "invProj",
+          "type": "mat4",
+          "source": "scene.camera.invProj"
+        },
+        {
+          "name": "position",
+          "type": "vec4",
+          "source": "scene.camera.positionVec4"
+        },
+        {
+          "name": "params",
+          "type": "vec4",
+          "source": "scene.camera.nearFarFovAspect"
+        }
+      ]
+    },
+    "MaterialPushConstants": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": [
+          "vertex",
+          "fragment"
+        ]
+      },
+      "fields": [
+        {
+          "name": "model",
+          "type": "mat4",
+          "source": "entity.transform.worldMatrix"
+        },
+        {
+          "name": "baseColorFactor",
+          "type": "vec4",
+          "source": "entity.material.params.baseColorFactor"
+        },
+        {
+          "name": "metallicFactor",
+          "type": "float",
+          "source": "entity.material.params.metallicFactor"
+        },
+        {
+          "name": "roughnessFactor",
+          "type": "float",
+          "source": "entity.material.params.roughnessFactor"
+        },
+        {
+          "name": "hasNormalMap",
+          "type": "float",
+          "source": "entity.material.textures.normalMap.exists"
+        },
+        {
+          "name": "hasMetalRoughMap",
+          "type": "float",
+          "source": "entity.material.textures.metallicRoughnessMap.exists"
+        },
+        {
+          "name": "alphaCutoff",
+          "type": "float",
+          "source": "entity.material.alphaCutoff"
+        },
+        {
+          "name": "padding1",
+          "type": "float",
+          "source": "const.0"
+        }
+      ]
+    }
+  },
+  "entityDataBindings": {
+    "pbrOpaque": {
+      "perDraw": {
+        "layoutRef": "MaterialPushConstants"
+      },
+      "material": {
+        "layoutRef": "materialSet"
+      }
+    }
+  },
+  "descriptorSetLayouts": {
+    "cameraSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "name": "CameraUBO",
+          "autoBindBuffer": "CameraUBO"
+        }
+      ]
+    },
+    "materialSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "albedoMap"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "normalMap"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "metallicRoughnessMap"
+        }
+      ]
+    }
+  },
+  "resources": [
+    {
+      "name": "swapchain",
+      "kind": "image",
+      "imported": true
+    },
+    {
+      "name": "depth",
+      "kind": "image",
+      "image": {
+        "format": "D32_SFLOAT"
+      }
+    }
+  ],
+  "passes": [
+    {
+      "name": "ForwardPass",
+      "type": "graphics",
+      "execution": {
+        "type": "opaque_geometry",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "pbrOpaque"
+      },
+      "pipeline": {
+        "vertexShader": "shaders/basic.vert.spv",
+        "fragmentShader": "shaders/basic.frag.spv",
+        "vertexInput": "standard",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "size": 104,
+          "offset": 0
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_write",
+          "present": true,
+          "clear": [
+            0.05,
+            0.06,
+            0.09,
+            1.0
+          ]
+        },
+        {
+          "resource": "depth",
+          "usage": "depth_write",
+          "clear": {
+            "depth": 1.0,
+            "stencil": 0
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -28,6 +28,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python')
 
 import shoonyakasha as sk
 
+# Keep the .spv files in step with their sources.
+sk.shaders.compile_dir("shaders")
+
 engine = sk.Engine(
     title="Shoonyakasha Sprite/UI Demo",
     width=1280, height=720,

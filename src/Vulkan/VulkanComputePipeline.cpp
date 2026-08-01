@@ -23,8 +23,16 @@ VulkanComputePipeline::VulkanComputePipeline(
     , m_descriptorLayouts(descriptorLayouts)
     , m_pushConstants(pushConstants)
 {
-    createPipelineLayout();
-    createPipeline();
+    // An object whose constructor throws is never destroyed, so ~VulkanComputePipeline
+    // does not run and whatever createPipelineLayout() already made would leak.
+    // createPipeline() throws for something as ordinary as a missing .spv.
+    try {
+        createPipelineLayout();
+        createPipeline();
+    } catch (...) {
+        cleanup();
+        throw;
+    }
 }
 
 VulkanComputePipeline::~VulkanComputePipeline() {

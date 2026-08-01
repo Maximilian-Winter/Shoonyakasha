@@ -19,6 +19,46 @@
 
 Shoonyakasha is a Vulkan-based C++ game engine library with Python bindings. Its main idea is that render pipelines are declared in JSON rather than coded in C++ — buffer layouts, render passes, shader bindings, and data sources are all described in a JSON file that the engine compiles into Vulkan resources at runtime. You can build 3D applications in C++ or drive the entire engine from Python through its Cython bridge.
 
+## Get started in one command
+
+```sh
+python -m shoonyakasha.init my_game
+cd my_game && python main.py
+```
+
+That writes a project that runs immediately: a single-pass pipeline, a vertex
+and fragment shader, and a `main.py` that compiles the shaders and opens a
+window. Edit `shaders/basic.frag`, run again, see the change.
+
+## Python utilities
+
+Three pure-Python modules ship alongside the bindings. They do not need the
+compiled extension, so they work in CI and before the engine is built.
+
+```python
+import shoonyakasha as sk
+
+sk.shaders.compile_dir("shaders")        # GLSL -> SPIR-V, only what changed
+sk.pipeline.validate("pipeline.json")    # every mistake at once, with the pass name
+sk.assets.exists("models/Sponza.gltf")   # check before starting, fall back if absent
+sk.assets.fetch("env")                   # download the large environment maps
+```
+
+`sk.shaders` finds `glslc` through `VULKAN_SDK`, `PATH`, or the usual SDK
+install roots, and recompiles only what is out of date — which is why the demos
+no longer document a manual `glslc` invocation for you to run.
+
+`sk.pipeline.validate` reports the file, the pass and the key:
+
+```
+error: pipeline.json passes[2] 'AdditivePass' outputs[0]
+    usage 'color_blnd' is not known
+    did you mean 'color_blend'?
+```
+
+The engine's own parser reports the first problem it hits and nothing about
+where it came from.
+
 ## Quick Start — Python
 
 ```python

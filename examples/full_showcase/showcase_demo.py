@@ -21,8 +21,6 @@ Usage:
 
 Requirements:
     - Build with -DBUILD_PYTHON=ON
-    - Compile shaders/sprite.vert and shaders/sprite.frag to .spv
-      (glslc shaders/sprite.vert -o shaders/sprite.vert.spv, same for .frag)
     - Run from this directory (so showcase_pipeline.json and shaders/ resolve)
     - Have orb.png, glow.png, vignette.png, panel.png images available, or
       point the texture_path arguments below at your own art. A flat-colored
@@ -36,6 +34,11 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 import shoonyakasha as sk
+
+# Compile any shader whose .spv is older than its source. This used to be a
+# manual glslc invocation documented in the docstring above, which is how one of
+# these .spv files silently drifted from its source.
+sk.shaders.compile_dir("shaders")
 
 engine = sk.Engine(
     title="Shoonyakasha Full Showcase",
