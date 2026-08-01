@@ -154,7 +154,7 @@ def on_init():
         text=f"Orbs: {len(orbs)}",
         anchor=sk.UI_ANCHOR_TOP_LEFT,
         offset_pixels=(20, 40),
-        font_path="font.ttf",
+        font_path="./font/font.ttf",
         font_size=22.0,
         color=(1.0, 1.0, 1.0, 1.0),
     )
@@ -164,7 +164,7 @@ def on_init():
         text="Systems: OK",
         anchor=sk.UI_ANCHOR_BOTTOM_LEFT,
         offset_pixels=(90, -30),
-        font_path="font.ttf",
+        font_path="./font/font.ttf",
         font_size=18.0,
         color=(0.6, 1.0, 0.6, 1.0),
     )

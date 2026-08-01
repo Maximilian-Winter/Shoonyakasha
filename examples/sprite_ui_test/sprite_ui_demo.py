@@ -71,7 +71,7 @@ def on_init():
         text="Score: 0",
         anchor=sk.UI_ANCHOR_TOP_LEFT,
         offset_pixels=(20, 60),
-        font_path="font.ttf",
+        font_path="./font/font.ttf",
         font_size=28.0,
         color=(1.0, 1.0, 1.0, 1.0),
     )
