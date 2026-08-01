@@ -461,11 +461,18 @@ the first example a new user is likely to try.
 stashing it and rebuilding), so it is pre-existing.
 
 When `run()` throws during initialisation, `onCleanup()` runs and logs, and the
-process then segfaults during destruction. The normal exit path has not been
-observed, because every example run so far was ended by a timeout rather than by
-closing the window — so it is not yet known whether this affects clean shutdown
-too. Worth establishing before anything else here: run one example and close its
-window.
+process then segfaults during destruction.
+
+**Confined to the failed-init path.** Normal shutdown — closing the window — was
+subsequently confirmed working. Every example run during this work was ended by a
+timeout rather than by closing the window, which is why the normal path had not
+been exercised; it is fine.
+
+So the remaining defect is narrow: destruction after a partially-completed
+initialisation, where some subsystems exist and others do not. Low priority
+given that a failed init is already an error path, but it turns a clear
+"Cannot open frame graph file" message into a crash, which hides the real
+cause from whoever hit it.
 
 ### Validation errors remaining in `bloom_test`
 
