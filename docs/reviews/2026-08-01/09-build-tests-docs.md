@@ -308,6 +308,13 @@ MIT is stated consistently across `LICENSE`, `README.md:210`, `vcpkg.json:7`, an
 | `third_party/VulkanMemoryAllocator/vk_mem_alloc.h` | MIT (AMD, 2017-2025) | Header preamble, lines 2-7. No standalone file. |
 | `third_party/tinyobjloader/tiny_obj_loader.h` | MIT (Syoyo Fujita, 2012-Present) | Header preamble, lines 2-8. No standalone file. |
 | `third_party/stb/*.h` (image, image_write, truetype) | Public domain / MIT dual | Header line 1 + full text at end of each file. No standalone file. |
+| `examples/*/font/font.ttf` (Roboto) | SIL Open Font License 1.1 (The Roboto Project Authors, 2011) | `OFL.txt` + `README.txt` alongside the font in each example |
+
+The font row was added after the review: at review time `font.ttf` sat loose in
+`examples/full_showcase/` with no accompanying licence, which is the one bundled
+asset that was not covered. It now ships with the OFL text and the upstream
+README in its own `font/` directory in both examples that use it — the same
+notice-beside-the-artifact pattern the gaps below ask for.
 
 All permissive, all compatible with MIT redistribution. Two gaps, both **MINOR**:
 
