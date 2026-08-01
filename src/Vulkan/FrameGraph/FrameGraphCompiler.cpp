@@ -517,19 +517,38 @@ void FrameGraphCompiler::resolveLayoutsAndInsertBarriers(
                 barrier.srcAccess = lastAccess[ri];
                 barrier.dstAccess = requiredAccess;
 
-                // Check for cross-queue ownership transfer
-                uint32_t srcQueue = lastQueueFamily[ri];
-                uint32_t dstQueue = resolveQueueFamily(passDecl.queueType, device);
-                if (srcQueue != VK_QUEUE_FAMILY_IGNORED && srcQueue != dstQueue) {
-                    // Cross-queue transition: set queue family indices
-                    barrier.srcQueueFamilyIndex = srcQueue;
-                    barrier.dstQueueFamilyIndex = dstQueue;
-
-                    // Create acquire barrier for the destination pass
-                    BarrierInfo acquireBarrier = barrier;
-                    compiled.acquireBarriers.push_back(acquireBarrier);
-                }
-
+                // No queue ownership transfer is emitted, deliberately.
+                //
+                // This used to compare the pass's *declared* queueType against the
+                // previous pass's and, on a mismatch, push the same BarrierInfo
+                // into both acquireBarriers and preBarriers with queue family
+                // indices set. Two things were wrong with that:
+                //
+                //  - The executor issues both lists, so the image was transitioned
+                //    old->new and then transitioned old->new again from a layout it
+                //    was no longer in ("cannot transition the layout ... from
+                //    GENERAL when the previous known layout is
+                //    SHADER_READ_ONLY_OPTIMAL").
+                //
+                //  - A queue ownership transfer needs a *release* barrier submitted
+                //    on the source queue and a matching *acquire* on the
+                //    destination. Only the acquire half existed, hence "no matching
+                //    release operation was queued for execution from source queue
+                //    family 2".
+                //
+                // And underneath both: the transfers were fabricated for an
+                // execution model that does not exist. executeMultiQueue() and
+                // needsMultiQueueSubmit() have no callers anywhere, so every pass —
+                // compute included — is recorded into one command buffer and
+                // submitted on the graphics queue. There is no second queue to
+                // transfer ownership to.
+                //
+                // Reinstating real async compute means reinstating both halves:
+                // a release on the source queue's submission and an acquire on the
+                // destination's, with identical layouts and queue indices in each.
+                // BarrierInfo still carries srcQueueFamilyIndex/dstQueueFamilyIndex
+                // and VulkanCommandBuilder::imageBarrier still forwards them, so
+                // the plumbing is in place; only the submission side is missing.
                 compiled.preBarriers.push_back(barrier);
                 currentLayouts[ri] = requiredLayout;
             }
