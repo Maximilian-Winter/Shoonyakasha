@@ -6,6 +6,7 @@
 //
 
 #include "Vulkan/FrameGraph/FrameGraph.h"
+#include "GPU/VkFormatUtils.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanRenderPass.h"
 #include "Vulkan/VulkanImage.h"
@@ -412,12 +413,7 @@ void FrameGraphCompiler::createPhysicalResources(
 
             // Determine if this is a depth resource from usage flags or format
             bool isDepthByUsage = (imageUsages[i] & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
-            bool isDepthByFormat = (desc.format == VK_FORMAT_D16_UNORM ||
-                                    desc.format == VK_FORMAT_D32_SFLOAT ||
-                                    desc.format == VK_FORMAT_D16_UNORM_S8_UINT ||
-                                    desc.format == VK_FORMAT_D24_UNORM_S8_UINT ||
-                                    desc.format == VK_FORMAT_D32_SFLOAT_S8_UINT);
-            bool isDepth = isDepthByUsage || isDepthByFormat;
+            bool isDepth = isDepthByUsage || Shoonyakasha::isDepthFormat(desc.format);
 
             VkFormat format = desc.format;
             if (format == VK_FORMAT_UNDEFINED && isDepth) {
@@ -431,8 +427,9 @@ void FrameGraphCompiler::createPhysicalResources(
             );
 
             // Create image view
-            VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-            image->createImageView(aspect);
+            // format is resolved by now (findDepthFormat may have replaced UNDEFINED),
+            // so derive the aspect from it rather than from the usage flags.
+            image->createImageView(Shoonyakasha::formatToAspectMask(format));
 
             PhysicalImage physImg;
             physImg.vkImage = image->getImage();

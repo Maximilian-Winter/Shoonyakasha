@@ -9,6 +9,7 @@
 #include <stb_image_write.h>
 
 #include "Vulkan/FrameGraph/RenderTargetSaver.h"
+#include "GPU/VkFormatUtils.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanMemoryAllocator.h"
 #include "Core/Logger.h"
@@ -138,8 +139,9 @@ bool RenderTargetSaver::save(VkImage image, VkFormat format, VkExtent2D extent,
     // ── Step 2: Record and execute one-shot command buffer ──
     VkCommandBuffer cmd = m_device.beginSingleTimeCommands();
 
-    // Determine aspect mask
-    VkImageAspectFlags aspectMask = isDepthFormat(format)
+    // Depth-only aspect: a copy to a buffer cannot span both the depth and the
+    // stencil aspect in one region, and only the depth values are saved.
+    VkImageAspectFlags aspectMask = Shoonyakasha::isDepthFormat(format)
         ? VK_IMAGE_ASPECT_DEPTH_BIT
         : VK_IMAGE_ASPECT_COLOR_BIT;
 
@@ -485,18 +487,6 @@ uint32_t RenderTargetSaver::getBytesPerPixel(VkFormat format) {
     }
 }
 
-bool RenderTargetSaver::isDepthFormat(VkFormat format) {
-    switch (format) {
-        case VK_FORMAT_D16_UNORM:
-        case VK_FORMAT_D32_SFLOAT:
-        case VK_FORMAT_D16_UNORM_S8_UINT:
-        case VK_FORMAT_D24_UNORM_S8_UINT:
-        case VK_FORMAT_D32_SFLOAT_S8_UINT:
-            return true;
-        default:
-            return false;
-    }
-}
 
 std::string RenderTargetSaver::getExtension(const std::string& path) {
     auto ext = std::filesystem::path(path).extension().string();
