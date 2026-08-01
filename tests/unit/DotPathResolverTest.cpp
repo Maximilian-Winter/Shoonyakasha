@@ -5,6 +5,7 @@
 //
 
 #include <gtest/gtest.h>
+#include <cstring>
 #include "FrameGraph/DotPathResolver.h"
 #include "TestHelpers.h"
 
@@ -182,7 +183,7 @@ TEST(ResolvedValue, TryAs_Monostate_ReturnsNullopt) {
 TEST(ResolvedValue, CopyTo_Float) {
     ResolvedValue v(42.0f);
     float dest = 0.0f;
-    v.copyTo(&dest);
+    EXPECT_EQ(v.copyTo(&dest, sizeof(dest)), sizeof(float));
     EXPECT_FLOAT_EQ(dest, 42.0f);
 }
 
@@ -190,7 +191,7 @@ TEST(ResolvedValue, CopyTo_Vec3) {
     glm::vec3 src(1.0f, 2.0f, 3.0f);
     ResolvedValue v(src);
     glm::vec3 dest(0.0f);
-    v.copyTo(&dest);
+    EXPECT_EQ(v.copyTo(&dest, sizeof(dest)), sizeof(glm::vec3));
     TestHelpers::ExpectVec3Near(dest, src);
 }
 
@@ -198,8 +199,51 @@ TEST(ResolvedValue, CopyTo_Monostate_NoOp) {
     // Ensure no crash when copying monostate
     ResolvedValue v;
     float dest = 99.0f;
-    v.copyTo(&dest);
+    EXPECT_EQ(v.copyTo(&dest, sizeof(dest)), 0u);
     EXPECT_FLOAT_EQ(dest, 99.0f);  // Untouched
+}
+
+// The capacity argument is the bound that stops a type mismatch from writing
+// past the field. A vec2 resolved into a field declared as float used to write
+// 8 bytes into a 4-byte slot.
+TEST(ResolvedValue, CopyTo_ClampsToCapacity) {
+    ResolvedValue v(glm::vec2(1.0f, 2.0f));
+
+    struct { float value; uint32_t guard; } dest{0.0f, 0xDEADBEEFu};
+    EXPECT_EQ(v.copyTo(&dest.value, sizeof(float)), sizeof(float));
+
+    EXPECT_FLOAT_EQ(dest.value, 1.0f);
+    EXPECT_EQ(dest.guard, 0xDEADBEEFu) << "wrote past the end of the field";
+}
+
+// glm packs mat3 columns contiguously (36 bytes); std140 and std430 place each
+// vec3 column on a 16-byte boundary (48 bytes). Writing it as one memcpy put
+// columns 1 and 2 at byte 12 and 24 instead of 16 and 32.
+TEST(ResolvedValue, CopyTo_Mat3_HonoursColumnStride) {
+    glm::mat3 src(1.0f,  2.0f,  3.0f,
+                  4.0f,  5.0f,  6.0f,
+                  7.0f,  8.0f,  9.0f);
+    ResolvedValue v(src);
+
+    alignas(16) uint8_t dest[48];
+    std::memset(dest, 0, sizeof(dest));
+
+    EXPECT_EQ(v.copyTo(dest, sizeof(dest), 16u), 44u);  // last column ends at 32+12
+
+    for (int c = 0; c < 3; ++c) {
+        glm::vec3 col;
+        std::memcpy(&col, dest + c * 16, sizeof(glm::vec3));
+        TestHelpers::ExpectVec3Near(col, src[c]);
+    }
+}
+
+TEST(ResolvedValue, CopyTo_Mat3_ContiguousWhenStrideZero) {
+    glm::mat3 src(1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f);
+    ResolvedValue v(src);
+
+    glm::mat3 dest(0.0f);
+    EXPECT_EQ(v.copyTo(&dest, sizeof(dest)), sizeof(glm::mat3));
+    for (int c = 0; c < 3; ++c) TestHelpers::ExpectVec3Near(dest[c], src[c]);
 }
 
 // ═══════════════════════════════════════════════════════════════
