@@ -58,3 +58,4 @@ __pycache__/
 *.egg-info/
 /.venv
 /python/shoonyakasha/vulkan-1.dll
+/examples/facade_test/cubemaps_hdrs
