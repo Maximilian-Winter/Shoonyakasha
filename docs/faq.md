@@ -24,7 +24,7 @@ The engine requires the LunarG Vulkan SDK. Any recent version (1.3 or later) sho
 
 ### How do I verify everything works?
 
-Build with `BUILD_TESTS=ON` and run the test suite. There are 582 tests in total (518 core + 64 facade). If all pass, the build is good.
+Build with `BUILD_TESTS=ON` and run the test suite. There are the automated test suite in total (518 core + 64 facade). If all pass, the build is good.
 
 ---
 
@@ -146,4 +146,4 @@ See [Entities and Components](guides/entities-and-components.md) for the full gu
 
 ### How many tests does the engine have?
 
-582 tests total: 518 core engine tests and 64 facade tests. Build with `BUILD_TESTS=ON` and run with `ctest` to execute them all.
+the automated test suite total: 518 core engine tests and 64 facade tests. Build with `BUILD_TESTS=ON` and run with `ctest` to execute them all.
