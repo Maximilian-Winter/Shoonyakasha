@@ -1504,88 +1504,59 @@ void FrameGraphCompiler::performAutoBindings(
 // Uses dot-path resolution for automatic data binding
 // ═══════════════════════════════════════════════════════════════
 
-namespace {
-
-/// Get size of a BufferFieldType in bytes
-uint32_t getFieldTypeSize(BufferFieldType type) {
-    switch (type) {
-        case BufferFieldType::Float:  return 4;
-        case BufferFieldType::Double: return 8;
-        case BufferFieldType::Int:    return 4;
-        case BufferFieldType::UInt:   return 4;
-        case BufferFieldType::Bool:   return 4;  // GLSL bool is 4 bytes
-        case BufferFieldType::Vec2:   return 8;
-        case BufferFieldType::Vec3:   return 12;
-        case BufferFieldType::Vec4:   return 16;
-        case BufferFieldType::IVec2:  return 8;
-        case BufferFieldType::IVec3:  return 12;
-        case BufferFieldType::IVec4:  return 16;
-        case BufferFieldType::UVec2:  return 8;
-        case BufferFieldType::UVec3:  return 12;
-        case BufferFieldType::UVec4:  return 16;
-        case BufferFieldType::Mat2:   return 16;
-        case BufferFieldType::Mat3:   return 36;
-        case BufferFieldType::Mat4:   return 64;
-    }
-    return 4;  // Default fallback
-}
-
-/// std140 alignment rules (OpenGL 4.6 spec, section 7.6.2.2)
-/// scalar: N (4 for float/int), vec2: 2N, vec3: 4N, vec4: 4N, matNxM: column vec alignment
-uint32_t getStd140Alignment(BufferFieldType type) {
-    switch (type) {
-        case BufferFieldType::Float:
-        case BufferFieldType::Int:
-        case BufferFieldType::UInt:
-        case BufferFieldType::Bool:   return 4;
-        case BufferFieldType::Double: return 8;
-        case BufferFieldType::Vec2:
-        case BufferFieldType::IVec2:
-        case BufferFieldType::UVec2:  return 8;
-        case BufferFieldType::Vec3:
-        case BufferFieldType::IVec3:
-        case BufferFieldType::UVec3:  return 16;  // vec3 aligned to vec4!
-        case BufferFieldType::Vec4:
-        case BufferFieldType::IVec4:
-        case BufferFieldType::UVec4:  return 16;
-        case BufferFieldType::Mat2:   return 16;  // columns are vec2, but aligned to vec4
-        case BufferFieldType::Mat3:   return 16;  // columns are vec3, aligned to vec4
-        case BufferFieldType::Mat4:   return 16;  // columns are vec4, aligned to vec4
-    }
-    return 4;
-}
-
-/// std140 padded size (accounts for column padding in matrices)
-uint32_t getStd140PaddedSize(BufferFieldType type) {
-    switch (type) {
-        // Scalars and vectors use their natural size
-        case BufferFieldType::Float:
-        case BufferFieldType::Int:
-        case BufferFieldType::UInt:
-        case BufferFieldType::Bool:   return 4;
-        case BufferFieldType::Double: return 8;
-        case BufferFieldType::Vec2:
-        case BufferFieldType::IVec2:
-        case BufferFieldType::UVec2:  return 8;
-        case BufferFieldType::Vec3:
-        case BufferFieldType::IVec3:
-        case BufferFieldType::UVec3:  return 12;  // 12 bytes data (padding handled by next alignment)
-        case BufferFieldType::Vec4:
-        case BufferFieldType::IVec4:
-        case BufferFieldType::UVec4:  return 16;
-        // Matrices: each column padded to vec4 alignment in std140
-        case BufferFieldType::Mat2:   return 2 * 16;  // 2 columns x 16 bytes (vec2 padded to vec4)
-        case BufferFieldType::Mat3:   return 3 * 16;  // 3 columns x 16 bytes (vec3 padded to vec4)
-        case BufferFieldType::Mat4:   return 4 * 16;  // 4 columns x 16 bytes (vec4)
-    }
-    return 4;
-}
-
-} // anonymous namespace
 
 // CompiledBufferLayout is now in Shoonyakasha::FrameGraph namespace
 VkShaderStageFlags CompiledBufferLayout::getShaderStages() const {
     return JsonUtils::stringsToShaderStages(binding.stages);
+}
+
+namespace {
+
+/// Map a shader-side field type onto what the dot-path resolver can produce.
+/// The gap is real: BufferFieldType has 17 members and ResolvedValue's variant
+/// has 8 value alternatives, so double, bool, the integer vectors and mat2 have
+/// no representation. Those fields still pack correctly; they are marked
+/// unresolvable so writeField leaves them zeroed instead of writing a float into
+/// a uvec4 slot, which is what the old `default:` case did silently, per draw.
+bool toResolverType(BufferFieldType t, Shoonyakasha::MaterialParam::Type& out) {
+    using MT = Shoonyakasha::MaterialParam::Type;
+    switch (t) {
+        case BufferFieldType::Float: out = MT::Float; return true;
+        case BufferFieldType::Int:   out = MT::Int;   return true;
+        case BufferFieldType::UInt:  out = MT::UInt;  return true;
+        case BufferFieldType::Vec2:  out = MT::Vec2;  return true;
+        case BufferFieldType::Vec3:  out = MT::Vec3;  return true;
+        case BufferFieldType::Vec4:  out = MT::Vec4;  return true;
+        case BufferFieldType::Mat3:  out = MT::Mat3;  return true;
+        case BufferFieldType::Mat4:  out = MT::Mat4;  return true;
+        default:                     out = MT::Float; return false;
+    }
+}
+
+} // namespace
+
+Shoonyakasha::CompiledBufferLayout CompiledBufferLayout::toResolverLayout() const {
+    Shoonyakasha::CompiledBufferLayout out;
+    out.name             = name;
+    out.totalSize        = totalSize;
+    out.hasSceneSources  = hasSceneSources;
+    out.hasEntitySources = hasEntitySources;
+    out.hasConstSources  = hasConstSources;
+    out.fields.reserve(fields.size());
+
+    for (const auto& f : fields) {
+        Shoonyakasha::BufferField rf;
+        rf.name         = f.name;
+        rf.source       = f.source;
+        rf.offset       = f.offset;
+        rf.size         = f.size;
+        rf.arrayCount   = f.arrayCount;
+        rf.arrayStride  = f.arrayStride;
+        rf.columnStride = f.columnStride;
+        rf.resolvable   = toResolverType(f.type, rf.type);
+        out.fields.push_back(std::move(rf));
+    }
+    return out;
 }
 
 void FrameGraphCompiler::ensureLogger() {
@@ -1628,45 +1599,30 @@ void FrameGraphCompiler::compileBufferLayouts(
         // Copy fields first so we can set computed offsets
         compiled.fields = desc.fields;
 
-        // Calculate total size from fields with packing-aware alignment
-        bool useStd140 = (desc.packing == BufferPackingRule::Std140);
-
+        // Packing: one shared implementation of the std140 / std430 / scalar
+        // rules, in FrameGraph/BufferFieldTypes.h. Previously only Std140 was
+        // handled here and Std430, Scalar and PushConstant all fell into a
+        // branch that applied no alignment at all.
         uint32_t currentOffset = 0;
+        uint32_t maxMemberAlignment = 1;
+
         for (auto& field : compiled.fields) {
-            uint32_t arrayMultiplier = (field.arrayCount > 0) ? field.arrayCount : 1;
+            const uint32_t explicitOffset = field.offset;
+            const PackedField packed = packField(
+                field.type, desc.packing, field.arrayCount,
+                field.hasExplicitOffset ? &explicitOffset : nullptr,
+                currentOffset);
 
-            if (useStd140) {
-                uint32_t alignment = getStd140Alignment(field.type);
+            field.offset       = packed.offset;
+            field.size         = packed.size;
+            field.columnStride = packed.columnStride;
+            field.arrayStride  = packed.arrayStride;
 
-                if (arrayMultiplier > 1) {
-                    // std140 rule: array elements are rounded up to vec4 alignment (16 bytes)
-                    alignment = std::max(alignment, 16u);
-                }
-
-                currentOffset = (currentOffset + alignment - 1) & ~(alignment - 1);
-                field.offset = currentOffset;
-
-                uint32_t fieldSize = getStd140PaddedSize(field.type);
-
-                if (arrayMultiplier > 1) {
-                    // Array stride: element size rounded up to 16 bytes (std140 rule)
-                    uint32_t arrayStride = (fieldSize + 15u) & ~15u;
-                    field.arrayStride = arrayStride;
-                    currentOffset += arrayStride * arrayMultiplier;
-                } else {
-                    currentOffset += fieldSize;
-                }
-            } else {
-                // Scalar packing: no alignment padding, use explicit offset or pack tightly
-                if (field.offset != 0) {
-                    currentOffset = field.offset;
-                }
-                field.offset = currentOffset;
-                uint32_t fieldSize = getFieldTypeSize(field.type);
-                currentOffset += fieldSize * arrayMultiplier;
-            }
+            maxMemberAlignment = std::max(maxMemberAlignment,
+                                          baseAlignment(field.type, desc.packing));
         }
-        compiled.totalSize = currentOffset;
+
+        compiled.totalSize = blockSize(currentOffset, desc.packing, maxMemberAlignment);
 
         // Validate push constant size against Vulkan minimum guarantee
         if (desc.usage == BufferUsageType::PushConstant && compiled.totalSize > 128) {
@@ -1698,13 +1654,16 @@ void FrameGraphCompiler::compileBufferLayouts(
                                desc.usage == BufferUsageType::StorageBuffer ? "storage_buffer" : "unknown";
         const char* freqStr = desc.updateFrequency == BufferUpdateFrequency::PerFrame ? ", per_frame" : "";
 
-        outLayouts[desc.name] = std::move(compiled);
-
-        m_logger->log(LogLevel::Info, "  Compiled buffer layout '%s' (%s%s, %u bytes, %zu fields%s%s)",
+        // Log before the move: this used to read `compiled` after std::move.
+        // Report totalSize rather than the raw cursor, since the two differ once
+        // the block is rounded to its final alignment.
+        m_logger->log(LogLevel::Info, "  Compiled buffer layout '%s' (%s%s, %u bytes, %zu fields, %s%s)",
                       desc.name.c_str(), usageStr, freqStr,
-                      currentOffset, desc.fields.size(),
-                      useStd140 ? ", std140" : ", scalar",
+                      compiled.totalSize, desc.fields.size(),
+                      toString(desc.packing),
                       compiled.usesDotPathSources() ? ", dot-path sources" : "");
+
+        outLayouts[desc.name] = std::move(compiled);
     }
 }
 

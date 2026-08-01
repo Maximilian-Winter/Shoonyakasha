@@ -14,6 +14,7 @@
 #include "FrameGraph/DotPathResolver.h"  // For Shoonyakasha::CompiledBufferLayout in DotPathUBO
 #include "FrameGraph/SharedBufferRegistry.h"  // Phase 2: cross-graph SSBO sharing
 #include "GPU/GPUResourceFactory.h"  // Default textures for fallback
+#include "FrameGraph/BufferFieldTypes.h"  // Field types + std140/std430/scalar packing
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
@@ -68,36 +69,31 @@ namespace FrameGraph {
 // Define ANY buffer layout in JSON - no C++ changes needed!
 // ═══════════════════════════════════════════════════════════════
 
-/// Field type for buffer layouts (maps to ShaderData FieldType)
-/// JSON: "float", "vec2", "vec3", "vec4", "mat4", etc.
-enum class BufferFieldType {
-    Float, Double, Int, UInt, Bool,
-    Vec2, Vec3, Vec4,
-    IVec2, IVec3, IVec4,
-    UVec2, UVec3, UVec4,
-    Mat2, Mat3, Mat4
-};
+// BufferFieldType, BufferPackingRule and the packing arithmetic now live in
+// FrameGraph/BufferFieldTypes.h so that both this compiler and the JSON
+// front-end share one implementation of the std140/std430/scalar rules.
+// Same namespace, so every existing reference is unaffected.
 
 /// Single field in a buffer layout
 struct BufferFieldDesc {
     std::string name;                       // Field name (e.g., "model", "baseColorFactor")
     BufferFieldType type = BufferFieldType::Float;
     uint32_t arrayCount = 1;                // Array size (1 = not an array)
-    uint32_t offset = 0;                    // Explicit offset (0 = auto-calculate)
-    uint32_t arrayStride = 0;               // Stride between array elements (0 = auto from packing)
+    uint32_t offset = 0;                    // Byte offset — computed by the packer unless
+                                            // hasExplicitOffset is set
+    bool hasExplicitOffset = false;         // JSON declared "offset". Needed because an
+                                            // explicit 0 is otherwise indistinguishable
+                                            // from "not set"
+    uint32_t arrayStride = 0;               // Stride between array elements (0 = not an array)
+    uint32_t size = 0;                      // Occupied size of one element, including
+                                            // interior padding (mat3 std140 = 48, not 36)
+    uint32_t columnStride = 0;              // Byte distance between matrix columns; 0 for
+                                            // non-matrix types. The resolver needs it to
+                                            // write a glm matrix into a padded slot
 
     // Dot-path source for automatic value resolution via DotPathResolver
     // JSON: "source": "entity.material.params.baseColorFactor"
     std::string source;                     // Dot-path source (e.g., "entity.transform.worldMatrix")
-};
-
-/// Packing rule for buffer layouts (maps to ShaderDataLayout::PackingRule)
-/// JSON: "std140", "std430", "scalar", "push_constant"
-enum class BufferPackingRule {
-    Std140,         // UBO standard packing
-    Std430,         // SSBO tighter packing
-    Scalar,         // VK_EXT_scalar_block_layout
-    PushConstant    // Push constant layout (≤128 bytes)
 };
 
 /// Usage type for buffer layouts (maps to ShaderDataUsage)
@@ -333,6 +329,16 @@ struct CompiledBufferLayout {
         return usage == BufferUsageType::UniformBuffer ||
                usage == BufferUsageType::StorageBuffer;
     }
+
+    /// Convert to the resolver-side layout consumed by BufferLayoutResolver.
+    ///
+    /// Copies the compiler's offsets, sizes and strides verbatim and computes
+    /// nothing. Three separate copies of this conversion used to exist in
+    /// RenderGraph.cpp, each with its own hardcoded type-size table that said
+    /// mat3 is 36 bytes regardless of packing, and two of which recomputed
+    /// offsets with a tight-packing accumulator that ignored the compiler
+    /// entirely.
+    Shoonyakasha::CompiledBufferLayout toResolverLayout() const;
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1239,6 +1245,22 @@ private:
     std::unique_ptr<Shoonyakasha::SceneContext> m_sceneContext;
     std::unique_ptr<Shoonyakasha::FrameGraphRenderer> m_frameGraphRenderer;  // Auto geometry rendering
     bool m_ecsBindingEnabled = true;
+
+    /// Resolver-side layouts, converted once and keyed by layout name.
+    ///
+    /// The conversion carries no entity-dependent data, so one entry serves every
+    /// entity and every frame. bindEntityData used to rebuild the whole thing on
+    /// every draw call — a layout struct, one BufferField per field, and two
+    /// std::string allocations each — roughly 16 heap allocations per draw.
+    ///
+    /// Cleared at the top of compile(), which is where m_compiled is overwritten.
+    /// unordered_map never invalidates references to existing elements, so the
+    /// pointers handed out below stay valid.
+    mutable std::unordered_map<std::string, Shoonyakasha::CompiledBufferLayout> m_resolvedLayoutCache;
+
+    /// Cached conversion of a compiled layout, converting on first use.
+    /// Returns nullptr if the layout name is unknown.
+    const Shoonyakasha::CompiledBufferLayout* getResolvedLayout(const std::string& name) const;
 
     // Material Descriptor Cache - per-entity texture descriptor sets
     // Key: (entity_id, layoutName_hash, frameIndex) -> VkDescriptorSet
