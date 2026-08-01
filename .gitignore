@@ -57,5 +57,4 @@ __pycache__/
 /build/
 *.egg-info/
 /.venv
-python/shoonyakasha/vulkan-1.dll
-python/shoonyakasha/_shoonyakasha.pyd
+/python/shoonyakasha/vulkan-1.dll
