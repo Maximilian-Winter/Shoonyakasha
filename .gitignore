@@ -1,5 +1,6 @@
-/cmake-build-debug/
-/cmake-build-release/
+# Any CLion / CMake build directory, not just the two that happened to exist.
+cmake-build-*/
+/build/
 /.idea
 *.log
 /pkg_a_curtains
