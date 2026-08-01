@@ -197,37 +197,9 @@ void RenderGraph::createDotPathUBOs(uint32_t maxFramesInFlight) {
             ubo.savePolicy = descIt->savePolicy;
         }
 
-        // Pre-convert the FrameGraph layout to Shoonyakasha resolver layout
-        ubo.resolvedLayout.name = layout.name;
-        ubo.resolvedLayout.totalSize = layout.totalSize;
-        ubo.resolvedLayout.hasSceneSources = layout.hasSceneSources;
-        ubo.resolvedLayout.hasEntitySources = layout.hasEntitySources;
-        ubo.resolvedLayout.hasConstSources = layout.hasConstSources;
-
-        for (const auto& field : layout.fields) {
-            Shoonyakasha::BufferField resolvedField;
-            resolvedField.name = field.name;
-            resolvedField.source = field.source;
-            resolvedField.offset = field.offset;
-
-            switch (field.type) {
-                case BufferFieldType::Float:  resolvedField.type = Shoonyakasha::MaterialParam::Type::Float; resolvedField.size = 4; break;
-                case BufferFieldType::Vec2:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Vec2;  resolvedField.size = 8; break;
-                case BufferFieldType::Vec3:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Vec3;  resolvedField.size = 12; break;
-                case BufferFieldType::Vec4:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Vec4;  resolvedField.size = 16; break;
-                case BufferFieldType::Mat3:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Mat3;  resolvedField.size = 36; break;
-                case BufferFieldType::Mat4:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Mat4;  resolvedField.size = 64; break;
-                case BufferFieldType::Int:    resolvedField.type = Shoonyakasha::MaterialParam::Type::Int;   resolvedField.size = 4; break;
-                case BufferFieldType::UInt:   resolvedField.type = Shoonyakasha::MaterialParam::Type::UInt;  resolvedField.size = 4; break;
-                default:                      resolvedField.type = Shoonyakasha::MaterialParam::Type::Float; resolvedField.size = 4; break;
-            }
-
-            // Propagate array info for [i] expansion in fillSceneBuffer
-            resolvedField.arrayCount = field.arrayCount;
-            resolvedField.arrayStride = field.arrayStride;
-
-            ubo.resolvedLayout.fields.push_back(resolvedField);
-        }
+        // Pre-convert once. One shared converter now; see
+        // CompiledBufferLayout::toResolverLayout.
+        ubo.resolvedLayout = *getResolvedLayout(layout.name);
 
         // Create per-frame VulkanBuffers
         ubo.perFrameBuffers.resize(maxFramesInFlight);
@@ -280,22 +252,6 @@ void RenderGraph::updateDotPathUBOs(uint32_t frameIndex) {
 // JSON declares struct layout, element count, and init strategy.
 // Engine creates device-local buffers, generates initial data, uploads via staging.
 // ═══════════════════════════════════════════════════════════════
-
-static uint32_t getFieldSizeForInit(BufferFieldType type) {
-    switch (type) {
-        case BufferFieldType::Float:  case BufferFieldType::Int:
-        case BufferFieldType::UInt:   case BufferFieldType::Bool:   return 4;
-        case BufferFieldType::Vec2:   case BufferFieldType::IVec2:
-        case BufferFieldType::UVec2:                                return 8;
-        case BufferFieldType::Vec3:   case BufferFieldType::IVec3:
-        case BufferFieldType::UVec3:                                return 12;
-        case BufferFieldType::Vec4:   case BufferFieldType::IVec4:
-        case BufferFieldType::UVec4:                                return 16;
-        case BufferFieldType::Mat3:                                  return 36;
-        case BufferFieldType::Mat4:                                  return 64;
-        default:                                                     return 4;
-    }
-}
 
 void RenderGraph::createDotPathSSBOs(uint32_t maxFramesInFlight) {
     const auto& compiledLayouts = m_compiled.bufferLayouts;
@@ -357,7 +313,10 @@ void RenderGraph::createDotPathSSBOs(uint32_t maxFramesInFlight) {
             };
             std::unordered_map<std::string, FieldInfo> fieldMap;
             for (const auto& field : layout.fields) {
-                fieldMap[field.name] = { field.offset, field.type, getFieldSizeForInit(field.type) };
+                // field.size is the packer's occupied size, which is the value the
+                // shader actually reads. A local size table here disagreed with it
+                // for every matrix under std140/std430.
+                fieldMap[field.name] = { field.offset, field.type, field.size };
             }
 
             // Initialize each element
@@ -1413,6 +1372,12 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
     // Invalidate cached analysis
     m_cachedAnalysis.reset();  // unique_ptr::reset() clears the pointer
 
+    // Invalidate converted layouts: compile() replaces m_compiled wholesale, so
+    // every cached conversion refers to layouts that are about to be discarded.
+    // Cleared here rather than in recompile() because compile() is public and
+    // reachable on its own.
+    m_resolvedLayoutCache.clear();
+
     // Apply callbacks to pass declarations before compilation
     applyCallbacks();
 
@@ -1559,6 +1524,15 @@ const CompiledBufferLayout* RenderGraph::getBufferLayout(const std::string& name
     auto it = m_compiled.bufferLayouts.find(name);
     if (it == m_compiled.bufferLayouts.end()) return nullptr;
     return &it->second;
+}
+
+const Shoonyakasha::CompiledBufferLayout* RenderGraph::getResolvedLayout(const std::string& name) const {
+    if (auto it = m_resolvedLayoutCache.find(name); it != m_resolvedLayoutCache.end()) {
+        return &it->second;
+    }
+    const CompiledBufferLayout* src = getBufferLayout(name);
+    if (!src) return nullptr;
+    return &m_resolvedLayoutCache.emplace(name, src->toResolverLayout()).first->second;
 }
 
 bool RenderGraph::hasBufferLayout(const std::string& name) const {
@@ -2035,47 +2009,17 @@ void RenderGraph::bindEntityData(entt::entity entity,
         return;
     }
 
+    const Shoonyakasha::CompiledBufferLayout* resolvedLayout = getResolvedLayout(pushConstantLayout);
+    if (!resolvedLayout) {
+        m_logger->log(LogLevel::Warning, "bindEntityData: Layout '%s' has no resolver form", pushConstantLayout.c_str());
+        return;
+    }
+
     // Allocate buffer for push constants
     std::vector<uint8_t> pushData(layout->totalSize, 0);
 
-    // Convert FrameGraph::CompiledBufferLayout to Shoonyakasha::CompiledBufferLayout
-    // We need to build a Shoonyakasha::CompiledBufferLayout from the FrameGraph one
-    Shoonyakasha::CompiledBufferLayout resolvedLayout;
-    resolvedLayout.name = layout->name;
-    resolvedLayout.totalSize = layout->totalSize;
-    resolvedLayout.hasSceneSources = layout->hasSceneSources;
-    resolvedLayout.hasEntitySources = layout->hasEntitySources;
-    resolvedLayout.hasConstSources = layout->hasConstSources;
-
-    // Convert fields
-    uint32_t currentOffset = 0;
-    for (const auto& field : layout->fields) {
-        Shoonyakasha::BufferField resolvedField;
-        resolvedField.name = field.name;
-        resolvedField.source = field.source;
-
-        // Convert type
-        switch (field.type) {
-            case BufferFieldType::Float:  resolvedField.type = Shoonyakasha::MaterialParam::Type::Float; resolvedField.size = 4; break;
-            case BufferFieldType::Vec2:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Vec2;  resolvedField.size = 8; break;
-            case BufferFieldType::Vec3:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Vec3;  resolvedField.size = 12; break;
-            case BufferFieldType::Vec4:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Vec4;  resolvedField.size = 16; break;
-            case BufferFieldType::Mat3:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Mat3;  resolvedField.size = 36; break;
-            case BufferFieldType::Mat4:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Mat4;  resolvedField.size = 64; break;
-            case BufferFieldType::Int:    resolvedField.type = Shoonyakasha::MaterialParam::Type::Int;   resolvedField.size = 4; break;
-            case BufferFieldType::UInt:   resolvedField.type = Shoonyakasha::MaterialParam::Type::UInt;  resolvedField.size = 4; break;
-            default:                      resolvedField.type = Shoonyakasha::MaterialParam::Type::Float; resolvedField.size = 4; break;
-        }
-
-        // Use explicit offset if set, otherwise compute
-        resolvedField.offset = (field.offset != 0) ? field.offset : currentOffset;
-        currentOffset = resolvedField.offset + resolvedField.size;
-
-        resolvedLayout.fields.push_back(resolvedField);
-    }
-
     // Fill the buffer using DotPathResolver
-    m_bufferResolver->fillBuffer(pushData.data(), resolvedLayout, *m_sceneContext, entity, registry);
+    m_bufferResolver->fillBuffer(pushData.data(), *resolvedLayout, *m_sceneContext, entity, registry);
 
     // Push the constants
     VkShaderStageFlags stages = layout->getShaderStages();
@@ -2099,39 +2043,13 @@ void RenderGraph::fillBuffer(void* buffer,
         return;
     }
 
-    // Convert to internal layout format and fill
-    Shoonyakasha::CompiledBufferLayout resolvedLayout;
-    resolvedLayout.name = layout->name;
-    resolvedLayout.totalSize = layout->totalSize;
-    resolvedLayout.hasSceneSources = layout->hasSceneSources;
-    resolvedLayout.hasEntitySources = layout->hasEntitySources;
-    resolvedLayout.hasConstSources = layout->hasConstSources;
-
-    uint32_t currentOffset = 0;
-    for (const auto& field : layout->fields) {
-        Shoonyakasha::BufferField resolvedField;
-        resolvedField.name = field.name;
-        resolvedField.source = field.source;
-
-        switch (field.type) {
-            case BufferFieldType::Float:  resolvedField.type = Shoonyakasha::MaterialParam::Type::Float; resolvedField.size = 4; break;
-            case BufferFieldType::Vec2:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Vec2;  resolvedField.size = 8; break;
-            case BufferFieldType::Vec3:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Vec3;  resolvedField.size = 12; break;
-            case BufferFieldType::Vec4:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Vec4;  resolvedField.size = 16; break;
-            case BufferFieldType::Mat3:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Mat3;  resolvedField.size = 36; break;
-            case BufferFieldType::Mat4:   resolvedField.type = Shoonyakasha::MaterialParam::Type::Mat4;  resolvedField.size = 64; break;
-            case BufferFieldType::Int:    resolvedField.type = Shoonyakasha::MaterialParam::Type::Int;   resolvedField.size = 4; break;
-            case BufferFieldType::UInt:   resolvedField.type = Shoonyakasha::MaterialParam::Type::UInt;  resolvedField.size = 4; break;
-            default:                      resolvedField.type = Shoonyakasha::MaterialParam::Type::Float; resolvedField.size = 4; break;
-        }
-
-        resolvedField.offset = (field.offset != 0) ? field.offset : currentOffset;
-        currentOffset = resolvedField.offset + resolvedField.size;
-
-        resolvedLayout.fields.push_back(resolvedField);
+    const Shoonyakasha::CompiledBufferLayout* resolvedLayout = getResolvedLayout(layoutName);
+    if (!resolvedLayout) {
+        m_logger->log(LogLevel::Warning, "fillBuffer: Layout '%s' has no resolver form", layoutName.c_str());
+        return;
     }
 
-    m_bufferResolver->fillBuffer(buffer, resolvedLayout, *m_sceneContext, entity, registry);
+    m_bufferResolver->fillBuffer(buffer, *resolvedLayout, *m_sceneContext, entity, registry);
 }
 
 void RenderGraph::createMaterialDescriptorPool(uint32_t maxSets) {
