@@ -568,14 +568,25 @@ void BufferLayoutResolver::fillBuffer(void* buffer,
 }
 
 void BufferLayoutResolver::writeField(void* buffer, const BufferField& field, const ResolvedValue& value) const {
-    if (!value.isValid()) {
-        // Write zeros for invalid values
-        std::memset(static_cast<uint8_t*>(buffer) + field.offset, 0, field.size);
+    uint8_t* dest = static_cast<uint8_t*>(buffer) + field.offset;
+
+    // Always start from zero: it clears the interior padding of a matrix, and it
+    // is the defined result for a field the resolver cannot produce.
+    std::memset(dest, 0, field.size);
+
+    // A shader type with no ResolvedValue representation (uvec4, dvec2, ...) is
+    // packed at the right offset but left zeroed. Writing whatever the resolver
+    // happened to produce into it would corrupt neighbouring fields.
+    if (!field.resolvable || !value.isValid()) {
         return;
     }
 
-    uint8_t* dest = static_cast<uint8_t*>(buffer) + field.offset;
-    value.copyTo(dest);
+    // The capacity argument is what stops a type mismatch from overrunning the
+    // field. copyTo used to memcpy sizeof(resolved type) with no bound at all, so
+    // a `{"type":"float","source":"const.0.5"}` — where const.0.5 resolves to a
+    // vec2 — wrote 8 bytes into a 4-byte slot, and the last field of a push
+    // constant layout overran the staging vector outright.
+    value.copyTo(dest, field.size, field.columnStride);
 }
 
 } // namespace Shoonyakasha
