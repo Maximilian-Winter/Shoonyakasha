@@ -115,7 +115,7 @@ struct GltfOptions {
     bool createEntities   = true;
     bool loadSkins        = true;
     bool loadAnimations   = true;
-    bool flattenHierarchy = true;
+    bool flattenHierarchy = false;  // see GltfLoadOptions::flattenHierarchy
     int  maxTextureSize   = 0;
     bool generateMipmaps  = true;
     bool srgbAlbedo       = true;

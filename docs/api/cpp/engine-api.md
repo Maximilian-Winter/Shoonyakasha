@@ -427,7 +427,7 @@ struct GltfOptions {
     bool createEntities   = true;
     bool loadSkins        = true;
     bool loadAnimations   = true;
-    bool flattenHierarchy = true;
+    bool flattenHierarchy = false;
     int  maxTextureSize   = 0;
     bool generateMipmaps  = true;
     bool srgbAlbedo       = true;
@@ -442,7 +442,7 @@ struct GltfOptions {
 | `createEntities` | `bool` | `true` | Create ECS entities for each mesh node. |
 | `loadSkins` | `bool` | `true` | Load skeleton/skin data for animated meshes. |
 | `loadAnimations` | `bool` | `true` | Load animation clips. |
-| `flattenHierarchy` | `bool` | `true` | Flatten the node tree into world-space transforms. |
+| `flattenHierarchy` | `bool` | `false` | Bake node transforms into vertices and emit a flat entity list. Leave `false` to keep the node tree and share vertex buffers between instances. |
 | `maxTextureSize` | `int` | `0` | Max texture dimension (0 = unlimited). |
 | `generateMipmaps` | `bool` | `true` | Generate mipmap chains for textures. |
 | `srgbAlbedo` | `bool` | `true` | Treat albedo textures as sRGB. |

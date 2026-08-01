@@ -151,7 +151,7 @@ options.loadTextures     = true;
 options.loadMaterials    = true;
 options.loadSkins        = true;
 options.loadAnimations   = true;
-options.flattenHierarchy = true;
+options.flattenHierarchy = false;  // keep the node tree; share meshes between instances
 options.generateMipmaps  = true;
 options.namePrefix       = "player_";
 

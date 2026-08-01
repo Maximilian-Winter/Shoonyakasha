@@ -25,7 +25,7 @@ struct GltfLoadOptions {
     bool loadAnimations     = true;
 
     // Transform handling
-    bool flattenHierarchy   = true;
+    bool flattenHierarchy   = false;
 
     // Texture settings
     int  maxTextureSize     = 0;
@@ -44,7 +44,7 @@ struct GltfLoadOptions {
 | `createEntities` | `true` | Create ECS entities with `MeshComponent`, `MaterialComponentV5`, and `RenderableTagComponent`. Requires a valid `Scene` pointer. |
 | `loadSkins` | `true` | Load skeletal skin data (`Skeleton` objects with joint hierarchies and inverse bind matrices). |
 | `loadAnimations` | `true` | Load animation clips (keyframe data for joints). Requires `loadSkins` to also be `true`. |
-| `flattenHierarchy` | `true` | Bake node transforms into world space. For static meshes, this avoids needing a scene graph at runtime. Skinned meshes are not affected. |
+| `flattenHierarchy` | `false` | `false` keeps the glTF node tree: one entity per node holding its local transform, geometry entities parented beneath it, and vertex buffers in mesh space — so every node referencing the same mesh shares one allocation. `true` restores the old behaviour, baking each node's world transform into its vertices and emitting a flat entity list; nothing can be shared, since each instance needs differently-transformed vertices. |
 | `maxTextureSize` | `0` | Maximum texture dimension in pixels. `0` means no limit. Textures exceeding this are downscaled during loading. |
 | `generateMipmaps` | `true` | Generate mipmaps for loaded textures. |
 | `srgbAlbedo` | `true` | Load albedo/base color textures in sRGB format. Normal maps and metallic-roughness maps are always loaded as linear. |

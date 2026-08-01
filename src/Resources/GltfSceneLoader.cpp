@@ -9,6 +9,7 @@
 #include "Vulkan/VulkanDevice.h"
 #include "ECS/Core.h"
 
+#include "ECS/TransformMath.h"
 #include "ECS/SkeletonComponents.h"
 #include "ECS/SkeletalAnimationSystem.h"
 
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
 // stb_image implementation in src/ThirdParty/stb_impl.cpp
@@ -167,43 +169,24 @@ GltfLoadResult GltfSceneLoader::load(
         }
     }
 
-    // Process scene nodes
+    // Walk the scene graph. Entities are created during the walk now, not in a
+    // second pass — the pass could only see a flat primitive list, so the parent
+    // links were gone by the time it ran, and it had to guess at skinning by
+    // comparing vertexStride against sizeof(SkinnedVertex).
     if (data->scene) {
         for (cgltf_size i = 0; i < data->scene->nodes_count; ++i) {
-            processNode(data, data->scene->nodes[i], glm::mat4(1.0f), result);
+            processNode(data, data->scene->nodes[i], entt::null, scene, result);
         }
     } else if (data->scenes_count > 0) {
         for (cgltf_size i = 0; i < data->scenes[0].nodes_count; ++i) {
-            processNode(data, data->scenes[0].nodes[i], glm::mat4(1.0f), result);
+            processNode(data, data->scenes[0].nodes[i], entt::null, scene, result);
         }
     } else {
         // No scenes, process root nodes
         for (cgltf_size i = 0; i < data->nodes_count; ++i) {
             if (data->nodes[i].parent == nullptr) {
-                processNode(data, &data->nodes[i], glm::mat4(1.0f), result);
+                processNode(data, &data->nodes[i], entt::null, scene, result);
             }
-        }
-    }
-
-    // Create ECS entities if requested
-    if (options.createEntities && scene) {
-        for (size_t i = 0; i < result.primitives.size(); ++i) {
-            const auto& primitive = result.primitives[i];
-            entt::entity entity;
-
-            // Check if this primitive came from a skinned node
-            // (indicated by vertexStride matching SkinnedVertex size)
-            if (primitive.vertexStride == sizeof(SkinnedVertex) &&
-                !result.skeletons.empty()) {
-                // Use the first skeleton for now (TODO: per-primitive skin mapping)
-                entity = createSkinnedEntity(scene, primitive,
-                    result.skeletons[0], result.animationClips,
-                    primitive.worldTransform);
-            } else {
-                entity = createEntity(scene, primitive);
-            }
-
-            result.entities.push_back(entity);
         }
     }
 
@@ -232,70 +215,172 @@ GltfLoadResult GltfSceneLoader::load(
 // Node Processing
 // ═══════════════════════════════════════════════════════════════
 
+void GltfSceneLoader::applyNodeTransform(ECS::TransformComponent& transform, const cgltf_node* node) {
+    if (node->has_matrix) {
+        decomposeTRS(glm::make_mat4(node->matrix),
+                     transform.position, transform.rotation, transform.scale);
+    } else {
+        // Preferred path: glTF gave us translation/rotation/scale directly, so
+        // there is nothing to decompose and nothing to lose.
+        if (node->has_translation) {
+            transform.position = glm::vec3(node->translation[0], node->translation[1], node->translation[2]);
+        }
+        if (node->has_scale) {
+            transform.scale = glm::vec3(node->scale[0], node->scale[1], node->scale[2]);
+        }
+        if (node->has_rotation) {
+            // cgltf stores the quaternion xyzw; glm::quat takes w first.
+            const glm::quat q(node->rotation[3], node->rotation[0],
+                              node->rotation[1], node->rotation[2]);
+            transform.rotation = eulerYXZFromRotation(glm::mat3_cast(glm::normalize(q)));
+        }
+    }
+    transform.isDirty = true;
+}
+
+GltfPrimitive GltfSceneLoader::buildPrimitive(
+    cgltf_data* data,
+    const cgltf_node* node,
+    size_t primitiveIndex,
+    bool skinned,
+    const std::string& name,
+    const glm::mat4& transform)
+{
+    const cgltf_primitive& primitive = node->mesh->primitives[primitiveIndex];
+
+    if (!skinned) {
+        return processPrimitive(data, primitive, transform, name);
+    }
+
+    // Skinned meshes are never baked — the skin puts them in skeleton space.
+    GltfPrimitive built = processPrimitive(data, primitive, glm::mat4(1.0f), name);
+
+    // processPrimitive built a StandardVertex buffer; skinning needs joints and
+    // weights. Assigning over the reference retires the old buffer, and the delete
+    // queue frees it once the frames that could name it have passed.
+    uint32_t vertexCount = 0;
+    uint32_t vertexStride = 0;
+    GPUBuffer skinnedVB = buildSkinnedVertexBuffer(data, primitive, vertexCount, vertexStride);
+    if (skinnedVB.isValid()) {
+        built.vertexBuffer = m_device.getDeleteQueue().adopt(skinnedVB);
+        built.vertexCount = vertexCount;
+        built.vertexStride = vertexStride;
+    }
+    return built;
+}
+
+const GltfPrimitive* GltfSceneLoader::getOrBuildPrimitive(
+    cgltf_data* data,
+    const cgltf_node* node,
+    size_t primitiveIndex,
+    bool skinned,
+    const std::string& name)
+{
+    // Keyed by file rather than by pointer: cgltf_free() runs at the end of load()
+    // and a later parse can reuse the same addresses.
+    const std::string key = m_currentFile.string() + "#"
+        + std::to_string(cgltf_mesh_index(data, node->mesh)) + "/"
+        + std::to_string(primitiveIndex)
+        + (skinned ? "_skinned" : "");
+
+    auto it = m_primitiveCache.find(key);
+    if (it != m_primitiveCache.end()) {
+        return &it->second;
+    }
+
+    GltfPrimitive built = buildPrimitive(data, node, primitiveIndex, skinned, name, glm::mat4(1.0f));
+    if (!built.vertexBuffer) {
+        return nullptr;
+    }
+    return &m_primitiveCache.emplace(key, std::move(built)).first->second;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Node Processing
+// ═══════════════════════════════════════════════════════════════
+
 void GltfSceneLoader::processNode(
     cgltf_data* data,
     const cgltf_node* node,
-    const glm::mat4& parentTransform,
+    entt::entity parentEntity,
+    std::shared_ptr<ECS::Scene> scene,
     GltfLoadResult& result)
 {
-    // Get this node's world transform
+    const bool makeEntities = m_options.createEntities && scene != nullptr;
+    const bool flatten = m_options.flattenHierarchy;
+
     cgltf_float worldMatrix[16];
     cgltf_node_transform_world(node, worldMatrix);
-    glm::mat4 worldTransform = glm::make_mat4(worldMatrix);
+    const glm::mat4 worldTransform = glm::make_mat4(worldMatrix);
 
-    // Process mesh if present
+    // The entity that carries this node's transform. In flatten mode there is no
+    // scene graph to carry — the transform is in the vertices — so geometry
+    // entities are created unparented, exactly as before.
+    entt::entity nodeEntity = entt::null;
+    if (makeEntities && !flatten) {
+        const std::string nodeName = m_options.namePrefix + "_"
+                                   + (node->name ? node->name : "node");
+        nodeEntity = scene->createEntity(nodeName)
+            .withTransform(glm::vec3(0.0f))
+            .withParent(parentEntity)
+            .build();
+
+        applyNodeTransform(
+            scene->getRegistry().get<ECS::TransformComponent>(nodeEntity), node);
+
+        result.nodeEntities.push_back(nodeEntity);
+        if (parentEntity == entt::null) {
+            result.rootEntities.push_back(nodeEntity);
+        }
+    }
+
     if (node->mesh) {
         const cgltf_mesh* mesh = node->mesh;
-        std::string meshBaseName = node->name ? node->name :
-                                   (mesh->name ? mesh->name : "mesh");
-
-        // Check if this node has a skin (skinned mesh)
-        bool isSkinned = (node->skin != nullptr && m_options.loadSkins);
+        const std::string meshBaseName = node->name ? node->name
+                                       : (mesh->name ? mesh->name : "mesh");
+        const bool isSkinned = (node->skin != nullptr && m_options.loadSkins);
 
         for (cgltf_size primIdx = 0; primIdx < mesh->primitives_count; ++primIdx) {
-            const cgltf_primitive& primitive = mesh->primitives[primIdx];
-
-            // Skip non-triangle primitives
-            if (primitive.type != cgltf_primitive_type_triangles) {
+            if (mesh->primitives[primIdx].type != cgltf_primitive_type_triangles) {
                 continue;
             }
 
-            // Generate unique name for this primitive
             std::string primName = m_options.namePrefix + "_" + meshBaseName;
             if (mesh->primitives_count > 1) {
                 primName += "_prim" + std::to_string(primIdx);
             }
 
-            if (isSkinned) {
-                // Build skinned primitive (with joints/weights, no transform baking)
-                GltfPrimitive loadedPrimitive = processPrimitive(data, primitive, glm::mat4(1.0f), primName);
-
-                // Replace vertex buffer with skinned version
-                // (processPrimitive built a StandardVertex buffer; we need SkinnedVertex)
-                uint32_t vertexCount = 0;
-                uint32_t vertexStride = 0;
-                GPUBuffer skinnedVB = buildSkinnedVertexBuffer(data, primitive, vertexCount, vertexStride);
-                if (skinnedVB.isValid()) {
-                    // Replaces the StandardVertex buffer processPrimitive built.
-                    // That was its only reference, so assigning over it retires the
-                    // old buffer and the delete queue frees it a few frames on.
-                    loadedPrimitive.vertexBuffer = m_device.getDeleteQueue().adopt(skinnedVB);
-                    loadedPrimitive.vertexCount = vertexCount;
-                    loadedPrimitive.vertexStride = vertexStride;
-                }
-                loadedPrimitive.worldTransform = worldTransform;  // Store but don't bake
-
-                result.primitives.push_back(std::move(loadedPrimitive));
+            GltfPrimitive instance;
+            if (flatten) {
+                // Baked vertices differ per node, so there is nothing to share.
+                instance = buildPrimitive(data, node, primIdx, isSkinned, primName, worldTransform);
             } else {
-                GltfPrimitive loadedPrimitive = processPrimitive(data, primitive, worldTransform, primName);
-                result.primitives.push_back(std::move(loadedPrimitive));
+                const GltfPrimitive* shared =
+                    getOrBuildPrimitive(data, node, primIdx, isSkinned, primName);
+                if (!shared) {
+                    continue;
+                }
+                instance = *shared;       // shares the buffers, copies the material
+                instance.name = primName;
             }
+            instance.worldTransform = worldTransform;
+
+            if (makeEntities) {
+                const entt::entity parent = flatten ? entt::null : nodeEntity;
+                const entt::entity entity =
+                    (isSkinned && !result.skeletons.empty())
+                        ? createSkinnedEntity(scene, instance, result.skeletons[0],
+                                              result.animationClips, parent)
+                        : createEntity(scene, instance, parent);
+                result.entities.push_back(entity);
+            }
+
+            result.primitives.push_back(std::move(instance));
         }
     }
 
-    // Process children recursively
     for (cgltf_size i = 0; i < node->children_count; ++i) {
-        processNode(data, node->children[i], worldTransform, result);
+        processNode(data, node->children[i], nodeEntity, scene, result);
     }
 }
 
@@ -701,11 +786,18 @@ GPUTexture GltfSceneLoader::loadTexture(
 
 entt::entity GltfSceneLoader::createEntity(
     std::shared_ptr<ECS::Scene> scene,
-    const GltfPrimitive& primitive)
+    const GltfPrimitive& primitive,
+    entt::entity parentEntity)
 {
-    auto entity = scene->createEntity(primitive.name)
-        .withTransform(glm::vec3(0.0f))  // Transform is baked into vertices
-        .build();
+    // Identity either way. Parented, the node entity above carries the transform
+    // and the vertices are in mesh space; unparented (flattenHierarchy), the
+    // transform is already baked into the vertices.
+    auto builder = scene->createEntity(primitive.name);
+    builder.withTransform(glm::vec3(0.0f));
+    if (parentEntity != entt::null) {
+        builder.withParent(parentEntity);
+    }
+    auto entity = builder.build();
 
     // Add MeshComponent
     auto& mesh = scene->addComponent<MeshComponent>(entity);
@@ -1076,40 +1168,26 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     const GltfPrimitive& primitive,
     std::shared_ptr<Shoonyakasha::Skeleton> skeleton,
     const std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>>& clips,
-    const glm::mat4& worldTransform)
+    entt::entity parentEntity)
 {
-    // Create entity with the node's world transform (NOT baked into vertices)
-    // Decompose the world transform matrix into TRS for TransformComponent
-    // 形之解 — Decomposing the form
-    glm::vec3 pos = glm::vec3(worldTransform[3]);
+    // Skinned vertices are never baked, so the node transform has to be applied
+    // somewhere. Parented, the node entity holds it and this entity is identity.
+    auto builder = scene->createEntity(primitive.name);
+    builder.withTransform(glm::vec3(0.0f));
+    if (parentEntity != entt::null) {
+        builder.withParent(parentEntity);
+    }
+    auto entity = builder.build();
 
-    // Extract scale from column vector lengths
-    glm::vec3 scl;
-    scl.x = glm::length(glm::vec3(worldTransform[0]));
-    scl.y = glm::length(glm::vec3(worldTransform[1]));
-    scl.z = glm::length(glm::vec3(worldTransform[2]));
-
-    // Extract rotation matrix by normalizing columns (removing scale)
-    glm::mat3 rotMatrix(1.0f);
-    if (scl.x > 0.0f) rotMatrix[0] = glm::vec3(worldTransform[0]) / scl.x;
-    if (scl.y > 0.0f) rotMatrix[1] = glm::vec3(worldTransform[1]) / scl.y;
-    if (scl.z > 0.0f) rotMatrix[2] = glm::vec3(worldTransform[2]) / scl.z;
-
-    // Extract euler angles (Y→X→Z order, matching TransformComponent::getLocalMatrix)
-    float pitch = std::asin(std::clamp(-rotMatrix[2][1], -1.0f, 1.0f));  // X rotation
-    float yaw   = std::atan2(rotMatrix[2][0], rotMatrix[2][2]);           // Y rotation
-    float roll  = std::atan2(rotMatrix[0][1], rotMatrix[1][1]);           // Z rotation
-    glm::vec3 rot(pitch, yaw, roll);
-
-    auto entity = scene->createEntity(primitive.name)
-        .withTransform(pos)
-        .build();
-
-    // Apply rotation and scale (withTransform only sets position)
-    auto& transform = scene->getRegistry().get<ECS::TransformComponent>(entity);
-    transform.rotation = rot;
-    transform.scale = scl;
-    transform.isDirty = true;
+    if (parentEntity == entt::null) {
+        // flattenHierarchy: no node entity exists, so decompose the world matrix
+        // here. Lossy if an ancestor's non-uniform scale composed with a rotation —
+        // one of the reasons the hierarchy path is the default.
+        auto& transform = scene->getRegistry().get<ECS::TransformComponent>(entity);
+        decomposeTRS(primitive.worldTransform,
+                     transform.position, transform.rotation, transform.scale);
+        transform.isDirty = true;
+    }
 
     // Add MeshComponent (with skinned vertex buffer)
     auto& mesh = scene->addComponent<MeshComponent>(entity);

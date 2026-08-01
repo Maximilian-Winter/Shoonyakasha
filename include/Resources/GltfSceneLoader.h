@@ -95,6 +95,14 @@ struct GltfLoadResult {
     // ─── ECS Entities ───────────────────────────────────────
     std::vector<entt::entity> entities;
 
+    /// One entity per glTF node, in traversal order. Nodes carry the scene graph;
+    /// the renderable entities in `entities` are their children.
+    std::vector<entt::entity> nodeEntities;
+
+    /// The top-level node entities. Parent something to one of these, or move it,
+    /// and the whole loaded scene follows.
+    std::vector<entt::entity> rootEntities;
+
     // ─── Skeleton & Animation Data ─────────────────────────
     std::vector<std::shared_ptr<Shoonyakasha::Skeleton>> skeletons;
     std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> animationClips;
@@ -119,8 +127,20 @@ struct GltfLoadOptions {
     bool loadSkins              = true;   // Load skeletal skin data
     bool loadAnimations         = true;   // Load animation clips
 
-    // Transform handling
-    bool flattenHierarchy       = true;   // Bake node transforms into vertices (static meshes only)
+    // Transform handling.
+    //
+    // false (default): keep the glTF node tree. One entity per node carrying its
+    //   local transform, geometry entities parented beneath, vertex buffers in
+    //   mesh space and therefore SHARED between every node referencing the same
+    //   mesh. Moving an entity rotates about its own origin.
+    //
+    // true: the old behaviour — bake each node's world transform into its vertices
+    //   and emit a flat entity list with identity transforms. No sharing is
+    //   possible, since every instance needs differently-transformed vertices.
+    //
+    // This flag was declared, plumbed through the facade and Python, and
+    // documented, but no code ever read it; baking was unconditional.
+    bool flattenHierarchy       = false;
 
     // Texture settings
     int maxTextureSize          = 0;      // 0 = no limit
@@ -166,17 +186,59 @@ private:
     /// stays per-load now that the cache spans loads.
     std::unordered_set<std::string> m_loadTextureKeys;
 
+    /// Mesh primitives in local space, keyed by file, mesh index, primitive index
+    /// and skinned-ness. Two nodes referencing the same glTF mesh get the same
+    /// GpuBufferRef and cost one allocation. Buffers are reference-counted, so this
+    /// map holding a copy is exactly what keeps them alive between loads.
+    std::unordered_map<std::string, GltfPrimitive> m_primitiveCache;
+
     /// Destroy every cached texture. Only safe once nothing references them —
     /// i.e. at destruction, after the scene holding the materials is gone.
     void destroyTextureCache();
 
     // ─── Internal Processing ────────────────────────────────
 
+    /// Walk one node and its subtree, creating an entity per node that carries the
+    /// node's LOCAL transform and a link to its parent. Geometry entities hang off
+    /// those, with an identity transform.
+    ///
+    /// Local rather than world on purpose: glTF forbids shear in a node's own
+    /// transform, so a local transform always survives the trip through
+    /// TransformComponent's position/euler/scale exactly. Their *product* can
+    /// shear, which is why the world matrix is composed by TransformSystem and
+    /// never decomposed here.
     void processNode(
         cgltf_data* data,
         const cgltf_node* node,
-        const glm::mat4& parentTransform,
+        entt::entity parentEntity,
+        std::shared_ptr<ECS::Scene> scene,
         GltfLoadResult& result
+    );
+
+    /// Set a TransformComponent from a glTF node, preferring the node's own TRS
+    /// over decomposing its matrix.
+    void applyNodeTransform(ECS::TransformComponent& transform, const cgltf_node* node);
+
+    /// Geometry and material for one glTF mesh primitive, in mesh-local space and
+    /// therefore independent of which node references it. Built once per
+    /// (file, mesh, primitive) and shared by every instance.
+    const GltfPrimitive* getOrBuildPrimitive(
+        cgltf_data* data,
+        const cgltf_node* node,
+        size_t primitiveIndex,
+        bool skinned,
+        const std::string& name
+    );
+
+    /// Build one primitive's geometry and material, applying `transform` to the
+    /// vertices. Pass identity for the shareable mesh-local form.
+    GltfPrimitive buildPrimitive(
+        cgltf_data* data,
+        const cgltf_node* node,
+        size_t primitiveIndex,
+        bool skinned,
+        const std::string& name,
+        const glm::mat4& transform
     );
 
     /// Extract alpha mode from glTF material
@@ -222,7 +284,8 @@ private:
     /// Create ECS entity with components
     entt::entity createEntity(
         std::shared_ptr<ECS::Scene> scene,
-        const GltfPrimitive& primitive
+        const GltfPrimitive& primitive,
+        entt::entity parentEntity
     );
 
     // ─── Skin & Animation Loading ───────────────────────────
@@ -253,7 +316,7 @@ private:
         const GltfPrimitive& primitive,
         std::shared_ptr<Shoonyakasha::Skeleton> skeleton,
         const std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>>& clips,
-        const glm::mat4& worldTransform
+        entt::entity parentEntity
     );
 
     /// Check if a node has an associated skin

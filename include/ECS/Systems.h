@@ -72,28 +72,44 @@ public:
     static constexpr uint32_t kMaxHierarchyDepth = 256;
 
 private:
+    /// Compose world matrices down the hierarchy.
+    ///
+    /// Roots are found with one scan; below that this descends through each node's
+    /// own `children` list. The previous version re-scanned every hierarchy entity
+    /// once per level — fine when a handful of entities were parented, quadratic
+    /// now that the glTF loader builds a real scene graph.
     void updateChildTransforms(entt::registry& registry, entt::entity parent, uint32_t depth) {
         if (depth >= kMaxHierarchyDepth) return;
 
-        auto hierarchyView = registry.view<HierarchyComponent, TransformComponent>();
+        if (parent == entt::null) {
+            auto rootView = registry.view<HierarchyComponent, TransformComponent>();
+            for (auto entity : rootView) {
+                auto [hierarchy, transform] =
+                    rootView.get<HierarchyComponent, TransformComponent>(entity);
+                if (hierarchy.parent != entt::null) continue;
 
-        for (auto entity : hierarchyView) {
-            auto [hierarchy, transform] = hierarchyView.get<HierarchyComponent, TransformComponent>(entity);
-
-            if (hierarchy.parent == parent) {
-                if (parent == entt::null) {
-                    // Root entity
-                    transform.worldMatrix = transform.localMatrix;
-                } else {
-                    // Child entity
-                    if (auto* parentTransform = registry.try_get<TransformComponent>(parent)) {
-                        transform.worldMatrix = parentTransform->worldMatrix * transform.localMatrix;
-                    }
-                }
-
-                // Recursively update children
+                transform.worldMatrix = transform.localMatrix;
                 updateChildTransforms(registry, entity, depth + 1);
             }
+            return;
+        }
+
+        auto* parentHierarchy = registry.try_get<HierarchyComponent>(parent);
+        auto* parentTransform = registry.try_get<TransformComponent>(parent);
+        if (!parentHierarchy || !parentTransform) return;
+
+        // By value: the recursion below can reach code that touches the registry,
+        // and a moved component would leave this dangling mid-loop.
+        const glm::mat4 parentWorld = parentTransform->worldMatrix;
+        const std::vector<entt::entity> children = parentHierarchy->children;
+
+        for (auto child : children) {
+            if (!registry.valid(child)) continue;
+            auto* childTransform = registry.try_get<TransformComponent>(child);
+            if (!childTransform) continue;
+
+            childTransform->worldMatrix = parentWorld * childTransform->localMatrix;
+            updateChildTransforms(registry, child, depth + 1);
         }
     }
 };
