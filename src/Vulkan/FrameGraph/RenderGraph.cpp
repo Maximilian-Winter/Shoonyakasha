@@ -92,6 +92,26 @@ RenderGraph::~RenderGraph() {
     }
     m_compiled.samplers.clear();
 
+    // Fallback material textures. Created lazily on the first material bind
+    // (createDefaultTextures below) and, until this call existed, never freed —
+    // DefaultTextures is a plain aggregate of GPUTexture values, so destroying
+    // the member releases nothing. Four images, views and samplers per run.
+    if (m_defaultTexturesCreated) {
+        Shoonyakasha::GPUResourceFactory::destroyDefaultTextures(
+            m_device.getAllocator().getHandle(),
+            m_device.getLogicalDevice(),
+            m_defaultTextures);
+        m_defaultTexturesCreated = false;
+    }
+
+    // Per-entity descriptor pool. createMaterialDescriptorPool() frees the
+    // previous pool before allocating a new one, which covers re-creation but
+    // never shutdown. Destroying the pool frees every set allocated from it.
+    if (m_materialDescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_materialDescriptorPool, nullptr);
+        m_materialDescriptorPool = VK_NULL_HANDLE;
+    }
+
     destroySyncPrimitives();
     delete m_logger;
 }

@@ -1,10 +1,20 @@
 # Object leaks at `vkDestroyDevice` — investigation
 
-**Status:** diagnosed, not yet fixed. Four independent causes, all confirmed
-against a running build. Nothing here is a regression from the 2026-08-01
-remediation work — these leaks predate it and only became *observable* when the
-teardown crash was fixed, because validation's object tracker runs at
-`vkDestroyDevice` and no example previously reached that call.
+**Status:** A, B and D fixed. C outstanding — it needs an ownership decision, not
+a patch. Four independent causes, all confirmed against a running build. Nothing
+here is a regression from the 2026-08-01 remediation work — these leaks predate
+it and only became *observable* when the teardown crash was fixed, because
+validation's object tracker runs at `vkDestroyDevice` and no example previously
+reached that call.
+
+After the fixes, with the message limit lifted, the only objects still reported
+are the mesh buffers of cause C:
+
+| Example | Buffer | DescPool | DescSet | Image | ImageView | Sampler |
+|---|---|---|---|---|---|---|
+| `declarative_sponza_test` | 2 | — | — | — | — | — |
+| `physics_test` | 22 | — | — | — | — | — |
+| `skinned_mesh_test` | 2 | — | — | — | — | — |
 
 ---
 
@@ -71,9 +81,9 @@ the reason the count is identical across three otherwise unrelated apps.
 `EntityRenderExecutor::~EntityRenderExecutor` (`src/FrameGraph/EntityRenderExecutor.cpp:31`)
 — the dead-but-compiled class. The live path never had a matching teardown.
 
-**Fix:** one call in `~RenderGraph`, guarded by `m_defaultTexturesCreated`.
-Low risk; the textures are engine-owned and not handed out beyond descriptor
-writes, which are gone by then.
+**Fixed.** One `destroyDefaultTextures` call in `~RenderGraph`, guarded by
+`m_defaultTexturesCreated`. The textures are engine-owned and not handed out
+beyond descriptor writes, which are gone by then.
 
 ## B. `RenderGraph::m_materialDescriptorPool` is never destroyed
 
@@ -88,7 +98,7 @@ pool is destroyed, so the pool is the only real leak).
   re-creation and nothing else.
 - `~RenderGraph` does not touch it.
 
-**Fix:** destroy it in `~RenderGraph`. Same shape and same risk as A.
+**Fixed.** Destroyed in `~RenderGraph`. Same shape and same risk as A.
 
 ## C. Mesh vertex/index buffers have no owner
 
@@ -142,13 +152,30 @@ exactly the four default textures).
   **loading a second scene leaks every texture of the first**.
 - `~GltfSceneLoader() = default` (`:79`) — nothing at shutdown either.
 
-Unlike C, the ownership here is unambiguous: the cache is the sole owner and
-deliberately shares textures across primitives by cache key. A `destroyTexture`
-loop before the `clear()` and in the destructor is the whole fix.
+Ownership here is unambiguous: the cache is the sole owner and deliberately
+shares textures across primitives by cache key.
 
-Related, and worth deleting while there: `include/Resources/GltfSceneLoader.h:255`
-declares a `std::unique_ptr<DefaultTextures> m_defaultTextures` that is never
-referenced anywhere in the implementation.
+**Fixed — but not by destroying at the `clear()` site**, which is the obvious move
+and is wrong. Entities from an earlier load still hold those views and samplers in
+their materials, so freeing them when a *second* scene loads trades a leak for a
+dangling handle. The cache now lives for the loader's lifetime and is destroyed
+only in `~GltfSceneLoader`, which in `ApplicationBase` runs after the scene that
+holds the materials is already gone.
+
+Two consequences that had to be handled:
+
+- The embedded-texture cache key was `"embedded_bv_" + (uintptr_t)buffer_view` —
+  a pointer into the `cgltf_data` that `load()` frees before returning. That was
+  survivable only because the cache was wiped each load; with a cache that spans
+  loads, a later allocation landing on the same address returns an unrelated
+  texture. Re-keyed on the source file path plus the view's offset and size.
+- `GltfLoadResult::totalTextures` was `m_textureCache.size()`, which meant
+  "this load's textures" only because of the wipe. Now counted from a per-load
+  key set, so it keeps its meaning and still counts a cache hit.
+
+Also deleted while there: `GltfSceneLoader` declared a
+`std::unique_ptr<DefaultTextures> m_defaultTextures` that no line of the
+implementation referenced.
 
 ---
 

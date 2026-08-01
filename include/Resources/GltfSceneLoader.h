@@ -18,6 +18,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
 #include <optional>
 
@@ -149,10 +150,22 @@ private:
 
     // Per-load state (reset on each load call)
     std::filesystem::path m_basePath;
+    std::filesystem::path m_currentFile;  // Scopes cache keys for embedded textures
     GltfLoadOptions m_options;
 
-    // Texture deduplication cache
+    /// Texture deduplication cache. Owns every GPUTexture it holds and lives for
+    /// the loader's lifetime — it deliberately is NOT cleared per load, because
+    /// entities from an earlier load still reference these views and samplers.
+    /// Freed only in ~GltfSceneLoader.
     std::unordered_map<std::string, Shoonyakasha::GPUTexture> m_textureCache;
+
+    /// Cache keys touched by the load in progress, so GltfLoadResult::totalTextures
+    /// stays per-load now that the cache spans loads.
+    std::unordered_set<std::string> m_loadTextureKeys;
+
+    /// Destroy every cached texture. Only safe once nothing references them —
+    /// i.e. at destruction, after the scene holding the materials is gone.
+    void destroyTextureCache();
 
     // ─── Internal Processing ────────────────────────────────
 
@@ -251,8 +264,6 @@ private:
     // Cached skeleton per skin (avoids reloading same skin for multiple meshes)
     std::unordered_map<const cgltf_skin*, std::shared_ptr<Shoonyakasha::Skeleton>> m_skinCache;
 
-    // Default textures cache
-    std::unique_ptr<Shoonyakasha::GPUResourceFactory::DefaultTextures> m_defaultTextures;
 };
 
 } // namespace Shoonyakasha

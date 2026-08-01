@@ -529,19 +529,26 @@ with validation's ten-per-VUID message cap lifted:
 | `skinned_mesh_test` | 2 | 1 | 4 | 5 | 5 | 5 |
 | `particle_test`, `bloom_test` | — | — | — | — | — | — |
 
-Four independent causes:
+Four independent causes. A, B and D are fixed; C remains.
 
-- **A.** `RenderGraph::m_defaultTextures` (`RenderGraph.cpp:2161`) is created and
-  never destroyed — the fixed 4 image/view/sampler in every affected example.
-  `GPUResourceFactory::destroyDefaultTextures` exists; its only caller is the dead
-  `EntityRenderExecutor`.
-- **B.** `RenderGraph::m_materialDescriptorPool` (`:2073`) is destroyed only by the
-  re-create guard at the top of its own creator, never in `~RenderGraph`.
-- **C.** Mesh vertex/index buffers in `MeshComponent` have no owner at all. Scales
-  with content — this is the one that needs a design decision (shared ownership
-  and deferred delete), not a one-line fix.
-- **D.** `GltfSceneLoader::m_textureCache` is `.clear()`ed at every load and never
-  destroyed, so each glTF texture leaks and reloading leaks the previous set too.
+- **A — FIXED.** `RenderGraph::m_defaultTextures` (`RenderGraph.cpp:2161`) was
+  created and never destroyed — the fixed 4 image/view/sampler in every affected
+  example. `GPUResourceFactory::destroyDefaultTextures` already existed; its only
+  caller was the dead `EntityRenderExecutor`. Now called from `~RenderGraph`.
+- **B — FIXED.** `RenderGraph::m_materialDescriptorPool` (`:2073`) was destroyed
+  only by the re-create guard at the top of its own creator, never at shutdown.
+  Now destroyed in `~RenderGraph`, which frees its sets with it.
+- **C — outstanding.** Mesh vertex/index buffers in `MeshComponent` have no owner
+  at all. Scales with content, and needs a design decision — shared ownership plus
+  a frame-indexed deferred delete — rather than a destroy hook.
+- **D — FIXED.** `GltfSceneLoader::m_textureCache` was `.clear()`ed at every load
+  and never destroyed. Destroying at the clear site would dangle textures still
+  referenced by the previous scene's materials, so the cache now spans the
+  loader's lifetime and is freed in `~GltfSceneLoader`. That required re-keying
+  embedded textures off something more stable than a freed `cgltf` pointer.
+
+After the fixes the only objects still reported are C's mesh buffers: 2, 22 and 2
+respectively, and nothing else.
 
 The earlier guess in this section — that the three leaking examples were the three
 that generate IBL — was wrong. IBL is clean. The correlation is that those three

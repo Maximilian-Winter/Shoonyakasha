@@ -76,7 +76,19 @@ GltfSceneLoader::GltfSceneLoader(VulkanDevice& device)
 {
 }
 
-GltfSceneLoader::~GltfSceneLoader() = default;
+GltfSceneLoader::~GltfSceneLoader() {
+    destroyTextureCache();
+}
+
+void GltfSceneLoader::destroyTextureCache() {
+    for (auto& [key, texture] : m_textureCache) {
+        GPUResourceFactory::destroyTexture(
+            m_device.getAllocator().getHandle(),
+            m_device.getLogicalDevice(),
+            texture);
+    }
+    m_textureCache.clear();
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Main Load Function
@@ -88,8 +100,13 @@ GltfLoadResult GltfSceneLoader::load(
     const GltfLoadOptions& options)
 {
     GltfLoadResult result;
-    m_textureCache.clear();
+    // The texture cache deliberately survives across loads: entities created by an
+    // earlier load still hold its views and samplers, so clearing it here would
+    // either leak them (what it did before) or dangle them (if it destroyed them).
+    // Only the per-load key set is reset.
+    m_loadTextureKeys.clear();
     m_basePath = path.parent_path();
+    m_currentFile = path;
     m_options = options;
 
     if (m_options.namePrefix.empty()) {
@@ -198,7 +215,7 @@ GltfLoadResult GltfSceneLoader::load(
         result.totalIndices += prim.indexCount;
     }
     result.totalMaterials = result.primitives.size();
-    result.totalTextures = m_textureCache.size();
+    result.totalTextures = m_loadTextureKeys.size();
 
     result.success = true;
 
@@ -583,11 +600,15 @@ GPUTexture GltfSceneLoader::loadTexture(
     if (image->uri) {
         cacheKey = resolveTexturePath(image->uri);
     } else if (image->buffer_view) {
-        // Embedded texture — data lives in the glTF/glb buffer
+        // Embedded texture — data lives in the glTF/glb buffer.
         isEmbedded = true;
-        // Use buffer_view offset as a stable cache key
-        cacheKey = "embedded_bv_" + std::to_string(
-            reinterpret_cast<uintptr_t>(image->buffer_view));
+        // Keyed by source file plus the view's offset and size. The old key was
+        // the buffer_view *pointer*, which is only valid until cgltf_free() at the
+        // end of this load; with a cache that spans loads, a later allocation
+        // landing on the same address would return an unrelated texture.
+        cacheKey = m_currentFile.string() + "_bv_"
+                 + std::to_string(image->buffer_view->offset) + "_"
+                 + std::to_string(image->buffer_view->size);
     }
 
     if (cacheKey.empty()) {
@@ -596,6 +617,7 @@ GPUTexture GltfSceneLoader::loadTexture(
 
     // Check cache first to avoid loading same texture multiple times
     std::string fullCacheKey = cacheKey + (srgb ? "_srgb" : "_linear");
+    m_loadTextureKeys.insert(fullCacheKey);
     auto cacheIt = m_textureCache.find(fullCacheKey);
     if (cacheIt != m_textureCache.end()) {
         return cacheIt->second;  // Return cached texture
