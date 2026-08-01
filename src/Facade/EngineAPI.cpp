@@ -4,6 +4,7 @@
 // All Vulkan, EnTT, and engine internals are confined to this translation unit.
 //
 
+#include <stdexcept>
 #include <entt/entt.hpp>
 #include "ECS/Core.h"
 #include "ECS/Sprite2DComponents.h"
@@ -75,20 +76,22 @@ protected:
     void onInit() override {
         // Create skeletal animation system (needs VulkanDevice — available after Vulkan init)
         m_animationSystem = std::make_unique<SkeletalAnimationSystem>(getDevice());
+        // Free bone SSBOs when skinned entities are destroyed; without this each
+        // one leaks a VMA allocation for the lifetime of the allocator.
+        m_animationSystem->attachTo(getRegistry());
 
         // Create sub-APIs now that engine internals are ready
         m_owner->sceneAPI = std::make_unique<SceneAPI>(getScene());
         m_owner->sceneAPI->wireSprite2DManager(&getSprite2DManager());
         m_owner->ecsAPI = std::make_unique<EcsAPI>(getScene());
 
-        // Wire InputAPI via Impl::wire (nested class can access private m_impl)
-        m_owner->inputAPI = std::make_unique<InputAPI>();
+        // InputAPI and PhysicsAPI already exist — they are default-constructible
+        // and were built in the EngineAPI constructor so callers can hold them
+        // before run(). Only the wiring needs the engine to be up.
         InputAPI::Impl::wire(*m_owner->inputAPI,
                              &getInputHandler(),
                              &getEventDispatcher());
 
-        // Wire PhysicsAPI via Impl::wire
-        m_owner->physicsAPI = std::make_unique<PhysicsAPI>();
         PhysicsAPI::Impl::wire(*m_owner->physicsAPI,
                                m_physicsSystem,
                                &getRegistry());
@@ -256,6 +259,13 @@ EngineAPI::EngineAPI(const EngineConfig& config)
 {
     auto appConfig = toAppConfig(config);
     m_impl->app = std::make_unique<Impl::CallbackApp>(appConfig, m_impl.get());
+
+    // Built here rather than in onInit: both are default-constructible and only
+    // their wiring needs a live engine, so getInput() and getPhysics() are usable
+    // from the moment the EngineAPI exists. Registering input callbacks before
+    // run() is the natural thing to do, and it used to dereference null.
+    m_impl->inputAPI   = std::make_unique<InputAPI>();
+    m_impl->physicsAPI = std::make_unique<PhysicsAPI>();
 }
 
 EngineAPI::~EngineAPI() = default;
@@ -286,6 +296,14 @@ void EngineAPI::setOnCleanup(VoidCallback cb)      { m_impl->onCleanupCb    = st
 // ═══════════════════════════════════════════════════════════════
 
 SceneAPI& EngineAPI::getScene() {
+    // Needs a live ECS::Scene, which only exists once run() has started. This
+    // used to dereference a null unique_ptr, and the C++ API docs told readers
+    // it was valid immediately after construction.
+    if (!m_impl->sceneAPI) {
+        throw std::logic_error(
+            "EngineAPI::getScene() is only available after run() has started. "
+            "Use setOnInit() to run scene setup at the right moment.");
+    }
     return *m_impl->sceneAPI;
 }
 
@@ -298,6 +316,11 @@ PhysicsAPI& EngineAPI::getPhysics() {
 }
 
 EcsAPI& EngineAPI::getEcs() {
+    if (!m_impl->ecsAPI) {
+        throw std::logic_error(
+            "EngineAPI::getEcs() is only available after run() has started. "
+            "Use setOnInit() to run ECS setup at the right moment.");
+    }
     return *m_impl->ecsAPI;
 }
 

@@ -239,6 +239,12 @@ private:
     void initializeVulkan();
     void initializeECS();
     void loadIBLTextures();
+    /// Construct the RenderGraph object. Runs before onInit() so subclasses and
+    /// facade callbacks can reach getRenderGraph() there.
+    void createRenderGraph();
+
+    /// Load the JSON, bind the scene and compile. Runs after onInit() so that
+    /// entities created there are present.
     void initializeRenderGraph();
     void bindIBLTextures();
     void createSyncObjects();

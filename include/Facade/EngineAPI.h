@@ -51,13 +51,24 @@ public:
     void setOnCleanup(VoidCallback cb);
 
     // ═══════════════════════════════════════════════════════════
-    // Sub-API Access (valid after construction; populated after onInit)
+    // Sub-API Access
+    //
+    // getInput() and getPhysics() are usable as soon as the EngineAPI exists —
+    // register input callbacks or set gravity before run() if you like. They
+    // become connected to the running engine during onInit.
+    //
+    // getScene() and getEcs() need a live ECS::Scene, which only exists once
+    // run() has started, and throw std::logic_error before that. Do scene setup
+    // from the setOnInit callback.
+    //
+    // (The previous contract comment claimed all four were "valid after
+    // construction", and the getters dereferenced null unique_ptrs.)
     // ═══════════════════════════════════════════════════════════
 
-    SceneAPI&   getScene();
-    InputAPI&   getInput();
-    PhysicsAPI& getPhysics();
-    EcsAPI&     getEcs();
+    SceneAPI&   getScene();     ///< throws std::logic_error before run()
+    InputAPI&   getInput();     ///< valid immediately
+    PhysicsAPI& getPhysics();   ///< valid immediately
+    EcsAPI&     getEcs();       ///< throws std::logic_error before run()
 
     // ═══════════════════════════════════════════════════════════
     // Convenience Helpers
