@@ -290,37 +290,26 @@ VulkanCommandBuilder& VulkanCommandBuilder::memoryBarrier(VkPipelineStageFlags s
     return *this;
 }
 
-VulkanCommandBuilder& VulkanCommandBuilder::imageBarrier(VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
-                                                         VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage) {
+VulkanCommandBuilder& VulkanCommandBuilder::imageBarrier(
+    VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
+    VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+    VkAccessFlags srcAccess, VkAccessFlags dstAccess,
+    const VkImageSubresourceRange& subresourceRange,
+    uint32_t srcQueueFamilyIndex, uint32_t dstQueueFamilyIndex)
+{
     VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = oldLayout;
-    barrier.newLayout = newLayout;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout           = oldLayout;
+    barrier.newLayout           = newLayout;
+    barrier.srcQueueFamilyIndex = srcQueueFamilyIndex;
+    barrier.dstQueueFamilyIndex = dstQueueFamilyIndex;
+    barrier.image               = image;
+    barrier.subresourceRange    = subresourceRange;
+    barrier.srcAccessMask       = srcAccess;
+    barrier.dstAccessMask       = dstAccess;
 
-    // Set access masks based on layouts (simplified version)
-    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
-        barrier.srcAccessMask = 0;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    }
-
-    if (newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    } else if (newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    }
-
-    vkCmdPipelineBarrier(m_commandBuffer, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    vkCmdPipelineBarrier(m_commandBuffer, srcStage, dstStage,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
     return *this;
 }
 

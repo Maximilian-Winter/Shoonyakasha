@@ -425,12 +425,16 @@ using PhysicalResource = std::variant<PhysicalImage, PhysicalBuffer>;
 
 struct BarrierInfo {
     ResourceHandle          resource;
-    VkImageLayout           oldLayout;
-    VkImageLayout           newLayout;
-    VkPipelineStageFlags    srcStage;
-    VkPipelineStageFlags    dstStage;
-    VkAccessFlags           srcAccess;
-    VkAccessFlags           dstAccess;
+    // Defaulted so a field added later is not silently left indeterminate:
+    // resolveLayoutsAndInsertBarriers assigns every member today, and the copy it
+    // makes for the acquire barrier would carry whatever the next member happened
+    // to hold.
+    VkImageLayout           oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout           newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkPipelineStageFlags    srcStage  = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkPipelineStageFlags    dstStage  = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    VkAccessFlags           srcAccess = 0;
+    VkAccessFlags           dstAccess = 0;
 
     // Queue ownership transfer (VK_QUEUE_FAMILY_IGNORED = no transfer)
     uint32_t                srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
