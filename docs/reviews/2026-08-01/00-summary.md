@@ -485,19 +485,52 @@ The general lesson is worth keeping: several classes take borrowed `Logger*` /
 them. Declaration order in `ApplicationBase` is now load-bearing and commented
 as such.
 
-### Validation errors remaining in `bloom_test`
+### Validation errors in `bloom_test` — FIXED
 
-See `validation-bloom-test.md`. After the barrier work, four examples are
-validation-clean and `bloom_test` is not. Its 50 messages are the two items
-deliberately deferred out of that phase:
+All 50 messages resolved, in two commits.
 
-- queue ownership transfer emitted twice on the acquiring queue, never released
-  on the source
-- barriers emitted only on layout *change*, so same-layout hazards get none and
-  the descriptor-declared layout drifts from the actual one
+**Fabricated queue ownership transfers (38 of the 50).** On a cross-queue
+transition the compiler pushed the same `BarrierInfo` into both
+`acquireBarriers` and `preBarriers`; the executor issues both, so the image was
+transitioned twice, the second time from a layout it was no longer in. A
+transfer also needs a *release* on the source queue paired with the acquire —
+only the acquire was ever emitted.
 
-Plus one not previously reported: a descriptor `params` used in a dispatch that
-was never updated.
+Underneath both: the transfers were fabricated for an execution model that does
+not exist. `executeMultiQueue()` and `needsMultiQueueSubmit()` have no callers,
+so every pass is recorded into one command buffer on the graphics queue. The
+compiler was comparing declared `queueType`s against an execution that ignores
+them.
+
+Removing it also cleared the twenty "Image layout specified by
+vkCmdBindDescriptorSets doesn't match actual image layout" messages — those were
+downstream of the double transition, not a separate defect.
+
+**Unbound `params` descriptor (the rest).** `bloom_pipeline.json` declared
+`brightExtractSet` binding 2 as a uniform buffer, and `BloomTestApp` computed
+and updated those values every frame, but nothing connected them: the app never
+called `registerUniformBuffer()` and the binding never declared
+`autoBindBuffer`, which is what the auto-binder matches on. It was the only
+shipped pipeline missing that field.
+
+### Object leaks at `vkDestroyDevice` — newly visible
+
+Not a regression. Validation's object tracker reports leaks when the device is
+destroyed, and until the shutdown crash was fixed no example ever reached that
+point.
+
+Now that they do, three of five report leaks — different ones each:
+
+| Example | Leaked at device destruction |
+|---|---|
+| `declarative_sponza_test` | 4 `VkImage`, 4 `VkImageView`, 2 `VkBuffer` |
+| `physics_test` | 10+ `VkBuffer` |
+| `skinned_mesh_test` | reports leaks |
+| `particle_test`, `bloom_test` | none |
+
+Counts are floors: validation caps at ten messages per VUID. The three that leak
+are the three that generate IBL, which is a lead rather than a conclusion —
+`physics_test` leaks only buffers, so there is more than one cause.
 
 ### The swapchain `present` usage was content, not engine
 
