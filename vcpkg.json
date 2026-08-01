@@ -1,8 +1,18 @@
 {
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "shoonyakasha",
   "version": "1.0.0",
   "description": "Shoonyakasha - Vulkan-based game engine with a JSON-driven render pipeline and Python bindings",
   "homepage": "https://github.com/Maximilian-Winter/Shoonyakasha",
+  "license": "MIT",
+  "$comment-baseline": [
+    "Without a builtin-baseline, vcpkg resolves every dependency against",
+    "whatever commit the local vcpkg clone happens to sit on. Two machines",
+    "then get two different EnTT or Bullet, and a wheel that builds here fails",
+    "there. Pin it once, from the repo root, with:",
+    "    vcpkg x-update-baseline --add-initial-baseline",
+    "which writes a builtin-baseline field next to this one."
+  ],
   "dependencies": [
     "vulkan",
     "nlohmann-json",
@@ -18,5 +28,6 @@
         "gtest"
       ]
     }
-  }
+  },
+  "builtin-baseline": "1f5e0348089e8a9b187f57d42866ebc871e815da"
 }

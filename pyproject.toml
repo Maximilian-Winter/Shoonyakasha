@@ -1,9 +1,11 @@
 [build-system]
-# cmake/ninja here are the PyPI packages (prebuilt binaries) - having pip
-# supply them avoids relying on whatever CMake/generator happens to be on
-# PATH (e.g. an IDE-bundled CMake version, or no ninja.exe on Windows at
-# all outside a Visual Studio Developer shell).
-requires = ["scikit-build-core>=0.10", "cython>=3.0", "cmake>=3.21", "ninja"]
+# cmake and ninja are deliberately NOT pinned here. scikit-build-core injects
+# them into the build environment itself, driven by cmake.version/ninja.version
+# below, and only when what's already on PATH doesn't satisfy the constraint.
+# That gets the same guarantee the old explicit pins were after (no reliance on
+# an IDE-bundled CMake, no missing ninja.exe outside a VS Developer shell)
+# without fetching a second copy when a good one is already installed.
+requires = ["scikit-build-core>=0.10", "cython>=3.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -33,9 +35,7 @@ Homepage = "https://github.com/Maximilian-Winter/Shoonyakasha"
 # ═══════════════════════════════════════════════════════════════
 #
 # This does NOT reimplement the C++ build - it configures/builds the
-# same CMake project you already build manually, with BUILD_PYTHON=ON
-# and BUILD_EXAMPLES/BUILD_TESTS=OFF (only the engine library + Python
-# extension are needed for the package), then packages whatever
+# same CMake project you already build manually, then packages whatever
 # `cmake --install` produces.
 #
 # Vulkan/nlohmann_json/EnTT/Bullet/glfw3/glm still need to be findable by
@@ -43,7 +43,8 @@ Homepage = "https://github.com/Maximilian-Winter/Shoonyakasha"
 # declares these for manifest-mode vcpkg - if you normally build with a
 # vcpkg toolchain file, pass it through the CMAKE_ARGS environment
 # variable before installing and vcpkg will install them automatically
-# (scikit-build-core reads CMAKE_ARGS and appends it to cmake.args below):
+# (scikit-build-core reads CMAKE_ARGS and appends it to the configure
+# command, alongside the defines below):
 #
 #   macOS/Linux (bash):
 #     CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake" \
@@ -59,19 +60,38 @@ Homepage = "https://github.com/Maximilian-Winter/Shoonyakasha"
 
 [tool.scikit-build]
 minimum-version = "0.10"
-build-dir = "build"
-cmake.source-dir = "."
-cmake.build-type = "Release"
-cmake.args = [
-    "-DBUILD_PYTHON=ON",
-    "-DBUILD_EXAMPLES=OFF",
-    "-DBUILD_TESTS=OFF",
-]
 
+# {wheel_tag} keeps each interpreter/platform in its own build tree. A single
+# shared "build" directory means a cp311 configure gets reused for a cp312
+# build, and the resulting cache mismatch surfaces as confusing link errors.
+build-dir = "build/{wheel_tag}"
+
+[tool.scikit-build.cmake]
+# Matches cmake_minimum_required in CMakeLists.txt.
+version = ">=3.21"
+source-dir = "."
+build-type = "Release"
+
+[tool.scikit-build.cmake.define]
+BUILD_PYTHON = "ON"
+BUILD_EXAMPLES = "OFF"
+BUILD_TESTS = "OFF"
+
+# The engine's own install(TARGETS/EXPORT) rules write include/, lib/ and
+# lib/cmake/ - relative to the install prefix, which for a wheel is the wheel
+# root. Left ON, `pip install .` would scatter those three directories directly
+# into site-packages. Only python/CMakeLists.txt's install of the extension
+# module into shoonyakasha/ belongs in the wheel.
+SHOONYAKASHA_INSTALL = "OFF"
+
+[tool.scikit-build.ninja]
+version = ">=1.11"
+
+[tool.scikit-build.wheel]
 # Pure-Python package sources (shoonyakasha/__init__.py etc.), merged
 # with whatever CMake install()s into the same "shoonyakasha" directory
 # (the compiled _shoonyakasha extension module - see python/CMakeLists.txt).
-wheel.packages = ["python/shoonyakasha"]
+packages = ["python/shoonyakasha"]
 
 # The existing local dev workflow (plain `cmake --build`, not this pip
 # packaging) drops the compiled extension directly into
@@ -79,18 +99,29 @@ wheel.packages = ["python/shoonyakasha"]
 # extension from a previous manual build never gets bundled instead of
 # (or alongside) the one this build produces via cmake --install - only
 # the .pyx/.pxd/.h *sources* should come from wheel.packages.
-wheel.exclude = [
+exclude = [
     "shoonyakasha/_shoonyakasha*.so",
     "shoonyakasha/_shoonyakasha*.pyd",
 ]
 
-# The compiled extension's exact filename is platform/ABI-specific and
-# scikit-build-core can't know it in advance, so every wheel it builds
-# is treated as impure/platform-specific (correct - the shipped .so/.pyd
-# is not portable across Python versions/platforms).
-wheel.expand-macos-universal-tags = true
+# Emit arm64/x86_64 tags for a macOS universal2 build rather than the
+# universal2 tag alone, so pip on a single-arch machine still matches.
+expand-macos-universal-tags = true
 
 [tool.scikit-build.sdist]
+# Listed explicitly because a source distribution that can't reconfigure the
+# CMake project is useless: vcpkg.json drives dependency resolution and
+# cmake/ShoonyakashaConfig.cmake.in is read by configure_package_config_file().
+include = [
+    "CMakeLists.txt",
+    "vcpkg.json",
+    "cmake/**",
+    "include/**",
+    "src/**",
+    "third_party/**",
+    "python/**",
+]
+
 # Only what's needed to rebuild from source - skip example asset
 # directories the engine's own examples use but the Python package doesn't.
 exclude = [
