@@ -109,7 +109,7 @@ You can change your entire rendering pipeline — add a shadow pass, swap a shad
 - Skeletal animation with skinned meshes
 
 **Entity Component System**
-- EnTT-based ECS with 17+ component types
+- EnTT-based ECS with 23 component types (11 registered for name-based access)
 - Hierarchical transforms with parent-child relationships
 - Entity builder pattern and component registry
 
@@ -136,24 +136,34 @@ You can change your entire rendering pipeline — add a shadow pass, swap a shad
 ### Prerequisites
 
 - C++20 compiler (MSVC 2022, GCC 12+, or Clang 15+)
-- CMake 3.12+
+- CMake 3.21+
 - Vulkan SDK
-- vcpkg or manually installed: GLFW3, nlohmann_json, EnTT, Bullet3, GLM
+- vcpkg (the repo is a vcpkg manifest with a pinned baseline; dependencies are
+  fetched for you)
+- Vulkan SDK — also provides `glslc`, needed to build the examples' shaders
 
 ### Build
 
 ```bash
-mkdir build && cd build
-cmake .. -DBUILD_EXAMPLES=ON -DBUILD_TESTS=ON
-cmake --build . --config Release
+cmake -B build -S .   -DCMAKE_TOOLCHAIN_FILE=<path-to-vcpkg>/scripts/buildsystems/vcpkg.cmake   -DBUILD_EXAMPLES=ON   -DBUILD_TESTS=ON -DVCPKG_MANIFEST_FEATURES=tests
+cmake --build build --config Release
 ```
+
+The toolchain file is not optional: every dependency is resolved through vcpkg,
+so `find_package` fails at configure time without it. `BUILD_TESTS=ON`
+additionally needs `VCPKG_MANIFEST_FEATURES=tests`, or GoogleTest is never
+installed. See [BUILDING.md](BUILDING.md) for the full matrix.
 
 For Python bindings:
 
 ```bash
-cmake .. -DBUILD_PYTHON=ON
-cmake --build . --config Release
+pip install .
 ```
+
+Building the extension by hand additionally requires
+`-DVCPKG_TARGET_TRIPLET=x64-windows-static-md` on Windows; without it the
+resulting module fails to import with `DLL load failed`. See
+[BUILDING.md](BUILDING.md).
 
 The compiled `_shoonyakasha.pyd` (Windows) or `.so` (Linux) will be in `python/shoonyakasha/`.
 
@@ -165,8 +175,8 @@ src/               Implementation files
 python/            Cython bindings and Python package
   shoonyakasha/    Python module
   examples/        Python demo scripts
-examples/          8 C++ example applications
-tests/             Automated test suite (582 tests)
+examples/          9 C++ example applications
+tests/             Automated test suite
 docs/              Guides, API reference, architecture docs
 third_party/       VulkanMemoryAllocator, cgltf, stb, tinyobjloader
 cmake/             CMake configuration

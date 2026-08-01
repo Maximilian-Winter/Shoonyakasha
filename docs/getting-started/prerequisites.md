@@ -8,66 +8,79 @@ Everything you need to build and run Shoonyakasha.
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| **C++17 compiler** | MSVC 19.14+ recommended | GCC 8+ / Clang 7+ also work, but MSVC is the primary target on Windows |
-| **CMake** | 3.20+ | Build system generator |
-| **Vulkan SDK** | Latest (LunarG) | [https://vulkan.lunarg.com/](https://vulkan.lunarg.com/) — includes validation layers and shader compiler |
-| **Python** | 3.10+ | Only required if building Python bindings (`BUILD_PYTHON=ON`) |
+| **C++20 compiler** | MSVC 2022 | GCC 12+ / Clang 15+ should work; only MSVC on Windows is verified by CI |
+| **CMake** | 3.21+ | Enforced by `CMakeLists.txt` |
+| **Vulkan SDK** | LunarG, recent | [vulkan.lunarg.com](https://vulkan.lunarg.com/) — provides the validation layers and `glslc` |
+| **vcpkg** | any recent checkout | All C++ dependencies come from here |
+| **Python** | 3.9+ | Only for the Python bindings (`BUILD_PYTHON=ON`) |
 
-## Dependencies (Managed by CMake)
+## Dependencies
 
-These are fetched or found automatically — you do not need to install them manually:
+These come from **vcpkg**, declared in `vcpkg.json` and pinned to a
+`builtin-baseline` so two machines resolve the same versions. You do not install
+them by hand, but you *do* have to pass vcpkg's toolchain file — see below.
 
-- **EnTT** — Entity Component System
-- **Bullet3** — Physics (collision detection, rigid body dynamics)
-- **GLM** — Math library (vectors, matrices, quaternions)
-- **VMA (Vulkan Memory Allocator)** — GPU memory management
-- **GLFW** — Windowing and input
+- **EnTT** — entity component system
+- **Bullet3** — physics
+- **GLM** — mathematics
+- **GLFW3** — windowing and input
 - **nlohmann-json** — JSON parsing
-- **stb** — Image loading (stb_image)
-- **tinygltf** — glTF model loading
+- **Vulkan** — via the SDK
+- **GoogleTest** — only with the `tests` feature
+
+Vendored under `third_party/` rather than fetched: **cgltf** (glTF loading),
+**stb** (image loading), **VulkanMemoryAllocator**, **tinyobjloader**.
 
 ## CMake Build Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `BUILD_PYTHON` | `OFF` | Build Cython/Python bindings. Produces `python/shoonyakasha/_shoonyakasha.pyd`. |
-| `BUILD_TESTS` | `OFF` | Build GTest test suite (582 tests: 518 core + 64 facade). |
+| `BUILD_EXAMPLES` | `OFF` | Build the nine C++ examples. Needs `glslc` from the Vulkan SDK. |
+| `BUILD_TESTS` | `OFF` | Build the GoogleTest suite. Also needs `-DVCPKG_MANIFEST_FEATURES=tests`. |
+| `BUILD_PYTHON` | `OFF` | Build the Cython extension module. |
+| `SHOONYAKASHA_INSTALL` | `ON` | Generate install/export rules. The wheel build turns this off. |
 
 ## Building
 
-### IDE Build (Recommended)
-
-Use **CLion with the MSVC toolchain** or **Visual Studio** (open the CMake project directly).
-
-> **Warning:** Do NOT build from a bare CLI terminal. The MSVC compiler requires `vcvars64.bat` environment setup, which IDE toolchains handle automatically. If you must use the command line, run from a **Developer Command Prompt** or source `vcvars64.bat` first.
-
-### CMake Configuration Example
-
-```
-cmake -B build -DBUILD_TESTS=ON -DBUILD_PYTHON=ON
+```bash
+cmake -B build -S . \
+  -DCMAKE_TOOLCHAIN_FILE=<path-to-vcpkg>/scripts/buildsystems/vcpkg.cmake \
+  -DBUILD_TESTS=ON -DVCPKG_MANIFEST_FEATURES=tests
 cmake --build build --config Release
 ```
 
+Two things are easy to miss, and both fail at configure time:
+
+- **The toolchain file is required.** Every dependency is resolved with
+  `find_package(... CONFIG REQUIRED)` against vcpkg, so without it the first
+  `find_package` fails.
+- **`BUILD_TESTS=ON` alone is not enough.** GoogleTest sits behind the `tests`
+  feature in the manifest, so `VCPKG_MANIFEST_FEATURES=tests` must be set too.
+
+An IDE that manages CMake for you (CLion, Visual Studio) will normally supply
+the toolchain file once vcpkg is configured. A plain terminal will not, but
+works fine otherwise — from a Developer Command Prompt, or any shell where
+`vcvars64.bat` has been sourced, so that MSVC is on `PATH`.
+
 ## Python Setup
 
-No wheel or `pip install` needed. The bindings compile to a local `.pyd` module.
+`pip install .` is the supported path; it drives CMake through scikit-build-core
+using the settings in `pyproject.toml`.
 
-1. Build with `BUILD_PYTHON=ON`.
-2. Add the `python/` directory to your `PYTHONPATH`:
-   ```
-   set PYTHONPATH=H:\cpp_dev\Shoonyakasha\python;%PYTHONPATH%
-   ```
-3. Import:
-   ```python
-   import shoonyakasha
-   ```
+Building the extension by hand on Windows additionally needs
+`-DVCPKG_TARGET_TRIPLET=x64-windows-static-md`. Without it the module builds but
+fails to import with `DLL load failed`, because it links against vcpkg DLLs that
+do not end up beside it.
 
 ## Verification
 
-After building with `BUILD_TESTS=ON`, run the test suite to confirm everything works:
-
-```
+```bash
 ctest --test-dir build --output-on-failure
 ```
 
-All **582 tests** should pass (518 core + 64 facade). If any fail, check that the Vulkan SDK is installed and your GPU drivers are up to date.
+The suite is entirely headless — it never creates a `VkInstance` — so it needs
+neither a GPU nor a display, and a failure does **not** indicate a driver
+problem.
+
+See [BUILDING.md](../../BUILDING.md) for the full details, including the Linux
+package list GLFW needs.
