@@ -13,6 +13,7 @@
 #include "ECS/SkeletalAnimationSystem.h"
 
 #include <cgltf.h>
+#include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -494,7 +495,23 @@ GPUBuffer GltfSceneLoader::buildIndexBuffer(
 
     const cgltf_accessor* indexAccessor = primitive.indices;
     size_t indexCount = indexAccessor->count;
-    bool use16Bit = (indexCount <= 65535);
+
+    // Read every index at full width first, then narrow only if the largest one
+    // actually fits. The width must be chosen from the maximum index *value*, not
+    // from the index *count* — indices address the primitive's vertex attributes,
+    // so a mesh with 100k vertices and 60k indices carries values well above 65535
+    // even though the count does not. Testing the count silently truncated those
+    // to garbage triangles.
+    std::vector<uint32_t> wide(indexCount);
+    uint32_t maxIndex = 0;
+    for (size_t i = 0; i < indexCount; ++i) {
+        wide[i] = static_cast<uint32_t>(cgltf_accessor_read_index(indexAccessor, i));
+        maxIndex = std::max(maxIndex, wide[i]);
+    }
+
+    // 0xFFFF is reserved as the primitive-restart marker for 16-bit indices, so it
+    // is not usable as a vertex index.
+    bool use16Bit = (indexCount > 0) && (maxIndex < 0xFFFFu);
 
     outIndexCount = static_cast<uint32_t>(indexCount);
     outIndexType = use16Bit ? Shoonyakasha::IndexType::UInt16 : Shoonyakasha::IndexType::UInt32;
@@ -505,7 +522,7 @@ GPUBuffer GltfSceneLoader::buildIndexBuffer(
     if (use16Bit) {
         std::vector<uint16_t> indices(indexCount);
         for (size_t i = 0; i < indexCount; ++i) {
-            indices[i] = static_cast<uint16_t>(cgltf_accessor_read_index(indexAccessor, i));
+            indices[i] = static_cast<uint16_t>(wide[i]);
         }
 
         bufferSize = indices.size() * sizeof(uint16_t);
@@ -526,10 +543,7 @@ GPUBuffer GltfSceneLoader::buildIndexBuffer(
             bufferSize
         );
     } else {
-        std::vector<uint32_t> indices(indexCount);
-        for (size_t i = 0; i < indexCount; ++i) {
-            indices[i] = static_cast<uint32_t>(cgltf_accessor_read_index(indexAccessor, i));
-        }
+        const std::vector<uint32_t>& indices = wide;
 
         bufferSize = indices.size() * sizeof(uint32_t);
         buffer = GPUResourceFactory::createBuffer(
