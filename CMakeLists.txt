@@ -175,6 +175,7 @@ if(BUILD_EXAMPLES)
     add_subdirectory(examples/physics_test)
     add_subdirectory(examples/pbr_physics_particles)
     add_subdirectory(examples/facade_test)
+    add_subdirectory(examples/instancing_test)
 endif()
 
 # Python/Cython bindings

@@ -175,7 +175,7 @@ src/               Implementation files
 python/            Cython bindings and Python package
   shoonyakasha/    Python module
   examples/        Python demo scripts
-examples/          9 C++ example applications
+examples/          10 C++ example applications
 tests/             Automated test suite
 docs/              Guides, API reference, architecture docs
 third_party/       VulkanMemoryAllocator, cgltf, stb, tinyobjloader

@@ -157,6 +157,10 @@ Three deliberate escape hatches, since automatic is not always what you want:
 `pendingCount()` and `liveCount()` report retired-not-yet-freed and
 adopted-and-still-referenced, which is the counting mechanism made visible.
 
+`examples/instancing_test` demonstrates all of it and checks it: run it with
+`--selftest` and it drives spawn, destroy, release and flush on a timer,
+asserting the buffer counts after each.
+
 ### A fifth leak this exposed
 
 With C fixed, `skinned_mesh_test` still leaked exactly one buffer: the bone SSBO.

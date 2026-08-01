@@ -93,7 +93,10 @@ TEST(FacadeTypes, GltfOptions_Defaults) {
     EXPECT_TRUE(opts.createEntities);
     EXPECT_TRUE(opts.loadSkins);
     EXPECT_TRUE(opts.loadAnimations);
-    EXPECT_TRUE(opts.flattenHierarchy);
+    // Defaults to false: keep the glTF node tree and share vertex buffers between
+    // instances. true restores the old behaviour of baking each node's world
+    // transform into its vertices, which makes sharing impossible.
+    EXPECT_FALSE(opts.flattenHierarchy);
     EXPECT_EQ(opts.maxTextureSize, 0);
     EXPECT_TRUE(opts.generateMipmaps);
     EXPECT_TRUE(opts.srgbAlbedo);

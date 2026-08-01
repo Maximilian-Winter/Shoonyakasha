@@ -168,6 +168,22 @@ public:
         const GltfLoadOptions& options = GltfLoadOptions{}
     );
 
+    /// Drop the shared-geometry cache.
+    ///
+    /// The cache holds a reference to every mesh primitive it has built, which is
+    /// what lets a second load of the same file reuse the buffers — and also what
+    /// keeps them alive after the last entity using them is destroyed. Without
+    /// this, geometry accumulates for the lifetime of the loader, which matters
+    /// for anything that loads more than one level.
+    ///
+    /// Safe at any time: primitives still referenced by a MeshComponent stay
+    /// alive, and the rest retire through the delete queue in the usual way.
+    /// Reloading the file afterwards simply rebuilds them.
+    ///
+    /// Textures are deliberately NOT dropped here — GPUTexture is not
+    /// reference-counted, and materials hold its views and samplers directly.
+    void releaseCachedGeometry();
+
 private:
     VulkanDevice& m_device;
 

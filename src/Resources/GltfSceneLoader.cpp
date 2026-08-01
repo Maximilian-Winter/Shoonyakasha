@@ -82,6 +82,10 @@ GltfSceneLoader::~GltfSceneLoader() {
     destroyTextureCache();
 }
 
+void GltfSceneLoader::releaseCachedGeometry() {
+    m_primitiveCache.clear();
+}
+
 void GltfSceneLoader::destroyTextureCache() {
     for (auto& [key, texture] : m_textureCache) {
         GPUResourceFactory::destroyTexture(
