@@ -436,3 +436,75 @@ Ordered by (impact × confidence) ÷ effort, not by severity alone.
 - CRIT-8 was found independently by two reviewers with different scopes.
 - Where a reviewer was unsure, the per-subsystem report says so explicitly. Findings marked
   "latent" have no live caller today and would only bite if the code is wired up.
+
+---
+
+## 10. Findings discovered during remediation (2026-08-01)
+
+Recorded as they surfaced while working through the fixes. None are regressions
+from that work; each was verified against the pre-change build where relevant.
+
+### `facade_test` cannot run from its own directory
+
+`examples/facade_test/` contains only `main.cpp` and `CMakeLists.txt`. The three
+assets its `main.cpp` names — `pipeline.json`, `cubemaps_hdrs/…8k.hdr`, and
+`Sponza/glTF/Sponza.gltf` — are all absent from the repository, so `run()`
+throws `Cannot open frame graph file: 'pipeline.json'`. Run with a working
+directory that has those assets, it initialises and renders normally.
+
+The README lists it as the example that demonstrates the Facade API, so this is
+the first example a new user is likely to try.
+
+### Teardown after a failed `run()` segfaults
+
+**Reproduced identically with and without the remediation work** (verified by
+stashing it and rebuilding), so it is pre-existing.
+
+When `run()` throws during initialisation, `onCleanup()` runs and logs, and the
+process then segfaults during destruction. The normal exit path has not been
+observed, because every example run so far was ended by a timeout rather than by
+closing the window — so it is not yet known whether this affects clean shutdown
+too. Worth establishing before anything else here: run one example and close its
+window.
+
+### Validation errors remaining in `bloom_test`
+
+See `validation-bloom-test.md`. After the barrier work, four examples are
+validation-clean and `bloom_test` is not. Its 50 messages are the two items
+deliberately deferred out of that phase:
+
+- queue ownership transfer emitted twice on the acquiring queue, never released
+  on the source
+- barriers emitted only on layout *change*, so same-layout hazards get none and
+  the descriptor-declared layout drifts from the actual one
+
+Plus one not previously reported: a descriptor `params` used in a dispatch that
+was never updated.
+
+### The swapchain `present` usage was content, not engine
+
+`vkQueuePresentKHR` complained every frame that the swapchain image was in
+`COLOR_ATTACHMENT_OPTIMAL`. `ResourceUsage::Present` already existed and was
+handled correctly throughout the compiler; the shipped pipelines just declared
+their final pass as `color_write`. Corrected in 14 of 17 pipelines.
+
+`full_showcase/showcase_pipeline.json` is the exception: three passes write the
+swapchain and two are `color_blend`. **A pass that both blends and presents
+cannot be expressed** — `ColorAttachmentBlend` carries its own initialLayout
+handling and previous-writer chain that `Present` does not. This is a genuine
+schema gap.
+
+### The per-draw path ignored the compiler's offsets
+
+Worse than the mat3 defect originally reported, and previously unnoticed:
+`bindEntityData` and `fillBuffer` recomputed field offsets with a tight-packing
+accumulator, discarding the compiler's std140/std430 offsets entirely. They
+agreed only because `MaterialPushConstants` happens to contain no `vec3`.
+
+### `mat3` and `std430` were latent, not live
+
+No shipped `bufferLayouts` entry uses `vec3`, `mat3`, `mat2`, `bool`, `double`,
+`ivecN` or `uvecN` — every field is `mat4`, `vec4`, `vec2`, `float`, `uint`, or
+`vec4[16]`. Correct std140 and correct std430 produce byte-identical layouts to
+the pre-fix output for all of them, which is what made the packing refactor
+safe to verify.
