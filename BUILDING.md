@@ -19,9 +19,19 @@ configure. You do not install them by hand.
 | Vulkan | GPU driver + [LunarG SDK](https://vulkan.lunarg.com/) | GPU driver + `glslc` |
 | Python (bindings only) | 3.8+, 64-bit | 3.8+, with `python3-dev` |
 
-The Vulkan **loader and headers** are supplied by vcpkg. The **SDK** is still
-worth installing separately: it provides `glslc` for shader compilation and the
-validation layers, neither of which vcpkg's `vulkan` port carries.
+The Vulkan **loader and headers** are supplied by vcpkg. The **SDK** is a hard
+requirement for `BUILD_EXAMPLES=ON`: each example calls `find_program(GLSLC glslc
+HINTS $ENV{VULKAN_SDK}/Bin $ENV{VULKAN_SDK}/bin)` and aborts with
+`glslc not found!` if it is missing. Install the SDK and make sure `VULKAN_SDK`
+is exported before configuring.
+
+On Linux, `glslc` can also come from a distribution package (`shaderc` on Fedora,
+`glslc` or `shaderc` on Arch; Debian/Ubuntu ship `glslangValidator` in
+`glslang-tools`, which is *not* the same binary). `find_program` searches `PATH`
+in addition to the hints, so a packaged `glslc` on `PATH` satisfies it without
+`VULKAN_SDK` being set.
+
+The engine library itself does not need the SDK — only the examples do.
 
 ### Getting vcpkg
 
@@ -131,16 +141,39 @@ cmake -S . -B build -G Ninja \
 cmake --build build
 ```
 
-Executables land in `build/examples/<name>/`. Run them **from their own source
-directory** — examples resolve shader and model paths relative to the working
-directory:
+**Target names are not directory names.** `examples/particle_flow_example` builds
+a target called `ParticleFlowExample`. To list what actually exists:
 
 ```bash
-cd examples/physics_test
-../../build/examples/physics_test/physics_test
+cmake --build build --target help        # Ninja / Make
 ```
 
-Available examples: `particle_test`, `bloom_test`, `declarative_sponza_test`,
+Executables land in `build/examples/<dir>/` with the Ninja generator, and in
+`build/examples/<dir>/Release/` with the Visual Studio generator.
+
+Run them **from their own source directory**. Each example compiles its shaders
+in-place — `add_custom_command` writes `.spv` files next to the `.vert`/`.frag`/
+`.comp` sources under `examples/<dir>/shaders/` — and models and textures live
+there too, so the working directory has to be the example's source folder:
+
+```bash
+cd examples/particle_flow_example
+../../build/examples/particle_flow_example/ParticleFlowExample
+```
+
+```powershell
+cd examples\particle_flow_example
+..\..\build\examples\particle_flow_example\ParticleFlowExample.exe
+```
+
+In CLion or Visual Studio this is already handled: the examples set
+`VS_DEBUGGER_WORKING_DIRECTORY` to their own source directory, so running from
+the IDE works without extra configuration.
+
+Because shaders are compiled in-source, `.spv` files appear in the working tree
+after a build. Add `*.spv` to `.gitignore` if it isn't there already.
+
+Example directories: `particle_test`, `bloom_test`, `declarative_sponza_test`,
 `ssbo_data_flow_example`, `particle_flow_example`, `skinned_mesh_test`,
 `physics_test`, `pbr_physics_particles`, `facade_test`.
 
@@ -332,8 +365,15 @@ a venv breaks if its directory is renamed, copied, or moved. Compare `pip -V` wi
 `python -m pip -V`; if they differ, delete and recreate the venv. Using
 `python -m pip` throughout avoids the class of problem entirely.
 
-**Configure succeeds but examples can't find shaders or models**
-Run them from their own source directory, not from the build tree.
+**`glslc not found! Make sure the Vulkan SDK is installed.`**
+Only affects `BUILD_EXAMPLES=ON`. Either install the LunarG SDK and export
+`VULKAN_SDK`, or put a `glslc` on `PATH`. Note that `glslangValidator` will not
+satisfy this check — the examples invoke `glslc` specifically.
+
+**Examples start but can't find shaders or models**
+Run them from their own source directory (`examples/<dir>/`), not from the build
+tree. Shaders are compiled in-place and assets are resolved relative to the
+working directory.
 
 **vcpkg rebuilds everything after switching triplets**
 Expected — the binary cache is keyed per triplet. The Windows engine build
