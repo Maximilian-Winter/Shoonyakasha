@@ -38,7 +38,7 @@ int main() {
         config.height = 2160;
         config.title = "Particle Flow — Visual Showcase";
         config.logFile = "particle_flow.log";
-        config.hdrEnvironmentPath = "cubemaps_hdrs/farm_sunset_8k.hdr";
+        config.hdrEnvironmentPath = "env/farm_sunset_1k.hdr";
         config.pipelineJsonPath = "ssbo_pipeline.json";
         config.renderGraphParameters["particleCount"] = 100000;
 

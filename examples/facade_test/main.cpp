@@ -52,7 +52,7 @@ int main() {
         config.width = 1920;
         config.height = 1080;
         config.logFile = "facade_test.log";
-        config.hdrEnvironmentPath = "cubemaps_hdrs/kloofendal_28d_misty_8k.hdr";
+        config.hdrEnvironmentPath = "env/kloofendal_misty_1k.hdr";
         config.pipelineJsonPath = "pipeline.json";
 
         EngineAPI engine(config);

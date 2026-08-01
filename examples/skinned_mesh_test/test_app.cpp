@@ -46,17 +46,10 @@ int main() {
         config.logFile = "skinned_mesh.log";
         config.pipelineJsonPath = "skinned_pipeline.json";
 
-        // IBL — search shared paths
-        std::vector<std::string> hdrPaths = {
-            "cubemaps_hdrs/charolettenbrunn_park_4k.hdr",
-            "../declarative_sponza_test/cubemaps_hdrs/charolettenbrunn_park_4k.hdr",
-        };
-        for (const auto& path : hdrPaths) {
-            if (std::filesystem::exists(path)) {
-                config.hdrEnvironmentPath = path;
-                break;
-            }
-        }
+        // Resolved against the shared assets/ directory, found by walking up from
+        // the working directory or the executable. This used to be a hand-written
+        // list of candidate paths to try.
+        config.hdrEnvironmentPath = "env/charolettenbrunn_park_1k.hdr";
 
         // Smaller IBL params for this test
         config.iblParams.environmentSize = 512;

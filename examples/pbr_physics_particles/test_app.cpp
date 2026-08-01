@@ -52,7 +52,7 @@ int main() {
         config.height = 1080;
         config.title = "PBR + Physics + Particles + Bloom";
         config.logFile = "combined_example.log";
-        config.hdrEnvironmentPath = "cubemaps_hdrs/kloofendal_28d_misty_8k.hdr";
+        config.hdrEnvironmentPath = "env/kloofendal_misty_1k.hdr";
         config.pipelineJsonPath = "pipeline.json";
         config.renderGraphParameters["particleCount"] = 75000;
 

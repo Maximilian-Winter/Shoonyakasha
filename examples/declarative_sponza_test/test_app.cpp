@@ -43,7 +43,7 @@ int main() {
         ApplicationConfig config;
         config.title = "Declarative Sponza - v3 Frame Graph";
         config.logFile = "declarative_sponza.log";
-        config.hdrEnvironmentPath = "cubemaps_hdrs/kloofendal_28d_misty_8k.hdr";
+        config.hdrEnvironmentPath = "env/kloofendal_misty_1k.hdr";
         config.pipelineJsonPath = "pbr_ibl_pipeline_v3.json";
         config.renderGraphParameters["particleCount"] = 50000;
 

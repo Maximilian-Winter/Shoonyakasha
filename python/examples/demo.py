@@ -49,7 +49,7 @@ engine = sk.Engine(
     width=1920,
     height=1080,
     log_file="python_demo.log",
-    hdr_environment_path="cubemaps_hdrs/kloofendal_28d_misty_8k.hdr",
+    hdr_environment_path="env/kloofendal_misty_1k.hdr",
     pipeline_json_path="pbr_ibl_pipeline_v3.json",
     render_graph_parameters={"particleCount": PARTICLE_COUNT},
 )

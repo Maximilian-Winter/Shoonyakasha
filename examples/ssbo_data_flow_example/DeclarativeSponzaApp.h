@@ -84,7 +84,7 @@ private:
     // IBL Resources
     // ═══════════════════════════════════════════════════════════════
     IBLResources m_iblResources;
-    std::string m_hdrEnvironmentPath = "cubemaps_hdrs/kloofendal_28d_misty_8k.hdr";
+    std::string m_hdrEnvironmentPath = "env/kloofendal_misty_1k.hdr";
 
     // ═══════════════════════════════════════════════════════════════
     // Particle System — GPU compute + SSBO

@@ -20,7 +20,7 @@ engine = sk.Engine(
     height=720,
     log_file="skinned_fox_python.log",
     pipeline_json_path="skinned_pipeline.json",
-    hdr_environment_path="cubemaps_hdrs/charolettenbrunn_park_4k.hdr",
+    hdr_environment_path="env/charolettenbrunn_park_1k.hdr",
 )
 
 # Track animated entities for key handling

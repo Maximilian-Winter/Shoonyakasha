@@ -31,7 +31,7 @@ void DeclarativeSponzaApp::onInit() {
     options.namePrefix = "sponza";
     options.maxTextureSize = 4096;
 
-    auto result = loadGltfScene("Box.gltf", options);
+    auto result = loadGltfScene("models/Box.gltf", options);
     if (!result.success) {
         throw std::runtime_error("Failed to load glTF: " + result.error);
     }

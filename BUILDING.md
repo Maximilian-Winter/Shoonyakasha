@@ -370,10 +370,22 @@ Only affects `BUILD_EXAMPLES=ON`. Either install the LunarG SDK and export
 `VULKAN_SDK`, or put a `glslc` on `PATH`. Note that `glslangValidator` will not
 satisfy this check — the examples invoke `glslc` specifically.
 
-**Examples start but can't find shaders or models**
+**Examples start but can't find shaders or the pipeline JSON**
 Run them from their own source directory (`examples/<dir>/`), not from the build
-tree. Shaders are compiled in-place and assets are resolved relative to the
-working directory.
+tree. Shaders are compiled in place and each example's `pipeline.json` sits
+beside its source.
+
+Models, environment maps, textures and fonts are *not* affected by this: they
+live in the shared `assets/` directory, which is found by walking up from either
+the working directory or the executable. The startup log records which:
+
+```
+[INFO] Asset root: found above the working directory: .../Shoonyakasha/assets
+```
+
+Set `SHOONYAKASHA_ASSET_DIR` to override it. If an asset is missing, run
+`python tools/fetch_assets.py --list` — the large environment maps and the
+Sponza scene are not committed.
 
 **vcpkg rebuilds everything after switching triplets**
 Expected — the binary cache is keyed per triplet. The Windows engine build

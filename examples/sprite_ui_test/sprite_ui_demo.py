@@ -62,7 +62,7 @@ def on_init():
         anchor=sk.UI_ANCHOR_BOTTOM_RIGHT,
         offset_pixels=(-90, -50),
         size_pixels=(160, 80),
-        texture_path="panel.png",
+        texture_path="textures/panel.png",
     )
 
     # Text label anchored to the top-left panel's position, baked from a
@@ -71,7 +71,7 @@ def on_init():
         text="Score: 0",
         anchor=sk.UI_ANCHOR_TOP_LEFT,
         offset_pixels=(20, 60),
-        font_path="./font/font.ttf",
+        font_path="fonts/Roboto-Regular.ttf",
         font_size=28.0,
         color=(1.0, 1.0, 1.0, 1.0),
     )

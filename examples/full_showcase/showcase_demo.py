@@ -95,7 +95,7 @@ def make_orb(index, count):
 
     orb = engine.create_sprite(
         world_pos=(center[0] + radius * math.cos(angle), center[1] + radius * math.sin(angle), 0.0),
-        texture_path="orb.png",
+        texture_path="textures/orb.png",
         size=(0.5, 0.5),
         tint=(1.0, 1.0, 1.0, 1.0),
     )
@@ -103,7 +103,7 @@ def make_orb(index, count):
 
     glow = engine.create_sprite(
         world_pos=(center[0] + radius * math.cos(angle), center[1] + radius * math.sin(angle), 0.0),
-        texture_path="glow.png",
+        texture_path="textures/glow.png",
         size=(1.2, 1.2),
         tint=(1.0, 0.8, 0.4, 0.6),
     )
@@ -132,7 +132,7 @@ def on_init():
         anchor=sk.UI_ANCHOR_MIDDLE_CENTER,
         offset_pixels=(0, 0),
         size_pixels=(1280, 720),
-        texture_path="vignette.png",
+        texture_path="textures/vignette.png",
         color=(0.0, 0.0, 0.05, 0.35),
     )
     engine.scene.set_render_layer_mask(vignette, LAYER_PREMULTIPLIED)
@@ -145,7 +145,7 @@ def on_init():
         anchor=sk.UI_ANCHOR_TOP_LEFT,
         offset_pixels=(140, 45),
         size_pixels=(260, 70),
-        texture_path="panel.png",
+        texture_path="textures/panel.png",
         color=(0.08, 0.08, 0.12, 0.85),
     )
     engine.scene.set_render_layer_mask(hud_panel, LAYER_ALPHA)
@@ -154,7 +154,7 @@ def on_init():
         text=f"Orbs: {len(orbs)}",
         anchor=sk.UI_ANCHOR_TOP_LEFT,
         offset_pixels=(20, 40),
-        font_path="./font/font.ttf",
+        font_path="fonts/Roboto-Regular.ttf",
         font_size=22.0,
         color=(1.0, 1.0, 1.0, 1.0),
     )
@@ -164,7 +164,7 @@ def on_init():
         text="Systems: OK",
         anchor=sk.UI_ANCHOR_BOTTOM_LEFT,
         offset_pixels=(90, -30),
-        font_path="./font/font.ttf",
+        font_path="fonts/Roboto-Regular.ttf",
         font_size=18.0,
         color=(0.6, 1.0, 0.6, 1.0),
     )

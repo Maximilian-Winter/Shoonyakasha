@@ -42,7 +42,7 @@ int main() {
         ApplicationConfig config;
         config.title = "Physics Test - Bullet3 Integration";
         config.logFile = "physics_test.log";
-        config.hdrEnvironmentPath = "cubemaps_hdrs/kloofendal_28d_misty_8k.hdr";
+        config.hdrEnvironmentPath = "env/kloofendal_misty_1k.hdr";
         config.pipelineJsonPath = "pipeline.json";
 
         PhysicsTestApp app(config);

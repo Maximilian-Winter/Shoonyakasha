@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
         config.logFile = "instancing_test.log";
         // Shared with physics_test rather than duplicated: it is the only HDR
         // tracked in the repository, and it is 99 MB.
-        config.hdrEnvironmentPath = "../physics_test/cubemaps_hdrs/kloofendal_28d_misty_8k.hdr";
+        config.hdrEnvironmentPath = "env/kloofendal_misty_1k.hdr";
         config.pipelineJsonPath = "pipeline.json";
 
         InstancingTestApp app(config, selfTest);

@@ -30,6 +30,8 @@
 #include "Resources/Sprite2DManager.h"
 #include "Resources/FontLoader.h"
 
+#include "Core/AssetPaths.h"
+
 #include <GLFW/glfw3.h>
 #include <stdexcept>
 #include <iostream>
@@ -64,6 +66,7 @@ void ApplicationBase::run() {
     m_logger->setLogLevel(m_config.logLevel);
     m_eventDispatcher = std::make_unique<EventDispatcher>();
     m_logger->log(LogLevel::Info, "Initializing %s", m_config.title.c_str());
+    m_logger->log(LogLevel::Info, "Asset root: %s", AssetPaths::describe().c_str());
 
     try {
         initializeVulkan();
@@ -168,7 +171,12 @@ void ApplicationBase::loadIBLTextures() {
 
     try {
         IBLGenerator iblGenerator(*m_device, "shaders/ibl/");
-        m_iblResources = iblGenerator.generate(m_config.hdrEnvironmentPath, m_config.iblParams);
+        // Paths go through the asset resolver, so "env/sky.hdr" finds the shared
+        // assets/ directory from whatever working directory the app was launched
+        // in — while a path that already resolves as given is left alone.
+        const std::string hdrPath =
+            AssetPaths::locate(m_config.hdrEnvironmentPath).string();
+        m_iblResources = iblGenerator.generate(hdrPath, m_config.iblParams);
 
         if (m_iblResources.isValid()) {
             m_logger->log(LogLevel::Info, "IBL textures generated successfully");
@@ -539,9 +547,10 @@ entt::entity ApplicationBase::createCamera(const glm::vec3& pos, float fov,
 
 GltfLoadResult ApplicationBase::loadGltfScene(const std::string& path,
                                                 const GltfLoadOptions& opts) {
-    m_logger->log(LogLevel::Info, "Loading glTF scene: %s", path.c_str());
+    const auto resolved = AssetPaths::locate(path);
+    m_logger->log(LogLevel::Info, "Loading glTF scene: %s", resolved.string().c_str());
 
-    auto result = m_gltfLoader->load(path, m_activeScene, opts);
+    auto result = m_gltfLoader->load(resolved, m_activeScene, opts);
 
     if (result.success) {
         m_logger->log(LogLevel::Info, "glTF loaded: %zu entities, %zu vertices, %zu indices",
@@ -621,7 +630,8 @@ entt::entity ApplicationBase::createSprite(const glm::vec3& worldPos,
     material.setParam("uvRect", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
     material.setParam("screenSpace", 0.0f);
     if (!texturePath.empty()) {
-        material.textures["spriteTexture"] = m_sprite2DManager->loadTexture(texturePath);
+        material.textures["spriteTexture"] =
+            m_sprite2DManager->loadTexture(AssetPaths::locate(texturePath).string());
     }
 
     registry.emplace<RenderableTagComponent>(entity);
@@ -651,7 +661,8 @@ entt::entity ApplicationBase::createUIPanel(UIAnchorComponent::Anchor anchor,
     material.setParam("uvRect", glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
     material.setParam("screenSpace", 1.0f);
     if (!texturePath.empty()) {
-        material.textures["spriteTexture"] = m_sprite2DManager->loadTexture(texturePath);
+        material.textures["spriteTexture"] =
+            m_sprite2DManager->loadTexture(AssetPaths::locate(texturePath).string());
     }
 
     registry.emplace<RenderableTagComponent>(entity);
@@ -681,7 +692,7 @@ entt::entity ApplicationBase::createText(const std::string& text,
 
     auto& textComp = registry.emplace<Text2DComponent>(entity);
     textComp.text = text;
-    textComp.font = fontPath;
+    textComp.font = AssetPaths::locate(fontPath).string();
     textComp.fontSize = fontSize;
     textComp.color = color;
 

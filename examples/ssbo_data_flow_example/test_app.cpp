@@ -61,7 +61,7 @@ int main(int argc, char* argv[]) {
         config.width = 3840;
         config.height = 2160;
         config.logFile = "ssbo_data_flow.log";
-        config.hdrEnvironmentPath = "cubemaps_hdrs/kloofendal_28d_misty_8k.hdr";
+        config.hdrEnvironmentPath = "env/kloofendal_misty_1k.hdr";
         config.renderGraphParameters["particleCount"] = 150000;
 
         // Choose pipeline JSON based on mode

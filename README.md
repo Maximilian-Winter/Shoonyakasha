@@ -176,11 +176,19 @@ python/            Cython bindings and Python package
   shoonyakasha/    Python module
   examples/        Python demo scripts
 examples/          10 C++ example applications
+assets/            Shared example assets (models, environments, textures, fonts)
+tools/             Asset fetch and conversion scripts
 tests/             Automated test suite
 docs/              Guides, API reference, architecture docs
 third_party/       VulkanMemoryAllocator, cgltf, stb, tinyobjloader
 cmake/             CMake configuration
 ```
+
+Every example runs on a fresh clone — `assets/` ships small versions of
+everything they load, and paths are resolved against it at runtime rather than
+relative to the working directory. `python tools/fetch_assets.py env` gets the
+full-resolution environment maps. See [assets/README.md](assets/README.md) for
+provenance and licences.
 
 ## Documentation
 

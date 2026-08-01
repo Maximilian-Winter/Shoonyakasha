@@ -165,7 +165,7 @@ void DeclarativeSponzaApp::loadGltfScene() {
     options.maxTextureSize = 4096;
 
     auto result = m_gltfLoader->load(
-        "Box.gltf",
+        "models/Box.gltf",
         m_activeScene,
         options
     );

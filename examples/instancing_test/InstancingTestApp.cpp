@@ -53,7 +53,7 @@ void InstancingTestApp::onInit() {
 
     GltfLoadOptions options;
     options.namePrefix = "box";
-    auto result = loadGltfScene("instanced_boxes.gltf", options);
+    auto result = loadGltfScene("models/instanced_boxes.gltf", options);
 
     const size_t buffersAfter = getDevice().getDeleteQueue().liveCount();
 
