@@ -5,6 +5,7 @@
 #include "../../include/Vulkan/VulkanInstance.h"
 #include <stdexcept>
 #include <iostream>
+#include <cstring>
 #include <GLFW/glfw3.h>
 
 namespace Shoonyakasha {
@@ -18,6 +19,12 @@ VulkanInstance::VulkanInstance(bool enableValidationLayers)
 {
     m_logger = new Logger("vulkan_instance.log");
     m_eventDispatcher = new EventDispatcher();
+
+    // The layer list must be populated before createInstance(), which reads it both
+    // for checkValidationLayerSupport() and for ppEnabledLayerNames.
+    if (m_validationLayersEnabled) {
+        m_validationLayers.push_back("VK_LAYER_KHRONOS_validation");
+    }
 
     m_logger->log(LogLevel::Info, "Creating Vulkan Instance");
     glfwInit();
@@ -45,7 +52,13 @@ VulkanInstance::~VulkanInstance() {
 
 void VulkanInstance::createInstance() {
     if (m_validationLayersEnabled && !checkValidationLayerSupport()) {
-        throw std::runtime_error("validation layers requested, but not available!");
+        // Degrade rather than abort: validation is on by default, and a machine without
+        // the Khronos layer installed should still be able to run the engine.
+        m_logger->log(LogLevel::Warning,
+                      "VK_LAYER_KHRONOS_validation not available - continuing without validation. "
+                      "Install the Vulkan SDK to enable it.");
+        m_validationLayers.clear();
+        m_validationLayersEnabled = false;
     }
 
     VkApplicationInfo appInfo{};
@@ -145,7 +158,10 @@ bool VulkanInstance::checkValidationLayerSupport() {
 void VulkanInstance::populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
     createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    // VERBOSE is deliberately omitted: the Logger filters below Info by default, so those
+    // messages cost layer-side work and are then discarded. Warnings and errors are the
+    // actionable set.
+    createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
     createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     createInfo.pfnUserCallback = debugCallback;
     createInfo.pUserData = this;  // Optional

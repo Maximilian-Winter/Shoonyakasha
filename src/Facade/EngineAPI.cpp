@@ -190,6 +190,7 @@ static ApplicationConfig toAppConfig(const EngineConfig& fc) {
     ac.hdrEnvironmentPath = fc.hdrEnvironmentPath;
     ac.pipelineJsonPath   = fc.pipelineJsonPath;
     ac.maxFramesInFlight  = fc.maxFramesInFlight;
+    ac.enableValidation   = fc.enableValidation;
 
     // Convert vector<pair> → unordered_map
     for (const auto& [key, val] : fc.renderGraphParameters) {
