@@ -92,6 +92,17 @@ if(BUILD_TESTS)
     target_compile_definitions(Shoonyakasha PRIVATE SHOONYAKASHA_TESTING)
 endif()
 
+# Warnings. Every example target and the test target already build at /W4 or
+# -Wall -Wextra; the engine library itself did not, which left the largest and
+# most error-prone part of the codebase compiling at the compiler default.
+# PRIVATE so consumers are not forced into our warning level.
+# No -Werror yet — turn it on once the existing warnings are cleared.
+if(MSVC)
+    target_compile_options(Shoonyakasha PRIVATE /W4)
+else()
+    target_compile_options(Shoonyakasha PRIVATE -Wall -Wextra)
+endif()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Install / export
 # ─────────────────────────────────────────────────────────────────────────────
