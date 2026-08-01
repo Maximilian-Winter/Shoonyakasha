@@ -195,6 +195,17 @@ protected:
 private:
     ApplicationConfig m_config;
 
+    // ─── Diagnostics ───────────────────────────────────────────
+    //
+    // Declared first, so they are destroyed LAST. Both are handed out as raw
+    // pointers and references — VulkanWindow borrows both, StandaloneInputHandler
+    // borrows the dispatcher, and getLogger()/getEventDispatcher() hand them to
+    // anyone. Declared further down, they were destroyed while their borrowers
+    // were still alive, and ~VulkanWindow's first statement logged through a
+    // freed Logger.
+    std::unique_ptr<Logger> m_logger;
+    std::unique_ptr<EventDispatcher> m_eventDispatcher;
+
     // ─── Vulkan Core ───────────────────────────────────────────
     std::unique_ptr<VulkanInstance> m_instance;
     std::unique_ptr<VulkanWindow> m_window;
@@ -206,14 +217,16 @@ private:
     std::unique_ptr<GltfSceneLoader> m_gltfLoader;
     std::unique_ptr<Sprite2DManager> m_sprite2DManager;
     std::unique_ptr<FontLoader> m_fontLoader;
-    std::unique_ptr<Logger> m_logger;
-    std::unique_ptr<EventDispatcher> m_eventDispatcher;
     std::vector<VkCommandBuffer> m_commandBuffers;
     glm::vec2 m_screenSize{1600.0f, 900.0f};  // Updated each frame; drives UILayoutSystem
 
     // ─── Frame Graph ───────────────────────────────────────────
-    std::unique_ptr<FrameGraph::RenderGraph> m_renderGraph;
+    // The registry must outlive the graph: RenderGraph holds a raw pointer to it
+    // (setSharedBufferRegistry) and unregisters its targets in ~RenderGraph.
+    // Declared the other way round, the registry was destroyed first and that
+    // unregister call reached into freed memory — the shutdown crash.
     std::unique_ptr<FrameGraph::SharedBufferRegistry> m_sharedBufferRegistry;
+    std::unique_ptr<FrameGraph::RenderGraph> m_renderGraph;
 
     // ─── ECS ───────────────────────────────────────────────────
     std::unique_ptr<ECS::SceneManager> m_sceneManager;

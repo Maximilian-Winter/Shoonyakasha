@@ -26,14 +26,22 @@ VulkanWindow::VulkanWindow(int width, int height, const std::string& title, Vulk
 }
 
 VulkanWindow::~VulkanWindow() {
-    m_logger->log(LogLevel::Info, "Destroying Vulkan Window");
+    // m_logger and m_eventDispatcher are borrowed, not owned — the constructor
+    // takes raw pointers to objects the caller keeps. Deleting them here made
+    // ApplicationBase's unique_ptrs double-free, and the log call above it was a
+    // use-after-free besides, since ApplicationBase destroys its logger before
+    // its window. That is why "Destroying Vulkan Window" never appeared in the
+    // log: the process died on this line.
+    if (m_logger) {
+        m_logger->log(LogLevel::Info, "Destroying Vulkan Window");
+    }
 
     vkDestroySurfaceKHR(m_instance.getInstance(), m_surface, nullptr);
     glfwDestroyWindow(m_window);
-    glfwTerminate();
 
-    delete m_logger;
-    delete m_eventDispatcher;
+    // glfwInit() is called by VulkanInstance, which outlives this object, so
+    // terminating GLFW here tears down a library the instance still owns.
+    // Left to VulkanInstance's destructor instead.
 }
 
 void VulkanWindow::initWindow() {

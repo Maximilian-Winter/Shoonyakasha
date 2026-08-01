@@ -46,6 +46,10 @@ VulkanInstance::~VulkanInstance() {
 
     vkDestroyInstance(m_instance, nullptr);
 
+    // Pairs with the glfwInit() in the constructor. It used to be called from
+    // ~VulkanWindow, which runs while this instance is still alive.
+    glfwTerminate();
+
     delete m_logger;
     delete m_eventDispatcher;
 }
