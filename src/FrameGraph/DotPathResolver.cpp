@@ -469,8 +469,17 @@ std::string DotPathResolver::validatePath(const std::string& path) const {
             return "Invalid scene path: '" + path + "' - must specify property (e.g., scene.camera.view)";
         }
         // Valid scene categories
-        static const std::vector<std::string> validCategories = {"camera", "environment", "time", "screen"};
+        // Must match what resolveScenePath actually handles. "lights" and
+        // "custom" were missing, so validatePath rejected two categories that
+        // resolve perfectly well — one reason it was never wired into anything.
+        static const std::vector<std::string> validCategories = {
+            "camera", "environment", "time", "screen", "lights", "custom"
+        };
         std::string category(parts[1]);
+        // scene.lights[0].positionType arrives as "lights[0]"
+        if (auto bracket = category.find('['); bracket != std::string::npos) {
+            category = category.substr(0, bracket);
+        }
         if (std::find(validCategories.begin(), validCategories.end(), category) == validCategories.end()) {
             return "Invalid scene category: '" + category + "' in path '" + path + "'";
         }
