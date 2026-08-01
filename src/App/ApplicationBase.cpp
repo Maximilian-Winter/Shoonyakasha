@@ -106,7 +106,7 @@ void ApplicationBase::run() {
 // ═══════════════════════════════════════════════════════════════
 
 void ApplicationBase::initializeVulkan() {
-    m_instance = std::make_unique<VulkanInstance>(true);
+    m_instance = std::make_unique<VulkanInstance>(m_config.enableValidation);
     m_window = std::make_unique<VulkanWindow>(
         m_config.width, m_config.height, m_config.title.c_str(),
         *m_instance, m_eventDispatcher.get(), m_logger.get());
