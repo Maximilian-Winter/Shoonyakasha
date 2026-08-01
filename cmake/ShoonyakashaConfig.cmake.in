@@ -1,5 +1,19 @@
 @PACKAGE_INIT@
 
-include("${CMAKE_CURRENT_LIST_DIR}/MagoLocoTargets.cmake")
+include(CMakeFindDependencyMacro)
 
-check_required_components(MagoLoco)
+# Shoonyakasha's exported target links these PUBLICly, so ShoonyakashaTargets
+# .cmake refers to them by name (Vulkan::Vulkan, glfw, BulletDynamics, ...).
+# Those names mean nothing in a consumer's project until the packages that
+# define them have been found, so they have to be resolved here, before the
+# targets file is included.
+find_dependency(Vulkan)
+find_dependency(nlohmann_json CONFIG)
+find_dependency(EnTT CONFIG)
+find_dependency(Bullet CONFIG)
+find_dependency(glfw3 CONFIG)
+find_dependency(glm CONFIG)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ShoonyakashaTargets.cmake")
+
+check_required_components(Shoonyakasha)
