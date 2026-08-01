@@ -365,3 +365,45 @@ TEST(DotPathResolver, ValidatePath_Empty_Invalid) {
     auto error = resolver.validatePath("");
     EXPECT_FALSE(error.empty());
 }
+
+// ═══════════════════════════════════════════════════════════════
+// validatePath — the whitelist must match what actually resolves
+//
+// validatePath had no production caller and its scene whitelist omitted
+// "lights" and "custom", so it rejected two categories resolveScenePath handles
+// perfectly well. It is now called once per field at layout-compile time, so a
+// false positive would be a warning on every shipped pipeline.
+// ═══════════════════════════════════════════════════════════════
+
+TEST(DotPathValidate, AcceptsEveryResolvableSceneCategory) {
+    DotPathResolver r;
+    for (const char* p : {"scene.camera.view",
+                          "scene.environment.ambient",
+                          "scene.time.elapsed",
+                          "scene.screen.width",
+                          "scene.lights.count",
+                          "scene.lights[0].positionType",
+                          "scene.custom.myValue"}) {
+        EXPECT_EQ(r.validatePath(p), "") << "rejected a path that resolves: " << p;
+    }
+}
+
+TEST(DotPathValidate, RejectsUnknownSceneCategory) {
+    DotPathResolver r;
+    EXPECT_NE(r.validatePath("scene.wetaher.rain"), "");
+}
+
+TEST(DotPathValidate, AcceptsEveryResolvableEntityComponent) {
+    DotPathResolver r;
+    for (const char* p : {"entity.transform.worldMatrix",
+                          "entity.material.params.baseColorFactor",
+                          "entity.mesh.vertexCount",
+                          "entity.skeleton.jointCount"}) {
+        EXPECT_EQ(r.validatePath(p), "") << "rejected a path that resolves: " << p;
+    }
+}
+
+TEST(DotPathValidate, RejectsUnknownEntityComponent) {
+    DotPathResolver r;
+    EXPECT_NE(r.validatePath("entity.transfrom.worldMatrix"), "");
+}

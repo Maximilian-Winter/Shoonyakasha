@@ -1637,15 +1637,39 @@ void FrameGraphCompiler::compileBufferLayouts(
         compiled.hasEntitySources = false;
         compiled.hasConstSources = false;
 
+        // Validate every source once, here, at compile time.
+        //
+        // An unresolvable dot-path produces zeros at runtime with no log line at
+        // any severity, no counter and no return value — for an engine whose
+        // premise is that the JSON *is* the pipeline, a typo'd `source` was the
+        // quietest possible failure. DotPathResolver::validatePath existed for
+        // exactly this and had no production caller.
+        Shoonyakasha::DotPathResolver validator;
+
         for (const auto& field : compiled.fields) {
-            if (!field.source.empty()) {
-                if (field.source.starts_with("scene.")) {
-                    compiled.hasSceneSources = true;
-                } else if (field.source.starts_with("entity.")) {
-                    compiled.hasEntitySources = true;
-                } else if (field.source.starts_with("const.")) {
-                    compiled.hasConstSources = true;
-                }
+            if (field.source.empty()) continue;
+
+            if (field.source.starts_with("scene.")) {
+                compiled.hasSceneSources = true;
+            } else if (field.source.starts_with("entity.")) {
+                compiled.hasEntitySources = true;
+            } else if (field.source.starts_with("const.")) {
+                compiled.hasConstSources = true;
+            }
+
+            const std::string problem = validator.validatePath(field.source);
+            if (!problem.empty()) {
+                m_logger->log(LogLevel::Warning,
+                              "  Buffer layout '%s' field '%s': %s. The field will be zeroed every frame.",
+                              desc.name.c_str(), field.name.c_str(), problem.c_str());
+            }
+
+            Shoonyakasha::MaterialParam::Type unusedType;
+            if (!toResolverType(field.type, unusedType)) {
+                m_logger->log(LogLevel::Warning,
+                              "  Buffer layout '%s' field '%s' has a shader type the dot-path "
+                              "resolver cannot produce; it is packed correctly but left zeroed.",
+                              desc.name.c_str(), field.name.c_str());
             }
         }
 
