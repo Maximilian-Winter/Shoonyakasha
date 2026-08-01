@@ -276,9 +276,10 @@ void GltfSceneLoader::processNode(
                 uint32_t vertexStride = 0;
                 GPUBuffer skinnedVB = buildSkinnedVertexBuffer(data, primitive, vertexCount, vertexStride);
                 if (skinnedVB.isValid()) {
-                    // Destroy the StandardVertex buffer that processPrimitive created
-                    GPUResourceFactory::destroyBuffer(m_device.getAllocator().getHandle(), loadedPrimitive.vertexBuffer);
-                    loadedPrimitive.vertexBuffer = skinnedVB;
+                    // Replaces the StandardVertex buffer processPrimitive built.
+                    // That was its only reference, so assigning over it retires the
+                    // old buffer and the delete queue frees it a few frames on.
+                    loadedPrimitive.vertexBuffer = m_device.getDeleteQueue().adopt(skinnedVB);
                     loadedPrimitive.vertexCount = vertexCount;
                     loadedPrimitive.vertexStride = vertexStride;
                 }
@@ -338,12 +339,14 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
     result.worldTransform = worldTransform;
 
     // Build vertex buffer
-    result.vertexBuffer = buildVertexBuffer(data, primitive, worldTransform,
-                                            result.vertexCount, result.vertexStride);
+    result.vertexBuffer = m_device.getDeleteQueue().adopt(
+        buildVertexBuffer(data, primitive, worldTransform,
+                          result.vertexCount, result.vertexStride));
 
     // Build index buffer
-    result.indexBuffer = buildIndexBuffer(data, primitive,
-                                          result.indexCount, result.indexType);
+    result.indexBuffer = m_device.getDeleteQueue().adopt(
+        buildIndexBuffer(data, primitive,
+                         result.indexCount, result.indexType));
 
     // Process material
     if (primitive.material && m_options.loadMaterials) {

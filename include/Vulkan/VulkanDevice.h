@@ -7,6 +7,7 @@
 #include <vulkan/vulkan.h>
 #include "VulkanInstance.h"
 #include "VulkanMemoryAllocator.h"
+#include "GPU/GpuDeleteQueue.h"
 #include "Core/Logger.h"
 #include "Core/EventSystem.h"
 #include <vector>
@@ -53,6 +54,10 @@ public:
     VulkanInstance& getInstance() const { return m_instance; }
     VulkanMemoryAllocator& getAllocator() const { return *m_vmaAllocator; }
 
+    /// Shared ownership and deferred release for GPU buffers. Wrap a buffer with
+    /// `adopt()` to have it freed automatically once nothing references it.
+    GpuDeleteQueue& getDeleteQueue() const { return *m_deleteQueue; }
+
     VkMemoryPropertyFlags getMemoryProperties() const;
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
     VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
@@ -74,6 +79,10 @@ private:
     bool m_hasDedicatedCompute = false;
     QueueFamilyIndices m_queueFamilyIndices;
     std::unique_ptr<VulkanMemoryAllocator> m_vmaAllocator;
+
+    // Declared after the allocator, so it is destroyed first and can still free
+    // what it holds. See the lifetime note on GpuDeleteQueue.
+    std::unique_ptr<GpuDeleteQueue> m_deleteQueue;
 
     Logger* m_logger;
     EventDispatcher* m_eventDispatcher;

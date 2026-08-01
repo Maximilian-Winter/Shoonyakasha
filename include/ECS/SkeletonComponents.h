@@ -12,6 +12,7 @@
 
 #include "Resources/AnimationData.h"
 #include "GPU/GPUTypes.h"
+#include "GPU/GpuDeleteQueue.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -38,8 +39,10 @@ struct SkeletonComponent {
     // boneMatrices[i] = globalTransform[i] * inverseBindMatrix[i]
     std::vector<glm::mat4> boneMatrices;
 
-    // GPU storage buffer for uploading bone matrices to the vertex shader
-    GPUBuffer boneSSBO;
+    // GPU storage buffer for uploading bone matrices to the vertex shader.
+    // Reference-counted: freed when the component goes away, without depending on
+    // an on_destroy hook whose system may already have been torn down.
+    GpuBufferRef boneSSBO;
 
     // Whether boneMatrices have been updated and need re-upload to GPU
     bool dirty = true;

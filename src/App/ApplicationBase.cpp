@@ -259,6 +259,9 @@ void ApplicationBase::bindIBLTextures() {
 }
 
 void ApplicationBase::createSyncObjects() {
+    // Retired GPU buffers must survive this many frames before they can be freed.
+    m_device->getDeleteQueue().setFramesInFlight(m_config.maxFramesInFlight);
+
     m_imageAvailableSemaphores.resize(m_config.maxFramesInFlight);
     m_renderFinishedSemaphores.resize(m_config.maxFramesInFlight);
     m_inFlightFences.resize(m_config.maxFramesInFlight);
@@ -360,6 +363,10 @@ void ApplicationBase::update() {
 
 void ApplicationBase::render() {
     vkWaitForFences(m_device->getLogicalDevice(), 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
+
+    // Release GPU buffers that were dropped long enough ago that no in-flight
+    // frame can still name them.
+    m_device->getDeleteQueue().beginFrame();
 
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(

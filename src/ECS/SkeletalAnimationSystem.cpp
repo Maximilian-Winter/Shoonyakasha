@@ -43,7 +43,7 @@ void SkeletalAnimationSystem::update(float deltaTime, entt::registry& registry) 
         evaluateAnimation(playback, skeleton);
 
         // Upload to GPU if dirty
-        if (skeleton.dirty && skeleton.boneSSBO.isValid()) {
+        if (skeleton.dirty && skeleton.boneSSBO && skeleton.boneSSBO->isValid()) {
             uploadBoneMatrices(skeleton);
         }
     }
@@ -139,22 +139,10 @@ void SkeletalAnimationSystem::evaluateAnimation(
 // SSBO Management
 // ============================================================================
 
-SkeletalAnimationSystem::~SkeletalAnimationSystem() {
-    if (m_onSkeletonDestroy) m_onSkeletonDestroy.release();
-}
+SkeletalAnimationSystem::~SkeletalAnimationSystem() = default;
 
-void SkeletalAnimationSystem::attachTo(entt::registry& registry) {
-    if (m_onSkeletonDestroy) m_onSkeletonDestroy.release();
-    m_onSkeletonDestroy = registry.on_destroy<SkeletonComponent>()
-        .connect<&SkeletalAnimationSystem::onSkeletonDestroyed>(*this);
-}
-
-void SkeletalAnimationSystem::onSkeletonDestroyed(entt::registry& registry, entt::entity entity) {
-    auto& skeleton = registry.get<SkeletonComponent>(entity);
-    if (skeleton.boneSSBO.isValid()) {
-        GPUResourceFactory::destroyBuffer(m_device.getAllocator().getHandle(), skeleton.boneSSBO);
-        skeleton.boneSSBO.reset();
-    }
+void SkeletalAnimationSystem::attachTo(entt::registry&) {
+    // No-op. See the header: boneSSBO owns itself now.
 }
 
 void SkeletalAnimationSystem::createBoneSSBO(SkeletonComponent& skeleton) {
@@ -165,30 +153,31 @@ void SkeletalAnimationSystem::createBoneSSBO(SkeletonComponent& skeleton) {
 
     // Create a host-coherent storage buffer (maps directly to CPU memory)
     // Bone data changes every frame, so host-coherent is appropriate
-    skeleton.boneSSBO = GPUResourceFactory::createBuffer(
-        m_device.getAllocator().getHandle(),
-        size,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        VMA_MEMORY_USAGE_CPU_TO_GPU  // Host-visible, device-accessible
-    );
+    skeleton.boneSSBO = m_device.getDeleteQueue().adopt(
+        GPUResourceFactory::createBuffer(
+            m_device.getAllocator().getHandle(),
+            size,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VMA_MEMORY_USAGE_CPU_TO_GPU  // Host-visible, device-accessible
+        ));
 }
 
 void SkeletalAnimationSystem::uploadBoneMatrices(SkeletonComponent& skeleton) {
-    if (!skeleton.boneSSBO.isValid() || skeleton.boneMatrices.empty()) return;
+    if (!skeleton.boneSSBO || !skeleton.boneSSBO->isValid() || skeleton.boneMatrices.empty()) return;
 
     uint32_t size = skeleton.ssboSize();
 
     // Map the buffer and write bone matrices directly
     void* mapped = GPUResourceFactory::mapBuffer(
         m_device.getAllocator().getHandle(),
-        skeleton.boneSSBO
+        *skeleton.boneSSBO
     );
 
     if (mapped) {
         std::memcpy(mapped, skeleton.boneMatrices.data(), size);
         GPUResourceFactory::unmapBuffer(
             m_device.getAllocator().getHandle(),
-            skeleton.boneSSBO
+            *skeleton.boneSSBO
         );
     }
 

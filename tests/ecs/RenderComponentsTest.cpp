@@ -164,32 +164,69 @@ TEST(MeshComponent, Default_Invalid) {
 
 TEST(MeshComponent, HasIndices_WithValidIndexBuffer) {
     MeshComponent mesh;
-    mesh.indexBuffer.buffer = TestHelpers::dummyVkBuffer();
+    mesh.indexBuffer = borrowBuffer(GPUBuffer{TestHelpers::dummyVkBuffer(), nullptr, 64});
     mesh.indexCount = 36;
     EXPECT_TRUE(mesh.hasIndices());
 }
 
 TEST(MeshComponent, HasIndices_NoIndexCount_False) {
     MeshComponent mesh;
-    mesh.indexBuffer.buffer = TestHelpers::dummyVkBuffer();
+    mesh.indexBuffer = borrowBuffer(GPUBuffer{TestHelpers::dummyVkBuffer(), nullptr, 64});
     mesh.indexCount = 0;
     EXPECT_FALSE(mesh.hasIndices());
 }
 
 TEST(MeshComponent, IsValid_WithVertexBuffer) {
     MeshComponent mesh;
-    mesh.vertexBuffer.buffer = TestHelpers::dummyVkBuffer();
+    mesh.vertexBuffer = borrowBuffer(GPUBuffer{TestHelpers::dummyVkBuffer(), nullptr, 64});
     mesh.vertexCount = 100;
     EXPECT_TRUE(mesh.isValid());
 }
 
 TEST(MeshComponent, IsValid_NoVertexCount_False) {
     MeshComponent mesh;
-    mesh.vertexBuffer.buffer = TestHelpers::dummyVkBuffer();
+    mesh.vertexBuffer = borrowBuffer(GPUBuffer{TestHelpers::dummyVkBuffer(), nullptr, 64});
     mesh.vertexCount = 0;
     EXPECT_FALSE(mesh.isValid());
 }
 
+
+TEST(MeshComponent, CopyingSharesGeometryRatherThanAliasingAHandle) {
+    MeshComponent a;
+    a.vertexBuffer = borrowBuffer(GPUBuffer{TestHelpers::dummyVkBuffer(), nullptr, 64});
+    a.vertexCount = 3;
+
+    MeshComponent b = a;
+
+    // Same allocation, two owners — the point of the shared handle. Two entities
+    // drawing identical geometry cost one buffer, and neither can free it while
+    // the other is alive.
+    EXPECT_EQ(a.vertexHandle(), b.vertexHandle());
+    EXPECT_EQ(2, a.vertexBuffer.use_count());
+}
+
+TEST(MeshComponent, ReleaseDropsThisComponentsClaimOnly) {
+    MeshComponent a;
+    a.vertexBuffer = borrowBuffer(GPUBuffer{TestHelpers::dummyVkBuffer(), nullptr, 64});
+    a.vertexCount = 3;
+    MeshComponent b = a;
+
+    a.release();
+
+    EXPECT_FALSE(a.isValid());
+    EXPECT_EQ(VK_NULL_HANDLE, a.vertexHandle());
+    EXPECT_TRUE(b.isValid());
+    EXPECT_EQ(1, b.vertexBuffer.use_count());
+}
+
+TEST(MeshComponent, HasIndicesIsFalseForANullIndexBuffer) {
+    MeshComponent mesh;
+    mesh.vertexBuffer = borrowBuffer(GPUBuffer{TestHelpers::dummyVkBuffer(), nullptr, 64});
+    mesh.vertexCount = 3;
+    mesh.indexCount = 36;  // count set, but no buffer
+    EXPECT_TRUE(mesh.isValid());
+    EXPECT_FALSE(mesh.hasIndices());
+}
 // ═══════════════════════════════════════════════════════════════
 // RenderableTagComponent Tests
 // ═══════════════════════════════════════════════════════════════

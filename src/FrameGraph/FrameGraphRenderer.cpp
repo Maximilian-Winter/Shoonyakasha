@@ -222,14 +222,14 @@ void FrameGraphRenderer::bindAndDrawEntity(
     }
 
     // Bind vertex buffer
-    VkBuffer vertexBuffer = mesh.vertexBuffer.buffer;
+    VkBuffer vertexBuffer = mesh.vertexHandle();
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
 
     // Bind index buffer and draw
     if (mesh.hasIndices()) {
         VkIndexType indexType = toVkIndexType(mesh.indexType);
-        vkCmdBindIndexBuffer(cmd, mesh.indexBuffer.buffer, 0, indexType);
+        vkCmdBindIndexBuffer(cmd, mesh.indexHandle(), 0, indexType);
         vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
     } else {
         vkCmdDraw(cmd, mesh.vertexCount, 1, 0, 0);

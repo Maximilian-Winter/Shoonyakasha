@@ -161,7 +161,7 @@ void GPUResourceFactory::uploadBuffer(
     destroyBuffer(allocator, staging);
 }
 
-void* GPUResourceFactory::mapBuffer(VmaAllocator allocator, GPUBuffer& buffer) {
+void* GPUResourceFactory::mapBuffer(VmaAllocator allocator, const GPUBuffer& buffer) {
     void* data;
     if (vmaMapMemory(allocator, buffer.allocation, &data) != VK_SUCCESS) {
         throw std::runtime_error("Failed to map buffer memory");
@@ -169,7 +169,7 @@ void* GPUResourceFactory::mapBuffer(VmaAllocator allocator, GPUBuffer& buffer) {
     return data;
 }
 
-void GPUResourceFactory::unmapBuffer(VmaAllocator allocator, GPUBuffer& buffer) {
+void GPUResourceFactory::unmapBuffer(VmaAllocator allocator, const GPUBuffer& buffer) {
     vmaUnmapMemory(allocator, buffer.allocation);
 }
 

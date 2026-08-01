@@ -327,7 +327,7 @@ void EntityRenderExecutor::bindEntityMesh(
     const MeshComponent& mesh
 ) const {
     // Bind vertex buffer
-    VkBuffer vertexBuffers[] = { mesh.vertexBuffer.buffer };
+    VkBuffer vertexBuffers[] = { mesh.vertexHandle() };
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
@@ -335,7 +335,7 @@ void EntityRenderExecutor::bindEntityMesh(
     if (mesh.hasIndices()) {
         vkCmdBindIndexBuffer(
             commandBuffer,
-            mesh.indexBuffer.buffer,
+            mesh.indexHandle(),
             0,
             toVkIndexType(mesh.indexType)
         );

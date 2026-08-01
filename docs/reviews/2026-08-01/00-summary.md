@@ -529,7 +529,8 @@ with validation's ten-per-VUID message cap lifted:
 | `skinned_mesh_test` | 2 | 1 | 4 | 5 | 5 | 5 |
 | `particle_test`, `bloom_test` | — | — | — | — | — | — |
 
-Four independent causes. A, B and D are fixed; C remains.
+Four independent causes, plus a fifth the fixes exposed. All are now fixed and
+every example reaches `vkDestroyDevice` reporting nothing.
 
 - **A — FIXED.** `RenderGraph::m_defaultTextures` (`RenderGraph.cpp:2161`) was
   created and never destroyed — the fixed 4 image/view/sampler in every affected
@@ -538,17 +539,25 @@ Four independent causes. A, B and D are fixed; C remains.
 - **B — FIXED.** `RenderGraph::m_materialDescriptorPool` (`:2073`) was destroyed
   only by the re-create guard at the top of its own creator, never at shutdown.
   Now destroyed in `~RenderGraph`, which frees its sets with it.
-- **C — outstanding.** Mesh vertex/index buffers in `MeshComponent` have no owner
-  at all. Scales with content, and needs a design decision — shared ownership plus
-  a frame-indexed deferred delete — rather than a destroy hook.
+- **C — FIXED.** Mesh vertex/index buffers in `MeshComponent` had no owner at all.
+  Fixed with shared ownership rather than a destroy hook: `GpuBufferRef` is a
+  reference-counted handle, and `GpuDeleteQueue` defers the actual free until the
+  frames that could still name the buffer have retired. Copying a component now
+  shares the geometry, so two entities drawing the same mesh cost one allocation.
+  `MeshComponent::release()`, `GpuDeleteQueue::flush()` and `borrowBuffer()` are
+  the manual escape hatches.
+- **E — FIXED.** Exposed by C: the bone SSBO's `on_destroy<SkeletonComponent>` hook
+  never fired, because an app owning `SkeletalAnimationSystem` as its own member
+  destroys it before the scene. `SkeletonComponent::boneSSBO` is reference-counted
+  now and the hook is gone — a good illustration of why C did not get one.
 - **D — FIXED.** `GltfSceneLoader::m_textureCache` was `.clear()`ed at every load
   and never destroyed. Destroying at the clear site would dangle textures still
   referenced by the previous scene's materials, so the cache now spans the
   loader's lifetime and is freed in `~GltfSceneLoader`. That required re-keying
   embedded textures off something more stable than a freed `cgltf` pointer.
 
-After the fixes the only objects still reported are C's mesh buffers: 2, 22 and 2
-respectively, and nothing else.
+All six runnable examples — the five above plus `pbr_physics_particles` — exit 0
+with zero validation messages of any kind.
 
 The earlier guess in this section — that the three leaking examples were the three
 that generate IBL — was wrong. IBL is clean. The correlation is that those three

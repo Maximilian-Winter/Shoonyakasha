@@ -163,7 +163,7 @@ public:
         for (auto entity : view) {
             auto& skel = view.get<SkeletonComponent>(entity);
             // Only create if SSBO hasn't been allocated yet
-            if (skel.boneSSBO.buffer == VK_NULL_HANDLE) {
+            if (!skel.boneSSBO) {
                 m_animationSystem->createBoneSSBO(skel);
             }
         }

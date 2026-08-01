@@ -30,10 +30,18 @@ VulkanDevice::VulkanDevice(VulkanInstance& instance, VkSurfaceKHR surface)
 
     // Initialize VMA after device and command pool are ready
     m_vmaAllocator = std::make_unique<VulkanMemoryAllocator>(m_instance, *this);
+
+    // Conservative default; ApplicationBase narrows it once maxFramesInFlight is
+    // known. Too high only delays a free, too low frees a buffer still in flight.
+    m_deleteQueue = std::make_unique<GpuDeleteQueue>(m_vmaAllocator->getHandle(), 3);
 }
 
 VulkanDevice::~VulkanDevice() {
     m_logger->log(LogLevel::Info, "Destroying Vulkan Device");
+
+    // Before VMA: the queue frees through the allocator. Anything still pending
+    // here is safe to free — the caller waited on the device to reach this point.
+    m_deleteQueue.reset();
 
     // Destroy VMA before device — all VMA allocations must be freed first
     m_vmaAllocator.reset();

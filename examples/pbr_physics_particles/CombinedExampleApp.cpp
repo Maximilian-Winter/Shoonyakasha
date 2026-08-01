@@ -145,7 +145,7 @@ Shoonyakasha::MeshComponent CombinedExampleApp::uploadMesh(
     Shoonyakasha::MeshComponent mesh;
 
     VkDeviceSize vertexSize = sizeof(StandardVertex) * vertices.size();
-    mesh.vertexBuffer = Shoonyakasha::GPUResourceFactory::createBuffer(
+    Shoonyakasha::GPUBuffer vb = Shoonyakasha::GPUResourceFactory::createBuffer(
         getDevice().getAllocator().getHandle(),
         vertexSize,
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -156,7 +156,7 @@ Shoonyakasha::MeshComponent CombinedExampleApp::uploadMesh(
         getDevice().getLogicalDevice(),
         getDevice().getGraphicsQueue(),
         getDevice().getCommandPool(),
-        mesh.vertexBuffer,
+        vb,
         vertices.data(),
         vertexSize);
 
@@ -164,7 +164,7 @@ Shoonyakasha::MeshComponent CombinedExampleApp::uploadMesh(
     mesh.vertexStride = sizeof(StandardVertex);
 
     VkDeviceSize indexSize = sizeof(uint32_t) * indices.size();
-    mesh.indexBuffer = Shoonyakasha::GPUResourceFactory::createBuffer(
+    Shoonyakasha::GPUBuffer ib = Shoonyakasha::GPUResourceFactory::createBuffer(
         getDevice().getAllocator().getHandle(),
         indexSize,
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -175,9 +175,14 @@ Shoonyakasha::MeshComponent CombinedExampleApp::uploadMesh(
         getDevice().getLogicalDevice(),
         getDevice().getGraphicsQueue(),
         getDevice().getCommandPool(),
-        mesh.indexBuffer,
+        ib,
         indices.data(),
         indexSize);
+
+    // Hand both buffers to the device's delete queue, which owns them from
+    // here and frees them once nothing references them any more.
+    mesh.vertexBuffer = getDevice().getDeleteQueue().adopt(vb);
+    mesh.indexBuffer = getDevice().getDeleteQueue().adopt(ib);
 
     mesh.indexCount = static_cast<uint32_t>(indices.size());
     mesh.indexType = Shoonyakasha::IndexType::UInt32;

@@ -13,6 +13,7 @@
 #pragma once
 
 #include "GPU/GPUTypes.h"
+#include "GPU/GpuDeleteQueue.h"
 #include <unordered_map>
 #include <string>
 #include <optional>
@@ -28,9 +29,16 @@ namespace Shoonyakasha {
 // when processing "draw_entities" passes.
 //
 
+// Ownership: the buffers are shared, reference-counted handles. Two entities
+// drawing the same geometry hold the same GpuBufferRef and the allocation exists
+// once; the buffer is freed when the last component referencing it goes away, a
+// few frames later so nothing in flight is pulled out from under the GPU.
+// Copying a MeshComponent shares the geometry rather than aliasing a raw handle,
+// which is what made the previous by-value GPUBuffer unsafe to free anywhere.
+
 struct MeshComponent {
-    GPUBuffer vertexBuffer;
-    GPUBuffer indexBuffer;      // Optional - if not present, use non-indexed drawing
+    GpuBufferRef vertexBuffer;
+    GpuBufferRef indexBuffer;   // Optional - if null, use non-indexed drawing
 
     IndexType indexType   = IndexType::UInt32;
     uint32_t  vertexCount = 0;
@@ -41,8 +49,21 @@ struct MeshComponent {
 
     // ─── Helpers ────────────────────────────────────────────────
 
-    bool hasIndices() const { return indexBuffer.isValid() && indexCount > 0; }
-    bool isValid() const { return vertexBuffer.isValid() && vertexCount > 0; }
+    bool hasIndices() const { return indexBuffer && indexBuffer->isValid() && indexCount > 0; }
+    bool isValid() const { return vertexBuffer && vertexBuffer->isValid() && vertexCount > 0; }
+
+    VkBuffer vertexHandle() const { return vertexBuffer ? vertexBuffer->buffer : VK_NULL_HANDLE; }
+    VkBuffer indexHandle() const { return indexBuffer ? indexBuffer->buffer : VK_NULL_HANDLE; }
+
+    /// Drop this component's claim on its geometry. If it held the last
+    /// reference, the buffers are freed once the frames using them retire.
+    /// The component is left valid but non-renderable.
+    void release() {
+        vertexBuffer.reset();
+        indexBuffer.reset();
+        vertexCount = 0;
+        indexCount = 0;
+    }
 };
 
 // ============================================================================

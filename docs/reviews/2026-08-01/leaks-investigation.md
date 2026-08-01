@@ -1,20 +1,17 @@
 # Object leaks at `vkDestroyDevice` — investigation
 
-**Status:** A, B and D fixed. C outstanding — it needs an ownership decision, not
-a patch. Four independent causes, all confirmed against a running build. Nothing
-here is a regression from the 2026-08-01 remediation work — these leaks predate
+**Status:** all four causes fixed, plus a fifth the fixes exposed. Every example
+now reaches `vkDestroyDevice` with no object-tracking report at all.
+
+None of these were regressions from the 2026-08-01 remediation work — they predate
 it and only became *observable* when the teardown crash was fixed, because
 validation's object tracker runs at `vkDestroyDevice` and no example previously
 reached that call.
 
-After the fixes, with the message limit lifted, the only objects still reported
-are the mesh buffers of cause C:
-
-| Example | Buffer | DescPool | DescSet | Image | ImageView | Sampler |
-|---|---|---|---|---|---|---|
-| `declarative_sponza_test` | 2 | — | — | — | — | — |
-| `physics_test` | 22 | — | — | — | — | — |
-| `skinned_mesh_test` | 2 | — | — | — | — | — |
+After the fixes, with the message limit lifted, all six runnable examples report
+nothing: `declarative_sponza_test`, `physics_test`, `skinned_mesh_test`,
+`particle_test`, `bloom_test` and `pbr_physics_particles` each exit 0 with zero
+validation messages of any kind.
 
 ---
 
@@ -43,9 +40,10 @@ are a global allocation ordinal — consecutive handles mean consecutively creat
 objects, which is what allowed each group below to be matched to its creator
 without instrumenting the build.
 
-## Measured counts
+## Measured counts, before the fixes
 
-With the message limit lifted:
+With the message limit lifted. This is the table the diagnosis below was built
+from; everything in it is now zero.
 
 | Example | Buffer | DescriptorPool | DescriptorSet | Image | ImageView | Sampler |
 |---|---|---|---|---|---|---|
@@ -122,22 +120,53 @@ The counts line up exactly: `declarative_sponza_test` loads `Box.gltf` — one
 primitive, 2 buffers. `skinned_mesh_test` — one primitive, 2 buffers.
 `physics_test` builds eleven meshes itself and leaks 22.
 
-**This one is not a one-line fix**, and that is why it is worth writing down
-rather than patching in passing:
+**Fixed by giving GPU buffers an owner**, not by adding a destroy hook. Two
+things ruled the hook out:
 
-- An `on_destroy<MeshComponent>` hook is the obvious answer and is *currently*
-  safe — the loader bakes each node's transform into its own vertex buffer, so no
-  two entities share a primitive's buffers today. But `MeshComponent` is
-  copyable, so a user copying the component or the entity gets an aliasing
-  double-free. Making the buffers a shared, ref-counted handle is the version
-  that stays correct.
-- It also needs a decision about *when*: freeing on component destruction means
-  freeing possibly mid-frame, while the buffer may still be referenced by an
-  in-flight command buffer. A deferred-delete queue keyed on frame index is the
-  usual answer, and the engine does not have one.
+- `MeshComponent` is copyable. A hook is safe only as long as no two components
+  name the same allocation — true today because the loader bakes each node's
+  transform into its own vertex buffer, but any copy of the component or the
+  entity turns it into a double free.
+- Freeing on component destruction frees mid-frame, while a command buffer
+  recorded one or two frames ago may still name the buffer.
 
-Suggested order: fix A and B first (contained, no design question), then treat C
-as its own piece of work.
+`include/GPU/GpuDeleteQueue.h` addresses both:
+
+- `GpuBufferRef` is `std::shared_ptr<const GPUBuffer>`. That is the reference
+  count. `MeshComponent`, `GltfPrimitive` and `SkeletonComponent::boneSSBO` all
+  hold one, so copying a component shares the allocation instead of aliasing a
+  raw handle, and two entities drawing identical geometry cost one buffer.
+- Dropping the last reference does not free: it *retires* the allocation with the
+  current frame index. `GpuDeleteQueue::beginFrame()`, called from
+  `ApplicationBase::render()`, releases anything that has survived
+  `maxFramesInFlight` frames. Nothing is freed while a frame that named it could
+  still be in flight.
+- `VulkanDevice` owns the queue and declares it after the allocator, so it is
+  destroyed first and can still free what it holds.
+
+Three deliberate escape hatches, since automatic is not always what you want:
+
+- `MeshComponent::release()` drops one component's claim. If it was the last, the
+  buffers retire normally.
+- `GpuDeleteQueue::flush()` frees everything pending immediately. The caller owns
+  the synchronisation — normally `vkDeviceWaitIdle`. For level transitions where
+  reclaiming the memory now matters more than not stalling.
+- `borrowBuffer()` wraps a buffer *without* taking ownership, for allocations
+  whose lifetime is managed elsewhere, and for tests with no device.
+
+`pendingCount()` and `liveCount()` report retired-not-yet-freed and
+adopted-and-still-referenced, which is the counting mechanism made visible.
+
+### A fifth leak this exposed
+
+With C fixed, `skinned_mesh_test` still leaked exactly one buffer: the bone SSBO.
+`SkeletalAnimationSystem` had an `on_destroy<SkeletonComponent>` hook to free it —
+added earlier in this remediation — and the hook was never firing, which is a neat
+demonstration of why the hook approach was rejected for C. The hook only works
+while the system is alive, and `SkinnedMeshApp` owns the system as its own member,
+so `~SkinnedMeshApp` released the connection before `~ApplicationBase` destroyed
+the scene. `SkeletonComponent::boneSSBO` is a `GpuBufferRef` now and the hook is
+gone; `attachTo()` is kept as a documented no-op.
 
 ## D. `GltfSceneLoader::m_textureCache` is cleared without destroying
 

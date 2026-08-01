@@ -28,10 +28,10 @@ Sprite2DManager::Sprite2DManager(VulkanDevice& device)
 }
 
 Sprite2DManager::~Sprite2DManager() {
-    if (m_quadCreated) {
-        GPUResourceFactory::destroyBuffer(m_device.getAllocator().getHandle(), m_quadMesh.vertexBuffer);
-        GPUResourceFactory::destroyBuffer(m_device.getAllocator().getHandle(), m_quadMesh.indexBuffer);
-    }
+    // The quad's buffers are reference-counted now: dropping m_quadMesh's
+    // references is what releases them. Every sprite entity shares this one quad,
+    // so the allocation only goes away once they are all gone too.
+    m_quadMesh.release();
     for (auto& [path, texture] : m_textureCache) {
         GPUResourceFactory::destroyTexture(m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), texture);
     }
@@ -48,24 +48,26 @@ void Sprite2DManager::createQuadMesh() {
     const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0};
 
     VkDeviceSize vbSize = vertices.size() * sizeof(SpriteVertex);
-    m_quadMesh.vertexBuffer = GPUResourceFactory::createBuffer(
+    GPUBuffer vb = GPUResourceFactory::createBuffer(
         m_device.getAllocator().getHandle(), vbSize,
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_MEMORY_USAGE_GPU_ONLY);
     GPUResourceFactory::uploadBuffer(
         m_device.getAllocator().getHandle(), m_device.getLogicalDevice(),
         m_device.getGraphicsQueue(), m_device.getCommandPool(),
-        m_quadMesh.vertexBuffer, vertices.data(), vbSize);
+        vb, vertices.data(), vbSize);
+    m_quadMesh.vertexBuffer = m_device.getDeleteQueue().adopt(vb);
 
     VkDeviceSize ibSize = indices.size() * sizeof(uint16_t);
-    m_quadMesh.indexBuffer = GPUResourceFactory::createBuffer(
+    GPUBuffer ib = GPUResourceFactory::createBuffer(
         m_device.getAllocator().getHandle(), ibSize,
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_MEMORY_USAGE_GPU_ONLY);
     GPUResourceFactory::uploadBuffer(
         m_device.getAllocator().getHandle(), m_device.getLogicalDevice(),
         m_device.getGraphicsQueue(), m_device.getCommandPool(),
-        m_quadMesh.indexBuffer, indices.data(), ibSize);
+        ib, indices.data(), ibSize);
+    m_quadMesh.indexBuffer = m_device.getDeleteQueue().adopt(ib);
 
     m_quadMesh.indexType = IndexType::UInt16;
     m_quadMesh.vertexCount = static_cast<uint32_t>(vertices.size());

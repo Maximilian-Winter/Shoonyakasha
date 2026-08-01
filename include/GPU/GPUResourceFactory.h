@@ -85,8 +85,8 @@ public:
     );
 
     // Map buffer memory for CPU access (only works for host-visible buffers)
-    static void* mapBuffer(VmaAllocator allocator, GPUBuffer& buffer);
-    static void unmapBuffer(VmaAllocator allocator, GPUBuffer& buffer);
+    static void* mapBuffer(VmaAllocator allocator, const GPUBuffer& buffer);
+    static void unmapBuffer(VmaAllocator allocator, const GPUBuffer& buffer);
 
     // Destroy a buffer and free its memory
     static void destroyBuffer(VmaAllocator allocator, GPUBuffer& buffer);

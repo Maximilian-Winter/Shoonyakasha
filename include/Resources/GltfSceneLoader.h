@@ -42,8 +42,11 @@ struct GltfPrimitive {
     std::string name;
 
     // ─── Geometry (thin GPU wrappers) ───────────────────────
-    Shoonyakasha::GPUBuffer vertexBuffer;
-    Shoonyakasha::GPUBuffer indexBuffer;
+    // Shared and reference-counted: copying a primitive shares its geometry, and
+    // the allocation is freed when the last holder — usually a MeshComponent — is
+    // gone.
+    Shoonyakasha::GpuBufferRef vertexBuffer;
+    Shoonyakasha::GpuBufferRef indexBuffer;
     uint32_t vertexCount    = 0;
     uint32_t indexCount     = 0;
     uint32_t vertexStride   = 0;
@@ -74,7 +77,7 @@ struct GltfPrimitive {
     bool isTransparent() const { return alphaMode == Shoonyakasha::AlphaMode::Blend; }
     bool isMasked() const { return alphaMode == Shoonyakasha::AlphaMode::Mask; }
     bool isOpaque() const { return alphaMode == Shoonyakasha::AlphaMode::Opaque; }
-    bool hasIndices() const { return indexBuffer.isValid() && indexCount > 0; }
+    bool hasIndices() const { return indexBuffer && indexBuffer->isValid() && indexCount > 0; }
 };
 
 // ═══════════════════════════════════════════════════════════════

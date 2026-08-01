@@ -2296,7 +2296,7 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
 
     // Get SkeletonComponent from entity
     auto* skeleton = registry.try_get<Shoonyakasha::SkeletonComponent>(entity);
-    if (!skeleton || !skeleton->boneSSBO.isValid()) {
+    if (!skeleton || !skeleton->boneSSBO || !skeleton->boneSSBO->isValid()) {
         return;
     }
 
@@ -2362,7 +2362,7 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
 
     // Update the SSBO descriptor with the entity's bone buffer
     VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = skeleton->boneSSBO.buffer;
+    bufferInfo.buffer = skeleton->boneSSBO->buffer;
     bufferInfo.offset = 0;
     bufferInfo.range = skeleton->ssboSize();
 
