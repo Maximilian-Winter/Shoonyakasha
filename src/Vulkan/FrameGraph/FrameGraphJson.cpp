@@ -576,17 +576,10 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                 layout.usage = BufferUsageType::DescriptorSet;
             }
 
-            // Parse packing rule
-            std::string packingStr = lj.value("packing", std::string{"std140"});
-            if (packingStr == "std140") {
-                layout.packing = BufferPackingRule::Std140;
-            } else if (packingStr == "std430") {
-                layout.packing = BufferPackingRule::Std430;
-            } else if (packingStr == "scalar") {
-                layout.packing = BufferPackingRule::Scalar;
-            } else if (packingStr == "push_constant") {
-                layout.packing = BufferPackingRule::PushConstant;
-            }
+            // Parse packing rule. Missing key defaults to std140, the
+            // over-aligned safe choice; an unrecognised value throws rather than
+            // silently leaving the previous default in place.
+            layout.packing = parsePackingRule(lj.value("packing", std::string{"std140"}));
 
             // Parse update frequency (for dot-path-driven auto-fill)
             std::string freqStr = lj.value("updateFrequency", std::string{"manual"});
@@ -624,31 +617,20 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                     BufferFieldDesc field;
                     field.name = fieldJson.at("name").get<std::string>();
                     field.arrayCount = fieldJson.value("arrayCount", 1u);
+                    // An explicitly declared offset of 0 has to be distinguishable
+                    // from "not declared", so record presence rather than relying
+                    // on the value.
+                    field.hasExplicitOffset = fieldJson.contains("offset");
                     field.offset = fieldJson.value("offset", 0u);
 
                     // ─── Parse source for dot-path resolution ─────
                     // JSON: "source": "entity.material.params.baseColorFactor"
                     field.source = fieldJson.value("source", std::string{});
 
-                    // Parse field type
-                    std::string typeStr = fieldJson.value("type", std::string{"float"});
-                    if (typeStr == "float") field.type = BufferFieldType::Float;
-                    else if (typeStr == "double") field.type = BufferFieldType::Double;
-                    else if (typeStr == "int") field.type = BufferFieldType::Int;
-                    else if (typeStr == "uint") field.type = BufferFieldType::UInt;
-                    else if (typeStr == "bool") field.type = BufferFieldType::Bool;
-                    else if (typeStr == "vec2") field.type = BufferFieldType::Vec2;
-                    else if (typeStr == "vec3") field.type = BufferFieldType::Vec3;
-                    else if (typeStr == "vec4") field.type = BufferFieldType::Vec4;
-                    else if (typeStr == "ivec2") field.type = BufferFieldType::IVec2;
-                    else if (typeStr == "ivec3") field.type = BufferFieldType::IVec3;
-                    else if (typeStr == "ivec4") field.type = BufferFieldType::IVec4;
-                    else if (typeStr == "uvec2") field.type = BufferFieldType::UVec2;
-                    else if (typeStr == "uvec3") field.type = BufferFieldType::UVec3;
-                    else if (typeStr == "uvec4") field.type = BufferFieldType::UVec4;
-                    else if (typeStr == "mat2") field.type = BufferFieldType::Mat2;
-                    else if (typeStr == "mat3") field.type = BufferFieldType::Mat3;
-                    else if (typeStr == "mat4") field.type = BufferFieldType::Mat4;
+                    // Parse field type. Unknown type strings used to fall through
+                    // this chain leaving the default Float, so every offset from
+                    // that field onward silently disagreed with the shader.
+                    field.type = parseFieldType(fieldJson.value("type", std::string{"float"}));
 
                     layout.fields.push_back(std::move(field));
                 }
