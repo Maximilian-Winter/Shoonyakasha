@@ -353,6 +353,19 @@ static ResourceAccess parseResourceAccess(
 
     access.usage = JsonUtils::stringToResourceUsage(j.at("usage").get<std::string>());
 
+    // "usage": "present" is the older spelling of a colour write that also
+    // presents. Normalise it here so the rest of the compiler sees one shape, and
+    // so `"usage": "color_blend", "present": true` is expressible at all.
+    if (access.usage == ResourceUsage::Present) {
+        access.usage = ResourceUsage::ColorAttachmentWrite;
+        access.present = true;
+    }
+
+    // Presentation is a post-condition and composes with any colour usage.
+    if (j.contains("present")) {
+        access.present = j["present"].get<bool>();
+    }
+
     // Parse clear value if present
     if (j.contains("clear")) {
         access.hasClearValue = true;
@@ -1248,6 +1261,12 @@ static nlohmann::json serializeResourceAccess(const ResourceAccess& access,
     }
 
     j["usage"] = JsonUtils::resourceUsageToString(access.usage);
+
+    // Written as a flag rather than folded back into "usage", so a round-trip
+    // through the serializer does not lose a blend that also presents.
+    if (access.present) {
+        j["present"] = true;
+    }
 
     if (access.hasClearValue) {
         if (access.usage == ResourceUsage::DepthStencilWrite) {

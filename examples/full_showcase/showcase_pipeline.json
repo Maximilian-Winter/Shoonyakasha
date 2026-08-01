@@ -145,7 +145,7 @@
         "renderLayerMask": 4
       },
       "outputs": [
-        { "resource": "swapchain", "usage": "color_blend" }
+        { "resource": "swapchain", "usage": "color_blend", "present": true }
       ],
       "pipeline": {
         "vertexShader": "shaders/sprite.vert.spv",

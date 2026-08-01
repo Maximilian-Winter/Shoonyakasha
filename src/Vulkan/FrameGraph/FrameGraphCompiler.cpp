@@ -19,6 +19,7 @@
 #include "Core/Logger.h"
 
 #include <queue>
+#include <unordered_set>
 #include <set>
 #include <algorithm>
 #include <stdexcept>
@@ -47,7 +48,10 @@ VkImageLayout FrameGraphCompiler::usageToLayout(ResourceUsage usage) {
         case ResourceUsage::InputAttachment:        return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         case ResourceUsage::TransferSrc:            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         case ResourceUsage::TransferDst:            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        case ResourceUsage::Present:                return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        // The layout a pass renders INTO. PRESENT_SRC_KHR is not a valid colour
+        // attachment layout — it is where the image ends up, which the render
+        // pass's finalLayout handles via ResourceAccess::present.
+        case ResourceUsage::Present:                return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
     return VK_IMAGE_LAYOUT_UNDEFINED;
 }
@@ -293,7 +297,7 @@ void FrameGraphCompiler::cullDeadPasses(
         }
 
         for (const auto& output : passes[pi].outputs) {
-            if (output.usage == ResourceUsage::Present ||
+            if (leavesPresentable(output) ||
                 (output.handle.valid() && output.handle.index < resources.size()
                  && resources[output.handle.index].imported)) {
                 if (!live.contains(pi)) {
@@ -556,6 +560,17 @@ void FrameGraphCompiler::resolveLayoutsAndInsertBarriers(
             lastStages[ri] = requiredStage;
             lastAccess[ri] = requiredAccess;
             lastQueueFamily[ri] = resolveQueueFamily(passDecl.queueType, device);
+
+            // The render pass created for this pass will end with finalLayout =
+            // PRESENT_SRC_KHR, so record that rather than the layout the pass
+            // rendered in. Tracking the declared usage instead left this table
+            // claiming COLOR_ATTACHMENT_OPTIMAL for an image the GPU had already
+            // moved to PRESENT_SRC_KHR.
+            if (leavesPresentable(access)) {
+                currentLayouts[ri] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                lastStages[ri] = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+                lastAccess[ri] = 0;
+            }
         };
 
         for (const auto& input : passDecl.inputs) {
@@ -597,16 +612,38 @@ void FrameGraphCompiler::createRenderPasses(
     // Derived rather than declared: the swapchain is the imported resource with
     // one view per swapchain image, so the compiler can identify it without the
     // JSON author having to remember.
-    std::unordered_map<uint32_t, uint32_t> lastPresentableWriter;  // resource index -> exec index
+    // Resources some pass explicitly declares it will leave presentable.
+    std::unordered_set<uint32_t> declaredPresent;
+    // Fallback: last writer of each presentable imported resource, used only when
+    // nothing declared it.
+    std::unordered_map<uint32_t, uint32_t> lastPresentableWriter;
+
     for (uint32_t execIdx : executionOrder) {
         const auto& decl = passes[compiledPasses[execIdx].declIndex];
         for (const auto& output : decl.outputs) {
             if (!output.handle.valid()) continue;
+            if (leavesPresentable(output)) {
+                declaredPresent.insert(output.handle.index);
+            }
             auto it = importedImages.find(output.handle.index);
             if (it != importedImages.end() && it->second.views.size() > 1) {
                 lastPresentableWriter[output.handle.index] = execIdx;
             }
         }
+    }
+
+    // A pipeline whose swapchain writes never say so still works — but say so,
+    // because the guess is only right while "imported with more than one view"
+    // keeps meaning "the swapchain".
+    for (const auto& [resourceIndex, execIdx] : lastPresentableWriter) {
+        if (declaredPresent.count(resourceIndex)) continue;
+        const auto& decl = passes[compiledPasses[execIdx].declIndex];
+        ensureLogger();
+        m_logger->log(LogLevel::Warning,
+                      "Pass '%s' is the last to write a presentable image but does not "
+                      "declare it. Add \"present\": true to that output; the compiler is "
+                      "assuming it for now.",
+                      decl.name.c_str());
     }
 
     for (uint32_t execIdx : executionOrder) {
@@ -670,10 +707,17 @@ void FrameGraphCompiler::createRenderPasses(
                     initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
                 }
 
-                // The last pass to write a presentable image must leave it in
-                // PRESENT_SRC_KHR regardless of the usage it declared.
-                auto presentIt = lastPresentableWriter.find(output.handle.index);
-                if (presentIt != lastPresentableWriter.end() && presentIt->second == execIdx) {
+                // Presentation is a post-condition, so it applies whatever colour
+                // usage the pass declared — a blend that presents keeps its LOAD op
+                // and its dependency on the previous writer, and still ends up
+                // presentable. That combination had no spelling before.
+                bool endsPresentable = leavesPresentable(output);
+                if (!endsPresentable && !declaredPresent.count(output.handle.index)) {
+                    auto presentIt = lastPresentableWriter.find(output.handle.index);
+                    endsPresentable = presentIt != lastPresentableWriter.end()
+                                   && presentIt->second == execIdx;
+                }
+                if (endsPresentable) {
                     finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
                 }
 

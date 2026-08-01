@@ -570,11 +570,17 @@ are the three that render entities with materials.
 handled correctly throughout the compiler; the shipped pipelines just declared
 their final pass as `color_write`. Corrected in 14 of 17 pipelines.
 
-`full_showcase/showcase_pipeline.json` is the exception: three passes write the
-swapchain and two are `color_blend`. **A pass that both blends and presents
-cannot be expressed** — `ColorAttachmentBlend` carries its own initialLayout
-handling and previous-writer chain that `Present` does not. This is a genuine
-schema gap.
+`full_showcase/showcase_pipeline.json` was the exception: three passes write the
+swapchain and two are `color_blend`. A pass that both blends and presents could
+not be expressed — `ColorAttachmentBlend` carries a LOAD op and a previous-writer
+dependency that `Present` does not, and an output could only name one of them.
+
+**Fixed.** Presentation is a post-condition, not something a pass does to an
+attachment while rendering, so it moved out of `ResourceUsage` into
+`ResourceAccess::present` and now composes with any colour usage:
+`{usage: color_blend, present: true}`. `usage: present` is kept as an
+alias for `color_write` plus the flag, so the 14 pipelines written that way are
+untouched.
 
 ### The per-draw path ignored the compiler's offsets
 

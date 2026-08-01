@@ -343,7 +343,7 @@ void FrameGraphAnalyzer::buildCullingReport(
                 }
 
                 // Check if output writes to imported resource with Present usage
-                if (output.usage == ResourceUsage::Present) {
+                if (leavesPresentable(output)) {
                     hasOutputsOnlyImported = false;
                 }
             }
@@ -531,7 +531,7 @@ CullingReport FrameGraphAnalyzer::simulateCulling(const FrameGraphBuilder& build
         }
 
         for (const auto& output : pass.outputs) {
-            if (output.usage == ResourceUsage::Present) {
+            if (leavesPresentable(output)) {
                 live.insert(i);
                 break;
             }

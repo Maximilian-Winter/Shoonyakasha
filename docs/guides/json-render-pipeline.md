@@ -749,6 +749,38 @@ The `vertexCount` uses a named parameter (`"particleCount"`) that is set from ap
 | `depth_write` | Write to the depth buffer |
 | `storage_image_write` | Write to a storage image (compute passes) |
 
+#### Presenting
+
+`usage` describes what a pass does to an attachment *while rendering*. Whether the
+resource must end up ready for the screen is a separate question, answered by the
+`present` flag:
+
+```json
+{ "resource": "swapchain", "usage": "color_write", "present": true }
+```
+
+The pass that leaves the swapchain presentable must say so. It sets the render
+pass's final layout to `PRESENT_SRC_KHR`, which is what `vkQueuePresentKHR`
+requires; without it the image is still in `COLOR_ATTACHMENT_OPTIMAL` and
+validation complains every frame.
+
+Because it is a separate flag, it composes with any colour usage — including
+blending, which was previously impossible to combine with presenting:
+
+```json
+{ "resource": "swapchain", "usage": "color_blend", "present": true }
+```
+
+That pass keeps the `LOAD` op and the dependency on whatever drew the swapchain
+before it, so earlier passes' output survives to be blended onto, *and* ends
+presentable. `examples/full_showcase` composites three passes into the swapchain
+this way.
+
+`"usage": "present"` is still accepted and means `"color_write"` with
+`"present": true`. If nothing in a pipeline declares `present`, the compiler
+assumes the last pass writing the swapchain meant to and logs a warning naming
+that pass.
+
 **Inputs** (read sources):
 
 | Usage | Description |

@@ -62,7 +62,16 @@ enum class ResourceUsage {
     InputAttachment,            // Vulkan input attachment (subpass read)
     TransferSrc,                // Copy source
     TransferDst,                // Copy destination
-    Present                     // Swapchain image presentation
+
+    /// Deprecated: "colour write that also presents".
+    ///
+    /// Presentation is a post-condition, not something a pass does to an
+    /// attachment while rendering — so it now lives in ResourceAccess::present
+    /// and composes with any colour usage. This value is kept because C++ code
+    /// builds graphs programmatically, and it behaves exactly as
+    /// ColorAttachmentWrite with present = true. In JSON, `"usage": "present"`
+    /// parses to that pair; prefer `"usage": "color_write", "present": true`.
+    Present
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -152,6 +161,16 @@ struct ResourceAccess {
     ResourceHandle  handle;
     ResourceUsage   usage;
 
+    /// Leave the resource in PRESENT_SRC_KHR after this pass.
+    ///
+    /// Independent of `usage`, because the two answer different questions:
+    /// `usage` is what the pass does to the attachment while rendering, and this
+    /// is the state it must be in afterwards. Conflating them made
+    /// "blend onto the swapchain and then present it" inexpressible — a pass had
+    /// to choose between the blend semantics (LOAD, previous-writer dependency)
+    /// and the present layout, and could not have both.
+    bool            present = false;
+
     // Clear value (only meaningful for attachment writes)
     bool            hasClearValue = false;
     VkClearValue    clearValue{};
@@ -161,6 +180,14 @@ struct ResourceAccess {
     VkPipelineStageFlags stageMask  = 0;
     VkAccessFlags        accessMask = 0;
 };
+
+/// Does this access leave its resource ready to present?
+///
+/// Single place to ask, so the deprecated ResourceUsage::Present and the
+/// `present` flag cannot drift apart across the compiler and the analyzer.
+inline bool leavesPresentable(const ResourceAccess& access) {
+    return access.present || access.usage == ResourceUsage::Present;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Pass Execute Context — injected into pass callbacks
