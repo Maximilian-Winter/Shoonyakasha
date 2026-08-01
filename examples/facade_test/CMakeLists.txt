@@ -5,7 +5,7 @@
 # Proof that the facade API is sufficient for a complete application.
 # This target includes NO internal engine headers — only Facade/*.h.
 #
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.21)
 project(FacadeTest)
 
 add_executable(FacadeTest main.cpp)
@@ -25,3 +25,10 @@ if(MSVC)
 else()
     target_compile_options(FacadeTest PRIVATE -Wall -Wextra -pedantic)
 endif()
+
+# Shaders (shared module: cmake/CompileShaders.cmake). Without this the example
+# built fine and then failed at runtime on a missing .spv, which is why it was
+# the one example that could not run.
+target_compile_shaders(FacadeTest
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+)

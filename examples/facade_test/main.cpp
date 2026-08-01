@@ -52,8 +52,11 @@ int main() {
         config.width = 1920;
         config.height = 1080;
         config.logFile = "facade_test.log";
-        config.hdrEnvironmentPath = "env/kloofendal_misty_1k.hdr";
         config.pipelineJsonPath = "pipeline.json";
+        // No hdrEnvironmentPath: pipeline.json is a single forward pass with
+        // analytic lighting, so there is nothing to bind image-based lighting to
+        // and nothing to wait for at startup. The point of this example is the
+        // API surface, not the renderer.
 
         EngineAPI engine(config);
 
@@ -81,8 +84,21 @@ int main() {
                 3.f
             );
 
-            // Load a glTF scene
-            GltfResult result = engine.loadGltfScene("../../examples/declarative_sponza_test/Sponza/glTF/Sponza.gltf");
+            // Sponza if it has been fetched, otherwise the box that ships with
+            // the repository. Paths resolve against the shared assets/ directory,
+            // so this works from any working directory.
+            // Asked rather than probed: attempting the load to find out logs a
+            // failure that did not happen, and a clean run should have a clean log.
+            const std::string sponza = "models/NewSponza_Main_glTF_003.gltf";
+            const bool haveSponza = assetExists(sponza);
+            if (!haveSponza) {
+                std::cout << "[Facade] Sponza not present — using models/Box.gltf "
+                             "(python tools/fetch_assets.py sponza)\n";
+            }
+
+            GltfResult result =
+                engine.loadGltfScene(haveSponza ? sponza : "models/Box.gltf");
+
             if (result.success) {
                 std::cout << "[Facade] Loaded scene: "
                           << result.entities.size() << " entities, "
@@ -90,12 +106,6 @@ int main() {
                           << result.totalTextures << " textures\n";
             } else {
                 std::cout << "[Facade] Failed to load scene: " << result.error << "\n";
-                // Try alternative path
-                result = engine.loadGltfScene("Sponza/glTF/Sponza.gltf");
-                if (result.success) {
-                    std::cout << "[Facade] Loaded from alt path: "
-                              << result.entities.size() << " entities\n";
-                }
             }
 
             // Demonstrate SceneAPI: query and manipulate entities

@@ -444,7 +444,7 @@ Ordered by (impact × confidence) ÷ effort, not by severity alone.
 Recorded as they surfaced while working through the fixes. None are regressions
 from that work; each was verified against the pre-change build where relevant.
 
-### `facade_test` cannot run from its own directory
+### `facade_test` cannot run from its own directory — FIXED
 
 `examples/facade_test/` contains only `main.cpp` and `CMakeLists.txt`. The three
 assets its `main.cpp` names — `pipeline.json`, `cubemaps_hdrs/…8k.hdr`, and
@@ -454,6 +454,18 @@ directory that has those assets, it initialises and renders normally.
 
 The README lists it as the example that demonstrates the Facade API, so this is
 the first example a new user is likely to try.
+
+**Fixed.** It now ships a single forward pass with analytic lighting — the
+example is about the API surface, not the renderer, so there is nothing for
+image-based lighting to bind to and no HDR to wait for. Its shaders are compiled
+by CMake like every other example, which is what was actually missing: it built
+fine and then failed at runtime on a .spv that no build step ever produced.
+
+The scene falls back to `models/Box.gltf` when Sponza has not been fetched. It
+asks rather than probes — `Facade::assetExists()` was added for this, because
+attempting the load to find out logs a failure that did not happen, and the
+graceful-fallback pattern the asset documentation recommends had no way to be
+written from the Facade layer alone.
 
 ### Teardown crashed on every exit — FIXED
 

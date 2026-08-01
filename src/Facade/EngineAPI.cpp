@@ -10,6 +10,8 @@
 #include "ECS/Sprite2DComponents.h"
 
 #include "Facade/EngineAPI.h"
+#include "Core/AssetPaths.h"
+#include <filesystem>
 #include "Facade/SceneAPI.h"
 #include "Facade/EcsAPI.h"
 #include "InputAPIImpl.h"
@@ -414,6 +416,27 @@ void EngineAPI::setCustomVec4(const std::string& key, const glm::vec4& value) {
 
 void EngineAPI::setCustomUint(const std::string& key, uint32_t value) {
     m_impl->app->getRenderGraph().getSceneContext().setCustom(key, value);
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// Assets
+// ═══════════════════════════════════════════════════════════════
+
+bool assetExists(const std::string& relativePath) {
+    if (relativePath.empty()) {
+        return false;
+    }
+    std::error_code ec;
+    return std::filesystem::exists(AssetPaths::locate(relativePath), ec);
+}
+
+std::string resolveAsset(const std::string& relativePath) {
+    return AssetPaths::locate(relativePath).string();
+}
+
+std::string describeAssetRoot() {
+    return AssetPaths::describe();
 }
 
 } // namespace Facade

@@ -192,9 +192,6 @@ class PipelineValidation(unittest.TestCase):
             if '"passes"' not in document:
                 continue
             errors = [p for p in pipeline.validate(path) if p.is_error]
-            # facade_test has no shaders directory at all; tracked separately.
-            if path.parent.name == "facade_test":
-                continue
             self.assertEqual([], errors, "%s: %s" % (path.name, errors))
             checked += 1
         self.assertGreater(checked, 5, "expected to find shipped pipelines")

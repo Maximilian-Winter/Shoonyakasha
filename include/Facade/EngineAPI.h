@@ -21,6 +21,27 @@ class InputAPI;
 class PhysicsAPI;
 class EcsAPI;
 
+// ═══════════════════════════════════════════════════════════════
+// Assets
+// ═══════════════════════════════════════════════════════════════
+//
+// The engine resolves asset paths against the shared assets/ directory, so an
+// application only ever names "models/Box.gltf". These let it ask about an asset
+// before trying to load one, which is what the graceful-fallback pattern needs:
+// large assets like Sponza are not committed, and probing by attempting a load
+// logs a failure that did not happen.
+
+/// Is this asset present, either as given or under the shared asset root?
+bool assetExists(const std::string& relativePath);
+
+/// Where an asset actually is. Returns the input unchanged when it cannot be
+/// found, so a failure names the path the caller wrote.
+std::string resolveAsset(const std::string& relativePath);
+
+/// Where the asset root came from, for startup logs and missing-asset reports.
+std::string describeAssetRoot();
+
+
 class EngineAPI {
 public:
     explicit EngineAPI(const EngineConfig& config);
