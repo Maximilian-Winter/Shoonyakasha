@@ -154,10 +154,16 @@ void main() {
     // IBL Specular
     // ═══════════════════════════════════════════════════════════════
 
-    // Determine mip level from roughness
-    // Typically prefilter map has 5 mip levels for roughness 0..1
-    const float MAX_REFLECTION_LOD = 4.0;
-    float mipLevel = roughness * MAX_REFLECTION_LOD;
+    // Determine mip level from roughness.
+    //
+    // Queried rather than hardcoded: IBLGenerator fills mip m of the prefilter
+    // map with roughness m/(mipLevels-1), and mipLevels comes from the cubemap
+    // size, which apps override (512 -> 10 mips, 256 -> 9). The old constant 4.0
+    // assumed a 5-mip map, so a roughness-1.0 surface sampled mip 4 — convolved
+    // for roughness 0.44 — and mips 5..9 were never read. Rough metals rendered
+    // far too glossy.
+    float maxReflectionLod = float(textureQueryLevels(prefilterMap) - 1);
+    float mipLevel = roughness * maxReflectionLod;
 
     // Sample pre-filtered environment map
     vec3 prefilteredColor = textureLod(prefilterMap, R, mipLevel).rgb;

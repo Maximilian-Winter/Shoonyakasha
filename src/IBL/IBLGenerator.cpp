@@ -400,14 +400,85 @@ VulkanCubemap* IBLGenerator::convertEquirectToCubemap(VulkanTexture* equirect, u
                              0, 1, &memBarrier, 0, nullptr, 0, nullptr);
     }
 
-    // Transition to shader read optimal
-    cubemap->transitionLayout(cmd,
-                              VK_IMAGE_LAYOUT_GENERAL,
-                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                              VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                              VK_ACCESS_SHADER_WRITE_BIT,
-                              VK_ACCESS_SHADER_READ_BIT);
+    // ── Build the mip chain ──
+    //
+    // createEnvironmentMap allocates a full chain but only mip 0 was ever
+    // written, and prefilter_convolution.comp samples the environment with
+    // textureLod(..., roughness * 4.0) — so for every roughness above 0 it read
+    // mips 1..4 as uninitialised device memory, and the sampler's maxLod let it.
+    const uint32_t mipLevels = cubemap->getMipLevels();
+
+    if (mipLevels > 1) {
+        // mip 0 holds the compute results and becomes the first blit source.
+        cubemap->transitionMipLayout(cmd, 0,
+                                     VK_IMAGE_LAYOUT_GENERAL,
+                                     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                     VK_ACCESS_SHADER_WRITE_BIT,
+                                     VK_ACCESS_TRANSFER_READ_BIT);
+
+        int32_t srcSize = static_cast<int32_t>(cubeSize);
+
+        for (uint32_t mip = 1; mip < mipLevels; ++mip) {
+            const int32_t dstSize = srcSize > 1 ? srcSize / 2 : 1;
+
+            cubemap->transitionMipLayout(cmd, mip,
+                                         VK_IMAGE_LAYOUT_GENERAL,
+                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         0,
+                                         VK_ACCESS_TRANSFER_WRITE_BIT);
+
+            VkImageBlit blit{};
+            blit.srcSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            blit.srcSubresource.mipLevel       = mip - 1;
+            blit.srcSubresource.baseArrayLayer = 0;
+            blit.srcSubresource.layerCount     = 6;   // all faces in one blit
+            blit.srcOffsets[0] = {0, 0, 0};
+            blit.srcOffsets[1] = {srcSize, srcSize, 1};
+            blit.dstSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            blit.dstSubresource.mipLevel       = mip;
+            blit.dstSubresource.baseArrayLayer = 0;
+            blit.dstSubresource.layerCount     = 6;
+            blit.dstOffsets[0] = {0, 0, 0};
+            blit.dstOffsets[1] = {dstSize, dstSize, 1};
+
+            vkCmdBlitImage(cmd,
+                           cubemap->getImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           cubemap->getImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &blit, VK_FILTER_LINEAR);
+
+            // This level becomes the next level's source.
+            cubemap->transitionMipLayout(cmd, mip,
+                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VK_ACCESS_TRANSFER_WRITE_BIT,
+                                         VK_ACCESS_TRANSFER_READ_BIT);
+
+            srcSize = dstSize;
+        }
+
+        // Every level is now in TRANSFER_SRC_OPTIMAL.
+        cubemap->transitionLayout(cmd,
+                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  VK_ACCESS_TRANSFER_READ_BIT,
+                                  VK_ACCESS_SHADER_READ_BIT);
+    } else {
+        cubemap->transitionLayout(cmd,
+                                  VK_IMAGE_LAYOUT_GENERAL,
+                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  VK_ACCESS_SHADER_WRITE_BIT,
+                                  VK_ACCESS_SHADER_READ_BIT);
+    }
 
     m_device.endSingleTimeCommands(cmd);
 
@@ -698,7 +769,14 @@ VulkanTexture* IBLGenerator::generateBRDFLUT(uint32_t size, uint32_t samples) {
                 VdotH = std::max(VdotH, 0.0f);
 
                 if (NdotL > 0.0f) {
-                    float k = (a * a) / 2.0f;
+                    // Smith-Schlick k for the IBL case is roughness^2 / 2.
+                    // `a` is already roughness^2 (used above for the GGX
+                    // distribution), so squaring it again gave roughness^4 / 2 —
+                    // far too little shadowing, so the LUT came out too bright
+                    // across the mid-roughness band. brdf_lut.comp, sitting
+                    // unused beside this, has always had it right.
+                    float rough2 = roughness * roughness;
+                    float k = rough2 / 2.0f;
                     float G1 = NdotV / (NdotV * (1.0f - k) + k);
                     float G2 = NdotL / (NdotL * (1.0f - k) + k);
                     float G = G1 * G2;
