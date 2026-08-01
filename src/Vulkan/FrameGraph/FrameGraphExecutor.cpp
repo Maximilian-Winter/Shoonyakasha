@@ -615,9 +615,16 @@ void FrameGraphExecutor::executeAutoCallback(
              exec.type == "transparent_geometry" ||
              exec.type == "shadow_casters" ||
              exec.type == "skinned_geometry" ||
-             exec.type == "skinned_transparent") {
+             exec.type == "skinned_transparent" ||
+             exec.type == "sprite_geometry") {
         // Call scene renderer callback if registered
         // For built-in geometry types, RenderGraph auto-registers the callback
+        //
+        // sprite_geometry was missing from this list. RenderGraph accepts it and
+        // registers a renderer (RenderGraph.cpp), and FrameGraphRenderer maps it
+        // to EntityFilter::Sprite2D — but the chain here had no branch for it, so
+        // the pass ran, recorded no draws, and said nothing. Every sprite, UI
+        // panel and text label rendered to nothing.
         if (passDecl.sceneRendererFn) {
             passDecl.sceneRendererFn(ctx);
         } else {
@@ -625,6 +632,14 @@ void FrameGraphExecutor::executeAutoCallback(
                 "Pass '%s' has execution.type='%s' but no scene renderer registered",
                 passDecl.name.c_str(), exec.type.c_str());
         }
+    }
+    else if (!exec.type.empty() && exec.type != "manual") {
+        // Falling off the end of this chain used to be silent: a pass with a
+        // typo'd or unsupported execution type simply drew nothing, with no
+        // diagnostic anywhere. That is how sprite_geometry went unnoticed.
+        m_logger->logEvery(5.0f, LogLevel::Warning,
+            "Pass '%s' has unrecognised execution.type='%s' — nothing was recorded for it",
+            passDecl.name.c_str(), exec.type.c_str());
     }
 }
 
