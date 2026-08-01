@@ -13,7 +13,8 @@
   "descriptorSetLayouts": {
     "forwardSet": {
       "bindings": [
-        { "binding": 0, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "count": 1, "name": "camera" },
+        { "binding": 0, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "count": 1, "name": "camera",
+            "autoBindBuffer": "camera" },
         { "binding": 1, "type": "combined_image_sampler", "stages": ["fragment"], "count": 1, "name": "diffuseTexture" }
       ]
     },
@@ -23,7 +24,8 @@
           "autoBindResource": "sceneColor", "autoBindSampler": "linearClamp" },
         { "binding": 1, "type": "storage_image", "stages": ["compute"], "count": 1, "name": "bloomBrightPass",
           "autoBindResource": "bloomBrightPass" },
-        { "binding": 2, "type": "uniform_buffer", "stages": ["compute"], "count": 1, "name": "bloomParams" }
+        { "binding": 2, "type": "uniform_buffer", "stages": ["compute"], "count": 1, "name": "bloomParams",
+            "autoBindBuffer": "bloomParams" }
       ]
     },
     "blurHorizontalSet": {

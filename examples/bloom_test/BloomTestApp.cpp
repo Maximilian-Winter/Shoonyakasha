@@ -54,6 +54,22 @@ void BloomTestApp::initRenderGraph() {
     m_renderGraph = std::make_unique<FrameGraph::RenderGraph>(*m_device, *m_commandManager);
     m_renderGraph->loadFromFile("bloom_pipeline.json");
 
+    // Hand the app-managed UBOs to the graph so the auto-binder can wire them to
+    // the descriptor bindings of the same name in bloom_pipeline.json.
+    //
+    // Without this, brightExtractSet binding 2 ("bloomParams") was declared in the
+    // JSON, allocated in the descriptor set, and never written — the compute
+    // shader read an undefined descriptor and validation reported it every frame
+    // ("variable \"params\" is being used in dispatch but has never been updated").
+    // The threshold, soft knee and intensity computed in update() were being
+    // written to a buffer nothing was reading.
+    m_renderGraph->registerUniformBuffer("camera",
+                                         m_cameraUBO->getBuffers(),
+                                         m_cameraUBO->getSize());
+    m_renderGraph->registerUniformBuffer("bloomParams",
+                                         m_bloomParamsUBO->getBuffers(),
+                                         m_bloomParamsUBO->getSize());
+
     // Import swapchain images
     VkExtent2D extent = m_swapChain->getSwapChainExtent();
     for (uint32_t i = 0; i < m_swapChain->getImageCount(); ++i) {
