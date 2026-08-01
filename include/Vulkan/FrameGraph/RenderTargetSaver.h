@@ -49,9 +49,6 @@ private:
     // Get bytes per pixel for a given VkFormat
     uint32_t getBytesPerPixel(VkFormat format);
 
-    // Determine if format is a depth format
-    bool isDepthFormat(VkFormat format);
-
     // Get file extension (lowercase)
     static std::string getExtension(const std::string& path);
 };

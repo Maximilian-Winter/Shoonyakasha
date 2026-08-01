@@ -5,6 +5,7 @@
 #include "Vulkan/VulkanImage.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanMemoryAllocator.h"
+#include "GPU/VkFormatUtils.h"
 #include <stdexcept>
 
 namespace Shoonyakasha {
@@ -134,11 +135,10 @@ void VulkanImage::transitionImageLayout(VkImageLayout oldLayout, VkImageLayout n
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = m_image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
+    // Derived from the format rather than assumed to be colour — VulkanImage is
+    // also used to create the depth image, which this function could not
+    // previously transition.
+    barrier.subresourceRange = fullSubresourceRange(m_format);
 
     VkPipelineStageFlags sourceStage;
     VkPipelineStageFlags destinationStage;

@@ -3,6 +3,7 @@
 //
 
 #include "GPU/GPUResourceFactory.h"
+#include "GPU/VkFormatUtils.h"
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
@@ -507,19 +508,13 @@ void GPUResourceFactory::transitionImageLayout(
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = layerCount;
 
-    // Determine aspect mask
-    if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ||
-        format == VK_FORMAT_D32_SFLOAT ||
-        format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
-        format == VK_FORMAT_D24_UNORM_S8_UINT) {
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        if (format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
-            format == VK_FORMAT_D24_UNORM_S8_UINT) {
-            barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-        }
-    } else {
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    }
+    // Aspect from the format. The layout is still honoured for the case where a
+    // caller transitions to DEPTH_STENCIL_ATTACHMENT_OPTIMAL with an unresolved
+    // format.
+    barrier.subresourceRange.aspectMask =
+        (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL && format == VK_FORMAT_UNDEFINED)
+            ? VK_IMAGE_ASPECT_DEPTH_BIT
+            : Shoonyakasha::formatToAspectMask(format);
 
     VkPipelineStageFlags sourceStage;
     VkPipelineStageFlags destinationStage;

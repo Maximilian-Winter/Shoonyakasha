@@ -6,6 +6,7 @@
 //
 
 #include "Vulkan/FrameGraph/FrameGraph.h"
+#include "GPU/VkFormatUtils.h"
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
 #include "Vulkan/FrameGraph/FrameGraphAnalyzer.h"
 #include "Vulkan/FrameGraph/FrameGraphExport.h"
@@ -726,17 +727,13 @@ void RenderGraph::createStagingBuffers(uint32_t maxFramesInFlight) {
             default: bpp = 4; break;
         }
 
-        bool isDepth = (img->format == VK_FORMAT_D16_UNORM || img->format == VK_FORMAT_D32_SFLOAT ||
-                        img->format == VK_FORMAT_D16_UNORM_S8_UINT || img->format == VK_FORMAT_D24_UNORM_S8_UINT ||
-                        img->format == VK_FORMAT_D32_SFLOAT_S8_UINT);
-
         StagingBufferManager::ImageConfig imgCfg;
         imgCfg.name = resDecl.name;
         imgCfg.gpuImage = img->vkImage;
         imgCfg.format = img->format;
         imgCfg.extent = img->extent;
         imgCfg.bufferSize = static_cast<VkDeviceSize>(img->extent.width) * img->extent.height * bpp;
-        imgCfg.aspectMask = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+        imgCfg.aspectMask = Shoonyakasha::formatToAspectMask(img->format);
         imgCfg.hasReadback = true;
 
         // Convert string frequency to enum
