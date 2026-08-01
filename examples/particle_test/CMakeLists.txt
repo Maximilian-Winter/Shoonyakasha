@@ -25,38 +25,8 @@ else()
 endif()
 
 # Shader compilation
-find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/Bin)
 
-function(target_compile_shaders TARGET SHADER_DIR OUTPUT_DIR)
-    file(GLOB SHADERS
-        "${SHADER_DIR}/*.vert"
-        "${SHADER_DIR}/*.frag"
-        "${SHADER_DIR}/*.comp"
-    )
-
-    foreach(SHADER ${SHADERS})
-        get_filename_component(SHADER_NAME ${SHADER} NAME)
-        set(SPV_OUTPUT "${OUTPUT_DIR}/${SHADER_NAME}.spv")
-
-        add_custom_command(
-            OUTPUT ${SPV_OUTPUT}
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${OUTPUT_DIR}
-            COMMAND ${GLSLC} ${SHADER} -o ${SPV_OUTPUT}
-            DEPENDS ${SHADER}
-            COMMENT "Compiling shader: ${SHADER_NAME}"
-            VERBATIM
-        )
-        list(APPEND SPV_FILES ${SPV_OUTPUT})
-    endforeach()
-
-    add_custom_target(${TARGET}_shaders DEPENDS ${SPV_FILES})
-    add_dependencies(${TARGET} ${TARGET}_shaders)
-endfunction()
-
-target_compile_shaders(ShoonyakashaParticleTest
-    "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
-    "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
-)
+target_compile_shaders(ShoonyakashaParticleTest "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 
 # Copy pipeline JSON to build directory
 add_custom_command(TARGET ShoonyakashaParticleTest POST_BUILD

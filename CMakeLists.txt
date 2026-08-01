@@ -162,6 +162,10 @@ endif()
 # pip install built all nine of them.
 # ─────────────────────────────────────────────────────────────────────────────
 if(BUILD_EXAMPLES)
+    # One shared GLSL -> SPIR-V step for every example, replacing nine private
+    # copies that had drifted apart. Included here so glslc is located once.
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompileShaders.cmake")
+
     add_subdirectory(examples/particle_test)
     add_subdirectory(examples/bloom_test)
     add_subdirectory(examples/declarative_sponza_test)
