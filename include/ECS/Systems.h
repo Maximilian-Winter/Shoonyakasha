@@ -60,11 +60,21 @@ public:
         }
 
         // Third pass: Update world matrices for child entities
-        updateChildTransforms(registry, entt::null);
+        updateChildTransforms(registry, entt::null, 0);
     }
 
+    /// Hard cap on hierarchy depth.
+    ///
+    /// SceneAPI::setParent rejects cycles, but a parent/child graph can also
+    /// arrive from Scene::deserialize, which restores links straight from JSON.
+    /// Without a bound, a cycle in that data is a stack overflow rather than a
+    /// diagnosable error.
+    static constexpr uint32_t kMaxHierarchyDepth = 256;
+
 private:
-    void updateChildTransforms(entt::registry& registry, entt::entity parent) {
+    void updateChildTransforms(entt::registry& registry, entt::entity parent, uint32_t depth) {
+        if (depth >= kMaxHierarchyDepth) return;
+
         auto hierarchyView = registry.view<HierarchyComponent, TransformComponent>();
 
         for (auto entity : hierarchyView) {
@@ -82,7 +92,7 @@ private:
                 }
 
                 // Recursively update children
-                updateChildTransforms(registry, entity);
+                updateChildTransforms(registry, entity, depth + 1);
             }
         }
     }
@@ -155,6 +165,9 @@ public:
             }
         }
 
+        // A parent and its child can both expire on the same frame. Destroying
+        // the parent cascades onto the child, so the second call here sees an
+        // already-dead handle — destroyEntity guards validity for exactly this.
         for (auto entity : toDestroy) {
             EntityHelper::destroyEntity(registry, entity);
         }
@@ -222,19 +235,28 @@ private:
 // System Manager - Orchestrating all systems in harmony
 // ═══════════════════════════════════════════════════════════════
 
+/// Owns the systems and drives them in priority order.
+///
+/// Adding or removing a system from inside a system's own update() used to be
+/// undefined behaviour: update() range-fors over the vector while addSystem
+/// appends and sorts it and removeSystem erases from it. Removing the running
+/// system additionally destroyed the std::function that was executing.
+/// EcsAPI exposes both to scripting languages, where "unregister this system
+/// when it is done" is the obvious idiom, so the mutations are deferred to the
+/// end of the update instead.
 class SystemManager {
 public:
     template<typename T, typename... Args>
     T* addSystem(Args&&... args) {
         auto system = std::make_unique<T>(std::forward<Args>(args)...);
         T* ptr = system.get();
-        m_systems.emplace_back(std::move(system));
 
-        // Sort systems by priority
-        std::sort(m_systems.begin(), m_systems.end(),
-                 [](const std::unique_ptr<ISystem>& a, const std::unique_ptr<ISystem>& b) {
-                     return a->priority < b->priority;
-                 });
+        if (m_iterating) {
+            m_pendingAdds.emplace_back(std::move(system));
+        } else {
+            m_systems.emplace_back(std::move(system));
+            sortByPriority();
+        }
 
         return ptr;
     }
@@ -258,27 +280,48 @@ public:
         return nullptr;
     }
 
-    // Remove a system by name. Returns true if a system was found and removed.
+    /// Remove a system by name. Returns true if a matching system was found.
+    ///
+    /// Called from within an update, the removal is deferred to the end of that
+    /// update — so a system may remove itself. The system's cleanup() runs
+    /// before it is destroyed, which matters for anything holding EnTT signal
+    /// connections: PhysicsSystem's on_construct/on_destroy sinks otherwise
+    /// survive into freed memory.
     bool removeSystem(const std::string& systemName) {
+        if (m_iterating) {
+            if (!findSystem(systemName)) return false;
+            m_pendingRemovals.push_back(systemName);
+            return true;
+        }
+
         auto it = std::find_if(m_systems.begin(), m_systems.end(),
             [&](const std::unique_ptr<ISystem>& s) { return s->name == systemName; });
         if (it == m_systems.end()) return false;
+
+        if (m_registry) (*it)->cleanup(*m_registry);
         m_systems.erase(it);
         return true;
     }
 
     void initialize(entt::registry& registry) {
+        m_registry = &registry;   // so removeSystem can run cleanup()
         for (auto& system : m_systems) {
             system->initialize(registry);
         }
     }
 
     void update(entt::registry& registry, float deltaTime) {
+        m_registry = &registry;
+
+        m_iterating = true;
         for (auto& system : m_systems) {
             if (system->enabled) {
                 system->update(registry, deltaTime);
             }
         }
+        m_iterating = false;
+
+        applyPendingChanges(registry);
     }
 
     void cleanup(entt::registry& registry) {
@@ -288,7 +331,43 @@ public:
     }
 
 private:
+    void sortByPriority() {
+        std::sort(m_systems.begin(), m_systems.end(),
+                 [](const std::unique_ptr<ISystem>& a, const std::unique_ptr<ISystem>& b) {
+                     return a->priority < b->priority;
+                 });
+    }
+
+    void applyPendingChanges(entt::registry& registry) {
+        if (m_pendingRemovals.empty() && m_pendingAdds.empty()) return;
+
+        for (const auto& name : m_pendingRemovals) {
+            auto it = std::find_if(m_systems.begin(), m_systems.end(),
+                [&](const std::unique_ptr<ISystem>& s) { return s->name == name; });
+            if (it != m_systems.end()) {
+                (*it)->cleanup(registry);
+                m_systems.erase(it);
+            }
+        }
+        m_pendingRemovals.clear();
+
+        for (auto& system : m_pendingAdds) {
+            system->initialize(registry);   // it missed this cycle's initialize()
+            m_systems.emplace_back(std::move(system));
+        }
+        m_pendingAdds.clear();
+
+        sortByPriority();
+    }
+
     std::vector<std::unique_ptr<ISystem>> m_systems;
+
+    // Deferred mutation while update() is walking m_systems
+    std::vector<std::unique_ptr<ISystem>> m_pendingAdds;
+    std::vector<std::string> m_pendingRemovals;
+    bool m_iterating = false;
+
+    entt::registry* m_registry = nullptr;   // last registry seen; for cleanup on removal
 };
 
 } // namespace ECS

@@ -700,7 +700,21 @@ void SceneAPI::setParent(EntityHandle child, EntityHandle parent) {
     auto childEntt  = toEntt(child);
     auto parentEntt = toEntt(parent);
 
-    // Ensure child has HierarchyComponent
+    // Reject cycles. Reparenting an entity under itself or under one of its own
+    // descendants makes TransformSystem's hierarchy walk recurse forever, and
+    // this is reachable from one scripting call.
+    if (childEntt == parentEntt ||
+        ECS::EntityHelper::isAncestorOf(m_impl->registry, childEntt, parentEntt)) {
+        return;
+    }
+
+    // Create the parent's component first: get_or_emplace on the parent can
+    // reallocate the HierarchyComponent pool, which would dangle a reference to
+    // the child's component taken before it.
+    if (m_impl->registry.valid(parentEntt)) {
+        m_impl->registry.get_or_emplace<ECS::HierarchyComponent>(parentEntt);
+    }
+
     auto& childH = m_impl->registry.get_or_emplace<ECS::HierarchyComponent>(childEntt);
 
     // Remove from old parent
@@ -714,8 +728,8 @@ void SceneAPI::setParent(EntityHandle child, EntityHandle parent) {
 
     // Add to new parent's children
     if (m_impl->registry.valid(parentEntt)) {
-        auto& parentH = m_impl->registry.get_or_emplace<ECS::HierarchyComponent>(parentEntt);
-        parentH.addChild(childEntt);
+        auto* parentH = m_impl->registry.try_get<ECS::HierarchyComponent>(parentEntt);
+        if (parentH) parentH->addChild(childEntt);
     }
 }
 

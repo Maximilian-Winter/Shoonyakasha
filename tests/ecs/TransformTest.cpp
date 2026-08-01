@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 #include "ECS/Core.h"
+#include "ECS/Systems.h"
 #include "TestHelpers.h"
 #include <glm/gtc/constants.hpp>
 
@@ -153,4 +154,110 @@ TEST(TransformComponent, FullConstructor) {
     TestHelpers::ExpectVec3Near(t.position, pos);
     TestHelpers::ExpectVec3Near(t.rotation, rot);
     TestHelpers::ExpectVec3Near(t.scale, scl);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Hierarchy destruction and cycle safety
+// ═══════════════════════════════════════════════════════════════
+
+// destroyEntity used to range-for over hierarchy->children while the recursive
+// call erased from that same vector, and held a component pointer across
+// registry.destroy calls that could relocate it. Both needed two or more
+// children to show, and both corrupted silently rather than crashing.
+TEST(EntityHelperHierarchy, DestroyParent_WithManyChildren_DestroysAll) {
+    entt::registry registry;
+
+    auto parent = registry.create();
+    registry.emplace<ECS::HierarchyComponent>(parent);
+
+    std::vector<entt::entity> children;
+    for (int i = 0; i < 8; ++i) {
+        auto child = registry.create();
+        auto& ch = registry.emplace<ECS::HierarchyComponent>(child);
+        ch.parent = parent;
+        registry.get<ECS::HierarchyComponent>(parent).addChild(child);
+        children.push_back(child);
+    }
+
+    ECS::EntityHelper::destroyEntity(registry, parent);
+
+    EXPECT_FALSE(registry.valid(parent));
+    for (auto c : children) EXPECT_FALSE(registry.valid(c)) << "child outlived its parent";
+}
+
+TEST(EntityHelperHierarchy, DestroyParent_DeepChain_DestroysAll) {
+    entt::registry registry;
+
+    std::vector<entt::entity> chain;
+    entt::entity prev = entt::null;
+    for (int i = 0; i < 32; ++i) {
+        auto e = registry.create();
+        auto& h = registry.emplace<ECS::HierarchyComponent>(e);
+        h.parent = prev;
+        if (prev != entt::null) registry.get<ECS::HierarchyComponent>(prev).addChild(e);
+        chain.push_back(e);
+        prev = e;
+    }
+
+    ECS::EntityHelper::destroyEntity(registry, chain.front());
+    for (auto e : chain) EXPECT_FALSE(registry.valid(e));
+}
+
+// A parent and child expiring on the same frame means the second destroy call
+// sees an already-dead handle. try_get on a dead entity is an EnTT precondition
+// violation.
+TEST(EntityHelperHierarchy, DestroyEntity_AlreadyDestroyed_IsNoOp) {
+    entt::registry registry;
+    auto e = registry.create();
+    ECS::EntityHelper::destroyEntity(registry, e);
+    EXPECT_NO_FATAL_FAILURE(ECS::EntityHelper::destroyEntity(registry, e));
+    EXPECT_NO_FATAL_FAILURE(ECS::EntityHelper::destroyEntity(registry, entt::null));
+}
+
+TEST(EntityHelperHierarchy, IsAncestorOf_DetectsSelfAndAncestors) {
+    entt::registry registry;
+
+    auto a = registry.create();
+    auto b = registry.create();
+    auto c = registry.create();
+    registry.emplace<ECS::HierarchyComponent>(a);
+    registry.emplace<ECS::HierarchyComponent>(b).parent = a;
+    registry.emplace<ECS::HierarchyComponent>(c).parent = b;
+
+    EXPECT_TRUE(ECS::EntityHelper::isAncestorOf(registry, a, c));
+    EXPECT_TRUE(ECS::EntityHelper::isAncestorOf(registry, b, c));
+    EXPECT_TRUE(ECS::EntityHelper::isAncestorOf(registry, c, c)) << "an entity is its own ancestor here";
+    EXPECT_FALSE(ECS::EntityHelper::isAncestorOf(registry, c, a));
+}
+
+// A cycle can arrive from Scene::deserialize, which restores parent links
+// straight from JSON without validating them. isAncestorOf must terminate.
+TEST(EntityHelperHierarchy, IsAncestorOf_TerminatesOnCycle) {
+    entt::registry registry;
+
+    auto a = registry.create();
+    auto b = registry.create();
+    registry.emplace<ECS::HierarchyComponent>(a).parent = b;
+    registry.emplace<ECS::HierarchyComponent>(b).parent = a;
+
+    EXPECT_NO_FATAL_FAILURE({
+        volatile bool r = ECS::EntityHelper::isAncestorOf(registry, a, b);
+        (void)r;
+    });
+}
+
+// TransformSystem walks the hierarchy recursively. With a cycle in the data it
+// used to recurse until the stack ran out.
+TEST(EntityHelperHierarchy, TransformSystem_SurvivesCyclicHierarchy) {
+    entt::registry registry;
+
+    auto a = registry.create();
+    auto b = registry.create();
+    registry.emplace<ECS::TransformComponent>(a);
+    registry.emplace<ECS::TransformComponent>(b);
+    registry.emplace<ECS::HierarchyComponent>(a).parent = b;
+    registry.emplace<ECS::HierarchyComponent>(b).parent = a;
+
+    ECS::TransformSystem sys;
+    EXPECT_NO_FATAL_FAILURE(sys.update(registry, 0.016f));
 }
