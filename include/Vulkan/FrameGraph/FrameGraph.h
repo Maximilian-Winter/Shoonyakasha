@@ -643,6 +643,16 @@ public:
         const std::unordered_map<std::string, std::shared_ptr<VulkanPipeline>>& manualPipelines = {}
     );
 
+    // ── Stage 11: Buffer layout compilation ──
+    // 緩衝之構 — Transform JSON BufferLayoutDesc into compiled layouts.
+    // Public and device-free: buffer packing is pure arithmetic over the JSON
+    // description, so it can be exercised without a VkDevice. The byte offsets it
+    // produces are the contract between the JSON, the shaders, and DotPathResolver,
+    // which makes them worth testing directly.
+    void compileBufferLayouts(
+        const std::vector<BufferLayoutDesc>& layoutDescs,
+        std::unordered_map<std::string, CompiledBufferLayout>& outLayouts);
+
 private:
     // ── Compilation stages ──
     bool topologicalSort(
@@ -731,13 +741,11 @@ private:
         const std::vector<PassDeclaration>& passes,
         QueueSubmitBatch& outBatches);
 
-    // ── Stage 11: Buffer layout compilation ──
-    // 緩衝之構 — Transform JSON BufferLayoutDesc into compiled layouts
-    void compileBufferLayouts(
-        const std::vector<BufferLayoutDesc>& layoutDescs,
-        std::unordered_map<std::string, CompiledBufferLayout>& outLayouts);
-
     // ── Helpers ──
+    /// Create m_logger on first use. compile() and compileBufferLayouts() are both
+    /// public entry points, so neither may assume the other ran first.
+    void ensureLogger();
+
     static VkImageLayout usageToLayout(ResourceUsage usage);
     static VkPipelineStageFlags usageToStageMask(ResourceUsage usage, PassType passType);
     static VkAccessFlags usageToAccessMask(ResourceUsage usage);

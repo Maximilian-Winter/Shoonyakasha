@@ -836,9 +836,7 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     uint32_t maxFramesInFlight,
     const std::unordered_map<std::string, std::shared_ptr<VulkanPipeline>>& manualPipelines)
 {
-    if (!m_logger) {
-        m_logger = new Logger("framegraph_compiler.log");
-    }
+    ensureLogger();
 
     CompileResult result;
     result.valid = false;
@@ -1593,10 +1591,18 @@ VkShaderStageFlags CompiledBufferLayout::getShaderStages() const {
     return JsonUtils::stringsToShaderStages(binding.stages);
 }
 
+void FrameGraphCompiler::ensureLogger() {
+    if (!m_logger) {
+        m_logger = new Logger("framegraph_compiler.log");
+    }
+}
+
 void FrameGraphCompiler::compileBufferLayouts(
     const std::vector<BufferLayoutDesc>& layoutDescs,
     std::unordered_map<std::string, CompiledBufferLayout>& outLayouts)
 {
+    ensureLogger();
+
     for (const auto& desc : layoutDescs) {
         CompiledBufferLayout compiled;
         compiled.name = desc.name;
