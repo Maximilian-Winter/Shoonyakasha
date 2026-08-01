@@ -564,8 +564,32 @@ void FrameGraphCompiler::createRenderPasses(
     std::vector<CompiledPass>& compiledPasses,
     const std::vector<uint32_t>& executionOrder,
     const std::vector<PassDeclaration>& passes,
-    const std::vector<PhysicalResource>& physResources)
+    const std::vector<PhysicalResource>& physResources,
+    const ImportedImageMap& importedImages)
 {
+    // Which pass writes each presentable resource last.
+    //
+    // A presented image must be in PRESENT_SRC_KHR, and finalLayout otherwise
+    // comes from the pass's declared ResourceUsage — so a pipeline whose final
+    // pass says "color_write" (or "color_blend", which cannot say "present"
+    // without losing its blend semantics) left the swapchain in
+    // COLOR_ATTACHMENT_OPTIMAL and vkQueuePresentKHR complained every frame.
+    //
+    // Derived rather than declared: the swapchain is the imported resource with
+    // one view per swapchain image, so the compiler can identify it without the
+    // JSON author having to remember.
+    std::unordered_map<uint32_t, uint32_t> lastPresentableWriter;  // resource index -> exec index
+    for (uint32_t execIdx : executionOrder) {
+        const auto& decl = passes[compiledPasses[execIdx].declIndex];
+        for (const auto& output : decl.outputs) {
+            if (!output.handle.valid()) continue;
+            auto it = importedImages.find(output.handle.index);
+            if (it != importedImages.end() && it->second.views.size() > 1) {
+                lastPresentableWriter[output.handle.index] = execIdx;
+            }
+        }
+    }
+
     for (uint32_t execIdx : executionOrder) {
         auto& compiled = compiledPasses[execIdx];
         const auto& passDecl = passes[compiled.declIndex];
@@ -625,6 +649,13 @@ void FrameGraphCompiler::createRenderPasses(
                 else if (output.usage == ResourceUsage::ColorAttachmentBlend &&
                          initialLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
                     initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                }
+
+                // The last pass to write a presentable image must leave it in
+                // PRESENT_SRC_KHR regardless of the usage it declared.
+                auto presentIt = lastPresentableWriter.find(output.handle.index);
+                if (presentIt != lastPresentableWriter.end() && presentIt->second == execIdx) {
+                    finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
                 }
 
                 AttachmentDescriptor desc;
@@ -914,7 +945,7 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
 
     // Stage 6: Create render passes
     createRenderPasses(device, result.compiledPasses, result.executionOrder,
-                       passes, result.physicalResources);
+                       passes, result.physicalResources, importedImages);
     m_logger->log(LogLevel::Info, "Render passes created");
 
     // Stage 7: Create framebuffers
