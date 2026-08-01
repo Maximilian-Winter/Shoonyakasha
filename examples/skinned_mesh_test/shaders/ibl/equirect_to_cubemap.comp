@@ -44,7 +44,13 @@ vec2 directionToEquirect(vec3 dir) {
     // Map to [0, 1]
     vec2 uv;
     uv.x = (phi / (2.0 * PI)) + 0.5;   // [0, 1]
-    uv.y = (theta / PI) + 0.5;          // [0, 1]
+    // theta = asin(dir.y), so dir.y = +1 (up) gives theta = +PI/2. Vulkan puts
+    // image row 0 at v = 0 and stb_image returns row 0 as the *top* scanline, so
+    // up must map to v = 0, not v = 1. The original is the LearnOpenGL formula,
+    // which is correct only alongside stbi_set_flip_vertically_on_load(true) --
+    // a call that appears nowhere in this repository. The sky was upside down,
+    // and so was every bounce derived from it.
+    uv.y = 0.5 - (theta / PI);          // [0, 1], v = 0 is up
 
     return uv;
 }
