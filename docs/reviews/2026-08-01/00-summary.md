@@ -513,24 +513,39 @@ called `registerUniformBuffer()` and the binding never declared
 `autoBindBuffer`, which is what the auto-binder matches on. It was the only
 shipped pipeline missing that field.
 
-### Object leaks at `vkDestroyDevice` — newly visible
+### Object leaks at `vkDestroyDevice` — newly visible, diagnosed
 
 Not a regression. Validation's object tracker reports leaks when the device is
 destroyed, and until the shutdown crash was fixed no example ever reached that
 point.
 
-Now that they do, three of five report leaks — different ones each:
+Full analysis in [`leaks-investigation.md`](leaks-investigation.md). Exact counts,
+with validation's ten-per-VUID message cap lifted:
 
-| Example | Leaked at device destruction |
-|---|---|
-| `declarative_sponza_test` | 4 `VkImage`, 4 `VkImageView`, 2 `VkBuffer` |
-| `physics_test` | 10+ `VkBuffer` |
-| `skinned_mesh_test` | reports leaks |
-| `particle_test`, `bloom_test` | none |
+| Example | Buffer | DescPool | DescSet | Image | ImageView | Sampler |
+|---|---|---|---|---|---|---|
+| `declarative_sponza_test` | 2 | 1 | 2 | 4 | 4 | 4 |
+| `physics_test` | 22 | 1 | 22 | 4 | 4 | 4 |
+| `skinned_mesh_test` | 2 | 1 | 4 | 5 | 5 | 5 |
+| `particle_test`, `bloom_test` | — | — | — | — | — | — |
 
-Counts are floors: validation caps at ten messages per VUID. The three that leak
-are the three that generate IBL, which is a lead rather than a conclusion —
-`physics_test` leaks only buffers, so there is more than one cause.
+Four independent causes:
+
+- **A.** `RenderGraph::m_defaultTextures` (`RenderGraph.cpp:2161`) is created and
+  never destroyed — the fixed 4 image/view/sampler in every affected example.
+  `GPUResourceFactory::destroyDefaultTextures` exists; its only caller is the dead
+  `EntityRenderExecutor`.
+- **B.** `RenderGraph::m_materialDescriptorPool` (`:2073`) is destroyed only by the
+  re-create guard at the top of its own creator, never in `~RenderGraph`.
+- **C.** Mesh vertex/index buffers in `MeshComponent` have no owner at all. Scales
+  with content — this is the one that needs a design decision (shared ownership
+  and deferred delete), not a one-line fix.
+- **D.** `GltfSceneLoader::m_textureCache` is `.clear()`ed at every load and never
+  destroyed, so each glTF texture leaks and reloading leaks the previous set too.
+
+The earlier guess in this section — that the three leaking examples were the three
+that generate IBL — was wrong. IBL is clean. The correlation is that those three
+are the three that render entities with materials.
 
 ### The swapchain `present` usage was content, not engine
 
