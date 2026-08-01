@@ -6,12 +6,10 @@
   "homepage": "https://github.com/Maximilian-Winter/Shoonyakasha",
   "license": "MIT",
   "$comment-baseline": [
-    "Without a builtin-baseline, vcpkg resolves every dependency against",
-    "whatever commit the local vcpkg clone happens to sit on. Two machines",
-    "then get two different EnTT or Bullet, and a wheel that builds here fails",
-    "there. Pin it once, from the repo root, with:",
-    "    vcpkg x-update-baseline --add-initial-baseline",
-    "which writes a builtin-baseline field next to this one."
+    "builtin-baseline below pins every dependency to one vcpkg commit, so two",
+    "machines resolve the same EnTT and Bullet. To move it forward, run from",
+    "the repo root:",
+    "    vcpkg x-update-baseline"
   ],
   "dependencies": [
     "vulkan",
