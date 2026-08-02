@@ -1196,7 +1196,14 @@ cdef class Engine:
         """
         return self._ptr.stopRecording()
 
+    @property
     def is_recording(self):
+        """Whether a recording is in progress.
+
+        A property, like every other no-argument accessor on this class —
+        having this one be a method while recorded_frame_count beside it was
+        a property was a trap worth removing.
+        """
         return self._ptr.isRecording()
 
     @property

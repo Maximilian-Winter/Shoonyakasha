@@ -469,9 +469,9 @@ class Pong:
         print("screenshot ->", path if engine.capture_screenshot(path) else "failed")
 
     def on_record(self):
-        if engine.is_recording():
+        if engine.is_recording:
             engine.stop_recording()
-            print("recording stopped after %d frames" % engine.recorded_frame_count())
+            print("recording stopped after %d frames" % engine.recorded_frame_count)
         elif not sk.video_recording_available():
             print("no ffmpeg found — put one on PATH or in $FFMPEG to record")
         elif engine.start_recording("pong_clip.mkv", fps=60):

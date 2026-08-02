@@ -99,6 +99,35 @@ std::string VideoRecorder::findFfmpeg(const std::string& hint) {
     return {};
 }
 
+std::string VideoRecorder::buildArguments(const std::string& path,
+                                          uint32_t width, uint32_t height,
+                                          const Options& options) {
+    std::ostringstream args;
+    args << "-hide_banner -loglevel error -y"
+         << " -f rawvideo -pixel_format rgba"
+         << " -video_size " << width << "x" << height
+         << " -framerate " << options.fps
+         << " -i -"                       // frames arrive on stdin
+         << " -an"                        // no audio track to wait for
+         << " -c:v " << options.codec
+         << " -crf " << options.quality
+         << " -pix_fmt yuv420p";          // what players actually accept
+
+    // Deliberately no flip filter. Vulkan's framebuffer origin is top-left and
+    // ffmpeg reads rawvideo top row first, so the two already agree — readback
+    // rows arrive in the order ffmpeg wants them. This once carried "-vf vflip"
+    // with a comment citing that same top-left origin as the reason to flip,
+    // which is exactly backwards, and every recording came out upside down.
+    // Screenshots were always right, which is the tell: stb_image_write takes
+    // top-first too, and RenderTargetSaver hands it the same buffer unflipped.
+
+    if (!options.extraArgs.empty()) {
+        args << " " << options.extraArgs;
+    }
+    args << " " << quote(path);
+    return args.str();
+}
+
 VideoRecorder::~VideoRecorder() {
     if (m_pipe) {
         stop();
@@ -137,25 +166,8 @@ bool VideoRecorder::start(const std::string& path, uint32_t width, uint32_t heig
         std::filesystem::create_directories(parent, ec);
     }
 
-    std::ostringstream command;
-    command << quote(ffmpeg)
-            << " -hide_banner -loglevel error -y"
-            << " -f rawvideo -pixel_format rgba"
-            << " -video_size " << width << "x" << height
-            << " -framerate " << options.fps
-            << " -i -"                       // frames arrive on stdin
-            << " -an"                        // no audio track to wait for
-            << " -c:v " << options.codec
-            << " -crf " << options.quality
-            << " -pix_fmt yuv420p"           // what players actually accept
-            << " -vf vflip";                 // Vulkan's origin is top-left
-
-    if (!options.extraArgs.empty()) {
-        command << " " << options.extraArgs;
-    }
-    command << " " << quote(path);
-
-    std::string commandLine = command.str();
+    std::string commandLine =
+        quote(ffmpeg) + " " + buildArguments(path, width, height, options);
 
 #ifdef _WIN32
     // cmd.exe strips the outermost pair of quotes from the command it is given,

@@ -79,6 +79,14 @@ public:
     /// $FFMPEG, then PATH, then the usual install locations.
     static std::string findFfmpeg(const std::string& hint = {});
 
+    /// The ffmpeg arguments a recording would use, without the executable or
+    /// the shell quoting. Public so a test can assert what is in it — the one
+    /// thing that made every recording come out upside down was a filter here,
+    /// and nothing that checked codec, size and frame count could see it.
+    static std::string buildArguments(const std::string& path,
+                                      uint32_t width, uint32_t height,
+                                      const Options& options);
+
     /// Is video recording available at all on this machine?
     static bool available() { return !findFfmpeg().empty(); }
 
