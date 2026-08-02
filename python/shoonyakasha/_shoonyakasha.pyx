@@ -501,6 +501,19 @@ cdef class Scene:
         """Propagated to every glyph entity generated for this label."""
         self._ptr.setTextLayerMask(entity, <uint8_t>mask)
 
+    def set_text_sort_key(self, uint32_t entity, uint32_t sort_key):
+        """Draw order — lower draws first, so text over a panel needs a
+        higher key than the panel. Labels default to 0."""
+        self._ptr.setTextSortKey(entity, sort_key)
+
+    def set_text_visible(self, uint32_t entity, bint visible):
+        """Show or hide a label. This is how to hide text — destroying the
+        label entity leaves its glyph entities on screen."""
+        self._ptr.setTextVisible(entity, visible)
+
+    def is_text_visible(self, uint32_t entity):
+        return self._ptr.isTextVisible(entity)
+
     # ── Renderable ────────────────────────────────────────────
 
     def is_visible(self, uint32_t entity):

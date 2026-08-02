@@ -21,7 +21,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "python"))
 
-from shoonyakasha import assets, pipeline, shaders  # noqa: E402
+from shoonyakasha import assets, keys, pipeline, shaders  # noqa: E402
 
 
 class ShaderCompilation(unittest.TestCase):
@@ -239,6 +239,32 @@ class VocabularyMatchesTheEngine(unittest.TestCase):
         self.assertEqual(marker, assets.MARKER_FILE,
                          "assets.MARKER_FILE has drifted from AssetPaths.cpp")
         self.assertEqual(env_var, assets.ENV_VAR)
+
+
+class KeyCodes(unittest.TestCase):
+    """The codes are GLFW's, so they have to keep matching GLFW's."""
+
+    def test_printable_keys_are_their_ascii_value(self):
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            self.assertEqual(ord(letter), getattr(keys, letter))
+        for digit in range(10):
+            self.assertEqual(ord(str(digit)), getattr(keys, "NUM_%d" % digit))
+        self.assertEqual(ord(" "), keys.SPACE)
+
+    def test_named_keys_match_glfw(self):
+        # Spot values straight from glfw3.h. If these drift, every game built
+        # on the module reads the wrong key.
+        self.assertEqual(256, keys.ESCAPE)
+        self.assertEqual(257, keys.ENTER)
+        self.assertEqual((262, 263, 264, 265),
+                         (keys.RIGHT, keys.LEFT, keys.DOWN, keys.UP))
+        self.assertEqual(290, keys.F1)
+        self.assertEqual(301, keys.F12)
+        self.assertEqual(340, keys.LEFT_SHIFT)
+
+    def test_name_round_trips(self):
+        self.assertEqual("ESCAPE", keys.name(keys.ESCAPE))
+        self.assertEqual("999", keys.name(999))
 
 
 if __name__ == "__main__":

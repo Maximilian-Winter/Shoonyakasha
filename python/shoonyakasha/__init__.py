@@ -13,7 +13,7 @@
 # The utility modules are pure Python and deliberately imported first: compiling
 # shaders or validating a pipeline should work before the extension is built, in
 # CI, or on an interpreter the current .pyd was not built for.
-from . import assets, pipeline, shaders
+from . import assets, keys, pipeline, shaders
 
 # The compiled extension may legitimately be absent or built for a different
 # Python version. Failing the whole package import on that hides the utilities
@@ -131,5 +131,5 @@ __all__ = [
     "TEXT_ALIGN_LEFT", "TEXT_ALIGN_CENTER", "TEXT_ALIGN_RIGHT",
     "video_recording_available", "find_ffmpeg",
     # Pure-Python utilities
-    "assets", "pipeline", "shaders", "extension_available",
+    "assets", "keys", "pipeline", "shaders", "extension_available",
 ]

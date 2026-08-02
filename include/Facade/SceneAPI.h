@@ -229,6 +229,17 @@ public:
     /// RenderableTagComponent of their own, only their generated glyphs do).
     void setTextLayerMask(EntityHandle entity, uint8_t mask);
 
+    /// Draw order among sprites and labels — lower draws first, so a label
+    /// that must sit on top of a panel needs a higher key than the panel.
+    /// Labels default to 0, which puts them behind every sprite that set one.
+    void setTextSortKey(EntityHandle entity, uint32_t sortKey);
+
+    /// Show or hide a label. This is the supported way to hide text: the
+    /// glyph entities a label generates are not linked to it by hierarchy,
+    /// so destroying the label entity leaves them on screen.
+    void setTextVisible(EntityHandle entity, bool visible);
+    bool isTextVisible(EntityHandle entity) const;
+
     // ═══════════════════════════════════════════════════════════
     // Renderable Tag Access
     // ═══════════════════════════════════════════════════════════

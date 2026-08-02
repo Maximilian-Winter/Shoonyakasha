@@ -129,6 +129,14 @@ struct TextBakedComponent {
     Text2DComponent::HAlign bakedAlign = Text2DComponent::HAlign::Left;
     bool bakedVisible = true;
     uint8_t bakedLayerMask = 0xFF;
+    uint32_t bakedSortKey = 0;
+
+    // Each glyph's own anchor is computed from the label's at bake time, so a
+    // label whose anchor moved has to be re-baked or the glyphs stay where
+    // they were. Without this, set_ui_anchor() on a label silently did nothing.
+    UIAnchorComponent::Anchor bakedAnchor = UIAnchorComponent::Anchor::TopLeft;
+    glm::vec2 bakedOffsetPixels{0.0f};
+
     std::vector<entt::entity> glyphEntities;
 };
 

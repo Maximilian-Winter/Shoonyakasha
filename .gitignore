@@ -55,4 +55,10 @@ __pycache__/
 /python/shoonyakasha/glfw3.dll
 /examples/facade_test/cubemaps_hdrs
 /examples/pong_game/assets
+# pong.py compiles its own shaders at startup, so the .spv are build output
+# here rather than something to ship and let drift out of date.
+/examples/pong_game/shaders/*.spv
+/examples/pong_game/pong.log
+/examples/pong_game/pong_screenshot.png
+/examples/pong_game/pong_clip.mkv
 PowerShell-Commands.txt

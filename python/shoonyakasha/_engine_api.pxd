@@ -213,6 +213,9 @@ cdef extern from "Facade/SceneAPI.h" namespace "Shoonyakasha::Facade":
         void setTextFontSize(EntityHandle entity, float fontSize)
         void setTextAlign(EntityHandle entity, TextHAlign align)
         void setTextLayerMask(EntityHandle entity, uint8_t mask)
+        void setTextSortKey(EntityHandle entity, uint32_t sortKey)
+        void setTextVisible(EntityHandle entity, cbool visible)
+        cbool isTextVisible(EntityHandle entity)
 
         # Renderable
         cbool isVisible(EntityHandle entity) const

@@ -629,6 +629,24 @@ void SceneAPI::setTextLayerMask(EntityHandle entity, uint8_t mask) {
     if (t) t->renderLayerMask = mask;
 }
 
+void SceneAPI::setTextSortKey(EntityHandle entity, uint32_t sortKey) {
+    if (!m_impl->valid(entity)) return;
+    auto* t = m_impl->registry.try_get<Shoonyakasha::Text2DComponent>(toEntt(entity));
+    if (t) t->sortKey = sortKey;
+}
+
+void SceneAPI::setTextVisible(EntityHandle entity, bool visible) {
+    if (!m_impl->valid(entity)) return;
+    auto* t = m_impl->registry.try_get<Shoonyakasha::Text2DComponent>(toEntt(entity));
+    if (t) t->visible = visible;
+}
+
+bool SceneAPI::isTextVisible(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return false;
+    auto* t = m_impl->registry.try_get<Shoonyakasha::Text2DComponent>(toEntt(entity));
+    return t ? t->visible : false;
+}
+
 void SceneAPI::wireSprite2DManager(Sprite2DManager* manager) {
     m_impl->sprite2DManager = manager;
 }

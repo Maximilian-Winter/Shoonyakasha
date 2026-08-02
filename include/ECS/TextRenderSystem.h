@@ -33,13 +33,24 @@ public:
             auto& text = view.get<Shoonyakasha::Text2DComponent>(entity);
             auto& baked = registry.get_or_emplace<Shoonyakasha::TextBakedComponent>(entity);
 
+            // The label's anchor is part of what was baked, since each glyph
+            // carries its own resolved anchor. A label with no anchor keeps the
+            // default, which is what rebuild() assumes for it too.
+            Shoonyakasha::UIAnchorComponent currentAnchor;
+            if (auto* a = registry.try_get<Shoonyakasha::UIAnchorComponent>(entity)) {
+                currentAnchor = *a;
+            }
+
             bool changed = baked.bakedText != text.text ||
                            baked.bakedFont != text.font ||
                            baked.bakedFontSize != text.fontSize ||
                            baked.bakedColor != text.color ||
                            baked.bakedAlign != text.hAlign ||
                            baked.bakedVisible != text.visible ||
-                           baked.bakedLayerMask != text.renderLayerMask;
+                           baked.bakedLayerMask != text.renderLayerMask ||
+                           baked.bakedSortKey != text.sortKey ||
+                           baked.bakedAnchor != currentAnchor.anchor ||
+                           baked.bakedOffsetPixels != currentAnchor.offsetPixels;
             if (!changed) continue;
 
             rebuild(registry, entity, text, baked);
@@ -66,16 +77,19 @@ private:
         baked.bakedAlign = text.hAlign;
         baked.bakedVisible = text.visible;
         baked.bakedLayerMask = text.renderLayerMask;
-
-        if (text.font.empty() || text.text.empty() || !text.visible) return;
-
-        const Shoonyakasha::BakedFont* font = m_fontLoader.getOrLoadFont(text.font, text.fontSize);
-        if (!font) return;
+        baked.bakedSortKey = text.sortKey;
 
         Shoonyakasha::UIAnchorComponent baseAnchor;
         if (auto* a = registry.try_get<Shoonyakasha::UIAnchorComponent>(labelEntity)) {
             baseAnchor = *a;
         }
+        baked.bakedAnchor = baseAnchor.anchor;
+        baked.bakedOffsetPixels = baseAnchor.offsetPixels;
+
+        if (text.font.empty() || text.text.empty() || !text.visible) return;
+
+        const Shoonyakasha::BakedFont* font = m_fontLoader.getOrLoadFont(text.font, text.fontSize);
+        if (!font) return;
 
         // Measure total width for center/right alignment.
         float totalWidth = 0.0f;

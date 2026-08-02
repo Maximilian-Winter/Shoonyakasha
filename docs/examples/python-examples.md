@@ -278,9 +278,34 @@ This demo only uses two callbacks -- `on_init` and `on_key_pressed`. No `on_upda
 
 ---
 
+## pong.py -- A Complete Small Game
+
+`examples/pong_game/pong.py` is a finished game rather than a feature
+demonstration: one `sprite_geometry` pass, six sprites, five labels, and no 3D
+geometry at all. It is the shortest read of what the sprite/UI half of the API
+feels like in practice.
+
+Worth borrowing from it:
+
+- **A fixed virtual canvas.** Every coordinate is in an 800x500 space that one
+  function maps to window pixels, so resizing letterboxes rather than distorts
+  and the game logic never sees the window size.
+- **Baselines, not centres.** A sprite's anchor offset is its centre; a label's
+  is its text baseline. Mixing the two up is the usual reason text sits a few
+  pixels off.
+- **Explicit draw order.** Sprites and labels both default to sort key 0, so
+  anything that overlaps needs a number -- `set_sort_key` for sprites,
+  `set_text_sort_key` for labels.
+- **`shoonyakasha.keys`.** Key codes by name (`keys.SPACE`, `keys.UP`) instead
+  of the GLFW integers `is_key_down` actually takes.
+
+It needs its art pack downloaded first; see `examples/pong_game/README.md`.
+
+---
+
 ## Running the Examples
 
-Both examples must be run from the correct working directory so that asset paths (pipeline JSON, HDR maps, glTF models) resolve correctly.
+The examples must be run from the correct working directory so that asset paths (pipeline JSON, HDR maps, glTF models) resolve correctly.
 
 **demo.py:**
 ```bash
@@ -292,6 +317,12 @@ python ../../python/examples/demo.py
 ```bash
 cd examples/skinned_mesh_test
 python ../../python/examples/skinned_fox_demo.py
+```
+
+**pong.py:**
+```bash
+cd examples/pong_game
+python pong.py
 ```
 
 Ensure that the engine is built with `-DBUILD_PYTHON=ON` and that `python/shoonyakasha/_shoonyakasha.pyd` exists. Add the `python/` directory to your `PYTHONPATH` or let the scripts' `sys.path.insert` handle it automatically.
