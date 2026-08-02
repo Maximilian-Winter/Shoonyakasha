@@ -463,11 +463,7 @@ uint64_t EngineAPI::getRecordedFrameCount() const {
 }
 
 bool assetExists(const std::string& relativePath) {
-    if (relativePath.empty()) {
-        return false;
-    }
-    std::error_code ec;
-    return std::filesystem::exists(AssetPaths::locate(relativePath), ec);
+    return AssetPaths::exists(relativePath);
 }
 
 std::string resolveAsset(const std::string& relativePath) {

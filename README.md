@@ -48,8 +48,9 @@ engine.stopRecording();
 ```
 
 Video needs ffmpeg on `PATH` or in `$FFMPEG`. Frames are piped to it rather than
-linking an encoder, so there is no extra dependency to build;
-`videoRecordingAvailable()` reports whether one was found.
+linking an encoder, so there is no extra dependency to build.
+`sk.video_recording_available()` / `videoRecordingAvailable()` reports whether
+one was found, and `find_ffmpeg()` says which.
 
 Readback is synchronous, so recording costs frame rate — the right trade for
 capturing a clip of a demo, the wrong one for anything shipping.

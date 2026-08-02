@@ -5,6 +5,7 @@
 #include <chrono>
 #include <iostream>
 
+#include "Core/AssetPaths.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/CameraController.h"
 #include "Vulkan/FrameGraph/FrameGraph.h"
@@ -33,7 +34,18 @@ void ParticleFlowApp::onInit() {
     options.namePrefix = "sponza";
     options.maxTextureSize = 4096;
 
-    auto result = loadGltfScene("NewSponza_Main_glTF_003.gltf", options);
+    // Sponza is a 200 MB optional download; fall back to the box that ships with
+    // the repo so the particle system is still visible without it.
+    std::string model = "models/NewSponza_Main_glTF_003.gltf";
+    if (!Shoonyakasha::AssetPaths::exists(model)) {
+        model = "models/Box.gltf";
+        getLogger().log(Shoonyakasha::LogLevel::Warning,
+                        "Sponza not present — using %s. Run "
+                        "'python tools/fetch_assets.py sponza' for the full scene.",
+                        model.c_str());
+    }
+
+    auto result = loadGltfScene(model, options);
     if (!result.success) {
         throw std::runtime_error("Failed to load glTF: " + result.error);
     }

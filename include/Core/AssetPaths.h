@@ -55,6 +55,11 @@ public:
     /// against some rewritten one they never wrote.
     static std::filesystem::path locate(const std::string& path);
 
+    /// Is there a file where locate() would look? For optional assets — the
+    /// large downloads in tools/fetch_assets.py — so an example can fall back to
+    /// something that ships with the repo instead of refusing to start.
+    static bool exists(const std::string& path);
+
     /// Human-readable account of where the root came from, for startup logs and
     /// for the error message when an asset is missing.
     static std::string describe();

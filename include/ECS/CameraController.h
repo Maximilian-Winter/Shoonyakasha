@@ -243,11 +243,13 @@ public:
         if (!enabled) return;
 
         // Get the input state (singleton pattern - only one input state per scene)
+        // A loop that always breaks on its first iteration leaves the increment
+        // unreachable, which MSVC reports as C4702 in Debug builds. Ask for the
+        // first element directly — it also reads as what this means.
         InputStateComponent* inputState = nullptr;
         auto inputView = registry.view<InputStateComponent>();
-        for (auto entity : inputView) {
-            inputState = &inputView.get<InputStateComponent>(entity);
-            break;
+        if (inputView.begin() != inputView.end()) {
+            inputState = &inputView.get<InputStateComponent>(*inputView.begin());
         }
 
         if (!inputState) return;

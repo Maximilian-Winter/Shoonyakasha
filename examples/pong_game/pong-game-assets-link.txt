@@ -1,0 +1,1 @@
+Create folder called assets and download the following free asset pack from Itch.io and extract it into it: 'Simple ping pong 2d  game assets by Esoe B.Studios' found at: https://myebstudios.itch.io/simple-ping-pong-assets

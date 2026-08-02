@@ -15,10 +15,9 @@ Requirements:
     - Compile sprite.vert/sprite.frag to shaders/sprite.vert.spv /
       shaders/sprite.frag.spv (glslc sprite.vert -o shaders/sprite.vert.spv)
     - Run from this directory (so sprite_pipeline.json and shaders/ resolve)
-    - Have a sprite.png / panel.png image available, or point texture_path
-      at your own art
-    - Have a .ttf/.otf font file available for the text label (e.g. any
-      system font), or remove the create_text() call below
+    - The textures and font come from the shared asset root (assets/), which
+      the engine finds on its own; point texture_path at your own art to
+      override
 """
 
 import sys
@@ -46,7 +45,7 @@ def on_init():
     engine.create_camera(pos=(0.0, 0.0, 5.0), fov=60.0)
     engine.create_sprite(
         world_pos=(0.0, 0.0, 0.0),
-        texture_path="sprite.png",
+        texture_path="textures/orb.png",
         size=(1.5, 1.5),
         tint=(1.0, 1.0, 1.0, 1.0),
     )

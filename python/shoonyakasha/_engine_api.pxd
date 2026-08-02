@@ -393,3 +393,8 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         void setCustomVec3(const string& key, const vec3& value)
         void setCustomVec4(const string& key, const vec4& value)
         void setCustomUint(const string& key, uint32_t value)
+
+    # Free functions — available without an engine instance, so a script can
+    # check for ffmpeg before it decides to record.
+    cbool videoRecordingAvailable()
+    string findFfmpeg()

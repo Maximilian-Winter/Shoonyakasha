@@ -412,6 +412,16 @@ void FrameGraphCompiler::createPhysicalResources(
             // Combine declared additional usage with usage derived from passes
             VkImageUsageFlags usage = imageUsages[i] | desc.additionalUsage;
 
+            // Readback and save copy out of the image, which no pass declares —
+            // so the usage derived from passes never includes TRANSFER_SRC and
+            // vkCmdCopyImageToBuffer is rejected. Buffers already get this from
+            // their own readback policy (RenderGraph::createSSBOs); images did
+            // not, which is why a declared image "readback" or "save" produced a
+            // validation error every time it fired.
+            if (decl.readbackPolicy.enabled || decl.savePolicy.enabled) {
+                usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            }
+
             // Determine memory properties based on usage
             VkMemoryPropertyFlags memProps = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 

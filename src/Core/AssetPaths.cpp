@@ -178,6 +178,14 @@ std::filesystem::path AssetPaths::locate(const std::string& path) {
     return asGiven;
 }
 
+bool AssetPaths::exists(const std::string& path) {
+    if (path.empty()) {
+        return false;
+    }
+    std::error_code ec;
+    return std::filesystem::exists(locate(path), ec);
+}
+
 std::string AssetPaths::describe() {
     root();  // ensure the search has run, so g_origin is meaningful
     std::lock_guard<std::mutex> lock(g_mutex);

@@ -44,6 +44,7 @@ from ._engine_api cimport (
     make_float2_callback, make_int_bool_callback,
     wrap_py_object, unwrap_py_object, make_system_update_callback,
     CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI,
+    videoRecordingAvailable, findFfmpeg,
 )
 from libcpp.memory cimport shared_ptr
 
@@ -1345,3 +1346,24 @@ cdef class Engine:
     def set_custom_uint(self, str key, uint32_t value):
         """Set custom uint for shader uniforms."""
         self._ptr.setCustomUint(key.encode('utf-8'), value)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Frame capture — module level
+# ═══════════════════════════════════════════════════════════════
+
+def video_recording_available():
+    """Can this machine record video? False when no ffmpeg was found.
+
+    Worth calling before start_recording(), which otherwise returns False
+    without saying which of several reasons applied.
+    """
+    return videoRecordingAvailable()
+
+
+def find_ffmpeg():
+    """The ffmpeg that recording would use, or '' if none was found.
+
+    Searched in order: $FFMPEG, PATH, then the usual install locations.
+    """
+    return findFfmpeg().decode('utf-8')

@@ -71,6 +71,11 @@ try:
             TEXT_ALIGN_LEFT,
             TEXT_ALIGN_CENTER,
             TEXT_ALIGN_RIGHT,
+
+        # Frame capture — usable before an Engine exists, so a script can
+        # check for ffmpeg before deciding to record.
+        video_recording_available,
+        find_ffmpeg,
     )
 except ImportError as exc:                       # pragma: no cover - environment
     _EXTENSION_ERROR = exc
@@ -87,6 +92,7 @@ _ENGINE_SYMBOLS = frozenset({
     "UI_ANCHOR_MIDDLE_LEFT", "UI_ANCHOR_MIDDLE_CENTER", "UI_ANCHOR_MIDDLE_RIGHT",
     "UI_ANCHOR_BOTTOM_LEFT", "UI_ANCHOR_BOTTOM_CENTER", "UI_ANCHOR_BOTTOM_RIGHT",
     "TEXT_ALIGN_LEFT", "TEXT_ALIGN_CENTER", "TEXT_ALIGN_RIGHT",
+    "video_recording_available", "find_ffmpeg",
 })
 
 
@@ -123,6 +129,7 @@ __all__ = [
     "UI_ANCHOR_MIDDLE_LEFT", "UI_ANCHOR_MIDDLE_CENTER", "UI_ANCHOR_MIDDLE_RIGHT",
     "UI_ANCHOR_BOTTOM_LEFT", "UI_ANCHOR_BOTTOM_CENTER", "UI_ANCHOR_BOTTOM_RIGHT",
     "TEXT_ALIGN_LEFT", "TEXT_ALIGN_CENTER", "TEXT_ALIGN_RIGHT",
+    "video_recording_available", "find_ffmpeg",
     # Pure-Python utilities
     "assets", "pipeline", "shaders", "extension_available",
 ]

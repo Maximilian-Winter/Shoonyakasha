@@ -120,6 +120,24 @@ TEST_F(AssetPathsTest, LocateHandlesAnEmptyPath) {
     EXPECT_TRUE(AssetPaths::locate("").empty());
 }
 
+TEST_F(AssetPathsTest, ExistsSeesWhatLocateWouldFind) {
+    // The distinction locate() cannot make: it returns the original path when
+    // nothing was found, which is indistinguishable from a path that resolved.
+    // exists() is what an example asks before falling back to a smaller model.
+    TempTree tree;
+    tree.touch("models/Box.gltf");
+    AssetPaths::setRoot(tree.root());
+
+    EXPECT_TRUE(AssetPaths::exists("models/Box.gltf"));
+    EXPECT_FALSE(AssetPaths::exists("models/NewSponza_Main_glTF_003.gltf"));
+    EXPECT_FALSE(AssetPaths::exists(""));
+}
+
+TEST_F(AssetPathsTest, ExistsIsFalseWithoutARoot) {
+    AssetPaths::setRoot({});
+    EXPECT_FALSE(AssetPaths::exists("models/Box.gltf"));
+}
+
 TEST_F(AssetPathsTest, DescribeReportsAnExplicitRoot) {
     TempTree tree;
     AssetPaths::setRoot(tree.root());

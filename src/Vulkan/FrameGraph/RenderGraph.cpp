@@ -221,13 +221,24 @@ void RenderGraph::createDotPathUBOs(uint32_t maxFramesInFlight) {
         // CompiledBufferLayout::toResolverLayout.
         ubo.resolvedLayout = *getResolvedLayout(layout.name);
 
+        // A UBO with readback is copied by StagingBufferManager with
+        // vkCmdCopyBuffer, which needs TRANSFER_SRC on the source. SSBOs get
+        // this from the same policy below; UBOs did not, so every declared UBO
+        // readback produced a validation error and read stale staging memory.
+        VkBufferUsageFlags uboUsage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        if (ubo.readbackPolicy.enabled ||
+            ubo.memoryPolicy.transferDirection == TransferDirection::GpuToCpu ||
+            ubo.memoryPolicy.transferDirection == TransferDirection::Bidirectional) {
+            uboUsage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        }
+
         // Create per-frame VulkanBuffers
         ubo.perFrameBuffers.resize(maxFramesInFlight);
         for (uint32_t i = 0; i < maxFramesInFlight; i++) {
             ubo.perFrameBuffers[i] = std::make_unique<VulkanBuffer>(
                 m_device,
                 layout.totalSize,
-                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                uboUsage,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
             );
 
@@ -663,8 +674,9 @@ void RenderGraph::createStagingBuffers(uint32_t maxFramesInFlight) {
 
         if (!needsReadback) continue;
 
-        // UBOs are host-visible, so readback = direct memcpy (no GPU copy needed)
-        // But we still use the staging manager for consistent callback/polling API
+        // UBOs are host-visible, so a memcpy would do — but the staging manager
+        // is used anyway for one callback/polling API, and it issues a real
+        // vkCmdCopyBuffer. Hence the TRANSFER_SRC bit added at creation above.
         StagingBufferManager::BufferConfig cfg;
         cfg.name = name;
         cfg.gpuBuffer = ubo.perFrameBuffers[0]->getBuffer();  // Use first frame buffer

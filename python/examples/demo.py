@@ -86,8 +86,14 @@ def on_init():
         intensity=3.0,
     )
 
-    # Load glTF scene
-    result = engine.load_gltf_scene("./NewSponza_Main_glTF_003.gltf")
+    # Load glTF scene. Sponza is a 200 MB optional download (tools/fetch_assets.py);
+    # fall back to the box that ships with the repo so the demo still runs.
+    model = "models/NewSponza_Main_glTF_003.gltf"
+    if not sk.assets.exists(model):
+        model = "models/Box.gltf"
+        print(f"[Python] Sponza not present — using {model}. "
+              f"Run 'python tools/fetch_assets.py sponza' for the full scene.")
+    result = engine.load_gltf_scene(model)
     print(f"[Python] Loaded scene: {len(result.entities)} entities, "
           f"{result.total_vertices} vertices, "
           f"{result.total_textures} textures")
