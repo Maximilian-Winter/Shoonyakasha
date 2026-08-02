@@ -15,8 +15,8 @@
 // with the buffers.
 //
 // Sources, verbatim field lists:
-//   examples/declarative_sponza_test/pbr_ibl_pipeline_v3.json
-//   examples/full_showcase/showcase_pipeline.json
+//   examples/cpp/rendering/declarative_sponza_test/pbr_ibl_pipeline_v3.json
+//   examples/python/games_2d/full_showcase/showcase_pipeline.json
 
 #include <gtest/gtest.h>
 #include "Vulkan/FrameGraph/FrameGraph.h"

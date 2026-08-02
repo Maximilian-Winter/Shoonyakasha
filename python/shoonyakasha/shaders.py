@@ -1,9 +1,9 @@
 """Compile GLSL to SPIR-V from Python.
 
 The C++ examples get their shaders compiled by CMake (`target_compile_shaders`).
-The Python side had no equivalent: `python/examples/pbr_ibl_shaders/` holds GLSL
+The Python side had no equivalent: `examples/python/getting_started/demo/shaders/` holds GLSL
 sources with committed `.spv` beside them and nothing that regenerates either,
-and `examples/full_showcase/showcase_demo.py` documented the `glslc` invocation
+and `examples/python/games_2d/full_showcase/showcase_demo.py` documented the `glslc` invocation
 in a docstring for the reader to run by hand. A build step living in a comment
 drifts, and one of these `.spv` files had already drifted once.
 

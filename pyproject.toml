@@ -93,16 +93,12 @@ version = ">=1.11"
 # (the compiled _shoonyakasha extension module - see python/CMakeLists.txt).
 packages = ["python/shoonyakasha"]
 
-# The existing local dev workflow (plain `cmake --build`, not this pip
-# packaging) drops the compiled extension directly into
-# python/shoonyakasha/ next to __init__.py. Exclude it here so a stale
-# extension from a previous manual build never gets bundled instead of
-# (or alongside) the one this build produces via cmake --install - only
-# the .pyx/.pxd/.h *sources* should come from wheel.packages.
-exclude = [
-    "shoonyakasha/_shoonyakasha*.so",
-    "shoonyakasha/_shoonyakasha*.pyd",
-]
+# These patterns are matched against the finished wheel, not against
+# wheel.packages alone, so they also removed the extension that
+# python/CMakeLists.txt installs - producing a wheel with the .pyx source but
+# no compiled module. python/CMakeLists.txt no longer writes into the source
+# tree under scikit-build-core, so there is no stale copy to exclude.
+exclude = []
 
 # Emit arm64/x86_64 tags for a macOS universal2 build rather than the
 # universal2 tag alone, so pip on a single-arch machine still matches.

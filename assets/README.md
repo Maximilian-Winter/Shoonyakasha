@@ -36,9 +36,9 @@ re-scale them.
 | `env/farm_sunset_1k.hdr` | [Poly Haven — Farm Sunset](https://polyhaven.com/a/farm_sunset) | CC0 | Downsampled from the 8k original |
 | `env/charolettenbrunn_park_1k.hdr` | [Poly Haven — Charolettenbrunn Park](https://polyhaven.com/a/charolettenbrunn_park) | CC0 | Downsampled from the 4k original |
 | `models/Box.gltf`, `Box0.bin` | [Khronos glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) | CC0 (per that repo's `LICENSE.md`) | |
-| `models/instanced_boxes.gltf` | Written for `examples/instancing_test`, shares `Box0.bin` | Same as `Box0.bin` | 19 nodes, one mesh |
+| `models/instanced_boxes.gltf` | Written for `examples/cpp/api/instancing_test`, shares `Box0.bin` | Same as `Box0.bin` | 19 nodes, one mesh |
 | `models/Fox.glb` | [Khronos glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) | CC0 | Skinned, animated |
-| `textures/*.png` | Authored for `examples/full_showcase` | Project licence (MIT) | |
+| `textures/*.png` | Authored for `examples/python/games_2d/full_showcase` | Project licence (MIT) | |
 | `fonts/Roboto-Regular.ttf` | [Roboto](https://github.com/googlefonts/roboto-classic) | SIL Open Font License 1.1 — see `fonts/OFL.txt` | |
 
 **The Poly Haven attributions are inferred from the filenames**, which match

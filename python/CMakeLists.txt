@@ -71,22 +71,30 @@ if(MSVC)
 endif()
 
 # ── Output location ──────────────────────────────────────────
-# Place the built module next to __init__.py for easy import
-set_target_properties(_shoonyakasha PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/shoonyakasha"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/shoonyakasha"
-)
-
-# Also handle multi-config generators (MSVC)
-foreach(CONFIG_TYPE ${CMAKE_CONFIGURATION_TYPES})
-    string(TOUPPER ${CONFIG_TYPE} CONFIG_TYPE_UPPER)
+# A plain `cmake --build` places the module next to __init__.py, so the source
+# tree is importable without installing.
+#
+# Under scikit-build-core (SKBUILD is set by it) the module stays in the build
+# tree and reaches the wheel through install(TARGETS) below. Writing into the
+# source tree there would overwrite the developer's module with one built for
+# whichever interpreter pip happened to use.
+if(NOT SKBUILD)
     set_target_properties(_shoonyakasha PROPERTIES
-        "LIBRARY_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/shoonyakasha"
-        "RUNTIME_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/shoonyakasha"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/shoonyakasha"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/shoonyakasha"
     )
-endforeach()
+
+    # Multi-config generators (MSVC) need the per-config properties as well.
+    foreach(CONFIG_TYPE ${CMAKE_CONFIGURATION_TYPES})
+        string(TOUPPER ${CONFIG_TYPE} CONFIG_TYPE_UPPER)
+        set_target_properties(_shoonyakasha PROPERTIES
+            "LIBRARY_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shoonyakasha"
+            "RUNTIME_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shoonyakasha"
+        )
+    endforeach()
+endif()
 
 # ── Install (for `pip install .` via scikit-build-core) ───────
 # scikit-build-core stages this install() tree into the wheel, merged

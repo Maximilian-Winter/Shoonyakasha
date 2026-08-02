@@ -141,41 +141,40 @@ cmake -S . -B build -G Ninja \
 cmake --build build
 ```
 
-**Target names are not directory names.** `examples/particle_flow_example` builds
+**Target names are not directory names.** `examples/cpp/compute/particle_flow_example` builds
 a target called `ParticleFlowExample`. To list what actually exists:
 
 ```bash
 cmake --build build --target help        # Ninja / Make
 ```
 
-Executables land in `build/examples/<dir>/` with the Ninja generator, and in
-`build/examples/<dir>/Release/` with the Visual Studio generator.
+The build tree mirrors the source tree, so an example at
+`examples/cpp/<category>/<name>/` produces its executable in
+`build/examples/cpp/<category>/<name>/`, or in a `Release/` subdirectory of that
+with the Visual Studio generator.
 
-Run them **from their own source directory**. Each example compiles its shaders
-in-place — `add_custom_command` writes `.spv` files next to the `.vert`/`.frag`/
-`.comp` sources under `examples/<dir>/shaders/` — and models and textures live
-there too, so the working directory has to be the example's source folder:
+Run each example **from its own source directory**. Shaders are compiled
+in-place, with `.spv` files written next to their `.vert`/`.frag`/`.comp`
+sources, and the pipeline JSON is loaded by relative path:
 
 ```bash
-cd examples/particle_flow_example
-../../build/examples/particle_flow_example/ParticleFlowExample
+cd examples/cpp/compute/particle_flow_example
+../../../../build/examples/cpp/compute/particle_flow_example/ParticleFlowExample
 ```
 
 ```powershell
-cd examples\particle_flow_example
-..\..\build\examples\particle_flow_example\ParticleFlowExample.exe
+cd examples\cpp\compute\particle_flow_example
+..\..\..\..\build\examples\cpp\compute\particle_flow_example\ParticleFlowExample.exe
 ```
 
-In CLion or Visual Studio this is already handled: the examples set
-`VS_DEBUGGER_WORKING_DIRECTORY` to their own source directory, so running from
-the IDE works without extra configuration.
+CLion and Visual Studio need no extra setup: each example sets
+`VS_DEBUGGER_WORKING_DIRECTORY` to its own source directory.
 
 Because shaders are compiled in-source, `.spv` files appear in the working tree
-after a build. Add `*.spv` to `.gitignore` if it isn't there already.
+after a build.
 
-Example directories: `particle_test`, `bloom_test`, `declarative_sponza_test`,
-`ssbo_data_flow_example`, `particle_flow_example`, `skinned_mesh_test`,
-`physics_test`, `pbr_physics_particles`, `facade_test`.
+The full list of examples, with what each one shows, is in
+[examples/README.md](examples/README.md).
 
 ### With tests
 
@@ -270,8 +269,8 @@ override is needed. If linking fails with *"recompile with -fPIC"*, use
 
 ```bash
 python -c "import shoonyakasha; print(shoonyakasha.__file__)"
-cd python/examples
-python <script>.py
+cd examples/python/getting_started/demo
+python demo.py
 ```
 
 ### Editable installs for development
@@ -371,9 +370,8 @@ Only affects `BUILD_EXAMPLES=ON`. Either install the LunarG SDK and export
 satisfy this check — the examples invoke `glslc` specifically.
 
 **Examples start but can't find shaders or the pipeline JSON**
-Run them from their own source directory (`examples/<dir>/`), not from the build
-tree. Shaders are compiled in place and each example's `pipeline.json` sits
-beside its source.
+Run them from their own source directory, not from the build tree. Shaders are
+compiled in place and each example's pipeline JSON sits beside its source.
 
 Models, environment maps, textures and fonts are *not* affected by this: they
 live in the shared `assets/` directory, which is found by walking up from either

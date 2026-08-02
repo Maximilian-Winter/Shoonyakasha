@@ -190,16 +190,22 @@ if(BUILD_EXAMPLES)
     # copies that had drifted apart. Included here so glslc is located once.
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompileShaders.cmake")
 
-    add_subdirectory(examples/particle_test)
-    add_subdirectory(examples/bloom_test)
-    add_subdirectory(examples/declarative_sponza_test)
-    add_subdirectory(examples/ssbo_data_flow_example)
-    add_subdirectory(examples/particle_flow_example)
-    add_subdirectory(examples/skinned_mesh_test)
-    add_subdirectory(examples/physics_test)
-    add_subdirectory(examples/pbr_physics_particles)
-    add_subdirectory(examples/facade_test)
-    add_subdirectory(examples/instancing_test)
+    # Grouped the same way examples/README.md groups them. The Python examples
+    # under examples/python/ have no build step and so appear nowhere here.
+    add_subdirectory(examples/cpp/api/facade_test)
+    add_subdirectory(examples/cpp/api/instancing_test)
+
+    add_subdirectory(examples/cpp/rendering/bloom_test)
+    add_subdirectory(examples/cpp/rendering/declarative_sponza_test)
+
+    add_subdirectory(examples/cpp/compute/particle_test)
+    add_subdirectory(examples/cpp/compute/particle_flow_example)
+    add_subdirectory(examples/cpp/compute/ssbo_data_flow_example)
+
+    add_subdirectory(examples/cpp/physics/physics_test)
+    add_subdirectory(examples/cpp/physics/pbr_physics_particles)
+
+    add_subdirectory(examples/cpp/animation/skinned_mesh_test)
 endif()
 
 # Python/Cython bindings

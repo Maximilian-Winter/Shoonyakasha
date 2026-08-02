@@ -1,0 +1,79 @@
+"""
+Shoonyakasha Sprite/UI/Text Demo
+
+Demonstrates the 2D rendering mechanics: world-space sprites,
+screen-space UI panels, and bitmap-font text labels - all rendered
+through the single "sprite_geometry" pass declared in sprite_pipeline.json.
+Text labels are baked into one sprite entity per glyph, so they reuse the
+exact same pass/shader as textured sprites and flat-colored UI panels.
+
+Usage:
+    python sprite_ui_demo.py
+
+Requirements:
+    - the shoonyakasha package installed (pip install .)
+    - run from this directory, so sprite_pipeline.json and shaders/ resolve
+
+Textures and fonts are loaded from the shared asset root (assets/), which the
+engine locates itself. Pass an absolute path to texture_path to override.
+"""
+
+
+import shoonyakasha as sk
+
+# Keep the .spv files in step with their sources.
+sk.shaders.compile_dir("shaders")
+
+engine = sk.Engine(
+    title="Shoonyakasha Sprite/UI Demo",
+    width=1280, height=720,
+    pipeline_json_path="sprite_pipeline.json",
+)
+
+
+def on_init():
+    scene = engine.scene
+
+    # World-space sprite: billboarded quad placed in 3D space, projected
+    # with the active 3D camera.
+    engine.create_camera(pos=(0.0, 0.0, 5.0), fov=60.0)
+    engine.create_sprite(
+        world_pos=(0.0, 0.0, 0.0),
+        texture_path="textures/orb.png",
+        size=(1.5, 1.5),
+        tint=(1.0, 1.0, 1.0, 1.0),
+    )
+
+    # Screen-space UI panel anchored to the top-left corner.
+    panel = engine.create_ui_panel(
+        anchor=sk.UI_ANCHOR_TOP_LEFT,
+        offset_pixels=(110, 40),
+        size_pixels=(200, 60),
+        texture_path="",  # flat-colored panel (no texture)
+        color=(0.1, 0.1, 0.15, 0.85),
+    )
+
+    # A second panel anchored to the bottom-right corner, textured.
+    engine.create_ui_panel(
+        anchor=sk.UI_ANCHOR_BOTTOM_RIGHT,
+        offset_pixels=(-90, -50),
+        size_pixels=(160, 80),
+        texture_path="textures/panel.png",
+    )
+
+    # Text label anchored to the top-left panel's position, baked from a
+    # TTF font into one glyph sprite entity per character.
+    engine.create_text(
+        text="Score: 0",
+        anchor=sk.UI_ANCHOR_TOP_LEFT,
+        offset_pixels=(20, 60),
+        font_path="fonts/Roboto-Regular.ttf",
+        font_size=28.0,
+        color=(1.0, 1.0, 1.0, 1.0),
+    )
+
+    print(f"[Python] Created top-left panel entity: {panel}")
+
+
+engine.set_on_init(on_init)
+engine.run()

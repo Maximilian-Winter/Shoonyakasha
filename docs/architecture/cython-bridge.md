@@ -239,15 +239,21 @@ python/
 
 ---
 
-## No Wheel Needed
+## Installing
 
-The compiled `.pyd` file is a standard Python extension module. Python's import machinery loads it directly when you `import shoonyakasha`, provided the `python/` directory is on `PYTHONPATH`:
+`pip install .` at the repository root builds the extension and installs it
+alongside the pure-Python modules:
 
 ```bash
-set PYTHONPATH=H:\cpp_dev\Shoonyakasha\python;%PYTHONPATH%
+pip install .
 python -c "import shoonyakasha as sk; print(sk.__version__)"
 ```
 
-There is no need to build a wheel or install via pip. The `.pyd` is self-contained (it links against the engine library and system Vulkan/Python libraries).
+The `.pyd` links against the engine library and the system Vulkan and Python
+libraries; nothing else is bundled.
+
+A plain `cmake --build` with `-DBUILD_PYTHON=ON` writes the module into
+`python/shoonyakasha/` instead, so the source tree is importable from that
+directory without installing. `pip install .` leaves that copy alone.
 
 This makes the development loop fast: rebuild the CMake target, and the updated `.pyd` is immediately available to Python scripts.

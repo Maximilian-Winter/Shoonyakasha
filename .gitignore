@@ -26,11 +26,15 @@ NewSponza_*
 /pkg_a_curtains
 /glTF-Sample-Assets/
 /old_not_working_examples
-/examples/*/textures/
-/examples/*/data/
-/examples/sponza_test/glTF/
-/examples/sponza_test/glTF_sponza_old
-/python/examples/textures/
+# Depth-independent, so these keep working wherever an example is filed.
+# (They were /examples/*/... when every example sat one level down.)
+examples/**/textures/
+examples/**/data/
+examples/**/cubemaps_hdrs/
+
+# Left behind by the move to examples/python/. Nothing here is tracked any
+# more; the directory holds local downloads and logs and can be deleted.
+/python/examples/
 
 # Fetched into the shared asset root by tools/fetch_assets.py. The committed 1k
 # versions are deliberately NOT matched.
@@ -53,12 +57,15 @@ __pycache__/
 /.venv
 /python/shoonyakasha/vulkan-1.dll
 /python/shoonyakasha/glfw3.dll
-/examples/facade_test/cubemaps_hdrs
-/examples/pong_game/assets
-# pong.py compiles its own shaders at startup, so the .spv are build output
-# here rather than something to ship and let drift out of date.
-/examples/pong_game/shaders/*.spv
-/examples/pong_game/pong.log
-/examples/pong_game/pong_screenshot.png
-/examples/pong_game/pong_clip.mkv
+/examples/python/games_2d/pong_game/assets
+
+# The Python examples compile their shaders at startup, so the .spv under them
+# are build output rather than something to ship and let drift out of date.
+# The C++ examples still commit theirs; CMake builds those.
+examples/python/**/*.spv
+
+# Output the Python examples write where they run.
+examples/python/**/*.log
+examples/python/**/*.mkv
+examples/python/**/*_screenshot.png
 PowerShell-Commands.txt

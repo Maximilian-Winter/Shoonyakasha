@@ -6,7 +6,7 @@ The engine ships with nine C++ example applications in the `examples/` directory
 
 ## 1. facade_test -- Pure Facade API
 
-**Source:** [`examples/facade_test/`](../../examples/facade_test/)
+**Source:** [`examples/cpp/api/facade_test/`](../../examples/cpp/api/facade_test/)
 
 **Purpose:** Demonstrates how to build a complete application using *only* the Facade API layer -- no `ApplicationBase`, no EnTT, no Vulkan types. This is the simplest C++ entry point and the closest analog to the Python API.
 
@@ -14,13 +14,13 @@ The example creates an `EngineAPI` with an `EngineConfig`, then registers lambda
 
 **Key pattern:** Callback-driven application structure using `EngineAPI::setOnInit()`, `setOnUpdate()`, etc. The entire application lives in a single `main.cpp` with no class inheritance.
 
-**Key file:** `examples/facade_test/main.cpp`
+**Key file:** `examples/cpp/api/facade_test/main.cpp`
 
 ---
 
 ## 2. declarative_sponza_test -- PBR + IBL Deferred Rendering with Particles
 
-**Source:** [`examples/declarative_sponza_test/`](../../examples/declarative_sponza_test/)
+**Source:** [`examples/cpp/rendering/declarative_sponza_test/`](../../examples/cpp/rendering/declarative_sponza_test/)
 
 **Purpose:** Full PBR deferred rendering with image-based lighting, a GPU particle compute pass, and SSBO readback. This is the primary `ApplicationBase` showcase.
 
@@ -28,13 +28,13 @@ The example creates an `EngineAPI` with an `EngineConfig`, then registers lambda
 
 **Key pattern:** `ApplicationBase` lifecycle hooks + custom uniform injection into compute shaders via the scene context dot-path system.
 
-**Key files:** `examples/declarative_sponza_test/DeclarativeSponzaApp.cpp`, `DeclarativeSponzaApp.h`
+**Key files:** `examples/cpp/rendering/declarative_sponza_test/DeclarativeSponzaApp.cpp`, `DeclarativeSponzaApp.h`
 
 ---
 
 ## 3. skinned_mesh_test -- GPU Skeletal Animation
 
-**Source:** [`examples/skinned_mesh_test/`](../../examples/skinned_mesh_test/)
+**Source:** [`examples/cpp/animation/skinned_mesh_test/`](../../examples/cpp/animation/skinned_mesh_test/)
 
 **Purpose:** GPU skeletal animation with the Fox.glb model. Loads a skinned glTF, creates bone SSBOs, registers the `SkeletalAnimationSystem`, and provides interactive clip switching.
 
@@ -42,13 +42,13 @@ The example creates an `EngineAPI` with an `EngineConfig`, then registers lambda
 
 **Key pattern:** `SkeletalAnimationSystem` registration and per-frame `update()` call in `onPreRender`. Bone SSBO creation for GPU-side skinning. Animation clip management via `AnimationPlaybackComponent`.
 
-**Key files:** `examples/skinned_mesh_test/SkinnedMeshApp.cpp`, `SkinnedMeshApp.h`
+**Key files:** `examples/cpp/animation/skinned_mesh_test/SkinnedMeshApp.cpp`, `SkinnedMeshApp.h`
 
 ---
 
 ## 4. physics_test -- Bullet3 Physics with Procedural Meshes
 
-**Source:** [`examples/physics_test/`](../../examples/physics_test/)
+**Source:** [`examples/cpp/physics/physics_test/`](../../examples/cpp/physics/physics_test/)
 
 **Purpose:** Bullet3 rigid body physics with procedurally generated box and sphere meshes. Demonstrates collision detection, impulse application, and dynamic object spawning.
 
@@ -58,13 +58,13 @@ Pressing Space spawns a new random object in front of the camera and launches it
 
 **Key pattern:** Procedural mesh generation + GPU upload, ECS component assembly for physics (`RigidBodyComponent` + `ColliderComponent`), dynamic spawning with impulse.
 
-**Key files:** `examples/physics_test/PhysicsTestApp.cpp`, `PhysicsTestApp.h`
+**Key files:** `examples/cpp/physics/physics_test/PhysicsTestApp.cpp`, `PhysicsTestApp.h`
 
 ---
 
 ## 5. bloom_test -- Post-Processing Bloom Effect
 
-**Source:** [`examples/bloom_test/`](../../examples/bloom_test/)
+**Source:** [`examples/cpp/rendering/bloom_test/`](../../examples/cpp/rendering/bloom_test/)
 
 **Purpose:** Post-processing bloom pipeline with bright extract, horizontal/vertical blur, and composite passes. This example does **not** use `ApplicationBase` -- it manually initializes Vulkan, the swapchain, command buffers, and synchronization objects.
 
@@ -74,13 +74,13 @@ Each frame, the app updates camera UBO (animated orbit), bloom parameter UBO (an
 
 **Key pattern:** Manual Vulkan setup without `ApplicationBase`. Fully declarative JSON pipeline with compute and fullscreen passes. Auto-binding of descriptors and samplers from JSON.
 
-**Key files:** `examples/bloom_test/BloomTestApp.cpp`, `BloomTestApp.h`
+**Key files:** `examples/cpp/rendering/bloom_test/BloomTestApp.cpp`, `BloomTestApp.h`
 
 ---
 
 ## 6. particle_test -- GPU Particle Compute Simulation
 
-**Source:** [`examples/particle_test/`](../../examples/particle_test/)
+**Source:** [`examples/cpp/compute/particle_test/`](../../examples/cpp/compute/particle_test/)
 
 **Purpose:** Standalone GPU particle simulation with 100,000 particles using ping-pong SSBO buffers and async compute. Like `bloom_test`, this example manages Vulkan directly without `ApplicationBase`.
 
@@ -90,13 +90,13 @@ The pipeline (`particle_pipeline.json`) defines a compute dispatch pass (`Partic
 
 **Key pattern:** Ping-pong SSBO double-buffering for GPU compute. External buffer registration with `registerStorageBuffer()` and `registerUniformBuffer()`. Parameter-based compute dispatch sizing.
 
-**Key files:** `examples/particle_test/ParticleTestApp.cpp`, `ParticleTestApp.h`
+**Key files:** `examples/cpp/compute/particle_test/ParticleTestApp.cpp`, `ParticleTestApp.h`
 
 ---
 
 ## 7. ssbo_data_flow_example -- Persistent Particle State
 
-**Source:** [`examples/ssbo_data_flow_example/`](../../examples/ssbo_data_flow_example/)
+**Source:** [`examples/cpp/compute/ssbo_data_flow_example/`](../../examples/cpp/compute/ssbo_data_flow_example/)
 
 **Purpose:** Demonstrates GPU-to-CPU data readback and save/load of particle state to disk. Extends the particle simulation with ring-buffered readback callbacks and file persistence.
 
@@ -104,13 +104,13 @@ The pipeline (`particle_pipeline.json`) defines a compute dispatch pass (`Partic
 
 **Key pattern:** `registerReadbackCallback()` for GPU-to-CPU data flow. `triggerSave()` for particle state persistence. Render target screenshot capture via `saveRenderTarget()`.
 
-**Key files:** `examples/ssbo_data_flow_example/SSBODataFlowApp.cpp`, `SSBODataFlowApp.h`
+**Key files:** `examples/cpp/compute/ssbo_data_flow_example/SSBODataFlowApp.cpp`, `SSBODataFlowApp.h`
 
 ---
 
 ## 8. pbr_physics_particles -- Combined Full-Stack Demo
 
-**Source:** [`examples/pbr_physics_particles/`](../../examples/pbr_physics_particles/)
+**Source:** [`examples/cpp/physics/pbr_physics_particles/`](../../examples/cpp/physics/pbr_physics_particles/)
 
 **Purpose:** The most comprehensive example -- combines physics simulation, GPU particle compute (75,000 particles), bloom post-processing, and PBR deferred rendering in a single application. Physics impacts create particle attractors.
 
@@ -120,13 +120,13 @@ Controls: Space spawns objects with impulse, P toggles physics, R resets the sce
 
 **Key pattern:** Cross-system integration -- physics collision velocity monitoring drives particle simulation attractors. Impact detection with velocity deltas. Time-decaying attractor system with fading strength.
 
-**Key files:** `examples/pbr_physics_particles/CombinedExampleApp.cpp`, `CombinedExampleApp.h`
+**Key files:** `examples/cpp/physics/pbr_physics_particles/CombinedExampleApp.cpp`, `CombinedExampleApp.h`
 
 ---
 
 ## 9. particle_flow_example -- Large-Scale Particle Showcase
 
-**Source:** [`examples/particle_flow_example/`](../../examples/particle_flow_example/)
+**Source:** [`examples/cpp/compute/particle_flow_example/`](../../examples/cpp/compute/particle_flow_example/)
 
 **Purpose:** A visual showcase of 100,000+ particles with dramatic, animated simulation parameters. Loads the full Sponza scene and overlays an aggressive particle system with pulsing gravity, a Lissajous-figure orbiting attractor, and high-turbulence wind.
 
@@ -134,7 +134,7 @@ Controls: Space spawns objects with impulse, P toggles physics, R resets the sce
 
 **Key pattern:** Large-scale particle simulation with aggressive, animated parameters. Multi-target screenshot capture for visual debugging.
 
-**Key files:** `examples/particle_flow_example/ParticleFlowApp.cpp`, `ParticleFlowApp.h`
+**Key files:** `examples/cpp/compute/particle_flow_example/ParticleFlowApp.cpp`, `ParticleFlowApp.h`
 
 ---
 

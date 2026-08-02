@@ -14,7 +14,7 @@
 # directory. Writing the SPIR-V to the build tree instead makes the build clean
 # but leaves every example loading whatever .spv was last committed, which is a
 # worse failure than a dirty working tree: it is exactly the stale-binary bug
-# already found in python/examples.
+# already found in examples/python.
 #
 # The real fix is an asset-staging step per example (copy the JSON and the
 # referenced assets next to the executable, run from there), after which this can

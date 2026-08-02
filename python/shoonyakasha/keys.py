@@ -1,20 +1,16 @@
 """Key codes for Input.is_key_down() and the key-event callbacks.
 
-अक्षरबीजानि — the seed syllables of input.
-
 The engine passes key codes through to GLFW unchanged, so these are GLFW's
-values. They are spelled out here rather than imported from a GLFW binding
-because the engine already links GLFW itself — asking users to install a
-second copy of it to learn that "W" is 87 would be a strange requirement.
+values.
 
     from shoonyakasha import keys
 
     if engine.input.is_key_down(keys.W):
         ...
 
-Printable keys use their ASCII value, so `ord("W")` works too. The named
-constants are here for the ones that have no character: arrows, function
-keys, modifiers.
+Printable keys use their ASCII value, so ord("W") also works. The named
+constants cover the keys that have no character: arrows, function keys and
+modifiers.
 """
 
 # ── Printable keys (ASCII) ────────────────────────────────────
@@ -95,9 +91,9 @@ MOUSE_MIDDLE = 2
 
 
 def name(code):
-    """The name of a key code, or its number as a string if unnamed.
+    """Return the name of a key code, or its number as a string if unnamed.
 
-    For key-event callbacks, which receive a raw code.
+    Key-event callbacks receive a raw code.
     """
     for key, value in globals().items():
         if key.isupper() and value == code and not key.startswith("_"):

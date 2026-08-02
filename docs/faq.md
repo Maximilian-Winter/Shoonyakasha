@@ -14,7 +14,7 @@ See [Prerequisites](getting-started/prerequisites.md) for full setup instruction
 
 ### How do I use the Python bindings?
 
-Build the engine with the CMake option `BUILD_PYTHON=ON`. Then add the `python/` directory to your `PYTHONPATH`. After that you can simply `import shoonyakasha` -- no `pip install` or wheel packaging is required.
+Install the package from the repository root with `pip install .`. That builds the engine and the extension module and installs both, after which `import shoonyakasha` works from anywhere. See [BUILDING.md](../BUILDING.md) for the vcpkg toolchain argument this needs on Windows.
 
 See [Python Quickstart](getting-started/python-quickstart.md) for a walkthrough.
 

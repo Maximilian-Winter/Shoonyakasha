@@ -35,10 +35,15 @@ engine.set_on_init(on_init)
 engine.run()
 ```
 
-Run it from the directory that contains your pipeline JSON and assets:
+Install the package once, from the repository root:
 
 ```
-set PYTHONPATH=H:\cpp_dev\Shoonyakasha\python;%PYTHONPATH%
+pip install .
+```
+
+Then run the script from the directory that contains your pipeline JSON:
+
+```
 python my_first_scene.py
 ```
 

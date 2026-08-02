@@ -1,0 +1,141 @@
+#version 450
+//
+// Particle Simulation -- Multi-Attractor Physics-Reactive
+//
+// Particles drift as atmospheric mist, attracted to recent
+// physics impact points. Up to 4 simultaneous attractors
+// allow multiple impacts to pull particles like sparks.
+//
+
+layout(local_size_x = 256) in;
+
+struct Particle {
+    vec4 position;   // xyz = world position, w = life (seconds)
+    vec4 velocity;   // xyz = velocity m/s, w = mass
+};
+
+layout(std430, binding = 0) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+layout(std140, binding = 1) uniform SimParams {
+    float deltaTime;
+    float gravity;
+    uint  particleCount;
+    float boundaryRadius;
+    vec4  attractorPos0;   // xyz = position, w = strength
+    vec4  attractorPos1;
+    vec4  attractorPos2;
+    vec4  attractorPos3;
+    vec4  wind;            // xyz = direction*speed, w = turbulence
+    float damping;
+    float spawnHeight;
+    float groundY;
+    float padding1;
+} params;
+
+// ── Hash-based pseudo-random ──────────────────────────────────
+float hash(uint seed) {
+    seed = (seed ^ 61u) ^ (seed >> 16u);
+    seed *= 9u;
+    seed = seed ^ (seed >> 4u);
+    seed *= 0x27d4eb2du;
+    seed = seed ^ (seed >> 15u);
+    return float(seed) / float(0xFFFFFFFFu);
+}
+
+// ── Attractor force from one slot ─────────────────────────────
+vec3 attractorForce(vec3 particlePos, vec4 attractorData) {
+    if (attractorData.w <= 0.01) return vec3(0.0);
+
+    vec3 toAttractor = attractorData.xyz - particlePos;
+    float dist = max(length(toAttractor), 0.5);
+    float force = attractorData.w / (dist * dist);
+    return normalize(toAttractor) * force;
+}
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= params.particleCount) return;
+
+    Particle p = particles[index];
+
+    // ── Gravity ──────────────────────────────────────────────
+    p.velocity.y -= params.gravity * params.deltaTime;
+
+    // ── Multi-attractor forces (from physics impacts) ────────
+    vec3 totalAttract = vec3(0.0);
+    totalAttract += attractorForce(p.position.xyz, params.attractorPos0);
+    totalAttract += attractorForce(p.position.xyz, params.attractorPos1);
+    totalAttract += attractorForce(p.position.xyz, params.attractorPos2);
+    totalAttract += attractorForce(p.position.xyz, params.attractorPos3);
+    p.velocity.xyz += totalAttract * params.deltaTime;
+
+    // ── Wind with turbulence ─────────────────────────────────
+    uint seed = index * 1021u + uint(abs(p.position.x * 50.0 + p.position.z * 70.0));
+    vec3 turbulence = vec3(
+        hash(seed) - 0.5,
+        hash(seed + 1u) - 0.5,
+        hash(seed + 2u) - 0.5
+    ) * params.wind.w;
+    p.velocity.xyz += (params.wind.xyz + turbulence) * params.deltaTime;
+
+    // ── Buoyancy (lighter particles rise) ────────────────────
+    float buoyancy = 0.6 / max(p.velocity.w, 0.5);
+    p.velocity.y += buoyancy * params.deltaTime;
+
+    // ── Damping (air resistance) ─────────────────────────────
+    p.velocity.xyz *= params.damping;
+
+    // ── Integrate position ───────────────────────────────────
+    p.position.xyz += p.velocity.xyz * params.deltaTime;
+
+    // ── Decrease life ────────────────────────────────────────
+    p.position.w -= params.deltaTime;
+
+    // ── Boundary: arena matching physics scene ───────────────
+    const float restitution = 0.3;
+
+    // Ground bounce
+    if (p.position.y < params.groundY) {
+        p.position.y = params.groundY;
+        p.velocity.y = abs(p.velocity.y) * restitution;
+    }
+
+    // Side boundaries
+    float bx = 30.0;
+    float bz = 30.0;
+    float by = 25.0;
+
+    if (p.position.x < -bx) { p.position.x = -bx; p.velocity.x = abs(p.velocity.x) * restitution; }
+    else if (p.position.x > bx) { p.position.x = bx; p.velocity.x = -abs(p.velocity.x) * restitution; }
+
+    if (p.position.y > by) { p.position.y = by; p.velocity.y = -abs(p.velocity.y) * restitution; }
+
+    if (p.position.z < -bz) { p.position.z = -bz; p.velocity.z = abs(p.velocity.z) * restitution; }
+    else if (p.position.z > bz) { p.position.z = bz; p.velocity.z = -abs(p.velocity.z) * restitution; }
+
+    // ── Respawn dead particles ───────────────────────────────
+    if (p.position.w <= 0.0) {
+        seed = index * 1023u + uint(gl_GlobalInvocationID.x * 31u);
+
+        // Respawn near ground plane, scattered widely -- rising mist
+        p.position.xyz = vec3(
+            (hash(seed) - 0.5) * 50.0,
+            params.groundY + hash(seed + 1u) * params.spawnHeight,
+            (hash(seed + 2u) - 0.5) * 50.0
+        );
+
+        // Gentle upward drift
+        p.velocity.xyz = vec3(
+            (hash(seed + 3u) - 0.5) * 1.0,
+            0.5 + hash(seed + 4u) * 2.0,
+            (hash(seed + 5u) - 0.5) * 1.0
+        );
+
+        p.position.w = 3.0 + hash(seed + 6u) * 5.0;  // life: 3-8 seconds
+        p.velocity.w = 0.8 + hash(seed + 7u) * 0.4;   // mass: 0.8-1.2
+    }
+
+    particles[index] = p;
+}

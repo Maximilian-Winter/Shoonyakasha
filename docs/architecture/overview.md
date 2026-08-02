@@ -178,7 +178,7 @@ Frame synchronization uses double-buffered semaphores and fences (`maxFramesInFl
 | `include/GPU/` | `GPUTypes.h`, `GPUResourceFactory.h` | Thin GPU type wrappers (`GPUTexture`, `GPUBuffer`), default texture factory |
 | `src/Facade/` | (implementations) | PIMPL internals for the Facade layer |
 | `python/shoonyakasha/` | `.pyx`, `.pxd`, bridge headers | Cython bindings wrapping the Facade |
-| `python/examples/` | `.py` scripts | Python demo applications |
+| `examples/python/` | `.py` scripts | Python demo applications |
 | `examples/` | C++ example apps | Standalone applications demonstrating various features |
 | `tests/` | GTest suites | the automated test suite |
 

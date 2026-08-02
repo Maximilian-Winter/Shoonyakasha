@@ -119,7 +119,7 @@ This creates an image at half the swapchain resolution. The engine automatically
 
 ### Real Example: GBuffer Resources
 
-From [`examples/declarative_sponza_test/pbr_ibl_pipeline_v3.json`](../../examples/declarative_sponza_test/pbr_ibl_pipeline_v3.json):
+From [`examples/cpp/rendering/declarative_sponza_test/pbr_ibl_pipeline_v3.json`](../../examples/cpp/rendering/declarative_sponza_test/pbr_ibl_pipeline_v3.json):
 
 ```json
 "resources": [
@@ -465,7 +465,7 @@ For skinned meshes, add a `skeleton` binding:
 }
 ```
 
-This tells the engine to also bind the skeleton's bone matrices SSBO when rendering skinned entities. From [`examples/skinned_mesh_test/skinned_pipeline.json`](../../examples/skinned_mesh_test/skinned_pipeline.json):
+This tells the engine to also bind the skeleton's bone matrices SSBO when rendering skinned entities. From [`examples/cpp/animation/skinned_mesh_test/skinned_pipeline.json`](../../examples/cpp/animation/skinned_mesh_test/skinned_pipeline.json):
 
 ```json
 "skeletonSet": {
@@ -773,7 +773,7 @@ blending, which was previously impossible to combine with presenting:
 
 That pass keeps the `LOAD` op and the dependency on whatever drew the swapchain
 before it, so earlier passes' output survives to be blended onto, *and* ends
-presentable. `examples/full_showcase` composites three passes into the swapchain
+presentable. `examples/python/games_2d/full_showcase` composites three passes into the swapchain
 this way.
 
 `"usage": "present"` is still accepted and means `"color_write"` with
@@ -914,7 +914,7 @@ The engine divides the parameter value by the divisor and rounds up, giving the 
 "y": { "resource": "bloomBrightPass", "dimension": "height", "divisor": 16 }
 ```
 
-This is the standard pattern for image-processing compute passes. From [`examples/bloom_test/bloom_pipeline.json`](../../examples/bloom_test/bloom_pipeline.json):
+This is the standard pattern for image-processing compute passes. From [`examples/cpp/rendering/bloom_test/bloom_pipeline.json`](../../examples/cpp/rendering/bloom_test/bloom_pipeline.json):
 
 ```json
 {
@@ -1113,7 +1113,7 @@ bloomBlurH  ──> [BlurVertical]   ──> bloomBlurV
 sceneColor + bloomBlurV ──> [Composite] ──> swapchain
 ```
 
-See [`examples/bloom_test/bloom_pipeline.json`](../../examples/bloom_test/bloom_pipeline.json) for the full implementation of this pattern.
+See [`examples/cpp/rendering/bloom_test/bloom_pipeline.json`](../../examples/cpp/rendering/bloom_test/bloom_pipeline.json) for the full implementation of this pattern.
 
 ### Half-Resolution Effects
 
@@ -1148,7 +1148,7 @@ GBufferPass_Skinned (skinned_geometry, "skinned" vertex) ──> GBuffer (contin
 IBLLightingPass     (fullscreen) ──> litColorHDR
 ```
 
-From [`examples/skinned_mesh_test/skinned_pipeline.json`](../../examples/skinned_mesh_test/skinned_pipeline.json), the skinned pass uses a separate vertex format with joint indices and weights, and its entity data binding includes a skeleton set.
+From [`examples/cpp/animation/skinned_mesh_test/skinned_pipeline.json`](../../examples/cpp/animation/skinned_mesh_test/skinned_pipeline.json), the skinned pass uses a separate vertex format with joint indices and weights, and its entity data binding includes a skeleton set.
 
 ---
 
@@ -1156,8 +1156,8 @@ From [`examples/skinned_mesh_test/skinned_pipeline.json`](../../examples/skinned
 
 | Pipeline | File | Features Demonstrated |
 |----------|------|----------------------|
-| PBR + IBL + Particles | [`examples/declarative_sponza_test/pbr_ibl_pipeline_v3.json`](../../examples/declarative_sponza_test/pbr_ibl_pipeline_v3.json) | Deferred PBR, IBL, transparency, compute particles, SSBO readback |
-| Bloom | [`examples/bloom_test/bloom_pipeline.json`](../../examples/bloom_test/bloom_pipeline.json) | Compute post-processing chain, half-res resources, storage images |
-| Particles | [`examples/particle_test/particle_pipeline.json`](../../examples/particle_test/particle_pipeline.json) | Compute simulation, point-list rendering, double-buffered SSBO |
-| Skinned Mesh | [`examples/skinned_mesh_test/skinned_pipeline.json`](../../examples/skinned_mesh_test/skinned_pipeline.json) | Skinned vertex format, skeleton SSBO, multiple GBuffer passes |
-| Physics | [`examples/physics_test/pipeline.json`](../../examples/physics_test/pipeline.json) | Standard deferred PBR (same pipeline, physics-driven entities) |
+| PBR + IBL + Particles | [`examples/cpp/rendering/declarative_sponza_test/pbr_ibl_pipeline_v3.json`](../../examples/cpp/rendering/declarative_sponza_test/pbr_ibl_pipeline_v3.json) | Deferred PBR, IBL, transparency, compute particles, SSBO readback |
+| Bloom | [`examples/cpp/rendering/bloom_test/bloom_pipeline.json`](../../examples/cpp/rendering/bloom_test/bloom_pipeline.json) | Compute post-processing chain, half-res resources, storage images |
+| Particles | [`examples/cpp/compute/particle_test/particle_pipeline.json`](../../examples/cpp/compute/particle_test/particle_pipeline.json) | Compute simulation, point-list rendering, double-buffered SSBO |
+| Skinned Mesh | [`examples/cpp/animation/skinned_mesh_test/skinned_pipeline.json`](../../examples/cpp/animation/skinned_mesh_test/skinned_pipeline.json) | Skinned vertex format, skeleton SSBO, multiple GBuffer passes |
+| Physics | [`examples/cpp/physics/physics_test/pipeline.json`](../../examples/cpp/physics/physics_test/pipeline.json) | Standard deferred PBR (same pipeline, physics-driven entities) |

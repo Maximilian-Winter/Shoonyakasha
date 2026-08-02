@@ -1,12 +1,12 @@
 # Python Example Walkthroughs
 
-This page walks through the two Python example applications included in `python/examples/`. These examples demonstrate the full Python API for the Shoonyakasha engine and serve as templates for building your own applications.
+This page walks through the two Python example applications included in `examples/python/`. These examples demonstrate the full Python API for the Shoonyakasha engine and serve as templates for building your own applications.
 
 ---
 
 ## demo.py -- Full-Featured Sponza Rendering
 
-**Source:** [`python/examples/demo.py`](../../python/examples/demo.py)
+**Source:** [`examples/python/getting_started/demo/demo.py`](../../examples/python/getting_started/demo/demo.py)
 
 **Purpose:** A complete rendering demo that loads the Sponza architectural scene with PBR+IBL lighting, GPU particle simulation, dynamic point light creation, and physics toggling. This is the primary Python showcase of the engine.
 
@@ -150,7 +150,7 @@ All callbacks are registered on the engine before calling `engine.run()`, which 
 
 ## skinned_fox_demo.py -- Skeletal Animation
 
-**Source:** [`python/examples/skinned_fox_demo.py`](../../python/examples/skinned_fox_demo.py)
+**Source:** [`examples/python/animation/skinned_fox_demo/skinned_fox_demo.py`](../../examples/python/animation/skinned_fox_demo/skinned_fox_demo.py)
 
 **Purpose:** A skeletal animation demo that loads the Fox.glb model, plays animation clips, and demonstrates interactive clip switching, pause/resume, and speed control.
 
@@ -280,7 +280,7 @@ This demo only uses two callbacks -- `on_init` and `on_key_pressed`. No `on_upda
 
 ## pong.py -- A Complete Small Game
 
-`examples/pong_game/pong.py` is a finished game rather than a feature
+`examples/python/games_2d/pong_game/pong.py` is a finished game rather than a feature
 demonstration: one `sprite_geometry` pass, six sprites, five labels, and no 3D
 geometry at all. It is the shortest read of what the sprite/UI half of the API
 feels like in practice.
@@ -299,7 +299,7 @@ Worth borrowing from it:
 - **`shoonyakasha.keys`.** Key codes by name (`keys.SPACE`, `keys.UP`) instead
   of the GLFW integers `is_key_down` actually takes.
 
-It needs its art pack downloaded first; see `examples/pong_game/README.md`.
+It needs its art pack downloaded first; see `examples/python/games_2d/pong_game/README.md`.
 
 ---
 
@@ -309,20 +309,20 @@ The examples must be run from the correct working directory so that asset paths 
 
 **demo.py:**
 ```bash
-cd examples/declarative_sponza_test
-python ../../python/examples/demo.py
+cd examples/cpp/rendering/declarative_sponza_test
+python ../../examples/python/getting_started/demo/demo.py
 ```
 
 **skinned_fox_demo.py:**
 ```bash
-cd examples/skinned_mesh_test
-python ../../python/examples/skinned_fox_demo.py
+cd examples/cpp/animation/skinned_mesh_test
+python ../../examples/python/animation/skinned_fox_demo/skinned_fox_demo.py
 ```
 
 **pong.py:**
 ```bash
-cd examples/pong_game
+cd examples/python/games_2d/pong_game
 python pong.py
 ```
 
-Ensure that the engine is built with `-DBUILD_PYTHON=ON` and that `python/shoonyakasha/_shoonyakasha.pyd` exists. Add the `python/` directory to your `PYTHONPATH` or let the scripts' `sys.path.insert` handle it automatically.
+The examples import the installed package, so run `pip install .` at the repository root first. Each one must be run from its own directory, since it loads its pipeline JSON and shaders by relative path.

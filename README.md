@@ -52,8 +52,8 @@ linking an encoder, so there is no extra dependency to build.
 `sk.video_recording_available()` / `videoRecordingAvailable()` reports whether
 one was found, and `find_ffmpeg()` says which.
 
-Readback is synchronous, so recording costs frame rate — the right trade for
-capturing a clip of a demo, the wrong one for anything shipping.
+Readback is synchronous: each captured frame stalls until the GPU copy
+completes, so recording lowers the frame rate.
 
 ## Python utilities
 
@@ -238,9 +238,9 @@ The compiled `_shoonyakasha.pyd` (Windows) or `.so` (Linux) will be in `python/s
 include/           C++ headers organized by subsystem
 src/               Implementation files
 python/            Cython bindings and Python package
-  shoonyakasha/    Python module
-  examples/        Python demo scripts
-examples/          10 C++ example applications
+examples/          Runnable examples, by language and topic
+  cpp/             10 C++ applications, built by CMake
+  python/          6 Python scripts, no build step
 assets/            Shared example assets (models, environments, textures, fonts)
 tools/             Asset fetch and conversion scripts
 tests/             Automated test suite

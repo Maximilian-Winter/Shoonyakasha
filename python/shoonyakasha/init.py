@@ -3,7 +3,7 @@
     python -m shoonyakasha.init my_game
     cd my_game && python main.py
 
-The templates are a reduction of `examples/instancing_test` — a pipeline that
+The templates are a reduction of `examples/cpp/api/instancing_test` — a pipeline that
 demonstrably renders, stripped to a single forward pass — rather than something
 written from the schema and hoped for.
 """
