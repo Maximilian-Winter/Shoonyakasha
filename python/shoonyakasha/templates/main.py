@@ -34,7 +34,7 @@ def main():
         # Paths are resolved against the shared assets/ directory.
         engine.load_gltf_scene("models/Box.gltf")
 
-        engine.create_camera(position=(0.0, 1.5, 5.0), fov=60.0)
+        engine.create_camera(pos=(0.0, 1.5, 5.0), fov=60.0)
         engine.create_directional_light(
             direction=(-0.4, -1.0, -0.3), color=(1.0, 0.97, 0.92), intensity=3.0)
 

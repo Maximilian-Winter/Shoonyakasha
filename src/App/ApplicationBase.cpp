@@ -31,6 +31,7 @@
 #include "Resources/FontLoader.h"
 
 #include "Core/AssetPaths.h"
+#include "Vulkan/FrameGraph/RenderTargetSaver.h"
 
 #include <GLFW/glfw3.h>
 #include <stdexcept>
@@ -100,6 +101,10 @@ void ApplicationBase::run() {
     }
 
     vkDeviceWaitIdle(m_device->getLogicalDevice());
+
+    // Before onCleanup: ffmpeg needs to finalise the container, and a file left
+    // half-written is not playable.
+    stopRecording();
 
     // ── Cleanup ──
     onCleanup();
@@ -436,9 +441,130 @@ void ApplicationBase::presentFrame(uint32_t imageIndex) {
 
     VkResult result = vkQueuePresentKHR(m_device->getPresentQueue(), &presentInfo);
 
+    m_lastPresentedImage = imageIndex;
+    m_hasPresented = true;
+
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         handleSwapChainRecreation();
+        // The swapchain's images are gone; nothing to capture until the next
+        // present fills a new one.
+        m_hasPresented = false;
+        return;
     }
+
+    if (m_videoRecorder.isRecording()) {
+        VkExtent2D extent{};
+        std::vector<uint8_t> pixels = readPresentedFrame(extent);
+        if (!pixels.empty() && !m_videoRecorder.writeFrame(pixels.data(), pixels.size())) {
+            m_logger->log(LogLevel::Error, "Recording stopped: %s",
+                          m_videoRecorder.lastError().c_str());
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Frame Capture
+// ═══════════════════════════════════════════════════════════════
+
+std::vector<uint8_t> ApplicationBase::readPresentedFrame(VkExtent2D& extentOut) {
+    if (!m_hasPresented) {
+        return {};
+    }
+    if (!m_swapChain->supportsCapture()) {
+        return {};
+    }
+
+    // The GPU is still presenting the image we are about to copy from.
+    vkDeviceWaitIdle(m_device->getLogicalDevice());
+
+    extentOut = m_swapChain->getSwapChainExtent();
+
+    FrameGraph::RenderTargetSaver saver(*m_device);
+    return saver.readbackRGBA8(
+        m_swapChain->getSwapChainImage(m_lastPresentedImage),
+        m_swapChain->getSwapChainImageFormat(),
+        extentOut,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        m_logger.get());
+}
+
+bool ApplicationBase::captureScreenshot(const std::string& path) {
+    if (!m_hasPresented) {
+        m_logger->log(LogLevel::Warning,
+                      "captureScreenshot: nothing has been presented yet");
+        return false;
+    }
+    if (!m_swapChain->supportsCapture()) {
+        m_logger->log(LogLevel::Error,
+                      "captureScreenshot: this surface does not allow copying from "
+                      "the presented image");
+        return false;
+    }
+
+    vkDeviceWaitIdle(m_device->getLogicalDevice());
+
+    FrameGraph::RenderTargetSaver saver(*m_device);
+    const bool ok = saver.save(
+        m_swapChain->getSwapChainImage(m_lastPresentedImage),
+        m_swapChain->getSwapChainImageFormat(),
+        m_swapChain->getSwapChainExtent(),
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        path,
+        m_logger.get());
+
+    if (ok) {
+        m_logger->log(LogLevel::Info, "Screenshot written to '%s'", path.c_str());
+    }
+    return ok;
+}
+
+bool ApplicationBase::startRecording(const std::string& path,
+                                     const VideoRecorder::Options& options) {
+    if (!m_swapChain->supportsCapture()) {
+        m_logger->log(LogLevel::Error,
+                      "startRecording: this surface does not allow copying from the "
+                      "presented image");
+        return false;
+    }
+
+    const VkExtent2D extent = m_swapChain->getSwapChainExtent();
+    if (!m_videoRecorder.start(path, extent.width, extent.height, options)) {
+        m_logger->log(LogLevel::Error, "startRecording: %s",
+                      m_videoRecorder.lastError().c_str());
+        return false;
+    }
+
+    m_logger->log(LogLevel::Info, "Recording %ux%u at %d fps to '%s' via %s",
+                  extent.width, extent.height, options.fps, path.c_str(),
+                  m_videoRecorder.ffmpegPath().c_str());
+    return true;
+}
+
+bool ApplicationBase::stopRecording() {
+    if (!m_videoRecorder.isRecording()) {
+        return true;
+    }
+
+    const uint64_t frames = m_videoRecorder.frameCount();
+    const std::string path = m_videoRecorder.outputPath();
+
+    if (!m_videoRecorder.stop()) {
+        m_logger->log(LogLevel::Error, "stopRecording: %s",
+                      m_videoRecorder.lastError().c_str());
+        return false;
+    }
+
+    m_logger->log(LogLevel::Info, "Recorded %llu frames to '%s'",
+                  static_cast<unsigned long long>(frames), path.c_str());
+    return true;
+}
+
+bool ApplicationBase::isRecording() const {
+    return m_videoRecorder.isRecording();
+}
+
+uint64_t ApplicationBase::getRecordedFrameCount() const {
+    return m_videoRecorder.frameCount();
 }
 
 void ApplicationBase::handleSwapChainRecreation() {

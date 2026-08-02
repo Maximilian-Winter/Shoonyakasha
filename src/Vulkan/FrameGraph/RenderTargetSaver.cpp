@@ -107,14 +107,59 @@ bool RenderTargetSaver::save(VkImage image, VkFormat format, VkExtent2D extent,
         std::filesystem::create_directories(parentPath);
     }
 
-    // Calculate staging buffer size
-    uint32_t bpp = getBytesPerPixel(format);
-    VkDeviceSize bufferSize = static_cast<VkDeviceSize>(extent.width) * extent.height * bpp;
+    if (logger) {
+        logger->log(LogLevel::Info, "RenderTargetSaver: saving %ux%u image (format %d) to '%s'",
+                    extent.width, extent.height, static_cast<int>(format), path.c_str());
+    }
+
+    std::vector<uint8_t> raw = readbackRaw(image, format, extent, currentLayout, logger);
+    if (raw.empty()) {
+        return false;
+    }
+    const void* mappedData = raw.data();
+
+    // ── Convert and write ──
+    bool success = false;
+
+    if (isHDR) {
+        std::vector<float> floatData = convertToRGBAFloat(mappedData, format,
+                                                           extent.width, extent.height);
+        success = stbi_write_hdr(path.c_str(), extent.width, extent.height, 4, floatData.data()) != 0;
+    } else {
+        success = writeLDR(path, ext, convertToRGBA8(mappedData, format,
+                                                     extent.width, extent.height),
+                           extent);
+    }
 
     if (logger) {
-        logger->log(LogLevel::Info, "RenderTargetSaver: saving %ux%u image (format %d, %u bpp) to '%s'",
-                    extent.width, extent.height, static_cast<int>(format), bpp, path.c_str());
+        logger->log(success ? LogLevel::Info : LogLevel::Error,
+                    "RenderTargetSaver: %s '%s'",
+                    success ? "wrote" : "failed to write", path.c_str());
     }
+    return success;
+}
+
+std::vector<uint8_t> RenderTargetSaver::readbackRGBA8(VkImage image, VkFormat format,
+                                                      VkExtent2D extent,
+                                                      VkImageLayout currentLayout,
+                                                      Logger* logger) {
+    std::vector<uint8_t> raw = readbackRaw(image, format, extent, currentLayout, logger);
+    if (raw.empty()) {
+        return {};
+    }
+    return convertToRGBA8(raw.data(), format, extent.width, extent.height);
+}
+
+std::vector<uint8_t> RenderTargetSaver::readbackRaw(VkImage image, VkFormat format,
+                                                    VkExtent2D extent,
+                                                    VkImageLayout currentLayout,
+                                                    Logger* logger) {
+    if (image == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) {
+        return {};
+    }
+
+    uint32_t bpp = getBytesPerPixel(format);
+    VkDeviceSize bufferSize = static_cast<VkDeviceSize>(extent.width) * extent.height * bpp;
 
     // ── Step 1: Create staging buffer ──
     auto& allocator = m_device.getAllocator();
@@ -133,7 +178,7 @@ bool RenderTargetSaver::save(VkImage image, VkFormat format, VkExtent2D extent,
 
     if (!stagingAlloc.valid()) {
         if (logger) logger->log(LogLevel::Error, "RenderTargetSaver: failed to create staging buffer");
-        return false;
+        return {};
     }
 
     // ── Step 2: Record and execute one-shot command buffer ──
@@ -218,53 +263,37 @@ bool RenderTargetSaver::save(VkImage image, VkFormat format, VkExtent2D extent,
     if (!mappedData) {
         if (logger) logger->log(LogLevel::Error, "RenderTargetSaver: failed to map staging buffer");
         allocator.destroyBuffer(stagingAlloc);
-        return false;
+        return {};
     }
 
-    // ── Step 4: Convert and write ──
-    bool success = false;
-
-    if (isHDR) {
-        // HDR output: convert to float RGBA
-        std::vector<float> floatData = convertToRGBAFloat(mappedData, format,
-                                                           extent.width, extent.height);
-        success = stbi_write_hdr(path.c_str(), extent.width, extent.height, 4, floatData.data()) != 0;
-    } else {
-        // LDR output: convert to uint8 RGBA
-        std::vector<uint8_t> rgba8 = convertToRGBA8(mappedData, format,
-                                                      extent.width, extent.height);
-        int channels = 4;
-
-        if (ext == ".png") {
-            int stride = extent.width * channels;
-            success = stbi_write_png(path.c_str(), extent.width, extent.height, channels,
-                                      rgba8.data(), stride) != 0;
-        } else if (ext == ".jpg" || ext == ".jpeg") {
-            success = stbi_write_jpg(path.c_str(), extent.width, extent.height, channels,
-                                      rgba8.data(), 90) != 0;
-        } else if (ext == ".bmp") {
-            success = stbi_write_bmp(path.c_str(), extent.width, extent.height, channels,
-                                      rgba8.data()) != 0;
-        } else if (ext == ".tga") {
-            success = stbi_write_tga(path.c_str(), extent.width, extent.height, channels,
-                                      rgba8.data()) != 0;
-        }
-    }
-
-    // ── Step 5: Cleanup ──
-    // If we manually mapped, unmap (but VMA_ALLOCATION_CREATE_MAPPED_BIT keeps it mapped)
+    // Copied out before the staging buffer goes away, so callers own their pixels
+    // and no one holds a mapping across a frame.
+    std::vector<uint8_t> bytes(static_cast<size_t>(bufferSize));
+    std::memcpy(bytes.data(), mappedData, bytes.size());
     allocator.destroyBuffer(stagingAlloc);
+    return bytes;
+}
 
-    if (logger) {
-        if (success) {
-            logger->log(LogLevel::Info, "RenderTargetSaver: saved '%s' (%ux%u)", path.c_str(),
-                        extent.width, extent.height);
-        } else {
-            logger->log(LogLevel::Error, "RenderTargetSaver: failed to write '%s'", path.c_str());
-        }
+bool RenderTargetSaver::writeLDR(const std::string& path, const std::string& ext,
+                                 const std::vector<uint8_t>& rgba8, VkExtent2D extent) {
+    const int channels = 4;
+    const int width = static_cast<int>(extent.width);
+    const int height = static_cast<int>(extent.height);
+
+    if (ext == ".png") {
+        return stbi_write_png(path.c_str(), width, height, channels,
+                              rgba8.data(), width * channels) != 0;
     }
-
-    return success;
+    if (ext == ".jpg" || ext == ".jpeg") {
+        return stbi_write_jpg(path.c_str(), width, height, channels, rgba8.data(), 90) != 0;
+    }
+    if (ext == ".bmp") {
+        return stbi_write_bmp(path.c_str(), width, height, channels, rgba8.data()) != 0;
+    }
+    if (ext == ".tga") {
+        return stbi_write_tga(path.c_str(), width, height, channels, rgba8.data()) != 0;
+    }
+    return false;
 }
 
 // ═══════════════════════════════════════════════════════════════

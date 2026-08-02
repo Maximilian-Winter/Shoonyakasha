@@ -33,6 +33,11 @@ public:
     VkImage getSwapChainImage(size_t index) const { return m_swapChainImages[index]->getImage(); }
     VkImageView getSwapChainImageView(size_t index) const { return m_swapChainImages[index]->getImageView(); }
 
+    /// Can the presented image be copied back? False on a platform whose surface
+    /// does not advertise TRANSFER_SRC, where frame capture is unavailable rather
+    /// than broken.
+    bool supportsCapture() const { return m_supportsCapture; }
+
     // Depth buffer access
     VkFormat getDepthFormat() const;
     VkImageView getDepthImageView() const;
@@ -52,6 +57,7 @@ private:
 
     VkSwapchainKHR m_swapChain;
     std::vector<std::unique_ptr<VulkanImage>> m_swapChainImages;
+    bool m_supportsCapture = false;
     VkFormat m_swapChainImageFormat;
     VkExtent2D m_swapChainExtent{};
     std::vector<VkFramebuffer> m_swapChainFramebuffers;

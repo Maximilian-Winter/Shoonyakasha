@@ -30,6 +30,30 @@ That writes a project that runs immediately: a single-pass pipeline, a vertex
 and fragment shader, and a `main.py` that compiles the shaders and opens a
 window. Edit `shaders/basic.frag`, run again, see the change.
 
+## Frame capture
+
+Screenshots and video of what was actually on screen — after tonemapping, after
+UI, everything — from either language.
+
+```python
+engine.capture_screenshot("shot.png")        # .png .jpg .bmp .tga .hdr
+engine.start_recording("clip.mkv", fps=30)   # .mkv .mp4 .webm
+engine.stop_recording()
+```
+
+```cpp
+engine.captureScreenshot("shot.png");
+engine.startRecording("clip.mkv");
+engine.stopRecording();
+```
+
+Video needs ffmpeg on `PATH` or in `$FFMPEG`. Frames are piped to it rather than
+linking an encoder, so there is no extra dependency to build;
+`videoRecordingAvailable()` reports whether one was found.
+
+Readback is synchronous, so recording costs frame rate — the right trade for
+capturing a clip of a demo, the wrong one for anything shipping.
+
 ## Python utilities
 
 Three pure-Python modules ship alongside the bindings. They do not need the

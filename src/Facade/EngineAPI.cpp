@@ -11,6 +11,7 @@
 
 #include "Facade/EngineAPI.h"
 #include "Core/AssetPaths.h"
+#include "Capture/VideoRecorder.h"
 #include <filesystem>
 #include "Facade/SceneAPI.h"
 #include "Facade/EcsAPI.h"
@@ -139,6 +140,11 @@ private:
 public:
     // Public forwarders — expose protected ApplicationBase methods for EngineAPI
     using ApplicationBase::createCamera;
+    using ApplicationBase::captureScreenshot;
+    using ApplicationBase::startRecording;
+    using ApplicationBase::stopRecording;
+    using ApplicationBase::isRecording;
+    using ApplicationBase::getRecordedFrameCount;
     using ApplicationBase::loadGltfScene;
     using ApplicationBase::createDirectionalLight;
     using ApplicationBase::createPointLight;
@@ -422,6 +428,39 @@ void EngineAPI::setCustomUint(const std::string& key, uint32_t value) {
 // ═══════════════════════════════════════════════════════════════
 // Assets
 // ═══════════════════════════════════════════════════════════════
+
+bool videoRecordingAvailable() {
+    return VideoRecorder::available();
+}
+
+std::string findFfmpeg() {
+    return VideoRecorder::findFfmpeg();
+}
+
+bool EngineAPI::captureScreenshot(const std::string& path) {
+    return m_impl->app->captureScreenshot(path);
+}
+
+bool EngineAPI::startRecording(const std::string& path, const RecordingOptions& options) {
+    VideoRecorder::Options engineOptions;
+    engineOptions.fps = options.fps;
+    engineOptions.quality = options.quality;
+    engineOptions.codec = options.codec;
+    engineOptions.ffmpegPath = options.ffmpegPath;
+    return m_impl->app->startRecording(path, engineOptions);
+}
+
+bool EngineAPI::stopRecording() {
+    return m_impl->app->stopRecording();
+}
+
+bool EngineAPI::isRecording() const {
+    return m_impl->app->isRecording();
+}
+
+uint64_t EngineAPI::getRecordedFrameCount() const {
+    return m_impl->app->getRecordedFrameCount();
+}
 
 bool assetExists(const std::string& relativePath) {
     if (relativePath.empty()) {

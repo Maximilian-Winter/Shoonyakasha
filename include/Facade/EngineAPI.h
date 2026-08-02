@@ -42,6 +42,17 @@ std::string resolveAsset(const std::string& relativePath);
 std::string describeAssetRoot();
 
 
+// ═══════════════════════════════════════════════════════════════
+// Frame capture
+// ═══════════════════════════════════════════════════════════════
+
+/// Is video recording possible here? False when no ffmpeg can be found.
+bool videoRecordingAvailable();
+
+/// The ffmpeg that would be used, or empty if none was found.
+std::string findFfmpeg();
+
+
 class EngineAPI {
 public:
     explicit EngineAPI(const EngineConfig& config);
@@ -103,6 +114,29 @@ public:
                               float farPlane = 1000.f);
 
     /// Load a glTF scene into the active ECS scene.
+    // ═══════════════════════════════════════════════════════════
+    // Frame capture
+    // ═══════════════════════════════════════════════════════════
+    //
+    // Both capture the frame that was last presented, so what lands on disk is
+    // what was on screen. Readback is synchronous, so recording costs frame
+    // rate — right for capturing a clip, wrong for anything shipping.
+
+    /// Write the last presented frame to disk. Format follows the extension:
+    /// .png, .jpg, .bmp, .tga, .hdr.
+    bool captureScreenshot(const std::string& path);
+
+    /// Record every presented frame. Container follows the extension —
+    /// .mkv, .mp4, .webm. Needs ffmpeg; see videoRecordingAvailable().
+    bool startRecording(const std::string& path,
+                        const RecordingOptions& options = {});
+
+    /// Finish and finalise the file. Called automatically at shutdown.
+    bool stopRecording();
+
+    bool isRecording() const;
+    uint64_t getRecordedFrameCount() const;
+
     GltfResult loadGltfScene(const std::string& path,
                              const GltfOptions& opts = {});
 

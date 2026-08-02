@@ -68,6 +68,13 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         uint32_t maxFramesInFlight
         vector[pair[string, uint32_t]] renderGraphParameters
 
+    cdef cppclass RecordingOptions:
+        RecordingOptions()
+        int fps
+        int quality
+        string codec
+        string ffmpegPath
+
     cdef cppclass GltfOptions:
         cbool loadTextures
         cbool loadMaterials

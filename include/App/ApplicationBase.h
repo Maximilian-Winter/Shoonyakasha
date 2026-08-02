@@ -15,6 +15,7 @@
 #include "IBL/IBLGenerator.h"
 #include "Resources/GltfSceneLoader.h"
 #include "ECS/Sprite2DComponents.h"
+#include "Capture/VideoRecorder.h"
 
 #include <glm/glm.hpp>
 #include <entt/entt.hpp>
@@ -192,6 +193,32 @@ protected:
     // Get the FontLoader (TTF baking + glyph atlas cache for text).
     FontLoader& getFontLoader();
 
+    // ─── Frame Capture ─────────────────────────────────────────
+    //
+    // Both capture the image that was last presented, so what lands on disk is
+    // what was on screen — after tonemapping, after UI, everything. Readback is
+    // synchronous, so recording costs frame rate; fine for a clip of a demo,
+    // wrong for anything shipping.
+
+    /// Write the last presented frame to disk. Format follows the extension:
+    /// .png, .jpg, .bmp, .tga, or .hdr. Returns false and logs why on failure.
+    bool captureScreenshot(const std::string& path);
+
+    /// Begin recording every presented frame. The container follows the
+    /// extension — .mkv, .mp4, .webm. Needs ffmpeg on PATH or in $FFMPEG;
+    /// returns false and logs why if it is missing.
+    bool startRecording(const std::string& path,
+                        const VideoRecorder::Options& options = {});
+
+    /// Finish the recording and finalise the file. Called automatically at
+    /// shutdown, because a recording that is never stopped may not be playable.
+    bool stopRecording();
+
+    bool isRecording() const;
+
+    /// Frames written to the current or most recent recording.
+    uint64_t getRecordedFrameCount() const;
+
 private:
     ApplicationConfig m_config;
 
@@ -237,6 +264,14 @@ private:
     // ─── IBL ───────────────────────────────────────────────────
     IBLResources m_iblResources;
 
+    // ─── Frame Capture ─────────────────────────────────────────
+    VideoRecorder m_videoRecorder;
+    // Index of the swapchain image most recently handed to vkQueuePresentKHR.
+    // Capture reads that one: reading the image currently being rendered into
+    // would show a half-drawn frame.
+    uint32_t m_lastPresentedImage = 0;
+    bool     m_hasPresented = false;
+
     // ─── Synchronization ───────────────────────────────────────
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkSemaphore> m_renderFinishedSemaphores;
@@ -266,6 +301,11 @@ private:
     void update();
     void render();
     void presentFrame(uint32_t imageIndex);
+
+    /// Pixels of the last presented swapchain image as tightly packed RGBA8, or
+    /// empty if nothing has been presented yet or the surface does not allow
+    /// copying from it.
+    std::vector<uint8_t> readPresentedFrame(VkExtent2D& extentOut);
     void handleSwapChainRecreation();
     void cleanup();
 };

@@ -109,6 +109,18 @@ struct EngineConfig {
 // GLTF Loading — clean mirrors of GltfLoadOptions / GltfLoadResult
 // ═══════════════════════════════════════════════════════════════
 
+/// How to encode a recording. Mirrors VideoRecorder::Options so Facade headers
+/// stay self-contained, the way GltfOptions mirrors GltfLoadOptions.
+struct RecordingOptions {
+    int fps = 30;
+    /// x264 constant rate factor: 0 lossless, 18 visually lossless, 51 worst.
+    int quality = 18;
+    /// Any encoder ffmpeg has. libx264 in a .mkv plays everywhere.
+    std::string codec = "libx264";
+    /// Empty searches $FFMPEG, then PATH, then the usual install locations.
+    std::string ffmpegPath;
+};
+
 struct GltfOptions {
     bool loadTextures     = true;
     bool loadMaterials    = true;

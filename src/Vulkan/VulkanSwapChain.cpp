@@ -80,7 +80,16 @@ void VulkanSwapChain::createSwapChain() {
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
+    // TRANSFER_SRC so the presented image can be copied back for screenshots and
+    // video capture. Asked for rather than assumed: the spec only guarantees
+    // COLOR_ATTACHMENT, and requesting an unsupported usage fails swapchain
+    // creation outright. Every desktop driver supports it; a platform that does
+    // not simply loses frame capture rather than the ability to start.
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (swapChainSupport.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
+        createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        m_supportsCapture = true;
+    }
 
     QueueFamilyIndices indices = m_device.findQueueFamilies(m_device.getPhysicalDevice());
     uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};

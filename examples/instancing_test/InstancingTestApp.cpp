@@ -227,6 +227,10 @@ void InstancingTestApp::runSelfTest() {
 
         case 2:
             spawnRing(24);
+            // Frame capture, checked here so it is not left to a human pressing keys.
+            check("screenshot of the presented frame",
+                  captureScreenshot("selftest_screenshot.png"), counts);
+            check("recording starts", startRecording("selftest_capture.mkv"), counts);
             break;
 
         case 3:
@@ -259,6 +263,10 @@ void InstancingTestApp::runSelfTest() {
             break;
 
         case 7:
+            check("recording captured frames",
+                  isRecording() && getRecordedFrameCount() > 30,
+                  "frames " + std::to_string(getRecordedFrameCount()));
+            check("recording stops cleanly", stopRecording(), counts);
             check("destroying every clone still leaves the loaded boxes' buffers",
                   queue.liveCount() == m_baselineBuffers && m_spawned.empty(), counts);
             vkDeviceWaitIdle(getDevice().getLogicalDevice());
@@ -358,6 +366,18 @@ void InstancingTestApp::onKeyPressed(int keyCode) {
             queue.flush();
             getLogger().log(LogLevel::Info, "Flushed; %zu pending, %zu alive",
                             queue.pendingCount(), queue.liveCount());
+            break;
+
+        case GLFW_KEY_P:
+            captureScreenshot("screenshot.png");
+            break;
+
+        case GLFW_KEY_V:
+            if (isRecording()) {
+                stopRecording();
+            } else {
+                startRecording("capture.mkv");
+            }
             break;
 
         case GLFW_KEY_H:

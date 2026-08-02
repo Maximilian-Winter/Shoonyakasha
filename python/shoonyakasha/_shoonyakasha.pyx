@@ -29,7 +29,7 @@ from ._facade_types cimport (
     UIAnchor_MiddleLeft, UIAnchor_MiddleCenter, UIAnchor_MiddleRight,
     UIAnchor_BottomLeft, UIAnchor_BottomCenter, UIAnchor_BottomRight,
     TextHAlign, TextHAlign_Left, TextHAlign_Center, TextHAlign_Right,
-    EngineConfig, GltfOptions, ClipInfo, GltfResult as CppGltfResult,
+    EngineConfig, GltfOptions, RecordingOptions, ClipInfo, GltfResult as CppGltfResult,
 )
 
 from ._engine_api cimport (
@@ -1144,6 +1144,51 @@ cdef class Engine:
         """
         return <uint32_t>self._ptr.createCamera(
             _tuple_to_vec3(pos), fov, speed, near_plane, far_plane)
+
+    # ── Frame capture ────────────────────────────────────────
+    #
+    # Both capture the frame that was last presented, so what lands on disk is
+    # what was on screen. Readback is synchronous, so recording costs frame rate.
+
+    def capture_screenshot(self, str path):
+        """Write the last presented frame to disk.
+
+        Format follows the extension: .png, .jpg, .bmp, .tga, .hdr.
+        Returns True on success.
+        """
+        return self._ptr.captureScreenshot(path.encode("utf-8"))
+
+    def start_recording(self, str path, int fps=30, int quality=18,
+                        str codec="libx264", str ffmpeg_path=""):
+        """Record every presented frame to a video file.
+
+        The container follows the extension -- .mkv, .mp4, .webm. Needs ffmpeg
+        on PATH or in $FFMPEG; see shoonyakasha.video_recording_available().
+
+        quality is x264's CRF: 0 lossless, 18 visually lossless, 51 worst.
+        """
+        cdef RecordingOptions opts
+        opts.fps = fps
+        opts.quality = quality
+        opts.codec = codec.encode("utf-8")
+        opts.ffmpegPath = ffmpeg_path.encode("utf-8")
+        return self._ptr.startRecording(path.encode("utf-8"), opts)
+
+    def stop_recording(self):
+        """Finish the recording and finalise the file.
+
+        Called automatically at shutdown; a recording that is never stopped may
+        produce a file that will not play.
+        """
+        return self._ptr.stopRecording()
+
+    def is_recording(self):
+        return self._ptr.isRecording()
+
+    @property
+    def recorded_frame_count(self):
+        """Frames written to the current or most recent recording."""
+        return self._ptr.getRecordedFrameCount()
 
     def load_gltf_scene(self, str path, **kwargs):
         """Load a glTF scene.

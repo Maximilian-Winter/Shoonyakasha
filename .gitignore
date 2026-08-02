@@ -4,6 +4,10 @@ cmake-build-*/
 /.idea
 *.log
 run.out
+
+# Frame-capture output from examples and the instancing self-test
+*.mkv
+selftest_screenshot.png
 # ── Large example assets ──────────────────────────────────────────────
 #
 # One shared copy of everything the examples load lives in assets/, small enough
@@ -48,5 +52,6 @@ __pycache__/
 *.egg-info/
 /.venv
 /python/shoonyakasha/vulkan-1.dll
+/python/shoonyakasha/glfw3.dll
 /examples/facade_test/cubemaps_hdrs
 /examples/pong_game/assets

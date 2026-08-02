@@ -17,7 +17,7 @@ from libc.stdint cimport uint8_t, uint32_t
 from cpython.ref cimport PyObject
 
 from ._facade_types cimport (
-    EntityHandle, EngineConfig, GltfOptions,
+    EntityHandle, EngineConfig, GltfOptions, RecordingOptions,
     GltfResult as CppGltfResult,
     CameraType, LightType, UIAnchor, TextHAlign,
 )
@@ -365,6 +365,13 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         EntityHandle createCamera(const vec3& pos, float fov, float speed,
                                   float nearPlane, float farPlane)
         CppGltfResult loadGltfScene(const string& path, const GltfOptions& opts) except +
+
+        # Frame capture
+        cbool captureScreenshot(const string& path) except +
+        cbool startRecording(const string& path, const RecordingOptions& options) except +
+        cbool stopRecording() except +
+        cbool isRecording() except +
+        unsigned long long getRecordedFrameCount() except +
         EntityHandle createDirectionalLight(const vec3& direction,
                                             const vec3& color, float intensity)
         EntityHandle createPointLight(const vec3& position,
