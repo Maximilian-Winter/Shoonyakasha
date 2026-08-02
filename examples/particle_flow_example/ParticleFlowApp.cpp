@@ -62,7 +62,7 @@ void ParticleFlowApp::onUpdate(float dt) {
     }
 }
 
-void ParticleFlowApp::onPreRender(float dt) {
+void ParticleFlowApp::onPreRender(float /*dt*/) {
     updateParticleParams();
 }
 

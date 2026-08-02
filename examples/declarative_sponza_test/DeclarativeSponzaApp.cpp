@@ -71,7 +71,7 @@ void DeclarativeSponzaApp::onPostInit() {
         });
 }
 
-void DeclarativeSponzaApp::onPreRender(float dt) {
+void DeclarativeSponzaApp::onPreRender(float /*dt*/) {
     updateParticleParams();
 }
 

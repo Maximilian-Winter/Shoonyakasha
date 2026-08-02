@@ -90,14 +90,14 @@ void VulkanWindow::framebufferResizeCallback(GLFWwindow* window, int width, int 
     vulkanWindow->m_eventDispatcher->publish(WindowResizeEvent{width, height});
 }
 
-void VulkanWindow::keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+void VulkanWindow::keyCallback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/) {
     auto vulkanWindow = getWindowUserPointer(window);
     bool pressed = (action != GLFW_RELEASE);
     vulkanWindow->m_logger->log(LogLevel::Debug, "Key event: key=%d, action=%d", key, action);
     vulkanWindow->m_eventDispatcher->publish(KeyEvent{key, pressed});
 }
 
-void VulkanWindow::mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
+void VulkanWindow::mouseButtonCallback(GLFWwindow* window, int button, int action, int /*mods*/) {
     auto vulkanWindow = getWindowUserPointer(window);
     bool pressed = (action == GLFW_PRESS);
     vulkanWindow->m_logger->log(LogLevel::Debug, "Mouse button event: button=%d, action=%d", button, action);

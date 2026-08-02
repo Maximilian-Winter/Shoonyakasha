@@ -273,7 +273,7 @@ void RenderGraph::updateDotPathUBOs(uint32_t frameIndex) {
 // Engine creates device-local buffers, generates initial data, uploads via staging.
 // ═══════════════════════════════════════════════════════════════
 
-void RenderGraph::createDotPathSSBOs(uint32_t maxFramesInFlight) {
+void RenderGraph::createDotPathSSBOs(uint32_t /*maxFramesInFlight*/) {
     const auto& compiledLayouts = m_compiled.bufferLayouts;
     const auto& builderLayouts = m_builder.getBufferLayouts();
 

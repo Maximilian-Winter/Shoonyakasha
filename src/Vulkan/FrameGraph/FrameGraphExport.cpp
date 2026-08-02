@@ -403,7 +403,7 @@ bool exportToDotFile(
 // ═══════════════════════════════════════════════════════════════
 
 std::string exportToJson(
-    const FrameGraphBuilder& builder,
+    const FrameGraphBuilder& /*builder*/,
     const AnalysisResult& analysis,
     const ExportOptions& options
 ) {
@@ -655,7 +655,7 @@ std::string generateTextSummary(
 
 std::string generateCullingReport(
     const CullingReport& culling,
-    const ExportOptions& options
+    const ExportOptions& /*options*/
 ) {
     std::ostringstream out;
 
@@ -764,7 +764,7 @@ std::string generateBarrierReport(
 
 std::string generateResourceLifetimeReport(
     const std::vector<ResourceLifetime>& lifetimes,
-    const ExportOptions& options
+    const ExportOptions& /*options*/
 ) {
     std::ostringstream out;
 
@@ -775,7 +775,8 @@ std::string generateResourceLifetimeReport(
     std::vector<const ResourceLifetime*> transientCandidates;
     std::vector<const ResourceLifetime*> aliasableCandidates;
     VkDeviceSize totalMemory = 0;
-    VkDeviceSize potentialSavings = 0;
+    // The figure reported below comes from stats.potentialMemorySavings, which the
+    // analyzer computes; a second local of the same name was only ever zero.
 
     for (const auto& r : lifetimes) {
         if (r.couldBeTransient) transientCandidates.push_back(&r);
@@ -837,7 +838,7 @@ std::string generateResourceLifetimeReport(
 }
 
 std::string generateMarkdownReport(
-    const FrameGraphBuilder& builder,
+    const FrameGraphBuilder& /*builder*/,
     const AnalysisResult& analysis,
     const ExportOptions& options
 ) {

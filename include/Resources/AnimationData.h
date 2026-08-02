@@ -63,8 +63,8 @@ struct Skeleton {
     }
 
     // Find joint index by name (-1 if not found)
-    int findJoint(const std::string& name) const {
-        auto it = jointNameToIndex.find(name);
+    int findJoint(const std::string& jointName) const {
+        auto it = jointNameToIndex.find(jointName);
         return it != jointNameToIndex.end() ? it->second : -1;
     }
 };

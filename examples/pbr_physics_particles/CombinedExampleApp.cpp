@@ -78,7 +78,7 @@ void CombinedExampleApp::onUpdate(float dt) {
     }
 }
 
-void CombinedExampleApp::onPreRender(float dt) {
+void CombinedExampleApp::onPreRender(float /*dt*/) {
     if (m_particlesEnabled) {
         updateParticleParams();
     }

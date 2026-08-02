@@ -116,7 +116,7 @@ struct PhysicsSystem::Impl {
         }
     }
 
-    void onRigidBodyRemoved(entt::registry& reg, entt::entity entity) {
+    void onRigidBodyRemoved(entt::registry& /*reg*/, entt::entity entity) {
         removeBodyInternal(entity);
     }
 };
@@ -234,7 +234,7 @@ void PhysicsSystem::update(entt::registry& registry, float deltaTime) {
     }
 }
 
-void PhysicsSystem::cleanup(entt::registry& registry) {
+void PhysicsSystem::cleanup(entt::registry& /*registry*/) {
     // Disconnect signals
     m_impl->onRigidBodyConstruct.release();
     m_impl->onRigidBodyDestroy.release();
@@ -250,7 +250,7 @@ void PhysicsSystem::cleanup(entt::registry& registry) {
 // Force / Impulse API
 // ═══════════════════════════════════════════════════════════════
 
-void PhysicsSystem::addForce(entt::registry& registry, entt::entity entity,
+void PhysicsSystem::addForce(entt::registry& /*registry*/, entt::entity entity,
                              const glm::vec3& force) {
     auto it = m_impl->bodies.find(entity);
     if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
@@ -258,7 +258,7 @@ void PhysicsSystem::addForce(entt::registry& registry, entt::entity entity,
     it->second.rigidBody->applyCentralForce(toBt(force));
 }
 
-void PhysicsSystem::addForceAtPoint(entt::registry& registry, entt::entity entity,
+void PhysicsSystem::addForceAtPoint(entt::registry& /*registry*/, entt::entity entity,
                                      const glm::vec3& force, const glm::vec3& point) {
     auto it = m_impl->bodies.find(entity);
     if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
@@ -266,7 +266,7 @@ void PhysicsSystem::addForceAtPoint(entt::registry& registry, entt::entity entit
     it->second.rigidBody->applyForce(toBt(force), toBt(point));
 }
 
-void PhysicsSystem::addImpulse(entt::registry& registry, entt::entity entity,
+void PhysicsSystem::addImpulse(entt::registry& /*registry*/, entt::entity entity,
                                const glm::vec3& impulse) {
     auto it = m_impl->bodies.find(entity);
     if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
@@ -274,7 +274,7 @@ void PhysicsSystem::addImpulse(entt::registry& registry, entt::entity entity,
     it->second.rigidBody->applyCentralImpulse(toBt(impulse));
 }
 
-void PhysicsSystem::addTorqueImpulse(entt::registry& registry, entt::entity entity,
+void PhysicsSystem::addTorqueImpulse(entt::registry& /*registry*/, entt::entity entity,
                                       const glm::vec3& torque) {
     auto it = m_impl->bodies.find(entity);
     if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
@@ -282,7 +282,7 @@ void PhysicsSystem::addTorqueImpulse(entt::registry& registry, entt::entity enti
     it->second.rigidBody->applyTorqueImpulse(toBt(torque));
 }
 
-void PhysicsSystem::setLinearVelocity(entt::registry& registry, entt::entity entity,
+void PhysicsSystem::setLinearVelocity(entt::registry& /*registry*/, entt::entity entity,
                                        const glm::vec3& velocity) {
     auto it = m_impl->bodies.find(entity);
     if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
@@ -290,7 +290,7 @@ void PhysicsSystem::setLinearVelocity(entt::registry& registry, entt::entity ent
     it->second.rigidBody->setLinearVelocity(toBt(velocity));
 }
 
-void PhysicsSystem::setAngularVelocity(entt::registry& registry, entt::entity entity,
+void PhysicsSystem::setAngularVelocity(entt::registry& /*registry*/, entt::entity entity,
                                         const glm::vec3& velocity) {
     auto it = m_impl->bodies.find(entity);
     if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
@@ -330,14 +330,14 @@ int PhysicsSystem::getMaxSubSteps() const {
 // Query API
 // ═══════════════════════════════════════════════════════════════
 
-glm::vec3 PhysicsSystem::getLinearVelocity(entt::registry& registry,
+glm::vec3 PhysicsSystem::getLinearVelocity(entt::registry& /*registry*/,
                                             entt::entity entity) const {
     auto it = m_impl->bodies.find(entity);
     if (it == m_impl->bodies.end() || !it->second.rigidBody) return glm::vec3(0.0f);
     return toGlm(it->second.rigidBody->getLinearVelocity());
 }
 
-glm::vec3 PhysicsSystem::getAngularVelocity(entt::registry& registry,
+glm::vec3 PhysicsSystem::getAngularVelocity(entt::registry& /*registry*/,
                                               entt::entity entity) const {
     auto it = m_impl->bodies.find(entity);
     if (it == m_impl->bodies.end() || !it->second.rigidBody) return glm::vec3(0.0f);
@@ -356,7 +356,7 @@ void PhysicsSystem::createBody(entt::registry& registry, entt::entity entity) {
     m_impl->createBodyInternal(registry, entity);
 }
 
-void PhysicsSystem::removeBody(entt::registry& registry, entt::entity entity) {
+void PhysicsSystem::removeBody(entt::registry& /*registry*/, entt::entity entity) {
     m_impl->removeBodyInternal(entity);
 }
 

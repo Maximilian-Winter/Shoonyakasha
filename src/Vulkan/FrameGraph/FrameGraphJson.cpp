@@ -7,6 +7,7 @@
 //
 
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
+#include <system_error>
 #include "Vulkan/FrameGraph/FrameGraph.h"
 
 #include <fstream>
@@ -1209,7 +1210,10 @@ void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath) 
                 DWORD winErr = GetLastError();
 
                 if (savedErrno != 0) {
-                    errorDetail = strerror(savedErrno);
+                    // Not strerror: it returns a pointer to a shared static buffer,
+                    // the same hazard localtime had. generic_category is portable
+                    // and returns a std::string.
+                    errorDetail = std::generic_category().message(savedErrno);
                     errorDetail += " (errno: " + std::to_string(savedErrno) + ")";
                 } else if (winErr != 0) {
                     char* msg = nullptr;

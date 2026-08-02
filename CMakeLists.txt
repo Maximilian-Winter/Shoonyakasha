@@ -62,9 +62,19 @@ target_include_directories(Shoonyakasha
         PUBLIC
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/VulkanMemoryAllocator>
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# SYSTEM: vendored headers are compiled as part of this target (stb and cgltf are
+# header-only with an implementation macro), and they raise warnings we cannot fix
+# without forking them -- cgltf alone uses fopen, strcpy and sprintf. Marking them
+# system tells the compiler to keep quiet about code we do not own, which is what
+# makes SHOONYAKASHA_WERROR usable at all rather than a permanent build break.
+target_include_directories(Shoonyakasha SYSTEM
+        PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/VulkanMemoryAllocator>
+        PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf
@@ -96,11 +106,25 @@ endif()
 # -Wall -Wextra; the engine library itself did not, which left the largest and
 # most error-prone part of the codebase compiling at the compiler default.
 # PRIVATE so consumers are not forced into our warning level.
-# No -Werror yet — turn it on once the existing warnings are cleared.
+#
+# The library, examples and tests all build clean at this level. SHOONYAKASHA_WERROR
+# keeps them that way -- it is ON in CI and OFF by default, deliberately: a new
+# compiler version that invents a warning should fail the pipeline, not somebody's
+# first local build of a project they just cloned.
+option(SHOONYAKASHA_WERROR "Treat compiler warnings as errors (used by CI)" OFF)
+
 if(MSVC)
     target_compile_options(Shoonyakasha PRIVATE /W4)
+    # Without /external:W0 the SYSTEM includes above still warn at /W4.
+    target_compile_options(Shoonyakasha PRIVATE /external:W0)
+    if(SHOONYAKASHA_WERROR)
+        target_compile_options(Shoonyakasha PRIVATE /WX)
+    endif()
 else()
     target_compile_options(Shoonyakasha PRIVATE -Wall -Wextra)
+    if(SHOONYAKASHA_WERROR)
+        target_compile_options(Shoonyakasha PRIVATE -Werror)
+    endif()
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -491,7 +491,7 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
 }
 
 GPUBuffer GltfSceneLoader::buildVertexBuffer(
-    cgltf_data* data,
+    cgltf_data* /*data*/,
     const cgltf_primitive& primitive,
     const glm::mat4& worldTransform,
     uint32_t& outVertexCount,
@@ -590,7 +590,7 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
 }
 
 GPUBuffer GltfSceneLoader::buildIndexBuffer(
-    cgltf_data* data,
+    cgltf_data* /*data*/,
     const cgltf_primitive& primitive,
     uint32_t& outIndexCount,
     Shoonyakasha::IndexType& outIndexType)
@@ -677,7 +677,7 @@ GPUBuffer GltfSceneLoader::buildIndexBuffer(
 }
 
 GPUTexture GltfSceneLoader::loadTexture(
-    cgltf_data* data,
+    cgltf_data* /*data*/,
     const cgltf_texture_view& textureView,
     bool srgb)
 {
@@ -869,7 +869,7 @@ std::unordered_map<const cgltf_node*, int> GltfSceneLoader::buildNodeToJointMap(
 }
 
 std::shared_ptr<Shoonyakasha::Skeleton> GltfSceneLoader::loadSkin(
-    cgltf_data* data,
+    cgltf_data* /*data*/,
     const cgltf_skin* skin)
 {
     if (!skin || skin->joints_count == 0) return nullptr;
@@ -1051,7 +1051,7 @@ std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> GltfSceneLoader::loadA
 // ═══════════════════════════════════════════════════════════════
 
 GPUBuffer GltfSceneLoader::buildSkinnedVertexBuffer(
-    cgltf_data* data,
+    cgltf_data* /*data*/,
     const cgltf_primitive& primitive,
     uint32_t& outVertexCount,
     uint32_t& outVertexStride)

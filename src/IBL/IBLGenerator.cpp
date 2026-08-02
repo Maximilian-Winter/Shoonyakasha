@@ -789,9 +789,10 @@ VulkanTexture* IBLGenerator::generateBRDFLUT(uint32_t size, uint32_t samples) {
                 float Hy = std::sin(phi) * sinTheta;
                 float Hz = cosTheta;
 
+                // L = reflect(-V, H). The normal is fixed at (0, 0, 1) for this
+                // integration, so only Lz is ever read — Lx and Ly were computed
+                // and discarded every iteration.
                 float VdotH = Vx * Hx + Vy * Hy + Vz * Hz;
-                float Lx = 2.0f * VdotH * Hx - Vx;
-                float Ly = 2.0f * VdotH * Hy - Vy;
                 float Lz = 2.0f * VdotH * Hz - Vz;
 
                 float NdotL = std::max(Lz, 0.0f);

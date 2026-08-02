@@ -161,7 +161,7 @@ public:
         m_frameCount++;
     }
 
-    void fixedUpdate(float fixedDeltaTime) {
+    void fixedUpdate(float /*fixedDeltaTime*/) {
         // For physics and other fixed-timestep systems
         /*if (auto* physicsSystem = getSystem<PhysicsSystem>()) {
             physicsSystem->update(m_registry, fixedDeltaTime);
@@ -428,6 +428,10 @@ public:
             file << sceneJson.dump(4);
             return true;
         } catch (const std::exception& e) {
+            // Returning false alone loses the reason entirely, which makes a
+            // failed save indistinguishable from a disk that is merely full.
+            std::cerr << "[Scene] Failed to save '" << filename << "': "
+                      << e.what() << std::endl;
             return false;
         }
     }
@@ -440,6 +444,8 @@ public:
             deserialize(sceneJson);
             return true;
         } catch (const std::exception& e) {
+            std::cerr << "[Scene] Failed to load '" << filename << "': "
+                      << e.what() << std::endl;
             return false;
         }
     }

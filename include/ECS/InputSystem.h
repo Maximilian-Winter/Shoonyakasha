@@ -65,7 +65,7 @@ public:
         }
     }
 
-    void update(entt::registry& registry, float deltaTime) override {
+    void update(entt::registry& registry, float /*deltaTime*/) override {
         if (!enabled) return;
 
         auto* input = registry.try_get<InputStateComponent>(m_inputEntity);

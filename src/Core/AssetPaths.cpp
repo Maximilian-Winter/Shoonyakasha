@@ -86,6 +86,13 @@ std::filesystem::path searchUpward(std::filesystem::path start) {
 std::filesystem::path AssetPaths::search() {
     std::error_code ec;
 
+    // MSVC deprecates getenv in favour of _dupenv_s, which is not portable. The
+    // hazard it warns about is the returned pointer being invalidated by a later
+    // setenv; this copies the value into a path immediately and never keeps it.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
     if (const char* fromEnv = std::getenv(kEnvVar)) {
         std::filesystem::path candidate(fromEnv);
         if (std::filesystem::is_directory(candidate, ec)) {
@@ -97,6 +104,9 @@ std::filesystem::path AssetPaths::search() {
         g_origin = std::string(kEnvVar) + " is set to '" + fromEnv
                  + "' but that is not a directory; fell back to searching";
     }
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
     auto cwd = std::filesystem::current_path(ec);
     if (!ec) {

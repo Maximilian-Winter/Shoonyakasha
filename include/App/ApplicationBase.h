@@ -98,19 +98,19 @@ protected:
     virtual void onPostInit() {}
 
     // Called each frame before ECS update.
-    virtual void onUpdate(float dt) {}
+    virtual void onUpdate(float /*dt*/) {}
 
     // Called each frame after scene context update, before command recording.
-    virtual void onPreRender(float dt) {}
+    virtual void onPreRender(float /*dt*/) {}
 
     // Called each frame after present.
     virtual void onPostRender() {}
 
     // Called on key press. keyCode is GLFW key code.
-    virtual void onKeyPressed(int keyCode) {}
+    virtual void onKeyPressed(int /*keyCode*/) {}
 
     // Called on window resize.
-    virtual void onResize(uint32_t width, uint32_t height) {}
+    virtual void onResize(uint32_t /*width*/, uint32_t /*height*/) {}
 
     // Called before destruction. Override for custom cleanup.
     virtual void onCleanup() {}

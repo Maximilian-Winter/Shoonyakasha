@@ -22,7 +22,7 @@ public:
     // (e.g. from the current swapchain extent) before scene->update() runs.
     explicit UILayoutSystem(const glm::vec2* screenSize) : m_screenSize(screenSize) {}
 
-    void update(entt::registry& registry, float deltaTime) override {
+    void update(entt::registry& registry, float /*deltaTime*/) override {
         if (!enabled || !m_screenSize) return;
 
         auto view = registry.view<Shoonyakasha::UIAnchorComponent, TransformComponent>();

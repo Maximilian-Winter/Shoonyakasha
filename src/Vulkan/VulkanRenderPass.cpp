@@ -403,7 +403,7 @@ void VulkanRenderPass::begin(VkCommandBuffer commandBuffer, VkFramebuffer frameb
 
 void VulkanRenderPass::begin(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer,
                             VkExtent2D extent, const std::vector<VkClearValue>& clearValues,
-                            uint32_t subpass) {
+                            uint32_t /*subpass*/) {
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass = m_renderPass;

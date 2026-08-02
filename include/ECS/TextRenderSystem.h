@@ -25,7 +25,7 @@ public:
     TextRenderSystem(Shoonyakasha::FontLoader& fontLoader, Shoonyakasha::Sprite2DManager& spriteManager)
         : m_fontLoader(fontLoader), m_spriteManager(spriteManager) {}
 
-    void update(entt::registry& registry, float deltaTime) override {
+    void update(entt::registry& registry, float /*deltaTime*/) override {
         if (!enabled) return;
 
         auto view = registry.view<Shoonyakasha::Text2DComponent>();

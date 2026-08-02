@@ -49,3 +49,4 @@ __pycache__/
 /.venv
 /python/shoonyakasha/vulkan-1.dll
 /examples/facade_test/cubemaps_hdrs
+/examples/pong_game/assets

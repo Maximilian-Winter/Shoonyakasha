@@ -137,7 +137,7 @@ VkImageUsageFlags FrameGraphCompiler::usageToImageUsageFlags(ResourceUsage usage
 
 bool FrameGraphCompiler::topologicalSort(
     const std::vector<PassDeclaration>& passes,
-    const std::vector<ResourceDeclaration>& resources,
+    const std::vector<ResourceDeclaration>& /*resources*/,
     std::vector<uint32_t>& outOrder,
     std::string& outError)
 {
@@ -850,7 +850,7 @@ void FrameGraphCompiler::createRenderPasses(
 // ═══════════════════════════════════════════════════════════════
 
 void FrameGraphCompiler::createFramebuffers(
-    VulkanDevice& device,
+    VulkanDevice& /*device*/,
     std::vector<CompiledPass>& compiledPasses,
     const std::vector<uint32_t>& executionOrder,
     const std::vector<PassDeclaration>& passes,
@@ -1206,7 +1206,7 @@ void FrameGraphCompiler::createPipelines(
     std::vector<CompiledPass>& compiledPasses,
     const std::vector<uint32_t>& executionOrder,
     const std::vector<PassDeclaration>& passes,
-    const std::vector<PhysicalResource>& physResources,
+    const std::vector<PhysicalResource>& /*physResources*/,
     const std::unordered_map<std::string, std::shared_ptr<VulkanPipeline>>& manualOverrides,
     const VertexFormatRegistry& vertexFormats)
 {
@@ -1382,7 +1382,7 @@ void FrameGraphCompiler::generateQueueBatches(
     VulkanDevice& device,
     const std::vector<CompiledPass>& compiledPasses,
     const std::vector<uint32_t>& executionOrder,
-    const std::vector<PassDeclaration>& passes,
+    const std::vector<PassDeclaration>& /*passes*/,
     QueueSubmitBatch& outBatches)
 {
     outBatches.batches.clear();
@@ -1503,7 +1503,7 @@ void FrameGraphCompiler::createSamplers(
 // ═══════════════════════════════════════════════════════════════
 
 void FrameGraphCompiler::performAutoBindings(
-    VulkanDevice& device,
+    VulkanDevice& /*device*/,
     const FrameGraphBuilder& builder,
     const std::vector<DescriptorSetLayoutDesc>& layoutDescs,
     std::unordered_map<std::string, std::shared_ptr<VulkanDescriptorSet>>& namedSets,

@@ -177,5 +177,13 @@ TEST(EntityBuilder, WithParent_MultipleChildren) {
     auto child2 = EntityBuilder(reg).withParent(parent).build();
 
     auto& parentHierarchy = reg.get<HierarchyComponent>(parent);
-    EXPECT_EQ(parentHierarchy.children.size(), 2u);
+    ASSERT_EQ(parentHierarchy.children.size(), 2u);
+
+    // Which children, and in what order — the count alone would pass if the
+    // second build overwrote the first, or if it recorded some other entity.
+    EXPECT_EQ(child1, parentHierarchy.children[0]);
+    EXPECT_EQ(child2, parentHierarchy.children[1]);
+
+    EXPECT_EQ(parent, reg.get<HierarchyComponent>(child1).parent);
+    EXPECT_EQ(parent, reg.get<HierarchyComponent>(child2).parent);
 }

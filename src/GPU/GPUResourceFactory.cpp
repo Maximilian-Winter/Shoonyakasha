@@ -44,8 +44,8 @@ GPUBuffer GPUResourceFactory::createVertexBuffer(
     VmaAllocator allocator,
     const void* data,
     VkDeviceSize size,
-    VkCommandBuffer cmdBuffer,
-    VmaAllocator stagingAllocator
+    VkCommandBuffer /*cmdBuffer*/,
+    VmaAllocator /*stagingAllocator*/
 ) {
     VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     if (data != nullptr) {
@@ -59,8 +59,8 @@ GPUBuffer GPUResourceFactory::createIndexBuffer(
     VmaAllocator allocator,
     const void* data,
     VkDeviceSize size,
-    IndexType indexType,
-    VkCommandBuffer cmdBuffer
+    IndexType /*indexType*/,
+    VkCommandBuffer /*cmdBuffer*/
 ) {
     VkBufferUsageFlags usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
     if (data != nullptr) {
@@ -559,7 +559,7 @@ void GPUResourceFactory::transitionImageLayout(
 void GPUResourceFactory::generateMipmaps(
     VkCommandBuffer cmdBuffer,
     VkImage image,
-    VkFormat format,
+    VkFormat /*format*/,
     uint32_t width,
     uint32_t height,
     uint32_t mipLevels

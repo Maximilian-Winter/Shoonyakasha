@@ -126,7 +126,8 @@ void ApplicationBase::initializeVulkan() {
     m_fontLoader = std::make_unique<FontLoader>(*m_device);
 
     m_commandManager = std::make_unique<VulkanCommandManager>(*m_device);
-    m_commandBuffers = m_commandManager->createCommandBuffers(m_swapChain->getImageCount());
+    m_commandBuffers = m_commandManager->createCommandBuffers(
+        static_cast<uint32_t>(m_swapChain->getImageCount()));
 
     m_logger->log(LogLevel::Info, "Vulkan systems initialized");
 }

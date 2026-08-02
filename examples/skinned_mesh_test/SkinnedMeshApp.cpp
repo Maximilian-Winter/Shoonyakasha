@@ -41,7 +41,7 @@ void SkinnedMeshApp::onInit() {
         5.0f, 20.0f);
 }
 
-void SkinnedMeshApp::onPreRender(float dt) {
+void SkinnedMeshApp::onPreRender(float /*dt*/) {
     // Evaluate keyframes, compute bone matrices, upload SSBOs
     m_animationSystem->update(getDeltaTime(), getRegistry());
 }

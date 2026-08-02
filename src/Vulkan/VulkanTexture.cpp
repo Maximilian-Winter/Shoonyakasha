@@ -145,7 +145,7 @@ void VulkanTexture::createTextureSampler() {
     m_eventDispatcher->publish(TextureSamplerCreatedEvent{m_textureSampler});
 }
 
-void VulkanTexture::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+void VulkanTexture::transitionImageLayout(VkImage image, VkFormat /*format*/, VkImageLayout oldLayout, VkImageLayout newLayout) {
     VkCommandBuffer commandBuffer = m_device.beginSingleTimeCommands();
 
     VkImageMemoryBarrier barrier{};

@@ -203,8 +203,8 @@ void EntityRenderExecutor::executeDrawEntities(
     const std::string& pushConstantLayoutName,
     EntityFilter filter,
     EntitySortMode sortMode,
-    uint32_t frameIndex,
-    uint32_t materialDescriptorSetIndex
+    uint32_t /*frameIndex*/,
+    uint32_t /*materialDescriptorSetIndex*/
 ) {
     // Get compiled push constant layout
     const CompiledBufferLayout* layout = getBufferLayout(pushConstantLayoutName);
@@ -216,8 +216,9 @@ void EntityRenderExecutor::executeDrawEntities(
     // Query entities
     auto entities = queryEntities(filter, sortMode);
 
-    // Check if this is a skinned geometry pass
-    bool isSkinnedPass = (filter == EntityFilter::Skinned || filter == EntityFilter::SkinnedTransparent);
+    // A skinned pass was meant to bind each entity's bone SSBO here. Nothing ever
+    // read the flag, so the branch was never written — one of the reasons this
+    // class is dead code rather than an alternative to FrameGraphRenderer.
 
     // Draw each entity
     for (const auto& renderable : entities) {
@@ -467,9 +468,9 @@ VkDescriptorSet EntityRenderExecutor::getEntityTextureDescriptorSet(
         const GPUTexture* texture = defaultTexture;
 
         // Check if material has this texture
-        auto it = material->textures.find(name);
-        if (it != material->textures.end() && it->second.isValid()) {
-            texture = &it->second;
+        auto override_ = material->textures.find(name);
+        if (override_ != material->textures.end() && override_->second.isValid()) {
+            texture = &override_->second;
         }
 
         VkDescriptorImageInfo imageInfo{};

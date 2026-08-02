@@ -712,7 +712,10 @@ void SceneAPI::setParent(EntityHandle child, EntityHandle parent) {
     // reallocate the HierarchyComponent pool, which would dangle a reference to
     // the child's component taken before it.
     if (m_impl->registry.valid(parentEntt)) {
-        m_impl->registry.get_or_emplace<ECS::HierarchyComponent>(parentEntt);
+        // Called for the side effect; the reference is deliberately dropped,
+        // because holding it across the next get_or_emplace is the bug this
+        // ordering exists to avoid.
+        static_cast<void>(m_impl->registry.get_or_emplace<ECS::HierarchyComponent>(parentEntt));
     }
 
     auto& childH = m_impl->registry.get_or_emplace<ECS::HierarchyComponent>(childEntt);

@@ -173,7 +173,7 @@ void VulkanInstance::populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreat
 
 VKAPI_ATTR VkBool32 VKAPI_CALL VulkanInstance::debugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-        VkDebugUtilsMessageTypeFlagsEXT messageType,
+        VkDebugUtilsMessageTypeFlagsEXT /*messageType*/,
         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
         void* pUserData) {
 

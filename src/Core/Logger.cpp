@@ -81,8 +81,19 @@ std::string Logger::getCurrentTimestamp() {
     auto time = std::chrono::system_clock::to_time_t(now);
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
+    // std::localtime returns a pointer to one shared static buffer, so two
+    // threads formatting a timestamp corrupt each other's. Logger::log holds
+    // m_mutex, but every subsystem constructs its own Logger with its own mutex,
+    // and resource loading runs on a worker — so the mutex does not cover this.
+    std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &time);
+#else
+    localtime_r(&time, &local);
+#endif
+
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S");
+    ss << std::put_time(&local, "%Y-%m-%d %H:%M:%S");
     ss << '.' << std::setfill('0') << std::setw(3) << ms.count();
     return ss.str();
 }

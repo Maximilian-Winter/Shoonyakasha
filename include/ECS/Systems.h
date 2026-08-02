@@ -24,9 +24,9 @@ namespace ECS {
 class ISystem {
 public:
     virtual ~ISystem() = default;
-    virtual void initialize(entt::registry& registry) {}
+    virtual void initialize(entt::registry& /*registry*/) {}
     virtual void update(entt::registry& registry, float deltaTime) = 0;
-    virtual void cleanup(entt::registry& registry) {}
+    virtual void cleanup(entt::registry& /*registry*/) {}
 
     bool enabled = true;
     int priority = 0;      // Lower numbers run first
@@ -39,7 +39,7 @@ public:
 
 class TransformSystem : public ISystem {
 public:
-    void update(entt::registry& registry, float deltaTime) override {
+    void update(entt::registry& registry, float /*deltaTime*/) override {
         if (!enabled) return;
 
         // First pass: Update all local matrices for dirty transforms
@@ -120,7 +120,7 @@ private:
 
 class CameraSystem : public ISystem {
 public:
-    void update(entt::registry& registry, float deltaTime) override {
+    void update(entt::registry& registry, float /*deltaTime*/) override {
         if (!enabled) return;
 
         auto cameraView = registry.view<CameraComponent, TransformComponent>();
@@ -221,7 +221,7 @@ public:
         priority = priorityValue;
     }
 
-    void update(entt::registry& registry, float deltaTime) override {
+    void update(entt::registry& /*registry*/, float deltaTime) override {
         if (!m_fn) return;
 
         bool ok = m_fn(deltaTime);

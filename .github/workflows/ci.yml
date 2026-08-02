@@ -55,7 +55,8 @@ jobs:
             -DVCPKG_MANIFEST_FEATURES=tests `
             -DBUILD_TESTS=ON `
             -DBUILD_EXAMPLES=OFF `
-            -DBUILD_PYTHON=OFF
+            -DBUILD_PYTHON=OFF `
+            -DSHOONYAKASHA_WERROR=ON
 
       - name: Build
         run: cmake --build build --config Release

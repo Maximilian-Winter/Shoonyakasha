@@ -281,7 +281,7 @@ void StagingBufferManager::recordReadbackCommands(VkCommandBuffer cmd, uint32_t 
     }
 }
 
-void StagingBufferManager::processCompletedReadbacks(uint32_t frameIndex, uint64_t frameNumber) {
+void StagingBufferManager::processCompletedReadbacks(uint32_t frameIndex, uint64_t /*frameNumber*/) {
     // When this function is called, the app has already waited on the fence for frameIndex.
     // Any copy command recorded into that frame's command buffer is now complete.
     // The readback staging buffer at slot (frameIndex % ringDepth) is safe to read.
@@ -465,7 +465,7 @@ void StagingBufferManager::recordImageReadbackCommands(VkCommandBuffer cmd, uint
     }
 }
 
-void StagingBufferManager::processCompletedImageReadbacks(uint32_t frameIndex, uint64_t frameNumber) {
+void StagingBufferManager::processCompletedImageReadbacks(uint32_t frameIndex, uint64_t /*frameNumber*/) {
     for (auto& [name, entry] : m_imageEntries) {
         if (!entry.hasReadback) continue;
 

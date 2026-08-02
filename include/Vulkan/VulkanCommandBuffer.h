@@ -83,9 +83,9 @@ struct DrawCommand {
     explicit DrawCommand(const std::string& n) : name(n) {}
 
     // Fluent configuration methods
-    DrawCommand& withDescriptorSet(std::shared_ptr<VulkanDescriptorSet> descriptorSet, uint32_t setIndex = 0) {
-        this->descriptorSet = descriptorSet;
-        this->descriptorSetIndex = setIndex;
+    DrawCommand& withDescriptorSet(std::shared_ptr<VulkanDescriptorSet> set, uint32_t setIndex = 0) {
+        descriptorSet = std::move(set);
+        descriptorSetIndex = setIndex;
         return *this;
     }
 
@@ -110,9 +110,9 @@ struct FullscreenQuadCommand {
         : name(n), pipeline(p) {}
 
     // Fluent configuration methods
-    FullscreenQuadCommand& withDescriptorSet(std::shared_ptr<VulkanDescriptorSet> descriptorSet, uint32_t setIndex = 0) {
-        this->descriptorSet = descriptorSet;
-        this->descriptorSetIndex = setIndex;
+    FullscreenQuadCommand& withDescriptorSet(std::shared_ptr<VulkanDescriptorSet> set, uint32_t setIndex = 0) {
+        descriptorSet = std::move(set);
+        descriptorSetIndex = setIndex;
         return *this;
     }
 };
@@ -130,9 +130,9 @@ struct ComputeDispatchCommand {
         : name(n), computePipeline(p) {}
 
     // Fluent configuration methods
-    ComputeDispatchCommand& withDescriptorSet(std::shared_ptr<VulkanDescriptorSet> descriptorSet, uint32_t setIndex = 0) {
-        this->descriptorSet = descriptorSet;
-        this->descriptorSetIndex = setIndex;
+    ComputeDispatchCommand& withDescriptorSet(std::shared_ptr<VulkanDescriptorSet> set, uint32_t setIndex = 0) {
+        descriptorSet = std::move(set);
+        descriptorSetIndex = setIndex;
         return *this;
     }
 

@@ -80,7 +80,7 @@ void VulkanBuffer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkM
     m_eventDispatcher->publish(BufferCreatedEvent{m_buffer, size});
 }
 
-void VulkanBuffer::map(VkDeviceSize size, VkDeviceSize offset) {
+void VulkanBuffer::map(VkDeviceSize /*size*/, VkDeviceSize offset) {
     if (m_mappedData) {
         m_logger->log(LogLevel::Warning, "Buffer is already mapped. Unmapping first.");
         unmap();

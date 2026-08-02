@@ -96,7 +96,7 @@ void SSBODataFlowApp::onUpdate(float dt) {
     }
 }
 
-void SSBODataFlowApp::onPreRender(float dt) {
+void SSBODataFlowApp::onPreRender(float /*dt*/) {
     updateParticleParams();
 }
 
