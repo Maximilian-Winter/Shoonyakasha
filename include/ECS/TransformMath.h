@@ -1,12 +1,9 @@
 //
 // TransformMath.h - Converting matrices into TransformComponent's TRS convention
 //
-// रूपस्य विश्लेषणम् — the analysis of form.
-//
-// TransformComponent stores rotation as Euler angles applied Y (yaw) → X (pitch)
-// → Z (roll), so R = Ry(y) * Rx(x) * Rz(z). Anything that has to turn a matrix
-// back into that representation must use the matching extraction, which is what
-// lives here rather than being written out again at each call site.
+// TransformComponent stores rotation as Euler angles applied Y (yaw), then
+// X (pitch), then Z (roll), so R = Ry(y) * Rx(x) * Rz(z). The extraction here
+// matches that order.
 //
 
 #pragma once
@@ -22,15 +19,14 @@ namespace Shoonyakasha {
 /// in the Y→X→Z order TransformComponent::getLocalMatrix() applies them.
 ///
 /// At pitch = ±90° the yaw and roll axes coincide (gimbal lock) and only their
-/// sum is recoverable. Roll is pinned to zero there and the whole rotation is
-/// folded into yaw, which reproduces the original matrix exactly.
+/// sum is recoverable. Roll is set to zero there and the rotation is folded into
+/// yaw, which reproduces the original matrix.
 ///
-/// The branch matters for matrices whose entries are exactly 0 and ±1 — which is
-/// what hand-authored glTF node matrices contain. Without it both yaw and roll
-/// read atan2(0, 0) and the rotation is lost. A matrix that reached ±90° through
-/// floating-point trigonometry has a cosine near 4e-8 rather than 0, and the
-/// naive form still recovers the angle from the ratio, which is why this went
-/// unnoticed.
+/// That branch is required for matrices whose entries are exactly 0 and ±1, as
+/// hand-authored glTF node matrices are: without it both yaw and roll evaluate
+/// atan2(0, 0) and the rotation is lost. A matrix that reaches ±90° through
+/// floating-point trigonometry has a cosine near 4e-8, for which the general
+/// form still recovers the angle.
 inline glm::vec3 eulerYXZFromRotation(const glm::mat3& r) {
     // glm is column-major: r[column][row].
     const float sinPitch = std::clamp(-r[2][1], -1.0f, 1.0f);
@@ -51,9 +47,9 @@ inline glm::vec3 eulerYXZFromRotation(const glm::mat3& r) {
 /// TransformComponent::getLocalMatrix() reproduces `m`.
 ///
 /// Exact for any matrix that is a product of translation, rotation and scale.
-/// A sheared matrix has no such representation and will not round-trip — which
-/// is why the glTF loader only ever passes node-local transforms here: the glTF
-/// spec requires a node's matrix to be decomposable to TRS, forbidding shear.
+/// A sheared matrix has no such representation and will not round-trip. The
+/// glTF loader passes only node-local transforms, which the glTF specification
+/// requires to be decomposable to TRS.
 inline void decomposeTRS(const glm::mat4& m,
                          glm::vec3& position,
                          glm::vec3& eulerRotation,
@@ -64,8 +60,8 @@ inline void decomposeTRS(const glm::mat4& m,
                       glm::length(glm::vec3(m[1])),
                       glm::length(glm::vec3(m[2])));
 
-    // Column lengths are always positive, so a mirrored transform would come back
-    // un-mirrored and render inside out. Fold the flip into one axis.
+    // Column lengths are always positive, so a mirrored transform would be
+    // returned un-mirrored. Fold the reflection into one axis.
     if (glm::determinant(glm::mat3(m)) < 0.0f) {
         scale.x = -scale.x;
     }

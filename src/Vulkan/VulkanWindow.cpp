@@ -27,11 +27,9 @@ VulkanWindow::VulkanWindow(int width, int height, const std::string& title, Vulk
 
 VulkanWindow::~VulkanWindow() {
     // m_logger and m_eventDispatcher are borrowed, not owned — the constructor
-    // takes raw pointers to objects the caller keeps. Deleting them here made
-    // ApplicationBase's unique_ptrs double-free, and the log call above it was a
-    // use-after-free besides, since ApplicationBase destroys its logger before
-    // its window. That is why "Destroying Vulkan Window" never appeared in the
-    // log: the process died on this line.
+    // takes raw pointers to objects the caller owns. Deleting them here would
+    // double-free ApplicationBase's unique_ptrs, and the logger is destroyed
+    // before the window, so the log call below must be guarded.
     if (m_logger) {
         m_logger->log(LogLevel::Info, "Destroying Vulkan Window");
     }

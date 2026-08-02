@@ -180,8 +180,8 @@ public:
     /// alive, and the rest retire through the delete queue in the usual way.
     /// Reloading the file afterwards simply rebuilds them.
     ///
-    /// Textures are deliberately NOT dropped here — GPUTexture is not
-    /// reference-counted, and materials hold its views and samplers directly.
+    /// Textures are not dropped: GPUTexture is not reference-counted, and
+    /// materials hold its views and samplers directly.
     void releaseCachedGeometry();
 
 private:
@@ -192,10 +192,10 @@ private:
     std::filesystem::path m_currentFile;  // Scopes cache keys for embedded textures
     GltfLoadOptions m_options;
 
-    /// Texture deduplication cache. Owns every GPUTexture it holds and lives for
-    /// the loader's lifetime — it deliberately is NOT cleared per load, because
-    /// entities from an earlier load still reference these views and samplers.
-    /// Freed only in ~GltfSceneLoader.
+    /// Texture deduplication cache. Owns every GPUTexture it holds and spans the
+    /// loader's lifetime; it is not cleared per load, because entities from an
+    /// earlier load still reference these views and samplers. Freed in
+    /// ~GltfSceneLoader.
     std::unordered_map<std::string, Shoonyakasha::GPUTexture> m_textureCache;
 
     /// Cache keys touched by the load in progress, so GltfLoadResult::totalTextures
@@ -218,11 +218,11 @@ private:
     /// node's LOCAL transform and a link to its parent. Geometry entities hang off
     /// those, with an identity transform.
     ///
-    /// Local rather than world on purpose: glTF forbids shear in a node's own
-    /// transform, so a local transform always survives the trip through
-    /// TransformComponent's position/euler/scale exactly. Their *product* can
-    /// shear, which is why the world matrix is composed by TransformSystem and
-    /// never decomposed here.
+    /// The transform stored is the node-local one. glTF forbids shear in a
+    /// node's own transform, so it round-trips exactly through
+    /// TransformComponent's position/euler/scale. A product of such transforms
+    /// can shear, so world matrices are composed by TransformSystem and are not
+    /// decomposed here.
     void processNode(
         cgltf_data* data,
         const cgltf_node* node,

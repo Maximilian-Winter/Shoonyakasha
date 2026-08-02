@@ -28,7 +28,7 @@ bool isExecutable(const std::filesystem::path& candidate) {
     return !candidate.empty() && std::filesystem::is_regular_file(candidate, ec);
 }
 
-/// Quote a path for the shell popen() hands the command to.
+/// Quote a path for the shell that popen() invokes.
 std::string quote(const std::string& value) {
     return "\"" + value + "\"";
 }
@@ -48,7 +48,8 @@ std::string VideoRecorder::findFfmpeg(const std::string& hint) {
 
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable : 4996)  // getenv; the value is used immediately
+#pragma warning(disable : 4996)  // getenv: the value is copied before any
+                                 // further environment access
 #endif
     if (const char* fromEnv = std::getenv("FFMPEG")) {
         if (isExecutable(fromEnv)) {
@@ -80,8 +81,7 @@ std::string VideoRecorder::findFfmpeg(const std::string& hint) {
         }
     }
 
-    // Common install roots, for someone who installed ffmpeg without adding it
-    // to PATH — which on Windows is most people.
+    // Common install roots, for an ffmpeg that is not on PATH.
     const char* roots[] = {
 #ifdef _WIN32
         "C:/ffmpeg/bin", "C:/tools/ffmpeg/bin", "C:/Program Files/ffmpeg/bin",
@@ -108,18 +108,15 @@ std::string VideoRecorder::buildArguments(const std::string& path,
          << " -video_size " << width << "x" << height
          << " -framerate " << options.fps
          << " -i -"                       // frames arrive on stdin
-         << " -an"                        // no audio track to wait for
+         << " -an"                        // no audio stream
          << " -c:v " << options.codec
          << " -crf " << options.quality
-         << " -pix_fmt yuv420p";          // what players actually accept
+         << " -pix_fmt yuv420p";          // widely supported chroma format
 
-    // Deliberately no flip filter. Vulkan's framebuffer origin is top-left and
-    // ffmpeg reads rawvideo top row first, so the two already agree — readback
-    // rows arrive in the order ffmpeg wants them. This once carried "-vf vflip"
-    // with a comment citing that same top-left origin as the reason to flip,
-    // which is exactly backwards, and every recording came out upside down.
-    // Screenshots were always right, which is the tell: stb_image_write takes
-    // top-first too, and RenderTargetSaver hands it the same buffer unflipped.
+    // No flip filter. Vulkan's framebuffer origin is top-left and ffmpeg reads
+    // rawvideo top row first, so readback rows are already in the order ffmpeg
+    // expects. Adding "-vf vflip" here inverts every frame; VideoRecorderTest's
+    // DoesNotFlipTheImage guards against it.
 
     if (!options.extraArgs.empty()) {
         args << " " << options.extraArgs;
@@ -146,8 +143,8 @@ bool VideoRecorder::start(const std::string& path, uint32_t width, uint32_t heig
         m_lastError = "zero frame size";
         return false;
     }
-    // x264 needs even dimensions for the default 4:2:0 chroma subsampling. Saying
-    // so beats letting ffmpeg fail after the first frame is already written.
+    // x264 requires even dimensions for the default 4:2:0 chroma subsampling.
+    // Checked here so the failure is reported before any frame is written.
     if ((width % 2) != 0 || (height % 2) != 0) {
         m_lastError = "frame size " + std::to_string(width) + "x" + std::to_string(height)
                     + " is not even, which most codecs require";
@@ -170,24 +167,23 @@ bool VideoRecorder::start(const std::string& path, uint32_t width, uint32_t heig
         quote(ffmpeg) + " " + buildArguments(path, width, height, options);
 
 #ifdef _WIN32
-    // cmd.exe strips the outermost pair of quotes from the command it is given,
-    // so a line that both starts and ends with a quoted token -- which this one
-    // does, the ffmpeg path and the output path -- gets mangled. Wrapping the
-    // whole thing in one more pair is the documented workaround.
+    // cmd.exe strips the outermost pair of quotes from its command line. This
+    // command both starts and ends with a quoted path, so an extra enclosing
+    // pair is needed for the inner quotes to survive.
     commandLine = "\"" + commandLine + "\"";
 #endif
 
-    // "wb": in text mode Windows would translate 0x0A bytes in the pixel data
-    // into CRLF and corrupt every frame.
+    // "wb": in text mode Windows translates 0x0A bytes in the pixel data to
+    // CRLF, which corrupts every frame.
     m_pipe = SHOONYAKASHA_POPEN(commandLine.c_str(), "wb");
     if (!m_pipe) {
         m_lastError = "could not start ffmpeg (" + ffmpeg + ")";
         return false;
     }
 
-    // popen on Windows starts a shell, which succeeds whether or not the program
-    // exists -- so a valid handle proves nothing. The first writeFrame reports
-    // the real outcome; keep the command so that error can name it.
+    // popen on Windows starts a shell, which succeeds whether or not the
+    // program exists, so a non-null handle does not mean ffmpeg is running. The
+    // first writeFrame() reports that. The command is kept for its error text.
     m_command = commandLine;
     m_ffmpegPath = ffmpeg;
 
@@ -210,8 +206,8 @@ bool VideoRecorder::writeFrame(const uint8_t* rgba, size_t byteCount) {
 
     const size_t written = std::fwrite(rgba, 1, byteCount, m_pipe);
     if (written != byteCount) {
-        // ffmpeg exited — a bad codec name, an unwritable path, a full disk. The
-        // pipe is the only channel we have, so close it and report.
+        // ffmpeg has exited: an unknown codec, an unwritable path, or a full
+        // disk. Close the pipe and report the command that was run.
         m_lastError = "ffmpeg stopped accepting frames after "
                     + std::to_string(m_frameCount) + " frames. Command was: "
                     + m_command;

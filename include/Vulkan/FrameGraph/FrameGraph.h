@@ -431,10 +431,9 @@ using PhysicalResource = std::variant<PhysicalImage, PhysicalBuffer>;
 
 struct BarrierInfo {
     ResourceHandle          resource;
-    // Defaulted so a field added later is not silently left indeterminate:
-    // resolveLayoutsAndInsertBarriers assigns every member today, and the copy it
-    // makes for the acquire barrier would carry whatever the next member happened
-    // to hold.
+    // Every member is defaulted. resolveLayoutsAndInsertBarriers assigns them
+    // all, and copies the struct for the acquire barrier, so a member added
+    // later without an assignment would otherwise be indeterminate.
     VkImageLayout           oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageLayout           newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkPipelineStageFlags    srcStage  = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;

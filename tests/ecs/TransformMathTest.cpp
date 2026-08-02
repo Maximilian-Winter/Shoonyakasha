@@ -1,10 +1,10 @@
 //
 // TransformMathTest.cpp - decomposeTRS must invert TransformComponent::getLocalMatrix
 //
-// The glTF loader stopped baking node transforms into vertex data and now puts
-// them on TransformComponent instead. That only renders correctly if the matrix
-// it decomposes rebuilds to the same matrix — a sign error or the wrong Euler
-// order is invisible in the load log and shows up as geometry in the wrong place.
+// The glTF loader stores node transforms on TransformComponent rather than
+// baking them into vertex data, so a matrix passed through decomposeTRS() and
+// back through getLocalMatrix() must reproduce the original. A sign error or a
+// mismatched Euler order places geometry incorrectly with no error reported.
 //
 
 #include <gtest/gtest.h>
@@ -29,9 +29,9 @@ void expectMatrixNear(const glm::mat4& a, const glm::mat4& b, const char* what) 
     }
 }
 
-/// Decompose, feed the result back through TransformComponent, and require the
-/// matrix to come out the same. Compares matrices rather than TRS triples: at
-/// gimbal lock more than one triple is correct, and the matrix is what renders.
+/// Decompose, rebuild through TransformComponent, and compare the matrices.
+/// Matrices are compared instead of TRS triples because more than one triple is
+/// correct at gimbal lock.
 void expectRoundTrip(const glm::mat4& m, const char* what) {
     glm::vec3 position, rotation, scale;
     decomposeTRS(m, position, rotation, scale);
@@ -76,8 +76,8 @@ TEST(TransformMath, EveryOctantOfRotation) {
     for (float y : angles) {
         for (float x : angles) {
             for (float z : angles) {
-                // Pitch is extracted with asin and so only spans [-pi/2, pi/2];
-                // anything outside re-expresses as a different, equivalent triple.
+                // Pitch is extracted with asin and spans [-pi/2, pi/2]; values
+                // outside that range map to a different equivalent triple.
                 if (std::abs(x) > 1.5f) continue;
                 expectRoundTrip(trs({0.5f, 0.0f, -0.5f}, {x, y, z}, {1, 1, 1}),
                                 "rotation sweep");
@@ -87,12 +87,12 @@ TEST(TransformMath, EveryOctantOfRotation) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// The cases that motivated the shared helper
+// Gimbal lock
 // ═══════════════════════════════════════════════════════════════
 
 TEST(TransformMath, GimbalLockPitchDownKeepsTheYaw) {
-    // At pitch = -90 the yaw and roll axes coincide. The obvious extraction reads
-    // atan2(0, 0) for both and drops the rotation entirely.
+    // At pitch = -90 the yaw and roll axes coincide, and an extraction without
+    // the gimbal branch evaluates atan2(0, 0) for both.
     expectRoundTrip(trs({}, {-glm::half_pi<float>(), 1.2f, 0.0f}, {1, 1, 1}),
                     "gimbal lock, pitch -90");
 }
@@ -103,12 +103,11 @@ TEST(TransformMath, GimbalLockPitchUpKeepsTheYaw) {
 }
 
 TEST(TransformMath, ExactGimbalLockWithYaw) {
-    // The case that actually needs the gimbal branch, and the one the two tests
-    // above do NOT catch: a matrix whose entries are exactly 0 and ±1, as
-    // hand-authored glTF node matrices are. Built through getLocalMatrix() the
-    // cosine of ±90° is 4e-8 rather than 0, and the naive extraction still
-    // recovers the angle from the ratio. Given exact zeros it reads atan2(0, 0)
-    // for both yaw and roll and loses the rotation completely.
+    // A matrix whose entries are exactly 0 and ±1, as hand-authored glTF node
+    // matrices are. The two tests above do not exercise the gimbal branch: built
+    // through getLocalMatrix(), the cosine of ±90° is 4e-8 rather than 0 and the
+    // general extraction still recovers the angle. With exact zeros it evaluates
+    // atan2(0, 0) for both yaw and roll.
     //
     // Yaw +90 composed with pitch -90, column-major.
     const glm::mat4 m( 0, 0, -1, 0,

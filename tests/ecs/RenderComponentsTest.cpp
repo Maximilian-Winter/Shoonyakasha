@@ -198,9 +198,8 @@ TEST(MeshComponent, CopyingSharesGeometryRatherThanAliasingAHandle) {
 
     MeshComponent b = a;
 
-    // Same allocation, two owners — the point of the shared handle. Two entities
-    // drawing identical geometry cost one buffer, and neither can free it while
-    // the other is alive.
+    // One allocation with two owners: entities drawing identical geometry share
+    // a single buffer, and neither releases it while the other holds it.
     EXPECT_EQ(a.vertexHandle(), b.vertexHandle());
     EXPECT_EQ(2, a.vertexBuffer.use_count());
 }

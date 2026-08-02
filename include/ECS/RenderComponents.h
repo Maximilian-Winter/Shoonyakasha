@@ -30,11 +30,11 @@ namespace Shoonyakasha {
 //
 
 // Ownership: the buffers are shared, reference-counted handles. Two entities
-// drawing the same geometry hold the same GpuBufferRef and the allocation exists
-// once; the buffer is freed when the last component referencing it goes away, a
-// few frames later so nothing in flight is pulled out from under the GPU.
-// Copying a MeshComponent shares the geometry rather than aliasing a raw handle,
-// which is what made the previous by-value GPUBuffer unsafe to free anywhere.
+// drawing the same geometry hold the same GpuBufferRef and the allocation
+// exists once. The buffer is freed once the last component referencing it is
+// gone and the frames that may still reference it have completed.
+// Copying a MeshComponent shares the geometry: the copy holds a reference to
+// the same allocation rather than a duplicate handle to it.
 
 struct MeshComponent {
     GpuBufferRef vertexBuffer;

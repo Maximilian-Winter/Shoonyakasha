@@ -110,10 +110,9 @@ TEST(FrameGraphCompilerBufferLayout, LightsUBO_Std140_WithVec4Arrays) {
 }
 
 // ── MaterialPushConstants — the per-draw push constant block ──────────────────
-// Declared "scalar" in JSON. Every member here happens to sit on its natural
-// alignment, so std140, std430 and true scalar layout all agree — which is why
-// this block is safe ground while the packing rules are corrected.
-// 104 bytes, comfortably inside the 128-byte guaranteed push constant limit.
+// Declared "scalar" in JSON. Every member sits on its natural alignment, so
+// std140, std430 and scalar layout produce identical offsets for this block.
+// 104 bytes, within the 128-byte guaranteed push constant limit.
 TEST(FrameGraphCompilerBufferLayout, MaterialPushConstants_Scalar) {
     BufferLayoutDesc desc;
     desc.name = "MaterialPushConstants";

@@ -3,10 +3,9 @@
 //
 // Tier 1: filesystem only, no GPU.
 //
-// The behaviour that matters here is the forgiving part. locate() has to leave
-// paths that already work untouched, or every example's existing layout breaks;
-// and it has to report failures against the path the caller actually wrote,
-// rather than against a rewritten one they would not recognise in a log.
+// The cases covered are locate()'s resolution order: a path that already exists
+// is returned unchanged, a path that resolves under the root is rewritten, and
+// a path that resolves nowhere is returned as it was passed in.
 //
 
 #include <gtest/gtest.h>
@@ -48,7 +47,7 @@ private:
     std::filesystem::path m_root;
 };
 
-/// Restores whatever the root was, so one test cannot leak into the next.
+/// Resets the root after each test.
 class AssetPathsTest : public ::testing::Test {
 protected:
     void TearDown() override { AssetPaths::resetForTesting(); }
@@ -77,8 +76,8 @@ TEST_F(AssetPathsTest, LocateFindsAFileUnderTheRoot) {
 }
 
 TEST_F(AssetPathsTest, LocateLeavesAWorkingPathAlone) {
-    // An absolute path, or one that already resolves from the working directory,
-    // must not be rewritten — that is what keeps existing layouts working.
+    // An absolute path, or one that resolves from the working directory, is
+    // returned unchanged.
     TempTree tree;
     auto direct = tree.touch("beside_me.hdr");
     AssetPaths::setRoot(tree.root());
@@ -87,9 +86,8 @@ TEST_F(AssetPathsTest, LocateLeavesAWorkingPathAlone) {
 }
 
 TEST_F(AssetPathsTest, LocatePrefersTheFileThatAlreadyResolves) {
-    // Same relative name present both as given and under the asset root. The one
-    // that already works wins, so pointing an app at a local override does not
-    // silently pick up the shared copy instead.
+    // The same relative name exists both as given and under the asset root.
+    // The path that already resolves takes precedence.
     TempTree tree;
     tree.touch("shared/dupe.hdr");
     AssetPaths::setRoot(tree.root() / "shared");
@@ -106,8 +104,8 @@ TEST_F(AssetPathsTest, LocatePrefersTheFileThatAlreadyResolves) {
 }
 
 TEST_F(AssetPathsTest, LocateReturnsTheOriginalWhenNothingIsFound) {
-    // Not the resolved-but-missing path: an error message naming a path the
-    // caller never wrote is worse than one naming the path they did.
+    // The original path, not the resolved-but-missing one, so an error names
+    // what the caller passed in.
     TempTree tree;
     AssetPaths::setRoot(tree.root());
 
@@ -121,9 +119,8 @@ TEST_F(AssetPathsTest, LocateHandlesAnEmptyPath) {
 }
 
 TEST_F(AssetPathsTest, ExistsSeesWhatLocateWouldFind) {
-    // The distinction locate() cannot make: it returns the original path when
-    // nothing was found, which is indistinguishable from a path that resolved.
-    // exists() is what an example asks before falling back to a smaller model.
+    // locate() returns the original path when nothing is found, which is
+    // indistinguishable from a path that resolved. exists() reports which.
     TempTree tree;
     tree.touch("models/Box.gltf");
     AssetPaths::setRoot(tree.root());

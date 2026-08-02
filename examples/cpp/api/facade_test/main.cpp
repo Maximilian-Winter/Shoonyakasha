@@ -54,9 +54,7 @@ int main() {
         config.logFile = "facade_test.log";
         config.pipelineJsonPath = "pipeline.json";
         // No hdrEnvironmentPath: pipeline.json is a single forward pass with
-        // analytic lighting, so there is nothing to bind image-based lighting to
-        // and nothing to wait for at startup. The point of this example is the
-        // API surface, not the renderer.
+        // analytic lighting and no image-based lighting bindings.
 
         EngineAPI engine(config);
 

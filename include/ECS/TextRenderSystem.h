@@ -33,9 +33,9 @@ public:
             auto& text = view.get<Shoonyakasha::Text2DComponent>(entity);
             auto& baked = registry.get_or_emplace<Shoonyakasha::TextBakedComponent>(entity);
 
-            // The label's anchor is part of what was baked, since each glyph
-            // carries its own resolved anchor. A label with no anchor keeps the
-            // default, which is what rebuild() assumes for it too.
+            // The label's anchor is part of the baked state, since each glyph
+            // carries a resolved copy of it. A label with no UIAnchorComponent
+            // uses the default, matching what rebuild() assumes.
             Shoonyakasha::UIAnchorComponent currentAnchor;
             if (auto* a = registry.try_get<Shoonyakasha::UIAnchorComponent>(entity)) {
                 currentAnchor = *a;

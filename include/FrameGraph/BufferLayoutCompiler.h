@@ -67,9 +67,8 @@ public:
     static uint32_t columnStride(FieldType t, PackingRule p)  { return FrameGraph::columnStride(t, p); }
     static uint32_t arrayStride(FieldType t, PackingRule p)   { return FrameGraph::arrayStride(t, p); }
 
-    /// Throws on an unknown packing string. It used to silently return Scalar,
-    /// which disagreed with the JSON front-end in FrameGraphJson.cpp defaulting
-    /// the same missing key to std140.
+    /// Throws on an unknown packing string, matching the JSON front-end in
+    /// FrameGraphJson.cpp, which defaults a missing key to std140.
     static PackingRule parsePackingRule(const std::string& s) { return FrameGraph::parsePackingRule(s); }
 
     /// Map a shader type onto what ResolvedValue can produce. Returns false for

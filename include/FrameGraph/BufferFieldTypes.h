@@ -10,8 +10,8 @@
 // all, while BufferLayoutCompiler.h used a third, size-bucket rule. This header
 // is the single source.
 //
-// Deliberately dependency-free (no Vulkan, no glm, no entt) so both front-ends
-// can include it cheaply.
+// Depends on no Vulkan, glm or entt headers, so both front-ends can include it
+// cheaply.
 //
 // Reference: OpenGL 4.6 §7.6.2.2, adopted by Vulkan as the Standard Uniform /
 // Storage Buffer Layouts.
@@ -75,8 +75,8 @@ inline BufferFieldType parseFieldType(std::string_view s) {
     if (s == "mat3")   return BufferFieldType::Mat3;
     if (s == "mat4")   return BufferFieldType::Mat4;
 
-    // Silently defaulting an unrecognised type to float produced a buffer whose
-    // offsets disagreed with the shader from that field onward.
+    // Throws rather than defaulting: an unrecognised type treated as float
+    // shifts every offset from that field onward out of step with the shader.
     throw std::runtime_error("Unknown buffer field type: '" + std::string(s) + "'");
 }
 

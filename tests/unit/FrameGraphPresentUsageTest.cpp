@@ -3,11 +3,10 @@
 //
 // Tier 1: pure JSON → declaration parsing, no GPU context.
 //
-// ResourceUsage used to fold presentation in as a value of its own, so an output
-// could say `color_blend` or `present` but never both — and the two carry
-// different semantics (LOAD and a dependency on the previous writer, versus the
-// final layout). A pipeline that composites several blended passes into the
-// swapchain had no way to spell its last pass. These tests pin the split.
+// Presentation is a separate boolean on ResourceAccess rather than a
+// ResourceUsage value, so an output can be both `color_blend` and presenting.
+// The two describe different things: the usage selects the load op and the
+// dependency on the previous writer, while `present` selects the final layout.
 //
 
 #include <gtest/gtest.h>
@@ -112,8 +111,8 @@ TEST(FrameGraphPresentUsage, LegacyUsagePresentKeepsItsClearValue) {
 }
 
 TEST(FrameGraphPresentUsage, SurvivesASerializationRoundTrip) {
-    // Folding present back into "usage" on the way out would silently downgrade a
-    // blend-and-present to a plain present, losing the LOAD op.
+    // Serialising `present` back into "usage" would turn a blend-and-present
+    // into a plain present and lose the LOAD op.
     FrameGraphBuilder builder;
     loadGraphFromJson(builder, graphWithSwapchainOutput({
         {"resource", "swapchain"}, {"usage", "color_blend"}, {"present", true}

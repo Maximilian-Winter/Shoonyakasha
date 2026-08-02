@@ -160,10 +160,10 @@ TEST(TransformComponent, FullConstructor) {
 // Hierarchy destruction and cycle safety
 // ═══════════════════════════════════════════════════════════════
 
-// destroyEntity used to range-for over hierarchy->children while the recursive
-// call erased from that same vector, and held a component pointer across
-// registry.destroy calls that could relocate it. Both needed two or more
-// children to show, and both corrupted silently rather than crashing.
+// destroyEntity iterates a copy of hierarchy->children, because the recursive
+// call erases from that vector, and re-fetches the parent's component after each
+// destroy, because registry.destroy can relocate it. Both require two or more
+// children to exercise.
 TEST(EntityHelperHierarchy, DestroyParent_WithManyChildren_DestroysAll) {
     entt::registry registry;
 

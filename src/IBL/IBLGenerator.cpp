@@ -162,10 +162,10 @@ void IBLGenerator::createDescriptorLayouts() {
 }
 
 void IBLGenerator::createDescriptorPool() {
-    // Every recorded dispatch needs its own descriptor set — see the comment in
-    // convertEquirectToCubemap. The prefilter pass is the greediest: 6 faces x one
-    // mip chain, so 6 * mipLevels sets (60 at the default 512px / 10 mips). Sized
-    // well above that so a larger prefilterSize does not silently exhaust the pool.
+    // Every recorded dispatch needs its own descriptor set; see
+    // convertEquirectToCubemap. The prefilter pass needs the most: 6 faces times
+    // the mip chain, so 6 * mipLevels sets, which is 60 at the default 512px and
+    // 10 mips. Sized above that to allow a larger prefilterSize.
     constexpr uint32_t kMaxIBLDescriptorSets = 256;
 
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
@@ -540,8 +540,9 @@ VulkanCubemap* IBLGenerator::generateIrradianceMap(VulkanCubemap* environment, u
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &m_convolutionLayout;
 
-    // One set per dispatch — see convertEquirectToCubemap for why a shared set
-    // silently collapses all six faces onto the last one.
+    // One set per dispatch. A shared set is overwritten by each face before the
+    // command buffer is submitted, leaving all six reading the last one; see
+    // convertEquirectToCubemap.
     std::vector<VkDescriptorSet> descriptorSets(6, VK_NULL_HANDLE);
     for (auto& set : descriptorSets) {
         if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, &set) != VK_SUCCESS) {

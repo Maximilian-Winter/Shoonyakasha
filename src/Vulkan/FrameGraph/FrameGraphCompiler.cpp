@@ -412,12 +412,10 @@ void FrameGraphCompiler::createPhysicalResources(
             // Combine declared additional usage with usage derived from passes
             VkImageUsageFlags usage = imageUsages[i] | desc.additionalUsage;
 
-            // Readback and save copy out of the image, which no pass declares —
-            // so the usage derived from passes never includes TRANSFER_SRC and
-            // vkCmdCopyImageToBuffer is rejected. Buffers already get this from
-            // their own readback policy (RenderGraph::createSSBOs); images did
-            // not, which is why a declared image "readback" or "save" produced a
-            // validation error every time it fired.
+            // Readback and save copy out of the image, and no pass declares
+            // that, so TRANSFER_SRC is added from the policy instead. SSBOs get
+            // the equivalent buffer usage in RenderGraph::createSSBOs. Without
+            // it vkCmdCopyImageToBuffer is rejected.
             if (decl.readbackPolicy.enabled || decl.savePolicy.enabled) {
                 usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
             }
@@ -531,7 +529,7 @@ void FrameGraphCompiler::resolveLayoutsAndInsertBarriers(
                 barrier.srcAccess = lastAccess[ri];
                 barrier.dstAccess = requiredAccess;
 
-                // No queue ownership transfer is emitted, deliberately.
+                // No queue ownership transfer is emitted.
                 //
                 // This used to compare the pass's *declared* queueType against the
                 // previous pass's and, on a mismatch, push the same BarrierInfo
@@ -1617,11 +1615,11 @@ VkShaderStageFlags CompiledBufferLayout::getShaderStages() const {
 namespace {
 
 /// Map a shader-side field type onto what the dot-path resolver can produce.
-/// The gap is real: BufferFieldType has 17 members and ResolvedValue's variant
-/// has 8 value alternatives, so double, bool, the integer vectors and mat2 have
-/// no representation. Those fields still pack correctly; they are marked
-/// unresolvable so writeField leaves them zeroed instead of writing a float into
-/// a uvec4 slot, which is what the old `default:` case did silently, per draw.
+/// BufferFieldType has 17 members and ResolvedValue's variant has 8 value
+/// alternatives, so double, bool, the integer vectors and mat2 have no
+/// representation. Those fields still pack correctly and are marked
+/// unresolvable, so writeField leaves them zeroed rather than writing a float
+/// into, for example, a uvec4 slot.
 bool toResolverType(BufferFieldType t, Shoonyakasha::MaterialParam::Type& out) {
     using MT = Shoonyakasha::MaterialParam::Type;
     switch (t) {

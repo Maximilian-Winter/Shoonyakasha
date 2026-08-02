@@ -1,17 +1,10 @@
 //
-// AssetPaths.h - Finding the shared asset directory from wherever you started
+// AssetPaths.h - Locate the shared asset directory
 //
-// एकं मूलं बहवः पन्थानः — one root, many paths to it.
-//
-// Examples run from three different working directories depending on how they
-// were launched: their own source directory (the CMake debugger setting), the
-// build tree (running the .exe directly), or wherever a user happened to be.
-// A relative path like "cubemaps_hdrs/sky.hdr" only works from one of those, so
-// assets ended up copied into every example directory that needed them — eight
-// copies of one 99 MB environment map — and two examples grew hand-written lists
-// of fallback paths to try.
-//
-// This finds one shared asset root instead, from any of those starting points.
+// Resolves asset paths against a single asset root, found by searching from the
+// working directory and from the executable's location. This makes a relative
+// path such as "env/sky.hdr" resolve identically whether a program is started
+// from its source directory, from the build tree, or from anywhere else.
 //
 
 #pragma once
@@ -30,13 +23,13 @@ public:
     ///   2. an `assets/` directory in the working directory or any ancestor
     ///   3. an `assets/` directory beside the executable or any ancestor
     ///
-    /// A candidate only counts if it contains the marker file
-    /// `.shoonyakasha-assets`, so an unrelated `assets/` belonging to some other
-    /// project higher up the tree is not mistaken for ours.
+    /// A candidate is accepted only if it contains the marker file
+    /// `.shoonyakasha-assets`, so an unrelated `assets/` directory further up
+    /// the tree is not matched.
     static const std::filesystem::path& root();
 
-    /// Set the root explicitly, bypassing the search. Mainly for tests and for
-    /// applications that ship assets somewhere of their own choosing.
+    /// Set the root explicitly, bypassing the search. For tests, and for
+    /// applications that ship assets elsewhere.
     static void setRoot(const std::filesystem::path& path);
 
     /// Undo setRoot() and search again on the next call.
@@ -46,22 +39,20 @@ public:
     /// root was not found, without checking whether the file exists.
     static std::filesystem::path resolve(const std::string& relative);
 
-    /// Best guess at where `path` actually is — the forgiving entry point.
+    /// Resolve `path` to a file that exists, if one can be found.
     ///
-    /// Returns, in order of preference: `path` itself if it exists (so absolute
-    /// paths and per-example layouts keep working untouched), then the asset-root
-    /// resolution if that exists, and otherwise `path` unchanged — so a failure
-    /// is reported against the path the caller actually asked for rather than
-    /// against some rewritten one they never wrote.
+    /// Returns, in order: `path` itself if it exists, which covers absolute
+    /// paths and files beside the working directory; then `path` resolved
+    /// against the asset root, if that exists; otherwise `path` unchanged, so
+    /// an error names the path the caller passed in.
     static std::filesystem::path locate(const std::string& path);
 
-    /// Is there a file where locate() would look? For optional assets — the
-    /// large downloads in tools/fetch_assets.py — so an example can fall back to
-    /// something that ships with the repo instead of refusing to start.
+    /// Whether locate() finds an existing file for `path`. Used to test for
+    /// optional assets, such as the large downloads in tools/fetch_assets.py.
     static bool exists(const std::string& path);
 
-    /// Human-readable account of where the root came from, for startup logs and
-    /// for the error message when an asset is missing.
+    /// Description of where the root was found, for startup logs and error
+    /// messages.
     static std::string describe();
 
 private:

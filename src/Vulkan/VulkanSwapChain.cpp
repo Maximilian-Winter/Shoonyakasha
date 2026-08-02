@@ -80,11 +80,10 @@ void VulkanSwapChain::createSwapChain() {
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
-    // TRANSFER_SRC so the presented image can be copied back for screenshots and
-    // video capture. Asked for rather than assumed: the spec only guarantees
-    // COLOR_ATTACHMENT, and requesting an unsupported usage fails swapchain
-    // creation outright. Every desktop driver supports it; a platform that does
-    // not simply loses frame capture rather than the ability to start.
+    // TRANSFER_SRC allows the presented image to be copied back for screenshots
+    // and video capture. It is requested only when the surface reports support,
+    // since requesting an unsupported usage fails swapchain creation. Without
+    // it, supportsCapture() is false and capture is unavailable.
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if (swapChainSupport.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
         createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;

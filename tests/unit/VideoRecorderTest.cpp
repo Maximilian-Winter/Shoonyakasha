@@ -1,14 +1,12 @@
 //
 // VideoRecorderTest.cpp - the ffmpeg command a recording is built from
 //
-// Tier 1: no GPU, no ffmpeg. These assert the command string, because that is
-// where the one bug this feature has had actually lived.
+// Tier 1: no GPU, no ffmpeg process. These assert the contents of the command
+// string that VideoRecorder::buildArguments produces.
 //
-// A recording came out upside down for its whole first life, and the checks in
-// place at the time -- codec name, frame size, frame rate, frame count, "does
-// ffprobe read it back" -- were all green, because every one of them is blind
-// to orientation. The frames were fine; a "-vf vflip" in the command was not.
-// So: pin what goes into the command, not just what comes out of the file.
+// Container-level checks (codec, frame size, frame rate, frame count) do not
+// detect a filter that transforms the image, so the arguments are asserted
+// directly. See DoesNotFlipTheImage.
 //
 
 #include <gtest/gtest.h>
@@ -31,8 +29,9 @@ bool contains(const std::string& haystack, const std::string& needle) {
 } // namespace
 
 TEST(VideoRecorderCommand, DoesNotFlipTheImage) {
-    // Vulkan's origin is top-left and ffmpeg reads rawvideo top row first, so
-    // the two already agree. Any flip or transpose here inverts every frame.
+    // Vulkan's framebuffer origin is top-left and ffmpeg reads rawvideo top row
+    // first, so readback rows are already in the expected order. A flip or
+    // transpose filter here inverts every frame.
     const std::string args = argumentsFor();
 
     EXPECT_FALSE(contains(args, "vflip")) << args;
@@ -42,9 +41,9 @@ TEST(VideoRecorderCommand, DoesNotFlipTheImage) {
 }
 
 TEST(VideoRecorderCommand, DescribesTheRawFramesItWillBeFed) {
-    // These four have to match what writeFrame() actually sends, byte for
-    // byte: RGBA, that size, from stdin. A mismatch is not a decode error --
-    // ffmpeg reinterprets the bytes and produces a plausible, wrong picture.
+    // These must match what writeFrame() sends: RGBA, that frame size, on
+    // stdin. A mismatch is not reported as an error; ffmpeg reinterprets the
+    // bytes and produces a valid file with wrong contents.
     const std::string args = argumentsFor(1280, 720);
 
     EXPECT_TRUE(contains(args, "-f rawvideo")) << args;
@@ -68,12 +67,12 @@ TEST(VideoRecorderCommand, CarriesTheRequestedEncodingOptions) {
 
 TEST(VideoRecorderCommand, EncodesToSomethingPlayersAccept) {
     EXPECT_TRUE(contains(argumentsFor(), "-pix_fmt yuv420p"));
-    EXPECT_TRUE(contains(argumentsFor(), "-an"));  // no audio stream to wait on
+    EXPECT_TRUE(contains(argumentsFor(), "-an"));  // no audio stream
 }
 
 TEST(VideoRecorderCommand, QuotesTheOutputPathAndPutsItLast) {
-    // Paths with spaces are the common case on Windows, and the path has to be
-    // the final argument or ffmpeg reads it as an option's value.
+    // The output path must be quoted and must be the final argument; otherwise
+    // ffmpeg reads it as the value of the preceding option.
     VideoRecorder::Options options;
     const std::string args =
         VideoRecorder::buildArguments("C:/some folder/clip.mkv", 640, 480, options);
@@ -94,8 +93,8 @@ TEST(VideoRecorderCommand, ExtraArgsLandBeforeTheOutputPath) {
 }
 
 TEST(VideoRecorderCommand, RejectsOddFrameSizesBeforeStarting) {
-    // 4:2:0 chroma needs even dimensions. Saying so up front beats letting
-    // ffmpeg die after the first frame is already down the pipe.
+    // 4:2:0 chroma requires even dimensions. start() reports this before
+    // opening the pipe.
     VideoRecorder recorder;
 
     EXPECT_FALSE(recorder.start("out.mkv", 801, 500));
@@ -112,5 +111,5 @@ TEST(VideoRecorderCommand, WriteFrameWithoutStartingFails) {
 
     EXPECT_FALSE(recorder.writeFrame(pixel, sizeof(pixel)));
     EXPECT_EQ(0u, recorder.frameCount());
-    EXPECT_TRUE(recorder.stop());  // stopping when idle is not an error
+    EXPECT_TRUE(recorder.stop());  // stopping when not recording succeeds
 }

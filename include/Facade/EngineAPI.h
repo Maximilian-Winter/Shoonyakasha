@@ -26,7 +26,7 @@ class EcsAPI;
 // ═══════════════════════════════════════════════════════════════
 //
 // The engine resolves asset paths against the shared assets/ directory, so an
-// application only ever names "models/Box.gltf". These let it ask about an asset
+// application names only "models/Box.gltf". These let it ask about an asset
 // before trying to load one, which is what the graceful-fallback pattern needs:
 // large assets like Sponza are not committed, and probing by attempting a load
 // logs a failure that did not happen.

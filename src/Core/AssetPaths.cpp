@@ -27,11 +27,9 @@ bool                  g_searched = false;
 std::filesystem::path g_root;
 std::string           g_origin = "not searched yet";
 
-/// Directory containing the running executable, or empty if it cannot be found.
-///
-/// Worth having in addition to the working directory: running the built .exe
-/// straight out of the build tree is the one case where the working directory
-/// tells you nothing about where the project is.
+/// Directory containing the running executable, or empty if it cannot be
+/// determined. Searched in addition to the working directory, which carries no
+/// information about the project when an executable is run from the build tree.
 std::filesystem::path executableDirectory() {
     std::error_code ec;
 #ifdef _WIN32
@@ -54,7 +52,7 @@ std::filesystem::path executableDirectory() {
     return std::filesystem::exists(dir, ec) ? dir : std::filesystem::path{};
 }
 
-/// Is this an asset root rather than some unrelated directory called "assets"?
+/// Whether `candidate` contains the asset-root marker file.
 bool isAssetRoot(const std::filesystem::path& candidate) {
     std::error_code ec;
     return std::filesystem::is_directory(candidate, ec)
@@ -86,9 +84,9 @@ std::filesystem::path searchUpward(std::filesystem::path start) {
 std::filesystem::path AssetPaths::search() {
     std::error_code ec;
 
-    // MSVC deprecates getenv in favour of _dupenv_s, which is not portable. The
-    // hazard it warns about is the returned pointer being invalidated by a later
-    // setenv; this copies the value into a path immediately and never keeps it.
+    // MSVC deprecates getenv in favour of the non-portable _dupenv_s. The
+    // returned pointer is copied into a path immediately and not retained, so a
+    // later environment change cannot invalidate it.
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4996)
@@ -99,8 +97,8 @@ std::filesystem::path AssetPaths::search() {
             g_origin = std::string(kEnvVar) + "=" + candidate.string();
             return candidate;
         }
-        // Deliberately not silent: someone who set the variable meant it, and a
-        // typo would otherwise look exactly like the variable not being set.
+        // Reported rather than ignored: a mistyped value would otherwise be
+        // indistinguishable from the variable not being set.
         g_origin = std::string(kEnvVar) + " is set to '" + fromEnv
                  + "' but that is not a directory; fell back to searching";
     }

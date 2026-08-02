@@ -112,11 +112,11 @@ struct ResolvedValue {
     /// Write the value at `dest`, never exceeding `capacity` bytes.
     ///
     /// `columnStride` handles matrices whose columns are padded on the GPU. glm
-    /// stores columns contiguously — a glm::mat3 is 36 bytes — while std140 and
-    /// std430 place each vec3 column on a 16-byte boundary, so the type occupies
-    /// 48. Copying sizeof(T) in one memcpy put columns 1 and 2 at byte offsets 12
-    /// and 24 instead of 16 and 32, which made every mat3 uniform silently
-    /// wrong. Pass 0 (the default) for a contiguous write.
+    /// stores columns contiguously, so a glm::mat3 is 36 bytes, while std140 and
+    /// std430 place each vec3 column on a 16-byte boundary and the type occupies
+    /// 48. A single memcpy of sizeof(T) would place columns 1 and 2 at offsets
+    /// 12 and 24 instead of 16 and 32. Pass 0 (the default) for a contiguous
+    /// write.
     ///
     /// Returns the number of bytes written.
     size_t copyTo(void* dest, size_t capacity, uint32_t columnStride = 0) const {

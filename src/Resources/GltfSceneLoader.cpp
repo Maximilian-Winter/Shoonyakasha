@@ -106,10 +106,8 @@ GltfLoadResult GltfSceneLoader::load(
     const GltfLoadOptions& options)
 {
     GltfLoadResult result;
-    // The texture cache deliberately survives across loads: entities created by an
-    // earlier load still hold its views and samplers, so clearing it here would
-    // either leak them (what it did before) or dangle them (if it destroyed them).
-    // Only the per-load key set is reset.
+    // The texture cache spans loads: entities created by an earlier load still
+    // hold its views and samplers. Only the per-load key set is reset here.
     m_loadTextureKeys.clear();
     m_basePath = path.parent_path();
     m_currentFile = path;
@@ -256,12 +254,12 @@ GltfPrimitive GltfSceneLoader::buildPrimitive(
         return processPrimitive(data, primitive, transform, name);
     }
 
-    // Skinned meshes are never baked — the skin puts them in skeleton space.
+    // Skinned meshes are not baked: the skin places them in skeleton space.
     GltfPrimitive built = processPrimitive(data, primitive, glm::mat4(1.0f), name);
 
     // processPrimitive built a StandardVertex buffer; skinning needs joints and
-    // weights. Assigning over the reference retires the old buffer, and the delete
-    // queue frees it once the frames that could name it have passed.
+    // weights. Assigning over the reference retires the old buffer, which the
+    // delete queue frees once the frames referencing it have completed.
     uint32_t vertexCount = 0;
     uint32_t vertexStride = 0;
     GPUBuffer skinnedVB = buildSkinnedVertexBuffer(data, primitive, vertexCount, vertexStride);
@@ -280,7 +278,7 @@ const GltfPrimitive* GltfSceneLoader::getOrBuildPrimitive(
     bool skinned,
     const std::string& name)
 {
-    // Keyed by file rather than by pointer: cgltf_free() runs at the end of load()
+    // Keyed by file path, not by pointer: cgltf_free() runs at the end of load()
     // and a later parse can reuse the same addresses.
     const std::string key = m_currentFile.string() + "#"
         + std::to_string(cgltf_mesh_index(data, node->mesh)) + "/"
@@ -605,12 +603,10 @@ GPUBuffer GltfSceneLoader::buildIndexBuffer(
     const cgltf_accessor* indexAccessor = primitive.indices;
     size_t indexCount = indexAccessor->count;
 
-    // Read every index at full width first, then narrow only if the largest one
-    // actually fits. The width must be chosen from the maximum index *value*, not
-    // from the index *count* — indices address the primitive's vertex attributes,
-    // so a mesh with 100k vertices and 60k indices carries values well above 65535
-    // even though the count does not. Testing the count silently truncated those
-    // to garbage triangles.
+    // Read every index at full width, then narrow only if the largest value
+    // fits. The width follows the maximum index value, not the index count:
+    // indices address the primitive's vertex attributes, so a mesh with 100k
+    // vertices and 60k indices holds values above 65535.
     std::vector<uint32_t> wide(indexCount);
     uint32_t maxIndex = 0;
     for (size_t i = 0; i < indexCount; ++i) {
@@ -1174,8 +1170,8 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     const std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>>& clips,
     entt::entity parentEntity)
 {
-    // Skinned vertices are never baked, so the node transform has to be applied
-    // somewhere. Parented, the node entity holds it and this entity is identity.
+    // Skinned vertices are not baked, so the node transform is carried by the
+    // parent node entity and this entity keeps an identity transform.
     auto builder = scene->createEntity(primitive.name);
     builder.withTransform(glm::vec3(0.0f));
     if (parentEntity != entt::null) {

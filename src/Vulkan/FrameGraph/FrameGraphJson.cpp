@@ -590,9 +590,7 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                 layout.usage = BufferUsageType::DescriptorSet;
             }
 
-            // Parse packing rule. Missing key defaults to std140, the
-            // over-aligned safe choice; an unrecognised value throws rather than
-            // silently leaving the previous default in place.
+            // A missing key defaults to std140. An unrecognised value throws.
             layout.packing = parsePackingRule(lj.value("packing", std::string{"std140"}));
 
             // Parse update frequency (for dot-path-driven auto-fill)
@@ -641,9 +639,8 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                     // JSON: "source": "entity.material.params.baseColorFactor"
                     field.source = fieldJson.value("source", std::string{});
 
-                    // Parse field type. Unknown type strings used to fall through
-                    // this chain leaving the default Float, so every offset from
-                    // that field onward silently disagreed with the shader.
+                    // Throws on an unknown type string. Treating one as float
+                    // would shift every offset from that field onward.
                     field.type = parseFieldType(fieldJson.value("type", std::string{"float"}));
 
                     layout.fields.push_back(std::move(field));

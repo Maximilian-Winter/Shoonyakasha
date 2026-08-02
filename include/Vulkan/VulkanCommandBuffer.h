@@ -231,9 +231,9 @@ public:
     /// spec violation on any depth image. Callers already know both; the
     /// frame graph compiler computes exact masks and then had them discarded.
     ///
-    /// The range is deliberately not defaulted. A default would reinstate the
-    /// hardcoded COLOR/1/1 that this exists to remove; see fullSubresourceRange()
-    /// in GPU/VkFormatUtils.h for the usual argument.
+    /// The subresource range has no default, so every caller states it. Use
+    /// fullSubresourceRange() in GPU/VkFormatUtils.h to derive it from a
+    /// format.
     VulkanCommandBuilder& imageBarrier(VkImage image,
                                        VkImageLayout oldLayout, VkImageLayout newLayout,
                                        VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,

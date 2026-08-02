@@ -1,17 +1,12 @@
 //
 // VideoRecorder.h - Encode a stream of frames by piping them to ffmpeg
 //
-// चलच्चित्रम् — the moving picture.
+// Raw RGBA frames are written to the stdin of an ffmpeg process, which performs
+// the encoding and writes the container. ffmpeg is located at runtime; see
+// findFfmpeg(). No encoding library is linked into the engine.
 //
-// No new dependency: raw RGBA goes down a pipe to an ffmpeg process, which does
-// the encoding and the container. Linking libavcodec would mean a vcpkg
-// dependency an order of magnitude larger than the engine's own, for a feature
-// most builds never use; ffmpeg is a single executable that is either present or
-// not, and this reports which.
-//
-// Capture is synchronous — see RenderTargetSaver::readbackRGBA8 — so recording
-// costs frame rate. That is the right trade for recording a clip of a demo and
-// the wrong one for anything shipping.
+// Frames come from RenderTargetSaver::readbackRGBA8, which is synchronous, so
+// recording lowers the frame rate.
 //
 
 #pragma once
@@ -27,14 +22,13 @@ public:
     struct Options {
         int fps = 30;
 
-        /// x264's constant rate factor: 0 is lossless, 18 is visually lossless,
-        /// 23 is the ffmpeg default, 51 is the worst. Ignored by codecs that do
-        /// not understand it.
+        /// x264 constant rate factor: 0 is lossless, 18 is visually lossless,
+        /// 23 is the ffmpeg default, 51 is the lowest quality. Ignored by codecs
+        /// that do not accept -crf.
         int quality = 18;
 
-        /// Anything ffmpeg can encode. libx264 in a .mkv plays everywhere;
-        /// "libx264rgb" avoids the RGB->YUV colour shift at the cost of
-        /// compatibility.
+        /// Any encoder ffmpeg accepts for -c:v. "libx264rgb" encodes without
+        /// the RGB to YUV conversion, at the cost of player support.
         std::string codec = "libx264";
 
         /// Empty means search PATH and the usual install locations.
@@ -56,13 +50,13 @@ public:
     bool start(const std::string& path, uint32_t width, uint32_t height,
                const Options& options = {});
 
-    /// Hand one frame to the encoder. `rgba` must be width * height * 4 bytes.
-    /// Returns false once the pipe has broken — which is how a caller finds out
-    /// ffmpeg died, since it is a separate process.
+    /// Write one frame to the encoder. `rgba` must be width * height * 4 bytes.
+    /// Returns false once the pipe has broken, which is how the exit of the
+    /// ffmpeg process is reported.
     bool writeFrame(const uint8_t* rgba, size_t byteCount);
 
     /// Close the pipe and wait for ffmpeg to finalise the container. A recording
-    /// that is not stopped produces a file that may not be playable.
+    /// that is not stopped may produce a file that will not play.
     bool stop();
 
     bool isRecording() const { return m_pipe != nullptr; }
@@ -79,21 +73,19 @@ public:
     /// $FFMPEG, then PATH, then the usual install locations.
     static std::string findFfmpeg(const std::string& hint = {});
 
-    /// The ffmpeg arguments a recording would use, without the executable or
-    /// the shell quoting. Public so a test can assert what is in it — the one
-    /// thing that made every recording come out upside down was a filter here,
-    /// and nothing that checked codec, size and frame count could see it.
+    /// The ffmpeg arguments a recording would use, without the executable path
+    /// or the shell quoting. Exposed for tests; see VideoRecorderTest.cpp.
     static std::string buildArguments(const std::string& path,
                                       uint32_t width, uint32_t height,
                                       const Options& options);
 
-    /// Is video recording available at all on this machine?
+    /// Whether an ffmpeg executable could be found.
     static bool available() { return !findFfmpeg().empty(); }
 
 private:
     std::FILE*  m_pipe = nullptr;
     std::string m_path;
-    std::string m_command;      // kept so a failure can say what was run
+    std::string m_command;      // reported in the error from writeFrame()
     std::string m_ffmpegPath;
     std::string m_lastError;
     uint64_t    m_frameCount = 0;

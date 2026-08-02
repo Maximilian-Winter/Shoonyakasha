@@ -14,8 +14,8 @@ GpuDeleteQueue::GpuDeleteQueue(VmaAllocator allocator, uint32_t framesInFlight)
 }
 
 GpuDeleteQueue::~GpuDeleteQueue() {
-    // Anything still referenced at this point outlives its owner, which is a bug
-    // in declaration order rather than something this can fix. Free what we hold.
+    // Free everything still held. A buffer still referenced at this point
+    // outlives the queue, which is a declaration-order error at the owner.
     flush();
 }
 
@@ -29,8 +29,8 @@ GpuBufferRef GpuDeleteQueue::adopt(const GPUBuffer& buffer) {
         ++m_live;
     }
 
-    // The deleter, not the shared_ptr's storage, is what owns the allocation:
-    // the pointed-to GPUBuffer is a plain handle struct with no destructor.
+    // The allocation is owned by the deleter, not by the shared_ptr's storage:
+    // GPUBuffer is a handle struct with no destructor.
     GpuDeleteQueue* queue = this;
     return GpuBufferRef(new GPUBuffer(buffer), [queue](const GPUBuffer* b) {
         queue->retire(*b);

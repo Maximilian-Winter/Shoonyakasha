@@ -131,9 +131,8 @@ struct TextBakedComponent {
     uint8_t bakedLayerMask = 0xFF;
     uint32_t bakedSortKey = 0;
 
-    // Each glyph's own anchor is computed from the label's at bake time, so a
-    // label whose anchor moved has to be re-baked or the glyphs stay where
-    // they were. Without this, set_ui_anchor() on a label silently did nothing.
+    // Each glyph's anchor is derived from the label's when the label is baked,
+    // so a label whose anchor changed must be re-baked for the glyphs to move.
     UIAnchorComponent::Anchor bakedAnchor = UIAnchorComponent::Anchor::TopLeft;
     glm::vec2 bakedOffsetPixels{0.0f};
 

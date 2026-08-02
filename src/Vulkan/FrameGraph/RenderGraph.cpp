@@ -92,10 +92,10 @@ RenderGraph::~RenderGraph() {
     }
     m_compiled.samplers.clear();
 
-    // Fallback material textures. Created lazily on the first material bind
-    // (createDefaultTextures below) and, until this call existed, never freed —
-    // DefaultTextures is a plain aggregate of GPUTexture values, so destroying
-    // the member releases nothing. Four images, views and samplers per run.
+    // Fallback material textures, created lazily on the first material bind by
+    // createDefaultTextures(). DefaultTextures is an aggregate of GPUTexture
+    // values with no destructor, so the four images, views and samplers have to
+    // be released explicitly.
     if (m_defaultTexturesCreated) {
         Shoonyakasha::GPUResourceFactory::destroyDefaultTextures(
             m_device.getAllocator().getHandle(),
@@ -105,8 +105,8 @@ RenderGraph::~RenderGraph() {
     }
 
     // Per-entity descriptor pool. createMaterialDescriptorPool() frees the
-    // previous pool before allocating a new one, which covers re-creation but
-    // never shutdown. Destroying the pool frees every set allocated from it.
+    // previous pool when re-creating, but not at shutdown. Destroying the pool
+    // frees every set allocated from it.
     if (m_materialDescriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_materialDescriptorPool, nullptr);
         m_materialDescriptorPool = VK_NULL_HANDLE;
@@ -222,9 +222,8 @@ void RenderGraph::createDotPathUBOs(uint32_t maxFramesInFlight) {
         ubo.resolvedLayout = *getResolvedLayout(layout.name);
 
         // A UBO with readback is copied by StagingBufferManager with
-        // vkCmdCopyBuffer, which needs TRANSFER_SRC on the source. SSBOs get
-        // this from the same policy below; UBOs did not, so every declared UBO
-        // readback produced a validation error and read stale staging memory.
+        // vkCmdCopyBuffer, which requires TRANSFER_SRC on the source buffer.
+        // SSBOs derive the same usage from their own policy below.
         VkBufferUsageFlags uboUsage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
         if (ubo.readbackPolicy.enabled ||
             ubo.memoryPolicy.transferDirection == TransferDirection::GpuToCpu ||
@@ -674,9 +673,10 @@ void RenderGraph::createStagingBuffers(uint32_t maxFramesInFlight) {
 
         if (!needsReadback) continue;
 
-        // UBOs are host-visible, so a memcpy would do — but the staging manager
-        // is used anyway for one callback/polling API, and it issues a real
-        // vkCmdCopyBuffer. Hence the TRANSFER_SRC bit added at creation above.
+        // UBOs are host-visible, but readback still goes through the staging
+        // manager for a single callback and polling API, and that issues a
+        // vkCmdCopyBuffer. The TRANSFER_SRC usage added at creation is required
+        // for it.
         StagingBufferManager::BufferConfig cfg;
         cfg.name = name;
         cfg.gpuBuffer = ubo.perFrameBuffers[0]->getBuffer();  // Use first frame buffer
@@ -1404,10 +1404,9 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
     // Invalidate cached analysis
     m_cachedAnalysis.reset();  // unique_ptr::reset() clears the pointer
 
-    // Invalidate converted layouts: compile() replaces m_compiled wholesale, so
-    // every cached conversion refers to layouts that are about to be discarded.
-    // Cleared here rather than in recompile() because compile() is public and
-    // reachable on its own.
+    // compile() replaces m_compiled, so every cached conversion refers to
+    // layouts about to be discarded. Cleared here, not in recompile(), because
+    // compile() is public and can be called directly.
     m_resolvedLayoutCache.clear();
 
     // Apply callbacks to pass declarations before compilation

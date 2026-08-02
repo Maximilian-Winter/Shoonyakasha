@@ -2,10 +2,10 @@
 // VkFormatUtils.h — format classification shared by every layer that has to
 // build a VkImageSubresourceRange.
 //
-// This lives under GPU/ rather than Vulkan/ deliberately. FrameGraph.h already
-// includes GPU/GPUResourceFactory.h, so the Vulkan -> GPU dependency edge exists;
-// the reverse does not, and GPUResourceFactory.cpp is one of the consumers. The
-// header itself depends on nothing but <vulkan/vulkan.h>.
+// Placed under GPU/ because GPUResourceFactory.cpp is one of its consumers and
+// the Vulkan -> GPU dependency edge already exists (FrameGraph.h includes
+// GPU/GPUResourceFactory.h) while the reverse does not. The header itself
+// depends on nothing but <vulkan/vulkan.h>.
 //
 // It replaces four hand-rolled copies of the depth-format list that had drifted
 // apart — each was individually incomplete, and none matched the others.

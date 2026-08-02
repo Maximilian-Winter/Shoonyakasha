@@ -67,7 +67,7 @@ public:
     ///
     /// SceneAPI::setParent rejects cycles, but a parent/child graph can also
     /// arrive from Scene::deserialize, which restores links straight from JSON.
-    /// Without a bound, a cycle in that data is a stack overflow rather than a
+    /// Without a bound, a cycle in that data causes a stack overflow instead of a
     /// diagnosable error.
     static constexpr uint32_t kMaxHierarchyDepth = 256;
 

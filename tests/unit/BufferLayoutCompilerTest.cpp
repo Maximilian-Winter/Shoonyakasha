@@ -482,8 +482,8 @@ TEST(BufferLayoutCompiler, Compile_Mat3_Std430_Occupies48) {
     EXPECT_EQ(r.fields[1].offset, 48u);
 }
 
-// Nor does std430 relax vec3: base alignment is 16 in both. Deliberately the
-// same expected values as the std140 case.
+// std430 does not relax vec3 either: base alignment is 16 in both. The expected
+// values match the std140 case.
 TEST(BufferLayoutCompiler, Compile_Vec3_Std430_StillAligns16) {
     BufferLayoutCompiler compiler;
     auto r = compiler.compile("t", layoutOf("std430", {{"a", "float"}, {"b", "vec3"}}));

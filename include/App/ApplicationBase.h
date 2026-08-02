@@ -211,7 +211,7 @@ protected:
                         const VideoRecorder::Options& options = {});
 
     /// Finish the recording and finalise the file. Called automatically at
-    /// shutdown, because a recording that is never stopped may not be playable.
+    /// shutdown; a recording that is not stopped may produce an unplayable file.
     bool stopRecording();
 
     bool isRecording() const;
