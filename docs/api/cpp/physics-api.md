@@ -1,291 +1,47 @@
 # PhysicsAPI
 
-`Shoonyakasha::Facade::PhysicsAPI` -- physics world control, forces, velocity, and body management.
+Access: `engine.getPhysics()`. [Other language reference](../python/physics.md).
 
-> **Facade layer** -- this is the same API that Python wraps via Cython. All Bullet3 internals are hidden behind PIMPL. For the inheritance-based alternative, see [ApplicationBase](application-base.md).
+Include `Facade/PhysicsAPI.h`; namespace `Shoonyakasha::Facade`. [Source declaration](../../../include/Facade/PhysicsAPI.h).
 
-**Header:** `#include "Facade/PhysicsAPI.h"`
-**Namespace:** `Shoonyakasha::Facade`
+Controls the Bullet-backed ECS physics system. Obtain it through the engine and configure it in init or later. The facade exists before initialization, but setters do not buffer pending configuration.
 
-**See also:** [Python Physics API](../python/physics.md)
+## World and body contract
 
----
+Defaults are disabled, gravity `(0, -9.81, 0)`, fixed step `1/60` seconds, and maximum 10 substeps. The `enabled` switch controls stepping; do not assume it prevents every body mutation API from being called.
 
-## Obtaining a PhysicsAPI
+Forces, impulses, and velocity operations require an entity with a live physics body. Missing bodies produce no effect or zero-valued velocity results. Rebuild after changing native collider/body settings; body count is the number tracked by the native system.
 
-You do not construct `PhysicsAPI` directly. Access it through `EngineAPI::getPhysics()`:
+C++ native ECS access is needed to configure body mass/type and collider dimensions. Python name-based component addition creates defaults but does not offer those typed fields. There is no facade raycast, constraint, or collision-event API. Native Mesh colliders currently fall back to a box.
 
-```cpp
-auto& physics = engine.getPhysics();
-physics.setGravity(glm::vec3(0.f, -9.81f, 0.f));
-physics.setEnabled(true);
-```
+See the [physics guide](../../guides/physics.md) for setup, supported shapes, and the native C++ example.
 
-The `PhysicsAPI` is valid for the lifetime of the `EngineAPI`.
+<!-- BEGIN SOURCE API -->
 
----
+## Members
 
-## Enable / Disable
-
-### isEnabled
+Declarations below are extracted from the public facade header; test constructors and internal wiring are omitted.
 
 ```cpp
+PhysicsAPI();
+~PhysicsAPI();
 bool isEnabled() const;
-```
-
-Check if the physics simulation is currently enabled.
-
-**Returns:** `bool` -- `true` if physics is running.
-
-### setEnabled
-
-```cpp
 void setEnabled(bool enabled);
-```
-
-Enable or disable the physics simulation. When disabled, no physics stepping occurs and forces/velocities are not applied.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `enabled` | `bool` | `true` to enable, `false` to disable. |
-
----
-
-## World Configuration
-
-### setGravity
-
-```cpp
 void setGravity(const glm::vec3& gravity);
-```
-
-Set the gravity vector for the physics world.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `gravity` | `const glm::vec3&` | Gravity vector (e.g. `glm::vec3(0, -9.81, 0)` for Earth gravity). |
-
-### getGravity
-
-```cpp
 glm::vec3 getGravity() const;
-```
-
-Get the current gravity vector.
-
-**Returns:** `glm::vec3` -- the gravity vector.
-
-### setFixedTimeStep
-
-```cpp
 void setFixedTimeStep(float timeStep);
-```
-
-Set the fixed time step for physics simulation. Bullet3 uses fixed-step integration for deterministic behavior.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `timeStep` | `float` | Fixed step duration in seconds (default is typically `1/60`). |
-
-### getFixedTimeStep
-
-```cpp
 float getFixedTimeStep() const;
-```
-
-Get the current fixed time step.
-
-**Returns:** `float` -- time step in seconds.
-
-### setMaxSubSteps
-
-```cpp
 void setMaxSubSteps(int maxSubSteps);
-```
-
-Set the maximum number of sub-steps per simulation tick. Higher values prevent "tunneling" at low frame rates but cost more CPU time.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `maxSubSteps` | `int` | Maximum sub-steps per tick. |
-
-### getMaxSubSteps
-
-```cpp
 int getMaxSubSteps() const;
-```
-
-Get the current maximum sub-step count.
-
-**Returns:** `int` -- max sub-steps.
-
----
-
-## Forces / Impulses
-
-All force and impulse methods require the entity to have a `RigidBody` component with type `Dynamic`.
-
-### addForce
-
-```cpp
 void addForce(EntityHandle entity, const glm::vec3& force);
-```
-
-Apply a continuous force to an entity. The force is accumulated over physics sub-steps and cleared after each tick. Suitable for sustained effects like thrust or wind.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `entity` | `EntityHandle` | Entity with a dynamic rigid body. |
-| `force` | `const glm::vec3&` | Force vector in world space (Newtons). |
-
-### addImpulse
-
-```cpp
 void addImpulse(EntityHandle entity, const glm::vec3& impulse);
-```
-
-Apply an instantaneous impulse (immediate velocity change). Suitable for one-time effects like jumps or explosions.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `entity` | `EntityHandle` | Entity with a dynamic rigid body. |
-| `impulse` | `const glm::vec3&` | Impulse vector in world space (Newton-seconds). |
-
-### addTorqueImpulse
-
-```cpp
 void addTorqueImpulse(EntityHandle entity, const glm::vec3& torque);
-```
-
-Apply an instantaneous torque impulse (immediate angular velocity change).
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `entity` | `EntityHandle` | Entity with a dynamic rigid body. |
-| `torque` | `const glm::vec3&` | Torque impulse vector in world space. |
-
----
-
-## Velocity
-
-### setLinearVelocity
-
-```cpp
 void setLinearVelocity(EntityHandle entity, const glm::vec3& velocity);
-```
-
-Set the linear velocity of a physics body directly.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `entity` | `EntityHandle` | Entity with a dynamic rigid body. |
-| `velocity` | `const glm::vec3&` | Velocity vector in world space (units/second). |
-
-### getLinearVelocity
-
-```cpp
 glm::vec3 getLinearVelocity(EntityHandle entity) const;
-```
-
-Get the current linear velocity of a physics body.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `entity` | `EntityHandle` | Entity with a rigid body. |
-
-**Returns:** `glm::vec3` -- velocity in units/second.
-
-### setAngularVelocity
-
-```cpp
 void setAngularVelocity(EntityHandle entity, const glm::vec3& velocity);
-```
-
-Set the angular velocity of a physics body directly.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `entity` | `EntityHandle` | Entity with a dynamic rigid body. |
-| `velocity` | `const glm::vec3&` | Angular velocity vector (radians/second). |
-
-### getAngularVelocity
-
-```cpp
 glm::vec3 getAngularVelocity(EntityHandle entity) const;
-```
-
-Get the current angular velocity of a physics body.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `entity` | `EntityHandle` | Entity with a rigid body. |
-
-**Returns:** `glm::vec3` -- angular velocity in radians/second.
-
----
-
-## Body Management
-
-### rebuildBody
-
-```cpp
 void rebuildBody(EntityHandle entity);
-```
-
-Rebuild the physics body for an entity. Call this after changing the collider shape at runtime to apply the new shape to the Bullet3 simulation.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `entity` | `EntityHandle` | Entity with a rigid body component. |
-
-### getBodyCount
-
-```cpp
 uint32_t getBodyCount() const;
 ```
 
-Get the total number of tracked physics bodies in the simulation.
-
-**Returns:** `uint32_t` -- body count.
-
----
-
-## Related Types
-
-### RigidBodyType
-
-```cpp
-enum class RigidBodyType : uint8_t {
-    Static    = 0,
-    Kinematic = 1,
-    Dynamic   = 2
-};
-```
-
-| Value | Description |
-|-------|-------------|
-| `Static` | Immovable body (walls, floors). Zero mass. |
-| `Kinematic` | Controlled by code, not physics. Affects dynamic bodies but is not affected by forces. |
-| `Dynamic` | Fully simulated. Affected by gravity, forces, and collisions. |
-
-### ColliderShape
-
-```cpp
-enum class ColliderShape : uint8_t {
-    Box     = 0,
-    Sphere  = 1,
-    Capsule = 2,
-    Mesh    = 3,
-    Plane   = 4
-};
-```
-
-| Value | Description |
-|-------|-------------|
-| `Box` | Axis-aligned box collider. |
-| `Sphere` | Sphere collider. |
-| `Capsule` | Capsule collider (cylinder with hemispherical caps). |
-| `Mesh` | Triangle mesh collider (static bodies only). |
-| `Plane` | Infinite plane collider. |
-
-These enums are defined in `Facade/FacadeTypes.h` and are used when adding physics components via [SceneAPI](scene-api.md).
+<!-- END SOURCE API -->

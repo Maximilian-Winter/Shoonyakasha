@@ -8,281 +8,105 @@
 
 </div>
 
----
+Shoonyakasha is a C++20 Vulkan engine library with Python bindings and **JSON-defined render pipelines**. Declare resources, graphics and compute passes, shader bindings, buffer layouts, and data sources; the engine compiles the graph and resolves its bindings at runtime. Build applications through the C++ facade or Python, or extend the renderer through the lower-level C++ APIs.
 
-> **Status:** Shoonyakasha is in early development. The core engine works and the examples run, but the API may change as things evolve. Feedback and contributions are welcome.
+**Status:** Early development. APIs may change. Supported settings do not necessarily have a ready-made rendering effect; see the feature boundaries below and the [documentation](docs/index.md).
 
-<!-- Add a hero screenshot here: screenshots/hero.png -->
-<!-- A rendered scene (e.g. Sponza with IBL and particles) works well -->
+## Example gallery
 
-## What is this?
+| 3D rendering | Compute particles |
+|---|---|
+| [<img src="docs/images/examples/cpp/instancing_test.png" alt="Pastel boxes with independent transforms and shared geometry" width="400">](docs/examples/cpp-examples.md#instancing-instancing_test) | [<img src="docs/images/examples/cpp/particle_flow_example.png" alt="Multicolored GPU particles surrounding the bundled red box" width="400">](docs/examples/cpp-examples.md#particle-flow-particle_flow_example) |
+| Instancing with bundled boxes | Particle flow with the bundled-box fallback |
+| **Skeletal animation** | **2D and UI** |
+| [<img src="docs/images/examples/python/skinned_fox_demo.png" alt="Bundled animated Fox model rendered through Python" width="400">](docs/examples/python-examples.md#animated-fox-skinned_fox_demo) | [<img src="docs/images/examples/python/full_showcase.png" alt="Orbiting sprites, colored halos, health HUD and system-status text" width="400">](docs/examples/python-examples.md#full-showcase-full_showcase) |
+| Fox animation through Python | Sprites, blend modes, text, and Python ECS |
 
-Shoonyakasha is a Vulkan-based C++ game engine library with Python bindings. Its main idea is that render pipelines are declared in JSON rather than coded in C++ — buffer layouts, render passes, shader bindings, and data sources are all described in a JSON file that the engine compiles into Vulkan resources at runtime. You can build 3D applications in C++ or drive the entire engine from Python through its Cython bridge.
+Browse every preview in the [C++ guide](docs/examples/cpp-examples.md) and [Python guide](docs/examples/python-examples.md). These are native runtime captures; the guides explain asset substitutions and the missing Pong preview.
 
-## Get started in one command
+## JSON is the rendering interface
 
-```sh
-python -m shoonyakasha.init my_game
-cd my_game && python main.py
-```
-
-That writes a project that runs immediately: a single-pass pipeline, a vertex
-and fragment shader, and a `main.py` that compiles the shaders and opens a
-window. Edit `shaders/basic.frag`, run again, see the change.
-
-## Frame capture
-
-Screenshots and video of what was actually on screen — after tonemapping, after
-UI, everything — from either language.
-
-```python
-engine.capture_screenshot("shot.png")        # .png .jpg .bmp .tga .hdr
-engine.start_recording("clip.mkv", fps=30)   # .mkv .mp4 .webm
-engine.stop_recording()
-```
-
-```cpp
-engine.captureScreenshot("shot.png");
-engine.startRecording("clip.mkv");
-engine.stopRecording();
-```
-
-Video needs ffmpeg on `PATH` or in `$FFMPEG`. Frames are piped to it rather than
-linking an encoder, so there is no extra dependency to build.
-`sk.video_recording_available()` / `videoRecordingAvailable()` reports whether
-one was found, and `find_ffmpeg()` says which.
-
-Readback is synchronous: each captured frame stalls until the GPU copy
-completes, so recording lowers the frame rate.
-
-## Python utilities
-
-Three pure-Python modules ship alongside the bindings. They do not need the
-compiled extension, so they work in CI and before the engine is built.
-
-```python
-import shoonyakasha as sk
-
-sk.shaders.compile_dir("shaders")        # GLSL -> SPIR-V, only what changed
-sk.pipeline.validate("pipeline.json")    # every mistake at once, with the pass name
-sk.assets.exists("models/Sponza.gltf")   # check before starting, fall back if absent
-sk.assets.fetch("env")                   # download the large environment maps
-```
-
-`sk.shaders` finds `glslc` through `VULKAN_SDK`, `PATH`, or the usual SDK
-install roots, and recompiles only what is out of date — which is why the demos
-no longer document a manual `glslc` invocation for you to run.
-
-`sk.pipeline.validate` reports the file, the pass and the key:
-
-```
-error: pipeline.json passes[2] 'AdditivePass' outputs[0]
-    usage 'color_blnd' is not known
-    did you mean 'color_blend'?
-```
-
-The engine's own parser reports the first problem it hits and nothing about
-where it came from.
-
-## Quick Start — Python
-
-```python
-import shoonyakasha as sk
-
-engine = sk.Engine(
-    title="My App",
-    width=1280, height=720,
-    pipeline_json_path="pipeline.json",
-    hdr_environment_path="environment.hdr",
-)
-
-def on_init():
-    engine.create_camera(pos=(0, 5, 15), fov=60, speed=8)
-    engine.create_directional_light(
-        direction=(-0.5, -1, -0.3),
-        color=(1, 0.975, 0.95),
-        intensity=3.0,
-    )
-    engine.load_gltf_scene("scene.gltf")
-
-engine.set_on_init(on_init)
-engine.run()
-```
-
-## Quick Start — C++
-
-```cpp
-#include "Facade/EngineAPI.h"
-
-using namespace Shoonyakasha::Facade;
-
-int main() {
-    EngineConfig config;
-    config.title = "My App";
-    config.width = 1280;
-    config.height = 720;
-    config.pipelineJsonPath = "pipeline.json";
-    config.hdrEnvironmentPath = "environment.hdr";
-
-    EngineAPI engine(config);
-
-    engine.setOnInit([&]() {
-        engine.createCamera(glm::vec3(0, 5, 15), 60.f, 8.f, 0.1f, 500.f);
-        engine.createDirectionalLight(
-            glm::vec3(-0.5f, -1.f, -0.3f),
-            glm::vec3(1.f, 0.975f, 0.95f),
-            3.f
-        );
-        engine.loadGltfScene("scene.gltf");
-    });
-
-    engine.run();
-    return 0;
-}
-```
-
-## JSON Render Pipelines
-
-Instead of writing C++ code to allocate buffers, create render passes, and bind descriptor sets, you describe your pipeline in JSON. The engine compiles it into Vulkan resources and resolves data bindings at runtime through dot-paths.
+This fragment defines a camera buffer populated from engine state:
 
 ```json
 {
-  "name": "CameraUBO",
-  "usage": "uniform_buffer",
-  "packing": "std140",
-  "updateFrequency": "per_frame",
-  "fields": [
-    { "name": "view",       "type": "mat4", "source": "scene.camera.view" },
-    { "name": "projection", "type": "mat4", "source": "scene.camera.projection" },
-    { "name": "position",   "type": "vec3", "source": "scene.camera.position" }
-  ]
+  "bufferLayouts": {
+    "CameraUBO": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "view", "type": "mat4", "source": "scene.camera.view" },
+        { "name": "projection", "type": "mat4", "source": "scene.camera.projection" }
+      ]
+    }
+  }
 }
 ```
 
-A dot-path like `scene.camera.view` tells the engine to walk the ECS at render time, find the camera's view matrix, and write it into the buffer. No glue code needed — add a new data source by referencing it by name in JSON.
+A complete pipeline also declares passes, resources, and bindings. Change their configuration without recompiling the engine; compile changed GLSL shaders to SPIR-V and restart the application. Dot-paths address supported engine data, material values, and application-provided `scene.custom.*` values. New renderer behavior or native data sources can still require C++.
 
-You can change your entire rendering pipeline — add a shadow pass, swap a shader, restructure your buffers — by editing the JSON file. No C++ recompilation required.
+Start with the [pipeline walkthrough](docs/guides/json-render-pipeline.md), [JSON reference](docs/reference/pipeline-json.md), or [complete starter pipeline](python/shoonyakasha/templates/pipeline.json).
 
 ## Features
 
-**Rendering**
-- Vulkan rendering with explicit synchronization
-- PBR materials and image-based lighting (IBL)
-- Declarative JSON render pipelines with runtime dot-path data binding
-- Post-processing (bloom)
-- Async compute (GPU particle simulation)
-- Skeletal animation with skinned meshes
+| Area | Current capabilities | Learn more |
+|---|---|---|
+| Declarative rendering | Graphics/compute passes, resource dependencies, queue selection, vertex formats, descriptors, push constants, UBO/SSBO layouts, packing, and dot-path bindings | [JSON pipelines](docs/guides/json-render-pipeline.md) |
+| Rendering examples | Forward shading, deferred PBR, HDR image-based lighting, tonemapping, bloom, and compute-driven particles | [Examples](examples/README.md) |
+| Render control | Depth/culling/blend state, custom blend factors, opaque/transparent/skinned/sprite execution, layer masks, and sorting | [Pipeline reference](docs/reference/pipeline-json.md) |
+| GPU data flow | Shared storage buffers, parameterized counts and dispatch, initialization, readback, and render-target saving | [Compute and data flow](docs/guides/compute-and-data-flow.md) |
+| Scenes and ECS | EnTT entities, named component registry, parent/child transforms, camera controllers, lights, material parameters, and partial scene serialization | [Entities](docs/guides/entities-and-components.md) |
+| Assets and instancing | glTF/GLB meshes, materials, textures, node hierarchies, shared geometry for repeated mesh nodes, skins, and animation clips | [Loading scenes](docs/guides/loading-scenes.md), [instancing](docs/guides/instancing.md) |
+| Animation | Skeletal clip playback, time/speed/loop control, and GPU bone buffers | [Animation](docs/guides/animation.md) |
+| 2D and UI | World sprites, anchored screen panels, UV rectangles, colors, glyph-atlas text, layering, and draw order | [Sprites, UI, and text](docs/guides/sprites-ui-text.md) |
+| Physics | Bullet rigid bodies; box, sphere, capsule, and plane shapes; gravity, forces, impulses, velocity, and fixed-step settings | [Physics](docs/guides/physics.md) |
+| Python | Cython facade bindings, lifecycle/input callbacks, arbitrary Python ECS components, and per-frame script systems | [Python quickstart](docs/getting-started/python-quickstart.md), [script ECS](docs/guides/script-ecs.md) |
+| Developer tools | Project scaffolding, incremental shader compilation, pipeline diagnostics, asset lookup/fetch, frame-graph analysis/export, and Vulkan validation | [Python utilities](docs/api/python/utilities.md), [frame graph](docs/api/cpp/frame-graph.md) |
+| Capture | Screenshots of the presented frame and video recording through an external ffmpeg executable | [Frame capture](docs/guides/frame-capture.md) |
 
-**Entity Component System**
-- EnTT-based ECS with 23 component types (11 registered for name-based access)
-- Hierarchical transforms with parent-child relationships
-- Entity builder pattern and component registry
+The mesh collider enum currently uses a box fallback; raycasting and constraints are not exposed by the physics API. Text supports ASCII glyphs 32–126. Scene JSON is a partial component snapshot, not a complete game save. Geometry sharing does not imply automatic batching into one instanced draw. Capture uses synchronous GPU readback. The linked guides explain these limits and C++/Python differences.
 
-**Physics**
-- Bullet3 rigid body dynamics and collision detection
-- Box, sphere, capsule, mesh, and plane colliders
-- Raycasting and gravity control
+## Get started
 
-**Asset Loading**
-- glTF 2.0 import (meshes, materials, node hierarchies, animations)
-- HDR environment maps for IBL
-- Automatic texture and material setup
+Install the compiler, Vulkan SDK, and vcpkg dependencies using [BUILDING.md](BUILDING.md). Python use also requires building the native extension.
 
-**Python Integration**
-- Cython bindings with near-native performance
-- Full engine control: scenes, physics, input, rendering
-- Callback-driven lifecycle (init, update, render, input, cleanup)
+After installing the Python package, run these commands **from the repository root**:
 
-<!-- screenshots/particles.png — 50K GPU particle simulation -->
-<!-- screenshots/animation.png — Skeletal animation playback -->
-
-## Building from Source
-
-### Prerequisites
-
-- C++20 compiler (MSVC 2022, GCC 12+, or Clang 15+)
-- CMake 3.21+
-- Vulkan SDK
-- vcpkg (the repo is a vcpkg manifest with a pinned baseline; dependencies are
-  fetched for you)
-- Vulkan SDK — also provides `glslc`, needed to build the examples' shaders
-
-### Build
-
-```bash
-cmake -B build -S .   -DCMAKE_TOOLCHAIN_FILE=<path-to-vcpkg>/scripts/buildsystems/vcpkg.cmake   -DBUILD_EXAMPLES=ON   -DBUILD_TESTS=ON -DVCPKG_MANIFEST_FEATURES=tests
-cmake --build build --config Release
+```sh
+python -m shoonyakasha.init my_game
+cd my_game
+python main.py
 ```
 
-The toolchain file is not optional: every dependency is resolved through vcpkg,
-so `find_package` fails at configure time without it. `BUILD_TESTS=ON`
-additionally needs `VCPKG_MANIFEST_FEATURES=tests`, or GoogleTest is never
-installed. See [BUILDING.md](BUILDING.md) for the full matrix.
+The starter contains Python code, a pipeline, and shaders. It compiles shaders on startup and loads the bundled box from the repository's `assets/` directory. For projects outside the checkout, set `SHOONYAKASHA_ASSET_DIR` to that directory. See the [Python quickstart](docs/getting-started/python-quickstart.md).
 
-For Python bindings:
+For C++, build and run `FacadeTest` following the [C++ quickstart](docs/getting-started/cpp-quickstart.md). It demonstrates scene loading, camera/input callbacks, and the facade without Vulkan or EnTT in application code. The [build guide](BUILDING.md) also covers linking the installed library through CMake.
 
-```bash
-pip install .
-```
+## Documentation and examples
 
-Building the extension by hand additionally requires
-`-DVCPKG_TARGET_TRIPLET=x64-windows-static-md` on Windows; without it the
-resulting module fails to import with `DLL load failed`. See
-[BUILDING.md](BUILDING.md).
+- [Documentation index](docs/index.md): guides, C++/Python references, and architecture.
+- [Example catalog](examples/README.md): rendering, compute, animation, physics, and 2D games.
+- [Asset guide](assets/README.md): bundled assets, optional downloads, and licenses.
+- [Documentation maintenance](docs/maintenance.md): checks and source-of-truth checklist.
 
-The compiled `_shoonyakasha.pyd` (Windows) or `.so` (Linux) will be in `python/shoonyakasha/`.
+Pipelines and shaders are resolved from the application's working directory. Models, environments, textures, and fonts use the shared asset resolver. Run examples from their own source directories; some artwork is optional or separately licensed.
 
-## Project Structure
+## Project structure
 
-```
-include/           C++ headers organized by subsystem
-src/               Implementation files
-python/            Cython bindings and Python package
-examples/          Runnable examples, by language and topic
-  cpp/             10 C++ applications, built by CMake
-  python/          6 Python scripts, no build step
-assets/            Shared example assets (models, environments, textures, fonts)
-tools/             Asset fetch and conversion scripts
-tests/             Automated test suite
-docs/              Guides, API reference, architecture docs
-third_party/       VulkanMemoryAllocator, cgltf, stb, tinyobjloader
-cmake/             CMake configuration
-```
-
-Every example runs on a fresh clone — `assets/` ships small versions of
-everything they load, and paths are resolved against it at runtime rather than
-relative to the working directory. `python tools/fetch_assets.py env` gets the
-full-resolution environment maps. See [assets/README.md](assets/README.md) for
-provenance and licences.
-
-## Documentation
-
-Full documentation is in the [`docs/`](docs/index.md) directory, including:
-
-- Getting started guides for [Python](docs/getting-started/python-quickstart.md) and [C++](docs/getting-started/cpp-quickstart.md)
-- Guides on [JSON pipelines](docs/guides/json-render-pipeline.md), [physics](docs/guides/physics.md), [animation](docs/guides/animation.md), and more
-- API reference for both Python and C++
-- Architecture documentation
-
-## Examples
-
-| Example | Description |
-|---------|-------------|
-| `facade_test` | Full application using only the Facade API |
-| `declarative_sponza_test` | Architectural scene with PBR and IBL |
-| `particle_test` | 50K+ GPU particle simulation with async compute |
-| `bloom_test` | Post-processing bloom effect |
-| `particle_flow_example` | Particle systems with SSBO data flow |
-| `ssbo_data_flow_example` | Storage buffer patterns and data binding |
-| `skinned_mesh_test` | Skeletal animation playback |
-| `physics_test` | Rigid body dynamics and collision |
-| `pbr_physics_particles` | Combined physics, particles, and PBR |
+| Directory | Contents |
+|---|---|
+| `include/`, `src/` | C++ interfaces and implementations |
+| `python/` | Cython bindings, Python utilities, and starter template |
+| `examples/` | C++ and Python examples grouped by topic |
+| `assets/`, `tools/` | Shared assets and development tools |
+| `tests/` | C++ unit tests and Python checks |
+| `docs/` | Current documentation and labeled historical material |
+| `cmake/`, `third_party/` | Build helpers and vendored dependencies |
 
 ## Philosophy
 
-**Shoonyakasha** (शून्याकाश) combines two Sanskrit words: *sunya* (शून्य, emptiness) and *akasa* (आकाश, space). Emptiness here means clean interfaces that don't get in the way. Space means a flexible architecture with room for what you haven't imagined yet.
-
-Read more in the [Philosophy](docs/philosophy.md) document.
+**Shoonyakasha** (शून्याकाश) combines *sunya* (emptiness) and *akasa* (space): clean interfaces and room to create. Read the [Philosophy](docs/philosophy.md).
 
 ## Dedication
 
@@ -290,4 +114,4 @@ Read more in the [Philosophy](docs/philosophy.md) document.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE). Assets have their own [provenance and licenses](assets/README.md).

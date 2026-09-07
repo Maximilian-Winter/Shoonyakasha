@@ -12,26 +12,16 @@ configure. You do not install them by hand.
 
 | | Windows | Linux |
 |---|---|---|
-| Compiler | MSVC 2022 (17.x) | GCC 11+ or Clang 14+ |
+| Compiler | MSVC 2022 (17.x) | C++20-capable GCC or Clang |
 | CMake | 3.21+ | 3.21+ |
 | Generator | Ninja or Visual Studio 17 2022 | Ninja or Make |
 | vcpkg | any clone (CLion's bundled one is fine) | any clone |
-| Vulkan | GPU driver + [LunarG SDK](https://vulkan.lunarg.com/) | GPU driver + `glslc` |
+| Vulkan | GPU driver + [LunarG SDK](https://vulkan.lunarg.com/) | GPU driver + Vulkan SDK (including `glslc`) |
 | Python (bindings only) | 3.8+, 64-bit | 3.8+, with `python3-dev` |
 
-The Vulkan **loader and headers** are supplied by vcpkg. The **SDK** is a hard
-requirement for `BUILD_EXAMPLES=ON`: each example calls `find_program(GLSLC glslc
-HINTS $ENV{VULKAN_SDK}/Bin $ENV{VULKAN_SDK}/bin)` and aborts with
-`glslc not found!` if it is missing. Install the SDK and make sure `VULKAN_SDK`
-is exported before configuring.
+Install the Vulkan SDK before configuring: the project calls `find_package(Vulkan REQUIRED)` and the pinned vcpkg manifest includes the `vulkan` port. Example builds also require the SDK's `glslc`, located by the shared `cmake/CompileShaders.cmake` helper through `VULKAN_SDK` or `PATH`.
 
-On Linux, `glslc` can also come from a distribution package (`shaderc` on Fedora,
-`glslc` or `shaderc` on Arch; Debian/Ubuntu ship `glslangValidator` in
-`glslang-tools`, which is *not* the same binary). `find_program` searches `PATH`
-in addition to the hints, so a packaged `glslc` on `PATH` satisfies it without
-`VULKAN_SDK` being set.
-
-The engine library itself does not need the SDK — only the examples do.
+Current CI verifies Windows/MSVC headless builds and tests. Linux commands below are a build recipe, not a claim of CI-tested runtime support. Rendering requires a suitable Vulkan device and driver; headless unit tests do not exercise that path.
 
 ### Getting vcpkg
 
@@ -50,8 +40,8 @@ cd vcpkg && ./bootstrap-vcpkg.sh     # bootstrap-vcpkg.bat on Windows
 Point `VCPKG_ROOT` at whichever clone you use. Everything below assumes it is set.
 
 ```powershell
-# Windows (PowerShell, persists for new shells)
-[Environment]::SetEnvironmentVariable("VCPKG_ROOT", "C:\Users\maxim\.vcpkg-clion\vcpkg", "User")
+# Windows (PowerShell, current shell)
+$env:VCPKG_ROOT = "C:/path/to/vcpkg"
 ```
 
 ```bash
@@ -83,10 +73,11 @@ rather than as a clear message, so it is worth installing all of them up front.
 
 | Option | Default | Effect |
 |---|---|---|
-| `BUILD_EXAMPLES` | `OFF` | Build the nine example applications |
+| `BUILD_EXAMPLES` | `OFF` | Build the C++ example applications |
 | `BUILD_TESTS` | `OFF` | Build the GoogleTest suite; also defines `SHOONYAKASHA_TESTING` |
 | `BUILD_PYTHON` | `OFF` | Build the Cython extension module |
 | `SHOONYAKASHA_INSTALL` | `ON` | Generate install/export rules for the C++ library |
+| `SHOONYAKASHA_WERROR` | `OFF` | Treat compiler warnings as errors; enabled in CI |
 
 `BUILD_TESTS=ON` additionally requires the manifest's `tests` feature so that
 vcpkg installs GoogleTest:
@@ -105,7 +96,7 @@ Run these from a **Developer PowerShell for VS 2022**. CMake needs `cl.exe` and
 `link.exe` on `PATH`; a plain PowerShell will fail at compiler detection.
 
 ```powershell
-cd H:\engine-dev\Shoonyakasha
+cd C:/path/to/Shoonyakasha
 
 cmake -S . -B build -G Ninja `
       -DCMAKE_BUILD_TYPE=Release `
@@ -167,8 +158,7 @@ cd examples\cpp\compute\particle_flow_example
 ..\..\..\..\build\examples\cpp\compute\particle_flow_example\ParticleFlowExample.exe
 ```
 
-CLion and Visual Studio need no extra setup: each example sets
-`VS_DEBUGGER_WORKING_DIRECTORY` to its own source directory.
+Examples set `VS_DEBUGGER_WORKING_DIRECTORY` for Visual Studio. In other IDEs, set the run configuration working directory to the example source directory.
 
 Because shaders are compiled in-source, `.spv` files appear in the working tree
 after a build.
@@ -219,18 +209,18 @@ proves less than a `find_package` that resolves.
 The `pyproject.toml` build drives the same `CMakeLists.txt` with `BUILD_PYTHON=ON`,
 `BUILD_EXAMPLES=OFF`, `BUILD_TESTS=OFF`, and `SHOONYAKASHA_INSTALL=OFF` — the last
 so the C++ library's `include/`/`lib/` install rules don't spill into
-`site-packages`. Only the compiled extension module is packaged.
+`site-packages`. The Python package sources, starter template, and compiled extension are packaged; repository assets are not.
 
 ### Windows
 
 ```powershell
-cd H:\engine-dev\Shoonyakasha
-py -3.13 -m venv .venv
+cd C:/path/to/Shoonyakasha
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
 
 python -m pip install . -v `
-  -C cmake.define.CMAKE_TOOLCHAIN_FILE="C:/Users/maxim/.vcpkg-clion/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+  -C cmake.define.CMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
   -C cmake.define.VCPKG_TARGET_TRIPLET=x64-windows-static-md
 ```
 
@@ -268,7 +258,7 @@ override is needed. If linking fails with *"recompile with -fPIC"*, use
 ### Verifying
 
 ```bash
-python -c "import shoonyakasha; print(shoonyakasha.__file__)"
+python -c "import shoonyakasha as sk; print(sk.extension_available()); print(sk.Engine)"
 cd examples/python/getting_started/demo
 python demo.py
 ```
@@ -282,8 +272,7 @@ python -m pip install --no-build-isolation -e . -v \
 ```
 
 `--no-build-isolation` is required: an editable install needs the build backend
-importable from the venv itself. Afterwards, changes to `.pyx` sources rebuild
-automatically on import.
+importable from the venv itself. Re-run the install command after changing `.pyx` sources; this project does not configure automatic editable rebuilds on import.
 
 ---
 
@@ -328,9 +317,11 @@ upgrade:
 When a newer port breaks the build and the fix has to wait:
 
 ```json
-"overrides": [
-  { "name": "bullet3", "version": "3.25", "port-version": 3 }
-]
+{
+  "overrides": [
+    { "name": "bullet3", "version": "3.25", "port-version": 3 }
+  ]
+}
 ```
 
 Overrides apply only from the top-level manifest and ignore all other constraints.
@@ -347,8 +338,7 @@ its own includes.
 
 **`ninja: error: build.ninja:35: loading 'CMakeFiles\rules.ninja'`**
 Collateral from a failed generate step — `build.ninja` exists but references files
-that were never written. Delete the build directory; a plain reconfigure won't
-recover it.
+that were never written. Inspect the original configure error and configure into a fresh build directory.
 
 **`Could not find toolchain file: C:Usersmaxim...`**
 Backslashes eaten by POSIX `shlex`. Use forward slashes, and prefer
@@ -365,7 +355,7 @@ a venv breaks if its directory is renamed, copied, or moved. Compare `pip -V` wi
 `python -m pip` throughout avoids the class of problem entirely.
 
 **`glslc not found! Make sure the Vulkan SDK is installed.`**
-Only affects `BUILD_EXAMPLES=ON`. Either install the LunarG SDK and export
+Example builds and Python shader compilation need this executable. Either install the LunarG SDK and export
 `VULKAN_SDK`, or put a `glslc` on `PATH`. Note that `glslangValidator` will not
 satisfy this check — the examples invoke `glslc` specifically.
 

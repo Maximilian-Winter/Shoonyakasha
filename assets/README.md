@@ -12,7 +12,9 @@ loadGltfScene("models/Box.gltf");
 Set `SHOONYAKASHA_ASSET_DIR` to point somewhere else. `.shoonyakasha-assets` is
 the marker that identifies this directory; do not delete it.
 
-## Everything here is committed, and every example runs on a fresh clone
+## Bundled assets and optional downloads
+
+Small assets support the starter and shared-asset examples. Pong artwork is separate; see its [README](../examples/python/games_2d/pong_game/README.md).
 
 The environment maps are 1024×512 downsamples, ~2 MB each rather than ~99 MB.
 They are enough to see IBL working. For the full-resolution originals:

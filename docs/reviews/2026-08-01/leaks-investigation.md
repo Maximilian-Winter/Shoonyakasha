@@ -1,3 +1,5 @@
+> **Historical document — not current guidance.** Preserved for context. See the [current documentation](../../index.md) and [archive index](../../archive.md).
+
 # Object leaks at `vkDestroyDevice` — investigation
 
 **Status:** all four causes fixed, plus a fifth the fixes exposed. Every example

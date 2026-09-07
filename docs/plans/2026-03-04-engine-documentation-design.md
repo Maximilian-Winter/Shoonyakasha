@@ -1,3 +1,5 @@
+> **Historical document — not current guidance.** Preserved for context. See the [current documentation](../index.md) and [archive index](../archive.md).
+
 # Shoonyakasha Engine Documentation — Design Document
 
 **Date:** 2026-03-04

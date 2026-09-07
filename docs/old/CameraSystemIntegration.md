@@ -1,3 +1,5 @@
+> **Historical document — not current guidance.** Preserved for context. See the [current documentation](../index.md) and [archive index](../archive.md).
+
 # Camera Controller System Integration Guide
 # 攝影機控制系統整合指南
 

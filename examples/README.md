@@ -1,6 +1,6 @@
 # Examples
 
-Sixteen runnable programs, split by language and then by what they show.
+Runnable programs, split by language and then by what they show.
 
 ```
 examples/
@@ -15,9 +15,21 @@ anywhere in the tree.
 
 ---
 
+## Example gallery
+
+| 3D rendering | Compute particles |
+|---|---|
+| [<img src="../docs/images/examples/cpp/instancing_test.png" alt="Pastel boxes with independent transforms and shared geometry" width="400">](../docs/examples/cpp-examples.md#instancing-instancing_test) | [<img src="../docs/images/examples/cpp/particle_flow_example.png" alt="Multicolored GPU particles surrounding the bundled red box" width="400">](../docs/examples/cpp-examples.md#particle-flow-particle_flow_example) |
+| Instancing with bundled boxes | Particle flow with the bundled-box fallback |
+| **Skeletal animation** | **2D and UI** |
+| [<img src="../docs/images/examples/python/skinned_fox_demo.png" alt="Bundled animated Fox model rendered through Python" width="400">](../docs/examples/python-examples.md#animated-fox-skinned_fox_demo) | [<img src="../docs/images/examples/python/full_showcase.png" alt="Orbiting sprites, colored halos, health HUD and system-status text" width="400">](../docs/examples/python-examples.md#full-showcase-full_showcase) |
+| Fox animation through Python | Sprites, blend modes, text, and Python ECS |
+
+Browse every preview in the [C++ guide](../docs/examples/cpp-examples.md) and [Python guide](../docs/examples/python-examples.md). These are native runtime captures; the guides explain asset substitutions and the missing Pong preview.
+
 ## C++
 
-Built when `-DBUILD_EXAMPLES=ON` (the default). Executables land in
+Built when `-DBUILD_EXAMPLES=ON` (default: `OFF`). Executables land in
 `build/examples/cpp/<category>/<name>/`; the target names differ from the
 directory names, see [BUILDING.md](../BUILDING.md).
 
@@ -47,7 +59,7 @@ directory names, see [BUILDING.md](../BUILDING.md).
 
 | | |
 |---|---|
-| [`physics_test`](cpp/physics/physics_test) | Rigid bodies, colliders and constraints through the physics facade. |
+| [`physics_test`](cpp/physics/physics_test) | Rigid bodies and collider setup through the native C++ ECS/physics system. |
 | [`pbr_physics_particles`](cpp/physics/pbr_physics_particles) | Everything at once: PBR, IBL, physics and compute particles in one frame. Filed under physics because it has to go somewhere. |
 
 ### animation

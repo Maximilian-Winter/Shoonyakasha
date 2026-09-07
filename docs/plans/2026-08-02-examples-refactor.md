@@ -1,3 +1,5 @@
+> **Historical document — not current guidance.** Preserved for context. See the [current documentation](../index.md) and [archive index](../archive.md).
+
 # Examples Refactor — Focused Examples with a Progression
 
 **Status:** planned, not started. Written 2026-08-02 against commit `38f594f`.

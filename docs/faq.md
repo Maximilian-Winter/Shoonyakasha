@@ -1,149 +1,45 @@
-# Frequently Asked Questions
+# FAQ and troubleshooting
 
-Answers to common questions, organized by category.
+## Where should I start?
 
----
+Use the [Python starter](getting-started/python-quickstart.md) or [C++ FacadeTest](getting-started/cpp-quickstart.md). Build/install prerequisites live in [BUILDING.md](../BUILDING.md).
 
-## Setup
+## Does JSON replace shaders and C++?
 
-### How do I build the engine?
+It configures resources, passes, supported execution types, and bindings. You still compile GLSL to SPIR-V. New native execution behavior or unsupported data sources may require C++. Restart to apply file edits; automatic live reload is not a documented facade feature.
 
-Use CLion with the MSVC toolchain, or open the project in Visual Studio. Load `CMakeLists.txt` as the project root. Do not build from the command line unless you have run `vcvars64.bat` first -- the MSVC environment variables will not be set otherwise.
+## Why does importing the package work but Engine fails?
 
-See [Prerequisites](getting-started/prerequisites.md) for full setup instructions.
+Utilities import without the extension. Check `sk.extension_available()` and `sk.Engine`; build the extension for the active interpreter. On Windows, follow the build guide's static-md triplet instructions. Do not assume a `.pyd` built for another Python version is usable.
 
-### How do I use the Python bindings?
+## Why are pipeline or shader files missing?
 
-Install the package from the repository root with `pip install .`. That builds the engine and the extension module and installs both, after which `import shoonyakasha` works from anywhere. See [BUILDING.md](../BUILDING.md) for the vcpkg toolchain argument this needs on Windows.
+Run from the example source directory. The asset-root resolver handles models/fonts/textures/environments, not arbitrary shader paths. Compile GLSL through CMake for C++ examples or `sk.shaders.compile_dir` for Python.
 
-See [Python Quickstart](getting-started/python-quickstart.md) for a walkthrough.
+## Why is my scene black or empty?
 
-### What Vulkan SDK version do I need?
+Check the log, glTF `result.success`, camera position/clip range, required environment resources, matching shader/vertex/descriptor layouts, and final present output. Confirm the pass execution type matches the geometry (ordinary, skinned, or sprite). The [pipeline guide](guides/json-render-pipeline.md) explains validation.
 
-The engine requires the LunarG Vulkan SDK. Any recent version (1.3 or later) should work.
+## Does validator success guarantee rendering?
 
-### How do I verify everything works?
+No. The validator checks selected declarations and files, not all C++ parser cases, shader interfaces, or Vulkan constraints. `pipeline.check` raises on errors and returns a diagnostic list on success. See [differences](reference/pipeline-json.md#validation-and-export).
 
-Build with `BUILD_TESTS=ON` and run the test suite. There are the automated test suite in total (518 core + 64 facade). If all pass, the build is good.
+## Are all engine features exposed in Python?
 
----
+No. Typed collider settings, raw registry/graph access, loader root/node result lists, and the validation config switch are examples of native-only surfaces. Use the public references instead of translating native names into guessed Python calls.
 
-## Rendering
+## Can I save and restore a complete scene?
 
-### How do I create a custom render pipeline?
+Not through the current component snapshot API. It clears entities on load and omits GPU/gameplay resources; it also has known write-check limitations. See [serialization](guides/scene-serialization.md).
 
-Write a JSON pipeline file that describes your passes, resources, and bindings. Then point the engine to it via the `pipeline_json_path` configuration option. The engine compiles the JSON into Vulkan resources and executes the pipeline automatically.
+## Why does text remain after destroying its entity?
 
-See [JSON Render Pipeline Guide](guides/json-render-pipeline.md) for the full specification.
+Labels generate separate glyph entities. Hide the label with `set_text_visible` before destruction. See [text lifetime](guides/sprites-ui-text.md#text-limitations-and-lifetime).
 
-### What is a dot-path?
+## Why does recording slow rendering down?
 
-A dot-path is a string expression like `"entity.transform.worldMatrix"` that resolves to runtime ECS data at render time. Dot-paths are used inside JSON pipeline buffer layouts to connect shader uniforms to live scene data without writing any binding code.
+It synchronously reads back presented frames and pipes them to ffmpeg. Check capture return values and logs; see [capture](guides/frame-capture.md).
 
-See [Dot-Path Syntax](guides/json-render-pipeline.md#dot-path-syntax) for the full syntax reference.
+## Which platforms are verified?
 
-### How do I add post-processing effects?
-
-Add a fullscreen pass in your JSON pipeline that reads the scene color attachment as an input and writes to the swapchain (or another intermediate target). Chain multiple fullscreen passes for multi-step effects. See the bloom pipeline example for a working reference.
-
-### My scene is black or not rendering. What do I check?
-
-Work through this checklist:
-
-1. **Pipeline JSON path** -- is the path correct and the file valid?
-2. **HDR environment** -- is an environment map loaded for image-based lighting?
-3. **Camera** -- does a camera entity exist with `isMainCamera = true`?
-4. **Lighting** -- does at least one light entity exist in the scene?
-5. **Model** -- did the model load successfully without errors?
-
----
-
-## Physics
-
-### Physics is not working. What do I check?
-
-Work through this checklist:
-
-1. **Physics enabled** -- is `physics.enabled` set to `True`?
-2. **Components** -- does the entity have both a `RigidBody` and a `Collider` component?
-3. **Rebuild** -- after adding physics components from Python, have you called `rebuild_body()`?
-4. **Gravity** -- is gravity configured (it defaults to zero if not set)?
-
-### How do I change a collider shape at runtime?
-
-Modify the fields on the `ColliderComponent`, then call `physics.rebuild_body(entity)` to reconstruct the underlying Bullet3 rigid body with the new shape.
-
----
-
-## Python
-
-### How do I pass data to shaders from Python?
-
-Use the custom uniform setters on the engine object:
-
-```python
-engine.set_custom_float("time", elapsed)
-engine.set_custom_vec3("tint", (1.0, 0.5, 0.0))
-```
-
-Then reference the value in your JSON pipeline as `scene.custom.<key>` (for example, `scene.custom.time`).
-
-See [Custom Shader Uniforms](guides/custom-shader-uniforms.md) for the full guide.
-
-### Can I use async/await with the engine?
-
-No. The engine runs a synchronous main loop via `engine.run()`. All callbacks (on_update, on_key, etc.) execute on the main thread during the render loop. If you need background work, manage your own threads, but keep all engine API calls on the main thread.
-
-### How do I access entity data?
-
-All entity manipulation goes through `engine.scene`. Use the getter and setter methods:
-
-```python
-pos = scene.get_position(entity)
-scene.set_light_color(entity, (1.0, 0.8, 0.6))
-```
-
-See the [Scene API](api/python/scene.md) reference for the complete method list.
-
-### What are GLFW key codes?
-
-Integer constants used for keyboard input in the `on_key` callback. Common values:
-
-| Key   | Code |
-|-------|------|
-| ESC   | 256  |
-| W     | 87   |
-| A     | 65   |
-| S     | 83   |
-| D     | 68   |
-| SPACE | 32   |
-| SHIFT | 340  |
-
-See the [Input API](api/python/input.md) reference for the full list.
-
----
-
-## General
-
-### What is the difference between ApplicationBase and EngineAPI?
-
-They provide the same functionality through different programming styles:
-
-- **ApplicationBase** is inheritance-based -- you subclass it and override virtual methods (`onInit`, `onUpdate`, etc.).
-- **EngineAPI** is callback-based -- you set lambdas or function pointers (`on_init`, `on_update`, etc.).
-
-The Python bindings wrap EngineAPI, so Python users always use the callback style.
-
-See [C++ Quickstart](getting-started/cpp-quickstart.md) for examples of both approaches.
-
-### How do I add a new ECS component?
-
-**In C++:** Define a struct for the component data and register it with the `ComponentRegistry`.
-
-**In Python:** Use the string-based API: `scene.add_component(entity, "ComponentName")`.
-
-See [Entities and Components](guides/entities-and-components.md) for the full guide.
-
-### How many tests does the engine have?
-
-the automated test suite total: 518 core engine tests and 64 facade tests. Build with `BUILD_TESTS=ON` and run with `ctest` to execute them all.
+CI builds and runs headless Windows/MSVC tests. Linux instructions are provided, but that CI does not verify Linux or macOS rendering. Headless tests also do not establish Vulkan runtime correctness.

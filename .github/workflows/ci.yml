@@ -21,6 +21,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check documentation links and snippet syntax
+        run: python tools/check_docs.py
+
+      - name: Check public API documentation inventories
+        run: python tools/generate_api_docs.py --check
+
       # find_package(Vulkan) resolves through vcpkg's `vulkan` port, which is a
       # stub that requires a real SDK on disk. Installed from LunarG directly
       # rather than via a third-party action so the provenance is visible here.

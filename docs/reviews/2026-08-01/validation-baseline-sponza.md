@@ -1,3 +1,5 @@
+> **Historical document — not current guidance.** Preserved for context. See the [current documentation](../../index.md) and [archive index](../../archive.md).
+
 2026-08-01 04:40:40.483 [ERROR] Validation layer: vkCmdPipelineBarrier(): pImageMemoryBarriers[0].image Using format (VK_FORMAT_D32_SFLOAT) with aspect flags (VK_IMAGE_ASPECT_COLOR_BIT) but depth-only image formats must have the VK_IMAGE_ASPECT_DEPTH_BIT set.
 2026-08-01 04:40:40.492 [ERROR] Validation layer: vkCmdPipelineBarrier(): pImageMemoryBarriers[0].image Using format (VK_FORMAT_D32_SFLOAT) with aspect flags (VK_IMAGE_ASPECT_COLOR_BIT) but depth-only image formats must have the VK_IMAGE_ASPECT_DEPTH_BIT set.
 2026-08-01 04:40:40.493 [ERROR] Validation layer: vkCmdBeginRenderPass(): pCreateInfo->pAttachments[1] You cannot start a render pass using attachment 1 where the render pass initial layout is VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL and the previous known layout of the attachment is VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL. The layouts must match, or the render pass initial layout for the attachment must be VK_IMAGE_LAYOUT_UNDEFINED.

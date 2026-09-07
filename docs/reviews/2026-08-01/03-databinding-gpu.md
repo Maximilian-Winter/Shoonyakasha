@@ -1,3 +1,5 @@
+> **Historical document — not current guidance.** Preserved for context. See the [current documentation](../../index.md) and [archive index](../../archive.md).
+
 # Review 03 — Data binding (dot-path) & GPU resources
 
 ## Scope

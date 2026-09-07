@@ -1,6 +1,8 @@
 # {project}
 
-A Shoonyakasha starter project.
+A Shoonyakasha starter project. Run from this directory after installing the native Python extension. You need a Vulkan-capable driver/device and `glslc` on PATH or discoverable through VULKAN_SDK.
+
+The starter loads `models/Box.gltf` from the shared engine assets. Outside the engine checkout, set `SHOONYAKASHA_ASSET_DIR` to the absolute path of its `assets` directory; the generator does not copy assets.
 
 ```sh
 python main.py
@@ -19,8 +21,7 @@ python main.py
 
 Edit `shaders/basic.frag` and run again. `main.py` recompiles it for you.
 
-Add a pass to `pipeline.json`. `sk.pipeline.validate()` will tell you which key
-is wrong before the engine tries to compile it.
+Add a pass to `pipeline.json`. `sk.pipeline.validate()` reports supported preflight checks; it does not validate every native parser feature or shader interface.
 
 Load a different model — anything under the shared `assets/models/`:
 

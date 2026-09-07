@@ -1,3 +1,5 @@
+> **Historical document — not current guidance.** Preserved for context. See the [current documentation](../../index.md) and [archive index](../../archive.md).
+
 2026-08-01 05:12:41.481 [ERROR] Validation layer: vkCmdDispatch(): the descriptor [VkDescriptorSet 0x2e000000002e, Set 0, Binding 2, Index 0, variable "params"] is being used in dispatch but has never been updated via vkUpdateDescriptorSets() or a similar call.
 2026-08-01 05:12:41.481 [ERROR] Validation layer: vkCmdDispatch(): Cannot use VkImage 0x140000000014 (layer=0 mip=0) with specific layout VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL that doesn't match the previous known layout VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL.
 2026-08-01 05:12:41.481 [ERROR] Validation layer: vkCmdDispatch(): Descriptor set VkDescriptorSet 0x2e000000002e Image layout specified by vkCmdBindDescriptorSets doesn't match actual image layout at time descriptor is used. See previous error callback for specific details.

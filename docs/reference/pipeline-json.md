@@ -1,0 +1,169 @@
+# Pipeline JSON reference
+
+This reference describes the current [C++ parser](../../src/Vulkan/FrameGraph/FrameGraphJson.cpp), [declarations](../../include/Vulkan/FrameGraph/FrameGraph.h), [compiler](../../src/Vulkan/FrameGraph/FrameGraphCompiler.cpp), and [executor](../../src/Vulkan/FrameGraph/FrameGraphExecutor.cpp). Start with the [walkthrough](../guides/json-render-pipeline.md) for a complete working pipeline.
+
+## Document structure
+
+| Key | Shape | Role |
+|---|---|---|
+| `name`, `version` | string, integer by convention | Metadata used by examples; the loader does not enforce a versioned schema |
+| `vertexFormats` | object keyed by name | Named vertex attribute sequences |
+| `bufferLayouts` | object keyed by name | Packed fields, initialization, and data flow |
+| `entityDataBindings` | object keyed by name | Per-draw, material, and skeleton binding configurations |
+| `samplers` | object keyed by name | Sampler state |
+| `descriptorSetLayouts` | object keyed by name | Descriptor binding declarations |
+| `resources` | array | Images and buffers used by passes |
+| `passes` | array | Pass declarations, analyzed for execution dependencies |
+| `uniformBuffers` | object keyed by name | Older explicit-size/offset UBO declarations; prefer `bufferLayouts` for new source-driven buffers |
+
+These sections are conditionally parsed. Their absence is not a useful runnable pipeline: normal windowed applications need resources, a rendering pass, and a final present output. `standardBuffers` is obsolete. Unknown keys are not comprehensively rejected; accepted JSON is not proof a key is implemented.
+
+## Resources and accesses
+
+Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defaults false. Imported resources need native backing; ApplicationBase supplies the imported `swapchain` image.
+
+| Image key | Default | Meaning |
+|---|---|---|
+| `format` | native descriptor default if omitted | Use an explicit format for created targets |
+| `width`, `height` | 0 | Reference-size dimensions when zero |
+| `widthScale`, `heightScale` | 1.0 | Scale reference-size dimensions, e.g. 0.5 for bloom |
+| `mipLevels`, `arrayLayers` | 1 | Image shape |
+| `samples` | 1 | Vulkan sample count; must match the rendering configuration |
+| `transient` | false | Transient image declaration |
+
+Image properties live inside `image`. Buffer properties live inside `buffer`: `size` in bytes (default 0), `persistentlyMapped` (false). Creating buffers through `bufferLayouts` is separate from declaring graph resource accesses; follow the SSBO examples for imported layout-backed buffers.
+
+Each pass input/output has a required `resource` name and `usage`. Optional `clear` is `[r,g,b,a]` or `{ "depth": 1.0, "stencil": 0 }`. Optional `present` marks the post-render presentation transition.
+
+| Usage | Meaning |
+|---|---|
+| `color_write`, `color_attachment_write` | Color attachment write |
+| `color_blend`, `color_attachment_blend` | Color attachment read/modify/write |
+| `depth_write`, `depth_stencil_write` | Depth/stencil write |
+| `depth_read` | Read-only depth |
+| `shader_read` | Shader read |
+| `shader_read_write` | Shader read/write |
+| `storage_image_write` | Storage-image write |
+| `input_attachment` | Input attachment |
+| `transfer_src`, `transfer_dst` | Transfer access |
+| `present` | Legacy alias for color write plus presentation |
+
+Prefer `"usage": "color_write", "present": true` on the final swapchain output. For an overlay, use `color_blend` plus `present: true`. Declare all inter-pass accesses; the graph cannot infer hazards from shader code.
+
+## Vertex formats
+
+A named format contains `attributes`, each with `name`, `type`, and `location`. The registry calculates offsets/stride. Match the actual uploaded geometry and GLSL locations; a declaration does not repack a mesh. See [VertexFormatRegistry](../../include/Vulkan/FrameGraph/VertexFormatRegistry.h) and the starter/skinned/sprite pipelines for compatible formats.
+
+## Buffer layouts
+
+| Key | Default / accepted forms |
+|---|---|
+| `usage` | `uniform_buffer`; also `storage_buffer`, `push_constant`, `descriptor_set` |
+| `packing` | `std140`; also `std430`, `scalar`, `push_constant` |
+| `updateFrequency` | `manual`; also `per_frame`, `every_n_frames`, `on_change`, `once` |
+| `updateFrequencyN` | 1 for `every_n_frames` |
+| `binding` | `set`, `binding`, `offset` default 0; `stages` selects shader stages |
+| `fields` | Array of packed field declarations |
+| `textures` | For descriptor-set layouts: `name`, `binding` (0), and `stages` |
+| `elementCount` | Unsigned integer SSBO element count |
+| `source`, `target`, `memory` | Initialization, output/readback/save, and memory policy; below |
+
+Fields require `name`; `type` defaults `float`, `arrayCount` defaults 1, and `source` defaults empty. An explicit `offset`, including 0, overrides automatic placement subject to layout checks. Use `arrayCount` rather than embedding array syntax in the type name.
+
+Scalar types are `float`, `double`, `int`, `uint`, `bool`; vector types are `vec2/3/4`, `ivec2/3/4`, `uvec2/3/4`; matrix types are `mat2/3/4`. `std140`, `std430`, and scalar packing differ in alignment/array stride. The shader block layout and push-constant byte range must agree with the compiled layout; device features and limits still apply.
+
+A field `source` is a dot-path. A layout-level `source` is an initialization object; they have different meanings. Manual/on-change scheduling is native-managed behavior, not automatic Python-object observation.
+
+## Dot-paths
+
+| Root | Supported values |
+|---|---|
+| `scene.camera` | `view`, `projection`, `viewProjection`, `invView`, `invProj`, `position`, `fov`, `nearPlane`, `farPlane`, `aspect`, `positionVec4`, `nearFarFovAspect` |
+| `scene.environment` | `irradianceMap`, `prefilterMap`, `brdfLUT`, `environmentMap` |
+| `scene.time` | `elapsed`, `delta`, `frame` |
+| `scene.screen` | `width`, `height`, `resolution` |
+| `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` |
+| `scene.custom` | Values explicitly published under a key by the application |
+| `entity.transform` | `worldMatrix`, `localMatrix`, `position`, `rotation`, `scale` |
+| `entity.material` | `params.<name>`, `textures.<slot>`, `textures.<slot>.exists`, `alphaCutoff`, `alphaMode`, `doubleSided` |
+| `entity.mesh` | `vertexCount`, `indexCount` |
+| `entity.skeleton` | `hasSkeleton`, `jointCount` |
+| `const` | Constant expressions such as `const.0`, `const.1`, `const.1.0.0.1` |
+
+The constant parser uses dots as vector separators: `const.0.5` is not a reliable spelling for scalar 0.5. Publish fractional scalars as custom values. Bare identifiers address resource bindings where supported. For fields with `arrayCount > 1`, a source such as `scene.lights[i].positionType` expands `[i]` for each element. Without `[i]`, the resolved value is broadcast to the array. These paths are implemented cases in [DotPathResolver](../../src/FrameGraph/DotPathResolver.cpp), not reflection over arbitrary C++ or Python fields. Component presence, value type, and initialization matter.
+
+## Descriptors and samplers
+
+Each descriptor-set layout has a `bindings` array. Bindings require `binding` and `type`; optional `count` defaults 1, `name` defaults `binding_<index>`, and `stages` selects shader visibility. Use the descriptor types accepted by [JsonUtils](../../src/Vulkan/FrameGraph/FrameGraphJson.cpp), such as `uniform_buffer`, `storage_buffer`, and `combined_image_sampler`.
+
+`autoBindBuffer` references a named buffer, `autoBindResource` an image/resource source, and `autoBindSampler` a named sampler. Pass `descriptorSets` is an ordered list of layout names; that order supplies shader set indices.
+
+Sampler keys: `magFilter`, `minFilter`, `mipmapMode` default `linear` (also `nearest`). Use `addressMode` for all axes or `addressModeU/V/W` individually (default `repeat`; also `clamp_to_edge`, `clamp_to_border`, `mirrored_repeat`). Other keys are `borderColor` (`float_opaque_black`), `anisotropyEnable` (false; alias `anisotropy`), `maxAnisotropy` (1), `compareEnable` (false), `compareOp` (`less`), `minLod`, `maxLod`, and `mipLodBias` (all 0). Set the LOD range deliberately when sampling mipmapped textures.
+
+## Entity data bindings
+
+Each named binding can contain:
+
+- `perDraw`: `layoutRef` (preferred; legacy `layout`), `method` (`push_constant`), `offset` (0), `size` (64), `stages`, `set` (0), and `binding` (0).
+- `material`: `layoutRef`, `method` (`descriptor_set`), `set` (1), and optional texture-name→binding-number `bindings`.
+- `skeleton`: `layoutRef` for the skeleton descriptor set.
+
+Use a matching `execution.entityDataBinding`. The parser accepting a method string is not a promise of an arbitrary binding backend; the supplied geometry examples use push constants for per-draw data and descriptor sets for materials/skeletons.
+
+## Passes and pipeline state
+
+Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` defaults `graphics`; `compute` requests the compute queue in a multi-queue execution setup. `enabled` defaults true; `hasSideEffects` defaults false and prevents culling work whose outputs otherwise appear unused. A transfer type does not supply a JSON copy/blit command: use native recording callbacks where needed.
+
+| `pipeline` key | Default / options |
+|---|---|
+| `vertexShader`, `fragmentShader`, `computeShader` | SPIR-V paths, default empty |
+| `vertexInput` | `default`; select a registered matching format |
+| `depthTest`, `depthWrite` | true |
+| `cullMode` | `back`; `front`, `none`, `front_and_back` |
+| `blending` | `none`; `alpha`, `additive`, `custom` |
+| `topology` | `triangle_list`; `triangle_strip`, `line_list`, `line_strip`, `point_list` |
+| `wireframe` | false; requires device support |
+
+For `custom` blending: `srcColorFactor=src_alpha`, `dstColorFactor=one_minus_src_alpha`, `colorBlendOp=add`, `srcAlphaFactor=one`, `dstAlphaFactor=zero`, `alphaBlendOp=add`. Operations are `add`, `subtract`, `reverse_subtract`, `min`, `max`. Factors include zero/one, source/destination color/alpha and their complements, constant color/alpha and complements, and `src_alpha_saturate`; native blend constants need appropriate setup. Unknown blend strings can fall back rather than fail, so use verified spellings.
+
+`pushConstants` accepts one object or an array. Each range requires `size`; `offset` defaults 0, `stages` selects visibility. Optional `bindings` map named graph parameters using `name`, `offset` (0), and `type` (`float`). These graph parameters are distinct from per-entity layout sources.
+
+## Execution
+
+`execution.type` defaults `none`; `bindPipeline` and `bindDescriptorSets` default true.
+
+| Type | Work |
+|---|---|
+| `fullscreen` | Draw a three-vertex fullscreen triangle |
+| `draw` | Non-indexed draw with vertex/instance counts |
+| `compute_dispatch` | Explicit or parameter/resource-based group counts |
+| `compute_image` | Group counts from render extent and `workgroupSize` |
+| `scene_geometry`, `opaque_geometry`, `transparent_geometry` | Registered scene/entity rendering |
+| `shadow_casters` | Registered shadow-caster rendering; requires the rest of a shadow pipeline |
+| `skinned_geometry`, `skinned_transparent` | Skinned rendering with matching layouts/shaders |
+| `sprite_geometry` | Sprite and glyph rendering |
+| `none`, `manual` | Native callback/manual recording use |
+
+Draw fields: `vertexCount` (integer, or `{ "parameter": "count", "divisor": 1 }`), `instanceCount` (1), `firstVertex` (0), `firstInstance` (0). The parser also accepts resource/dimension on vertexCount, but the current draw executor implements fixed/parameter counts, not resource-derived vertex counts.
+
+Compute dispatch uses `dispatch.x/y/z`, each a fixed group count, a parameter/divisor object, or `{ "resource": "imageName", "dimension": "width", "divisor": 16 }` (also `height`). Division rounds up. Use positive divisors and workgroup sizes; JSON does not alter GLSL `local_size`. `compute_image` uses `workgroupSize` to derive x/y groups and z=1.
+
+Geometry execution also accepts `entityDataBinding`, `sortMode` (e.g. `front_to_back`, `back_to_front`, `sort_key`), `renderLayerMask` (default all bits), and `lightIndex` (-1). Entity masks are eight bits. The default facade application uses single-queue execution; native multi-queue recording/submission must be integrated explicitly for asynchronous compute.
+
+## Initialization, memory, and readback
+
+Layout `source` accepts `type` (`initializer` by default), `seed` (42), and per-field initializers under `fields`: `constant`, `randomRange` (`min`/`max`), `gaussian` (`mean`/`stddev`), `grid` (`dimensions`/`origin`/`spacing`/`w`), or `sphere` (`center`/`radius`/`mode`/`w`). These initialize numeric components, not arbitrary structs. `type: file` uses a binary `path`; `type: buffer_ref` references a shared `ref` with `frequency` (default `per_frame`).
+
+`memory` selects `location` (`device_local`, `host_visible`, `host_coherent`), `staging` (`auto`, `persistent`, `none`), and `transferDirection` (`gpu_only`, `cpu_to_gpu`, `gpu_to_cpu`, `bidirectional`). Defaults are the first value in each list.
+
+Layout `target` is a string or an object with `name`, optional `readback`, and optional `save`. Readback has `frequency` (`manual`, `per_frame`, `every_n_frames`, `once`), `n` (1), `callback` (false), and `ringDepth` (0). Save has `path`, `trigger` (`manual`, `every_n_frames`, `on_readback`), `n` (1), and `autoCreateDirectories` (true). A save policy can enable readback automatically; explicit memory configuration is parsed afterwards and can override its transfer direction.
+
+Image resources also accept `target`, `readback`, and `save`; resource-level policies take precedence over policies nested in the target object. For complete layouts, resource declarations, and native callback/trigger setup, see [compute/data flow](../guides/compute-and-data-flow.md).
+
+## Validation and export
+
+`sk.pipeline.validate(path)` returns diagnostic objects. `check(path, warnings_are_errors=False)` raises ValueError on errors and otherwise returns the diagnostic list; it does **not** return a success boolean. Neither verifies shader interfaces, device features, or every parser key.
+
+Known differences: the Python validator tolerates layout arrays and type strings such as `vec4[16]`, while native declarations use named layout objects and `arrayCount`. Conversely, native `descriptor_set` layout usage is not in the Python validator's buffer-usage vocabulary. Treat disagreements as tooling limitations and check native behavior.
+
+The loader does not enforce `version` 2/3. Builder serialization currently writes version 1 and omits declarations such as buffer layouts/entity bindings and some execution/data-flow information. Diagnostic graph export is a separate representation. Neither is a safe substitute for keeping authored pipeline JSON under version control.

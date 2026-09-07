@@ -1,328 +1,54 @@
-# Python Example Walkthroughs
-
-This page walks through the two Python example applications included in `examples/python/`. These examples demonstrate the full Python API for the Shoonyakasha engine and serve as templates for building your own applications.
-
----
-
-## demo.py -- Full-Featured Sponza Rendering
-
-**Source:** [`examples/python/getting_started/demo/demo.py`](../../examples/python/getting_started/demo/demo.py)
-
-**Purpose:** A complete rendering demo that loads the Sponza architectural scene with PBR+IBL lighting, GPU particle simulation, dynamic point light creation, and physics toggling. This is the primary Python showcase of the engine.
-
-### Engine Setup
-
-The demo begins by creating an `sk.Engine` instance with full configuration:
-
-```python
-PARTICLE_COUNT = 50000
-
-engine = sk.Engine(
-    title="Python Demo",
-    width=1920,
-    height=1080,
-    log_file="python_demo.log",
-    hdr_environment_path="cubemaps_hdrs/kloofendal_28d_misty_8k.hdr",
-    pipeline_json_path="pbr_ibl_pipeline_v3.json",
-    render_graph_parameters={"particleCount": PARTICLE_COUNT},
-)
-```
-
-Key points:
-- `pipeline_json_path` selects the JSON render pipeline. The `pbr_ibl_pipeline_v3.json` pipeline includes a deferred PBR pass, IBL lighting, bloom, and a GPU particle compute pass.
-- `hdr_environment_path` loads an HDR environment map for image-based lighting (IBL).
-- `render_graph_parameters` injects compile-time constants into the render graph. Here, `particleCount` tells the particle SSBO how many particles to allocate.
-
-### on_init -- Scene Construction
-
-```python
-def on_init():
-    camera = engine.create_camera(
-        pos=(0.0, 5.0, 15.0), fov=60.0, speed=8.0,
-        near_plane=0.1, far_plane=500.0,
-    )
-
-    engine.create_directional_light(
-        direction=(-0.5, -1.0, -0.3),
-        color=(1.0, 0.975, 0.95),
-        intensity=3.0,
-    )
-
-    result = engine.load_gltf_scene("./NewSponza_Main_glTF_003.gltf")
-
-    physics = engine.physics
-    physics.gravity = (0.0, -9.81, 0.0)
-```
+# Python examples
 
-The initialization callback sets up:
-1. **Camera** -- positioned at `(0, 5, 15)` with 60-degree FOV and 8 units/sec movement speed. Near/far planes at 0.1 and 500.0.
-2. **Directional light** -- warm white sunlight angled downward.
-3. **glTF scene** -- loads the Intel Sponza model. The `GltfResult` reports entity count, vertex count, and texture count.
-4. **Physics** -- sets standard Earth gravity. The physics world is available even though no rigid bodies exist yet.
+Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings). Each example compiles its own shaders, so `glslc` must be discoverable. Run each from the directory containing its script, JSON, and `shaders/`.
 
-### on_update -- Per-Frame Logic
+| Directory | Run | Demonstrates |
+|---|---|---|
+| [getting_started/demo](../../examples/python/getting_started/demo) | `python demo.py` | PBR/IBL scene and facade use |
+| [getting_started/ecs_bindings_demo](../../examples/python/getting_started/ecs_bindings_demo) | `python ecs_bindings_demo.py` | Custom Python components and systems |
+| [animation/skinned_fox_demo](../../examples/python/animation/skinned_fox_demo) | `python skinned_fox_demo.py` | Skeletal animation |
+| [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
+| [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
+| [games_2d/pong_game](../../examples/python/games_2d/pong_game) | `python pong.py` | Complete 2D game and capture controls |
 
-```python
-def on_update(dt):
-    # FPS tracking (print every 5 seconds)
-    fps_timer += dt
-    fps_frames += 1
-    if fps_timer >= 5.0:
-        print(f"[FPS] {fps_frames / fps_timer:.1f}")
+Pong's third-party artwork must be obtained separately; follow its [README](../../examples/python/games_2d/pong_game/README.md). Other optional assets and fallback behavior are described in the [shared asset guide](../../assets/README.md). The Fox script has an older comment suggesting the C++ directory; use its own Python directory as listed here.
 
-    # Dynamic light spawning with 'L' key
-    inp = engine.input
-    if inp.is_key_down(76):  # 'L'
-        scene = engine.scene
-        cam = engine.camera_entity
-        pos = scene.get_position(cam)
-        engine.create_point_light(pos=pos, color=(1.0, 0.8, 0.6),
-                                  intensity=5.0, range=20.0)
-```
-
-The update callback runs every frame with the delta time `dt`. It demonstrates:
-- **FPS tracking** -- accumulates frames and prints average FPS every 5 seconds.
-- **Runtime entity creation** -- when the user holds `L`, the engine queries the camera's current world position via `scene.get_position()` and creates a new warm-toned point light at that location. This shows how entities can be created dynamically at runtime.
-
-### on_pre_render -- Compute Shader Parameters
-
-```python
-def on_pre_render(dt):
-    particle_time += dt
-
-    engine.set_custom_float("particles.gravity", 1.5)
-    engine.set_custom_uint("particles.count", PARTICLE_COUNT)
-    engine.set_custom_float("particles.boundaryRadius", 15.0)
-    engine.set_custom_float("particles.damping", 0.998)
-    engine.set_custom_float("particles.spawnHeight", 0.5)
-
-    engine.set_custom_vec4("particles.attractorPos", (0.0, 5.0, 0.0, 25.0))
-
-    wind_angle = particle_time * 0.2
-    engine.set_custom_vec4("particles.wind", (
-        math.sin(wind_angle) * 0.4, 0.1,
-        math.cos(wind_angle) * 0.4, 0.3,
-    ))
-```
-
-The pre-render callback runs just before the frame is submitted to the GPU. It uses `set_custom_float`, `set_custom_uint`, and `set_custom_vec4` to write named parameters into the render graph's scene context. These values are automatically picked up by the particle compute shader via the JSON pipeline's dot-path bindings.
-
-Key parameters:
-- **gravity** -- downward pull strength (1.5).
-- **boundaryRadius** -- particles beyond this distance are respawned.
-- **damping** -- velocity decay per frame (0.998 = slow decay).
-- **attractorPos** -- `(x, y, z, strength)` packed as vec4. The attractor pulls particles toward the atrium center.
-- **wind** -- `(wx, wy, wz, turbulence)` packed as vec4. The wind direction rotates slowly over time using `sin`/`cos` of the elapsed time.
-
-### on_key_pressed -- Physics Toggle
-
-```python
-def on_key_pressed(key_code):
-    if key_code == 80:  # 'P'
-        physics = engine.physics
-        was_enabled = physics.enabled
-        physics.enabled = not was_enabled
-```
-
-Pressing `P` toggles physics simulation on or off. This demonstrates the `PhysicsAPI.enabled` property.
-
-### Callback Registration and Run
-
-```python
-engine.set_on_init(on_init)
-engine.set_on_update(on_update)
-engine.set_on_pre_render(on_pre_render)
-engine.set_on_key_pressed(on_key_pressed)
-engine.set_on_cleanup(on_cleanup)
-engine.run()
-```
-
-All callbacks are registered on the engine before calling `engine.run()`, which enters the main loop and does not return until the window is closed.
-
-### Key Takeaways
-
-- **Custom uniforms for compute shaders** -- `set_custom_float/uint/vec4` lets Python drive GPU compute passes without any Vulkan code.
-- **Dynamic entity creation** -- point lights (and any other entity) can be created at runtime during `on_update`.
-- **Callback-driven architecture** -- the entire application is structured as a set of callbacks (`on_init`, `on_update`, `on_pre_render`, `on_key_pressed`, `on_cleanup`), with no main loop management required.
-- **Render graph parameters** -- compile-time constants like `particleCount` are passed via `render_graph_parameters` at engine construction time.
-
----
-
-## skinned_fox_demo.py -- Skeletal Animation
-
-**Source:** [`examples/python/animation/skinned_fox_demo/skinned_fox_demo.py`](../../examples/python/animation/skinned_fox_demo/skinned_fox_demo.py)
-
-**Purpose:** A skeletal animation demo that loads the Fox.glb model, plays animation clips, and demonstrates interactive clip switching, pause/resume, and speed control.
-
-### Engine Setup
-
-```python
-engine = sk.Engine(
-    title="Skinned Fox -- Python Demo",
-    width=1280,
-    height=720,
-    log_file="skinned_fox_python.log",
-    pipeline_json_path="skinned_pipeline.json",
-    hdr_environment_path="cubemaps_hdrs/charolettenbrunn_park_4k.hdr",
-)
-```
-
-The skinned animation pipeline requires a different JSON pipeline (`skinned_pipeline.json`) that includes vertex shader support for bone matrix transforms. No `render_graph_parameters` are needed since this demo does not use particles.
-
-### on_init -- Loading a Skinned Model
-
-```python
-def on_init():
-    engine.create_camera(
-        pos=(0, 40, 200), fov=60.0, speed=50.0,
-        near_plane=1.0, far_plane=2000.0,
-    )
-
-    engine.create_directional_light(
-        direction=(-0.5, -1.0, -0.3),
-        color=(1.0, 0.975, 0.95), intensity=3.0,
-    )
-
-    engine.create_point_light(
-        pos=(3.0, 1.0, 2.0),
-        color=(1.0, 0.85, 0.7), intensity=5.0, range=20.0,
-    )
-
-    result = engine.load_gltf_scene(
-        "models/Fox.glb",
-        load_textures=True, load_materials=True,
-        create_entities=True, load_skins=True,
-        load_animations=True, name_prefix="fox",
-    )
-```
-
-Key points:
-- **Camera placement** -- the Fox model is approximately 80 units tall, so the camera is positioned at `(0, 40, 200)` with high speed (50 units/sec) and a far plane of 2000 to accommodate the scale.
-- **Two-light setup** -- a directional sunlight plus a warm golden point light for fill.
-- **Skinned glTF loading** -- the critical flags are `load_skins=True` and `load_animations=True`. These instruct the glTF loader to parse skeleton hierarchies and animation clip data from the file.
-
-### Animation Discovery and Auto-Play
-
-```python
-    for i, (name, dur) in enumerate(result.animation_clips):
-        print(f"  [{i}] {name} ({dur:.2f}s)")
-
-    scene = engine.scene
-    for entity in result.entities:
-        if scene.get_animation_clip_count(entity) > 0:
-            animated_entities.append(entity)
-            scene.set_animation_looping(entity, True)
-            scene.play_animation(entity, 0)
-```
-
-After loading, the demo inspects `result.animation_clips` to list all available clips by name and duration (e.g., "Survey", "Walk", "Run"). It then iterates through all loaded entities, finds those with animation clips, enables looping, and auto-plays clip index 0.
-
-### Interactivity -- Clip Switching and Speed Control
-
-```python
-def on_key_pressed(key):
-    scene = engine.scene
-    for entity in animated_entities:
-        clip_count = scene.get_animation_clip_count(entity)
-
-        if key == 52 and clip_count > 0:       # '4'
-            scene.play_animation(entity, 0)
-        elif key == 53 and clip_count > 1:     # '5'
-            scene.play_animation(entity, 1)
-        elif key == 54 and clip_count > 2:     # '6'
-            scene.play_animation(entity, 2)
-
-        elif key == 32:                        # Space
-            if scene.is_animation_playing(entity):
-                scene.stop_animation(entity)
-            else:
-                current = scene.get_current_animation_clip(entity)
-                if current >= 0:
-                    scene.play_animation(entity, current)
-
-        elif key in (61, 334):                 # '+' / '='
-            anim_speed = min(anim_speed * 1.5, 10.0)
-            scene.set_animation_speed(entity, anim_speed)
-
-        elif key in (45, 333):                 # '-'
-            anim_speed = max(anim_speed / 1.5, 0.1)
-            scene.set_animation_speed(entity, anim_speed)
-```
-
-Controls:
-| Key | Action |
-|-----|--------|
-| `4` | Play clip 0 (typically "Survey") |
-| `5` | Play clip 1 (typically "Walk") |
-| `6` | Play clip 2 (typically "Run") |
-| `Space` | Pause/resume the current animation |
-| `+` / `=` | Speed up by 1.5x (max 10x) |
-| `-` | Slow down by 1.5x (min 0.1x) |
-
-### Minimal Main Loop
-
-```python
-engine.set_on_init(on_init)
-engine.set_on_key_pressed(on_key_pressed)
-engine.run()
-```
-
-This demo only uses two callbacks -- `on_init` and `on_key_pressed`. No `on_update` or `on_pre_render` is needed because the skeletal animation system runs automatically each frame inside the engine.
-
-### Key Takeaways
-
-- **Animation clip discovery** -- `result.animation_clips` returns a list of `(name, duration)` tuples. `scene.get_animation_clip_count(entity)` tells you how many clips an entity has.
-- **Playback control** -- `play_animation(entity, clip_index)`, `stop_animation(entity)`, `is_animation_playing(entity)`, and `get_current_animation_clip(entity)` provide full control over animation state.
-- **Speed adjustment** -- `set_animation_speed(entity, speed)` scales playback rate. Values below 1.0 slow down, above 1.0 speed up.
-- **Looping** -- `set_animation_looping(entity, True)` enables continuous looping; otherwise the clip plays once and stops.
-
----
-
-## pong.py -- A Complete Small Game
-
-`examples/python/games_2d/pong_game/pong.py` is a finished game rather than a feature
-demonstration: one `sprite_geometry` pass, six sprites, five labels, and no 3D
-geometry at all. It is the shortest read of what the sprite/UI half of the API
-feels like in practice.
-
-Worth borrowing from it:
-
-- **A fixed virtual canvas.** Every coordinate is in an 800x500 space that one
-  function maps to window pixels, so resizing letterboxes rather than distorts
-  and the game logic never sees the window size.
-- **Baselines, not centres.** A sprite's anchor offset is its centre; a label's
-  is its text baseline. Mixing the two up is the usual reason text sits a few
-  pixels off.
-- **Explicit draw order.** Sprites and labels both default to sort key 0, so
-  anything that overlaps needs a number -- `set_sort_key` for sprites,
-  `set_text_sort_key` for labels.
-- **`shoonyakasha.keys`.** Key codes by name (`keys.SPACE`, `keys.UP`) instead
-  of the GLFW integers `is_key_down` actually takes.
-
-It needs its art pack downloaded first; see `examples/python/games_2d/pong_game/README.md`.
-
----
-
-## Running the Examples
-
-The examples must be run from the correct working directory so that asset paths (pipeline JSON, HDR maps, glTF models) resolve correctly.
-
-**demo.py:**
-```bash
-cd examples/cpp/rendering/declarative_sponza_test
-python ../../examples/python/getting_started/demo/demo.py
-```
-
-**skinned_fox_demo.py:**
-```bash
-cd examples/cpp/animation/skinned_mesh_test
-python ../../examples/python/animation/skinned_fox_demo/skinned_fox_demo.py
-```
-
-**pong.py:**
-```bash
-cd examples/python/games_2d/pong_game
-python pong.py
-```
-
-The examples import the installed package, so run `pip install .` at the repository root first. Each one must be run from its own directory, since it loads its pipeline JSON and shaders by relative path.
+For a minimal first project, prefer the [generated starter](../getting-started/python-quickstart.md). For pipeline authoring, see [JSON walkthrough](../guides/json-render-pipeline.md).
+
+## Runtime previews
+
+Native frame captures using bundled assets. See [capture recipes and asset choices](../images/examples/README.md) for refresh instructions. Click an image to view it at full resolution.
+
+### Facade demo (`demo`)
+
+<a href="../images/examples/python/demo.png"><img src="../images/examples/python/demo.png" alt="Red box near the bottom of a multicolored particle field" width="720"></a>
+
+The Python facade demo with its bundled `Box.gltf` fallback and active compute particles; optional Sponza is not installed in the shared asset root.
+
+### ECS bindings (`ecs_bindings_demo`)
+
+<a href="../images/examples/python/ecs_bindings_demo.png"><img src="../images/examples/python/ecs_bindings_demo.png" alt="Uniform dark empty viewport from the ECS bindings example" width="720"></a>
+
+This example intentionally creates no meshes or sprites. Its custom components and systems run without visible objects; the deliberately failing system reports its auto-disable in the console. The empty viewport is expected, not a loading failure.
+
+### Animated Fox (`skinned_fox_demo`)
+
+<a href="../images/examples/python/skinned_fox_demo.png"><img src="../images/examples/python/skinned_fox_demo.png" alt="Low-poly orange and white fox in an animated pose" width="720"></a>
+
+Bundled `Fox.glb` during playback of the first animation clip, driven through the Python bindings.
+
+### Sprites and UI (`sprite_ui_test`)
+
+<a href="../images/examples/python/sprite_ui_test.png"><img src="../images/examples/python/sprite_ui_test.png" alt="Purple orb in the center with a score label and a panel in opposite corners" width="720"></a>
+
+Bundled orb and panel textures with a screen-space score label. The checkerboard around the orb is part of the supplied texture, not an added screenshot background.
+
+### Full showcase (`full_showcase`)
+
+<a href="../images/examples/python/full_showcase.png"><img src="../images/examples/python/full_showcase.png" alt="Five orbiting orbs with colored halos, a health HUD and system-status text" width="720"></a>
+
+Bundled sprites, layered blend passes, text, and Python ECS systems in motion. The status confirms that the deliberately failing system has auto-disabled.
+
+### Pong (`pong_game`) — preview unavailable
+
+Pong uses separately obtained **Simple Ping Pong Assets by Esoe B.Studios**. The local artwork README provides attribution but no license grant, and the [publisher page](https://myebstudios.itch.io/simple-ping-pong-assets) does not establish permission to publish gameplay captures. The bundled font licenses do not cover that artwork. A screenshot is omitted pending permission; see the [capture record](../images/examples/README.md#pong-artwork-permission).
