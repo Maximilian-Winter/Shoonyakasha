@@ -9,6 +9,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [animation/skinned_fox_demo](../../examples/python/animation/skinned_fox_demo) | `python skinned_fox_demo.py` | Skeletal animation |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
+| [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters |
 | [games_2d/pong_game](../../examples/python/games_2d/pong_game) | `python pong.py` | Complete 2D game and capture controls |
 
 Pong's third-party artwork must be obtained separately; follow its [README](../../examples/python/games_2d/pong_game/README.md). Other optional assets and fallback behavior are described in the [shared asset guide](../../assets/README.md). The Fox script has an older comment suggesting the C++ directory; use its own Python directory as listed here.
@@ -48,6 +49,12 @@ Bundled orb and panel textures with a screen-space score label. The checkerboard
 <a href="../images/examples/python/full_showcase.png"><img src="../images/examples/python/full_showcase.png" alt="Five orbiting orbs with colored halos, a health HUD and system-status text" width="720"></a>
 
 Bundled sprites, layered blend passes, text, and Python ECS systems in motion. The status confirms that the deliberately failing system has auto-disabled.
+
+### Dakini temple (`dakini_temple`)
+
+<a href="../images/examples/python/dakini_temple.png"><img src="../images/examples/python/dakini_temple.png" alt="Top-down mandala palace with a fire ring, vajra fence, four coloured quarters, a red lotus and a red double triangle at the centre" width="720"></a>
+
+A Vajrayogini mandala palace with no textures. `shaders/mandala.frag` draws each layer onto its quad from a `shape` material parameter, and Python systems turn the rings, make the lotus breathe, flicker the lamps and drift the embers.
 
 ### Pong (`pong_game`) — preview unavailable
 

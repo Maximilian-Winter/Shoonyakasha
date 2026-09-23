@@ -27,6 +27,7 @@ PYTHON = [
     ('animation/skinned_fox_demo', 'skinned_fox_demo.py'),
     ('games_2d/sprite_ui_test', 'sprite_ui_demo.py'),
     ('games_2d/full_showcase', 'showcase_demo.py'),
+    ('games_2d/dakini_temple', 'temple.py'),
 ]
 
 
