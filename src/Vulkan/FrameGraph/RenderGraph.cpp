@@ -1513,6 +1513,9 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
         m_stagingManager->processCompletedImageReadbacks(frameIndex, m_globalFrameNumber);
     }
 
+    // The same fence makes this frame's descriptor sets safe to free.
+    releaseDestroyedEntityDescriptors(frameIndex);
+
     // Phase 3: Upload CPU→GPU before passes
     if (m_stagingManager) {
         m_stagingManager->recordUploadCommands(commandBuffer, frameIndex, m_globalFrameNumber);
@@ -2105,6 +2108,29 @@ void RenderGraph::createMaterialDescriptorPool(uint32_t maxSets) {
         m_logger->log(LogLevel::Error, "Failed to create material descriptor pool");
     } else {
         m_logger->log(LogLevel::Info, "Material descriptor pool created with %u max sets", maxSets);
+    }
+}
+
+void RenderGraph::releaseDestroyedEntityDescriptors(uint32_t frameIndex) {
+    if (!m_boundScene || m_materialDescriptorPool == VK_NULL_HANDLE) return;
+
+    // Cache keys hold the full entity handle, version included, so a destroyed
+    // entity stays invalid even after its index is recycled.
+    auto& registry = m_boundScene->getRegistry();
+    std::vector<VkDescriptorSet> released;
+    for (auto it = m_materialDescriptorCache.begin(); it != m_materialDescriptorCache.end();) {
+        if (it->first.frameIndex == frameIndex &&
+            !registry.valid(static_cast<entt::entity>(it->first.entityId))) {
+            released.push_back(it->second);
+            it = m_materialDescriptorCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (!released.empty()) {
+        vkFreeDescriptorSets(m_device.getLogicalDevice(), m_materialDescriptorPool,
+                             static_cast<uint32_t>(released.size()), released.data());
     }
 }
 

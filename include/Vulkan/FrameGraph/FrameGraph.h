@@ -1299,6 +1299,11 @@ private:
     // Create descriptor pool for material textures
     void createMaterialDescriptorPool(uint32_t maxSets = 4096);
 
+    // Frees the cached descriptor sets of entities that are no longer valid in
+    // the bound scene. Only sets cached for frameIndex are freed, because the
+    // caller has waited on that frame's fence and the GPU no longer reads them.
+    void releaseDestroyedEntityDescriptors(uint32_t frameIndex);
+
     // createStandardBuffers removed — replaced by createDotPathUBOs
 
     // Imported resource data — supports per-swapchain-image entries
