@@ -11,6 +11,9 @@
 // (one, one_minus_src_alpha) for solid layers and (one, one) for glows.
 //
 
+#include "sk/noise.glsl"
+#include "sk/shapes2d.glsl"
+
 layout(set = 0, binding = 0) uniform TempleSceneUBO {
     mat4 viewProjection;
     vec2 resolution;
@@ -28,7 +31,7 @@ layout(location = 0) in vec2 fragLocal;
 
 layout(location = 0) out vec4 outColor;
 
-const float TAU = 6.28318531;
+const float TAU = SK_TAU;
 
 const int LAYER_SKY      = 0;
 const int LAYER_FIRE     = 1;
@@ -147,91 +150,10 @@ Palette paletteFor(int deity) {
     return p;
 }
 
-// ── Noise ───────────────────────────────────────────────────────
-
-// Integer hash of the lattice cell containing p, in [0, 1].
-float hash(vec2 p) {
-    uvec2 q = uvec2(ivec2(floor(p)));
-    uint h = (q.x * 1597334677u) ^ (q.y * 3812015801u);
-    h = h * 747796405u + 2891336453u;
-    h ^= h >> 16;
-    h *= 2246822519u;
-    h ^= h >> 13;
-    return float(h) * (1.0 / 4294967295.0);
-}
-
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-
-float fbm(vec2 p) {
-    float v = 0.0;
-    float a = 0.5;
-    for (int i = 0; i < 5; i++) {
-        v += a * noise(p);
-        p = p * 2.03 + vec2(1.7, 9.2);
-        a *= 0.5;
-    }
-    return v;
-}
+// ── Shapes ──────────────────────────────────────────────────────
 
 vec3 hue(float h) {
     return clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
-}
-
-// ── Coverage and compositing ────────────────────────────────────
-
-// Coverage of the region d < 0, antialiased over one pixel.
-float fill(float d) {
-    return clamp(0.5 - d / max(fwidth(d), 1e-5), 0.0, 1.0);
-}
-
-// Coverage of a line of half-width w along d = 0.
-float stroke(float d, float w) {
-    return fill(abs(d) - w);
-}
-
-// Premultiplied "over": paints colour at the given coverage on top of acc.
-void over(inout vec4 acc, vec3 color, float alpha) {
-    acc = vec4(color * alpha, alpha) + acc * (1.0 - alpha);
-}
-
-// ── Signed distance functions ───────────────────────────────────
-
-float sdBox(vec2 p, vec2 b) {
-    vec2 d = abs(p) - b;
-    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
-}
-
-// Equilateral triangle pointing up (+y), centred on its centroid; r is half the side.
-float sdTriangle(vec2 p, float r) {
-    const float k = sqrt(3.0);
-    p.x = abs(p.x) - r;
-    p.y = p.y + r / k;
-    if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
-    p.x -= clamp(p.x, -2.0 * r, 0.0);
-    return -length(p) * sign(p.y);
-}
-
-// Vertical vesica: intersection of two circles of radius r whose centres are d apart from the axis.
-float sdVesica(vec2 p, float r, float d) {
-    p = abs(p);
-    float b = sqrt(r * r - d * d);
-    return ((p.y - b) * d > p.x * b) ? length(p - vec2(0.0, b)) : length(p - vec2(-d, 0.0)) - r;
-}
-
-// Pointed petal lying along x, centred on the origin.
-float sdPetal(vec2 p, float halfLength, float halfWidth) {
-    float r = 0.5 * (halfLength * halfLength / halfWidth + halfWidth);
-    return sdVesica(p.yx, r, r - halfWidth);
-}
-
-float sdEllipse(vec2 p, vec2 radii) {
-    return (length(p / radii) - 1.0) * min(radii.x, radii.y);
 }
 
 // Vajra lying along x, centred on its hub, about 0.5 long.
@@ -242,19 +164,6 @@ float sdVajra(vec2 q) {
     float centreProng = sdEllipse(m - vec2(0.195, 0.0), vec2(0.055, 0.016));
     float sideProngs = sdEllipse(vec2(m.x, abs(m.y)) - vec2(0.18, 0.052), vec2(0.05, 0.014));
     return min(min(hub, bulb), min(centreProng, sideProngs));
-}
-
-// Folds the plane into one of n equal angular sectors, centred on +x.
-vec2 foldPolar(vec2 p, float n) {
-    float sector = TAU / n;
-    float a = mod(atan(p.y, p.x) + 0.5 * sector, sector) - 0.5 * sector;
-    return length(p) * vec2(cos(a), sin(a));
-}
-
-vec2 rotate(vec2 p, float a) {
-    float c = cos(a);
-    float s = sin(a);
-    return vec2(c * p.x - s * p.y, s * p.x + c * p.y);
 }
 
 // ── Layers ──────────────────────────────────────────────────────

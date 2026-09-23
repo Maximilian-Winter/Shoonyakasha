@@ -11,7 +11,7 @@
 // pre-filtered map at mip `skyBlur` so the sky can be softened.
 //
 
-const float PI = 3.14159265359;
+#include "sk/pbr.glsl"
 
 // GBuffer textures (set 0)
 layout(set = 0, binding = 0) uniform sampler2D gPosition;
@@ -97,20 +97,6 @@ layout(location = 0) in vec2 fragTexCoord;
 // Output HDR color
 layout(location = 0) out vec4 outColor;
 
-// ═══════════════════════════════════════════════════════════════
-// PBR Helper Functions
-// ═══════════════════════════════════════════════════════════════
-
-// Fresnel-Schlick approximation
-vec3 fresnelSchlick(float cosTheta, vec3 F0) {
-    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
-}
-
-// Fresnel-Schlick with roughness for IBL
-vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
-    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
-}
-
 void main() {
     // Sample GBuffer
     vec3 worldPos = texture(gPosition, fragTexCoord).rgb;
@@ -151,11 +137,7 @@ void main() {
     // Reflection vector
     vec3 R = reflect(-V, N);
 
-    // F0 (base reflectivity)
-    // Dielectrics: 0.04 (typical for non-metals)
-    // Metals: use albedo color
-    vec3 F0 = vec3(0.04);
-    F0 = mix(F0, albedo, metallic);
+    vec3 F0 = baseReflectivity(albedo, metallic);
 
     // ═══════════════════════════════════════════════════════════════
     // IBL Diffuse
@@ -212,7 +194,6 @@ void main() {
     bool sunSeen = false;
 
     // Dynamic lights from ECS via dot-path UBO
-    float NdotV_direct = max(dot(N, V), 0.0);
     for (uint idx = 0u; idx < min(lightCount, uint(MAX_LIGHTS)); idx++) {
         vec3 lightPos = lightsPositionType[idx].xyz;
         float lightType = lightsPositionType[idx].w;
@@ -252,24 +233,8 @@ void main() {
 
         float NdotL = max(dot(N, L), 0.0);
         if (NdotL > 0.0 && attenFactor > 0.001) {
-            vec3 H = normalize(V + L);
-            float NdotH = max(dot(N, H), 0.0);
-            float VdotH = max(dot(V, H), 0.0);
-
-            vec3 F = fresnelSchlick(VdotH, F0);
-            float alpha = roughness * roughness;
-            float alpha2 = alpha * alpha;
-            float denom = NdotH * NdotH * (alpha2 - 1.0) + 1.0;
-            float D = alpha2 / (PI * denom * denom);
-
-            float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-            float G = (NdotV_direct / (NdotV_direct * (1.0 - k) + k))
-                    * (NdotL / (NdotL * (1.0 - k) + k));
-
-            vec3 directSpecular = (D * G * F) / max(4.0 * NdotV_direct * NdotL, 0.001);
-            vec3 directDiffuse = (1.0 - F) * (1.0 - metallic) * albedo / PI;
-
-            direct += (directDiffuse + directSpecular) * lColor * lIntensity * NdotL * attenFactor;
+            direct += cookTorrance(N, V, L, albedo, metallic, roughness, F0)
+                    * lColor * lIntensity * NdotL * attenFactor;
         }
     }
 
