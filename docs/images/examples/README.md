@@ -54,6 +54,7 @@ The delay starts after initialization (Python: after the first rendered frame). 
 | Python `sprite_ui_test` | Bundled orb/panel textures and Roboto font; no input. Checkerboard pixels are part of the orb texture. | 3 s |
 | Python `full_showcase` | Bundled orb/panel textures and Roboto font; automatic motion and system-failure demonstration. | 3 s |
 | Python `dakini_temple` | Procedural shader layers and bundled Roboto font; no textures, no input. | 3 s |
+| Python `japanese_shrine` | Hand-downloaded `models/japanese_shrine.glb` (CC BY 4.0, aumiella; see the asset README) with the bundled sunset environment; automatic orbit, no input. | 3 s |
 | Python `pong_game` | **Not captured:** separately obtained artwork; permission unresolved below. | — |
 
 The shared [asset guide](../../../assets/README.md) records asset locations and attribution. These captures do not redistribute model or texture source files.
@@ -66,7 +67,7 @@ Pong requires **Simple Ping Pong Assets by Esoe B.Studios**, obtained separately
 
 ## Validation
 
-The published set contains **16 PNGs for 17 examples**, with Pong explicitly blocked. Inspect every full-size capture for correct content and framing before replacing images. The ECS viewport is intentionally empty; bloom's diffuse light shapes and the UI texture's checkerboard are actual example output.
+The published set contains **17 PNGs for 18 examples**, with Pong explicitly blocked. Inspect every full-size capture for correct content and framing before replacing images. The ECS viewport is intentionally empty; bloom's diffuse light shapes and the UI texture's checkerboard are actual example output.
 
 ```powershell
 python tools/check_docs.py

@@ -41,6 +41,8 @@ examples/**/cubemaps_hdrs/
 /assets/env/*_4k.hdr
 /assets/env/*_8k.hdr
 /assets/models/NewSponza_*
+# Downloaded by hand from Sketchfab; see assets/README.md.
+/assets/models/japanese_shrine.glb
 /.claude
 
 # Compiled Cython/Python extension + generated intermediates (built by
@@ -69,3 +71,4 @@ examples/python/**/*.log
 examples/python/**/*.mkv
 examples/python/**/*_screenshot.png
 PowerShell-Commands.txt
+/examples/python/games_2d/dakini_temple/fonts

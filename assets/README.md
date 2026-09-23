@@ -55,6 +55,15 @@ the pages linked above.
 |---|---|---|
 | Full-resolution HDRs (4k/8k, 25–99 MB each) | Size | `python tools/fetch_assets.py env` |
 | Intel Sponza (`NewSponza_*`, ~450 MB with textures) | Size **and** licence | `python tools/fetch_assets.py sponza` prints the page |
+| Japanese shrine (`models/japanese_shrine.glb`, 60 MB) | Size | Download the glTF archive from [Sketchfab](https://skfb.ly/pMEO8) (account required) and save its `source/*.glb` as `models/japanese_shrine.glb` |
+
+The shrine is CC BY 4.0, so anything that shows or redistributes it must credit it:
+
+```
+"Japanese Shrine - Traditional Temple" (https://skfb.ly/pMEO8) by aumiella,
+licensed under Creative Commons Attribution 4.0
+(http://creativecommons.org/licenses/by/4.0/).
+```
 
 **Read Sponza's licence before redistributing anything built on it.** The
 `credits_license.txt` that ships with the add-on package says two different

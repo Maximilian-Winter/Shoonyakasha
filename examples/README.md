@@ -88,6 +88,12 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 |---|---|
 | [`skinned_fox_demo`](python/animation/skinned_fox_demo) | Loading and playing a skinned glTF animation from Python. |
 
+### rendering
+
+| | |
+|---|---|
+| [`japanese_shrine`](python/rendering/japanese_shrine) | Deferred PBR of a glTF metallic-roughness model with image-based light, a sun shadow map declared entirely in the pipeline JSON, the environment drawn as the sky, and distance fog. Needs the shrine model, which is downloaded by hand (see the asset README). |
+
 ### games_2d
 
 | | |

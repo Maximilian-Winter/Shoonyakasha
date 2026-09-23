@@ -7,6 +7,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [getting_started/demo](../../examples/python/getting_started/demo) | `python demo.py` | PBR/IBL scene and facade use |
 | [getting_started/ecs_bindings_demo](../../examples/python/getting_started/ecs_bindings_demo) | `python ecs_bindings_demo.py` | Custom Python components and systems |
 | [animation/skinned_fox_demo](../../examples/python/animation/skinned_fox_demo) | `python skinned_fox_demo.py` | Skeletal animation |
+| [rendering/japanese_shrine](../../examples/python/rendering/japanese_shrine) | `python shrine.py` | Deferred PBR of a downloaded glTF model with IBL, sun shadows, sky and fog |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -37,6 +38,14 @@ This example intentionally creates no meshes or sprites. Its custom components a
 <a href="../images/examples/python/skinned_fox_demo.png"><img src="../images/examples/python/skinned_fox_demo.png" alt="Low-poly orange and white fox in an animated pose" width="720"></a>
 
 Bundled `Fox.glb` during playback of the first animation clip, driven through the Python bindings.
+
+### Japanese shrine (`japanese_shrine`)
+
+<a href="../images/examples/python/japanese_shrine.png"><img src="../images/examples/python/japanese_shrine.png" alt="Red lacquered Japanese shrine with a dark tiled roof casting a long shadow across a stone ground, under a hazy sunset sky" width="720"></a>
+
+The model's glTF metallic-roughness textures go through the same G-buffer shader as Sponza. `shaders/shrine_lighting.frag` then adds image-based light from `farm_sunset_1k.hdr` and a low sun, draws the environment as the sky, and fades distant ground into it. The sun casts shadows: `ShadowPass` renders depth into a fixed 2048×2048 `shadowMap` declared in the pipeline JSON, from an orthographic sun projection that `shrine.py` builds and passes in as four custom `vec4` columns, and the lighting pass filters it with 5×5 PCF. The camera circles the shrine; **Space** stops the orbit for free flight. The model is not in the repository: download it as the [asset guide](../../assets/README.md#not-committed) describes.
+
+Model: "Japanese Shrine - Traditional Temple" (https://skfb.ly/pMEO8) by aumiella, licensed under [Creative Commons Attribution 4.0](http://creativecommons.org/licenses/by/4.0/).
 
 ### Sprites and UI (`sprite_ui_test`)
 
