@@ -85,6 +85,14 @@ PipelineStateBuilder& PipelineStateBuilder::withDepthWrite(bool enable) {
     return *this;
 }
 
+PipelineStateBuilder& PipelineStateBuilder::withDepthBias(float constantFactor, float slopeFactor, float clamp) {
+    m_state.depthBias = true;
+    m_state.depthBiasConstant = constantFactor;
+    m_state.depthBiasSlope = slopeFactor;
+    m_state.depthBiasClamp = clamp;
+    return *this;
+}
+
 PipelineStateBuilder& PipelineStateBuilder::withDepthBounds(float min, float max) {
     m_state.depthBounds = true;
     m_state.minDepthBounds = min;
@@ -400,7 +408,10 @@ void VulkanPipeline::createPipeline() {
     rasterizer.lineWidth = m_state.lineWidth;
     rasterizer.cullMode = m_state.cullMode;
     rasterizer.frontFace = m_state.frontFace;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    rasterizer.depthBiasEnable = m_state.depthBias ? VK_TRUE : VK_FALSE;
+    rasterizer.depthBiasConstantFactor = m_state.depthBiasConstant;
+    rasterizer.depthBiasSlopeFactor = m_state.depthBiasSlope;
+    rasterizer.depthBiasClamp = m_state.depthBiasClamp;
 
     // Multisampling state
     VkPipelineMultisampleStateCreateInfo multisampling{};

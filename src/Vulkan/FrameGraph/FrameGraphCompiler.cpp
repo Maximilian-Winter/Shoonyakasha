@@ -1319,6 +1319,9 @@ void FrameGraphCompiler::createPipelines(
         // Rasterization
         builder.withCulling(stringToCullMode(pd.cullMode));
         if (pd.wireframe) builder.withWireframe();
+        if (pd.depthBias) {
+            builder.withDepthBias(pd.depthBiasConstant, pd.depthBiasSlope, pd.depthBiasClamp);
+        }
 
         // Depth
         builder.withDepthTest(pd.depthTest);

@@ -1046,6 +1046,14 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                 pass.pipelineDesc.vertexInput     = pipeJson.value("vertexInput", std::string{"default"});
                 pass.pipelineDesc.wireframe       = pipeJson.value("wireframe", false);
 
+                if (pipeJson.contains("depthBias")) {
+                    const auto& biasJson = pipeJson["depthBias"];
+                    pass.pipelineDesc.depthBias         = true;
+                    pass.pipelineDesc.depthBiasConstant = biasJson.value("constant", 0.0f);
+                    pass.pipelineDesc.depthBiasSlope    = biasJson.value("slope", 0.0f);
+                    pass.pipelineDesc.depthBiasClamp    = biasJson.value("clamp", 0.0f);
+                }
+
                 // Only meaningful when blending == "custom" - see PipelineDesc
                 // for the accepted VkBlendFactor/VkBlendOp string names.
                 pass.pipelineDesc.srcColorBlendFactor = pipeJson.value("srcColorFactor", std::string{"src_alpha"});
@@ -1411,6 +1419,13 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             pipeJson["topology"]   = pd.topology;
             if (pd.vertexInput != "default") pipeJson["vertexInput"] = pd.vertexInput;
             if (pd.wireframe) pipeJson["wireframe"] = true;
+            if (pd.depthBias) {
+                pipeJson["depthBias"] = {
+                    {"constant", pd.depthBiasConstant},
+                    {"slope",    pd.depthBiasSlope},
+                    {"clamp",    pd.depthBiasClamp}
+                };
+            }
             if (pd.blending == "custom") {
                 pipeJson["srcColorFactor"] = pd.srcColorBlendFactor;
                 pipeJson["dstColorFactor"] = pd.dstColorBlendFactor;

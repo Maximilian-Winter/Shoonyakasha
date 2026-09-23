@@ -248,6 +248,14 @@ struct PipelineDesc {
     std::string vertexInput   = "default";        // "default" (Vertex type), "none" (fullscreen)
     bool wireframe = false;
 
+    // Rasterizer depth bias, JSON "depthBias": {"constant", "slope", "clamp"}.
+    // Off unless the block is present. A non-zero clamp needs the
+    // depthBiasClamp device feature.
+    bool  depthBias         = false;
+    float depthBiasConstant = 0.0f;
+    float depthBiasSlope    = 0.0f;
+    float depthBiasClamp    = 0.0f;
+
     // Only read when blending == "custom" - explicit VkBlendFactor/VkBlendOp
     // names (snake_case, e.g. "src_alpha", "one_minus_src_alpha", "add").
     // See docs/guides/json-render-pipeline.md for the full accepted list.

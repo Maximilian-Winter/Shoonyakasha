@@ -52,6 +52,7 @@ public:
     PipelineStateBuilder& withCulling(VkCullModeFlags cullMode, VkFrontFace frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE);
     PipelineStateBuilder& withDepthClamp(bool enable = true);
     PipelineStateBuilder& withLineWidth(float width);
+    PipelineStateBuilder& withDepthBias(float constantFactor, float slopeFactor, float clamp = 0.0f);
 
     // Depth and stencil test configuration
     PipelineStateBuilder& withDepthTest(bool enable = true, VkCompareOp compareOp = VK_COMPARE_OP_LESS);
@@ -105,6 +106,10 @@ public:
         VkFrontFace frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         bool depthClamp = false;
         float lineWidth = 1.0f;
+        bool depthBias = false;
+        float depthBiasConstant = 0.0f;
+        float depthBiasSlope = 0.0f;
+        float depthBiasClamp = 0.0f;   // non-zero needs the depthBiasClamp device feature
 
         // Depth/Stencil
         bool depthTest = true;

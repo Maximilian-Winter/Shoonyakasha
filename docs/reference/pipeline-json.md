@@ -123,6 +123,7 @@ Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` de
 | `blending` | `none`; `alpha`, `additive`, `custom` |
 | `topology` | `triangle_list`; `triangle_strip`, `line_list`, `line_strip`, `point_list` |
 | `wireframe` | false; requires device support |
+| `depthBias` | absent = off; object `{constant, slope, clamp}`, each default 0. A non-zero `clamp` requires the `depthBiasClamp` device feature |
 
 For `custom` blending: `srcColorFactor=src_alpha`, `dstColorFactor=one_minus_src_alpha`, `colorBlendOp=add`, `srcAlphaFactor=one`, `dstAlphaFactor=zero`, `alphaBlendOp=add`. Operations are `add`, `subtract`, `reverse_subtract`, `min`, `max`. Factors include zero/one, source/destination color/alpha and their complements, constant color/alpha and complements, and `src_alpha_saturate`; native blend constants need appropriate setup. Unknown blend strings can fall back rather than fail, so use verified spellings.
 
