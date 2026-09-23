@@ -38,6 +38,7 @@ find_package(EnTT CONFIG REQUIRED)
 find_package(Bullet CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
+find_package(unofficial-spirv-reflect CONFIG REQUIRED)
 
 # CONFIGURE_DEPENDS makes the build system re-glob when files appear or vanish.
 # A glob without it goes stale the moment you add a source file.
@@ -93,6 +94,9 @@ target_link_libraries(Shoonyakasha
         nlohmann_json::nlohmann_json
         EnTT::EnTT
         ${BULLET_LIBRARIES}
+        PRIVATE
+        # Only ShaderInterfaceValidator.cpp uses it; the headers stay internal.
+        unofficial::spirv-reflect
 )
 
 # Test-support constructors. Previously unconditional, which meant every

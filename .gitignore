@@ -65,6 +65,8 @@ __pycache__/
 # are build output rather than something to ship and let drift out of date.
 # The C++ examples still commit theirs; CMake builds those.
 examples/python/**/*.spv
+# Test fixtures, compiled by tests/CMakeLists.txt.
+/tests/shaders/*.spv
 
 # Output the Python examples write where they run.
 examples/python/**/*.log

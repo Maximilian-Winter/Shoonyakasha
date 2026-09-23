@@ -165,6 +165,14 @@ Image resources also accept `target`, `readback`, and `save`; resource-level pol
 
 `sk.pipeline.validate(path)` returns diagnostic objects. `check(path, warnings_are_errors=False)` raises ValueError on errors and otherwise returns the diagnostic list; it does **not** return a success boolean. Neither verifies shader interfaces, device features, or every parser key.
 
+The native compiler does verify shader interfaces, at startup. After compiling buffer layouts it reflects every pass's SPIR-V (with SPIRV-Reflect) and compares it with the JSON:
+
+- every descriptor the shader uses must be declared in the pass's `descriptorSets` at the same set index and binding, with the same descriptor type;
+- for a uniform or storage buffer bound through `autoBindBuffer`, and for the push constants of the pass's `entityDataBinding` `perDraw` layout, each block member's offset, base type, vector size, matrix stride, array length and array stride must match a field of the layout. Names are not compared. A shader may declare fewer members than the layout;
+- push constants must fit inside the pass's `pushConstants` ranges.
+
+Blocks ending in a runtime array, and arrays of structs, are not compared member by member. A mismatch fails compilation with one line per problem, naming the pass, the shader file and the member, so `Engine(...)` raises instead of rendering from misread bytes.
+
 Known differences: the Python validator tolerates layout arrays and type strings such as `vec4[16]`, while native declarations use named layout objects and `arrayCount`. Conversely, native `descriptor_set` layout usage is not in the Python validator's buffer-usage vocabulary. Treat disagreements as tooling limitations and check native behavior.
 
 The loader does not enforce `version` 2/3. Builder serialization currently writes version 1 and omits declarations such as buffer layouts/entity bindings and some execution/data-flow information. Diagnostic graph export is a separate representation. Neither is a safe substitute for keeping authored pipeline JSON under version control.

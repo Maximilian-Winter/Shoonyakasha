@@ -16,8 +16,10 @@
 #include "Vulkan/VulkanDescriptorSystem.h"
 #include "Vulkan/VulkanMemoryAllocator.h"
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
+#include "FrameGraph/ShaderInterfaceValidator.h"
 #include "Core/Logger.h"
 
+#include <fstream>
 #include <queue>
 #include <unordered_set>
 #include <set>
@@ -1055,6 +1057,11 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         m_logger->log(LogLevel::Info, "Buffer layouts compiled: %zu layouts", result.bufferLayouts.size());
     }
 
+    // Stage 12: Check each shader's declared interface against the JSON
+    if (!validateShaderInterfaces(builder, result.bufferLayouts, result.errorMessage)) {
+        return result;
+    }
+
     result.valid = true;
     m_logger->log(LogLevel::Info, "Frame graph compilation successful");
 
@@ -1668,6 +1675,74 @@ void FrameGraphCompiler::ensureLogger() {
     if (!m_logger) {
         m_logger = new Logger("framegraph_compiler.log");
     }
+}
+
+bool FrameGraphCompiler::validateShaderInterfaces(
+    const FrameGraphBuilder& builder,
+    const std::unordered_map<std::string, CompiledBufferLayout>& layouts,
+    std::string& outError)
+{
+    ensureLogger();
+    std::vector<std::string> problems;
+
+    for (const auto& pass : builder.getPassDeclarations()) {
+        const auto& pd = pass.pipelineDesc;
+        const std::string* shaders[] = {&pd.vertexShader, &pd.fragmentShader, &pd.computeShader};
+
+        ShaderInterfaceExpectation expected;
+        expected.setCount = static_cast<uint32_t>(pass.descriptorSetRefs.size());
+        for (uint32_t set = 0; set < expected.setCount; ++set) {
+            const auto* setDesc = builder.getDescriptorSetLayout(pass.descriptorSetRefs[set]);
+            if (!setDesc) continue;
+            for (const auto& binding : setDesc->bindings) {
+                ExpectedDescriptor descriptor;
+                try {
+                    descriptor.type = JsonUtils::stringToDescriptorType(binding.type);
+                } catch (const std::exception&) {
+                    continue;
+                }
+                descriptor.setName = setDesc->name;
+                descriptor.bindingName = binding.name;
+                if (!binding.autoBindBuffer.empty()) {
+                    const auto it = layouts.find(binding.autoBindBuffer);
+                    if (it != layouts.end()) descriptor.layout = &it->second;
+                }
+                expected.descriptors[{set, binding.binding}] = descriptor;
+            }
+        }
+        for (const auto& range : pass.pushConstants) {
+            expected.pushConstantSize = std::max(expected.pushConstantSize, range.offset + range.size);
+        }
+        if (!pass.execution.entityDataBinding.empty()) {
+            const auto* config = builder.getEntityDataBinding(pass.execution.entityDataBinding);
+            if (config && !config->perDraw.layoutRef.empty()) {
+                const auto it = layouts.find(config->perDraw.layoutRef);
+                if (it != layouts.end()) expected.pushConstantLayout = &it->second;
+            }
+        }
+
+        for (const std::string* path : shaders) {
+            if (path->empty()) continue;
+            std::ifstream file(*path, std::ios::binary | std::ios::ate);
+            if (!file) continue;
+            std::vector<char> code(static_cast<size_t>(file.tellg()));
+            file.seekg(0);
+            file.read(code.data(), static_cast<std::streamsize>(code.size()));
+
+            for (const auto& message : validateShaderInterface(code.data(), code.size(), expected)) {
+                problems.push_back("pass '" + pass.name + "', " + *path + ": " + message);
+            }
+        }
+    }
+
+    if (problems.empty()) return true;
+
+    outError = "Shader interfaces do not match the pipeline JSON:";
+    for (const auto& problem : problems) {
+        m_logger->log(LogLevel::Error, "%s", problem.c_str());
+        outError += "\n  " + problem;
+    }
+    return false;
 }
 
 void FrameGraphCompiler::compileBufferLayouts(

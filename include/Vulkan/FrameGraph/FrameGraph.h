@@ -662,6 +662,16 @@ public:
         const std::vector<BufferLayoutDesc>& layoutDescs,
         std::unordered_map<std::string, CompiledBufferLayout>& outLayouts);
 
+    // ── Stage 12: Shader interface validation ──
+    // Reflects every pass's SPIR-V and compares its descriptor bindings, buffer
+    // blocks and push constants with the JSON (see ShaderInterfaceValidator.h).
+    // Returns false and fills outError with every mismatch found. A shader file
+    // that cannot be read is skipped; pipeline creation reports that itself.
+    bool validateShaderInterfaces(
+        const FrameGraphBuilder& builder,
+        const std::unordered_map<std::string, CompiledBufferLayout>& layouts,
+        std::string& outError);
+
 private:
     // ── Compilation stages ──
     bool topologicalSort(

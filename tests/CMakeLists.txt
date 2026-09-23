@@ -27,6 +27,13 @@ target_include_directories(ShoonyakashaTests PRIVATE
 
 target_compile_definitions(ShoonyakashaTests PRIVATE SHOONYAKASHA_TESTING)
 
+# SPIR-V fixtures for ShaderInterfaceValidatorTest, built next to their sources.
+include("${PROJECT_SOURCE_DIR}/cmake/CompileShaders.cmake")
+target_compile_shaders(ShoonyakashaTests "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+target_compile_definitions(ShoonyakashaTests PRIVATE
+    SHOONYAKASHA_TEST_SHADER_DIR="${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+    SHOONYAKASHA_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
 if(MSVC)
     target_compile_options(ShoonyakashaTests PRIVATE /W4)
 endif()

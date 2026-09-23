@@ -13,6 +13,8 @@ find_dependency(EnTT CONFIG)
 find_dependency(Bullet CONFIG)
 find_dependency(glfw3 CONFIG)
 find_dependency(glm CONFIG)
+# Linked privately, but a static Shoonyakasha still needs it at link time.
+find_dependency(unofficial-spirv-reflect CONFIG)
 
 include("${CMAKE_CURRENT_LIST_DIR}/ShoonyakashaTargets.cmake")
 

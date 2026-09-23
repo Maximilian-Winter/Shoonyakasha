@@ -17,7 +17,8 @@
     "entt",
     "bullet3",
     "glfw3",
-    "glm"
+    "glm",
+    "spirv-reflect"
   ],
   "features": {
     "tests": {

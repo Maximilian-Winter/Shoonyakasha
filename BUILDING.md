@@ -197,7 +197,9 @@ target_link_libraries(myapp PRIVATE Shoonyakasha::Shoonyakasha)
 with `CMAKE_PREFIX_PATH` pointing at the install prefix. The consuming project
 needs the same dependencies findable — `ShoonyakashaConfig.cmake` calls
 `find_dependency()` for Vulkan, GLFW, Bullet, EnTT, glm, and nlohmann_json,
-because they are linked `PUBLIC`.
+because they are linked `PUBLIC`, and for SPIRV-Reflect
+(`unofficial-spirv-reflect`), which is linked privately but, since both
+libraries are static, is still needed when the consumer links.
 
 Worth doing once after any change to the export set: an install that succeeds
 proves less than a `find_package` that resolves.
