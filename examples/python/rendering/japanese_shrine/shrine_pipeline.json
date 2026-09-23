@@ -48,11 +48,8 @@
       "packing": "std140",
       "updateFrequency": "per_frame",
       "fields": [
-        { "name": "lightViewProjCol0", "type": "vec4", "source": "scene.custom.shadow.col0" },
-        { "name": "lightViewProjCol1", "type": "vec4", "source": "scene.custom.shadow.col1" },
-        { "name": "lightViewProjCol2", "type": "vec4", "source": "scene.custom.shadow.col2" },
-        { "name": "lightViewProjCol3", "type": "vec4", "source": "scene.custom.shadow.col3" },
-        { "name": "params",            "type": "vec4", "source": "scene.custom.shadow.params" }
+        { "name": "lightViewProj", "type": "mat4", "source": "scene.custom.shadow.lightViewProj" },
+        { "name": "params",        "type": "vec4", "source": "scene.custom.shadow.params" }
       ]
     },
     "ShadowPerDraw": {
@@ -201,7 +198,8 @@
         "fragmentShader": "shaders/shadow_depth.frag.spv",
         "depthTest": true,
         "depthWrite": true,
-        "cullMode": "none"
+        "cullMode": "none",
+        "depthBias": { "constant": 0.0, "slope": 1.75 }
       },
       "descriptorSets": ["shadowWriteSet"],
       "pushConstants": [{ "stages": ["vertex"], "size": 64, "offset": 0 }]

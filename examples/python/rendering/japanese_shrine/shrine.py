@@ -9,8 +9,8 @@ environment behind it. The camera circles the shrine.
 
 The sun casts shadows. ShadowPass renders depth from the sun into a 2048x2048
 map through an orthographic projection that this script builds and hands to
-the shaders as four custom vec4 columns; the lighting pass compares against
-it with a 5x5 PCF kernel.
+the shaders as a custom mat4; the lighting pass compares against it with a
+5x5 PCF kernel.
 
 Keys:
     SPACE   stop or resume the orbit; while stopped, WASD/Q/E and the right
@@ -69,7 +69,9 @@ SHADOW_RADIUS = 2.6
 SHADOW_DISTANCE = 12.0  # sun eye distance from SHADOW_CENTER
 SHADOW_FAR = 30.0       # deep enough to reach ground in the shrine's long shadow
 # Normal offset, constant depth bias, slope bias, sky light kept in shadow.
-SHADOW_PARAMS = (0.02, 0.0005, 0.0015, 0.55)
+# ShadowPass also applies hardware slope bias (its "depthBias" block), so the
+# shader-side slope term stays at 0.
+SHADOW_PARAMS = (0.02, 0.0003, 0.0, 0.55)
 
 
 def normalize(v):
@@ -114,8 +116,8 @@ def sun_view_projection():
 
 def upload_sun_shadow():
     matrix = sun_view_projection()
-    for column in range(4):
-        engine.set_custom_vec4(f"shadow.col{column}", tuple(matrix[row][column] for row in range(4)))
+    columns = tuple(tuple(matrix[row][column] for row in range(4)) for column in range(4))
+    engine.set_custom_mat4("shadow.lightViewProj", columns)
     engine.set_custom_vec4("shadow.params", SHADOW_PARAMS)
 
 

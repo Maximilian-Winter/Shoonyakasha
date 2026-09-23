@@ -14,8 +14,12 @@ layout(push_constant) uniform PushConstants {
     mat4 model;
 } push;
 
-// Position only; the engine's other vertex attributes are left unread.
+// The engine's full vertex format (VulkanModel.h). Only the position is used;
+// the rest are declared so the pipeline's vertex input matches the shader.
 layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inColor;
+layout(location = 2) in vec2 inTexCoord;
+layout(location = 3) in vec3 inNormal;
 
 void main() {
     gl_Position = shadow.lightViewProj * push.model * vec4(inPosition, 1.0);
