@@ -12,7 +12,7 @@ engine.setCustomFloat("effect.exposure", 1.f);
 engine.setCustomVec4("effect.tint", glm::vec4(1.f, 0.8f, 0.6f, 1.f));
 ```
 
-Supported facade setters are float, vec2, vec3, vec4, and uint. The key omits `scene.custom.`; embedded dots remain part of the key.
+Supported facade setters are float, vec2, vec3, vec4, mat4, and uint. The key omits `scene.custom.`; embedded dots remain part of the key. From Python, `set_custom_mat4` takes four columns of four floats, the column-major shape `Scene.get_world_matrix` returns; a `mat4` buffer field receives it unchanged.
 
 ## Pipeline fragment
 

@@ -120,6 +120,13 @@ cdef inline vec3 _tuple_to_vec3(object t):
 cdef inline vec4 _tuple_to_vec4(object t):
     return make_vec4(<float>t[0], <float>t[1], <float>t[2], <float>t[3])
 
+cdef inline mat4 _tuple_to_mat4(object m):
+    # Four columns of four, the shape _mat4_to_tuple returns.
+    return make_mat4(<float>m[0][0], <float>m[0][1], <float>m[0][2], <float>m[0][3],
+                     <float>m[1][0], <float>m[1][1], <float>m[1][2], <float>m[1][3],
+                     <float>m[2][0], <float>m[2][1], <float>m[2][2], <float>m[2][3],
+                     <float>m[3][0], <float>m[3][1], <float>m[3][2], <float>m[3][3])
+
 cdef inline vec2 _tuple_to_vec2(object t):
     return make_vec2(<float>t[0], <float>t[1])
 
@@ -1362,6 +1369,14 @@ cdef class Engine:
     def set_custom_vec4(self, str key, value):
         """Set custom vec4 for shader uniforms."""
         self._ptr.setCustomVec4(key.encode('utf-8'), _tuple_to_vec4(value))
+
+    def set_custom_mat4(self, str key, value):
+        """Set custom mat4 for shader uniforms.
+
+        `value` is four columns of four floats (column-major), the shape
+        Scene.get_world_matrix returns.
+        """
+        self._ptr.setCustomMat4(key.encode('utf-8'), _tuple_to_mat4(value))
 
     def set_custom_uint(self, str key, uint32_t value):
         """Set custom uint for shader uniforms."""

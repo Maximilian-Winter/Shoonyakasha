@@ -420,6 +420,10 @@ void EngineAPI::setCustomVec4(const std::string& key, const glm::vec4& value) {
     m_impl->app->getRenderGraph().getSceneContext().setCustom(key, value);
 }
 
+void EngineAPI::setCustomMat4(const std::string& key, const glm::mat4& value) {
+    m_impl->app->getRenderGraph().getSceneContext().setCustom(key, value);
+}
+
 void EngineAPI::setCustomUint(const std::string& key, uint32_t value) {
     m_impl->app->getRenderGraph().getSceneContext().setCustom(key, value);
 }

@@ -75,6 +75,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_custom_vec2(key, value)` | None | Set custom vec2 for shader uniforms. |
 | `set_custom_vec3(key, value)` | None | Set custom vec3 for shader uniforms. |
 | `set_custom_vec4(key, value)` | None | Set custom vec4 for shader uniforms. |
+| `set_custom_mat4(key, value)` | None | Set custom mat4 for shader uniforms. |
 | `set_custom_uint(key, value)` | None | Set custom uint for shader uniforms. |
 
 <!-- END SOURCE API -->

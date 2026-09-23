@@ -77,6 +77,7 @@ void setCustomFloat(const std::string& key, float value);
 void setCustomVec2(const std::string& key, const glm::vec2& value);
 void setCustomVec3(const std::string& key, const glm::vec3& value);
 void setCustomVec4(const std::string& key, const glm::vec4& value);
+void setCustomMat4(const std::string& key, const glm::mat4& value);
 void setCustomUint(const std::string& key, uint32_t value);
 ```
 
