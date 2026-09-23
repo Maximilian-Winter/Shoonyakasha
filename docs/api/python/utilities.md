@@ -8,11 +8,29 @@ The package's `assets`, `keys`, `pipeline`, and `shaders` modules work without t
 |---|---|
 | `shaders.find_glslc(hint=None)` | Locate compiler through hint, SDK, PATH, and known SDK locations; raises `GlslcNotFound` if absent |
 | `shaders.output_path_for(source)` | Default `.spv` output path |
-| `shaders.is_stale(source, output=None)` | Whether compilation is needed |
+| `shaders.include_dir()` | The shared GLSL library shipped in the package, passed to glslc as `-I` on every compile |
+| `shaders.is_stale(source, output=None)` | Whether compilation is needed: the output is missing, or the source or any file it `#include`d (from the `.spv.d` file glslc writes beside the output) is newer |
 | `shaders.compile(source, output=None, *, glslc=None, args=(), force=False, quiet=True)` | Compile one shader; returns its output Path |
 | `shaders.compile_dir(directory, *, recursive=True, force=False, glslc=None, args=(), extensions=SHADER_EXTENSIONS, quiet=True)` | Returns output Paths actually rebuilt; empty when up to date |
 
 Compilation errors raise `ShaderCompileError`; missing directories raise `FileNotFoundError`. Source: [shaders.py](../../../python/shoonyakasha/shaders.py).
+
+### Shared GLSL library
+
+Shaders compiled by `sk.shaders` or by CMake's `target_compile_shaders` can include the engine's GLSL library, which lives in [`python/shoonyakasha/glsl/sk/`](../../../python/shoonyakasha/glsl/sk) and ships in the wheel:
+
+| Include | Contents |
+|---|---|
+| `sk/pbr.glsl` | `fresnelSchlick`, `fresnelSchlickRoughness`, `baseReflectivity`, `distributionGGX`, `geometrySmith`, `cookTorrance`, `SK_PI` |
+| `sk/tonemap.glsl` | `ACESFilm`, `Reinhard`, `Uncharted2Tonemap`, `Uncharted2` |
+| `sk/noise.glsl` | integer `hash`, value `noise`, five-octave `fbm` |
+| `sk/shapes2d.glsl` | antialiased `fill`/`stroke`, premultiplied `over`, 2D distances (`sdBox`, `sdTriangle`, `sdVesica`, `sdPetal`, `sdEllipse`), `foldPolar`, `rotate`, `SK_TAU` |
+
+```glsl
+#include "sk/pbr.glsl"
+```
+
+Each header has an include guard, so including one twice is harmless. Editing a header rebuilds the shaders that include it, in both builds.
 
 ## Pipeline diagnostics
 

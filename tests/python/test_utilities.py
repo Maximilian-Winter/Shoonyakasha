@@ -108,6 +108,52 @@ class ShaderCompilation(unittest.TestCase):
         self.write("a.vert", self.VALID)
         self.assertEqual(1, len(shaders.compile_dir(self.tmp)))
 
+    def test_every_shared_library_header_compiles(self):
+        # Each header on its own, in a fragment shader because shapes2d uses
+        # fwidth(). Catches a header that only compiled alongside another.
+        headers = sorted((shaders.include_dir() / "sk").glob("*.glsl"))
+        self.assertTrue(headers, "no headers under %s" % shaders.include_dir())
+        for header in headers:
+            with self.subTest(header=header.name):
+                source = self.write(header.stem + ".frag",
+                                    '#version 450\n#include "sk/%s"\n' % header.name
+                                    + "layout(location = 0) out vec4 c;\n"
+                                    + "void main() { c = vec4(1.0); }\n")
+                self.assertTrue(shaders.compile(source, force=True).exists())
+
+    def _shader_with_local_include(self, directory):
+        (directory / "common.glsl").write_text("float half_of(float x) { return x * 0.5; }\n",
+                                               encoding="utf-8")
+        source = directory / "uses.frag"
+        source.write_text('#version 450\n#include "common.glsl"\n'
+                          "layout(location = 0) out vec4 c;\n"
+                          "void main() { c = vec4(half_of(1.0)); }\n", encoding="utf-8")
+        return source
+
+    def test_a_newer_include_makes_the_output_stale(self):
+        source = self._shader_with_local_include(self.tmp)
+        output = shaders.compile(source)
+        self.assertFalse(shaders.is_stale(source))
+
+        header = self.tmp / "common.glsl"
+        os.utime(header, (output.stat().st_atime + 10, output.stat().st_mtime + 10))
+        self.assertTrue(shaders.is_stale(source))
+        self.assertEqual([output], shaders.compile_dir(self.tmp))
+
+    def test_a_deleted_include_makes_the_output_stale(self):
+        source = self._shader_with_local_include(self.tmp)
+        shaders.compile(source)
+        (self.tmp / "common.glsl").unlink()
+        self.assertTrue(shaders.is_stale(source))
+
+    def test_dependencies_are_found_in_paths_with_spaces(self):
+        # glslc writes these paths unescaped; they still have to be recognised.
+        spaced = self.tmp / "has a space"
+        spaced.mkdir()
+        source = self._shader_with_local_include(spaced)
+        shaders.compile(source)
+        self.assertFalse(shaders.is_stale(source))
+
 
 class AssetLookup(unittest.TestCase):
 

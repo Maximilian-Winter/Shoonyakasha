@@ -67,6 +67,8 @@ __pycache__/
 examples/python/**/*.spv
 # Test fixtures, compiled by tests/CMakeLists.txt.
 /tests/shaders/*.spv
+# glslc dependency files, written beside every compiled shader.
+*.spv.d
 
 # Output the Python examples write where they run.
 examples/python/**/*.log

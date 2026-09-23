@@ -12,9 +12,15 @@ drifts, and one of these `.spv` files had already drifted once.
     sk.shaders.compile_dir("shaders")          # only what changed
     sk.shaders.compile("shaders/basic.vert")   # -> shaders/basic.vert.spv
 
-Staleness is decided by modification time. No shader in this repository uses
-`#include`, so there is nothing else to track; if that changes, this needs to
-learn about glslc's `-MD` dependency files.
+Every compile can `#include` the engine's shared GLSL library, which ships in
+this package under `glsl/` (see `include_dir()`):
+
+    #include "sk/pbr.glsl"
+
+Staleness is decided by modification time. glslc writes a dependency file
+beside each output (`basic.vert.spv.d`) listing every file the shader
+included, and an output is stale when its source or any of those files is
+newer than it.
 """
 
 import os
@@ -28,6 +34,7 @@ __all__ = [
     "ShaderCompileError",
     "SHADER_EXTENSIONS",
     "find_glslc",
+    "include_dir",
     "is_stale",
     "compile",
     "compile_dir",
@@ -111,13 +118,67 @@ def output_path_for(source):
     return Path(str(source) + ".spv")
 
 
+def include_dir():
+    """The engine's shared GLSL library, passed to glslc as `-I` on every compile.
+
+    The same directory is the include path of the C++ build (cmake/CompileShaders.cmake).
+    """
+    return Path(__file__).resolve().parent / "glsl"
+
+
+def depfile_path_for(output):
+    """`shaders/basic.vert.spv` -> `shaders/basic.vert.spv.d`."""
+    return Path(str(output) + ".d")
+
+
+def _depfile_dependencies(depfile):
+    """Paths listed in a make-style dependency file, or [] if it cannot be read.
+
+    The file reads `target: dep dep ...`. glslc does not escape spaces inside
+    paths, so whitespace-separated tokens are joined until they name an
+    existing file. Tokens that never do are returned as one path that does not
+    exist, which is_stale() treats as stale.
+    """
+    try:
+        text = Path(depfile).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    text = text.replace("\\\r\n", " ").replace("\\\n", " ")
+    _, sep, deps = text.partition(": ")
+    if not sep:
+        return []
+
+    placeholder = "\0"   # a `\ ` escape, from tools that do write one
+    paths, pending = [], ""
+    for token in deps.replace("\\ ", placeholder).split():
+        token = token.replace(placeholder, " ")
+        pending = token if not pending else pending + " " + token
+        if Path(pending).is_file():
+            paths.append(Path(pending))
+            pending = ""
+    if pending:
+        paths.append(Path(pending))
+    return paths
+
+
 def is_stale(source, output=None):
-    """Does `output` need rebuilding from `source`?"""
+    """Does `output` need rebuilding from `source` or anything it includes?"""
     source = Path(source)
     output = Path(output) if output else output_path_for(source)
     if not output.exists():
         return True
-    return source.stat().st_mtime > output.stat().st_mtime
+    built = output.stat().st_mtime
+    if source.stat().st_mtime > built:
+        return True
+    for dependency in _depfile_dependencies(depfile_path_for(output)):
+        try:
+            if dependency.stat().st_mtime > built:
+                return True
+        except OSError:
+            # A dependency that no longer exists: rebuild so glslc reports
+            # the broken #include instead of keeping the old output.
+            return True
+    return False
 
 
 def compile(source, output=None, *, glslc=None, args=(), force=False, quiet=True):
@@ -135,7 +196,11 @@ def compile(source, output=None, *, glslc=None, args=(), force=False, quiet=True
         return output
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    command = [glslc or find_glslc(), str(source), "-o", str(output), *args]
+    # The source goes in as an absolute path, so the dependency file does not
+    # depend on the working directory the next staleness check runs from.
+    command = [glslc or find_glslc(), str(source.resolve()), "-o", str(output),
+               "-I", str(include_dir()),
+               "-MD", "-MF", str(depfile_path_for(output)), *args]
 
     proc = subprocess.run(command, capture_output=True, text=True)
     if proc.returncode != 0:

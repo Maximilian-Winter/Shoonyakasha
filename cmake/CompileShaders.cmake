@@ -36,6 +36,11 @@ if(NOT SHOONYAKASHA_GLSLC)
         "Configure with -DBUILD_EXAMPLES=OFF to skip the examples entirely.")
 endif()
 
+# The engine's shared GLSL library (#include "sk/pbr.glsl"). It lives in the
+# Python package so that the wheel ships it; sk.shaders passes the same
+# directory to glslc.
+set(SHOONYAKASHA_GLSL_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../python/shoonyakasha/glsl")
+
 # target_compile_shaders(<target> <shader-dir> [<shader-dir> ...])
 #
 # Compiles every .vert/.frag/.comp/.geom in each directory and makes <target>
@@ -66,11 +71,16 @@ function(target_compile_shaders TARGET)
             get_filename_component(SHADER_NAME ${SHADER} NAME)
             set(SPV_OUTPUT "${OUTPUT_DIR}/${SHADER_NAME}.spv")
 
+            # glslc's dependency file lists every #include, so editing a
+            # shared header rebuilds the shaders that use it.
             add_custom_command(
                 OUTPUT ${SPV_OUTPUT}
                 COMMAND ${CMAKE_COMMAND} -E make_directory ${OUTPUT_DIR}
                 COMMAND ${SHOONYAKASHA_GLSLC} ${SHADER} -o ${SPV_OUTPUT}
+                        -I ${SHOONYAKASHA_GLSL_INCLUDE_DIR}
+                        -MD -MF ${SPV_OUTPUT}.d
                 DEPENDS ${SHADER}
+                DEPFILE ${SPV_OUTPUT}.d
                 COMMENT "Compiling shader: ${REL_DIR}/${SHADER_NAME}"
                 VERBATIM
             )

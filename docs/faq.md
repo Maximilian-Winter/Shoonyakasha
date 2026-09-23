@@ -22,7 +22,7 @@ Check the log, glTF `result.success`, camera position/clip range, required envir
 
 ## Does validator success guarantee rendering?
 
-No. The validator checks selected declarations and files, not all C++ parser cases, shader interfaces, or Vulkan constraints. `pipeline.check` raises on errors and returns a diagnostic list on success. See [differences](reference/pipeline-json.md#validation-and-export).
+No. The validator checks selected declarations and files, not all C++ parser cases, shader interfaces, or Vulkan constraints. Shader interfaces are checked by the native compiler when the engine starts. `pipeline.check` raises on errors and returns a diagnostic list on success. See [differences](reference/pipeline-json.md#validation-and-export).
 
 ## Are all engine features exposed in Python?
 

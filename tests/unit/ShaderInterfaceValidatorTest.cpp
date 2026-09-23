@@ -220,6 +220,13 @@ TEST(ShaderInterfaceValidator, SkipsRuntimeArrayBlocks) {
     EXPECT_TRUE(errors.empty()) << joined(errors);
 }
 
+TEST(ShaderInterfaceValidator, SharedLibraryIncludesCompile) {
+    // uses_library.frag #includes sk/pbr.glsl and sk/tonemap.glsl; the build
+    // only produces it when glslc gets the library's include directory.
+    const auto errors = validate("uses_library.frag.spv", ShaderInterfaceExpectation{});
+    EXPECT_TRUE(errors.empty()) << joined(errors);
+}
+
 TEST(ShaderInterfaceValidator, UnparseableModuleIsOneError) {
     const std::vector<char> garbage(64, '\x7f');
     const auto errors = validateShaderInterface(garbage.data(), garbage.size(), ShaderInterfaceExpectation{});
