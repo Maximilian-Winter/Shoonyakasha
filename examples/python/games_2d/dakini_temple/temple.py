@@ -1,21 +1,31 @@
 """
 Shoonyakasha Dakini Temple
 
-A top-down mandala palace for Vajrayogini, seen from above:
+A top-down mandala palace, seen from above:
 
   - a ring of wisdom fire, a vajra fence and a ring of lotus petals
   - a palace with five-coloured walls and a gate in each direction, its
     ground split into the blue, yellow, red and green quarters
-  - an eight-petalled lotus holding the red dharmodaya, a pair of
-    interlocking triangles with a turning joy-swirl at its centre
+  - an eight-petalled lotus holding the deity's symbol at the centre
   - eight butter lamps and embers that spiral out into space
+
+The palace can hold four deities, each with its own colours, centre symbol
+and mantra:
+
+  Vajrayogini   the red dharmodaya with a turning joy-swirl
+  Green Tara    a blue utpala flower on a moon disc
+  White Tara    an eye of wisdom on a moon disc
+  Vajrapani     an upright vajra blazing in front of a sun disc
 
 Every mandala layer is a single quad whose pattern is drawn procedurally by
 shaders/mandala.frag. Python picks the layer through a "shape" material
-parameter, and Python ECS systems turn, breathe and flicker the quads.
+parameter and the deity through the "deity" custom scene value; Python ECS
+systems turn, breathe and flicker the quads.
 
 Keys:
-    P    save a screenshot to dakini_temple.png
+    LEFT / RIGHT   previous / next deity
+    SPACE          next deity
+    P              save a screenshot to dakini_temple.png
 
 Usage:
     python temple.py
@@ -48,11 +58,53 @@ LAYER_OVERLAY = 4   # vignette
 LAYER_TEXT = 8
 
 # Layer ids understood by shaders/mandala.frag.
-SKY, FIRE, VAJRA, PETALS, PALACE, LOTUS, DHARMODAYA, GLOW, VIGNETTE, LAMP = range(10)
+SKY, FIRE, VAJRA, PETALS, PALACE, LOTUS, CENTRE, GLOW, VIGNETTE, LAMP = range(10)
 
 LAMP_RADIUS = 2.95
 EMBER_COUNT = 90
 EMBER_ESCAPE_RADIUS = 5.2
+
+# Seconds to dim the mandala away, and again to bring the next one back.
+FADE_SECONDS = 0.9
+# How bright the sky stays while the mandala is dimmed.
+SKY_AT_DARKEST = 0.2
+
+
+class Deity:
+    def __init__(self, name, mantra, lamp, lamp_core, aura, bindu, embers, centre_spin):
+        self.name = name
+        self.mantra = mantra
+        self.lamp = lamp              # (r, g, b) of the lamp halos
+        self.lamp_core = lamp_core    # (r, g, b) of the flame at each lamp's heart
+        self.aura = aura              # (r, g, b, a) of the light around the centre
+        self.bindu = bindu            # (r, g, b, a) of the bright point at the centre
+        self.embers = embers          # (r, g, b) choices for new embers
+        self.centre_spin = centre_spin  # radians/sec of the centre symbol
+
+
+# The order matches the DEITY_* ids in shaders/mandala.frag.
+DEITIES = [
+    Deity("VAJRAYOGINI", "OM VAJRAYOGINI HUM PHAT",
+          lamp=(1.0, 0.55, 0.18), lamp_core=(1.0, 0.90, 0.65),
+          aura=(0.75, 0.05, 0.02, 0.35), bindu=(1.0, 0.85, 0.75, 0.55),
+          embers=((1.0, 0.75, 0.35), (1.0, 0.35, 0.18), (1.0, 0.92, 0.80)),
+          centre_spin=-0.12),
+    Deity("GREEN TARA", "OM TARE TUTTARE TURE SOHA",
+          lamp=(0.35, 1.0, 0.50), lamp_core=(0.90, 1.0, 0.80),
+          aura=(0.05, 0.60, 0.25, 0.35), bindu=(0.80, 1.0, 0.90, 0.50),
+          embers=((0.40, 1.0, 0.55), (1.0, 0.85, 0.40), (0.85, 1.0, 0.90)),
+          centre_spin=0.06),
+    Deity("WHITE TARA", "OM TARE TUTTARE TURE MAMA AYUR PUNYE JNANA PUTRIM KURU SOHA",
+          lamp=(0.85, 0.90, 1.0), lamp_core=(1.0, 1.0, 1.0),
+          aura=(0.60, 0.70, 1.0, 0.30), bindu=(1.0, 1.0, 1.0, 0.40),
+          embers=((1.0, 1.0, 1.0), (0.70, 0.80, 1.0), (1.0, 0.90, 0.70)),
+          centre_spin=0.0),
+    Deity("VAJRAPANI", "OM VAJRAPANI HUM",
+          lamp=(0.30, 0.50, 1.0), lamp_core=(0.80, 0.90, 1.0),
+          aura=(0.10, 0.20, 1.0, 0.22), bindu=(1.0, 0.80, 0.45, 0.15),
+          embers=((0.35, 0.55, 1.0), (0.60, 0.95, 1.0), (1.0, 0.80, 0.40)),
+          centre_spin=0.0),
+]
 
 rng = random.Random(108)
 
@@ -73,28 +125,89 @@ class Breathe:
         self.phase = phase
 
 
-class Flicker:
-    def __init__(self, color, size, seed):
-        self.color = color            # (r, g, b) of the flame light
+class Light:
+    def __init__(self, color, flicker=False, size=0.0, seed=0.0):
+        self.color = color            # (r, g, b, a) before fading
+        self.flicker = flicker        # butter lamps waver in strength and size
         self.size = size
         self.seed = seed
 
 
 class Ember:
-    def __init__(self):
-        self.respawn(first=True)
+    def __init__(self, deity):
+        self.respawn(deity, first=True)
 
-    def respawn(self, first=False):
+    def respawn(self, deity, first=False):
         self.angle = rng.uniform(0.0, math.tau)
         self.radius = rng.uniform(0.3, 4.5) if first else rng.uniform(0.2, 0.9)
         self.outward = rng.uniform(0.18, 0.45)     # world units/sec
         self.swirl = rng.uniform(0.15, 0.40)       # radians/sec
         self.size = rng.uniform(0.10, 0.24)
-        self.color = rng.choice(((1.0, 0.75, 0.35), (1.0, 0.35, 0.18), (1.0, 0.92, 0.80)))
+        self.color = rng.choice(deity.embers)
 
 
-elapsed = 0.0
-embers = []
+class Temple:
+    """Which deity is shown, and the fade between one and the next."""
+
+    def __init__(self):
+        self.index = 0
+        self.target = 0
+        self.fade = 1.0               # 1 = mandala fully shown, 0 = dimmed away
+        self.elapsed = 0.0
+        self.sky = None
+        self.solid_layers = []        # quads on LAYER_MANDALA and LAYER_OVERLAY
+        self.centre = None
+        self.lamps = []               # (halo, core) pairs
+        self.aura = None
+        self.bindu = None
+        self.embers = []
+        self.title = None
+        self.mantra = None
+
+    @property
+    def deity(self):
+        return DEITIES[self.index]
+
+    def request(self, index):
+        self.target = index % len(DEITIES)
+
+    def show(self, index):
+        """Swap the dimmed mandala over to another deity.
+
+        Labels are only retitled here, not faded: every change to a label
+        re-bakes its glyph entities.
+        """
+        self.index = index
+        deity = self.deity
+        engine.set_custom_float("deity", float(index))
+        engine.scene.set_text(self.title, deity.name)
+        engine.scene.set_text(self.mantra, deity.mantra)
+        spin = engine.ecs.get_component(self.centre, "Spin")
+        spin.rate = deity.centre_spin
+        spin.angle = 0.0
+        for halo, core in self.lamps:
+            engine.ecs.get_component(halo, "Light").color = (*deity.lamp, 1.0)
+            engine.ecs.get_component(core, "Light").color = (*deity.lamp_core, 1.0)
+        engine.ecs.get_component(self.aura, "Light").color = deity.aura
+        engine.ecs.get_component(self.bindu, "Light").color = deity.bindu
+
+    def step(self, dt):
+        """Dims towards the requested deity, swaps at the darkest point, then returns."""
+        self.elapsed += dt
+        rate = dt / FADE_SECONDS
+        if self.target != self.index:
+            self.fade = max(0.0, self.fade - rate)
+            if self.fade == 0.0:
+                self.show(self.target)
+        else:
+            self.fade = min(1.0, self.fade + rate)
+
+    @property
+    def eased(self):
+        return self.fade * self.fade * (3.0 - 2.0 * self.fade)
+
+
+temple = Temple()
 
 
 def mandala_quad(layer, size, render_layer=LAYER_MANDALA, sort_key=0,
@@ -108,7 +221,7 @@ def mandala_quad(layer, size, render_layer=LAYER_MANDALA, sort_key=0,
 
 
 def build_mandala():
-    mandala_quad(SKY, (30.0, 18.0), sort_key=0)
+    temple.sky = mandala_quad(SKY, (30.0, 18.0), sort_key=0)
 
     fire = mandala_quad(FIRE, (9.8, 9.8), sort_key=1)
     engine.ecs.set_component(fire, "Spin", Spin(0.03))
@@ -119,64 +232,93 @@ def build_mandala():
     petals = mandala_quad(PETALS, (7.2, 7.2), sort_key=3)
     engine.ecs.set_component(petals, "Spin", Spin(0.04))
 
-    mandala_quad(PALACE, (5.4, 5.4), sort_key=4)
+    palace = mandala_quad(PALACE, (5.4, 5.4), sort_key=4)
 
     lotus = mandala_quad(LOTUS, (3.6, 3.6), sort_key=5)
     engine.ecs.set_component(lotus, "Spin", Spin(0.08))
     engine.ecs.set_component(lotus, "Breathe", Breathe((3.6, 3.6), rate=0.18, amount=0.035))
 
-    dharmodaya = mandala_quad(DHARMODAYA, (2.3, 2.3), sort_key=6)
-    engine.ecs.set_component(dharmodaya, "Spin", Spin(-0.12))
+    temple.centre = mandala_quad(CENTRE, (2.3, 2.3), sort_key=6)
+    engine.ecs.set_component(temple.centre, "Spin", Spin(temple.deity.centre_spin))
+
+    temple.solid_layers = [fire, vajra, petals, palace, lotus, temple.centre]
 
     for i in range(8):
         angle = math.tau * (i + 0.5) / 8.0
         pos = (LAMP_RADIUS * math.cos(angle), LAMP_RADIUS * math.sin(angle), 0.0)
-        mandala_quad(LAMP, (0.42, 0.42), sort_key=7, pos=pos)
+        temple.solid_layers.append(mandala_quad(LAMP, (0.42, 0.42), sort_key=7, pos=pos))
 
-        light = mandala_quad(GLOW, (1.4, 1.4), render_layer=LAYER_GLOW, sort_key=1, pos=pos)
-        engine.ecs.set_component(light, "Flicker", Flicker((1.0, 0.55, 0.18), 1.4, seed=i * 1.7))
+        halo = mandala_quad(GLOW, (1.4, 1.4), render_layer=LAYER_GLOW, sort_key=1, pos=pos)
+        engine.ecs.set_component(halo, "Light", Light((*temple.deity.lamp, 1.0),
+                                                      flicker=True, size=1.4, seed=i * 1.7))
         core = mandala_quad(GLOW, (0.32, 0.32), render_layer=LAYER_GLOW, sort_key=2, pos=pos)
-        engine.ecs.set_component(core, "Flicker", Flicker((1.0, 0.90, 0.65), 0.32, seed=i * 1.7))
+        engine.ecs.set_component(core, "Light", Light((*temple.deity.lamp_core, 1.0),
+                                                      flicker=True, size=0.32, seed=i * 1.7))
+        temple.lamps.append((halo, core))
 
-    aura = mandala_quad(GLOW, (4.6, 4.6), render_layer=LAYER_GLOW, sort_key=0,
-                        tint=(0.75, 0.05, 0.02, 0.35))
-    engine.ecs.set_component(aura, "Breathe", Breathe((4.6, 4.6), rate=0.18, amount=0.08))
-    bindu = mandala_quad(GLOW, (0.9, 0.9), render_layer=LAYER_GLOW, sort_key=0,
-                         tint=(1.0, 0.85, 0.75, 0.55))
-    engine.ecs.set_component(bindu, "Breathe", Breathe((0.9, 0.9), rate=0.18, amount=0.15))
+    temple.aura = mandala_quad(GLOW, (4.6, 4.6), render_layer=LAYER_GLOW, sort_key=0)
+    engine.ecs.set_component(temple.aura, "Light", Light(temple.deity.aura))
+    engine.ecs.set_component(temple.aura, "Breathe", Breathe((4.6, 4.6), rate=0.18, amount=0.08))
+
+    temple.bindu = mandala_quad(GLOW, (0.9, 0.9), render_layer=LAYER_GLOW, sort_key=0)
+    engine.ecs.set_component(temple.bindu, "Light", Light(temple.deity.bindu))
+    engine.ecs.set_component(temple.bindu, "Breathe", Breathe((0.9, 0.9), rate=0.18, amount=0.15))
 
     for _ in range(EMBER_COUNT):
         spark = mandala_quad(GLOW, (0.1, 0.1), render_layer=LAYER_GLOW, sort_key=3,
                              tint=(0.0, 0.0, 0.0, 0.0))
-        engine.ecs.set_component(spark, "Ember", Ember())
-        embers.append(spark)
+        engine.ecs.set_component(spark, "Ember", Ember(temple.deity))
+        temple.embers.append(spark)
 
     mandala_quad(VIGNETTE, (22.0, 12.4), render_layer=LAYER_OVERLAY)
 
 
 def build_text():
-    mantra = engine.create_text(
-        text="OM VAJRAYOGINI HUM PHAT",
+    temple.title = engine.create_text(
+        text=temple.deity.name,
+        anchor=sk.UI_ANCHOR_TOP_CENTER,
+        offset_pixels=(0, 44),
+        font_path="fonts/Roboto-Regular.ttf",
+        font_size=30.0,
+        color=(1.0, 0.80, 0.42, 0.9),
+    )
+    temple.mantra = engine.create_text(
+        text=temple.deity.mantra,
         anchor=sk.UI_ANCHOR_BOTTOM_CENTER,
         offset_pixels=(0, -34),
         font_path="fonts/Roboto-Regular.ttf",
-        font_size=26.0,
+        font_size=24.0,
         color=(1.0, 0.80, 0.42, 0.9),
     )
-    engine.scene.set_text_align(mantra, sk.TEXT_ALIGN_CENTER)
-    engine.scene.set_text_layer_mask(mantra, LAYER_TEXT)
+    hint = engine.create_text(
+        text="LEFT / RIGHT  change deity",
+        anchor=sk.UI_ANCHOR_BOTTOM_RIGHT,
+        offset_pixels=(-20, -16),
+        font_path="fonts/Roboto-Regular.ttf",
+        font_size=14.0,
+        color=(1.0, 0.90, 0.75, 0.35),
+    )
+    for label in (temple.title, temple.mantra):
+        engine.scene.set_text_align(label, sk.TEXT_ALIGN_CENTER)
+    engine.scene.set_text_align(hint, sk.TEXT_ALIGN_RIGHT)
+    for label in (temple.title, temple.mantra, hint):
+        engine.scene.set_text_layer_mask(label, LAYER_TEXT)
 
 
 def register_systems():
     # Priorities below 0 run before TransformSystem, so this frame's
     # rotations and scales reach this frame's world matrices.
 
-    def time_system(dt):
-        global elapsed
-        elapsed += dt
+    def temple_system(dt):
+        temple.step(dt)
+        fade = temple.eased
+        for entity in temple.solid_layers:
+            engine.scene.set_sprite_color(entity, (fade, fade, fade, fade))
+        sky = SKY_AT_DARKEST + (1.0 - SKY_AT_DARKEST) * fade
+        engine.scene.set_sprite_color(temple.sky, (sky, sky, sky, 1.0))
         return True
 
-    engine.ecs.add_system("TempleTime", time_system, priority=-10)
+    engine.ecs.add_system("Temple", temple_system, priority=-10)
 
     def spin_system(dt):
         for entity in engine.ecs.find_entities_with_component("Spin"):
@@ -190,32 +332,35 @@ def register_systems():
     def breathe_system(dt):
         for entity in engine.ecs.find_entities_with_component("Breathe"):
             breath = engine.ecs.get_component(entity, "Breathe")
-            s = 1.0 + breath.amount * math.sin(math.tau * breath.rate * elapsed + breath.phase)
+            s = 1.0 + breath.amount * math.sin(math.tau * breath.rate * temple.elapsed + breath.phase)
             engine.scene.set_scale(entity, (breath.size[0] * s, breath.size[1] * s, 1.0))
         return True
 
     engine.ecs.add_system("Breathe", breathe_system, priority=-5)
 
-    def flicker_system(dt):
-        for entity in engine.ecs.find_entities_with_component("Flicker"):
-            flame = engine.ecs.get_component(entity, "Flicker")
-            t = elapsed * 7.0 + flame.seed
-            wave = 0.5 * math.sin(t) + 0.3 * math.sin(t * 2.3 + 1.1) + 0.2 * math.sin(t * 5.7 + 2.9)
-            strength = 0.78 + 0.22 * wave
-            engine.scene.set_sprite_color(entity, (*flame.color, strength))
-            s = flame.size * (0.94 + 0.06 * wave)
-            engine.scene.set_scale(entity, (s, s, 1.0))
+    def light_system(dt):
+        fade = temple.eased
+        for entity in engine.ecs.find_entities_with_component("Light"):
+            light = engine.ecs.get_component(entity, "Light")
+            r, g, b, a = light.color
+            if light.flicker:
+                t = temple.elapsed * 7.0 + light.seed
+                wave = 0.5 * math.sin(t) + 0.3 * math.sin(t * 2.3 + 1.1) + 0.2 * math.sin(t * 5.7 + 2.9)
+                a *= 0.78 + 0.22 * wave
+                s = light.size * (0.94 + 0.06 * wave)
+                engine.scene.set_scale(entity, (s, s, 1.0))
+            engine.scene.set_sprite_color(entity, (r, g, b, a * fade))
         return True
 
-    engine.ecs.add_system("Flicker", flicker_system, priority=-5)
+    engine.ecs.add_system("Light", light_system, priority=-5)
 
     def ember_system(dt):
-        for entity in embers:
+        for entity in temple.embers:
             ember = engine.ecs.get_component(entity, "Ember")
             ember.radius += ember.outward * dt
             ember.angle += ember.swirl * dt
             if ember.radius > EMBER_ESCAPE_RADIUS:
-                ember.respawn()
+                ember.respawn(temple.deity)
             # Fade in near the centre and out towards the edge of space.
             life = ember.radius / EMBER_ESCAPE_RADIUS
             alpha = math.sin(math.pi * life) ** 1.5 * 0.9
@@ -231,18 +376,28 @@ def register_systems():
 class Controls:
     def __init__(self):
         # is_key_down reports the current state, so the previous state is kept
-        # to save once per press.
-        self._was_down = False
+        # to act once per press.
+        self._was_down = {}
+
+    def pressed(self, key):
+        down = engine.input.is_key_down(key)
+        was_down = self._was_down.get(key, False)
+        self._was_down[key] = down
+        return down and not was_down
 
     def update(self, dt):
-        down = engine.input.is_key_down(keys.P)
-        if down and not self._was_down:
+        right, space = self.pressed(keys.RIGHT), self.pressed(keys.SPACE)
+        if right or space:
+            temple.request(temple.target + 1)
+        if self.pressed(keys.LEFT):
+            temple.request(temple.target - 1)
+        if self.pressed(keys.P):
             path = "dakini_temple.png"
             print("screenshot ->", path if engine.capture_screenshot(path) else "failed")
-        self._was_down = down
 
 
 def on_init():
+    engine.set_custom_float("deity", 0.0)
     engine.create_camera(pos=(0.0, 0.0, 9.5), fov=60.0, speed=0.0)
     build_mandala()
     build_text()

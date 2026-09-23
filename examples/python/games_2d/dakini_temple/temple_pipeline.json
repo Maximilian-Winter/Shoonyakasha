@@ -11,7 +11,7 @@
         { "name": "viewProjection", "type": "mat4",  "source": "scene.camera.viewProjection" },
         { "name": "resolution",     "type": "vec2",  "source": "scene.screen.resolution" },
         { "name": "time",           "type": "float", "source": "scene.time.elapsed" },
-        { "name": "padding",        "type": "float", "source": "const.0" }
+        { "name": "deity",          "type": "float", "source": "scene.custom.deity" }
       ]
     },
     "MandalaPerDraw": {

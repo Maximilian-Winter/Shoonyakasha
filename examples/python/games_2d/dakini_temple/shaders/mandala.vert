@@ -9,7 +9,7 @@ layout(set = 0, binding = 0) uniform TempleSceneUBO {
     mat4 viewProjection;
     vec2 resolution;
     float time;
-    float padding;
+    float deity;       // which mandala is shown, see temple.py DEITIES
 } scene;
 
 layout(push_constant) uniform PushConstants {

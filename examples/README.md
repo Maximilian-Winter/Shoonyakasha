@@ -95,7 +95,7 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 | [`pong_game`](python/games_2d/pong_game) | A finished game. Sprites, UI, text, input and a match loop, in one file. |
 | [`sprite_ui_test`](python/games_2d/sprite_ui_test) | The pieces pong is built from, one at a time: world-space sprites, anchored UI panels, baked text. |
 | [`full_showcase`](python/games_2d/full_showcase) | Three blend modes in one frame via render layer masks, plus custom Python ECS components and systems. |
-| [`dakini_temple`](python/games_2d/dakini_temple) | A Vajrayogini mandala palace drawn entirely in a fragment shader: each quad picks its layer through a material parameter, and Python systems animate them. |
+| [`dakini_temple`](python/games_2d/dakini_temple) | A mandala palace for Vajrayogini, Green Tara, White Tara or Vajrapani, drawn entirely in a fragment shader: each quad picks its layer through a material parameter, a custom scene value picks the deity, and Python systems animate them. |
 
 ---
 
