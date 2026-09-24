@@ -61,9 +61,11 @@ Bundled sprites, layered blend passes, text, and Python ECS systems in motion. T
 
 ### Dakini temple (`dakini_temple`)
 
-<a href="../images/examples/python/dakini_temple.png"><img src="../images/examples/python/dakini_temple.png" alt="Top-down mandala palace with a fire ring, vajra fence, four coloured quarters, a red lotus and a red double triangle at the centre" width="720"></a>
+<a href="../images/examples/python/dakini_temple.png"><img src="../images/examples/python/dakini_temple.png" alt="Top-down mandala palace with a fire ring, vajra fence, four coloured quarters, a red lotus and a red double triangle at the centre, titled वज्रयोगिनी with its mantra in Devanagari below" width="720"></a>
 
 A mandala palace with no textures. `shaders/mandala.frag` draws each layer onto its quad from a `shape` material parameter, and Python systems turn the rings, make the lotus breathe, flicker the lamps and drift the embers. **Left**/**Right** (or **Space**) dim the palace and bring it back for another deity: Vajrayogini, Green Tara, White Tara or Vajrapani. Each has its own palette, centre symbol and mantra, chosen in the shader through the `scene.custom.deity` value. The preview shows Vajrayogini, the first deity.
+
+The names and mantras are in Devanagari, which the engine's ASCII-only text baking cannot shape. `temple.py` renders them with Pillow's raqm (HarfBuzz) layout and the bundled Noto Sans Devanagari into PNGs under `generated/`, and shows them as screen-space panels that fade with the mandala. Without Pillow + raqm it shows the transliterations as engine text instead.
 
 ### Pong (`pong_game`) — preview unavailable
 

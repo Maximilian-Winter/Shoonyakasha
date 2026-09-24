@@ -76,3 +76,5 @@ examples/python/**/*.mkv
 examples/python/**/*_screenshot.png
 PowerShell-Commands.txt
 /examples/python/games_2d/dakini_temple/fonts
+# Devanagari labels temple.py renders on first run.
+/examples/python/games_2d/dakini_temple/generated/

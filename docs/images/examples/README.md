@@ -53,7 +53,7 @@ The delay starts after initialization (Python: after the first rendered frame). 
 | Python `skinned_fox_demo` | Bundled `Fox.glb` and environment, first animation clip playing. | 3 s |
 | Python `sprite_ui_test` | Bundled orb/panel textures and Roboto font; no input. Checkerboard pixels are part of the orb texture. | 3 s |
 | Python `full_showcase` | Bundled orb/panel textures and Roboto font; automatic motion and system-failure demonstration. | 3 s |
-| Python `dakini_temple` | Procedural shader layers and bundled Roboto font; no textures, no input. | 3 s |
+| Python `dakini_temple` | Procedural shader layers; bundled Noto Sans Devanagari and Roboto fonts, labels rendered with Pillow + raqm; no input. | 3 s |
 | Python `japanese_shrine` | Hand-downloaded `models/japanese_shrine.glb` (CC BY 4.0, aumiella; see the asset README) with the bundled sunset environment; automatic orbit, no input. | 3 s |
 | Python `pong_game` | **Not captured:** separately obtained artwork; permission unresolved below. | — |
 

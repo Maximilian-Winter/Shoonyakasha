@@ -42,6 +42,7 @@ re-scale them.
 | `models/Fox.glb` | [Khronos glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) | CC0 | Skinned, animated |
 | `textures/*.png` | Authored for `examples/python/games_2d/full_showcase` | Project licence (MIT) | |
 | `fonts/Roboto-Regular.ttf` | [Roboto](https://github.com/googlefonts/roboto-classic) | SIL Open Font License 1.1 — see `fonts/OFL.txt` | |
+| `fonts/NotoSansDevanagari-Regular.ttf` | [Noto Sans Devanagari](https://github.com/notofonts/devanagari), the static Regular from the Google Fonts download | SIL Open Font License 1.1 — see `fonts/OFL-NotoSansDevanagari.txt` | Needs a shaping text layout (HarfBuzz); the engine's own text baking is ASCII-only |
 
 **The Poly Haven attributions are inferred from the filenames**, which match
 their assets, and Poly Haven publishes everything CC0. No provenance file

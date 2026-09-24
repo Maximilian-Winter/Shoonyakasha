@@ -22,6 +22,14 @@ shaders/mandala.frag. Python picks the layer through a "shape" material
 parameter and the deity through the "deity" custom scene value; Python ECS
 systems turn, breathe and flicker the quads.
 
+Each deity's name and mantra are shown in Devanagari with a transliteration
+beneath. The engine's text baking is ASCII-only, and Devanagari needs a
+shaping layout (conjuncts such as ज्र, the ि matra drawn before its
+consonant), so these are rendered with Pillow's raqm layout into PNGs under
+generated/ and shown as screen-space panels. Without Pillow + raqm, or
+without fonts/NotoSansDevanagari-Regular.ttf in the asset root, the
+transliterations are shown as engine text instead.
+
 Keys:
     LEFT / RIGHT   previous / next deity
     SPACE          next deity
@@ -33,10 +41,13 @@ Usage:
 Requirements:
     - the shoonyakasha package installed (pip install .)
     - run from this directory, so temple_pipeline.json and shaders/ resolve
+    - optional: Pillow with raqm support, for the Devanagari labels
 """
 
+import hashlib
 import math
 import random
+from pathlib import Path
 
 import shoonyakasha as sk
 from shoonyakasha import keys
@@ -71,9 +82,12 @@ SKY_AT_DARKEST = 0.2
 
 
 class Deity:
-    def __init__(self, name, mantra, lamp, lamp_core, aura, bindu, embers, centre_spin):
-        self.name = name
-        self.mantra = mantra
+    def __init__(self, name, mantra, sanskrit_name, sanskrit_mantra,
+                 lamp, lamp_core, aura, bindu, embers, centre_spin):
+        self.name = name              # ASCII, for the engine's text labels
+        self.mantra = mantra          # ASCII transliteration
+        self.sanskrit_name = sanskrit_name      # Devanagari
+        self.sanskrit_mantra = sanskrit_mantra  # Devanagari
         self.lamp = lamp              # (r, g, b) of the lamp halos
         self.lamp_core = lamp_core    # (r, g, b) of the flame at each lamp's heart
         self.aura = aura              # (r, g, b, a) of the light around the centre
@@ -85,21 +99,25 @@ class Deity:
 # The order matches the DEITY_* ids in shaders/mandala.frag.
 DEITIES = [
     Deity("VAJRAYOGINI", "OM VAJRAYOGINI HUM PHAT",
+          "वज्रयोगिनी", "ॐ वज्रयोगिनी हूं फट्",
           lamp=(1.0, 0.55, 0.18), lamp_core=(1.0, 0.90, 0.65),
           aura=(0.75, 0.05, 0.02, 0.35), bindu=(1.0, 0.85, 0.75, 0.55),
           embers=((1.0, 0.75, 0.35), (1.0, 0.35, 0.18), (1.0, 0.92, 0.80)),
           centre_spin=-0.12),
     Deity("GREEN TARA", "OM TARE TUTTARE TURE SOHA",
+          "श्यामतारा", "ॐ तारे तुत्तारे तुरे स्वाहा",
           lamp=(0.35, 1.0, 0.50), lamp_core=(0.90, 1.0, 0.80),
           aura=(0.05, 0.60, 0.25, 0.35), bindu=(0.80, 1.0, 0.90, 0.50),
           embers=((0.40, 1.0, 0.55), (1.0, 0.85, 0.40), (0.85, 1.0, 0.90)),
           centre_spin=0.06),
     Deity("WHITE TARA", "OM TARE TUTTARE TURE MAMA AYUR PUNYE JNANA PUTRIM KURU SOHA",
+          "सिततारा", "ॐ तारे तुत्तारे तुरे मम आयुः पुण्य ज्ञान पुष्टिं कुरु स्वाहा",
           lamp=(0.85, 0.90, 1.0), lamp_core=(1.0, 1.0, 1.0),
           aura=(0.60, 0.70, 1.0, 0.30), bindu=(1.0, 1.0, 1.0, 0.40),
           embers=((1.0, 1.0, 1.0), (0.70, 0.80, 1.0), (1.0, 0.90, 0.70)),
           centre_spin=0.0),
     Deity("VAJRAPANI", "OM VAJRAPANI HUM",
+          "वज्रपाणि", "ॐ वज्रपाणि हूं",
           lamp=(0.30, 0.50, 1.0), lamp_core=(0.80, 0.90, 1.0),
           aura=(0.10, 0.20, 1.0, 0.22), bindu=(1.0, 0.80, 0.45, 0.15),
           embers=((0.35, 0.55, 1.0), (0.60, 0.95, 1.0), (1.0, 0.80, 0.40)),
@@ -107,6 +125,89 @@ DEITIES = [
 ]
 
 rng = random.Random(108)
+
+
+# ── Devanagari labels ──────────────────────────────────────────────
+
+DEVANAGARI_FONT = "fonts/NotoSansDevanagari-Regular.ttf"
+LATIN_FONT = "fonts/Roboto-Regular.ttf"
+LABEL_DIR = Path("generated")
+LABEL_GOLD = (1.0, 0.80, 0.42)
+LABEL_MAX_WIDTH = WIDTH - 80
+
+
+def devanagari_available():
+    """Pillow with the raqm (HarfBuzz) layout, and the font in the asset root."""
+    try:
+        from PIL import features
+    except ImportError:
+        return False
+    return bool(features.check("raqm")) and sk.assets.exists(DEVANAGARI_FONT)
+
+
+def render_label(lines):
+    """Render centred lines of white text over a soft black halo into a PNG.
+
+    `lines` holds (text, font asset path, pixel size, opacity) tuples, drawn
+    top to bottom. A line wider than LABEL_MAX_WIDTH is set smaller until it
+    fits. The panel's tint multiplies the PNG, so the text takes the tint
+    colour and the halo stays dark, keeping the text readable over the fire.
+    Returns (absolute path, width, height); an existing PNG rendered from the
+    same text, sizes and fonts is reused.
+    """
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+    fonts = {font for _, font, _, _ in lines}
+    stamp = sorted((font, Path(sk.assets.locate(font)).stat().st_mtime_ns) for font in fonts)
+    key = hashlib.sha1(repr((lines, LABEL_MAX_WIDTH, stamp)).encode("utf-8")).hexdigest()[:16]
+    path = (LABEL_DIR / ("label_%s.png" % key)).resolve()
+    if path.exists():
+        with Image.open(path) as cached:
+            return str(path), cached.width, cached.height
+
+    laid_out = []
+    for text, font_path, size, opacity in lines:
+        while True:
+            font = ImageFont.truetype(str(sk.assets.locate(font_path)), size,
+                                      layout_engine=ImageFont.Layout.RAQM)
+            left, top, right, bottom = font.getbbox(text)
+            if right - left <= LABEL_MAX_WIDTH or size <= 8:
+                break
+            size = int(size * LABEL_MAX_WIDTH / (right - left))
+        ascent, descent = font.getmetrics()
+        laid_out.append((text, font, opacity, left, right - left, ascent + descent))
+
+    pad = 14   # room for the halo's blur
+    width = max(w for *_, w, _ in laid_out) + 2 * pad
+    height = sum(h for *_, h in laid_out) + 2 * pad
+    coverage = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(coverage)
+    y = pad
+    for text, font, opacity, left, w, h in laid_out:
+        draw.text(((width - w) / 2 - left, y), text, font=font, fill=int(255 * opacity))
+        y += h
+
+    halo = coverage.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(5))
+    halo = halo.point(lambda v: int(v * 0.75))
+    black = Image.new("L", (width, height), 0)
+    white = Image.new("L", (width, height), 255)
+    label = Image.alpha_composite(Image.merge("RGBA", (black, black, black, halo)),
+                                  Image.merge("RGBA", (white, white, white, coverage)))
+    LABEL_DIR.mkdir(exist_ok=True)
+    label.save(path)
+    return str(path), width, height
+
+
+def label_panel(lines, anchor, edge_offset):
+    """A screen-space panel showing render_label(lines), `edge_offset` pixels
+    from the anchored edge to the panel's nearest edge (negative from the bottom)."""
+    path, w, h = render_label(lines)
+    centre_y = edge_offset + (h / 2 if edge_offset >= 0 else -h / 2)
+    panel = engine.create_ui_panel(anchor=anchor, offset_pixels=(0, centre_y),
+                                   size_pixels=(w, h), texture_path=path,
+                                   color=(*LABEL_GOLD, 0.0))
+    engine.scene.set_render_layer_mask(panel, LAYER_TEXT)
+    return panel
 
 
 # ── Custom ECS components ──────────────────────────────────────────
@@ -161,7 +262,8 @@ class Temple:
         self.aura = None
         self.bindu = None
         self.embers = []
-        self.title = None
+        self.label_panels = []        # (title, mantra) Devanagari panels, one pair per deity
+        self.title = None             # engine text labels, used when there are no panels
         self.mantra = None
 
     @property
@@ -174,14 +276,16 @@ class Temple:
     def show(self, index):
         """Swap the dimmed mandala over to another deity.
 
-        Labels are only retitled here, not faded: every change to a label
-        re-bakes its glyph entities.
+        Engine text labels are only retitled here, not faded: every change
+        to a label re-bakes its glyph entities. The Devanagari panels fade
+        in temple_system instead.
         """
         self.index = index
         deity = self.deity
         engine.set_custom_float("deity", float(index))
-        engine.scene.set_text(self.title, deity.name)
-        engine.scene.set_text(self.mantra, deity.mantra)
+        if self.title is not None:
+            engine.scene.set_text(self.title, deity.name)
+            engine.scene.set_text(self.mantra, deity.mantra)
         spin = engine.ecs.get_component(self.centre, "Spin")
         spin.rate = deity.centre_spin
         spin.angle = 0.0
@@ -274,6 +378,32 @@ def build_mandala():
 
 
 def build_text():
+    if devanagari_available():
+        for deity in DEITIES:
+            title = label_panel([(deity.sanskrit_name, DEVANAGARI_FONT, 46, 1.0),
+                                 (deity.name, LATIN_FONT, 17, 0.7)],
+                                sk.UI_ANCHOR_TOP_CENTER, 0)
+            mantra = label_panel([(deity.sanskrit_mantra, DEVANAGARI_FONT, 32, 1.0),
+                                  (deity.mantra, LATIN_FONT, 15, 0.65)],
+                                 sk.UI_ANCHOR_BOTTOM_CENTER, -14)
+            temple.label_panels.append((title, mantra))
+    else:
+        build_ascii_labels()
+
+    hint = engine.create_text(
+        text="LEFT / RIGHT  change deity",
+        anchor=sk.UI_ANCHOR_BOTTOM_RIGHT,
+        offset_pixels=(-20, -16),
+        font_path="fonts/Roboto-Regular.ttf",
+        font_size=14.0,
+        color=(1.0, 0.90, 0.75, 0.35),
+    )
+    engine.scene.set_text_align(hint, sk.TEXT_ALIGN_RIGHT)
+    engine.scene.set_text_layer_mask(hint, LAYER_TEXT)
+
+
+def build_ascii_labels():
+    """Title and mantra as engine text, used when Devanagari cannot be rendered."""
     temple.title = engine.create_text(
         text=temple.deity.name,
         anchor=sk.UI_ANCHOR_TOP_CENTER,
@@ -290,18 +420,8 @@ def build_text():
         font_size=24.0,
         color=(1.0, 0.80, 0.42, 0.9),
     )
-    hint = engine.create_text(
-        text="LEFT / RIGHT  change deity",
-        anchor=sk.UI_ANCHOR_BOTTOM_RIGHT,
-        offset_pixels=(-20, -16),
-        font_path="fonts/Roboto-Regular.ttf",
-        font_size=14.0,
-        color=(1.0, 0.90, 0.75, 0.35),
-    )
     for label in (temple.title, temple.mantra):
         engine.scene.set_text_align(label, sk.TEXT_ALIGN_CENTER)
-    engine.scene.set_text_align(hint, sk.TEXT_ALIGN_RIGHT)
-    for label in (temple.title, temple.mantra, hint):
         engine.scene.set_text_layer_mask(label, LAYER_TEXT)
 
 
@@ -316,6 +436,11 @@ def register_systems():
             engine.scene.set_sprite_color(entity, (fade, fade, fade, fade))
         sky = SKY_AT_DARKEST + (1.0 - SKY_AT_DARKEST) * fade
         engine.scene.set_sprite_color(temple.sky, (sky, sky, sky, 1.0))
+        # Only the current deity's labels show; they dim with the mandala.
+        for index, panels in enumerate(temple.label_panels):
+            alpha = 0.95 * fade if index == temple.index else 0.0
+            for panel in panels:
+                engine.scene.set_sprite_color(panel, (*LABEL_GOLD, alpha))
         return True
 
     engine.ecs.add_system("Temple", temple_system, priority=-10)
