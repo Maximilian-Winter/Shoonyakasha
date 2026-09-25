@@ -101,6 +101,7 @@ A field `source` is a dot-path. A layout-level `source` is an initialization obj
 | `entity.mesh` | `vertexCount`, `indexCount` |
 | `entity.skeleton` | `hasSkeleton`, `jointCount` |
 | `const` | Constant expressions such as `const.0`, `const.1`, `const.1.0.0.1` |
+| `pass` | `repeatIndex`, `repeatCount` (see [Repeated passes](#repeated-passes)), `extent` and `texelSize` of the pass being recorded. Push-constant layouts only: a buffer is filled once per frame, so any other layout using `pass.*` fails compilation |
 
 The constant parser uses dots as vector separators: `const.0.5` is not a reliable spelling for scalar 0.5. Publish fractional scalars as custom values. Bare identifiers address resource bindings where supported. For fields with `arrayCount > 1`, a source such as `scene.lights[i].positionType` expands `[i]` for each element. Without `[i]`, the resolved value is broadcast to the array. These paths are implemented cases in [DotPathResolver](../../src/FrameGraph/DotPathResolver.cpp), not reflection over arbitrary C++ or Python fields. Component presence, value type, and initialization matter.
 
@@ -141,7 +142,40 @@ Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` de
 
 For `custom` blending: `srcColorFactor=src_alpha`, `dstColorFactor=one_minus_src_alpha`, `colorBlendOp=add`, `srcAlphaFactor=one`, `dstAlphaFactor=zero`, `alphaBlendOp=add`. Operations are `add`, `subtract`, `reverse_subtract`, `min`, `max`. Factors include zero/one, source/destination color/alpha and their complements, constant color/alpha and complements, and `src_alpha_saturate`; native blend constants need appropriate setup. Unknown blend strings can fall back rather than fail, so use verified spellings.
 
-`pushConstants` accepts one object or an array. Each range requires `size`; `offset` defaults 0, `stages` selects visibility. Optional `bindings` map named graph parameters using `name`, `offset` (0), and `type` (`float`). These graph parameters are distinct from per-entity layout sources.
+`pushConstants` accepts one object or an array. Each range requires `size`; `offset` defaults 0, `stages` selects visibility. Optional `bindings` map named graph parameters using `name`, `offset` (0), and `type` (`float`). A binding named `pass.repeatIndex`, `pass.repeatCount`, `pass.extent` or `pass.texelSize` pushes that value of the pass instead, which is how a fullscreen or compute pass learns its mip level. These graph parameters are distinct from per-entity layout sources.
+
+## Repeated passes
+
+`"repeat": { "count": N, "index": "name", "first": 0 }` on a pass declares N passes at once. Each instance substitutes its index value (`first`, `first + 1`, ...) for `{name}`, `{name+K}` and `{name-K}` in every string of the pass; a string that is only a placeholder becomes a number. An instance is named by substituting into `name` when it contains the placeholder, and `Name[value]` otherwise. `index` defaults to `i`. Four shadow cascades:
+
+```json
+{ "name": "SunShadow", "type": "graphics",
+  "repeat": { "count": 4, "index": "cascade" },
+  "execution": { "type": "shadow_casters", "entityDataBinding": "shadowCaster" },
+  "outputs": [{ "resource": "sunShadow", "usage": "depth_write", "layer": "{cascade}",
+                "clear": { "depth": 1.0 } }],
+  "pipeline": { "vertexShader": "shaders/shadow.vert.spv", "depthClamp": true },
+  "descriptorSets": ["cascadeSet"],
+  "pushConstants": [{ "stages": ["vertex"], "size": 68 }] }
+```
+
+with the per-draw layout reading which cascade it is drawing:
+
+```json
+{ "ShadowPerDraw": { "usage": "push_constant", "packing": "scalar", "fields": [
+    { "name": "model",   "type": "mat4", "source": "entity.transform.worldMatrix" },
+    { "name": "cascade", "type": "uint", "source": "pass.repeatIndex" } ] } }
+```
+
+Descriptor set layouts take the same `repeat`, for passes that bind a different part of an image each; the layout name must contain the placeholder:
+
+```json
+{ "downsample{m}": { "repeat": { "count": 4, "index": "m", "first": 1 },
+    "bindings": [{ "binding": 0, "type": "combined_image_sampler", "name": "src",
+                   "autoBindResource": "bloomChain", "autoBindSampler": "linearClamp", "mip": "{m-1}" }] } }
+```
+
+`set_pass_enabled` / `setPassEnabled` with the declared name (`"SunShadow"`) switches every instance, and `is_pass_enabled` on it is true when all of them are enabled. Repetition happens at load: `saveGraphToJson` writes the expanded passes. A `count` is a fixed number; it cannot come from a graph parameter yet.
 
 ## Execution
 

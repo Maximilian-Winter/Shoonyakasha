@@ -553,6 +553,18 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     if (!bufferLayoutDescs.empty()) {
         compileBufferLayouts(bufferLayoutDescs, result.bufferLayouts);
         m_logger->log(LogLevel::Info, "Buffer layouts compiled: %zu layouts", result.bufferLayouts.size());
+
+        // pass.* values change from one pass to the next. Push constants are
+        // written while each pass records; buffers are filled once per frame
+        // and would only ever see one of them.
+        for (const auto& [name, layout] : result.bufferLayouts) {
+            if (layout.hasPassSources && !layout.isPushConstant()) {
+                result.errorMessage = "Buffer layout '" + name + "' uses a pass.* source; those change "
+                                      "from pass to pass, so only push_constant layouts may use them";
+                m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+                return result;
+            }
+        }
     }
 
     // Stage 12: Check each shader's declared interface against the JSON
@@ -1182,6 +1194,7 @@ Shoonyakasha::CompiledBufferLayout CompiledBufferLayout::toResolverLayout() cons
     out.hasSceneSources  = hasSceneSources;
     out.hasEntitySources = hasEntitySources;
     out.hasConstSources  = hasConstSources;
+    out.hasPassSources   = hasPassSources;
     out.fields.reserve(fields.size());
 
     for (const auto& f : fields) {
@@ -1344,6 +1357,7 @@ void FrameGraphCompiler::compileBufferLayouts(
         compiled.hasSceneSources = false;
         compiled.hasEntitySources = false;
         compiled.hasConstSources = false;
+        compiled.hasPassSources = false;
 
         // Validate every source once, here, at compile time.
         //
@@ -1363,6 +1377,8 @@ void FrameGraphCompiler::compileBufferLayouts(
                 compiled.hasEntitySources = true;
             } else if (field.source.starts_with("const.")) {
                 compiled.hasConstSources = true;
+            } else if (field.source.starts_with("pass.")) {
+                compiled.hasPassSources = true;
             }
 
             const std::string problem = validator.validatePath(field.source);

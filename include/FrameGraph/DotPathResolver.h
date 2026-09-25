@@ -155,6 +155,16 @@ struct ResolvedValue {
 // ============================================================================
 
 struct SceneContext {
+    // ─── Current pass ──────────────────────────────────────────
+    // Set before each geometry pass records its draws; read by "pass.*"
+    // dot-paths, which only per-draw push constants may use.
+    struct PassInfo {
+        uint32_t  repeatIndex = 0;          // pass.repeatIndex
+        uint32_t  repeatCount = 1;          // pass.repeatCount
+        glm::vec2 extent{0.0f};             // pass.extent, pass.texelSize = 1 / extent
+    };
+    PassInfo pass;
+
     // Camera (from active camera entity)
     glm::mat4 cameraView = glm::mat4(1.0f);
     glm::mat4 cameraProjection = glm::mat4(1.0f);       // Vulkan Y-flipped
@@ -241,6 +251,7 @@ public:
         Scene,      // "scene.*"
         Entity,     // "entity.*"
         Const,      // "const.*"
+        Pass,       // "pass.*" — the pass being recorded
         Resource,   // Plain name (graph resource)
         Invalid
     };
@@ -249,6 +260,7 @@ public:
     static bool isScenePath(const std::string& path) { return getPathRoot(path) == PathRoot::Scene; }
     static bool isEntityPath(const std::string& path) { return getPathRoot(path) == PathRoot::Entity; }
     static bool isConstPath(const std::string& path) { return getPathRoot(path) == PathRoot::Const; }
+    static bool isPassPath(const std::string& path) { return getPathRoot(path) == PathRoot::Pass; }
     static bool isResourcePath(const std::string& path) { return getPathRoot(path) == PathRoot::Resource; }
 
     // ─── Validation ─────────────────────────────────────────────
@@ -265,6 +277,7 @@ private:
     ResolvedValue resolveScenePath(std::string_view path, const SceneContext& scene) const;
     ResolvedValue resolveEntityPath(std::string_view path, entt::entity entity, entt::registry& registry) const;
     ResolvedValue resolveConstPath(std::string_view path) const;
+    ResolvedValue resolvePassPath(std::string_view path, const SceneContext& scene) const;
 
     // ─── Path Parsing ───────────────────────────────────────────
 
@@ -305,6 +318,7 @@ struct CompiledBufferLayout {
     bool hasSceneSources = false;   // Contains scene.* paths
     bool hasEntitySources = false;  // Contains entity.* paths
     bool hasConstSources = false;   // Contains const.* paths
+    bool hasPassSources = false;    // Contains pass.* paths
 };
 
 class BufferLayoutResolver {

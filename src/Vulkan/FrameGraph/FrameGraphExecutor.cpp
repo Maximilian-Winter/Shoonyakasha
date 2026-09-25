@@ -17,6 +17,8 @@
 #include "Core/Logger.h"
 
 #include <stdexcept>
+#include <optional>
+#include <array>
 #include <cassert>
 
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
@@ -249,6 +251,8 @@ void FrameGraphExecutor::execute(
         ctx.renderExtent = compiledPass.extent;
         ctx.physicalResourcesPtr = &compiled.physicalResources;
         ctx.physicalResourceCount = static_cast<uint32_t>(compiled.physicalResources.size());
+        ctx.repeatIndex = passDecl.repeatIndex;
+        ctx.repeatCount = passDecl.repeatCount;
 
         // Populate descriptor set and pipeline context
         if (!compiledPass.descriptorSets.empty()) {
@@ -385,6 +389,8 @@ void FrameGraphExecutor::executePasses(
         ctx.renderExtent = compiledPass.extent;
         ctx.physicalResourcesPtr = &compiled.physicalResources;
         ctx.physicalResourceCount = static_cast<uint32_t>(compiled.physicalResources.size());
+        ctx.repeatIndex = passDecl.repeatIndex;
+        ctx.repeatCount = passDecl.repeatCount;
 
         if (!compiledPass.descriptorSets.empty()) {
             ctx.descriptorSets = &compiledPass.descriptorSets;
@@ -477,7 +483,20 @@ void FrameGraphExecutor::executeAutoCallback(
     }
 
     // ── Auto-push constants from named parameters ──
-    if (parameters && !passDecl.pushConstants.empty()) {
+    // A binding named pass.* reads this pass instead of a graph parameter.
+    auto passValue = [&](const std::string& name) -> std::optional<ParameterValue> {
+        if (name == "pass.repeatIndex") return ParameterValue{passDecl.repeatIndex};
+        if (name == "pass.repeatCount") return ParameterValue{passDecl.repeatCount};
+        const float w = static_cast<float>(ctx.renderExtent.width);
+        const float h = static_cast<float>(ctx.renderExtent.height);
+        if (name == "pass.extent") return ParameterValue{std::array<float, 2>{w, h}};
+        if (name == "pass.texelSize") {
+            return ParameterValue{std::array<float, 2>{w > 0.0f ? 1.0f / w : 0.0f, h > 0.0f ? 1.0f / h : 0.0f}};
+        }
+        return std::nullopt;
+    };
+
+    if (!passDecl.pushConstants.empty()) {
         for (const auto& pc : passDecl.pushConstants) {
             // Convert stage strings to VkShaderStageFlags
             VkShaderStageFlags stageFlags = 0;
@@ -487,10 +506,14 @@ void FrameGraphExecutor::executeAutoCallback(
 
             // Push each named binding
             for (const auto& binding : pc.bindings) {
-                auto paramIt = parameters->find(binding.name);
-                if (paramIt == parameters->end()) continue;
+                std::optional<ParameterValue> found = passValue(binding.name);
+                if (!found && parameters) {
+                    auto paramIt = parameters->find(binding.name);
+                    if (paramIt != parameters->end()) found = paramIt->second;
+                }
+                if (!found) continue;
 
-                const ParameterValue& value = paramIt->second;
+                const ParameterValue& value = *found;
                 uint32_t offset = pc.offset + binding.offset;
 
                 // Push based on type

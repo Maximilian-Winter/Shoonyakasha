@@ -106,6 +106,7 @@ DotPathResolver::PathRoot DotPathResolver::getPathRoot(const std::string& path) 
     if (path.starts_with("scene.")) return PathRoot::Scene;
     if (path.starts_with("entity.")) return PathRoot::Entity;
     if (path.starts_with("const.")) return PathRoot::Const;
+    if (path.starts_with("pass.")) return PathRoot::Pass;
 
     // No prefix = resource reference (e.g., "gPosition", "litColorHDR")
     // Check it's a valid identifier
@@ -154,6 +155,8 @@ ResolvedValue DotPathResolver::resolve(const std::string& path,
             return resolveEntityPath(path, entity, registry);
         case PathRoot::Const:
             return resolveConstPath(path);
+        case PathRoot::Pass:
+            return resolvePassPath(path, scene);
         case PathRoot::Resource:
             // Resource paths are handled by the frame graph, not the resolver
             return ResolvedValue();
@@ -168,6 +171,9 @@ ResolvedValue DotPathResolver::resolveScene(const std::string& path, const Scene
     }
     if (getPathRoot(path) == PathRoot::Const) {
         return resolveConstPath(path);
+    }
+    if (getPathRoot(path) == PathRoot::Pass) {
+        return resolvePassPath(path, scene);
     }
     return ResolvedValue();
 }
@@ -452,6 +458,23 @@ ResolvedValue DotPathResolver::resolveConstPath(std::string_view path) const {
 }
 
 // ============================================================================
+// Pass Path Resolution
+// ============================================================================
+
+ResolvedValue DotPathResolver::resolvePassPath(std::string_view path, const SceneContext& scene) const {
+    auto name = stripPrefix(path, "pass.");
+    const auto& pass = scene.pass;
+    if (name == "repeatIndex") return ResolvedValue(pass.repeatIndex);
+    if (name == "repeatCount") return ResolvedValue(pass.repeatCount);
+    if (name == "extent")      return ResolvedValue(pass.extent);
+    if (name == "texelSize") {
+        return ResolvedValue(glm::vec2(pass.extent.x > 0.0f ? 1.0f / pass.extent.x : 0.0f,
+                                       pass.extent.y > 0.0f ? 1.0f / pass.extent.y : 0.0f));
+    }
+    return ResolvedValue();
+}
+
+// ============================================================================
 // Path Validation
 // ============================================================================
 
@@ -459,7 +482,18 @@ std::string DotPathResolver::validatePath(const std::string& path) const {
     auto root = getPathRoot(path);
 
     if (root == PathRoot::Invalid) {
-        return "Invalid path: '" + path + "' - must start with scene., entity., const., or be a valid identifier";
+        return "Invalid path: '" + path + "' - must start with scene., entity., const., pass., or be a valid identifier";
+    }
+
+    if (root == PathRoot::Pass) {
+        static const std::vector<std::string> validPassValues = {
+            "pass.repeatIndex", "pass.repeatCount", "pass.extent", "pass.texelSize"
+        };
+        if (std::find(validPassValues.begin(), validPassValues.end(), path) == validPassValues.end()) {
+            return "Invalid pass path: '" + path +
+                   "' - expected pass.repeatIndex, pass.repeatCount, pass.extent or pass.texelSize";
+        }
+        return "";
     }
 
     auto parts = splitPath(path);

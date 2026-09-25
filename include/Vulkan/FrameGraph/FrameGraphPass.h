@@ -220,6 +220,10 @@ struct PassExecuteContext {
     // Auto-created descriptor sets for this pass (ordered by descriptorSetRefs)
     const std::vector<std::shared_ptr<VulkanDescriptorSet>>* descriptorSets = nullptr;
 
+    // For an instance of a JSON "repeat": its index value and the count
+    uint32_t    repeatIndex = 0;
+    uint32_t    repeatCount = 1;
+
     explicit PassExecuteContext(VulkanCommandBuilder& cmdBuilder) : cmd(cmdBuilder) {}
 
     // Physical resource accessors
@@ -434,6 +438,13 @@ struct PassDeclaration {
 
     // Whether this pass is enabled (disabled passes are skipped during execution)
     bool                        enabled = true;
+
+    // Set when the pass is one instance of a JSON "repeat": the declared
+    // name (e.g. "SunShadow"), this instance's index value and the count.
+    // Readable in shaders through the pass.repeatIndex/repeatCount dot-paths.
+    std::string                 repeatGroup;
+    uint32_t                    repeatIndex = 0;
+    uint32_t                    repeatCount = 1;
 };
 
 } // namespace FrameGraph

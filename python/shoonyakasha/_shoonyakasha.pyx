@@ -1387,8 +1387,9 @@ cdef class Engine:
 
         A disabled pass draws nothing but still clears its attachments, so a
         disabled shadow pass leaves everything lit. May be called from the
-        on_init callback, before the pipeline is loaded. Returns False if the
-        pipeline has no pass with that name.
+        on_init callback, before the pipeline is loaded. The declared name of a
+        repeated pass ("repeat" in the JSON) switches every instance. Returns
+        False if the pipeline has no pass with that name.
         """
         return self._ptr.setPassEnabled(pass_name.encode('utf-8'), enabled)
 

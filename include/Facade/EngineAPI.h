@@ -198,7 +198,8 @@ public:
     /// Turn a pipeline pass on or off from the next frame. A disabled pass
     /// draws nothing but still clears its attachments, so a disabled shadow
     /// pass leaves everything lit. May be called from onInit, before the
-    /// pipeline is loaded. Returns false if the pipeline has no such pass.
+    /// pipeline is loaded. The declared name of a repeated pass switches
+    /// every instance. Returns false if the pipeline has no such pass.
     bool setPassEnabled(const std::string& passName, bool enabled);
     bool isPassEnabled(const std::string& passName) const;
 

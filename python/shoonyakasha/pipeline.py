@@ -19,6 +19,7 @@ those sources and asserts they still agree.
 
 import difflib
 import json
+import re
 from pathlib import Path
 
 __all__ = [
@@ -95,6 +96,57 @@ def _check_enum(value, options, where, what, problems):
     problems.append(Problem(where, "%s '%s' is not known" % (what, value),
                             hint=_suggest(value, options)))
     return False
+
+
+_PLACEHOLDER = re.compile(r"\{([A-Za-z0-9_]+?)([+-][0-9]+)?\}")
+
+
+def _substitute(value, index, number, where, problems):
+    """Replace {index}, {index+N}, {index-N} as the engine's loader does: a
+    string that is only a placeholder becomes an int."""
+    if isinstance(value, str):
+        whole = _PLACEHOLDER.fullmatch(value)
+        def replace(match):
+            if match.group(1) != index:
+                return match.group(0)
+            result = number + int(match.group(2) or 0)
+            if result < 0:
+                problems.append(Problem(where, "'%s' is negative for %s = %d"
+                                        % (match.group(0), index, number)))
+            return str(result)
+        if whole and whole.group(1) == index:
+            return int(replace(whole))
+        return _PLACEHOLDER.sub(replace, value)
+    if isinstance(value, list):
+        return [_substitute(v, index, number, where, problems) for v in value]
+    if isinstance(value, dict):
+        return {k: _substitute(v, index, number, where, problems) for k, v in value.items()}
+    return value
+
+
+def _expand_repeats(passes, source, problems):
+    """Expand passes that declare "repeat", mirroring the engine's loader."""
+    expanded = []
+    for index, pass_decl in enumerate(passes):
+        if not isinstance(pass_decl, dict) or "repeat" not in pass_decl:
+            expanded.append(pass_decl)
+            continue
+        name = pass_decl.get("name", "<unnamed>")
+        where = "%s passes[%d] '%s' repeat" % (source, index, name)
+        spec = pass_decl["repeat"]
+        count = spec.get("count") if isinstance(spec, dict) else None
+        if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+            problems.append(Problem(where, "needs a 'count' of at least 1"))
+            continue
+        placeholder = spec.get("index", "i")
+        first = spec.get("first", 0)
+        base = {k: v for k, v in pass_decl.items() if k != "repeat"}
+        for k in range(count):
+            instance = _substitute(base, placeholder, first + k, where, problems)
+            if instance.get("name") == name:
+                instance["name"] = "%s[%d]" % (name, first + k)
+            expanded.append(instance)
+    return expanded
 
 
 def validate_json(document, base_dir=None, source="<json>"):
@@ -187,6 +239,7 @@ def validate_json(document, base_dir=None, source="<json>"):
     if not isinstance(passes, list):
         problems.append(Problem(source, "'passes' must be an array"))
         passes = []
+    passes = _expand_repeats(passes, source, problems)
 
     for index, pass_decl in enumerate(passes):
         where = "%s passes[%d]" % (source, index)

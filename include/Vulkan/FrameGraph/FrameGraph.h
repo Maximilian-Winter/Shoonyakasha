@@ -313,9 +313,12 @@ struct CompiledBufferLayout {
     bool hasSceneSources = false;            // Contains scene.* paths
     bool hasEntitySources = false;           // Contains entity.* paths
     bool hasConstSources = false;            // Contains const.* paths
+    bool hasPassSources = false;             // Contains pass.* paths (push constants only)
 
     /// Check if this layout uses dot-path sources
-    bool usesDotPathSources() const { return hasSceneSources || hasEntitySources || hasConstSources; }
+    bool usesDotPathSources() const {
+        return hasSceneSources || hasEntitySources || hasConstSources || hasPassSources;
+    }
 
     /// Get VkShaderStageFlags from the binding configuration
     VkShaderStageFlags getShaderStages() const;
@@ -910,7 +913,9 @@ public:
     // leaves a map cleared to far depth, i.e. everything lit.
     // Before the pipeline JSON is loaded (e.g. from an onInit callback) the
     // setting is kept and applied when it loads. Returns false if the loaded
-    // pipeline has no pass with that name.
+    // pipeline has no pass with that name. The declared name of a JSON
+    // "repeat" pass switches every instance; isPassEnabled on it is true when
+    // all of them are enabled.
     bool setPassEnabled(const std::string& passName, bool enabled);
     bool isPassEnabled(const std::string& passName) const;
 

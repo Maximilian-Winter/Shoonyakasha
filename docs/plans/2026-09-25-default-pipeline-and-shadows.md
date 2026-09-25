@@ -231,14 +231,27 @@ Each phase is usable on its own and keeps existing JSON valid.
 Left for later: the analyzer, exporter and debugger still print barriers
 without their ranges.
 
-### Phase 2 — pass repetition and pass-scoped data
-- `"repeat": { "count": N, "index": "name" }` expands at JSON load into
-  `Name[0]..Name[N-1]`; `{name}` is substituted in string values
-  (layer, view, sources). `count` may be a dot-path read at compile time,
-  with a recompile when it changes.
-- New dot-path namespace `pass.*`: `pass.repeatIndex`, `pass.extent`,
-  available to per-draw push constants. That removes the need for one UBO per
-  cascade.
+### Phase 2 — pass repetition and pass-scoped data — done
+- `"repeat": { "count": N, "index": "name", "first": 0 }` expands a pass at
+  load into one pass per index value. `{name}`, `{name+K}` and `{name-K}` are
+  substituted in every string, and a string that is only a placeholder becomes
+  a number (`"layer": "{cascade}"`). Instances are named by the substituted
+  name, or `Name[value]` when the name has no placeholder.
+- Descriptor set layouts repeat the same way (`"downsample{m}"`), for passes
+  that each bind a different mip or layer.
+- `pass.repeatIndex`, `pass.repeatCount`, `pass.extent` and `pass.texelSize`
+  resolve in push-constant layouts, including per-entity ones, and as named
+  push-constant bindings of fullscreen and compute passes. Other layouts using
+  them fail compilation.
+- `setPassEnabled` with a repeated pass's declared name switches every
+  instance.
+- The Python validator expands repeats the same way before checking.
+- Checked on lavapipe: the four-cascade scratch pipeline written as one
+  repeated pass with one cascade UBO renders pixel-identically to the
+  four-pass version, with no validation messages.
+
+Not done: `count` from a graph parameter (with a recompile when it
+changes). A fixed count covers cascades and mip chains.
 
 ### Phase 3 — engine-side shadow setup
 - A `ShadowSetupSystem` (per frame, before `updateSceneContext`) that reads

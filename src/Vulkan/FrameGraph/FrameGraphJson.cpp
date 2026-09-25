@@ -10,6 +10,8 @@
 #include <system_error>
 #include "Vulkan/FrameGraph/FrameGraph.h"
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <stdexcept>
 #include <cstring>  // For strerror
@@ -459,6 +461,191 @@ static ResourceAccess parseResourceAccess(
 
     return access;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// "repeat": one declaration, several passes or layouts
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+struct RepeatSpec {
+    std::string index = "i";  // placeholder name, written {i}
+    uint32_t    first = 0;    // value of the first instance
+    uint32_t    count = 1;
+};
+
+RepeatSpec parseRepeat(const nlohmann::json& r, const std::string& where) {
+    if (!r.is_object()) {
+        throw std::runtime_error(where + ": \"repeat\" must be an object like {\"count\": 4, \"index\": \"i\"}");
+    }
+    RepeatSpec spec;
+    spec.index = r.value("index", std::string{"i"});
+    // Parsed JSON stores positive integers as unsigned, JSON built in C++
+    // from an int as signed; either is fine if it is in range.
+    auto readCount = [&](const char* key, int64_t minimum, int64_t fallback) -> uint32_t {
+        if (!r.contains(key)) return static_cast<uint32_t>(fallback);
+        const auto& v = r[key];
+        if (!v.is_number_integer() || v.get<int64_t>() < minimum ||
+            v.get<int64_t>() > static_cast<int64_t>(UINT32_MAX)) {
+            throw std::runtime_error(where + ": repeat \"" + key + "\" must be an integer of at least " +
+                                     std::to_string(minimum));
+        }
+        return static_cast<uint32_t>(v.get<int64_t>());
+    };
+    if (!r.contains("count")) {
+        throw std::runtime_error(where + ": \"repeat\" needs a \"count\" of at least 1");
+    }
+    spec.count = readCount("count", 1, 1);
+    spec.first = readCount("first", 0, 0);
+    if (spec.index.empty() ||
+        !std::all_of(spec.index.begin(), spec.index.end(),
+                     [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; })) {
+        throw std::runtime_error(where + ": repeat \"index\" must be a plain name, e.g. \"cascade\"");
+    }
+    return spec;
+}
+
+/// Replace every {index}, {index+N} and {index-N} in `text` with the
+/// instance's value. A string that is nothing but one such placeholder
+/// becomes a number, so "layer": "{cascade}" reads as an integer. Braces
+/// around anything else are left alone.
+nlohmann::json substitute(const std::string& text, const RepeatSpec& spec, int64_t value,
+                          const std::string& where) {
+    std::string out;
+    bool wholeIsPlaceholder = false;
+    int64_t wholeValue = 0;
+
+    size_t pos = 0;
+    while (pos < text.size()) {
+        if (text[pos] != '{') {
+            out += text[pos++];
+            continue;
+        }
+        const size_t close = text.find('}', pos);
+        if (close == std::string::npos) {
+            out += text.substr(pos);
+            break;
+        }
+        const std::string inner = text.substr(pos + 1, close - pos - 1);
+        if (!inner.starts_with(spec.index)) {
+            out += text.substr(pos, close - pos + 1);
+            pos = close + 1;
+            continue;
+        }
+        const std::string rest = inner.substr(spec.index.size());
+        int64_t offset = 0;
+        if (!rest.empty()) {
+            const bool validOffset = rest.size() >= 2 && (rest[0] == '+' || rest[0] == '-') &&
+                std::all_of(rest.begin() + 1, rest.end(), [](char c) { return c >= '0' && c <= '9'; });
+            if (!validOffset) {
+                // {indexSomethingElse}: another name that merely starts with ours
+                out += text.substr(pos, close - pos + 1);
+                pos = close + 1;
+                continue;
+            }
+            offset = std::stoll(rest.substr(1));
+            if (rest[0] == '-') offset = -offset;
+        }
+        const int64_t result = value + offset;
+        if (result < 0) {
+            throw std::runtime_error(where + ": \"{" + inner + "}\" is negative for " + spec.index +
+                                     " = " + std::to_string(value));
+        }
+        wholeIsPlaceholder = pos == 0 && close + 1 == text.size();
+        wholeValue = result;
+        out += std::to_string(result);
+        pos = close + 1;
+    }
+
+    if (wholeIsPlaceholder) return nlohmann::json(wholeValue);
+    return nlohmann::json(out);
+}
+
+nlohmann::json substituteAll(const nlohmann::json& j, const RepeatSpec& spec, int64_t value,
+                             const std::string& where) {
+    if (j.is_string()) return substitute(j.get<std::string>(), spec, value, where);
+    if (j.is_array()) {
+        nlohmann::json out = nlohmann::json::array();
+        for (const auto& e : j) out.push_back(substituteAll(e, spec, value, where));
+        return out;
+    }
+    if (j.is_object()) {
+        nlohmann::json out = nlohmann::json::object();
+        for (auto it = j.begin(); it != j.end(); ++it) {
+            out[it.key()] = substituteAll(it.value(), spec, value, where);
+        }
+        return out;
+    }
+    return j;
+}
+
+struct ExpandedPass {
+    nlohmann::json json;
+    std::string    group;       // declared name of a repeated pass, else empty
+    uint32_t       index = 0;
+    uint32_t       count = 1;
+};
+
+/// Passes with "repeat" become one pass per index value. An instance is named
+/// by substituting into the declared name, or, if the name has no
+/// placeholder, by appending [value].
+std::vector<ExpandedPass> expandRepeatedPasses(const nlohmann::json& passes) {
+    std::vector<ExpandedPass> out;
+    for (const auto& passJson : passes) {
+        if (!passJson.is_object() || !passJson.contains("repeat")) {
+            out.push_back({passJson, {}, 0, 1});
+            continue;
+        }
+        const std::string name = passJson.value("name", std::string{});
+        const std::string where = "Pass '" + name + "'";
+        const RepeatSpec spec = parseRepeat(passJson["repeat"], where);
+
+        nlohmann::json base = passJson;
+        base.erase("repeat");
+        for (uint32_t k = 0; k < spec.count; ++k) {
+            const uint32_t value = spec.first + k;
+            ExpandedPass instance{substituteAll(base, spec, value, where), name, value, spec.count};
+            auto& instanceName = instance.json["name"];
+            if (instanceName.is_string() && instanceName.get<std::string>() == name) {
+                instanceName = name + "[" + std::to_string(value) + "]";
+            }
+            out.push_back(std::move(instance));
+        }
+    }
+    return out;
+}
+
+/// Descriptor set layouts with "repeat" become one layout per index value;
+/// their names must contain the placeholder, e.g. "downsample{m}".
+nlohmann::json expandRepeatedLayouts(const nlohmann::json& layouts) {
+    nlohmann::json out = nlohmann::json::object();
+    for (auto it = layouts.begin(); it != layouts.end(); ++it) {
+        if (!it.value().is_object() || !it.value().contains("repeat")) {
+            out[it.key()] = it.value();
+            continue;
+        }
+        const std::string where = "Descriptor set layout '" + it.key() + "'";
+        const RepeatSpec spec = parseRepeat(it.value()["repeat"], where);
+        nlohmann::json base = it.value();
+        base.erase("repeat");
+        for (uint32_t k = 0; k < spec.count; ++k) {
+            const uint32_t value = spec.first + k;
+            const auto key = substitute(it.key(), spec, value, where);
+            const std::string name = key.is_string() ? key.get<std::string>() : key.dump();
+            if (name == it.key()) {
+                throw std::runtime_error(where + " repeats but its name has no {" + spec.index +
+                                         "}, so every copy would have the same name");
+            }
+            if (out.contains(name)) {
+                throw std::runtime_error(where + ": repeated name '" + name + "' is already declared");
+            }
+            out[name] = substituteAll(base, spec, value, where);
+        }
+    }
+    return out;
+}
+
+} // namespace
 
 // ═══════════════════════════════════════════════════════════════
 // JSON Loading
@@ -935,7 +1122,7 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
 
     // ── Parse descriptor set layouts (before resources/passes, as they're referenced by name) ──
     if (json.contains("descriptorSetLayouts")) {
-        const auto& layoutsJson = json["descriptorSetLayouts"];
+        const auto layoutsJson = expandRepeatedLayouts(json["descriptorSetLayouts"]);
         for (auto it = layoutsJson.begin(); it != layoutsJson.end(); ++it) {
             DescriptorSetLayoutDesc layoutDesc;
             layoutDesc.name = it.key();
@@ -1111,9 +1298,13 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
 
     // ── Parse passes ──
     if (json.contains("passes")) {
-        for (const auto& passJson : json["passes"]) {
+        for (const auto& expanded : expandRepeatedPasses(json["passes"])) {
+            const auto& passJson = expanded.json;
             PassDeclaration pass;
             pass.name = passJson.at("name").get<std::string>();
+            pass.repeatGroup = expanded.group;
+            pass.repeatIndex = expanded.index;
+            pass.repeatCount = expanded.count;
             pass.type = JsonUtils::stringToPassType(passJson.at("type").get<std::string>());
 
             // Parse queue type (default: "graphics" for backward compatibility)

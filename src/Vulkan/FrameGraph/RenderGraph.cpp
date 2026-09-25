@@ -137,21 +137,40 @@ bool RenderGraph::setPassEnabled(const std::string& passName, bool enabled) {
         m_pendingPassEnabled[passName] = enabled;
         return true;
     }
-    PassDeclaration* pass = m_builder.getPass(passName);
-    if (!pass) {
-        m_logger->log(LogLevel::Warning, "setPassEnabled: no pass named '%s'", passName.c_str());
-        return false;
+    if (PassDeclaration* pass = m_builder.getPass(passName)) {
+        pass->enabled = enabled;
+        return true;
     }
-    pass->enabled = enabled;
-    return true;
+    // The declared name of a repeated pass switches every instance.
+    bool found = false;
+    for (auto& pass : m_builder.getPassDeclarations()) {
+        if (pass.repeatGroup == passName) {
+            pass.enabled = enabled;
+            found = true;
+        }
+    }
+    if (!found) {
+        m_logger->log(LogLevel::Warning, "setPassEnabled: no pass named '%s'", passName.c_str());
+    }
+    return found;
 }
 
 bool RenderGraph::isPassEnabled(const std::string& passName) const {
     if (auto it = m_pendingPassEnabled.find(passName); it != m_pendingPassEnabled.end()) {
         return it->second;
     }
-    const PassDeclaration* pass = m_builder.getPass(passName);
-    return pass && pass->enabled;
+    if (const PassDeclaration* pass = m_builder.getPass(passName)) {
+        return pass->enabled;
+    }
+    // A repeated pass's declared name: enabled when every instance is.
+    bool found = false;
+    for (const auto& pass : m_builder.getPassDeclarations()) {
+        if (pass.repeatGroup == passName) {
+            if (!pass.enabled) return false;
+            found = true;
+        }
+    }
+    return found;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1680,6 +1699,13 @@ void RenderGraph::setupAutoGeometryRenderers() {
         passDecl.sceneRendererFn = [this, passIndex](const PassExecuteContext& ctx) {
             const auto& compiled = m_compiled.compiledPasses[passIndex];
             const auto& decl = m_builder.getPassDeclarations()[passIndex];
+
+            // What pass.* dot-paths read while this pass's draws are recorded
+            auto& passInfo = getSceneContext().pass;
+            passInfo.repeatIndex = decl.repeatIndex;
+            passInfo.repeatCount = decl.repeatCount;
+            passInfo.extent = glm::vec2(static_cast<float>(compiled.extent.width),
+                                        static_cast<float>(compiled.extent.height));
 
             m_frameGraphRenderer->executeGeometryPass(
                 compiled,
