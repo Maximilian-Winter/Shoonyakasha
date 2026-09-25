@@ -698,8 +698,9 @@ entt::entity ApplicationBase::createDirectionalLight(const glm::vec3& direction,
     auto entity = registry.create();
 
     auto& transform = registry.emplace<ECS::TransformComponent>(entity);
-    glm::vec3 dir = glm::normalize(direction);
-    transform.rotation = glm::vec3(asinf(-dir.y), atan2f(-dir.x, -dir.z), 0.0f);
+    // Forward is the direction the light travels. The pitch used to be
+    // asin(-dir.y), which gave the light the opposite vertical direction.
+    transform.rotation = ECS::TransformComponent::rotationFacing(direction);
     transform.position = glm::vec3(0.0f, 50.0f, 0.0f);
 
     auto& light = registry.emplace<ECS::LightComponent>(entity);
