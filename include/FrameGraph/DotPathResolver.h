@@ -16,6 +16,7 @@
 #pragma once
 
 #include "GPU/GPUTypes.h"
+#include "FrameGraph/ShadowCascades.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/Core.h"
 #include <entt/entt.hpp>
@@ -202,6 +203,18 @@ struct SceneContext {
 
     std::array<PackedLight, MAX_SCENE_LIGHTS> lights{};
     uint32_t lightCount = 0;
+
+    // ─── Sun shadow ─────────────────────────────────────────────
+    // Cascades for the first directional light with castShadows, refitted to
+    // the camera every frame by updateFromRegistry. Read by
+    // "scene.shadows.sun.*" dot-paths.
+    struct SunShadow {
+        SunShadowSettings settings;         // set by the application
+        SunShadowCascades cascades;         // cascades.valid = false when no light casts
+        int32_t           lightIndex = -1;  // index of the sun in lights[], -1 when none
+        glm::vec4         direction{0.0f};  // xyz = direction the light travels
+    };
+    SunShadow sunShadow;
 
     // ─── Custom Application Values ─────────────────────────────
     // Generic key→value storage for application-specific data.

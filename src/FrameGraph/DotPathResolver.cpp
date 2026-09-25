@@ -94,6 +94,31 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
     for (uint32_t i = lightCount; i < MAX_SCENE_LIGHTS; i++) {
         lights[i] = PackedLight{};
     }
+
+    // ─── Sun shadow ─────────────────────────────────────────────
+    // The first directional light that casts shadows, in the order lights[]
+    // was filled, so lightIndex points at its packed entry.
+    sunShadow.lightIndex = -1;
+    sunShadow.cascades = SunShadowCascades{};
+    {
+        uint32_t packedIndex = 0;
+        for (auto entity : lightEntities) {
+            if (packedIndex >= MAX_SCENE_LIGHTS) break;
+            const auto& light = lightEntities.get<ECS::LightComponent>(entity);
+            if (light.type == ECS::LightComponent::Directional && light.castShadows) {
+                sunShadow.lightIndex = static_cast<int32_t>(packedIndex);
+                break;
+            }
+            ++packedIndex;
+        }
+    }
+    if (sunShadow.lightIndex >= 0 && foundCamera) {
+        const glm::vec3 direction = glm::vec3(lights[sunShadow.lightIndex].directionRange);
+        sunShadow.direction = glm::vec4(direction, 0.0f);
+        sunShadow.cascades = computeSunCascades(cameraView, cameraFov, cameraAspect,
+                                                cameraNearPlane, cameraFarPlane,
+                                                direction, sunShadow.settings);
+    }
 }
 
 // ============================================================================
@@ -281,6 +306,33 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
                 }
             }
         }
+    }
+
+    // ─── Sun shadow ────────────────────────────────────────────
+    // scene.shadows.sun.{enabled, cascadeCount, splits, texelWorldSize,
+    // lightIndex, direction} and scene.shadows.sun.cascades[N].viewProj
+    if (parts[0] == "shadows" && parts.size() >= 3 && parts[1] == "sun") {
+        const auto& sun = scene.sunShadow;
+        const auto& c = sun.cascades;
+        if (parts.size() == 3) {
+            if (parts[2] == "enabled")        return ResolvedValue(c.valid ? 1u : 0u);
+            if (parts[2] == "cascadeCount")   return ResolvedValue(c.valid ? c.count : 0u);
+            if (parts[2] == "splits")         return ResolvedValue(c.splits);
+            if (parts[2] == "texelWorldSize") return ResolvedValue(c.texelWorldSize);
+            if (parts[2] == "lightIndex")     return ResolvedValue(sun.lightIndex);
+            if (parts[2] == "direction")      return ResolvedValue(sun.direction);
+        }
+        std::string_view cascadePart = parts[2];
+        if (parts.size() == 4 && cascadePart.starts_with("cascades[") && cascadePart.ends_with("]") &&
+            parts[3] == "viewProj") {
+            auto numStr = cascadePart.substr(9, cascadePart.size() - 10);
+            uint32_t index = 0;
+            auto [ptr, ec] = std::from_chars(numStr.data(), numStr.data() + numStr.size(), index);
+            if (ec == std::errc() && ptr == numStr.data() + numStr.size() && index < MAX_SUN_CASCADES) {
+                return ResolvedValue(c.viewProj[index]);
+            }
+        }
+        return ResolvedValue();
     }
 
     // ─── Custom application values ─────────────────────────────
@@ -507,7 +559,7 @@ std::string DotPathResolver::validatePath(const std::string& path) const {
         // "custom" were missing, so validatePath rejected two categories that
         // resolve perfectly well — one reason it was never wired into anything.
         static const std::vector<std::string> validCategories = {
-            "camera", "environment", "time", "screen", "lights", "custom"
+            "camera", "environment", "time", "screen", "lights", "shadows", "custom"
         };
         std::string category(parts[1]);
         // scene.lights[0].positionType arrives as "lights[0]"

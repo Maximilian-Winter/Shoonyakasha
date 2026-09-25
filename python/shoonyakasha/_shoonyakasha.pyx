@@ -1382,6 +1382,24 @@ cdef class Engine:
         """Set custom uint for shader uniforms."""
         self._ptr.setCustomUint(key.encode('utf-8'), value)
 
+    def set_sun_shadows(self, uint32_t cascades=4, float max_distance=60.0,
+                        float split_lambda=0.75, uint32_t resolution=2048,
+                        float caster_extension=50.0):
+        """Configure the sun's shadow cascades.
+
+        Applies to the first directional light with cast shadows on. The engine
+        refits the cascades to the camera every frame and publishes them as
+        scene.shadows.sun.* dot-paths. `resolution` is the shadow map's size in
+        texels and should match it; `split_lambda` blends evenly spaced (0)
+        and logarithmic (1) splits.
+        """
+        self._ptr.setSunShadowSettings(cascades, max_distance, split_lambda,
+                                       resolution, caster_extension)
+
+    def get_sun_shadow_cascade(self, uint32_t index):
+        """World-to-light-clip matrix of a sun cascade this frame, as four columns."""
+        return _mat4_to_tuple(self._ptr.getSunShadowCascade(index))
+
     def set_pass_enabled(self, str pass_name, bint enabled):
         """Turn a pipeline pass on or off from the next frame.
 

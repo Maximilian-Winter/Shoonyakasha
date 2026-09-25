@@ -253,16 +253,28 @@ without their ranges.
 Not done: `count` from a graph parameter (with a recompile when it
 changes). A fixed count covers cascades and mip chains.
 
-### Phase 3 — engine-side shadow setup
-- A `ShadowSetupSystem` (per frame, before `updateSceneContext`) that reads
-  lights with `castShadows`, computes sun cascades (split, fit, snap,
-  near-extend) and local-light matrices, and assigns budgeted slots.
-- Parameters as scene values (`shadows.sun.distance`, `.cascadeCount`,
-  `.splitLambda`, `.resolution`) so Python/C++ can tune without touching JSON.
-- Publishes `scene.shadows.sun.*` and `scene.shadows.local[i].*` dot-paths,
-  including `viewProj`, `splits`, `texelWorldSize`, and each light's slot
-  index in `scene.lights[i]` so lighting shaders can find its map.
-- Facade: `setShadowSettings(...)`, `getShadowCascade(i)` for debugging.
+### Phase 3 — engine-side shadow setup — done for the sun
+- `ShadowCascades` (device-free, unit-tested) splits the view (blend of
+  logarithmic and even splits), fits each cascade with the bounding sphere
+  of its frustum slice, which depends only on depths, field of view and
+  aspect ratio so it is unchanged by camera rotation, and snaps the matrix so
+  the world moves across the map in whole texels.
+- `SceneContext` fits them every frame for the first directional light with
+  `castShadows` and publishes `scene.shadows.sun.*` (`cascades[N].viewProj`,
+  `splits`, `texelWorldSize`, `cascadeCount`, `enabled`, `lightIndex`,
+  `direction`).
+- Settings through `setSunShadowSettings` / `set_sun_shadows`, debugging
+  through `getSunShadowCascade` / `get_sun_shadow_cascade`.
+- Found on the way: directional lights were created with their vertical
+  direction inverted (a sun meant to shine down shone up), and the shader
+  interface validator rejected every array of matrices. Both fixed.
+- Checked on lavapipe: the four-cascade scratch pipeline driven entirely by
+  `scene.shadows.sun.*` renders correct shadows with no validation messages.
+
+Moved to phase 6: local-light (spot and point) shadow matrices and slot
+assignment. Nothing consumes them before a pipeline has local-light shadow
+maps, and the slot scheme belongs with that pipeline's layout (arrays or an
+atlas).
 
 ### Phase 4 — per-view culling
 - World-space AABB per mesh (computed at load, transformed per frame).

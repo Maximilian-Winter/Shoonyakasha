@@ -95,6 +95,7 @@ A field `source` is a dot-path. A layout-level `source` is an initialization obj
 | `scene.time` | `elapsed`, `delta`, `frame` |
 | `scene.screen` | `width`, `height`, `resolution` |
 | `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` |
+| `scene.shadows.sun` | `enabled`, `cascadeCount`, `splits`, `texelWorldSize`, `lightIndex`, `direction`; indexed `scene.shadows.sun.cascades[N].viewProj`. See [sun shadow cascades](../guides/lighting-and-ibl.md#sun-shadow-cascades) |
 | `scene.custom` | Values explicitly published under a key by the application |
 | `entity.transform` | `worldMatrix`, `localMatrix`, `position`, `rotation`, `scale` |
 | `entity.material` | `params.<name>`, `textures.<slot>`, `textures.<slot>.exists`, `alphaCutoff`, `alphaMode`, `doubleSided` |

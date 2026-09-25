@@ -428,6 +428,23 @@ void EngineAPI::setCustomUint(const std::string& key, uint32_t value) {
     m_impl->app->getRenderGraph().getSceneContext().setCustom(key, value);
 }
 
+void EngineAPI::setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
+                                     float splitLambda, uint32_t resolution,
+                                     float casterExtension) {
+    auto& settings = m_impl->app->getRenderGraph().getSceneContext().sunShadow.settings;
+    settings.cascadeCount = cascadeCount;
+    settings.maxDistance = maxDistance;
+    settings.splitLambda = splitLambda;
+    settings.resolution = resolution;
+    settings.casterExtension = casterExtension;
+}
+
+glm::mat4 EngineAPI::getSunShadowCascade(uint32_t index) const {
+    const auto& cascades = m_impl->app->getRenderGraph().getSceneContext().sunShadow.cascades;
+    if (!cascades.valid || index >= cascades.count) return glm::mat4(1.0f);
+    return cascades.viewProj[index];
+}
+
 bool EngineAPI::setPassEnabled(const std::string& passName, bool enabled) {
     return m_impl->app->getRenderGraph().setPassEnabled(passName, enabled);
 }

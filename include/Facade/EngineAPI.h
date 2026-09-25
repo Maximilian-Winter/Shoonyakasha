@@ -192,6 +192,22 @@ public:
     void setCustomUint(const std::string& key, uint32_t value);
 
     // ═══════════════════════════════════════════════════════════
+    // Sun Shadow Cascades
+    // ═══════════════════════════════════════════════════════════
+
+    /// Cascade settings for the first directional light with castShadows.
+    /// The engine refits the cascades to the camera every frame and publishes
+    /// them as scene.shadows.sun.* dot-paths. `resolution` is the shadow map's
+    /// size in texels and should match it.
+    void setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
+                              float splitLambda, uint32_t resolution,
+                              float casterExtension = 50.f);
+
+    /// World-to-light-clip matrix of cascade `index` for the current frame,
+    /// identity when no light casts sun shadows.
+    glm::mat4 getSunShadowCascade(uint32_t index) const;
+
+    // ═══════════════════════════════════════════════════════════
     // Render Pipeline Passes
     // ═══════════════════════════════════════════════════════════
 
