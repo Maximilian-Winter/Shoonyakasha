@@ -297,3 +297,22 @@ TEST(ShaderInterfaceValidator, CompilerStageReadsThePassJson) {
     EXPECT_NE(error.find("pass 'DrawPass'"), std::string::npos) << error;
     EXPECT_NE(error.find("camera.count"), std::string::npos) << error;
 }
+
+TEST(ShaderInterfaceValidator, ArraysOfMatricesMatch) {
+    // SPIRV-Reflect gives no matrix stride for a matrix array; the validator
+    // derives it from the array stride instead of reporting 0.
+    BufferLayoutDesc desc;
+    desc.name = "CascadeUBO";
+    desc.usage = BufferUsageType::UniformBuffer;
+    desc.packing = BufferPackingRule::Std140;
+    desc.fields = {field("viewProj", BufferFieldType::Mat4, 4), field("splits", BufferFieldType::Vec4)};
+    auto layouts = compileLayouts({desc});
+
+    ShaderInterfaceExpectation e;
+    e.setCount = 1;
+    e.descriptors[{0, 0}] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, "cascadeSet", "CascadeUBO", &layouts.at("CascadeUBO")};
+    e.pushConstantSize = 4;
+
+    const auto errors = validate("matrix_array.vert.spv", e);
+    EXPECT_TRUE(errors.empty()) << joined(errors);
+}
