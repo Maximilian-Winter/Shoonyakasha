@@ -117,6 +117,8 @@ void VulkanDevice::createLogicalDevice() {
     vkGetPhysicalDeviceFeatures(m_physicalDevice, &supportedFeatures);
     deviceFeatures.depthClamp     = supportedFeatures.depthClamp;
     deviceFeatures.depthBiasClamp = supportedFeatures.depthBiasClamp;
+    // Point-light shadow maps sample several cubes through one cube_array view.
+    deviceFeatures.imageCubeArray = supportedFeatures.imageCubeArray;
     m_enabledFeatures = deviceFeatures;
 
     // Enable timeline semaphore feature for multi-queue synchronization
@@ -124,8 +126,13 @@ void VulkanDevice::createLogicalDevice() {
     timelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
     timelineFeatures.timelineSemaphore = VK_TRUE;
 
+    VkPhysicalDeviceVulkan13Features vulkan13Features{};
+    vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    vulkan13Features.dynamicRendering = VK_TRUE;
+
     VkPhysicalDeviceVulkan12Features vulkan12Features{};
     vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vulkan12Features.pNext = &vulkan13Features;
     vulkan12Features.timelineSemaphore = VK_TRUE;
 
     VkDeviceCreateInfo createInfo{};
@@ -260,7 +267,26 @@ bool VulkanDevice::isDeviceSuitable(VkPhysicalDevice device) {
     VkPhysicalDeviceFeatures supportedFeatures;
     vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
-    return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
+    // The frame graph records graphics passes with core dynamic rendering, so
+    // the device must implement Vulkan 1.3 and expose the feature.
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(device, &properties);
+    if (properties.apiVersion < VK_API_VERSION_1_3) {
+        m_logger->log(LogLevel::Info, "Skipping '%s': Vulkan %u.%u, 1.3 is required",
+                      properties.deviceName,
+                      VK_API_VERSION_MAJOR(properties.apiVersion),
+                      VK_API_VERSION_MINOR(properties.apiVersion));
+        return false;
+    }
+    VkPhysicalDeviceVulkan13Features vulkan13Features{};
+    vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    VkPhysicalDeviceFeatures2 features2{};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &vulkan13Features;
+    vkGetPhysicalDeviceFeatures2(device, &features2);
+
+    return indices.isComplete() && extensionsSupported && swapChainAdequate &&
+           supportedFeatures.samplerAnisotropy && vulkan13Features.dynamicRendering;
 }
 
 QueueFamilyIndices VulkanDevice::findQueueFamilies(VkPhysicalDevice device) {

@@ -8,7 +8,6 @@
 #include "Vulkan/FrameGraph/FrameGraph.h"
 #include "GPU/VkFormatUtils.h"
 #include "Vulkan/VulkanDevice.h"
-#include "Vulkan/VulkanRenderPass.h"
 #include "Vulkan/VulkanImage.h"
 #include "Vulkan/VulkanBuffer.h"
 #include "Vulkan/VulkanPipeline.h"
@@ -38,77 +37,6 @@ FrameGraphCompiler::~FrameGraphCompiler() {
 // Usage → Vulkan mapping helpers
 // ═══════════════════════════════════════════════════════════════
 
-VkImageLayout FrameGraphCompiler::usageToLayout(ResourceUsage usage) {
-    switch (usage) {
-        case ResourceUsage::ColorAttachmentWrite:   return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        case ResourceUsage::ColorAttachmentBlend:   return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;  // Same layout, blending is pipeline state
-        case ResourceUsage::DepthStencilWrite:      return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        case ResourceUsage::DepthStencilReadOnly:   return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-        case ResourceUsage::ShaderReadOnly:         return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        case ResourceUsage::ShaderReadWrite:        return VK_IMAGE_LAYOUT_GENERAL;
-        case ResourceUsage::StorageImageWrite:      return VK_IMAGE_LAYOUT_GENERAL;
-        case ResourceUsage::InputAttachment:        return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        case ResourceUsage::TransferSrc:            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        case ResourceUsage::TransferDst:            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        // The layout a pass renders INTO. PRESENT_SRC_KHR is not a valid colour
-        // attachment layout — it is where the image ends up, which the render
-        // pass's finalLayout handles via ResourceAccess::present.
-        case ResourceUsage::Present:                return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    }
-    return VK_IMAGE_LAYOUT_UNDEFINED;
-}
-
-VkPipelineStageFlags FrameGraphCompiler::usageToStageMask(ResourceUsage usage, PassType passType) {
-    switch (usage) {
-        case ResourceUsage::ColorAttachmentWrite:
-        case ResourceUsage::ColorAttachmentBlend:  // Blending uses same stage as color write
-            return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        case ResourceUsage::DepthStencilWrite:
-        case ResourceUsage::DepthStencilReadOnly:
-            return VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-        case ResourceUsage::ShaderReadOnly:
-        case ResourceUsage::ShaderReadWrite:
-        case ResourceUsage::StorageImageWrite:
-        case ResourceUsage::InputAttachment:
-            if (passType == PassType::Compute) return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-        case ResourceUsage::TransferSrc:
-        case ResourceUsage::TransferDst:
-            return VK_PIPELINE_STAGE_TRANSFER_BIT;
-        case ResourceUsage::Present:
-            return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    }
-    return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-}
-
-VkAccessFlags FrameGraphCompiler::usageToAccessMask(ResourceUsage usage) {
-    switch (usage) {
-        case ResourceUsage::ColorAttachmentWrite:
-            return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        case ResourceUsage::ColorAttachmentBlend:
-            // Blending requires READ (to fetch dst color) + WRITE (to output blended result)
-            return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        case ResourceUsage::DepthStencilWrite:
-            return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        case ResourceUsage::DepthStencilReadOnly:
-            return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-        case ResourceUsage::ShaderReadOnly:
-        case ResourceUsage::InputAttachment:
-            return VK_ACCESS_SHADER_READ_BIT;
-        case ResourceUsage::ShaderReadWrite:
-            return VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        case ResourceUsage::StorageImageWrite:
-            return VK_ACCESS_SHADER_WRITE_BIT;
-        case ResourceUsage::TransferSrc:
-            return VK_ACCESS_TRANSFER_READ_BIT;
-        case ResourceUsage::TransferDst:
-            return VK_ACCESS_TRANSFER_WRITE_BIT;
-        case ResourceUsage::Present:
-            return 0;  // No explicit access for present
-    }
-    return 0;
-}
-
 VkImageUsageFlags FrameGraphCompiler::usageToImageUsageFlags(ResourceUsage usage) {
     switch (usage) {
         case ResourceUsage::ColorAttachmentWrite:
@@ -134,234 +62,17 @@ VkImageUsageFlags FrameGraphCompiler::usageToImageUsageFlags(ResourceUsage usage
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Topological Sort — Kahn's algorithm
-// ═══════════════════════════════════════════════════════════════
-
-bool FrameGraphCompiler::topologicalSort(
-    const std::vector<PassDeclaration>& passes,
-    const std::vector<ResourceDeclaration>& /*resources*/,
-    std::vector<uint32_t>& outOrder,
-    std::string& outError)
-{
-    uint32_t passCount = static_cast<uint32_t>(passes.size());
-
-    // Build ordered writer lists per resource (declaration order).
-    // Multiple passes may write/blend to the same resource — we need to
-    // chain them correctly: color_write → color_blend → color_blend → reader.
-    std::unordered_map<uint32_t, std::vector<uint32_t>> resourceWriters;
-
-    for (uint32_t pi = 0; pi < passCount; ++pi) {
-        for (const auto& output : passes[pi].outputs) {
-            if (output.handle.valid()) {
-                resourceWriters[output.handle.index].push_back(pi);
-            }
-        }
-    }
-
-    // Helper: find the most recent writer of a resource that was declared
-    // before the given pass (in declaration order).
-    auto findPreviousWriter = [&](uint32_t resourceIdx, uint32_t currentPass) -> int32_t {
-        auto it = resourceWriters.find(resourceIdx);
-        if (it == resourceWriters.end()) return -1;
-        int32_t prev = -1;
-        for (uint32_t w : it->second) {
-            if (w >= currentPass) break;  // Writers are in declaration order
-            prev = static_cast<int32_t>(w);
-        }
-        return prev;
-    };
-
-    // Build in-degree and adjacency list
-    std::vector<uint32_t> inDegree(passCount, 0);
-    std::vector<std::vector<uint32_t>> adj(passCount);  // adj[i] = passes that depend on pass i
-
-    for (uint32_t pi = 0; pi < passCount; ++pi) {
-        // Standard input dependencies: depend on most recent previous writer
-        for (const auto& input : passes[pi].inputs) {
-            if (!input.handle.valid()) continue;
-            int32_t writer = findPreviousWriter(input.handle.index, pi);
-            if (writer >= 0) {
-                adj[writer].push_back(pi);
-                inDegree[pi]++;
-            }
-        }
-
-        // ColorAttachmentBlend outputs also need dependency on previous writer
-        // (blending is read-modify-write, requires previous content).
-        // This creates proper chains: color_write → color_blend → color_blend
-        for (const auto& output : passes[pi].outputs) {
-            if (!output.handle.valid()) continue;
-            if (output.usage != ResourceUsage::ColorAttachmentBlend) continue;
-            int32_t writer = findPreviousWriter(output.handle.index, pi);
-            if (writer >= 0) {
-                adj[writer].push_back(pi);
-                inDegree[pi]++;
-            }
-        }
-    }
-
-    // Kahn's algorithm
-    std::queue<uint32_t> ready;
-    for (uint32_t i = 0; i < passCount; ++i) {
-        if (inDegree[i] == 0) ready.push(i);
-    }
-
-    outOrder.clear();
-    outOrder.reserve(passCount);
-
-    while (!ready.empty()) {
-        uint32_t curr = ready.front();
-        ready.pop();
-        outOrder.push_back(curr);
-
-        for (uint32_t next : adj[curr]) {
-            if (--inDegree[next] == 0) {
-                ready.push(next);
-            }
-        }
-    }
-
-    if (outOrder.size() != passCount) {
-        // Find cycle participants for error message
-        outError = "FrameGraph: Cycle detected among passes: ";
-        for (uint32_t i = 0; i < passCount; ++i) {
-            if (inDegree[i] > 0) {
-                outError += "'" + passes[i].name + "' ";
-            }
-        }
-        return false;
-    }
-
-    return true;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Dead Pass Culling — backward reachability from Present outputs
-// ═══════════════════════════════════════════════════════════════
-
-void FrameGraphCompiler::cullDeadPasses(
-    std::vector<uint32_t>& order,
-    const std::vector<PassDeclaration>& passes,
-    const std::vector<ResourceDeclaration>& resources)
-{
-    uint32_t passCount = static_cast<uint32_t>(passes.size());
-
-    // Build reverse adjacency: who reads what I write?
-    // First, find which pass reads each resource
-    std::unordered_map<uint32_t, std::vector<uint32_t>> resourceReaders;  // resource -> passes that read it
-    // Track ALL writers to each resource in order (for ColorAttachmentBlend dependency)
-    std::unordered_map<uint32_t, std::vector<uint32_t>> resourceWriters;  // resource -> all passes that write it
-
-    for (uint32_t pi = 0; pi < passCount; ++pi) {
-        for (const auto& input : passes[pi].inputs) {
-            if (input.handle.valid())
-                resourceReaders[input.handle.index].push_back(pi);
-        }
-        for (const auto& output : passes[pi].outputs) {
-            if (output.handle.valid())
-                resourceWriters[output.handle.index].push_back(pi);
-        }
-    }
-
-    // Helper to find the previous writer before a given pass index
-    auto findPreviousWriter = [&](uint32_t resourceIdx, uint32_t currentPass) -> int32_t {
-        auto it = resourceWriters.find(resourceIdx);
-        if (it == resourceWriters.end()) return -1;
-        const auto& writers = it->second;
-        int32_t prevWriter = -1;
-        for (uint32_t w : writers) {
-            if (w < currentPass) prevWriter = static_cast<int32_t>(w);
-            else break;  // Writers are in declaration order
-        }
-        return prevWriter;
-    };
-
-    // Build single-writer map for standard dependency tracking (last writer)
-    std::unordered_map<uint32_t, uint32_t> resourceWriter;
-    for (const auto& [resIdx, writers] : resourceWriters) {
-        if (!writers.empty()) {
-            resourceWriter[resIdx] = writers.back();
-        }
-    }
-
-    // Find root passes: those that write to Present, imported resources, or have side effects
-    std::set<uint32_t> live;
-    std::queue<uint32_t> worklist;
-
-    for (uint32_t pi = 0; pi < passCount; ++pi) {
-        // Passes with side effects are always live (e.g., compute passes that write to SSBOs)
-        if (passes[pi].hasSideEffects) {
-            if (!live.contains(pi)) {
-                live.insert(pi);
-                worklist.push(pi);
-            }
-            continue;
-        }
-
-        for (const auto& output : passes[pi].outputs) {
-            if (leavesPresentable(output) ||
-                (output.handle.valid() && output.handle.index < resources.size()
-                 && resources[output.handle.index].imported)) {
-                if (!live.contains(pi)) {
-                    live.insert(pi);
-                    worklist.push(pi);
-                }
-            }
-        }
-    }
-
-    // Walk backward: if pass P is live, all passes that produce P's inputs are also live
-    // Also handle ColorAttachmentBlend outputs which implicitly depend on previous writers
-    while (!worklist.empty()) {
-        uint32_t pi = worklist.front();
-        worklist.pop();
-
-        // Standard input dependencies
-        for (const auto& input : passes[pi].inputs) {
-            if (!input.handle.valid()) continue;
-            auto wit = resourceWriter.find(input.handle.index);
-            if (wit != resourceWriter.end() && !live.contains(wit->second)) {
-                live.insert(wit->second);
-                worklist.push(wit->second);
-            }
-        }
-
-        // ColorAttachmentBlend outputs also need their previous writer to be live
-        // (blending is read-modify-write: requires content from the previous pass)
-        for (const auto& output : passes[pi].outputs) {
-            if (!output.handle.valid()) continue;
-            if (output.usage != ResourceUsage::ColorAttachmentBlend) continue;
-
-            int32_t prevWriter = findPreviousWriter(output.handle.index, pi);
-            if (prevWriter >= 0 && !live.contains(static_cast<uint32_t>(prevWriter))) {
-                live.insert(static_cast<uint32_t>(prevWriter));
-                worklist.push(static_cast<uint32_t>(prevWriter));
-            }
-        }
-    }
-
-    // Filter execution order to only live passes
-    std::vector<uint32_t> filtered;
-    filtered.reserve(order.size());
-    for (uint32_t idx : order) {
-        if (live.contains(idx)) {
-            filtered.push_back(idx);
-        }
-    }
-    order = std::move(filtered);
-}
-
-// ═══════════════════════════════════════════════════════════════
 // Physical Resource Creation
 // ═══════════════════════════════════════════════════════════════
 
-void FrameGraphCompiler::createPhysicalResources(
+bool FrameGraphCompiler::createPhysicalResources(
     VulkanDevice& device,
     const std::vector<ResourceDeclaration>& declarations,
     const std::vector<PassDeclaration>& passes,
     std::vector<PhysicalResource>& outResources,
     VkExtent2D referenceExtent,
-    const ImportedImageMap& importedImages)
+    const ImportedImageMap& importedImages,
+    std::string& outError)
 {
     outResources.resize(declarations.size());
 
@@ -397,6 +108,7 @@ void FrameGraphCompiler::createPhysicalResources(
                         physImg.view = it->second.views[0];
                     }
                 }
+                physImg.aspect = formatToAspectMask(physImg.format);
                 outResources[i] = std::move(physImg);
             } else {
                 outResources[i] = PhysicalBuffer{};
@@ -407,17 +119,29 @@ void FrameGraphCompiler::createPhysicalResources(
         if (decl.kind == ResourceKind::Image) {
             const auto& desc = decl.imageDesc;
 
-            // Graph images are created with one mip and one layer.
-            if (desc.mipLevels != 1 || desc.arrayLayers != 1) {
-                m_logger->log(LogLevel::Warning,
-                    "Resource '%s' asks for %u mip levels and %u array layers; frame graph images "
-                    "currently have exactly one of each, and the rest are ignored",
-                    decl.name.c_str(), desc.mipLevels, desc.arrayLayers);
-            }
-
             // Resolve size
             uint32_t width  = desc.width  > 0 ? desc.width  : static_cast<uint32_t>(referenceExtent.width * desc.widthScale);
             uint32_t height = desc.height > 0 ? desc.height : static_cast<uint32_t>(referenceExtent.height * desc.heightScale);
+            width  = std::max(width, 1u);
+            height = std::max(height, 1u);
+
+            // Mips and layers
+            const uint32_t maxMips = fullMipChainLength(width, height);
+            const uint32_t mipLevels = desc.mipLevels == 0 ? maxMips : desc.mipLevels;
+            if (mipLevels > maxMips) {
+                outError = "Resource '" + decl.name + "' asks for " + std::to_string(mipLevels) +
+                           " mip levels; " + std::to_string(width) + "x" + std::to_string(height) +
+                           " has at most " + std::to_string(maxMips);
+                return false;
+            }
+            const bool cube = desc.viewType == ImageViewKind::Cube ||
+                              desc.viewType == ImageViewKind::CubeArray;
+            if (cube && width != height) {
+                outError = "Resource '" + decl.name + "' is a cube image but is " +
+                           std::to_string(width) + "x" + std::to_string(height) + "; faces must be square";
+                return false;
+            }
+            const ImageShape shape{mipLevels, desc.arrayLayers};
 
             // Combine declared additional usage with usage derived from passes
             VkImageUsageFlags usage = imageUsages[i] | desc.additionalUsage;
@@ -445,13 +169,19 @@ void FrameGraphCompiler::createPhysicalResources(
 
             auto image = std::make_unique<VulkanImage>(
                 device, width, height, format,
-                VK_IMAGE_TILING_OPTIMAL, usage, memProps
+                VK_IMAGE_TILING_OPTIMAL, usage, memProps,
+                shape.mipLevels, shape.arrayLayers,
+                cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0
             );
 
-            // Create image view
-            // format is resolved by now (findDepthFormat may have replaced UNDEFINED),
-            // so derive the aspect from it rather than from the usage flags.
-            image->createImageView(Shoonyakasha::formatToAspectMask(format));
+            // The whole-image view shaders sample. A sampled depth/stencil view
+            // may name only one aspect, so depth formats are viewed as depth.
+            const VkImageAspectFlags fullAspect = Shoonyakasha::formatToAspectMask(format);
+            const VkImageAspectFlags sampledAspect =
+                Shoonyakasha::isDepthFormat(format) ? VkImageAspectFlags{VK_IMAGE_ASPECT_DEPTH_BIT} : fullAspect;
+            SubresourceRange whole;
+            const VkImageViewType viewType = sampledViewType(desc.viewType, shape, shape.resolve(whole));
+            image->createImageView(sampledAspect, viewType);
 
             PhysicalImage physImg;
             physImg.vkImage = image->getImage();
@@ -459,7 +189,11 @@ void FrameGraphCompiler::createPhysicalResources(
             physImg.format = format;
             physImg.extent = {width, height};
             physImg.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            physImg.shape = shape;
+            physImg.viewType = viewType;
+            physImg.aspect = fullAspect;
             physImg.ownedImage = std::move(image);
+            physImg.subresourceViews = std::make_unique<ImageViewSet>(device.getLogicalDevice());
 
             outResources[i] = std::move(physImg);
         } else {
@@ -479,13 +213,10 @@ void FrameGraphCompiler::createPhysicalResources(
             outResources[i] = std::move(physBuf);
         }
     }
+    return true;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Layout Resolution + Barrier Insertion
-// ═══════════════════════════════════════════════════════════════
-
-// Helper: resolve queue family index from QueueType
+// Queue family index a pass of this queue type runs on
 static uint32_t resolveQueueFamily(QueueType type, VulkanDevice& device) {
     switch (type) {
         case QueueType::Compute:
@@ -496,440 +227,155 @@ static uint32_t resolveQueueFamily(QueueType type, VulkanDevice& device) {
     }
 }
 
-void FrameGraphCompiler::resolveLayoutsAndInsertBarriers(
-    VulkanDevice& device,
-    std::vector<CompiledPass>& compiledPasses,
-    const std::vector<uint32_t>& executionOrder,
-    const std::vector<PassDeclaration>& passes,
-    std::vector<PhysicalResource>& physResources)
-{
-    // Track current layout of each image resource
-    std::vector<VkImageLayout> currentLayouts(physResources.size(), VK_IMAGE_LAYOUT_UNDEFINED);
-    std::vector<VkPipelineStageFlags> lastStages(physResources.size(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
-    std::vector<VkAccessFlags> lastAccess(physResources.size(), 0);
-    // Track which queue family last wrote each resource
-    std::vector<uint32_t> lastQueueFamily(physResources.size(), VK_QUEUE_FAMILY_IGNORED);
+// ═══════════════════════════════════════════════════════════════
+// Subresource views
+// ═══════════════════════════════════════════════════════════════
 
-    for (uint32_t execIdx : executionOrder) {
-        auto& compiled = compiledPasses[execIdx];
-        const auto& passDecl = passes[compiled.declIndex];
-
-        // Store queue type on compiled pass
-        compiled.queueType = passDecl.queueType;
-
-        // Process all resource accesses (inputs + outputs)
-        auto processAccess = [&](const ResourceAccess& access) {
-            if (!access.handle.valid()) return;
-            uint32_t ri = access.handle.index;
-
-            auto* physImg = std::get_if<PhysicalImage>(&physResources[ri]);
-            if (!physImg) return;  // Buffers don't need layout transitions
-
-            VkImageLayout requiredLayout = usageToLayout(access.usage);
-            VkPipelineStageFlags requiredStage = usageToStageMask(access.usage, passDecl.type);
-            VkAccessFlags requiredAccess = usageToAccessMask(access.usage);
-
-            if (currentLayouts[ri] != requiredLayout) {
-                BarrierInfo barrier;
-                barrier.resource = access.handle;
-                barrier.oldLayout = currentLayouts[ri];
-                barrier.newLayout = requiredLayout;
-                barrier.srcStage = lastStages[ri];
-                barrier.dstStage = requiredStage;
-                barrier.srcAccess = lastAccess[ri];
-                barrier.dstAccess = requiredAccess;
-
-                // No queue ownership transfer is emitted.
-                //
-                // This used to compare the pass's *declared* queueType against the
-                // previous pass's and, on a mismatch, push the same BarrierInfo
-                // into both acquireBarriers and preBarriers with queue family
-                // indices set. Two things were wrong with that:
-                //
-                //  - The executor issues both lists, so the image was transitioned
-                //    old->new and then transitioned old->new again from a layout it
-                //    was no longer in ("cannot transition the layout ... from
-                //    GENERAL when the previous known layout is
-                //    SHADER_READ_ONLY_OPTIMAL").
-                //
-                //  - A queue ownership transfer needs a *release* barrier submitted
-                //    on the source queue and a matching *acquire* on the
-                //    destination. Only the acquire half existed, hence "no matching
-                //    release operation was queued for execution from source queue
-                //    family 2".
-                //
-                // And underneath both: the transfers were fabricated for an
-                // execution model that does not exist. executeMultiQueue() and
-                // needsMultiQueueSubmit() have no callers anywhere, so every pass —
-                // compute included — is recorded into one command buffer and
-                // submitted on the graphics queue. There is no second queue to
-                // transfer ownership to.
-                //
-                // Reinstating real async compute means reinstating both halves:
-                // a release on the source queue's submission and an acquire on the
-                // destination's, with identical layouts and queue indices in each.
-                // BarrierInfo still carries srcQueueFamilyIndex/dstQueueFamilyIndex
-                // and VulkanCommandBuilder::imageBarrier still forwards them, so
-                // the plumbing is in place; only the submission side is missing.
-                compiled.preBarriers.push_back(barrier);
-                currentLayouts[ri] = requiredLayout;
-            }
-
-            lastStages[ri] = requiredStage;
-            lastAccess[ri] = requiredAccess;
-            lastQueueFamily[ri] = resolveQueueFamily(passDecl.queueType, device);
-
-            // The render pass created for this pass will end with finalLayout =
-            // PRESENT_SRC_KHR, so record that rather than the layout the pass
-            // rendered in. Tracking the declared usage instead left this table
-            // claiming COLOR_ATTACHMENT_OPTIMAL for an image the GPU had already
-            // moved to PRESENT_SRC_KHR.
-            if (leavesPresentable(access)) {
-                currentLayouts[ri] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-                lastStages[ri] = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-                lastAccess[ri] = 0;
-            }
-        };
-
-        for (const auto& input : passDecl.inputs) {
-            processAccess(input);
-        }
-        for (const auto& output : passDecl.outputs) {
-            processAccess(output);
-        }
-    }
-
-    // Update physical image layouts to their final state
-    for (uint32_t i = 0; i < physResources.size(); ++i) {
-        if (auto* img = std::get_if<PhysicalImage>(&physResources[i])) {
-            img->currentLayout = currentLayouts[i];
-        }
+ImageViewSet::~ImageViewSet() {
+    for (const auto& e : m_entries) {
+        vkDestroyImageView(m_device, e.view, nullptr);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Render Pass Creation — uses existing RenderPassBuilder
-// ═══════════════════════════════════════════════════════════════
-
-void FrameGraphCompiler::createRenderPasses(
-    VulkanDevice& device,
-    std::vector<CompiledPass>& compiledPasses,
-    const std::vector<uint32_t>& executionOrder,
-    const std::vector<PassDeclaration>& passes,
-    const std::vector<PhysicalResource>& physResources,
-    const ImportedImageMap& importedImages)
-{
-    // Which pass writes each presentable resource last.
-    //
-    // A presented image must be in PRESENT_SRC_KHR, and finalLayout otherwise
-    // comes from the pass's declared ResourceUsage — so a pipeline whose final
-    // pass says "color_write" (or "color_blend", which cannot say "present"
-    // without losing its blend semantics) left the swapchain in
-    // COLOR_ATTACHMENT_OPTIMAL and vkQueuePresentKHR complained every frame.
-    //
-    // Derived rather than declared: the swapchain is the imported resource with
-    // one view per swapchain image, so the compiler can identify it without the
-    // JSON author having to remember.
-    // Resources some pass explicitly declares it will leave presentable.
-    std::unordered_set<uint32_t> declaredPresent;
-    // Fallback: last writer of each presentable imported resource, used only when
-    // nothing declared it.
-    std::unordered_map<uint32_t, uint32_t> lastPresentableWriter;
-
-    for (uint32_t execIdx : executionOrder) {
-        const auto& decl = passes[compiledPasses[execIdx].declIndex];
-        for (const auto& output : decl.outputs) {
-            if (!output.handle.valid()) continue;
-            if (leavesPresentable(output)) {
-                declaredPresent.insert(output.handle.index);
-            }
-            auto it = importedImages.find(output.handle.index);
-            if (it != importedImages.end() && it->second.views.size() > 1) {
-                lastPresentableWriter[output.handle.index] = execIdx;
-            }
+VkImageView ImageViewSet::get(VkImage image, VkFormat format, VkImageViewType type,
+                              const VkImageSubresourceRange& range) {
+    for (const auto& e : m_entries) {
+        if (e.type == type &&
+            e.range.aspectMask == range.aspectMask &&
+            e.range.baseMipLevel == range.baseMipLevel &&
+            e.range.levelCount == range.levelCount &&
+            e.range.baseArrayLayer == range.baseArrayLayer &&
+            e.range.layerCount == range.layerCount) {
+            return e.view;
         }
     }
 
-    // A pipeline whose swapchain writes never say so still works — but say so,
-    // because the guess is only right while "imported with more than one view"
-    // keeps meaning "the swapchain".
-    for (const auto& [resourceIndex, execIdx] : lastPresentableWriter) {
-        if (declaredPresent.count(resourceIndex)) continue;
-        const auto& decl = passes[compiledPasses[execIdx].declIndex];
-        ensureLogger();
-        m_logger->log(LogLevel::Warning,
-                      "Pass '%s' is the last to write a presentable image but does not "
-                      "declare it. Add \"present\": true to that output; the compiler is "
-                      "assuming it for now.",
-                      decl.name.c_str());
-    }
+    VkImageViewCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    info.image = image;
+    info.viewType = type;
+    info.format = format;
+    info.subresourceRange = range;
 
+    VkImageView view = VK_NULL_HANDLE;
+    if (vkCreateImageView(m_device, &info, nullptr, &view) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create a subresource image view");
+    }
+    m_entries.push_back({type, range, view});
+    return view;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Attachments — what each pass renders into
+// ═══════════════════════════════════════════════════════════════
+
+bool FrameGraphCompiler::createAttachments(
+    std::vector<CompiledPass>& compiledPasses,
+    const std::vector<uint32_t>& executionOrder,
+    const std::vector<PassDeclaration>& passes,
+    std::vector<PhysicalResource>& physResources,
+    const std::vector<ResourceDeclaration>& declarations,
+    std::string& outError)
+{
     for (uint32_t execIdx : executionOrder) {
         auto& compiled = compiledPasses[execIdx];
         const auto& passDecl = passes[compiled.declIndex];
 
-        if (passDecl.type != PassType::Graphics) continue;
+        compiled.colorAttachments.clear();
+        compiled.hasDepthAttachment = false;
+        compiled.extent = {};
+        compiled.layerCount = 1;
+        bool haveExtent = false;
 
-        RenderPassBuilder builder;
-
-        // Collect color and depth attachments from outputs
-        std::vector<std::string> colorNames;
-        std::string depthName;
+        // Compute passes render nothing; their extent, which compute_image
+        // dispatches over, is that of the first image they write at the mip
+        // level they write, or failing that the first image they read.
+        if (passDecl.type != PassType::Graphics) {
+            for (const auto* list : {&passDecl.outputs, &passDecl.inputs}) {
+                for (const auto& access : *list) {
+                    if (haveExtent || !access.handle.valid()) continue;
+                    const auto* physImg = std::get_if<PhysicalImage>(&physResources[access.handle.index]);
+                    if (!physImg) continue;
+                    compiled.extent = physImg->mipExtent(physImg->shape.resolve(access.subresource).baseMip);
+                    haveExtent = true;
+                }
+            }
+            continue;
+        }
 
         for (const auto& output : passDecl.outputs) {
-            if (!output.handle.valid()) continue;
-            uint32_t ri = output.handle.index;
-            const auto* physImg = std::get_if<PhysicalImage>(&physResources[ri]);
+            if (!output.handle.valid() || !isAttachmentUsage(output.usage)) continue;
+            const uint32_t ri = output.handle.index;
+            auto* physImg = std::get_if<PhysicalImage>(&physResources[ri]);
             if (!physImg) continue;
 
-            if (output.usage == ResourceUsage::ColorAttachmentWrite ||
-                output.usage == ResourceUsage::ColorAttachmentBlend ||
-                output.usage == ResourceUsage::Present) {
-                std::string attachName = "color_" + std::to_string(colorNames.size());
+            const auto range = physImg->shape.resolve(output.subresource);
+            const bool isDepth = output.usage == ResourceUsage::DepthStencilWrite ||
+                                 output.usage == ResourceUsage::DepthStencilReadOnly;
 
-                // Determine load op:
-                // - CLEAR if we have a clear value
-                // - LOAD for ColorAttachmentBlend (preserves content for alpha blending)
-                // - LOAD if the resource was already written by a previous pass
-                VkAttachmentLoadOp loadOp;
-                if (output.hasClearValue) {
-                    loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                } else if (output.usage == ResourceUsage::ColorAttachmentBlend) {
-                    loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;  // Must preserve for blending
+            CompiledAttachment att;
+            att.resource = output.handle;
+            att.format   = physImg->format;
+            att.layout   = usageToLayout(output.usage);
+            att.loadOp   = output.hasClearValue ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+            // A read-only depth attachment must keep its contents for later
+            // readers; STORE_OP_NONE leaves them untouched without writing.
+            att.storeOp  = output.usage == ResourceUsage::DepthStencilReadOnly
+                         ? VK_ATTACHMENT_STORE_OP_NONE : VK_ATTACHMENT_STORE_OP_STORE;
+            if (output.hasClearValue) {
+                att.clearValue = output.clearValue;
+            } else if (isDepth) {
+                att.clearValue.depthStencil = {1.0f, 0};
+            } else {
+                att.clearValue.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+            }
+
+            if (!declarations[ri].imported) {
+                const bool wholeSingle = physImg->shape.mipLevels == 1 && physImg->shape.arrayLayers == 1 &&
+                                         physImg->viewType == VK_IMAGE_VIEW_TYPE_2D;
+                if (wholeSingle) {
+                    att.view = physImg->view;
                 } else {
-                    loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                }
-
-                // Determine initial/final layouts from our barrier analysis
-                VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                VkImageLayout finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-                // If there's a barrier transitioning this resource for this pass,
-                // the render pass should start from the barrier's newLayout
-                for (const auto& barrier : compiled.preBarriers) {
-                    if (barrier.resource == output.handle) {
-                        initialLayout = barrier.oldLayout;
-                        finalLayout = barrier.newLayout;
-                        break;
-                    }
-                }
-
-                // If we're clearing, we can start from UNDEFINED
-                if (output.hasClearValue) {
-                    initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                }
-                // For ColorAttachmentBlend with LOAD op, we MUST use proper layout
-                // (UNDEFINED + LOAD = undefined behavior, content may be discarded!)
-                else if (output.usage == ResourceUsage::ColorAttachmentBlend &&
-                         initialLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
-                    initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                }
-
-                // Presentation is a post-condition, so it applies whatever colour
-                // usage the pass declared — a blend that presents keeps its LOAD op
-                // and its dependency on the previous writer, and still ends up
-                // presentable. That combination had no spelling before.
-                bool endsPresentable = leavesPresentable(output);
-                if (!endsPresentable && !declaredPresent.count(output.handle.index)) {
-                    auto presentIt = lastPresentableWriter.find(output.handle.index);
-                    endsPresentable = presentIt != lastPresentableWriter.end()
-                                   && presentIt->second == execIdx;
-                }
-                if (endsPresentable) {
-                    finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-                }
-
-                AttachmentDescriptor desc;
-                desc.name = attachName;
-                desc.format = physImg->format;
-                desc.loadOp = loadOp;
-                desc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-                desc.initialLayout = initialLayout;
-                desc.finalLayout = finalLayout;
-
-                if (output.hasClearValue) {
-                    desc.clearValue = output.clearValue;
-                }
-
-                builder.addAttachment(desc);
-                colorNames.push_back(attachName);
-
-                compiled.clearValues.push_back(
-                    output.hasClearValue ? output.clearValue : VkClearValue{{0.0f, 0.0f, 0.0f, 1.0f}}
-                );
-            }
-            else if (output.usage == ResourceUsage::DepthStencilWrite) {
-                depthName = "depth";
-
-                VkAttachmentLoadOp loadOp = output.hasClearValue ?
-                    VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-
-                VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                if (output.hasClearValue) {
-                    initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                }
-
-                AttachmentDescriptor desc;
-                desc.name = depthName;
-                desc.format = physImg->format;
-                desc.loadOp = loadOp;
-                desc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-                desc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                desc.initialLayout = initialLayout;
-                desc.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-                if (output.hasClearValue) {
-                    desc.clearValue = output.clearValue;
-                }
-
-                builder.addAttachment(desc);
-
-                VkClearValue defaultDepthClear{};
-                defaultDepthClear.depthStencil.depth = 1.0f;
-                defaultDepthClear.depthStencil.stencil = 0;
-                compiled.clearValues.push_back(
-                    output.hasClearValue ? output.clearValue : defaultDepthClear
-                );
-            }
-            else if (output.usage == ResourceUsage::DepthStencilReadOnly) {
-                // Read-only depth attachment (for depth testing without writing)
-                // 深度之讀 — Reading depth to test against, but not writing
-                depthName = "depth";
-
-                // LOAD existing depth values, don't clear
-                VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-
-                // Start from DEPTH_STENCIL_READ_ONLY layout (set by barrier)
-                // and stay in read-only layout
-                VkImageLayout initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-                VkImageLayout finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-
-                AttachmentDescriptor desc;
-                desc.name = depthName;
-                desc.format = physImg->format;
-                desc.loadOp = loadOp;
-                desc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;  // Read-only, no need to store
-                desc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                desc.initialLayout = initialLayout;
-                desc.finalLayout = finalLayout;
-
-                builder.addAttachment(desc);
-
-                // Clear value needed for array alignment even though we're loading
-                VkClearValue depthClear{};
-                depthClear.depthStencil.depth = 1.0f;
-                depthClear.depthStencil.stencil = 0;
-                compiled.clearValues.push_back(depthClear);
-            }
-        }
-
-        // Add a single subpass with all attachments
-        builder.addBasicSubpass("main", colorNames, depthName);
-        builder.addExternalDependency("main");
-
-        // Build the render pass
-        auto config = builder.build();
-        compiled.renderPass = std::make_shared<VulkanRenderPass>(device, config);
-
-        // Determine pass extent from the first color attachment
-        for (const auto& output : passDecl.outputs) {
-            if (!output.handle.valid()) continue;
-            if (output.usage == ResourceUsage::ColorAttachmentWrite ||
-                output.usage == ResourceUsage::ColorAttachmentBlend ||
-                output.usage == ResourceUsage::Present) {
-                const auto* physImg = std::get_if<PhysicalImage>(&physResources[output.handle.index]);
-                if (physImg) {
-                    compiled.extent = physImg->extent;
-                    break;
+                    VkImageSubresourceRange vr{};
+                    vr.aspectMask     = isDepth ? VkImageAspectFlags{VK_IMAGE_ASPECT_DEPTH_BIT} : physImg->aspect;
+                    vr.baseMipLevel   = range.baseMip;
+                    vr.levelCount     = 1;
+                    vr.baseArrayLayer = range.baseLayer;
+                    vr.layerCount     = range.layerCount;
+                    att.view = physImg->subresourceViews->get(
+                        physImg->vkImage, physImg->format, attachmentViewType(range), vr);
                 }
             }
-        }
 
-        // Fallback for depth-only passes (no color attachments)
-        if (compiled.extent.width == 0 || compiled.extent.height == 0) {
-            for (const auto& output : passDecl.outputs) {
-                if (!output.handle.valid()) continue;
-                if (output.usage == ResourceUsage::DepthStencilWrite) {
-                    const auto* physImg = std::get_if<PhysicalImage>(&physResources[output.handle.index]);
-                    if (physImg) {
-                        compiled.extent = physImg->extent;
-                        break;
-                    }
+            // Every attachment of a pass shares one render area and layer count.
+            const VkExtent2D ext = physImg->mipExtent(range.baseMip);
+            if (!haveExtent) {
+                compiled.extent = ext;
+                compiled.layerCount = range.layerCount;
+                haveExtent = true;
+            } else if (ext.width != compiled.extent.width || ext.height != compiled.extent.height ||
+                       range.layerCount != compiled.layerCount) {
+                outError = "Pass '" + passDecl.name + "': attachment '" + declarations[ri].name + "' is " +
+                           std::to_string(ext.width) + "x" + std::to_string(ext.height) + " with " +
+                           std::to_string(range.layerCount) + " layer(s), but the pass's other attachments are " +
+                           std::to_string(compiled.extent.width) + "x" + std::to_string(compiled.extent.height) +
+                           " with " + std::to_string(compiled.layerCount);
+                return false;
+            }
+
+            if (isDepth) {
+                if (compiled.hasDepthAttachment) {
+                    outError = "Pass '" + passDecl.name + "' has more than one depth attachment";
+                    return false;
                 }
+                compiled.depthAttachment = att;
+                compiled.hasDepthAttachment = true;
+            } else {
+                compiled.colorAttachments.push_back(att);
             }
         }
     }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Framebuffer Creation
-// ═══════════════════════════════════════════════════════════════
-
-void FrameGraphCompiler::createFramebuffers(
-    VulkanDevice& /*device*/,
-    std::vector<CompiledPass>& compiledPasses,
-    const std::vector<uint32_t>& executionOrder,
-    const std::vector<PassDeclaration>& passes,
-    const std::vector<PhysicalResource>& physResources,
-    uint32_t swapchainImageCount,
-    const ImportedImageMap& importedImages)
-{
-    for (uint32_t execIdx : executionOrder) {
-        auto& compiled = compiledPasses[execIdx];
-        const auto& passDecl = passes[compiled.declIndex];
-
-        if (passDecl.type != PassType::Graphics || !compiled.renderPass) continue;
-
-        // Check if any attachment uses an imported resource with per-swapchain views
-        bool usesPerSwapchainViews = false;
-        for (const auto& output : passDecl.outputs) {
-            if (!output.handle.valid()) continue;
-            auto importIt = importedImages.find(output.handle.index);
-            if (importIt != importedImages.end() && importIt->second.views.size() > 1) {
-                usesPerSwapchainViews = true;
-                break;
-            }
-        }
-
-        uint32_t fbCount = usesPerSwapchainViews ? swapchainImageCount : 1;
-        compiled.framebuffers.resize(fbCount);
-
-        for (uint32_t fi = 0; fi < fbCount; ++fi) {
-            // Collect attachment views in order
-            std::vector<VkImageView> views;
-
-            for (const auto& output : passDecl.outputs) {
-                if (!output.handle.valid()) continue;
-                if (output.usage != ResourceUsage::ColorAttachmentWrite &&
-                    output.usage != ResourceUsage::ColorAttachmentBlend &&
-                    output.usage != ResourceUsage::Present &&
-                    output.usage != ResourceUsage::DepthStencilWrite &&
-                    output.usage != ResourceUsage::DepthStencilReadOnly) continue;
-
-                const auto* physImg = std::get_if<PhysicalImage>(&physResources[output.handle.index]);
-                if (!physImg) continue;
-
-                // For imported resources, use per-swapchain-image view
-                VkImageView view = physImg->view;
-                auto importIt = importedImages.find(output.handle.index);
-                if (importIt != importedImages.end() && fi < importIt->second.views.size()) {
-                    view = importIt->second.views[fi];
-                }
-
-                if (view != VK_NULL_HANDLE) {
-                    views.push_back(view);
-                }
-            }
-
-            if (!views.empty() && compiled.extent.width > 0 && compiled.extent.height > 0) {
-                compiled.framebuffers[fi] = compiled.renderPass->createFramebuffer(
-                    compiled.extent, views
-                );
-            }
-        }
-    }
+    return true;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -940,7 +386,7 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     VulkanDevice& device,
     const FrameGraphBuilder& builder,
     VkExtent2D referenceExtent,
-    uint32_t swapchainImageCount,
+    uint32_t /*swapchainImageCount*/,
     const ImportedImageMap& importedImages,
     uint32_t maxFramesInFlight,
     const std::unordered_map<std::string, std::shared_ptr<VulkanPipeline>>& manualPipelines)
@@ -962,23 +408,52 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     m_logger->log(LogLevel::Info, "Compiling frame graph: %zu passes, %zu resources",
                   passes.size(), resources.size());
 
-    // Stage 1: Topological sort
-    if (!topologicalSort(passes, resources, result.executionOrder, result.errorMessage)) {
+    // Stage 1: Create physical resources. Their shapes (mips and layers) feed
+    // everything below, so they exist before the graph is scheduled.
+    if (!createPhysicalResources(device, resources, passes, result.physicalResources,
+                                 referenceExtent, importedImages, result.errorMessage)) {
         m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
         return result;
     }
-    m_logger->log(LogLevel::Info, "Topological sort complete: %zu passes in order",
-                  result.executionOrder.size());
-
-    // Stage 2: Dead pass culling
-    size_t beforeCull = result.executionOrder.size();
-    cullDeadPasses(result.executionOrder, passes, resources);
-    m_logger->log(LogLevel::Info, "Dead pass culling: %zu -> %zu passes",
-                  beforeCull, result.executionOrder.size());
-
-    // Stage 3: Create physical resources
-    createPhysicalResources(device, resources, passes, result.physicalResources, referenceExtent, importedImages);
     m_logger->log(LogLevel::Info, "Physical resources created: %zu", result.physicalResources.size());
+
+    // The scheduler's view of each resource, from what was actually created.
+    std::vector<ScheduledResource> scheduled(resources.size());
+    for (uint32_t i = 0; i < resources.size(); ++i) {
+        if (const auto* img = std::get_if<PhysicalImage>(&result.physicalResources[i])) {
+            scheduled[i].isImage = true;
+            scheduled[i].shape = img->shape;
+            scheduled[i].aspect = img->aspect;
+            auto importIt = importedImages.find(i);
+            scheduled[i].presentFallback = resources[i].imported && importIt != importedImages.end() &&
+                                           importIt->second.views.size() > 1;
+        }
+    }
+
+    // Stage 2: Mip and layer ranges must fit their images
+    if (!validateSubresources(passes, resources, scheduled, builder.getDescriptorSetLayouts(),
+                              result.errorMessage)) {
+        m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+        return result;
+    }
+
+    // Stage 3: Order passes by the subresources they read and write
+    const auto dependencies = passDependencies(passes, scheduled);
+    if (!sortPasses(passes, dependencies, result.executionOrder, result.errorMessage)) {
+        m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+        return result;
+    }
+
+    // Stage 3.1: Dead pass culling
+    {
+        const auto live = livePasses(passes, resources, dependencies);
+        std::vector<bool> isLive(passes.size(), false);
+        for (uint32_t pi : live) isLive[pi] = true;
+        const size_t beforeCull = result.executionOrder.size();
+        std::erase_if(result.executionOrder, [&](uint32_t pi) { return !isLive[pi]; });
+        m_logger->log(LogLevel::Info, "Pass order: %zu passes, %zu after culling",
+                      beforeCull, result.executionOrder.size());
+    }
 
     // Stage 3.5: Create samplers from JSON declarations
     const auto& samplerDescs = builder.getSamplers();
@@ -1019,20 +494,35 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         }
     }
 
-    // Stage 5: Layout resolution + barrier insertion (with queue ownership transfers)
-    resolveLayoutsAndInsertBarriers(
-        device, result.compiledPasses, result.executionOrder, passes, result.physicalResources);
-    m_logger->log(LogLevel::Info, "Layout resolution and barriers complete");
+    // Stage 5: Barriers, per mip and layer
+    {
+        auto plan = planBarriers(passes, result.executionOrder, scheduled);
+        for (uint32_t pi = 0; pi < passes.size(); ++pi) {
+            result.compiledPasses[pi].preBarriers  = std::move(plan.preBarriers[pi]);
+            result.compiledPasses[pi].postBarriers = std::move(plan.postBarriers[pi]);
+        }
+        for (uint32_t i = 0; i < resources.size(); ++i) {
+            if (auto* img = std::get_if<PhysicalImage>(&result.physicalResources[i])) {
+                img->finalLayouts = std::move(plan.finalLayouts[i]);
+                img->currentLayout = img->finalLayouts.empty()
+                                   ? VK_IMAGE_LAYOUT_UNDEFINED : img->finalLayouts.front();
+            }
+        }
+        for (const auto& warning : plan.warnings) {
+            m_logger->log(LogLevel::Warning, "%s", warning.c_str());
+        }
+        for (uint32_t pi : result.executionOrder) {
+            result.compiledPasses[pi].queueType = passes[pi].queueType;
+        }
+    }
+    m_logger->log(LogLevel::Info, "Barriers planned");
 
-    // Stage 6: Create render passes
-    createRenderPasses(device, result.compiledPasses, result.executionOrder,
-                       passes, result.physicalResources, importedImages);
-    m_logger->log(LogLevel::Info, "Render passes created");
-
-    // Stage 7: Create framebuffers
-    createFramebuffers(device, result.compiledPasses, result.executionOrder,
-                       passes, result.physicalResources, swapchainImageCount, importedImages);
-    m_logger->log(LogLevel::Info, "Framebuffers created");
+    // Stage 6: Attachments and render areas
+    if (!createAttachments(result.compiledPasses, result.executionOrder, passes,
+                           result.physicalResources, resources, result.errorMessage)) {
+        m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+        return result;
+    }
 
     // Stage 8: Create descriptor set layouts
     const auto& layoutDescs = builder.getDescriptorSetLayouts();
@@ -1282,8 +772,8 @@ void FrameGraphCompiler::createPipelines(
         // Skip non-graphics passes
         if (passDecl.type != PassType::Graphics) continue;
 
-        // Skip if no render pass (shouldn't happen for graphics, but be safe)
-        if (!compiled.renderPass) continue;
+        // A graphics pass with no attachments has nothing to render into.
+        if (!compiled.rendersAttachments()) continue;
 
         // Check for manual override
         auto overrideIt = manualOverrides.find(passDecl.name);
@@ -1372,17 +862,14 @@ void FrameGraphCompiler::createPipelines(
                 stringToBlendOp(pd.alphaBlendOp));
         }
 
-        // Count color attachments for MRT support
-        uint32_t colorAttachmentCount = 0;
-        for (const auto& output : passDecl.outputs) {
-            if (output.usage == ResourceUsage::ColorAttachmentWrite ||
-                output.usage == ResourceUsage::ColorAttachmentBlend ||
-                output.usage == ResourceUsage::Present) {
-                colorAttachmentCount++;
-            }
+        // Attachment formats, which dynamic rendering takes in place of a
+        // render pass
+        RenderingFormats formats;
+        for (const auto& att : compiled.colorAttachments) {
+            formats.color.push_back(att.format);
         }
-        if (colorAttachmentCount > 0) {
-            builder.withColorAttachmentCount(colorAttachmentCount);
+        if (compiled.hasDepthAttachment) {
+            formats.depth = compiled.depthAttachment.format;
         }
 
         // Always use dynamic viewport/scissor
@@ -1402,7 +889,7 @@ void FrameGraphCompiler::createPipelines(
 
         // Build the pipeline
         try {
-            compiled.pipeline = builder.buildPipeline(device, *compiled.renderPass, compiled.extent);
+            compiled.pipeline = builder.buildPipeline(device, formats, compiled.extent);
             compiled.pipelineLayout = compiled.pipeline->getLayout();
             m_logger->log(LogLevel::Info, "  Auto-created pipeline for pass '%s'",
                           passDecl.name.c_str());
@@ -1612,9 +1099,25 @@ void FrameGraphCompiler::performAutoBindings(
                     layout = VK_IMAGE_LAYOUT_GENERAL;
                 }
 
+                // The whole image, or the mips and layers the binding names
+                VkImageView view = physImg->view;
+                if (!binding.autoBindSubresource.isWholeImage() && physImg->subresourceViews) {
+                    const auto range = physImg->shape.resolve(binding.autoBindSubresource);
+                    const auto kind = builder.getResourceDeclarations()[resourceHandle.index].imageDesc.viewType;
+                    VkImageSubresourceRange vr{};
+                    vr.aspectMask     = isDepthFormat(physImg->format) ? VkImageAspectFlags{VK_IMAGE_ASPECT_DEPTH_BIT}
+                                                                     : physImg->aspect;
+                    vr.baseMipLevel   = range.baseMip;
+                    vr.levelCount     = range.mipCount;
+                    vr.baseArrayLayer = range.baseLayer;
+                    vr.layerCount     = range.layerCount;
+                    view = physImg->subresourceViews->get(physImg->vkImage, physImg->format,
+                                                          sampledViewType(kind, physImg->shape, range), vr);
+                }
+
                 // Bind to all frames
                 for (uint32_t frame = 0; frame < maxFramesInFlight; ++frame) {
-                    ImageResource imgRes{physImg->view, sampler, layout};
+                    ImageResource imgRes{view, sampler, layout};
                     descriptorSet->bindImage(bindingName, frame, imgRes);
                     descriptorSet->updateSet(frame);
                 }

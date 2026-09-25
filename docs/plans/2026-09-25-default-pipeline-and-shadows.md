@@ -206,27 +206,30 @@ Each phase is usable on its own and keeps existing JSON valid.
 - Warn when JSON sets `mipLevels`/`arrayLayers` until phase 1 lands.
 - Move the shrine to `shadow_casters` and a compare sampler.
 
-### Phase 1 — image subresources
-- Create images with `mipLevels`, `arrayLayers`, and cube-compatible flag;
-  `viewType`: `2d`, `2d_array`, `cube`, `cube_array`.
-- `PhysicalImage` keeps the full view plus lazily created per-(mip, layer)
-  views.
-- `ResourceAccess` gains `baseMip/mipCount/baseLayer/layerCount`
-  (JSON `"mip"`, `"layer"`, `"layers": [first, count]`). Attachments use
-  the single-subresource view in the framebuffer; reads default to the full
-  view.
-- Barrier tracking per subresource (a small per-image table of
-  layout/stage/access per mip×layer, merged into ranges when emitting
-  barriers). Whole-image tracking would be enough for sequential cascades,
-  but a Hi-Z or bloom chain reads and writes one image in consecutive passes,
-  so do it properly once.
-- Descriptor auto-binding picks the full view unless the binding names a
-  subresource.
-- Analyzer/exporter/debugger print subresources.
+### Phase 1 — image subresources — done
+- Vulkan 1.3 is required; graph passes render with dynamic rendering, so
+  there are no render pass or framebuffer objects. Presentation is an explicit
+  post-barrier.
+- Images take `mipLevels` (or `"full"`), `arrayLayers` and `viewType`
+  (`2d`, `2d_array`, `cube`, `cube_array`); cube images are created
+  cube-compatible.
+- Accesses and auto-bound descriptors take `"mip"`/`"mips"` and
+  `"layer"`/`"layers"`. `PhysicalImage` keeps the sampled whole-image view
+  plus views of parts, created on first use.
+- Dependencies, culling and barriers work per mip and layer, in
+  `FrameGraphSchedule` (device-free and unit-tested). Barriers are merged into
+  ranges, are emitted for write hazards even without a layout change, and each
+  frame's first barriers wait for the previous frame's last accesses.
+- Passes run in declaration order, which is always a valid order now that
+  every dependency points backwards.
+- Compute passes get an extent (their first image output's mip size), so
+  `compute_image` dispatches over it.
+- Checked on lavapipe with synchronization validation: the shrine pipeline
+  and a scratch pipeline with four cascades in one array and a three-level
+  bloom mip chain run clean.
 
-Consider switching graph passes to dynamic rendering (core in 1.3) here:
-it removes per-layer framebuffers entirely and simplifies phase 1, if the
-device floor allows it.
+Left for later: the analyzer, exporter and debugger still print barriers
+without their ranges.
 
 ### Phase 2 — pass repetition and pass-scoped data
 - `"repeat": { "count": N, "index": "name" }` expands at JSON load into

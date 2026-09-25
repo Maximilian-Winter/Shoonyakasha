@@ -74,16 +74,6 @@ RenderGraph::~RenderGraph() {
     }
     m_trackedRenderTargets.clear();
 
-    // Clean up framebuffers before physical resources
-    for (auto& compiled : m_compiled.compiledPasses) {
-        for (auto fb : compiled.framebuffers) {
-            if (fb != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(m_device.getLogicalDevice(), fb, nullptr);
-            }
-        }
-        compiled.framebuffers.clear();
-    }
-
     // Clean up samplers
     for (auto& [name, sampler] : m_compiled.samplers) {
         if (sampler != VK_NULL_HANDLE) {
@@ -126,6 +116,15 @@ void RenderGraph::loadFromFile(const std::string& filePath) {
     m_logger->log(LogLevel::Info, "Loaded %zu resources, %zu passes from JSON",
                   m_builder.getResourceDeclarations().size(),
                   m_builder.getPassDeclarations().size());
+
+    for (const auto& [name, enabled] : m_pendingPassEnabled) {
+        if (!setPassEnabled(name, enabled)) {
+            m_logger->log(LogLevel::Warning,
+                "setPassEnabled('%s') was called before loading, but '%s' has no such pass",
+                name.c_str(), filePath.c_str());
+        }
+    }
+    m_pendingPassEnabled.clear();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -133,6 +132,11 @@ void RenderGraph::loadFromFile(const std::string& filePath) {
 // ═══════════════════════════════════════════════════════════════
 
 bool RenderGraph::setPassEnabled(const std::string& passName, bool enabled) {
+    if (m_builder.getPassDeclarations().empty()) {
+        // Nothing loaded yet; applied by loadFromFile.
+        m_pendingPassEnabled[passName] = enabled;
+        return true;
+    }
     PassDeclaration* pass = m_builder.getPass(passName);
     if (!pass) {
         m_logger->log(LogLevel::Warning, "setPassEnabled: no pass named '%s'", passName.c_str());
@@ -143,6 +147,9 @@ bool RenderGraph::setPassEnabled(const std::string& passName, bool enabled) {
 }
 
 bool RenderGraph::isPassEnabled(const std::string& passName) const {
+    if (auto it = m_pendingPassEnabled.find(passName); it != m_pendingPassEnabled.end()) {
+        return it->second;
+    }
     const PassDeclaration* pass = m_builder.getPass(passName);
     return pass && pass->enabled;
 }
@@ -1496,15 +1503,6 @@ bool RenderGraph::recompile(VkExtent2D referenceExtent, uint32_t swapchainImageC
         }
     }
     m_trackedRenderTargets.clear();
-
-    // Clean up old framebuffers
-    for (auto& compiled : m_compiled.compiledPasses) {
-        for (auto fb : compiled.framebuffers) {
-            if (fb != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(m_device.getLogicalDevice(), fb, nullptr);
-            }
-        }
-    }
 
     // Physical resources (owned VulkanImages/Buffers) are cleaned up
     // by their unique_ptrs when the CompileResult is replaced

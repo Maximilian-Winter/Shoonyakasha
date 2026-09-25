@@ -28,6 +28,70 @@ struct ResourceHandle {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// Image shape: view types and subresource ranges
+// ═══════════════════════════════════════════════════════════════
+
+/// How an image resource is seen by shaders that sample the whole of it,
+/// JSON image "viewType".
+enum class ImageViewKind {
+    Auto,       // "auto": 2d for one layer, 2d_array for more
+    Tex2D,      // "2d"
+    Tex2DArray, // "2d_array"
+    Cube,       // "cube": exactly 6 layers, square
+    CubeArray   // "cube_array": a multiple of 6 layers, square
+};
+
+/// A block of mip levels and array layers of an image, as a pass access or a
+/// descriptor binding names it. Counts of kAll run to the end of the image,
+/// so the default range is the whole image.
+struct SubresourceRange {
+    static constexpr uint32_t kAll = std::numeric_limits<uint32_t>::max();
+
+    uint32_t baseMip   = 0;
+    uint32_t mipCount  = kAll;
+    uint32_t baseLayer = 0;
+    uint32_t layerCount = kAll;
+
+    bool isWholeImage() const {
+        return baseMip == 0 && mipCount == kAll && baseLayer == 0 && layerCount == kAll;
+    }
+    bool operator==(const SubresourceRange&) const = default;
+};
+
+/// Mip and layer counts of a created image; what a SubresourceRange is
+/// resolved against.
+struct ImageShape {
+    uint32_t mipLevels   = 1;
+    uint32_t arrayLayers = 1;
+
+    /// Replace kAll counts with the remainder of the image. The result may
+    /// still reach past the image; check it with contains().
+    SubresourceRange resolve(const SubresourceRange& r) const {
+        SubresourceRange out = r;
+        if (out.mipCount == SubresourceRange::kAll)
+            out.mipCount = out.baseMip < mipLevels ? mipLevels - out.baseMip : 0;
+        if (out.layerCount == SubresourceRange::kAll)
+            out.layerCount = out.baseLayer < arrayLayers ? arrayLayers - out.baseLayer : 0;
+        return out;
+    }
+
+    /// Whether a resolved range is non-empty and lies inside the image.
+    bool contains(const SubresourceRange& resolved) const {
+        return resolved.mipCount > 0 && resolved.layerCount > 0 &&
+               resolved.baseMip + resolved.mipCount <= mipLevels &&
+               resolved.baseLayer + resolved.layerCount <= arrayLayers;
+    }
+};
+
+/// Length of a full mip chain for an image of this size.
+inline uint32_t fullMipChainLength(uint32_t width, uint32_t height) {
+    uint32_t levels = 1;
+    uint32_t size = width > height ? width : height;
+    while (size > 1) { size >>= 1; ++levels; }
+    return levels;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Image Resource Descriptor — what the graph wants
 // ═══════════════════════════════════════════════════════════════
 
@@ -42,8 +106,10 @@ struct ImageDesc {
     float widthScale  = 1.0f;
     float heightScale = 1.0f;
 
+    // 0 means a full mip chain for the resolved size (JSON "mipLevels": "full").
     uint32_t mipLevels   = 1;
     uint32_t arrayLayers = 1;
+    ImageViewKind viewType = ImageViewKind::Auto;
 
     // For future transient aliasing (Phase 5)
     bool transient = false;

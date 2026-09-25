@@ -144,6 +144,7 @@ struct DescriptorBindingDesc {
 
     // Auto-binding: automatically bind resources at compile time
     std::string                 autoBindResource;   // Resource name from graph resources (images)
+    SubresourceRange            autoBindSubresource; // Part of autoBindResource to bind, JSON "mip"/"mips"/"layer"/"layers"
     std::string                 autoBindSampler;    // Sampler name from graph samplers
     std::string                 autoBindBuffer;     // Buffer name (for external UBOs)
 };
@@ -160,6 +161,11 @@ struct DescriptorSetLayoutDesc {
 struct ResourceAccess {
     ResourceHandle  handle;
     ResourceUsage   usage;
+
+    /// Mip levels and array layers touched, JSON "mip"/"mips" and
+    /// "layer"/"layers". Defaults to the whole image. An attachment covering one
+    /// layer renders into that layer; several layers render layered.
+    SubresourceRange subresource;
 
     /// Leave the resource in PRESENT_SRC_KHR after this pass.
     ///

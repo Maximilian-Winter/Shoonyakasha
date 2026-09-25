@@ -10,6 +10,7 @@
 
 #include "FrameGraphPass.h"
 #include "FrameGraphResource.h"
+#include "FrameGraphSchedule.h"  // BarrierInfo, dependency and barrier planning
 #include "VertexFormatRegistry.h"  // Declarative vertex format definitions
 #include "FrameGraph/DotPathResolver.h"  // For Shoonyakasha::CompiledBufferLayout in DotPathUBO
 #include "FrameGraph/SharedBufferRegistry.h"  // Phase 2: cross-graph SSBO sharing
@@ -26,6 +27,7 @@
 #include <variant>
 #include <optional>
 #include <functional>
+#include <algorithm>
 
 // Forward declarations
 namespace Shoonyakasha {
@@ -408,13 +410,53 @@ class FrameGraphDebugger;
 // Physical Resources — compiled, real Vulkan objects
 // ═══════════════════════════════════════════════════════════════
 
+/// Image views of parts of one image, created on first request and
+/// destroyed with the set.
+class ImageViewSet {
+public:
+    explicit ImageViewSet(VkDevice device) : m_device(device) {}
+    ~ImageViewSet();
+
+    ImageViewSet(const ImageViewSet&) = delete;
+    ImageViewSet& operator=(const ImageViewSet&) = delete;
+
+    /// A view of `range` as `type`, shared by every caller asking for the
+    /// same pair. Throws if the view cannot be created.
+    VkImageView get(VkImage image, VkFormat format, VkImageViewType type,
+                    const VkImageSubresourceRange& range);
+
+private:
+    struct Entry {
+        VkImageViewType         type;
+        VkImageSubresourceRange range;
+        VkImageView             view;
+    };
+    VkDevice           m_device;
+    std::vector<Entry> m_entries;
+};
+
 struct PhysicalImage {
     std::unique_ptr<VulkanImage> ownedImage;    // null if imported
     VkImage         vkImage  = VK_NULL_HANDLE;
-    VkImageView     view     = VK_NULL_HANDLE;
+    VkImageView     view     = VK_NULL_HANDLE;  // whole image, as shaders sample it
     VkFormat        format   = VK_FORMAT_UNDEFINED;
-    VkExtent2D      extent   = {};
+    VkExtent2D      extent   = {};              // of mip 0
+    /// Layout of mip 0, layer 0 at the end of the frame, for readback and saves.
     VkImageLayout   currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    ImageShape         shape;                               // created mips and layers
+    VkImageViewType    viewType = VK_IMAGE_VIEW_TYPE_2D;    // type of `view`
+    VkImageAspectFlags aspect   = VK_IMAGE_ASPECT_COLOR_BIT; // all aspects, for barriers
+    /// Every subresource's layout at the end of the frame (mip * layers + layer).
+    std::vector<VkImageLayout> finalLayouts;
+    /// Views of single mips and layers. Declared after ownedImage so it is
+    /// destroyed first.
+    std::unique_ptr<ImageViewSet> subresourceViews;
+
+    /// Extent of one mip level.
+    VkExtent2D mipExtent(uint32_t mip) const {
+        return {std::max(1u, extent.width >> mip), std::max(1u, extent.height >> mip)};
+    }
 };
 
 struct PhysicalBuffer {
@@ -429,32 +471,37 @@ using PhysicalResource = std::variant<PhysicalImage, PhysicalBuffer>;
 // Compiled Pass — ready for execution
 // ═══════════════════════════════════════════════════════════════
 
-struct BarrierInfo {
-    ResourceHandle          resource;
-    // Every member is defaulted. resolveLayoutsAndInsertBarriers assigns them
-    // all, and copies the struct for the acquire barrier, so a member added
-    // later without an assignment would otherwise be indeterminate.
-    VkImageLayout           oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkImageLayout           newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkPipelineStageFlags    srcStage  = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkPipelineStageFlags    dstStage  = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    VkAccessFlags           srcAccess = 0;
-    VkAccessFlags           dstAccess = 0;
-
-    // Queue ownership transfer (VK_QUEUE_FAMILY_IGNORED = no transfer)
-    uint32_t                srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    uint32_t                dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+/// One attachment of a graphics pass, as vkCmdBeginRendering takes it.
+struct CompiledAttachment {
+    ResourceHandle      resource;
+    /// View of the attached mip and layers. Null for imported images, whose
+    /// view changes per swapchain image; the executor reads PhysicalImage::view.
+    VkImageView         view    = VK_NULL_HANDLE;
+    VkImageLayout       layout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkAttachmentLoadOp  loadOp  = VK_ATTACHMENT_LOAD_OP_LOAD;
+    VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkClearValue        clearValue{};
+    VkFormat            format  = VK_FORMAT_UNDEFINED;
 };
 
 struct CompiledPass {
     uint32_t                            declIndex;          // into pass declarations
-    std::shared_ptr<VulkanRenderPass>   renderPass;         // null for compute/transfer
-    std::vector<VkFramebuffer>          framebuffers;       // [swapchainImageIndex] or single entry
-    std::vector<VkClearValue>           clearValues;
+
+    // Attachments for dynamic rendering, in output order. Graphics passes only.
+    std::vector<CompiledAttachment>     colorAttachments;
+    CompiledAttachment                  depthAttachment;
+    bool                                hasDepthAttachment = false;
+    uint32_t                            layerCount = 1;     // layers rendered at once
+    /// Render area: the attachments' mip extent for graphics passes, the first
+    /// image output's for compute passes.
     VkExtent2D                          extent{};
+
+    bool rendersAttachments() const { return !colorAttachments.empty() || hasDepthAttachment; }
 
     // Barriers to insert BEFORE this pass executes
     std::vector<BarrierInfo>            preBarriers;
+    // Barriers to insert AFTER it, e.g. to PRESENT_SRC_KHR
+    std::vector<BarrierInfo>            postBarriers;
 
     // Auto-created descriptor set layouts (ordered by pass's descriptorSetRefs)
     std::vector<VkDescriptorSetLayout>  descriptorSetLayouts;
@@ -674,51 +721,31 @@ public:
 
 private:
     // ── Compilation stages ──
-    bool topologicalSort(
-        const std::vector<PassDeclaration>& passes,
-        const std::vector<ResourceDeclaration>& resources,
-        std::vector<uint32_t>& outOrder,
-        std::string& outError);
+    // Ordering, culling and barriers are planned in FrameGraphSchedule.h; the
+    // stages here are the ones that need a device.
 
-    void cullDeadPasses(
-        std::vector<uint32_t>& order,
-        const std::vector<PassDeclaration>& passes,
-        const std::vector<ResourceDeclaration>& resources);
-
-    void createPhysicalResources(
+    /// Create every non-imported image and buffer, with its mips, layers and
+    /// sampled view. Returns false and sets outError for a shape the image
+    /// cannot have (a non-square cube, more mips than the size allows).
+    bool createPhysicalResources(
         VulkanDevice& device,
         const std::vector<ResourceDeclaration>& declarations,
         const std::vector<PassDeclaration>& passes,
         std::vector<PhysicalResource>& outResources,
         VkExtent2D referenceExtent,
-        const ImportedImageMap& importedImages);
+        const ImportedImageMap& importedImages,
+        std::string& outError);
 
-    void resolveLayoutsAndInsertBarriers(
-        VulkanDevice& device,
+    /// Fill each live pass's attachments (views, load/store ops, layouts) and
+    /// extent. Returns false and sets outError when a pass's attachments
+    /// disagree on extent or layer count.
+    bool createAttachments(
         std::vector<CompiledPass>& compiledPasses,
         const std::vector<uint32_t>& executionOrder,
         const std::vector<PassDeclaration>& passes,
-        std::vector<PhysicalResource>& physResources);
-
-    /// Resources that must end the frame in PRESENT_SRC_KHR — i.e. the swapchain.
-    /// Passed to createRenderPasses so the last pass writing one can set its
-    /// attachment finalLayout accordingly, whatever ResourceUsage it declared.
-    void createRenderPasses(
-        VulkanDevice& device,
-        std::vector<CompiledPass>& compiledPasses,
-        const std::vector<uint32_t>& executionOrder,
-        const std::vector<PassDeclaration>& passes,
-        const std::vector<PhysicalResource>& physResources,
-        const ImportedImageMap& importedImages);
-
-    void createFramebuffers(
-        VulkanDevice& device,
-        std::vector<CompiledPass>& compiledPasses,
-        const std::vector<uint32_t>& executionOrder,
-        const std::vector<PassDeclaration>& passes,
-        const std::vector<PhysicalResource>& physResources,
-        uint32_t swapchainImageCount,
-        const ImportedImageMap& importedImages);
+        std::vector<PhysicalResource>& physResources,
+        const std::vector<ResourceDeclaration>& declarations,
+        std::string& outError);
 
     // ── Stage 8: Descriptor set layout creation ──
     void createDescriptorSetLayouts(
@@ -769,9 +796,6 @@ private:
     /// public entry points, so neither may assume the other ran first.
     void ensureLogger();
 
-    static VkImageLayout usageToLayout(ResourceUsage usage);
-    static VkPipelineStageFlags usageToStageMask(ResourceUsage usage, PassType passType);
-    static VkAccessFlags usageToAccessMask(ResourceUsage usage);
     static VkImageUsageFlags usageToImageUsageFlags(ResourceUsage usage);
     static VkCullModeFlags stringToCullMode(const std::string& str);
     static VkPrimitiveTopology stringToTopology(const std::string& str);
@@ -880,11 +904,13 @@ public:
 
     // ── Pass enable/disable ──
     // Takes effect from the next execute(), without a recompile. A disabled
-    // pass records no draws or dispatches, but its barriers and render pass
+    // pass records no draws or dispatches, but its barriers and rendering
     // still run: its attachments are cleared to their JSON clear values and
     // end in the layouts later passes expect. A disabled shadow pass therefore
     // leaves a map cleared to far depth, i.e. everything lit.
-    // Returns false if no pass has that name.
+    // Before the pipeline JSON is loaded (e.g. from an onInit callback) the
+    // setting is kept and applied when it loads. Returns false if the loaded
+    // pipeline has no pass with that name.
     bool setPassEnabled(const std::string& passName, bool enabled);
     bool isPassEnabled(const std::string& passName) const;
 
@@ -1157,6 +1183,9 @@ private:
     // Geometry renderers by execution type (pipeline-agnostic!)
     // Key: "opaque", "transparent", "shadow_casters", etc.
     std::unordered_map<std::string, PassExecuteFn> m_geometryTypeRenderers;
+
+    // setPassEnabled calls made before the pipeline was loaded
+    std::unordered_map<std::string, bool> m_pendingPassEnabled;
 
     // Manual pipeline overrides (hybrid mode)
     std::unordered_map<std::string, std::shared_ptr<VulkanPipeline>> m_manualPipelines;

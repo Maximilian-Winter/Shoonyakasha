@@ -1,7 +1,7 @@
 # From JSON to rendering
 
 1. `loadGraphFromJson` populates named layouts, resources, and passes in FrameGraphBuilder.
-2. FrameGraphCompiler analyzes resource dependencies, orders/culls passes, and creates images, buffers, descriptors, pipelines, attachments, and synchronization data.
+2. FrameGraphCompiler analyzes resource dependencies per mip level and array layer, orders/culls passes, and creates images, buffers, views, descriptors, pipelines, attachments, and barriers. The scheduling half (dependencies, culling, barrier planning) lives in FrameGraphSchedule and needs no device. Graphics passes render with Vulkan 1.3 dynamic rendering; there are no render pass or framebuffer objects.
 3. RenderGraph connects external resources and scene bindings; its runtime layout helpers fill buffers and per-entity push constants from supported dot-paths.
 4. FrameGraphExecutor records compiled passes, dispatches/draws, and registered callbacks. Entity renderers supply geometry for the selected execution categories.
 5. ApplicationBase submits and presents, then runs post-render. Resize recreates swapchain bindings and recompiles the graph.

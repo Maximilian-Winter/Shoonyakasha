@@ -2,7 +2,6 @@
 
 #include "Vulkan/VulkanPipeline.h"
 #include "Vulkan/VulkanDevice.h"
-#include "Vulkan/VulkanRenderPass.h"
 #include "Vulkan/VertexTypes.h"
 #include <fstream>
 #include <stdexcept>
@@ -195,10 +194,10 @@ PipelineStateBuilder& PipelineStateBuilder::withPushConstants(VkShaderStageFlags
     return *this;
 }
 
-std::unique_ptr<VulkanPipeline> PipelineStateBuilder::buildPipeline(VulkanDevice &device, VulkanRenderPass &renderPass,
+std::unique_ptr<VulkanPipeline> PipelineStateBuilder::buildPipeline(VulkanDevice &device, const RenderingFormats& formats,
     VkExtent2D extent) {
     auto state = build();
-    return std::make_unique<VulkanPipeline>(device, renderPass, extent, state);
+    return std::make_unique<VulkanPipeline>(device, formats, extent, state);
 }
 
 PipelineStateBuilder::PipelineState PipelineStateBuilder::build() const {
@@ -221,11 +220,11 @@ PipelineStateBuilder& PipelineStateBuilder::withVertexType<Vertex>() {
 // ═══════════════════════════════════════════════════════════════
 
 VulkanPipeline::VulkanPipeline(VulkanDevice& device,
-                               VulkanRenderPass& renderPass,
+                               const RenderingFormats& formats,
                                VkExtent2D extent,
                                const PipelineStateBuilder::PipelineState& state)
     : m_device(device)
-    , m_renderPass(renderPass)
+    , m_formats(formats)
     , m_extent(extent)
     , m_state(state) {
 
@@ -236,7 +235,7 @@ VulkanPipeline::VulkanPipeline(VulkanDevice& device,
 
 std::unique_ptr<VulkanPipeline> VulkanPipeline::createDefault(
     VulkanDevice& device,
-    VulkanRenderPass& renderPass,
+    const RenderingFormats& formats,
     VkExtent2D extent,
     const std::string& vertShader,
     const std::string& fragShader) {
@@ -248,12 +247,12 @@ std::unique_ptr<VulkanPipeline> VulkanPipeline::createDefault(
         .withCulling(VK_CULL_MODE_BACK_BIT)
         .build();
 
-    return std::make_unique<VulkanPipeline>(device, renderPass, extent, state);
+    return std::make_unique<VulkanPipeline>(device, formats, extent, state);
 }
 
 std::unique_ptr<VulkanPipeline> VulkanPipeline::createWireframe(
     VulkanDevice& device,
-    VulkanRenderPass& renderPass,
+    const RenderingFormats& formats,
     VkExtent2D extent,
     const std::string& vertShader,
     const std::string& fragShader) {
@@ -266,12 +265,12 @@ std::unique_ptr<VulkanPipeline> VulkanPipeline::createWireframe(
         .withDepthTest(true)
         .build();
 
-    return std::make_unique<VulkanPipeline>(device, renderPass, extent, state);
+    return std::make_unique<VulkanPipeline>(device, formats, extent, state);
 }
 
 std::unique_ptr<VulkanPipeline> VulkanPipeline::createTransparent(
     VulkanDevice& device,
-    VulkanRenderPass& renderPass,
+    const RenderingFormats& formats,
     VkExtent2D extent,
     const std::string& vertShader,
     const std::string& fragShader) {
@@ -285,7 +284,7 @@ std::unique_ptr<VulkanPipeline> VulkanPipeline::createTransparent(
         .withDepthWrite(false) // Usually don't write depth for transparent objects
         .build();
 
-    return std::make_unique<VulkanPipeline>(device, renderPass, extent, state);
+    return std::make_unique<VulkanPipeline>(device, formats, extent, state);
 }
 
 VulkanPipeline::~VulkanPipeline() {
@@ -432,7 +431,7 @@ void VulkanPipeline::createPipeline() {
     depthStencil.stencilTestEnable = m_state.stencilTest ? VK_TRUE : VK_FALSE;
 
     // Color blend state — replicate for all color attachments (MRT support)
-    uint32_t colorCount = m_state.colorAttachmentCount > 0 ? m_state.colorAttachmentCount : 1;
+    const uint32_t colorCount = static_cast<uint32_t>(m_formats.color.size());
 
     VkPipelineColorBlendAttachmentState colorBlendTemplate{};
     colorBlendTemplate.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -475,7 +474,15 @@ void VulkanPipeline::createPipeline() {
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = m_state.dynamicStates.empty() ? nullptr : &dynamicState;
     pipelineInfo.layout = m_pipelineLayout;
-    pipelineInfo.renderPass = m_renderPass.getHandle();
+    // Dynamic rendering: attachment formats instead of a render pass
+    VkPipelineRenderingCreateInfo renderingInfo{};
+    renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    renderingInfo.colorAttachmentCount = colorCount;
+    renderingInfo.pColorAttachmentFormats = m_formats.color.data();
+    renderingInfo.depthAttachmentFormat = m_formats.depth;
+    renderingInfo.stencilAttachmentFormat = m_formats.stencil;
+    pipelineInfo.pNext = &renderingInfo;
+    pipelineInfo.renderPass = VK_NULL_HANDLE;
     pipelineInfo.subpass = 0;
 
     if (vkCreateGraphicsPipelines(m_device.getLogicalDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline) != VK_SUCCESS) {

@@ -9,7 +9,6 @@
 #include "GPU/VkFormatUtils.h"
 #include "Vulkan/FrameGraph/FrameGraphDebugger.h"
 #include "Vulkan/VulkanCommandBuffer.h"
-#include "Vulkan/VulkanRenderPass.h"
 #include "Vulkan/VulkanPipeline.h"
 #include "Vulkan/VulkanComputePipeline.h"
 #include "Vulkan/VulkanDescriptorSystem.h"
@@ -87,6 +86,91 @@ FrameGraphExecutor::~FrameGraphExecutor() {
     delete m_logger;
 }
 
+namespace {
+
+/// Record image barriers, each over its own subresource range.
+void recordImageBarriers(VulkanCommandBuilder& cmd,
+                         const std::vector<BarrierInfo>& barriers,
+                         const FrameGraphCompiler::CompileResult& compiled,
+                         const std::vector<ResourceDeclaration>& resources,
+                         FrameGraphDebugger* debugger)
+{
+    for (const auto& barrier : barriers) {
+        if (!barrier.resource.valid()) continue;
+        const auto* physImg = std::get_if<PhysicalImage>(
+            &compiled.physicalResources[barrier.resource.index]);
+        if (!physImg || physImg->vkImage == VK_NULL_HANDLE) continue;
+
+        if (debugger) {
+            std::string resourceName = (barrier.resource.index < resources.size())
+                ? resources[barrier.resource.index].name : "unknown";
+            bool isQueueTransfer = barrier.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED;
+            debugger->onBarrierInserted(resourceName, barrier.oldLayout,
+                                        barrier.newLayout, isQueueTransfer);
+        }
+
+        // Outside a queue transfer the family indices hold
+        // VK_QUEUE_FAMILY_IGNORED, so one call covers both cases.
+        cmd.imageBarrier(
+            physImg->vkImage,
+            barrier.oldLayout, barrier.newLayout,
+            barrier.srcStage,  barrier.dstStage,
+            barrier.srcAccess, barrier.dstAccess,
+            barrier.range,
+            barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
+    }
+}
+
+/// Begin dynamic rendering into the pass's attachments. Returns false, having
+/// recorded nothing, if the pass has no attachments or one has no view yet
+/// (an imported image that was never provided).
+bool beginRendering(VkCommandBuffer commandBuffer,
+                    const CompiledPass& pass,
+                    const FrameGraphCompiler::CompileResult& compiled)
+{
+    if (!pass.rendersAttachments() || pass.extent.width == 0 || pass.extent.height == 0) {
+        return false;
+    }
+
+    auto toInfo = [&](const CompiledAttachment& att, VkRenderingAttachmentInfo& info) {
+        VkImageView view = att.view;
+        if (view == VK_NULL_HANDLE) {
+            // Imported: the view for this frame's swapchain image.
+            const auto* physImg = std::get_if<PhysicalImage>(
+                &compiled.physicalResources[att.resource.index]);
+            view = physImg ? physImg->view : VK_NULL_HANDLE;
+        }
+        info = VkRenderingAttachmentInfo{};
+        info.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        info.imageView   = view;
+        info.imageLayout = att.layout;
+        info.loadOp      = att.loadOp;
+        info.storeOp     = att.storeOp;
+        info.clearValue  = att.clearValue;
+        return view != VK_NULL_HANDLE;
+    };
+
+    std::vector<VkRenderingAttachmentInfo> colors(pass.colorAttachments.size());
+    for (size_t i = 0; i < colors.size(); ++i) {
+        if (!toInfo(pass.colorAttachments[i], colors[i])) return false;
+    }
+    VkRenderingAttachmentInfo depth{};
+    if (pass.hasDepthAttachment && !toInfo(pass.depthAttachment, depth)) return false;
+
+    VkRenderingInfo rendering{};
+    rendering.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering.renderArea           = {{0, 0}, pass.extent};
+    rendering.layerCount           = pass.layerCount;
+    rendering.colorAttachmentCount = static_cast<uint32_t>(colors.size());
+    rendering.pColorAttachments    = colors.data();
+    rendering.pDepthAttachment     = pass.hasDepthAttachment ? &depth : nullptr;
+
+    vkCmdBeginRendering(commandBuffer, &rendering);
+    return true;
+}
+
+} // namespace
+
 void FrameGraphExecutor::execute(
     const FrameGraphCompiler::CompileResult& compiled,
     const FrameGraphBuilder& builder,
@@ -153,50 +237,10 @@ void FrameGraphExecutor::execute(
         }
 
         // ── Insert acquire barriers (queue ownership transfers) ──
-        for (const auto& barrier : compiledPass.acquireBarriers) {
-            if (!barrier.resource.valid()) continue;
-            const auto* physImg = std::get_if<PhysicalImage>(
-                &compiled.physicalResources[barrier.resource.index]);
-            if (physImg && physImg->vkImage != VK_NULL_HANDLE) {
-                cmd.imageBarrier(
-                    physImg->vkImage,
-                    barrier.oldLayout, barrier.newLayout,
-                    barrier.srcStage,  barrier.dstStage,
-                    barrier.srcAccess, barrier.dstAccess,
-                    fullSubresourceRange(physImg->format),
-                    barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
-            }
-        }
+        recordImageBarriers(cmd, compiledPass.acquireBarriers, compiled, resources, nullptr);
 
         // ── Insert pre-barriers ──
-        for (const auto& barrier : compiledPass.preBarriers) {
-            if (!barrier.resource.valid()) continue;
-
-            const auto* physImg = std::get_if<PhysicalImage>(
-                &compiled.physicalResources[barrier.resource.index]);
-
-            if (physImg && physImg->vkImage != VK_NULL_HANDLE) {
-                // Notify debugger of barrier
-                if (m_debugger) {
-                    std::string resourceName = (barrier.resource.index < resources.size())
-                        ? resources[barrier.resource.index].name : "unknown";
-                    bool isQueueTransfer = barrier.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED;
-                    m_debugger->onBarrierInserted(resourceName, barrier.oldLayout,
-                                                  barrier.newLayout, isQueueTransfer);
-                }
-
-                // One call for both cases: outside a queue transfer the family
-                // indices already hold VK_QUEUE_FAMILY_IGNORED, which is exactly
-                // what the non-transfer branch used to pass by hand.
-                cmd.imageBarrier(
-                    physImg->vkImage,
-                    barrier.oldLayout, barrier.newLayout,
-                    barrier.srcStage,  barrier.dstStage,
-                    barrier.srcAccess, barrier.dstAccess,
-                    fullSubresourceRange(physImg->format),
-                    barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
-            }
-        }
+        recordImageBarriers(cmd, compiledPass.preBarriers, compiled, resources, m_debugger);
 
         // ── Build execution context ──
         PassExecuteContext ctx(cmd);
@@ -219,26 +263,12 @@ void FrameGraphExecutor::execute(
             ctx.pipelineLayout = compiledPass.pipelineLayout;
         }
 
-        // ── Begin render pass for graphics passes ──
-        if (passDecl.type == PassType::Graphics && compiledPass.renderPass) {
-            // Select framebuffer for this swapchain image
-            VkFramebuffer fb = VK_NULL_HANDLE;
-            if (!compiledPass.framebuffers.empty()) {
-                uint32_t fbIdx = (compiledPass.framebuffers.size() > 1)
-                    ? swapchainImageIndex
-                    : 0;
-                fb = compiledPass.framebuffers[fbIdx];
-            }
-
-            if (fb != VK_NULL_HANDLE) {
-                RenderPassContext rpCtx(compiledPass.renderPass, fb, compiledPass.extent);
-                rpCtx.withClearValues(compiledPass.clearValues);
-                cmd.beginRenderPass(rpCtx);
-            }
-        }
+        // ── Begin rendering for graphics passes ──
+        const bool rendering = passDecl.type == PassType::Graphics &&
+                               beginRendering(commandBuffer, compiledPass, compiled);
 
         // A disabled pass binds and records nothing. Its barriers above and
-        // its render pass still run, so its attachments receive their clear
+        // its rendering still run, so its attachments receive their clear
         // values and end in the layouts that later passes' barriers expect.
         const bool active = passDecl.enabled;
 
@@ -267,13 +297,11 @@ void FrameGraphExecutor::execute(
                           passDecl.name.c_str());
         }
 
-        // ── End render pass ──
-        if (passDecl.type == PassType::Graphics && compiledPass.renderPass) {
-            if (!compiledPass.framebuffers.empty() &&
-                compiledPass.framebuffers[0] != VK_NULL_HANDLE) {
-                cmd.endRenderPass();
-            }
+        // ── End rendering, then post-barriers (e.g. to PRESENT_SRC_KHR) ──
+        if (rendering) {
+            vkCmdEndRendering(commandBuffer);
         }
+        recordImageBarriers(cmd, compiledPass.postBarriers, compiled, resources, m_debugger);
 
         // Notify debugger of pass end
         if (m_debugger) {
@@ -345,48 +373,10 @@ void FrameGraphExecutor::executePasses(
         }
 
         // ── Insert acquire barriers (queue ownership transfers) ──
-        for (const auto& barrier : compiledPass.acquireBarriers) {
-            if (!barrier.resource.valid()) continue;
-            const auto* physImg = std::get_if<PhysicalImage>(
-                &compiled.physicalResources[barrier.resource.index]);
-            if (physImg && physImg->vkImage != VK_NULL_HANDLE) {
-                cmd.imageBarrier(
-                    physImg->vkImage,
-                    barrier.oldLayout, barrier.newLayout,
-                    barrier.srcStage,  barrier.dstStage,
-                    barrier.srcAccess, barrier.dstAccess,
-                    fullSubresourceRange(physImg->format),
-                    barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
-            }
-        }
+        recordImageBarriers(cmd, compiledPass.acquireBarriers, compiled, resources, nullptr);
 
         // ── Insert pre-barriers ──
-        for (const auto& barrier : compiledPass.preBarriers) {
-            if (!barrier.resource.valid()) continue;
-            const auto* physImg = std::get_if<PhysicalImage>(
-                &compiled.physicalResources[barrier.resource.index]);
-            if (physImg && physImg->vkImage != VK_NULL_HANDLE) {
-                // Notify debugger of barrier
-                if (m_debugger) {
-                    std::string resourceName = (barrier.resource.index < resources.size())
-                        ? resources[barrier.resource.index].name : "unknown";
-                    bool isQueueTransfer = barrier.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED;
-                    m_debugger->onBarrierInserted(resourceName, barrier.oldLayout,
-                                                  barrier.newLayout, isQueueTransfer);
-                }
-
-                // One call for both cases: outside a queue transfer the family
-                // indices already hold VK_QUEUE_FAMILY_IGNORED, which is exactly
-                // what the non-transfer branch used to pass by hand.
-                cmd.imageBarrier(
-                    physImg->vkImage,
-                    barrier.oldLayout, barrier.newLayout,
-                    barrier.srcStage,  barrier.dstStage,
-                    barrier.srcAccess, barrier.dstAccess,
-                    fullSubresourceRange(physImg->format),
-                    barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
-            }
-        }
+        recordImageBarriers(cmd, compiledPass.preBarriers, compiled, resources, m_debugger);
 
         // ── Build execution context ──
         PassExecuteContext ctx(cmd);
@@ -408,22 +398,11 @@ void FrameGraphExecutor::executePasses(
             ctx.pipelineLayout = compiledPass.pipelineLayout;
         }
 
-        // ── Begin render pass for graphics passes ──
-        if (passDecl.type == PassType::Graphics && compiledPass.renderPass) {
-            VkFramebuffer fb = VK_NULL_HANDLE;
-            if (!compiledPass.framebuffers.empty()) {
-                uint32_t fbIdx = (compiledPass.framebuffers.size() > 1)
-                    ? swapchainImageIndex : 0;
-                fb = compiledPass.framebuffers[fbIdx];
-            }
-            if (fb != VK_NULL_HANDLE) {
-                RenderPassContext rpCtx(compiledPass.renderPass, fb, compiledPass.extent);
-                rpCtx.withClearValues(compiledPass.clearValues);
-                cmd.beginRenderPass(rpCtx);
-            }
-        }
+        // ── Begin rendering for graphics passes ──
+        const bool rendering = passDecl.type == PassType::Graphics &&
+                               beginRendering(commandBuffer, compiledPass, compiled);
 
-        // A disabled pass keeps its barriers and render pass; see execute().
+        // A disabled pass keeps its barriers and rendering; see execute().
         const bool active = passDecl.enabled;
 
         // ── Auto-bind pipeline ──
@@ -445,13 +424,11 @@ void FrameGraphExecutor::executePasses(
             executeAutoCallback(ctx, passDecl, compiledPass, compiled, builder, parameters, commandBuffer);
         }
 
-        // ── End render pass ──
-        if (passDecl.type == PassType::Graphics && compiledPass.renderPass) {
-            if (!compiledPass.framebuffers.empty() &&
-                compiledPass.framebuffers[0] != VK_NULL_HANDLE) {
-                cmd.endRenderPass();
-            }
+        // ── End rendering, then post-barriers (e.g. to PRESENT_SRC_KHR) ──
+        if (rendering) {
+            vkCmdEndRendering(commandBuffer);
         }
+        recordImageBarriers(cmd, compiledPass.postBarriers, compiled, resources, m_debugger);
 
         // Notify debugger of pass end
         if (m_debugger) {

@@ -340,6 +340,77 @@ VkCompareOp stringToCompareOp(const std::string& str) {
 // JSON → ResourceAccess parsing helpers
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// Subresources and view types
+// ═══════════════════════════════════════════════════════════════
+
+/// Read "mip"/"mips" and "layer"/"layers" from an access or binding object.
+/// "mip": n is one level; "mips": [first, count] a block. Same for layers.
+static SubresourceRange parseSubresource(const nlohmann::json& j, const std::string& where) {
+    SubresourceRange range;
+
+    auto readOne = [&](const char* single, const char* block,
+                       uint32_t& base, uint32_t& count) {
+        if (j.contains(single) && j.contains(block)) {
+            throw std::runtime_error(where + ": give either \"" + single + "\" or \"" +
+                                     block + "\", not both");
+        }
+        if (j.contains(single)) {
+            base = j[single].get<uint32_t>();
+            count = 1;
+        } else if (j.contains(block)) {
+            const auto& b = j[block];
+            if (!b.is_array() || b.size() != 2) {
+                throw std::runtime_error(where + ": \"" + block + "\" must be [first, count]");
+            }
+            base = b[0].get<uint32_t>();
+            count = b[1].get<uint32_t>();
+            if (count == 0) {
+                throw std::runtime_error(where + ": \"" + block + "\" has a count of 0");
+            }
+        }
+    };
+    readOne("mip", "mips", range.baseMip, range.mipCount);
+    readOne("layer", "layers", range.baseLayer, range.layerCount);
+    return range;
+}
+
+/// Inverse of parseSubresource; writes nothing for the whole image.
+static void serializeSubresource(nlohmann::json& j, const SubresourceRange& range) {
+    auto writeOne = [&](const char* single, const char* block, uint32_t base, uint32_t count) {
+        if (count == 1) {
+            j[single] = base;
+        } else if (base != 0 || count != SubresourceRange::kAll) {
+            // A block running to the end keeps its open count, spelled as the
+            // largest uint32 so it reloads unchanged.
+            j[block] = {base, count};
+        }
+    };
+    writeOne("mip", "mips", range.baseMip, range.mipCount);
+    writeOne("layer", "layers", range.baseLayer, range.layerCount);
+}
+
+static ImageViewKind stringToImageViewKind(const std::string& str) {
+    if (str == "auto")       return ImageViewKind::Auto;
+    if (str == "2d")         return ImageViewKind::Tex2D;
+    if (str == "2d_array")   return ImageViewKind::Tex2DArray;
+    if (str == "cube")       return ImageViewKind::Cube;
+    if (str == "cube_array") return ImageViewKind::CubeArray;
+    throw std::runtime_error("Unknown image viewType: '" + str +
+                             "' (expected auto, 2d, 2d_array, cube or cube_array)");
+}
+
+static const char* imageViewKindToString(ImageViewKind kind) {
+    switch (kind) {
+        case ImageViewKind::Auto:       return "auto";
+        case ImageViewKind::Tex2D:      return "2d";
+        case ImageViewKind::Tex2DArray: return "2d_array";
+        case ImageViewKind::Cube:       return "cube";
+        case ImageViewKind::CubeArray:  return "cube_array";
+    }
+    return "auto";
+}
+
 static ResourceAccess parseResourceAccess(
     const nlohmann::json& j,
     const FrameGraphBuilder& builder)
@@ -353,6 +424,7 @@ static ResourceAccess parseResourceAccess(
     }
 
     access.usage = JsonUtils::stringToResourceUsage(j.at("usage").get<std::string>());
+    access.subresource = parseSubresource(j, "Access to '" + resourceName + "'");
 
     // "usage": "present" is the older spelling of a colour write that also
     // presents. Normalise it here so the rest of the compiler sees one shape, and
@@ -886,6 +958,8 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                     binding.autoBindResource = bindingJson.value("autoBindResource", std::string{});
                     binding.autoBindSampler  = bindingJson.value("autoBindSampler", std::string{});
                     binding.autoBindBuffer   = bindingJson.value("autoBindBuffer", std::string{});
+                    binding.autoBindSubresource = parseSubresource(
+                        bindingJson, "Binding '" + binding.name + "' of layout '" + layoutDesc.name + "'");
 
                     layoutDesc.bindings.push_back(std::move(binding));
                 }
@@ -917,8 +991,37 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                         desc.height      = imgJson.value("height", 0u);
                         desc.widthScale  = imgJson.value("widthScale", 1.0f);
                         desc.heightScale = imgJson.value("heightScale", 1.0f);
-                        desc.mipLevels   = imgJson.value("mipLevels", 1u);
-                        desc.arrayLayers = imgJson.value("arrayLayers", 1u);
+                        if (imgJson.contains("mipLevels") && imgJson["mipLevels"].is_string()) {
+                            if (imgJson["mipLevels"].get<std::string>() != "full") {
+                                throw std::runtime_error("Resource '" + name +
+                                    "': mipLevels must be a number or \"full\"");
+                            }
+                            desc.mipLevels = 0;
+                        } else {
+                            desc.mipLevels = imgJson.value("mipLevels", 1u);
+                            if (desc.mipLevels == 0) {
+                                throw std::runtime_error("Resource '" + name +
+                                    "': mipLevels must be at least 1 (or \"full\")");
+                            }
+                        }
+                        desc.viewType = stringToImageViewKind(imgJson.value("viewType", std::string{"auto"}));
+                        const uint32_t defaultLayers = desc.viewType == ImageViewKind::Cube ? 6u : 1u;
+                        desc.arrayLayers = imgJson.value("arrayLayers", defaultLayers);
+                        if (desc.arrayLayers == 0) {
+                            throw std::runtime_error("Resource '" + name + "': arrayLayers must be at least 1");
+                        }
+                        if (desc.viewType == ImageViewKind::Cube && desc.arrayLayers != 6) {
+                            throw std::runtime_error("Resource '" + name +
+                                "': a cube image has exactly 6 layers");
+                        }
+                        if (desc.viewType == ImageViewKind::CubeArray && desc.arrayLayers % 6 != 0) {
+                            throw std::runtime_error("Resource '" + name +
+                                "': a cube_array image has a multiple of 6 layers");
+                        }
+                        if (desc.viewType == ImageViewKind::Tex2D && desc.arrayLayers != 1) {
+                            throw std::runtime_error("Resource '" + name +
+                                "': a 2d image has one layer; use 2d_array for more");
+                        }
                         desc.transient   = imgJson.value("transient", false);
 
                         if (imgJson.contains("format")) {
@@ -1297,6 +1400,7 @@ static nlohmann::json serializeResourceAccess(const ResourceAccess& access,
     }
 
     j["usage"] = JsonUtils::resourceUsageToString(access.usage);
+    serializeSubresource(j, access.subresource);
 
     // Written as a flag rather than folded back into "usage", so a round-trip
     // through the serializer does not lose a blend that also presents.
@@ -1387,8 +1491,10 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             if (desc.samples != VK_SAMPLE_COUNT_1_BIT) {
                 imgJson["samples"] = static_cast<int>(desc.samples);
             }
-            if (desc.mipLevels != 1)   imgJson["mipLevels"] = desc.mipLevels;
+            if (desc.mipLevels == 0)        imgJson["mipLevels"] = "full";
+            else if (desc.mipLevels != 1)   imgJson["mipLevels"] = desc.mipLevels;
             if (desc.arrayLayers != 1) imgJson["arrayLayers"] = desc.arrayLayers;
+            if (desc.viewType != ImageViewKind::Auto) imgJson["viewType"] = imageViewKindToString(desc.viewType);
             if (desc.transient)        imgJson["transient"] = true;
 
             resJson["image"] = imgJson;

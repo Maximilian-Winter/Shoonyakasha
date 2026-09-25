@@ -27,13 +27,25 @@ Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defau
 | `format` | native descriptor default if omitted | Use an explicit format for created targets |
 | `width`, `height` | 0 | Reference-size dimensions when zero |
 | `widthScale`, `heightScale` | 1.0 | Scale reference-size dimensions, e.g. 0.5 for bloom |
-| `mipLevels`, `arrayLayers` | 1 | Image shape |
+| `mipLevels` | 1 | Mip levels, or `"full"` for a complete chain at the resolved size |
+| `arrayLayers` | 1 (6 for `cube`) | Array layers, e.g. one per shadow cascade |
+| `viewType` | `auto` | How shaders sampling the whole image see it: `auto` (`2d` for one layer, `2d_array` for more), `2d`, `2d_array`, `cube` (6 square layers), `cube_array` (a multiple of 6) |
 | `samples` | 1 | Vulkan sample count; must match the rendering configuration |
 | `transient` | false | Transient image declaration |
 
 Image properties live inside `image`. Buffer properties live inside `buffer`: `size` in bytes (default 0), `persistentlyMapped` (false). Creating buffers through `bufferLayouts` is separate from declaring graph resource accesses; follow the SSBO examples for imported layout-backed buffers.
 
 Each pass input/output has a required `resource` name and `usage`. Optional `clear` is `[r,g,b,a]` or `{ "depth": 1.0, "stencil": 0 }`. Optional `present` marks the post-render presentation transition.
+
+An access covers the whole image unless it names a part: `"mip": n` or `"mips": [first, count]`, and `"layer": n` or `"layers": [first, count]`. An attachment names one mip level; one layer renders into that layer, several render layered. Ranges outside the image, and one pass using the same mip and layer in two different layouts, fail compilation. Descriptor bindings with `autoBindResource` accept the same keys and bind a view of just that part, so a downsample pass can sample mip n-1 while rendering mip n:
+
+```json
+{ "name": "Downsample2",
+  "inputs":  [{ "resource": "bloomChain", "usage": "shader_read", "mip": 1 }],
+  "outputs": [{ "resource": "bloomChain", "usage": "color_write", "mip": 2 }] }
+```
+
+Dependencies and barriers are tracked per mip and layer: passes writing different layers of one image (shadow cascades) are independent, a pass reading the whole image depends on all of them, and each gets barriers for only its own layers. A write that loads rather than clears (no `clear`) depends on the previous writer.
 
 | Usage | Meaning |
 |---|---|
@@ -112,7 +124,7 @@ Use a matching `execution.entityDataBinding`. The parser accepting a method stri
 
 ## Passes and pipeline state
 
-Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` defaults `graphics`; `compute` requests the compute queue in a multi-queue execution setup. `enabled` defaults true and can be changed at runtime with `set_pass_enabled` (C++ `setPassEnabled`). A disabled pass draws and dispatches nothing, but its barriers and render pass still run: its attachments are cleared to their `clear` values and end in the layouts later passes expect, so a disabled shadow pass leaves a map cleared to far depth. `hasSideEffects` defaults false and prevents culling work whose outputs otherwise appear unused. A transfer type does not supply a JSON copy/blit command: use native recording callbacks where needed.
+Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` defaults `graphics`; `compute` requests the compute queue in a multi-queue execution setup. `enabled` defaults true and can be changed at runtime with `set_pass_enabled` (C++ `setPassEnabled`). A disabled pass draws and dispatches nothing, but its barriers still run and its attachments still begin and end rendering: they are cleared to their `clear` values and end in the layouts later passes expect, so a disabled shadow pass leaves a map cleared to far depth. `hasSideEffects` defaults false and prevents culling work whose outputs otherwise appear unused. A transfer type does not supply a JSON copy/blit command: use native recording callbacks where needed.
 
 | `pipeline` key | Default / options |
 |---|---|
