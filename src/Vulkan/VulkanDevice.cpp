@@ -110,6 +110,15 @@ void VulkanDevice::createLogicalDevice() {
     deviceFeatures.wideLines = VK_TRUE;         // Nice-to-have for debug line rendering
     deviceFeatures.samplerAnisotropy = VK_TRUE; // Better texture quality
 
+    // Shadow-map rendering: depth clamping keeps casters behind a directional
+    // light's near plane, and depthBiasClamp backs the pipeline JSON's
+    // "depthBias": {"clamp"}. Both are optional, so only enabled where present.
+    VkPhysicalDeviceFeatures supportedFeatures{};
+    vkGetPhysicalDeviceFeatures(m_physicalDevice, &supportedFeatures);
+    deviceFeatures.depthClamp     = supportedFeatures.depthClamp;
+    deviceFeatures.depthBiasClamp = supportedFeatures.depthBiasClamp;
+    m_enabledFeatures = deviceFeatures;
+
     // Enable timeline semaphore feature for multi-queue synchronization
     VkPhysicalDeviceTimelineSemaphoreFeatures timelineFeatures{};
     timelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;

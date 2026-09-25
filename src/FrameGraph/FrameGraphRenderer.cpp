@@ -33,7 +33,8 @@ glm::vec3 FrameGraphRenderer::getCameraPosition() const {
 std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
     EntityFilter filter,
     EntitySortMode sortMode,
-    uint32_t renderLayerMask) const
+    uint32_t renderLayerMask,
+    FrameGraph::AlphaFilter alphaFilter) const
 {
     std::vector<RenderableEntity> result;
 
@@ -70,6 +71,8 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
 
         // Apply filter
         if (!passesFilter(material, tag, filter, hasSkeleton, isSprite2D)) continue;
+
+        if (!passesAlphaFilter(material, alphaFilter)) continue;
 
         // Apply render layer mask (bitwise intersection with the tag's
         // 8-bit mask; default renderLayerMask matches every layer)
@@ -145,7 +148,8 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
     EntitySortMode sortMode = sortModeStringToEnum(passDecl.execution.sortMode);
 
     // Query entities
-    auto entities = queryEntities(filter, sortMode, passDecl.execution.renderLayerMask);
+    auto entities = queryEntities(filter, sortMode, passDecl.execution.renderLayerMask,
+                                  passDecl.execution.alphaFilter);
 
     // Render each entity
     uint32_t drawCount = 0;

@@ -129,6 +129,25 @@ void RenderGraph::loadFromFile(const std::string& filePath) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Pass Enable/Disable
+// ═══════════════════════════════════════════════════════════════
+
+bool RenderGraph::setPassEnabled(const std::string& passName, bool enabled) {
+    PassDeclaration* pass = m_builder.getPass(passName);
+    if (!pass) {
+        m_logger->log(LogLevel::Warning, "setPassEnabled: no pass named '%s'", passName.c_str());
+        return false;
+    }
+    pass->enabled = enabled;
+    return true;
+}
+
+bool RenderGraph::isPassEnabled(const std::string& passName) const {
+    const PassDeclaration* pass = m_builder.getPass(passName);
+    return pass && pass->enabled;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Pass Callback Registration
 // ═══════════════════════════════════════════════════════════════
 
@@ -1655,12 +1674,7 @@ void RenderGraph::setupAutoGeometryRenderers() {
 
         // Skip if not a geometry type
         const auto& type = passDecl.execution.type;
-        if (type != "opaque_geometry" &&
-            type != "transparent_geometry" &&
-            type != "shadow_casters" &&
-            type != "skinned_geometry" &&
-            type != "skinned_transparent" &&
-            type != "sprite_geometry") continue;
+        if (!isEntityGeometryExecutionType(type)) continue;
 
         // Auto-register the callback!
         // Capture by value since passDecl reference may be invalidated

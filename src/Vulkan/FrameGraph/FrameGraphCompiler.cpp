@@ -407,6 +407,14 @@ void FrameGraphCompiler::createPhysicalResources(
         if (decl.kind == ResourceKind::Image) {
             const auto& desc = decl.imageDesc;
 
+            // Graph images are created with one mip and one layer.
+            if (desc.mipLevels != 1 || desc.arrayLayers != 1) {
+                m_logger->log(LogLevel::Warning,
+                    "Resource '%s' asks for %u mip levels and %u array layers; frame graph images "
+                    "currently have exactly one of each, and the rest are ignored",
+                    decl.name.c_str(), desc.mipLevels, desc.arrayLayers);
+            }
+
             // Resolve size
             uint32_t width  = desc.width  > 0 ? desc.width  : static_cast<uint32_t>(referenceExtent.width * desc.widthScale);
             uint32_t height = desc.height > 0 ? desc.height : static_cast<uint32_t>(referenceExtent.height * desc.heightScale);
@@ -1326,12 +1334,29 @@ void FrameGraphCompiler::createPipelines(
         // Rasterization
         builder.withCulling(stringToCullMode(pd.cullMode));
         if (pd.wireframe) builder.withWireframe();
+        const VkPhysicalDeviceFeatures& features = device.getEnabledFeatures();
         if (pd.depthBias) {
-            builder.withDepthBias(pd.depthBiasConstant, pd.depthBiasSlope, pd.depthBiasClamp);
+            float biasClamp = pd.depthBiasClamp;
+            if (biasClamp != 0.0f && !features.depthBiasClamp) {
+                m_logger->log(LogLevel::Warning,
+                    "Pass '%s': depthBias clamp ignored, the device lacks the depthBiasClamp feature",
+                    passDecl.name.c_str());
+                biasClamp = 0.0f;
+            }
+            builder.withDepthBias(pd.depthBiasConstant, pd.depthBiasSlope, biasClamp);
+        }
+        if (pd.depthClamp) {
+            if (features.depthClamp) {
+                builder.withDepthClamp(true);
+            } else {
+                m_logger->log(LogLevel::Warning,
+                    "Pass '%s': depthClamp ignored, the device lacks the depthClamp feature",
+                    passDecl.name.c_str());
+            }
         }
 
         // Depth
-        builder.withDepthTest(pd.depthTest);
+        builder.withDepthTest(pd.depthTest, JsonUtils::stringToCompareOp(pd.depthCompareOp));
         builder.withDepthWrite(pd.depthWrite);
 
         // Blending

@@ -191,6 +191,16 @@ public:
     void setCustomMat4(const std::string& key, const glm::mat4& value);
     void setCustomUint(const std::string& key, uint32_t value);
 
+    // ═══════════════════════════════════════════════════════════
+    // Render Pipeline Passes
+    // ═══════════════════════════════════════════════════════════
+
+    /// Turn a pipeline pass on or off from the next frame. A disabled pass
+    /// draws nothing but still clears its attachments, so a disabled shadow
+    /// pass leaves everything lit. Returns false if no pass has that name.
+    bool setPassEnabled(const std::string& passName, bool enabled);
+    bool isPassEnabled(const std::string& passName) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

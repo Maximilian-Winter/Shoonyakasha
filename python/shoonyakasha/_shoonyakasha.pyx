@@ -1382,6 +1382,19 @@ cdef class Engine:
         """Set custom uint for shader uniforms."""
         self._ptr.setCustomUint(key.encode('utf-8'), value)
 
+    def set_pass_enabled(self, str pass_name, bint enabled):
+        """Turn a pipeline pass on or off from the next frame.
+
+        A disabled pass draws nothing but still clears its attachments, so a
+        disabled shadow pass leaves everything lit. Returns False if the
+        pipeline has no pass with that name.
+        """
+        return self._ptr.setPassEnabled(pass_name.encode('utf-8'), enabled)
+
+    def is_pass_enabled(self, str pass_name):
+        """Whether a pipeline pass is enabled; False if there is no such pass."""
+        return self._ptr.isPassEnabled(pass_name.encode('utf-8'))
+
 
 # ═══════════════════════════════════════════════════════════════
 # Frame capture — module level

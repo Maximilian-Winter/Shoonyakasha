@@ -878,6 +878,16 @@ public:
     // Register manual pipeline override (hybrid mode: skips auto-creation for this pass)
     void registerPassPipeline(const std::string& passName, std::shared_ptr<VulkanPipeline> pipeline);
 
+    // ── Pass enable/disable ──
+    // Takes effect from the next execute(), without a recompile. A disabled
+    // pass records no draws or dispatches, but its barriers and render pass
+    // still run: its attachments are cleared to their JSON clear values and
+    // end in the layouts later passes expect. A disabled shadow pass therefore
+    // leaves a map cleared to far depth, i.e. everything lit.
+    // Returns false if no pass has that name.
+    bool setPassEnabled(const std::string& passName, bool enabled);
+    bool isPassEnabled(const std::string& passName) const;
+
     // ── Named Parameters (for push constants) ──
     void setParameter(const std::string& name, float value);
     void setParameter(const std::string& name, int32_t value);

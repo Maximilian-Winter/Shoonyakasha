@@ -66,6 +66,11 @@ public:
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
 
     VkFormat findDepthFormat();
+
+    /// Optional core features turned on at device creation, each only when the
+    /// physical device supports it. Pipeline creation checks these before
+    /// asking for depth clamping or a depth bias clamp.
+    const VkPhysicalDeviceFeatures& getEnabledFeatures() const { return m_enabledFeatures; }
 private:
     VulkanInstance& m_instance;
     VkSurfaceKHR m_surface;
@@ -78,6 +83,7 @@ private:
     VkCommandPool m_computeCommandPool = VK_NULL_HANDLE;
     bool m_hasDedicatedCompute = false;
     QueueFamilyIndices m_queueFamilyIndices;
+    VkPhysicalDeviceFeatures m_enabledFeatures{};
     std::unique_ptr<VulkanMemoryAllocator> m_vmaAllocator;
 
     // Declared after the allocator, so it is destroyed first and can still free

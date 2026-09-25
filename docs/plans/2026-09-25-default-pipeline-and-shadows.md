@@ -33,7 +33,7 @@ What blocks cascaded, local-light and "modern" shadows:
 | 6 | No frustum culling anywhere; one `vkCmdDrawIndexed` per entity. Sort distance is always from the main camera. | `FrameGraphRenderer::queryEntities` | Each cascade draws every caster in the scene. With 4 cascades + local lights this becomes the dominant CPU and vertex cost. |
 | 7 | `depthClamp` exists in `PipelineStateBuilder` but isn't in JSON; depth compare op is fixed to `LESS`. | `FrameGraphCompiler.cpp:1334` | No shadow "pancaking" for directional lights, no reverse-Z, no `EQUAL` test after a depth prepass. |
 | 8 | `shadow_casters` includes skinned and alpha-masked entities, but there is one vertex shader for all of them and no alpha test. | `FrameGraphRenderer.h:235` | Animated meshes cast bind-pose shadows; foliage casts solid-quad shadows. |
-| 9 | `PassDeclaration::enabled` can't be set from JSON or at runtime. | `FrameGraphPass.h` | No quality tiers or shadow on/off without a second JSON file. |
+| 9 | `enabled` is parsed from JSON, but can't be changed at runtime, and a disabled pass was skipped together with its barriers. | `FrameGraphExecutor.cpp` | No quality tiers; turning a shadow pass off left later barriers expecting a layout the map was never put in. |
 | 10 | No cross-frame (history) resources. | — | No TAA, no temporal shadow/AO filtering. |
 
 Minor: the shrine's `ShadowPass` uses `opaque_geometry`, so it ignores the
@@ -191,15 +191,18 @@ getting the full array view.
 
 Each phase is usable on its own and keeps existing JSON valid.
 
-### Phase 0 — small fixes (no new concepts)
+### Phase 0 — small fixes (no new concepts) — done
 - Expose `depthClamp` (with a device-feature check) and `depthCompareOp` in
   the pipeline JSON block.
-- Parse `"enabled"` on passes; add `RenderGraph::setPassEnabled(name, bool)`
-  and a facade/Python binding. Disabled passes' outputs must still get a
-  defined layout (clear once, or skip readers).
+- `RenderGraph::setPassEnabled(name, bool)` with facade and Python
+  bindings. A disabled pass keeps its barriers and render pass, so its
+  attachments are cleared and end in the expected layouts; only draws and
+  dispatches are skipped.
 - Split the shadow filter: `shadow_casters` excludes skinned entities; add
-  `skinned_shadow_casters`. Optionally `shadow_casters_masked` so opaque
-  casters keep a fragment-shader-free pipeline.
+  `skinned_shadow_casters`. Execution `"alphaFilter": "opaque" | "mask"`
+  lets opaque casters keep a fragment-shader-free pipeline.
+- The entity geometry execution types live in one list
+  (`isEntityGeometryExecutionType`) shared by the executor and RenderGraph.
 - Warn when JSON sets `mipLevels`/`arrayLayers` until phase 1 lands.
 - Move the shrine to `shadow_casters` and a compare sampler.
 

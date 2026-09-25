@@ -117,12 +117,6 @@ void FrameGraphExecutor::execute(
         const auto& compiledPass = compiled.compiledPasses[passIdx];
         const auto& passDecl = passes[compiledPass.declIndex];
 
-        // Skip disabled passes
-        if (!passDecl.enabled) {
-            execIdx++;
-            continue;
-        }
-
         // Log execution order for debugging pass scheduling (throttled to every 5s)
         m_logger->logEvery(5.0f, LogLevel::Info, "  [pass %u/%u] '%s' (type=%s, exec=%s)",
             execIdx++, static_cast<uint32_t>(compiled.executionOrder.size()),
@@ -243,19 +237,26 @@ void FrameGraphExecutor::execute(
             }
         }
 
+        // A disabled pass binds and records nothing. Its barriers above and
+        // its render pass still run, so its attachments receive their clear
+        // values and end in the layouts that later passes' barriers expect.
+        const bool active = passDecl.enabled;
+
         // ── Auto-bind pipeline if available ──
-        if (passDecl.type == PassType::Graphics && compiledPass.pipeline) {
+        if (active && passDecl.type == PassType::Graphics && compiledPass.pipeline) {
             cmd.bindPipeline(compiledPass.pipeline.get())
                .setViewport(ViewportState::fromExtent(compiledPass.extent))
                .setScissor(ScissorState::fromExtent(compiledPass.extent));
         }
-        else if (passDecl.type == PassType::Compute && compiledPass.computePipeline) {
+        else if (active && passDecl.type == PassType::Compute && compiledPass.computePipeline) {
             // Auto-bind compute pipeline before callback
             compiledPass.computePipeline->bind(commandBuffer);
         }
 
         // ── Execute pass (manual callback or auto-execution) ──
-        if (passDecl.executeFn) {
+        if (!active) {
+            // Nothing to record.
+        } else if (passDecl.executeFn) {
             // Manual callback takes highest priority
             passDecl.executeFn(ctx);
         } else if (passDecl.execution.type != "none") {
@@ -422,18 +423,23 @@ void FrameGraphExecutor::executePasses(
             }
         }
 
+        // A disabled pass keeps its barriers and render pass; see execute().
+        const bool active = passDecl.enabled;
+
         // ── Auto-bind pipeline ──
-        if (passDecl.type == PassType::Graphics && compiledPass.pipeline) {
+        if (active && passDecl.type == PassType::Graphics && compiledPass.pipeline) {
             cmd.bindPipeline(compiledPass.pipeline.get())
                .setViewport(ViewportState::fromExtent(compiledPass.extent))
                .setScissor(ScissorState::fromExtent(compiledPass.extent));
         }
-        else if (passDecl.type == PassType::Compute && compiledPass.computePipeline) {
+        else if (active && passDecl.type == PassType::Compute && compiledPass.computePipeline) {
             compiledPass.computePipeline->bind(commandBuffer);
         }
 
         // ── Execute pass (manual callback or auto-execution) ──
-        if (passDecl.executeFn) {
+        if (!active) {
+            // Nothing to record.
+        } else if (passDecl.executeFn) {
             passDecl.executeFn(ctx);
         } else if (passDecl.execution.type != "none") {
             executeAutoCallback(ctx, passDecl, compiledPass, compiled, builder, parameters, commandBuffer);
@@ -610,21 +616,10 @@ void FrameGraphExecutor::executeAutoCallback(
 
         vkCmdDispatch(commandBuffer, groupX, groupY, groupZ);
     }
-    else if (exec.type == "scene_geometry" ||
-             exec.type == "opaque_geometry" ||
-             exec.type == "transparent_geometry" ||
-             exec.type == "shadow_casters" ||
-             exec.type == "skinned_geometry" ||
-             exec.type == "skinned_transparent" ||
-             exec.type == "sprite_geometry") {
-        // Call scene renderer callback if registered
-        // For built-in geometry types, RenderGraph auto-registers the callback
-        //
-        // sprite_geometry was missing from this list. RenderGraph accepts it and
-        // registers a renderer (RenderGraph.cpp), and FrameGraphRenderer maps it
-        // to EntityFilter::Sprite2D — but the chain here had no branch for it, so
-        // the pass ran, recorded no draws, and said nothing. Every sprite, UI
-        // panel and text label rendered to nothing.
+    else if (exec.type == "scene_geometry" || isEntityGeometryExecutionType(exec.type)) {
+        // Call scene renderer callback if registered. For the entity geometry
+        // types RenderGraph auto-registers it, using the same
+        // isEntityGeometryExecutionType list as this branch.
         if (passDecl.sceneRendererFn) {
             passDecl.sceneRendererFn(ctx);
         } else {

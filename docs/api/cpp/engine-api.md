@@ -79,6 +79,8 @@ void setCustomVec3(const std::string& key, const glm::vec3& value);
 void setCustomVec4(const std::string& key, const glm::vec4& value);
 void setCustomMat4(const std::string& key, const glm::mat4& value);
 void setCustomUint(const std::string& key, uint32_t value);
+bool setPassEnabled(const std::string& passName, bool enabled);
+bool isPassEnabled(const std::string& passName) const;
 ```
 
 <!-- END SOURCE API -->

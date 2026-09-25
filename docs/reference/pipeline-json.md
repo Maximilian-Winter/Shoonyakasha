@@ -112,18 +112,20 @@ Use a matching `execution.entityDataBinding`. The parser accepting a method stri
 
 ## Passes and pipeline state
 
-Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` defaults `graphics`; `compute` requests the compute queue in a multi-queue execution setup. `enabled` defaults true; `hasSideEffects` defaults false and prevents culling work whose outputs otherwise appear unused. A transfer type does not supply a JSON copy/blit command: use native recording callbacks where needed.
+Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` defaults `graphics`; `compute` requests the compute queue in a multi-queue execution setup. `enabled` defaults true and can be changed at runtime with `set_pass_enabled` (C++ `setPassEnabled`). A disabled pass draws and dispatches nothing, but its barriers and render pass still run: its attachments are cleared to their `clear` values and end in the layouts later passes expect, so a disabled shadow pass leaves a map cleared to far depth. `hasSideEffects` defaults false and prevents culling work whose outputs otherwise appear unused. A transfer type does not supply a JSON copy/blit command: use native recording callbacks where needed.
 
 | `pipeline` key | Default / options |
 |---|---|
 | `vertexShader`, `fragmentShader`, `computeShader` | SPIR-V paths, default empty |
 | `vertexInput` | `default`; select a registered matching format |
 | `depthTest`, `depthWrite` | true |
+| `depthCompareOp` | `less`; `never`, `equal`, `less_or_equal`, `greater`, `not_equal`, `greater_or_equal`, `always`. An unknown name fails at load |
+| `depthClamp` | false; clamps depth instead of clipping at the near and far planes (directional shadow passes). Requires the `depthClamp` device feature and is ignored with a warning without it |
 | `cullMode` | `back`; `front`, `none`, `front_and_back` |
 | `blending` | `none`; `alpha`, `additive`, `custom` |
 | `topology` | `triangle_list`; `triangle_strip`, `line_list`, `line_strip`, `point_list` |
 | `wireframe` | false; requires device support |
-| `depthBias` | absent = off; object `{constant, slope, clamp}`, each default 0. A non-zero `clamp` requires the `depthBiasClamp` device feature |
+| `depthBias` | absent = off; object `{constant, slope, clamp}`, each default 0. A non-zero `clamp` requires the `depthBiasClamp` device feature and is ignored with a warning without it |
 
 For `custom` blending: `srcColorFactor=src_alpha`, `dstColorFactor=one_minus_src_alpha`, `colorBlendOp=add`, `srcAlphaFactor=one`, `dstAlphaFactor=zero`, `alphaBlendOp=add`. Operations are `add`, `subtract`, `reverse_subtract`, `min`, `max`. Factors include zero/one, source/destination color/alpha and their complements, constant color/alpha and complements, and `src_alpha_saturate`; native blend constants need appropriate setup. Unknown blend strings can fall back rather than fail, so use verified spellings.
 
@@ -140,8 +142,9 @@ For `custom` blending: `srcColorFactor=src_alpha`, `dstColorFactor=one_minus_src
 | `compute_dispatch` | Explicit or parameter/resource-based group counts |
 | `compute_image` | Group counts from render extent and `workgroupSize` |
 | `scene_geometry`, `opaque_geometry`, `transparent_geometry` | Registered scene/entity rendering |
-| `shadow_casters` | Registered shadow-caster rendering; requires the rest of a shadow pipeline |
+| `shadow_casters` | Static entities with `castShadows`, opaque or masked; requires the rest of a shadow pipeline |
 | `skinned_geometry`, `skinned_transparent` | Skinned rendering with matching layouts/shaders |
+| `skinned_shadow_casters` | Skinned entities with `castShadows`, opaque or masked; needs a skinned vertex shader and `skeleton` binding |
 | `sprite_geometry` | Sprite and glyph rendering |
 | `none`, `manual` | Native callback/manual recording use |
 
@@ -149,7 +152,7 @@ Draw fields: `vertexCount` (integer, or `{ "parameter": "count", "divisor": 1 }`
 
 Compute dispatch uses `dispatch.x/y/z`, each a fixed group count, a parameter/divisor object, or `{ "resource": "imageName", "dimension": "width", "divisor": 16 }` (also `height`). Division rounds up. Use positive divisors and workgroup sizes; JSON does not alter GLSL `local_size`. `compute_image` uses `workgroupSize` to derive x/y groups and z=1.
 
-Geometry execution also accepts `entityDataBinding`, `sortMode` (e.g. `front_to_back`, `back_to_front`, `sort_key`), `renderLayerMask` (default all bits), and `lightIndex` (-1). Entity masks are eight bits. The default facade application uses single-queue execution; native multi-queue recording/submission must be integrated explicitly for asynchronous compute.
+Geometry execution also accepts `entityDataBinding`, `sortMode` (e.g. `front_to_back`, `back_to_front`, `sort_key`), `renderLayerMask` (default all bits), `alphaFilter`, and `lightIndex` (-1). `alphaFilter` is `any` (default), `opaque` or `mask`, and narrows the pass to materials with that alpha mode, so opaque and alpha-tested geometry can use separate pipelines (e.g. a depth-only shadow pass and one that samples albedo and discards). It is rejected at load on transparent and sprite types, where it could only match nothing. Entity masks are eight bits. The default facade application uses single-queue execution; native multi-queue recording/submission must be integrated explicitly for asynchronous compute.
 
 ## Initialization, memory, and readback
 

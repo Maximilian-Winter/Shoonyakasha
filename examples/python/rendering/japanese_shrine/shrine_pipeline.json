@@ -104,6 +104,13 @@
       "minFilter": "linear",
       "mipmapMode": "linear",
       "addressMode": "clamp_to_edge"
+    },
+    "shadowCompare": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "addressMode": "clamp_to_edge",
+      "compareEnable": true,
+      "compareOp": "less_or_equal"
     }
   },
 
@@ -158,7 +165,7 @@
     },
     "shadowReadSet": {
       "bindings": [
-        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "shadowMap", "autoBindResource": "shadowMap", "autoBindSampler": "nearestClamp" },
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "shadowMap", "autoBindResource": "shadowMap", "autoBindSampler": "shadowCompare" },
         { "binding": 1, "type": "uniform_buffer", "stages": ["fragment"], "name": "ShadowUBO", "autoBindBuffer": "ShadowUBO" }
       ]
     },
@@ -186,7 +193,7 @@
       "name": "ShadowPass",
       "type": "graphics",
       "execution": {
-        "type": "opaque_geometry",
+        "type": "shadow_casters",
         "sortMode": "none",
         "entityDataBinding": "shadowCaster"
       },

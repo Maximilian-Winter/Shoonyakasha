@@ -38,9 +38,10 @@ enum class EntityFilter {
     All,              // All renderable entities
     Opaque,           // AlphaMode::Opaque or AlphaMode::Mask (excludes skinned)
     Transparent,      // AlphaMode::Blend (excludes skinned)
-    ShadowCasters,    // Entities with castShadows = true
+    ShadowCasters,    // castShadows = true, opaque or masked (excludes skinned)
     Skinned,          // Skinned entities (has SkeletonComponent) - opaque
     SkinnedTransparent, // Skinned transparent entities
+    SkinnedShadowCasters, // Skinned, castShadows = true, opaque or masked
     Sprite2D          // Entities with Sprite2DComponent (sprites/UI panels)
 };
 
@@ -80,7 +81,8 @@ struct RenderableEntity {
 // The execution type in the pass determines what to render:
 //   "opaque_geometry"      -> render opaque entities, sort front-to-back
 //   "transparent_geometry" -> render transparent entities, sort back-to-front
-//   "shadow_casters"       -> render shadow-casting entities
+//   "shadow_casters"       -> render static shadow-casting entities
+//   "skinned_shadow_casters" -> render skinned shadow-casting entities
 //
 // The entityDataBinding in the pass determines how to bind:
 //   pass.entityDataBinding.perDraw.layoutRef   -> push constant layout
@@ -136,11 +138,27 @@ public:
     /// intersects renderLayerMask (bitwise AND != 0). Default matches
     /// every layer, so passes that don't set "renderLayerMask" in JSON see
     /// no behavior change. Useful for custom rendering or debugging.
+    /// alphaFilter further narrows by material alpha mode (JSON
+    /// execution "alphaFilter").
     std::vector<RenderableEntity> queryEntities(
         EntityFilter filter,
         EntitySortMode sortMode,
-        uint32_t renderLayerMask = 0xFFFFFFFFu
+        uint32_t renderLayerMask = 0xFFFFFFFFu,
+        FrameGraph::AlphaFilter alphaFilter = FrameGraph::AlphaFilter::Any
     ) const;
+
+    // ── Filtering ───────────────────────────────────────────────────
+
+    /// Whether an entity is drawn by a pass using `filter`.
+    static bool passesFilter(const MaterialComponentV5& material,
+                             const RenderableTagComponent& tag,
+                             EntityFilter filter,
+                             bool hasSkeleton,
+                             bool isSprite2D);
+
+    /// Whether a material's alpha mode is accepted by `alphaFilter`.
+    static bool passesAlphaFilter(const MaterialComponentV5& material,
+                                  FrameGraph::AlphaFilter alphaFilter);
 
     // ── Statistics ──────────────────────────────────────────────────
 
@@ -170,13 +188,6 @@ private:
     /// Get camera position (from override or scene context)
     glm::vec3 getCameraPosition() const;
 
-    /// Check if entity passes the filter
-    bool passesFilter(const MaterialComponentV5& material,
-                      const RenderableTagComponent& tag,
-                      EntityFilter filter,
-                      bool hasSkeleton,
-                      bool isSprite2D) const;
-
     /// Calculate distance from entity to camera
     float calculateDistance(const ECS::TransformComponent& transform) const;
 
@@ -205,6 +216,7 @@ inline EntityFilter FrameGraphRenderer::executionTypeToFilter(const std::string&
     if (type == "shadow_casters") return EntityFilter::ShadowCasters;
     if (type == "skinned_geometry") return EntityFilter::Skinned;
     if (type == "skinned_transparent") return EntityFilter::SkinnedTransparent;
+    if (type == "skinned_shadow_casters") return EntityFilter::SkinnedShadowCasters;
     if (type == "sprite_geometry") return EntityFilter::Sprite2D;
     return EntityFilter::All;
 }
@@ -221,7 +233,7 @@ inline bool FrameGraphRenderer::passesFilter(
     const RenderableTagComponent& tag,
     EntityFilter filter,
     bool hasSkeleton,
-    bool isSprite2D) const
+    bool isSprite2D)
 {
     if (!tag.shouldRender()) return false;
 
@@ -233,13 +245,29 @@ inline bool FrameGraphRenderer::passesFilter(
         case EntityFilter::Transparent:
             return !hasSkeleton && !isSprite2D && material.isTransparent();
         case EntityFilter::ShadowCasters:
-            return !isSprite2D && tag.castShadows && material.isOpaqueOrMasked();
+            // Skinned casters need the skinned vertex shader, so they have
+            // their own type rather than casting bind-pose shadows here.
+            return !hasSkeleton && !isSprite2D && tag.castShadows && material.isOpaqueOrMasked();
         case EntityFilter::Skinned:
             return hasSkeleton && material.isOpaqueOrMasked();
         case EntityFilter::SkinnedTransparent:
             return hasSkeleton && material.isTransparent();
+        case EntityFilter::SkinnedShadowCasters:
+            return hasSkeleton && tag.castShadows && material.isOpaqueOrMasked();
         case EntityFilter::Sprite2D:
             return isSprite2D;
+    }
+    return false;
+}
+
+inline bool FrameGraphRenderer::passesAlphaFilter(
+    const MaterialComponentV5& material,
+    FrameGraph::AlphaFilter alphaFilter)
+{
+    switch (alphaFilter) {
+        case FrameGraph::AlphaFilter::Any:    return true;
+        case FrameGraph::AlphaFilter::Opaque: return material.isOpaque();
+        case FrameGraph::AlphaFilter::Mask:   return material.isMasked();
     }
     return false;
 }

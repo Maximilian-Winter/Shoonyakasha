@@ -1040,6 +1040,11 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                 pass.pipelineDesc.computeShader  = pipeJson.value("computeShader", std::string{});
                 pass.pipelineDesc.depthTest      = pipeJson.value("depthTest", true);
                 pass.pipelineDesc.depthWrite     = pipeJson.value("depthWrite", true);
+                pass.pipelineDesc.depthCompareOp = pipeJson.value("depthCompareOp", std::string{"less"});
+                // Throws on an unknown name, so a typo fails at load, not at
+                // pipeline creation.
+                JsonUtils::stringToCompareOp(pass.pipelineDesc.depthCompareOp);
+                pass.pipelineDesc.depthClamp     = pipeJson.value("depthClamp", false);
                 pass.pipelineDesc.cullMode        = pipeJson.value("cullMode", std::string{"back"});
                 pass.pipelineDesc.blending        = pipeJson.value("blending", std::string{"none"});
                 pass.pipelineDesc.topology        = pipeJson.value("topology", std::string{"triangle_list"});
@@ -1182,6 +1187,28 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                 pass.execution.entityDataBinding = execJson.value("entityDataBinding", std::string{});
                 pass.execution.renderLayerMask = execJson.value("renderLayerMask", 0xFFFFFFFFu);
                 pass.execution.lightIndex = execJson.value("lightIndex", -1);
+
+                if (execJson.contains("alphaFilter")) {
+                    const auto alpha = execJson["alphaFilter"].get<std::string>();
+                    if (alpha == "any")         pass.execution.alphaFilter = AlphaFilter::Any;
+                    else if (alpha == "opaque") pass.execution.alphaFilter = AlphaFilter::Opaque;
+                    else if (alpha == "mask")   pass.execution.alphaFilter = AlphaFilter::Mask;
+                    else {
+                        throw std::runtime_error("Pass '" + pass.name + "': unknown alphaFilter '" +
+                                                 alpha + "' (expected any, opaque or mask)");
+                    }
+
+                    // Blended passes never see opaque or masked materials, so
+                    // narrowing them to one would silently draw nothing.
+                    const auto& type = pass.execution.type;
+                    if (pass.execution.alphaFilter != AlphaFilter::Any &&
+                        (!isEntityGeometryExecutionType(type) ||
+                         type == "transparent_geometry" || type == "skinned_transparent" ||
+                         type == "sprite_geometry")) {
+                        throw std::runtime_error("Pass '" + pass.name + "': alphaFilter '" + alpha +
+                                                 "' does not apply to execution type '" + type + "'");
+                    }
+                }
             }
 
             // Parse hasSideEffects flag (prevents pass culling for compute-only passes)
@@ -1414,6 +1441,8 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             if (!pd.computeShader.empty())  pipeJson["computeShader"] = pd.computeShader;
             pipeJson["depthTest"]  = pd.depthTest;
             pipeJson["depthWrite"] = pd.depthWrite;
+            if (pd.depthCompareOp != "less") pipeJson["depthCompareOp"] = pd.depthCompareOp;
+            if (pd.depthClamp) pipeJson["depthClamp"] = true;
             pipeJson["cullMode"]   = pd.cullMode;
             pipeJson["blending"]   = pd.blending;
             pipeJson["topology"]   = pd.topology;
@@ -1453,6 +1482,8 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
                 passJson["pushConstants"].push_back(pcJson);
             }
         }
+
+        if (!pass.enabled) passJson["enabled"] = false;
 
         passesJson.push_back(passJson);
     }

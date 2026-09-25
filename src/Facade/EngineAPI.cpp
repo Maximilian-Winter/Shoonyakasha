@@ -428,6 +428,14 @@ void EngineAPI::setCustomUint(const std::string& key, uint32_t value) {
     m_impl->app->getRenderGraph().getSceneContext().setCustom(key, value);
 }
 
+bool EngineAPI::setPassEnabled(const std::string& passName, bool enabled) {
+    return m_impl->app->getRenderGraph().setPassEnabled(passName, enabled);
+}
+
+bool EngineAPI::isPassEnabled(const std::string& passName) const {
+    return m_impl->app->getRenderGraph().isPassEnabled(passName);
+}
+
 
 // ═══════════════════════════════════════════════════════════════
 // Assets

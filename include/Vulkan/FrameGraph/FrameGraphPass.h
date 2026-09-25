@@ -242,6 +242,16 @@ struct PipelineDesc {
 
     bool depthTest  = true;
     bool depthWrite = true;
+    // Depth test comparison, JSON "depthCompareOp": "never", "less",
+    // "equal", "less_or_equal", "greater", "not_equal", "greater_or_equal",
+    // "always". "greater" with a depth clear of 0 gives reverse-Z; "equal" or
+    // "less_or_equal" re-tests against a depth prepass.
+    std::string depthCompareOp = "less";
+    // Clamp fragment depth to [0, 1] instead of clipping at the near and far
+    // planes, JSON "depthClamp". Directional shadow passes use it so casters
+    // between the light and the near plane still write depth. Needs the
+    // depthClamp device feature; ignored with a warning where it is missing.
+    bool depthClamp = false;
     std::string cullMode      = "back";           // "none", "front", "back", "front_and_back"
     std::string blending      = "none";           // "none", "alpha", "additive", "custom"
     std::string topology      = "triangle_list";  // "triangle_list", "triangle_strip", "line_list", "point_list"
@@ -308,6 +318,34 @@ struct DispatchDimension {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// Entity geometry execution types
+// ═══════════════════════════════════════════════════════════════
+
+/// Execution types whose draws come from the built-in entity renderer
+/// (FrameGraphRenderer). The executor dispatches these and RenderGraph
+/// registers the renderer for them, both through this one list, so a type
+/// cannot be accepted by one and dropped by the other.
+inline bool isEntityGeometryExecutionType(const std::string& type) {
+    return type == "opaque_geometry" ||
+           type == "transparent_geometry" ||
+           type == "shadow_casters" ||
+           type == "skinned_geometry" ||
+           type == "skinned_transparent" ||
+           type == "skinned_shadow_casters" ||
+           type == "sprite_geometry";
+}
+
+/// Narrows an entity geometry pass by material alpha mode, JSON
+/// execution "alphaFilter". Lets opaque and alpha-tested geometry use
+/// separate pipelines: opaque shadow casters need no fragment shader, and
+/// only masked ones pay for the texture read and discard.
+enum class AlphaFilter {
+    Any,     // "any": whatever the execution type accepts
+    Opaque,  // "opaque": AlphaMode::Opaque only
+    Mask     // "mask": AlphaMode::Mask only
+};
+
+// ═══════════════════════════════════════════════════════════════
 // Execution Description — how a pass executes (auto-callback config)
 // 位先於動 — Position before action
 // ═══════════════════════════════════════════════════════════════
@@ -323,9 +361,11 @@ struct ExecutionDesc {
     //   "scene_geometry"     - Hybrid: framework binds, callback draws
     //   "opaque_geometry"    - Built-in: render opaque entities
     //   "transparent_geometry" - Built-in: render transparent entities (back-to-front)
-    //   "shadow_casters"     - Built-in: render shadow-casting entities
+    //   "shadow_casters"     - Built-in: render static shadow-casting entities
     //   "skinned_geometry"   - Built-in: render skinned (animated) entities
     //   "skinned_transparent" - Built-in: render skinned transparent entities
+    //   "skinned_shadow_casters" - Built-in: render skinned shadow-casting entities
+    //   "sprite_geometry"    - Built-in: render sprites and UI panels
     std::string type = "none";
 
     // For "draw" type
@@ -342,6 +382,7 @@ struct ExecutionDesc {
     std::string sortMode = "none";          // "none", "front_to_back", "back_to_front"
     std::string entityDataBinding;          // Reference to entityDataBindings config (e.g., "pbrOpaque")
     uint32_t    renderLayerMask = 0xFFFFFFFF;  // Bitmask for render layer filtering
+    AlphaFilter alphaFilter = AlphaFilter::Any;  // Narrow by material alpha mode
     int32_t     lightIndex = -1;            // For shadow_casters: which light's VP to use
 
     // Common options
