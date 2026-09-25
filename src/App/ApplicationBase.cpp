@@ -233,7 +233,7 @@ void ApplicationBase::initializeRenderGraph() {
             extent);
     }
 
-    if (!m_renderGraph->compile(extent, imageCount)) {
+    if (!m_renderGraph->compile(extent, imageCount, m_config.maxFramesInFlight)) {
         throw std::runtime_error("Failed to compile render graph: " + m_renderGraph->getLastError());
     }
 
@@ -253,7 +253,9 @@ void ApplicationBase::bindIBLTextures() {
         auto iblSet = m_renderGraph->getDescriptorSet(setName);
         if (!iblSet) continue;
 
-        for (uint32_t i = 0; i < m_swapChain->getImageCount(); i++) {
+        // One descriptor set per frame in flight, however many swapchain
+        // images there are.
+        for (uint32_t i = 0; i < m_config.maxFramesInFlight; i++) {
             iblSet->bindImage("irradianceMap", i,
                 ImageResource{m_iblResources.irradianceMap->getCubeView(),
                              m_iblResources.irradianceMap->getSampler()});
@@ -588,7 +590,7 @@ void ApplicationBase::handleSwapChainRecreation() {
             newExtent);
     }
 
-    if (!m_renderGraph->recompile(newExtent, imageCount)) {
+    if (!m_renderGraph->recompile(newExtent, imageCount, m_config.maxFramesInFlight)) {
         throw std::runtime_error("Failed to recompile render graph: " + m_renderGraph->getLastError());
     }
 
