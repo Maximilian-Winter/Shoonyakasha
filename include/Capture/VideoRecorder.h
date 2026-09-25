@@ -17,26 +17,31 @@
 
 namespace Shoonyakasha {
 
+/// Encoder settings for VideoRecorder::start. Defined outside the class so
+/// it is complete where start() uses it as a defaulted argument; GCC and
+/// Clang reject `= {}` for a nested class with member initializers.
+struct VideoRecorderOptions {
+    int fps = 30;
+
+    /// x264 constant rate factor: 0 is lossless, 18 is visually lossless,
+    /// 23 is the ffmpeg default, 51 is the lowest quality. Ignored by codecs
+    /// that do not accept -crf.
+    int quality = 18;
+
+    /// Any encoder ffmpeg accepts for -c:v. "libx264rgb" encodes without
+    /// the RGB to YUV conversion, at the cost of player support.
+    std::string codec = "libx264";
+
+    /// Empty means search PATH and the usual install locations.
+    std::string ffmpegPath;
+
+    /// Extra arguments inserted before the output path.
+    std::string extraArgs;
+};
+
 class VideoRecorder {
 public:
-    struct Options {
-        int fps = 30;
-
-        /// x264 constant rate factor: 0 is lossless, 18 is visually lossless,
-        /// 23 is the ffmpeg default, 51 is the lowest quality. Ignored by codecs
-        /// that do not accept -crf.
-        int quality = 18;
-
-        /// Any encoder ffmpeg accepts for -c:v. "libx264rgb" encodes without
-        /// the RGB to YUV conversion, at the cost of player support.
-        std::string codec = "libx264";
-
-        /// Empty means search PATH and the usual install locations.
-        std::string ffmpegPath;
-
-        /// Extra arguments inserted before the output path.
-        std::string extraArgs;
-    };
+    using Options = VideoRecorderOptions;
 
     VideoRecorder() = default;
     ~VideoRecorder();
