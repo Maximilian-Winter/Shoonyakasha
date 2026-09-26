@@ -270,7 +270,7 @@ void FrameGraphRenderer::bindAndDrawEntity(
             *m_registry,
             pass.entityDataBinding.material.layoutRef,
             cmd,
-            pass.pipelineLayout,
+            pass,
             frameIndex
         );
     }
@@ -283,7 +283,7 @@ void FrameGraphRenderer::bindAndDrawEntity(
             *m_registry,
             pass.entityDataBinding.skeleton.layoutRef,
             cmd,
-            pass.pipelineLayout,
+            pass,
             frameIndex
         );
     }

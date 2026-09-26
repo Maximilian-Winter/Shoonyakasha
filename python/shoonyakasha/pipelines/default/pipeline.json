@@ -1,0 +1,1339 @@
+{
+  "version": 3,
+  "name": "DefaultPipeline",
+  "description": "Shoonyakasha's default pipeline: deferred PBR with cascaded sun shadows, contact shadows, image-based light, forward transparency and ACES tonemapping. Settings are scene.custom.default.* values; see README.md.",
+  "vertexFormats": {
+    "skinned": {
+      "attributes": [
+        {
+          "name": "position",
+          "type": "vec3",
+          "location": 0
+        },
+        {
+          "name": "normal",
+          "type": "vec3",
+          "location": 1
+        },
+        {
+          "name": "texCoord",
+          "type": "vec2",
+          "location": 2
+        },
+        {
+          "name": "jointIndices",
+          "type": "uvec4",
+          "location": 3
+        },
+        {
+          "name": "jointWeights",
+          "type": "vec4",
+          "location": 4
+        }
+      ]
+    }
+  },
+  "bufferLayouts": {
+    "Camera": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "view",
+          "type": "mat4",
+          "source": "scene.camera.view"
+        },
+        {
+          "name": "proj",
+          "type": "mat4",
+          "source": "scene.camera.projection"
+        },
+        {
+          "name": "invView",
+          "type": "mat4",
+          "source": "scene.camera.invView"
+        },
+        {
+          "name": "invProj",
+          "type": "mat4",
+          "source": "scene.camera.invProj"
+        },
+        {
+          "name": "position",
+          "type": "vec4",
+          "source": "scene.camera.positionVec4"
+        },
+        {
+          "name": "params",
+          "type": "vec4",
+          "source": "scene.camera.nearFarFovAspect"
+        }
+      ]
+    },
+    "Lights": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "lightCount",
+          "type": "uint",
+          "source": "scene.lights.count"
+        },
+        {
+          "name": "pad0",
+          "type": "float",
+          "source": "const.0"
+        },
+        {
+          "name": "pad1",
+          "type": "float",
+          "source": "const.0"
+        },
+        {
+          "name": "pad2",
+          "type": "float",
+          "source": "const.0"
+        },
+        {
+          "name": "lightsPositionType",
+          "type": "vec4",
+          "source": "scene.lights[i].positionType",
+          "arrayCount": 16
+        },
+        {
+          "name": "lightsColorIntensity",
+          "type": "vec4",
+          "source": "scene.lights[i].colorIntensity",
+          "arrayCount": 16
+        },
+        {
+          "name": "lightsDirectionRange",
+          "type": "vec4",
+          "source": "scene.lights[i].directionRange",
+          "arrayCount": 16
+        },
+        {
+          "name": "lightsAttenuation",
+          "type": "vec4",
+          "source": "scene.lights[i].attenuation",
+          "arrayCount": 16
+        }
+      ]
+    },
+    "Cascades": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "cascadeViewProj",
+          "type": "mat4",
+          "source": "scene.shadows.sun.cascades[i].viewProj",
+          "arrayCount": 4
+        },
+        {
+          "name": "splits",
+          "type": "vec4",
+          "source": "scene.shadows.sun.splits"
+        },
+        {
+          "name": "texelWorldSize",
+          "type": "vec4",
+          "source": "scene.shadows.sun.texelWorldSize"
+        },
+        {
+          "name": "sunDirection",
+          "type": "vec4",
+          "source": "scene.shadows.sun.direction",
+          "default": [
+            0,
+            -1,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "sunEnabled",
+          "type": "uint",
+          "source": "scene.shadows.sun.enabled"
+        },
+        {
+          "name": "sunLightIndex",
+          "type": "int",
+          "source": "scene.shadows.sun.lightIndex",
+          "default": -1
+        },
+        {
+          "name": "cascadeCount",
+          "type": "uint",
+          "source": "scene.shadows.sun.cascadeCount"
+        }
+      ]
+    },
+    "Settings": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "exposure",
+          "type": "float",
+          "source": "scene.custom.default.exposure",
+          "default": 1.0
+        },
+        {
+          "name": "iblIntensity",
+          "type": "float",
+          "source": "scene.custom.default.iblIntensity",
+          "default": 1.0
+        },
+        {
+          "name": "skyBlur",
+          "type": "float",
+          "source": "scene.custom.default.skyBlur",
+          "default": 0.0
+        },
+        {
+          "name": "shadowSoftness",
+          "type": "float",
+          "source": "scene.custom.default.shadowSoftness",
+          "default": 1.5
+        },
+        {
+          "name": "shadowNormalBias",
+          "type": "float",
+          "source": "scene.custom.default.shadowNormalBias",
+          "default": 1.0
+        },
+        {
+          "name": "shadowDepthBias",
+          "type": "float",
+          "source": "scene.custom.default.shadowDepthBias",
+          "default": 0.0002
+        },
+        {
+          "name": "cascadeBlend",
+          "type": "float",
+          "source": "scene.custom.default.cascadeBlend",
+          "default": 0.1
+        },
+        {
+          "name": "contactShadowLength",
+          "type": "float",
+          "source": "scene.custom.default.contactShadowLength",
+          "default": 0.25
+        },
+        {
+          "name": "contactShadowThickness",
+          "type": "float",
+          "source": "scene.custom.default.contactShadowThickness",
+          "default": 0.1
+        },
+        {
+          "name": "shadowAmbient",
+          "type": "float",
+          "source": "scene.custom.default.shadowAmbient",
+          "default": 1.0
+        },
+        {
+          "name": "debugView",
+          "type": "uint",
+          "source": "scene.custom.default.debugView",
+          "default": 0
+        }
+      ]
+    },
+    "ShadowDraw": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": [
+          "vertex"
+        ]
+      },
+      "fields": [
+        {
+          "name": "model",
+          "type": "mat4",
+          "source": "entity.transform.worldMatrix"
+        },
+        {
+          "name": "cascade",
+          "type": "uint",
+          "source": "pass.repeatIndex"
+        }
+      ]
+    },
+    "MaskedShadowDraw": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": [
+          "vertex",
+          "fragment"
+        ]
+      },
+      "fields": [
+        {
+          "name": "model",
+          "type": "mat4",
+          "source": "entity.transform.worldMatrix"
+        },
+        {
+          "name": "baseColorFactor",
+          "type": "vec4",
+          "source": "entity.material.params.baseColorFactor",
+          "default": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "cascade",
+          "type": "uint",
+          "source": "pass.repeatIndex"
+        },
+        {
+          "name": "alphaCutoff",
+          "type": "float",
+          "source": "entity.material.alphaCutoff",
+          "default": 0.5
+        }
+      ]
+    },
+    "MaterialDraw": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": [
+          "vertex",
+          "fragment"
+        ]
+      },
+      "fields": [
+        {
+          "name": "model",
+          "type": "mat4",
+          "source": "entity.transform.worldMatrix"
+        },
+        {
+          "name": "baseColorFactor",
+          "type": "vec4",
+          "source": "entity.material.params.baseColorFactor",
+          "default": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "emissiveFactor",
+          "type": "vec4",
+          "source": "entity.material.params.emissiveFactor",
+          "default": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "metallicFactor",
+          "type": "float",
+          "source": "entity.material.params.metallicFactor",
+          "default": 0.0
+        },
+        {
+          "name": "roughnessFactor",
+          "type": "float",
+          "source": "entity.material.params.roughnessFactor",
+          "default": 0.5
+        },
+        {
+          "name": "alphaCutoff",
+          "type": "float",
+          "source": "entity.material.alphaCutoff",
+          "default": 0.5
+        },
+        {
+          "name": "hasNormalMap",
+          "type": "float",
+          "source": "entity.material.textures.normalMap.exists"
+        },
+        {
+          "name": "hasMetalRoughMap",
+          "type": "float",
+          "source": "entity.material.textures.metallicRoughnessMap.exists"
+        }
+      ]
+    }
+  },
+  "entityDataBindings": {
+    "shadowOpaque": {
+      "perDraw": {
+        "layoutRef": "ShadowDraw"
+      }
+    },
+    "shadowMasked": {
+      "perDraw": {
+        "layoutRef": "MaskedShadowDraw"
+      },
+      "material": {
+        "layoutRef": "materialSet"
+      }
+    },
+    "shadowSkinned": {
+      "perDraw": {
+        "layoutRef": "ShadowDraw"
+      },
+      "skeleton": {
+        "layoutRef": "skeletonSet"
+      }
+    },
+    "material": {
+      "perDraw": {
+        "layoutRef": "MaterialDraw"
+      },
+      "material": {
+        "layoutRef": "materialSet"
+      }
+    },
+    "skinnedMaterial": {
+      "perDraw": {
+        "layoutRef": "MaterialDraw"
+      },
+      "material": {
+        "layoutRef": "materialSet"
+      },
+      "skeleton": {
+        "layoutRef": "skeletonSet"
+      }
+    }
+  },
+  "samplers": {
+    "nearestClamp": {
+      "magFilter": "nearest",
+      "minFilter": "nearest",
+      "mipmapMode": "nearest",
+      "addressMode": "clamp_to_edge"
+    },
+    "linearClamp": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "addressMode": "clamp_to_edge"
+    },
+    "shadowCompare": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "addressMode": "clamp_to_edge",
+      "compareEnable": true,
+      "compareOp": "less_or_equal"
+    }
+  },
+  "descriptorSetLayouts": {
+    "cameraSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "name": "Camera",
+          "autoBindBuffer": "Camera"
+        }
+      ]
+    },
+    "lightsSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "Lights",
+          "autoBindBuffer": "Lights"
+        }
+      ]
+    },
+    "cascadesSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "vertex"
+          ],
+          "name": "Cascades",
+          "autoBindBuffer": "Cascades"
+        }
+      ]
+    },
+    "settingsSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "Settings",
+          "autoBindBuffer": "Settings"
+        },
+        {
+          "binding": 1,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "Cascades",
+          "autoBindBuffer": "Cascades"
+        }
+      ]
+    },
+    "materialSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "albedoMap"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "normalMap"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "metallicRoughnessMap"
+        },
+        {
+          "binding": 3,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "aoMap"
+        },
+        {
+          "binding": 4,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "emissiveMap"
+        }
+      ]
+    },
+    "skeletonSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_buffer",
+          "stages": [
+            "vertex"
+          ],
+          "name": "boneMatrices",
+          "autoBindBuffer": "entity.skeleton.boneMatrices"
+        }
+      ]
+    },
+    "iblSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "irradianceMap"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "prefilterMap"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "brdfLUT"
+        }
+      ]
+    },
+    "shadowMapSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "shadowMap",
+          "autoBindResource": "shadowMap",
+          "autoBindSampler": "shadowCompare"
+        }
+      ]
+    },
+    "depthNormalSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
+    "gbufferSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gAlbedo",
+          "autoBindResource": "gAlbedo",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gMaterial",
+          "autoBindResource": "gMaterial",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 3,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 4,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "shadowMask",
+          "autoBindResource": "shadowMask",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
+    "tonemapSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "hdrColor",
+          "autoBindResource": "hdrColor",
+          "autoBindSampler": "linearClamp"
+        },
+        {
+          "binding": 1,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "Settings",
+          "autoBindBuffer": "Settings"
+        }
+      ]
+    }
+  },
+  "resources": [
+    {
+      "name": "swapchain",
+      "kind": "image",
+      "imported": true
+    },
+    {
+      "name": "shadowMap",
+      "kind": "image",
+      "image": {
+        "format": "D32_SFLOAT",
+        "width": 2048,
+        "height": 2048,
+        "arrayLayers": 4,
+        "viewType": "2d_array"
+      }
+    },
+    {
+      "name": "gAlbedo",
+      "kind": "image",
+      "image": {
+        "format": "R8G8B8A8_SRGB"
+      }
+    },
+    {
+      "name": "gNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT"
+      }
+    },
+    {
+      "name": "gMaterial",
+      "kind": "image",
+      "image": {
+        "format": "R8G8_UNORM"
+      }
+    },
+    {
+      "name": "gDepth",
+      "kind": "image",
+      "image": {
+        "format": "D32_SFLOAT"
+      }
+    },
+    {
+      "name": "hdrColor",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "shadowMask",
+      "kind": "image",
+      "image": {
+        "format": "R8G8_UNORM"
+      }
+    }
+  ],
+  "passes": [
+    {
+      "name": "ShadowOpaque{cascade}",
+      "type": "graphics",
+      "repeat": {
+        "count": 4,
+        "index": "cascade"
+      },
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "opaque",
+        "view": "shadows.sun.cascades[{cascade}]",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "shadowOpaque"
+      },
+      "outputs": [
+        {
+          "resource": "shadowMap",
+          "usage": "depth_write",
+          "layer": "{cascade}",
+          "clear": {
+            "depth": 1.0,
+            "stencil": 0
+          }
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/shadow.vert.spv",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthClamp": true,
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        }
+      },
+      "descriptorSets": [
+        "cascadesSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ]
+    },
+    {
+      "name": "ShadowMasked{cascade}",
+      "type": "graphics",
+      "repeat": {
+        "count": 4,
+        "index": "cascade"
+      },
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "mask",
+        "view": "shadows.sun.cascades[{cascade}]",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "shadowMasked"
+      },
+      "outputs": [
+        {
+          "resource": "shadowMap",
+          "usage": "depth_write",
+          "layer": "{cascade}"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/shadow_masked.vert.spv",
+        "fragmentShader": "shaders/shadow_masked.frag.spv",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthClamp": true,
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        }
+      },
+      "descriptorSets": [
+        "cascadesSet",
+        "materialSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 88
+        }
+      ]
+    },
+    {
+      "name": "ShadowSkinned{cascade}",
+      "type": "graphics",
+      "repeat": {
+        "count": 4,
+        "index": "cascade"
+      },
+      "execution": {
+        "type": "skinned_shadow_casters",
+        "view": "shadows.sun.cascades[{cascade}]",
+        "entityDataBinding": "shadowSkinned"
+      },
+      "outputs": [
+        {
+          "resource": "shadowMap",
+          "usage": "depth_write",
+          "layer": "{cascade}"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/shadow_skinned.vert.spv",
+        "vertexInput": "skinned",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthClamp": true,
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        }
+      },
+      "descriptorSets": [
+        "cascadesSet",
+        "skeletonSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ]
+    },
+    {
+      "name": "GBufferOpaque",
+      "type": "graphics",
+      "execution": {
+        "type": "opaque_geometry",
+        "alphaFilter": "opaque",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "material"
+      },
+      "outputs": [
+        {
+          "resource": "gAlbedo",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "gNormal",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "hdrColor",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_write",
+          "clear": {
+            "depth": 1.0,
+            "stencil": 0
+          }
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/gbuffer.vert.spv",
+        "fragmentShader": "shaders/gbuffer.frag.spv",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 116
+        }
+      ]
+    },
+    {
+      "name": "GBufferMasked",
+      "type": "graphics",
+      "execution": {
+        "type": "opaque_geometry",
+        "alphaFilter": "mask",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "material"
+      },
+      "outputs": [
+        {
+          "resource": "gAlbedo",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "color_write"
+        },
+        {
+          "resource": "hdrColor",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/gbuffer.vert.spv",
+        "fragmentShader": "shaders/gbuffer_masked.frag.spv",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 116
+        }
+      ]
+    },
+    {
+      "name": "GBufferSkinned",
+      "type": "graphics",
+      "execution": {
+        "type": "skinned_geometry",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "skinnedMaterial",
+        "alphaFilter": "opaque"
+      },
+      "outputs": [
+        {
+          "resource": "gAlbedo",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "color_write"
+        },
+        {
+          "resource": "hdrColor",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/gbuffer_skinned.vert.spv",
+        "fragmentShader": "shaders/gbuffer.frag.spv",
+        "vertexInput": "skinned",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet",
+        "skeletonSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 116
+        }
+      ]
+    },
+    {
+      "name": "GBufferSkinnedMasked",
+      "type": "graphics",
+      "execution": {
+        "type": "skinned_geometry",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "skinnedMaterial",
+        "alphaFilter": "mask"
+      },
+      "outputs": [
+        {
+          "resource": "gAlbedo",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "color_write"
+        },
+        {
+          "resource": "hdrColor",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/gbuffer_skinned.vert.spv",
+        "fragmentShader": "shaders/gbuffer_masked.frag.spv",
+        "vertexInput": "skinned",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet",
+        "skeletonSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 116
+        }
+      ]
+    },
+    {
+      "name": "ShadowMask",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "shadowMap",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "shadowMask",
+          "usage": "color_write",
+          "clear": [
+            1.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/shadow_mask.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "depthNormalSet",
+        "cameraSet",
+        "shadowMapSet",
+        "settingsSet"
+      ]
+    },
+    {
+      "name": "Lighting",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gAlbedo",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "shadowMask",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "color_blend"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/lighting.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": [
+        "gbufferSet",
+        "iblSet",
+        "cameraSet",
+        "lightsSet",
+        "settingsSet"
+      ]
+    },
+    {
+      "name": "Transparent",
+      "type": "graphics",
+      "execution": {
+        "type": "transparent_geometry",
+        "sortMode": "back_to_front",
+        "entityDataBinding": "material"
+      },
+      "inputs": [
+        {
+          "resource": "shadowMap",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "color_blend"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_read"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/gbuffer.vert.spv",
+        "fragmentShader": "shaders/forward.frag.spv",
+        "depthTest": true,
+        "depthWrite": false,
+        "cullMode": "none",
+        "blending": "alpha"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet",
+        "lightsSet",
+        "iblSet",
+        "shadowMapSet",
+        "settingsSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 116
+        }
+      ]
+    },
+    {
+      "name": "Tonemap",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_write",
+          "present": true,
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/tonemap.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "tonemapSet"
+      ]
+    }
+  ]
+}

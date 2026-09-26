@@ -19,7 +19,10 @@ PipelineStateBuilder::PipelineStateBuilder() {
 PipelineStateBuilder& PipelineStateBuilder::withShaders(const std::string& vertPath, const std::string& fragPath) {
     m_state.shaderPaths.clear();
     m_state.shaderPaths.emplace_back(VK_SHADER_STAGE_VERTEX_BIT, vertPath);
-    m_state.shaderPaths.emplace_back(VK_SHADER_STAGE_FRAGMENT_BIT, fragPath);
+    // No fragment shader: a depth-only pipeline, such as a shadow pass.
+    if (!fragPath.empty()) {
+        m_state.shaderPaths.emplace_back(VK_SHADER_STAGE_FRAGMENT_BIT, fragPath);
+    }
     return *this;
 }
 

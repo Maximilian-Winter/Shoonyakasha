@@ -82,6 +82,12 @@ A named format contains `attributes`, each with `name`, `type`, and `location`. 
 
 Fields require `name`; `type` defaults `float`, `arrayCount` defaults 1, and `source` defaults empty. An explicit `offset`, including 0, overrides automatic placement subject to layout checks. Use `arrayCount` rather than embedding array syntax in the type name.
 
+`default` is what a field holds while its `source` does not resolve, for instance a `scene.custom.*` value the application has not set, or a material parameter an entity lacks: a number for scalars, an array of numbers for vectors and matrices (column-major, as many as the type has components). Without one such a field is left as it was. A default that is not numbers fails at load; one with the wrong number of components is ignored with a warning:
+
+```json
+{ "name": "exposure", "type": "float", "source": "scene.custom.default.exposure", "default": 1.0 }
+```
+
 Scalar types are `float`, `double`, `int`, `uint`, `bool`; vector types are `vec2/3/4`, `ivec2/3/4`, `uvec2/3/4`; matrix types are `mat2/3/4`. `std140`, `std430`, and scalar packing differ in alignment/array stride. The shader block layout and push-constant byte range must agree with the compiled layout; device features and limits still apply.
 
 A field `source` is a dot-path. A layout-level `source` is an initialization object; they have different meanings. Manual/on-change scheduling is native-managed behavior, not automatic Python-object observation.
@@ -130,7 +136,7 @@ Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` de
 
 | `pipeline` key | Default / options |
 |---|---|
-| `vertexShader`, `fragmentShader`, `computeShader` | SPIR-V paths, default empty |
+| `vertexShader`, `fragmentShader`, `computeShader` | SPIR-V paths, default empty. A relative path that names a file beside the pipeline JSON loads that file, so a pipeline and its shaders work from any working directory; otherwise it is relative to the working directory. A graphics pass with a vertex shader and no fragment shader is depth only |
 | `vertexInput` | `default`; select a registered matching format |
 | `depthTest`, `depthWrite` | true |
 | `depthCompareOp` | `less`; `never`, `equal`, `less_or_equal`, `greater`, `not_equal`, `greater_or_equal`, `always`. An unknown name fails at load |

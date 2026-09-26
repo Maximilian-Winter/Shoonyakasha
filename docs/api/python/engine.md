@@ -27,7 +27,7 @@ Use update for custom values that must enter the current frame's automatic buffe
 
 C++ configuration is `EngineConfig` in [FacadeTypes.h](../../../include/Facade/FacadeTypes.h). Defaults: 1600×900, title `Shoonyakasha Application`, log file `application.log`, log level 1 (Info), two frames in flight, empty environment and pipeline paths. A pipeline path is required to run. Log levels are 0 Debug, 1 Info, 2 Warning, 3 Error. Render graph parameters are string→unsigned-integer values for allocation/count configuration.
 
-Python exposes the constructor arguments listed below. It does **not** expose C++ `enableValidation`; the C++ default is true with a warning/fallback when the layer is unavailable.
+Python exposes the constructor arguments listed below. It does **not** expose C++ `enableValidation`; the C++ default is true with a warning/fallback when the layer is unavailable. An empty `pipeline_json_path` loads the [default pipeline](../../../python/shoonyakasha/pipelines/default/README.md). Without an HDR map, or when it fails to load, a pipeline that samples IBL gets a uniform environment of `environment_color`.
 
 Creation helpers return entity handles. glTF loading returns a result whose `success` and `error` must be checked. Capture/start/stop return success booleans. Custom-value setters publish values under `scene.custom.<key>`; pass the key without that prefix.
 
@@ -43,7 +43,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 
 | Member | Returns / property value | Description |
 |---|---|---|
-| `Engine(title="Shoonyakasha Application", width=1600, height=900, log_file="application.log", log_level=1, hdr_environment_path="", pipeline_json_path="", max_frames_in_flight=2, render_graph_parameters=None)` | Engine | Create engine with configuration. |
+| `Engine(title="Shoonyakasha Application", width=1600, height=900, log_file="application.log", log_level=1, hdr_environment_path="", pipeline_json_path="", max_frames_in_flight=2, render_graph_parameters=None, environment_color=(0.25, 0.28, 0.33))` | Engine | Create engine with configuration. |
 | `run()` | None | Run the engine. Blocks until the window is closed. |
 | `set_on_init(callback)` | None | Set initialization callback: callback(). |
 | `set_on_post_init(callback)` | None | Set post-initialization callback: callback(). |

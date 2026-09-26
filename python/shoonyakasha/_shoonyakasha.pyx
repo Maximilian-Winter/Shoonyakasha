@@ -1017,7 +1017,8 @@ cdef class Engine:
                  str hdr_environment_path="",
                  str pipeline_json_path="",
                  int max_frames_in_flight=2,
-                 dict render_graph_parameters=None):
+                 dict render_graph_parameters=None,
+                 environment_color=(0.25, 0.28, 0.33)):
         """Create engine with configuration.
 
         Args:
@@ -1026,11 +1027,18 @@ cdef class Engine:
             height: Window height
             log_file: Log file path
             log_level: 0=Debug, 1=Info, 2=Warning, 3=Error
-            hdr_environment_path: HDR environment map (empty = no IBL)
-            pipeline_json_path: JSON render graph (required)
+            hdr_environment_path: HDR environment map. Empty: a pipeline
+                that samples IBL gets a uniform environment_color instead.
+            pipeline_json_path: JSON render graph. Empty: the default
+                pipeline, shoonyakasha.pipeline.DEFAULT.
             max_frames_in_flight: Vulkan frames in flight
             render_graph_parameters: Dict of str→int for SSBO sizing etc.
+            environment_color: (r, g, b) of the uniform environment used
+                when there is no HDR map.
         """
+        if not pipeline_json_path:
+            from . import pipeline as _pipeline
+            pipeline_json_path = str(_pipeline.DEFAULT)
         cdef EngineConfig cfg
         cfg.width = width
         cfg.height = height
@@ -1038,6 +1046,8 @@ cdef class Engine:
         cfg.logFile = log_file.encode('utf-8')
         cfg.logLevel = log_level
         cfg.hdrEnvironmentPath = hdr_environment_path.encode('utf-8')
+        for i in range(3):
+            cfg.uniformEnvironmentColor[i] = float(environment_color[i])
         cfg.pipelineJsonPath = pipeline_json_path.encode('utf-8')
         cfg.maxFramesInFlight = max_frames_in_flight
 

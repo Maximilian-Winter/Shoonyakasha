@@ -804,14 +804,8 @@ void FrameGraphCompiler::createPipelines(
         // Build pipeline from PipelineDesc
         PipelineStateBuilder builder;
 
-        // Shaders
-        if (!pd.fragmentShader.empty()) {
-            builder.withShaders(pd.vertexShader, pd.fragmentShader);
-        } else {
-            // Depth-only pass: vertex shader only (fragment shader omitted)
-            // PipelineStateBuilder needs vertex shader at minimum
-            builder.withShaders(pd.vertexShader, "");
-        }
+        // Shaders. Without a fragment shader the pipeline is depth only.
+        builder.withShaders(pd.vertexShader, pd.fragmentShader);
 
         // Vertex input — check declarative registry first, then fall back to hardcoded
         if (pd.vertexInput != "none") {
@@ -1185,6 +1179,29 @@ bool toResolverType(BufferFieldType t, Shoonyakasha::MaterialParam::Type& out) {
     }
 }
 
+/// A field's JSON "default" as the value the resolver writes, or an invalid
+/// value when there is none or its component count does not fit the type.
+Shoonyakasha::ResolvedValue defaultAsResolvedValue(const BufferFieldDesc& f) {
+    const auto& d = f.defaultValue;
+    switch (f.type) {
+        case BufferFieldType::Float: if (d.size() == 1) return Shoonyakasha::ResolvedValue(d[0]); break;
+        case BufferFieldType::Int:   if (d.size() == 1) return Shoonyakasha::ResolvedValue(static_cast<int32_t>(d[0])); break;
+        case BufferFieldType::UInt:  if (d.size() == 1) return Shoonyakasha::ResolvedValue(static_cast<uint32_t>(d[0])); break;
+        case BufferFieldType::Vec2:  if (d.size() == 2) return Shoonyakasha::ResolvedValue(glm::vec2(d[0], d[1])); break;
+        case BufferFieldType::Vec3:  if (d.size() == 3) return Shoonyakasha::ResolvedValue(glm::vec3(d[0], d[1], d[2])); break;
+        case BufferFieldType::Vec4:  if (d.size() == 4) return Shoonyakasha::ResolvedValue(glm::vec4(d[0], d[1], d[2], d[3])); break;
+        case BufferFieldType::Mat4:
+            if (d.size() == 16) {
+                glm::mat4 m;
+                for (int c = 0; c < 4; ++c) for (int r = 0; r < 4; ++r) m[c][r] = d[static_cast<size_t>(c * 4 + r)];
+                return Shoonyakasha::ResolvedValue(m);
+            }
+            break;
+        default: break;
+    }
+    return Shoonyakasha::ResolvedValue();
+}
+
 } // namespace
 
 Shoonyakasha::CompiledBufferLayout CompiledBufferLayout::toResolverLayout() const {
@@ -1207,6 +1224,7 @@ Shoonyakasha::CompiledBufferLayout CompiledBufferLayout::toResolverLayout() cons
         rf.arrayStride  = f.arrayStride;
         rf.columnStride = f.columnStride;
         rf.resolvable   = toResolverType(f.type, rf.type);
+        rf.fallback     = defaultAsResolvedValue(f);
         out.fields.push_back(std::move(rf));
     }
     return out;
@@ -1369,6 +1387,12 @@ void FrameGraphCompiler::compileBufferLayouts(
         Shoonyakasha::DotPathResolver validator;
 
         for (const auto& field : compiled.fields) {
+            if (!field.defaultValue.empty() && !defaultAsResolvedValue(field).isValid()) {
+                m_logger->log(LogLevel::Warning,
+                              "  Buffer layout '%s' field '%s': \"default\" has %zu values, which does not "
+                              "fit the field's type; it is ignored.",
+                              desc.name.c_str(), field.name.c_str(), field.defaultValue.size());
+            }
             if (field.source.empty()) continue;
 
             if (field.source.starts_with("scene.")) {

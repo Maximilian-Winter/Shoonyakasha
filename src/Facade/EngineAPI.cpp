@@ -199,6 +199,8 @@ static ApplicationConfig toAppConfig(const EngineConfig& fc) {
     }
 
     ac.hdrEnvironmentPath = fc.hdrEnvironmentPath;
+    ac.uniformEnvironmentColor = glm::vec3(fc.uniformEnvironmentColor[0], fc.uniformEnvironmentColor[1],
+                                           fc.uniformEnvironmentColor[2]);
     ac.pipelineJsonPath   = fc.pipelineJsonPath;
     ac.maxFramesInFlight  = fc.maxFramesInFlight;
     ac.enableValidation   = fc.enableValidation;

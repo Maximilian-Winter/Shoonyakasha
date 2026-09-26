@@ -44,6 +44,8 @@ int main() {
 }
 ```
 
+Leaving `pipelineJsonPath` empty loads the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md): deferred PBR with cascaded sun shadows. It is found through `$SHOONYAKASHA_DEFAULT_PIPELINE`, or else in the source tree the engine was built from, so a program installed elsewhere sets the variable.
+
 For your own CMake target, follow [installing the C++ library](../../BUILDING.md#installing-the-c-library). Include the corresponding `Facade/SceneAPI.h`, `InputAPI.h`, `PhysicsAPI.h`, or `EcsAPI.h` to call sub-API methods; `EngineAPI.h` only forward-declares them.
 
 ## Lifecycle

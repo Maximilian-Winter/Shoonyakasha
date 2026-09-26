@@ -57,16 +57,21 @@ struct ApplicationConfig {
     std::string logFile = "application.log";
     LogLevel logLevel = LogLevel::Info;
 
-    // IBL (empty = no IBL generation)
+    // IBL from an HDR environment map. Empty, or failing to load: a pipeline
+    // that samples IBL (declares an "iblSet") gets a uniform environment of
+    // this colour instead.
     std::string hdrEnvironmentPath;
     IBLGenerationParams iblParams{};
+    glm::vec3 uniformEnvironmentColor{0.25f, 0.28f, 0.33f};
 
     // Resources
     size_t resourceCacheSize = 2ULL * 1024 * 1024 * 1024;
 
     // Rendering
     uint32_t maxFramesInFlight = 2;
-    std::string pipelineJsonPath;   // Required — JSON render graph pipeline
+    // JSON render graph pipeline. Empty: the default pipeline, see
+    // ApplicationBase::defaultPipelinePath().
+    std::string pipelineJsonPath;
 
     // Vulkan validation layers. On by default; falls back to off with a warning if the
     // Khronos layer is not installed. Turn off for release builds or profiling runs.
@@ -87,6 +92,12 @@ public:
 
     // Main entry point — initializes everything, runs loop, cleans up
     void run();
+
+    /// The pipeline an empty ApplicationConfig::pipelineJsonPath loads:
+    /// $SHOONYAKASHA_DEFAULT_PIPELINE if set, otherwise the default pipeline
+    /// in the source tree the engine was built from
+    /// (python/shoonyakasha/pipelines/default/pipeline.json).
+    static std::string defaultPipelinePath();
 
 protected:
     // ─── Virtual Hooks ─────────────────────────────────────────
@@ -287,6 +298,7 @@ private:
     void initializeVulkan();
     void initializeECS();
     void loadIBLTextures();
+    std::string iblShaderDirectory() const;  // empty if the IBL shaders are nowhere to be found
     /// Construct the RenderGraph object. Runs before onInit() so subclasses and
     /// facade callbacks can reach getRenderGraph() there.
     void createRenderGraph();

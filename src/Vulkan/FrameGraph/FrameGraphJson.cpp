@@ -898,6 +898,18 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                     // ─── Parse source for dot-path resolution ─────
                     // JSON: "source": "entity.material.params.baseColorFactor"
                     field.source = fieldJson.value("source", std::string{});
+                    if (fieldJson.contains("default")) {
+                        const auto& dj = fieldJson["default"];
+                        if (dj.is_number()) {
+                            field.defaultValue = {dj.get<float>()};
+                        } else if (dj.is_array() && std::all_of(dj.begin(), dj.end(),
+                                       [](const nlohmann::json& v) { return v.is_number(); })) {
+                            for (const auto& v : dj) field.defaultValue.push_back(v.get<float>());
+                        } else {
+                            throw std::runtime_error("Buffer layout field '" + field.name +
+                                                     "': \"default\" must be a number or an array of numbers");
+                        }
+                    }
 
                     // Throws on an unknown type string. Treating one as float
                     // would shift every offset from that field onward.
@@ -1547,6 +1559,32 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
     }
 }
 
+namespace {
+
+/// Relative shader paths that name a file beside the pipeline JSON become
+/// paths to that file, so a pipeline and its shaders load together from any
+/// working directory. Paths that do not exist there are left as they are and
+/// resolve against the working directory, as they always have.
+void resolveShaderPathsAgainst(nlohmann::json& json, const std::filesystem::path& dir) {
+    if (dir.empty() || !json.contains("passes") || !json["passes"].is_array()) return;
+    for (auto& pass : json["passes"]) {
+        if (!pass.is_object() || !pass.contains("pipeline") || !pass["pipeline"].is_object()) continue;
+        auto& pipe = pass["pipeline"];
+        for (const char* key : {"vertexShader", "fragmentShader", "computeShader"}) {
+            if (!pipe.contains(key) || !pipe[key].is_string()) continue;
+            const std::filesystem::path shader = pipe[key].get<std::string>();
+            if (shader.empty() || shader.is_absolute()) continue;
+            std::error_code ec;
+            const std::filesystem::path beside = dir / shader;
+            if (std::filesystem::exists(beside, ec)) {
+                pipe[key] = beside.lexically_normal().generic_string();
+            }
+        }
+    }
+}
+
+} // namespace
+
 void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath) {
     nlohmann::json json;
     {
@@ -1600,6 +1638,7 @@ void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath) 
         }
         file >> json;
     } // File closed here before modifying builder
+    resolveShaderPathsAgainst(json, std::filesystem::absolute(filePath).parent_path());
     loadGraphFromJson(builder, json);
 }
 

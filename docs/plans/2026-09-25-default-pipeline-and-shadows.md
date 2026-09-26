@@ -293,7 +293,50 @@ Not done: a caster whose shadow cannot reach the camera's view is still drawn
 if it is inside the cascade (a tighter test would sweep its bounds along the
 sun), and there is no GPU-driven culling or indirect drawing yet.
 
-### Phase 5 — ship the default pipeline
+### Phase 5 — ship the default pipeline — first half done
+
+Done: [`python/shoonyakasha/pipelines/default/`](../../python/shoonyakasha/pipelines/default/README.md),
+under the Python package so the wheel ships it, with its SPIR-V committed.
+`sk.Engine()` with no pipeline path loads it; so does a C++ config with an
+empty `pipelineJsonPath` (`$SHOONYAKASHA_DEFAULT_PIPELINE`, else the source
+tree). It has cascaded sun shadows with 16-tap Vogel PCF, per-cascade normal
+offset and blended seams; contact shadows; opaque, masked and skinned
+variants of the shadow and G-buffer passes; a shadow mask; deferred lighting
+with IBL; forward transparency sampling the cascades; ACES tonemapping; and
+debug views for cascades, the mask and normals. Its settings are
+`scene.custom.default.*` values.
+
+Differences from the sketch above: the shadow mask and contact shadows are one
+fullscreen fragment pass rather than compute; the G-buffer has no motion
+vectors yet; the shaders live beside the pipeline rather than in `sk/`, since
+they share buffer blocks with its JSON; tonemapping is still ACES.
+
+What it needed on the engine side:
+- Buffer-layout fields take a `"default"`, written while their source does
+  not resolve, so settings work without the application publishing them.
+- Relative shader paths resolve beside the pipeline JSON when the file is
+  there, so a pipeline loads from any working directory.
+- Vertex-only graphics pipelines: a pass without a fragment shader used to
+  fail to build, despite phase 0 describing depth-only casters.
+- Material and skeleton sets bind at the index the current pass lists them;
+  it used to be the index of whichever pass was found first or last.
+- A skeleton set is rewritten only when its bone buffer changes. Rewriting it
+  after an earlier pass in the frame bound it invalidated the command buffer
+  as soon as two passes drew the same skinned mesh.
+- Without an HDR map, or when it fails to load, a pipeline declaring an
+  `iblSet` gets a uniform environment (`IBLGenerator::generateUniform`);
+  IBL shaders are also looked for beside the pipeline.
+
+Checked on lavapipe with sync validation: boxes, a skinned fox, a blended
+pane and a point light, with and without an HDR map, from a directory with no
+shaders of its own; no validation messages beyond the known screenshot one.
+
+Still to do in this phase:
+- GTAO, bloom and auto exposure.
+- Quality tiers.
+- Moving the shrine and Sponza examples onto it.
+
+The original outline:
 - `assets/pipelines/default/pipeline.json` + shaders, built by
   `CompileShaders.cmake`, loadable with one call from C++ and Python.
 - Shaders: GBuffer (static/skinned/masked), shadow (static/skinned/masked),

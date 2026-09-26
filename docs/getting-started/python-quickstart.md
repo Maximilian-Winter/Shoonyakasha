@@ -48,6 +48,8 @@ engine.set_on_init(on_init)
 engine.run()
 ```
 
+Leave out `pipeline_json_path` and the engine renders with the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md) instead: deferred PBR with cascaded sun shadows, no shaders of your own needed.
+
 `run()` blocks until the window closes. Create entities in `on_init`: Vulkan and the scene exist, but graph compilation follows this callback. `on_post_init` runs after compilation. Update application state in `on_update(dt)`; `dt` is seconds.
 
 `engine.scene` and `engine.ecs` require initialization. Configure physics in `on_init`; setters called before the native physics system is connected do not persist. Input callbacks can be registered before `run()`.

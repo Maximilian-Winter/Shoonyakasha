@@ -99,6 +99,7 @@ RenderGraph::~RenderGraph() {
     // frees every set allocated from it.
     if (m_materialDescriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_materialDescriptorPool, nullptr);
+        m_skeletonSetBuffers.clear();
         m_materialDescriptorPool = VK_NULL_HANDLE;
     }
 
@@ -2135,6 +2136,7 @@ void RenderGraph::fillBuffer(void* buffer,
 void RenderGraph::createMaterialDescriptorPool(uint32_t maxSets) {
     if (m_materialDescriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_materialDescriptorPool, nullptr);
+        m_skeletonSetBuffers.clear();
     }
 
     // Pool sizes for per-entity descriptors (textures + skeleton SSBOs)
@@ -2168,6 +2170,7 @@ void RenderGraph::releaseDestroyedEntityDescriptors(uint32_t frameIndex) {
         if (it->first.frameIndex == frameIndex &&
             !registry.valid(static_cast<entt::entity>(it->first.entityId))) {
             released.push_back(it->second);
+            m_skeletonSetBuffers.erase(it->second);
             it = m_materialDescriptorCache.erase(it);
         } else {
             ++it;
@@ -2184,7 +2187,7 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
                                         entt::registry& registry,
                                         const std::string& descriptorSetName,
                                         VkCommandBuffer cmd,
-                                        VkPipelineLayout pipelineLayout,
+                                        const CompiledPass& pass,
                                         uint32_t frameIndex) {
     if (!m_ecsBindingEnabled) {
         m_logger->log(LogLevel::Warning, "bindMaterialTextures: ECS binding not enabled");
@@ -2343,22 +2346,12 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
         m_materialDescriptorCache[cacheKey] = descriptorSet;
     }
 
-    // Find set index again for binding (could cache this too)
-    uint32_t setIndex = 0;
-    for (const auto& pass : m_compiled.compiledPasses) {
-        const auto& passDecl = m_builder.getPassDeclarations()[pass.declIndex];
-        for (size_t i = 0; i < passDecl.descriptorSetRefs.size(); ++i) {
-            if (passDecl.descriptorSetRefs[i] == descriptorSetName) {
-                setIndex = static_cast<uint32_t>(i);
-                break;
-            }
-        }
-    }
-
-    // Bind the descriptor set
-    if (descriptorSet != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
-                                setIndex, 1, &descriptorSet, 0, nullptr);
+    // Bound where this pass lists the set, which need not be where other
+    // passes list it.
+    const auto setIndex = descriptorSetIndexIn(pass, descriptorSetName);
+    if (descriptorSet != VK_NULL_HANDLE && setIndex) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pass.pipelineLayout,
+                                *setIndex, 1, &descriptorSet, 0, nullptr);
     }
 }
 
@@ -2371,7 +2364,7 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
                                    entt::registry& registry,
                                    const std::string& descriptorSetName,
                                    VkCommandBuffer cmd,
-                                   VkPipelineLayout pipelineLayout,
+                                   const CompiledPass& pass,
                                    uint32_t frameIndex) {
     if (!m_ecsBindingEnabled) {
         return;
@@ -2443,43 +2436,43 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
         m_materialDescriptorCache[cacheKey] = descriptorSet;
     }
 
-    // Update the SSBO descriptor with the entity's bone buffer
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = skeleton->boneSSBO->buffer;
-    bufferInfo.offset = 0;
-    bufferInfo.range = skeleton->ssboSize();
+    // Point the set at the entity's bone buffer, when it is not already.
+    // The matrices change every frame but are written into the same buffer.
+    const std::pair<VkBuffer, VkDeviceSize> contents{skeleton->boneSSBO->buffer, skeleton->ssboSize()};
+    auto written = m_skeletonSetBuffers.find(descriptorSet);
+    if (written == m_skeletonSetBuffers.end() || written->second != contents) {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = contents.first;
+        bufferInfo.offset = 0;
+        bufferInfo.range = contents.second;
 
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = descriptorSet;
-    write.dstBinding = 0;
-    write.dstArrayElement = 0;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    write.descriptorCount = 1;
-    write.pBufferInfo = &bufferInfo;
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = descriptorSet;
+        write.dstBinding = 0;
+        write.dstArrayElement = 0;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.descriptorCount = 1;
+        write.pBufferInfo = &bufferInfo;
 
-    vkUpdateDescriptorSets(m_device.getLogicalDevice(), 1, &write, 0, nullptr);
-
-    // Find set index for binding
-    uint32_t setIndex = 0;
-    bool foundSetIndex = false;
-    for (const auto& pass : m_compiled.compiledPasses) {
-        const auto& passDecl = m_builder.getPassDeclarations()[pass.declIndex];
-        for (size_t i = 0; i < passDecl.descriptorSetRefs.size(); ++i) {
-            if (passDecl.descriptorSetRefs[i] == descriptorSetName) {
-                setIndex = static_cast<uint32_t>(i);
-                foundSetIndex = true;
-                break;
-            }
-        }
-        if (foundSetIndex) break;
+        vkUpdateDescriptorSets(m_device.getLogicalDevice(), 1, &write, 0, nullptr);
+        m_skeletonSetBuffers[descriptorSet] = contents;
     }
 
-    // Bind the descriptor set
-    if (descriptorSet != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
-                                setIndex, 1, &descriptorSet, 0, nullptr);
+    const auto setIndex = descriptorSetIndexIn(pass, descriptorSetName);
+    if (descriptorSet != VK_NULL_HANDLE && setIndex) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pass.pipelineLayout,
+                                *setIndex, 1, &descriptorSet, 0, nullptr);
     }
+}
+
+std::optional<uint32_t> RenderGraph::descriptorSetIndexIn(const CompiledPass& pass,
+                                                          const std::string& descriptorSetName) const {
+    const auto& refs = m_builder.getPassDeclarations()[pass.declIndex].descriptorSetRefs;
+    for (size_t i = 0; i < refs.size(); ++i) {
+        if (refs[i] == descriptorSetName) return static_cast<uint32_t>(i);
+    }
+    return std::nullopt;
 }
 
 } // namespace FrameGraph

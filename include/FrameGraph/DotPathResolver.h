@@ -320,6 +320,7 @@ struct BufferField {
                                 // representation (uvec4, dvec2, ...). Such a field
                                 // is packed correctly but left zeroed rather than
                                 // being filled with a wrongly-typed value.
+    ResolvedValue fallback;     // written when the source does not resolve; invalid = zeros
 };
 
 struct CompiledBufferLayout {

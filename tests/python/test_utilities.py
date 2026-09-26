@@ -272,6 +272,21 @@ class PipelineValidation(unittest.TestCase):
             checked += 1
         self.assertGreater(checked, 5, "expected to find shipped pipelines")
 
+    def test_the_default_pipeline_ships_complete(self):
+        # Every shader it names is compiled and in the package: a wheel has no
+        # compiler to build them, so a missing .spv is an error here too.
+        self.assertTrue(pipeline.DEFAULT.is_file())
+        self.assertEqual([], pipeline.validate(pipeline.DEFAULT))
+        ibl = pipeline.DEFAULT.parent / "shaders" / "ibl"
+        for name in ("equirect_to_cubemap", "irradiance_convolution", "prefilter_convolution"):
+            self.assertTrue((ibl / (name + ".comp.spv")).is_file(), name)
+
+    def test_the_default_pipeline_spirv_is_current(self):
+        # A shader edited without recompiling would ship the old program.
+        stale = [str(p) for p in sorted((pipeline.DEFAULT.parent / "shaders").rglob("*"))
+                 if p.suffix in shaders.SHADER_EXTENSIONS and shaders.is_stale(p)]
+        self.assertEqual([], stale)
+
 
 class VocabularyMatchesTheEngine(unittest.TestCase):
     """The reason these modules are allowed to restate C++ tables at all."""

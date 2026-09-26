@@ -23,6 +23,7 @@ import re
 from pathlib import Path
 
 __all__ = [
+    "DEFAULT",
     "Problem",
     "RESOURCE_USAGES",
     "BUFFER_USAGES",
@@ -34,6 +35,11 @@ __all__ = [
     "validate_json",
     "check",
 ]
+
+#: The default pipeline shipped with the package: deferred PBR lighting with
+#: cascaded sun shadows. `sk.Engine()` loads it when no pipeline is named.
+#: Its settings are `scene.custom.default.*` values; see its README.md.
+DEFAULT = Path(__file__).parent / "pipelines" / "default" / "pipeline.json"
 
 RESOURCE_USAGES = frozenset({
     "color_write", "color_attachment_write",

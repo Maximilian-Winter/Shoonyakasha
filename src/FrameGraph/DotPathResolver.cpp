@@ -672,7 +672,11 @@ void BufferLayoutResolver::writeField(void* buffer, const BufferField& field, co
     // A shader type with no ResolvedValue representation (uvec4, dvec2, ...) is
     // packed at the right offset but left zeroed. Writing whatever the resolver
     // happened to produce into it would corrupt neighbouring fields.
-    if (!field.resolvable || !value.isValid()) {
+    if (!field.resolvable) {
+        return;
+    }
+    if (!value.isValid()) {
+        if (field.fallback.isValid()) field.fallback.copyTo(dest, field.size, field.columnStride);
         return;
     }
 

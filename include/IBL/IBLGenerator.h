@@ -14,6 +14,7 @@
 #include "Vulkan/VulkanTexture.h"
 #include <memory>
 #include <string>
+#include <glm/glm.hpp>
 
 namespace Shoonyakasha {
 
@@ -65,6 +66,12 @@ public:
     IBLResources generate(const std::string& hdrPath,
                           const IBLGenerationParams& params = IBLGenerationParams{});
 
+    /// IBL for an environment of one colour in every direction, for scenes
+    /// with no HDR map. Irradiance and reflections are that colour; the BRDF
+    /// lookup table is the usual one.
+    IBLResources generateUniform(const glm::vec3& color,
+                                 const IBLGenerationParams& params = IBLGenerationParams{});
+
     // Step-by-step generation (for custom pipelines)
     VulkanCubemap* convertEquirectToCubemap(VulkanTexture* equirect, uint32_t cubeSize);
     VulkanCubemap* generateIrradianceMap(VulkanCubemap* environment, uint32_t size, uint32_t samples);
@@ -94,6 +101,11 @@ private:
 
     // Helper to load HDR texture
     VulkanTexture* loadHDRTexture(const std::string& path);
+
+    // Everything after loading: cubemap, irradiance, prefilter, BRDF LUT.
+    // Takes ownership of `equirect`.
+    IBLResources generateFromEquirect(std::unique_ptr<VulkanTexture> equirect,
+                                      const IBLGenerationParams& params);
 
     // Get bytes per pixel for format
     static uint32_t getBytesPerPixel(VkFormat format);

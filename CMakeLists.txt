@@ -99,6 +99,13 @@ target_link_libraries(Shoonyakasha
         unofficial::spirv-reflect
 )
 
+# Where ApplicationBase finds the default pipeline when a program names none.
+# A source-tree path, so it only helps programs run on the machine that built
+# the engine; installed programs set $SHOONYAKASHA_DEFAULT_PIPELINE, and the
+# Python package passes the copy it ships explicitly.
+target_compile_definitions(Shoonyakasha PRIVATE
+        SHOONYAKASHA_DEFAULT_PIPELINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/python/shoonyakasha/pipelines/default")
+
 # Test-support constructors. Previously unconditional, which meant every
 # shipped wheel and every release build carried them. They are only needed by
 # the target that actually tests against them.

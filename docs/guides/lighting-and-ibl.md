@@ -8,7 +8,11 @@ engine.create_directional_light((-0.5, -1.0, -0.3), intensity=3.0)
 engine.create_point_light((2.0, 3.0, 1.0), intensity=5.0, range=15.0)
 ```
 
-C++ equivalents are `createDirectionalLight` and `createPointLight` with GLM vectors. A directional light's direction is the way its light travels, so a sun shining down has a negative y. Scene setters modify type, color, intensity, range, and shadow flags. A shadow flag does not create a shadow-map pipeline.
+C++ equivalents are `createDirectionalLight` and `createPointLight` with GLM vectors. A directional light's direction is the way its light travels, so a sun shining down has a negative y. Scene setters modify type, color, intensity, range, and shadow flags. A shadow flag does not create a shadow-map pipeline; the pipeline has to read the cascades.
+
+## The default pipeline
+
+`sk.Engine()` without a `pipeline_json_path` (C++: an empty `pipelineJsonPath`) renders with the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md): deferred PBR with every scene light, image-based light, cascaded sun shadows with filtering and contact shadows, alpha-tested and skinned casters, and forward-shaded blended materials. It is also the starting point for a pipeline of your own: copy its directory and point `pipeline_json_path` at the copy. `shoonyakasha.pipeline.DEFAULT` is its path. From C++ it is found through `$SHOONYAKASHA_DEFAULT_PIPELINE`, or else in the source tree the engine was built from.
 
 ## Sun shadow cascades
 
@@ -40,7 +44,7 @@ A shadow pass declared with `"repeat": { "count": 4, "index": "cascade" }` write
 
 For image-based lighting, configure `hdr_environment_path` / `hdrEnvironmentPath` and use a pipeline with environment bindings. The engine generates irradiance, prefiltered environment, and BRDF lookup textures. The [PBR demo](../../examples/python/getting_started/demo/demo.py) and [deferred pipeline](../../examples/cpp/rendering/declarative_sponza_test/pbr_ibl_pipeline_v3.json) are complete examples.
 
-Dot-paths include `scene.environment.irradianceMap`, `prefilterMap`, `brdfLUT`, and `environmentMap`. These resources require a loaded environment; an empty HDR configuration is suitable only when the pipeline does not depend on them.
+Dot-paths include `scene.environment.irradianceMap`, `prefilterMap`, `brdfLUT`, and `environmentMap`. Without an HDR map, or when it fails to load, a pipeline that declares an `iblSet` gets a uniform environment instead of unbound textures: every direction is `environment_color` (C++ `uniformEnvironmentColor`), default (0.25, 0.28, 0.33). The IBL compute shaders are looked for in `shaders/ibl/` under the working directory, then beside the pipeline JSON; the default pipeline ships a copy.
 
 The simple starter has analytic forward shading and does not consume every scene light/IBL property. Use the PBR example's shader/layout combination when learning lighting data bindings. Environment assets and their optional full-resolution versions are listed in the [asset guide](../../assets/README.md).
 

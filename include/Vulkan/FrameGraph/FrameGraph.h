@@ -96,6 +96,11 @@ struct BufferFieldDesc {
     // Dot-path source for automatic value resolution via DotPathResolver
     // JSON: "source": "entity.material.params.baseColorFactor"
     std::string source;                     // Dot-path source (e.g., "entity.transform.worldMatrix")
+
+    // JSON "default": written when `source` does not resolve, e.g. an
+    // application setting under scene.custom that was never set. One value
+    // per component (16 for a mat4); empty = zeros.
+    std::vector<float> defaultValue;
 };
 
 /// Usage type for buffer layouts (maps to ShaderDataUsage)
@@ -1039,13 +1044,14 @@ public:
     /// @param registry ECS registry containing the entity
     /// @param descriptorSetName Name of the descriptor set layout (e.g., "materialSet")
     /// @param cmd Command buffer to record into
-    /// @param pipelineLayout Pipeline layout for binding
+    /// @param pass The pass being recorded: its layout, and the set index at
+    ///             which it lists descriptorSetName
     /// @param frameIndex Current frame index
     void bindMaterialTextures(entt::entity entity,
                               entt::registry& registry,
                               const std::string& descriptorSetName,
                               VkCommandBuffer cmd,
-                              VkPipelineLayout pipelineLayout,
+                              const CompiledPass& pass,
                               uint32_t frameIndex);
 
     /// Bind per-entity skeleton SSBO (bone matrices) to a descriptor set
@@ -1054,7 +1060,7 @@ public:
                           entt::registry& registry,
                           const std::string& descriptorSetName,
                           VkCommandBuffer cmd,
-                          VkPipelineLayout pipelineLayout,
+                          const CompiledPass& pass,
                           uint32_t frameIndex);
 
     /// Get the scene context (for external use)
@@ -1166,6 +1172,10 @@ public:
     double getFrameTime() const;
 
 private:
+    /// Where `pass` lists `descriptorSetName` among its descriptor sets.
+    std::optional<uint32_t> descriptorSetIndexIn(const CompiledPass& pass,
+                                                 const std::string& descriptorSetName) const;
+
     VulkanDevice&                   m_device;
     VulkanCommandManager&           m_cmdManager;
     FrameGraphBuilder               m_builder;
@@ -1346,6 +1356,10 @@ private:
         }
     };
     std::unordered_map<MaterialDescriptorCacheKey, VkDescriptorSet, MaterialDescriptorCacheKeyHash> m_materialDescriptorCache;
+    /// The bone buffer each cached skeleton set was last written with. A set
+    /// is rewritten only when that changes: updating a set that an earlier
+    /// pass of the frame bound invalidates the command buffer.
+    std::unordered_map<VkDescriptorSet, std::pair<VkBuffer, VkDeviceSize>> m_skeletonSetBuffers;
     VkDescriptorPool m_materialDescriptorPool = VK_NULL_HANDLE;
 
     // Default textures for fallback when material textures are missing

@@ -64,6 +64,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         string logFile
         int logLevel
         string hdrEnvironmentPath
+        float uniformEnvironmentColor[3]
         string pipelineJsonPath
         uint32_t maxFramesInFlight
         vector[pair[string, uint32_t]] renderGraphParameters
