@@ -276,14 +276,22 @@ assignment. Nothing consumes them before a pipeline has local-light shadow
 maps, and the slot scheme belongs with that pipeline's layout (arrays or an
 atlas).
 
-### Phase 4 — per-view culling
-- World-space AABB per mesh (computed at load, transformed per frame).
-- `execution.view` names a view the renderer culls against; default is the
-  main camera. Sorting uses the same view.
-- Shadow views also cull casters whose shadow volume can't reach the camera
-  frustum (cheap version: skip casters outside the cascade's light-space box).
-- Later: instanced/indirect draws and GPU culling, which is what VSM would
-  build on.
+### Phase 4 — per-view culling — done
+- glTF meshes carry mesh-space bounds (`MeshComponent::boundsMin/Max`),
+  transformed to world space per draw.
+- `execution.view`: `camera` (default for camera-facing passes), `none`
+  (default for shadow casters and sprites) or `shadows.sun.cascades[N]`,
+  which culls against the cascade's light volume without a near plane and
+  sorts by depth along the sun. Skinned entities are never culled.
+- Culling math (`ViewCulling`) is device-free and unit-tested; per-pass
+  drawn/culled counts are available through `get_pass_draw_stats`.
+- Checked on lavapipe: with boxes around and behind the camera, draws per
+  frame fell from 120 to 47 (G-buffer 11 of 24, cascades 3, 6, 8 and 19), and
+  the frame was pixel-identical to the unculled one.
+
+Not done: a caster whose shadow cannot reach the camera's view is still drawn
+if it is inside the cascade (a tighter test would sweep its bounds along the
+sun), and there is no GPU-driven culling or indirect drawing yet.
 
 ### Phase 5 — ship the default pipeline
 - `assets/pipelines/default/pipeline.json` + shaders, built by

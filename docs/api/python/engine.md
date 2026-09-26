@@ -80,6 +80,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_sun_shadows(cascades=4, max_distance=60.0, split_lambda=0.75, resolution=2048, caster_extension=50.0)` | None | Configure the sun's shadow cascades. |
 | `get_sun_shadow_cascade(index)` | 4×4 tuple (column-major) | World-to-light-clip matrix of a sun cascade this frame, as four columns. |
 | `set_pass_enabled(pass_name, enabled)` | bool | Turn a pipeline pass on or off from the next frame. |
+| `get_pass_draw_stats(pass_name)` | int | (drawn, culled): entities a geometry pass drew and culled as outside its view, last run. |
 | `is_pass_enabled(pass_name)` | bool | Whether a pipeline pass is enabled; False if there is no such pass. |
 
 <!-- END SOURCE API -->

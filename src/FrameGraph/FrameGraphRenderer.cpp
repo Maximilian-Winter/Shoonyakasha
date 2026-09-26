@@ -34,9 +34,11 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
     EntityFilter filter,
     EntitySortMode sortMode,
     uint32_t renderLayerMask,
-    FrameGraph::AlphaFilter alphaFilter) const
+    FrameGraph::AlphaFilter alphaFilter,
+    const ViewCull* cullView) const
 {
     std::vector<RenderableEntity> result;
+    m_lastCulledCount = 0;
 
     if (!m_registry) {
         m_lastQueryCount = 0;
@@ -78,13 +80,20 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
         // 8-bit mask; default renderLayerMask matches every layer)
         if ((static_cast<uint32_t>(tag.renderLayerMask) & renderLayerMask) == 0) continue;
 
+        // Outside the pass's view. Skinned meshes are kept: their bounds are
+        // the bind pose, which an animation can leave.
+        if (cullView && !hasSkeleton && !isVisible(*cullView, mesh, transform.worldMatrix)) {
+            ++m_lastCulledCount;
+            continue;
+        }
+
         RenderableEntity re;
         re.entity = entity;
         re.mesh = &mesh;
         re.material = &material;
         re.tag = &tag;
         re.transform = &transform;
-        re.distanceToCamera = calculateDistance(transform);
+        re.distanceToCamera = calculateDistance(transform, cullView);
 
         result.push_back(re);
     }
@@ -121,6 +130,58 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
 }
 
 // ============================================================================
+// Views - what a pass culls and sorts against
+// ============================================================================
+
+FrameGraphRenderer::ViewCull FrameGraphRenderer::resolveView(
+    const FrameGraph::PassDeclaration& passDecl) const
+{
+    using FrameGraph::CullView;
+    const auto& scene = m_renderGraph.getSceneContext();
+
+    ViewCull view;
+    view.origin = getCameraPosition();
+
+    CullView kind = passDecl.execution.view;
+    if (kind == CullView::Default) {
+        // Shadow casters outside the camera's view still cast into it.
+        const auto filter = executionTypeToFilter(passDecl.execution.type);
+        const bool shadow = filter == EntityFilter::ShadowCasters ||
+                            filter == EntityFilter::SkinnedShadowCasters;
+        const bool sprites = filter == EntityFilter::Sprite2D;
+        kind = (shadow || sprites) ? CullView::None : CullView::Camera;
+    }
+
+    if (kind == CullView::Camera) {
+        // cameraViewProjection is identity until a main camera is found.
+        if (scene.cameraViewProjection != glm::mat4(1.0f)) {
+            view.cull = true;
+            view.frustum = frustumFromViewProj(scene.cameraViewProjection, ClipDepth::MinusOneToOne);
+        }
+    } else if (kind == CullView::SunCascade) {
+        const auto& sun = scene.sunShadow;
+        if (sun.cascades.valid) {
+            const uint32_t index = std::min(passDecl.execution.viewIndex, sun.cascades.count - 1);
+            // No near plane: with depth clamping, casters between the sun and
+            // the cascade still write depth.
+            view.cull = true;
+            view.frustum = frustumFromViewProj(sun.cascades.viewProj[index], ClipDepth::ZeroToOne,
+                                               /*withNearPlane=*/false);
+            view.alongDirection = true;
+            view.direction = glm::vec3(sun.direction);
+        }
+    }
+    return view;
+}
+
+bool FrameGraphRenderer::isVisible(const ViewCull& view, const MeshComponent& mesh, const glm::mat4& world) {
+    if (!view.cull || !mesh.hasBounds) return true;
+    glm::vec3 min, max;
+    transformBounds(world, mesh.boundsMin, mesh.boundsMax, min, max);
+    return boundsInFrustum(view.frustum, min, max);
+}
+
+// ============================================================================
 // executeGeometryPass - The main rendering method (reads from CompiledPass!)
 // ============================================================================
 
@@ -147,9 +208,10 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
     EntityFilter filter = executionTypeToFilter(passDecl.execution.type);
     EntitySortMode sortMode = sortModeStringToEnum(passDecl.execution.sortMode);
 
-    // Query entities
+    // Query entities inside the pass's view
+    const ViewCull view = resolveView(passDecl);
     auto entities = queryEntities(filter, sortMode, passDecl.execution.renderLayerMask,
-                                  passDecl.execution.alphaFilter);
+                                  passDecl.execution.alphaFilter, &view);
 
     // Render each entity
     uint32_t drawCount = 0;
@@ -159,6 +221,7 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
     }
 
     m_lastDrawCount = drawCount;
+    m_passStats[passDecl.name] = PassDrawStats{drawCount, m_lastCulledCount};
 
     // Debug logging (once per session)
     static bool loggedOnce = false;

@@ -9,6 +9,7 @@
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
 #include <system_error>
 #include "Vulkan/FrameGraph/FrameGraph.h"
+#include "FrameGraph/ShadowCascades.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1481,6 +1482,36 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                 pass.execution.entityDataBinding = execJson.value("entityDataBinding", std::string{});
                 pass.execution.renderLayerMask = execJson.value("renderLayerMask", 0xFFFFFFFFu);
                 pass.execution.lightIndex = execJson.value("lightIndex", -1);
+
+                if (execJson.contains("view")) {
+                    const auto& viewJson = execJson["view"];
+                    const std::string view = viewJson.is_string() ? viewJson.get<std::string>() : viewJson.dump();
+                    const std::string cascadePrefix = "shadows.sun.cascades[";
+                    if (!isEntityGeometryExecutionType(pass.execution.type)) {
+                        throw std::runtime_error("Pass '" + pass.name + "': \"view\" applies only to entity "
+                                                 "geometry passes, not '" + pass.execution.type + "'");
+                    }
+                    if (view == "none") {
+                        pass.execution.view = CullView::None;
+                    } else if (view == "camera") {
+                        pass.execution.view = CullView::Camera;
+                    } else if (view.starts_with(cascadePrefix) && view.ends_with("]")) {
+                        const std::string digits = view.substr(cascadePrefix.size(),
+                                                               view.size() - cascadePrefix.size() - 1);
+                        const bool numeric = !digits.empty() && digits.size() < 4 &&
+                            std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; });
+                        if (!numeric || std::stoul(digits) >= MAX_SUN_CASCADES) {
+                            throw std::runtime_error("Pass '" + pass.name + "': view '" + view +
+                                                     "' names no sun cascade (0 to " +
+                                                     std::to_string(MAX_SUN_CASCADES - 1) + ")");
+                        }
+                        pass.execution.view = CullView::SunCascade;
+                        pass.execution.viewIndex = static_cast<uint32_t>(std::stoul(digits));
+                    } else {
+                        throw std::runtime_error("Pass '" + pass.name + "': unknown view '" + view +
+                                                 "' (expected camera, none or shadows.sun.cascades[N])");
+                    }
+                }
 
                 if (execJson.contains("alphaFilter")) {
                     const auto alpha = execJson["alphaFilter"].get<std::string>();

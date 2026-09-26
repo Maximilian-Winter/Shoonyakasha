@@ -919,6 +919,11 @@ public:
     bool setPassEnabled(const std::string& passName, bool enabled);
     bool isPassEnabled(const std::string& passName) const;
 
+    // ── Geometry pass statistics ──
+    // Entities an entity geometry pass drew, and left out as outside its
+    // view, the last time it ran. Returns false if it has not run.
+    bool getPassDrawStats(const std::string& passName, uint32_t& drawn, uint32_t& culled) const;
+
     // ── Named Parameters (for push constants) ──
     void setParameter(const std::string& name, float value);
     void setParameter(const std::string& name, int32_t value);

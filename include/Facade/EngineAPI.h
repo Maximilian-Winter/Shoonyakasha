@@ -219,6 +219,11 @@ public:
     bool setPassEnabled(const std::string& passName, bool enabled);
     bool isPassEnabled(const std::string& passName) const;
 
+    /// Entities an entity geometry pass drew / culled as outside its view the
+    /// last time it ran; 0 if it has not run.
+    uint32_t getPassDrawnCount(const std::string& passName) const;
+    uint32_t getPassCulledCount(const std::string& passName) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

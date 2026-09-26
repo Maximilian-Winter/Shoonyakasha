@@ -47,6 +47,12 @@ struct MeshComponent {
     // Vertex stride in bytes (for binding)
     uint32_t  vertexStride = 0;
 
+    // Axis-aligned bounds of the vertices in mesh space, for view culling.
+    // Meshes without bounds are never culled.
+    glm::vec3 boundsMin{0.0f};
+    glm::vec3 boundsMax{0.0f};
+    bool      hasBounds = false;
+
     // ─── Helpers ────────────────────────────────────────────────
 
     bool hasIndices() const { return indexBuffer && indexBuffer->isValid() && indexCount > 0; }

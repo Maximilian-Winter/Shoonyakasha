@@ -83,6 +83,8 @@ void setSunShadowSettings(uint32_t cascadeCount, float maxDistance, float splitL
 glm::mat4 getSunShadowCascade(uint32_t index) const;
 bool setPassEnabled(const std::string& passName, bool enabled);
 bool isPassEnabled(const std::string& passName) const;
+uint32_t getPassDrawnCount(const std::string& passName) const;
+uint32_t getPassCulledCount(const std::string& passName) const;
 ```
 
 <!-- END SOURCE API -->

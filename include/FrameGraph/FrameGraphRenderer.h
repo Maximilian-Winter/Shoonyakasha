@@ -14,12 +14,14 @@
 #include "ECS/SkeletonComponents.h"
 #include "ECS/Sprite2DComponents.h"
 #include "ECS/Core.h"
+#include "FrameGraph/ViewCulling.h"
 
 #include <vulkan/vulkan.h>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <unordered_map>
 
 // Forward declarations for FrameGraph types (now under Shoonyakasha::FrameGraph)
 namespace Shoonyakasha { namespace FrameGraph {
@@ -131,6 +133,26 @@ public:
         uint32_t frameIndex
     );
 
+    // ── Views ───────────────────────────────────────────────────────
+
+    /// What a pass culls and sorts against: a frustum, and where distances
+    /// for sorting are measured from.
+    struct ViewCull {
+        bool      cull = false;           // test bounds against `frustum`
+        Frustum   frustum;
+        bool      alongDirection = false; // sort by depth along `direction`, not distance
+        glm::vec3 origin{0.0f};           // for distance sorting
+        glm::vec3 direction{0.0f};        // for depth sorting (a sun's travel direction)
+    };
+
+    /// Resolve execution.view for this frame. A view that cannot be resolved
+    /// (no main camera, no casting sun) culls nothing.
+    ViewCull resolveView(const FrameGraph::PassDeclaration& passDecl) const;
+
+    /// Whether an entity with these bounds and world matrix is inside the
+    /// view. Entities without bounds are always inside.
+    static bool isVisible(const ViewCull& view, const MeshComponent& mesh, const glm::mat4& world);
+
     // ── Query API ───────────────────────────────────────────────────
 
     /// Query entities matching the filter, optionally sorted, and
@@ -140,11 +162,15 @@ public:
     /// no behavior change. Useful for custom rendering or debugging.
     /// alphaFilter further narrows by material alpha mode (JSON
     /// execution "alphaFilter").
+    /// With `view`, entities outside it are left out, except skinned ones,
+    /// whose animated extent their bind-pose bounds do not cover, and
+    /// distances are measured in that view.
     std::vector<RenderableEntity> queryEntities(
         EntityFilter filter,
         EntitySortMode sortMode,
         uint32_t renderLayerMask = 0xFFFFFFFFu,
-        FrameGraph::AlphaFilter alphaFilter = FrameGraph::AlphaFilter::Any
+        FrameGraph::AlphaFilter alphaFilter = FrameGraph::AlphaFilter::Any,
+        const ViewCull* view = nullptr
     ) const;
 
     // ── Filtering ───────────────────────────────────────────────────
@@ -164,6 +190,17 @@ public:
 
     uint32_t getLastDrawCount() const { return m_lastDrawCount; }
     uint32_t getLastQueryCount() const { return m_lastQueryCount; }
+    uint32_t getLastCulledCount() const { return m_lastCulledCount; }
+
+    /// Entities drawn and culled by a pass the last time it ran.
+    struct PassDrawStats {
+        uint32_t drawn = 0;
+        uint32_t culled = 0;
+    };
+    const PassDrawStats* getPassDrawStats(const std::string& passName) const {
+        auto it = m_passStats.find(passName);
+        return it == m_passStats.end() ? nullptr : &it->second;
+    }
 
 private:
     FrameGraph::RenderGraph& m_renderGraph;
@@ -176,6 +213,8 @@ private:
     // Statistics
     mutable uint32_t m_lastDrawCount = 0;
     mutable uint32_t m_lastQueryCount = 0;
+    mutable uint32_t m_lastCulledCount = 0;
+    std::unordered_map<std::string, PassDrawStats> m_passStats;
 
     // ── Internal Helpers ────────────────────────────────────────────
 
@@ -188,8 +227,8 @@ private:
     /// Get camera position (from override or scene context)
     glm::vec3 getCameraPosition() const;
 
-    /// Calculate distance from entity to camera
-    float calculateDistance(const ECS::TransformComponent& transform) const;
+    /// Calculate distance from entity to camera, or within `view` if given
+    float calculateDistance(const ECS::TransformComponent& transform, const ViewCull* view = nullptr) const;
 
     /// Bind and draw a single entity using CompiledPass data
     void bindAndDrawEntity(
@@ -272,8 +311,16 @@ inline bool FrameGraphRenderer::passesAlphaFilter(
     return false;
 }
 
-inline float FrameGraphRenderer::calculateDistance(const ECS::TransformComponent& transform) const {
+inline float FrameGraphRenderer::calculateDistance(const ECS::TransformComponent& transform,
+                                                  const ViewCull* view) const {
     glm::vec3 entityPos = glm::vec3(transform.worldMatrix[3]);
+    if (view && view->alongDirection) {
+        return glm::dot(entityPos, view->direction);  // depth along the light
+    }
+    if (view) {
+        glm::vec3 diff = entityPos - view->origin;
+        return glm::dot(diff, diff);
+    }
     glm::vec3 camPos = getCameraPosition();
     glm::vec3 diff = entityPos - camPos;
     return glm::dot(diff, diff);  // Squared distance (faster, same ordering)

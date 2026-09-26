@@ -173,6 +173,14 @@ bool RenderGraph::isPassEnabled(const std::string& passName) const {
     return found;
 }
 
+bool RenderGraph::getPassDrawStats(const std::string& passName, uint32_t& drawn, uint32_t& culled) const {
+    const auto* stats = m_frameGraphRenderer ? m_frameGraphRenderer->getPassDrawStats(passName) : nullptr;
+    if (!stats) return false;
+    drawn = stats->drawn;
+    culled = stats->culled;
+    return true;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Pass Callback Registration
 // ═══════════════════════════════════════════════════════════════

@@ -1411,6 +1411,11 @@ cdef class Engine:
         """
         return self._ptr.setPassEnabled(pass_name.encode('utf-8'), enabled)
 
+    def get_pass_draw_stats(self, str pass_name):
+        """(drawn, culled): entities a geometry pass drew and culled as outside its view, last run."""
+        name = pass_name.encode('utf-8')
+        return (self._ptr.getPassDrawnCount(name), self._ptr.getPassCulledCount(name))
+
     def is_pass_enabled(self, str pass_name):
         """Whether a pipeline pass is enabled; False if there is no such pass."""
         return self._ptr.isPassEnabled(pass_name.encode('utf-8'))

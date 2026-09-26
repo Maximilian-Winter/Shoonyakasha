@@ -355,6 +355,17 @@ enum class AlphaFilter {
     Mask     // "mask": AlphaMode::Mask only
 };
 
+/// The view an entity geometry pass culls and sorts against, JSON execution
+/// "view". Default is the camera for passes that draw what the camera sees,
+/// and no culling for shadow casters, which must also draw what lies outside
+/// the camera's view.
+enum class CullView {
+    Default,     // omitted
+    None,        // "none": draw every entity the filter accepts
+    Camera,      // "camera": the main camera's frustum
+    SunCascade   // "shadows.sun.cascades[N]": sun cascade N's light volume
+};
+
 // ═══════════════════════════════════════════════════════════════
 // Execution Description — how a pass executes (auto-callback config)
 // 位先於動 — Position before action
@@ -393,6 +404,8 @@ struct ExecutionDesc {
     std::string entityDataBinding;          // Reference to entityDataBindings config (e.g., "pbrOpaque")
     uint32_t    renderLayerMask = 0xFFFFFFFF;  // Bitmask for render layer filtering
     AlphaFilter alphaFilter = AlphaFilter::Any;  // Narrow by material alpha mode
+    CullView    view = CullView::Default;        // What to cull and sort against
+    uint32_t    viewIndex = 0;                   // Cascade for CullView::SunCascade
     int32_t     lightIndex = -1;            // For shadow_casters: which light's VP to use
 
     // Common options
