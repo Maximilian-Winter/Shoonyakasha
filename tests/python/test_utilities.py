@@ -213,6 +213,21 @@ class PipelineValidation(unittest.TestCase):
         self.assertEqual({"layer": 2, "mip": 1, "path": "x3.spv", "other": "{d}"}, instance)
         self.assertEqual([], problems)
 
+    def test_repeat_step_counts_down_like_the_engine(self):
+        import copy
+        document = copy.deepcopy(self.MINIMAL)
+        document["resources"].append({"name": "chain", "kind": "image"})
+        document["passes"].insert(0, {
+            "name": "Up{m}", "type": "graphics",
+            "repeat": {"count": 3, "index": "m", "first": 2, "step": -1},
+            "outputs": [{"resource": "chain", "usage": "color_blend", "mip": "{m}"}]})
+        expanded = pipeline._expand_repeats(document["passes"], "<json>", [])
+        self.assertEqual(["Up2", "Up1", "Up0"], [p["name"] for p in expanded[:3]])
+        self.assertEqual([2, 1, 0], [p["outputs"][0]["mip"] for p in expanded[:3]])
+
+        document["passes"][0]["repeat"]["first"] = 1
+        self.assertTrue(any("at least 0" in p.message for p in self.problems(document)))
+
     def test_repeat_without_a_count_is_reported(self):
         document = dict(self.MINIMAL)
         document["passes"] = [dict(self.MINIMAL["passes"][0], repeat={"index": "i"})]

@@ -113,6 +113,12 @@ struct ImageDesc {
 
     // For future transient aliasing (Phase 5)
     bool transient = false;
+
+    // Contents carry over from one frame to the next (JSON "persistent"):
+    // a frame's first access does not discard them. Cleared to zero when the
+    // graph is compiled. For state a pass accumulates, such as an adapted
+    // exposure.
+    bool persistent = false;
 };
 
 // ═══════════════════════════════════════════════════════════════

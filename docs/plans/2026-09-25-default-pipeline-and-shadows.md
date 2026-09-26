@@ -293,7 +293,7 @@ Not done: a caster whose shadow cannot reach the camera's view is still drawn
 if it is inside the cascade (a tighter test would sweep its bounds along the
 sun), and there is no GPU-driven culling or indirect drawing yet.
 
-### Phase 5 — ship the default pipeline — first half done
+### Phase 5 — ship the default pipeline — done, except tiers and the examples
 
 Done: [`python/shoonyakasha/pipelines/default/`](../../python/shoonyakasha/pipelines/default/README.md),
 under the Python package so the wheel ships it, with its SPIR-V committed.
@@ -331,8 +331,26 @@ Checked on lavapipe with sync validation: boxes, a skinned fox, a blended
 pane and a point light, with and without an HDR map, from a directory with no
 shaders of its own; no validation messages beyond the known screenshot one.
 
+Second half, also done:
+- GTAO at full resolution (2 slices x 8 steps each side, a 4x4 pattern of
+  slice directions and a depth-aware 4x4 average), with multi-bounce and
+  specular occlusion in the lighting.
+- Bloom: 13-tap downsampling into a 6-mip half-resolution chain, the first
+  step Karis-averaged, then tent-filtered upsampling added back up the chain.
+  No threshold; mixed into the image before tonemapping.
+- Automatic exposure without buffers: one compute workgroup builds a 64-bin
+  log-luminance histogram of mip 2 of the bloom chain in shared memory,
+  averages the 40th to 95th percentile and adapts a 1x1 image.
+- For these the frame graph gained `"persistent"` images, whose contents
+  survive into the next frame (their first barrier starts from last frame's
+  layout; they are cleared once at compile time), and `"step"` on `repeat`,
+  so the upsampling passes can be declared smallest mip first.
+
+Checked on lavapipe with sync validation, with and without an HDR map: no
+validation messages, a flat floor reads about 0.98 unoccluded, and exposure
+brings an HDR scene that blows out at exposure 1 back into range.
+
 Still to do in this phase:
-- GTAO, bloom and auto exposure.
 - Quality tiers.
 - Moving the shrine and Sponza examples onto it.
 

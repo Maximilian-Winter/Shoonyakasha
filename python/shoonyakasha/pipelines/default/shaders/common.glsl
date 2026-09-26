@@ -48,7 +48,16 @@
     float contactShadowLength;  \
     float contactShadowThickness; \
     float shadowAmbient;        \
-    uint debugView;
+    uint debugView;             \
+    float aoRadius;             \
+    float aoIntensity;          \
+    float bloomIntensity;       \
+    float bloomRadius;          \
+    uint autoExposure;          \
+    float exposureAdaptSpeed;   \
+    float exposureMinEV;        \
+    float exposureMaxEV;        \
+    float deltaTime;
 
 // ── Normals ─────────────────────────────────────────────────────
 // Octahedral encoding of a unit vector into two values in -1..1.

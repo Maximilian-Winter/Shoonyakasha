@@ -1,0 +1,66 @@
+#version 450
+// Automatic exposure. One workgroup builds a histogram of log2 luminance over
+// a small mip of the bloom chain (already a filtered, downsampled copy of
+// the scene), averages the middle of it, ignoring the darkest 40% and the
+// brightest 5%, and moves the stored exposure towards what would put that
+// average at middle grey. The 1x1 image is persistent: it holds last frame's
+// value, and starts at 0, which means "adopt the target at once".
+
+#include "common.glsl"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) uniform sampler2D luminanceSource;
+layout(set = 0, binding = 1, r32f) uniform image2D exposureImage;
+layout(set = 1, binding = 0) uniform Settings { DEFAULT_SETTINGS_BLOCK } settings;
+
+const int BINS = 64;
+const float MIN_LOG = -12.0;
+const float MAX_LOG = 10.0;
+const float LOW_PERCENT = 0.40;
+const float HIGH_PERCENT = 0.95;
+const float MIDDLE_GREY = 0.18;
+
+shared uint histogram[BINS];
+
+void main() {
+    uint thread = gl_LocalInvocationIndex;
+    if (thread < uint(BINS)) histogram[thread] = 0u;
+    barrier();
+
+    ivec2 size = textureSize(luminanceSource, 0);
+    for (int y = int(gl_LocalInvocationID.y); y < size.y; y += 16) {
+        for (int x = int(gl_LocalInvocationID.x); x < size.x; x += 16) {
+            float lum = dot(texelFetch(luminanceSource, ivec2(x, y), 0).rgb, vec3(0.2126, 0.7152, 0.0722));
+            float t = (log2(max(lum, 1e-6)) - MIN_LOG) / (MAX_LOG - MIN_LOG);
+            atomicAdd(histogram[clamp(int(t * float(BINS)), 0, BINS - 1)], 1u);
+        }
+    }
+    barrier();
+    if (thread != 0u) return;
+
+    float total = float(size.x * size.y);
+    float low = total * LOW_PERCENT, high = total * HIGH_PERCENT;
+    float seen = 0.0, sum = 0.0, weight = 0.0;
+    for (int b = 0; b < BINS; ++b) {
+        float count = float(histogram[b]);
+        // The part of this bin between the two percentiles.
+        float inside = clamp(seen + count, low, high) - clamp(seen, low, high);
+        float logLum = MIN_LOG + (float(b) + 0.5) / float(BINS) * (MAX_LOG - MIN_LOG);
+        sum += logLum * inside;
+        weight += inside;
+        seen += count;
+    }
+    float averageLog = weight > 0.0 ? sum / weight : log2(MIDDLE_GREY);
+    // exposureMinEV / MaxEV bound the scene brightness adapted to, as EV100.
+    averageLog = clamp(averageLog, settings.exposureMinEV - 3.0, settings.exposureMaxEV - 3.0);
+    float target = log2(MIDDLE_GREY) - averageLog;   // log2 of the exposure multiplier
+
+    float previous = imageLoad(exposureImage, ivec2(0)).r;
+    float current = target;
+    if (previous > 0.0 && !isnan(previous) && !isinf(previous)) {
+        float amount = 1.0 - exp(-max(settings.deltaTime, 0.0) * settings.exposureAdaptSpeed);
+        current = mix(log2(previous), target, amount);
+    }
+    imageStore(exposureImage, ivec2(0), vec4(exp2(current)));
+}

@@ -32,6 +32,7 @@ Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defau
 | `viewType` | `auto` | How shaders sampling the whole image see it: `auto` (`2d` for one layer, `2d_array` for more), `2d`, `2d_array`, `cube` (6 square layers), `cube_array` (a multiple of 6) |
 | `samples` | 1 | Vulkan sample count; must match the rendering configuration |
 | `transient` | false | Transient image declaration |
+| `persistent` | false | Contents carry over from one frame to the next, for state a pass accumulates (an adapted exposure, a history). Normally a frame's first access discards an image's contents; a persistent image's first barrier instead waits on and keeps the previous frame's. Cleared to zero (depth to 1) whenever the graph is compiled, including after a resize |
 
 Image properties live inside `image`. Buffer properties live inside `buffer`: `size` in bytes (default 0), `persistentlyMapped` (false). Creating buffers through `bufferLayouts` is separate from declaring graph resource accesses; follow the SSBO examples for imported layout-backed buffers.
 
@@ -153,7 +154,7 @@ For `custom` blending: `srcColorFactor=src_alpha`, `dstColorFactor=one_minus_src
 
 ## Repeated passes
 
-`"repeat": { "count": N, "index": "name", "first": 0 }` on a pass declares N passes at once. Each instance substitutes its index value (`first`, `first + 1`, ...) for `{name}`, `{name+K}` and `{name-K}` in every string of the pass; a string that is only a placeholder becomes a number. An instance is named by substituting into `name` when it contains the placeholder, and `Name[value]` otherwise. `index` defaults to `i`. Four shadow cascades:
+`"repeat": { "count": N, "index": "name", "first": 0, "step": 1 }` on a pass declares N passes at once. Each instance substitutes its index value (`first`, `first + step`, ...; a `step` of -1 counts down, as an upsampling chain that starts from the smallest mip needs, and every value must stay at least 0) for `{name}`, `{name+K}` and `{name-K}` in every string of the pass; a string that is only a placeholder becomes a number. An instance is named by substituting into `name` when it contains the placeholder, and `Name[value]` otherwise. `index` defaults to `i`. Four shadow cascades:
 
 ```json
 { "name": "SunShadow", "type": "graphics",

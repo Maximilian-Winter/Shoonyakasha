@@ -146,11 +146,19 @@ def _expand_repeats(passes, source, problems):
             continue
         placeholder = spec.get("index", "i")
         first = spec.get("first", 0)
+        step = spec.get("step", 1)
+        if not isinstance(step, int) or isinstance(step, bool) or step == 0:
+            problems.append(Problem(where, "'step' must be a non-zero integer"))
+            continue
+        if first + step * (count - 1) < 0:
+            problems.append(Problem(where, "counts below 0: every value must be at least 0"))
+            continue
         base = {k: v for k, v in pass_decl.items() if k != "repeat"}
         for k in range(count):
-            instance = _substitute(base, placeholder, first + k, where, problems)
+            value = first + step * k
+            instance = _substitute(base, placeholder, value, where, problems)
             if instance.get("name") == name:
-                instance["name"] = "%s[%d]" % (name, first + k)
+                instance["name"] = "%s[%d]" % (name, value)
             expanded.append(instance)
     return expanded
 

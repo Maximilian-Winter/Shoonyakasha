@@ -1500,6 +1500,8 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
         // Set up auto geometry renderers for passes with entityDataBinding
         setupAutoGeometryRenderers();
 
+        initializePersistentImages();
+
         m_logger->log(LogLevel::Info, "Render graph compiled successfully");
     }
 
@@ -2464,6 +2466,66 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pass.pipelineLayout,
                                 *setIndex, 1, &descriptorSet, 0, nullptr);
     }
+}
+
+void RenderGraph::initializePersistentImages() {
+    // A persistent image's first barrier each frame starts from the layout
+    // the frame leaves it in, so it has to be in that layout, with defined
+    // contents, before the first frame.
+    const auto& declarations = m_builder.getResourceDeclarations();
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    for (size_t i = 0; i < declarations.size() && i < m_compiled.physicalResources.size(); ++i) {
+        const auto& decl = declarations[i];
+        if (decl.kind != ResourceKind::Image || decl.imported || !decl.imageDesc.persistent) continue;
+        const auto* img = std::get_if<PhysicalImage>(&m_compiled.physicalResources[i]);
+        if (!img || img->vkImage == VK_NULL_HANDLE) continue;
+
+        if (cmd == VK_NULL_HANDLE) cmd = m_device.beginSingleTimeCommands();
+
+        const VkImageSubresourceRange all{img->aspect, 0, img->shape.mipLevels, 0, img->shape.arrayLayers};
+        VkImageMemoryBarrier toClear{};
+        toClear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        toClear.srcAccessMask = 0;
+        toClear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        toClear.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        toClear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        toClear.srcQueueFamilyIndex = toClear.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toClear.image = img->vkImage;
+        toClear.subresourceRange = all;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &toClear);
+
+        if (img->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+            const VkClearDepthStencilValue zero{1.0f, 0};
+            vkCmdClearDepthStencilImage(cmd, img->vkImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &all);
+        } else {
+            const VkClearColorValue zero{};
+            vkCmdClearColorImage(cmd, img->vkImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &all);
+        }
+
+        std::vector<VkImageMemoryBarrier> toFinal;
+        for (uint32_t mip = 0; mip < img->shape.mipLevels; ++mip) {
+            for (uint32_t layer = 0; layer < img->shape.arrayLayers; ++layer) {
+                const size_t index = static_cast<size_t>(mip) * img->shape.arrayLayers + layer;
+                if (index >= img->finalLayouts.size()) continue;
+                const VkImageLayout layout = img->finalLayouts[index];
+                if (layout == VK_IMAGE_LAYOUT_UNDEFINED) continue;   // never accessed
+                VkImageMemoryBarrier b = toClear;
+                b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+                b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                b.newLayout = layout;
+                b.subresourceRange = {img->aspect, mip, 1, layer, 1};
+                toFinal.push_back(b);
+            }
+        }
+        if (!toFinal.empty()) {
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                 0, 0, nullptr, 0, nullptr, static_cast<uint32_t>(toFinal.size()), toFinal.data());
+        }
+        m_logger->log(LogLevel::Info, "Persistent image '%s' cleared", decl.name.c_str());
+    }
+    if (cmd != VK_NULL_HANDLE) m_device.endSingleTimeCommands(cmd);
 }
 
 std::optional<uint32_t> RenderGraph::descriptorSetIndexIn(const CompiledPass& pass,

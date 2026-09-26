@@ -53,6 +53,9 @@ struct ScheduledResource {
     /// An imported image with one view per swapchain image. When no pass
     /// declares "present" on it, its last writer presents it.
     bool presentFallback = false;
+    /// Contents carry over between frames: a frame's first barrier keeps the
+    /// layout the previous frame left rather than starting from UNDEFINED.
+    bool persistent = false;
 };
 
 /// Build the scheduler's view of every declared resource from the

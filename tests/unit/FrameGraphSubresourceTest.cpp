@@ -499,6 +499,69 @@ TEST(SubresourceBarriers, FinalLayoutsArePerSubresource) {
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL}));
 }
 
+TEST(SubresourceBarriers, PersistentImagesKeepTheirContentsAcrossFrames) {
+    // An exposure image: read and rewritten by a compute pass, then sampled.
+    auto withPersistence = [](bool persistent) {
+        json image = {{"name", "exposure"}, {"kind", "image"},
+                      {"image", {{"format", "R32_SFLOAT"}, {"width", 1}, {"height", 1}}}};
+        if (persistent) image["image"]["persistent"] = true;
+        return graph(json::array({image, {{"name", "swapchain"}, {"kind", "image"}, {"imported", true}}}),
+                     json::array({
+                         pass("Adapt", json::array(), {{{"resource", "exposure"}, {"usage", "shader_read_write"}}}, "compute"),
+                         pass("Tonemap", {{{"resource", "exposure"}, {"usage", "shader_read"}}},
+                              {{{"resource", "swapchain"}, {"usage", "color_write"}, {"present", true}}})}));
+    };
+    auto firstBarrier = [](const BarrierPlan& p) {
+        const auto& pre = p.preBarriers[0];
+        const auto it = std::find_if(pre.begin(), pre.end(), [](const BarrierInfo& b) { return b.resource.index == 0; });
+        EXPECT_NE(it, pre.end());
+        return it == pre.end() ? BarrierInfo{} : *it;
+    };
+
+    auto transient = schedule(withPersistence(false));
+    EXPECT_EQ(firstBarrier(plan(transient)).oldLayout, VK_IMAGE_LAYOUT_UNDEFINED);
+
+    auto persistent = schedule(withPersistence(true));
+    EXPECT_TRUE(persistent.resources[0].persistent);
+    const auto p = plan(persistent);
+    const auto b = firstBarrier(p);
+    // From where the previous frame left it, waiting for its reads.
+    EXPECT_EQ(b.oldLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    EXPECT_EQ(b.newLayout, VK_IMAGE_LAYOUT_GENERAL);
+    EXPECT_EQ(p.finalLayouts[0], (std::vector<VkImageLayout>{VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}));
+
+    const auto& desc = persistent.builder.getResourceDeclarations()[0].imageDesc;
+    EXPECT_TRUE(desc.persistent);
+    EXPECT_TRUE(desc.additionalUsage & VK_IMAGE_USAGE_TRANSFER_DST_BIT);   // cleared at compile time
+}
+
+TEST(SubresourceBarriers, UpsamplePassesDeclaredSmallestFirstRunInThatOrder) {
+    json up = {{"name", "Up{m}"}, {"type", "graphics"},
+               {"repeat", {{"count", 3}, {"index", "m"}, {"first", 2}, {"step", -1}}},
+               {"inputs", json::array({{{"resource", "chain"}, {"usage", "shader_read"}, {"mip", "{m+1}"}}})},
+               {"outputs", json::array({{{"resource", "chain"}, {"usage", "color_blend"}, {"mip", "{m}"}}})}};
+    json down = {{"name", "Down{m}"}, {"type", "graphics"},
+                 {"repeat", {{"count", 3}, {"index", "m"}, {"first", 1}}},
+                 {"inputs", json::array({{{"resource", "chain"}, {"usage", "shader_read"}, {"mip", "{m-1}"}}})},
+                 {"outputs", json::array({{{"resource", "chain"}, {"usage", "color_write"}, {"mip", "{m}"}}})}};
+    json j = graph(json::array({{{"name", "chain"}, {"kind", "image"},
+                                 {"image", {{"format", "R16G16B16A16_SFLOAT"}, {"width", 64}, {"height", 64},
+                                            {"mipLevels", 4}}}},
+                                {{"name", "swapchain"}, {"kind", "image"}, {"imported", true}}}),
+                   json::array({pass("Fill", json::array(), {{{"resource", "chain"}, {"usage", "color_write"}, {"mip", 0}}}),
+                                down, up,
+                                pass("Show", {{{"resource", "chain"}, {"usage", "shader_read"}, {"mip", 0}}},
+                                     {{{"resource", "swapchain"}, {"usage", "color_write"}, {"present", true}}})}));
+    auto s = schedule(j);
+    auto position = [&](const std::string& name) {
+        return std::find(s.order.begin(), s.order.end(), passIndex(s.builder, name)) - s.order.begin();
+    };
+    EXPECT_LT(position("Down3"), position("Up2"));
+    EXPECT_LT(position("Up2"), position("Up1"));
+    EXPECT_LT(position("Up1"), position("Up0"));
+    EXPECT_LT(position("Up0"), position("Show"));
+}
+
 // ── View types ──────────────────────────────────────────────────
 
 TEST(SubresourceViews, SampledViewTypes) {

@@ -11,6 +11,7 @@ layout(set = 0, binding = 1) uniform sampler2D gNormal;
 layout(set = 0, binding = 2) uniform sampler2D gMaterial;
 layout(set = 0, binding = 3) uniform sampler2D gDepth;
 layout(set = 0, binding = 4) uniform sampler2D shadowMask;
+layout(set = 0, binding = 5) uniform sampler2D aoMap;
 layout(set = 1, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 1, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 1, binding = 2) uniform sampler2D brdfLUT;
@@ -53,9 +54,20 @@ void main() {
 
     int sunIndex = cascades.sunEnabled != 0u ? cascades.sunLightIndex : -1;
     vec3 direct = directLight(worldPos, N, V, albedo, metallic, roughness, F0, sunIndex, sunVisibility);
-    vec3 ambient = ambientLight(irradianceMap, prefilterMap, brdfLUT, N, V, albedo, metallic, roughness, F0)
-                 * settings.iblIntensity * occlusion
-                 * mix(settings.shadowAmbient, 1.0, sunVisibility);
+    // Screen-space and material occlusion, with the light that bounces
+    // between occluders added back for bright albedo (Jimenez 2016), and
+    // occlusion of reflections from it (Lagarde 2014).
+    float ao = min(textureLod(aoMap, fragTexCoord, 0.0).r, occlusion);
+    vec3 a = 2.0404 * albedo - 0.3324, b = -4.7951 * albedo + 0.6417, c = 2.7552 * albedo + 0.6903;
+    vec3 diffuseAO = max(vec3(ao), ((ao * a + b) * ao + c) * ao);
+    float NdotV = max(dot(N, V), 1e-4);
+    float specularAO = clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
+
+    vec3 ambientDiffuse, ambientSpecular;
+    ambientLightParts(irradianceMap, prefilterMap, brdfLUT, N, V, albedo, metallic, roughness, F0,
+                      ambientDiffuse, ambientSpecular);
+    vec3 ambient = (ambientDiffuse * diffuseAO + ambientSpecular * specularAO)
+                 * settings.iblIntensity * mix(settings.shadowAmbient, 1.0, sunVisibility);
 
     vec3 color = direct + ambient;
 
@@ -66,6 +78,8 @@ void main() {
         color = vec3(sunVisibility);
     } else if (settings.debugView == 3u) {   // normals
         color = N * 0.5 + 0.5;
+    } else if (settings.debugView == 4u) {   // ambient occlusion
+        color = vec3(ao);
     }
     outColor = vec4(color, 1.0);
 }

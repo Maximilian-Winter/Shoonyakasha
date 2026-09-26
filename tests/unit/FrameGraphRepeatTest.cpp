@@ -136,6 +136,38 @@ TEST(FrameGraphRepeat, MalformedRepeatFailsAtLoad) {
     }
 }
 
+TEST(FrameGraphRepeat, StepCountsDownForUpsampleChains) {
+    // Up{m} blends mip m+1 into mip m, smallest first.
+    json p = {
+        {"name", "Up{m}"},
+        {"type", "graphics"},
+        {"repeat", {{"count", 3}, {"index", "m"}, {"first", 2}, {"step", -1}}},
+        {"inputs",  json::array({{{"resource", "chain"}, {"usage", "shader_read"}, {"mip", "{m+1}"}}})},
+        {"outputs", json::array({{{"resource", "chain"}, {"usage", "color_blend"}, {"mip", "{m}"}}})}
+    };
+    auto b = load(graph(json::array({p})));
+    const auto& passes = b.getPassDeclarations();
+    ASSERT_EQ(passes.size(), 3u);
+    for (uint32_t k = 0; k < 3; ++k) {
+        const uint32_t m = 2 - k;
+        EXPECT_EQ(passes[k].name, "Up" + std::to_string(m));
+        EXPECT_EQ(passes[k].repeatIndex, m);
+        EXPECT_EQ(passes[k].inputs[0].subresource.baseMip, m + 1);
+        EXPECT_EQ(passes[k].outputs[0].subresource.baseMip, m);
+    }
+}
+
+TEST(FrameGraphRepeat, StepMustBeNonZeroAndStayAtOrAboveZero) {
+    for (const json& repeat : {json{{"count", 2}, {"step", 0}},
+                               json{{"count", 2}, {"step", "down"}},
+                               json{{"count", 3}, {"first", 1}, {"step", -1}}}) {
+        json p = cascadePass();
+        p["repeat"] = repeat;
+        FrameGraphBuilder b;
+        EXPECT_THROW(loadGraphFromJson(b, graph(json::array({p}))), std::runtime_error) << repeat.dump();
+    }
+}
+
 TEST(FrameGraphRepeat, NegativeSubstitutionFailsAtLoad) {
     json p = cascadePass();
     p["outputs"][0]["layer"] = "{cascade-1}";

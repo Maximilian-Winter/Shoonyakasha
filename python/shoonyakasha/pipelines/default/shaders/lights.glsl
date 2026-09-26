@@ -47,20 +47,29 @@ vec3 directLight(vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, flo
     return total;
 }
 
-// Image-based light: diffuse irradiance plus split-sum specular.
-vec3 ambientLight(samplerCube irradianceMap, samplerCube prefilterMap, sampler2D brdfLUT,
-                  vec3 N, vec3 V, vec3 albedo, float metallic, float roughness, vec3 F0) {
+// Image-based light, diffuse irradiance and split-sum specular apart, for
+// occluding them differently.
+void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, sampler2D brdfLUT,
+                       vec3 N, vec3 V, vec3 albedo, float metallic, float roughness, vec3 F0,
+                       out vec3 diffuse, out vec3 specular) {
     float NdotV = max(dot(N, V), 1e-4);
     vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
     vec3 kD = (1.0 - kS) * (1.0 - metallic);
-    vec3 diffuse = texture(irradianceMap, N).rgb * albedo;
+    diffuse = kD * texture(irradianceMap, N).rgb * albedo;
 
     float maxLod = float(textureQueryLevels(prefilterMap) - 1);
     vec3 R = reflect(-V, N);
     vec3 prefiltered = textureLod(prefilterMap, R, roughness * maxLod).rgb;
     vec2 brdf = texture(brdfLUT, vec2(NdotV, roughness)).rg;
-    vec3 specular = prefiltered * (F0 * brdf.x + brdf.y);
-    return kD * diffuse + specular;
+    specular = prefiltered * (F0 * brdf.x + brdf.y);
+}
+
+vec3 ambientLight(samplerCube irradianceMap, samplerCube prefilterMap, sampler2D brdfLUT,
+                  vec3 N, vec3 V, vec3 albedo, float metallic, float roughness, vec3 F0) {
+    vec3 diffuse, specular;
+    ambientLightParts(irradianceMap, prefilterMap, brdfLUT, N, V, albedo, metallic, roughness, F0,
+                      diffuse, specular);
+    return diffuse + specular;
 }
 
 #endif

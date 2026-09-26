@@ -473,6 +473,9 @@ struct RepeatSpec {
     std::string index = "i";  // placeholder name, written {i}
     uint32_t    first = 0;    // value of the first instance
     uint32_t    count = 1;
+    int64_t     step  = 1;    // added per instance; -1 counts down
+
+    uint32_t valueOf(uint32_t k) const { return static_cast<uint32_t>(first + step * static_cast<int64_t>(k)); }
 };
 
 RepeatSpec parseRepeat(const nlohmann::json& r, const std::string& where) {
@@ -498,6 +501,18 @@ RepeatSpec parseRepeat(const nlohmann::json& r, const std::string& where) {
     }
     spec.count = readCount("count", 1, 1);
     spec.first = readCount("first", 0, 0);
+    if (r.contains("step")) {
+        const auto& s = r["step"];
+        if (!s.is_number_integer() || s.get<int64_t>() == 0) {
+            throw std::runtime_error(where + ": repeat \"step\" must be a non-zero integer");
+        }
+        spec.step = s.get<int64_t>();
+    }
+    const int64_t last = static_cast<int64_t>(spec.first) + spec.step * (static_cast<int64_t>(spec.count) - 1);
+    if (last < 0 || last > static_cast<int64_t>(UINT32_MAX)) {
+        throw std::runtime_error(where + ": repeat counts to " + std::to_string(last) +
+                                 "; every value must be at least 0");
+    }
     if (spec.index.empty() ||
         !std::all_of(spec.index.begin(), spec.index.end(),
                      [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; })) {
@@ -604,7 +619,7 @@ std::vector<ExpandedPass> expandRepeatedPasses(const nlohmann::json& passes) {
         nlohmann::json base = passJson;
         base.erase("repeat");
         for (uint32_t k = 0; k < spec.count; ++k) {
-            const uint32_t value = spec.first + k;
+            const uint32_t value = spec.valueOf(k);
             ExpandedPass instance{substituteAll(base, spec, value, where), name, value, spec.count};
             auto& instanceName = instance.json["name"];
             if (instanceName.is_string() && instanceName.get<std::string>() == name) {
@@ -630,7 +645,7 @@ nlohmann::json expandRepeatedLayouts(const nlohmann::json& layouts) {
         nlohmann::json base = it.value();
         base.erase("repeat");
         for (uint32_t k = 0; k < spec.count; ++k) {
-            const uint32_t value = spec.first + k;
+            const uint32_t value = spec.valueOf(k);
             const auto key = substitute(it.key(), spec, value, where);
             const std::string name = key.is_string() ? key.get<std::string>() : key.dump();
             if (name == it.key()) {
@@ -1223,6 +1238,11 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                                 "': a 2d image has one layer; use 2d_array for more");
                         }
                         desc.transient   = imgJson.value("transient", false);
+                        desc.persistent  = imgJson.value("persistent", false);
+                        if (desc.persistent) {
+                            // Cleared once when the graph is compiled.
+                            desc.additionalUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                        }
 
                         if (imgJson.contains("format")) {
                             desc.format = JsonUtils::stringToFormat(imgJson["format"].get<std::string>());
@@ -1757,6 +1777,7 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             if (desc.arrayLayers != 1) imgJson["arrayLayers"] = desc.arrayLayers;
             if (desc.viewType != ImageViewKind::Auto) imgJson["viewType"] = imageViewKindToString(desc.viewType);
             if (desc.transient)        imgJson["transient"] = true;
+            if (desc.persistent)       imgJson["persistent"] = true;
 
             resJson["image"] = imgJson;
         } else if (decl.kind == ResourceKind::Buffer && !decl.imported) {

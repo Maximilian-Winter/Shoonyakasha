@@ -1172,6 +1172,10 @@ public:
     double getFrameTime() const;
 
 private:
+    /// Clear persistent images and put them in the layouts a frame leaves
+    /// them in, which is where each frame's barriers start from for them.
+    void initializePersistentImages();
+
     /// Where `pass` lists `descriptorSetName` among its descriptor sets.
     std::optional<uint32_t> descriptorSetIndexIn(const CompiledPass& pass,
                                                  const std::string& descriptorSetName) const;

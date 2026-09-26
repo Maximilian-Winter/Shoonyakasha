@@ -1,7 +1,7 @@
 {
   "version": 3,
   "name": "DefaultPipeline",
-  "description": "Shoonyakasha's default pipeline: deferred PBR with cascaded sun shadows, contact shadows, image-based light, forward transparency and ACES tonemapping. Settings are scene.custom.default.* values; see README.md.",
+  "description": "Shoonyakasha's default pipeline: deferred PBR with cascaded sun shadows, contact shadows, image-based light, ground-truth ambient occlusion, forward transparency, bloom, automatic exposure and ACES tonemapping. Settings are scene.custom.default.* values; see README.md.",
   "vertexFormats": {
     "skinned": {
       "attributes": [
@@ -242,6 +242,60 @@
           "type": "uint",
           "source": "scene.custom.default.debugView",
           "default": 0
+        },
+        {
+          "name": "aoRadius",
+          "type": "float",
+          "source": "scene.custom.default.aoRadius",
+          "default": 0.6
+        },
+        {
+          "name": "aoIntensity",
+          "type": "float",
+          "source": "scene.custom.default.aoIntensity",
+          "default": 1.0
+        },
+        {
+          "name": "bloomIntensity",
+          "type": "float",
+          "source": "scene.custom.default.bloomIntensity",
+          "default": 0.04
+        },
+        {
+          "name": "bloomRadius",
+          "type": "float",
+          "source": "scene.custom.default.bloomRadius",
+          "default": 1.0
+        },
+        {
+          "name": "autoExposure",
+          "type": "uint",
+          "source": "scene.custom.default.autoExposure",
+          "default": 1
+        },
+        {
+          "name": "exposureAdaptSpeed",
+          "type": "float",
+          "source": "scene.custom.default.exposureAdaptSpeed",
+          "default": 1.5
+        },
+        {
+          "name": "exposureMinEV",
+          "type": "float",
+          "source": "scene.custom.default.exposureMinEV",
+          "default": -4.0
+        },
+        {
+          "name": "exposureMaxEV",
+          "type": "float",
+          "source": "scene.custom.default.exposureMaxEV",
+          "default": 14.0
+        },
+        {
+          "name": "deltaTime",
+          "type": "float",
+          "source": "scene.time.delta",
+          "default": 0.016
         }
       ]
     },
@@ -485,7 +539,8 @@
           "binding": 0,
           "type": "uniform_buffer",
           "stages": [
-            "fragment"
+            "fragment",
+            "compute"
           ],
           "name": "Settings",
           "autoBindBuffer": "Settings"
@@ -675,6 +730,16 @@
           "name": "shadowMask",
           "autoBindResource": "shadowMask",
           "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 5,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "aoMap",
+          "autoBindResource": "ao",
+          "autoBindSampler": "nearestClamp"
         }
       ]
     },
@@ -698,6 +763,130 @@
           ],
           "name": "Settings",
           "autoBindBuffer": "Settings"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "bloom",
+          "autoBindResource": "bloomChain",
+          "autoBindSampler": "linearClamp",
+          "mip": 0
+        },
+        {
+          "binding": 3,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "exposureImage",
+          "autoBindResource": "exposure",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
+    "aoDenoiseSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "aoRaw",
+          "autoBindResource": "aoRaw",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
+    "bloomDownFirstSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "source",
+          "autoBindResource": "hdrColor",
+          "autoBindSampler": "linearClamp"
+        }
+      ]
+    },
+    "bloomDown{m}": {
+      "repeat": {
+        "count": 5,
+        "index": "m",
+        "first": 1
+      },
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "source",
+          "autoBindResource": "bloomChain",
+          "autoBindSampler": "linearClamp",
+          "mip": "{m-1}"
+        }
+      ]
+    },
+    "bloomUp{m}": {
+      "repeat": {
+        "count": 5,
+        "index": "m",
+        "first": 4,
+        "step": -1
+      },
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "source",
+          "autoBindResource": "bloomChain",
+          "autoBindSampler": "linearClamp",
+          "mip": "{m+1}"
+        }
+      ]
+    },
+    "exposureSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "luminanceSource",
+          "autoBindResource": "bloomChain",
+          "autoBindSampler": "nearestClamp",
+          "mip": 2
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "exposureImage",
+          "autoBindResource": "exposure"
         }
       ]
     }
@@ -759,6 +948,40 @@
       "kind": "image",
       "image": {
         "format": "R8G8_UNORM"
+      }
+    },
+    {
+      "name": "aoRaw",
+      "kind": "image",
+      "image": {
+        "format": "R8_UNORM"
+      }
+    },
+    {
+      "name": "ao",
+      "kind": "image",
+      "image": {
+        "format": "R8_UNORM"
+      }
+    },
+    {
+      "name": "bloomChain",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "mipLevels": 6
+      }
+    },
+    {
+      "name": "exposure",
+      "kind": "image",
+      "image": {
+        "format": "R32_SFLOAT",
+        "width": 1,
+        "height": 1,
+        "persistent": true
       }
     }
   ],
@@ -1197,6 +1420,89 @@
       ]
     },
     {
+      "name": "GTAO",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "aoRaw",
+          "usage": "color_write",
+          "clear": [
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/gtao.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "depthNormalSet",
+        "cameraSet",
+        "settingsSet"
+      ]
+    },
+    {
+      "name": "AODenoise",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "aoRaw",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "ao",
+          "usage": "color_write",
+          "clear": [
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/ao_denoise.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "aoDenoiseSet",
+        "cameraSet"
+      ]
+    },
+    {
       "name": "Lighting",
       "type": "graphics",
       "execution": {
@@ -1221,6 +1527,10 @@
         },
         {
           "resource": "shadowMask",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "ao",
           "usage": "shader_read"
         }
       ],
@@ -1299,6 +1609,163 @@
       ]
     },
     {
+      "name": "BloomDown0",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "bloomChain",
+          "usage": "color_write",
+          "mip": 0,
+          "clear": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/bloom_down_first.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "bloomDownFirstSet"
+      ]
+    },
+    {
+      "name": "BloomDown{m}",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "bloomChain",
+          "usage": "shader_read",
+          "mip": "{m-1}"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "bloomChain",
+          "usage": "color_write",
+          "mip": "{m}",
+          "clear": [
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/bloom_down.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "bloomDown{m}"
+      ],
+      "repeat": {
+        "count": 5,
+        "index": "m",
+        "first": 1
+      }
+    },
+    {
+      "name": "AutoExposure",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          16,
+          16,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "bloomChain",
+          "usage": "shader_read",
+          "mip": 2
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "exposure",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/exposure.comp.spv"
+      },
+      "descriptorSets": [
+        "exposureSet",
+        "settingsSet"
+      ]
+    },
+    {
+      "name": "BloomUp{m}",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "bloomChain",
+          "usage": "shader_read",
+          "mip": "{m+1}"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "bloomChain",
+          "usage": "color_blend",
+          "mip": "{m}"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/bloom_up.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": [
+        "bloomUp{m}",
+        "settingsSet"
+      ],
+      "repeat": {
+        "count": 5,
+        "index": "m",
+        "first": 4,
+        "step": -1
+      }
+    },
+    {
       "name": "Tonemap",
       "type": "graphics",
       "execution": {
@@ -1307,6 +1774,15 @@
       "inputs": [
         {
           "resource": "hdrColor",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "bloomChain",
+          "usage": "shader_read",
+          "mip": 0
+        },
+        {
+          "resource": "exposure",
           "usage": "shader_read"
         }
       ],

@@ -12,7 +12,7 @@ C++ equivalents are `createDirectionalLight` and `createPointLight` with GLM vec
 
 ## The default pipeline
 
-`sk.Engine()` without a `pipeline_json_path` (C++: an empty `pipelineJsonPath`) renders with the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md): deferred PBR with every scene light, image-based light, cascaded sun shadows with filtering and contact shadows, alpha-tested and skinned casters, and forward-shaded blended materials. It is also the starting point for a pipeline of your own: copy its directory and point `pipeline_json_path` at the copy. `shoonyakasha.pipeline.DEFAULT` is its path. From C++ it is found through `$SHOONYAKASHA_DEFAULT_PIPELINE`, or else in the source tree the engine was built from.
+`sk.Engine()` without a `pipeline_json_path` (C++: an empty `pipelineJsonPath`) renders with the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md): deferred PBR with every scene light, image-based light, cascaded sun shadows with filtering and contact shadows, alpha-tested and skinned casters, ambient occlusion, forward-shaded blended materials, bloom and automatic exposure. It is also the starting point for a pipeline of your own: copy its directory and point `pipeline_json_path` at the copy. `shoonyakasha.pipeline.DEFAULT` is its path. From C++ it is found through `$SHOONYAKASHA_DEFAULT_PIPELINE`, or else in the source tree the engine was built from.
 
 ## Sun shadow cascades
 

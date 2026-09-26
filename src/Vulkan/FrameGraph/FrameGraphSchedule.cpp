@@ -37,6 +37,7 @@ std::vector<ScheduledResource> describeResources(
         r.aspect = formatToAspectMask(format);
         if (decl.imported) continue;
 
+        r.persistent = decl.imageDesc.persistent;
         r.shape.arrayLayers = decl.imageDesc.arrayLayers;
         if (decl.imageDesc.mipLevels != 0) {
             r.shape.mipLevels = decl.imageDesc.mipLevels;
@@ -640,7 +641,8 @@ BarrierPlan planBarriers(
     // Plan a frame once to find where each subresource ends up, then plan it
     // for real starting from there, so each first barrier waits for the
     // previous frame's last access. The layout still starts UNDEFINED: the
-    // first frame has nothing to wait for and no contents to keep.
+    // first frame has nothing to wait for and no contents to keep. Persistent
+    // images keep theirs, and are put in those layouts once at compile time.
     {
         std::vector<std::vector<BarrierInfo>> scratchPre(passes.size()), scratchPost(passes.size());
         runFrame(scratchPre, scratchPost);
@@ -655,7 +657,7 @@ BarrierPlan planBarriers(
                 st.stage  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
                 st.access = 0;
             }
-            st.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            if (!resources[ri].persistent) st.layout = VK_IMAGE_LAYOUT_UNDEFINED;
         }
     }
     runFrame(plan.preBarriers, plan.postBarriers);
