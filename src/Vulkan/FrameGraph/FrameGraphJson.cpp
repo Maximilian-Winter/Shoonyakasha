@@ -9,7 +9,10 @@
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
 #include <system_error>
 #include "Vulkan/FrameGraph/FrameGraph.h"
+#include "FrameGraph/ShadowCascades.h"
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <stdexcept>
 #include <cstring>  // For strerror
@@ -340,6 +343,77 @@ VkCompareOp stringToCompareOp(const std::string& str) {
 // JSON → ResourceAccess parsing helpers
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// Subresources and view types
+// ═══════════════════════════════════════════════════════════════
+
+/// Read "mip"/"mips" and "layer"/"layers" from an access or binding object.
+/// "mip": n is one level; "mips": [first, count] a block. Same for layers.
+static SubresourceRange parseSubresource(const nlohmann::json& j, const std::string& where) {
+    SubresourceRange range;
+
+    auto readOne = [&](const char* single, const char* block,
+                       uint32_t& base, uint32_t& count) {
+        if (j.contains(single) && j.contains(block)) {
+            throw std::runtime_error(where + ": give either \"" + single + "\" or \"" +
+                                     block + "\", not both");
+        }
+        if (j.contains(single)) {
+            base = j[single].get<uint32_t>();
+            count = 1;
+        } else if (j.contains(block)) {
+            const auto& b = j[block];
+            if (!b.is_array() || b.size() != 2) {
+                throw std::runtime_error(where + ": \"" + block + "\" must be [first, count]");
+            }
+            base = b[0].get<uint32_t>();
+            count = b[1].get<uint32_t>();
+            if (count == 0) {
+                throw std::runtime_error(where + ": \"" + block + "\" has a count of 0");
+            }
+        }
+    };
+    readOne("mip", "mips", range.baseMip, range.mipCount);
+    readOne("layer", "layers", range.baseLayer, range.layerCount);
+    return range;
+}
+
+/// Inverse of parseSubresource; writes nothing for the whole image.
+static void serializeSubresource(nlohmann::json& j, const SubresourceRange& range) {
+    auto writeOne = [&](const char* single, const char* block, uint32_t base, uint32_t count) {
+        if (count == 1) {
+            j[single] = base;
+        } else if (base != 0 || count != SubresourceRange::kAll) {
+            // A block running to the end keeps its open count, spelled as the
+            // largest uint32 so it reloads unchanged.
+            j[block] = {base, count};
+        }
+    };
+    writeOne("mip", "mips", range.baseMip, range.mipCount);
+    writeOne("layer", "layers", range.baseLayer, range.layerCount);
+}
+
+static ImageViewKind stringToImageViewKind(const std::string& str) {
+    if (str == "auto")       return ImageViewKind::Auto;
+    if (str == "2d")         return ImageViewKind::Tex2D;
+    if (str == "2d_array")   return ImageViewKind::Tex2DArray;
+    if (str == "cube")       return ImageViewKind::Cube;
+    if (str == "cube_array") return ImageViewKind::CubeArray;
+    throw std::runtime_error("Unknown image viewType: '" + str +
+                             "' (expected auto, 2d, 2d_array, cube or cube_array)");
+}
+
+static const char* imageViewKindToString(ImageViewKind kind) {
+    switch (kind) {
+        case ImageViewKind::Auto:       return "auto";
+        case ImageViewKind::Tex2D:      return "2d";
+        case ImageViewKind::Tex2DArray: return "2d_array";
+        case ImageViewKind::Cube:       return "cube";
+        case ImageViewKind::CubeArray:  return "cube_array";
+    }
+    return "auto";
+}
+
 static ResourceAccess parseResourceAccess(
     const nlohmann::json& j,
     const FrameGraphBuilder& builder)
@@ -353,6 +427,7 @@ static ResourceAccess parseResourceAccess(
     }
 
     access.usage = JsonUtils::stringToResourceUsage(j.at("usage").get<std::string>());
+    access.subresource = parseSubresource(j, "Access to '" + resourceName + "'");
 
     // "usage": "present" is the older spelling of a colour write that also
     // presents. Normalise it here so the rest of the compiler sees one shape, and
@@ -387,6 +462,206 @@ static ResourceAccess parseResourceAccess(
 
     return access;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// "repeat": one declaration, several passes or layouts
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+struct RepeatSpec {
+    std::string index = "i";  // placeholder name, written {i}
+    uint32_t    first = 0;    // value of the first instance
+    uint32_t    count = 1;
+    int64_t     step  = 1;    // added per instance; -1 counts down
+
+    uint32_t valueOf(uint32_t k) const { return static_cast<uint32_t>(first + step * static_cast<int64_t>(k)); }
+};
+
+RepeatSpec parseRepeat(const nlohmann::json& r, const std::string& where) {
+    if (!r.is_object()) {
+        throw std::runtime_error(where + ": \"repeat\" must be an object like {\"count\": 4, \"index\": \"i\"}");
+    }
+    RepeatSpec spec;
+    spec.index = r.value("index", std::string{"i"});
+    // Parsed JSON stores positive integers as unsigned, JSON built in C++
+    // from an int as signed; either is fine if it is in range.
+    auto readCount = [&](const char* key, int64_t minimum, int64_t fallback) -> uint32_t {
+        if (!r.contains(key)) return static_cast<uint32_t>(fallback);
+        const auto& v = r[key];
+        if (!v.is_number_integer() || v.get<int64_t>() < minimum ||
+            v.get<int64_t>() > static_cast<int64_t>(UINT32_MAX)) {
+            throw std::runtime_error(where + ": repeat \"" + key + "\" must be an integer of at least " +
+                                     std::to_string(minimum));
+        }
+        return static_cast<uint32_t>(v.get<int64_t>());
+    };
+    if (!r.contains("count")) {
+        throw std::runtime_error(where + ": \"repeat\" needs a \"count\" of at least 1");
+    }
+    spec.count = readCount("count", 1, 1);
+    spec.first = readCount("first", 0, 0);
+    if (r.contains("step")) {
+        const auto& s = r["step"];
+        if (!s.is_number_integer() || s.get<int64_t>() == 0) {
+            throw std::runtime_error(where + ": repeat \"step\" must be a non-zero integer");
+        }
+        spec.step = s.get<int64_t>();
+    }
+    const int64_t last = static_cast<int64_t>(spec.first) + spec.step * (static_cast<int64_t>(spec.count) - 1);
+    if (last < 0 || last > static_cast<int64_t>(UINT32_MAX)) {
+        throw std::runtime_error(where + ": repeat counts to " + std::to_string(last) +
+                                 "; every value must be at least 0");
+    }
+    if (spec.index.empty() ||
+        !std::all_of(spec.index.begin(), spec.index.end(),
+                     [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; })) {
+        throw std::runtime_error(where + ": repeat \"index\" must be a plain name, e.g. \"cascade\"");
+    }
+    return spec;
+}
+
+/// Replace every {index}, {index+N} and {index-N} in `text` with the
+/// instance's value. A string that is nothing but one such placeholder
+/// becomes a number, so "layer": "{cascade}" reads as an integer. Braces
+/// around anything else are left alone.
+nlohmann::json substitute(const std::string& text, const RepeatSpec& spec, int64_t value,
+                          const std::string& where) {
+    std::string out;
+    bool wholeIsPlaceholder = false;
+    int64_t wholeValue = 0;
+
+    size_t pos = 0;
+    while (pos < text.size()) {
+        if (text[pos] != '{') {
+            out += text[pos++];
+            continue;
+        }
+        const size_t close = text.find('}', pos);
+        if (close == std::string::npos) {
+            out += text.substr(pos);
+            break;
+        }
+        const std::string inner = text.substr(pos + 1, close - pos - 1);
+        if (!inner.starts_with(spec.index)) {
+            out += text.substr(pos, close - pos + 1);
+            pos = close + 1;
+            continue;
+        }
+        const std::string rest = inner.substr(spec.index.size());
+        int64_t offset = 0;
+        if (!rest.empty()) {
+            const bool validOffset = rest.size() >= 2 && (rest[0] == '+' || rest[0] == '-') &&
+                std::all_of(rest.begin() + 1, rest.end(), [](char c) { return c >= '0' && c <= '9'; });
+            if (!validOffset) {
+                // {indexSomethingElse}: another name that merely starts with ours
+                out += text.substr(pos, close - pos + 1);
+                pos = close + 1;
+                continue;
+            }
+            offset = std::stoll(rest.substr(1));
+            if (rest[0] == '-') offset = -offset;
+        }
+        const int64_t result = value + offset;
+        if (result < 0) {
+            throw std::runtime_error(where + ": \"{" + inner + "}\" is negative for " + spec.index +
+                                     " = " + std::to_string(value));
+        }
+        wholeIsPlaceholder = pos == 0 && close + 1 == text.size();
+        wholeValue = result;
+        out += std::to_string(result);
+        pos = close + 1;
+    }
+
+    if (wholeIsPlaceholder) return nlohmann::json(wholeValue);
+    return nlohmann::json(out);
+}
+
+nlohmann::json substituteAll(const nlohmann::json& j, const RepeatSpec& spec, int64_t value,
+                             const std::string& where) {
+    if (j.is_string()) return substitute(j.get<std::string>(), spec, value, where);
+    if (j.is_array()) {
+        nlohmann::json out = nlohmann::json::array();
+        for (const auto& e : j) out.push_back(substituteAll(e, spec, value, where));
+        return out;
+    }
+    if (j.is_object()) {
+        nlohmann::json out = nlohmann::json::object();
+        for (auto it = j.begin(); it != j.end(); ++it) {
+            out[it.key()] = substituteAll(it.value(), spec, value, where);
+        }
+        return out;
+    }
+    return j;
+}
+
+struct ExpandedPass {
+    nlohmann::json json;
+    std::string    group;       // declared name of a repeated pass, else empty
+    uint32_t       index = 0;
+    uint32_t       count = 1;
+};
+
+/// Passes with "repeat" become one pass per index value. An instance is named
+/// by substituting into the declared name, or, if the name has no
+/// placeholder, by appending [value].
+std::vector<ExpandedPass> expandRepeatedPasses(const nlohmann::json& passes) {
+    std::vector<ExpandedPass> out;
+    for (const auto& passJson : passes) {
+        if (!passJson.is_object() || !passJson.contains("repeat")) {
+            out.push_back({passJson, {}, 0, 1});
+            continue;
+        }
+        const std::string name = passJson.value("name", std::string{});
+        const std::string where = "Pass '" + name + "'";
+        const RepeatSpec spec = parseRepeat(passJson["repeat"], where);
+
+        nlohmann::json base = passJson;
+        base.erase("repeat");
+        for (uint32_t k = 0; k < spec.count; ++k) {
+            const uint32_t value = spec.valueOf(k);
+            ExpandedPass instance{substituteAll(base, spec, value, where), name, value, spec.count};
+            auto& instanceName = instance.json["name"];
+            if (instanceName.is_string() && instanceName.get<std::string>() == name) {
+                instanceName = name + "[" + std::to_string(value) + "]";
+            }
+            out.push_back(std::move(instance));
+        }
+    }
+    return out;
+}
+
+/// Descriptor set layouts with "repeat" become one layout per index value;
+/// their names must contain the placeholder, e.g. "downsample{m}".
+nlohmann::json expandRepeatedLayouts(const nlohmann::json& layouts) {
+    nlohmann::json out = nlohmann::json::object();
+    for (auto it = layouts.begin(); it != layouts.end(); ++it) {
+        if (!it.value().is_object() || !it.value().contains("repeat")) {
+            out[it.key()] = it.value();
+            continue;
+        }
+        const std::string where = "Descriptor set layout '" + it.key() + "'";
+        const RepeatSpec spec = parseRepeat(it.value()["repeat"], where);
+        nlohmann::json base = it.value();
+        base.erase("repeat");
+        for (uint32_t k = 0; k < spec.count; ++k) {
+            const uint32_t value = spec.valueOf(k);
+            const auto key = substitute(it.key(), spec, value, where);
+            const std::string name = key.is_string() ? key.get<std::string>() : key.dump();
+            if (name == it.key()) {
+                throw std::runtime_error(where + " repeats but its name has no {" + spec.index +
+                                         "}, so every copy would have the same name");
+            }
+            if (out.contains(name)) {
+                throw std::runtime_error(where + ": repeated name '" + name + "' is already declared");
+            }
+            out[name] = substituteAll(base, spec, value, where);
+        }
+    }
+    return out;
+}
+
+} // namespace
 
 // ═══════════════════════════════════════════════════════════════
 // JSON Loading
@@ -638,6 +913,18 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                     // ─── Parse source for dot-path resolution ─────
                     // JSON: "source": "entity.material.params.baseColorFactor"
                     field.source = fieldJson.value("source", std::string{});
+                    if (fieldJson.contains("default")) {
+                        const auto& dj = fieldJson["default"];
+                        if (dj.is_number()) {
+                            field.defaultValue = {dj.get<float>()};
+                        } else if (dj.is_array() && std::all_of(dj.begin(), dj.end(),
+                                       [](const nlohmann::json& v) { return v.is_number(); })) {
+                            for (const auto& v : dj) field.defaultValue.push_back(v.get<float>());
+                        } else {
+                            throw std::runtime_error("Buffer layout field '" + field.name +
+                                                     "': \"default\" must be a number or an array of numbers");
+                        }
+                    }
 
                     // Throws on an unknown type string. Treating one as float
                     // would shift every offset from that field onward.
@@ -863,7 +1150,7 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
 
     // ── Parse descriptor set layouts (before resources/passes, as they're referenced by name) ──
     if (json.contains("descriptorSetLayouts")) {
-        const auto& layoutsJson = json["descriptorSetLayouts"];
+        const auto layoutsJson = expandRepeatedLayouts(json["descriptorSetLayouts"]);
         for (auto it = layoutsJson.begin(); it != layoutsJson.end(); ++it) {
             DescriptorSetLayoutDesc layoutDesc;
             layoutDesc.name = it.key();
@@ -886,6 +1173,8 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                     binding.autoBindResource = bindingJson.value("autoBindResource", std::string{});
                     binding.autoBindSampler  = bindingJson.value("autoBindSampler", std::string{});
                     binding.autoBindBuffer   = bindingJson.value("autoBindBuffer", std::string{});
+                    binding.autoBindSubresource = parseSubresource(
+                        bindingJson, "Binding '" + binding.name + "' of layout '" + layoutDesc.name + "'");
 
                     layoutDesc.bindings.push_back(std::move(binding));
                 }
@@ -917,9 +1206,43 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                         desc.height      = imgJson.value("height", 0u);
                         desc.widthScale  = imgJson.value("widthScale", 1.0f);
                         desc.heightScale = imgJson.value("heightScale", 1.0f);
-                        desc.mipLevels   = imgJson.value("mipLevels", 1u);
-                        desc.arrayLayers = imgJson.value("arrayLayers", 1u);
+                        if (imgJson.contains("mipLevels") && imgJson["mipLevels"].is_string()) {
+                            if (imgJson["mipLevels"].get<std::string>() != "full") {
+                                throw std::runtime_error("Resource '" + name +
+                                    "': mipLevels must be a number or \"full\"");
+                            }
+                            desc.mipLevels = 0;
+                        } else {
+                            desc.mipLevels = imgJson.value("mipLevels", 1u);
+                            if (desc.mipLevels == 0) {
+                                throw std::runtime_error("Resource '" + name +
+                                    "': mipLevels must be at least 1 (or \"full\")");
+                            }
+                        }
+                        desc.viewType = stringToImageViewKind(imgJson.value("viewType", std::string{"auto"}));
+                        const uint32_t defaultLayers = desc.viewType == ImageViewKind::Cube ? 6u : 1u;
+                        desc.arrayLayers = imgJson.value("arrayLayers", defaultLayers);
+                        if (desc.arrayLayers == 0) {
+                            throw std::runtime_error("Resource '" + name + "': arrayLayers must be at least 1");
+                        }
+                        if (desc.viewType == ImageViewKind::Cube && desc.arrayLayers != 6) {
+                            throw std::runtime_error("Resource '" + name +
+                                "': a cube image has exactly 6 layers");
+                        }
+                        if (desc.viewType == ImageViewKind::CubeArray && desc.arrayLayers % 6 != 0) {
+                            throw std::runtime_error("Resource '" + name +
+                                "': a cube_array image has a multiple of 6 layers");
+                        }
+                        if (desc.viewType == ImageViewKind::Tex2D && desc.arrayLayers != 1) {
+                            throw std::runtime_error("Resource '" + name +
+                                "': a 2d image has one layer; use 2d_array for more");
+                        }
                         desc.transient   = imgJson.value("transient", false);
+                        desc.persistent  = imgJson.value("persistent", false);
+                        if (desc.persistent) {
+                            // Cleared once when the graph is compiled.
+                            desc.additionalUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+                        }
 
                         if (imgJson.contains("format")) {
                             desc.format = JsonUtils::stringToFormat(imgJson["format"].get<std::string>());
@@ -1008,9 +1331,13 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
 
     // ── Parse passes ──
     if (json.contains("passes")) {
-        for (const auto& passJson : json["passes"]) {
+        for (const auto& expanded : expandRepeatedPasses(json["passes"])) {
+            const auto& passJson = expanded.json;
             PassDeclaration pass;
             pass.name = passJson.at("name").get<std::string>();
+            pass.repeatGroup = expanded.group;
+            pass.repeatIndex = expanded.index;
+            pass.repeatCount = expanded.count;
             pass.type = JsonUtils::stringToPassType(passJson.at("type").get<std::string>());
 
             // Parse queue type (default: "graphics" for backward compatibility)
@@ -1040,6 +1367,11 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                 pass.pipelineDesc.computeShader  = pipeJson.value("computeShader", std::string{});
                 pass.pipelineDesc.depthTest      = pipeJson.value("depthTest", true);
                 pass.pipelineDesc.depthWrite     = pipeJson.value("depthWrite", true);
+                pass.pipelineDesc.depthCompareOp = pipeJson.value("depthCompareOp", std::string{"less"});
+                // Throws on an unknown name, so a typo fails at load, not at
+                // pipeline creation.
+                JsonUtils::stringToCompareOp(pass.pipelineDesc.depthCompareOp);
+                pass.pipelineDesc.depthClamp     = pipeJson.value("depthClamp", false);
                 pass.pipelineDesc.cullMode        = pipeJson.value("cullMode", std::string{"back"});
                 pass.pipelineDesc.blending        = pipeJson.value("blending", std::string{"none"});
                 pass.pipelineDesc.topology        = pipeJson.value("topology", std::string{"triangle_list"});
@@ -1182,6 +1514,58 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                 pass.execution.entityDataBinding = execJson.value("entityDataBinding", std::string{});
                 pass.execution.renderLayerMask = execJson.value("renderLayerMask", 0xFFFFFFFFu);
                 pass.execution.lightIndex = execJson.value("lightIndex", -1);
+
+                if (execJson.contains("view")) {
+                    const auto& viewJson = execJson["view"];
+                    const std::string view = viewJson.is_string() ? viewJson.get<std::string>() : viewJson.dump();
+                    const std::string cascadePrefix = "shadows.sun.cascades[";
+                    if (!isEntityGeometryExecutionType(pass.execution.type)) {
+                        throw std::runtime_error("Pass '" + pass.name + "': \"view\" applies only to entity "
+                                                 "geometry passes, not '" + pass.execution.type + "'");
+                    }
+                    if (view == "none") {
+                        pass.execution.view = CullView::None;
+                    } else if (view == "camera") {
+                        pass.execution.view = CullView::Camera;
+                    } else if (view.starts_with(cascadePrefix) && view.ends_with("]")) {
+                        const std::string digits = view.substr(cascadePrefix.size(),
+                                                               view.size() - cascadePrefix.size() - 1);
+                        const bool numeric = !digits.empty() && digits.size() < 4 &&
+                            std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; });
+                        if (!numeric || std::stoul(digits) >= MAX_SUN_CASCADES) {
+                            throw std::runtime_error("Pass '" + pass.name + "': view '" + view +
+                                                     "' names no sun cascade (0 to " +
+                                                     std::to_string(MAX_SUN_CASCADES - 1) + ")");
+                        }
+                        pass.execution.view = CullView::SunCascade;
+                        pass.execution.viewIndex = static_cast<uint32_t>(std::stoul(digits));
+                    } else {
+                        throw std::runtime_error("Pass '" + pass.name + "': unknown view '" + view +
+                                                 "' (expected camera, none or shadows.sun.cascades[N])");
+                    }
+                }
+
+                if (execJson.contains("alphaFilter")) {
+                    const auto alpha = execJson["alphaFilter"].get<std::string>();
+                    if (alpha == "any")         pass.execution.alphaFilter = AlphaFilter::Any;
+                    else if (alpha == "opaque") pass.execution.alphaFilter = AlphaFilter::Opaque;
+                    else if (alpha == "mask")   pass.execution.alphaFilter = AlphaFilter::Mask;
+                    else {
+                        throw std::runtime_error("Pass '" + pass.name + "': unknown alphaFilter '" +
+                                                 alpha + "' (expected any, opaque or mask)");
+                    }
+
+                    // Blended passes never see opaque or masked materials, so
+                    // narrowing them to one would silently draw nothing.
+                    const auto& type = pass.execution.type;
+                    if (pass.execution.alphaFilter != AlphaFilter::Any &&
+                        (!isEntityGeometryExecutionType(type) ||
+                         type == "transparent_geometry" || type == "skinned_transparent" ||
+                         type == "sprite_geometry")) {
+                        throw std::runtime_error("Pass '" + pass.name + "': alphaFilter '" + alpha +
+                                                 "' does not apply to execution type '" + type + "'");
+                    }
+                }
             }
 
             // Parse hasSideEffects flag (prevents pass culling for compute-only passes)
@@ -1194,6 +1578,32 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
         }
     }
 }
+
+namespace {
+
+/// Relative shader paths that name a file beside the pipeline JSON become
+/// paths to that file, so a pipeline and its shaders load together from any
+/// working directory. Paths that do not exist there are left as they are and
+/// resolve against the working directory, as they always have.
+void resolveShaderPathsAgainst(nlohmann::json& json, const std::filesystem::path& dir) {
+    if (dir.empty() || !json.contains("passes") || !json["passes"].is_array()) return;
+    for (auto& pass : json["passes"]) {
+        if (!pass.is_object() || !pass.contains("pipeline") || !pass["pipeline"].is_object()) continue;
+        auto& pipe = pass["pipeline"];
+        for (const char* key : {"vertexShader", "fragmentShader", "computeShader"}) {
+            if (!pipe.contains(key) || !pipe[key].is_string()) continue;
+            const std::filesystem::path shader = pipe[key].get<std::string>();
+            if (shader.empty() || shader.is_absolute()) continue;
+            std::error_code ec;
+            const std::filesystem::path beside = dir / shader;
+            if (std::filesystem::exists(beside, ec)) {
+                pipe[key] = beside.lexically_normal().generic_string();
+            }
+        }
+    }
+}
+
+} // namespace
 
 void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath) {
     nlohmann::json json;
@@ -1248,6 +1658,7 @@ void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath) 
         }
         file >> json;
     } // File closed here before modifying builder
+    resolveShaderPathsAgainst(json, std::filesystem::absolute(filePath).parent_path());
     loadGraphFromJson(builder, json);
 }
 
@@ -1270,6 +1681,7 @@ static nlohmann::json serializeResourceAccess(const ResourceAccess& access,
     }
 
     j["usage"] = JsonUtils::resourceUsageToString(access.usage);
+    serializeSubresource(j, access.subresource);
 
     // Written as a flag rather than folded back into "usage", so a round-trip
     // through the serializer does not lose a blend that also presents.
@@ -1360,9 +1772,12 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             if (desc.samples != VK_SAMPLE_COUNT_1_BIT) {
                 imgJson["samples"] = static_cast<int>(desc.samples);
             }
-            if (desc.mipLevels != 1)   imgJson["mipLevels"] = desc.mipLevels;
+            if (desc.mipLevels == 0)        imgJson["mipLevels"] = "full";
+            else if (desc.mipLevels != 1)   imgJson["mipLevels"] = desc.mipLevels;
             if (desc.arrayLayers != 1) imgJson["arrayLayers"] = desc.arrayLayers;
+            if (desc.viewType != ImageViewKind::Auto) imgJson["viewType"] = imageViewKindToString(desc.viewType);
             if (desc.transient)        imgJson["transient"] = true;
+            if (desc.persistent)       imgJson["persistent"] = true;
 
             resJson["image"] = imgJson;
         } else if (decl.kind == ResourceKind::Buffer && !decl.imported) {
@@ -1414,6 +1829,8 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             if (!pd.computeShader.empty())  pipeJson["computeShader"] = pd.computeShader;
             pipeJson["depthTest"]  = pd.depthTest;
             pipeJson["depthWrite"] = pd.depthWrite;
+            if (pd.depthCompareOp != "less") pipeJson["depthCompareOp"] = pd.depthCompareOp;
+            if (pd.depthClamp) pipeJson["depthClamp"] = true;
             pipeJson["cullMode"]   = pd.cullMode;
             pipeJson["blending"]   = pd.blending;
             pipeJson["topology"]   = pd.topology;
@@ -1453,6 +1870,8 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
                 passJson["pushConstants"].push_back(pcJson);
             }
         }
+
+        if (!pass.enabled) passJson["enabled"] = false;
 
         passesJson.push_back(passJson);
     }

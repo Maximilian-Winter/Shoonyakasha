@@ -27,6 +27,7 @@
 #include <fstream>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace Shoonyakasha {
 
@@ -428,7 +429,9 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
     // Build vertex buffer
     result.vertexBuffer = m_device.getDeleteQueue().adopt(
         buildVertexBuffer(data, primitive, worldTransform,
-                          result.vertexCount, result.vertexStride));
+                          result.vertexCount, result.vertexStride,
+                          result.boundsMin, result.boundsMax));
+    result.hasBounds = result.vertexCount > 0;
 
     // Build index buffer
     result.indexBuffer = m_device.getDeleteQueue().adopt(
@@ -493,7 +496,9 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
     const cgltf_primitive& primitive,
     const glm::mat4& worldTransform,
     uint32_t& outVertexCount,
-    uint32_t& outVertexStride)
+    uint32_t& outVertexStride,
+    glm::vec3& outBoundsMin,
+    glm::vec3& outBoundsMax)
 {
     // Find attribute accessors
     const cgltf_accessor* posAccessor = nullptr;
@@ -523,6 +528,8 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
 
     // Build interleaved vertex data
     std::vector<StandardVertex> vertices(vertexCount);
+    outBoundsMin = glm::vec3(std::numeric_limits<float>::max());
+    outBoundsMax = glm::vec3(std::numeric_limits<float>::lowest());
 
     for (size_t i = 0; i < vertexCount; ++i) {
         StandardVertex& v = vertices[i];
@@ -532,6 +539,8 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
         cgltf_accessor_read_float(posAccessor, i, pos, 3);
         glm::vec4 worldPos = worldTransform * glm::vec4(pos[0], pos[1], pos[2], 1.0f);
         v.pos = glm::vec3(worldPos);
+        outBoundsMin = glm::min(outBoundsMin, v.pos);
+        outBoundsMax = glm::max(outBoundsMax, v.pos);
 
         // Color
         if (colorAccessor) {
@@ -807,6 +816,9 @@ entt::entity GltfSceneLoader::createEntity(
     mesh.indexCount = primitive.indexCount;
     mesh.vertexStride = primitive.vertexStride;
     mesh.indexType = primitive.indexType;
+    mesh.boundsMin = primitive.boundsMin;
+    mesh.boundsMax = primitive.boundsMax;
+    mesh.hasBounds = primitive.hasBounds;
 
     // Add MaterialComponentV5
     auto& material = scene->addComponent<MaterialComponentV5>(entity);
@@ -1197,6 +1209,9 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     mesh.indexCount = primitive.indexCount;
     mesh.vertexStride = primitive.vertexStride;
     mesh.indexType = primitive.indexType;
+    mesh.boundsMin = primitive.boundsMin;
+    mesh.boundsMax = primitive.boundsMax;
+    mesh.hasBounds = primitive.hasBounds;
 
     // Add MaterialComponentV5
     auto& material = scene->addComponent<MaterialComponentV5>(entity);

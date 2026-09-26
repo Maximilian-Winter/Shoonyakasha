@@ -38,6 +38,8 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 
 namespace Shoonyakasha {
 
@@ -48,6 +50,9 @@ namespace Shoonyakasha {
 ApplicationBase::ApplicationBase(const ApplicationConfig& config)
     : m_config(config)
 {
+    if (m_config.pipelineJsonPath.empty()) {
+        m_config.pipelineJsonPath = defaultPipelinePath();
+    }
     m_startTime = std::chrono::high_resolution_clock::now();
     m_lastFrameTime = m_startTime;
 }
@@ -166,9 +171,37 @@ void ApplicationBase::registerSystems() {
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
 }
 
+std::string ApplicationBase::defaultPipelinePath() {
+    if (const char* env = std::getenv("SHOONYAKASHA_DEFAULT_PIPELINE"); env && *env) {
+        return env;
+    }
+#ifdef SHOONYAKASHA_DEFAULT_PIPELINE_DIR
+    return std::string(SHOONYAKASHA_DEFAULT_PIPELINE_DIR) + "/pipeline.json";
+#else
+    return "pipeline.json";
+#endif
+}
+
+std::string ApplicationBase::iblShaderDirectory() const {
+    // shaders/ibl/ in the working directory, as every example ships it; then
+    // beside the pipeline, which is where the default pipeline keeps its copy.
+    const char* probe = "equirect_to_cubemap.comp.spv";
+    std::error_code ec;
+    if (std::filesystem::exists(std::filesystem::path("shaders/ibl") / probe, ec)) {
+        return "shaders/ibl/";
+    }
+    const std::filesystem::path beside =
+        std::filesystem::absolute(m_config.pipelineJsonPath, ec).parent_path() / "shaders" / "ibl";
+    if (std::filesystem::exists(beside / probe, ec)) {
+        return beside.generic_string() + "/";
+    }
+    return {};
+}
+
 void ApplicationBase::loadIBLTextures() {
     if (m_config.hdrEnvironmentPath.empty()) {
-        m_logger->log(LogLevel::Info, "No HDR environment path — skipping IBL generation");
+        m_logger->log(LogLevel::Info, "No HDR environment path — IBL, if the pipeline samples it, "
+                      "will be a uniform environment");
         return;
     }
 
@@ -176,7 +209,13 @@ void ApplicationBase::loadIBLTextures() {
                   m_config.hdrEnvironmentPath.c_str());
 
     try {
-        IBLGenerator iblGenerator(*m_device, "shaders/ibl/");
+        const std::string shaderDir = iblShaderDirectory();
+        if (shaderDir.empty()) {
+            m_logger->log(LogLevel::Error, "IBL shaders not found in shaders/ibl/ or beside the "
+                          "pipeline — skipping IBL generation");
+            return;
+        }
+        IBLGenerator iblGenerator(*m_device, shaderDir);
         // Paths go through the asset resolver, so "env/sky.hdr" finds the shared
         // assets/ directory from whatever working directory the app was launched
         // in — while a path that already resolves as given is left alone.
@@ -233,7 +272,7 @@ void ApplicationBase::initializeRenderGraph() {
             extent);
     }
 
-    if (!m_renderGraph->compile(extent, imageCount)) {
+    if (!m_renderGraph->compile(extent, imageCount, m_config.maxFramesInFlight)) {
         throw std::runtime_error("Failed to compile render graph: " + m_renderGraph->getLastError());
     }
 
@@ -241,6 +280,28 @@ void ApplicationBase::initializeRenderGraph() {
 }
 
 void ApplicationBase::bindIBLTextures() {
+    if (!m_iblResources.isValid() && m_renderGraph->getDescriptorSet("iblSet")) {
+        // No HDR map, or one that failed to load, but the pipeline samples
+        // IBL: give it an environment of one colour rather than unbound
+        // descriptors.
+        const std::string shaderDir = iblShaderDirectory();
+        if (shaderDir.empty()) {
+            m_logger->log(LogLevel::Warning, "The pipeline samples IBL but no IBL shaders were found "
+                          "in shaders/ibl/ or beside the pipeline");
+        } else {
+            try {
+                IBLGenerator iblGenerator(*m_device, shaderDir);
+                m_iblResources = iblGenerator.generateUniform(m_config.uniformEnvironmentColor,
+                                                              m_config.iblParams);
+                m_logger->log(LogLevel::Info, "Generated a uniform IBL environment (%.2f, %.2f, %.2f)",
+                              m_config.uniformEnvironmentColor.r, m_config.uniformEnvironmentColor.g,
+                              m_config.uniformEnvironmentColor.b);
+            } catch (const std::exception& e) {
+                m_logger->log(LogLevel::Error, "Uniform IBL generation failed: %s", e.what());
+            }
+        }
+    }
+
     if (!m_iblResources.isValid()) {
         m_logger->log(LogLevel::Warning, "IBL resources not available — skipping texture binding");
         return;
@@ -253,7 +314,9 @@ void ApplicationBase::bindIBLTextures() {
         auto iblSet = m_renderGraph->getDescriptorSet(setName);
         if (!iblSet) continue;
 
-        for (uint32_t i = 0; i < m_swapChain->getImageCount(); i++) {
+        // One descriptor set per frame in flight, however many swapchain
+        // images there are.
+        for (uint32_t i = 0; i < m_config.maxFramesInFlight; i++) {
             iblSet->bindImage("irradianceMap", i,
                 ImageResource{m_iblResources.irradianceMap->getCubeView(),
                              m_iblResources.irradianceMap->getSampler()});
@@ -588,7 +651,7 @@ void ApplicationBase::handleSwapChainRecreation() {
             newExtent);
     }
 
-    if (!m_renderGraph->recompile(newExtent, imageCount)) {
+    if (!m_renderGraph->recompile(newExtent, imageCount, m_config.maxFramesInFlight)) {
         throw std::runtime_error("Failed to recompile render graph: " + m_renderGraph->getLastError());
     }
 
@@ -696,8 +759,9 @@ entt::entity ApplicationBase::createDirectionalLight(const glm::vec3& direction,
     auto entity = registry.create();
 
     auto& transform = registry.emplace<ECS::TransformComponent>(entity);
-    glm::vec3 dir = glm::normalize(direction);
-    transform.rotation = glm::vec3(asinf(-dir.y), atan2f(-dir.x, -dir.z), 0.0f);
+    // Forward is the direction the light travels. The pitch used to be
+    // asin(-dir.y), which gave the light the opposite vertical direction.
+    transform.rotation = ECS::TransformComponent::rotationFacing(direction);
     transform.position = glm::vec3(0.0f, 50.0f, 0.0f);
 
     auto& light = registry.emplace<ECS::LightComponent>(entity);

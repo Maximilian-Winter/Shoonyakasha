@@ -199,6 +199,8 @@ static ApplicationConfig toAppConfig(const EngineConfig& fc) {
     }
 
     ac.hdrEnvironmentPath = fc.hdrEnvironmentPath;
+    ac.uniformEnvironmentColor = glm::vec3(fc.uniformEnvironmentColor[0], fc.uniformEnvironmentColor[1],
+                                           fc.uniformEnvironmentColor[2]);
     ac.pipelineJsonPath   = fc.pipelineJsonPath;
     ac.maxFramesInFlight  = fc.maxFramesInFlight;
     ac.enableValidation   = fc.enableValidation;
@@ -426,6 +428,43 @@ void EngineAPI::setCustomMat4(const std::string& key, const glm::mat4& value) {
 
 void EngineAPI::setCustomUint(const std::string& key, uint32_t value) {
     m_impl->app->getRenderGraph().getSceneContext().setCustom(key, value);
+}
+
+void EngineAPI::setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
+                                     float splitLambda, uint32_t resolution,
+                                     float casterExtension) {
+    auto& settings = m_impl->app->getRenderGraph().getSceneContext().sunShadow.settings;
+    settings.cascadeCount = cascadeCount;
+    settings.maxDistance = maxDistance;
+    settings.splitLambda = splitLambda;
+    settings.resolution = resolution;
+    settings.casterExtension = casterExtension;
+}
+
+glm::mat4 EngineAPI::getSunShadowCascade(uint32_t index) const {
+    const auto& cascades = m_impl->app->getRenderGraph().getSceneContext().sunShadow.cascades;
+    if (!cascades.valid || index >= cascades.count) return glm::mat4(1.0f);
+    return cascades.viewProj[index];
+}
+
+bool EngineAPI::setPassEnabled(const std::string& passName, bool enabled) {
+    return m_impl->app->getRenderGraph().setPassEnabled(passName, enabled);
+}
+
+bool EngineAPI::isPassEnabled(const std::string& passName) const {
+    return m_impl->app->getRenderGraph().isPassEnabled(passName);
+}
+
+uint32_t EngineAPI::getPassDrawnCount(const std::string& passName) const {
+    uint32_t drawn = 0, culled = 0;
+    m_impl->app->getRenderGraph().getPassDrawStats(passName, drawn, culled);
+    return drawn;
+}
+
+uint32_t EngineAPI::getPassCulledCount(const std::string& passName) const {
+    uint32_t drawn = 0, culled = 0;
+    m_impl->app->getRenderGraph().getPassDrawStats(passName, drawn, culled);
+    return culled;
 }
 
 

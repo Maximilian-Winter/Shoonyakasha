@@ -16,6 +16,7 @@
 #pragma once
 
 #include "GPU/GPUTypes.h"
+#include "FrameGraph/ShadowCascades.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/Core.h"
 #include <entt/entt.hpp>
@@ -155,6 +156,16 @@ struct ResolvedValue {
 // ============================================================================
 
 struct SceneContext {
+    // ─── Current pass ──────────────────────────────────────────
+    // Set before each geometry pass records its draws; read by "pass.*"
+    // dot-paths, which only per-draw push constants may use.
+    struct PassInfo {
+        uint32_t  repeatIndex = 0;          // pass.repeatIndex
+        uint32_t  repeatCount = 1;          // pass.repeatCount
+        glm::vec2 extent{0.0f};             // pass.extent, pass.texelSize = 1 / extent
+    };
+    PassInfo pass;
+
     // Camera (from active camera entity)
     glm::mat4 cameraView = glm::mat4(1.0f);
     glm::mat4 cameraProjection = glm::mat4(1.0f);       // Vulkan Y-flipped
@@ -192,6 +203,18 @@ struct SceneContext {
 
     std::array<PackedLight, MAX_SCENE_LIGHTS> lights{};
     uint32_t lightCount = 0;
+
+    // ─── Sun shadow ─────────────────────────────────────────────
+    // Cascades for the first directional light with castShadows, refitted to
+    // the camera every frame by updateFromRegistry. Read by
+    // "scene.shadows.sun.*" dot-paths.
+    struct SunShadow {
+        SunShadowSettings settings;         // set by the application
+        SunShadowCascades cascades;         // cascades.valid = false when no light casts
+        int32_t           lightIndex = -1;  // index of the sun in lights[], -1 when none
+        glm::vec4         direction{0.0f};  // xyz = direction the light travels
+    };
+    SunShadow sunShadow;
 
     // ─── Custom Application Values ─────────────────────────────
     // Generic key→value storage for application-specific data.
@@ -241,6 +264,7 @@ public:
         Scene,      // "scene.*"
         Entity,     // "entity.*"
         Const,      // "const.*"
+        Pass,       // "pass.*" — the pass being recorded
         Resource,   // Plain name (graph resource)
         Invalid
     };
@@ -249,6 +273,7 @@ public:
     static bool isScenePath(const std::string& path) { return getPathRoot(path) == PathRoot::Scene; }
     static bool isEntityPath(const std::string& path) { return getPathRoot(path) == PathRoot::Entity; }
     static bool isConstPath(const std::string& path) { return getPathRoot(path) == PathRoot::Const; }
+    static bool isPassPath(const std::string& path) { return getPathRoot(path) == PathRoot::Pass; }
     static bool isResourcePath(const std::string& path) { return getPathRoot(path) == PathRoot::Resource; }
 
     // ─── Validation ─────────────────────────────────────────────
@@ -265,6 +290,7 @@ private:
     ResolvedValue resolveScenePath(std::string_view path, const SceneContext& scene) const;
     ResolvedValue resolveEntityPath(std::string_view path, entt::entity entity, entt::registry& registry) const;
     ResolvedValue resolveConstPath(std::string_view path) const;
+    ResolvedValue resolvePassPath(std::string_view path, const SceneContext& scene) const;
 
     // ─── Path Parsing ───────────────────────────────────────────
 
@@ -294,6 +320,7 @@ struct BufferField {
                                 // representation (uvec4, dvec2, ...). Such a field
                                 // is packed correctly but left zeroed rather than
                                 // being filled with a wrongly-typed value.
+    ResolvedValue fallback;     // written when the source does not resolve; invalid = zeros
 };
 
 struct CompiledBufferLayout {
@@ -305,6 +332,7 @@ struct CompiledBufferLayout {
     bool hasSceneSources = false;   // Contains scene.* paths
     bool hasEntitySources = false;  // Contains entity.* paths
     bool hasConstSources = false;   // Contains const.* paths
+    bool hasPassSources = false;    // Contains pass.* paths
 };
 
 class BufferLayoutResolver {

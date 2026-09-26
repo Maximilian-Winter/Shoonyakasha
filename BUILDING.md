@@ -16,7 +16,7 @@ configure. You do not install them by hand.
 | CMake | 3.21+ | 3.21+ |
 | Generator | Ninja or Visual Studio 17 2022 | Ninja or Make |
 | vcpkg | any clone (CLion's bundled one is fine) | any clone |
-| Vulkan | GPU driver + [LunarG SDK](https://vulkan.lunarg.com/) | GPU driver + Vulkan SDK (including `glslc`) |
+| Vulkan | Vulkan 1.3 GPU driver + [LunarG SDK](https://vulkan.lunarg.com/) | Vulkan 1.3 GPU driver + Vulkan SDK (including `glslc`) |
 | Python (bindings only) | 3.8+, 64-bit | 3.8+, with `python3-dev` |
 
 Install the Vulkan SDK before configuring: the project calls `find_package(Vulkan REQUIRED)` and the pinned vcpkg manifest includes the `vulkan` port. Example builds also require the SDK's `glslc`, located by the shared `cmake/CompileShaders.cmake` helper through `VULKAN_SDK` or `PATH`.

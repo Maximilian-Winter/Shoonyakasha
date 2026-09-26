@@ -74,16 +74,6 @@ RenderGraph::~RenderGraph() {
     }
     m_trackedRenderTargets.clear();
 
-    // Clean up framebuffers before physical resources
-    for (auto& compiled : m_compiled.compiledPasses) {
-        for (auto fb : compiled.framebuffers) {
-            if (fb != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(m_device.getLogicalDevice(), fb, nullptr);
-            }
-        }
-        compiled.framebuffers.clear();
-    }
-
     // Clean up samplers
     for (auto& [name, sampler] : m_compiled.samplers) {
         if (sampler != VK_NULL_HANDLE) {
@@ -109,6 +99,7 @@ RenderGraph::~RenderGraph() {
     // frees every set allocated from it.
     if (m_materialDescriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_materialDescriptorPool, nullptr);
+        m_skeletonSetBuffers.clear();
         m_materialDescriptorPool = VK_NULL_HANDLE;
     }
 
@@ -126,6 +117,69 @@ void RenderGraph::loadFromFile(const std::string& filePath) {
     m_logger->log(LogLevel::Info, "Loaded %zu resources, %zu passes from JSON",
                   m_builder.getResourceDeclarations().size(),
                   m_builder.getPassDeclarations().size());
+
+    for (const auto& [name, enabled] : m_pendingPassEnabled) {
+        if (!setPassEnabled(name, enabled)) {
+            m_logger->log(LogLevel::Warning,
+                "setPassEnabled('%s') was called before loading, but '%s' has no such pass",
+                name.c_str(), filePath.c_str());
+        }
+    }
+    m_pendingPassEnabled.clear();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Pass Enable/Disable
+// ═══════════════════════════════════════════════════════════════
+
+bool RenderGraph::setPassEnabled(const std::string& passName, bool enabled) {
+    if (m_builder.getPassDeclarations().empty()) {
+        // Nothing loaded yet; applied by loadFromFile.
+        m_pendingPassEnabled[passName] = enabled;
+        return true;
+    }
+    if (PassDeclaration* pass = m_builder.getPass(passName)) {
+        pass->enabled = enabled;
+        return true;
+    }
+    // The declared name of a repeated pass switches every instance.
+    bool found = false;
+    for (auto& pass : m_builder.getPassDeclarations()) {
+        if (pass.repeatGroup == passName) {
+            pass.enabled = enabled;
+            found = true;
+        }
+    }
+    if (!found) {
+        m_logger->log(LogLevel::Warning, "setPassEnabled: no pass named '%s'", passName.c_str());
+    }
+    return found;
+}
+
+bool RenderGraph::isPassEnabled(const std::string& passName) const {
+    if (auto it = m_pendingPassEnabled.find(passName); it != m_pendingPassEnabled.end()) {
+        return it->second;
+    }
+    if (const PassDeclaration* pass = m_builder.getPass(passName)) {
+        return pass->enabled;
+    }
+    // A repeated pass's declared name: enabled when every instance is.
+    bool found = false;
+    for (const auto& pass : m_builder.getPassDeclarations()) {
+        if (pass.repeatGroup == passName) {
+            if (!pass.enabled) return false;
+            found = true;
+        }
+    }
+    return found;
+}
+
+bool RenderGraph::getPassDrawStats(const std::string& passName, uint32_t& drawn, uint32_t& culled) const {
+    const auto* stats = m_frameGraphRenderer ? m_frameGraphRenderer->getPassDrawStats(passName) : nullptr;
+    if (!stats) return false;
+    drawn = stats->drawn;
+    culled = stats->culled;
+    return true;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1446,6 +1500,8 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
         // Set up auto geometry renderers for passes with entityDataBinding
         setupAutoGeometryRenderers();
 
+        initializePersistentImages();
+
         m_logger->log(LogLevel::Info, "Render graph compiled successfully");
     }
 
@@ -1477,15 +1533,6 @@ bool RenderGraph::recompile(VkExtent2D referenceExtent, uint32_t swapchainImageC
         }
     }
     m_trackedRenderTargets.clear();
-
-    // Clean up old framebuffers
-    for (auto& compiled : m_compiled.compiledPasses) {
-        for (auto fb : compiled.framebuffers) {
-            if (fb != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(m_device.getLogicalDevice(), fb, nullptr);
-            }
-        }
-    }
 
     // Physical resources (owned VulkanImages/Buffers) are cleaned up
     // by their unique_ptrs when the CompileResult is replaced
@@ -1655,12 +1702,7 @@ void RenderGraph::setupAutoGeometryRenderers() {
 
         // Skip if not a geometry type
         const auto& type = passDecl.execution.type;
-        if (type != "opaque_geometry" &&
-            type != "transparent_geometry" &&
-            type != "shadow_casters" &&
-            type != "skinned_geometry" &&
-            type != "skinned_transparent" &&
-            type != "sprite_geometry") continue;
+        if (!isEntityGeometryExecutionType(type)) continue;
 
         // Auto-register the callback!
         // Capture by value since passDecl reference may be invalidated
@@ -1668,6 +1710,13 @@ void RenderGraph::setupAutoGeometryRenderers() {
         passDecl.sceneRendererFn = [this, passIndex](const PassExecuteContext& ctx) {
             const auto& compiled = m_compiled.compiledPasses[passIndex];
             const auto& decl = m_builder.getPassDeclarations()[passIndex];
+
+            // What pass.* dot-paths read while this pass's draws are recorded
+            auto& passInfo = getSceneContext().pass;
+            passInfo.repeatIndex = decl.repeatIndex;
+            passInfo.repeatCount = decl.repeatCount;
+            passInfo.extent = glm::vec2(static_cast<float>(compiled.extent.width),
+                                        static_cast<float>(compiled.extent.height));
 
             m_frameGraphRenderer->executeGeometryPass(
                 compiled,
@@ -2089,6 +2138,7 @@ void RenderGraph::fillBuffer(void* buffer,
 void RenderGraph::createMaterialDescriptorPool(uint32_t maxSets) {
     if (m_materialDescriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_materialDescriptorPool, nullptr);
+        m_skeletonSetBuffers.clear();
     }
 
     // Pool sizes for per-entity descriptors (textures + skeleton SSBOs)
@@ -2122,6 +2172,7 @@ void RenderGraph::releaseDestroyedEntityDescriptors(uint32_t frameIndex) {
         if (it->first.frameIndex == frameIndex &&
             !registry.valid(static_cast<entt::entity>(it->first.entityId))) {
             released.push_back(it->second);
+            m_skeletonSetBuffers.erase(it->second);
             it = m_materialDescriptorCache.erase(it);
         } else {
             ++it;
@@ -2138,7 +2189,7 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
                                         entt::registry& registry,
                                         const std::string& descriptorSetName,
                                         VkCommandBuffer cmd,
-                                        VkPipelineLayout pipelineLayout,
+                                        const CompiledPass& pass,
                                         uint32_t frameIndex) {
     if (!m_ecsBindingEnabled) {
         m_logger->log(LogLevel::Warning, "bindMaterialTextures: ECS binding not enabled");
@@ -2297,22 +2348,12 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
         m_materialDescriptorCache[cacheKey] = descriptorSet;
     }
 
-    // Find set index again for binding (could cache this too)
-    uint32_t setIndex = 0;
-    for (const auto& pass : m_compiled.compiledPasses) {
-        const auto& passDecl = m_builder.getPassDeclarations()[pass.declIndex];
-        for (size_t i = 0; i < passDecl.descriptorSetRefs.size(); ++i) {
-            if (passDecl.descriptorSetRefs[i] == descriptorSetName) {
-                setIndex = static_cast<uint32_t>(i);
-                break;
-            }
-        }
-    }
-
-    // Bind the descriptor set
-    if (descriptorSet != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
-                                setIndex, 1, &descriptorSet, 0, nullptr);
+    // Bound where this pass lists the set, which need not be where other
+    // passes list it.
+    const auto setIndex = descriptorSetIndexIn(pass, descriptorSetName);
+    if (descriptorSet != VK_NULL_HANDLE && setIndex) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pass.pipelineLayout,
+                                *setIndex, 1, &descriptorSet, 0, nullptr);
     }
 }
 
@@ -2325,7 +2366,7 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
                                    entt::registry& registry,
                                    const std::string& descriptorSetName,
                                    VkCommandBuffer cmd,
-                                   VkPipelineLayout pipelineLayout,
+                                   const CompiledPass& pass,
                                    uint32_t frameIndex) {
     if (!m_ecsBindingEnabled) {
         return;
@@ -2397,43 +2438,103 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
         m_materialDescriptorCache[cacheKey] = descriptorSet;
     }
 
-    // Update the SSBO descriptor with the entity's bone buffer
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = skeleton->boneSSBO->buffer;
-    bufferInfo.offset = 0;
-    bufferInfo.range = skeleton->ssboSize();
+    // Point the set at the entity's bone buffer, when it is not already.
+    // The matrices change every frame but are written into the same buffer.
+    const std::pair<VkBuffer, VkDeviceSize> contents{skeleton->boneSSBO->buffer, skeleton->ssboSize()};
+    auto written = m_skeletonSetBuffers.find(descriptorSet);
+    if (written == m_skeletonSetBuffers.end() || written->second != contents) {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = contents.first;
+        bufferInfo.offset = 0;
+        bufferInfo.range = contents.second;
 
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = descriptorSet;
-    write.dstBinding = 0;
-    write.dstArrayElement = 0;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    write.descriptorCount = 1;
-    write.pBufferInfo = &bufferInfo;
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = descriptorSet;
+        write.dstBinding = 0;
+        write.dstArrayElement = 0;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.descriptorCount = 1;
+        write.pBufferInfo = &bufferInfo;
 
-    vkUpdateDescriptorSets(m_device.getLogicalDevice(), 1, &write, 0, nullptr);
+        vkUpdateDescriptorSets(m_device.getLogicalDevice(), 1, &write, 0, nullptr);
+        m_skeletonSetBuffers[descriptorSet] = contents;
+    }
 
-    // Find set index for binding
-    uint32_t setIndex = 0;
-    bool foundSetIndex = false;
-    for (const auto& pass : m_compiled.compiledPasses) {
-        const auto& passDecl = m_builder.getPassDeclarations()[pass.declIndex];
-        for (size_t i = 0; i < passDecl.descriptorSetRefs.size(); ++i) {
-            if (passDecl.descriptorSetRefs[i] == descriptorSetName) {
-                setIndex = static_cast<uint32_t>(i);
-                foundSetIndex = true;
-                break;
+    const auto setIndex = descriptorSetIndexIn(pass, descriptorSetName);
+    if (descriptorSet != VK_NULL_HANDLE && setIndex) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pass.pipelineLayout,
+                                *setIndex, 1, &descriptorSet, 0, nullptr);
+    }
+}
+
+void RenderGraph::initializePersistentImages() {
+    // A persistent image's first barrier each frame starts from the layout
+    // the frame leaves it in, so it has to be in that layout, with defined
+    // contents, before the first frame.
+    const auto& declarations = m_builder.getResourceDeclarations();
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    for (size_t i = 0; i < declarations.size() && i < m_compiled.physicalResources.size(); ++i) {
+        const auto& decl = declarations[i];
+        if (decl.kind != ResourceKind::Image || decl.imported || !decl.imageDesc.persistent) continue;
+        const auto* img = std::get_if<PhysicalImage>(&m_compiled.physicalResources[i]);
+        if (!img || img->vkImage == VK_NULL_HANDLE) continue;
+
+        if (cmd == VK_NULL_HANDLE) cmd = m_device.beginSingleTimeCommands();
+
+        const VkImageSubresourceRange all{img->aspect, 0, img->shape.mipLevels, 0, img->shape.arrayLayers};
+        VkImageMemoryBarrier toClear{};
+        toClear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        toClear.srcAccessMask = 0;
+        toClear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        toClear.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        toClear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        toClear.srcQueueFamilyIndex = toClear.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toClear.image = img->vkImage;
+        toClear.subresourceRange = all;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &toClear);
+
+        if (img->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+            const VkClearDepthStencilValue zero{1.0f, 0};
+            vkCmdClearDepthStencilImage(cmd, img->vkImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &all);
+        } else {
+            const VkClearColorValue zero{};
+            vkCmdClearColorImage(cmd, img->vkImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &all);
+        }
+
+        std::vector<VkImageMemoryBarrier> toFinal;
+        for (uint32_t mip = 0; mip < img->shape.mipLevels; ++mip) {
+            for (uint32_t layer = 0; layer < img->shape.arrayLayers; ++layer) {
+                const size_t index = static_cast<size_t>(mip) * img->shape.arrayLayers + layer;
+                if (index >= img->finalLayouts.size()) continue;
+                const VkImageLayout layout = img->finalLayouts[index];
+                if (layout == VK_IMAGE_LAYOUT_UNDEFINED) continue;   // never accessed
+                VkImageMemoryBarrier b = toClear;
+                b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+                b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                b.newLayout = layout;
+                b.subresourceRange = {img->aspect, mip, 1, layer, 1};
+                toFinal.push_back(b);
             }
         }
-        if (foundSetIndex) break;
+        if (!toFinal.empty()) {
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                 0, 0, nullptr, 0, nullptr, static_cast<uint32_t>(toFinal.size()), toFinal.data());
+        }
+        m_logger->log(LogLevel::Info, "Persistent image '%s' cleared", decl.name.c_str());
     }
+    if (cmd != VK_NULL_HANDLE) m_device.endSingleTimeCommands(cmd);
+}
 
-    // Bind the descriptor set
-    if (descriptorSet != VK_NULL_HANDLE) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
-                                setIndex, 1, &descriptorSet, 0, nullptr);
+std::optional<uint32_t> RenderGraph::descriptorSetIndexIn(const CompiledPass& pass,
+                                                          const std::string& descriptorSetName) const {
+    const auto& refs = m_builder.getPassDeclarations()[pass.declIndex].descriptorSetRefs;
+    for (size_t i = 0; i < refs.size(); ++i) {
+        if (refs[i] == descriptorSetName) return static_cast<uint32_t>(i);
     }
+    return std::nullopt;
 }
 
 } // namespace FrameGraph

@@ -16,6 +16,7 @@
 
 #define STB_IMAGE_IMPLEMENTATION_SKIP  // Already defined elsewhere
 #include <array>
+#include <vector>
 #include <stb_image.h>
 
 namespace Shoonyakasha {
@@ -252,7 +253,34 @@ VulkanTexture* IBLGenerator::loadHDRTexture(const std::string& path) {
 
 IBLResources IBLGenerator::generate(const std::string& hdrPath, const IBLGenerationParams& params) {
     std::cout << "[IBL] Generating IBL textures from: " << hdrPath << std::endl;
+    std::cout << "[IBL] Loading HDR texture..." << std::endl;
+    return generateFromEquirect(std::unique_ptr<VulkanTexture>(loadHDRTexture(hdrPath)), params);
+}
 
+IBLResources IBLGenerator::generateUniform(const glm::vec3& color, const IBLGenerationParams& params) {
+    std::cout << "[IBL] Generating uniform IBL" << std::endl;
+    // A small equirectangular image of one colour goes through the same
+    // conversion and convolution as a loaded HDR.
+    constexpr uint32_t width = 8, height = 4;
+    std::vector<float> pixels(static_cast<size_t>(width) * height * 4);
+    for (size_t i = 0; i < pixels.size(); i += 4) {
+        pixels[i] = color.r;
+        pixels[i + 1] = color.g;
+        pixels[i + 2] = color.b;
+        pixels[i + 3] = 1.0f;
+    }
+    auto equirect = std::make_unique<VulkanTexture>(m_device, pixels.data(), width, height,
+                                                    4, VK_FORMAT_R32G32B32A32_SFLOAT);
+    IBLGenerationParams small = params;
+    // Nothing varies with direction, so the maps can be tiny.
+    small.environmentSize = std::min(params.environmentSize, 64u);
+    small.prefilterSize = std::min(params.prefilterSize, 64u);
+    small.irradianceSize = std::min(params.irradianceSize, 16u);
+    return generateFromEquirect(std::move(equirect), small);
+}
+
+IBLResources IBLGenerator::generateFromEquirect(std::unique_ptr<VulkanTexture> equirect,
+                                                const IBLGenerationParams& params) {
     IBLResources resources{};
 
     // Every step below can throw — a missing compute shader is enough, which is
@@ -263,13 +291,8 @@ IBLResources IBLGenerator::generate(const std::string& hdrPath, const IBLGenerat
     //
     // The caller only ever sees the exception, so cleaning up here is the only
     // place it can happen.
-    std::unique_ptr<VulkanTexture> equirect;
     try {
-        // Step 1: Load HDR equirectangular image
-        std::cout << "[IBL] Loading HDR texture..." << std::endl;
-        equirect.reset(loadHDRTexture(hdrPath));
-
-        // Step 2: Convert to cubemap
+        // Convert to cubemap
         std::cout << "[IBL] Converting equirectangular to cubemap..." << std::endl;
         resources.environmentMap = convertEquirectToCubemap(equirect.get(), params.environmentSize);
 
@@ -277,19 +300,19 @@ IBLResources IBLGenerator::generate(const std::string& hdrPath, const IBLGenerat
         vkDeviceWaitIdle(m_device.getLogicalDevice());
         equirect.reset();
 
-        // Step 3: Generate irradiance map
+        // Generate irradiance map
         std::cout << "[IBL] Generating irradiance map..." << std::endl;
         resources.irradianceMap = generateIrradianceMap(resources.environmentMap,
                                                          params.irradianceSize,
                                                          params.irradianceSamples);
 
-        // Step 4: Generate prefiltered environment map
+        // Generate prefiltered environment map
         std::cout << "[IBL] Generating prefiltered environment map..." << std::endl;
         resources.prefilterMap = generatePrefilterMap(resources.environmentMap,
                                                        params.prefilterSize,
                                                        params.prefilterSamples);
 
-        // Step 5: Generate BRDF LUT
+        // Generate BRDF LUT
         std::cout << "[IBL] Generating BRDF LUT..." << std::endl;
         resources.brdfLUT = generateBRDFLUT(params.brdfLUTSize, params.brdfSamples);
     } catch (...) {

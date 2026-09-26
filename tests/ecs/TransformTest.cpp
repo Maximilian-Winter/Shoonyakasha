@@ -261,3 +261,18 @@ TEST(EntityHelperHierarchy, TransformSystem_SurvivesCyclicHierarchy) {
     ECS::TransformSystem sys;
     EXPECT_NO_FATAL_FAILURE(sys.update(registry, 0.016f));
 }
+
+TEST(Transform, RotationFacingPointsForwardAlongTheDirection) {
+    // Directional lights are oriented with this; their getForward() is the
+    // direction the light travels, which a sun shining down must keep.
+    for (const glm::vec3 dir : {glm::vec3(-0.55f, -0.5f, 0.67f), glm::vec3(0.3f, 0.8f, -0.2f),
+                                glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f)}) {
+        ECS::TransformComponent t;
+        t.rotation = ECS::TransformComponent::rotationFacing(dir);
+        const glm::vec3 forward = t.getForward();
+        const glm::vec3 expected = glm::normalize(dir);
+        EXPECT_NEAR(forward.x, expected.x, 1e-5f);
+        EXPECT_NEAR(forward.y, expected.y, 1e-5f);
+        EXPECT_NEAR(forward.z, expected.z, 1e-5f);
+    }
+}

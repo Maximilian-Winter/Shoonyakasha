@@ -73,6 +73,13 @@ struct GltfPrimitive {
     // ─── Transforms ─────────────────────────────────────────
     glm::mat4 worldTransform    = glm::mat4(1.0f);
 
+    // ─── Bounds ─────────────────────────────────────────────
+    // Of the vertices as uploaded (transform baked in when flattened; bind
+    // pose for skinned meshes).
+    glm::vec3 boundsMin         = glm::vec3(0.0f);
+    glm::vec3 boundsMax         = glm::vec3(0.0f);
+    bool      hasBounds         = false;
+
     // ─── Convenience ────────────────────────────────────────
     bool isTransparent() const { return alphaMode == Shoonyakasha::AlphaMode::Blend; }
     bool isMasked() const { return alphaMode == Shoonyakasha::AlphaMode::Mask; }
@@ -279,7 +286,9 @@ private:
         const cgltf_primitive& primitive,
         const glm::mat4& worldTransform,
         uint32_t& outVertexCount,
-        uint32_t& outVertexStride
+        uint32_t& outVertexStride,
+        glm::vec3& outBoundsMin,
+        glm::vec3& outBoundsMax
     );
 
     /// Build index GPUBuffer

@@ -9,12 +9,13 @@ environment behind it. The camera circles the shrine.
 
 The sun casts shadows. ShadowPass renders depth from the sun into a 2048x2048
 map through an orthographic projection that this script builds and hands to
-the shaders as a custom mat4; the lighting pass compares against it with a
-5x5 PCF kernel.
+the shaders as a custom mat4; the lighting pass compares against it through a
+comparison sampler with a 5x5 kernel of filtered lookups.
 
 Keys:
     SPACE   stop or resume the orbit; while stopped, WASD/Q/E and the right
             mouse button fly the camera
+    O       turn sun shadows off or on (disables ShadowPass)
     P       save a screenshot to shrine_screenshot.png
 
 Usage:
@@ -209,6 +210,12 @@ class Controls:
     def update(self, dt):
         if self.pressed(keys.SPACE):
             orbit.running = not orbit.running
+        if self.pressed(keys.O):
+            # A disabled pass still clears its depth target, to 1.0 here, so
+            # every receiver passes the comparison and the sun lights everything.
+            enabled = not engine.is_pass_enabled("ShadowPass")
+            engine.set_pass_enabled("ShadowPass", enabled)
+            print("sun shadows", "on" if enabled else "off")
         if self.pressed(keys.P):
             path = "shrine_screenshot.png"
             print("screenshot ->", path if engine.capture_screenshot(path) else "failed")

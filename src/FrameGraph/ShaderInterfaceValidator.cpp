@@ -113,6 +113,12 @@ bool flatten(const SpvReflectBlockVariable& v, const std::string& prefix, std::v
         leaf.components = v.numeric.matrix.row_count;
         leaf.columns = v.numeric.matrix.column_count;
         leaf.matrixStride = v.numeric.matrix.stride;
+        // SPIRV-Reflect reports no matrix stride for an array of matrices.
+        // An element of such an array is exactly its columns, so the column
+        // stride is the array stride divided by the column count.
+        if (leaf.matrixStride == 0 && v.array.dims_count > 0 && leaf.columns > 0) {
+            leaf.matrixStride = v.array.stride / leaf.columns;
+        }
     } else if (flags & SPV_REFLECT_TYPE_FLAG_VECTOR) {
         leaf.components = v.numeric.vector.component_count;
     }

@@ -144,6 +144,7 @@ struct DescriptorBindingDesc {
 
     // Auto-binding: automatically bind resources at compile time
     std::string                 autoBindResource;   // Resource name from graph resources (images)
+    SubresourceRange            autoBindSubresource; // Part of autoBindResource to bind, JSON "mip"/"mips"/"layer"/"layers"
     std::string                 autoBindSampler;    // Sampler name from graph samplers
     std::string                 autoBindBuffer;     // Buffer name (for external UBOs)
 };
@@ -160,6 +161,11 @@ struct DescriptorSetLayoutDesc {
 struct ResourceAccess {
     ResourceHandle  handle;
     ResourceUsage   usage;
+
+    /// Mip levels and array layers touched, JSON "mip"/"mips" and
+    /// "layer"/"layers". Defaults to the whole image. An attachment covering one
+    /// layer renders into that layer; several layers render layered.
+    SubresourceRange subresource;
 
     /// Leave the resource in PRESENT_SRC_KHR after this pass.
     ///
@@ -214,6 +220,10 @@ struct PassExecuteContext {
     // Auto-created descriptor sets for this pass (ordered by descriptorSetRefs)
     const std::vector<std::shared_ptr<VulkanDescriptorSet>>* descriptorSets = nullptr;
 
+    // For an instance of a JSON "repeat": its index value and the count
+    uint32_t    repeatIndex = 0;
+    uint32_t    repeatCount = 1;
+
     explicit PassExecuteContext(VulkanCommandBuilder& cmdBuilder) : cmd(cmdBuilder) {}
 
     // Physical resource accessors
@@ -242,6 +252,16 @@ struct PipelineDesc {
 
     bool depthTest  = true;
     bool depthWrite = true;
+    // Depth test comparison, JSON "depthCompareOp": "never", "less",
+    // "equal", "less_or_equal", "greater", "not_equal", "greater_or_equal",
+    // "always". "greater" with a depth clear of 0 gives reverse-Z; "equal" or
+    // "less_or_equal" re-tests against a depth prepass.
+    std::string depthCompareOp = "less";
+    // Clamp fragment depth to [0, 1] instead of clipping at the near and far
+    // planes, JSON "depthClamp". Directional shadow passes use it so casters
+    // between the light and the near plane still write depth. Needs the
+    // depthClamp device feature; ignored with a warning where it is missing.
+    bool depthClamp = false;
     std::string cullMode      = "back";           // "none", "front", "back", "front_and_back"
     std::string blending      = "none";           // "none", "alpha", "additive", "custom"
     std::string topology      = "triangle_list";  // "triangle_list", "triangle_strip", "line_list", "point_list"
@@ -308,6 +328,45 @@ struct DispatchDimension {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// Entity geometry execution types
+// ═══════════════════════════════════════════════════════════════
+
+/// Execution types whose draws come from the built-in entity renderer
+/// (FrameGraphRenderer). The executor dispatches these and RenderGraph
+/// registers the renderer for them, both through this one list, so a type
+/// cannot be accepted by one and dropped by the other.
+inline bool isEntityGeometryExecutionType(const std::string& type) {
+    return type == "opaque_geometry" ||
+           type == "transparent_geometry" ||
+           type == "shadow_casters" ||
+           type == "skinned_geometry" ||
+           type == "skinned_transparent" ||
+           type == "skinned_shadow_casters" ||
+           type == "sprite_geometry";
+}
+
+/// Narrows an entity geometry pass by material alpha mode, JSON
+/// execution "alphaFilter". Lets opaque and alpha-tested geometry use
+/// separate pipelines: opaque shadow casters need no fragment shader, and
+/// only masked ones pay for the texture read and discard.
+enum class AlphaFilter {
+    Any,     // "any": whatever the execution type accepts
+    Opaque,  // "opaque": AlphaMode::Opaque only
+    Mask     // "mask": AlphaMode::Mask only
+};
+
+/// The view an entity geometry pass culls and sorts against, JSON execution
+/// "view". Default is the camera for passes that draw what the camera sees,
+/// and no culling for shadow casters, which must also draw what lies outside
+/// the camera's view.
+enum class CullView {
+    Default,     // omitted
+    None,        // "none": draw every entity the filter accepts
+    Camera,      // "camera": the main camera's frustum
+    SunCascade   // "shadows.sun.cascades[N]": sun cascade N's light volume
+};
+
+// ═══════════════════════════════════════════════════════════════
 // Execution Description — how a pass executes (auto-callback config)
 // 位先於動 — Position before action
 // ═══════════════════════════════════════════════════════════════
@@ -323,9 +382,11 @@ struct ExecutionDesc {
     //   "scene_geometry"     - Hybrid: framework binds, callback draws
     //   "opaque_geometry"    - Built-in: render opaque entities
     //   "transparent_geometry" - Built-in: render transparent entities (back-to-front)
-    //   "shadow_casters"     - Built-in: render shadow-casting entities
+    //   "shadow_casters"     - Built-in: render static shadow-casting entities
     //   "skinned_geometry"   - Built-in: render skinned (animated) entities
     //   "skinned_transparent" - Built-in: render skinned transparent entities
+    //   "skinned_shadow_casters" - Built-in: render skinned shadow-casting entities
+    //   "sprite_geometry"    - Built-in: render sprites and UI panels
     std::string type = "none";
 
     // For "draw" type
@@ -342,6 +403,9 @@ struct ExecutionDesc {
     std::string sortMode = "none";          // "none", "front_to_back", "back_to_front"
     std::string entityDataBinding;          // Reference to entityDataBindings config (e.g., "pbrOpaque")
     uint32_t    renderLayerMask = 0xFFFFFFFF;  // Bitmask for render layer filtering
+    AlphaFilter alphaFilter = AlphaFilter::Any;  // Narrow by material alpha mode
+    CullView    view = CullView::Default;        // What to cull and sort against
+    uint32_t    viewIndex = 0;                   // Cascade for CullView::SunCascade
     int32_t     lightIndex = -1;            // For shadow_casters: which light's VP to use
 
     // Common options
@@ -387,6 +451,13 @@ struct PassDeclaration {
 
     // Whether this pass is enabled (disabled passes are skipped during execution)
     bool                        enabled = true;
+
+    // Set when the pass is one instance of a JSON "repeat": the declared
+    // name (e.g. "SunShadow"), this instance's index value and the count.
+    // Readable in shaders through the pass.repeatIndex/repeatCount dot-paths.
+    std::string                 repeatGroup;
+    uint32_t                    repeatIndex = 0;
+    uint32_t                    repeatCount = 1;
 };
 
 } // namespace FrameGraph

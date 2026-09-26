@@ -189,6 +189,51 @@ class PipelineValidation(unittest.TestCase):
     def test_a_valid_pipeline_has_nothing_to_report(self):
         self.assertEqual([], self.problems(self.MINIMAL))
 
+    def test_repeated_passes_are_checked_per_instance(self):
+        document = dict(self.MINIMAL)
+        document["resources"] = self.MINIMAL["resources"] + [
+            {"name": "shadow0", "kind": "image"}, {"name": "shadow1", "kind": "image"}]
+        document["passes"] = [{
+            "name": "Shadow", "type": "graphics",
+            "repeat": {"count": 3, "index": "c"},
+            "outputs": [{"resource": "shadow{c}", "usage": "depth_write"}],
+        }] + self.MINIMAL["passes"]
+        found = self.problems(document)
+        # shadow0 and shadow1 exist; the third instance names shadow2
+        undeclared = [p for p in found if "not declared" in p.message]
+        self.assertEqual(1, len(undeclared))
+        self.assertIn("Shadow[2]", undeclared[0].where)
+        self.assertIn("shadow2", undeclared[0].message)
+
+    def test_repeat_substitutes_numbers_like_the_engine(self):
+        problems = []
+        instance = pipeline._substitute(
+            {"layer": "{c}", "mip": "{c-1}", "path": "x{c+1}.spv", "other": "{d}"},
+            "c", 2, "here", problems)
+        self.assertEqual({"layer": 2, "mip": 1, "path": "x3.spv", "other": "{d}"}, instance)
+        self.assertEqual([], problems)
+
+    def test_repeat_step_counts_down_like_the_engine(self):
+        import copy
+        document = copy.deepcopy(self.MINIMAL)
+        document["resources"].append({"name": "chain", "kind": "image"})
+        document["passes"].insert(0, {
+            "name": "Up{m}", "type": "graphics",
+            "repeat": {"count": 3, "index": "m", "first": 2, "step": -1},
+            "outputs": [{"resource": "chain", "usage": "color_blend", "mip": "{m}"}]})
+        expanded = pipeline._expand_repeats(document["passes"], "<json>", [])
+        self.assertEqual(["Up2", "Up1", "Up0"], [p["name"] for p in expanded[:3]])
+        self.assertEqual([2, 1, 0], [p["outputs"][0]["mip"] for p in expanded[:3]])
+
+        document["passes"][0]["repeat"]["first"] = 1
+        self.assertTrue(any("at least 0" in p.message for p in self.problems(document)))
+
+    def test_repeat_without_a_count_is_reported(self):
+        document = dict(self.MINIMAL)
+        document["passes"] = [dict(self.MINIMAL["passes"][0], repeat={"index": "i"})]
+        found = self.problems(document)
+        self.assertTrue(any("count" in p.message for p in found))
+
     def test_unknown_usage_is_reported_with_a_suggestion(self):
         document = dict(self.MINIMAL)
         document["passes"] = [{
@@ -241,6 +286,21 @@ class PipelineValidation(unittest.TestCase):
             self.assertEqual([], errors, "%s: %s" % (path.name, errors))
             checked += 1
         self.assertGreater(checked, 5, "expected to find shipped pipelines")
+
+    def test_the_default_pipeline_ships_complete(self):
+        # Every shader it names is compiled and in the package: a wheel has no
+        # compiler to build them, so a missing .spv is an error here too.
+        self.assertTrue(pipeline.DEFAULT.is_file())
+        self.assertEqual([], pipeline.validate(pipeline.DEFAULT))
+        ibl = pipeline.DEFAULT.parent / "shaders" / "ibl"
+        for name in ("equirect_to_cubemap", "irradiance_convolution", "prefilter_convolution"):
+            self.assertTrue((ibl / (name + ".comp.spv")).is_file(), name)
+
+    def test_the_default_pipeline_spirv_is_current(self):
+        # A shader edited without recompiling would ship the old program.
+        stale = [str(p) for p in sorted((pipeline.DEFAULT.parent / "shaders").rglob("*"))
+                 if p.suffix in shaders.SHADER_EXTENSIONS and shaders.is_stale(p)]
+        self.assertEqual([], stale)
 
 
 class VocabularyMatchesTheEngine(unittest.TestCase):

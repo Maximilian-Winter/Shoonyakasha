@@ -92,8 +92,9 @@ struct EngineConfig {
     std::string logFile = "application.log";
     int logLevel = 1;   // 0=Debug, 1=Info, 2=Warning, 3=Error
 
-    std::string hdrEnvironmentPath;   // empty = no IBL
-    std::string pipelineJsonPath;     // Required — JSON render graph
+    std::string hdrEnvironmentPath;   // empty = uniform IBL, for pipelines that sample it
+    float uniformEnvironmentColor[3] = {0.25f, 0.28f, 0.33f};
+    std::string pipelineJsonPath;     // empty = the default pipeline
 
     uint32_t maxFramesInFlight = 2;
 

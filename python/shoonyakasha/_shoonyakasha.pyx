@@ -1017,7 +1017,8 @@ cdef class Engine:
                  str hdr_environment_path="",
                  str pipeline_json_path="",
                  int max_frames_in_flight=2,
-                 dict render_graph_parameters=None):
+                 dict render_graph_parameters=None,
+                 environment_color=(0.25, 0.28, 0.33)):
         """Create engine with configuration.
 
         Args:
@@ -1026,11 +1027,18 @@ cdef class Engine:
             height: Window height
             log_file: Log file path
             log_level: 0=Debug, 1=Info, 2=Warning, 3=Error
-            hdr_environment_path: HDR environment map (empty = no IBL)
-            pipeline_json_path: JSON render graph (required)
+            hdr_environment_path: HDR environment map. Empty: a pipeline
+                that samples IBL gets a uniform environment_color instead.
+            pipeline_json_path: JSON render graph. Empty: the default
+                pipeline, shoonyakasha.pipeline.DEFAULT.
             max_frames_in_flight: Vulkan frames in flight
             render_graph_parameters: Dict of str→int for SSBO sizing etc.
+            environment_color: (r, g, b) of the uniform environment used
+                when there is no HDR map.
         """
+        if not pipeline_json_path:
+            from . import pipeline as _pipeline
+            pipeline_json_path = str(_pipeline.DEFAULT)
         cdef EngineConfig cfg
         cfg.width = width
         cfg.height = height
@@ -1038,6 +1046,8 @@ cdef class Engine:
         cfg.logFile = log_file.encode('utf-8')
         cfg.logLevel = log_level
         cfg.hdrEnvironmentPath = hdr_environment_path.encode('utf-8')
+        for i in range(3):
+            cfg.uniformEnvironmentColor[i] = float(environment_color[i])
         cfg.pipelineJsonPath = pipeline_json_path.encode('utf-8')
         cfg.maxFramesInFlight = max_frames_in_flight
 
@@ -1381,6 +1391,44 @@ cdef class Engine:
     def set_custom_uint(self, str key, uint32_t value):
         """Set custom uint for shader uniforms."""
         self._ptr.setCustomUint(key.encode('utf-8'), value)
+
+    def set_sun_shadows(self, uint32_t cascades=4, float max_distance=60.0,
+                        float split_lambda=0.75, uint32_t resolution=2048,
+                        float caster_extension=50.0):
+        """Configure the sun's shadow cascades.
+
+        Applies to the first directional light with cast shadows on. The engine
+        refits the cascades to the camera every frame and publishes them as
+        scene.shadows.sun.* dot-paths. `resolution` is the shadow map's size in
+        texels and should match it; `split_lambda` blends evenly spaced (0)
+        and logarithmic (1) splits.
+        """
+        self._ptr.setSunShadowSettings(cascades, max_distance, split_lambda,
+                                       resolution, caster_extension)
+
+    def get_sun_shadow_cascade(self, uint32_t index):
+        """World-to-light-clip matrix of a sun cascade this frame, as four columns."""
+        return _mat4_to_tuple(self._ptr.getSunShadowCascade(index))
+
+    def set_pass_enabled(self, str pass_name, bint enabled):
+        """Turn a pipeline pass on or off from the next frame.
+
+        A disabled pass draws nothing but still clears its attachments, so a
+        disabled shadow pass leaves everything lit. May be called from the
+        on_init callback, before the pipeline is loaded. The declared name of a
+        repeated pass ("repeat" in the JSON) switches every instance. Returns
+        False if the pipeline has no pass with that name.
+        """
+        return self._ptr.setPassEnabled(pass_name.encode('utf-8'), enabled)
+
+    def get_pass_draw_stats(self, str pass_name):
+        """(drawn, culled): entities a geometry pass drew and culled as outside its view, last run."""
+        name = pass_name.encode('utf-8')
+        return (self._ptr.getPassDrawnCount(name), self._ptr.getPassCulledCount(name))
+
+    def is_pass_enabled(self, str pass_name):
+        """Whether a pipeline pass is enabled; False if there is no such pass."""
+        return self._ptr.isPassEnabled(pass_name.encode('utf-8'))
 
 
 # ═══════════════════════════════════════════════════════════════

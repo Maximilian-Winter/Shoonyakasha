@@ -191,6 +191,39 @@ public:
     void setCustomMat4(const std::string& key, const glm::mat4& value);
     void setCustomUint(const std::string& key, uint32_t value);
 
+    // ═══════════════════════════════════════════════════════════
+    // Sun Shadow Cascades
+    // ═══════════════════════════════════════════════════════════
+
+    /// Cascade settings for the first directional light with castShadows.
+    /// The engine refits the cascades to the camera every frame and publishes
+    /// them as scene.shadows.sun.* dot-paths. `resolution` is the shadow map's
+    /// size in texels and should match it.
+    void setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
+                              float splitLambda, uint32_t resolution,
+                              float casterExtension = 50.f);
+
+    /// World-to-light-clip matrix of cascade `index` for the current frame,
+    /// identity when no light casts sun shadows.
+    glm::mat4 getSunShadowCascade(uint32_t index) const;
+
+    // ═══════════════════════════════════════════════════════════
+    // Render Pipeline Passes
+    // ═══════════════════════════════════════════════════════════
+
+    /// Turn a pipeline pass on or off from the next frame. A disabled pass
+    /// draws nothing but still clears its attachments, so a disabled shadow
+    /// pass leaves everything lit. May be called from onInit, before the
+    /// pipeline is loaded. The declared name of a repeated pass switches
+    /// every instance. Returns false if the pipeline has no such pass.
+    bool setPassEnabled(const std::string& passName, bool enabled);
+    bool isPassEnabled(const std::string& passName) const;
+
+    /// Entities an entity geometry pass drew / culled as outside its view the
+    /// last time it ran; 0 if it has not run.
+    uint32_t getPassDrawnCount(const std::string& passName) const;
+    uint32_t getPassCulledCount(const std::string& passName) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

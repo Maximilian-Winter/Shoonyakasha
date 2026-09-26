@@ -204,10 +204,7 @@ void DeclarativeSponzaApp::createLights() {
         // Compute Euler angles so getForward() returns the direction FROM the sun
         // Old hardcoded L was normalize(vec3(0.5, 1.0, 0.3)) — pointing toward light
         // Sun direction (away from light, toward scene) = -normalize(0.5, 1.0, 0.3)
-        glm::vec3 dir = glm::normalize(glm::vec3(-0.5f, -1.0f, -0.3f));
-        float pitch = asinf(-dir.y);
-        float yaw = atan2f(-dir.x, -dir.z);
-        transform.rotation = glm::vec3(pitch, yaw, 0.0f);
+        transform.rotation = ECS::TransformComponent::rotationFacing(glm::vec3(-0.5f, -1.0f, -0.3f));
         transform.position = glm::vec3(0.0f, 50.0f, 0.0f);
 
         auto& light = registry.emplace<ECS::LightComponent>(sun);

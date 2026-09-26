@@ -54,16 +54,19 @@ layout(set = 4, binding = 0) uniform ShadingUBO {
     float fogStart;       // distance from the camera where the fog begins
 } shading;
 
-// Sun shadow map and its projection (set 5) — written by ShadowPass
-layout(set = 5, binding = 0) uniform sampler2D shadowMap;
+// Sun shadow map and its projection (set 5) — written by ShadowPass. The map
+// is read through a comparison sampler: each lookup returns the filtered
+// fraction of the 2x2 texels around it whose depth passes the reference.
+layout(set = 5, binding = 0) uniform sampler2DShadow shadowMap;
 layout(set = 5, binding = 1) uniform ShadowUBO {
     mat4 lightViewProj;  // world -> sun clip space, Vulkan depth range [0, 1]
     vec4 params;         // x = normal offset (world units), y = depth bias,
                          // z = slope bias, w = sky light kept in shadow (0..1)
 } shadow;
 
-// Fraction of sunlight reaching worldPos, 0 = fully shadowed. A 5x5 PCF
-// kernel softens the edge. Points outside the shadow map are lit.
+// Fraction of sunlight reaching worldPos, 0 = fully shadowed. A 5x5 kernel
+// of hardware-filtered comparisons softens the edge. Points outside the
+// shadow map are lit.
 float sunVisibility(vec3 worldPos, vec3 N, vec3 L) {
     float NdotL = clamp(dot(N, L), 0.0, 1.0);
     vec3 offsetPos = worldPos + N * shadow.params.x * (1.0 - NdotL);
@@ -76,11 +79,11 @@ float sunVisibility(vec3 worldPos, vec3 N, vec3 L) {
 
     float bias = shadow.params.y + shadow.params.z * sqrt(1.0 - NdotL * NdotL) / max(NdotL, 0.05);
     vec2 texel = 1.0 / vec2(textureSize(shadowMap, 0));
+    float reference = ndc.z - bias;
     float lit = 0.0;
     for (int y = -2; y <= 2; y++) {
         for (int x = -2; x <= 2; x++) {
-            float occluder = texture(shadowMap, uv + vec2(x, y) * texel).r;
-            lit += (ndc.z - bias <= occluder) ? 1.0 : 0.0;
+            lit += texture(shadowMap, vec3(uv + vec2(x, y) * texel, reference));
         }
     }
     return lit / 25.0;

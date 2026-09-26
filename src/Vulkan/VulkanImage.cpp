@@ -31,6 +31,32 @@ VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, 
     createImage(width, height, format, tiling, usage, properties);
 }
 
+VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
+                         VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
+                         uint32_t mipLevels, uint32_t arrayLayers, VkImageCreateFlags flags)
+        : m_device(device)
+        , m_image(VK_NULL_HANDLE)
+        , m_allocation(VK_NULL_HANDLE)
+        , m_imageView(VK_NULL_HANDLE)
+        , m_format(format)
+        , m_width(width)
+        , m_height(height)
+        , m_mipLevels(mipLevels)
+        , m_arrayLayers(arrayLayers)
+        , m_flags(flags)
+        , m_tiling(tiling)
+        , m_usage(usage)
+        , m_properties(properties)
+        , m_ownImage(true)
+{
+    m_logger = new Logger("vulkan_image.log");
+    m_eventDispatcher = new EventDispatcher();
+
+    m_logger->log(LogLevel::Info, "Creating Vulkan Image of size %ux%u, %u mips, %u layers",
+                  width, height, mipLevels, arrayLayers);
+    createImage(width, height, format, tiling, usage, properties);
+}
+
 VulkanImage::VulkanImage(VulkanDevice &device, VkImage existingImage, VkFormat format, uint32_t width, uint32_t height,
                          VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
         : m_device(device)
@@ -74,8 +100,9 @@ void VulkanImage::createImage(uint32_t width, uint32_t height, VkFormat format, 
     imageInfo.extent.width = width;
     imageInfo.extent.height = height;
     imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
+    imageInfo.mipLevels = m_mipLevels;
+    imageInfo.arrayLayers = m_arrayLayers;
+    imageInfo.flags = m_flags;
     imageInfo.format = format;
     imageInfo.tiling = tiling;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -115,6 +142,27 @@ void VulkanImage::createImageView(VkImageAspectFlags aspectFlags) {
     viewInfo.subresourceRange.levelCount = 1;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(m_device.getLogicalDevice(), &viewInfo, nullptr, &m_imageView) != VK_SUCCESS) {
+        m_logger->log(LogLevel::Error, "Failed to create image view");
+        throw std::runtime_error("Failed to create image view!");
+    }
+
+    m_logger->log(LogLevel::Info, "Image view created successfully");
+    m_eventDispatcher->publish(ImageViewCreatedEvent{m_imageView});
+}
+
+void VulkanImage::createImageView(VkImageAspectFlags aspectFlags, VkImageViewType viewType) {
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = m_image;
+    viewInfo.viewType = viewType;
+    viewInfo.format = m_format;
+    viewInfo.subresourceRange.aspectMask = aspectFlags;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = m_mipLevels;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = m_arrayLayers;
 
     if (vkCreateImageView(m_device.getLogicalDevice(), &viewInfo, nullptr, &m_imageView) != VK_SUCCESS) {
         m_logger->log(LogLevel::Error, "Failed to create image view");

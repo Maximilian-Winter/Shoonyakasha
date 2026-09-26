@@ -21,7 +21,14 @@ namespace Shoonyakasha {
 class VulkanPipeline;
 // Forward declarations
 class VulkanDevice;
-class VulkanRenderPass;
+
+/// Attachment formats a pipeline renders into. Pipelines are created for
+/// dynamic rendering (Vulkan 1.3), so this takes the place of a render pass.
+struct RenderingFormats {
+    std::vector<VkFormat> color;                // one per colour attachment, in order
+    VkFormat depth   = VK_FORMAT_UNDEFINED;     // UNDEFINED = no depth attachment
+    VkFormat stencil = VK_FORMAT_UNDEFINED;     // UNDEFINED = no stencil attachment
+};
 
 // ═══════════════════════════════════════════════════════════════
 // Pipeline State Builder - Fluent API for pipeline configuration
@@ -84,7 +91,7 @@ public:
     PipelineStateBuilder& withDescriptorSetLayout(VkDescriptorSetLayout layout);
     PipelineStateBuilder& withPushConstants(VkShaderStageFlags stages, uint32_t size, uint32_t offset = 0);
     std::unique_ptr<VulkanPipeline> buildPipeline(VulkanDevice& device,
-                                                         VulkanRenderPass& renderPass,
+                                                         const RenderingFormats& formats,
                                                          VkExtent2D extent);
 
     // Build the immutable state
@@ -129,7 +136,8 @@ public:
         VkBlendFactor dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         VkBlendOp alphaBlendOp = VK_BLEND_OP_ADD;
 
-        // Color attachment count (for MRT; 0 = auto-detect as 1)
+        // Unused since pipelines take RenderingFormats: the colour
+        // attachment count is formats.color.size().
         uint32_t colorAttachmentCount = 0;
 
         // Multisampling
@@ -159,28 +167,28 @@ class VulkanPipeline {
 public:
     // Constructor with builder pattern for flexible configuration
     VulkanPipeline(VulkanDevice& device,
-                   VulkanRenderPass& renderPass,
+                   const RenderingFormats& formats,
                    VkExtent2D extent,
                    const PipelineStateBuilder::PipelineState& state);
 
     // Named constructors for common patterns
     static std::unique_ptr<VulkanPipeline> createDefault(
         VulkanDevice& device,
-        VulkanRenderPass& renderPass,
+        const RenderingFormats& formats,
         VkExtent2D extent,
         const std::string& vertShader,
         const std::string& fragShader);
 
     static std::unique_ptr<VulkanPipeline> createWireframe(
         VulkanDevice& device,
-        VulkanRenderPass& renderPass,
+        const RenderingFormats& formats,
         VkExtent2D extent,
         const std::string& vertShader,
         const std::string& fragShader);
 
     static std::unique_ptr<VulkanPipeline> createTransparent(
         VulkanDevice& device,
-        VulkanRenderPass& renderPass,
+        const RenderingFormats& formats,
         VkExtent2D extent,
         const std::string& vertShader,
         const std::string& fragShader);
@@ -206,7 +214,7 @@ public:
 
 private:
     VulkanDevice& m_device;
-    VulkanRenderPass& m_renderPass;
+    RenderingFormats m_formats;
     VkExtent2D m_extent;
     PipelineStateBuilder::PipelineState m_state;
 

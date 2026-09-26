@@ -84,6 +84,12 @@ struct TransformComponent {
         return t * r * s;
     }
 
+    /// Euler rotation (pitch, yaw, 0) whose getForward() is `direction`.
+    static glm::vec3 rotationFacing(const glm::vec3& direction) {
+        const glm::vec3 d = glm::normalize(direction);
+        return glm::vec3(asinf(glm::clamp(d.y, -1.0f, 1.0f)), atan2f(-d.x, -d.z), 0.0f);
+    }
+
     glm::vec3 getForward() const {
         // Extract forward (-Z) from the rotation matrix
         // Uses same Y→X→Z rotation order as getLocalMatrix()

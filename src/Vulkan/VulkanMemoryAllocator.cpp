@@ -18,7 +18,7 @@ VulkanMemoryAllocator::VulkanMemoryAllocator(VulkanInstance& instance, VulkanDev
     allocatorInfo.physicalDevice = device.getPhysicalDevice();
     allocatorInfo.device = device.getLogicalDevice();
     allocatorInfo.instance = instance.getInstance();
-    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_0;
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
 
     if (vmaCreateAllocator(&allocatorInfo, &m_allocator) != VK_SUCCESS) {
         m_logger->log(LogLevel::Error, "Failed to create VMA allocator");
