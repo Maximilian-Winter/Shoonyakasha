@@ -208,6 +208,15 @@ public:
     /// identity when no light casts sun shadows.
     glm::mat4 getSunShadowCascade(uint32_t index) const;
 
+    /// Shadow slots for spot and point lights with castShadows. Each frame
+    /// the engine gives the slots to the lights that matter most (bright,
+    /// near the camera, able to reach the view) and publishes them as
+    /// scene.shadows.spot* and scene.shadows.point* dot-paths. The counts and
+    /// resolutions should match the pipeline's maps; the default pipeline has
+    /// 4 spot slots of 1024 and 2 point slots of 512, the defaults here.
+    void setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount,
+                                uint32_t spotResolution, uint32_t pointResolution);
+
     // ═══════════════════════════════════════════════════════════
     // Render Pipeline Passes
     // ═══════════════════════════════════════════════════════════

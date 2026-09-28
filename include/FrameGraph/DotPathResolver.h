@@ -17,6 +17,7 @@
 
 #include "GPU/GPUTypes.h"
 #include "FrameGraph/ShadowCascades.h"
+#include "FrameGraph/LocalShadows.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/Core.h"
 #include <entt/entt.hpp>
@@ -215,6 +216,16 @@ struct SceneContext {
         glm::vec4         direction{0.0f};  // xyz = direction the light travels
     };
     SunShadow sunShadow;
+
+    // ─── Spot and point light shadows ──────────────────────────
+    // Slots assigned every frame by updateFromRegistry to the lights with
+    // castShadows that matter most. Read by "scene.shadows.spot*" and
+    // "scene.shadows.point*" dot-paths.
+    struct LocalShadow {
+        LocalShadowSettings settings;       // set by the application; budgets must match the pipeline
+        LocalShadows        shadows;
+    };
+    LocalShadow localShadow;
 
     // ─── Custom Application Values ─────────────────────────────
     // Generic key→value storage for application-specific data.

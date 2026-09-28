@@ -10,6 +10,9 @@
 
 layout(set = 0, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
+layout(set = 2, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
+layout(set = 2, binding = 2) uniform sampler2DArrayShadow spotShadowMap;
+layout(set = 2, binding = 3) uniform samplerCubeArrayShadow pointShadowMap;
 layout(set = 3, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 3, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 3, binding = 2) uniform sampler2D brdfLUT;
@@ -18,6 +21,7 @@ layout(set = 5, binding = 0) uniform Settings { DEFAULT_SETTINGS_BLOCK } setting
 layout(set = 5, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascades;
 
 #include "csm.glsl"
+#define LOCAL_SHADOWS
 #include "lights.glsl"
 
 layout(location = 0) out vec4 outColor;

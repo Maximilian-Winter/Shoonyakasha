@@ -363,7 +363,9 @@ enum class CullView {
     Default,     // omitted
     None,        // "none": draw every entity the filter accepts
     Camera,      // "camera": the main camera's frustum
-    SunCascade   // "shadows.sun.cascades[N]": sun cascade N's light volume
+    SunCascade,     // "shadows.sun.cascades[N]": sun cascade N's light volume
+    SpotShadow,     // "shadows.spot[N]": spot shadow slot N's cone
+    PointShadowFace // "shadows.point.faces[N]": face N % 6 of point shadow slot N / 6
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -405,7 +407,7 @@ struct ExecutionDesc {
     uint32_t    renderLayerMask = 0xFFFFFFFF;  // Bitmask for render layer filtering
     AlphaFilter alphaFilter = AlphaFilter::Any;  // Narrow by material alpha mode
     CullView    view = CullView::Default;        // What to cull and sort against
-    uint32_t    viewIndex = 0;                   // Cascade for CullView::SunCascade
+    uint32_t    viewIndex = 0;                   // Cascade, spot slot or point face for the shadow views
     int32_t     lightIndex = -1;            // For shadow_casters: which light's VP to use
 
     // Common options

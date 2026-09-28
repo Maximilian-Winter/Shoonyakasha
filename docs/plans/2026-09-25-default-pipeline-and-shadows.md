@@ -374,7 +374,25 @@ The original outline:
 - Update the shrine and Sponza examples to use it; keep the hand-written
   shrine JSON as the "write your own pipeline" example.
 
-### Phase 6 — later
+### Phase 6 — local-light shadows done, the rest later
+
+Done: spot and point light shadows (`LocalShadows`, device-free). Each frame
+the lights with `castShadows` compete for a budget of slots per type (4 spot,
+2 point by default, up to 8 and 4): lights whose range cannot reach the view
+are dropped, the rest ranked by intensity over distance. Spot maps are
+layers of a 2D array; point lights get a cube each in a cube array, one pass
+per face, with face matrices built from the Vulkan spec's face-selection
+table and checked against it in a unit test. Views `shadows.spot[N]` and
+`shadows.point.faces[N]` cull per slot or face and draw nothing for an empty
+slot; dot-paths `scene.shadows.spot*` / `scene.shadows.point*` publish them.
+The default pipeline samples both with 3x3 hardware comparisons in the
+lighting and forward passes.
+
+Not done here: arrays rather than an atlas, so every slot has one resolution
+whatever the light's size on screen; an empty slot's passes still clear their
+layer.
+
+The original list:
 - Local-light shadows (needs phases 1–4).
 - History resources (`"history": true`, readable as `name.prev`) → TAA,
   temporal shadow/AO filtering.

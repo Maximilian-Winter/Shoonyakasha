@@ -5,6 +5,10 @@
 #ifndef DEFAULT_LIGHTS_GLSL
 #define DEFAULT_LIGHTS_GLSL
 
+#ifdef LOCAL_SHADOWS
+#include "local_shadows.glsl"
+#endif
+
 // Light from every scene light. `sunIndex` is the light shadowed by
 // `sunVisibility`; -1 when none is.
 vec3 directLight(vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
@@ -37,6 +41,11 @@ vec3 directLight(vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, flo
                 float theta = dot(L, -normalize(direction));
                 falloff *= smoothstep(cosOuter, mix(cosOuter, 1.0, 0.1), theta);
             }
+#ifdef LOCAL_SHADOWS
+            if (falloff > 1e-4 && dot(N, L) > 0.0) {
+                falloff *= localShadowVisibility(int(i), type, worldPos, N, L);
+            }
+#endif
         }
 
         float NdotL = dot(N, L);

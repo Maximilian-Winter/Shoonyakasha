@@ -40,7 +40,7 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
     std::vector<RenderableEntity> result;
     m_lastCulledCount = 0;
 
-    if (!m_registry) {
+    if (!m_registry || (cullView && cullView->skip)) {
         m_lastQueryCount = 0;
         return result;
     }
@@ -169,6 +169,26 @@ FrameGraphRenderer::ViewCull FrameGraphRenderer::resolveView(
                                                /*withNearPlane=*/false);
             view.alongDirection = true;
             view.direction = glm::vec3(sun.direction);
+        }
+    } else if (kind == CullView::SpotShadow) {
+        const auto& local = scene.localShadow.shadows;
+        const uint32_t slot = passDecl.execution.viewIndex;
+        if (slot >= local.spotCount) {
+            view.skip = true;
+        } else {
+            view.cull = true;
+            view.frustum = frustumFromViewProj(local.spot[slot].viewProj, ClipDepth::ZeroToOne);
+            view.origin = glm::vec3(scene.lights[local.spot[slot].lightIndex].positionType);
+        }
+    } else if (kind == CullView::PointShadowFace) {
+        const auto& local = scene.localShadow.shadows;
+        const uint32_t slot = passDecl.execution.viewIndex / 6, face = passDecl.execution.viewIndex % 6;
+        if (slot >= local.pointCount) {
+            view.skip = true;
+        } else {
+            view.cull = true;
+            view.frustum = frustumFromViewProj(local.point[slot].faceViewProj[face], ClipDepth::ZeroToOne);
+            view.origin = glm::vec3(local.point[slot].positionFar);
         }
     }
     return view;

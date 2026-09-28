@@ -8,6 +8,9 @@ Deferred PBR (glTF metallic-roughness) with:
   PCF rotated per pixel, per-cascade normal offset, blended cascade seams
 - contact shadows: a short screen-space march towards the sun, for the detail
   the cascades are too coarse for
+- shadows from up to four spot lights (1024² each) and two point lights (a
+  512² cube each), given each frame to the shadow-casting lights that matter
+  most, filtered with 3x3 hardware comparisons
 - opaque, alpha-tested (glTF `MASK`) and skinned geometry, in the G-buffer
   and in the shadows
 - up to 16 directional, point and spot lights
@@ -40,7 +43,9 @@ engine.run()
 
 Only a directional light with its shadow flag set casts shadows; the first
 such light is the sun. `resolution` should stay 2048, the size of the map
-declared in `pipeline.json`.
+declared in `pipeline.json`. Spot and point lights cast shadows the same way,
+with `set_light_cast_shadows(light, True)`; `set_local_shadows()` sets how many
+get one, and its defaults match this pipeline.
 
 ## Settings
 
@@ -80,7 +85,7 @@ The pipeline declares three presets; apply one with
 
 | Preset | Changes |
 |---|---|
-| `low` | No ambient occlusion, no shadows from alpha-tested casters, no contact shadows, no bloom, a narrower shadow filter and hard cascade seams |
+| `low` | No ambient occlusion, no shadows from alpha-tested casters (sun, spot or point), no contact shadows, no bloom, a narrower shadow filter and hard cascade seams |
 | `medium` | Everything but contact shadows |
 | `high` | Everything, every setting back to its default. What the pipeline starts with |
 
@@ -92,6 +97,8 @@ own that it does not mention stay as you set them.
 | Pass | Draws |
 |---|---|
 | `ShadowOpaque0..3`, `ShadowMasked0..3`, `ShadowSkinned0..3` | Shadow casters into cascade 0..3, each culled against its cascade |
+| `SpotShadowOpaque0..3`, `SpotShadowMasked0..3`, `SpotShadowSkinned0..3` | Shadow casters into spot slot 0..3, culled against the light's cone; nothing when the slot is empty |
+| `PointShadowOpaque0..11`, `PointShadowMasked0..11`, `PointShadowSkinned0..11` | Shadow casters into cube face 0..11 (two lights, six faces each), culled per face |
 | `GBufferOpaque`, `GBufferMasked`, `GBufferSkinned`, `GBufferSkinnedMasked` | The G-buffer; emission goes straight into the HDR target |
 | `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` |
 | `GTAO`, `AODenoise` | Ambient occlusion from the depth buffer in a 4x4 pattern of slice directions, then a depth-aware 4x4 average |
@@ -125,5 +132,5 @@ compiled SPIR-V; after editing, recompile with
 stage shaders: `common.glsl` holds the buffer blocks, which must match the
 `bufferLayouts` in `pipeline.json`.
 
-Not here yet: shadows from point and spot lights, temporal anti-aliasing (and
-with it temporal filtering of shadows and AO), quality presets.
+Not here yet: temporal anti-aliasing (and with it temporal filtering of
+shadows and AO), more than 16 lights.

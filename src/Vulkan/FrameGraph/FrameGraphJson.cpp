@@ -10,6 +10,7 @@
 #include <system_error>
 #include "Vulkan/FrameGraph/FrameGraph.h"
 #include "FrameGraph/ShadowCascades.h"
+#include "FrameGraph/LocalShadows.h"
 
 #include <algorithm>
 #include <cctype>
@@ -17,6 +18,7 @@
 #include <stdexcept>
 #include <cstring>  // For strerror
 #include <filesystem>
+#include <optional>
 #include <cerrno>
 
 #ifdef _WIN32
@@ -519,6 +521,17 @@ RepeatSpec parseRepeat(const nlohmann::json& r, const std::string& where) {
         throw std::runtime_error(where + ": repeat \"index\" must be a plain name, e.g. \"cascade\"");
     }
     return spec;
+}
+
+/// N from a view named `prefix` + "N]", or nothing when `view` is not one.
+std::optional<uint32_t> indexedView(const std::string& view, const std::string& prefix) {
+    if (!view.starts_with(prefix) || !view.ends_with("]")) return std::nullopt;
+    const std::string digits = view.substr(prefix.size(), view.size() - prefix.size() - 1);
+    if (digits.empty() || digits.size() > 3 ||
+        !std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+        return std::nullopt;
+    }
+    return static_cast<uint32_t>(std::stoul(digits));
 }
 
 /// Replace every {index}, {index+N} and {index-N} in `text` with the
@@ -1539,9 +1552,26 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
                         }
                         pass.execution.view = CullView::SunCascade;
                         pass.execution.viewIndex = static_cast<uint32_t>(std::stoul(digits));
+                    } else if (auto slot = indexedView(view, "shadows.spot[")) {
+                        if (*slot >= MAX_SPOT_SHADOWS) {
+                            throw std::runtime_error("Pass '" + pass.name + "': view '" + view +
+                                                     "' names no spot shadow slot (0 to " +
+                                                     std::to_string(MAX_SPOT_SHADOWS - 1) + ")");
+                        }
+                        pass.execution.view = CullView::SpotShadow;
+                        pass.execution.viewIndex = *slot;
+                    } else if (auto face = indexedView(view, "shadows.point.faces[")) {
+                        if (*face >= MAX_POINT_SHADOWS * 6) {
+                            throw std::runtime_error("Pass '" + pass.name + "': view '" + view +
+                                                     "' names no point shadow face (0 to " +
+                                                     std::to_string(MAX_POINT_SHADOWS * 6 - 1) + ")");
+                        }
+                        pass.execution.view = CullView::PointShadowFace;
+                        pass.execution.viewIndex = *face;
                     } else {
                         throw std::runtime_error("Pass '" + pass.name + "': unknown view '" + view +
-                                                 "' (expected camera, none or shadows.sun.cascades[N])");
+                                                 "' (expected camera, none, shadows.sun.cascades[N], "
+                                                 "shadows.spot[N] or shadows.point.faces[N])");
                     }
                 }
 

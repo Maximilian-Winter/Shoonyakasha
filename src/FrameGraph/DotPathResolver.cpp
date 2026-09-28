@@ -119,6 +119,34 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
                                                 cameraNearPlane, cameraFarPlane,
                                                 direction, sunShadow.settings);
     }
+
+    // ─── Spot and point light shadows ───────────────────────────
+    {
+        std::vector<LocalShadowCandidate> candidates;
+        uint32_t packedIndex = 0;
+        for (auto entity : lightEntities) {
+            if (packedIndex >= MAX_SCENE_LIGHTS) break;
+            const auto& light = lightEntities.get<ECS::LightComponent>(entity);
+            const bool spot = light.type == ECS::LightComponent::Spot;
+            if (light.castShadows && (spot || light.type == ECS::LightComponent::Point)) {
+                const auto& packed = lights[packedIndex];
+                LocalShadowCandidate c;
+                c.lightIndex = packedIndex;
+                c.spot = spot;
+                c.position = glm::vec3(packed.positionType);
+                c.direction = glm::vec3(packed.directionRange);
+                c.range = packed.directionRange.w;
+                c.cosOuterCone = packed.attenuation.w;
+                c.intensity = packed.colorIntensity.w * glm::max(packed.colorIntensity.x,
+                                  glm::max(packed.colorIntensity.y, packed.colorIntensity.z));
+                candidates.push_back(c);
+            }
+            ++packedIndex;
+        }
+        localShadow.shadows = assignLocalShadows(
+            candidates, cameraPosition, foundCamera ? cameraViewProjection : glm::mat4(1.0f),
+            /*cameraMinusOneToOne=*/true, localShadow.settings);
+    }
 }
 
 // ============================================================================
@@ -305,6 +333,50 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
                     if (parts[1] == "attenuation")     return ResolvedValue(packed.attenuation);
                 }
             }
+        }
+    }
+
+    // ─── Spot and point light shadows ──────────────────────────
+    // scene.shadows.spot.count, scene.shadows.spot[N].{viewProj, lightIndex,
+    // params}; scene.shadows.point.count, scene.shadows.point[N].{lightIndex,
+    // positionFar, depthParams}, scene.shadows.point.faces[N].viewProj with
+    // N = slot * 6 + face
+    if (parts[0] == "shadows" && parts.size() >= 3) {
+        const auto& local = scene.localShadow.shadows;
+        auto indexIn = [](std::string_view part, std::string_view name, uint32_t& index) {
+            if (!part.starts_with(name) || part.size() < name.size() + 3 || part[name.size()] != '[' ||
+                part.back() != ']') return false;
+            const auto digits = part.substr(name.size() + 1, part.size() - name.size() - 2);
+            auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), index);
+            return ec == std::errc() && ptr == digits.data() + digits.size();
+        };
+        uint32_t index = 0;
+        if (parts[1] == "spot" && parts.size() == 3 && parts[2] == "count") {
+            return ResolvedValue(local.spotCount);
+        }
+        if (parts[1] == "point" && parts.size() == 3 && parts[2] == "count") {
+            return ResolvedValue(local.pointCount);
+        }
+        if (parts.size() == 3 && indexIn(parts[1], "spot", index)) {
+            if (index >= MAX_SPOT_SHADOWS) return ResolvedValue();
+            const auto& s = local.spot[index];
+            if (parts[2] == "viewProj")   return ResolvedValue(s.viewProj);
+            if (parts[2] == "lightIndex") return ResolvedValue(s.lightIndex);
+            if (parts[2] == "params")     return ResolvedValue(s.params);
+            return ResolvedValue();
+        }
+        if (parts.size() == 3 && indexIn(parts[1], "point", index)) {
+            if (index >= MAX_POINT_SHADOWS) return ResolvedValue();
+            const auto& p = local.point[index];
+            if (parts[2] == "lightIndex")  return ResolvedValue(p.lightIndex);
+            if (parts[2] == "positionFar") return ResolvedValue(p.positionFar);
+            if (parts[2] == "depthParams") return ResolvedValue(p.depthParams);
+            return ResolvedValue();
+        }
+        if (parts.size() == 4 && parts[1] == "point" && indexIn(parts[2], "faces", index) &&
+            parts[3] == "viewProj") {
+            if (index >= MAX_POINT_SHADOWS * 6) return ResolvedValue();
+            return ResolvedValue(local.point[index / 6].faceViewProj[index % 6]);
         }
     }
 

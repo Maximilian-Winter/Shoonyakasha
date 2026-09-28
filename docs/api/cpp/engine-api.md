@@ -81,6 +81,7 @@ void setCustomMat4(const std::string& key, const glm::mat4& value);
 void setCustomUint(const std::string& key, uint32_t value);
 void setSunShadowSettings(uint32_t cascadeCount, float maxDistance, float splitLambda, uint32_t resolution, float casterExtension = 50.f);
 glm::mat4 getSunShadowCascade(uint32_t index) const;
+void setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount, uint32_t spotResolution, uint32_t pointResolution);
 bool setPassEnabled(const std::string& passName, bool enabled);
 bool isPassEnabled(const std::string& passName) const;
 bool applyPipelinePreset(const std::string& name);

@@ -400,6 +400,8 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         void setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
                                   float splitLambda, uint32_t resolution, float casterExtension)
         mat4 getSunShadowCascade(uint32_t index)
+        void setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount,
+                                    uint32_t spotResolution, uint32_t pointResolution)
         bint setPassEnabled(const string& passName, bint enabled)
         bint isPassEnabled(const string& passName)
         bint applyPipelinePreset(const string& name)

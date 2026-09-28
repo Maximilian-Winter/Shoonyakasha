@@ -138,6 +138,7 @@ public:
     /// What a pass culls and sorts against: a frustum, and where distances
     /// for sorting are measured from.
     struct ViewCull {
+        bool      skip = false;           // draw nothing: a shadow slot no light has this frame
         bool      cull = false;           // test bounds against `frustum`
         Frustum   frustum;
         bool      alongDirection = false; // sort by depth along `direction`, not distance

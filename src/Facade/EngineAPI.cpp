@@ -4,6 +4,7 @@
 // All Vulkan, EnTT, and engine internals are confined to this translation unit.
 //
 
+#include <algorithm>
 #include <stdexcept>
 #include <entt/entt.hpp>
 #include "ECS/Core.h"
@@ -428,6 +429,15 @@ void EngineAPI::setCustomMat4(const std::string& key, const glm::mat4& value) {
 
 void EngineAPI::setCustomUint(const std::string& key, uint32_t value) {
     m_impl->app->getRenderGraph().getSceneContext().setCustom(key, value);
+}
+
+void EngineAPI::setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount,
+                                       uint32_t spotResolution, uint32_t pointResolution) {
+    auto& settings = m_impl->app->getRenderGraph().getSceneContext().localShadow.settings;
+    settings.spotCount = std::min(spotCount, MAX_SPOT_SHADOWS);
+    settings.pointCount = std::min(pointCount, MAX_POINT_SHADOWS);
+    settings.spotResolution = spotResolution;
+    settings.pointResolution = pointResolution;
 }
 
 void EngineAPI::setSunShadowSettings(uint32_t cascadeCount, float maxDistance,

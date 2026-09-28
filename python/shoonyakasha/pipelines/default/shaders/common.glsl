@@ -36,6 +36,19 @@
     int sunLightIndex;         \
     uint cascadeCount;
 
+// scene.shadows.spot* and scene.shadows.point* (pipeline.json
+// "LocalShadowMatrices"): 4 spot slots, 2 point slots of 6 faces each
+#define SPOT_SHADOW_SLOTS 4
+#define POINT_SHADOW_SLOTS 2
+#define DEFAULT_LOCAL_SHADOWS_BLOCK                          \
+    mat4 spotViewProj[SPOT_SHADOW_SLOTS];                    \
+    mat4 pointFaceViewProj[POINT_SHADOW_SLOTS * 6];          \
+    vec4 spotParams[SPOT_SHADOW_SLOTS];      /* x = texel size one unit away */ \
+    vec4 pointPositionFar[POINT_SHADOW_SLOTS];                \
+    vec4 pointDepthParams[POINT_SHADOW_SLOTS]; /* depth = x + y / m; z = texel size one unit away */ \
+    int spotLightIndex[SPOT_SHADOW_SLOTS];   /* -1: empty slot */ \
+    int pointLightIndex[POINT_SHADOW_SLOTS];
+
 // scene.custom.default.* (pipeline.json "Settings"); see README.md
 #define DEFAULT_SETTINGS_BLOCK  \
     float exposure;             \
