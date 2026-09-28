@@ -20,10 +20,12 @@ layout(set = 3, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
 layout(set = 3, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
 layout(set = 3, binding = 2) uniform sampler2DArrayShadow spotShadowMap;
 layout(set = 3, binding = 3) uniform samplerCubeArrayShadow pointShadowMap;
+layout(set = 3, binding = 4) uniform usampler2D lightClusters;
 layout(set = 4, binding = 0) uniform Settings { DEFAULT_SETTINGS_BLOCK } settings;
 layout(set = 4, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascades;
 
 #define LOCAL_SHADOWS
+#define CLUSTERED
 #include "lights.glsl"
 
 layout(location = 0) in vec2 fragTexCoord;
@@ -57,7 +59,8 @@ void main() {
     vec3 F0 = baseReflectivity(albedo, metallic);
 
     int sunIndex = cascades.sunEnabled != 0u ? cascades.sunLightIndex : -1;
-    vec3 direct = directLight(worldPos, N, V, albedo, metallic, roughness, F0, sunIndex, sunVisibility);
+    uint cluster = clusterIndex(fragTexCoord, -viewPos.z, camera.params.x, camera.params.y);
+    vec3 direct = directLight(cluster, worldPos, N, V, albedo, metallic, roughness, F0, sunIndex, sunVisibility);
     // Screen-space and material occlusion, with the light that bounces
     // between occluders added back for bright albedo (Jimenez 2016), and
     // occlusion of reflections from it (Lagarde 2014).
@@ -84,6 +87,9 @@ void main() {
         color = N * 0.5 + 0.5;
     } else if (settings.debugView == 4u) {   // ambient occlusion
         color = vec3(ao);
+    } else if (settings.debugView == 5u) {   // lights in the pixel's cluster: blue 0, green 8, red 16+
+        float n = float(texelFetch(lightClusters, ivec2(int(cluster), 0), 0).r) / 16.0;
+        color = clamp(vec3(n * 2.0 - 1.0, 1.0 - abs(n * 2.0 - 1.0), 1.0 - n * 2.0), 0.0, 1.0) * (0.4 + 0.6 * albedo);
     }
     outColor = vec4(color, 1.0);
 }

@@ -8,7 +8,7 @@ engine.create_directional_light((-0.5, -1.0, -0.3), intensity=3.0)
 engine.create_point_light((2.0, 3.0, 1.0), intensity=5.0, range=15.0)
 ```
 
-C++ equivalents are `createDirectionalLight` and `createPointLight` with GLM vectors. A directional light's direction is the way its light travels, so a sun shining down has a negative y. Scene setters modify type, color, intensity, range, and shadow flags. A shadow flag does not create a shadow-map pipeline; the pipeline has to read the cascades.
+The engine publishes up to 128 lights as `scene.lights[N]`; a pipeline whose arrays are shorter reads the first ones. C++ equivalents are `createDirectionalLight` and `createPointLight` with GLM vectors. A directional light's direction is the way its light travels, so a sun shining down has a negative y. Scene setters modify type, color, intensity, range, and shadow flags. A shadow flag does not create a shadow-map pipeline; the pipeline has to read the cascades.
 
 ## The default pipeline
 

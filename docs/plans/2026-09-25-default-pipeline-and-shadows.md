@@ -406,6 +406,14 @@ its barrier did not grant attachment read access.
 
 Not done: per-object motion vectors (moving objects rely on the clipping).
 
+Also done: clustered lighting. The engine publishes up to 128 lights (was
+16). A compute pass bins the point and spot lights by range into 16 x 9 x 24
+view clusters, logarithmic in depth, listing them in an R32_UINT image (a
+column per cluster, plus one of the directional lights); the lighting and
+forward passes loop over their cluster only. With 11 lights the result is
+pixel-identical to the previous brute-force loop; 60 lamps render with a
+debug view (5) showing each cluster's count.
+
 The original list:
 - Local-light shadows (needs phases 1–4).
 - History resources (`"history": true`, readable as `name.prev`) → TAA,

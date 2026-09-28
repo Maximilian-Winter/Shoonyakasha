@@ -22,7 +22,7 @@
     uint taa;
 
 // scene.lights[i].* (pipeline.json "Lights")
-#define MAX_LIGHTS 16
+#define MAX_LIGHTS 128
 #define DEFAULT_LIGHTS_BLOCK                      \
     uint lightCount;                              \
     float _lightsPad0, _lightsPad1, _lightsPad2;  \

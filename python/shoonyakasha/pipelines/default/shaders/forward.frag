@@ -13,6 +13,7 @@ layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
 layout(set = 2, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
 layout(set = 2, binding = 2) uniform sampler2DArrayShadow spotShadowMap;
 layout(set = 2, binding = 3) uniform samplerCubeArrayShadow pointShadowMap;
+layout(set = 2, binding = 4) uniform usampler2D lightClusters;
 layout(set = 3, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 3, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 3, binding = 2) uniform sampler2D brdfLUT;
@@ -22,6 +23,7 @@ layout(set = 5, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascade
 
 #include "csm.glsl"
 #define LOCAL_SHADOWS
+#define CLUSTERED
 #include "lights.glsl"
 
 layout(location = 0) out vec4 outColor;
@@ -38,7 +40,8 @@ void main() {
                                         temporalNoise(gl_FragCoord.xy, camera.frame, camera.taa), cascade);
     int sunIndex = cascades.sunEnabled != 0u ? cascades.sunLightIndex : -1;
 
-    vec3 color = directLight(fragWorldPos, s.N, V, s.baseColor.rgb, s.metallic, s.roughness, F0,
+    uint cluster = clusterIndex(gl_FragCoord.xy / camera.resolution, viewDepth, camera.params.x, camera.params.y);
+    vec3 color = directLight(cluster, fragWorldPos, s.N, V, s.baseColor.rgb, s.metallic, s.roughness, F0,
                              sunIndex, sunLit)
                + ambientLight(irradianceMap, prefilterMap, brdfLUT, s.N, V, s.baseColor.rgb,
                               s.metallic, s.roughness, F0)

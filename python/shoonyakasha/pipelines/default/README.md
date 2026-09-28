@@ -13,7 +13,10 @@ Deferred PBR (glTF metallic-roughness) with:
   most, filtered with 3x3 hardware comparisons
 - opaque, alpha-tested (glTF `MASK`) and skinned geometry, in the G-buffer
   and in the shadows
-- up to 16 directional, point and spot lights
+- up to 128 directional, point and spot lights, clustered: a compute pass
+  sorts the point and spot lights into 16 x 9 screen tiles x 24 depth slices
+  by range, and each pixel shades only its cluster's (at most 63) and the
+  directional lights
 - image-based light from the HDR environment, or from a uniform environment
   when there is none
 - ground-truth ambient occlusion (GTAO), with the light that bounces between
@@ -76,7 +79,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `bloomIntensity` | 0.04 | How much of the bloom is mixed into the image |
 | `bloomRadius` | 1.0 | Spread of each upsampling step, in texels |
 | `taa` | 1 | 1 for temporal anti-aliasing, 0 for none (`set_custom_uint`). Turn it off here rather than turning its passes off: the passes after it read its output |
-| `debugView` | 0 | 1 cascades (red, green, blue, yellow), 2 shadow mask, 3 normals, 4 ambient occlusion; shown without tonemapping, bloom or exposure (`set_custom_uint`) |
+| `debugView` | 0 | 1 cascades (red, green, blue, yellow), 2 shadow mask, 3 normals, 4 ambient occlusion, 5 point and spot lights reaching each pixel's cluster (blue none, green 8, red 16 or more); shown without tonemapping, bloom or exposure (`set_custom_uint`) |
 
 Without an HDR map the environment is one colour, `environment_color` on
 `sk.Engine` (`uniformEnvironmentColor` in C++), default (0.25, 0.28, 0.33).
@@ -106,6 +109,7 @@ own that it does not mention stay as you set them.
 | `GBufferOpaque`, `GBufferMasked`, `GBufferSkinned`, `GBufferSkinnedMasked` | The G-buffer; emission goes straight into the HDR target |
 | `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` |
 | `GTAO`, `AODenoise` | Ambient occlusion from the depth buffer in a 4x4 pattern of slice directions, then a depth-aware 4x4 average |
+| `LightClusters` | A compute pass listing the point and spot lights that reach each cluster of the view, into `lightClusters` |
 | `Lighting` | Lights, image-based light and the sky, added onto the emission |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which is then copied into the persistent `taaHistory` for the next frame |
@@ -139,4 +143,4 @@ stage shaders: `common.glsl` holds the buffer blocks, which must match the
 
 Not here yet: motion vectors (TAA reprojects the camera's motion only, and
 relies on clipping for moving objects, which can leave a faint trail behind
-fast ones), more than 16 lights.
+fast ones).

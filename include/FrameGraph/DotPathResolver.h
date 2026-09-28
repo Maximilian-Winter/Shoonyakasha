@@ -197,7 +197,9 @@ struct SceneContext {
 
     // ─── Lights ─────────────────────────────────────────────────
     // Collected each frame from entities with LightComponent + TransformComponent
-    static constexpr uint32_t MAX_SCENE_LIGHTS = 16;
+    // A pipeline's light arrays may be shorter: shaders that declare 16
+    // read the first 16.
+    static constexpr uint32_t MAX_SCENE_LIGHTS = 128;
 
     struct PackedLight {
         glm::vec4 positionType{0.f};      // xyz=world position, w=type (0=dir,1=point,2=spot)
