@@ -26,19 +26,28 @@ float contactShadow(vec3 viewPos, vec3 viewN, vec3 viewL, float noise) {
     float len = settings.contactShadowLength;
     if (len <= 0.0) return 1.0;
 
+    // The world size of a pixel here. The march starts two of them off the
+    // surface and ignores anything closer than one, so the surface it starts
+    // from cannot shadow itself where the sun grazes it.
+    vec2 size = vec2(textureSize(gDepth, 0));
+    float pixel = 2.0 * -viewPos.z / (abs(camera.proj[1][1]) * size.y);
+
     const int STEPS = 12;
-    vec3 start = viewPos + viewN * (0.02 * -viewPos.z / 10.0 + 0.005);
+    vec3 start = viewPos + viewN * (2.0 * pixel);
     vec3 step = viewL * (len / float(STEPS));
     vec3 p = start + step * noise;
     for (int i = 0; i < STEPS; ++i, p += step) {
         vec4 clip = camera.proj * vec4(p, 1.0);
         vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
         if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) break;
+        // Reconstruct at the texel's centre: its depth belongs there, and
+        // anywhere else a sloped surface would seem to rise and fall.
+        uv = (floor(uv * size) + 0.5) / size;
         float depth = textureLod(gDepth, uv, 0.0).r;
         if (depth >= 1.0) continue;
         float sceneZ = viewPositionFromDepth(camera.invProj, uv, depth).z;
         float behind = sceneZ - p.z;   // > 0: the surface on screen is nearer the camera than p
-        if (behind > 0.0 && behind < settings.contactShadowThickness) {
+        if (behind > pixel && behind < settings.contactShadowThickness) {
             // Fade hits near the end of the ray, so the shadow has no hard tip.
             return float(i) / float(STEPS);
         }
