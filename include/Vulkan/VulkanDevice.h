@@ -71,6 +71,12 @@ public:
     /// physical device supports it. Pipeline creation checks these before
     /// asking for depth clamping or a depth bias clamp.
     const VkPhysicalDeviceFeatures& getEnabledFeatures() const { return m_enabledFeatures; }
+
+    /// Ray queries against acceleration structures (VK_KHR_ray_query and
+    /// VK_KHR_acceleration_structure, with buffer device addresses), enabled
+    /// when the device has them all. $SHOONYAKASHA_DISABLE_RAY_QUERY turns
+    /// them off, to try the fallbacks.
+    bool hasRayQuery() const { return m_rayQuery; }
 private:
     VulkanInstance& m_instance;
     VkSurfaceKHR m_surface;
@@ -84,6 +90,8 @@ private:
     bool m_hasDedicatedCompute = false;
     QueueFamilyIndices m_queueFamilyIndices;
     VkPhysicalDeviceFeatures m_enabledFeatures{};
+    bool m_rayQuery = false;
+    bool supportsRayQuery(VkPhysicalDevice device) const;
     std::unique_ptr<VulkanMemoryAllocator> m_vmaAllocator;
 
     // Declared after the allocator, so it is destroyed first and can still free

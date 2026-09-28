@@ -292,6 +292,7 @@ private:
     );
 
     /// Build index GPUBuffer
+    VkBufferUsageFlags rayTracingInputUsage() const;
     Shoonyakasha::GPUBuffer buildIndexBuffer(
         cgltf_data* data,
         const cgltf_primitive& primitive,

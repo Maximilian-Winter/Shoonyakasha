@@ -164,6 +164,8 @@ public:
     void bindBuffer(const std::string& name, uint32_t set, const BufferResource& resource);
     void bindImage(const std::string& name, uint32_t set, const ImageResource& resource);
     void bindResource(const std::string& name, uint32_t set, const Resource& resource);
+    /// Write an acceleration structure binding now (not a pending write).
+    void bindAccelerationStructure(const std::string& name, uint32_t set, VkAccelerationStructureKHR structure);
 
     // Bulk operations for efficiency
     void bindResources(uint32_t set, const std::unordered_map<std::string, Resource>& resources);

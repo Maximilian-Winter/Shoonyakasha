@@ -51,6 +51,18 @@ class ShaderCompilation(unittest.TestCase):
         self.assertEqual(self.tmp / "a.vert.spv", output)
         self.assertGreater(output.stat().st_size, 0)
 
+    def test_a_shader_can_name_its_own_arguments(self):
+        # Ray queries need SPIR-V 1.4, which some glslc versions only target
+        # when asked; the shader asks, and compile() passes it on.
+        body = ("#extension GL_EXT_ray_query : require\n"
+                "layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;\n"
+                "layout(location = 0) out vec4 color;\n"
+                "void main() { rayQueryEXT q; rayQueryInitializeEXT(q, scene, 0u, 0xFFu, vec3(0), 0.0, vec3(1), 1.0);"
+                " color = vec4(1.0); }\n")
+        source = self.write("traced.frag", "#version 460\n// glslc: --target-env=vulkan1.2\n" + body)
+        self.assertEqual(["--target-env=vulkan1.2"], shaders.source_args(source))
+        self.assertGreater(shaders.compile(source).stat().st_size, 0)
+
     def test_second_call_is_a_no_op(self):
         source = self.write("a.vert", self.VALID)
         first = shaders.compile(source)
@@ -227,6 +239,15 @@ class PipelineValidation(unittest.TestCase):
 
         document["passes"][0]["repeat"]["first"] = 1
         self.assertTrue(any("at least 0" in p.message for p in self.problems(document)))
+
+    def test_pass_requirements_must_be_known_capabilities(self):
+        import copy
+        document = copy.deepcopy(self.MINIMAL)
+        document["passes"][0]["requires"] = ["rayQuery"]
+        self.assertEqual([], self.problems(document))
+        document["passes"][0]["requires"] = ["rayQuerry"]
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("'rayQuerry', which is not a capability" in m for m in messages), messages)
 
     def test_presets_are_checked_against_the_passes(self):
         import copy

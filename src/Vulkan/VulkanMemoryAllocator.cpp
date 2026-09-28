@@ -19,6 +19,10 @@ VulkanMemoryAllocator::VulkanMemoryAllocator(VulkanInstance& instance, VulkanDev
     allocatorInfo.device = device.getLogicalDevice();
     allocatorInfo.instance = instance.getInstance();
     allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    if (device.hasRayQuery()) {
+        // Acceleration structure builds address their inputs by device address.
+        allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    }
 
     if (vmaCreateAllocator(&allocatorInfo, &m_allocator) != VK_SUCCESS) {
         m_logger->log(LogLevel::Error, "Failed to create VMA allocator");

@@ -234,6 +234,11 @@ public:
     /// scene.custom values. May be called from onInit, before the pipeline is
     /// loaded. Returns false if the pipeline has no such preset.
     bool applyPipelinePreset(const std::string& name);
+
+    /// Whether the device traces rays with ray queries, which passes that
+    /// "require" them (the default pipeline's "raytraced" preset) need.
+    /// Known once run() has created the device; false before.
+    bool rayQuerySupported() const;
     std::vector<std::string> getPipelinePresets() const;
 
     /// Entities an entity geometry pass drew / culled as outside its view the

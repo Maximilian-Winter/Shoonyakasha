@@ -11,6 +11,7 @@ shadows and occlusion.
 Keys:
     WASD/Q/E + right mouse   fly the camera
     1 / 2 / 3                quality preset low / medium / high (the default)
+    4                        ray-traced sun shadows, where the device has ray queries
     V                        cycle the debug views: final image, shadow
                              cascades, shadow mask, normals, ambient occlusion
     X                        automatic exposure off or on
@@ -47,7 +48,7 @@ EYE = (-10.5, 1.8, -0.6)
 TARGET = (4.0, 2.6, 0.4)
 # Direction the sunlight travels: steeply down through the open roof.
 SUN_DIRECTION = (0.3, -1.0, 0.35)
-PRESETS = {keys.NUM_1: "low", keys.NUM_2: "medium", keys.NUM_3: "high"}
+PRESETS = {keys.NUM_1: "low", keys.NUM_2: "medium", keys.NUM_3: "high", keys.NUM_4: "raytraced"}
 DEBUG_VIEWS = ("final image", "shadow cascades", "shadow mask", "normals", "ambient occlusion")
 
 
@@ -130,6 +131,9 @@ class Controls:
     def update(self, dt):
         for key, preset in PRESETS.items():
             if self.pressed(key):
+                if preset == "raytraced" and not engine.ray_query_supported():
+                    print("this device has no ray queries; keeping the current preset")
+                    continue
                 engine.apply_pipeline_preset(preset)
                 print("preset", preset)
         if self.pressed(keys.V):

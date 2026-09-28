@@ -405,6 +405,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         bint setPassEnabled(const string& passName, bint enabled)
         bint isPassEnabled(const string& passName)
         bint applyPipelinePreset(const string& name)
+        bint rayQuerySupported() const
         vector[string] getPipelinePresets() const
         uint32_t getPassDrawnCount(const string& passName)
         uint32_t getPassCulledCount(const string& passName)

@@ -181,11 +181,28 @@ def is_stale(source, output=None):
     return False
 
 
+def source_args(source):
+    """glslc arguments a shader asks for itself, on its first line after the
+    #version: `// glslc: --target-env=vulkan1.2` (for ray queries, which need
+    SPIR-V 1.4), for instance."""
+    try:
+        with open(source, encoding="utf-8") as f:
+            for line in (f.readline(), f.readline()):
+                line = line.strip()
+                if line.startswith("// glslc:"):
+                    return line[len("// glslc:"):].split()
+    except OSError:
+        pass
+    return []
+
+
 def compile(source, output=None, *, glslc=None, args=(), force=False, quiet=True):
     """Compile one shader. Returns the output path.
 
     Skips the work when the output is newer than the source unless `force`.
     Raises ShaderCompileError carrying glslc's own diagnostics on failure.
+    Arguments the shader names on its second line (`// glslc: ...`) are
+    passed too.
     """
     source = Path(source)
     if not source.is_file():
@@ -200,7 +217,7 @@ def compile(source, output=None, *, glslc=None, args=(), force=False, quiet=True
     # depend on the working directory the next staleness check runs from.
     command = [glslc or find_glslc(), str(source.resolve()), "-o", str(output),
                "-I", str(include_dir()),
-               "-MD", "-MF", str(depfile_path_for(output)), *args]
+               "-MD", "-MF", str(depfile_path_for(output)), *source_args(source), *args]
 
     proc = subprocess.run(command, capture_output=True, text=True)
     if proc.returncode != 0:

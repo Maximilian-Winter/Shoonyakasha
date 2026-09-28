@@ -578,7 +578,7 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
     GPUBuffer buffer = GPUResourceFactory::createBuffer(
         m_device.getAllocator().getHandle(),
         bufferSize,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | rayTracingInputUsage(),
         VMA_MEMORY_USAGE_GPU_ONLY
     );
 
@@ -594,6 +594,15 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
     );
 
     return buffer;
+}
+
+VkBufferUsageFlags GltfSceneLoader::rayTracingInputUsage() const {
+    // Static meshes are built into acceleration structures for ray queries,
+    // which read their vertices and indices by device address.
+    return m_device.hasRayQuery()
+        ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
+        : 0;
 }
 
 GPUBuffer GltfSceneLoader::buildIndexBuffer(
@@ -643,7 +652,7 @@ GPUBuffer GltfSceneLoader::buildIndexBuffer(
         buffer = GPUResourceFactory::createBuffer(
             m_device.getAllocator().getHandle(),
             bufferSize,
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | rayTracingInputUsage(),
             VMA_MEMORY_USAGE_GPU_ONLY
         );
 
@@ -663,7 +672,7 @@ GPUBuffer GltfSceneLoader::buildIndexBuffer(
         buffer = GPUResourceFactory::createBuffer(
             m_device.getAllocator().getHandle(),
             bufferSize,
-            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | rayTracingInputUsage(),
             VMA_MEMORY_USAGE_GPU_ONLY
         );
 
@@ -819,6 +828,9 @@ entt::entity GltfSceneLoader::createEntity(
     mesh.boundsMin = primitive.boundsMin;
     mesh.boundsMax = primitive.boundsMax;
     mesh.hasBounds = primitive.hasBounds;
+    // Standard-vertex meshes are made with acceleration structure input usage
+    // on a device with ray queries (rayTracingInputUsage); skinned ones are not.
+    mesh.rayTracingInput = m_device.hasRayQuery() && mesh.vertexStride == sizeof(StandardVertex);
 
     // Add MaterialComponentV5
     auto& material = scene->addComponent<MaterialComponentV5>(entity);
@@ -1212,6 +1224,9 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     mesh.boundsMin = primitive.boundsMin;
     mesh.boundsMax = primitive.boundsMax;
     mesh.hasBounds = primitive.hasBounds;
+    // Standard-vertex meshes are made with acceleration structure input usage
+    // on a device with ray queries (rayTracingInputUsage); skinned ones are not.
+    mesh.rayTracingInput = m_device.hasRayQuery() && mesh.vertexStride == sizeof(StandardVertex);
 
     // Add MaterialComponentV5
     auto& material = scene->addComponent<MaterialComponentV5>(entity);

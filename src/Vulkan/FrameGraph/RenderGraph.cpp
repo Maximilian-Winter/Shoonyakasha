@@ -33,6 +33,8 @@
 
 #include <stdexcept>
 #include <random>
+#include "Vulkan/RayTracingScene.h"
+
 #include <algorithm>
 #include <utility>
 #include <cmath>
@@ -114,7 +116,9 @@ RenderGraph::~RenderGraph() {
 
 void RenderGraph::loadFromFile(const std::string& filePath) {
     m_logger->log(LogLevel::Info, "Loading render graph from '%s'", filePath.c_str());
-    loadGraphFromFile(m_builder, filePath);
+    PipelineCapabilities capabilities;
+    capabilities.rayQuery = m_device.hasRayQuery();
+    loadGraphFromFile(m_builder, filePath, capabilities);
     m_logger->log(LogLevel::Info, "Loaded %zu resources, %zu passes from JSON",
                   m_builder.getResourceDeclarations().size(),
                   m_builder.getPassDeclarations().size());
@@ -147,6 +151,13 @@ bool RenderGraph::applyPreset(const std::string& name) {
     if (!preset) {
         m_logger->log(LogLevel::Warning, "applyPreset: the pipeline has no preset '%s'", name.c_str());
         return false;
+    }
+    for (const auto& [pass, enabled] : preset->passes) {
+        if (enabled && m_builder.isUnavailablePass(pass)) {
+            m_logger->log(LogLevel::Warning, "applyPreset: preset '%s' needs pass '%s', which this device "
+                          "cannot run; nothing applied", name.c_str(), pass.c_str());
+            return false;
+        }
     }
 
     for (const auto& [pass, enabled] : preset->passes) setPassEnabled(pass, enabled);
@@ -206,6 +217,13 @@ bool RenderGraph::setPassEnabled(const std::string& passName, bool enabled) {
         // Nothing loaded yet; applied by loadFromFile.
         m_pendingPassEnabled[passName] = enabled;
         return true;
+    }
+    if (m_builder.isUnavailablePass(passName)) {
+        if (enabled) {
+            m_logger->log(LogLevel::Warning, "setPassEnabled: pass '%s' needs a capability this device "
+                          "lacks (\"requires\") and was left out", passName.c_str());
+        }
+        return !enabled;
     }
     if (PassDeclaration* pass = m_builder.getPass(passName)) {
         pass->enabled = enabled;
@@ -1637,6 +1655,9 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
         m_stagingManager->recordUploadCommands(commandBuffer, frameIndex, m_globalFrameNumber);
     }
 
+    // The scene's acceleration structures, for passes that trace rays.
+    recordRayTracingScene(commandBuffer, frameIndex);
+
     // Execute all passes
     m_executor.execute(m_compiled, m_builder, frameIndex, swapchainImageIndex, commandBuffer, &m_parameters);
 
@@ -2534,6 +2555,33 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
     if (descriptorSet != VK_NULL_HANDLE && setIndex) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pass.pipelineLayout,
                                 *setIndex, 1, &descriptorSet, 0, nullptr);
+    }
+}
+
+void RenderGraph::recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex) {
+    // Only for pipelines with an acceleration structure binding, on a device
+    // that has ray queries; created on first use.
+    if (!m_device.hasRayQuery() || !m_boundScene) return;
+    if (m_accelerationBindings.empty()) {
+        for (const auto& layout : m_builder.getDescriptorSetLayouts()) {
+            for (const auto& binding : layout.bindings) {
+                if (binding.type == "acceleration_structure") {
+                    m_accelerationBindings.emplace_back(layout.name,
+                        binding.name.empty() ? "binding_" + std::to_string(binding.binding) : binding.name);
+                }
+            }
+        }
+        if (m_accelerationBindings.empty()) return;
+    }
+    if (!m_rayTracingScene) {
+        m_rayTracingScene = std::make_unique<RayTracingScene>(m_device, m_maxFramesInFlight);
+    }
+    m_rayTracingScene->recordBuild(cmd, frameIndex, m_boundScene->getRegistry());
+    const VkAccelerationStructureKHR scene = m_rayTracingScene->topLevel(frameIndex);
+    for (const auto& [layout, binding] : m_accelerationBindings) {
+        if (auto set = getDescriptorSet(layout)) {
+            set->bindAccelerationStructure(binding, frameIndex % m_maxFramesInFlight, scene);
+        }
     }
 }
 

@@ -157,6 +157,8 @@ public:
     using ApplicationBase::getCameraEntity;
     using ApplicationBase::getDeltaTime;
     using ApplicationBase::getRenderGraph;
+    using ApplicationBase::getDevice;
+    using ApplicationBase::hasDevice;
     using ApplicationBase::getScene;
     using ApplicationBase::getEventDispatcher;
     using ApplicationBase::getInputHandler;
@@ -467,6 +469,10 @@ bool EngineAPI::isPassEnabled(const std::string& passName) const {
 
 bool EngineAPI::applyPipelinePreset(const std::string& name) {
     return m_impl->app->getRenderGraph().applyPreset(name);
+}
+
+bool EngineAPI::rayQuerySupported() const {
+    return m_impl->app && m_impl->app->hasDevice() && m_impl->app->getDevice().hasRayQuery();
 }
 
 std::vector<std::string> EngineAPI::getPipelinePresets() const {

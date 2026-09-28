@@ -53,6 +53,11 @@ struct MeshComponent {
     glm::vec3 boundsMax{0.0f};
     bool      hasBounds = false;
 
+    // The buffers were made with the usage acceleration structure builds
+    // need (static glTF meshes on a device with ray queries), so the mesh
+    // can appear in ray-traced shadows.
+    bool      rayTracingInput = false;
+
     // ─── Helpers ────────────────────────────────────────────────
 
     bool hasIndices() const { return indexBuffer && indexBuffer->isValid() && indexCount > 0; }

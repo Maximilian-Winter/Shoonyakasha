@@ -64,6 +64,20 @@ The counts and resolutions must match the pipeline's maps; `set_local_shadows` d
 
 Passes render a slot with `"view": "shadows.spot[{s}]"` or `"view": "shadows.point.faces[{f}]"` in a repeated pass, writing layer `{s}` of a `2d_array` or layer `{f}` of a `cube_array` image; a slot no light has this frame draws nothing. The [default pipeline](../../python/shoonyakasha/pipelines/default/README.md) is a complete example.
 
+## Ray-traced sun shadows
+
+On a device with ray queries (`VK_KHR_ray_query` and `VK_KHR_acceleration_structure`, which the engine turns on when present), the engine keeps an acceleration structure of the scene for shaders to trace against: a bottom-level structure per mesh, built the first time the mesh is drawn, and a top-level one rebuilt every frame. It holds the static, opaque, shadow-casting meshes; skinned and alpha-tested meshes are left out. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to run without it.
+
+The default pipeline's `raytraced` preset uses it for the sun: one ray per pixel to a random point on the sun's disc, averaged over frames by TAA, so shadows are sharp at contact and soften with distance. The meshes left out of the acceleration structure still cast through the cascades.
+
+```python
+if engine.ray_query_supported():
+    engine.apply_pipeline_preset("raytraced")
+engine.set_custom_float("default.sunAngle", 0.27)   # the real sun's angular radius, in degrees
+```
+
+A pipeline of your own traces the same structure through an `acceleration_structure` descriptor, in a pass that declares `"requires": ["rayQuery"]`; see the [pipeline JSON reference](../reference/pipeline-json.md#descriptors-and-samplers).
+
 ## IBL setup
 
 For image-based lighting, configure `hdr_environment_path` / `hdrEnvironmentPath` and use a pipeline with environment bindings. The engine generates irradiance, prefiltered environment, and BRDF lookup textures. The [PBR demo](../../examples/python/getting_started/demo/demo.py) and [deferred pipeline](../../examples/cpp/rendering/declarative_sponza_test/pbr_ibl_pipeline_v3.json) are complete examples.

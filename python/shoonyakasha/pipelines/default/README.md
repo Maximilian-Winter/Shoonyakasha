@@ -6,6 +6,9 @@ Deferred PBR (glTF metallic-roughness) with:
 
 - cascaded sun shadows: four cascades in one 2048² depth array, 16-tap Vogel
   PCF rotated per pixel, per-cascade normal offset, blended cascade seams
+- ray-traced sun shadows, where the device has ray queries (the `raytraced`
+  preset): one ray per pixel towards a random point of the sun's disc,
+  averaged over frames by TAA into a penumbra that widens away from the caster
 - contact shadows: a short screen-space march towards the sun, for the detail
   the cascades are too coarse for
 - shadows from up to four spot lights (1024² each) and two point lights (a
@@ -74,6 +77,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `contactShadowLength` | 0.25 | World-space length of the contact shadow march; 0 turns contact shadows off |
 | `contactShadowThickness` | 0.1 | How thick things on screen are assumed to be, in world units |
 | `shadowAmbient` | 1.0 | Ambient light kept in the sun's shadow. Below 1 darkens shadowed areas' sky light too |
+| `sunAngle` | 0.4 | Angular radius of the sun in degrees, for ray-traced shadows: how quickly their penumbra widens with distance from the caster. The real sun's is 0.27 |
 | `aoRadius` | 0.6 | World-space reach of ambient occlusion; 0 turns it off |
 | `aoIntensity` | 1.0 | Power applied to the occlusion; above 1 darkens it |
 | `bloomIntensity` | 0.04 | How much of the bloom is mixed into the image |
@@ -86,7 +90,7 @@ Without an HDR map the environment is one colour, `environment_color` on
 
 ## Quality presets
 
-The pipeline declares three presets; apply one with
+The pipeline declares four presets; apply one with
 `engine.apply_pipeline_preset("low")` (C++ `applyPipelinePreset`), from
 `on_init` or at any time after:
 
@@ -95,6 +99,7 @@ The pipeline declares three presets; apply one with
 | `low` | No ambient occlusion, no shadows from alpha-tested casters (sun, spot or point), no contact shadows, no bloom, a narrower shadow filter and hard cascade seams |
 | `medium` | Everything but contact shadows |
 | `high` | Everything, every setting back to its default. What the pipeline starts with |
+| `raytraced` | `high`, with sun shadows from ray queries instead of the cascades' opaque casters. Refused, with a warning, on a device without ray queries; check with `engine.ray_query_supported()` (C++ `rayQuerySupported`) |
 
 A preset only touches the passes and settings it names, so settings of your
 own that it does not mention stay as you set them.
@@ -108,6 +113,7 @@ own that it does not mention stay as you set them.
 | `PointShadowOpaque0..11`, `PointShadowMasked0..11`, `PointShadowSkinned0..11` | Shadow casters into cube face 0..11 (two lights, six faces each), culled per face |
 | `GBufferOpaque`, `GBufferMasked`, `GBufferSkinned`, `GBufferSkinnedMasked` | The G-buffer; emission goes straight into the HDR target |
 | `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` |
+| `ShadowMaskRT` | In the `raytraced` preset, instead of `ShadowMask`: a shadow ray per pixel, multiplied with the cascades of the casters the rays do not see. `"requires": ["rayQuery"]`; off by default |
 | `GTAO`, `AODenoise` | Ambient occlusion from the depth buffer in a 4x4 pattern of slice directions, then a depth-aware 4x4 average |
 | `LightClusters` | A compute pass listing the point and spot lights that reach each cluster of the view, into `lightClusters` |
 | `Lighting` | Lights, image-based light and the sky, added onto the emission |
@@ -130,6 +136,28 @@ G-buffer layout: `gAlbedo` (RGBA8 sRGB: albedo, material occlusion),
 `gNormal` (RG16F: octahedral world normal), `gMaterial` (RG8: metallic,
 roughness), `gDepth` (D32; positions are reconstructed from it) and
 `hdrColor` (RGBA16F).
+
+## Ray-traced shadows
+
+Where the device has `VK_KHR_ray_query` (the engine enables it and
+`VK_KHR_acceleration_structure` when present; set
+`SHOONYAKASHA_DISABLE_RAY_QUERY=1` to leave them off), the engine keeps an
+acceleration structure of the scene: one bottom-level structure per mesh,
+built when the mesh is first seen, and a top-level one rebuilt every frame
+from the transforms. `ShadowMaskRT` binds it as an `acceleration_structure`
+descriptor and traces one ray per pixel.
+
+Only static, opaque, shadow-casting meshes go into it. Skinned meshes would
+need their structures rebuilt from the skinned vertices every frame, and
+alpha-tested ones an any-hit test against their textures; both still cast
+into the cascades, which is why the preset keeps `ShadowMasked{cascade}` and
+`ShadowSkinned{cascade}` on and turns only `ShadowOpaque{cascade}` off. The
+mask is the product of the two. Blended materials read the cascades directly,
+so in this preset they get no shadow from opaque static casters; spot and point
+lights keep their shadow maps.
+
+One ray per pixel is noisy on its own; TAA averages it. With `taa` 0 the
+shadows' edges are left grainy.
 
 ## Changing it
 

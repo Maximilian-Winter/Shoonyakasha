@@ -75,7 +75,8 @@
     float exposureAdaptSpeed;   \
     float exposureMinEV;        \
     float exposureMaxEV;        \
-    float deltaTime;
+    float deltaTime;            \
+    float sunAngle;
 
 // ── Normals ─────────────────────────────────────────────────────
 // Octahedral encoding of a unit vector into two values in -1..1.

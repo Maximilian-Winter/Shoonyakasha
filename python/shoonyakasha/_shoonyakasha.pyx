@@ -1450,6 +1450,12 @@ cdef class Engine:
         """
         return self._ptr.applyPipelinePreset(name.encode('utf-8'))
 
+    def ray_query_supported(self):
+        """Whether the device traces rays with ray queries, which the default
+        pipeline's "raytraced" preset needs. Known from the on_init callback
+        on; False before run()."""
+        return self._ptr.rayQuerySupported()
+
     def get_pipeline_presets(self):
         """Names of the presets the loaded pipeline declares."""
         return [n.decode('utf-8') for n in self._ptr.getPipelinePresets()]

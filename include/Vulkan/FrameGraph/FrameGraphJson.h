@@ -70,10 +70,19 @@ namespace JsonUtils {
 // ═══════════════════════════════════════════════════════════════
 
 // Load a complete render graph from a JSON object
-void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json);
+/// What the device can do, for passes that declare "requires". A pass that
+/// requires something missing is left out of the graph (its name is kept, so
+/// presets may still switch it off).
+struct PipelineCapabilities {
+    bool rayQuery = true;   // "rayQuery": VulkanDevice::hasRayQuery
+};
+
+void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
+                       const PipelineCapabilities& capabilities = {});
 
 // Load from a JSON file path
-void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath);
+void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath,
+                       const PipelineCapabilities& capabilities = {});
 
 // ═══════════════════════════════════════════════════════════════
 // JSON Saving — serialize a FrameGraphBuilder to JSON

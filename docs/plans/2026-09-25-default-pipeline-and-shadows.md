@@ -414,6 +414,29 @@ forward passes loop over their cluster only. With 11 lights the result is
 pixel-identical to the previous brute-force loop; 60 lamps render with a
 debug view (5) showing each cluster's count.
 
+Also done: ray-traced sun shadows. The device enables `VK_KHR_ray_query`,
+`VK_KHR_acceleration_structure` and buffer device addresses when present
+(`SHOONYAKASHA_DISABLE_RAY_QUERY=1` leaves them off). `RayTracingScene`
+builds a BLAS per mesh on first sight and rebuilds a TLAS per frame in
+flight from the static, opaque, shadow-casting meshes; an
+`acceleration_structure` descriptor binds it. A pass can declare
+`"requires": ["rayQuery"]`: on a device without ray queries it loads but
+stays off, and a preset or `set_pass_enabled` that would turn it on is
+refused. The default pipeline's `raytraced` preset swaps `ShadowMask` for
+`ShadowMaskRT`, one ray per pixel to a random point on the sun's disc
+(`sunAngle`), averaged by TAA; skinned and alpha-tested casters are not in
+the acceleration structure, so their cascade passes stay on and the mask is
+the product of both. Blended materials still read the cascades, which in
+this preset lack the opaque casters.
+
+Not done, on purpose: the shadow atlas. What it buys over the arrays is a
+resolution per light by its size on screen. It needs per-view viewport
+rects chosen each frame, a packer, and, for point lights, six rects with the
+face selection done by hand in the shader in place of hardware cube-map
+comparisons. At four spot and two point slots the arrays cost about 28 MB and
+none of that; the atlas is worth it once there are many more shadowed
+lights than that, together with GPU-driven culling.
+
 The original list:
 - Local-light shadows (needs phases 1–4).
 - History resources (`"history": true`, readable as `name.prev`) → TAA,

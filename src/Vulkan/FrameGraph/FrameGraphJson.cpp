@@ -236,6 +236,7 @@ VkDescriptorType stringToDescriptorType(const std::string& str) {
         {"storage_image",               VK_DESCRIPTOR_TYPE_STORAGE_IMAGE},
         {"input_attachment",            VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT},
         {"sampler",                     VK_DESCRIPTOR_TYPE_SAMPLER},
+        {"acceleration_structure",      VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR},
     };
     auto it = map.find(str);
     if (it != map.end()) return it->second;
@@ -253,6 +254,7 @@ std::string descriptorTypeToString(VkDescriptorType type) {
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:           return "storage_image";
         case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:        return "input_attachment";
         case VK_DESCRIPTOR_TYPE_SAMPLER:                 return "sampler";
+        case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR: return "acceleration_structure";
         default:                                         return "unknown";
     }
 }
@@ -680,7 +682,8 @@ nlohmann::json expandRepeatedLayouts(const nlohmann::json& layouts) {
 // JSON Loading
 // ═══════════════════════════════════════════════════════════════
 
-void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
+void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
+                       const PipelineCapabilities& capabilities) {
     builder.clear();
 
     // ── Parse samplers (before descriptor sets, as they're referenced by name) ──
@@ -1346,6 +1349,31 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
     if (json.contains("passes")) {
         for (const auto& expanded : expandRepeatedPasses(json["passes"])) {
             const auto& passJson = expanded.json;
+
+            // "requires": capabilities without which the pass is left out.
+            if (passJson.contains("requires")) {
+                const auto& req = passJson["requires"];
+                const std::string name = passJson.value("name", std::string{});
+                if (!req.is_array()) {
+                    throw std::runtime_error("Pass '" + name + "': \"requires\" must be an array, e.g. [\"rayQuery\"]");
+                }
+                bool met = true;
+                for (const auto& r : req) {
+                    const std::string what = r.is_string() ? r.get<std::string>() : r.dump();
+                    if (what == "rayQuery") {
+                        met = met && capabilities.rayQuery;
+                    } else {
+                        throw std::runtime_error("Pass '" + name + "' requires '" + what +
+                                                 "', which is not a capability (expected rayQuery)");
+                    }
+                }
+                if (!met) {
+                    builder.addUnavailablePass(name);
+                    if (!expanded.group.empty()) builder.addUnavailablePass(expanded.group);
+                    continue;
+                }
+            }
+
             PassDeclaration pass;
             pass.name = passJson.at("name").get<std::string>();
             pass.repeatGroup = expanded.group;
@@ -1615,7 +1643,7 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
             throw std::runtime_error("\"presets\" must be an object of named presets");
         }
         auto passExists = [&](const std::string& name) {
-            if (builder.hasPass(name)) return true;
+            if (builder.hasPass(name) || builder.isUnavailablePass(name)) return true;
             for (const auto& p : builder.getPassDeclarations()) if (p.repeatGroup == name) return true;
             return false;
         };
@@ -1692,7 +1720,8 @@ void resolveShaderPathsAgainst(nlohmann::json& json, const std::filesystem::path
 
 } // namespace
 
-void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath) {
+void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath,
+                       const PipelineCapabilities& capabilities) {
     nlohmann::json json;
     {
         // Capture errno before any other operations
@@ -1746,7 +1775,7 @@ void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath) 
         file >> json;
     } // File closed here before modifying builder
     resolveShaderPathsAgainst(json, std::filesystem::absolute(filePath).parent_path());
-    loadGraphFromJson(builder, json);
+    loadGraphFromJson(builder, json, capabilities);
 }
 
 // ═══════════════════════════════════════════════════════════════

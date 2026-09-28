@@ -50,6 +50,9 @@ RESOURCE_USAGES = frozenset({
 })
 
 PASS_TYPES = frozenset({"graphics", "compute", "transfer"})
+
+#: What a pass may "require"; a device without it leaves the pass out.
+CAPABILITIES = frozenset({"rayQuery"})
 RESOURCE_KINDS = frozenset({"image", "buffer"})
 
 FIELD_TYPES = frozenset({
@@ -265,6 +268,15 @@ def validate_json(document, base_dir=None, source="<json>"):
 
         if "name" not in pass_decl:
             problems.append(Problem(where, "missing 'name'"))
+
+        requires = pass_decl.get("requires", [])
+        if not isinstance(requires, list):
+            problems.append(Problem(where, "'requires' must be an array, e.g. [\"rayQuery\"]"))
+            requires = []
+        for capability in requires:
+            if capability not in CAPABILITIES:
+                problems.append(Problem(where, "requires '%s', which is not a capability" % capability,
+                                        hint=_suggest(str(capability), CAPABILITIES)))
 
         pass_type = pass_decl.get("type")
         if pass_type is None:

@@ -600,6 +600,16 @@ void FrameGraphCompiler::createDescriptorSetLayouts(
 
     // Create VulkanDescriptorSet for each unique layout name referenced by any pass
     for (const auto& desc : layoutDescs) {
+        // A layout with an acceleration structure cannot exist without ray
+        // queries; only passes left out for lacking them ("requires") use one.
+        if (!device.hasRayQuery() &&
+            std::any_of(desc.bindings.begin(), desc.bindings.end(),
+                        [](const auto& b) { return b.type == "acceleration_structure"; })) {
+            m_logger->log(LogLevel::Info, "  Skipped descriptor set layout '%s': it needs ray queries",
+                          desc.name.c_str());
+            continue;
+        }
+
         // Build a DescriptorLayoutBuilder from the JSON-declared bindings
         DescriptorLayoutBuilder builder;
 
@@ -615,7 +625,9 @@ void FrameGraphCompiler::createDescriptorSetLayouts(
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
                 case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-                case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC: {
+                case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+                // Written per frame by RenderGraph with the scene's structure.
+                case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR: {
                     BufferBinding buf;
                     buf.name = bindingName;
                     buf.type = descType;

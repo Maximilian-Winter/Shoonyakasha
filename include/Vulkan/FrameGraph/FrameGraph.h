@@ -26,6 +26,7 @@
 #include <string>
 #include <variant>
 #include <optional>
+#include <unordered_set>
 #include <functional>
 #include <algorithm>
 
@@ -58,6 +59,7 @@ namespace Shoonyakasha {
     struct MeshComponent;
     struct MaterialComponentV5;  // Material component with generic params/textures
     struct SkeletonComponent;    // Skeleton SSBO for skinned meshes
+    class RayTracingScene;       // Acceleration structures for ray queries
 }
 
 namespace Shoonyakasha {
@@ -612,6 +614,10 @@ public:
     bool hasBufferLayout(const std::string& name) const;
     const std::vector<BufferLayoutDesc>& getBufferLayouts() const { return m_bufferLayouts; }
 
+    // ── Passes left out for a missing capability ("requires") ──
+    void addUnavailablePass(const std::string& name) { m_unavailablePasses.insert(name); }
+    bool isUnavailablePass(const std::string& name) const { return m_unavailablePasses.count(name) > 0; }
+
     // ── Presets ──
     void addPreset(PipelinePreset preset) { m_presets.push_back(std::move(preset)); }
     const std::vector<PipelinePreset>& getPresets() const { return m_presets; }
@@ -660,6 +666,7 @@ private:
     std::unordered_map<std::string, uint32_t>       m_entityDataBindingLookup;
     std::vector<BufferLayoutDesc>                   m_bufferLayouts;
     std::vector<PipelinePreset>                     m_presets;
+    std::unordered_set<std::string>                 m_unavailablePasses;
     std::unordered_map<std::string, uint32_t>       m_bufferLayoutLookup;
 
     // Declarative vertex format registry
@@ -1213,6 +1220,11 @@ public:
     double getFrameTime() const;
 
 private:
+    /// Build this frame's acceleration structures and bind them, when the
+    /// pipeline has an "acceleration_structure" binding and the device ray
+    /// queries.
+    void recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex);
+
     /// Clear persistent images and put them in the layouts a frame leaves
     /// them in, which is where each frame's barriers start from for them.
     void initializePersistentImages();
@@ -1335,6 +1347,8 @@ private:
 
     // Phase 3: Staging buffer management for CPU↔GPU transfers
     std::unique_ptr<StagingBufferManager> m_stagingManager;
+    std::unique_ptr<Shoonyakasha::RayTracingScene> m_rayTracingScene;
+    std::vector<std::pair<std::string, std::string>> m_accelerationBindings;   // (layout, binding)
     uint64_t m_globalFrameNumber = 0;
     std::unordered_map<std::string, ReadbackCallbackFn> m_readbackCallbacks;
     void createStagingBuffers(uint32_t maxFramesInFlight);

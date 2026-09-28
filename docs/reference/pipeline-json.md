@@ -119,6 +119,8 @@ The constant parser uses dots as vector separators: `const.0.5` is not a reliabl
 
 Each descriptor-set layout has a `bindings` array. Bindings require `binding` and `type`; optional `count` defaults 1, `name` defaults `binding_<index>`, and `stages` selects shader visibility. Use the descriptor types accepted by [JsonUtils](../../src/Vulkan/FrameGraph/FrameGraphJson.cpp), such as `uniform_buffer`, `storage_buffer`, and `combined_image_sampler`.
 
+`acceleration_structure` binds the engine's top-level acceleration structure of the scene, for ray queries (`GL_EXT_ray_query`; compile such a shader for Vulkan 1.2 or later). The engine keeps one only on a device with ray queries. It holds the static, opaque, shadow-casting meshes, and is rebuilt every frame from their transforms. On a device without ray queries a layout with such a binding is skipped, and only a pass that `requires` `rayQuery` may use it.
+
 `autoBindBuffer` references a named buffer, `autoBindResource` an image/resource source, and `autoBindSampler` a named sampler. Pass `descriptorSets` is an ordered list of layout names; that order supplies shader set indices.
 
 Sampler keys: `magFilter`, `minFilter`, `mipmapMode` default `linear` (also `nearest`). Use `addressMode` for all axes or `addressModeU/V/W` individually (default `repeat`; also `clamp_to_edge`, `clamp_to_border`, `mirrored_repeat`). Other keys are `borderColor` (`float_opaque_black`), `anisotropyEnable` (false; alias `anisotropy`), `maxAnisotropy` (1), `compareEnable` (false), `compareOp` (`less`), `minLod`, `maxLod`, and `mipLodBias` (all 0). Set the LOD range deliberately when sampling mipmapped textures.
@@ -135,7 +137,7 @@ Use a matching `execution.entityDataBinding`. The parser accepting a method stri
 
 ## Passes and pipeline state
 
-Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` defaults `graphics`; `compute` requests the compute queue in a multi-queue execution setup. `enabled` defaults true and can be changed at runtime with `set_pass_enabled` (C++ `setPassEnabled`). A disabled pass draws and dispatches nothing, but its barriers still run and its attachments still begin and end rendering: they are cleared to their `clear` values and end in the layouts later passes expect, so a disabled shadow pass leaves a map cleared to far depth. `hasSideEffects` defaults false and prevents culling work whose outputs otherwise appear unused. A transfer type does not supply a JSON copy/blit command: use native recording callbacks where needed.
+Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` defaults `graphics`; `compute` requests the compute queue in a multi-queue execution setup. `enabled` defaults true and can be changed at runtime with `set_pass_enabled` (C++ `setPassEnabled`). A disabled pass draws and dispatches nothing, but its barriers still run and its attachments still begin and end rendering: they are cleared to their `clear` values and end in the layouts later passes expect, so a disabled shadow pass leaves a map cleared to far depth. `requires` lists device capabilities the pass needs; the only one is `rayQuery`. On a device without them the pass is unavailable: it loads, stays disabled, and `set_pass_enabled` or a preset that would turn it on is refused with a warning. Declare such a pass `"enabled": false` and turn it on with a preset, so the pipeline still runs everywhere. `hasSideEffects` defaults false and prevents culling work whose outputs otherwise appear unused. A transfer type does not supply a JSON copy/blit command: use native recording callbacks where needed.
 
 | `pipeline` key | Default / options |
 |---|---|
@@ -224,7 +226,7 @@ A preset switches passes and sets `scene.custom` values in one call, `apply_pipe
               "values": { "default.contactShadowLength": null, "default.bloomIntensity": null } } } }
 ```
 
-`passes` maps pass names, or the declared name of a repeated pass, to `true` or `false`; a name that is not a pass fails at load. `values` maps `scene.custom` keys, without the prefix, to a number or an array of numbers, each set with the type of the buffer-layout field whose `source` reads it (so `0` above lands as a float), or as a float or vector when no field does. `null` removes the value so the field's `default` applies again, which is how a preset returns to the pipeline's defaults without repeating them. Called before the pipeline is loaded, from `on_init`, the preset is applied once it is; an unknown name is then a warning at load.
+`passes` maps pass names, or the declared name of a repeated pass, to `true` or `false`; a name that is not a pass fails at load. `values` maps `scene.custom` keys, without the prefix, to a number or an array of numbers, each set with the type of the buffer-layout field whose `source` reads it (so `0` above lands as a float), or as a float or vector when no field does. `null` removes the value so the field's `default` applies again, which is how a preset returns to the pipeline's defaults without repeating them. A preset that turns on a pass the device cannot run is refused whole, with a warning. Called before the pipeline is loaded, from `on_init`, the preset is applied once it is; an unknown name is then a warning at load.
 
 ## Initialization, memory, and readback
 

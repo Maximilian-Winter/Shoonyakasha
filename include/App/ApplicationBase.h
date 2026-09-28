@@ -134,6 +134,7 @@ protected:
     // ─── Accessors ─────────────────────────────────────────────
 
     VulkanDevice& getDevice();
+    bool hasDevice() const { return m_device != nullptr; }   // false before run() creates it
     VulkanWindow& getWindow();
     VulkanSwapChain& getSwapChain();
     FrameGraph::RenderGraph& getRenderGraph();

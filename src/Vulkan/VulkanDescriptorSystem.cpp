@@ -286,6 +286,25 @@ void VulkanDescriptorSet::bindResources(uint32_t set, const std::unordered_map<s
     }
 }
 
+void VulkanDescriptorSet::bindAccelerationStructure(const std::string& name, uint32_t set,
+                                                    VkAccelerationStructureKHR structure) {
+    if (set >= m_maxSets) {
+        throw std::runtime_error("Set index out of range: " + std::to_string(set));
+    }
+    VkWriteDescriptorSetAccelerationStructureKHR asInfo{};
+    asInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    asInfo.accelerationStructureCount = 1;
+    asInfo.pAccelerationStructures = &structure;
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.pNext = &asInfo;
+    write.dstSet = m_sets[set];
+    write.dstBinding = getBindingIndex(name);
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    vkUpdateDescriptorSets(m_device.getLogicalDevice(), 1, &write, 0, nullptr);
+}
+
 void VulkanDescriptorSet::updateSet(uint32_t set) {
     if (set >= m_maxSets) {
         throw std::runtime_error("Set index out of range: " + std::to_string(set));
