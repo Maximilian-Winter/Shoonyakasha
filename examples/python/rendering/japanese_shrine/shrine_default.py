@@ -9,11 +9,17 @@ pipeline adds contact shadows, ambient occlusion, bloom and automatic
 exposure. Its settings are scene.custom.default.* values, a few of which are
 set in on_init below.
 
+Where the device has ray queries, the sun's shadows are ray traced (the
+pipeline's "raytraced" preset): sharp where the shrine meets the ground,
+softening with distance, and averaged over frames by TAA. Elsewhere the
+cascades are used, as in the "high" preset.
+
 shrine.py stays as the example of writing a pipeline yourself.
 
 Keys:
     SPACE   stop or resume the orbit; while stopped, WASD/Q/E and the right
             mouse button fly the camera
+    R       ray-traced or cascaded sun shadows, where the device has ray queries
     O       sun shadows off or on
     G       ambient occlusion off or on
     B       bloom off or on
@@ -70,6 +76,7 @@ SETTINGS = {
     "skyBlur": 1.5,
     "aoRadius": 0.5,
     "contactShadowLength": 0.15,
+    "sunAngle": 0.4,             # degrees; how quickly ray-traced shadows soften
 }
 
 
@@ -128,6 +135,12 @@ def on_init():
     # cascades cover 30 units of view depth: the shrine and its surroundings.
     engine.scene.set_light_cast_shadows(sun[0], True)
     engine.set_sun_shadows(cascades=4, max_distance=30.0, split_lambda=0.75, resolution=2048)
+    # Applied once the pipeline has loaded. The cascades still carry the
+    # shadows of alpha-tested and skinned casters, which the rays do not see.
+    controls.ray_traced = engine.ray_query_supported()
+    if controls.ray_traced:
+        engine.apply_pipeline_preset("raytraced")
+    print("sun shadows:", "ray traced" if controls.ray_traced else "cascaded (no ray queries)")
 
     result = engine.load_gltf_scene(MODEL)
     print(f"[shrine] {len(result.entities)} entities, {result.total_vertices} vertices, "
@@ -157,6 +170,7 @@ class Controls:
         self.ao = True
         self.bloom = True
         self.auto_exposure = True
+        self.ray_traced = False     # set in on_init, once the device exists
 
     def pressed(self, key):
         down = engine.input.is_key_down(key)
@@ -167,6 +181,13 @@ class Controls:
     def update(self, dt):
         if self.pressed(keys.SPACE):
             orbit.running = not orbit.running
+        if self.pressed(keys.R):
+            if not engine.ray_query_supported():
+                print("this device has no ray queries; the shadows stay cascaded")
+            else:
+                self.ray_traced = not self.ray_traced
+                engine.apply_pipeline_preset("raytraced" if self.ray_traced else "high")
+                print("sun shadows:", "ray traced" if self.ray_traced else "cascaded")
         if self.pressed(keys.O):
             # Without a shadow-casting sun the pipeline treats everything as lit.
             self.shadows = not self.shadows
