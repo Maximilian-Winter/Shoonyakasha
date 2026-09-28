@@ -1,7 +1,7 @@
 {
   "version": 3,
   "name": "DefaultPipeline",
-  "description": "Shoonyakasha's default pipeline: deferred PBR with cascaded sun shadows, spot and point light shadows, contact shadows, image-based light, ground-truth ambient occlusion, forward transparency, bloom, automatic exposure and ACES tonemapping. Settings are scene.custom.default.* values; see README.md.",
+  "description": "Shoonyakasha's default pipeline: deferred PBR with cascaded sun shadows, spot and point light shadows, contact shadows, image-based light, ground-truth ambient occlusion, forward transparency, temporal anti-aliasing, bloom, automatic exposure and ACES tonemapping. Settings are scene.custom.default.* values; see README.md.",
   "vertexFormats": {
     "skinned": {
       "attributes": [
@@ -68,6 +68,27 @@
           "name": "params",
           "type": "vec4",
           "source": "scene.camera.nearFarFovAspect"
+        },
+        {
+          "name": "prevViewProj",
+          "type": "mat4",
+          "source": "scene.camera.prevViewProjection"
+        },
+        {
+          "name": "resolution",
+          "type": "vec2",
+          "source": "scene.screen.resolution"
+        },
+        {
+          "name": "frame",
+          "type": "uint",
+          "source": "scene.time.frame"
+        },
+        {
+          "name": "taa",
+          "type": "uint",
+          "source": "scene.custom.default.taa",
+          "default": 1
         }
       ]
     },
@@ -832,7 +853,7 @@
             "fragment"
           ],
           "name": "hdrColor",
-          "autoBindResource": "hdrColor",
+          "autoBindResource": "taaColor",
           "autoBindSampler": "linearClamp"
         },
         {
@@ -900,7 +921,7 @@
             "fragment"
           ],
           "name": "source",
-          "autoBindResource": "hdrColor",
+          "autoBindResource": "taaColor",
           "autoBindSampler": "linearClamp"
         }
       ]
@@ -982,6 +1003,54 @@
           "autoBindBuffer": "LocalShadowMatrices"
         }
       ]
+    },
+    "taaSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "current",
+          "autoBindResource": "hdrColor",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "history",
+          "autoBindResource": "taaHistory",
+          "autoBindSampler": "linearClamp"
+        }
+      ]
+    },
+    "taaCopySet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "source",
+          "autoBindResource": "taaColor",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
     }
   },
   "resources": [
@@ -1056,6 +1125,21 @@
       "kind": "image",
       "image": {
         "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "taaColor",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "taaHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "persistent": true
       }
     },
     {
@@ -2014,7 +2098,7 @@
       ]
     },
     {
-      "name": "BloomDown0",
+      "name": "TAA",
       "type": "graphics",
       "execution": {
         "type": "fullscreen"
@@ -2022,6 +2106,87 @@
       "inputs": [
         {
           "resource": "hdrColor",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "taaHistory",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "taaColor",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "fragmentShader": "shaders/taa.frag.spv"
+      },
+      "descriptorSets": [
+        "taaSet",
+        "cameraSet"
+      ]
+    },
+    {
+      "name": "TAAHistory",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "taaColor",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "taaHistory",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "fragmentShader": "shaders/copy.frag.spv"
+      },
+      "descriptorSets": [
+        "taaCopySet"
+      ]
+    },
+    {
+      "name": "BloomDown0",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "taaColor",
           "usage": "shader_read"
         }
       ],
@@ -2178,7 +2343,7 @@
       },
       "inputs": [
         {
-          "resource": "hdrColor",
+          "resource": "taaColor",
           "usage": "shader_read"
         },
         {

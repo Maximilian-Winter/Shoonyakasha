@@ -7,14 +7,19 @@
 #ifndef DEFAULT_COMMON_GLSL
 #define DEFAULT_COMMON_GLSL
 
-// scene.camera.* (pipeline.json "Camera")
+// scene.camera.* (pipeline.json "Camera"). prevViewProj is last frame's;
+// frame counts frames, and taa is scene.custom.default.taa.
 #define DEFAULT_CAMERA_BLOCK \
     mat4 view;               \
     mat4 proj;               \
     mat4 invView;            \
     mat4 invProj;            \
     vec4 position;           \
-    vec4 params;
+    vec4 params;             \
+    mat4 prevViewProj;       \
+    vec2 resolution;         \
+    uint frame;              \
+    uint taa;
 
 // scene.lights[i].* (pipeline.json "Lights")
 #define MAX_LIGHTS 16
@@ -102,12 +107,39 @@ vec3 viewPositionFromDepth(mat4 invProj, vec2 uv, float depth) {
     return p.xyz / p.w;
 }
 
+// ── Temporal anti-aliasing ──────────────────────────────────────
+
+float halton(uint index, uint base) {
+    float f = 1.0, r = 0.0;
+    while (index > 0u) {
+        f /= float(base);
+        r += f * float(index % base);
+        index /= base;
+    }
+    return r;
+}
+
+// This frame's sub-pixel camera offset in NDC: 8 points of the (2, 3)
+// Halton sequence, so the temporal filter sees each pixel's area sampled
+// evenly. Zero with TAA off.
+vec2 taaJitter(uint frame, uint taa, vec2 resolution) {
+    if (taa == 0u) return vec2(0.0);
+    uint i = frame % 8u + 1u;
+    return (vec2(halton(i, 2u), halton(i, 3u)) - 0.5) * 2.0 / resolution;
+}
+
 // ── Noise ───────────────────────────────────────────────────────
 // Interleaved gradient noise (Jimenez 2014): per-pixel values in 0..1 whose
 // neighbours differ as much as possible, so few filter taps look smooth.
 
 float interleavedGradientNoise(vec2 pixel) {
     return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+}
+
+// The same, moving every frame when TAA is on, so the temporal filter
+// averages the noise of filtered shadows and occlusion away.
+float temporalNoise(vec2 pixel, uint frame, uint taa) {
+    return interleavedGradientNoise(pixel + (taa != 0u ? 5.588238 * float(frame % 64u) : 0.0));
 }
 
 #endif

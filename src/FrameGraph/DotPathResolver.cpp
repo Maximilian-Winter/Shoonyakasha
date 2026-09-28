@@ -24,6 +24,8 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
 
     auto cameraEntities = registry.view<ECS::CameraComponent, ECS::TransformComponent>();
     bool foundCamera = false;
+    const glm::mat4 previousViewProjection = cameraViewProjection;
+    const bool hadCamera = hasCamera;
 
     for (auto entity : cameraEntities) {
         const auto& cam = cameraEntities.get<ECS::CameraComponent>(entity);
@@ -40,12 +42,14 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
             this->cameraFov = cam.fov;
             this->cameraNearPlane = cam.nearPlane;
             this->cameraFarPlane = cam.farPlane;
+            this->cameraPrevViewProjection = hadCamera ? previousViewProjection : cameraViewProjection;
             foundCamera = true;
 
             break;
         }
     }
 
+    hasCamera = foundCamera;
     if (!foundCamera) {
         // Only warn once to avoid spam
         static bool warnedNoCamera = false;
@@ -258,6 +262,7 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
         if (parts[1] == "view") return ResolvedValue(scene.cameraView);
         if (parts[1] == "projection") return ResolvedValue(scene.cameraProjection);
         if (parts[1] == "viewProjection") return ResolvedValue(scene.cameraViewProjection);
+        if (parts[1] == "prevViewProjection") return ResolvedValue(scene.cameraPrevViewProjection);
         if (parts[1] == "invView") return ResolvedValue(scene.cameraInvView);
         if (parts[1] == "invProj") return ResolvedValue(scene.cameraInvProj);
         if (parts[1] == "position") return ResolvedValue(scene.cameraPosition);

@@ -47,8 +47,11 @@ void main() {
 
     // 4x4 interleaved slice rotation and step jitter.
     ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
-    float rotation = (float(pixel.x * 4 + pixel.y) + 0.5) / 16.0;
-    float jitter = fract(float(pixel.y * 4 + pixel.x) * 0.61803398 + 0.3);
+    // With TAA on, both move every frame: over 8 frames the temporal filter
+    // averages 128 slice directions instead of one frame's 16.
+    float temporal = camera.taa != 0u ? float(camera.frame % 8u) : 0.0;
+    float rotation = fract((float(pixel.x * 4 + pixel.y) + 0.5) / 16.0 + temporal / 128.0);
+    float jitter = fract(float(pixel.y * 4 + pixel.x) * 0.61803398 + 0.3 + temporal * 0.38196601);
 
     float visibility = 0.0;
     for (int s = 0; s < SLICES; ++s) {

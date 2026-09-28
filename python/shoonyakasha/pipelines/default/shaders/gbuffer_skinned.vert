@@ -29,4 +29,5 @@ void main() {
     fragTexCoord = inTexCoord;
     fragColor = vec3(1.0);
     gl_Position = camera.proj * camera.view * worldPos;
+    gl_Position.xy += taaJitter(camera.frame, camera.taa, camera.resolution) * gl_Position.w;
 }

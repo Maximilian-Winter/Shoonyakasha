@@ -392,6 +392,20 @@ Not done here: arrays rather than an atlas, so every slot has one resolution
 whatever the light's size on screen; an empty slot's passes still clear their
 layer.
 
+Also done: temporal anti-aliasing. History needs no new resource kind: a
+`persistent` image read in the pass that makes a result and written with a
+copy after it holds last frame's result. The engine publishes
+`scene.camera.prevViewProjection`; the default pipeline jitters its
+G-buffer passes by 8 Halton points (from `scene.time.frame`), reprojects
+through the previous camera using the nearest depth around each pixel,
+reads history with a Catmull-Rom filter, clips it to the variance box of the
+new frame in YCoCg and blends with inverse-luminance weights. Shadow
+filtering and AO now vary their noise per frame, so TAA filters them over
+time too. Found on the way: a color output without "clear" is loaded, but
+its barrier did not grant attachment read access.
+
+Not done: per-object motion vectors (moving objects rely on the clipping).
+
 The original list:
 - Local-light shadows (needs phases 1–4).
 - History resources (`"history": true`, readable as `name.prev`) → TAA,

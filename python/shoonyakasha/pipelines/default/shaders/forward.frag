@@ -35,7 +35,7 @@ void main() {
     vec3 L = -normalize(cascades.sunDirection.xyz);
     int cascade;
     float sunLit = sunVisibility(fragWorldPos, s.N, L, viewDepth,
-                                        interleavedGradientNoise(gl_FragCoord.xy), cascade);
+                                        temporalNoise(gl_FragCoord.xy, camera.frame, camera.taa), cascade);
     int sunIndex = cascades.sunEnabled != 0u ? cascades.sunLightIndex : -1;
 
     vec3 color = directLight(fragWorldPos, s.N, V, s.baseColor.rgb, s.metallic, s.roughness, F0,

@@ -171,6 +171,9 @@ struct SceneContext {
     glm::mat4 cameraView = glm::mat4(1.0f);
     glm::mat4 cameraProjection = glm::mat4(1.0f);       // Vulkan Y-flipped
     glm::mat4 cameraViewProjection = glm::mat4(1.0f);
+    // Last frame's cameraViewProjection, for reprojecting into last frame's
+    // image (temporal anti-aliasing). The current one on the first frame.
+    glm::mat4 cameraPrevViewProjection = glm::mat4(1.0f);
     glm::mat4 cameraInvView = glm::mat4(1.0f);          // Inverse of view matrix
     glm::mat4 cameraInvProj = glm::mat4(1.0f);          // Inverse of (Y-flipped) projection
     glm::vec3 cameraPosition = glm::vec3(0.0f);
@@ -178,6 +181,7 @@ struct SceneContext {
     float cameraNearPlane = 0.1f;
     float cameraFarPlane = 1000.0f;
     float cameraAspect = 1.77f;                          // screenWidth / screenHeight
+    bool hasCamera = false;                              // a main camera was found last update
 
     // Environment (IBL textures)
     const SceneEnvironment* environment = nullptr;

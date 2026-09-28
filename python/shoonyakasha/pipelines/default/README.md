@@ -20,6 +20,9 @@ Deferred PBR (glTF metallic-roughness) with:
   occluders added back and occlusion of reflections
 - emission, material occlusion, forward-shaded blended (glTF `BLEND`)
   materials that receive shadows
+- temporal anti-aliasing: a sub-pixel camera jitter, history reprojected
+  through last frame's camera and clipped to the new frame's colours; it also
+  averages the per-frame noise of shadow filtering and ambient occlusion
 - bloom from a six-level mip chain, with no brightness threshold
 - automatic exposure from a luminance histogram, adapting over time
 - ACES filmic tonemapping
@@ -51,7 +54,7 @@ get one, and its defaults match this pipeline.
 
 Each is a `scene.custom.default.*` value with a default in the pipeline, so
 set only what you want to change: `engine.set_custom_float("default.exposure", 0.8)`
-(`set_custom_uint` for `autoExposure` and `debugView`).
+(`set_custom_uint` for `autoExposure`, `taa` and `debugView`).
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -72,6 +75,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `aoIntensity` | 1.0 | Power applied to the occlusion; above 1 darkens it |
 | `bloomIntensity` | 0.04 | How much of the bloom is mixed into the image |
 | `bloomRadius` | 1.0 | Spread of each upsampling step, in texels |
+| `taa` | 1 | 1 for temporal anti-aliasing, 0 for none (`set_custom_uint`). Turn it off here rather than turning its passes off: the passes after it read its output |
 | `debugView` | 0 | 1 cascades (red, green, blue, yellow), 2 shadow mask, 3 normals, 4 ambient occlusion; shown without tonemapping, bloom or exposure (`set_custom_uint`) |
 
 Without an HDR map the environment is one colour, `environment_color` on
@@ -104,6 +108,7 @@ own that it does not mention stay as you set them.
 | `GTAO`, `AODenoise` | Ambient occlusion from the depth buffer in a 4x4 pattern of slice directions, then a depth-aware 4x4 average |
 | `Lighting` | Lights, image-based light and the sky, added onto the emission |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
+| `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which is then copied into the persistent `taaHistory` for the next frame |
 | `BloomDown0`, `BloomDown1..5` | The HDR image down a half-resolution mip chain, with a 13-tap filter |
 | `AutoExposure` | A compute pass: a histogram of mip 2 of the chain, and the adapted exposure in a persistent 1x1 image |
 | `BloomUp4..0` | Back up the chain, each mip adding a tent-filtered copy of the one below |
@@ -132,5 +137,6 @@ compiled SPIR-V; after editing, recompile with
 stage shaders: `common.glsl` holds the buffer blocks, which must match the
 `bufferLayouts` in `pipeline.json`.
 
-Not here yet: temporal anti-aliasing (and with it temporal filtering of
-shadows and AO), more than 16 lights.
+Not here yet: motion vectors (TAA reprojects the camera's motion only, and
+relies on clipping for moving objects, which can leave a faint trail behind
+fast ones), more than 16 lights.

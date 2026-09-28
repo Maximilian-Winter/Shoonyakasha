@@ -66,7 +66,7 @@ void main() {
     vec3 worldPos = (camera.invView * vec4(viewPos, 1.0)).xyz;
     vec3 N = octDecode(textureLod(gNormal, fragTexCoord, 0.0).xy);
     vec3 L = -normalize(cascades.sunDirection.xyz);
-    float noise = interleavedGradientNoise(gl_FragCoord.xy);
+    float noise = temporalNoise(gl_FragCoord.xy, camera.frame, camera.taa);
 
     int cascade;
     float visibility = sunVisibility(worldPos, N, L, -viewPos.z, noise, cascade);

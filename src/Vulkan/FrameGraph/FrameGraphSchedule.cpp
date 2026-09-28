@@ -98,6 +98,9 @@ VkPipelineStageFlags usageToStageMask(ResourceUsage usage, PassType passType) {
 VkAccessFlags usageToAccessMask(ResourceUsage usage) {
     switch (usage) {
         case ResourceUsage::ColorAttachmentWrite:
+            // An output without "clear" is loaded: a read, which the barrier
+            // before it must make the previous write visible to.
+            return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         case ResourceUsage::Present:
             return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         case ResourceUsage::ColorAttachmentBlend:

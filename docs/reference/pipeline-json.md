@@ -33,7 +33,7 @@ Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defau
 | `viewType` | `auto` | How shaders sampling the whole image see it: `auto` (`2d` for one layer, `2d_array` for more), `2d`, `2d_array`, `cube` (6 square layers), `cube_array` (a multiple of 6) |
 | `samples` | 1 | Vulkan sample count; must match the rendering configuration |
 | `transient` | false | Transient image declaration |
-| `persistent` | false | Contents carry over from one frame to the next, for state a pass accumulates (an adapted exposure, a history). Normally a frame's first access discards an image's contents; a persistent image's first barrier instead waits on and keeps the previous frame's. Cleared to zero (depth to 1) whenever the graph is compiled, including after a resize |
+| `persistent` | false | Contents carry over from one frame to the next, for state a pass accumulates (an adapted exposure, a history). For last frame's image of a result, read a persistent image in the pass that makes the result, then copy the result into it in a pass after: the default pipeline's `TAA` and `TAAHistory` do this. Normally a frame's first access discards an image's contents; a persistent image's first barrier instead waits on and keeps the previous frame's. Cleared to zero (depth to 1) whenever the graph is compiled, including after a resize |
 
 Image properties live inside `image`. Buffer properties live inside `buffer`: `size` in bytes (default 0), `persistentlyMapped` (false). Creating buffers through `bufferLayouts` is separate from declaring graph resource accesses; follow the SSBO examples for imported layout-backed buffers.
 
@@ -98,7 +98,7 @@ A field `source` is a dot-path. A layout-level `source` is an initialization obj
 
 | Root | Supported values |
 |---|---|
-| `scene.camera` | `view`, `projection`, `viewProjection`, `invView`, `invProj`, `position`, `fov`, `nearPlane`, `farPlane`, `aspect`, `positionVec4`, `nearFarFovAspect` |
+| `scene.camera` | `view`, `projection`, `viewProjection`, `prevViewProjection` (last frame's, for reprojection), `invView`, `invProj`, `position`, `fov`, `nearPlane`, `farPlane`, `aspect`, `positionVec4`, `nearFarFovAspect` |
 | `scene.environment` | `irradianceMap`, `prefilterMap`, `brdfLUT`, `environmentMap` |
 | `scene.time` | `elapsed`, `delta`, `frame` |
 | `scene.screen` | `width`, `height`, `resolution` |
