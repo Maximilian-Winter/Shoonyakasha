@@ -82,5 +82,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_pass_enabled(pass_name, enabled)` | bool | Turn a pipeline pass on or off from the next frame. |
 | `get_pass_draw_stats(pass_name)` | int | (drawn, culled): entities a geometry pass drew and culled as outside its view, last run. |
 | `is_pass_enabled(pass_name)` | bool | Whether a pipeline pass is enabled; False if there is no such pass. |
+| `apply_pipeline_preset(name)` | bool | Apply one of the pipeline's "presets", such as the default pipeline's "low", "medium" and "high" quality tiers: switches its passes and sets its scene.custom values. May be called from the on_init callback, before the pipeline is loaded. Returns False if there is no such preset. |
+| `get_pipeline_presets()` | list[str] | Names of the presets the loaded pipeline declares. |
 
 <!-- END SOURCE API -->

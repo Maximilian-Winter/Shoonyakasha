@@ -15,6 +15,7 @@ This reference describes the current [C++ parser](../../src/Vulkan/FrameGraph/Fr
 | `resources` | array | Images and buffers used by passes |
 | `passes` | array | Pass declarations, analyzed for execution dependencies |
 | `uniformBuffers` | object keyed by name | Older explicit-size/offset UBO declarations; prefer `bufferLayouts` for new source-driven buffers |
+| `presets` | object keyed by name | Named sets of pass switches and scene values, such as quality tiers; below |
 
 These sections are conditionally parsed. Their absence is not a useful runnable pipeline: normal windowed applications need resources, a rendering pass, and a final present output. `standardBuffers` is obsolete. Unknown keys are not comprehensively rejected; accepted JSON is not proof a key is implemented.
 
@@ -209,6 +210,20 @@ Compute dispatch uses `dispatch.x/y/z`, each a fixed group count, a parameter/di
 Geometry execution also accepts `entityDataBinding`, `sortMode` (e.g. `front_to_back`, `back_to_front`, `sort_key`), `renderLayerMask` (default all bits), `alphaFilter`, `view`, and `lightIndex` (-1). `alphaFilter` is `any` (default), `opaque` or `mask`, and narrows the pass to materials with that alpha mode, so opaque and alpha-tested geometry can use separate pipelines (e.g. a depth-only shadow pass and one that samples albedo and discards). It is rejected at load on transparent and sprite types, where it could only match nothing. Entity masks are eight bits. The default facade application uses single-queue execution; native multi-queue recording/submission must be integrated explicitly for asynchronous compute.
 
 `view` sets what the pass culls entities against and measures sort distances in: `camera` (the main camera's frustum), `none`, or `shadows.sun.cascades[N]` (sun cascade N's light volume, with no near plane so casters between the sun and the cascade still draw; sorting is by depth along the sun). It defaults to `camera`, except for shadow casters and sprites, which default to `none`: a caster outside the camera's view can still shadow what is in it. A repeated shadow pass culls each cascade with `"view": "shadows.sun.cascades[{cascade}]"`. Entities are tested by the bounds of their mesh (glTF meshes have them; meshes made in code without `hasBounds` are never culled), and skinned entities are never culled, since animation can leave their bind-pose bounds. `get_pass_draw_stats(name)` / `getPassDrawnCount` and `getPassCulledCount` report what a pass drew and culled when it last ran.
+
+## Presets
+
+A preset switches passes and sets `scene.custom` values in one call, `apply_pipeline_preset(name)` (C++ `EngineAPI::applyPipelinePreset` or `RenderGraph::applyPreset`):
+
+```json
+{ "presets": {
+    "low":  { "passes": { "GTAO": false, "ShadowMasked{cascade}": false },
+              "values": { "default.contactShadowLength": 0, "default.bloomIntensity": 0 } },
+    "high": { "passes": { "GTAO": true, "ShadowMasked{cascade}": true },
+              "values": { "default.contactShadowLength": null, "default.bloomIntensity": null } } } }
+```
+
+`passes` maps pass names, or the declared name of a repeated pass, to `true` or `false`; a name that is not a pass fails at load. `values` maps `scene.custom` keys, without the prefix, to a number or an array of numbers, each set with the type of the buffer-layout field whose `source` reads it (so `0` above lands as a float), or as a float or vector when no field does. `null` removes the value so the field's `default` applies again, which is how a preset returns to the pipeline's defaults without repeating them. Called before the pipeline is loaded, from `on_init`, the preset is applied once it is; an unknown name is then a warning at load.
 
 ## Initialization, memory, and readback
 

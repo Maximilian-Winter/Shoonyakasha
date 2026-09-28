@@ -8,6 +8,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [getting_started/ecs_bindings_demo](../../examples/python/getting_started/ecs_bindings_demo) | `python ecs_bindings_demo.py` | Custom Python components and systems |
 | [animation/skinned_fox_demo](../../examples/python/animation/skinned_fox_demo) | `python skinned_fox_demo.py` | Skeletal animation |
 | [rendering/japanese_shrine](../../examples/python/rendering/japanese_shrine) | `python shrine.py`, `python shrine_default.py` | Deferred PBR of a downloaded glTF model with IBL, sun shadows, sky and fog; the second on the default pipeline |
+| [rendering/sponza](../../examples/python/rendering/sponza) | `python sponza.py` | The default pipeline on Sponza, or on a colonnade of boxes without it; quality presets |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -38,6 +39,10 @@ This example intentionally creates no meshes or sprites. Its custom components a
 <a href="../images/examples/python/skinned_fox_demo.png"><img src="../images/examples/python/skinned_fox_demo.png" alt="Low-poly orange and white fox in an animated pose" width="720"></a>
 
 Bundled `Fox.glb` during playback of the first animation clip, driven through the Python bindings.
+
+### Sponza (`sponza`)
+
+Sponza lit by the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md), with no pipeline or shaders of its own: a steep sun through the open roof in four shadow cascades, two warm lamps, ambient occlusion, bloom and automatic exposure. Without the Sponza download it builds a colonnade of boxes, which still shows the shadows and occlusion. **1**, **2** and **3** apply the pipeline's `low`, `medium` and `high` presets with `apply_pipeline_preset`, **V** cycles the debug views and **X** turns automatic exposure off and on.
 
 ### Japanese shrine (`japanese_shrine`)
 

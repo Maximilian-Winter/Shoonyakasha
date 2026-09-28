@@ -1430,6 +1430,18 @@ cdef class Engine:
         """Whether a pipeline pass is enabled; False if there is no such pass."""
         return self._ptr.isPassEnabled(pass_name.encode('utf-8'))
 
+    def apply_pipeline_preset(self, str name):
+        """Apply one of the pipeline's "presets", such as the default pipeline's
+        "low", "medium" and "high" quality tiers: switches its passes and sets
+        its scene.custom values. May be called from the on_init callback,
+        before the pipeline is loaded. Returns False if there is no such preset.
+        """
+        return self._ptr.applyPipelinePreset(name.encode('utf-8'))
+
+    def get_pipeline_presets(self):
+        """Names of the presets the loaded pipeline declares."""
+        return [n.decode('utf-8') for n in self._ptr.getPipelinePresets()]
+
 
 # ═══════════════════════════════════════════════════════════════
 # Frame capture — module level

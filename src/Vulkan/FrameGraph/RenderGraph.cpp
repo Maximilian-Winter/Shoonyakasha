@@ -34,6 +34,7 @@
 #include <stdexcept>
 #include <random>
 #include <algorithm>
+#include <utility>
 #include <cmath>
 #include <fstream>
 #include <filesystem>
@@ -126,6 +127,74 @@ void RenderGraph::loadFromFile(const std::string& filePath) {
         }
     }
     m_pendingPassEnabled.clear();
+
+    if (!m_pendingPreset.empty()) {
+        const std::string preset = std::exchange(m_pendingPreset, std::string{});
+        applyPreset(preset);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Presets
+// ═══════════════════════════════════════════════════════════════
+
+bool RenderGraph::applyPreset(const std::string& name) {
+    if (m_builder.getPassDeclarations().empty()) {
+        m_pendingPreset = name;   // applied by loadFromFile
+        return true;
+    }
+    const PipelinePreset* preset = m_builder.getPreset(name);
+    if (!preset) {
+        m_logger->log(LogLevel::Warning, "applyPreset: the pipeline has no preset '%s'", name.c_str());
+        return false;
+    }
+
+    for (const auto& [pass, enabled] : preset->passes) setPassEnabled(pass, enabled);
+    for (const auto& warning : applyPresetValues(m_builder, *preset, getSceneContext())) {
+        m_logger->log(LogLevel::Warning, "%s", warning.c_str());
+    }
+    m_logger->log(LogLevel::Info, "Applied pipeline preset '%s'", name.c_str());
+    return true;
+}
+
+std::vector<std::string> applyPresetValues(const FrameGraphBuilder& builder, const PipelinePreset& preset,
+                                           Shoonyakasha::SceneContext& scene) {
+    std::vector<std::string> warnings;
+    for (const auto& [key, components] : preset.values) {
+        if (!components) {
+            scene.customValues.erase(key);   // back to the field's "default"
+            continue;
+        }
+        // The type of the field that reads the value; a float or vecN when
+        // no field does.
+        const std::string source = "scene.custom." + key;
+        std::optional<BufferFieldType> type;
+        for (const auto& layout : builder.getBufferLayouts()) {
+            for (const auto& field : layout.fields) {
+                if (field.source == source) { type = field.type; break; }
+            }
+            if (type) break;
+        }
+        if (!type) {
+            static const BufferFieldType byCount[] = {BufferFieldType::Float, BufferFieldType::Vec2,
+                                                      BufferFieldType::Vec3, BufferFieldType::Vec4};
+            type = components->size() <= 4 ? byCount[components->size() - 1] : BufferFieldType::Mat4;
+        }
+        const auto value = resolvedValueOf(*type, *components);
+        if (!value.isValid()) {
+            warnings.push_back("Preset '" + preset.name + "': " + std::to_string(components->size()) +
+                               " values for '" + key + "' do not fit its type");
+            continue;
+        }
+        scene.customValues[key] = value;
+    }
+    return warnings;
+}
+
+std::vector<std::string> RenderGraph::getPresetNames() const {
+    std::vector<std::string> names;
+    for (const auto& p : m_builder.getPresets()) names.push_back(p.name);
+    return names;
 }
 
 // ═══════════════════════════════════════════════════════════════

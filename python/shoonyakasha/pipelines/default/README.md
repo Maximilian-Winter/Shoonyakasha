@@ -72,6 +72,21 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 Without an HDR map the environment is one colour, `environment_color` on
 `sk.Engine` (`uniformEnvironmentColor` in C++), default (0.25, 0.28, 0.33).
 
+## Quality presets
+
+The pipeline declares three presets; apply one with
+`engine.apply_pipeline_preset("low")` (C++ `applyPipelinePreset`), from
+`on_init` or at any time after:
+
+| Preset | Changes |
+|---|---|
+| `low` | No ambient occlusion, no shadows from alpha-tested casters, no contact shadows, no bloom, a narrower shadow filter and hard cascade seams |
+| `medium` | Everything but contact shadows |
+| `high` | Everything, every setting back to its default. What the pipeline starts with |
+
+A preset only touches the passes and settings it names, so settings of your
+own that it does not mention stay as you set them.
+
 ## Passes
 
 | Pass | Draws |

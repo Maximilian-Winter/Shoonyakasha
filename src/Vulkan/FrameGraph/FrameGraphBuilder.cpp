@@ -258,6 +258,7 @@ void FrameGraphBuilder::clear() {
     m_entityDataBindingLookup.clear();
     m_bufferLayouts.clear();
     m_bufferLayoutLookup.clear();
+    m_presets.clear();
 }
 
 } // namespace FrameGraph

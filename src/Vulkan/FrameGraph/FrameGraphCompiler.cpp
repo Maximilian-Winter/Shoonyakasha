@@ -1182,8 +1182,13 @@ bool toResolverType(BufferFieldType t, Shoonyakasha::MaterialParam::Type& out) {
 /// A field's JSON "default" as the value the resolver writes, or an invalid
 /// value when there is none or its component count does not fit the type.
 Shoonyakasha::ResolvedValue defaultAsResolvedValue(const BufferFieldDesc& f) {
-    const auto& d = f.defaultValue;
-    switch (f.type) {
+    return resolvedValueOf(f.type, f.defaultValue);
+}
+
+} // namespace
+
+Shoonyakasha::ResolvedValue resolvedValueOf(BufferFieldType type, const std::vector<float>& d) {
+    switch (type) {
         case BufferFieldType::Float: if (d.size() == 1) return Shoonyakasha::ResolvedValue(d[0]); break;
         case BufferFieldType::Int:   if (d.size() == 1) return Shoonyakasha::ResolvedValue(static_cast<int32_t>(d[0])); break;
         case BufferFieldType::UInt:  if (d.size() == 1) return Shoonyakasha::ResolvedValue(static_cast<uint32_t>(d[0])); break;
@@ -1201,8 +1206,6 @@ Shoonyakasha::ResolvedValue defaultAsResolvedValue(const BufferFieldDesc& f) {
     }
     return Shoonyakasha::ResolvedValue();
 }
-
-} // namespace
 
 Shoonyakasha::CompiledBufferLayout CompiledBufferLayout::toResolverLayout() const {
     Shoonyakasha::CompiledBufferLayout out;

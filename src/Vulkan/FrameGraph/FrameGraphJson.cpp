@@ -1577,6 +1577,63 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json) {
             builder.addPass(std::move(pass));
         }
     }
+
+    // ── Presets (after passes, whose names they are checked against) ──
+    if (json.contains("presets")) {
+        const auto& presetsJson = json["presets"];
+        if (!presetsJson.is_object()) {
+            throw std::runtime_error("\"presets\" must be an object of named presets");
+        }
+        auto passExists = [&](const std::string& name) {
+            if (builder.hasPass(name)) return true;
+            for (const auto& p : builder.getPassDeclarations()) if (p.repeatGroup == name) return true;
+            return false;
+        };
+        for (auto it = presetsJson.begin(); it != presetsJson.end(); ++it) {
+            const std::string where = "Preset '" + it.key() + "'";
+            const auto& pj = it.value();
+            if (!pj.is_object()) throw std::runtime_error(where + " must be an object");
+            PipelinePreset preset;
+            preset.name = it.key();
+            if (pj.contains("passes")) {
+                if (!pj["passes"].is_object()) {
+                    throw std::runtime_error(where + ": \"passes\" must map pass names to true or false");
+                }
+                for (auto p = pj["passes"].begin(); p != pj["passes"].end(); ++p) {
+                    if (!p.value().is_boolean()) {
+                        throw std::runtime_error(where + ": pass '" + p.key() + "' must be true or false");
+                    }
+                    if (!passExists(p.key())) {
+                        throw std::runtime_error(where + " switches '" + p.key() + "', which is not a pass");
+                    }
+                    preset.passes.emplace_back(p.key(), p.value().get<bool>());
+                }
+            }
+            if (pj.contains("values")) {
+                if (!pj["values"].is_object()) {
+                    throw std::runtime_error(where + ": \"values\" must map scene.custom keys to values");
+                }
+                for (auto v = pj["values"].begin(); v != pj["values"].end(); ++v) {
+                    const auto& value = v.value();
+                    if (value.is_null()) {
+                        preset.values.emplace_back(v.key(), std::nullopt);
+                    } else if (value.is_number()) {
+                        preset.values.emplace_back(v.key(), std::vector<float>{value.get<float>()});
+                    } else if (value.is_array() && !value.empty() &&
+                               std::all_of(value.begin(), value.end(),
+                                           [](const nlohmann::json& c) { return c.is_number(); })) {
+                        std::vector<float> components;
+                        for (const auto& c : value) components.push_back(c.get<float>());
+                        preset.values.emplace_back(v.key(), std::move(components));
+                    } else {
+                        throw std::runtime_error(where + ": value '" + v.key() +
+                                                 "' must be a number, an array of numbers or null");
+                    }
+                }
+            }
+            builder.addPreset(std::move(preset));
+        }
+    }
 }
 
 namespace {

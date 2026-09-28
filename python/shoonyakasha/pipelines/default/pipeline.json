@@ -1811,5 +1811,46 @@
         "tonemapSet"
       ]
     }
-  ]
+  ],
+  "presets": {
+    "low": {
+      "passes": {
+        "GTAO": false,
+        "AODenoise": false,
+        "ShadowMasked{cascade}": false
+      },
+      "values": {
+        "default.contactShadowLength": 0,
+        "default.bloomIntensity": 0,
+        "default.shadowSoftness": 1.0,
+        "default.cascadeBlend": 0
+      }
+    },
+    "medium": {
+      "passes": {
+        "GTAO": true,
+        "AODenoise": true,
+        "ShadowMasked{cascade}": true
+      },
+      "values": {
+        "default.contactShadowLength": 0,
+        "default.bloomIntensity": null,
+        "default.shadowSoftness": null,
+        "default.cascadeBlend": null
+      }
+    },
+    "high": {
+      "passes": {
+        "GTAO": true,
+        "AODenoise": true,
+        "ShadowMasked{cascade}": true
+      },
+      "values": {
+        "default.contactShadowLength": null,
+        "default.bloomIntensity": null,
+        "default.shadowSoftness": null,
+        "default.cascadeBlend": null
+      }
+    }
+  }
 }

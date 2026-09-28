@@ -46,6 +46,7 @@ directory names, see [BUILDING.md](../BUILDING.md).
 |---|---|
 | [`declarative_sponza_test`](cpp/rendering/declarative_sponza_test) | Deferred PBR with image-based lighting, driven entirely from `pbr_ibl_pipeline_v3.json`. The reference for what the JSON frame graph can express. |
 | [`bloom_test`](cpp/rendering/bloom_test) | Multi-pass post-processing: bright-pass extraction, separable blur, composite. |
+| [`default_pipeline`](cpp/rendering/default_pipeline) | Sponza on the pipeline the engine ships, through the facade alone: no pipeline JSON or shaders, a quality preset on the command line. Falls back to a colonnade of boxes. |
 
 ### compute
 
@@ -92,7 +93,8 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 
 | | |
 |---|---|
-| [`japanese_shrine`](python/rendering/japanese_shrine) | Deferred PBR of a glTF metallic-roughness model with image-based light, a sun shadow map declared entirely in the pipeline JSON, the environment drawn as the sky, and distance fog. Needs the shrine model, which is downloaded by hand (see the asset README). |
+| [`japanese_shrine`](python/rendering/japanese_shrine) | Deferred PBR of a glTF metallic-roughness model with image-based light, a sun shadow map declared entirely in the pipeline JSON, the environment drawn as the sky, and distance fog; `shrine_default.py` renders it on the default pipeline instead. Needs the shrine model, which is downloaded by hand (see the asset README). |
+| [`sponza`](python/rendering/sponza) | Sponza on the default pipeline: cascaded sun shadows through the open roof, lamps, ambient occlusion, quality presets on keys 1-3. Falls back to a colonnade of boxes. |
 
 ### games_2d
 

@@ -329,6 +329,41 @@ def validate_json(document, base_dir=None, source="<json>"):
                 problems.append(Problem("%s pipeline.%s" % (where, key),
                                         "'%s' does not exist" % reference, hint=hint))
 
+    # ── presets ────────────────────────────────────────────────
+    presets = document.get("presets", {})
+    if not isinstance(presets, dict):
+        problems.append(Problem(source, "'presets' must be an object of named presets"))
+        presets = {}
+    pass_names = {p.get("name") for p in passes if isinstance(p, dict)}
+    for original in document.get("passes", []) if isinstance(document.get("passes"), list) else []:
+        if isinstance(original, dict) and "repeat" in original:
+            pass_names.add(original.get("name"))   # a repeated pass's declared name
+    for preset_name, preset in presets.items():
+        where = "%s presets '%s'" % (source, preset_name)
+        if not isinstance(preset, dict):
+            problems.append(Problem(where, "must be an object"))
+            continue
+        switches = preset.get("passes", {})
+        if not isinstance(switches, dict):
+            problems.append(Problem(where, "'passes' must map pass names to true or false"))
+            switches = {}
+        for pass_name, enabled in switches.items():
+            if not isinstance(enabled, bool):
+                problems.append(Problem(where, "pass '%s' must be true or false" % pass_name))
+            if pass_name not in pass_names:
+                problems.append(Problem(where, "switches '%s', which is not a pass" % pass_name,
+                                        hint=_suggest(pass_name, pass_names)))
+        values = preset.get("values", {})
+        if not isinstance(values, dict):
+            problems.append(Problem(where, "'values' must map scene.custom keys to values"))
+            values = {}
+        for key, value in values.items():
+            number = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+            if not (value is None or number(value)
+                    or (isinstance(value, list) and value and all(number(v) for v in value))):
+                problems.append(Problem(where, "value '%s' must be a number, an array of numbers or null"
+                                        % key))
+
     # ── whole-graph checks ─────────────────────────────────────
     for resource in sorted(read - written):
         if not declared.get(resource, {}).get("imported"):

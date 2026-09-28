@@ -455,6 +455,14 @@ bool EngineAPI::isPassEnabled(const std::string& passName) const {
     return m_impl->app->getRenderGraph().isPassEnabled(passName);
 }
 
+bool EngineAPI::applyPipelinePreset(const std::string& name) {
+    return m_impl->app->getRenderGraph().applyPreset(name);
+}
+
+std::vector<std::string> EngineAPI::getPipelinePresets() const {
+    return m_impl->app->getRenderGraph().getPresetNames();
+}
+
 uint32_t EngineAPI::getPassDrawnCount(const std::string& passName) const {
     uint32_t drawn = 0, culled = 0;
     m_impl->app->getRenderGraph().getPassDrawStats(passName, drawn, culled);

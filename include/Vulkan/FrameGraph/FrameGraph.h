@@ -301,6 +301,12 @@ struct BufferLayoutDesc {
 // 轉化之道 — The way of transformation
 // ═══════════════════════════════════════════════════════════════
 
+/// Numbers as a value of a buffer field's type: one for scalars, one per
+/// component for vectors, 16 column-major for mat4. Invalid when the count
+/// does not fit or the type has no ResolvedValue. Used for field "default"s
+/// and preset values.
+Shoonyakasha::ResolvedValue resolvedValueOf(BufferFieldType type, const std::vector<float>& components);
+
 /// Compiled buffer layout - ready for runtime use
 /// Uses dot-path sources for automatic value resolution
 struct CompiledBufferLayout {
@@ -539,6 +545,25 @@ struct CompiledPass {
 // 青龍司生 — The Azure Dragon governs growth
 // ═══════════════════════════════════════════════════════════════
 
+/// A named set of pass switches and scene values (JSON "presets"), for
+/// quality tiers and the like. Applied with RenderGraph::applyPreset.
+struct PipelinePreset {
+    std::string name;
+    /// Pass name or declared name of a repeated pass -> enabled.
+    std::vector<std::pair<std::string, bool>> passes;
+    /// scene.custom key (without the prefix) -> components. std::nullopt
+    /// (JSON null) removes the value, so a field's "default" applies again.
+    std::vector<std::pair<std::string, std::optional<std::vector<float>>>> values;
+};
+
+class FrameGraphBuilder;
+
+/// Set a preset's scene.custom values in `scene`, each with the type of the
+/// buffer field in `builder` that reads it. Returns warnings for values that
+/// do not fit. RenderGraph::applyPreset also switches the preset's passes.
+std::vector<std::string> applyPresetValues(const FrameGraphBuilder& builder, const PipelinePreset& preset,
+                                           Shoonyakasha::SceneContext& scene);
+
 class FrameGraphBuilder {
 public:
     FrameGraphBuilder();
@@ -587,6 +612,14 @@ public:
     bool hasBufferLayout(const std::string& name) const;
     const std::vector<BufferLayoutDesc>& getBufferLayouts() const { return m_bufferLayouts; }
 
+    // ── Presets ──
+    void addPreset(PipelinePreset preset) { m_presets.push_back(std::move(preset)); }
+    const std::vector<PipelinePreset>& getPresets() const { return m_presets; }
+    const PipelinePreset* getPreset(const std::string& name) const {
+        for (const auto& p : m_presets) if (p.name == name) return &p;
+        return nullptr;
+    }
+
     // ── Vertex Format Declaration ──
     // 頂點之構 — The structure of vertices arises from declaration
     void setVertexFormatRegistry(const VertexFormatRegistry& registry) { m_vertexFormats = registry; }
@@ -626,6 +659,7 @@ private:
     std::vector<EntityDataBindingConfig>            m_entityDataBindings;
     std::unordered_map<std::string, uint32_t>       m_entityDataBindingLookup;
     std::vector<BufferLayoutDesc>                   m_bufferLayouts;
+    std::vector<PipelinePreset>                     m_presets;
     std::unordered_map<std::string, uint32_t>       m_bufferLayoutLookup;
 
     // Declarative vertex format registry
@@ -924,6 +958,13 @@ public:
     bool setPassEnabled(const std::string& passName, bool enabled);
     bool isPassEnabled(const std::string& passName) const;
 
+    // Apply a preset from the pipeline's "presets": switch its passes and set
+    // its scene.custom values, each with the type of the buffer field that
+    // reads it. Before the pipeline is loaded, remembered and applied at
+    // load. False, with a warning, when the pipeline has no such preset.
+    bool applyPreset(const std::string& name);
+    std::vector<std::string> getPresetNames() const;
+
     // ── Geometry pass statistics ──
     // Entities an entity geometry pass drew, and left out as outside its
     // view, the last time it ran. Returns false if it has not run.
@@ -1210,6 +1251,8 @@ private:
 
     // setPassEnabled calls made before the pipeline was loaded
     std::unordered_map<std::string, bool> m_pendingPassEnabled;
+    // applyPreset called before the pipeline was loaded
+    std::string m_pendingPreset;
 
     // Manual pipeline overrides (hybrid mode)
     std::unordered_map<std::string, std::shared_ptr<VulkanPipeline>> m_manualPipelines;

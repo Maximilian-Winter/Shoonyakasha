@@ -228,6 +228,17 @@ class PipelineValidation(unittest.TestCase):
         document["passes"][0]["repeat"]["first"] = 1
         self.assertTrue(any("at least 0" in p.message for p in self.problems(document)))
 
+    def test_presets_are_checked_against_the_passes(self):
+        import copy
+        document = copy.deepcopy(self.MINIMAL)
+        document["presets"] = {"low": {"passes": {"Only": False}, "values": {"a.b": 1, "a.c": None}}}
+        self.assertEqual([], self.problems(document))
+        document["presets"]["low"]["passes"]["Onyl"] = True
+        document["presets"]["low"]["values"]["a.d"] = "bright"
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("'Onyl', which is not a pass" in m for m in messages), messages)
+        self.assertTrue(any("'a.d' must be" in m for m in messages), messages)
+
     def test_repeat_without_a_count_is_reported(self):
         document = dict(self.MINIMAL)
         document["passes"] = [dict(self.MINIMAL["passes"][0], repeat={"index": "i"})]

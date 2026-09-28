@@ -8,6 +8,7 @@ Configure with `BUILD_EXAMPLES=ON` following [BUILDING.md](../../BUILDING.md), t
 | [api/instancing_test](../../examples/cpp/api/instancing_test) | `InstancingTest` | Shared geometry, hierarchy, capture; `--selftest` available |
 | [rendering/declarative_sponza_test](../../examples/cpp/rendering/declarative_sponza_test) | `DeclarativeSponzaTest` | Deferred PBR/IBL |
 | [rendering/bloom_test](../../examples/cpp/rendering/bloom_test) | `ShoonyakashaBloomTest` | Multipass bloom |
+| [rendering/default_pipeline](../../examples/cpp/rendering/default_pipeline) | `DefaultPipelineExample` | The default pipeline with no JSON or shaders; `low`, `medium` or `high` as its argument |
 | [compute/particle_test](../../examples/cpp/compute/particle_test) | `ShoonyakashaParticleTest` | Compute particles |
 | [compute/particle_flow_example](../../examples/cpp/compute/particle_flow_example) | `ParticleFlowExample` | Particle parameters and target saving |
 | [compute/ssbo_data_flow_example](../../examples/cpp/compute/ssbo_data_flow_example) | `SSBODataFlowExample` | Buffer initialization, sharing, readback, and files |

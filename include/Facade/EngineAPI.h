@@ -11,6 +11,7 @@
 #include <glm/glm.hpp>
 #include <string>
 #include <memory>
+#include <vector>
 
 namespace Shoonyakasha {
 namespace Facade {
@@ -218,6 +219,13 @@ public:
     /// every instance. Returns false if the pipeline has no such pass.
     bool setPassEnabled(const std::string& passName, bool enabled);
     bool isPassEnabled(const std::string& passName) const;
+
+    /// Apply one of the pipeline's "presets" (quality tiers, for the default
+    /// pipeline "low", "medium" and "high"): switches its passes and sets its
+    /// scene.custom values. May be called from onInit, before the pipeline is
+    /// loaded. Returns false if the pipeline has no such preset.
+    bool applyPipelinePreset(const std::string& name);
+    std::vector<std::string> getPipelinePresets() const;
 
     /// Entities an entity geometry pass drew / culled as outside its view the
     /// last time it ran; 0 if it has not run.

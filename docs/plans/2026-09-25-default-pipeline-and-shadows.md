@@ -293,7 +293,7 @@ Not done: a caster whose shadow cannot reach the camera's view is still drawn
 if it is inside the cascade (a tighter test would sweep its bounds along the
 sun), and there is no GPU-driven culling or indirect drawing yet.
 
-### Phase 5 — ship the default pipeline — done, except tiers and the examples
+### Phase 5 — ship the default pipeline — done
 
 Done: [`python/shoonyakasha/pipelines/default/`](../../python/shoonyakasha/pipelines/default/README.md),
 under the Python package so the wheel ships it, with its SPIR-V committed.
@@ -350,9 +350,18 @@ Checked on lavapipe with sync validation, with and without an HDR map: no
 validation messages, a flat floor reads about 0.98 unoccluded, and exposure
 brings an HDR scene that blows out at exposure 1 back into range.
 
-Still to do in this phase:
-- Quality tiers.
-- Moving the shrine and Sponza examples onto it.
+Finally:
+- Quality tiers are `"presets"` in the pipeline JSON: named pass switches and
+  `scene.custom` values, applied with `apply_pipeline_preset` /
+  `applyPipelinePreset`. Values take the type of the field that reads them,
+  and `null` returns a value to its field's default. The default pipeline has
+  `low`, `medium` and `high`. Shadow map resolution is fixed in the JSON, so
+  tiers do not change it yet.
+- `shrine_default.py` beside the hand-written shrine, and Sponza on the
+  default pipeline in Python (`examples/python/rendering/sponza`) and C++
+  (`examples/cpp/rendering/default_pipeline`, facade only, empty
+  `pipelineJsonPath`). The hand-written shrine and Sponza pipelines stay as
+  the write-your-own examples.
 
 The original outline:
 - `assets/pipelines/default/pipeline.json` + shaders, built by
