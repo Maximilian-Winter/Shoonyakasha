@@ -2305,6 +2305,74 @@
       ]
     },
     {
+      "name": "TransparentRT",
+      "type": "graphics",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "transparent_geometry",
+        "sortMode": "back_to_front",
+        "entityDataBinding": "material"
+      },
+      "inputs": [
+        {
+          "resource": "shadowMap",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "spotShadowMap",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "pointShadowMap",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "lightClusters",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "color_blend"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_read"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/gbuffer.vert.spv",
+        "fragmentShader": "shaders/forward_rt.frag.spv",
+        "depthTest": true,
+        "depthWrite": false,
+        "cullMode": "none",
+        "blending": "alpha"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet",
+        "lightsSet",
+        "iblSet",
+        "shadowMapSet",
+        "settingsSet",
+        "rayTracingSceneSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 180
+        }
+      ]
+    },
+    {
       "name": "TAA",
       "type": "graphics",
       "execution": {
@@ -2601,6 +2669,8 @@
         "ShadowSkinned{cascade}": true,
         "ShadowMask": true,
         "ShadowMaskRT": false,
+        "Transparent": true,
+        "TransparentRT": false,
         "GTAO": false,
         "AODenoise": false,
         "SpotShadowMasked{s}": false,
@@ -2620,6 +2690,8 @@
         "ShadowSkinned{cascade}": true,
         "ShadowMask": true,
         "ShadowMaskRT": false,
+        "Transparent": true,
+        "TransparentRT": false,
         "GTAO": true,
         "AODenoise": true,
         "SpotShadowMasked{s}": true,
@@ -2639,6 +2711,8 @@
         "ShadowSkinned{cascade}": true,
         "ShadowMask": true,
         "ShadowMaskRT": false,
+        "Transparent": true,
+        "TransparentRT": false,
         "GTAO": true,
         "AODenoise": true,
         "SpotShadowMasked{s}": true,
@@ -2658,6 +2732,8 @@
         "ShadowSkinned{cascade}": true,
         "ShadowMask": false,
         "ShadowMaskRT": true,
+        "Transparent": false,
+        "TransparentRT": true,
         "GTAO": true,
         "AODenoise": true,
         "SpotShadowMasked{s}": true,

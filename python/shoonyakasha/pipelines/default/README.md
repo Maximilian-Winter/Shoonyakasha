@@ -100,7 +100,7 @@ The pipeline declares four presets; apply one with
 | `low` | No ambient occlusion, no shadows from alpha-tested casters (sun, spot or point), no contact shadows, no bloom, a narrower shadow filter and hard cascade seams |
 | `medium` | Everything but contact shadows |
 | `high` | Everything, every setting back to its default. What the pipeline starts with |
-| `raytraced` | `high`, with sun shadows from ray queries instead of the cascades' opaque casters. Refused, with a warning, on a device without ray queries; check with `engine.ray_query_supported()` (C++ `rayQuerySupported`) |
+| `raytraced` | `high`, with sun shadows from ray queries instead of the cascades' opaque casters, on blended materials too. Refused, with a warning, on a device without ray queries; check with `engine.ray_query_supported()` (C++ `rayQuerySupported`) |
 
 A preset only touches the passes and settings it names, so settings of your
 own that it does not mention stay as you set them.
@@ -119,6 +119,7 @@ own that it does not mention stay as you set them.
 | `LightClusters` | A compute pass listing the point and spot lights that reach each cluster of the view, into `lightClusters` |
 | `Lighting` | Lights, image-based light and the sky, added onto the emission |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
+| `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with sun shadow rays. `"requires": ["rayQuery"]`; off by default |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which is then copied into the persistent `taaHistory` for the next frame |
 | `BloomDown0`, `BloomDown1..5` | The HDR image down a half-resolution mip chain, with a 13-tap filter |
 | `AutoExposure` | A compute pass: a histogram of mip 2 of the chain, and the adapted exposure in a persistent 1x1 image |
@@ -159,9 +160,10 @@ need their structures rebuilt from the skinned vertices every frame, and
 alpha-tested ones an any-hit test against their textures; both still cast
 into the cascades, which is why the preset keeps `ShadowMasked{cascade}` and
 `ShadowSkinned{cascade}` on and turns only `ShadowOpaque{cascade}` off. The
-mask is the product of the two. Blended materials read the cascades directly,
-so in this preset they get no shadow from opaque static casters; spot and point
-lights keep their shadow maps.
+mask is the product of the two. Blended materials have no mask; the preset
+swaps `Transparent` for `TransparentRT`, which traces four rays per pixel
+itself (TAA cannot average a surface it sees through) and multiplies them
+with the cascades the same way. Spot and point lights keep their shadow maps.
 
 One ray per pixel is noisy on its own; TAA averages it. With `taa` 0 the
 shadows' edges are left grainy.

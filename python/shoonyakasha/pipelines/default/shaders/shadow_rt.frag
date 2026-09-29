@@ -25,6 +25,7 @@ layout(set = 3, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascade
 layout(set = 4, binding = 0) uniform sampler2DArrayShadow shadowMap;
 
 #include "csm.glsl"
+#include "rt_shadows.glsl"
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec2 outMask;
@@ -48,19 +49,7 @@ void main() {
     // A point on the sun's disc, different every pixel and frame.
     float u = temporalNoise(gl_FragCoord.xy, camera.frame, camera.taa);
     float v = temporalNoise(gl_FragCoord.yx + 17.0, camera.frame + 3u, camera.taa);
-    float radius = tan(radians(settings.sunAngle)) * sqrt(u);
-    float angle = v * 6.28318531;
-    vec3 t = normalize(cross(L, abs(L.y) < 0.99 ? vec3(0, 1, 0) : vec3(1, 0, 0)));
-    vec3 b = cross(L, t);
-    vec3 direction = normalize(L + (t * cos(angle) + b * sin(angle)) * radius);
-
-    // Off the surface by a little more farther away, where depth is coarser.
-    float offset = 0.01 + 0.002 * -viewPos.z;
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-                          0xFF, worldPos + N * offset, 0.0, direction, 10000.0);
-    while (rayQueryProceedEXT(query)) {}
-    bool shadowed = rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT;
+    bool shadowed = sunRayBlocked(worldPos + N * sunRayOffset(-viewPos.z), L, u, v);
 
     // The casters that are not in the acceleration structure.
     int cascade;

@@ -433,8 +433,9 @@ refused. The default pipeline's `raytraced` preset swaps `ShadowMask` for
 `ShadowMaskRT`, one ray per pixel to a random point on the sun's disc
 (`sunAngle`), averaged by TAA; skinned and alpha-tested casters are not in
 the acceleration structure, so their cascade passes stay on and the mask is
-the product of both. Blended materials still read the cascades, which in
-this preset lack the opaque casters.
+the product of both. Blended materials at first still read the cascades,
+which in this preset lack the opaque casters; later a `TransparentRT` pass
+(forward_rt.frag, four rays per pixel) replaced `Transparent` in the preset.
 
 Not done, on purpose: the shadow atlas. What it buys over the arrays is a
 resolution per light by its size on screen. It needs per-view viewport
