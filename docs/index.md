@@ -7,6 +7,7 @@ Build C++ or Python applications with JSON-defined Vulkan rendering. Begin with 
 - [Prerequisites](getting-started/prerequisites.md) and [build/install guide](../BUILDING.md).
 - [Python quickstart](getting-started/python-quickstart.md): generate and run a starter.
 - [C++ quickstart](getting-started/cpp-quickstart.md): build and run the facade example.
+- [Using the default pipeline](guides/default-pipeline.md): render a glTF scene with the built-in renderer, no shaders needed.
 - [JSON pipeline walkthrough](guides/json-render-pipeline.md) and [detailed JSON reference](reference/pipeline-json.md).
 - [FAQ](faq.md): missing files, validation, bindings, and known limits.
 
@@ -18,6 +19,7 @@ Build C++ or Python applications with JSON-defined Vulkan rendering. Begin with 
 | Create, parent, query, and update entities | [Entities/components](guides/entities-and-components.md) |
 | Write custom components and per-frame systems | [Script ECS](guides/script-ecs.md) |
 | Set up a camera and input | [Cameras/controllers](guides/cameras-and-controllers.md) |
+| Render with the built-in pipeline: presets, settings, ray-traced shadows, changing a copy | [Default pipeline](guides/default-pipeline.md) |
 | Work with surfaces and light | [Materials](guides/materials.md), [lighting/IBL](guides/lighting-and-ibl.md) |
 | Animate a character | [Skeletal animation](guides/animation.md) |
 | Draw 2D content | [Sprites, UI, and text](guides/sprites-ui-text.md) |

@@ -1,7 +1,10 @@
 # The default pipeline
 
 What `sk.Engine()` renders with when no `pipeline_json_path` is given, and
-what a C++ `ApplicationConfig` with an empty `pipelineJsonPath` loads.
+what a C++ `ApplicationConfig` with an empty `pipelineJsonPath` loads. This
+is the reference; [Using the default pipeline](../../../../docs/guides/default-pipeline.md)
+is the guide: what a scene needs, which settings to reach for, and how to
+change a copy.
 Deferred PBR (glTF metallic-roughness) with:
 
 - cascaded sun shadows: four cascades in one 2048² depth array, 16-tap Vogel

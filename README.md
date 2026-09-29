@@ -53,6 +53,7 @@ Start with the [pipeline walkthrough](docs/guides/json-render-pipeline.md), [JSO
 | Area | Current capabilities | Learn more |
 |---|---|---|
 | Declarative rendering | Graphics/compute passes, resource dependencies, queue selection, vertex formats, descriptors, push constants, UBO/SSBO layouts, packing, and dot-path bindings | [JSON pipelines](docs/guides/json-render-pipeline.md) |
+| Default pipeline | A built-in renderer used when no pipeline is named: clustered deferred PBR, cascaded and ray-traced sun shadows, spot and point shadows in an atlas, ambient occlusion, TAA with motion vectors, bloom, automatic exposure, and quality presets | [Using the default pipeline](docs/guides/default-pipeline.md) |
 | Rendering examples | Forward shading, deferred PBR, HDR image-based lighting, tonemapping, bloom, and compute-driven particles | [Examples](examples/README.md) |
 | Render control | Depth/culling/blend state, custom blend factors, opaque/transparent/skinned/sprite execution, layer masks, and sorting | [Pipeline reference](docs/reference/pipeline-json.md) |
 | GPU data flow | Shared storage buffers, parameterized counts and dispatch, initialization, readback, and render-target saving | [Compute and data flow](docs/guides/compute-and-data-flow.md) |

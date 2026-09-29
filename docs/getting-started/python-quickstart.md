@@ -48,7 +48,7 @@ engine.set_on_init(on_init)
 engine.run()
 ```
 
-Leave out `pipeline_json_path` and the engine renders with the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md) instead: deferred PBR with cascaded sun shadows, no shaders of your own needed.
+Leave out `pipeline_json_path` and the engine renders with the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md) instead: deferred PBR with sun and local light shadows, ambient occlusion and TAA, no shaders of your own needed. [Using the default pipeline](../guides/default-pipeline.md) shows how.
 
 `run()` blocks until the window closes. Create entities in `on_init`: Vulkan and the scene exist, but graph compilation follows this callback. `on_post_init` runs after compilation. Update application state in `on_update(dt)`; `dt` is seconds.
 
