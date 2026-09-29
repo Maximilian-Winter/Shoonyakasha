@@ -414,6 +414,14 @@ nearest-depth pixel's motion, the sky still through the camera. The per-draw
 push constants grew to 180 bytes, and the compiler now checks each pass
 against the device's `maxPushConstantsSize`.
 
+Found later: dead-pass culling removed `TAAHistory`, whose only reader is
+the next frame, so the history never updated and TAA showed the raw
+jittered frames; a moving camera hid it, a still one shimmered. A pass
+writing a persistent image now counts as live. With TAA accumulating, the
+history clip box widened to 1.25 standard deviations (and never beyond the
+neighbourhood's min/max), and feedback rose to 0.96 where the image stands
+still, falling to 0.88 at 2 pixels a frame.
+
 Also done: clustered lighting. The engine publishes up to 128 lights (was
 16). A compute pass bins the point and spot lights by range into 16 x 9 x 24
 view clusters, logarithmic in depth, listing them in an R32_UINT image (a

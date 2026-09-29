@@ -398,9 +398,12 @@ std::vector<uint32_t> livePasses(
             continue;
         }
         for (const auto& out : passes[pi].outputs) {
+            // A persistent image is read by the next frame, which this
+            // frame's dependencies cannot see: writing it is an effect.
             if (leavesPresentable(out) ||
                 (out.handle.valid() && out.handle.index < declarations.size() &&
-                 declarations[out.handle.index].imported)) {
+                 (declarations[out.handle.index].imported ||
+                  declarations[out.handle.index].imageDesc.persistent))) {
                 mark(pi);
             }
         }

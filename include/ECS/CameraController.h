@@ -166,6 +166,7 @@ struct CameraControllerComponent {
     float currentYaw = 0.0f;          // Current horizontal rotation
     float currentPitch = 0.0f;        // Current vertical rotation
     bool initialized = false;         // Whether yaw/pitch have been initialized from transform
+    glm::vec3 writtenRotation{0.0f};  // The rotation this last gave the transform
 
     // ─────────────────────────────────────────────────────────────
     // Key Bindings - The Map of Intention
@@ -283,6 +284,14 @@ public:
     }
 
 private:
+    static void adoptRotation(CameraControllerComponent& ctrl, const TransformComponent& transform) {
+        if (!ctrl.initialized || transform.rotation != ctrl.writtenRotation) {
+            ctrl.currentYaw = transform.rotation.y;
+            ctrl.currentPitch = transform.rotation.x;
+            ctrl.initialized = true;
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Free Camera - Unbound Flight
     // ─────────────────────────────────────────────────────────────
@@ -293,12 +302,10 @@ private:
         const InputStateComponent& input,
         float dt
     ) {
-        // Initialize yaw/pitch from current transform on first update
-        if (!ctrl.initialized) {
-            ctrl.currentYaw = transform.rotation.y;
-            ctrl.currentPitch = transform.rotation.x;
-            ctrl.initialized = true;
-        }
+        // Take yaw/pitch from the transform on the first update, and again
+        // whenever something else has turned the camera since this last did
+        // (a script's camera path), so control resumes from where it is.
+        adoptRotation(ctrl, transform);
 
         // Mouse look (when captured or holding right mouse button)
         if (input.mouseCaptured || input.isMouseButtonDown(ctrl.mouseButtonLook)) {
@@ -362,6 +369,7 @@ private:
         // Apply movement
         transform.position += ctrl.velocity * dt;
         transform.rotation = glm::vec3(ctrl.currentPitch, ctrl.currentYaw, 0.0f);
+        ctrl.writtenRotation = transform.rotation;
         transform.isDirty = true;
     }
 
@@ -472,12 +480,10 @@ private:
         const InputStateComponent& input,
         float dt
     ) {
-        // Initialize yaw/pitch from current transform on first update
-        if (!ctrl.initialized) {
-            ctrl.currentYaw = transform.rotation.y;
-            ctrl.currentPitch = transform.rotation.x;
-            ctrl.initialized = true;
-        }
+        // Take yaw/pitch from the transform on the first update, and again
+        // whenever something else has turned the camera since this last did
+        // (a script's camera path), so control resumes from where it is.
+        adoptRotation(ctrl, transform);
 
         // Mouse look (always active when captured or holding right mouse)
         if (input.mouseCaptured || input.isMouseButtonDown(ctrl.mouseButtonLook)) {
@@ -524,6 +530,7 @@ private:
         transform.position.y = ctrl.groundY + ctrl.eyeHeight;
 
         transform.rotation = glm::vec3(ctrl.currentPitch, ctrl.currentYaw, 0.0f);
+        ctrl.writtenRotation = transform.rotation;
         transform.isDirty = true;
     }
 

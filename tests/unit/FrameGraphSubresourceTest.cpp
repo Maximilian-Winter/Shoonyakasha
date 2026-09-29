@@ -535,6 +535,36 @@ TEST(SubresourceBarriers, PersistentImagesKeepTheirContentsAcrossFrames) {
     EXPECT_TRUE(desc.additionalUsage & VK_IMAGE_USAGE_TRANSFER_DST_BIT);   // cleared at compile time
 }
 
+TEST(SubresourceBarriers, PassesWritingPersistentImagesAreNotCulled) {
+    // TAA: the resolve reads last frame's history, and a copy after it writes
+    // this frame's into the history. Nothing later in the frame reads the
+    // history, but the next frame does, so the copy must run.
+    json images = json::array({
+        {{"name", "resolved"}, {"kind", "image"}, {"image", {{"format", "R16G16B16A16_SFLOAT"}}}},
+        {{"name", "history"}, {"kind", "image"}, {"image", {{"format", "R16G16B16A16_SFLOAT"}, {"persistent", true}}}},
+        {{"name", "scratch"}, {"kind", "image"}, {"image", {{"format", "R16G16B16A16_SFLOAT"}}}},
+        {{"name", "swapchain"}, {"kind", "image"}, {"imported", true}}});
+    json j = graph(images, json::array({
+        pass("Resolve", {{{"resource", "history"}, {"usage", "shader_read"}}},
+             {{{"resource", "resolved"}, {"usage", "color_write"}}}),
+        pass("KeepHistory", {{{"resource", "resolved"}, {"usage", "shader_read"}}},
+             {{{"resource", "history"}, {"usage", "color_write"}}}),
+        pass("Unused", {{{"resource", "resolved"}, {"usage", "shader_read"}}},
+             {{{"resource", "scratch"}, {"usage", "color_write"}}}),
+        pass("Show", {{{"resource", "resolved"}, {"usage", "shader_read"}}},
+             {{{"resource", "swapchain"}, {"usage", "color_write"}, {"present", true}}})}));
+    auto s = schedule(j);
+    const auto& passes = s.builder.getPassDeclarations();
+    const auto live = livePasses(passes, s.builder.getResourceDeclarations(), passDependencies(passes, s.resources));
+    auto isLive = [&](const std::string& name) {
+        return std::find(live.begin(), live.end(), passIndex(s.builder, name)) != live.end();
+    };
+    EXPECT_TRUE(isLive("Resolve"));
+    EXPECT_TRUE(isLive("KeepHistory"));
+    EXPECT_FALSE(isLive("Unused"));
+    EXPECT_TRUE(isLive("Show"));
+}
+
 TEST(SubresourceBarriers, UpsamplePassesDeclaredSmallestFirstRunInThatOrder) {
     json up = {{"name", "Up{m}"}, {"type", "graphics"},
                {"repeat", {{"count", 3}, {"index", "m"}, {"first", 2}, {"step", -1}}},

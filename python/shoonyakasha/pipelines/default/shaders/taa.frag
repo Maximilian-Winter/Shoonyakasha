@@ -24,7 +24,15 @@ layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
-const float FEEDBACK = 0.9;   // how much of the history each frame keeps
+// How much of the history each frame keeps: more where the image stands
+// still, so it settles; less where it moves, so it follows.
+const float FEEDBACK_STILL = 0.96;
+const float FEEDBACK_MOVING = 0.88;   // at MOVING_PIXELS a frame and faster
+const float MOVING_PIXELS = 2.0;
+// Width of the colour box the history is clipped to, in standard deviations
+// of the neighbourhood. Wide enough that the settled history of detail finer
+// than a pixel, which the jitter samples differently each frame, is kept.
+const float CLIP_SIGMAS = 1.25;
 
 vec3 toYCoCg(vec3 c) {
     return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b);
@@ -72,6 +80,7 @@ void main() {
     // The new frame's neighbourhood, and the nearest depth in it: at an
     // edge the foreground's motion is the one that matters.
     vec3 mean = vec3(0.0), meanSquare = vec3(0.0);
+    vec3 lo = vec3(1e9), hi = vec3(-1e9);
     float nearest = 1.0;
     ivec2 nearestPixel = pixel;
     for (int y = -1; y <= 1; ++y) {
@@ -80,6 +89,8 @@ void main() {
             vec3 c = toYCoCg(texelFetch(current, p, 0).rgb);
             mean += c;
             meanSquare += c * c;
+            lo = min(lo, c);
+            hi = max(hi, c);
             float d = texelFetch(gDepth, p, 0).r;
             if (d < nearest) { nearest = d; nearestPixel = p; }
         }
@@ -109,19 +120,22 @@ void main() {
         return;
     }
 
-    // Clip the history towards the neighbourhood's mean, to within one
-    // standard deviation of it on each axis.
+    // Clip the history towards the neighbourhood's mean, to within
+    // CLIP_SIGMAS standard deviations of it on each axis, and never beyond
+    // the colours the neighbourhood actually has.
     vec3 h = toYCoCg(previous.rgb);
-    vec3 extent = sigma * 1.0 + 1e-4;
+    vec3 extent = sigma * CLIP_SIGMAS + 1e-4;
     vec3 offset = h - mean;
     vec3 units = abs(offset / extent);
     float largest = max(units.x, max(units.y, units.z));
     if (largest > 1.0) h = mean + offset / largest;
-    vec3 clipped = fromYCoCg(h);
+    vec3 clipped = fromYCoCg(clamp(h, lo, hi));
 
     // Blend, weighting by inverse luminance so one bright sample cannot
     // flicker through (Karis 2014).
-    float wCurrent = (1.0 - FEEDBACK) / (1.0 + luma(color));
-    float wHistory = FEEDBACK / (1.0 + luma(clipped));
+    float moved = length((fragTexCoord - prevUV) * vec2(size));
+    float feedback = mix(FEEDBACK_STILL, FEEDBACK_MOVING, clamp(moved / MOVING_PIXELS, 0.0, 1.0));
+    float wCurrent = (1.0 - feedback) / (1.0 + luma(color));
+    float wHistory = feedback / (1.0 + luma(clipped));
     outColor = vec4((color * wCurrent + clipped * wHistory) / (wCurrent + wHistory), 1.0);
 }
