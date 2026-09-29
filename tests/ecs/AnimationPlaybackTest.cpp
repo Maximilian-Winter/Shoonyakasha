@@ -163,8 +163,8 @@ TEST(SkeletonComponent, JointCount_NoSkeleton_ReturnsZero) {
 TEST(SkeletonComponent, SsboSize) {
     SkeletonComponent comp;
     comp.skeleton = makeTestSkeleton(4);
-    // 4 joints × sizeof(mat4) = 4 × 64 = 256
-    EXPECT_EQ(comp.ssboSize(), 4u * 64u);
+    // This frame's and last frame's matrices: 2 × 4 joints × sizeof(mat4)
+    EXPECT_EQ(comp.ssboSize(), 2u * 4u * 64u);
 }
 
 TEST(SkeletonComponent, SsboSize_NoSkeleton_ReturnsZero) {

@@ -454,6 +454,7 @@ ResolvedValue DotPathResolver::resolveEntityPath(std::string_view path,
         if (!transform || parts.size() < 2) return ResolvedValue();
 
         if (parts[1] == "worldMatrix") return ResolvedValue(transform->worldMatrix);
+        if (parts[1] == "previousWorldMatrix") return ResolvedValue(transform->previousWorldMatrix);
         if (parts[1] == "localMatrix") return ResolvedValue(transform->localMatrix);
         if (parts[1] == "position") return ResolvedValue(transform->position);
         if (parts[1] == "rotation") return ResolvedValue(glm::vec4(transform->rotation.x,

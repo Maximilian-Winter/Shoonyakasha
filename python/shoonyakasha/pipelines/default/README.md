@@ -27,8 +27,9 @@ Deferred PBR (glTF metallic-roughness) with:
 - emission, material occlusion, forward-shaded blended (glTF `BLEND`)
   materials that receive shadows
 - temporal anti-aliasing: a sub-pixel camera jitter, history reprojected
-  through last frame's camera and clipped to the new frame's colours; it also
-  averages the per-frame noise of shadow filtering and ambient occlusion
+  with per-pixel motion vectors (moving, skinned and animated objects as well
+  as the camera) and clipped to the new frame's colours; it also averages the
+  per-frame noise of shadow filtering and ambient occlusion
 - bloom from a six-level mip chain, with no brightness threshold
 - automatic exposure from a luminance histogram, adapting over time
 - ACES filmic tonemapping
@@ -83,7 +84,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `bloomIntensity` | 0.04 | How much of the bloom is mixed into the image |
 | `bloomRadius` | 1.0 | Spread of each upsampling step, in texels |
 | `taa` | 1 | 1 for temporal anti-aliasing, 0 for none (`set_custom_uint`). Turn it off here rather than turning its passes off: the passes after it read its output |
-| `debugView` | 0 | 1 cascades (red, green, blue, yellow), 2 shadow mask, 3 normals, 4 ambient occlusion, 5 point and spot lights reaching each pixel's cluster (blue none, green 8, red 16 or more); shown without tonemapping, bloom or exposure (`set_custom_uint`) |
+| `debugView` | 0 | 1 cascades (red, green, blue, yellow), 2 shadow mask, 3 normals, 4 ambient occlusion, 5 point and spot lights reaching each pixel's cluster (blue none, green 8, red 16 or more), 6 motion vectors (hue for direction, full brightness at 10 pixels a frame); shown without tonemapping, bloom or exposure (`set_custom_uint`) |
 
 Without an HDR map the environment is one colour, `environment_color` on
 `sk.Engine` (`uniformEnvironmentColor` in C++), default (0.25, 0.28, 0.33).
@@ -111,7 +112,7 @@ own that it does not mention stay as you set them.
 | `ShadowOpaque0..3`, `ShadowMasked0..3`, `ShadowSkinned0..3` | Shadow casters into cascade 0..3, each culled against its cascade |
 | `SpotShadowOpaque0..3`, `SpotShadowMasked0..3`, `SpotShadowSkinned0..3` | Shadow casters into spot slot 0..3, culled against the light's cone; nothing when the slot is empty |
 | `PointShadowOpaque0..11`, `PointShadowMasked0..11`, `PointShadowSkinned0..11` | Shadow casters into cube face 0..11 (two lights, six faces each), culled per face |
-| `GBufferOpaque`, `GBufferMasked`, `GBufferSkinned`, `GBufferSkinnedMasked` | The G-buffer; emission goes straight into the HDR target |
+| `GBufferOpaque`, `GBufferMasked`, `GBufferSkinned`, `GBufferSkinnedMasked` | The G-buffer and motion vectors; emission goes straight into the HDR target |
 | `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` |
 | `ShadowMaskRT` | In the `raytraced` preset, instead of `ShadowMask`: a shadow ray per pixel, multiplied with the cascades of the casters the rays do not see. `"requires": ["rayQuery"]`; off by default |
 | `GTAO`, `AODenoise` | Ambient occlusion from the depth buffer in a 4x4 pattern of slice directions, then a depth-aware 4x4 average |
@@ -134,8 +135,14 @@ the chain.
 
 G-buffer layout: `gAlbedo` (RGBA8 sRGB: albedo, material occlusion),
 `gNormal` (RG16F: octahedral world normal), `gMaterial` (RG8: metallic,
-roughness), `gDepth` (D32; positions are reconstructed from it) and
-`hdrColor` (RGBA16F).
+roughness), `gVelocity` (RG16F: this frame's screen position minus last
+frame's, in UV units, without the jitter), `gDepth` (D32; positions are
+reconstructed from it) and `hdrColor` (RGBA16F).
+
+The G-buffer passes push 180 bytes of constants per draw (this and last
+frame's model matrix, then the material factors). Every desktop GPU allows
+256; a device that allows only Vulkan's minimum of 128 reports those passes
+at load and draws nothing in them.
 
 ## Ray-traced shadows
 
@@ -168,7 +175,3 @@ compiled SPIR-V; after editing, recompile with
 `sk.shaders.compile_dir("shaders")`. The `.glsl` files are included by the
 stage shaders: `common.glsl` holds the buffer blocks, which must match the
 `bufferLayouts` in `pipeline.json`.
-
-Not here yet: motion vectors (TAA reprojects the camera's motion only, and
-relies on clipping for moving objects, which can leave a faint trail behind
-fast ones).

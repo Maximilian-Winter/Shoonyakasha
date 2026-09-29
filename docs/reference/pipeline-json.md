@@ -106,10 +106,10 @@ A field `source` is a dot-path. A layout-level `source` is an initialization obj
 | `scene.shadows.sun` | `enabled`, `cascadeCount`, `splits`, `texelWorldSize`, `lightIndex`, `direction`; indexed `scene.shadows.sun.cascades[N].viewProj`. See [sun shadow cascades](../guides/lighting-and-ibl.md#sun-shadow-cascades) |
 | `scene.shadows.spot`, `scene.shadows.point` | `count`; indexed `scene.shadows.spot[N].viewProj`, `lightIndex`, `params`; `scene.shadows.point[N].lightIndex`, `positionFar`, `depthParams`; `scene.shadows.point.faces[N].viewProj` with N = slot × 6 + face. See [spot and point light shadows](../guides/lighting-and-ibl.md#spot-and-point-light-shadows) |
 | `scene.custom` | Values explicitly published under a key by the application |
-| `entity.transform` | `worldMatrix`, `localMatrix`, `position`, `rotation`, `scale` |
+| `entity.transform` | `worldMatrix`, `previousWorldMatrix` (last frame's, for motion vectors; the same as `worldMatrix` in an entity's first frame), `localMatrix`, `position`, `rotation`, `scale` |
 | `entity.material` | `params.<name>`, `textures.<slot>`, `textures.<slot>.exists`, `alphaCutoff`, `alphaMode`, `doubleSided` |
 | `entity.mesh` | `vertexCount`, `indexCount` |
-| `entity.skeleton` | `hasSkeleton`, `jointCount` |
+| `entity.skeleton` | `hasSkeleton`, `jointCount`; `boneMatrices` for `autoBindBuffer`: this frame's bone matrices followed by last frame's, `jointCount` of each |
 | `const` | Constant expressions such as `const.0`, `const.1`, `const.1.0.0.1` |
 | `pass` | `repeatIndex`, `repeatCount` (see [Repeated passes](#repeated-passes)), `extent` and `texelSize` of the pass being recorded. Push-constant layouts only: a buffer is filled once per frame, so any other layout using `pass.*` fails compilation |
 

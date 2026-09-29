@@ -44,6 +44,9 @@ struct SkeletonComponent {
     // an on_destroy hook whose system may already have been torn down.
     GpuBufferRef boneSSBO;
 
+    // What boneMatrices were at the previous upload, for motion vectors.
+    std::vector<glm::mat4> previousBoneMatrices;
+
     // Whether boneMatrices have been updated and need re-upload to GPU
     bool dirty = true;
 
@@ -59,9 +62,11 @@ struct SkeletonComponent {
         return skeleton ? skeleton->jointCount() : 0;
     }
 
-    // SSBO size in bytes
+    // SSBO size in bytes: this frame's bone matrices, then the previous
+    // frame's (for motion vectors), jointCount() of each. A shader finds the
+    // previous frame's bone j at j + bones.length() / 2.
     uint32_t ssboSize() const {
-        return jointCount() * static_cast<uint32_t>(sizeof(glm::mat4));
+        return 2u * jointCount() * static_cast<uint32_t>(sizeof(glm::mat4));
     }
 };
 

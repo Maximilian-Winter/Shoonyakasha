@@ -404,7 +404,14 @@ filtering and AO now vary their noise per frame, so TAA filters them over
 time too. Found on the way: a color output without "clear" is loaded, but
 its barrier did not grant attachment read access.
 
-Not done: per-object motion vectors (moving objects rely on the clipping).
+Not done at first: per-object motion vectors (moving objects relied on the
+clipping). Added later: `TransformComponent::previousWorldMatrix`
+(`entity.transform.previousWorldMatrix`), set by the transform system; the
+bone buffer carries last frame's matrices after this frame's; the G-buffer
+writes `gVelocity` (RG16F, UV units, unjittered) and TAA reprojects with the
+nearest-depth pixel's motion, the sky still through the camera. The per-draw
+push constants grew to 180 bytes, and the compiler now checks each pass
+against the device's `maxPushConstantsSize`.
 
 Also done: clustered lighting. The engine publishes up to 128 lights (was
 16). A compute pass bins the point and spot lights by range into 16 x 9 x 24

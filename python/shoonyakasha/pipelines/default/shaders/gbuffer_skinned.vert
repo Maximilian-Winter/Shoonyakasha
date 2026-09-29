@@ -18,10 +18,16 @@ layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec3 fragWorldNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec3 fragColor;
+layout(location = 4) out vec4 fragClip;          // unjittered, for motion vectors
+layout(location = 5) out vec4 fragPrevClip;      // where it was last frame
 
 void main() {
     mat4 skin = inWeights.x * bones[inJoints.x] + inWeights.y * bones[inJoints.y] +
                 inWeights.z * bones[inJoints.z] + inWeights.w * bones[inJoints.w];
+    // Last frame's bone matrices follow this frame's (SkeletonComponent::ssboSize).
+    uint previous = uint(bones.length()) / 2u;
+    mat4 prevSkin = inWeights.x * bones[previous + inJoints.x] + inWeights.y * bones[previous + inJoints.y] +
+                    inWeights.z * bones[previous + inJoints.z] + inWeights.w * bones[previous + inJoints.w];
     mat4 model = draw.model * skin;
     vec4 worldPos = model * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
@@ -29,5 +35,7 @@ void main() {
     fragTexCoord = inTexCoord;
     fragColor = vec3(1.0);
     gl_Position = camera.proj * camera.view * worldPos;
+    fragClip = gl_Position;
+    fragPrevClip = camera.prevViewProj * (draw.prevModel * prevSkin * vec4(inPosition, 1.0));
     gl_Position.xy += taaJitter(camera.frame, camera.taa, camera.resolution) * gl_Position.w;
 }

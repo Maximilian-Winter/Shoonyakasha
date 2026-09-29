@@ -7,6 +7,7 @@
 //   "scene.camera.view"                    → mat4 from CameraComponent
 //   "entity.material.params.baseColorFactor" → vec4 from MaterialComponentV5
 //   "entity.transform.worldMatrix"         → mat4 from TransformComponent
+//   "entity.transform.previousWorldMatrix" → mat4, last frame's worldMatrix
 //   "const.0"                              → float 0.0
 //
 // This is the bridge between declarative JSON and imperative C++.

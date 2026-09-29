@@ -174,7 +174,15 @@ void SkeletalAnimationSystem::uploadBoneMatrices(SkeletonComponent& skeleton) {
     );
 
     if (mapped) {
-        std::memcpy(mapped, skeleton.boneMatrices.data(), size);
+        // The previous upload's matrices follow this frame's; on the first
+        // upload they are the same.
+        if (skeleton.previousBoneMatrices.size() != skeleton.boneMatrices.size()) {
+            skeleton.previousBoneMatrices = skeleton.boneMatrices;
+        }
+        const size_t half = size / 2;
+        std::memcpy(mapped, skeleton.boneMatrices.data(), half);
+        std::memcpy(static_cast<char*>(mapped) + half, skeleton.previousBoneMatrices.data(), half);
+        skeleton.previousBoneMatrices = skeleton.boneMatrices;
         GPUResourceFactory::unmapBuffer(
             m_device.getAllocator().getHandle(),
             *skeleton.boneSSBO

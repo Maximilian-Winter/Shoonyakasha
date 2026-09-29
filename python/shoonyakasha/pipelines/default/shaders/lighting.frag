@@ -12,6 +12,7 @@ layout(set = 0, binding = 2) uniform sampler2D gMaterial;
 layout(set = 0, binding = 3) uniform sampler2D gDepth;
 layout(set = 0, binding = 4) uniform sampler2D shadowMask;
 layout(set = 0, binding = 5) uniform sampler2D aoMap;
+layout(set = 0, binding = 6) uniform sampler2D gVelocity;
 layout(set = 1, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 1, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 1, binding = 2) uniform sampler2D brdfLUT;
@@ -90,6 +91,11 @@ void main() {
     } else if (settings.debugView == 5u) {   // lights in the pixel's cluster: blue 0, green 8, red 16+
         float n = float(texelFetch(lightClusters, ivec2(int(cluster), 0), 0).r) / 16.0;
         color = clamp(vec3(n * 2.0 - 1.0, 1.0 - abs(n * 2.0 - 1.0), 1.0 - n * 2.0), 0.0, 1.0) * (0.4 + 0.6 * albedo);
+    } else if (settings.debugView == 6u) {   // motion vectors: direction as hue, 10 pixels a frame at full brightness
+        vec2 motion = textureLod(gVelocity, fragTexCoord, 0.0).xy * camera.resolution;
+        float amount = clamp(length(motion) / 10.0, 0.0, 1.0);
+        vec2 d = motion / max(length(motion), 1e-4);
+        color = (vec3(0.5) + 0.5 * vec3(d.x, d.y, -d.x)) * amount;
     }
     outColor = vec4(color, 1.0);
 }

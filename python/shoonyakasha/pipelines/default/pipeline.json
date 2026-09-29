@@ -1,7 +1,7 @@
 {
   "version": 3,
   "name": "DefaultPipeline",
-  "description": "Shoonyakasha's default pipeline: clustered deferred PBR with cascaded sun shadows, spot and point light shadows, contact shadows, image-based light, ground-truth ambient occlusion, forward transparency, temporal anti-aliasing, bloom, automatic exposure and ACES tonemapping. Settings are scene.custom.default.* values; see README.md.",
+  "description": "Shoonyakasha's default pipeline: clustered deferred PBR with cascaded sun shadows, spot and point light shadows, contact shadows, image-based light, ground-truth ambient occlusion, forward transparency, temporal anti-aliasing with motion vectors, bloom, automatic exposure and ACES tonemapping. Settings are scene.custom.default.* values; see README.md.",
   "vertexFormats": {
     "skinned": {
       "attributes": [
@@ -403,6 +403,11 @@
           "name": "model",
           "type": "mat4",
           "source": "entity.transform.worldMatrix"
+        },
+        {
+          "name": "prevModel",
+          "type": "mat4",
+          "source": "entity.transform.previousWorldMatrix"
         },
         {
           "name": "baseColorFactor",
@@ -858,6 +863,16 @@
           "name": "aoMap",
           "autoBindResource": "ao",
           "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 6,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gVelocity",
+          "autoBindResource": "gVelocity",
+          "autoBindSampler": "nearestClamp"
         }
       ]
     },
@@ -1052,6 +1067,16 @@
           "name": "history",
           "autoBindResource": "taaHistory",
           "autoBindSampler": "linearClamp"
+        },
+        {
+          "binding": 3,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gVelocity",
+          "autoBindResource": "gVelocity",
+          "autoBindSampler": "nearestClamp"
         }
       ]
     },
@@ -1166,6 +1191,13 @@
       "kind": "image",
       "image": {
         "format": "R8G8_UNORM"
+      }
+    },
+    {
+      "name": "gVelocity",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT"
       }
     },
     {
@@ -1716,6 +1748,16 @@
           ]
         },
         {
+          "resource": "gVelocity",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_write",
           "clear": {
@@ -1742,7 +1784,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 116
+          "size": 180
         }
       ]
     },
@@ -1773,6 +1815,10 @@
           "usage": "color_write"
         },
         {
+          "resource": "gVelocity",
+          "usage": "color_write"
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_write"
         }
@@ -1795,7 +1841,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 116
+          "size": 180
         }
       ]
     },
@@ -1826,6 +1872,10 @@
           "usage": "color_write"
         },
         {
+          "resource": "gVelocity",
+          "usage": "color_write"
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_write"
         }
@@ -1850,7 +1900,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 116
+          "size": 180
         }
       ]
     },
@@ -1881,6 +1931,10 @@
           "usage": "color_write"
         },
         {
+          "resource": "gVelocity",
+          "usage": "color_write"
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_write"
         }
@@ -1905,7 +1959,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 116
+          "size": 180
         }
       ]
     },
@@ -2140,6 +2194,10 @@
           "usage": "shader_read"
         },
         {
+          "resource": "gVelocity",
+          "usage": "shader_read"
+        },
+        {
           "resource": "shadowMask",
           "usage": "shader_read"
         },
@@ -2242,7 +2300,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 116
+          "size": 180
         }
       ]
     },
@@ -2259,6 +2317,10 @@
         },
         {
           "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gVelocity",
           "usage": "shader_read"
         },
         {

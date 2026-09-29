@@ -42,8 +42,14 @@ public:
     void update(entt::registry& registry, float /*deltaTime*/) override {
         if (!enabled) return;
 
-        // First pass: Update all local matrices for dirty transforms
+        // Last frame's world matrices, for motion vectors.
         auto transformView = registry.view<TransformComponent>();
+        for (auto entity : transformView) {
+            auto& transform = transformView.get<TransformComponent>(entity);
+            if (transform.hasPreviousWorld) transform.previousWorldMatrix = transform.worldMatrix;
+        }
+
+        // First pass: Update all local matrices for dirty transforms
         for (auto entity : transformView) {
             auto& transform = transformView.get<TransformComponent>(entity);
             if (transform.isDirty) {
@@ -61,6 +67,15 @@ public:
 
         // Third pass: Update world matrices for child entities
         updateChildTransforms(registry, entt::null, 0);
+
+        // A new entity has not moved yet.
+        for (auto entity : transformView) {
+            auto& transform = transformView.get<TransformComponent>(entity);
+            if (!transform.hasPreviousWorld) {
+                transform.previousWorldMatrix = transform.worldMatrix;
+                transform.hasPreviousWorld = true;
+            }
+        }
     }
 
     /// Hard cap on hierarchy depth.

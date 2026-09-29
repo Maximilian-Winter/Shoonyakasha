@@ -137,6 +137,10 @@ void VulkanDevice::createLogicalDevice() {
     vulkan12Features.pNext = &vulkan13Features;
     vulkan12Features.timelineSemaphore = VK_TRUE;
 
+    VkPhysicalDeviceProperties deviceProperties;
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &deviceProperties);
+    m_limits = deviceProperties.limits;
+
     // Ray queries, when the device has everything they need.
     std::vector<const char*> extensions(m_deviceExtensions.begin(), m_deviceExtensions.end());
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationFeatures{};

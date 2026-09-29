@@ -38,3 +38,30 @@ TEST(CameraHistory, PreviousViewProjectionLagsOneUpdate) {
     EXPECT_EQ(scene.cameraPrevViewProjection, first);
     EXPECT_EQ(resolver.resolveScene("scene.camera.prevViewProjection", scene).as<glm::mat4>(), first);
 }
+
+TEST(CameraHistory, EntityPreviousWorldMatrixLagsOneUpdate) {
+    entt::registry registry;
+    auto entity = registry.create();
+    registry.emplace<ECS::TransformComponent>(entity).position = glm::vec3(2.0f, 0.0f, 0.0f);
+    ECS::TransformSystem transforms;
+    DotPathResolver resolver;
+
+    // A new entity has not moved yet.
+    transforms.update(registry, 0.016f);
+    auto& t = registry.get<ECS::TransformComponent>(entity);
+    const glm::mat4 first = t.worldMatrix;
+    EXPECT_EQ(first[3], glm::vec4(2.0f, 0.0f, 0.0f, 1.0f));
+    EXPECT_EQ(t.previousWorldMatrix, first);
+
+    t.position.x = 3.0f;
+    t.isDirty = true;
+    transforms.update(registry, 0.016f);
+    EXPECT_EQ(t.worldMatrix[3], glm::vec4(3.0f, 0.0f, 0.0f, 1.0f));
+    EXPECT_EQ(t.previousWorldMatrix, first);
+    EXPECT_EQ(resolver.resolveEntity("entity.transform.previousWorldMatrix", entity, registry).as<glm::mat4>(),
+              first);
+
+    // Standing still, the two catch up.
+    transforms.update(registry, 0.016f);
+    EXPECT_EQ(t.previousWorldMatrix, t.worldMatrix);
+}

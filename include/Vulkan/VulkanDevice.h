@@ -77,6 +77,9 @@ public:
     /// when the device has them all. $SHOONYAKASHA_DISABLE_RAY_QUERY turns
     /// them off, to try the fallbacks.
     bool hasRayQuery() const { return m_rayQuery; }
+
+    /// The physical device's limits, such as maxPushConstantsSize.
+    const VkPhysicalDeviceLimits& getLimits() const { return m_limits; }
 private:
     VulkanInstance& m_instance;
     VkSurfaceKHR m_surface;
@@ -91,6 +94,7 @@ private:
     QueueFamilyIndices m_queueFamilyIndices;
     VkPhysicalDeviceFeatures m_enabledFeatures{};
     bool m_rayQuery = false;
+    VkPhysicalDeviceLimits m_limits{};
     bool supportsRayQuery(VkPhysicalDevice device) const;
     std::unique_ptr<VulkanMemoryAllocator> m_vmaAllocator;
 

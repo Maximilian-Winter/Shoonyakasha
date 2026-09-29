@@ -34,4 +34,6 @@ Playback time/duration use seconds, indices start at zero, and speed defaults to
 
 Use skinned vertex attributes, a skeleton descriptor binding, matching shaders, and `skinned_geometry` / `skinned_transparent` execution. The example's [pipeline](../../examples/python/animation/skinned_fox_demo/skinned_pipeline.json) shows the complete configuration. A static geometry shader cannot animate merely because clips were loaded.
 
+The bone buffer holds this frame's matrices and then last frame's, so a shader can compute motion vectors: last frame's bone `j` is `bones[j + bones.length() / 2]`. The [default pipeline's](../../python/shoonyakasha/pipelines/default/README.md) `gbuffer_skinned.vert` does this.
+
 The public controls select one current clip; they do not expose an animation state machine, blending tree, or retargeting API. See [Scene reference](../api/python/scene.md) and [native components](../api/cpp/ecs-components.md).

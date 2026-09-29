@@ -13,7 +13,8 @@ Keys:
     1 / 2 / 3                quality preset low / medium / high (the default)
     4                        ray-traced sun shadows, where the device has ray queries
     V                        cycle the debug views: final image, shadow
-                             cascades, shadow mask, normals, ambient occlusion
+                             cascades, shadow mask, normals, ambient occlusion,
+                             lights per cluster, motion vectors
     X                        automatic exposure off or on
     P                        save a screenshot to sponza_screenshot.png
 
@@ -49,7 +50,8 @@ TARGET = (4.0, 2.6, 0.4)
 # Direction the sunlight travels: steeply down through the open roof.
 SUN_DIRECTION = (0.3, -1.0, 0.35)
 PRESETS = {keys.NUM_1: "low", keys.NUM_2: "medium", keys.NUM_3: "high", keys.NUM_4: "raytraced"}
-DEBUG_VIEWS = ("final image", "shadow cascades", "shadow mask", "normals", "ambient occlusion")
+DEBUG_VIEWS = ("final image", "shadow cascades", "shadow mask", "normals", "ambient occlusion",
+               "lights per cluster", "motion vectors")
 
 
 def look_rotation(eye, target):

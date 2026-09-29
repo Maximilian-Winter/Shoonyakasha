@@ -2,13 +2,13 @@
 // Temporal anti-aliasing. The camera is jittered by a sub-pixel amount every
 // frame (common.glsl taaJitter), so successive frames sample different parts
 // of each pixel; this pass blends the new frame into last frame's result,
-// found by reprojecting each pixel's position through last frame's camera.
+// found from the G-buffer's motion vectors, or for the sky from last frame's
+// camera.
 //
 // History is read with a Catmull-Rom filter, which stays sharp under
 // repeated resampling, and clipped to the spread of the new frame's colours
 // around the pixel (in YCoCg), so what was there before but is not any more
-// cannot linger. Only the camera's motion is reprojected: moving objects rely
-// on the clipping.
+// cannot linger: what was hidden and is now uncovered, for instance.
 //
 // The history image is persistent and starts cleared; its alpha is 1 once
 // written, so alpha 0 means "no history": after a resize, for instance.
@@ -18,6 +18,7 @@
 layout(set = 0, binding = 0) uniform sampler2D current;
 layout(set = 0, binding = 1) uniform sampler2D gDepth;
 layout(set = 0, binding = 2) uniform sampler2D history;
+layout(set = 0, binding = 3) uniform sampler2D gVelocity;
 layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 
 layout(location = 0) in vec2 fragTexCoord;
@@ -86,18 +87,24 @@ void main() {
     mean /= 9.0;
     vec3 sigma = sqrt(max(meanSquare / 9.0 - mean * mean, vec3(0.0)));
 
-    // Where this pixel was last frame. The sky reprojects as seen from the
-    // camera's position, a direction only.
-    vec2 uv = (vec2(nearestPixel) + 0.5) / vec2(size);
-    vec3 viewPos = viewPositionFromDepth(camera.invProj, uv, nearest);
-    vec4 world = camera.invView * vec4(viewPos, 1.0);
-    if (nearest >= 1.0) world = vec4(mat3(camera.invView) * viewPos, 0.0);
-    vec4 prevClip = camera.prevViewProj * world;
-    vec2 prevUV = fragTexCoord + (prevClip.xy / prevClip.w * 0.5 + 0.5 - uv);
+    // Where this pixel was last frame: moved back by the nearest geometry's
+    // motion vector. The sky has none; it reprojects through last frame's
+    // camera as seen from the camera's position, a direction only.
+    vec2 prevUV;
+    bool behind = false;
+    if (nearest < 1.0) {
+        prevUV = fragTexCoord - texelFetch(gVelocity, nearestPixel, 0).xy;
+    } else {
+        vec2 uv = (vec2(nearestPixel) + 0.5) / vec2(size);
+        vec3 viewPos = viewPositionFromDepth(camera.invProj, uv, nearest);
+        vec4 prevClip = camera.prevViewProj * vec4(mat3(camera.invView) * viewPos, 0.0);
+        prevUV = fragTexCoord + (prevClip.xy / prevClip.w * 0.5 + 0.5 - uv);
+        behind = prevClip.w <= 0.0;
+    }
 
     vec4 previous = sampleCatmullRom(history, prevUV);
     bool offscreen = any(lessThan(prevUV, vec2(0.0))) || any(greaterThan(prevUV, vec2(1.0)));
-    if (offscreen || previous.a < 0.5 || prevClip.w <= 0.0) {
+    if (offscreen || previous.a < 0.5 || behind) {
         outColor = vec4(color, 1.0);
         return;
     }

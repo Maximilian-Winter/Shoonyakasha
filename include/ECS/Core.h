@@ -67,6 +67,12 @@ struct TransformComponent {
     glm::mat4 worldMatrix{1.0f};
     bool isDirty = true;
 
+    // worldMatrix as it was the frame before, for motion vectors. The
+    // transform system sets it; an entity's first frame has it equal to
+    // worldMatrix.
+    glm::mat4 previousWorldMatrix{1.0f};
+    bool hasPreviousWorld = false;
+
     TransformComponent() = default;
     TransformComponent(const glm::vec3& pos) : position(pos) {}
     TransformComponent(const glm::vec3& pos, const glm::vec3& rot, const glm::vec3& scl)

@@ -900,9 +900,17 @@ void FrameGraphCompiler::createPipelines(
         }
 
         // Push constant ranges
+        uint32_t pushEnd = 0;
         for (const auto& pc : passDecl.pushConstants) {
             VkShaderStageFlags stages = JsonUtils::stringsToShaderStages(pc.stages);
             builder.withPushConstants(stages, pc.size, pc.offset);
+            pushEnd = std::max(pushEnd, pc.offset + pc.size);
+        }
+        if (pushEnd > device.getLimits().maxPushConstantsSize) {
+            m_logger->log(LogLevel::Error,
+                "  Pass '%s' uses %u bytes of push constants; this device allows %u. The pass draws nothing",
+                passDecl.name.c_str(), pushEnd, device.getLimits().maxPushConstantsSize);
+            continue;
         }
 
         // Build the pipeline
@@ -1378,11 +1386,12 @@ void FrameGraphCompiler::compileBufferLayouts(
 
         compiled.totalSize = blockSize(currentOffset, desc.packing, maxMemberAlignment);
 
-        // Validate push constant size against Vulkan minimum guarantee
+        // Vulkan guarantees 128 bytes of push constants (256 from Vulkan 1.4,
+        // and on every desktop GPU). createPipelines checks the device's own
+        // limit for each pass.
         if (desc.usage == BufferUsageType::PushConstant && compiled.totalSize > 128) {
-            m_logger->log(LogLevel::Warning,
-                "  Push constant layout '%s' is %u bytes, exceeding Vulkan minimum guarantee "
-                "(128 bytes). May fail on some hardware. Consider moving data to a UBO.",
+            m_logger->log(LogLevel::Info,
+                "  Push constant layout '%s' is %u bytes, over the 128 bytes every Vulkan device allows",
                 desc.name.c_str(), compiled.totalSize);
         }
 
