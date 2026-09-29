@@ -56,6 +56,7 @@ the pages linked above.
 |---|---|---|
 | Full-resolution HDRs (4k/8k, 25–99 MB each) | Size | `python tools/fetch_assets.py env` |
 | Intel Sponza (`NewSponza_*`, ~450 MB with textures) | Size **and** licence | `python tools/fetch_assets.py sponza` prints the page |
+| Poly Haven models and textures for the alley demo (`polyhaven/`, ~120 MB at 1k) | Size | `python tools/fetch_assets.py alley` (`--resolution 2k` for sharper textures). All CC0; see [polyhaven.com](https://polyhaven.com) |
 | Japanese shrine (`models/japanese_shrine.glb`, 60 MB) | Size | Download the glTF archive from [Sketchfab](https://skfb.ly/pMEO8) (account required) and save its `source/*.glb` as `models/japanese_shrine.glb` |
 
 The shrine is CC BY 4.0, so anything that shows or redistributes it must credit it:

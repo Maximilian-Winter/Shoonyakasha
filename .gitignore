@@ -41,6 +41,7 @@ examples/**/cubemaps_hdrs/
 /assets/env/*_4k.hdr
 /assets/env/*_8k.hdr
 /assets/models/NewSponza_*
+/assets/polyhaven/
 # Downloaded by hand from Sketchfab; see assets/README.md.
 /assets/models/japanese_shrine.glb
 /.claude

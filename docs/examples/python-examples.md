@@ -8,6 +8,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [getting_started/ecs_bindings_demo](../../examples/python/getting_started/ecs_bindings_demo) | `python ecs_bindings_demo.py` | Custom Python components and systems |
 | [animation/skinned_fox_demo](../../examples/python/animation/skinned_fox_demo) | `python skinned_fox_demo.py` | Skeletal animation |
 | [rendering/japanese_shrine](../../examples/python/rendering/japanese_shrine) | `python shrine.py`, `python shrine_default.py` | Deferred PBR of a downloaded glTF model with IBL, sun shadows, sky and fog; the second on the default pipeline |
+| [rendering/alley](../../examples/python/rendering/alley) | `python alley.py` | A tech demo on the default pipeline, built from Poly Haven models: dusk to night, ray-traced and local-light shadows, lit windows, a walking fox |
 | [rendering/sponza](../../examples/python/rendering/sponza) | `python sponza.py` | The default pipeline on Sponza, or on a colonnade of boxes without it; quality presets, ray-traced shadows |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
@@ -39,6 +40,10 @@ This example intentionally creates no meshes or sprites. Its custom components a
 <a href="../images/examples/python/skinned_fox_demo.png"><img src="../images/examples/python/skinned_fox_demo.png" alt="Low-poly orange and white fox in an animated pose" width="720"></a>
 
 Bundled `Fox.glb` during playback of the first animation clip, driven through the Python bindings.
+
+### Alley (`alley`)
+
+A back alley between an apartment block and an old factory, assembled from [Poly Haven](https://polyhaven.com)'s CC0 modular facades and props, on the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md). **N** turns late afternoon into night over a few seconds: the sun reddens and sets, windows light up one by one, wall lanterns, a security light and a street lamp come on with their own shadows, and exposure follows. **R** switches the sun between ray-traced and cascaded shadows. The models are not in the repository: `python tools/fetch_assets.py alley` downloads them (~120 MB), and the [example's README](../../examples/python/rendering/alley/README.md) explains how the buildings are put together from the modular kits.
 
 ### Sponza (`sponza`)
 

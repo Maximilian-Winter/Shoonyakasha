@@ -260,4 +260,4 @@ Some things this example shows about the pipeline:
 - [Default pipeline README](../../python/shoonyakasha/pipelines/default/README.md): every setting, preset, pass and resource.
 - [Lighting and IBL](lighting-and-ibl.md): the sun cascades, local light shadows and ray-traced shadows from the engine's side, with their dot-paths.
 - [Pipeline JSON reference](../reference/pipeline-json.md) and [walkthrough](json-render-pipeline.md), for changing a copy.
-- Examples: [sponza.py](../../examples/python/rendering/sponza/sponza.py), [shrine_default.py](../../examples/python/rendering/japanese_shrine/shrine_default.py), and the C++ [default_pipeline](../../examples/cpp/rendering/default_pipeline/main.cpp).
+- Examples: [alley.py](../../examples/python/rendering/alley/alley.py), a tech demo with a dusk from day to night, [sponza.py](../../examples/python/rendering/sponza/sponza.py), [shrine_default.py](../../examples/python/rendering/japanese_shrine/shrine_default.py), and the C++ [default_pipeline](../../examples/cpp/rendering/default_pipeline/main.cpp).
