@@ -11,9 +11,10 @@ Deferred PBR (glTF metallic-roughness) with:
   averaged over frames by TAA into a penumbra that widens away from the caster
 - contact shadows: a short screen-space march towards the sun, for the detail
   the cascades are too coarse for
-- shadows from up to four spot lights (1024² each) and two point lights (a
-  512² cube each), given each frame to the shadow-casting lights that matter
-  most, filtered with 3x3 hardware comparisons
+- shadows from up to eight spot lights and four point lights, given each
+  frame to the shadow-casting lights that matter most, as tiles of one 4096²
+  atlas sized by how large each light looks (spot maps up to 2048², cube
+  faces up to 1024²), filtered with 3x3 hardware comparisons
 - opaque, alpha-tested (glTF `MASK`) and skinned geometry, in the G-buffer
   and in the shadows
 - up to 128 directional, point and spot lights, clustered: a compute pass
@@ -110,8 +111,8 @@ own that it does not mention stay as you set them.
 | Pass | Draws |
 |---|---|
 | `ShadowOpaque0..3`, `ShadowMasked0..3`, `ShadowSkinned0..3` | Shadow casters into cascade 0..3, each culled against its cascade |
-| `SpotShadowOpaque0..3`, `SpotShadowMasked0..3`, `SpotShadowSkinned0..3` | Shadow casters into spot slot 0..3, culled against the light's cone; nothing when the slot is empty |
-| `PointShadowOpaque0..11`, `PointShadowMasked0..11`, `PointShadowSkinned0..11` | Shadow casters into cube face 0..11 (two lights, six faces each), culled per face |
+| `SpotShadowOpaque0..7`, `SpotShadowMasked0..7`, `SpotShadowSkinned0..7` | Shadow casters into spot slot 0..7's tile of `localShadowAtlas`, culled against the light's cone; nothing when the slot is empty |
+| `PointShadowOpaque0..23`, `PointShadowMasked0..23`, `PointShadowSkinned0..23` | Shadow casters into cube face 0..23's tile (four lights, six faces each), culled per face |
 | `GBufferOpaque`, `GBufferMasked`, `GBufferSkinned`, `GBufferSkinnedMasked` | The G-buffer and motion vectors; emission goes straight into the HDR target |
 | `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` |
 | `ShadowMaskRT` | In the `raytraced` preset, instead of `ShadowMask`: a shadow ray per pixel, multiplied with the cascades of the casters the rays do not see. `"requires": ["rayQuery"]`; off by default |
@@ -167,6 +168,24 @@ with the cascades the same way. Spot and point lights keep their shadow maps.
 
 One ray per pixel is noisy on its own; TAA averages it. With `taa` 0 the
 shadows' edges are left grainy.
+
+## The shadow atlas
+
+Spot and point light shadows share `localShadowAtlas`, 4096² of 32-bit depth
+(64 MB). Each frame the engine gives every shadowed light a square tile, a
+power of two by how large its range looks from the camera: the full 2048² for
+a spot light the camera stands in, less as it recedes, down to 128². A point
+light gets six tiles, one per cube face, up to 1024². When they would not all
+fit, the least important lights' tiles are halved first. The tile passes
+render into their rectangle only (`"viewport"` in `pipeline.json`), clearing
+just that; the shaders read each light through its tile's rectangle and keep
+the filter inside it, and pick the cube face of a point light themselves.
+
+`set_local_shadows(spot=8, point=4, spot_resolution=2048,
+point_resolution=1024, atlas_resolution=4096)` are the defaults; lower the
+largest tiles for a smaller budget of memory bandwidth, or the atlas to fit a
+smaller image declared in a copy of the pipeline. `atlas_resolution=0` is for
+pipelines that keep one array layer per slot instead.
 
 ## Changing it
 

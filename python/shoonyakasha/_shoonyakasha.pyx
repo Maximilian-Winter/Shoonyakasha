@@ -1406,17 +1406,23 @@ cdef class Engine:
         self._ptr.setSunShadowSettings(cascades, max_distance, split_lambda,
                                        resolution, caster_extension)
 
-    def set_local_shadows(self, uint32_t spot=4, uint32_t point=2,
-                          uint32_t spot_resolution=1024, uint32_t point_resolution=512):
+    def set_local_shadows(self, uint32_t spot=8, uint32_t point=4,
+                          uint32_t spot_resolution=2048, uint32_t point_resolution=1024,
+                          uint32_t atlas_resolution=4096):
         """Shadow slots for spot and point lights with cast shadows on.
 
         Each frame the engine gives the slots to the lights that matter most
         (bright, near the camera, able to reach the view) and publishes them as
-        scene.shadows.spot* and scene.shadows.point* dot-paths. The counts and
-        resolutions should match the pipeline's maps; the defaults match the
-        default pipeline. At most 8 spot and 4 point slots.
+        scene.shadows.spot* and scene.shadows.point* dot-paths. The counts
+        should match the pipeline's passes; at most 8 spot and 4 point slots.
+        With atlas_resolution > 0 every map is a tile of one atlas of that
+        size, sized each frame by how large the light looks, up to
+        spot_resolution (point_resolution per cube face); with 0 the maps are
+        array layers of exactly those sizes. The defaults match the default
+        pipeline.
         """
-        self._ptr.setLocalShadowSettings(spot, point, spot_resolution, point_resolution)
+        self._ptr.setLocalShadowSettings(spot, point, spot_resolution, point_resolution,
+                                         atlas_resolution)
 
     def get_sun_shadow_cascade(self, uint32_t index):
         """World-to-light-clip matrix of a sun cascade this frame, as four columns."""

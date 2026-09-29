@@ -321,8 +321,12 @@ std::vector<std::vector<uint32_t>> passDependencies(
         };
 
         for (const auto& in : passes[pi].inputs) visit(in);
+        // A pass with a viewport rectangle writes only part of its outputs
+        // and keeps the rest, cleared or not, so it follows their earlier
+        // writers: the tiles of an atlas.
+        const bool partial = !passes[pi].viewport.empty();
         for (const auto& out : passes[pi].outputs) {
-            if (readsPreviousContents(out, true)) visit(out);
+            if (partial || readsPreviousContents(out, true)) visit(out);
         }
         deps[pi].assign(found.begin(), found.end());
     }

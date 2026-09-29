@@ -1,64 +1,71 @@
 // local_shadows.glsl - how much of a spot or point light reaches a point,
-// from their shadow maps. Included by lights.glsl, after the Lights block,
-// when the including shader defines LOCAL_SHADOWS and declares, before
-// including lights.glsl:
+// from their shadow maps: tiles of one atlas, a tile per spot light and one
+// per face of a point light's cube. Included by lights.glsl, after the
+// Lights block, when the including shader defines LOCAL_SHADOWS and
+// declares, before including lights.glsl:
 //   uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
-//   uniform sampler2DArrayShadow spotShadowMap;     one layer per spot slot
-//   uniform samplerCubeArrayShadow pointShadowMap;  one cube per point slot
+//   uniform sampler2DShadow localShadowAtlas;
 //   a Settings block instance named `settings`      (DEFAULT_SETTINGS_BLOCK)
 
 #ifndef DEFAULT_LOCAL_SHADOWS_GLSL
 #define DEFAULT_LOCAL_SHADOWS_GLSL
 
-// 3x3 hardware-filtered comparisons around the point's texel in layer `slot`.
-float spotShadow(int slot, vec3 lightPos, vec3 worldPos, vec3 N, vec3 L) {
-    float distance = length(worldPos - lightPos);
-    float texel = localShadows.spotParams[slot].x * distance;
-    float NdotL = clamp(dot(N, L), 0.0, 1.0);
-    vec3 offsetPos = worldPos + N * texel * settings.shadowNormalBias * (0.5 + sqrt(1.0 - NdotL * NdotL));
+// 3x3 hardware-filtered comparisons around `uv` (0..1 across the tile) in
+// tile `rect`, kept inside the tile so no neighbour's depth bleeds in.
+float atlasShadow(vec4 rect, vec2 uv, float reference) {
+    vec2 texel = 1.0 / vec2(textureSize(localShadowAtlas, 0));
+    vec2 lo = rect.xy + texel * 0.5, hi = rect.xy + rect.zw - texel * 0.5;
+    vec2 center = rect.xy + uv * rect.zw;
+    float lit = 0.0;
+    for (int y = -1; y <= 1; ++y)
+        for (int x = -1; x <= 1; ++x)
+            lit += texture(localShadowAtlas, vec3(clamp(center + vec2(x, y) * texel, lo, hi), reference));
+    return lit / 9.0;
+}
 
-    vec4 clip = localShadows.spotViewProj[slot] * vec4(offsetPos, 1.0);
+// Moved off the surface along its normal by a few texels of the map, more at
+// grazing angles.
+vec3 normalOffset(vec3 worldPos, vec3 N, vec3 L, float texel) {
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    return worldPos + N * texel * settings.shadowNormalBias * (0.5 + sqrt(1.0 - NdotL * NdotL));
+}
+
+float spotShadow(int slot, vec3 lightPos, vec3 worldPos, vec3 N, vec3 L) {
+    vec4 rect = localShadows.spotRect[slot];
+    if (rect.z <= 0.0) return 1.0;
+    float texel = localShadows.spotParams[slot].x * length(worldPos - lightPos);
+    vec4 clip = localShadows.spotViewProj[slot] * vec4(normalOffset(worldPos, N, L, texel), 1.0);
     if (clip.w <= 0.0) return 1.0;
     vec3 ndc = clip.xyz / clip.w;
     vec2 uv = ndc.xy * 0.5 + 0.5;
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || ndc.z > 1.0) return 1.0;
-
-    vec2 step = 1.0 / vec2(textureSize(spotShadowMap, 0).xy);
-    float reference = ndc.z - settings.shadowDepthBias;
-    float lit = 0.0;
-    for (int y = -1; y <= 1; ++y)
-        for (int x = -1; x <= 1; ++x)
-            lit += texture(spotShadowMap, vec4(uv + vec2(x, y) * step, float(slot), reference));
-    return lit / 9.0;
+    return atlasShadow(rect, uv, ndc.z - settings.shadowDepthBias);
 }
 
-// 3x3 hardware-filtered comparisons around the direction to the point, in
-// cube `slot`.
+// The cube face a direction falls on, in the order +X, -X, +Y, -Y, +Z, -Z.
+int cubeFace(vec3 r) {
+    vec3 a = abs(r);
+    if (a.x >= a.y && a.x >= a.z) return r.x > 0.0 ? 0 : 1;
+    if (a.y >= a.z) return r.y > 0.0 ? 2 : 3;
+    return r.z > 0.0 ? 4 : 5;
+}
+
+// Through the face's own matrix, so the lookup lands where that face's pass
+// rendered.
 float pointShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
     vec4 positionFar = localShadows.pointPositionFar[slot];
-    vec4 depthParams = localShadows.pointDepthParams[slot];
-    float distance = length(worldPos - positionFar.xyz);
-    float texel = depthParams.z * distance;
-    float NdotL = clamp(dot(N, L), 0.0, 1.0);
-    vec3 offsetPos = worldPos + N * texel * settings.shadowNormalBias * (0.5 + sqrt(1.0 - NdotL * NdotL));
-
+    float texel = localShadows.pointDepthParams[slot].z * length(worldPos - positionFar.xyz);
+    vec3 offsetPos = normalOffset(worldPos, N, L, texel);
     vec3 r = offsetPos - positionFar.xyz;
     vec3 a = abs(r);
-    float m = max(a.x, max(a.y, a.z));
-    if (m >= positionFar.w) return 1.0;   // beyond the map's far plane
-    float reference = depthParams.x + depthParams.y / m - settings.shadowDepthBias;
+    if (max(a.x, max(a.y, a.z)) >= positionFar.w) return 1.0;   // beyond the map's far plane
 
-    // Two directions across the face, a texel apart at this distance.
-    vec3 axis = a.x >= a.y && a.x >= a.z ? vec3(1, 0, 0) : (a.y >= a.z ? vec3(0, 1, 0) : vec3(0, 0, 1));
-    vec3 u = normalize(cross(axis, abs(axis.y) > 0.5 ? vec3(1, 0, 0) : vec3(0, 1, 0)));
-    vec3 v = cross(axis, u);
-    u *= texel;
-    v *= texel;
-    float lit = 0.0;
-    for (int y = -1; y <= 1; ++y)
-        for (int x = -1; x <= 1; ++x)
-            lit += texture(pointShadowMap, vec4(r + u * float(x) + v * float(y), float(slot)), reference);
-    return lit / 9.0;
+    int face = slot * 6 + cubeFace(r);
+    vec4 rect = localShadows.pointFaceRect[face];
+    if (rect.z <= 0.0) return 1.0;
+    vec4 clip = localShadows.pointFaceViewProj[face] * vec4(offsetPos, 1.0);
+    vec3 ndc = clip.xyz / clip.w;
+    return atlasShadow(rect, clamp(ndc.xy * 0.5 + 0.5, 0.0, 1.0), ndc.z - settings.shadowDepthBias);
 }
 
 // Shadowing of scene light `lightIndex`, 1 when it has no shadow slot.

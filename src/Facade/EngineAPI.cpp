@@ -434,12 +434,14 @@ void EngineAPI::setCustomUint(const std::string& key, uint32_t value) {
 }
 
 void EngineAPI::setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount,
-                                       uint32_t spotResolution, uint32_t pointResolution) {
+                                       uint32_t spotResolution, uint32_t pointResolution,
+                                       uint32_t atlasResolution) {
     auto& settings = m_impl->app->getRenderGraph().getSceneContext().localShadow.settings;
     settings.spotCount = std::min(spotCount, MAX_SPOT_SHADOWS);
     settings.pointCount = std::min(pointCount, MAX_POINT_SHADOWS);
     settings.spotResolution = spotResolution;
     settings.pointResolution = pointResolution;
+    settings.atlasResolution = atlasResolution;
 }
 
 void EngineAPI::setSunShadowSettings(uint32_t cascadeCount, float maxDistance,

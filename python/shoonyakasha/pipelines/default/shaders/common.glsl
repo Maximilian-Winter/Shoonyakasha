@@ -42,15 +42,18 @@
     uint cascadeCount;
 
 // scene.shadows.spot* and scene.shadows.point* (pipeline.json
-// "LocalShadowMatrices"): 4 spot slots, 2 point slots of 6 faces each
-#define SPOT_SHADOW_SLOTS 4
-#define POINT_SHADOW_SLOTS 2
+// "LocalShadowMatrices"): 8 spot slots, 4 point slots of 6 faces each, all
+// tiles of one atlas
+#define SPOT_SHADOW_SLOTS 8
+#define POINT_SHADOW_SLOTS 4
 #define DEFAULT_LOCAL_SHADOWS_BLOCK                          \
     mat4 spotViewProj[SPOT_SHADOW_SLOTS];                    \
     mat4 pointFaceViewProj[POINT_SHADOW_SLOTS * 6];          \
     vec4 spotParams[SPOT_SHADOW_SLOTS];      /* x = texel size one unit away */ \
     vec4 pointPositionFar[POINT_SHADOW_SLOTS];                \
     vec4 pointDepthParams[POINT_SHADOW_SLOTS]; /* depth = x + y / m; z = texel size one unit away */ \
+    vec4 spotRect[SPOT_SHADOW_SLOTS];        /* tile in the atlas: x, y, width, height in fractions */ \
+    vec4 pointFaceRect[POINT_SHADOW_SLOTS * 6];               \
     int spotLightIndex[SPOT_SHADOW_SLOTS];   /* -1: empty slot */ \
     int pointLightIndex[POINT_SHADOW_SLOTS];
 

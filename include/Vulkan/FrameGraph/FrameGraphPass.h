@@ -454,6 +454,13 @@ struct PassDeclaration {
     // Whether this pass is enabled (disabled passes are skipped during execution)
     bool                        enabled = true;
 
+    // JSON "viewport": a dot-path to a vec4 (x, y, width, height), in
+    // fractions of the attachments' extent, that the pass renders into:
+    // clears, draws, viewport and scissor stay inside it. Resolved every
+    // frame; an empty rectangle skips the pass's rendering. Empty for all of
+    // the attachments (a shadow atlas's tiles use it).
+    std::string                 viewport;
+
     // Set when the pass is one instance of a JSON "repeat": the declared
     // name (e.g. "SunShadow"), this instance's index value and the count.
     // Readable in shaders through the pass.repeatIndex/repeatCount dot-paths.

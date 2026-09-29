@@ -11,6 +11,7 @@
 #include "ECS/Systems.h"
 #include "Vulkan/FrameGraph/FrameGraph.h"
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
+#include "Vulkan/FrameGraph/FrameGraphSchedule.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <nlohmann/json.hpp>
@@ -161,6 +162,115 @@ TEST(LocalShadowSlots, LightsThatCannotReachTheViewAreSkipped) {
     EXPECT_EQ(s.point[0].lightIndex, 1);
 }
 
+// ── The atlas ───────────────────────────────────────────────────
+
+namespace {
+
+bool overlap(const glm::vec4& a, const glm::vec4& b) {
+    return a.x < b.x + b.z && b.x < a.x + a.z && a.y < b.y + b.w && b.y < a.y + a.w;
+}
+
+} // namespace
+
+TEST(ShadowAtlas, PackingFillsWithoutOverlap) {
+    // 1 of 512, 3 of 256, 4 of 128 in a 1024 atlas: 0.25 + 0.1875 + 0.0625 of it.
+    const std::vector<uint32_t> sizes = {128, 512, 256, 128, 256, 128, 256, 128};
+    const auto corners = packAtlasTiles(sizes, 1024);
+    ASSERT_EQ(corners.size(), sizes.size());
+    for (size_t i = 0; i < sizes.size(); ++i) {
+        const glm::vec4 a{glm::vec2(corners[i]), float(sizes[i]), float(sizes[i])};
+        EXPECT_LE(a.x + a.z, 1024.0f);
+        EXPECT_LE(a.y + a.w, 1024.0f);
+        EXPECT_EQ(corners[i].x % sizes[i], 0u);   // aligned to its own size
+        EXPECT_EQ(corners[i].y % sizes[i], 0u);
+        for (size_t j = 0; j < i; ++j) {
+            const glm::vec4 b{glm::vec2(corners[j]), float(sizes[j]), float(sizes[j])};
+            EXPECT_FALSE(overlap(a, b)) << i << " and " << j;
+        }
+    }
+    // Exactly full is fine; one more is not.
+    EXPECT_EQ(packAtlasTiles(std::vector<uint32_t>(16, 256), 1024).size(), 16u);
+    EXPECT_TRUE(packAtlasTiles(std::vector<uint32_t>(17, 256), 1024).empty());
+}
+
+TEST(ShadowAtlas, NearerLightsGetLargerTilesAndEverythingFits) {
+    LocalShadowSettings settings;   // 4096 atlas, spot tiles up to 2048, faces up to 1024
+    std::vector<LocalShadowCandidate> lights;
+    for (uint32_t i = 0; i < 8; ++i)   // spots at 2, 6, 10 ... units, each reaching 4
+        lights.push_back(candidate(i, true, {0, 0, -2.0f - 4.0f * float(i)}, 1.0f, 4.0f));
+    for (uint32_t i = 0; i < 4; ++i)
+        lights.push_back(candidate(8 + i, false, {3, 0, -2.0f - 6.0f * float(i)}, 1.0f, 4.0f));
+    const auto s = assignLocalShadows(lights, glm::vec3(0.0f), glm::mat4(1.0f), true, settings);
+    ASSERT_EQ(s.spotCount, 8u);
+    ASSERT_EQ(s.pointCount, 4u);
+
+    std::vector<glm::vec4> rects;
+    for (uint32_t i = 0; i < s.spotCount; ++i) rects.push_back(s.spot[i].rect);
+    for (uint32_t i = 0; i < s.pointCount; ++i)
+        for (const auto& r : s.point[i].faceRect) rects.push_back(r);
+    for (size_t i = 0; i < rects.size(); ++i) {
+        EXPECT_GT(rects[i].z, 0.0f);
+        EXPECT_EQ(rects[i].z, rects[i].w);
+        EXPECT_LE(rects[i].x + rects[i].z, 1.0f);
+        EXPECT_LE(rects[i].y + rects[i].w, 1.0f);
+        for (size_t j = 0; j < i; ++j) EXPECT_FALSE(overlap(rects[i], rects[j])) << i << " and " << j;
+    }
+    // The camera stands inside the nearest spot's range: the largest tile.
+    // Farther lights look smaller and get smaller ones.
+    EXPECT_FLOAT_EQ(s.spot[0].rect.z * 4096.0f, 2048.0f);
+    float previous = 1.0f;
+    for (uint32_t i = 0; i < s.spotCount; ++i) {
+        EXPECT_LE(s.spot[i].rect.z, previous);
+        previous = s.spot[i].rect.z;
+    }
+    EXPECT_LT(s.spot[7].rect.z, s.spot[0].rect.z);
+    // The texel size follows the tile: the same cone over fewer texels.
+    for (uint32_t i = 1; i < s.spotCount; ++i)
+        EXPECT_NEAR(s.spot[i].params.x * s.spot[i].rect.z, s.spot[0].params.x * s.spot[0].rect.z, 1e-6f);
+    // A point light's faces share one size.
+    for (const auto& r : s.point[0].faceRect) EXPECT_EQ(r.z, s.point[0].faceRect[0].z);
+    EXPECT_FLOAT_EQ(s.point[0].depthParams.z, 2.0f / (s.point[0].faceRect[0].z * 4096.0f));
+}
+
+TEST(ShadowAtlas, TilesShrinkLeastImportantFirstToFit) {
+    LocalShadowSettings settings;
+    settings.atlasResolution = 2048;
+    settings.spotResolution = 2048;
+    std::vector<LocalShadowCandidate> lights;
+    // All around the camera, so each wants the largest tile: 8 x 2048^2 cannot fit.
+    for (uint32_t i = 0; i < 8; ++i) lights.push_back(candidate(i, true, {0, 0, -1}, float(8 - i), 10.0f));
+    const auto s = assignLocalShadows(lights, glm::vec3(0.0f), glm::mat4(1.0f), true, settings);
+    ASSERT_EQ(s.spotCount, 8u);
+    float area = 0.0f;
+    for (uint32_t i = 0; i < s.spotCount; ++i) area += s.spot[i].rect.z * s.spot[i].rect.w;
+    EXPECT_LE(area, 1.0f + 1e-6f);
+    EXPECT_EQ(s.spot[0].lightIndex, 0);                          // the brightest
+    EXPECT_GE(s.spot[0].rect.z, s.spot[7].rect.z);
+    EXPECT_GT(s.spot[0].rect.z, s.spot[7].rect.z);
+}
+
+TEST(ShadowAtlas, ArraysUseTheWholeLayer) {
+    LocalShadowSettings settings;
+    settings.atlasResolution = 0;
+    const auto s = assignLocalShadows({candidate(0, true, {0, 0, -3}, 1.0f), candidate(1, false, {0, 0, -3}, 1.0f)},
+                                      glm::vec3(0.0f), glm::mat4(1.0f), true, settings);
+    EXPECT_EQ(s.spot[0].rect, glm::vec4(0, 0, 1, 1));
+    EXPECT_EQ(s.point[0].faceRect[5], glm::vec4(0, 0, 1, 1));
+    EXPECT_EQ(s.spot[1].rect, glm::vec4(0.0f));   // empty slot
+}
+
+TEST(ShadowAtlas, ViewportRectanglesInTexels) {
+    const VkExtent2D extent{4096, 4096};
+    const VkRect2D r = FrameGraph::FrameGraphExecutor::viewportRect(glm::vec4(0.25f, 0.5f, 0.125f, 0.125f), extent);
+    EXPECT_EQ(r.offset.x, 1024);
+    EXPECT_EQ(r.offset.y, 2048);
+    EXPECT_EQ(r.extent.width, 512u);
+    EXPECT_EQ(r.extent.height, 512u);
+    EXPECT_EQ(FrameGraph::FrameGraphExecutor::viewportRect(glm::vec4(0.0f), extent).extent.width, 0u);
+    const VkRect2D clamped = FrameGraph::FrameGraphExecutor::viewportRect(glm::vec4(0.75f, 0.75f, 0.5f, 0.5f), extent);
+    EXPECT_EQ(clamped.extent.width, 1024u);
+}
+
 // ── In the scene context ────────────────────────────────────────
 
 class LocalShadowScene : public testing::Test {
@@ -225,6 +335,11 @@ TEST_F(LocalShadowScene, CastingLightsArePublished) {
               local.point[0].positionFar);
     EXPECT_EQ(resolver.resolveScene("scene.shadows.point.faces[3].viewProj", scene).as<glm::mat4>(),
               local.point[0].faceViewProj[3]);
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.spot[0].rect", scene).as<glm::vec4>(), local.spot[0].rect);
+    EXPECT_GT(local.spot[0].rect.z, 0.0f);
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.point.faces[3].rect", scene).as<glm::vec4>(),
+              local.point[0].faceRect[3]);
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.spot[1].rect", scene).as<glm::vec4>(), glm::vec4(0.0f));
     EXPECT_FALSE(resolver.resolveScene("scene.shadows.spot[8].viewProj", scene).isValid());
     EXPECT_FALSE(resolver.resolveScene("scene.shadows.point.faces[24].viewProj", scene).isValid());
 }
@@ -253,4 +368,54 @@ TEST(LocalShadowViews, ParseAndCheckTheirSlot) {
         FrameGraph::FrameGraphBuilder c;
         EXPECT_THROW(FrameGraph::loadGraphFromJson(c, graph(bad)), std::runtime_error) << bad;
     }
+}
+
+TEST(ShadowAtlas, PassViewportParses) {
+    using nlohmann::json;
+    auto graph = [](const json& viewport, const std::string& type) {
+        json pass = {{"name", "Tile"}, {"type", type}, {"viewport", viewport},
+                     {"execution", {{"type", type == "graphics" ? "shadow_casters" : "dispatch"}}}};
+        if (type == "graphics") {
+            pass["outputs"] = json::array({{{"resource", "atlas"}, {"usage", "depth_write"}}});
+        }
+        return json{{"version", 1},
+                    {"resources", json::array({{{"name", "atlas"}, {"kind", "image"},
+                                                {"image", {{"format", "D32_SFLOAT"}}}}})},
+                    {"passes", json::array({pass})}};
+    };
+    FrameGraph::FrameGraphBuilder b;
+    FrameGraph::loadGraphFromJson(b, graph("scene.shadows.spot[2].rect", "graphics"));
+    EXPECT_EQ(b.getPassDeclarations()[0].viewport, "scene.shadows.spot[2].rect");
+    FrameGraph::FrameGraphBuilder c;
+    EXPECT_THROW(FrameGraph::loadGraphFromJson(c, graph(json::array({0, 0, 1, 1}), "graphics")), std::runtime_error);
+    FrameGraph::FrameGraphBuilder d;
+    EXPECT_THROW(FrameGraph::loadGraphFromJson(d, graph("scene.shadows.spot[2].rect", "compute")), std::runtime_error);
+}
+
+TEST(ShadowAtlas, TilesThatClearTheirRectangleKeepEarlierTiles) {
+    using nlohmann::json;
+    // Two tile passes clear and draw into one atlas; a third pass reads it.
+    auto tile = [](const std::string& name, const std::string& rect) {
+        return json{{"name", name}, {"type", "graphics"}, {"viewport", rect},
+                    {"execution", {{"type", "shadow_casters"}}},
+                    {"outputs", json::array({{{"resource", "atlas"}, {"usage", "depth_write"},
+                                              {"clear", {{"depth", 1.0}, {"stencil", 0}}}}})}};
+    };
+    const json graph = {
+        {"version", 1},
+        {"resources", json::array({{{"name", "atlas"}, {"kind", "image"},
+                                    {"image", {{"format", "D32_SFLOAT"}, {"width", 64}, {"height", 64}}}}})},
+        {"passes", json::array({tile("TileA", "scene.shadows.spot[0].rect"), tile("TileB", "scene.shadows.spot[1].rect"),
+                                {{"name", "Read"}, {"type", "graphics"}, {"hasSideEffects", true},
+                                 {"execution", {{"type", "fullscreen"}}},
+                                 {"inputs", json::array({{{"resource", "atlas"}, {"usage", "shader_read"}}})}}})}};
+    FrameGraph::FrameGraphBuilder b;
+    FrameGraph::loadGraphFromJson(b, graph);
+    const auto scheduled = FrameGraph::describeResources(b.getResourceDeclarations());
+    const auto deps = FrameGraph::passDependencies(b.getPassDeclarations(), scheduled);
+    ASSERT_EQ(deps.size(), 3u);
+    EXPECT_EQ(deps[1], std::vector<uint32_t>{0});   // TileB keeps TileA's tile
+    EXPECT_EQ(deps[2], std::vector<uint32_t>{1});
+    const auto live = FrameGraph::livePasses(b.getPassDeclarations(), b.getResourceDeclarations(), deps);
+    EXPECT_EQ(live, (std::vector<uint32_t>{0, 1, 2}));
 }

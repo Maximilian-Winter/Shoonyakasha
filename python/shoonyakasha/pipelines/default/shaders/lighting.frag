@@ -19,9 +19,8 @@ layout(set = 1, binding = 2) uniform sampler2D brdfLUT;
 layout(set = 2, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 layout(set = 3, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
 layout(set = 3, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
-layout(set = 3, binding = 2) uniform sampler2DArrayShadow spotShadowMap;
-layout(set = 3, binding = 3) uniform samplerCubeArrayShadow pointShadowMap;
-layout(set = 3, binding = 4) uniform usampler2D lightClusters;
+layout(set = 3, binding = 2) uniform sampler2DShadow localShadowAtlas;
+layout(set = 3, binding = 3) uniform usampler2D lightClusters;
 layout(set = 4, binding = 0) uniform Settings { DEFAULT_SETTINGS_BLOCK } settings;
 layout(set = 4, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascades;
 

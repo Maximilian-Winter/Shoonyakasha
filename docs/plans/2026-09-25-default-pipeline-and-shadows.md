@@ -388,9 +388,10 @@ slot; dot-paths `scene.shadows.spot*` / `scene.shadows.point*` publish them.
 The default pipeline samples both with 3x3 hardware comparisons in the
 lighting and forward passes.
 
-Not done here: arrays rather than an atlas, so every slot has one resolution
-whatever the light's size on screen; an empty slot's passes still clear their
-layer.
+Not done here at first: arrays rather than an atlas, so every slot had one
+resolution whatever the light's size on screen, and an empty slot's passes
+still cleared their layer. Both went with the atlas below: an empty slot's
+tile rectangle is empty, and its passes record nothing.
 
 Also done: temporal anti-aliasing. History needs no new resource kind: a
 `persistent` image read in the pass that makes a result and written with a
@@ -437,13 +438,18 @@ the product of both. Blended materials at first still read the cascades,
 which in this preset lack the opaque casters; later a `TransparentRT` pass
 (forward_rt.frag, four rays per pixel) replaced `Transparent` in the preset.
 
-Not done, on purpose: the shadow atlas. What it buys over the arrays is a
-resolution per light by its size on screen. It needs per-view viewport
-rects chosen each frame, a packer, and, for point lights, six rects with the
-face selection done by hand in the shader in place of hardware cube-map
-comparisons. At four spot and two point slots the arrays cost about 28 MB and
-none of that; the atlas is worth it once there are many more shadowed
-lights than that, together with GPU-driven culling.
+The shadow atlas was first left out (at four spot and two point slots the
+arrays cost about 28 MB), then done: a pass `"viewport"` dot-path limits
+its rendering, clears included, to a rectangle resolved each frame, and
+such a pass counts as keeping the rest of its outputs, so dead-pass culling
+keeps every tile. `assignLocalShadows` sizes tiles by the light's apparent
+size (range over distance, powers of two from 128 up to 2048 for spots and
+1024 per cube face), halves the least important until they fit, and packs
+them largest first along a Z-order curve, which leaves no gaps for
+decreasing powers of two. The default pipeline has 8 spot and 4 point slots
+in a 4096² D32 atlas (64 MB); the shaders read tiles through their rects,
+clamp the 3x3 filter inside them, and pick a point light's face by its major
+axis and sample it through that face's matrix.
 
 The original list:
 - Local-light shadows (needs phases 1–4).

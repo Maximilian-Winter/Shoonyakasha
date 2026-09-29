@@ -1,7 +1,7 @@
 {
   "version": 3,
   "name": "DefaultPipeline",
-  "description": "Shoonyakasha's default pipeline: clustered deferred PBR with cascaded sun shadows, spot and point light shadows, contact shadows, image-based light, ground-truth ambient occlusion, forward transparency, temporal anti-aliasing with motion vectors, bloom, automatic exposure and ACES tonemapping. Settings are scene.custom.default.* values; see README.md.",
+  "description": "Shoonyakasha's default pipeline: clustered deferred PBR with cascaded sun shadows, spot and point light shadows in an atlas, contact shadows, image-based light, ground-truth ambient occlusion, forward transparency, temporal anti-aliasing with motion vectors, bloom, automatic exposure and ACES tonemapping. Settings are scene.custom.default.* values; see README.md.",
   "vertexFormats": {
     "skinned": {
       "attributes": [
@@ -470,44 +470,56 @@
           "name": "spotViewProj",
           "type": "mat4",
           "source": "scene.shadows.spot[i].viewProj",
-          "arrayCount": 4
+          "arrayCount": 8
         },
         {
           "name": "pointFaceViewProj",
           "type": "mat4",
           "source": "scene.shadows.point.faces[i].viewProj",
-          "arrayCount": 12
+          "arrayCount": 24
         },
         {
           "name": "spotParams",
           "type": "vec4",
           "source": "scene.shadows.spot[i].params",
-          "arrayCount": 4
+          "arrayCount": 8
         },
         {
           "name": "pointPositionFar",
           "type": "vec4",
           "source": "scene.shadows.point[i].positionFar",
-          "arrayCount": 2
+          "arrayCount": 4
         },
         {
           "name": "pointDepthParams",
           "type": "vec4",
           "source": "scene.shadows.point[i].depthParams",
-          "arrayCount": 2
+          "arrayCount": 4
+        },
+        {
+          "name": "spotRect",
+          "type": "vec4",
+          "source": "scene.shadows.spot[i].rect",
+          "arrayCount": 8
+        },
+        {
+          "name": "pointFaceRect",
+          "type": "vec4",
+          "source": "scene.shadows.point.faces[i].rect",
+          "arrayCount": 24
         },
         {
           "name": "spotLightIndex",
           "type": "int",
           "source": "scene.shadows.spot[i].lightIndex",
-          "arrayCount": 4,
+          "arrayCount": 8,
           "default": -1
         },
         {
           "name": "pointLightIndex",
           "type": "int",
           "source": "scene.shadows.point[i].lightIndex",
-          "arrayCount": 2,
+          "arrayCount": 4,
           "default": -1
         }
       ]
@@ -617,22 +629,12 @@
           "stages": [
             "fragment"
           ],
-          "name": "spotShadowMap",
-          "autoBindResource": "spotShadowMap",
+          "name": "localShadowAtlas",
+          "autoBindResource": "localShadowAtlas",
           "autoBindSampler": "shadowCompare"
         },
         {
           "binding": 3,
-          "type": "combined_image_sampler",
-          "stages": [
-            "fragment"
-          ],
-          "name": "pointShadowMap",
-          "autoBindResource": "pointShadowMap",
-          "autoBindSampler": "shadowCompare"
-        },
-        {
-          "binding": 4,
           "type": "combined_image_sampler",
           "stages": [
             "fragment"
@@ -1151,25 +1153,12 @@
       }
     },
     {
-      "name": "spotShadowMap",
+      "name": "localShadowAtlas",
       "kind": "image",
       "image": {
         "format": "D32_SFLOAT",
-        "width": 1024,
-        "height": 1024,
-        "arrayLayers": 4,
-        "viewType": "2d_array"
-      }
-    },
-    {
-      "name": "pointShadowMap",
-      "kind": "image",
-      "image": {
-        "format": "D32_SFLOAT",
-        "width": 512,
-        "height": 512,
-        "arrayLayers": 12,
-        "viewType": "cube_array"
+        "width": 4096,
+        "height": 4096
       }
     },
     {
@@ -1427,9 +1416,10 @@
       "name": "SpotShadowOpaque{s}",
       "type": "graphics",
       "repeat": {
-        "count": 4,
+        "count": 8,
         "index": "s"
       },
+      "viewport": "scene.shadows.spot[{s}].rect",
       "execution": {
         "type": "shadow_casters",
         "alphaFilter": "opaque",
@@ -1438,9 +1428,8 @@
       },
       "outputs": [
         {
-          "resource": "spotShadowMap",
+          "resource": "localShadowAtlas",
           "usage": "depth_write",
-          "layer": "{s}",
           "clear": {
             "depth": 1.0,
             "stencil": 0
@@ -1474,9 +1463,10 @@
       "name": "SpotShadowMasked{s}",
       "type": "graphics",
       "repeat": {
-        "count": 4,
+        "count": 8,
         "index": "s"
       },
+      "viewport": "scene.shadows.spot[{s}].rect",
       "execution": {
         "type": "shadow_casters",
         "alphaFilter": "mask",
@@ -1485,9 +1475,8 @@
       },
       "outputs": [
         {
-          "resource": "spotShadowMap",
-          "usage": "depth_write",
-          "layer": "{s}"
+          "resource": "localShadowAtlas",
+          "usage": "depth_write"
         }
       ],
       "pipeline": {
@@ -1520,9 +1509,10 @@
       "name": "SpotShadowSkinned{s}",
       "type": "graphics",
       "repeat": {
-        "count": 4,
+        "count": 8,
         "index": "s"
       },
+      "viewport": "scene.shadows.spot[{s}].rect",
       "execution": {
         "type": "skinned_shadow_casters",
         "view": "shadows.spot[{s}]",
@@ -1530,9 +1520,8 @@
       },
       "outputs": [
         {
-          "resource": "spotShadowMap",
-          "usage": "depth_write",
-          "layer": "{s}"
+          "resource": "localShadowAtlas",
+          "usage": "depth_write"
         }
       ],
       "pipeline": {
@@ -1564,9 +1553,10 @@
       "name": "PointShadowOpaque{f}",
       "type": "graphics",
       "repeat": {
-        "count": 12,
+        "count": 24,
         "index": "f"
       },
+      "viewport": "scene.shadows.point.faces[{f}].rect",
       "execution": {
         "type": "shadow_casters",
         "alphaFilter": "opaque",
@@ -1575,9 +1565,8 @@
       },
       "outputs": [
         {
-          "resource": "pointShadowMap",
+          "resource": "localShadowAtlas",
           "usage": "depth_write",
-          "layer": "{f}",
           "clear": {
             "depth": 1.0,
             "stencil": 0
@@ -1611,9 +1600,10 @@
       "name": "PointShadowMasked{f}",
       "type": "graphics",
       "repeat": {
-        "count": 12,
+        "count": 24,
         "index": "f"
       },
+      "viewport": "scene.shadows.point.faces[{f}].rect",
       "execution": {
         "type": "shadow_casters",
         "alphaFilter": "mask",
@@ -1622,9 +1612,8 @@
       },
       "outputs": [
         {
-          "resource": "pointShadowMap",
-          "usage": "depth_write",
-          "layer": "{f}"
+          "resource": "localShadowAtlas",
+          "usage": "depth_write"
         }
       ],
       "pipeline": {
@@ -1657,9 +1646,10 @@
       "name": "PointShadowSkinned{f}",
       "type": "graphics",
       "repeat": {
-        "count": 12,
+        "count": 24,
         "index": "f"
       },
+      "viewport": "scene.shadows.point.faces[{f}].rect",
       "execution": {
         "type": "skinned_shadow_casters",
         "view": "shadows.point.faces[{f}]",
@@ -1667,9 +1657,8 @@
       },
       "outputs": [
         {
-          "resource": "pointShadowMap",
-          "usage": "depth_write",
-          "layer": "{f}"
+          "resource": "localShadowAtlas",
+          "usage": "depth_write"
         }
       ],
       "pipeline": {
@@ -2206,11 +2195,7 @@
           "usage": "shader_read"
         },
         {
-          "resource": "spotShadowMap",
-          "usage": "shader_read"
-        },
-        {
-          "resource": "pointShadowMap",
+          "resource": "localShadowAtlas",
           "usage": "shader_read"
         },
         {
@@ -2255,11 +2240,7 @@
           "usage": "shader_read"
         },
         {
-          "resource": "spotShadowMap",
-          "usage": "shader_read"
-        },
-        {
-          "resource": "pointShadowMap",
+          "resource": "localShadowAtlas",
           "usage": "shader_read"
         },
         {
@@ -2322,11 +2303,7 @@
           "usage": "shader_read"
         },
         {
-          "resource": "spotShadowMap",
-          "usage": "shader_read"
-        },
-        {
-          "resource": "pointShadowMap",
+          "resource": "localShadowAtlas",
           "usage": "shader_read"
         },
         {

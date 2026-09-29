@@ -12,9 +12,8 @@
 layout(set = 0, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
 layout(set = 2, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
-layout(set = 2, binding = 2) uniform sampler2DArrayShadow spotShadowMap;
-layout(set = 2, binding = 3) uniform samplerCubeArrayShadow pointShadowMap;
-layout(set = 2, binding = 4) uniform usampler2D lightClusters;
+layout(set = 2, binding = 2) uniform sampler2DShadow localShadowAtlas;
+layout(set = 2, binding = 3) uniform usampler2D lightClusters;
 layout(set = 3, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 3, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 3, binding = 2) uniform sampler2D brdfLUT;

@@ -343,9 +343,9 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
 
     // ─── Spot and point light shadows ──────────────────────────
     // scene.shadows.spot.count, scene.shadows.spot[N].{viewProj, lightIndex,
-    // params}; scene.shadows.point.count, scene.shadows.point[N].{lightIndex,
-    // positionFar, depthParams}, scene.shadows.point.faces[N].viewProj with
-    // N = slot * 6 + face
+    // params, rect}; scene.shadows.point.count, scene.shadows.point[N].{lightIndex,
+    // positionFar, depthParams}, scene.shadows.point.faces[N].{viewProj, rect}
+    // with N = slot * 6 + face
     if (parts[0] == "shadows" && parts.size() >= 3) {
         const auto& local = scene.localShadow.shadows;
         auto indexIn = [](std::string_view part, std::string_view name, uint32_t& index) {
@@ -368,6 +368,7 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
             if (parts[2] == "viewProj")   return ResolvedValue(s.viewProj);
             if (parts[2] == "lightIndex") return ResolvedValue(s.lightIndex);
             if (parts[2] == "params")     return ResolvedValue(s.params);
+            if (parts[2] == "rect")       return ResolvedValue(s.rect);
             return ResolvedValue();
         }
         if (parts.size() == 3 && indexIn(parts[1], "point", index)) {
@@ -378,10 +379,10 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
             if (parts[2] == "depthParams") return ResolvedValue(p.depthParams);
             return ResolvedValue();
         }
-        if (parts.size() == 4 && parts[1] == "point" && indexIn(parts[2], "faces", index) &&
-            parts[3] == "viewProj") {
+        if (parts.size() == 4 && parts[1] == "point" && indexIn(parts[2], "faces", index)) {
             if (index >= MAX_POINT_SHADOWS * 6) return ResolvedValue();
-            return ResolvedValue(local.point[index / 6].faceViewProj[index % 6]);
+            if (parts[3] == "viewProj") return ResolvedValue(local.point[index / 6].faceViewProj[index % 6]);
+            if (parts[3] == "rect")     return ResolvedValue(local.point[index / 6].faceRect[index % 6]);
         }
     }
 

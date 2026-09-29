@@ -17,6 +17,8 @@
 #include "Core/Logger.h"
 
 #include <stdexcept>
+#include <algorithm>
+#include <cmath>
 #include <optional>
 #include <array>
 #include <cassert>
@@ -128,9 +130,10 @@ void recordImageBarriers(VulkanCommandBuilder& cmd,
 /// (an imported image that was never provided).
 bool beginRendering(VkCommandBuffer commandBuffer,
                     const CompiledPass& pass,
-                    const FrameGraphCompiler::CompileResult& compiled)
+                    const FrameGraphCompiler::CompileResult& compiled,
+                    const VkRect2D& area)
 {
-    if (!pass.rendersAttachments() || pass.extent.width == 0 || pass.extent.height == 0) {
+    if (!pass.rendersAttachments() || area.extent.width == 0 || area.extent.height == 0) {
         return false;
     }
 
@@ -161,7 +164,7 @@ bool beginRendering(VkCommandBuffer commandBuffer,
 
     VkRenderingInfo rendering{};
     rendering.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    rendering.renderArea           = {{0, 0}, pass.extent};
+    rendering.renderArea           = area;
     rendering.layerCount           = pass.layerCount;
     rendering.colorAttachmentCount = static_cast<uint32_t>(colors.size());
     rendering.pColorAttachments    = colors.data();
@@ -172,6 +175,35 @@ bool beginRendering(VkCommandBuffer commandBuffer,
 }
 
 } // namespace
+
+VkRect2D FrameGraphExecutor::viewportRect(const glm::vec4& fractions, VkExtent2D extent) {
+    const auto edge = [](float f, uint32_t size) {
+        const float texels = std::round(std::clamp(f, 0.0f, 1.0f) * static_cast<float>(size));
+        return static_cast<int32_t>(texels);
+    };
+    const int32_t x0 = edge(fractions.x, extent.width);
+    const int32_t y0 = edge(fractions.y, extent.height);
+    const int32_t x1 = edge(fractions.x + fractions.z, extent.width);
+    const int32_t y1 = edge(fractions.y + fractions.w, extent.height);
+    VkRect2D rect{};
+    rect.offset = {x0, y0};
+    rect.extent = {static_cast<uint32_t>(std::max(x1 - x0, 0)), static_cast<uint32_t>(std::max(y1 - y0, 0))};
+    return rect;
+}
+
+VkRect2D FrameGraphExecutor::renderArea(const PassDeclaration& passDecl, const CompiledPass& compiledPass) const {
+    VkRect2D full{{0, 0}, compiledPass.extent};
+    if (passDecl.viewport.empty() || !m_viewportResolver) return full;
+    glm::vec4 fractions(0.0f);
+    if (!m_viewportResolver(passDecl.viewport, fractions)) {
+        if (m_logger) {
+            m_logger->logEvery(5.0f, LogLevel::Warning, "Pass '%s': viewport '%s' has no vec4 value; "
+                               "the pass renders nothing", passDecl.name.c_str(), passDecl.viewport.c_str());
+        }
+        return VkRect2D{};
+    }
+    return viewportRect(fractions, compiledPass.extent);
+}
 
 void FrameGraphExecutor::execute(
     const FrameGraphCompiler::CompileResult& compiled,
@@ -268,19 +300,28 @@ void FrameGraphExecutor::execute(
         }
 
         // ── Begin rendering for graphics passes ──
+        const VkRect2D area = passDecl.type == PassType::Graphics ? renderArea(passDecl, compiledPass)
+                                                                  : VkRect2D{{0, 0}, compiledPass.extent};
         const bool rendering = passDecl.type == PassType::Graphics &&
-                               beginRendering(commandBuffer, compiledPass, compiled);
+                               beginRendering(commandBuffer, compiledPass, compiled, area);
 
         // A disabled pass binds and records nothing. Its barriers above and
         // its rendering still run, so its attachments receive their clear
         // values and end in the layouts that later passes' barriers expect.
-        const bool active = passDecl.enabled;
+        // So does one whose viewport rectangle is empty this frame, and it
+        // renders nothing either.
+        const bool active = passDecl.enabled &&
+                            (passDecl.type != PassType::Graphics || area.extent.width > 0);
 
         // ── Auto-bind pipeline if available ──
         if (active && passDecl.type == PassType::Graphics && compiledPass.pipeline) {
             cmd.bindPipeline(compiledPass.pipeline.get())
-               .setViewport(ViewportState::fromExtent(compiledPass.extent))
-               .setScissor(ScissorState::fromExtent(compiledPass.extent));
+               .setViewport(ViewportState::fromRect(static_cast<float>(area.offset.x),
+                                                    static_cast<float>(area.offset.y),
+                                                    static_cast<float>(area.extent.width),
+                                                    static_cast<float>(area.extent.height)))
+               .setScissor(ScissorState::fromRect(area.offset.x, area.offset.y,
+                                                  area.extent.width, area.extent.height));
         }
         else if (active && passDecl.type == PassType::Compute && compiledPass.computePipeline) {
             // Auto-bind compute pipeline before callback
@@ -405,17 +446,24 @@ void FrameGraphExecutor::executePasses(
         }
 
         // ── Begin rendering for graphics passes ──
+        const VkRect2D area = passDecl.type == PassType::Graphics ? renderArea(passDecl, compiledPass)
+                                                                  : VkRect2D{{0, 0}, compiledPass.extent};
         const bool rendering = passDecl.type == PassType::Graphics &&
-                               beginRendering(commandBuffer, compiledPass, compiled);
+                               beginRendering(commandBuffer, compiledPass, compiled, area);
 
         // A disabled pass keeps its barriers and rendering; see execute().
-        const bool active = passDecl.enabled;
+        const bool active = passDecl.enabled &&
+                            (passDecl.type != PassType::Graphics || area.extent.width > 0);
 
         // ── Auto-bind pipeline ──
         if (active && passDecl.type == PassType::Graphics && compiledPass.pipeline) {
             cmd.bindPipeline(compiledPass.pipeline.get())
-               .setViewport(ViewportState::fromExtent(compiledPass.extent))
-               .setScissor(ScissorState::fromExtent(compiledPass.extent));
+               .setViewport(ViewportState::fromRect(static_cast<float>(area.offset.x),
+                                                    static_cast<float>(area.offset.y),
+                                                    static_cast<float>(area.extent.width),
+                                                    static_cast<float>(area.extent.height)))
+               .setScissor(ScissorState::fromRect(area.offset.x, area.offset.y,
+                                                  area.extent.width, area.extent.height));
         }
         else if (active && passDecl.type == PassType::Compute && compiledPass.computePipeline) {
             compiledPass.computePipeline->bind(commandBuffer);

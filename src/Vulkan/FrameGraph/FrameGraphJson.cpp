@@ -1632,6 +1632,20 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
             // Parse enabled flag (default: true — passes execute unless explicitly disabled)
             pass.enabled = passJson.value("enabled", true);
 
+            // "viewport": a dot-path to the rectangle the pass renders into.
+            if (passJson.contains("viewport")) {
+                const auto& viewport = passJson["viewport"];
+                if (!viewport.is_string() || viewport.get<std::string>().empty()) {
+                    throw std::runtime_error("Pass '" + pass.name + "': \"viewport\" must be a dot-path "
+                                             "to a vec4, e.g. \"scene.shadows.spot[0].rect\"");
+                }
+                if (pass.type != PassType::Graphics) {
+                    throw std::runtime_error("Pass '" + pass.name + "': \"viewport\" applies only to "
+                                             "graphics passes");
+                }
+                pass.viewport = viewport.get<std::string>();
+            }
+
             builder.addPass(std::move(pass));
         }
     }

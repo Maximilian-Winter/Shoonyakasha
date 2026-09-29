@@ -18,6 +18,15 @@
 // camera's view are skipped; the rest are ranked by intensity and by how
 // close they are to the camera.
 //
+// The maps are either layers of arrays, each at a fixed resolution, or tiles
+// of one atlas (atlasResolution > 0). In an atlas each light's tiles are
+// sized by how large its range looks from the camera, as a power of two up to
+// spotResolution (pointResolution for each cube face), and halved, least
+// important light first, until they all fit; then packed largest first, each
+// at the next free position of a Z-order curve, which fills a power-of-two
+// square without gaps when the sizes come in decreasing powers of two. Each
+// slot and face publishes its tile as a rectangle in fractions of the atlas.
+//
 // Pure math, no device: SceneContext fills itself with it each frame, and the
 // unit tests call it directly.
 //
@@ -35,10 +44,12 @@ constexpr uint32_t MAX_SPOT_SHADOWS  = 8;
 constexpr uint32_t MAX_POINT_SHADOWS = 4;
 
 struct LocalShadowSettings {
-    uint32_t spotCount       = 4;     // slots for spot lights, 0..MAX_SPOT_SHADOWS; match the pipeline
-    uint32_t pointCount      = 2;     // slots for point lights, 0..MAX_POINT_SHADOWS; match the pipeline
-    uint32_t spotResolution  = 1024;  // texels per side of a spot map, for the published texel size
-    uint32_t pointResolution = 512;   // texels per side of a cube face
+    uint32_t spotCount       = 8;     // slots for spot lights, 0..MAX_SPOT_SHADOWS; match the pipeline
+    uint32_t pointCount      = 4;     // slots for point lights, 0..MAX_POINT_SHADOWS; match the pipeline
+    uint32_t spotResolution  = 2048;  // texels per side of a spot map (in an atlas, the largest tile)
+    uint32_t pointResolution = 1024;  // texels per side of a cube face (in an atlas, the largest tile)
+    uint32_t atlasResolution = 4096;  // texels per side of the atlas holding every map; 0 for arrays
+    uint32_t minTileResolution = 128; // the smallest tile an atlas gives a map
     float    nearPlane       = 0.05f; // closest caster distance from the light
     float    defaultRange    = 50.0f; // far plane for lights with no range (range <= 0)
 };
@@ -48,6 +59,9 @@ struct SpotShadow {
     glm::mat4 viewProj{1.0f};           // world to light clip space, depth 0..1
     /// x = world size of a texel one unit from the light, y = near, z = far
     glm::vec4 params{0.0f};
+    /// The map's tile in the atlas: x, y, width, height in fractions of it;
+    /// (0, 0, 1, 1) with arrays, all 0 for an empty slot.
+    glm::vec4 rect{0.0f};
 };
 
 struct PointShadow {
@@ -57,6 +71,7 @@ struct PointShadow {
     /// x, y = depth from the major-axis distance m: x + y / m; z = world size
     /// of a texel one unit from the light; w = near
     glm::vec4 depthParams{0.0f};
+    std::array<glm::vec4, 6> faceRect{};       // each face's tile, as SpotShadow::rect
 };
 
 struct LocalShadows {
@@ -88,6 +103,12 @@ std::array<glm::mat4, 6> pointShadowFaceViewProj(const glm::vec3& position, floa
 /// Pick which candidates get a slot and compute their shadows. `cameraViewProj`
 /// culls lights whose sphere of influence is outside the view (identity: no
 /// culling); `cameraClip` says whether it maps depth to -1..1 (true) or 0..1.
+/// Pack square tiles, each a power of two no larger than `atlas` (also a
+/// power of two), largest first along a Z-order curve. Returns each tile's
+/// top-left corner in texels, in the order given, or an empty vector when
+/// they do not fit.
+std::vector<glm::uvec2> packAtlasTiles(const std::vector<uint32_t>& sizes, uint32_t atlas);
+
 LocalShadows assignLocalShadows(const std::vector<LocalShadowCandidate>& candidates,
                                 const glm::vec3& cameraPosition, const glm::mat4& cameraViewProj,
                                 bool cameraMinusOneToOne, const LocalShadowSettings& settings);

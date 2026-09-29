@@ -78,7 +78,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_custom_mat4(key, value)` | None | Set custom mat4 for shader uniforms. |
 | `set_custom_uint(key, value)` | None | Set custom uint for shader uniforms. |
 | `set_sun_shadows(cascades=4, max_distance=60.0, split_lambda=0.75, resolution=2048, caster_extension=50.0)` | None | Configure the sun's shadow cascades. |
-| `set_local_shadows(spot=4, point=2, spot_resolution=1024, point_resolution=512)` | None | Shadow slots for spot and point lights with cast shadows on. |
+| `set_local_shadows(spot=8, point=4, spot_resolution=2048, point_resolution=1024, atlas_resolution=4096)` | None | Shadow slots for spot and point lights with cast shadows on. |
 | `get_sun_shadow_cascade(index)` | 4×4 tuple (column-major) | World-to-light-clip matrix of a sun cascade this frame, as four columns. |
 | `set_pass_enabled(pass_name, enabled)` | bool | Turn a pipeline pass on or off from the next frame. |
 | `get_pass_draw_stats(pass_name)` | int | (drawn, culled): entities a geometry pass drew and culled as outside its view, last run. |

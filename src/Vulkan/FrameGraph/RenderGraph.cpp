@@ -2125,6 +2125,15 @@ void RenderGraph::initSystems() {
     m_sceneContext = std::make_unique<Shoonyakasha::SceneContext>();
     m_bufferResolver = std::make_unique<Shoonyakasha::BufferLayoutResolver>(*m_pathResolver);
 
+    // Passes' "viewport" rectangles come from the scene.
+    m_executor.setViewportResolver([this](const std::string& path, glm::vec4& fractions) {
+        if (!m_pathResolver || !m_sceneContext) return false;
+        const auto value = m_pathResolver->resolveScene(path, *m_sceneContext).tryAs<glm::vec4>();
+        if (!value) return false;
+        fractions = *value;
+        return true;
+    });
+
     m_logger->log(LogLevel::Info, "DotPathResolver integration initialized");
 }
 

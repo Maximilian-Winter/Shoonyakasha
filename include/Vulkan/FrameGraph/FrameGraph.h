@@ -884,6 +884,16 @@ public:
     /// Set debugger for execution tracing (optional)
     void setDebugger(FrameGraphDebugger* debugger) { m_debugger = debugger; }
 
+    /// Resolves a pass's "viewport" dot-path to (x, y, width, height) in
+    /// fractions of its extent; false when the path has no value. Without
+    /// one, passes render into all of their attachments.
+    using ViewportResolver = std::function<bool(const std::string& path, glm::vec4& fractions)>;
+    void setViewportResolver(ViewportResolver resolver) { m_viewportResolver = std::move(resolver); }
+
+    /// The pixels of `extent` that `fractions` covers, rounded to whole
+    /// texels and clamped to the extent; zero-sized when it covers none.
+    static VkRect2D viewportRect(const glm::vec4& fractions, VkExtent2D extent);
+
     /// Single command-buffer execution (existing behavior — all passes on one queue)
     void execute(
         const FrameGraphCompiler::CompileResult& compiled,
@@ -910,6 +920,11 @@ private:
     VulkanCommandManager&   m_cmdManager;
     FrameGraphDebugger*     m_debugger = nullptr;
     Logger*                 m_logger = nullptr;
+    ViewportResolver        m_viewportResolver;
+
+    /// The area a graphics pass renders into this frame: all of its extent,
+    /// or its "viewport" rectangle.
+    VkRect2D renderArea(const PassDeclaration& passDecl, const CompiledPass& compiledPass) const;
 
     /// Execute auto-callback based on PassDeclaration::execution configuration
     void executeAutoCallback(

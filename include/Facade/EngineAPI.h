@@ -211,11 +211,16 @@ public:
     /// Shadow slots for spot and point lights with castShadows. Each frame
     /// the engine gives the slots to the lights that matter most (bright,
     /// near the camera, able to reach the view) and publishes them as
-    /// scene.shadows.spot* and scene.shadows.point* dot-paths. The counts and
-    /// resolutions should match the pipeline's maps; the default pipeline has
-    /// 4 spot slots of 1024 and 2 point slots of 512, the defaults here.
-    void setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount,
-                                uint32_t spotResolution, uint32_t pointResolution);
+    /// scene.shadows.spot* and scene.shadows.point* dot-paths. The counts
+    /// should match the pipeline's passes. With `atlasResolution` > 0 every
+    /// map is a tile of one atlas that size, sized each frame by how large
+    /// the light looks, up to `spotResolution` (`pointResolution` per cube
+    /// face); with 0 the maps are array layers of exactly those sizes. The
+    /// defaults match the default pipeline: 8 spot and 4 point slots in a
+    /// 4096 atlas.
+    void setLocalShadowSettings(uint32_t spotCount = 8, uint32_t pointCount = 4,
+                                uint32_t spotResolution = 2048, uint32_t pointResolution = 1024,
+                                uint32_t atlasResolution = 4096);
 
     // ═══════════════════════════════════════════════════════════
     // Render Pipeline Passes

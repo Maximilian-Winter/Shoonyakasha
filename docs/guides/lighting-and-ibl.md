@@ -47,10 +47,10 @@ Spot and point lights with the shadow flag set compete for shadow slots, a fixed
 ```python
 lamp = engine.create_point_light((0.3, 1.2, 0.0), intensity=12.0, range=10.0)
 engine.scene.set_light_cast_shadows(lamp, True)
-engine.set_local_shadows(spot=4, point=2, spot_resolution=1024, point_resolution=512)
+engine.set_local_shadows(spot=8, point=4, spot_resolution=2048, point_resolution=1024, atlas_resolution=4096)
 ```
 
-The counts and resolutions must match the pipeline's maps; `set_local_shadows` defaults to the default pipeline's (C++ `setLocalShadowSettings`). A spot light's shadow is a perspective map covering its cone; a point light's is a cube map rendered one face at a time. Each face's matrix follows the cube-map face selection of the Vulkan specification, so a pass rendering face F writes exactly the texels a cube lookup along the same direction reads, and the depth it stores is the usual 0..1 perspective depth of the distance along the face's major axis. A shader recomputes it from the light-to-point vector `r` as `depthParams.x + depthParams.y / max(|r.x|, |r.y|, |r.z|)`.
+The counts must match the pipeline's passes; `set_local_shadows` defaults to the default pipeline's (C++ `setLocalShadowSettings`). With `atlas_resolution` above 0 every map is a square tile of one atlas image: each frame a light's tile is sized by how large its range looks from the camera, a power of two up to `spot_resolution` (`point_resolution` for each cube face) and down to 128, halved for the least important lights when they would not all fit, and packed without gaps. With 0 each slot is an array layer of exactly those sizes. A spot light's shadow is a perspective map covering its cone; a point light's is a cube map rendered one face at a time. Each face's matrix follows the cube-map face selection of the Vulkan specification, so a pass rendering face F writes exactly the texels a cube lookup along the same direction reads, and the depth it stores is the usual 0..1 perspective depth of the distance along the face's major axis. A shader recomputes it from the light-to-point vector `r` as `depthParams.x + depthParams.y / max(|r.x|, |r.y|, |r.z|)`.
 
 | Path | Type | Value |
 |---|---|---|
@@ -61,8 +61,9 @@ The counts and resolutions must match the pipeline's maps; `set_local_shadows` d
 | `scene.shadows.point[N].positionFar` | vec4 | Light position and far plane |
 | `scene.shadows.point[N].depthParams` | vec4 | x, y: depth from the major-axis distance as above; z: texel size one unit away; w: near |
 | `scene.shadows.point.faces[N].viewProj` | mat4 | Face N % 6 (+X, -X, +Y, -Y, +Z, -Z) of point slot N / 6 |
+| `scene.shadows.spot[N].rect`, `scene.shadows.point.faces[N].rect` | vec4 | The map's tile in the atlas: x, y, width, height in fractions of it. (0, 0, 1, 1) without an atlas; all 0 for an empty slot |
 
-Passes render a slot with `"view": "shadows.spot[{s}]"` or `"view": "shadows.point.faces[{f}]"` in a repeated pass, writing layer `{s}` of a `2d_array` or layer `{f}` of a `cube_array` image; a slot no light has this frame draws nothing. The [default pipeline](../../python/shoonyakasha/pipelines/default/README.md) is a complete example.
+Passes render a slot with `"view": "shadows.spot[{s}]"` or `"view": "shadows.point.faces[{f}]"` in a repeated pass. With an atlas they also name the tile, `"viewport": "scene.shadows.spot[{s}].rect"`, and write the atlas image; a shader reads face F's tile through that face's `viewProj`. Without one they write layer `{s}` of a `2d_array` or layer `{f}` of a `cube_array` image. A slot no light has this frame draws nothing. The [default pipeline](../../python/shoonyakasha/pipelines/default/README.md) is a complete example.
 
 ## Ray-traced sun shadows
 
