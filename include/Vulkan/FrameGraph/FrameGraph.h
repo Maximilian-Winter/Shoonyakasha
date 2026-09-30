@@ -1437,6 +1437,14 @@ private:
     /// pass of the frame bound invalidates the command buffer.
     std::unordered_map<VkDescriptorSet, std::pair<VkBuffer, VkDeviceSize>> m_skeletonSetBuffers;
     VkDescriptorPool m_materialDescriptorPool = VK_NULL_HANDLE;
+    /// Earlier material pools that ran out of room. Their sets stay live; a new
+    /// pool takes the next allocations.
+    std::vector<VkDescriptorPool> m_fullMaterialDescriptorPools;
+    /// The pool each per-entity set came from, to free it back there.
+    std::unordered_map<VkDescriptorSet, VkDescriptorPool> m_descriptorSetPools;
+    /// Material texture sets, shared by every entity whose material binds the
+    /// same textures under the same layout. Written once, never changed.
+    std::unordered_map<std::string, VkDescriptorSet> m_materialTextureSets;
 
     // Default textures for fallback when material textures are missing
     Shoonyakasha::GPUResourceFactory::DefaultTextures m_defaultTextures;
@@ -1447,6 +1455,11 @@ private:
 
     // Create descriptor pool for material textures
     void createMaterialDescriptorPool(uint32_t maxSets = 4096);
+    // Destroys every material pool, and with them every set allocated from them.
+    void destroyMaterialDescriptorPools();
+    // A set with `layout` from the material pools, chaining a new pool when the
+    // current one is full. VK_NULL_HANDLE on failure.
+    VkDescriptorSet allocateMaterialDescriptorSet(VkDescriptorSetLayout layout);
 
     // Frees the cached descriptor sets of entities that are no longer valid in
     // the bound scene. Only sets cached for frameIndex are freed, because the

@@ -97,14 +97,9 @@ RenderGraph::~RenderGraph() {
         m_defaultTexturesCreated = false;
     }
 
-    // Per-entity descriptor pool. createMaterialDescriptorPool() frees the
-    // previous pool when re-creating, but not at shutdown. Destroying the pool
-    // frees every set allocated from it.
-    if (m_materialDescriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_materialDescriptorPool, nullptr);
-        m_skeletonSetBuffers.clear();
-        m_materialDescriptorPool = VK_NULL_HANDLE;
-    }
+    // Per-entity descriptor pools. Destroying a pool frees every set
+    // allocated from it.
+    destroyMaterialDescriptorPools();
 
     destroySyncPrimitives();
     delete m_logger;
@@ -2234,10 +2229,53 @@ void RenderGraph::fillBuffer(void* buffer,
     m_bufferResolver->fillBuffer(buffer, *resolvedLayout, *m_sceneContext, entity, registry);
 }
 
-void RenderGraph::createMaterialDescriptorPool(uint32_t maxSets) {
+void RenderGraph::destroyMaterialDescriptorPools() {
+    for (VkDescriptorPool pool : m_fullMaterialDescriptorPools) {
+        vkDestroyDescriptorPool(m_device.getLogicalDevice(), pool, nullptr);
+    }
+    m_fullMaterialDescriptorPools.clear();
     if (m_materialDescriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_materialDescriptorPool, nullptr);
-        m_skeletonSetBuffers.clear();
+        m_materialDescriptorPool = VK_NULL_HANDLE;
+    }
+    m_skeletonSetBuffers.clear();
+    m_descriptorSetPools.clear();
+    m_materialDescriptorCache.clear();
+    m_materialTextureSets.clear();
+}
+
+VkDescriptorSet RenderGraph::allocateMaterialDescriptorSet(VkDescriptorSetLayout layout) {
+    if (m_materialDescriptorPool == VK_NULL_HANDLE) {
+        createMaterialDescriptorPool(4096);
+    }
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &layout;
+
+    // A full pool keeps its sets; the next pool takes new ones. Two tries: the
+    // current pool, then a fresh one.
+    for (int attempt = 0; attempt < 2 && m_materialDescriptorPool != VK_NULL_HANDLE; ++attempt) {
+        allocInfo.descriptorPool = m_materialDescriptorPool;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        const VkResult result = vkAllocateDescriptorSets(m_device.getLogicalDevice(), &allocInfo, &set);
+        if (result == VK_SUCCESS) {
+            m_descriptorSetPools[set] = m_materialDescriptorPool;
+            return set;
+        }
+        if (result != VK_ERROR_OUT_OF_POOL_MEMORY && result != VK_ERROR_FRAGMENTED_POOL) {
+            break;
+        }
+        m_fullMaterialDescriptorPools.push_back(m_materialDescriptorPool);
+        m_materialDescriptorPool = VK_NULL_HANDLE;
+        createMaterialDescriptorPool(4096);
+    }
+    return VK_NULL_HANDLE;
+}
+
+void RenderGraph::createMaterialDescriptorPool(uint32_t maxSets) {
+    if (m_materialDescriptorPool != VK_NULL_HANDLE) {
+        destroyMaterialDescriptorPools();
     }
 
     // Pool sizes for per-entity descriptors (textures + skeleton SSBOs)
@@ -2256,7 +2294,8 @@ void RenderGraph::createMaterialDescriptorPool(uint32_t maxSets) {
     if (vkCreateDescriptorPool(m_device.getLogicalDevice(), &poolInfo, nullptr, &m_materialDescriptorPool) != VK_SUCCESS) {
         m_logger->log(LogLevel::Error, "Failed to create material descriptor pool");
     } else {
-        m_logger->log(LogLevel::Info, "Material descriptor pool created with %u max sets", maxSets);
+        m_logger->log(LogLevel::Info, "Material descriptor pool %zu created with %u max sets",
+                      m_fullMaterialDescriptorPools.size() + 1, maxSets);
     }
 }
 
@@ -2266,21 +2305,20 @@ void RenderGraph::releaseDestroyedEntityDescriptors(uint32_t frameIndex) {
     // Cache keys hold the full entity handle, version included, so a destroyed
     // entity stays invalid even after its index is recycled.
     auto& registry = m_boundScene->getRegistry();
-    std::vector<VkDescriptorSet> released;
     for (auto it = m_materialDescriptorCache.begin(); it != m_materialDescriptorCache.end();) {
         if (it->first.frameIndex == frameIndex &&
             !registry.valid(static_cast<entt::entity>(it->first.entityId))) {
-            released.push_back(it->second);
-            m_skeletonSetBuffers.erase(it->second);
+            VkDescriptorSet set = it->second;
+            m_skeletonSetBuffers.erase(set);
+            auto pool = m_descriptorSetPools.find(set);
+            if (pool != m_descriptorSetPools.end()) {
+                vkFreeDescriptorSets(m_device.getLogicalDevice(), pool->second, 1, &set);
+                m_descriptorSetPools.erase(pool);
+            }
             it = m_materialDescriptorCache.erase(it);
         } else {
             ++it;
         }
-    }
-
-    if (!released.empty()) {
-        vkFreeDescriptorSets(m_device.getLogicalDevice(), m_materialDescriptorPool,
-                             static_cast<uint32_t>(released.size()), released.data());
     }
 }
 
@@ -2309,36 +2347,83 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
         return;
     }
 
-    // Create descriptor pool if not exists
-    if (m_materialDescriptorPool == VK_NULL_HANDLE) {
-        createMaterialDescriptorPool(4096);
+    // Create default textures if not yet created (lazy initialization)
+    if (!m_defaultTexturesCreated) {
+        m_defaultTextures = Shoonyakasha::GPUResourceFactory::createDefaultTextures(
+            m_device.getAllocator().getHandle(),
+            m_device.getLogicalDevice(),
+            m_device.getGraphicsQueue(),
+            m_device.getCommandPool()
+        );
+        m_defaultTexturesCreated = true;
+        m_logger->log(LogLevel::Info, "Default textures created - white: view=%p sampler=%p, normal: view=%p sampler=%p, metalRough: view=%p sampler=%p",
+            (void*)m_defaultTextures.white.view, (void*)m_defaultTextures.white.sampler,
+            (void*)m_defaultTextures.normal.view, (void*)m_defaultTextures.normal.sampler,
+            (void*)m_defaultTextures.metallicRoughness.view, (void*)m_defaultTextures.metallicRoughness.sampler);
     }
 
-    // Create cache key
-    MaterialDescriptorCacheKey cacheKey;
-    cacheKey.entityId = static_cast<uint32_t>(entity);
-    cacheKey.layoutHash = std::hash<std::string>{}(descriptorSetName);
-    cacheKey.frameIndex = frameIndex;
+    // The texture behind each of the layout's image bindings, from the
+    // material or a fallback.
+    struct BoundTexture { uint32_t binding; VkImageView view; VkSampler sampler; };
+    std::vector<BoundTexture> bound;
+    bound.reserve(layoutDesc->bindings.size());
+    for (const auto& binding : layoutDesc->bindings) {
+        // Type is a string: "combined_image_sampler"
+        if (binding.type != "combined_image_sampler") continue;
 
-    // Check cache
-    auto cacheIt = m_materialDescriptorCache.find(cacheKey);
+        const Shoonyakasha::GPUTexture* gpuTex = nullptr;
+        auto texIt = material->textures.find(binding.name);
+        if (texIt != material->textures.end() && texIt->second.isValid()) {
+            gpuTex = &texIt->second;
+        } else if (binding.name == "albedoMap" || binding.name == "baseColorMap") {
+            gpuTex = &m_defaultTextures.white;
+        } else if (binding.name == "normalMap") {
+            gpuTex = &m_defaultTextures.normal;
+        } else if (binding.name == "metallicRoughnessMap" || binding.name == "aoMap") {
+            gpuTex = &m_defaultTextures.metallicRoughness;
+        } else {
+            gpuTex = &m_defaultTextures.white;  // Generic fallback
+        }
+
+        if (!gpuTex || !gpuTex->isValid()) {
+            m_logger->log(LogLevel::Warning, "bindMaterialTextures: Skipping invalid texture for binding '%s'", binding.name.c_str());
+            continue;
+        }
+        if (gpuTex->view == VK_NULL_HANDLE || gpuTex->sampler == VK_NULL_HANDLE) {
+            m_logger->log(LogLevel::Error, "bindMaterialTextures: Texture '%s' has null view or sampler! view=%p sampler=%p",
+                binding.name.c_str(), (void*)gpuTex->view, (void*)gpuTex->sampler);
+            continue;
+        }
+        bound.push_back({binding.binding, gpuTex->view, gpuTex->sampler});
+    }
+
+    // Sets are shared by what they hold: entities whose materials bind the
+    // same textures under the same layout use one set. They are written once
+    // and never changed, so frames in flight can share them too.
+    std::string key = descriptorSetName;
+    key.push_back('\0');
+    auto append = [&key](const auto& value) {
+        key.append(reinterpret_cast<const char*>(&value), sizeof(value));
+    };
+    for (const auto& b : bound) {    // field by field: the struct has padding
+        append(b.binding);
+        append(b.view);
+        append(b.sampler);
+    }
+
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-
-    if (cacheIt != m_materialDescriptorCache.end()) {
-        descriptorSet = cacheIt->second;
+    auto cached = m_materialTextureSets.find(key);
+    if (cached != m_materialTextureSets.end()) {
+        descriptorSet = cached->second;
     } else {
-        // Find the compiled descriptor set layout and set index by looking at passes
+        // Find the compiled descriptor set layout by looking at passes
         VkDescriptorSetLayout vkLayout = VK_NULL_HANDLE;
-        uint32_t setIndex = 0;
-
-        // Search through passes to find one that uses this layout
-        for (const auto& pass : m_compiled.compiledPasses) {
-            const auto& passDecl = m_builder.getPassDeclarations()[pass.declIndex];
+        for (const auto& compiledPass : m_compiled.compiledPasses) {
+            const auto& passDecl = m_builder.getPassDeclarations()[compiledPass.declIndex];
             for (size_t i = 0; i < passDecl.descriptorSetRefs.size(); ++i) {
                 if (passDecl.descriptorSetRefs[i] == descriptorSetName) {
-                    if (i < pass.descriptorSetLayouts.size()) {
-                        vkLayout = pass.descriptorSetLayouts[i];
-                        setIndex = static_cast<uint32_t>(i);
+                    if (i < compiledPass.descriptorSetLayouts.size()) {
+                        vkLayout = compiledPass.descriptorSetLayouts[i];
                     }
                     break;
                 }
@@ -2351,100 +2436,32 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
             return;
         }
 
-        // Allocate new descriptor set
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = m_materialDescriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &vkLayout;
-
-        if (vkAllocateDescriptorSets(m_device.getLogicalDevice(), &allocInfo, &descriptorSet) != VK_SUCCESS) {
+        descriptorSet = allocateMaterialDescriptorSet(vkLayout);
+        if (descriptorSet == VK_NULL_HANDLE) {
             m_logger->log(LogLevel::Error, "bindMaterialTextures: Failed to allocate descriptor set");
             return;
         }
 
-        // Create default textures if not yet created (lazy initialization)
-        if (!m_defaultTexturesCreated) {
-            m_defaultTextures = Shoonyakasha::GPUResourceFactory::createDefaultTextures(
-                m_device.getAllocator().getHandle(),
-                m_device.getLogicalDevice(),
-                m_device.getGraphicsQueue(),
-                m_device.getCommandPool()
-            );
-            m_defaultTexturesCreated = true;
-            m_logger->log(LogLevel::Info, "Default textures created - white: view=%p sampler=%p, normal: view=%p sampler=%p, metalRough: view=%p sampler=%p",
-                (void*)m_defaultTextures.white.view, (void*)m_defaultTextures.white.sampler,
-                (void*)m_defaultTextures.normal.view, (void*)m_defaultTextures.normal.sampler,
-                (void*)m_defaultTextures.metallicRoughness.view, (void*)m_defaultTextures.metallicRoughness.sampler);
+        std::vector<VkDescriptorImageInfo> imageInfos(bound.size());
+        std::vector<VkWriteDescriptorSet> writes(bound.size());
+        for (size_t i = 0; i < bound.size(); ++i) {
+            imageInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfos[i].imageView = bound[i].view;
+            imageInfos[i].sampler = bound[i].sampler;
+            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[i].dstSet = descriptorSet;
+            writes[i].dstBinding = bound[i].binding;
+            writes[i].dstArrayElement = 0;
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[i].descriptorCount = 1;
+            writes[i].pImageInfo = &imageInfos[i];
         }
-
-        // Write texture bindings from MaterialComponentV5
-        std::vector<VkDescriptorImageInfo> imageInfos;
-        std::vector<VkWriteDescriptorSet> writes;
-
-        // Pre-reserve to prevent reallocation during loop (dangling pointer prevention)
-        imageInfos.reserve(layoutDesc->bindings.size());
-        writes.reserve(layoutDesc->bindings.size());
-
-        for (const auto& binding : layoutDesc->bindings) {
-            // Type is a string: "combined_image_sampler"
-            if (binding.type != "combined_image_sampler") continue;
-
-            // Find the texture in MaterialComponentV5 or use fallback
-            const Shoonyakasha::GPUTexture* gpuTex = nullptr;
-            auto texIt = material->textures.find(binding.name);
-            if (texIt != material->textures.end() && texIt->second.isValid()) {
-                gpuTex = &texIt->second;
-            } else {
-                // Use appropriate fallback based on texture name
-                if (binding.name == "albedoMap" || binding.name == "baseColorMap") {
-                    gpuTex = &m_defaultTextures.white;
-                } else if (binding.name == "normalMap") {
-                    gpuTex = &m_defaultTextures.normal;
-                } else if (binding.name == "metallicRoughnessMap" || binding.name == "aoMap") {
-                    gpuTex = &m_defaultTextures.metallicRoughness;
-                } else {
-                    gpuTex = &m_defaultTextures.white;  // Generic fallback
-                }
-            }
-
-            if (!gpuTex || !gpuTex->isValid()) {
-                m_logger->log(LogLevel::Warning, "bindMaterialTextures: Skipping invalid texture for binding '%s'", binding.name.c_str());
-                continue;
-            }
-
-            // Extra validation - ensure view and sampler are not null
-            if (gpuTex->view == VK_NULL_HANDLE || gpuTex->sampler == VK_NULL_HANDLE) {
-                m_logger->log(LogLevel::Error, "bindMaterialTextures: Texture '%s' has null view or sampler! view=%p sampler=%p",
-                    binding.name.c_str(), (void*)gpuTex->view, (void*)gpuTex->sampler);
-                continue;
-            }
-
-            VkDescriptorImageInfo imageInfo{};
-            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = gpuTex->view;
-            imageInfo.sampler = gpuTex->sampler;
-            imageInfos.push_back(imageInfo);
-
-            VkWriteDescriptorSet write{};
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            write.dstSet = descriptorSet;
-            write.dstBinding = binding.binding;
-            write.dstArrayElement = 0;
-            write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            write.descriptorCount = 1;
-            write.pImageInfo = &imageInfos.back();
-            writes.push_back(write);
-        }
-
         if (!writes.empty()) {
             vkUpdateDescriptorSets(m_device.getLogicalDevice(),
                                     static_cast<uint32_t>(writes.size()),
                                     writes.data(), 0, nullptr);
         }
-
-        // Cache the descriptor set (with setIndex encoded)
-        m_materialDescriptorCache[cacheKey] = descriptorSet;
+        m_materialTextureSets.emplace(std::move(key), descriptorSet);
     }
 
     // Bound where this pass lists the set, which need not be where other
@@ -2483,11 +2500,6 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
         return;
     }
 
-    // Create descriptor pool if not exists (reuse material pool)
-    if (m_materialDescriptorPool == VK_NULL_HANDLE) {
-        createMaterialDescriptorPool(4096);
-    }
-
     // Create cache key (same mechanism as material textures)
     MaterialDescriptorCacheKey cacheKey;
     cacheKey.entityId = static_cast<uint32_t>(entity);
@@ -2522,14 +2534,8 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
             return;
         }
 
-        // Allocate new descriptor set
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = m_materialDescriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &vkLayout;
-
-        if (vkAllocateDescriptorSets(m_device.getLogicalDevice(), &allocInfo, &descriptorSet) != VK_SUCCESS) {
+        descriptorSet = allocateMaterialDescriptorSet(vkLayout);
+        if (descriptorSet == VK_NULL_HANDLE) {
             m_logger->log(LogLevel::Error, "bindSkeletonSSBO: Failed to allocate descriptor set");
             return;
         }
