@@ -9,6 +9,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [animation/skinned_fox_demo](../../examples/python/animation/skinned_fox_demo) | `python skinned_fox_demo.py` | Skeletal animation |
 | [rendering/japanese_shrine](../../examples/python/rendering/japanese_shrine) | `python shrine.py`, `python shrine_default.py` | Deferred PBR of a downloaded glTF model with IBL, sun shadows, sky and fog; the second on the default pipeline |
 | [rendering/alley](../../examples/python/rendering/alley) | `python alley.py` | A tech demo on the default pipeline, built from Poly Haven models: dusk to night, ray-traced and local-light shadows, lit windows, a walking fox |
+| [rendering/bistro](../../examples/python/rendering/bistro) | `python bistro.py` | Amazon Lumberyard's Bistro on the default pipeline: 2.8M triangles, 96 point lights switching on at dusk, a walk from the lane to the plaza |
 | [rendering/sponza](../../examples/python/rendering/sponza) | `python sponza.py` | The default pipeline on Sponza, or on a colonnade of boxes without it; quality presets, ray-traced shadows |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
@@ -44,6 +45,10 @@ Bundled `Fox.glb` during playback of the first animation clip, driven through th
 ### Alley (`alley`)
 
 A back alley between an apartment block and an old factory, assembled from [Poly Haven](https://polyhaven.com)'s CC0 modular facades and props, on the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md). **N** turns late afternoon into night over a few seconds: the sun reddens and sets, windows light up one by one, wall lanterns, a security light and a street lamp come on with their own shadows, and exposure follows. **R** switches the sun between ray-traced and cascaded shadows. The models are not in the repository: `python tools/fetch_assets.py alley` downloads them (~120 MB), and the [example's README](../../examples/python/rendering/alley/README.md) explains how the buildings are put together from the modular kits.
+
+### Bistro (`bistro`)
+
+Amazon Lumberyard's Bistro, a Paris street corner of 2.8 million triangles, on the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md). It opens at dusk: the sun leaves the rooftops, then the scene's 96 lights come on one by one, street lamps and lanterns first, then the strings of coloured bulbs over the café terraces. The shadow atlas keeps choosing which lamps near the camera get point shadows as the camera walks from the north lane to the plaza. **N** goes back to day, **R** switches the sun between ray-traced and cascaded shadows. The scene is CC BY 4.0 and not in the repository: `python tools/fetch_assets.py bistro` downloads it (~2 GB) and converts its DDS textures and specular-glossiness materials, as the [example's README](../../examples/python/rendering/bistro/README.md) describes.
 
 ### Sponza (`sponza`)
 

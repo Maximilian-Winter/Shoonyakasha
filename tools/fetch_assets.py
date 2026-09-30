@@ -12,11 +12,18 @@ full-resolution environment maps, or the Sponza scene.
     python tools/fetch_assets.py alley        # the alley demo's Poly Haven models
     python tools/fetch_assets.py alley --resolution 2k
 
+    python tools/fetch_assets.py bistro       # Amazon Lumberyard Bistro, ~2 GB, then converted
+
 Sponza is deliberately not downloaded automatically: its licence terms are worth
 reading before you accept them, so the script prints the page to get it from.
 
 Poly Haven sets (models and textures, all CC0) go into assets/polyhaven/<id>/,
 one directory per asset, at the texture resolution asked for (1k by default).
+
+The Bistro (CC BY 4.0) is downloaded into assets/bistro/source/ and converted
+for the engine into assets/bistro/, its textures at most 2k by default
+(`--resolution` 1k or 4k to change that). Converting needs Pillow and numpy;
+see tools/bistro.py for what it changes.
 """
 
 import argparse
@@ -144,6 +151,25 @@ def _alpha_textures(files, resolution, gltf_path):
             json.dump(gltf, f)
 
 
+def fetch_bistro(resolution):
+    """Download the Bistro and convert it; see tools/bistro.py."""
+    sys.path.insert(0, HERE)
+    import bistro
+    directory = os.path.join(ASSETS, "bistro")
+    print("Amazon Lumberyard Bistro (CC BY 4.0, https://developer.nvidia.com/orca/amazon-lumberyard-bistro)")
+    print("  downloading into assets/bistro/source/ (~2 GB) ...")
+    try:
+        bistro.fetch(os.path.join(directory, "source"))
+    except Exception as exc:                      # noqa: BLE001 - report and stop
+        print("  FAILED: %s (run again to resume)" % exc)
+        return False
+    print("  converting at %s ..." % resolution)
+    path = bistro.convert(os.path.join(directory, "source"), directory,
+                          max_size={"1k": 1024, "2k": 2048, "4k": 4096}[resolution])
+    print("  -> assets/%s" % os.path.relpath(path, ASSETS).replace(os.sep, "/"))
+    return True
+
+
 MANUAL = {
     "sponza": (
         "models/NewSponza_Main_glTF_003.gltf",
@@ -194,8 +220,9 @@ def main():
     parser.add_argument("what", nargs="*", default=["env"],
                         help="asset or group name (default: env)")
     parser.add_argument("--list", action="store_true", help="show what is available")
-    parser.add_argument("--resolution", default="1k", choices=["1k", "2k", "4k"],
-                        help="texture resolution of Poly Haven sets (default: 1k)")
+    parser.add_argument("--resolution", choices=["1k", "2k", "4k"],
+                        help="texture resolution of Poly Haven sets (default: 1k) "
+                             "and the Bistro (default: 2k)")
     args = parser.parse_args()
 
     if args.list:
@@ -209,6 +236,9 @@ def main():
         print("\nPoly Haven sets (CC0, into assets/polyhaven/):")
         for name, (models, textures) in POLYHAVEN_SETS.items():
             print("  %-22s %d models, %d textures" % (name, len(models), len(textures)))
+        print("\nConverted (CC BY 4.0, into assets/bistro/):")
+        here = "present" if os.path.exists(os.path.join(ASSETS, "bistro", "bistro.gltf")) else "missing"
+        print("  %-22s ~2000 MB  Amazon Lumberyard Bistro  %s" % ("bistro", here))
         print("\nManual (licence needs reading first):")
         for name, (relative, url, note) in MANUAL.items():
             print("  %-22s %s\n    %s\n    %s" % (name, relative, url, note))
@@ -216,11 +246,16 @@ def main():
 
     wanted = []
     for item in args.what:
+        if item == "bistro":
+            if not fetch_bistro(args.resolution or "2k"):
+                return 1
+            continue
         if item in POLYHAVEN_SETS:
             models, textures = POLYHAVEN_SETS[item]
-            print("Poly Haven set '%s' at %s (CC0, https://polyhaven.com):" % (item, args.resolution))
-            failures = sum(not fetch_polyhaven(m, "model", args.resolution) for m in models)
-            failures += sum(not fetch_polyhaven(t, "texture", args.resolution) for t in textures)
+            resolution = args.resolution or "1k"
+            print("Poly Haven set '%s' at %s (CC0, https://polyhaven.com):" % (item, resolution))
+            failures = sum(not fetch_polyhaven(m, "model", resolution) for m in models)
+            failures += sum(not fetch_polyhaven(t, "texture", resolution) for t in textures)
             if failures:
                 print("%d asset(s) failed" % failures)
                 return 1
