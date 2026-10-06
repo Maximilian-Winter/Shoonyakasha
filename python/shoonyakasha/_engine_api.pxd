@@ -184,6 +184,10 @@ cdef extern from "Facade/SceneAPI.h" namespace "Shoonyakasha::Facade":
         void setLightRange(EntityHandle entity, float range)
         cbool getLightCastShadows(EntityHandle entity) const
         void setLightCastShadows(EntityHandle entity, cbool castShadows)
+        vec2 getLightCone(EntityHandle entity) const
+        void setLightCone(EntityHandle entity, float innerDegrees, float outerDegrees)
+        float getLightSourceRadius(EntityHandle entity) const
+        void setLightSourceRadius(EntityHandle entity, float radius)
 
         # Material
         void setMaterialFloat(EntityHandle entity, const string& param, float value)

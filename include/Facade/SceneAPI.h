@@ -163,6 +163,15 @@ public:
     bool getLightCastShadows(EntityHandle entity) const;
     void setLightCastShadows(EntityHandle entity, bool castShadows);
 
+    // Spot cone half-angles in degrees: full intensity inside `inner`,
+    // fading to nothing at `outer`.
+    glm::vec2 getLightCone(EntityHandle entity) const;
+    void setLightCone(EntityHandle entity, float innerDegrees, float outerDegrees);
+
+    // Radius of the light's emitting sphere, for soft ray-traced shadows.
+    float getLightSourceRadius(EntityHandle entity) const;
+    void setLightSourceRadius(EntityHandle entity, float radius);
+
     // ═══════════════════════════════════════════════════════════
     // Material Access (explicit typed methods — no templates)
     // ═══════════════════════════════════════════════════════════

@@ -235,6 +235,7 @@ public:
                 lightJson["range"] = light->range;
                 lightJson["innerCone"] = light->innerCone;
                 lightJson["outerCone"] = light->outerCone;
+                lightJson["sourceRadius"] = light->sourceRadius;
                 lightJson["castShadows"] = light->castShadows;
                 componentsJson["Light"] = lightJson;
             }
@@ -378,6 +379,9 @@ public:
                         }
                         if (lightJson.contains("outerCone")) {
                             light.outerCone = lightJson["outerCone"];
+                        }
+                        if (lightJson.contains("sourceRadius")) {
+                            light.sourceRadius = lightJson["sourceRadius"];
                         }
                         if (lightJson.contains("castShadows")) {
                             light.castShadows = lightJson["castShadows"];

@@ -207,6 +207,7 @@ struct SceneContext {
         glm::vec4 colorIntensity{0.f};    // xyz=color, w=intensity
         glm::vec4 directionRange{0.f};    // xyz=direction (forward), w=range
         glm::vec4 attenuation{0.f};       // x=constant, y=linear, z=quadratic, w=cos(outerCone)
+        glm::vec4 source{0.f};            // x=source radius, y=casts shadows (0/1), z=cos(innerCone), w=0
     };
 
     std::array<PackedLight, MAX_SCENE_LIGHTS> lights{};

@@ -102,7 +102,7 @@ A field `source` is a dot-path. A layout-level `source` is an initialization obj
 | `scene.environment` | `irradianceMap`, `prefilterMap`, `brdfLUT`, `environmentMap` |
 | `scene.time` | `elapsed`, `delta`, `frame` |
 | `scene.screen` | `width`, `height`, `resolution` |
-| `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` |
+| `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` (w: cos of the outer cone), `source` (x: source radius, y: 1 when it casts shadows, z: cos of the inner cone) |
 | `scene.shadows.sun` | `enabled`, `cascadeCount`, `splits`, `texelWorldSize`, `lightIndex`, `direction`; indexed `scene.shadows.sun.cascades[N].viewProj`. See [sun shadow cascades](../guides/lighting-and-ibl.md#sun-shadow-cascades) |
 | `scene.shadows.spot`, `scene.shadows.point` | `count`; indexed `scene.shadows.spot[N].viewProj`, `lightIndex`, `params`, `rect`; `scene.shadows.point[N].lightIndex`, `positionFar`, `depthParams`; `scene.shadows.point.faces[N].viewProj`, `rect` with N = slot × 6 + face. See [spot and point light shadows](../guides/lighting-and-ibl.md#spot-and-point-light-shadows) |
 | `scene.custom` | Values explicitly published under a key by the application |

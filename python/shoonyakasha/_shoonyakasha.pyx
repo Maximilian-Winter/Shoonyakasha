@@ -419,6 +419,23 @@ cdef class Scene:
     def set_light_cast_shadows(self, uint32_t entity, bint cast_shadows):
         self._ptr.setLightCastShadows(entity, cast_shadows)
 
+    def get_light_cone(self, uint32_t entity):
+        """A spot light's (inner, outer) cone half-angles in degrees."""
+        return _vec2_to_tuple(self._ptr.getLightCone(entity))
+
+    def set_light_cone(self, uint32_t entity, float inner_degrees, float outer_degrees):
+        """A spot light's cone: full intensity within `inner_degrees` of its
+        axis, fading to nothing at `outer_degrees` (at most 89)."""
+        self._ptr.setLightCone(entity, inner_degrees, outer_degrees)
+
+    def get_light_source_radius(self, uint32_t entity):
+        return self._ptr.getLightSourceRadius(entity)
+
+    def set_light_source_radius(self, uint32_t entity, float radius):
+        """Radius of the light's emitting sphere. Pipelines that trace shadow
+        rays use it for penumbrae; zero is a hard-edged point light."""
+        self._ptr.setLightSourceRadius(entity, radius)
+
     # ── Material ──────────────────────────────────────────────
 
     def set_material_float(self, uint32_t entity, str param, float value):

@@ -91,6 +91,13 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
             glm::cos(glm::radians(light.outerCone))
         );
 
+        packed.source = glm::vec4(
+            light.sourceRadius,
+            light.castShadows ? 1.0f : 0.0f,
+            glm::cos(glm::radians(light.innerCone)),
+            0.0f
+        );
+
         lightCount++;
     }
 
@@ -336,6 +343,7 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
                     if (parts[1] == "colorIntensity")  return ResolvedValue(packed.colorIntensity);
                     if (parts[1] == "directionRange")  return ResolvedValue(packed.directionRange);
                     if (parts[1] == "attenuation")     return ResolvedValue(packed.attenuation);
+                    if (parts[1] == "source")          return ResolvedValue(packed.source);
                 }
             }
         }

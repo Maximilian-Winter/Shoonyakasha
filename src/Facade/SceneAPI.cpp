@@ -465,6 +465,32 @@ void SceneAPI::setLightCastShadows(EntityHandle entity, bool castShadows) {
     if (l) l->castShadows = castShadows;
 }
 
+glm::vec2 SceneAPI::getLightCone(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return glm::vec2(30.0f, 45.0f);
+    auto* l = m_impl->registry.try_get<ECS::LightComponent>(toEntt(entity));
+    return l ? glm::vec2(l->innerCone, l->outerCone) : glm::vec2(30.0f, 45.0f);
+}
+
+void SceneAPI::setLightCone(EntityHandle entity, float innerDegrees, float outerDegrees) {
+    if (!m_impl->valid(entity)) return;
+    auto* l = m_impl->registry.try_get<ECS::LightComponent>(toEntt(entity));
+    if (!l) return;
+    l->outerCone = glm::clamp(outerDegrees, 0.5f, 89.0f);
+    l->innerCone = glm::clamp(innerDegrees, 0.0f, l->outerCone);
+}
+
+float SceneAPI::getLightSourceRadius(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return 0.0f;
+    auto* l = m_impl->registry.try_get<ECS::LightComponent>(toEntt(entity));
+    return l ? l->sourceRadius : 0.0f;
+}
+
+void SceneAPI::setLightSourceRadius(EntityHandle entity, float radius) {
+    if (!m_impl->valid(entity)) return;
+    auto* l = m_impl->registry.try_get<ECS::LightComponent>(toEntt(entity));
+    if (l) l->sourceRadius = glm::max(radius, 0.0f);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Material Access
 // ═══════════════════════════════════════════════════════════════

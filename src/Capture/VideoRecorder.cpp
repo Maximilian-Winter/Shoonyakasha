@@ -174,8 +174,13 @@ bool VideoRecorder::start(const std::string& path, uint32_t width, uint32_t heig
 #endif
 
     // "wb": in text mode Windows translates 0x0A bytes in the pixel data to
-    // CRLF, which corrupts every frame.
+    // CRLF, which corrupts every frame. POSIX popen() takes only "r" or "w"
+    // (glibc refuses "wb" with EINVAL) and has no text mode to avoid.
+#ifdef _WIN32
     m_pipe = SHOONYAKASHA_POPEN(commandLine.c_str(), "wb");
+#else
+    m_pipe = SHOONYAKASHA_POPEN(commandLine.c_str(), "w");
+#endif
     if (!m_pipe) {
         m_lastError = "could not start ffmpeg (" + ffmpeg + ")";
         return false;

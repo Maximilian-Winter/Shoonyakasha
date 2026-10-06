@@ -87,6 +87,10 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_light_range(entity, range)` | None | Calls native `setLightRange`; see the class contract above. |
 | `get_light_cast_shadows(entity)` | bool | Calls native `getLightCastShadows`; see the class contract above. |
 | `set_light_cast_shadows(entity, cast_shadows)` | None | Calls native `setLightCastShadows`; see the class contract above. |
+| `get_light_cone(entity)` | 2-tuple | A spot light's (inner, outer) cone half-angles in degrees. |
+| `set_light_cone(entity, inner_degrees, outer_degrees)` | None | Full intensity within `inner` of the axis, fading to nothing at `outer`. The outer angle is clamped to 0.5–89 and the inner one to `outer`. The default pipeline uses only the outer angle; pipelines can read the inner one from `scene.lights[N].source.z`. |
+| `get_light_source_radius(entity)` | float | Calls native `getLightSourceRadius`. |
+| `set_light_source_radius(entity, radius)` | None | Radius of the light's emitting sphere; 0, the default, is a point. Published as `scene.lights[N].source.x` for pipelines that trace soft shadows or size highlights by it, such as the [showroom pipeline](../../../examples/python/rendering/showroom/pipeline/README.md). |
 | `set_material_float(entity, param, value)` | None | Calls native `setMaterialFloat`; see the class contract above. |
 | `get_material_float(entity, param, default_val=0.0)` | float | Calls native `getMaterialFloat`; see the class contract above. |
 | `set_material_vec3(entity, param, value)` | None | Calls native `setMaterialVec3`; see the class contract above. |

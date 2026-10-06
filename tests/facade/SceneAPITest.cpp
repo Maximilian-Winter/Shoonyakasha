@@ -325,6 +325,36 @@ TEST_F(SceneAPIFixture, Light_SetGetCastShadows) {
     EXPECT_TRUE(api->getLightCastShadows(entity));
 }
 
+TEST_F(SceneAPIFixture, Light_SetGetCone) {
+    auto entity = api->createEntity("Light");
+    api->addComponent(entity, "Light");
+    api->setLightCone(entity, 20.0f, 35.0f);
+    EXPECT_FLOAT_EQ(api->getLightCone(entity).x, 20.0f);
+    EXPECT_FLOAT_EQ(api->getLightCone(entity).y, 35.0f);
+}
+
+TEST_F(SceneAPIFixture, Light_ConeIsClamped) {
+    auto entity = api->createEntity("Light");
+    api->addComponent(entity, "Light");
+    // The outer cone stays under 90 degrees, the inner one inside it.
+    api->setLightCone(entity, 120.0f, 100.0f);
+    EXPECT_FLOAT_EQ(api->getLightCone(entity).y, 89.0f);
+    EXPECT_FLOAT_EQ(api->getLightCone(entity).x, 89.0f);
+    api->setLightCone(entity, 30.0f, 10.0f);
+    EXPECT_FLOAT_EQ(api->getLightCone(entity).y, 10.0f);
+    EXPECT_FLOAT_EQ(api->getLightCone(entity).x, 10.0f);
+}
+
+TEST_F(SceneAPIFixture, Light_SetGetSourceRadius) {
+    auto entity = api->createEntity("Light");
+    api->addComponent(entity, "Light");
+    EXPECT_FLOAT_EQ(api->getLightSourceRadius(entity), 0.0f);
+    api->setLightSourceRadius(entity, 0.35f);
+    EXPECT_FLOAT_EQ(api->getLightSourceRadius(entity), 0.35f);
+    api->setLightSourceRadius(entity, -1.0f);
+    EXPECT_FLOAT_EQ(api->getLightSourceRadius(entity), 0.0f);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Material Access
 // ═══════════════════════════════════════════════════════════════

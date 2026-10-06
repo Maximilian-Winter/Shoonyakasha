@@ -103,6 +103,31 @@ TEST_F(DotPathResolverECS, SceneContext_LightsCollected) {
     EXPECT_NEAR(scene.lights[0].colorIntensity.w, 2.0f, 1e-4f);
 }
 
+TEST_F(DotPathResolverECS, SceneContext_LightSourcePacked) {
+    auto e = registry.create();
+    registry.emplace<TransformComponent>(e);
+    auto& l = registry.emplace<LightComponent>(e);
+    l.type = LightComponent::Spot;
+    l.sourceRadius = 0.4f;
+    l.castShadows = true;
+    l.innerCone = 20.0f;
+    scene.updateFromRegistry(registry);
+
+    ASSERT_EQ(scene.lightCount, 2u);
+    const uint32_t i = scene.lights[0].positionType.w > 1.5f ? 0u : 1u;    // the spot light
+    EXPECT_NEAR(scene.lights[i].source.x, 0.4f, 1e-5f);
+    EXPECT_NEAR(scene.lights[i].source.y, 1.0f, 1e-5f);
+    EXPECT_NEAR(scene.lights[i].source.z, std::cos(glm::radians(20.0f)), 1e-5f);
+
+    auto v = resolver.resolveScene("scene.lights[" + std::to_string(i) + "].source", scene);
+    ASSERT_TRUE(v.isVec4());
+    EXPECT_NEAR(v.as<glm::vec4>().x, 0.4f, 1e-5f);
+
+    // The fixture's directional light: no source radius, no shadow flag.
+    EXPECT_NEAR(scene.lights[1u - i].source.x, 0.0f, 1e-5f);
+    EXPECT_NEAR(scene.lights[1u - i].source.y, 0.0f, 1e-5f);
+}
+
 TEST_F(DotPathResolverECS, SceneContext_LightCountCapped) {
     // Add MAX_SCENE_LIGHTS + 1 lights
     for (uint32_t i = 0; i < SceneContext::MAX_SCENE_LIGHTS + 5; ++i) {

@@ -166,6 +166,10 @@ struct LightComponent {
     float innerCone = 30.0f; // degrees
     float outerCone = 45.0f; // degrees
 
+    // Radius of the emitting sphere (point, spot) in world units. Zero is a
+    // true point. Pipelines that trace shadow rays use it for soft shadows.
+    float sourceRadius = 0.0f;
+
     // Shadow casting
     bool castShadows = false;
     uint32_t shadowMapSize = 1024;

@@ -121,6 +121,9 @@ void VulkanDevice::createLogicalDevice() {
     deviceFeatures.depthBiasClamp = supportedFeatures.depthBiasClamp;
     // Point-light shadow maps sample several cubes through one cube_array view.
     deviceFeatures.imageCubeArray = supportedFeatures.imageCubeArray;
+    // Fragment shaders that write storage images, or use image atomics: a
+    // virtual shadow map's casters write their depth into its pages that way.
+    deviceFeatures.fragmentStoresAndAtomics = supportedFeatures.fragmentStoresAndAtomics;
     m_enabledFeatures = deviceFeatures;
 
     // Enable timeline semaphore feature for multi-queue synchronization
