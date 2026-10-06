@@ -43,6 +43,7 @@ examples/**/cubemaps_hdrs/
 /assets/models/NewSponza_*
 /assets/polyhaven/
 /assets/bistro/
+/assets/showroom/
 # Downloaded by hand from Sketchfab; see assets/README.md.
 /assets/models/japanese_shrine.glb
 /.claude

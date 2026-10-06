@@ -14,6 +14,9 @@ full-resolution environment maps, or the Sponza scene.
 
     python tools/fetch_assets.py bistro       # Amazon Lumberyard Bistro, ~2 GB, then converted
 
+    python tools/fetch_assets.py showroom     # the showroom demo's Sketchfab models (needs an API token)
+    python tools/fetch_assets.py showroom/alfa_gtv6 showroom/aat
+
 Sponza is deliberately not downloaded automatically: its licence terms are worth
 reading before you accept them, so the script prints the page to get it from.
 
@@ -24,6 +27,13 @@ The Bistro (CC BY 4.0) is downloaded into assets/bistro/source/ and converted
 for the engine into assets/bistro/, its textures at most 2k by default
 (`--resolution` 1k or 4k to change that). Converting needs Pillow and numpy;
 see tools/bistro.py for what it changes.
+
+The showroom's models come from Sketchfab, which hands out downloads only to a
+signed-in account: set SKETCHFAB_API_TOKEN to the API token from
+https://sketchfab.com/settings/password (or pass --sketchfab-token). They are
+converted into assets/showroom/<name>/ (Pillow and numpy again; see
+tools/sketchfab.py). Most are CC BY-NC-SA 4.0, a few CC BY 4.0: credit them
+wherever they are shown, and keep NC models out of commercial use.
 """
 
 import argparse
@@ -151,6 +161,16 @@ def _alpha_textures(files, resolution, gltf_path):
             json.dump(gltf, f)
 
 
+def fetch_showroom(names, resolution, token):
+    """Download the showroom's Sketchfab models and convert them; see
+    tools/sketchfab.py."""
+    sys.path.insert(0, HERE)
+    import sketchfab
+    print("Showroom models from Sketchfab, into assets/showroom/ (textures at most %s):" % resolution)
+    return sketchfab.fetch(names, ASSETS, token,
+                           max_size={"1k": 1024, "2k": 2048, "4k": 4096}[resolution]) == 0
+
+
 def fetch_bistro(resolution):
     """Download the Bistro and convert it; see tools/bistro.py."""
     sys.path.insert(0, HERE)
@@ -221,8 +241,11 @@ def main():
                         help="asset or group name (default: env)")
     parser.add_argument("--list", action="store_true", help="show what is available")
     parser.add_argument("--resolution", choices=["1k", "2k", "4k"],
-                        help="texture resolution of Poly Haven sets (default: 1k) "
-                             "and the Bistro (default: 2k)")
+                        help="texture resolution of Poly Haven sets (default: 1k), "
+                             "the Bistro and the showroom models (default: 2k)")
+    parser.add_argument("--sketchfab-token", default=os.environ.get("SKETCHFAB_API_TOKEN"),
+                        help="Sketchfab API token for the showroom models "
+                             "(default: $SKETCHFAB_API_TOKEN)")
     args = parser.parse_args()
 
     if args.list:
@@ -239,13 +262,30 @@ def main():
         print("\nConverted (CC BY 4.0, into assets/bistro/):")
         here = "present" if os.path.exists(os.path.join(ASSETS, "bistro", "bistro.gltf")) else "missing"
         print("  %-22s ~2000 MB  Amazon Lumberyard Bistro  %s" % ("bistro", here))
+        sys.path.insert(0, HERE)
+        import sketchfab
+        print("\nShowroom models (Sketchfab, needs an API token; into assets/showroom/):")
+        for name, (_, credit) in sketchfab.MODELS.items():
+            here = "present" if os.path.exists(os.path.join(ASSETS, "showroom", name, "model.gltf")) else "missing"
+            print("  %-22s %s\n    %s" % ("showroom/" + name, here, credit))
         print("\nManual (licence needs reading first):")
         for name, (relative, url, note) in MANUAL.items():
             print("  %-22s %s\n    %s\n    %s" % (name, relative, url, note))
         return 0
 
     wanted = []
+    showroom = []
     for item in args.what:
+        if item == "showroom" or item.startswith("showroom/"):
+            sys.path.insert(0, HERE)
+            import sketchfab
+            names = list(sketchfab.MODELS) if item == "showroom" else [item.split("/", 1)[1]]
+            unknown = [n for n in names if n not in sketchfab.MODELS]
+            if unknown:
+                print("Unknown showroom model: %s (try --list)" % ", ".join(unknown))
+                return 1
+            showroom += names
+            continue
         if item == "bistro":
             if not fetch_bistro(args.resolution or "2k"):
                 return 1
@@ -275,6 +315,9 @@ def main():
             print("Unknown: %s (try --list)" % item)
             return 1
 
+    if showroom and not fetch_showroom(list(dict.fromkeys(showroom)), args.resolution or "2k",
+                                       args.sketchfab_token):
+        return 1
     if not wanted:
         return 0
     failures = 0

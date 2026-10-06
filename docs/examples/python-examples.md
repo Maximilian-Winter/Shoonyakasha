@@ -9,6 +9,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [animation/skinned_fox_demo](../../examples/python/animation/skinned_fox_demo) | `python skinned_fox_demo.py` | Skeletal animation |
 | [rendering/japanese_shrine](../../examples/python/rendering/japanese_shrine) | `python shrine.py`, `python shrine_default.py` | Deferred PBR of a downloaded glTF model with IBL, sun shadows, sky and fog; the second on the default pipeline |
 | [rendering/alley](../../examples/python/rendering/alley) | `python alley.py` | A tech demo on the default pipeline, built from Poly Haven models: dusk to night, ray-traced and local-light shadows, lit windows, a walking fox |
+| [rendering/showroom](../../examples/python/rendering/showroom) | `python showroom.py` | Cars and starships on a turntable: a virtual shadow map, ray-traced soft light shadows and reflections, studio, hard-light, night and neon lighting, stills and video for posting |
 | [rendering/bistro](../../examples/python/rendering/bistro) | `python bistro.py` | Amazon Lumberyard's Bistro on the default pipeline: 2.8M triangles, 96 point lights switching on at dusk, a walk from the lane to the plaza |
 | [rendering/sponza](../../examples/python/rendering/sponza) | `python sponza.py` | The default pipeline on Sponza, or on a colonnade of boxes without it; quality presets, ray-traced shadows |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
@@ -49,6 +50,17 @@ A back alley between an apartment block and an old factory, assembled from [Poly
 ### Bistro (`bistro`)
 
 Amazon Lumberyard's Bistro, a Paris street corner of 2.8 million triangles, on the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md). It opens at dusk: the sun leaves the rooftops, then the scene's 96 lights come on one by one, street lamps and lanterns first, then the strings of coloured bulbs over the café terraces. The shadow atlas keeps choosing which lamps near the camera get point shadows as the camera walks from the north lane to the plaza. **N** goes back to day, **R** switches the sun between ray-traced and cascaded shadows. The scene is CC BY 4.0 and not in the repository: `python tools/fetch_assets.py bistro` downloads it (~2 GB) and converts its DDS textures and specular-glossiness materials, as the [example's README](../../examples/python/rendering/bistro/README.md) describes.
+
+### Showroom (`showroom`)
+
+A studio for showing models off: each model on a turntable in an infinity cove, on the [showroom pipeline](../../examples/python/rendering/showroom/pipeline/README.md), a copy of the default pipeline.
+- **The sun:** its shadows come from a virtual shadow map, eight clipmap levels whose pages are rendered only where visible pixels need them and cached between frames.
+- **Softboxes and spotlights:** these are sphere lights with ray-traced soft shadows, and glossy floors and paint get ray-traced reflections.
+- **Shadow techniques:** **G** steps through them, ending at the default pipeline's cascades for comparison. **V** shows the map's levels and which of its pages were redrawn this frame.
+- **Lighting:** **L** switches between studio softboxes, hard light, night spotlights and neon.
+- **Capture:** `--screenshots` saves stills of every model and `--record` films a cinematic tour, with each model's credit on screen.
+
+The cars and starships are Sketchfab models (CC BY and CC BY-NC-SA). `python tools/fetch_assets.py showroom` fetches and converts them with a Sketchfab API token, as the [example's README](../../examples/python/rendering/showroom/README.md) describes; without them it shows the Fox.
 
 ### Sponza (`sponza`)
 

@@ -1,0 +1,47 @@
+#version 450
+// Virtual shadow map, step 1 of 4: every visible pixel asks for the page it
+// will read its shadow from, at the level whose texels match its size on
+// screen. The pages under the corners of its filter are asked for too, so
+// the filter never reads a page that is not there.
+
+#include "common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D gDepth;
+layout(set = 0, binding = 1) uniform sampler2D gNormal;
+layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
+layout(set = 2, binding = 2) uniform Showroom { SHOWROOM_BLOCK } showroom;
+layout(set = 3, binding = 5, r32ui) uniform writeonly uimage2D vsmRequest;
+
+#include "vsm.glsl"
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = textureSize(gDepth, 0);
+    if (any(greaterThanEqual(pixel, size)) || showroom.sunEnabled == 0u) return;
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+    float depth = texelFetch(gDepth, pixel, 0).r;
+    if (depth >= 1.0) return;
+
+    vec3 viewPos = viewPositionFromDepth(camera.invProj, uv, depth);
+    vec3 worldPos = (camera.invView * vec4(viewPos, 1.0)).xyz;
+    vec3 N = octDecode(texelFetch(gNormal, pixel, 0).xy);
+
+    VsmBasis b = vsmBasis();
+    int level = vsmSelectLevel(b, worldPos, vsmPixelWorld(-viewPos.z, camera.proj, float(size.y)));
+    if (level < 0) return;
+
+    vec3 p = vsmOffsetPosition(worldPos, N, b.toSun, level);
+    vec2 texel = vsmLightSpace(b, p).xy / vsmTexelSize(level);
+    ivec2 origin = vsmWindowOrigin(b, level);
+    float reach = showroom.vsmSoftness + 1.5;
+    for (int corner = 0; corner < 4; ++corner) {
+        vec2 offset = vec2((corner & 1) == 0 ? -reach : reach, (corner & 2) == 0 ? -reach : reach);
+        ivec2 page = ivec2(floor((texel + offset) / float(VSM_PAGE_SIZE)));
+        if (vsmInWindow(page, origin)) {
+            imageStore(vsmRequest, vsmEntryCoord(level, page), uvec4(1u));
+        }
+    }
+}

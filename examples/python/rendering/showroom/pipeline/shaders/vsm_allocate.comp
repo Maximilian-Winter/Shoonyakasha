@@ -1,0 +1,176 @@
+#version 450
+// Virtual shadow map, step 2 of 4: bring the page table up to date with this
+// frame's requests. One workgroup does it all:
+//
+//   A. Every table entry: a page whose slot now stands for another absolute
+//      page (the camera moved the window), or whose contents are stale, gives
+//      its physical page back. A requested page that is still valid is kept
+//      as it is, the cache; it is marked dirty (rendered again) only where a
+//      moving caster's bounding sphere covers it. Requested pages that have
+//      no memory are listed.
+//   B. Listed pages get a physical page: first the free ones, then the ones
+//      no pixel asked for this frame, whose entries are evicted. They are
+//      marked dirty.
+//
+// Everything is invalidated when the sun turns, when the levels' size or
+// depth range changes, or when showroom.vsmEpoch or vsmContent changes (the
+// application bumps the epoch when everything should be redrawn; presets
+// change vsmContent when they change which casters the map holds).
+
+#include "common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 2) uniform Showroom { SHOWROOM_BLOCK } showroom;
+layout(set = 1, binding = 0, r32ui) uniform uimage2D vsmPageTable;
+layout(set = 1, binding = 1, r32ui) uniform uimage2D vsmPageTag;
+layout(set = 1, binding = 3, r32ui) uniform uimage2D vsmOwner;
+layout(set = 1, binding = 4, r32ui) uniform uimage2D vsmAge;
+layout(set = 1, binding = 5, r32ui) uniform uimage2D vsmRequest;
+layout(set = 1, binding = 6, r32ui) uniform uimage2D vsmState;
+layout(set = 1, binding = 7, r32ui) uniform writeonly uimage2D vsmLevelInfo;
+
+#include "vsm.glsl"
+
+// Most pages that can be newly backed in one frame: more than the pool holds
+// would be pointless. Pages past it wait for the next frame.
+#define MAX_NEW 2048
+
+shared uint frame;
+shared bool reset;
+shared uint needCount;
+shared uint grantCount;
+shared uint need[MAX_NEW];
+shared uint levelDirty[VSM_LEVELS];
+
+// State slots in vsmState.
+#define STATE_FRAME 0
+#define STATE_SUN 1          // three slots: the sun's direction, as float bits
+#define STATE_FIRST_LEVEL 4
+#define STATE_DEPTH_RANGE 5
+#define STATE_EPOCH 6
+#define STATE_CONTENT 7
+#define STATE_STARTED 8
+
+bool stateChanged(int slot, uint value) {
+    bool changed = imageLoad(vsmState, ivec2(slot, 0)).r != value;
+    imageStore(vsmState, ivec2(slot, 0), uvec4(value));
+    return changed;
+}
+
+// Whether a page lies (in light space) under a moving caster's bounding
+// sphere: an orthographic sun's shadow of it falls nowhere else.
+bool touchesDirtySphere(VsmBasis b, int level, ivec2 page) {
+    float size = vsmPageWorld(level);
+    vec2 lo = vec2(page) * size, hi = lo + size;
+    for (int i = 0; i < 4; ++i) {
+        vec4 sphere = i == 0 ? showroom.vsmDirty0 : i == 1 ? showroom.vsmDirty1
+                    : i == 2 ? showroom.vsmDirty2 : showroom.vsmDirty3;
+        if (sphere.w <= 0.0) continue;
+        vec2 c = vsmLightSpace(b, sphere.xyz).xy;
+        vec2 nearest = clamp(c, lo, hi);
+        if (dot(nearest - c, nearest - c) <= sphere.w * sphere.w) return true;
+    }
+    return false;
+}
+
+void freePage(ivec2 slot, uint entry) {
+    imageStore(vsmOwner, vsmPhysicalPage(entry), uvec4(0u));
+    imageStore(vsmPageTable, slot, uvec4(0u));
+}
+
+void main() {
+    uint t = gl_LocalInvocationIndex;
+    VsmBasis b = vsmBasis();
+
+    if (t == 0u) {
+        frame = imageLoad(vsmState, ivec2(STATE_FRAME, 0)).r + 1u;
+        imageStore(vsmState, ivec2(STATE_FRAME, 0), uvec4(frame));
+        vec3 sun = normalize(showroom.sunDirection.xyz);
+        bool changed = false;
+        // Every check runs, so every slot is brought up to date.
+        changed = stateChanged(STATE_SUN + 0, floatBitsToUint(sun.x)) || changed;
+        changed = stateChanged(STATE_SUN + 1, floatBitsToUint(sun.y)) || changed;
+        changed = stateChanged(STATE_SUN + 2, floatBitsToUint(sun.z)) || changed;
+        changed = stateChanged(STATE_FIRST_LEVEL, floatBitsToUint(showroom.vsmFirstLevel)) || changed;
+        changed = stateChanged(STATE_DEPTH_RANGE, floatBitsToUint(showroom.vsmDepthRange)) || changed;
+        changed = stateChanged(STATE_EPOCH, showroom.vsmEpoch) || changed;
+        changed = stateChanged(STATE_CONTENT, showroom.vsmContent) || changed;
+        changed = stateChanged(STATE_STARTED, 1u) || changed;
+        reset = changed || showroom.sunEnabled == 0u;
+        needCount = 0u;
+        grantCount = 0u;
+    }
+    if (t < uint(VSM_LEVELS)) levelDirty[t] = 0u;
+    memoryBarrierShared();
+    barrier();
+
+    // ── A: the table ────────────────────────────────────────────────
+    for (uint e = t; e < uint(VSM_ENTRIES); e += gl_WorkGroupSize.x) {
+        ivec2 slot = vsmEntryCoordOf(e);
+        int level = int(e) / (VSM_PAGES * VSM_PAGES);
+        ivec2 page = vsmPageOfSlot(vsmWindowOrigin(b, level), ivec2(slot.x, slot.y % VSM_PAGES));
+
+        uint entry = imageLoad(vsmPageTable, slot).r;
+        bool requested = imageLoad(vsmRequest, slot).r != 0u && showroom.sunEnabled != 0u;
+        imageStore(vsmRequest, slot, uvec4(0u));
+
+        bool valid = (entry & VSM_VALID) != 0u;
+        if (valid) {
+            bool stale = reset || imageLoad(vsmPageTag, slot).r != vsmTag(page);
+            bool moved = !stale && touchesDirtySphere(b, level, page);
+            if (stale || (moved && !requested)) {
+                freePage(slot, entry);
+                valid = false;
+            } else if (requested) {
+                imageStore(vsmPageTable, slot, uvec4((entry & ~VSM_DIRTY) | (moved ? VSM_DIRTY : 0u)));
+                imageStore(vsmAge, vsmPhysicalPage(entry), uvec4(frame));
+                if (moved) atomicAdd(levelDirty[level], 1u);
+            } else if ((entry & VSM_DIRTY) != 0u) {
+                imageStore(vsmPageTable, slot, uvec4(entry & ~VSM_DIRTY));
+            }
+        }
+        if (!valid && requested) {
+            uint k = atomicAdd(needCount, 1u);
+            if (k < uint(MAX_NEW)) need[k] = e;
+        }
+    }
+    memoryBarrierImage();
+    memoryBarrierShared();
+    barrier();
+
+    // ── B: memory for the pages that have none ─────────────────────
+    uint wanted = min(needCount, uint(MAX_NEW));
+    for (int round = 0; round < 2; ++round) {
+        for (uint p = t; p < uint(VSM_POOL_COUNT) && wanted > 0u; p += gl_WorkGroupSize.x) {
+            ivec2 pc = ivec2(int(p) % VSM_POOL_PAGES, int(p) / VSM_POOL_PAGES);
+            uint owner = imageLoad(vsmOwner, pc).r;
+            // Round 0 takes free pages, round 1 pages no pixel needs this frame.
+            bool available = round == 0 ? owner == 0u
+                                        : owner != 0u && imageLoad(vsmAge, pc).r != frame;
+            if (!available) continue;
+            uint k = atomicAdd(grantCount, 1u);
+            if (k >= wanted) break;
+
+            if (owner != 0u) {
+                imageStore(vsmPageTable, vsmEntryCoordOf(owner - 1u), uvec4(0u));
+            }
+            uint e = need[k];
+            ivec2 slot = vsmEntryCoordOf(e);
+            int level = int(e) / (VSM_PAGES * VSM_PAGES);
+            ivec2 page = vsmPageOfSlot(vsmWindowOrigin(b, level), ivec2(slot.x, slot.y % VSM_PAGES));
+            imageStore(vsmPageTable, slot, uvec4(p | VSM_VALID | VSM_DIRTY));
+            imageStore(vsmPageTag, slot, uvec4(vsmTag(page)));
+            imageStore(vsmOwner, pc, uvec4(e + 1u));
+            imageStore(vsmAge, pc, uvec4(frame));
+            atomicAdd(levelDirty[level], 1u);
+        }
+        memoryBarrierImage();
+        memoryBarrierShared();
+        barrier();
+    }
+
+    if (t < uint(VSM_LEVELS)) {
+        imageStore(vsmLevelInfo, ivec2(int(t), 0), uvec4(levelDirty[t]));
+    }
+}

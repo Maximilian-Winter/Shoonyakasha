@@ -1,0 +1,72 @@
+#version 450
+// Light clusters: the view is divided into 16 x 9 screen tiles and 24 depth
+// slices, spaced logarithmically from the camera's near plane to its far
+// plane, and each cluster lists the point and spot lights whose range
+// reaches it. Lighting then loops over its pixel's cluster only.
+//
+// The lists live in an R32_UINT image, one column per cluster: row 0 holds
+// the count, rows 1.. the light indices, at most MAX_PER_CLUSTER. Column
+// CLUSTER_COUNT lists the directional lights, which reach everything.
+
+#include "common.glsl"
+#include "clusters.glsl"
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 0, r32ui) uniform writeonly uimage2D clusters;
+layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
+layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
+
+// View-space point on the ray through NDC xy, at view depth -z.
+vec3 onRay(vec2 ndc, float depth) {
+    vec4 p = camera.invProj * vec4(ndc, 1.0, 1.0);
+    vec3 direction = p.xyz / p.w;
+    return direction * (depth / -direction.z);
+}
+
+void main() {
+    uint cluster = gl_GlobalInvocationID.x;
+    if (cluster > uint(CLUSTER_COUNT)) return;
+
+    uint count = min(lightCount, uint(MAX_LIGHTS));
+    uint found = 0u;
+
+    if (cluster == uint(CLUSTER_COUNT)) {
+        // The directional lights' column.
+        for (uint i = 0u; i < count && found < uint(MAX_PER_CLUSTER); ++i) {
+            if (lightsPositionType[i].w < 0.5) imageStore(clusters, ivec2(cluster, 1u + found++), uvec4(i));
+        }
+        imageStore(clusters, ivec2(cluster, 0), uvec4(found));
+        return;
+    }
+
+    // The cluster's box in view space: its tile's corners at its slice's two
+    // depths.
+    uvec3 c = uvec3(cluster % CLUSTER_X, (cluster / CLUSTER_X) % CLUSTER_Y, cluster / (CLUSTER_X * CLUSTER_Y));
+    float nearPlane = camera.params.x, farPlane = camera.params.y;
+    float d0 = clusterSliceDepth(c.z, nearPlane, farPlane);
+    float d1 = clusterSliceDepth(c.z + 1u, nearPlane, farPlane);
+    vec2 ndc0 = vec2(c.xy) / vec2(CLUSTER_X, CLUSTER_Y) * 2.0 - 1.0;
+    vec2 ndc1 = vec2(c.xy + 1u) / vec2(CLUSTER_X, CLUSTER_Y) * 2.0 - 1.0;
+    vec3 lo = vec3(1e30), hi = vec3(-1e30);
+    for (int k = 0; k < 8; ++k) {
+        vec2 ndc = vec2((k & 1) != 0 ? ndc1.x : ndc0.x, (k & 2) != 0 ? ndc1.y : ndc0.y);
+        vec3 p = onRay(ndc, (k & 4) != 0 ? d1 : d0);
+        lo = min(lo, p);
+        hi = max(hi, p);
+    }
+
+    for (uint i = 0u; i < count && found < uint(MAX_PER_CLUSTER); ++i) {
+        float type = lightsPositionType[i].w;
+        if (type < 0.5) continue;   // directional: in their own column
+        float range = lightsDirectionRange[i].w;
+        bool reaches = range <= 0.0;   // no range: everywhere
+        if (!reaches) {
+            vec3 center = (camera.view * vec4(lightsPositionType[i].xyz, 1.0)).xyz;
+            vec3 nearest = clamp(center, lo, hi);
+            reaches = dot(nearest - center, nearest - center) <= range * range;
+        }
+        if (reaches) imageStore(clusters, ivec2(cluster, 1u + found++), uvec4(i));
+    }
+    imageStore(clusters, ivec2(cluster, 0), uvec4(found));
+}
