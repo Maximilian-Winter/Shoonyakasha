@@ -107,7 +107,7 @@ public:
     // ── Configuration ───────────────────────────────────────────────
 
     /// Set the ECS registry to query entities from
-    void setRegistry(entt::registry* registry) { m_registry = registry; }
+    void setRegistry(entt::registry* registry) { m_registry = registry; m_renderablesFrame = ~uint64_t{0}; }
 
     /// Set camera position for distance calculations (optional - uses scene context if not set)
     void setCameraPosition(const glm::vec3& pos) { m_cameraPosition = pos; m_hasCameraPosition = true; }
@@ -212,6 +212,23 @@ private:
     bool m_hasCameraPosition = false;
 
     // Statistics
+    /// Every renderable entity with its world-space bounds, gathered once a
+    /// frame for all of the frame's geometry passes rather than once per pass.
+    struct Renderable {
+        entt::entity entity = entt::null;
+        const MeshComponent* mesh = nullptr;
+        const MaterialComponentV5* material = nullptr;
+        const RenderableTagComponent* tag = nullptr;
+        const ECS::TransformComponent* transform = nullptr;
+        bool hasSkeleton = false;
+        bool isSprite2D = false;
+        bool hasBounds = false;
+        glm::vec3 worldMin{0.0f}, worldMax{0.0f};
+    };
+    mutable std::vector<Renderable> m_renderables;
+    mutable uint64_t m_renderablesFrame = ~uint64_t{0};
+    void gatherRenderables() const;
+
     mutable uint32_t m_lastDrawCount = 0;
     mutable uint32_t m_lastQueryCount = 0;
     mutable uint32_t m_lastCulledCount = 0;
@@ -232,10 +249,19 @@ private:
     float calculateDistance(const ECS::TransformComponent& transform, const ViewCull* view = nullptr) const;
 
     /// Bind and draw a single entity using CompiledPass data
+    /// Buffers already bound in the pass being recorded, to skip rebinding.
+    struct BoundBuffers {
+        VkBuffer vertex = VK_NULL_HANDLE;
+        VkBuffer index = VK_NULL_HANDLE;
+        VkIndexType indexType = VK_INDEX_TYPE_MAX_ENUM;
+    };
+
     void bindAndDrawEntity(
         entt::entity entity,
         const MeshComponent& mesh,
         const FrameGraph::CompiledPass& pass,
+        FrameGraph::RenderGraph::EntityBindingPlan& plan,
+        BoundBuffers& bound,
         VkCommandBuffer cmd,
         uint32_t frameIndex
     );

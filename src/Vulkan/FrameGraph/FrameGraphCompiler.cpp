@@ -1309,6 +1309,7 @@ Shoonyakasha::CompiledBufferLayout CompiledBufferLayout::toResolverLayout() cons
         Shoonyakasha::BufferField rf;
         rf.name         = f.name;
         rf.source       = f.source;
+        rf.compiled     = DotPathResolver().compile(f.source);
         rf.offset       = f.offset;
         rf.size         = f.size;
         rf.arrayCount   = f.arrayCount;

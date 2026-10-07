@@ -46,55 +46,34 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
         return result;
     }
 
-    // Query entities with required render components
-    auto view = m_registry->view<
-        MeshComponent,
-        MaterialComponentV5,
-        RenderableTagComponent,
-        ECS::TransformComponent
-    >();
+    gatherRenderables();
+    result.reserve(m_renderables.size());
 
-    // Reserve space (estimate)
-    result.reserve(view.size_hint());
-
-    for (auto entity : view) {
-        auto& mesh = view.get<MeshComponent>(entity);
-        auto& material = view.get<MaterialComponentV5>(entity);
-        auto& tag = view.get<RenderableTagComponent>(entity);
-        auto& transform = view.get<ECS::TransformComponent>(entity);
-
-        // Skip invalid meshes
-        if (!mesh.isValid()) continue;
-
-        // Check if entity has a skeleton (for skinned vs. static filtering)
-        bool hasSkeleton = m_registry->all_of<Shoonyakasha::SkeletonComponent>(entity);
-
-        // Check if entity is a 2D sprite/UI element
-        bool isSprite2D = m_registry->all_of<Shoonyakasha::Sprite2DComponent>(entity);
-
+    for (const auto& r : m_renderables) {
         // Apply filter
-        if (!passesFilter(material, tag, filter, hasSkeleton, isSprite2D)) continue;
+        if (!passesFilter(*r.material, *r.tag, filter, r.hasSkeleton, r.isSprite2D)) continue;
 
-        if (!passesAlphaFilter(material, alphaFilter)) continue;
+        if (!passesAlphaFilter(*r.material, alphaFilter)) continue;
 
         // Apply render layer mask (bitwise intersection with the tag's
         // 8-bit mask; default renderLayerMask matches every layer)
-        if ((static_cast<uint32_t>(tag.renderLayerMask) & renderLayerMask) == 0) continue;
+        if ((static_cast<uint32_t>(r.tag->renderLayerMask) & renderLayerMask) == 0) continue;
 
         // Outside the pass's view. Skinned meshes are kept: their bounds are
         // the bind pose, which an animation can leave.
-        if (cullView && !hasSkeleton && !isVisible(*cullView, mesh, transform.worldMatrix)) {
+        if (cullView && !r.hasSkeleton && cullView->cull && r.hasBounds &&
+            !boundsInFrustum(cullView->frustum, r.worldMin, r.worldMax)) {
             ++m_lastCulledCount;
             continue;
         }
 
         RenderableEntity re;
-        re.entity = entity;
-        re.mesh = &mesh;
-        re.material = &material;
-        re.tag = &tag;
-        re.transform = &transform;
-        re.distanceToCamera = calculateDistance(transform, cullView);
+        re.entity = r.entity;
+        re.mesh = r.mesh;
+        re.material = r.material;
+        re.tag = r.tag;
+        re.transform = r.transform;
+        re.distanceToCamera = calculateDistance(*r.transform, cullView);
 
         result.push_back(re);
     }
@@ -128,6 +107,38 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
 
     m_lastQueryCount = static_cast<uint32_t>(result.size());
     return result;
+}
+
+// ============================================================================
+// gatherRenderables - the frame's renderable entities, once per frame
+// ============================================================================
+
+void FrameGraphRenderer::gatherRenderables() const {
+    const uint64_t frame = m_renderGraph.getFrameNumber();
+    if (frame == m_renderablesFrame) return;
+    m_renderablesFrame = frame;
+    m_renderables.clear();
+
+    // Transforms are final by the time the frame records, so world bounds
+    // are computed here once instead of in each pass that culls.
+    auto view = m_registry->view<MeshComponent, MaterialComponentV5, RenderableTagComponent, ECS::TransformComponent>();
+    m_renderables.reserve(view.size_hint());
+    for (auto entity : view) {
+        const auto& mesh = view.get<MeshComponent>(entity);
+        if (!mesh.isValid()) continue;
+
+        Renderable r;
+        r.entity = entity;
+        r.mesh = &mesh;
+        r.material = &view.get<MaterialComponentV5>(entity);
+        r.tag = &view.get<RenderableTagComponent>(entity);
+        r.transform = &view.get<ECS::TransformComponent>(entity);
+        r.hasSkeleton = m_registry->all_of<Shoonyakasha::SkeletonComponent>(entity);
+        r.isSprite2D = m_registry->all_of<Shoonyakasha::Sprite2DComponent>(entity);
+        r.hasBounds = mesh.hasBounds;
+        if (r.hasBounds) transformBounds(r.transform->worldMatrix, mesh.boundsMin, mesh.boundsMax, r.worldMin, r.worldMax);
+        m_renderables.push_back(r);
+    }
 }
 
 // ============================================================================
@@ -234,10 +245,13 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
     auto entities = queryEntities(filter, sortMode, passDecl.execution.renderLayerMask,
                                   passDecl.execution.alphaFilter, &view);
 
-    // Render each entity
+    // Look up what the pass binds once, then bind each entity through it.
+    auto plan = m_renderGraph.planEntityBindings(pass);
+    BoundBuffers bound;
+
     uint32_t drawCount = 0;
     for (const auto& re : entities) {
-        bindAndDrawEntity(re.entity, *re.mesh, pass, cmd, frameIndex);
+        bindAndDrawEntity(re.entity, *re.mesh, pass, plan, bound, cmd, frameIndex);
         drawCount++;
     }
 
@@ -268,56 +282,33 @@ void FrameGraphRenderer::bindAndDrawEntity(
     entt::entity entity,
     const MeshComponent& mesh,
     const FrameGraph::CompiledPass& pass,
+    FrameGraph::RenderGraph::EntityBindingPlan& plan,
+    BoundBuffers& bound,
     VkCommandBuffer cmd,
     uint32_t frameIndex)
 {
-    // Bind push constants via dot-path resolution
-    // The layoutRef comes from the COMPILED PASS - no hardcoded strings!
-    if (!pass.entityDataBinding.perDraw.layoutRef.empty()) {
-        m_renderGraph.bindEntityData(
-            entity,
-            *m_registry,
-            pass.entityDataBinding.perDraw.layoutRef,
-            cmd,
-            pass.pipelineLayout
-        );
-    }
+    // Push constants, material textures and bone buffer, as the pass's
+    // entityDataBinding names them (looked up once, in `plan`).
+    m_renderGraph.bindEntityData(entity, *m_registry, plan, cmd, pass.pipelineLayout);
+    m_renderGraph.bindMaterialTextures(entity, *m_registry, plan, cmd, pass.pipelineLayout);
+    m_renderGraph.bindSkeletonSSBO(entity, *m_registry, plan, cmd, pass.pipelineLayout, frameIndex);
 
-    // Bind material textures
-    // The layoutRef comes from the COMPILED PASS - no hardcoded strings!
-    if (!pass.entityDataBinding.material.layoutRef.empty()) {
-        m_renderGraph.bindMaterialTextures(
-            entity,
-            *m_registry,
-            pass.entityDataBinding.material.layoutRef,
-            cmd,
-            pass,
-            frameIndex
-        );
-    }
-
-    // Bind skeleton SSBO (per-entity bone matrices for skinned geometry)
-    // 骨之繫 — The binding of bones
-    if (!pass.entityDataBinding.skeleton.layoutRef.empty()) {
-        m_renderGraph.bindSkeletonSSBO(
-            entity,
-            *m_registry,
-            pass.entityDataBinding.skeleton.layoutRef,
-            cmd,
-            pass,
-            frameIndex
-        );
-    }
-
-    // Bind vertex buffer
+    // Vertex and index buffers, unless the previous draw left them bound:
+    // meshes are often suballocated from shared buffers.
     VkBuffer vertexBuffer = mesh.vertexHandle();
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+    if (vertexBuffer != bound.vertex) {
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+        bound.vertex = vertexBuffer;
+    }
 
-    // Bind index buffer and draw
     if (mesh.hasIndices()) {
-        VkIndexType indexType = toVkIndexType(mesh.indexType);
-        vkCmdBindIndexBuffer(cmd, mesh.indexHandle(), 0, indexType);
+        const VkIndexType indexType = toVkIndexType(mesh.indexType);
+        if (mesh.indexHandle() != bound.index || indexType != bound.indexType) {
+            vkCmdBindIndexBuffer(cmd, mesh.indexHandle(), 0, indexType);
+            bound.index = mesh.indexHandle();
+            bound.indexType = indexType;
+        }
         vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
         FrameGraph::countDraw(mesh.indexCount);
     } else {

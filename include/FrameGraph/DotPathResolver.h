@@ -256,11 +256,52 @@ struct SceneContext {
 };
 
 // ============================================================================
+// CompiledPath - a dot-path parsed once, for values resolved every draw
+// ============================================================================
+//
+// Resolving a path by its string compares prefixes, splits it into parts and
+// matches names, every time. Push constants are filled for every draw, so
+// their paths are compiled once into an operation and resolved with a switch.
+// Paths without an operation of their own stay Generic and resolve by string;
+// either way the value is the same.
+
+struct CompiledPath {
+    enum class Op : uint8_t {
+        Generic,                // resolve the string
+        Constant,               // const.*: resolved once
+        WorldMatrix, PreviousWorldMatrix, LocalMatrix, Position, Rotation, Scale,
+        MaterialParam,          // entity.material.params.<key>
+        MaterialTexture,        // entity.material.textures.<key>
+        MaterialTextureExists,  // entity.material.textures.<key>.exists
+        AlphaCutoff, AlphaMode, DoubleSided,
+        VertexCount, IndexCount,
+        HasSkeleton, JointCount,
+        PassRepeatIndex, PassRepeatCount, PassExtent, PassTexelSize
+    };
+
+    Op            op = Op::Generic;
+    std::string   key;        // material parameter or texture name
+    ResolvedValue constant;   // Op::Constant
+};
+
+// ============================================================================
 // DotPathResolver - The core resolver
 // ============================================================================
 
 class DotPathResolver {
 public:
+    // ─── Compiled paths ─────────────────────────────────────────
+
+    /// Parse `path` once. Resolving the result gives what resolve(path) gives.
+    CompiledPath compile(const std::string& path) const;
+
+    /// Resolve a compiled path; `path` is its source, used for Op::Generic.
+    ResolvedValue resolve(const CompiledPath& compiled,
+                          const std::string& path,
+                          const SceneContext& scene,
+                          entt::entity entity,
+                          entt::registry& registry) const;
+
     // ─── Resolution Methods ─────────────────────────────────────
 
     // Resolve a path against scene context only (for "scene.*" and "const.*")
@@ -328,6 +369,7 @@ private:
 struct BufferField {
     std::string name;
     std::string source;         // Dot-path source (may contain [i] for arrays)
+    CompiledPath compiled;      // `source` parsed once; Generic until compiled
     MaterialParam::Type type = MaterialParam::Type::Float;
     uint32_t offset = 0;        // Byte offset in buffer
     uint32_t size = 0;          // Occupied size of one element, including interior

@@ -21,6 +21,7 @@
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <entt/entt.hpp>
+#include <array>
 #include <vector>
 #include <unordered_map>
 #include <memory>
@@ -1180,6 +1181,56 @@ public:
                           const CompiledPass& pass,
                           uint32_t frameIndex);
 
+    // ── Per-draw binding, planned once per pass ──
+    //
+    // The name-based calls above look up layouts, descriptor sets and set
+    // indices by name on every draw. A geometry pass plans those lookups once
+    // and then binds each entity through the plan; the plan also remembers
+    // the last material set bound, so draws sharing a material skip the bind.
+
+    struct EntityBindingPlan {
+        // Push constants
+        const Shoonyakasha::CompiledBufferLayout* perDraw = nullptr;
+        VkShaderStageFlags perDrawStages = 0;
+        uint32_t           perDrawOffset = 0;
+
+        // Material textures
+        struct ImageBinding {
+            uint32_t binding = 0;
+            const std::string* name = nullptr;
+            const Shoonyakasha::GPUTexture* fallback = nullptr;
+        };
+        static constexpr size_t kMaxMaterialImages = 16;
+        bool                      material = false;
+        std::vector<ImageBinding> materialImages;
+        uint32_t                  materialSetIndex = 0;
+        VkDescriptorSetLayout     materialLayout = VK_NULL_HANDLE;
+        void*                     materialSets = nullptr;   // this layout's set cache
+        VkDescriptorSet           lastMaterialSet = VK_NULL_HANDLE;
+
+        // Skeleton bone buffer
+        bool                  skeleton = false;
+        size_t                skeletonLayoutHash = 0;
+        uint32_t              skeletonSetIndex = 0;
+        VkDescriptorSetLayout skeletonLayout = VK_NULL_HANDLE;
+    };
+
+    /// Look up what `pass`'s entityDataBinding names. Problems are logged
+    /// here, once per pass; the parts that cannot be bound are left out.
+    EntityBindingPlan planEntityBindings(const CompiledPass& pass);
+
+    void bindEntityData(entt::entity entity, entt::registry& registry,
+                        const EntityBindingPlan& plan, VkCommandBuffer cmd, VkPipelineLayout pipelineLayout);
+    void bindMaterialTextures(entt::entity entity, entt::registry& registry,
+                              EntityBindingPlan& plan, VkCommandBuffer cmd, VkPipelineLayout pipelineLayout);
+    void bindSkeletonSSBO(entt::entity entity, entt::registry& registry,
+                          EntityBindingPlan& plan, VkCommandBuffer cmd, VkPipelineLayout pipelineLayout,
+                          uint32_t frameIndex);
+
+    /// Counts recorded frames, single- and multi-queue alike; constant while
+    /// a frame's passes record.
+    uint64_t getFrameNumber() const { return m_recordedFrames; }
+
     /// Get the scene context (for external use)
     Shoonyakasha::SceneContext& getSceneContext();
     const Shoonyakasha::SceneContext& getSceneContext() const;
@@ -1431,6 +1482,7 @@ private:
     std::unique_ptr<Shoonyakasha::RayTracingScene> m_rayTracingScene;
     std::vector<std::pair<std::string, std::string>> m_accelerationBindings;   // (layout, binding)
     uint64_t m_globalFrameNumber = 0;
+    uint64_t m_recordedFrames = 0;   // see getFrameNumber
     std::unordered_map<std::string, ReadbackCallbackFn> m_readbackCallbacks;
     void createStagingBuffers(uint32_t maxFramesInFlight);
 
@@ -1510,7 +1562,43 @@ private:
     std::unordered_map<VkDescriptorSet, VkDescriptorPool> m_descriptorSetPools;
     /// Material texture sets, shared by every entity whose material binds the
     /// same textures under the same layout. Written once, never changed.
-    std::unordered_map<std::string, VkDescriptorSet> m_materialTextureSets;
+    /// Keyed by layout name, then by the textures in a fixed-size key, so a
+    /// draw finds its set without building a string.
+    struct MaterialTexture {
+        uint32_t binding = 0;
+        VkImageView view = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
+        bool operator==(const MaterialTexture&) const = default;
+    };
+    struct MaterialTextureKey {
+        uint32_t count = 0;
+        std::array<MaterialTexture, EntityBindingPlan::kMaxMaterialImages> textures{};
+        bool operator==(const MaterialTextureKey& o) const {
+            return count == o.count && std::equal(textures.begin(), textures.begin() + count, o.textures.begin());
+        }
+    };
+    struct MaterialTextureKeyHash {
+        size_t operator()(const MaterialTextureKey& k) const {
+            size_t h = k.count;
+            for (uint32_t i = 0; i < k.count; ++i) {
+                for (size_t v : {size_t{k.textures[i].binding}, reinterpret_cast<size_t>(k.textures[i].view),
+                                 reinterpret_cast<size_t>(k.textures[i].sampler)}) {
+                    h ^= std::hash<size_t>{}(v) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+                }
+            }
+            return h;
+        }
+    };
+    using MaterialSetMap = std::unordered_map<MaterialTextureKey, VkDescriptorSet, MaterialTextureKeyHash>;
+    std::unordered_map<std::string, MaterialSetMap> m_materialTextureSets;
+
+    /// The compiled layout of the descriptor set `name`, from any pass that
+    /// lists it.
+    VkDescriptorSetLayout compiledSetLayout(const std::string& name) const;
+    void ensureDefaultTextures();
+    bool planPerDraw(const std::string& name, EntityBindingPlan& plan);
+    bool planMaterial(const std::string& name, const CompiledPass& pass, EntityBindingPlan& plan);
+    bool planSkeleton(const std::string& name, const CompiledPass& pass, EntityBindingPlan& plan);
 
     // Default textures for fallback when material textures are missing
     Shoonyakasha::GPUResourceFactory::DefaultTextures m_defaultTextures;

@@ -33,6 +33,7 @@
 
 #include <stdexcept>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <random>
 #include "Vulkan/RayTracingScene.h"
@@ -1669,6 +1670,7 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
     recordRayTracingScene(commandBuffer, frameIndex);
 
     // Execute all passes
+    ++m_recordedFrames;
     if (m_stats) {
         m_stats->beginFrame(frameIndex, std::max(m_maxFramesInFlight, frameIndex + 1),
                             static_cast<uint32_t>(m_compiled.executionOrder.size()));
@@ -1894,6 +1896,7 @@ void RenderGraph::executeMultiQueue(uint32_t frameIndex, uint32_t swapchainImage
 
     const auto& batches = m_compiled.queueBatches;
 
+    ++m_recordedFrames;
     if (m_stats) {
         m_stats->beginFrame(frameIndex, std::max(m_maxFramesInFlight, frameIndex + 1),
                             static_cast<uint32_t>(m_compiled.executionOrder.size()));
@@ -2203,40 +2206,56 @@ void RenderGraph::bindEntityData(entt::entity entity,
                                   const std::string& pushConstantLayout,
                                   VkCommandBuffer cmd,
                                   VkPipelineLayout pipelineLayout) {
+    EntityBindingPlan plan;
+    if (!planPerDraw(pushConstantLayout, plan)) return;
+    bindEntityData(entity, registry, plan, cmd, pipelineLayout);
+}
+
+bool RenderGraph::planPerDraw(const std::string& name, EntityBindingPlan& plan) {
     if (!m_ecsBindingEnabled || !m_bufferResolver) {
         m_logger->log(LogLevel::Warning, "bindEntityData: ECS binding not enabled");
-        return;
+        return false;
     }
-
-    // Get the compiled buffer layout
-    const CompiledBufferLayout* layout = getBufferLayout(pushConstantLayout);
+    const CompiledBufferLayout* layout = getBufferLayout(name);
     if (!layout) {
-        m_logger->log(LogLevel::Warning, "bindEntityData: Layout '%s' not found", pushConstantLayout.c_str());
-        return;
+        m_logger->log(LogLevel::Warning, "bindEntityData: Layout '%s' not found", name.c_str());
+        return false;
     }
-
     if (!layout->isPushConstant()) {
-        m_logger->log(LogLevel::Warning, "bindEntityData: Layout '%s' is not a push constant layout", pushConstantLayout.c_str());
-        return;
+        m_logger->log(LogLevel::Warning, "bindEntityData: Layout '%s' is not a push constant layout", name.c_str());
+        return false;
     }
-
-    const Shoonyakasha::CompiledBufferLayout* resolvedLayout = getResolvedLayout(pushConstantLayout);
-    if (!resolvedLayout) {
-        m_logger->log(LogLevel::Warning, "bindEntityData: Layout '%s' has no resolver form", pushConstantLayout.c_str());
-        return;
+    const Shoonyakasha::CompiledBufferLayout* resolved = getResolvedLayout(name);
+    if (!resolved) {
+        m_logger->log(LogLevel::Warning, "bindEntityData: Layout '%s' has no resolver form", name.c_str());
+        return false;
     }
+    plan.perDraw = resolved;
+    plan.perDrawStages = layout->getShaderStages();
+    plan.perDrawOffset = layout->binding.offset;
+    return true;
+}
 
-    // Allocate buffer for push constants
-    std::vector<uint8_t> pushData(layout->totalSize, 0);
+void RenderGraph::bindEntityData(entt::entity entity,
+                                  entt::registry& registry,
+                                  const EntityBindingPlan& plan,
+                                  VkCommandBuffer cmd,
+                                  VkPipelineLayout pipelineLayout) {
+    if (!plan.perDraw) return;
+    const uint32_t size = plan.perDraw->totalSize;
 
-    // Fill the buffer using DotPathResolver
-    m_bufferResolver->fillBuffer(pushData.data(), *resolvedLayout, *m_sceneContext, entity, registry);
+    // Push constants rarely pass 256 bytes; the stack holds them then.
+    alignas(16) uint8_t local[256];
+    std::vector<uint8_t> heap;
+    uint8_t* data = local;
+    if (size > sizeof(local)) {
+        heap.resize(size);
+        data = heap.data();
+    }
+    std::memset(data, 0, size);
 
-    // Push the constants
-    VkShaderStageFlags stages = layout->getShaderStages();
-    uint32_t offset = layout->binding.offset;
-
-    vkCmdPushConstants(cmd, pipelineLayout, stages, offset, static_cast<uint32_t>(pushData.size()), pushData.data());
+    m_bufferResolver->fillBuffer(data, *plan.perDraw, *m_sceneContext, entity, registry);
+    vkCmdPushConstants(cmd, pipelineLayout, plan.perDrawStages, plan.perDrawOffset, size, data);
 }
 
 void RenderGraph::fillBuffer(void* buffer,
@@ -2356,154 +2375,165 @@ void RenderGraph::releaseDestroyedEntityDescriptors(uint32_t frameIndex) {
     }
 }
 
+void RenderGraph::ensureDefaultTextures() {
+    if (m_defaultTexturesCreated) return;
+    m_defaultTextures = Shoonyakasha::GPUResourceFactory::createDefaultTextures(
+        m_device.getAllocator().getHandle(),
+        m_device.getLogicalDevice(),
+        m_device.getGraphicsQueue(),
+        m_device.getCommandPool()
+    );
+    m_defaultTexturesCreated = true;
+    m_logger->log(LogLevel::Info, "Default textures created - white: view=%p sampler=%p, normal: view=%p sampler=%p, metalRough: view=%p sampler=%p",
+        (void*)m_defaultTextures.white.view, (void*)m_defaultTextures.white.sampler,
+        (void*)m_defaultTextures.normal.view, (void*)m_defaultTextures.normal.sampler,
+        (void*)m_defaultTextures.metallicRoughness.view, (void*)m_defaultTextures.metallicRoughness.sampler);
+}
+
+VkDescriptorSetLayout RenderGraph::compiledSetLayout(const std::string& name) const {
+    for (const auto& compiledPass : m_compiled.compiledPasses) {
+        const auto& refs = m_builder.getPassDeclarations()[compiledPass.declIndex].descriptorSetRefs;
+        for (size_t i = 0; i < refs.size(); ++i) {
+            if (refs[i] == name) {
+                return i < compiledPass.descriptorSetLayouts.size() ? compiledPass.descriptorSetLayouts[i]
+                                                                    : VK_NULL_HANDLE;
+            }
+        }
+    }
+    return VK_NULL_HANDLE;
+}
+
+bool RenderGraph::planMaterial(const std::string& name, const CompiledPass& pass, EntityBindingPlan& plan) {
+    if (!m_ecsBindingEnabled) {
+        m_logger->log(LogLevel::Warning, "bindMaterialTextures: ECS binding not enabled");
+        return false;
+    }
+    const DescriptorSetLayoutDesc* layoutDesc = m_builder.getDescriptorSetLayout(name);
+    if (!layoutDesc) {
+        m_logger->log(LogLevel::Warning, "bindMaterialTextures: Layout '%s' not found", name.c_str());
+        return false;
+    }
+    const auto setIndex = descriptorSetIndexIn(pass, name);
+    if (!setIndex) return false;   // the pass does not list it: nothing to bind
+
+    ensureDefaultTextures();
+
+    // The fallback for each image binding when the material has no texture.
+    plan.materialImages.clear();
+    for (const auto& binding : layoutDesc->bindings) {
+        if (binding.type != "combined_image_sampler") continue;
+        const Shoonyakasha::GPUTexture* fallback = &m_defaultTextures.white;   // generic fallback
+        if (binding.name == "normalMap") {
+            fallback = &m_defaultTextures.normal;
+        } else if (binding.name == "metallicRoughnessMap" || binding.name == "aoMap") {
+            fallback = &m_defaultTextures.metallicRoughness;
+        }
+        plan.materialImages.push_back({binding.binding, &binding.name, fallback});
+    }
+    if (plan.materialImages.size() > EntityBindingPlan::kMaxMaterialImages) {
+        m_logger->log(LogLevel::Error, "bindMaterialTextures: Layout '%s' has %zu image bindings; at most %zu are supported",
+                      name.c_str(), plan.materialImages.size(), EntityBindingPlan::kMaxMaterialImages);
+        return false;
+    }
+
+    plan.materialLayout = compiledSetLayout(name);
+    if (plan.materialLayout == VK_NULL_HANDLE) {
+        m_logger->log(LogLevel::Warning, "bindMaterialTextures: Compiled layout '%s' not found in any pass", name.c_str());
+        return false;
+    }
+    plan.materialSetIndex = *setIndex;
+    plan.materialSets = &m_materialTextureSets[name];
+    plan.material = true;
+    plan.lastMaterialSet = VK_NULL_HANDLE;
+    return true;
+}
+
 void RenderGraph::bindMaterialTextures(entt::entity entity,
                                         entt::registry& registry,
                                         const std::string& descriptorSetName,
                                         VkCommandBuffer cmd,
                                         const CompiledPass& pass,
-                                        uint32_t frameIndex) {
-    if (!m_ecsBindingEnabled) {
-        m_logger->log(LogLevel::Warning, "bindMaterialTextures: ECS binding not enabled");
-        return;
-    }
+                                        uint32_t /*frameIndex*/) {
+    EntityBindingPlan plan;
+    if (!planMaterial(descriptorSetName, pass, plan)) return;
+    bindMaterialTextures(entity, registry, plan, cmd, pass.pipelineLayout);
+}
 
-    // Get MaterialComponentV5 from entity
+void RenderGraph::bindMaterialTextures(entt::entity entity,
+                                        entt::registry& registry,
+                                        EntityBindingPlan& plan,
+                                        VkCommandBuffer cmd,
+                                        VkPipelineLayout pipelineLayout) {
+    if (!plan.material) return;
+
     auto* material = registry.try_get<Shoonyakasha::MaterialComponentV5>(entity);
     if (!material) {
-        m_logger->log(LogLevel::Warning, "bindMaterialTextures: Entity has no MaterialComponentV5");
+        m_logger->logEvery(5.0f, LogLevel::Warning, "bindMaterialTextures: Entity has no MaterialComponentV5");
         return;
-    }
-
-    // Get the descriptor set layout definition
-    const DescriptorSetLayoutDesc* layoutDesc = m_builder.getDescriptorSetLayout(descriptorSetName);
-    if (!layoutDesc) {
-        m_logger->log(LogLevel::Warning, "bindMaterialTextures: Layout '%s' not found", descriptorSetName.c_str());
-        return;
-    }
-
-    // Create default textures if not yet created (lazy initialization)
-    if (!m_defaultTexturesCreated) {
-        m_defaultTextures = Shoonyakasha::GPUResourceFactory::createDefaultTextures(
-            m_device.getAllocator().getHandle(),
-            m_device.getLogicalDevice(),
-            m_device.getGraphicsQueue(),
-            m_device.getCommandPool()
-        );
-        m_defaultTexturesCreated = true;
-        m_logger->log(LogLevel::Info, "Default textures created - white: view=%p sampler=%p, normal: view=%p sampler=%p, metalRough: view=%p sampler=%p",
-            (void*)m_defaultTextures.white.view, (void*)m_defaultTextures.white.sampler,
-            (void*)m_defaultTextures.normal.view, (void*)m_defaultTextures.normal.sampler,
-            (void*)m_defaultTextures.metallicRoughness.view, (void*)m_defaultTextures.metallicRoughness.sampler);
     }
 
     // The texture behind each of the layout's image bindings, from the
-    // material or a fallback.
-    struct BoundTexture { uint32_t binding; VkImageView view; VkSampler sampler; };
-    std::vector<BoundTexture> bound;
-    bound.reserve(layoutDesc->bindings.size());
-    for (const auto& binding : layoutDesc->bindings) {
-        // Type is a string: "combined_image_sampler"
-        if (binding.type != "combined_image_sampler") continue;
-
-        const Shoonyakasha::GPUTexture* gpuTex = nullptr;
-        auto texIt = material->textures.find(binding.name);
+    // material or its fallback.
+    MaterialTextureKey key;
+    for (const auto& image : plan.materialImages) {
+        const Shoonyakasha::GPUTexture* gpuTex = image.fallback;
+        auto texIt = material->textures.find(*image.name);
         if (texIt != material->textures.end() && texIt->second.isValid()) {
             gpuTex = &texIt->second;
-        } else if (binding.name == "albedoMap" || binding.name == "baseColorMap") {
-            gpuTex = &m_defaultTextures.white;
-        } else if (binding.name == "normalMap") {
-            gpuTex = &m_defaultTextures.normal;
-        } else if (binding.name == "metallicRoughnessMap" || binding.name == "aoMap") {
-            gpuTex = &m_defaultTextures.metallicRoughness;
-        } else {
-            gpuTex = &m_defaultTextures.white;  // Generic fallback
         }
-
         if (!gpuTex || !gpuTex->isValid()) {
-            m_logger->log(LogLevel::Warning, "bindMaterialTextures: Skipping invalid texture for binding '%s'", binding.name.c_str());
+            m_logger->logEvery(5.0f, LogLevel::Warning, "bindMaterialTextures: Skipping invalid texture for binding '%s'",
+                               image.name->c_str());
             continue;
         }
         if (gpuTex->view == VK_NULL_HANDLE || gpuTex->sampler == VK_NULL_HANDLE) {
-            m_logger->log(LogLevel::Error, "bindMaterialTextures: Texture '%s' has null view or sampler! view=%p sampler=%p",
-                binding.name.c_str(), (void*)gpuTex->view, (void*)gpuTex->sampler);
+            m_logger->logEvery(5.0f, LogLevel::Error, "bindMaterialTextures: Texture '%s' has null view or sampler! view=%p sampler=%p",
+                               image.name->c_str(), (void*)gpuTex->view, (void*)gpuTex->sampler);
             continue;
         }
-        bound.push_back({binding.binding, gpuTex->view, gpuTex->sampler});
+        key.textures[key.count++] = {image.binding, gpuTex->view, gpuTex->sampler};
     }
 
     // Sets are shared by what they hold: entities whose materials bind the
     // same textures under the same layout use one set. They are written once
     // and never changed, so frames in flight can share them too.
-    std::string key = descriptorSetName;
-    key.push_back('\0');
-    auto append = [&key](const auto& value) {
-        key.append(reinterpret_cast<const char*>(&value), sizeof(value));
-    };
-    for (const auto& b : bound) {    // field by field: the struct has padding
-        append(b.binding);
-        append(b.view);
-        append(b.sampler);
-    }
-
+    auto& sets = *static_cast<MaterialSetMap*>(plan.materialSets);
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-    auto cached = m_materialTextureSets.find(key);
-    if (cached != m_materialTextureSets.end()) {
+    auto cached = sets.find(key);
+    if (cached != sets.end()) {
         descriptorSet = cached->second;
     } else {
-        // Find the compiled descriptor set layout by looking at passes
-        VkDescriptorSetLayout vkLayout = VK_NULL_HANDLE;
-        for (const auto& compiledPass : m_compiled.compiledPasses) {
-            const auto& passDecl = m_builder.getPassDeclarations()[compiledPass.declIndex];
-            for (size_t i = 0; i < passDecl.descriptorSetRefs.size(); ++i) {
-                if (passDecl.descriptorSetRefs[i] == descriptorSetName) {
-                    if (i < compiledPass.descriptorSetLayouts.size()) {
-                        vkLayout = compiledPass.descriptorSetLayouts[i];
-                    }
-                    break;
-                }
-            }
-            if (vkLayout != VK_NULL_HANDLE) break;
-        }
-
-        if (vkLayout == VK_NULL_HANDLE) {
-            m_logger->log(LogLevel::Warning, "bindMaterialTextures: Compiled layout '%s' not found in any pass", descriptorSetName.c_str());
-            return;
-        }
-
-        descriptorSet = allocateMaterialDescriptorSet(vkLayout);
+        descriptorSet = allocateMaterialDescriptorSet(plan.materialLayout);
         if (descriptorSet == VK_NULL_HANDLE) {
-            m_logger->log(LogLevel::Error, "bindMaterialTextures: Failed to allocate descriptor set");
+            m_logger->logEvery(5.0f, LogLevel::Error, "bindMaterialTextures: Failed to allocate descriptor set");
             return;
         }
 
-        std::vector<VkDescriptorImageInfo> imageInfos(bound.size());
-        std::vector<VkWriteDescriptorSet> writes(bound.size());
-        for (size_t i = 0; i < bound.size(); ++i) {
+        std::array<VkDescriptorImageInfo, EntityBindingPlan::kMaxMaterialImages> imageInfos{};
+        std::array<VkWriteDescriptorSet, EntityBindingPlan::kMaxMaterialImages> writes{};
+        for (uint32_t i = 0; i < key.count; ++i) {
             imageInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfos[i].imageView = bound[i].view;
-            imageInfos[i].sampler = bound[i].sampler;
+            imageInfos[i].imageView = key.textures[i].view;
+            imageInfos[i].sampler = key.textures[i].sampler;
             writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[i].dstSet = descriptorSet;
-            writes[i].dstBinding = bound[i].binding;
+            writes[i].dstBinding = key.textures[i].binding;
             writes[i].dstArrayElement = 0;
             writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             writes[i].descriptorCount = 1;
             writes[i].pImageInfo = &imageInfos[i];
         }
-        if (!writes.empty()) {
-            vkUpdateDescriptorSets(m_device.getLogicalDevice(),
-                                    static_cast<uint32_t>(writes.size()),
-                                    writes.data(), 0, nullptr);
+        if (key.count > 0) {
+            vkUpdateDescriptorSets(m_device.getLogicalDevice(), key.count, writes.data(), 0, nullptr);
         }
-        m_materialTextureSets.emplace(std::move(key), descriptorSet);
+        sets.emplace(key, descriptorSet);
     }
 
-    // Bound where this pass lists the set, which need not be where other
-    // passes list it.
-    const auto setIndex = descriptorSetIndexIn(pass, descriptorSetName);
-    if (descriptorSet != VK_NULL_HANDLE && setIndex) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pass.pipelineLayout,
-                                *setIndex, 1, &descriptorSet, 0, nullptr);
+    // Draws in a row that share a material keep the set already bound.
+    if (descriptorSet != plan.lastMaterialSet) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
+                                plan.materialSetIndex, 1, &descriptorSet, 0, nullptr);
+        plan.lastMaterialSet = descriptorSet;
     }
 }
 
@@ -2512,15 +2542,35 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
 // 骨之繫 — The binding of bones
 // ════════════════════════════════════════════════════════════════════
 
+bool RenderGraph::planSkeleton(const std::string& name, const CompiledPass& pass, EntityBindingPlan& plan) {
+    if (!m_ecsBindingEnabled || !m_builder.getDescriptorSetLayout(name)) return false;
+    const auto setIndex = descriptorSetIndexIn(pass, name);
+    plan.skeletonLayout = compiledSetLayout(name);
+    if (!setIndex || plan.skeletonLayout == VK_NULL_HANDLE) return false;
+    plan.skeletonSetIndex = *setIndex;
+    plan.skeletonLayoutHash = std::hash<std::string>{}(name);
+    plan.skeleton = true;
+    return true;
+}
+
 void RenderGraph::bindSkeletonSSBO(entt::entity entity,
                                    entt::registry& registry,
                                    const std::string& descriptorSetName,
                                    VkCommandBuffer cmd,
                                    const CompiledPass& pass,
                                    uint32_t frameIndex) {
-    if (!m_ecsBindingEnabled) {
-        return;
-    }
+    EntityBindingPlan plan;
+    if (!planSkeleton(descriptorSetName, pass, plan)) return;
+    bindSkeletonSSBO(entity, registry, plan, cmd, pass.pipelineLayout, frameIndex);
+}
+
+void RenderGraph::bindSkeletonSSBO(entt::entity entity,
+                                   entt::registry& registry,
+                                   EntityBindingPlan& plan,
+                                   VkCommandBuffer cmd,
+                                   VkPipelineLayout pipelineLayout,
+                                   uint32_t frameIndex) {
+    if (!plan.skeleton) return;
 
     // Get SkeletonComponent from entity
     auto* skeleton = registry.try_get<Shoonyakasha::SkeletonComponent>(entity);
@@ -2528,52 +2578,22 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
         return;
     }
 
-    // Get the descriptor set layout definition
-    const DescriptorSetLayoutDesc* layoutDesc = m_builder.getDescriptorSetLayout(descriptorSetName);
-    if (!layoutDesc) {
-        return;
-    }
-
-    // Create cache key (same mechanism as material textures)
+    // One set per entity, layout and frame in flight
     MaterialDescriptorCacheKey cacheKey;
     cacheKey.entityId = static_cast<uint32_t>(entity);
-    cacheKey.layoutHash = std::hash<std::string>{}(descriptorSetName);
+    cacheKey.layoutHash = plan.skeletonLayoutHash;
     cacheKey.frameIndex = frameIndex;
 
-    // Check cache
-    auto cacheIt = m_materialDescriptorCache.find(cacheKey);
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-
+    auto cacheIt = m_materialDescriptorCache.find(cacheKey);
     if (cacheIt != m_materialDescriptorCache.end()) {
-        // Cached — but we still need to update the buffer info since bone matrices change every frame
         descriptorSet = cacheIt->second;
     } else {
-        // Find the compiled descriptor set layout and set index
-        VkDescriptorSetLayout vkLayout = VK_NULL_HANDLE;
-
-        for (const auto& pass : m_compiled.compiledPasses) {
-            const auto& passDecl = m_builder.getPassDeclarations()[pass.declIndex];
-            for (size_t i = 0; i < passDecl.descriptorSetRefs.size(); ++i) {
-                if (passDecl.descriptorSetRefs[i] == descriptorSetName) {
-                    if (i < pass.descriptorSetLayouts.size()) {
-                        vkLayout = pass.descriptorSetLayouts[i];
-                    }
-                    break;
-                }
-            }
-            if (vkLayout != VK_NULL_HANDLE) break;
-        }
-
-        if (vkLayout == VK_NULL_HANDLE) {
-            return;
-        }
-
-        descriptorSet = allocateMaterialDescriptorSet(vkLayout);
+        descriptorSet = allocateMaterialDescriptorSet(plan.skeletonLayout);
         if (descriptorSet == VK_NULL_HANDLE) {
-            m_logger->log(LogLevel::Error, "bindSkeletonSSBO: Failed to allocate descriptor set");
+            m_logger->logEvery(5.0f, LogLevel::Error, "bindSkeletonSSBO: Failed to allocate descriptor set");
             return;
         }
-
         m_materialDescriptorCache[cacheKey] = descriptorSet;
     }
 
@@ -2600,11 +2620,17 @@ void RenderGraph::bindSkeletonSSBO(entt::entity entity,
         m_skeletonSetBuffers[descriptorSet] = contents;
     }
 
-    const auto setIndex = descriptorSetIndexIn(pass, descriptorSetName);
-    if (descriptorSet != VK_NULL_HANDLE && setIndex) {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pass.pipelineLayout,
-                                *setIndex, 1, &descriptorSet, 0, nullptr);
-    }
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
+                            plan.skeletonSetIndex, 1, &descriptorSet, 0, nullptr);
+}
+
+RenderGraph::EntityBindingPlan RenderGraph::planEntityBindings(const CompiledPass& pass) {
+    EntityBindingPlan plan;
+    const auto& binding = pass.entityDataBinding;
+    if (!binding.perDraw.layoutRef.empty())  planPerDraw(binding.perDraw.layoutRef, plan);
+    if (!binding.material.layoutRef.empty()) planMaterial(binding.material.layoutRef, pass, plan);
+    if (!binding.skeleton.layoutRef.empty()) planSkeleton(binding.skeleton.layoutRef, pass, plan);
+    return plan;
 }
 
 void RenderGraph::recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex) {

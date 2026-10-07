@@ -597,6 +597,164 @@ ResolvedValue DotPathResolver::resolveConstPath(std::string_view path) const {
 }
 
 // ============================================================================
+// Compiled Paths
+// ============================================================================
+
+CompiledPath DotPathResolver::compile(const std::string& path) const {
+    using Op = CompiledPath::Op;
+    CompiledPath out;
+    auto make = [&](Op op, std::string_view key = {}) {
+        out.op = op;
+        out.key.assign(key.data(), key.size());
+        return out;
+    };
+
+    switch (getPathRoot(path)) {
+        case PathRoot::Const:
+            out.constant = resolveConstPath(path);
+            return make(Op::Constant);
+
+        case PathRoot::Pass: {
+            const auto name = stripPrefix(path, "pass.");
+            if (name == "repeatIndex") return make(Op::PassRepeatIndex);
+            if (name == "repeatCount") return make(Op::PassRepeatCount);
+            if (name == "extent")      return make(Op::PassExtent);
+            if (name == "texelSize")   return make(Op::PassTexelSize);
+            return out;
+        }
+
+        case PathRoot::Entity: {
+            // Only the exact shapes below; anything longer or unknown stays
+            // Generic, so its string resolution decides what it means.
+            const auto parts = splitPath(stripPrefix(path, "entity."));
+            if (parts.size() == 2) {
+                const auto& a = parts[0];
+                const auto& b = parts[1];
+                if (a == "transform") {
+                    if (b == "worldMatrix")         return make(Op::WorldMatrix);
+                    if (b == "previousWorldMatrix") return make(Op::PreviousWorldMatrix);
+                    if (b == "localMatrix")         return make(Op::LocalMatrix);
+                    if (b == "position")            return make(Op::Position);
+                    if (b == "rotation")            return make(Op::Rotation);
+                    if (b == "scale")               return make(Op::Scale);
+                } else if (a == "material") {
+                    if (b == "alphaCutoff") return make(Op::AlphaCutoff);
+                    if (b == "alphaMode")   return make(Op::AlphaMode);
+                    if (b == "doubleSided") return make(Op::DoubleSided);
+                } else if (a == "mesh") {
+                    if (b == "vertexCount") return make(Op::VertexCount);
+                    if (b == "indexCount")  return make(Op::IndexCount);
+                } else if (a == "skeleton") {
+                    if (b == "hasSkeleton") return make(Op::HasSkeleton);
+                    if (b == "jointCount")  return make(Op::JointCount);
+                }
+            } else if (parts.size() == 3 && parts[0] == "material") {
+                if (parts[1] == "params")   return make(Op::MaterialParam, parts[2]);
+                if (parts[1] == "textures") return make(Op::MaterialTexture, parts[2]);
+            } else if (parts.size() == 4 && parts[0] == "material" && parts[1] == "textures" &&
+                       parts[3] == "exists") {
+                return make(Op::MaterialTextureExists, parts[2]);
+            }
+            return out;
+        }
+
+        default:
+            return out;
+    }
+}
+
+ResolvedValue DotPathResolver::resolve(const CompiledPath& compiled,
+                                       const std::string& path,
+                                       const SceneContext& scene,
+                                       entt::entity entity,
+                                       entt::registry& registry) const {
+    using Op = CompiledPath::Op;
+    switch (compiled.op) {
+        case Op::Generic:  return resolve(path, scene, entity, registry);
+        case Op::Constant: return compiled.constant;
+
+        case Op::PassRepeatIndex: return ResolvedValue(scene.pass.repeatIndex);
+        case Op::PassRepeatCount: return ResolvedValue(scene.pass.repeatCount);
+        case Op::PassExtent:      return ResolvedValue(scene.pass.extent);
+        case Op::PassTexelSize: {
+            const auto& e = scene.pass.extent;
+            return ResolvedValue(glm::vec2(e.x > 0.0f ? 1.0f / e.x : 0.0f, e.y > 0.0f ? 1.0f / e.y : 0.0f));
+        }
+        default: break;
+    }
+
+    // Entity paths, with resolveEntityPath's checks.
+    if (entity == entt::null || !registry.valid(entity)) return ResolvedValue();
+
+    switch (compiled.op) {
+        case Op::WorldMatrix: case Op::PreviousWorldMatrix: case Op::LocalMatrix:
+        case Op::Position: case Op::Rotation: case Op::Scale: {
+            const auto* t = registry.try_get<ECS::TransformComponent>(entity);
+            if (!t) return ResolvedValue();
+            switch (compiled.op) {
+                case Op::WorldMatrix:         return ResolvedValue(t->worldMatrix);
+                case Op::PreviousWorldMatrix: return ResolvedValue(t->previousWorldMatrix);
+                case Op::LocalMatrix:         return ResolvedValue(t->localMatrix);
+                case Op::Position:            return ResolvedValue(t->position);
+                case Op::Rotation:  return ResolvedValue(glm::vec4(t->rotation.x, t->rotation.y, t->rotation.z, 0.0f));
+                default:                      return ResolvedValue(t->scale);
+            }
+        }
+
+        case Op::MaterialParam: case Op::MaterialTexture: case Op::MaterialTextureExists:
+        case Op::AlphaCutoff: case Op::AlphaMode: case Op::DoubleSided: {
+            const auto* m = registry.try_get<MaterialComponentV5>(entity);
+            if (!m) return ResolvedValue();
+            switch (compiled.op) {
+                case Op::MaterialParam: {
+                    const auto it = m->params.find(compiled.key);
+                    if (it == m->params.end()) return ResolvedValue();
+                    const auto& param = it->second;
+                    switch (param.type) {
+                        case MaterialParam::Type::Float: return ResolvedValue(param.as<float>());
+                        case MaterialParam::Type::Vec2:  return ResolvedValue(param.as<glm::vec2>());
+                        case MaterialParam::Type::Vec3:  return ResolvedValue(param.as<glm::vec3>());
+                        case MaterialParam::Type::Vec4:  return ResolvedValue(param.as<glm::vec4>());
+                        case MaterialParam::Type::Mat3:  return ResolvedValue(param.as<glm::mat3>());
+                        case MaterialParam::Type::Mat4:  return ResolvedValue(param.as<glm::mat4>());
+                        case MaterialParam::Type::Int:   return ResolvedValue(param.as<int32_t>());
+                        case MaterialParam::Type::UInt:  return ResolvedValue(param.as<uint32_t>());
+                    }
+                    return ResolvedValue();
+                }
+                case Op::MaterialTexture: {
+                    const auto it = m->textures.find(compiled.key);
+                    return it != m->textures.end() ? ResolvedValue(it->second) : ResolvedValue();
+                }
+                case Op::MaterialTextureExists: {
+                    const auto it = m->textures.find(compiled.key);
+                    return ResolvedValue(it != m->textures.end() && it->second.exists ? 1.0f : 0.0f);
+                }
+                case Op::AlphaCutoff: return ResolvedValue(m->alphaCutoff);
+                case Op::AlphaMode:   return ResolvedValue(static_cast<uint32_t>(m->alphaMode));
+                default:              return ResolvedValue(m->doubleSided ? 1.0f : 0.0f);
+            }
+        }
+
+        case Op::VertexCount: case Op::IndexCount: {
+            const auto* mesh = registry.try_get<MeshComponent>(entity);
+            if (!mesh) return ResolvedValue();
+            return compiled.op == Op::VertexCount ? ResolvedValue(mesh->vertexCount) : ResolvedValue(mesh->indexCount);
+        }
+
+        case Op::HasSkeleton:
+            return ResolvedValue(registry.all_of<SkeletonComponent>(entity) ? 1.0f : 0.0f);
+        case Op::JointCount: {
+            const auto* skeleton = registry.try_get<SkeletonComponent>(entity);
+            return skeleton ? ResolvedValue(skeleton->jointCount()) : ResolvedValue();
+        }
+
+        default:
+            return resolve(path, scene, entity, registry);
+    }
+}
+
+// ============================================================================
 // Pass Path Resolution
 // ============================================================================
 
@@ -734,9 +892,9 @@ void BufferLayoutResolver::fillEntityBuffer(void* buffer,
                                             const SceneContext& scene,
                                             entt::entity entity,
                                             entt::registry& registry) const {
+    // Called for every draw: fields use their compiled paths.
     for (const auto& field : layout.fields) {
-        auto value = m_pathResolver.resolve(field.source, scene, entity, registry);
-        writeField(buffer, field, value);
+        writeField(buffer, field, m_pathResolver.resolve(field.compiled, field.source, scene, entity, registry));
     }
 }
 
