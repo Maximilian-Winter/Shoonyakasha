@@ -92,37 +92,16 @@ FrameGraphExecutor::~FrameGraphExecutor() {
 
 namespace {
 
-/// Record image barriers, each over its own subresource range.
-void recordImageBarriers(VulkanCommandBuilder& cmd,
-                         const std::vector<BarrierInfo>& barriers,
-                         const FrameGraphCompiler::CompileResult& compiled,
-                         const std::vector<ResourceDeclaration>& resources,
-                         FrameGraphDebugger* debugger)
-{
-    for (const auto& barrier : barriers) {
-        if (!barrier.resource.valid()) continue;
-        const auto* physImg = std::get_if<PhysicalImage>(
-            &compiled.physicalResources[barrier.resource.index]);
-        if (!physImg || physImg->vkImage == VK_NULL_HANDLE) continue;
-
-        if (debugger) {
-            std::string resourceName = (barrier.resource.index < resources.size())
-                ? resources[barrier.resource.index].name : "unknown";
-            bool isQueueTransfer = barrier.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED;
-            debugger->onBarrierInserted(resourceName, barrier.oldLayout,
-                                        barrier.newLayout, isQueueTransfer);
-        }
-
-        // Outside a queue transfer the family indices hold
-        // VK_QUEUE_FAMILY_IGNORED, so one call covers both cases.
-        cmd.imageBarrier(
-            physImg->vkImage,
-            barrier.oldLayout, barrier.newLayout,
-            barrier.srcStage,  barrier.dstStage,
-            barrier.srcAccess, barrier.dstAccess,
-            barrier.range,
-            barrier.srcQueueFamilyIndex, barrier.dstQueueFamilyIndex);
-    }
+/// A synchronization2 stage mask for a planned one. The legacy bits keep
+/// their values; TOP_OF_PIPE as a source and BOTTOM_OF_PIPE as a destination
+/// mean "nothing", which synchronization2 spells NONE.
+VkPipelineStageFlags2 srcStage2(VkPipelineStageFlags stages) {
+    return stages == VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT ? VK_PIPELINE_STAGE_2_NONE
+                                                       : static_cast<VkPipelineStageFlags2>(stages);
+}
+VkPipelineStageFlags2 dstStage2(VkPipelineStageFlags stages) {
+    return stages == VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT ? VK_PIPELINE_STAGE_2_NONE
+                                                          : static_cast<VkPipelineStageFlags2>(stages);
 }
 
 /// Begin dynamic rendering into the pass's attachments. Returns false, having
@@ -131,7 +110,8 @@ void recordImageBarriers(VulkanCommandBuilder& cmd,
 bool beginRendering(VkCommandBuffer commandBuffer,
                     const CompiledPass& pass,
                     const FrameGraphCompiler::CompileResult& compiled,
-                    const VkRect2D& area)
+                    const VkRect2D& area,
+                    std::vector<VkRenderingAttachmentInfo>& colors)
 {
     if (!pass.rendersAttachments() || area.extent.width == 0 || area.extent.height == 0) {
         return false;
@@ -155,7 +135,7 @@ bool beginRendering(VkCommandBuffer commandBuffer,
         return view != VK_NULL_HANDLE;
     };
 
-    std::vector<VkRenderingAttachmentInfo> colors(pass.colorAttachments.size());
+    colors.resize(pass.colorAttachments.size());
     for (size_t i = 0; i < colors.size(); ++i) {
         if (!toInfo(pass.colorAttachments[i], colors[i])) return false;
     }
@@ -175,6 +155,68 @@ bool beginRendering(VkCommandBuffer commandBuffer,
 }
 
 } // namespace
+
+void FrameGraphExecutor::recordBarriers(VkCommandBuffer commandBuffer,
+                                        const std::vector<BarrierInfo>& barriers,
+                                        const MemoryBarrierInfo* memory,
+                                        const FrameGraphCompiler::CompileResult& compiled,
+                                        const std::vector<ResourceDeclaration>& resources,
+                                        bool notifyDebugger)
+{
+    m_imageBarriers.clear();
+    for (const auto& barrier : barriers) {
+        if (!barrier.resource.valid()) continue;
+        const auto* physImg = std::get_if<PhysicalImage>(
+            &compiled.physicalResources[barrier.resource.index]);
+        if (!physImg || physImg->vkImage == VK_NULL_HANDLE) continue;
+
+        if (m_debugger && notifyDebugger) {
+            std::string resourceName = (barrier.resource.index < resources.size())
+                ? resources[barrier.resource.index].name : "unknown";
+            bool isQueueTransfer = barrier.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED;
+            m_debugger->onBarrierInserted(resourceName, barrier.oldLayout,
+                                          barrier.newLayout, isQueueTransfer);
+        }
+
+        // Outside a queue transfer the family indices hold
+        // VK_QUEUE_FAMILY_IGNORED, so one form covers both cases.
+        VkImageMemoryBarrier2 b{};
+        b.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        b.srcStageMask        = srcStage2(barrier.srcStage);
+        b.srcAccessMask       = barrier.srcAccess;
+        b.dstStageMask        = dstStage2(barrier.dstStage);
+        b.dstAccessMask       = barrier.dstAccess;
+        b.oldLayout           = barrier.oldLayout;
+        b.newLayout           = barrier.newLayout;
+        b.srcQueueFamilyIndex = barrier.srcQueueFamilyIndex;
+        b.dstQueueFamilyIndex = barrier.dstQueueFamilyIndex;
+        b.image               = physImg->vkImage;
+        b.subresourceRange    = barrier.range;
+        m_imageBarriers.push_back(b);
+    }
+
+    VkMemoryBarrier2 memoryBarrier{};
+    const bool hasMemory = memory && !memory->empty();
+    if (hasMemory) {
+        memoryBarrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+        memoryBarrier.srcStageMask  = srcStage2(memory->srcStage);
+        memoryBarrier.srcAccessMask = memory->srcAccess;
+        memoryBarrier.dstStageMask  = dstStage2(memory->dstStage);
+        memoryBarrier.dstAccessMask = memory->dstAccess;
+    }
+    if (m_imageBarriers.empty() && !hasMemory) return;
+
+    // One call for the whole set. Each barrier keeps its own stages, so the
+    // GPU waits exactly as long as it did with a call per barrier, but
+    // drivers see one dependency rather than a chain of them.
+    VkDependencyInfo dependency{};
+    dependency.sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency.memoryBarrierCount       = hasMemory ? 1u : 0u;
+    dependency.pMemoryBarriers          = hasMemory ? &memoryBarrier : nullptr;
+    dependency.imageMemoryBarrierCount  = static_cast<uint32_t>(m_imageBarriers.size());
+    dependency.pImageMemoryBarriers     = m_imageBarriers.data();
+    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+}
 
 VkRect2D FrameGraphExecutor::viewportRect(const glm::vec4& fractions, VkExtent2D extent) {
     const auto edge = [](float f, uint32_t size) {
@@ -223,21 +265,53 @@ void FrameGraphExecutor::execute(
         m_debugger->onFrameBegin(frameIndex);
     }
 
+    recordPasses(compiled, builder, compiled.executionOrder, frameIndex, swapchainImageIndex,
+                 commandBuffer, parameters);
+
+    // Notify debugger of frame end
+    if (m_debugger) {
+        m_debugger->onFrameEnd(frameIndex);
+    }
+}
+
+void FrameGraphExecutor::executePasses(
+    const FrameGraphCompiler::CompileResult& compiled,
+    const FrameGraphBuilder& builder,
+    const std::vector<uint32_t>& passIndices,
+    uint32_t frameIndex,
+    uint32_t swapchainImageIndex,
+    VkCommandBuffer commandBuffer,
+    const std::unordered_map<std::string, ParameterValue>* parameters)
+{
+    if (!compiled.valid) {
+        m_logger->log(LogLevel::Error, "Cannot execute invalid frame graph");
+        return;
+    }
+    recordPasses(compiled, builder, passIndices, frameIndex, swapchainImageIndex,
+                 commandBuffer, parameters);
+}
+
+void FrameGraphExecutor::recordPasses(
+    const FrameGraphCompiler::CompileResult& compiled,
+    const FrameGraphBuilder& builder,
+    const std::vector<uint32_t>& passIndices,
+    uint32_t frameIndex,
+    uint32_t swapchainImageIndex,
+    VkCommandBuffer commandBuffer,
+    const std::unordered_map<std::string, ParameterValue>* parameters)
+{
     const auto& passes = builder.getPassDeclarations();
     const auto& resources = builder.getResourceDeclarations();
     VulkanCommandBuilder cmd(m_device, commandBuffer);
 
-    // Track previous pass type for compute→graphics buffer barriers
-    PassType previousPassType = PassType::Graphics;
-
     uint32_t execIdx = 0;
-    for (uint32_t passIdx : compiled.executionOrder) {
+    for (uint32_t passIdx : passIndices) {
         const auto& compiledPass = compiled.compiledPasses[passIdx];
         const auto& passDecl = passes[compiledPass.declIndex];
 
         // Log execution order for debugging pass scheduling (throttled to every 5s)
         m_logger->logEvery(5.0f, LogLevel::Info, "  [pass %u/%u] '%s' (type=%s, exec=%s)",
-            execIdx++, static_cast<uint32_t>(compiled.executionOrder.size()),
+            execIdx++, static_cast<uint32_t>(passIndices.size()),
             passDecl.name.c_str(),
             passDecl.type == PassType::Compute ? "compute" : "graphics",
             passDecl.execution.type.c_str());
@@ -250,31 +324,15 @@ void FrameGraphExecutor::execute(
             m_debugger->onPassBegin(passIdx, passDecl.name, commandBuffer);
         }
 
-        // ── Insert compute→graphics memory barrier for SSBO synchronization ──
-        if (passDecl.type != PassType::Compute && previousPassType == PassType::Compute) {
-            VkMemoryBarrier memBarrier{};
-            memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-
-            vkCmdPipelineBarrier(commandBuffer,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                0,
-                1, &memBarrier,
-                0, nullptr,
-                0, nullptr);
-
-            m_logger->logEvery(5.0f, LogLevel::Info,
-                "  Inserted compute->graphics memory barrier before pass '%s'",
-                passDecl.name.c_str());
+        // ── Queue ownership acquires, on their own: an acquire and a layout
+        // transition of one image in one call would not be ordered ──
+        if (!compiledPass.acquireBarriers.empty()) {
+            recordBarriers(commandBuffer, compiledPass.acquireBarriers, nullptr, compiled, resources, false);
         }
 
-        // ── Insert acquire barriers (queue ownership transfers) ──
-        recordImageBarriers(cmd, compiledPass.acquireBarriers, compiled, resources, nullptr);
-
-        // ── Insert pre-barriers ──
-        recordImageBarriers(cmd, compiledPass.preBarriers, compiled, resources, m_debugger);
+        // ── Image barriers and buffer hazards, in one call ──
+        recordBarriers(commandBuffer, compiledPass.preBarriers, &compiledPass.memoryBarrier,
+                       compiled, resources, true);
 
         // ── Build execution context ──
         PassExecuteContext ctx(cmd);
@@ -303,7 +361,7 @@ void FrameGraphExecutor::execute(
         const VkRect2D area = passDecl.type == PassType::Graphics ? renderArea(passDecl, compiledPass)
                                                                   : VkRect2D{{0, 0}, compiledPass.extent};
         const bool rendering = passDecl.type == PassType::Graphics &&
-                               beginRendering(commandBuffer, compiledPass, compiled, area);
+                               beginRendering(commandBuffer, compiledPass, compiled, area, m_colorAttachments);
 
         // A disabled pass binds and records nothing. Its barriers above and
         // its rendering still run, so its attachments receive their clear
@@ -334,19 +392,20 @@ void FrameGraphExecutor::execute(
         } else if (passDecl.executeFn) {
             // Manual callback takes highest priority
             passDecl.executeFn(ctx);
-        } else if (passDecl.execution.type != "none") {
+        } else if (compiledPass.executionKind != ExecutionKind::None) {
             // Auto-execution based on execution.type
             executeAutoCallback(ctx, passDecl, compiledPass, compiled, builder, parameters, commandBuffer);
         } else {
-            m_logger->log(LogLevel::Warning, "Pass '%s' has no execute callback and execution.type is 'none'",
-                          passDecl.name.c_str());
+            m_logger->logEvery(5.0f, LogLevel::Warning,
+                               "Pass '%s' has no execute callback and execution.type is 'none'",
+                               passDecl.name.c_str());
         }
 
         // ── End rendering, then post-barriers (e.g. to PRESENT_SRC_KHR) ──
         if (rendering) {
             vkCmdEndRendering(commandBuffer);
         }
-        recordImageBarriers(cmd, compiledPass.postBarriers, compiled, resources, m_debugger);
+        recordBarriers(commandBuffer, compiledPass.postBarriers, nullptr, compiled, resources, true);
 
         // Notify debugger of pass end
         if (m_debugger) {
@@ -354,144 +413,6 @@ void FrameGraphExecutor::execute(
         }
 
         cmd.endDebugLabel();
-
-        previousPassType = passDecl.type;
-    }
-
-    // Notify debugger of frame end
-    if (m_debugger) {
-        m_debugger->onFrameEnd(frameIndex);
-    }
-}
-
-void FrameGraphExecutor::executePasses(
-    const FrameGraphCompiler::CompileResult& compiled,
-    const FrameGraphBuilder& builder,
-    const std::vector<uint32_t>& passIndices,
-    uint32_t frameIndex,
-    uint32_t swapchainImageIndex,
-    VkCommandBuffer commandBuffer,
-    const std::unordered_map<std::string, ParameterValue>* parameters)
-{
-    if (!compiled.valid) {
-        m_logger->log(LogLevel::Error, "Cannot execute invalid frame graph");
-        return;
-    }
-
-    const auto& passes = builder.getPassDeclarations();
-    const auto& resources = builder.getResourceDeclarations();
-    VulkanCommandBuilder cmd(m_device, commandBuffer);
-
-    // Track previous pass type for compute→graphics buffer barriers
-    PassType previousPassType = PassType::Graphics;
-
-    for (uint32_t passIdx : passIndices) {
-        const auto& compiledPass = compiled.compiledPasses[passIdx];
-        const auto& passDecl = passes[compiledPass.declIndex];
-
-        // Debug label
-        cmd.beginDebugLabel(passDecl.name, {0.3f, 0.7f, 0.9f, 1.0f});
-
-        // Notify debugger of pass begin
-        if (m_debugger) {
-            m_debugger->onPassBegin(passIdx, passDecl.name, commandBuffer);
-        }
-
-        // ── Insert compute→graphics memory barrier for SSBO synchronization ──
-        if (passDecl.type != PassType::Compute && previousPassType == PassType::Compute) {
-            VkMemoryBarrier memBarrier{};
-            memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-
-            vkCmdPipelineBarrier(commandBuffer,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                0,
-                1, &memBarrier,
-                0, nullptr,
-                0, nullptr);
-
-            m_logger->logEvery(5.0f, LogLevel::Info,
-                "  Inserted compute->graphics memory barrier before pass '%s'",
-                passDecl.name.c_str());
-        }
-
-        // ── Insert acquire barriers (queue ownership transfers) ──
-        recordImageBarriers(cmd, compiledPass.acquireBarriers, compiled, resources, nullptr);
-
-        // ── Insert pre-barriers ──
-        recordImageBarriers(cmd, compiledPass.preBarriers, compiled, resources, m_debugger);
-
-        // ── Build execution context ──
-        PassExecuteContext ctx(cmd);
-        ctx.frameIndex = frameIndex;
-        ctx.swapchainIndex = swapchainImageIndex;
-        ctx.renderExtent = compiledPass.extent;
-        ctx.physicalResourcesPtr = &compiled.physicalResources;
-        ctx.physicalResourceCount = static_cast<uint32_t>(compiled.physicalResources.size());
-        ctx.repeatIndex = passDecl.repeatIndex;
-        ctx.repeatCount = passDecl.repeatCount;
-
-        if (!compiledPass.descriptorSets.empty()) {
-            ctx.descriptorSets = &compiledPass.descriptorSets;
-        }
-        if (compiledPass.pipeline) {
-            ctx.pipeline = compiledPass.pipeline.get();
-            ctx.pipelineLayout = compiledPass.pipelineLayout;
-        }
-        if (compiledPass.computePipeline) {
-            ctx.computePipeline = compiledPass.computePipeline.get();
-            ctx.pipelineLayout = compiledPass.pipelineLayout;
-        }
-
-        // ── Begin rendering for graphics passes ──
-        const VkRect2D area = passDecl.type == PassType::Graphics ? renderArea(passDecl, compiledPass)
-                                                                  : VkRect2D{{0, 0}, compiledPass.extent};
-        const bool rendering = passDecl.type == PassType::Graphics &&
-                               beginRendering(commandBuffer, compiledPass, compiled, area);
-
-        // A disabled pass keeps its barriers and rendering; see execute().
-        const bool active = passDecl.enabled &&
-                            (passDecl.type != PassType::Graphics || area.extent.width > 0);
-
-        // ── Auto-bind pipeline ──
-        if (active && passDecl.type == PassType::Graphics && compiledPass.pipeline) {
-            cmd.bindPipeline(compiledPass.pipeline.get())
-               .setViewport(ViewportState::fromRect(static_cast<float>(area.offset.x),
-                                                    static_cast<float>(area.offset.y),
-                                                    static_cast<float>(area.extent.width),
-                                                    static_cast<float>(area.extent.height)))
-               .setScissor(ScissorState::fromRect(area.offset.x, area.offset.y,
-                                                  area.extent.width, area.extent.height));
-        }
-        else if (active && passDecl.type == PassType::Compute && compiledPass.computePipeline) {
-            compiledPass.computePipeline->bind(commandBuffer);
-        }
-
-        // ── Execute pass (manual callback or auto-execution) ──
-        if (!active) {
-            // Nothing to record.
-        } else if (passDecl.executeFn) {
-            passDecl.executeFn(ctx);
-        } else if (passDecl.execution.type != "none") {
-            executeAutoCallback(ctx, passDecl, compiledPass, compiled, builder, parameters, commandBuffer);
-        }
-
-        // ── End rendering, then post-barriers (e.g. to PRESENT_SRC_KHR) ──
-        if (rendering) {
-            vkCmdEndRendering(commandBuffer);
-        }
-        recordImageBarriers(cmd, compiledPass.postBarriers, compiled, resources, m_debugger);
-
-        // Notify debugger of pass end
-        if (m_debugger) {
-            m_debugger->onPassEnd(passIdx, passDecl.name, commandBuffer);
-        }
-
-        cmd.endDebugLabel();
-
-        previousPassType = passDecl.type;
     }
 }
 
@@ -512,22 +433,33 @@ void FrameGraphExecutor::executeAutoCallback(
     const auto& exec = passDecl.execution;
 
     // ── Auto-bind descriptor sets if enabled ──
+    // Consecutive sets go down in one call; a missing set ends a run.
     if (exec.bindDescriptorSets && !compiledPass.descriptorSets.empty()) {
         VkPipelineBindPoint bindPoint = (passDecl.type == PassType::Compute)
             ? VK_PIPELINE_BIND_POINT_COMPUTE
             : VK_PIPELINE_BIND_POINT_GRAPHICS;
 
-        for (uint32_t i = 0; i < compiledPass.descriptorSets.size(); ++i) {
-            auto& set = compiledPass.descriptorSets[i];
-            if (set) {
-                const auto& sets = set->getSets();
-                if (ctx.frameIndex < sets.size()) {
-                    VkDescriptorSet ds = sets[ctx.frameIndex];
-                    vkCmdBindDescriptorSets(commandBuffer, bindPoint,
-                        compiledPass.pipelineLayout, i, 1, &ds, 0, nullptr);
-                }
+        uint32_t first = 0;
+        m_descriptorSets.clear();
+        auto flush = [&]() {
+            if (!m_descriptorSets.empty()) {
+                vkCmdBindDescriptorSets(commandBuffer, bindPoint, compiledPass.pipelineLayout, first,
+                                        static_cast<uint32_t>(m_descriptorSets.size()),
+                                        m_descriptorSets.data(), 0, nullptr);
+                m_descriptorSets.clear();
             }
+        };
+        for (uint32_t i = 0; i < compiledPass.descriptorSets.size(); ++i) {
+            const auto& set = compiledPass.descriptorSets[i];
+            const bool bound = set && ctx.frameIndex < set->getSets().size();
+            if (!bound) {
+                flush();
+                continue;
+            }
+            if (m_descriptorSets.empty()) first = i;
+            m_descriptorSets.push_back(set->getSets()[ctx.frameIndex]);
         }
+        flush();
     }
 
     // ── Auto-push constants from named parameters ──
@@ -545,12 +477,12 @@ void FrameGraphExecutor::executeAutoCallback(
     };
 
     if (!passDecl.pushConstants.empty()) {
-        for (const auto& pc : passDecl.pushConstants) {
-            // Convert stage strings to VkShaderStageFlags
-            VkShaderStageFlags stageFlags = 0;
-            for (const auto& stage : pc.stages) {
-                stageFlags |= JsonUtils::stringToShaderStage(stage);
-            }
+        for (size_t pci = 0; pci < passDecl.pushConstants.size(); ++pci) {
+            const auto& pc = passDecl.pushConstants[pci];
+            // Stage flags were resolved from the JSON strings at compile time
+            const VkShaderStageFlags stageFlags = pci < compiledPass.pushConstantStages.size()
+                ? compiledPass.pushConstantStages[pci]
+                : JsonUtils::stringsToShaderStages(pc.stages);
 
             // Push each named binding
             for (const auto& binding : pc.bindings) {
@@ -600,11 +532,13 @@ void FrameGraphExecutor::executeAutoCallback(
     };
 
     // ── Execute based on type ──
-    if (exec.type == "fullscreen") {
+    switch (compiledPass.executionKind) {
+    case ExecutionKind::Fullscreen:
         // Fullscreen triangle draw
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-    }
-    else if (exec.type == "draw") {
+        break;
+
+    case ExecutionKind::Draw: {
         // Custom draw with specified counts
         uint32_t vertexCount = exec.vertexCount.value;
 
@@ -623,12 +557,15 @@ void FrameGraphExecutor::executeAutoCallback(
 
         vkCmdDraw(commandBuffer, vertexCount, exec.instanceCount,
                   exec.firstVertex, exec.firstInstance);
+        break;
     }
-    else if (exec.type == "compute_dispatch" || exec.type == "compute_image") {
+
+    case ExecutionKind::ComputeDispatch:
+    case ExecutionKind::ComputeImage: {
         // Calculate dispatch dimensions
         uint32_t groupX = 1, groupY = 1, groupZ = 1;
 
-        if (exec.type == "compute_image") {
+        if (compiledPass.executionKind == ExecutionKind::ComputeImage) {
             // Dispatch based on output image dimensions
             groupX = (ctx.renderExtent.width + exec.workgroupSize[0] - 1) / exec.workgroupSize[0];
             groupY = (ctx.renderExtent.height + exec.workgroupSize[1] - 1) / exec.workgroupSize[1];
@@ -663,26 +600,34 @@ void FrameGraphExecutor::executeAutoCallback(
             passDecl.name.c_str(), groupX, groupY, groupZ);
 
         vkCmdDispatch(commandBuffer, groupX, groupY, groupZ);
+        break;
     }
-    else if (exec.type == "scene_geometry" || isEntityGeometryExecutionType(exec.type)) {
+
+    case ExecutionKind::SceneRenderer:
         // Call scene renderer callback if registered. For the entity geometry
         // types RenderGraph auto-registers it, using the same
-        // isEntityGeometryExecutionType list as this branch.
+        // isEntityGeometryExecutionType list as executionKindOf.
         if (passDecl.sceneRendererFn) {
             passDecl.sceneRendererFn(ctx);
         } else {
-            m_logger->log(LogLevel::Warning,
+            m_logger->logEvery(5.0f, LogLevel::Warning,
                 "Pass '%s' has execution.type='%s' but no scene renderer registered",
                 passDecl.name.c_str(), exec.type.c_str());
         }
-    }
-    else if (!exec.type.empty() && exec.type != "manual") {
+        break;
+
+    case ExecutionKind::Unknown:
         // Falling off the end of this chain used to be silent: a pass with a
         // typo'd or unsupported execution type simply drew nothing, with no
         // diagnostic anywhere. That is how sprite_geometry went unnoticed.
         m_logger->logEvery(5.0f, LogLevel::Warning,
             "Pass '%s' has unrecognised execution.type='%s' — nothing was recorded for it",
             passDecl.name.c_str(), exec.type.c_str());
+        break;
+
+    case ExecutionKind::None:
+    case ExecutionKind::Manual:
+        break;
     }
 }
 

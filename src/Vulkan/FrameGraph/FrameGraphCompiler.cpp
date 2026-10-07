@@ -19,6 +19,7 @@
 #include "Core/Logger.h"
 
 #include <fstream>
+#include <map>
 #include <queue>
 #include <unordered_set>
 #include <set>
@@ -31,6 +32,17 @@ namespace FrameGraph {
 
 FrameGraphCompiler::~FrameGraphCompiler() {
     delete m_logger;
+}
+
+ExecutionKind executionKindOf(const std::string& type) {
+    if (type == "none")             return ExecutionKind::None;
+    if (type == "fullscreen")       return ExecutionKind::Fullscreen;
+    if (type == "draw")             return ExecutionKind::Draw;
+    if (type == "compute_dispatch") return ExecutionKind::ComputeDispatch;
+    if (type == "compute_image")    return ExecutionKind::ComputeImage;
+    if (type == "manual" || type.empty()) return ExecutionKind::Manual;
+    if (type == "scene_geometry" || isEntityGeometryExecutionType(type)) return ExecutionKind::SceneRenderer;
+    return ExecutionKind::Unknown;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -275,6 +287,7 @@ bool FrameGraphCompiler::createAttachments(
     const std::vector<PassDeclaration>& passes,
     std::vector<PhysicalResource>& physResources,
     const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<std::vector<AttachmentOps>>& attachmentOps,
     std::string& outError)
 {
     for (uint32_t execIdx : executionOrder) {
@@ -303,8 +316,12 @@ bool FrameGraphCompiler::createAttachments(
             continue;
         }
 
-        for (const auto& output : passDecl.outputs) {
+        for (size_t oi = 0; oi < passDecl.outputs.size(); ++oi) {
+            const auto& output = passDecl.outputs[oi];
             if (!output.handle.valid() || !isAttachmentUsage(output.usage)) continue;
+            const AttachmentOps ops = compiled.declIndex < attachmentOps.size() &&
+                                      oi < attachmentOps[compiled.declIndex].size()
+                                    ? attachmentOps[compiled.declIndex][oi] : AttachmentOps{};
             const uint32_t ri = output.handle.index;
             auto* physImg = std::get_if<PhysicalImage>(&physResources[ri]);
             if (!physImg) continue;
@@ -317,11 +334,16 @@ bool FrameGraphCompiler::createAttachments(
             att.resource = output.handle;
             att.format   = physImg->format;
             att.layout   = usageToLayout(output.usage);
-            att.loadOp   = output.hasClearValue ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+            // Loads of contents nothing wrote this frame, and stores nothing
+            // reads, cost bandwidth for nothing; the plan finds both.
+            att.loadOp   = output.hasClearValue ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                         : ops.discardLoad      ? VK_ATTACHMENT_LOAD_OP_DONT_CARE
+                                                : VK_ATTACHMENT_LOAD_OP_LOAD;
             // A read-only depth attachment must keep its contents for later
             // readers; STORE_OP_NONE leaves them untouched without writing.
-            att.storeOp  = output.usage == ResourceUsage::DepthStencilReadOnly
-                         ? VK_ATTACHMENT_STORE_OP_NONE : VK_ATTACHMENT_STORE_OP_STORE;
+            att.storeOp  = output.usage == ResourceUsage::DepthStencilReadOnly ? VK_ATTACHMENT_STORE_OP_NONE
+                         : ops.discardStore ? VK_ATTACHMENT_STORE_OP_DONT_CARE
+                                            : VK_ATTACHMENT_STORE_OP_STORE;
             if (output.hasClearValue) {
                 att.clearValue = output.clearValue;
             } else if (isDepth) {
@@ -424,6 +446,11 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
             scheduled[i].isImage = true;
             scheduled[i].shape = img->shape;
             scheduled[i].aspect = img->aspect;
+            // As describeResources has it. Without this a persistent image's
+            // first barrier each frame came from UNDEFINED, which lets the
+            // driver drop what initializePersistentImages and the last frame
+            // left in it.
+            scheduled[i].persistent = !resources[i].imported && resources[i].imageDesc.persistent;
             auto importIt = importedImages.find(i);
             scheduled[i].presentFallback = resources[i].imported && importIt != importedImages.end() &&
                                            importIt->second.views.size() > 1;
@@ -465,7 +492,12 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     // Stage 4: Initialize compiled passes
     result.compiledPasses.resize(passes.size());
     for (uint32_t i = 0; i < passes.size(); ++i) {
-        result.compiledPasses[i].declIndex = i;
+        auto& compiled = result.compiledPasses[i];
+        compiled.declIndex = i;
+        compiled.executionKind = executionKindOf(passes[i].execution.type);
+        for (const auto& pc : passes[i].pushConstants) {
+            compiled.pushConstantStages.push_back(JsonUtils::stringsToShaderStages(pc.stages));
+        }
     }
 
     // Stage 4.5: Resolve entityDataBindings for geometry passes
@@ -515,13 +547,49 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
             result.compiledPasses[pi].queueType = passes[pi].queueType;
         }
     }
-    m_logger->log(LogLevel::Info, "Barriers planned");
+    // Stage 5.1: Buffer barriers, from the buffers each pass's descriptors
+    // and declared accesses touch
+    {
+        const auto table = describeBufferAccesses(passes, resources, builder.getDescriptorSetLayouts(),
+                                                  reflectShaderBufferUse(passes, [&](const std::string& name) {
+                                                      return manualPipelines.count(name) > 0;
+                                                  }));
+        const auto memoryBarriers = planBufferBarriers(result.executionOrder, table);
+        for (uint32_t pi = 0; pi < passes.size(); ++pi) {
+            result.compiledPasses[pi].memoryBarrier = memoryBarriers[pi];
+        }
+    }
+
+    size_t imageBarrierCount = 0, memoryBarrierCount = 0;
+    for (uint32_t pi : result.executionOrder) {
+        const auto& compiled = result.compiledPasses[pi];
+        imageBarrierCount += compiled.preBarriers.size() + compiled.postBarriers.size();
+        memoryBarrierCount += compiled.memoryBarrier.empty() ? 0 : 1;
+    }
+    m_logger->log(LogLevel::Info, "Barriers planned: %zu image, %zu buffer memory",
+                  imageBarrierCount, memoryBarrierCount);
 
     // Stage 6: Attachments and render areas
+    const auto attachmentOps = planAttachmentOps(passes, resources, builder.getDescriptorSetLayouts(),
+                                                 result.executionOrder, scheduled);
     if (!createAttachments(result.compiledPasses, result.executionOrder, passes,
-                           result.physicalResources, resources, result.errorMessage)) {
+                           result.physicalResources, resources, attachmentOps, result.errorMessage)) {
         m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
         return result;
+    }
+    {
+        size_t discardedLoads = 0, discardedStores = 0;
+        for (uint32_t pi : result.executionOrder) {
+            const auto& compiled = result.compiledPasses[pi];
+            auto count = [&](const CompiledAttachment& att) {
+                discardedLoads  += att.loadOp == VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                discardedStores += att.storeOp == VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            };
+            for (const auto& att : compiled.colorAttachments) count(att);
+            if (compiled.hasDepthAttachment) count(compiled.depthAttachment);
+        }
+        m_logger->log(LogLevel::Info, "Attachments: %zu load(s) and %zu store(s) discarded",
+                      discardedLoads, discardedStores);
     }
 
     // Stage 8: Create descriptor set layouts

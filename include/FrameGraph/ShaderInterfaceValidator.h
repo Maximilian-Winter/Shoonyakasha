@@ -21,7 +21,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -50,6 +52,22 @@ struct ShaderInterfaceExpectation {
 /// SPIRV-Reflect cannot parse yields a single message saying so.
 std::vector<std::string> validateShaderInterface(const void* code, size_t sizeBytes,
                                                  const ShaderInterfaceExpectation& expected);
+
+/// The storage buffers `code` declares, by (set, binding), each with whether
+/// the shader may write it: false when its block is declared readonly.
+/// std::nullopt when SPIRV-Reflect cannot parse the module.
+std::optional<std::map<std::pair<uint32_t, uint32_t>, bool>> reflectStorageBufferWrites(
+    const void* code, size_t sizeBytes);
+
+/// Answers describeBufferAccesses' question for `passes` by reflecting their
+/// shaders, each file read once: which stages declare a storage buffer
+/// binding and whether any may write it. Passes whose pipeline is supplied by
+/// code (`hasManualPipeline`), or whose shader cannot be read, answer
+/// "unknown". Shader paths resolve against the working directory, as they do
+/// for pipeline creation. `passes` must outlive the returned function.
+ShaderBufferQuery reflectShaderBufferUse(
+    const std::vector<PassDeclaration>& passes,
+    std::function<bool(const std::string& passName)> hasManualPipeline = {});
 
 } // namespace FrameGraph
 } // namespace Shoonyakasha

@@ -7,7 +7,10 @@
 
 #include <spirv-reflect/spirv_reflect.h>
 
+#include <fstream>
+#include <memory>
 #include <sstream>
+#include <unordered_map>
 
 namespace Shoonyakasha {
 namespace FrameGraph {
@@ -248,6 +251,95 @@ std::vector<std::string> validateShaderInterface(const void* code, size_t sizeBy
 
     spvReflectDestroyShaderModule(&module);
     return errors;
+}
+
+std::optional<std::map<std::pair<uint32_t, uint32_t>, bool>> reflectStorageBufferWrites(
+    const void* code, size_t sizeBytes)
+{
+    SpvReflectShaderModule module{};
+    if (spvReflectCreateShaderModule(sizeBytes, code, &module) != SPV_REFLECT_RESULT_SUCCESS) {
+        return std::nullopt;
+    }
+
+    uint32_t bindingCount = 0;
+    spvReflectEnumerateDescriptorBindings(&module, &bindingCount, nullptr);
+    std::vector<SpvReflectDescriptorBinding*> bindings(bindingCount);
+    spvReflectEnumerateDescriptorBindings(&module, &bindingCount, bindings.data());
+
+    std::map<std::pair<uint32_t, uint32_t>, bool> out;
+    for (const auto* b : bindings) {
+        if (b->descriptor_type != SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
+            b->descriptor_type != SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) {
+            continue;
+        }
+        // GLSL "readonly buffer" marks every member NonWritable. SPIRV-Reflect
+        // flags the whole block when any one member is, so check them all.
+        bool readOnly = (b->decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) != 0;
+        if (!readOnly && b->block.member_count > 0) {
+            readOnly = true;
+            for (uint32_t m = 0; m < b->block.member_count; ++m) {
+                if (!(b->block.members[m].decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE)) {
+                    readOnly = false;
+                    break;
+                }
+            }
+        }
+        out[{b->set, b->binding}] = !readOnly;
+    }
+
+    spvReflectDestroyShaderModule(&module);
+    return out;
+}
+
+ShaderBufferQuery reflectShaderBufferUse(
+    const std::vector<PassDeclaration>& passes,
+    std::function<bool(const std::string& passName)> hasManualPipeline)
+{
+    using Writes = std::map<std::pair<uint32_t, uint32_t>, bool>;
+    // Per shader path, reflected once however many passes share it.
+    auto cache = std::make_shared<std::unordered_map<std::string, std::optional<Writes>>>();
+    auto reflect = [cache](const std::string& path) -> const std::optional<Writes>& {
+        auto it = cache->find(path);
+        if (it != cache->end()) return it->second;
+        std::optional<Writes> result;
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (file) {
+            std::vector<char> code(static_cast<size_t>(file.tellg()));
+            file.seekg(0);
+            file.read(code.data(), static_cast<std::streamsize>(code.size()));
+            result = reflectStorageBufferWrites(code.data(), code.size());
+        }
+        return cache->emplace(path, std::move(result)).first->second;
+    };
+
+    return [&passes, hasManualPipeline = std::move(hasManualPipeline), reflect](uint32_t pi, uint32_t set, uint32_t binding)
+               -> std::optional<ShaderBufferUse> {
+        if (pi >= passes.size()) return std::nullopt;
+        const auto& pass = passes[pi];
+        if (hasManualPipeline && hasManualPipeline(pass.name)) return std::nullopt;
+        const auto& pd = pass.pipelineDesc;
+        const std::pair<const std::string*, VkPipelineStageFlags> shaders[] = {
+            {&pd.vertexShader,   VK_PIPELINE_STAGE_VERTEX_SHADER_BIT},
+            {&pd.fragmentShader, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT},
+            {&pd.computeShader,  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT},
+        };
+        ShaderBufferUse use;
+        bool any = false;
+        for (const auto& [path, stage] : shaders) {
+            if (path->empty()) continue;
+            const bool computeShader = stage == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            if (computeShader != (pass.type == PassType::Compute)) continue;
+            const auto& writes = reflect(*path);
+            if (!writes) return std::nullopt;
+            any = true;
+            const auto it = writes->find({set, binding});
+            if (it == writes->end()) continue;
+            use.stages |= stage;
+            use.writes = use.writes || it->second;
+        }
+        if (!any) return std::nullopt;
+        return use;
+    };
 }
 
 } // namespace FrameGraph

@@ -13,6 +13,7 @@
 #include <vector>
 #include <optional>
 #include <memory>
+#include <string>
 
 namespace Shoonyakasha {
 
@@ -80,6 +81,17 @@ public:
 
     /// The physical device's limits, such as maxPushConstantsSize.
     const VkPhysicalDeviceLimits& getLimits() const { return m_limits; }
+
+    /// Shared by every pipeline the engine creates, so recompiling a graph
+    /// (on resize, for one) rebuilds its pipelines from the cache rather than
+    /// from SPIR-V. Kept on disk between runs at
+    /// $SHOONYAKASHA_PIPELINE_CACHE, by default shoonyakasha_pipeline_cache.bin
+    /// in the working directory; "0" keeps it in memory only.
+    VkPipelineCache getPipelineCache() const { return m_pipelineCache; }
+
+    /// Write the pipeline cache to disk now. Also done when the device is
+    /// destroyed.
+    void savePipelineCache();
 private:
     VulkanInstance& m_instance;
     VkSurfaceKHR m_surface;
@@ -95,6 +107,8 @@ private:
     VkPhysicalDeviceFeatures m_enabledFeatures{};
     bool m_rayQuery = false;
     VkPhysicalDeviceLimits m_limits{};
+    VkPipelineCache m_pipelineCache = VK_NULL_HANDLE;
+    std::string m_pipelineCachePath;
     bool supportsRayQuery(VkPhysicalDevice device) const;
     std::unique_ptr<VulkanMemoryAllocator> m_vmaAllocator;
 
@@ -108,6 +122,7 @@ private:
     void pickPhysicalDevice();
     void createLogicalDevice();
     void createCommandPool();
+    void createPipelineCache();
     bool isDeviceSuitable(VkPhysicalDevice device);
 
     bool checkDeviceExtensionSupport(VkPhysicalDevice device);

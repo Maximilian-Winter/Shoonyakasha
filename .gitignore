@@ -3,6 +3,7 @@ cmake-build-*/
 /build/
 /.idea
 *.log
+shoonyakasha_pipeline_cache.bin*
 run.out
 
 # Frame-capture output from examples and the instancing self-test

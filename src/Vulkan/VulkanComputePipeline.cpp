@@ -118,7 +118,7 @@ void VulkanComputePipeline::createPipeline() {
     pipelineInfo.stage = stageInfo;
     pipelineInfo.layout = m_pipelineLayout;
 
-    if (vkCreateComputePipelines(m_device.getLogicalDevice(), VK_NULL_HANDLE,
+    if (vkCreateComputePipelines(m_device.getLogicalDevice(), m_device.getPipelineCache(),
                                   1, &pipelineInfo, nullptr, &m_pipeline) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create compute pipeline!");
     }

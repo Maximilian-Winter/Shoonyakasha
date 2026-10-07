@@ -11,6 +11,7 @@
 #include <queue>
 #include <set>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace Shoonyakasha {
@@ -677,6 +678,336 @@ BarrierPlan planBarriers(
         for (const auto& st : states[ri]) plan.finalLayouts[ri].push_back(st.layout);
     }
     return plan;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Buffers
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+constexpr VkPipelineStageFlags kGraphicsBufferStages =
+    VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
+    VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+constexpr VkAccessFlags kGraphicsBufferReads =
+    VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_INDEX_READ_BIT |
+    VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+constexpr VkAccessFlags kComputeBufferReads =
+    VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+/// Pipeline stages of the shader stages in `stages` that a pass of `type` runs.
+VkPipelineStageFlags shaderPipelineStages(const std::vector<std::string>& stages, PassType type) {
+    VkPipelineStageFlags out = 0;
+    for (const auto& s : stages) {
+        if (type == PassType::Compute) {
+            if (s == "compute" || s == "all") out |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            continue;
+        }
+        if (s == "vertex")            out |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+        else if (s == "fragment")     out |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        else if (s == "geometry")     out |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
+        else if (s == "tess_control") out |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT;
+        else if (s == "tess_eval")    out |= VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
+        else if (s == "all")          out |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }
+    return out;
+}
+
+/// Whether the pass records through code the graph cannot see.
+bool recordsOpaquely(const PassDeclaration& pass) {
+    const auto& type = pass.execution.type;
+    return static_cast<bool>(pass.executeFn) ||
+           type == "none" || type == "manual" || type == "scene_geometry";
+}
+
+bool isStorageBufferType(const std::string& type) {
+    return type == "storage_buffer" || type == "storage_buffer_dynamic";
+}
+
+bool isUniformBufferType(const std::string& type) {
+    return type == "uniform_buffer" || type == "uniform_buffer_dynamic";
+}
+
+} // namespace
+
+BufferAccessTable describeBufferAccesses(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
+    const ShaderBufferQuery& query)
+{
+    BufferAccessTable table;
+    table.passes.resize(passes.size());
+
+    std::unordered_map<std::string, uint32_t> keys;
+    auto key = [&](const std::string& name) {
+        auto [it, inserted] = keys.emplace(name, static_cast<uint32_t>(table.buffers.size()));
+        if (inserted) table.buffers.push_back(name);
+        return it->second;
+    };
+
+    std::unordered_map<std::string, const DescriptorSetLayoutDesc*> layoutsByName;
+    for (const auto& layout : descriptorLayouts) layoutsByName[layout.name] = &layout;
+
+    // Accesses are merged per buffer, so a pass has one entry for each.
+    std::vector<std::map<uint32_t, BufferAccess>> merged(passes.size());
+    auto add = [&](uint32_t pi, uint32_t buffer, VkPipelineStageFlags stages, VkAccessFlags access) {
+        if (stages == 0) return;
+        auto& a = merged[pi][buffer];
+        a.buffer = buffer;
+        a.stages |= stages;
+        a.access |= access;
+    };
+
+    // What an opaque pass does to every buffer.
+    struct Opaque { VkPipelineStageFlags stages = 0; VkAccessFlags access = 0; };
+    std::vector<Opaque> opaque(passes.size());
+
+    for (uint32_t pi = 0; pi < passes.size(); ++pi) {
+        const auto& pass = passes[pi];
+        const bool compute = pass.type == PassType::Compute;
+        const bool transfer = pass.type == PassType::Transfer;
+
+        const VkPipelineStageFlags passStages =
+            compute ? VkPipelineStageFlags{VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT}
+          : transfer ? VkPipelineStageFlags{VK_PIPELINE_STAGE_TRANSFER_BIT}
+          : kGraphicsBufferStages;
+        const VkAccessFlags passReads =
+            compute ? kComputeBufferReads
+          : transfer ? VkAccessFlags{VK_ACCESS_TRANSFER_READ_BIT}
+          : kGraphicsBufferReads;
+        const VkAccessFlags passWrites =
+            transfer ? VkAccessFlags{VK_ACCESS_TRANSFER_WRITE_BIT} : VkAccessFlags{VK_ACCESS_SHADER_WRITE_BIT};
+
+        auto makeOpaque = [&](bool writes) {
+            opaque[pi].stages |= passStages;
+            opaque[pi].access |= passReads | (writes ? passWrites : 0);
+        };
+
+        if (recordsOpaquely(pass)) makeOpaque(pass.type != PassType::Graphics);
+        else if (isEntityGeometryExecutionType(pass.execution.type)) makeOpaque(false);
+
+        // Graph buffer resources named in inputs and outputs.
+        auto visit = [&](const ResourceAccess& access) {
+            if (!access.handle.valid() || access.handle.index >= declarations.size()) return;
+            const auto& decl = declarations[access.handle.index];
+            if (decl.kind != ResourceKind::Buffer) return;
+            const uint32_t buffer = key("resource:" + decl.name);
+            switch (access.usage) {
+                case ResourceUsage::TransferSrc:
+                    add(pi, buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+                    break;
+                case ResourceUsage::TransferDst:
+                    add(pi, buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+                    break;
+                case ResourceUsage::ShaderReadOnly:
+                    add(pi, buffer, passStages, passReads);
+                    break;
+                default:
+                    add(pi, buffer, passStages, passReads | passWrites);
+                    break;
+            }
+        };
+        for (const auto& in : pass.inputs)   visit(in);
+        for (const auto& out : pass.outputs) visit(out);
+
+        // Buffers bound through the pass's descriptor sets.
+        for (uint32_t set = 0; set < pass.descriptorSetRefs.size(); ++set) {
+            const auto it = layoutsByName.find(pass.descriptorSetRefs[set]);
+            if (it == layoutsByName.end()) continue;
+            for (const auto& binding : it->second->bindings) {
+                const bool storage = isStorageBufferType(binding.type);
+                if (!storage && !isUniformBufferType(binding.type)) continue;
+
+                VkPipelineStageFlags stages = shaderPipelineStages(binding.stages, pass.type);
+                bool writes = storage;
+                if (storage && query) {
+                    if (const auto use = query(pi, set, binding.binding)) {
+                        stages = use->stages;
+                        writes = use->writes;
+                    }
+                }
+                if (stages == 0) continue;
+                const VkAccessFlags reads = storage ? VkAccessFlags{VK_ACCESS_SHADER_READ_BIT}
+                                                    : VkAccessFlags{VK_ACCESS_UNIFORM_READ_BIT};
+                const VkAccessFlags access = reads | (writes ? VkAccessFlags{VK_ACCESS_SHADER_WRITE_BIT} : 0);
+
+                if (!binding.autoBindBuffer.empty()) {
+                    add(pi, key(binding.autoBindBuffer), stages, access);
+                } else {
+                    // Bound by code the graph cannot see: any buffer at all.
+                    opaque[pi].stages |= stages;
+                    opaque[pi].access |= access;
+                }
+            }
+        }
+    }
+
+    // Opaque passes touch every buffer, including those no pass names.
+    const uint32_t any = key("*");
+    for (uint32_t pi = 0; pi < passes.size(); ++pi) {
+        if (opaque[pi].stages == 0) continue;
+        for (uint32_t b = 0; b <= any; ++b) add(pi, b, opaque[pi].stages, opaque[pi].access);
+    }
+
+    for (uint32_t pi = 0; pi < passes.size(); ++pi) {
+        for (const auto& [buffer, access] : merged[pi]) table.passes[pi].push_back(access);
+    }
+    return table;
+}
+
+std::vector<MemoryBarrierInfo> planBufferBarriers(
+    const std::vector<uint32_t>& executionOrder,
+    const BufferAccessTable& table)
+{
+    std::vector<MemoryBarrierInfo> out(table.passes.size());
+
+    struct State {
+        VkPipelineStageFlags stage  = 0;
+        VkAccessFlags        access = 0;
+        bool                 used   = false;
+    };
+    std::vector<State> states(table.buffers.size());
+
+    auto runFrame = [&](std::vector<MemoryBarrierInfo>& barriers) {
+        for (uint32_t pi : executionOrder) {
+            if (pi >= table.passes.size()) continue;
+            auto& barrier = barriers[pi];
+            barrier = {};
+            for (const auto& a : table.passes[pi]) {
+                if (a.buffer >= states.size()) continue;
+                auto& st = states[a.buffer];
+                const bool writes = (a.access & kWriteAccess) != 0;
+                const bool hazard = (st.access & kWriteAccess) != 0 || (writes && st.used);
+                if (!hazard) {
+                    // Read after read: no barrier, but a later writer must
+                    // wait for this reader too.
+                    st.stage |= a.stages;
+                    st.access |= a.access;
+                    st.used = true;
+                    continue;
+                }
+                barrier.srcStage  |= st.stage;
+                barrier.srcAccess |= st.access & kWriteAccess;
+                barrier.dstStage  |= a.stages;
+                barrier.dstAccess |= a.access;
+                st = {a.stages, a.access, true};
+            }
+        }
+    };
+
+    // As with images: plan one frame to find where each buffer ends up, then
+    // plan it for real from there, so a frame's first access waits for the
+    // previous frame's last.
+    std::vector<MemoryBarrierInfo> scratch(table.passes.size());
+    runFrame(scratch);
+    runFrame(out);
+    return out;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Attachment load and store operations
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+bool overlaps(const SubresourceRange& a, const SubresourceRange& b) {
+    return a.baseMip < b.baseMip + b.mipCount && b.baseMip < a.baseMip + a.mipCount &&
+           a.baseLayer < b.baseLayer + b.layerCount && b.baseLayer < a.baseLayer + a.layerCount;
+}
+
+} // namespace
+
+std::vector<std::vector<AttachmentOps>> planAttachmentOps(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
+    const std::vector<uint32_t>& executionOrder,
+    const std::vector<ScheduledResource>& resources)
+{
+    std::vector<std::vector<AttachmentOps>> out(passes.size());
+    for (uint32_t pi = 0; pi < passes.size(); ++pi) out[pi].resize(passes[pi].outputs.size());
+
+    // Descriptor set name -> resources its bindings sample or store to.
+    std::unordered_map<std::string, std::unordered_set<std::string>> boundImages;
+    for (const auto& layout : descriptorLayouts) {
+        for (const auto& binding : layout.bindings) {
+            if (!binding.autoBindResource.empty()) boundImages[layout.name].insert(binding.autoBindResource);
+        }
+    }
+    auto bindsImage = [&](const PassDeclaration& pass, const std::string& name) {
+        for (const auto& ref : pass.descriptorSetRefs) {
+            const auto it = boundImages.find(ref);
+            if (it != boundImages.end() && it->second.count(name)) return true;
+        }
+        return false;
+    };
+
+    // Whether `pass` touches `range` of image `ri`: any access, or only those
+    // that depend on the contents already there.
+    auto touches = [&](const PassDeclaration& pass, uint32_t ri, const SubresourceRange& range, bool readsOnly) {
+        const auto& shape = resources[ri].shape;
+        auto hit = [&](const ResourceAccess& a) {
+            return a.handle.valid() && a.handle.index == ri && overlaps(shape.resolve(a.subresource), range);
+        };
+        for (const auto& in : pass.inputs) {
+            if (hit(in)) return true;
+        }
+        const bool partial = !pass.viewport.empty();
+        for (const auto& o : pass.outputs) {
+            if (hit(o) && (!readsOnly || partial || readsPreviousContents(o, true))) return true;
+        }
+        return false;
+    };
+
+    for (size_t pos = 0; pos < executionOrder.size(); ++pos) {
+        const uint32_t pi = executionOrder[pos];
+        const auto& pass = passes[pi];
+        if (pass.type != PassType::Graphics) continue;
+
+        for (size_t oi = 0; oi < pass.outputs.size(); ++oi) {
+            const auto& o = pass.outputs[oi];
+            if (!o.handle.valid() || o.handle.index >= resources.size()) continue;
+            const uint32_t ri = o.handle.index;
+            if (!resources[ri].isImage || ri >= declarations.size()) continue;
+            const auto& decl = declarations[ri];
+            const auto range = resources[ri].shape.resolve(o.subresource);
+            if (!resources[ri].shape.contains(range)) continue;
+
+            const bool write = o.usage == ResourceUsage::ColorAttachmentWrite ||
+                               o.usage == ResourceUsage::DepthStencilWrite ||
+                               o.usage == ResourceUsage::Present;
+            const bool blend = o.usage == ResourceUsage::ColorAttachmentBlend;
+            if (!write && !blend) continue;
+
+            auto& ops = out[pi][oi];
+
+            const bool persistent = resources[ri].persistent || decl.imageDesc.persistent;
+            if (write && !o.hasClearValue && !persistent) {
+                bool earlier = false;
+                for (size_t j = 0; j < pos && !earlier; ++j) {
+                    const auto& prev = passes[executionOrder[j]];
+                    earlier = recordsOpaquely(prev) || bindsImage(prev, decl.name) ||
+                              touches(prev, ri, range, false);
+                }
+                ops.discardLoad = !earlier;
+            }
+
+            const bool kept = leavesPresentable(o) || decl.imported || persistent || decl.readbackPolicy.enabled ||
+                              decl.savePolicy.enabled || !decl.target.empty();
+            if (!kept) {
+                bool later = false;
+                for (size_t j = pos + 1; j < executionOrder.size() && !later; ++j) {
+                    const auto& next = passes[executionOrder[j]];
+                    later = recordsOpaquely(next) || bindsImage(next, decl.name) ||
+                            touches(next, ri, range, true);
+                }
+                ops.discardStore = !later;
+            }
+        }
+    }
+    return out;
 }
 
 } // namespace FrameGraph

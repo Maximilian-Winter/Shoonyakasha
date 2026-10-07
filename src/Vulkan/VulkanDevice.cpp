@@ -6,6 +6,8 @@
 #include "../../include/Vulkan/VulkanMemoryAllocator.h"
 #include <set>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <cstring>
 #include <string>
 #include <stdexcept>
@@ -29,6 +31,7 @@ VulkanDevice::VulkanDevice(VulkanInstance& instance, VkSurfaceKHR surface)
     pickPhysicalDevice();
     createLogicalDevice();
     createCommandPool();
+    createPipelineCache();
 
     // Initialize VMA after device and command pool are ready
     m_vmaAllocator = std::make_unique<VulkanMemoryAllocator>(m_instance, *this);
@@ -47,6 +50,11 @@ VulkanDevice::~VulkanDevice() {
 
     // Destroy VMA before device — all VMA allocations must be freed first
     m_vmaAllocator.reset();
+
+    savePipelineCache();
+    if (m_pipelineCache != VK_NULL_HANDLE) {
+        vkDestroyPipelineCache(m_device, m_pipelineCache, nullptr);
+    }
 
     if (m_computeCommandPool != VK_NULL_HANDLE && m_computeCommandPool != m_commandPool) {
         vkDestroyCommandPool(m_device, m_computeCommandPool, nullptr);
@@ -83,6 +91,101 @@ void VulkanDevice::pickPhysicalDevice() {
     }
 
     m_logger->log(LogLevel::Info, "Physical device selected successfully");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Pipeline cache
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+/// Where the pipeline cache lives: $SHOONYAKASHA_PIPELINE_CACHE, or a file in
+/// the working directory beside the logs. Empty (the variable set to "" or
+/// "0") keeps the cache in memory only.
+std::string pipelineCachePath() {
+    if (const char* env = std::getenv("SHOONYAKASHA_PIPELINE_CACHE")) {
+        const std::string path(env);
+        return path == "0" ? std::string{} : path;
+    }
+    return "shoonyakasha_pipeline_cache.bin";
+}
+
+} // namespace
+
+void VulkanDevice::createPipelineCache() {
+    m_pipelineCachePath = pipelineCachePath();
+
+    // Data from another driver or GPU is not handed over: drivers should reject
+    // it themselves, but some have crashed on it instead.
+    std::vector<char> data;
+    if (!m_pipelineCachePath.empty()) {
+        std::ifstream file(m_pipelineCachePath, std::ios::binary | std::ios::ate);
+        if (file) {
+            data.resize(static_cast<size_t>(file.tellg()));
+            file.seekg(0);
+            file.read(data.data(), static_cast<std::streamsize>(data.size()));
+        }
+    }
+    if (!data.empty()) {
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
+        VkPipelineCacheHeaderVersionOne header{};
+        bool matches = data.size() >= sizeof(header);
+        if (matches) {
+            std::memcpy(&header, data.data(), sizeof(header));
+            matches = header.headerSize >= sizeof(header) &&
+                      header.headerVersion == VK_PIPELINE_CACHE_HEADER_VERSION_ONE &&
+                      header.vendorID == props.vendorID && header.deviceID == props.deviceID &&
+                      std::memcmp(header.pipelineCacheUUID, props.pipelineCacheUUID, VK_UUID_SIZE) == 0;
+        }
+        if (!matches) {
+            m_logger->log(LogLevel::Info, "Pipeline cache '%s' is from another device or driver; starting empty",
+                          m_pipelineCachePath.c_str());
+            data.clear();
+        }
+    }
+
+    VkPipelineCacheCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    info.initialDataSize = data.size();
+    info.pInitialData = data.empty() ? nullptr : data.data();
+    if (vkCreatePipelineCache(m_device, &info, nullptr, &m_pipelineCache) != VK_SUCCESS && !data.empty()) {
+        // Retry without the stored data rather than going without a cache.
+        info.initialDataSize = 0;
+        info.pInitialData = nullptr;
+        data.clear();
+        if (vkCreatePipelineCache(m_device, &info, nullptr, &m_pipelineCache) != VK_SUCCESS) {
+            m_pipelineCache = VK_NULL_HANDLE;
+        }
+    }
+    m_logger->log(LogLevel::Info, "Pipeline cache: %s (%zu bytes loaded)",
+                  m_pipelineCachePath.empty() ? "in memory" : m_pipelineCachePath.c_str(), data.size());
+}
+
+void VulkanDevice::savePipelineCache() {
+    if (m_pipelineCache == VK_NULL_HANDLE || m_pipelineCachePath.empty()) return;
+
+    size_t size = 0;
+    if (vkGetPipelineCacheData(m_device, m_pipelineCache, &size, nullptr) != VK_SUCCESS || size == 0) return;
+    std::vector<char> data(size);
+    if (vkGetPipelineCacheData(m_device, m_pipelineCache, &size, data.data()) != VK_SUCCESS) return;
+
+    // Written beside the old file and moved over it, so a crash mid-write
+    // never leaves a truncated cache behind.
+    const std::string temp = m_pipelineCachePath + ".tmp";
+    {
+        std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+        if (!file) return;
+        file.write(data.data(), static_cast<std::streamsize>(size));
+        if (!file) return;
+    }
+    std::error_code ec;
+    std::filesystem::rename(temp, m_pipelineCachePath, ec);
+    if (ec) {
+        m_logger->log(LogLevel::Warning, "Could not save the pipeline cache to '%s': %s",
+                      m_pipelineCachePath.c_str(), ec.message().c_str());
+        std::filesystem::remove(temp, ec);
+    }
 }
 
 void VulkanDevice::createLogicalDevice() {
@@ -134,6 +237,8 @@ void VulkanDevice::createLogicalDevice() {
     VkPhysicalDeviceVulkan13Features vulkan13Features{};
     vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     vulkan13Features.dynamicRendering = VK_TRUE;
+    // The frame graph records each pass's barriers in one vkCmdPipelineBarrier2.
+    vulkan13Features.synchronization2 = VK_TRUE;
 
     VkPhysicalDeviceVulkan12Features vulkan12Features{};
     vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -296,8 +401,9 @@ bool VulkanDevice::isDeviceSuitable(VkPhysicalDevice device) {
     VkPhysicalDeviceFeatures supportedFeatures;
     vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
-    // The frame graph records graphics passes with core dynamic rendering, so
-    // the device must implement Vulkan 1.3 and expose the feature.
+    // The frame graph records graphics passes with core dynamic rendering and
+    // barriers with synchronization2, so the device must implement Vulkan 1.3
+    // and expose both features (1.3 requires them).
     VkPhysicalDeviceProperties properties;
     vkGetPhysicalDeviceProperties(device, &properties);
     if (properties.apiVersion < VK_API_VERSION_1_3) {
@@ -315,7 +421,8 @@ bool VulkanDevice::isDeviceSuitable(VkPhysicalDevice device) {
     vkGetPhysicalDeviceFeatures2(device, &features2);
 
     return indices.isComplete() && extensionsSupported && swapChainAdequate &&
-           supportedFeatures.samplerAnisotropy && vulkan13Features.dynamicRendering;
+           supportedFeatures.samplerAnisotropy && vulkan13Features.dynamicRendering &&
+           vulkan13Features.synchronization2;
 }
 
 bool VulkanDevice::supportsRayQuery(VkPhysicalDevice device) const {

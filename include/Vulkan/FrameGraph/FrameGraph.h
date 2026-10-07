@@ -500,6 +500,21 @@ struct CompiledAttachment {
     VkFormat            format  = VK_FORMAT_UNDEFINED;
 };
 
+/// What the executor records for a pass, resolved from its execution type
+/// when the graph is compiled rather than by comparing strings every frame.
+enum class ExecutionKind : uint8_t {
+    None,            // "none": nothing, unless an execute callback is set
+    Fullscreen,      // "fullscreen"
+    Draw,            // "draw"
+    ComputeDispatch, // "compute_dispatch"
+    ComputeImage,    // "compute_image"
+    SceneRenderer,   // "scene_geometry" and the entity geometry types
+    Manual,          // "manual"
+    Unknown          // anything else; warned about while recording
+};
+
+ExecutionKind executionKindOf(const std::string& type);
+
 struct CompiledPass {
     uint32_t                            declIndex;          // into pass declarations
 
@@ -518,6 +533,13 @@ struct CompiledPass {
     std::vector<BarrierInfo>            preBarriers;
     // Barriers to insert AFTER it, e.g. to PRESENT_SRC_KHR
     std::vector<BarrierInfo>            postBarriers;
+    /// Buffer hazards before this pass, as one global memory barrier;
+    /// recorded with preBarriers. Empty when there are none.
+    MemoryBarrierInfo                   memoryBarrier;
+
+    ExecutionKind                       executionKind = ExecutionKind::None;
+    /// Shader stages of each of the pass's push constant ranges, in order.
+    std::vector<VkShaderStageFlags>     pushConstantStages;
 
     // Auto-created descriptor set layouts (ordered by pass's descriptorSetRefs)
     std::vector<VkDescriptorSetLayout>  descriptorSetLayouts;
@@ -794,7 +816,9 @@ private:
         const std::vector<PassDeclaration>& passes,
         std::vector<PhysicalResource>& physResources,
         const std::vector<ResourceDeclaration>& declarations,
+        const std::vector<std::vector<AttachmentOps>>& attachmentOps,
         std::string& outError);
+
 
     // ── Stage 8: Descriptor set layout creation ──
     void createDescriptorSetLayouts(
@@ -925,6 +949,31 @@ private:
     /// The area a graphics pass renders into this frame: all of its extent,
     /// or its "viewport" rectangle.
     VkRect2D renderArea(const PassDeclaration& passDecl, const CompiledPass& compiledPass) const;
+
+    /// Record passes in the order given; execute() and executePasses() share it.
+    void recordPasses(
+        const FrameGraphCompiler::CompileResult& compiled,
+        const FrameGraphBuilder& builder,
+        const std::vector<uint32_t>& passIndices,
+        uint32_t frameIndex,
+        uint32_t swapchainImageIndex,
+        VkCommandBuffer commandBuffer,
+        const std::unordered_map<std::string, ParameterValue>* parameters);
+
+    /// Record `barriers` and, if given, a buffer memory barrier, in a single
+    /// vkCmdPipelineBarrier2. Barriers on images with no VkImage are skipped.
+    void recordBarriers(
+        VkCommandBuffer commandBuffer,
+        const std::vector<BarrierInfo>& barriers,
+        const MemoryBarrierInfo* memory,
+        const FrameGraphCompiler::CompileResult& compiled,
+        const std::vector<ResourceDeclaration>& resources,
+        bool notifyDebugger);
+
+    // Scratch reused from pass to pass, so recording allocates nothing once warm.
+    std::vector<VkImageMemoryBarrier2>      m_imageBarriers;
+    std::vector<VkRenderingAttachmentInfo>  m_colorAttachments;
+    std::vector<VkDescriptorSet>            m_descriptorSets;
 
     /// Execute auto-callback based on PassDeclaration::execution configuration
     void executeAutoCallback(

@@ -12,6 +12,8 @@
 #include "FrameGraphResource.h"
 
 #include <vulkan/vulkan.h>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -166,6 +168,108 @@ struct BarrierPlan {
 /// An output that presents gets a post-barrier to PRESENT_SRC_KHR.
 BarrierPlan planBarriers(
     const std::vector<PassDeclaration>& passes,
+    const std::vector<uint32_t>& executionOrder,
+    const std::vector<ScheduledResource>& resources);
+
+// ═══════════════════════════════════════════════════════════════
+// Buffers
+// ═══════════════════════════════════════════════════════════════
+
+/// One pass's access to one tracked buffer.
+struct BufferAccess {
+    uint32_t             buffer = 0;   // index into BufferAccessTable::buffers
+    VkPipelineStageFlags stages = 0;
+    VkAccessFlags        access = 0;
+};
+
+/// What a pass's shaders do with one storage buffer binding, found by
+/// reflecting them: the stages that declare it, and whether any of them may
+/// write it (a block not declared readonly).
+struct ShaderBufferUse {
+    VkPipelineStageFlags stages = 0;
+    bool                 writes = false;
+};
+
+/// Asks about pass `pass` (declaration index), descriptor set `set` (position
+/// in its "descriptorSets") and `binding`. std::nullopt means the shaders
+/// could not be inspected; the binding's JSON stages are then taken as
+/// reading and writing it.
+using ShaderBufferQuery =
+    std::function<std::optional<ShaderBufferUse>(uint32_t pass, uint32_t set, uint32_t binding)>;
+
+struct BufferAccessTable {
+    /// Tracked buffers: graph buffer resources ("resource:<name>"), the
+    /// "autoBindBuffer" names of uniform and storage buffer bindings, and
+    /// last, "*", every buffer the graph cannot name.
+    std::vector<std::string> buffers;
+    /// Indexed by pass declaration index; at most one entry per buffer.
+    std::vector<std::vector<BufferAccess>> passes;
+};
+
+/// The buffers each pass reads and writes on the GPU. Graph buffer resources
+/// come from inputs and outputs; other buffers from the pass's descriptor
+/// sets, narrowed by `query`. Uniform buffers count as reads; the host writes
+/// them before the frame is submitted, which needs no barrier.
+///
+/// A pass that records through code the graph cannot see is taken to touch
+/// every buffer: one with an execute callback, an execution type of "none",
+/// "manual" or "scene_geometry", or an entity geometry type (its renderer
+/// binds vertex and index buffers). Graphics passes of that kind are taken to
+/// read, compute and transfer passes to read and write. A uniform or storage
+/// binding without "autoBindBuffer" likewise reads any buffer, and writes any
+/// when it is a storage buffer its shaders may write.
+BufferAccessTable describeBufferAccesses(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
+    const ShaderBufferQuery& query = {});
+
+/// A global memory barrier. Empty (no stages) when none is needed.
+struct MemoryBarrierInfo {
+    VkPipelineStageFlags srcStage  = 0;
+    VkPipelineStageFlags dstStage  = 0;
+    VkAccessFlags        srcAccess = 0;
+    VkAccessFlags        dstAccess = 0;
+
+    bool empty() const { return dstStage == 0; }
+};
+
+/// For each pass (by declaration index), the one memory barrier to place
+/// before it so it sees earlier writes to the buffers it reads, and does not
+/// overwrite a buffer earlier passes are still using. Reads after reads need
+/// none. Planned like image barriers, across the frame boundary: a frame's
+/// first access waits for the previous frame's last.
+std::vector<MemoryBarrierInfo> planBufferBarriers(
+    const std::vector<uint32_t>& executionOrder,
+    const BufferAccessTable& table);
+
+// ═══════════════════════════════════════════════════════════════
+// Attachment load and store operations
+// ═══════════════════════════════════════════════════════════════
+
+struct AttachmentOps {
+    /// Nothing earlier this frame wrote the attachment's subresources, so a
+    /// load would only fetch undefined contents: LOAD_OP_DONT_CARE.
+    bool discardLoad  = false;
+    /// Nothing later reads what the pass rendered: STORE_OP_DONT_CARE.
+    bool discardStore = false;
+};
+
+/// For each pass (by declaration index), one entry per output, in output
+/// order; only attachment outputs of passes in `executionOrder` are set.
+///
+/// A load is discarded for a colour or depth write without a clear that is
+/// the first access to its subresources in the frame, of an image that is
+/// not persistent. A store is discarded for a colour or depth write that does
+/// not present, of an image that is not imported, persistent, read back,
+/// saved or shared as a target, when no later pass reads those subresources:
+/// as an input, by loading or blending onto them, through any descriptor set
+/// that binds the image, or through code the graph cannot see (an execute
+/// callback, or execution type "none", "manual" or "scene_geometry").
+std::vector<std::vector<AttachmentOps>> planAttachmentOps(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
     const std::vector<uint32_t>& executionOrder,
     const std::vector<ScheduledResource>& resources);
 

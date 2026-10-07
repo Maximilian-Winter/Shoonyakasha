@@ -49,6 +49,8 @@ An access covers the whole image unless it names a part: `"mip": n` or `"mips": 
 
 Dependencies and barriers are tracked per mip and layer: passes writing different layers of one image (shadow cascades) are independent, a pass reading the whole image depends on all of them, and each gets barriers for only its own layers. A write that loads rather than clears (no `clear`) depends on the previous writer.
 
+The compiler also picks each attachment's load and store operation. A write without `clear` that is the first access to its mips and layers this frame, of an image that is not `persistent`, would only load undefined contents, so it does not load them (`LOAD_OP_DONT_CARE`). A write that no later pass reads is not stored (`STORE_OP_DONT_CARE`): a later pass reads it by declaring it as an input, loading or blending onto it, or binding the image through any of its descriptor sets. Images that present, are imported or `persistent`, or have a `readback`, `save` or `target` are always stored, and so is anything a later pass with an execute callback or execution type `none`, `manual` or `scene_geometry` could reach. A depth buffer used only for its own pass's depth test is the usual case: on tile-based GPUs it then never leaves the tile.
+
 | Usage | Meaning |
 |---|---|
 | `color_write`, `color_attachment_write` | Color attachment write |

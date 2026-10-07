@@ -10,6 +10,12 @@ Use [ParticleTest](../../examples/cpp/compute/particle_test) for a small compute
 4. Declare shader read/write accesses in the producer and shader-read accesses in consumers so dependency/barrier analysis sees the data flow.
 5. Keep allocation count, draw/dispatch parameters, and shader-side count consistent. Updating a custom uniform alone does not resize the storage buffer.
 
+## Buffer synchronization
+
+Storage buffers rarely appear in a pass's inputs and outputs, so the compiler finds them through descriptor sets: a `uniform_buffer` or `storage_buffer` binding with `autoBindBuffer` names the buffer, and the pass's SPIR-V says which stages declare it and whether any may write it. Declare a buffer a shader only reads as `readonly buffer`; otherwise the pass counts as writing it, and the next pass to use the buffer waits for it. From that, each pass gets at most one memory barrier, placed only where a pass reads a buffer an earlier pass wrote, or writes one an earlier pass is still using, including the previous frame's last user. Uniform buffers the host fills need none.
+
+Some passes record through code the graph cannot see: those with an execute callback, execution type `none`, `manual` or `scene_geometry`, the entity geometry types (their renderers bind vertex and index buffers), and those with a buffer binding without `autoBindBuffer`. They are taken to touch every buffer, graphics passes reading and compute passes reading and writing, so a buffer a compute pass writes is still visible to a renderer that binds it as vertex data. Give buffer bindings an `autoBindBuffer` where you can, so unrelated passes do not wait on each other.
+
 For a side-effect-only compute pass, set `hasSideEffects: true` if otherwise unused outputs would allow culling. JSON `queue: compute` only selects queue intent: the default ApplicationBase/facade render loop records through single-queue `execute`. Native `executeMultiQueue` requires appropriate command buffers and synchronized queue submission by its caller.
 
 ## Initialization and sharing
