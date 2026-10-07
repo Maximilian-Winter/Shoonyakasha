@@ -803,8 +803,9 @@ class StatsPanel:
         gpu = stats["gpu_ms"] is not None
         scene.set_text(self.header[0], "%.0f FPS   %.2f ms   (worst %.2f ms)"
                        % (stats["fps"], stats["frame_time_ms"], stats["frame_time_max_ms"]))
-        scene.set_text(self.header[1], "GPU %s   CPU record %.2f ms"
-                       % ("%.2f ms" % stats["gpu_ms"] if gpu else "n/a", stats["cpu_record_ms"]))
+        scene.set_text(self.header[1], "GPU %s   CPU record %.2f ms%s"
+                       % ("%.2f ms" % stats["gpu_ms"] if gpu else "n/a", stats["cpu_record_ms"],
+                          "   (validation layers on)" if stats["validation_layers"] else ""))
         scene.set_text(self.header[2], "%d draws   %d dispatches   %s vertices"
                        % (stats["draw_calls"], stats["dispatches"], count(stats["vertices"])))
 

@@ -73,9 +73,15 @@ struct ApplicationConfig {
     // ApplicationBase::defaultPipelinePath().
     std::string pipelineJsonPath;
 
-    // Vulkan validation layers. On by default; falls back to off with a warning if the
-    // Khronos layer is not installed. Turn off for release builds or profiling runs.
+    // Vulkan validation layers: on in debug builds, off in release builds,
+    // where they would add microseconds to every command recorded.
+    // SHOONYAKASHA_VALIDATION=1 or 0 overrides this either way. Falls back to
+    // off with a warning if the Khronos layer is not installed.
+#ifdef NDEBUG
+    bool enableValidation = false;
+#else
     bool enableValidation = true;
+#endif
 
     // Render graph parameters (set before compile — used for SSBO sizing, dispatch counts, etc.)
     std::unordered_map<std::string, uint32_t> renderGraphParameters;

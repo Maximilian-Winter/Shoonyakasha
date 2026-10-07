@@ -27,7 +27,7 @@ Use update for custom values that must enter the current frame's automatic buffe
 
 C++ configuration is `EngineConfig` in [FacadeTypes.h](../../../include/Facade/FacadeTypes.h). Defaults: 1600×900, title `Shoonyakasha Application`, log file `application.log`, log level 1 (Info), two frames in flight, empty environment and pipeline paths. A pipeline path is required to run. Log levels are 0 Debug, 1 Info, 2 Warning, 3 Error. Render graph parameters are string→unsigned-integer values for allocation/count configuration.
 
-Python exposes the constructor arguments listed in its [Engine reference](../python/engine.md). It does **not** expose C++ `enableValidation`; the C++ default is true with a warning/fallback when the layer is unavailable.
+Python exposes the constructor arguments listed in its [Engine reference](../python/engine.md), including `enable_validation`. `EngineConfig::enableValidation` defaults to on in debug builds and off in release builds; `SHOONYAKASHA_VALIDATION=1` or `0` overrides it. Without the Khronos layer installed it falls back to off with a warning.
 
 Creation helpers return entity handles. glTF loading returns a result whose `success` and `error` must be checked. Capture/start/stop return success booleans. Custom-value setters publish values under `scene.custom.<key>`; pass the key without that prefix.
 

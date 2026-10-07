@@ -48,3 +48,7 @@ if (stats.enabled) std::printf("%s", stats.summary.c_str());
 - **Draw calls** count the engine's own draws: fullscreen and `draw` passes, the entity renderers, dispatches, and the `VulkanCommandBuilder` draw methods. A pass callback that calls `vkCmdDraw*` directly can report its draws with `FrameGraph::countDraw(vertices, instances)`.
 
 Disabled passes are listed too: they still clear their attachments, which costs GPU time.
+
+## Profiling
+
+Profile with the Vulkan validation layers off. They check every command recorded, which can multiply CPU record time several times over; the summary and `validation_layers` say when they are on. They are off by default in release builds and the Python package, on in debug builds, and `SHOONYAKASHA_VALIDATION=1` or `0` overrides either. A debug build of the engine itself is also far slower on the CPU than a release build.

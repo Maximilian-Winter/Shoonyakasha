@@ -113,6 +113,10 @@ struct RenderStats {
 
     /// Whether this device can time passes on the GPU, and GPU timing is on.
     bool       gpuTiming = false;
+
+    /// Vulkan validation layers are on. They check every command recorded,
+    /// which multiplies CPU recording time; profile without them.
+    bool       validationLayers = false;
 };
 
 /// A readable summary: frame rate and times, totals, and the passes taking

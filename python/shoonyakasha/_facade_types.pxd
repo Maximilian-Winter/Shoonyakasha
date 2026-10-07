@@ -67,6 +67,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         float uniformEnvironmentColor[3]
         string pipelineJsonPath
         uint32_t maxFramesInFlight
+        cbool enableValidation
         vector[pair[string, uint32_t]] renderGraphParameters
 
     cdef cppclass RecordingOptions:
@@ -112,6 +113,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         uint32_t drawCalls
         uint32_t dispatches
         uint64_t vertices
+        cbool validationLayers
         vector[RenderPassStats] passes
         string summary
 

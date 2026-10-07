@@ -120,7 +120,12 @@ void ApplicationBase::run() {
 // ═══════════════════════════════════════════════════════════════
 
 void ApplicationBase::initializeVulkan() {
-    m_instance = std::make_unique<VulkanInstance>(m_config.enableValidation);
+    bool validation = m_config.enableValidation;
+    if (const char* env = std::getenv("SHOONYAKASHA_VALIDATION"); env && *env) {
+        validation = std::string(env) != "0";
+    }
+    m_logger->log(LogLevel::Info, "Vulkan validation layers: %s", validation ? "requested" : "off");
+    m_instance = std::make_unique<VulkanInstance>(validation);
     m_window = std::make_unique<VulkanWindow>(
         m_config.width, m_config.height, m_config.title.c_str(),
         *m_instance, m_eventDispatcher.get(), m_logger.get());

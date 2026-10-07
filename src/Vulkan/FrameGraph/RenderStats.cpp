@@ -4,6 +4,7 @@
 
 #include "Vulkan/FrameGraph/RenderStats.h"
 #include "Vulkan/VulkanDevice.h"
+#include "Vulkan/VulkanInstance.h"
 
 #include <algorithm>
 #include <cmath>
@@ -215,7 +216,8 @@ std::string formatRenderStats(const RenderStats& stats, size_t topPasses) {
         out += stats.gpuTiming ? "pending" : "off";
     }
     out += " | " + std::to_string(f.draws.drawCalls) + " draws, " + std::to_string(f.draws.dispatches) +
-           " dispatches, " + formatCount(f.draws.vertices) + " vertices\n";
+           " dispatches, " + formatCount(f.draws.vertices) + " vertices";
+    out += stats.validationLayers ? " | validation layers on: CPU times inflated\n" : "\n";
 
     // The passes that cost the most.
     std::vector<size_t> order(f.passes.size());
@@ -260,6 +262,7 @@ RenderStatsCollector::RenderStatsCollector(VulkanDevice& device)
     m_nsPerTick = props.limits.timestampPeriod;
     m_validMask = validBits >= 64 ? ~uint64_t{0} : ((uint64_t{1} << validBits) - 1);
     m_stats.gpuTiming = m_gpuSupported && m_gpuWanted;
+    m_stats.validationLayers = device.getInstance().isValidationLayersEnabled();
 }
 
 RenderStatsCollector::~RenderStatsCollector() {

@@ -1036,7 +1036,8 @@ cdef class Engine:
                  str pipeline_json_path="",
                  int max_frames_in_flight=2,
                  dict render_graph_parameters=None,
-                 environment_color=(0.25, 0.28, 0.33)):
+                 environment_color=(0.25, 0.28, 0.33),
+                 enable_validation=None):
         """Create engine with configuration.
 
         Args:
@@ -1053,6 +1054,9 @@ cdef class Engine:
             render_graph_parameters: Dict of str→int for SSBO sizing etc.
             environment_color: (r, g, b) of the uniform environment used
                 when there is no HDR map.
+            enable_validation: Vulkan validation layers. None follows the
+                build: off in the released package, where they would slow
+                every draw. SHOONYAKASHA_VALIDATION=1 or 0 overrides it.
         """
         if not pipeline_json_path:
             from . import pipeline as _pipeline
@@ -1068,6 +1072,8 @@ cdef class Engine:
             cfg.uniformEnvironmentColor[i] = float(environment_color[i])
         cfg.pipelineJsonPath = pipeline_json_path.encode('utf-8')
         cfg.maxFramesInFlight = max_frames_in_flight
+        if enable_validation is not None:
+            cfg.enableValidation = bool(enable_validation)
 
         if render_graph_parameters:
             for k, v in render_graph_parameters.items():
@@ -1489,6 +1495,7 @@ cdef class Engine:
 
         A dict with fps, frame_time_ms, frame_time_max_ms, cpu_record_ms,
         gpu_ms (None without GPU timing), draw_calls, dispatches, vertices,
+        validation_layers (True: CPU times include the layers' checks),
         summary (readable text) and passes: one dict per pass in execution
         order with name, cpu_ms, gpu_ms, draw_calls, dispatches, vertices.
         GPU times describe frames that finished one or two frames ago.
@@ -1516,6 +1523,7 @@ cdef class Engine:
             'draw_calls': s.drawCalls,
             'dispatches': s.dispatches,
             'vertices': s.vertices,
+            'validation_layers': s.validationLayers,
             'passes': passes,
             'summary': s.summary.decode('utf-8'),
         }

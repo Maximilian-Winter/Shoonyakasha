@@ -14,6 +14,6 @@ Ordinary callback exceptions are printed by the bridge. Script-system exceptions
 
 The package imports pure-Python utilities before attempting the extension. `extension_available()` distinguishes utility-only import from native availability. Accessing a missing engine symbol raises an actionable import error.
 
-Bindings do not expose every facade/config field: `EngineConfig.enableValidation`, native loader root/node lists, and detailed collider fields are examples. Keep `.pxd`, `.pyx`, package exports, and references aligned when changing the bridge.
+Bindings do not expose every facade/config field: native loader root/node lists, and detailed collider fields are examples. Keep `.pxd`, `.pyx`, package exports, and references aligned when changing the bridge.
 
 Sources: [wrapper](../../python/shoonyakasha/_shoonyakasha.pyx), [callback bridge](../../python/shoonyakasha/_callback_bridge.h), [ECS bridge](../../python/shoonyakasha/_ecs_bridge.h). See [build instructions](../../BUILDING.md#python-bindings) and [maintenance](../maintenance.md).

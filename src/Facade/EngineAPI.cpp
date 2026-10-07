@@ -536,6 +536,7 @@ RenderStatsSnapshot EngineAPI::getRenderStats() const {
     out.drawCalls = avg.draws.drawCalls;
     out.dispatches = avg.draws.dispatches;
     out.vertices = avg.draws.vertices;
+    out.validationLayers = stats->validationLayers;
     out.passes.reserve(avg.passes.size());
     for (const auto& pass : avg.passes) {
         RenderPassStats p;
