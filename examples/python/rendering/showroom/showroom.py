@@ -48,12 +48,15 @@ renders at --supersample times the window's size (2 for recordings):
     python showroom.py --record tour.mp4               a cinematic tour
     python showroom.py --record reel.mp4 --vertical --models alfa_gtv6
     python showroom.py --record tour.mp4 --dof 1.4     with depth of field
+Recording prints its progress every few seconds; Esc or Ctrl+C stops it
+early and keeps what is recorded.
 """
 
 import argparse
 import json
 import math
 import os
+import signal
 import struct
 import sys
 import time
@@ -1306,6 +1309,8 @@ class Stills:
         showroom.spinning = False
 
     def update(self, dt):
+        if engine.input.is_key_down(keys.ESCAPE):
+            finish("stopped")
         samples = max(args.samples, 1)
         if self.job >= 0:
             self.frames += 1
@@ -1352,9 +1357,27 @@ class Tour:
         self.started = False
         self.frames = 0
         self.sub = 0      # sub-frame of the recorded frame being rendered
+        # Every model gets the same shots, so the length is known up front.
+        self.total = int(round(len(showroom.models) * self.seconds() * args.fps))
+        self.start_time = None
+        self.last_report = 0.0
 
     def seconds(self):
         return args.seconds or sum(s.seconds for s in showroom.shots)
+
+    def report(self):
+        """Every few seconds: frames written, and an estimate of the time left."""
+        now = time.monotonic()
+        if now - self.last_report < 5.0:
+            return
+        self.last_report = now
+        done = engine.recorded_frame_count
+        elapsed = now - self.start_time
+        line = "[showroom] recording: %d / %d frames (%d%%)" % (done, self.total, 100 * done // max(self.total, 1))
+        if done > 0:
+            left = elapsed / done * max(self.total - done, 0)
+            line += ", %s left" % format_duration(left)
+        print(line + "  (Esc or Ctrl+C stops and keeps what is recorded)", flush=True)
 
     def update(self, dt):
         if not self.started:
@@ -1368,6 +1391,7 @@ class Tour:
                 os._exit(1)
             print("[showroom] recording ->", self.path)
             self.started = True
+            self.start_time = time.monotonic()
             if args.motion_blur > 1:
                 accumulation.begin(Accumulation.TAA)
 
@@ -1375,7 +1399,10 @@ class Tour:
         # the shutter; only the last is written, holding the average.
         blur = max(args.motion_blur, 1)
         sub_step = self.step * min(max(args.shutter, 0.0), 1.0) / blur
+        if engine.input.is_key_down(keys.ESCAPE):
+            finish("stopped")
         if self.sub == 0:
+            self.report()
             self.model_time += self.step
             if self.model_time >= self.seconds():
                 if showroom.index + 1 >= len(showroom.models):
@@ -1393,6 +1420,38 @@ class Tour:
         showroom.update(self.step - (blur - 1) * sub_step if self.sub == 0 else sub_step)
         self.sub = (self.sub + 1) % blur
 
+
+def format_duration(seconds):
+    seconds = int(seconds)
+    if seconds >= 3600:
+        return "%d:%02d:%02d" % (seconds // 3600, seconds // 60 % 60, seconds % 60)
+    return "%d:%02d" % (seconds // 60, seconds % 60)
+
+
+def finish(reason):
+    """Finish any recording, so the file plays, and quit."""
+    if engine.is_recording:
+        frames = engine.recorded_frame_count
+        ok = engine.stop_recording()
+        print("[showroom] recording %s after %d frames (%s): %s" % (
+            reason, frames, format_duration(frames / max(args.fps, 1)),
+            "saved" if ok else "could not be finished, see the error above"), flush=True)
+    os._exit(0)        # the engine has no quit call
+
+
+# Ctrl+C: Python only notices it when a callback next runs, so the handler
+# just asks, and the next frame finishes the recording and quits. (Raising
+# KeyboardInterrupt instead would end that one callback and leave the
+# engine running.)
+quit_requested = False
+
+
+def request_quit(signum, frame):
+    global quit_requested
+    quit_requested = True
+
+
+signal.signal(signal.SIGINT, request_quit)
 
 controls = Controls()
 automation = None
@@ -1420,6 +1479,8 @@ def on_init():
         automation = Tour(os.path.abspath(args.record))
 
     def animate(dt):
+        if quit_requested:
+            finish("stopped")
         if automation is None and still_capture.active:
             showroom.update(0.0)        # held still while it is averaged
             still_capture.update()

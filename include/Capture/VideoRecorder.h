@@ -93,7 +93,11 @@ public:
     static bool available() { return !findFfmpeg().empty(); }
 
 private:
+    bool openPipe(const std::string& commandLine);
+    int closePipe();   // waits for ffmpeg; its exit status
+
     std::FILE*  m_pipe = nullptr;
+    void*       m_process = nullptr;   // Windows: ffmpeg's process handle
     std::string m_path;
     std::string m_command;      // reported in the error from writeFrame()
     std::string m_ffmpegPath;

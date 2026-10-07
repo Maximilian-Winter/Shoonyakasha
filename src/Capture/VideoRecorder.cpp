@@ -11,12 +11,10 @@
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
-#define SHOONYAKASHA_POPEN  _popen
-#define SHOONYAKASHA_PCLOSE _pclose
+#include <fcntl.h>
+#include <io.h>
 #else
 #include <unistd.h>
-#define SHOONYAKASHA_POPEN  popen
-#define SHOONYAKASHA_PCLOSE pclose
 #endif
 
 namespace Shoonyakasha {
@@ -28,7 +26,8 @@ bool isExecutable(const std::filesystem::path& candidate) {
     return !candidate.empty() && std::filesystem::is_regular_file(candidate, ec);
 }
 
-/// Quote a path for the shell that popen() invokes.
+/// Quote a path on the command line: for the shell popen() starts, or for
+/// CreateProcess on Windows.
 std::string quote(const std::string& value) {
     return "\"" + value + "\"";
 }
@@ -166,32 +165,16 @@ bool VideoRecorder::start(const std::string& path, uint32_t width, uint32_t heig
         std::filesystem::create_directories(parent, ec);
     }
 
-    std::string commandLine =
+    const std::string commandLine =
         quote(ffmpeg) + " " + buildArguments(path, encodedWidth, encodedHeight, options);
-
-#ifdef _WIN32
-    // cmd.exe strips the outermost pair of quotes from its command line. This
-    // command both starts and ends with a quoted path, so an extra enclosing
-    // pair is needed for the inner quotes to survive.
-    commandLine = "\"" + commandLine + "\"";
-#endif
-
-    // "wb": in text mode Windows translates 0x0A bytes in the pixel data to
-    // CRLF, which corrupts every frame. POSIX popen() takes only "r" or "w"
-    // (glibc refuses "wb" with EINVAL) and has no text mode to avoid.
-#ifdef _WIN32
-    m_pipe = SHOONYAKASHA_POPEN(commandLine.c_str(), "wb");
-#else
-    m_pipe = SHOONYAKASHA_POPEN(commandLine.c_str(), "w");
-#endif
-    if (!m_pipe) {
+    if (!openPipe(commandLine)) {
         m_lastError = "could not start ffmpeg (" + ffmpeg + ")";
         return false;
     }
 
-    // popen on Windows starts a shell, which succeeds whether or not the
-    // program exists, so a non-null handle does not mean ffmpeg is running. The
-    // first writeFrame() reports that. The command is kept for its error text.
+    // The command is kept for the error text of writeFrame(), which is where
+    // an ffmpeg that started but then exited (an unknown codec, an unwritable
+    // path) shows.
     m_command = commandLine;
     m_ffmpegPath = ffmpeg;
 
@@ -202,6 +185,80 @@ bool VideoRecorder::start(const std::string& path, uint32_t width, uint32_t heig
     m_encodedHeight = encodedHeight;
     m_expectedFrameBytes = static_cast<size_t>(width) * height * 4;
     return true;
+}
+
+bool VideoRecorder::openPipe(const std::string& commandLine) {
+#ifdef _WIN32
+    // ffmpeg is started directly rather than through _popen's shell, in a
+    // process group of its own. Ctrl+C in the console then reaches only the
+    // application, which can stop the recording and finish the file, and not
+    // ffmpeg too, which would quit with frames still to come.
+    SECURITY_ATTRIBUTES inheritable{};
+    inheritable.nLength = sizeof(inheritable);
+    inheritable.bInheritHandle = TRUE;
+    HANDLE readEnd = nullptr;
+    HANDLE writeEnd = nullptr;
+    if (!CreatePipe(&readEnd, &writeEnd, &inheritable, 1u << 20)) {
+        return false;
+    }
+    SetHandleInformation(writeEnd, HANDLE_FLAG_INHERIT, 0);   // ffmpeg inherits only its end
+
+    STARTUPINFOA startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = readEnd;
+    startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);   // ffmpeg's errors still show
+
+    std::string mutableCommand = commandLine;              // CreateProcessA may write to it
+    PROCESS_INFORMATION process{};
+    const BOOL started = CreateProcessA(nullptr, mutableCommand.data(), nullptr, nullptr, TRUE,
+                                        CREATE_NEW_PROCESS_GROUP, nullptr, nullptr,
+                                        &startup, &process);
+    CloseHandle(readEnd);
+    if (!started) {
+        CloseHandle(writeEnd);
+        return false;
+    }
+    CloseHandle(process.hThread);
+
+    // Binary mode: text mode would turn every 0x0A byte of the pixels into CRLF.
+    const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(writeEnd), _O_BINARY);
+    m_pipe = fd >= 0 ? _fdopen(fd, "wb") : nullptr;
+    if (!m_pipe) {
+        if (fd >= 0) _close(fd);
+        else CloseHandle(writeEnd);
+        TerminateProcess(process.hProcess, 1);
+        CloseHandle(process.hProcess);
+        return false;
+    }
+    m_process = process.hProcess;
+    return true;
+#else
+    // POSIX popen() takes only "r" or "w" (glibc refuses "wb"), and has no
+    // text mode to avoid.
+    m_pipe = popen(commandLine.c_str(), "w");
+    return m_pipe != nullptr;
+#endif
+}
+
+int VideoRecorder::closePipe() {
+    int status = 0;
+#ifdef _WIN32
+    std::fclose(m_pipe);   // the end of input: ffmpeg finishes the file and exits
+    if (m_process) {
+        WaitForSingleObject(m_process, INFINITE);
+        DWORD code = 1;
+        GetExitCodeProcess(m_process, &code);
+        CloseHandle(m_process);
+        m_process = nullptr;
+        status = static_cast<int>(code);
+    }
+#else
+    status = pclose(m_pipe);
+#endif
+    m_pipe = nullptr;
+    return status;
 }
 
 bool VideoRecorder::writeFrame(const uint8_t* rgba, size_t byteCount) {
@@ -235,8 +292,7 @@ bool VideoRecorder::writeFrame(const uint8_t* rgba, size_t byteCount) {
         m_lastError = "ffmpeg stopped accepting frames after "
                     + std::to_string(m_frameCount) + " frames. Command was: "
                     + m_command;
-        SHOONYAKASHA_PCLOSE(m_pipe);
-        m_pipe = nullptr;
+        closePipe();
         return false;
     }
 
@@ -249,8 +305,7 @@ bool VideoRecorder::stop() {
         return true;
     }
 
-    const int status = SHOONYAKASHA_PCLOSE(m_pipe);
-    m_pipe = nullptr;
+    const int status = closePipe();
 
     if (status != 0) {
         m_lastError = "ffmpeg exited with status " + std::to_string(status);
