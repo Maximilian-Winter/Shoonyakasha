@@ -45,8 +45,6 @@ CATALOGUE = [
           rig="neon", spin=12.0),
     Entry("aat", "AAT Battle Tank", "Trade Federation", "vehicle", 9.0, hover=0.45, rig="hardlight", spin=6.0),
     Entry("alkesh", "Al'kesh", "Goa'uld bomber", "ship", 12.0, hover=2.2, rig="night", spin=6.0),
-    Entry("lego_xwing", "LEGO X-Wing", "UCS-style build", "miniature", 0.95, plinth=0.9, rig="hardlight",
-          spin=10.0),
 ]
 
 BY_NAME = {e.name: e for e in CATALOGUE}

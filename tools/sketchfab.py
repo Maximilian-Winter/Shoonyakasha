@@ -70,9 +70,6 @@ MODELS = {
     "jedi_starfighter": ("27c14b58ffd343edabea8bea7b595005",
                          '"Anakin\'s Jedi Starfighter - Star Wars" (https://skfb.ly/6RSHr) by Quiznos323 is licensed under '
                          'CC Attribution-NonCommercial-ShareAlike (http://creativecommons.org/licenses/by-nc-sa/4.0/).'),
-    "lego_xwing": ("f02b6cbcfc14415096389db281bef535",
-                   '"LEGO X-Wing" (https://skfb.ly/onFGv) by Zack_Hawley is licensed under '
-                   'Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).'),
     "aat": ("9ed126f4616a482fabee52b0e0d46e52",
             '"-Star Wars- AAT" (https://skfb.ly/owYtF) by ARKON MAREK is licensed under '
             'Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).'),
@@ -633,12 +630,18 @@ class Converter:
     # Bounds -------------------------------------------------------------
 
     def bounds(self):
-        """World-space bounds of every mesh, from its accessors' min/max."""
+        """World-space bounds of the model, and of every mesh in full.
+
+        The first ignore the outermost 0.05% of vertices on each axis: some
+        files carry a large ground plane or a stray part far away, a handful
+        of vertices that would otherwise make the model look many times its
+        size. The full bounds come from the accessors' min/max."""
         import numpy as np
         g = self.gltf
         world = node_matrices(g)
         lo = np.full(3, np.inf)
         hi = np.full(3, -np.inf)
+        samples = []
         triangles = 0
         for node_index, matrix in world.items():
             node = g["nodes"][node_index]
@@ -658,7 +661,15 @@ class Converter:
                 count = (g["accessors"][primitive["indices"]]["count"] if "indices" in primitive
                          else accessor["count"])
                 triangles += count // 3
-        return [float(v) for v in lo], [float(v) for v in hi], int(triangles)
+                p = read_accessor(g, self.buffers, primitive["attributes"]["POSITION"]).astype(np.float64)
+                p = p[::max(1, len(p) // 50000)]
+                samples.append(p @ matrix[:3, :3].T + matrix[:3, 3])
+        full = ([float(v) for v in lo], [float(v) for v in hi])
+        if samples:
+            points = np.concatenate(samples)
+            lo = np.percentile(points, 0.05, axis=0)
+            hi = np.percentile(points, 99.95, axis=0)
+        return [float(v) for v in lo], [float(v) for v in hi], int(triangles), full
 
     # Writing ------------------------------------------------------------
 
@@ -702,7 +713,7 @@ def convert(name, source_path, out_dir, max_size=2048):
     c.fix_uvs()
     c.write_textures()
     c.split_and_name()
-    lo, hi, triangles = c.bounds()
+    lo, hi, triangles, full = c.bounds()
     c.write()
     materials = []
     for m in c.gltf.get("materials", []):
@@ -710,7 +721,8 @@ def convert(name, source_path, out_dir, max_size=2048):
                           "emissive": max(m.get("emissiveFactor", [0, 0, 0])) > 0.0})
     uid, credit = MODELS.get(name, ("", ""))
     summary = {"name": name, "uid": uid, "credit": credit,
-               "boundsMin": lo, "boundsMax": hi, "triangles": triangles,
+               "boundsMin": lo, "boundsMax": hi, "fullBoundsMin": full[0], "fullBoundsMax": full[1],
+               "triangles": triangles,
                "maxTextureSize": max_size, "materials": materials, "notes": c.notes}
     with open(os.path.join(out_dir, "showroom.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=1)

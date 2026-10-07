@@ -14,7 +14,7 @@ Sketchfab only gives downloads to a signed-in account. Copy the API token from [
 
 ```
 export SKETCHFAB_API_TOKEN=...                 # PowerShell: $env:SKETCHFAB_API_TOKEN = "..."
-python tools/fetch_assets.py showroom          # all nine, or showroom/alfa_gtv6 for one
+python tools/fetch_assets.py showroom          # all eight, or showroom/alfa_gtv6 for one
 ```
 
 **Fetching without a token:** download each model's glTF archive from its page by hand and save it as `assets/showroom/source/<name>.zip`, with the names below. The fetch converts whatever it finds there.
@@ -65,7 +65,6 @@ python showroom.py --record reel.mp4 --vertical --models alfa_33_stradale_2024 -
 | `jedi_starfighter` | "Anakin's Jedi Starfighter - Star Wars" ([skfb.ly/6RSHr](https://skfb.ly/6RSHr)) by Quiznos323 | [CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/) |
 | `aat` | "-Star Wars- AAT" ([skfb.ly/owYtF](https://skfb.ly/owYtF)) by ARKON MAREK | [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) |
 | `alkesh` | "Inspired By Stargate SG-1: Goa´Uld Alkesh" ([skfb.ly/pNuWv](https://skfb.ly/pNuWv)) by Ska-Ara | [CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/) |
-| `lego_xwing` | "LEGO X-Wing" ([skfb.ly/onFGv](https://skfb.ly/onFGv)) by Zack_Hawley | [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) |
 
 The full attribution lines, ready to paste into a post's caption:
 
@@ -76,7 +75,6 @@ The full attribution lines, ready to paste into a post's caption:
 "2024 Alfa Romeo 33 Stradale ICE" (https://skfb.ly/pNXHu) by Ddiaz Design is licensed under CC Attribution-NonCommercial-ShareAlike (http://creativecommons.org/licenses/by-nc-sa/4.0/).
 "SWBF2(Custom) - Anakin's Eta-2 Actis Interceptor" (https://skfb.ly/pxvCx) by Zorg_Sinister is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
 "Anakin's Jedi Starfighter - Star Wars" (https://skfb.ly/6RSHr) by Quiznos323 is licensed under CC Attribution-NonCommercial-ShareAlike (http://creativecommons.org/licenses/by-nc-sa/4.0/).
-"LEGO X-Wing" (https://skfb.ly/onFGv) by Zack_Hawley is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
 "-Star Wars- AAT" (https://skfb.ly/owYtF) by ARKON MAREK is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
 "Inspired By Stargate SG-1: Goa´Uld Alkesh" (https://skfb.ly/pNuWv) by Ska-Ara is licensed under CC Attribution-NonCommercial-ShareAlike (http://creativecommons.org/licenses/by-nc-sa/4.0/).
 ```
@@ -103,6 +101,6 @@ The full attribution lines, ready to paste into a post's caption:
 
 ## Notes
 
-- **Untested settings:** the nine models could not be downloaded where this was written. Their `yaw`, paint patterns and lengths in `catalogue.py` are the obvious guesses, worth a look the first time each is shown. The showroom and the converter were tested on Khronos glTF samples that use the same glTF extensions.
-- **LEGO X-Wing:** at 6.6 million triangles it takes a while to load, and every virtual shadow map level draws all of it. Without indirect draws in the engine, levels with nothing to redraw still run its vertex shader, though no triangles get rasterised. Keep it in its own run (`--models lego_xwing`) on a smaller GPU.
+- **Catalogue settings:** each model's `yaw`, paint pattern and length in `catalogue.py` are first guesses. **Y** turns a model and prints the yaw to keep. The showroom prints every model's size and scale when it loads it; a model shown far too small usually has stray geometry far away, which the converter's bounds ignore (convert again with `python tools/fetch_assets.py showroom/<name>`: the download is kept).
+- **Big models:** the stage grows with the model, so a 12 m bomber gets a larger cove, and the camera stays inside it.
 - **Requirements:** ray-traced lights and reflections need `VK_KHR_ray_query`. Without it the showroom uses the virtual shadow map with shadow-mapped lights, and **G** cycles only `high` and `cascades`.

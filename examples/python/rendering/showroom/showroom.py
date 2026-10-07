@@ -303,10 +303,12 @@ class Model:
                     self.paint.append(e)
                     self.paint_original[e] = scene.get_material_vec4(e, "baseColorFactor", (1, 1, 1, 1))
         self.loaded = True
-        print("[showroom] %s: %d entities, %d vertices, %.1fs%s" % (
-            self.entry.name, len(self.entities), result.total_vertices, time.time() - started,
-            ", %d paint" % len(self.paint) if self.paint else ""))
         self.place()
+        lo, hi = self.bounds
+        print("[showroom] %s: %d entities, %d vertices, %.1fs%s; %.2f x %.2f x %.2f in the file, shown at x%.3g" % (
+            self.entry.name, len(self.entities), result.total_vertices, time.time() - started,
+            ", %d paint" % len(self.paint) if self.paint else "",
+            hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], self.scale))
 
     def place(self):
         """Scale to the catalogue length, turn, centre on the turntable, and
@@ -369,7 +371,13 @@ def find_models():
             name = os.path.basename(os.path.dirname(path))      # a converted model's directory
         entry = catalogue.Entry(name, name.replace("_", " "), "", "car",
                                 float(length) if length else None, paint=catalogue.CAR_PAINT)
-        models.append(Model(entry, path, gltf_bounds(path), ""))
+        info = os.path.join(os.path.dirname(path), "showroom.json")
+        if os.path.exists(info):        # converted by tools/sketchfab.py: bounds without stray parts
+            with open(info, encoding="utf-8") as f:
+                info = json.load(f)
+            models.append(Model(entry, path, (info["boundsMin"], info["boundsMax"]), info.get("credit", "")))
+        else:
+            models.append(Model(entry, path, gltf_bounds(path), ""))
     if not models:
         print("[showroom] No showroom models found. Fetch them once with\n"
               "    python tools/fetch_assets.py showroom\n"
@@ -440,11 +448,11 @@ RIGS = [
     ], ibl=0.04, floor=(0.03, 0.03, 0.035), floor_roughness=0.18, cove=(0.05, 0.05, 0.06),
         rim=(0.1, 0.45, 1.6), exposure=1.0, min_ev=-1.5),
     Rig("neon", "Neon", [
-        LightSpec((-0.95, 0.22, 0.25), 1.8, (1.0, 0.12, 0.65), 70.0, radius=0.35, cone=(40.0, 70.0), softbox=(0.3, 2.4)),
-        LightSpec((0.9, 0.35, -0.45), 1.8, (0.1, 0.85, 1.0), 70.0, radius=0.35, cone=(40.0, 70.0), softbox=(0.3, 2.4)),
-        LightSpec((0.0, 1.0, -0.2), 1.6, (0.55, 0.3, 1.0), 40.0, radius=0.6, cone=(45.0, 80.0), softbox=(1.0, 3.0)),
+        LightSpec((-0.95, 0.22, 0.25), 1.8, (1.0, 0.12, 0.65), 32.0, radius=0.35, cone=(35.0, 60.0), softbox=(0.3, 2.4)),
+        LightSpec((0.9, 0.35, -0.45), 1.8, (0.1, 0.85, 1.0), 32.0, radius=0.35, cone=(35.0, 60.0), softbox=(0.3, 2.4)),
+        LightSpec((0.0, 1.0, -0.2), 1.6, (0.55, 0.3, 1.0), 16.0, radius=0.6, cone=(40.0, 70.0), softbox=(1.0, 3.0)),
     ], ibl=0.03, floor=(0.02, 0.02, 0.025), floor_roughness=0.14, cove=(0.03, 0.025, 0.04),
-        rim=(1.4, 0.1, 0.9), exposure=1.05, min_ev=-1.0),
+        rim=(1.4, 0.1, 0.9), exposure=0.8, min_ev=0.0),
 ]
 RIG_BY_NAME = {r.name: r for r in RIGS}
 MAX_LIGHTS = max(len(r.lights) for r in RIGS)
@@ -464,6 +472,10 @@ class Stage:
     def build(self):
         self.spin = holder("turntable_spin")
         result = engine.load_gltf_scene(os.path.join(STUDIO, "stage.gltf"), name_prefix="stage")
+        self.stage_root = holder("stage")
+        for root in roots_of(result.entities):
+            scene.set_parent(root, self.stage_root)
+        self.stage_scale = 1.0
         self.floor = by_suffix(result.entities, "floor")
         self.cove = by_suffix(result.entities, "cove")
         for e in result.entities:
@@ -496,7 +508,13 @@ class Stage:
         self.sun = engine.create_directional_light(direction=(0.4, -0.7, -0.5), intensity=0.0)
 
     def stand(self, model):
-        """Size the turntable and plinth for a model."""
+        """Size the turntable and plinth for a model, and the cove so the
+        farthest camera of any shot stays inside it."""
+        aspect = args.width / args.height
+        farthest = max(framing_distance(model.radius(), 24.0, aspect) * 1.15,
+                       framing_distance(model.radius(), 40.0, aspect) * 1.3)
+        self.stage_scale = max(1.0, (farthest + 1.5) / studio.FLOOR_RADIUS)
+        scene.set_scale(self.stage_root, (self.stage_scale,) * 3)
         r = model.turntable_radius()
         scene.set_scale(self.turntable, (r, 1.0, r))
         plinth = model.entry.plinth
@@ -840,6 +858,12 @@ class Showroom:
 
     def pose(self, eye, target, fov):
         camera = engine.camera_entity
+        # Inside the cove, and above its floor, whatever the shot asks for.
+        limit = studio.FLOOR_RADIUS * self.stage.stage_scale - 0.5
+        horizontal = math.hypot(eye[0], eye[2])
+        if horizontal > limit:
+            eye = (eye[0] * limit / horizontal, eye[1], eye[2] * limit / horizontal)
+        eye = (eye[0], max(eye[1], 0.15), eye[2])
         scene.set_position(camera, eye)
         scene.set_rotation(camera, look_rotation(eye, target))
         scene.set_camera_fov(camera, fov)
