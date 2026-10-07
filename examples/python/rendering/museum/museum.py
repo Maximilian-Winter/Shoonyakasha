@@ -16,6 +16,9 @@ Keys:
                    VSM with shadow maps, cascades
     R              ray-traced reflections on or off (with ray-traced lights)
     T              turntable on or off
+    LEFT MOUSE     drag to turn the turntable; it coasts on when let go
+    , / .          turn the turntable while held
+    - / =          turntable slower / faster
     K              next paint colour (cars)
     X              clear coat on or off (the lacquer over car paint)
     M              next tone mapper: AgX, PBR Neutral, ACES
@@ -26,7 +29,7 @@ Keys:
     V              debug views (VSM levels and pages, shadow mask, normals ...)
     H              hide or show the placard (the credit stays)
     O              render stats: frame rate, GPU time per pass, draw calls
-    P              screenshot into museum_captures/
+    P              screenshot into museum_captures/, as on screen
     I              high-quality still into museum_captures/: the view held
                    while --samples frames are averaged
     F9             start or stop recording a video into museum_captures/
@@ -867,6 +870,11 @@ class Overlay:
             name.set((exhibit.name if exhibit else model.entry.title).upper())
             self.stops.append((dot, year, name))
 
+        # Short notes: a capture saved, the turntable's speed
+        self.toast_label = Text(sk.UI_ANCHOR_TOP_RIGHT, -32.0 * k, 70.0 * k, 18.0 * k, GOLD,
+                                align=sk.TEXT_ALIGN_RIGHT)
+        self.toast_until = 0.0
+
         lines = [line.strip() for line in __doc__.split("Keys:")[1].split("Automatic")[0].strip().splitlines()]
         self.help = []
         for i, line in enumerate(lines):
@@ -908,6 +916,16 @@ class Overlay:
 
     def set_status(self, text):
         self.status.set(text)
+
+    def toast(self, text, seconds=3.0):
+        """Show `text` at the top right for a few seconds; None hides it."""
+        self.toast_label.set(text or "")
+        self.toast_label.show(bool(text))
+        self.toast_until = time.monotonic() + seconds if text else 0.0
+
+    def update_toast(self):
+        if self.toast_until and time.monotonic() > self.toast_until:
+            self.toast(None)
 
     def labels(self):
         out = [self.number, self.year, self.maker, self.name, self.kind, self.status] + self.text
@@ -1059,6 +1077,52 @@ PAINTS = [None, (0.42, 0.012, 0.012), (0.012, 0.012, 0.014), (0.8, 0.8, 0.78), (
           (0.35, 0.36, 0.38), (0.75, 0.32, 0.02)]
 
 
+class Plate:
+    """The turntable by hand: drag it with the left mouse button and it
+    coasts on when let go; hold , or . to turn it; - and = set how fast it
+    turns by itself."""
+
+    DRAG = 0.25          # degrees per pixel dragged
+    KEYS = 45.0          # degrees per second while , or . is held
+    FRICTION = 2.5       # how fast a coasting turn dies down, per second
+
+    def __init__(self):
+        self.speed = 1.0     # times the catalogue's spin
+        self.velocity = 0.0  # degrees per second, while coasting
+        self.last_mouse = None
+
+    def faster(self, factor):
+        self.speed = min(max(self.speed * factor, 0.125), 8.0)
+        return self.speed
+
+    def update(self, dt, auto_speed):
+        """Degrees to turn the turntable by this frame, or None to leave it
+        to the automatic spin."""
+        if dt <= 0.0:
+            self.last_mouse = None
+            return None
+        inp = engine.input
+        turn = None
+        if inp.is_mouse_button_down(keys.MOUSE_LEFT):
+            x, _ = inp.get_mouse_position()
+            if self.last_mouse is not None:
+                turn = (x - self.last_mouse) * self.DRAG
+                # The last moments of the drag set the coast
+                self.velocity = 0.7 * self.velocity + 0.3 * turn / dt
+            self.last_mouse = x
+            return turn if turn is not None else 0.0
+        self.last_mouse = None
+        held = (1.0 if inp.is_key_down(keys.PERIOD) else 0.0) - (1.0 if inp.is_key_down(keys.COMMA) else 0.0)
+        if held:
+            self.velocity = 0.0
+            return held * self.KEYS * dt
+        if abs(self.velocity) > abs(auto_speed) + 1.0:
+            self.velocity *= math.exp(-self.FRICTION * dt)
+            return self.velocity * dt
+        self.velocity = 0.0
+        return None
+
+
 class Showroom:
     def __init__(self):
         self.models = find_models()
@@ -1069,6 +1133,7 @@ class Showroom:
         self.rig = None
         self.camera_mode = args.camera
         self.spinning = True
+        self.plate = Plate()
         self.shots = []
         self.shot_time = 0.0
         self.epoch = 0
@@ -1190,11 +1255,15 @@ class Showroom:
     def update(self, dt):
         self.time += dt
         model = self.model
+        auto = model.entry.spin * self.plate.speed if self.spinning else 0.0
+        manual = self.plate.update(dt, auto) if self.camera_mode != "cinematic" else None
         if self.camera_mode == "cinematic":
             self.stage.turn(0.0)
+        elif manual is not None:
+            self.stage.turn(manual)
         elif self.spinning:
-            self.stage.turn(model.entry.spin * dt)
-        moving = self.spinning and self.camera_mode != "cinematic"
+            self.stage.turn(auto * dt)
+        moving = (self.spinning or manual is not None) and self.camera_mode != "cinematic"
         if model.entry.hover:
             bob = 0.04 * math.sin(self.time * 1.7) * min(1.0, model.radius() / 2.0)
             scene.set_position(self.stage.spin, (0.0, bob, 0.0))
@@ -1367,6 +1436,7 @@ class StillCapture:
         else:
             # The frame presented last holds the full average.
             ok = engine.capture_screenshot(self.path)
+            showroom.overlay.toast(("Saved " + os.path.basename(self.path)) if ok else "Still failed")
             print("[museum] still ->", self.path if ok else "failed")
             accumulation.end()
             self.frames = -1
@@ -1375,6 +1445,32 @@ class StillCapture:
 
 
 still_capture = StillCapture()
+
+
+class Screenshot:
+    """Key P: the frame as on screen, without the toast saying a capture
+    was saved: the toast is hidden, and the frame after next is captured."""
+
+    def __init__(self):
+        self.wait = -1
+
+    def request(self):
+        showroom.overlay.toast(None)
+        self.wait = 2
+
+    def update(self):
+        if self.wait < 0:
+            return
+        self.wait -= 1
+        if self.wait == 0:
+            self.wait = -1
+            path = capture_path(".png")
+            ok = engine.capture_screenshot(path)
+            print("[museum] screenshot ->", path if ok else "failed")
+            showroom.overlay.toast(("Saved " + os.path.basename(path)) if ok else "Screenshot failed")
+
+
+screenshot = Screenshot()
 
 
 def capture_path(suffix):
@@ -1440,11 +1536,15 @@ class Controls:
         if self.pressed(keys.B):
             s.next_dof()
         s.stats.update(dt)
+        slower, faster = self.pressed(keys.MINUS), self.pressed(keys.EQUAL)
+        if slower or faster:
+            speed = s.plate.faster(1.5 if faster else 1.0 / 1.5)
+            s.overlay.toast("Turntable %.2gx" % speed + ("" if s.spinning else " (off: T)"))
         if self.pressed(keys.I):
+            s.overlay.toast(None)
             still_capture.start()
         if self.pressed(keys.P):
-            path = capture_path(".png")
-            print("[museum] screenshot ->", path if engine.capture_screenshot(path) else "failed")
+            screenshot.request()
         if self.pressed(keys.F9):
             if engine.is_recording:
                 engine.stop_recording()
@@ -1649,6 +1749,8 @@ def on_init():
     def animate(dt):
         if quit_requested:
             finish("stopped")
+        showroom.overlay.update_toast()
+        screenshot.update()
         if automation is None and still_capture.active:
             showroom.update(0.0)        # held still while it is averaged
             still_capture.update()

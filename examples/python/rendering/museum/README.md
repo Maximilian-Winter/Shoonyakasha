@@ -21,6 +21,13 @@ python museum.py --record museum.mp4 --dof 2.8 --grain 0.02 # the collection in 
 python museum.py --record reel.mp4 --vertical               # phone-shaped: the car above, the placard below
 ```
 
+**Keys of its own:**
+
+- **Left mouse:** drag to turn the turntable. Let go and it coasts on, slowing like a heavy plate, before its own spin takes over again.
+- **, / .:** turn it while held.
+- **- / =:** slower or faster spin. **T** still turns the spin off and on.
+- **P:** a screenshot as on screen, placard included. **I:** a still averaged over `--samples` frames. Both go to `museum_captures/`, and a note at the top right says when the file is saved. The note is never in the picture.
+
 **Layout:** the placard takes the left third of the frame, and the camera shifts so the car stands in the rest. In `--vertical` the placard takes the lower half and the car stands above it. **H** hides the placard and centres the car again; the model's credit stays on screen, as its licence asks.
 
 ## The placards
