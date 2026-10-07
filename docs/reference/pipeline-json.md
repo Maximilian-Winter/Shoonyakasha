@@ -103,7 +103,7 @@ A field `source` is a dot-path. A layout-level `source` is an initialization obj
 | `scene.camera` | `view`, `projection`, `viewProjection`, `prevViewProjection` (last frame's, for reprojection), `invView`, `invProj`, `position`, `fov`, `nearPlane`, `farPlane`, `aspect`, `positionVec4`, `nearFarFovAspect` |
 | `scene.environment` | `irradianceMap`, `prefilterMap`, `brdfLUT`, `environmentMap` |
 | `scene.time` | `elapsed`, `delta`, `frame` |
-| `scene.screen` | `width`, `height`, `resolution` |
+| `scene.screen` | `width`, `height`, `resolution`: the window's; `renderWidth`, `renderHeight`, `renderResolution`: the size the scene renders at, the window's times the [render scale](../guides/frame-capture.md#supersampling). Passes that write the swapchain run at the window's size, the others at the render size |
 | `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` (w: cos of the outer cone), `source` (x: source radius, y: 1 when it casts shadows, z: cos of the inner cone) |
 | `scene.shadows.sun` | `enabled`, `cascadeCount`, `splits`, `texelWorldSize`, `lightIndex`, `direction`; indexed `scene.shadows.sun.cascades[N].viewProj`. See [sun shadow cascades](../guides/lighting-and-ibl.md#sun-shadow-cascades) |
 | `scene.shadows.spot`, `scene.shadows.point` | `count`; indexed `scene.shadows.spot[N].viewProj`, `lightIndex`, `params`, `rect`; `scene.shadows.point[N].lightIndex`, `positionFar`, `depthParams`; `scene.shadows.point.faces[N].viewProj`, `rect` with N = slot × 6 + face. See [spot and point light shadows](../guides/lighting-and-ibl.md#spot-and-point-light-shadows) |

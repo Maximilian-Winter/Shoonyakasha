@@ -20,6 +20,8 @@ takes core metallic-roughness glTF with one UV set, so:
 - KHR_materials_pbrSpecularGlossiness becomes metallic-roughness, per pixel
   where there are maps (the Bistro converter's conversion).
 - KHR_materials_unlit becomes emission (screens, lamps, painted-on light).
+- KHR_materials_clearcoat is kept with its amount and roughness maps; its
+  normal map is dropped.
 - Maps on TEXCOORD_1 move the UV set to TEXCOORD_0 when a material uses only
   that set, and are dropped when it mixes sets (usually baked occlusion).
 - Textures larger than --resolution are scaled down; WebP and other formats
@@ -311,9 +313,11 @@ class Converter:
     def _texture_slots(self, material):
         """(slot dict, srgb) for every texture a material uses."""
         pbr = material.get("pbrMetallicRoughness", {})
+        coat = material.get("extensions", {}).get("KHR_materials_clearcoat", {})
         slots = [(pbr.get("baseColorTexture"), True), (pbr.get("metallicRoughnessTexture"), False),
                  (material.get("normalTexture"), False), (material.get("occlusionTexture"), False),
-                 (material.get("emissiveTexture"), True)]
+                 (material.get("emissiveTexture"), True),
+                 (coat.get("clearcoatTexture"), False), (coat.get("clearcoatRoughnessTexture"), False)]
         return [(s, srgb) for s, srgb in slots if s]
 
     def convert_materials(self):
@@ -345,7 +349,10 @@ class Converter:
                 pbr["baseColorFactor"] = [0.0, 0.0, 0.0, color[3]]
                 pbr["metallicFactor"] = 0.0
                 pbr["roughnessFactor"] = 1.0
-            for dropped in ("KHR_materials_clearcoat", "KHR_materials_specular", "KHR_materials_ior",
+            coat = ext.get("KHR_materials_clearcoat")
+            if coat is not None and coat.pop("clearcoatNormalTexture", None) is not None:
+                self.notes.append("%s: clear coat normal map dropped (the coat takes the base normal)" % m["name"])
+            for dropped in ("KHR_materials_specular", "KHR_materials_ior",
                             "KHR_materials_volume", "KHR_materials_sheen", "KHR_materials_iridescence",
                             "KHR_materials_anisotropy", "KHR_materials_dispersion"):
                 if ext.pop(dropped, None) is not None:
@@ -467,6 +474,8 @@ class Converter:
         pbr = material.get("pbrMetallicRoughness", {})
         out = [(pbr, k) for k in ("baseColorTexture", "metallicRoughnessTexture") if k in pbr]
         out += [(material, k) for k in ("normalTexture", "occlusionTexture", "emissiveTexture") if k in material]
+        coat = material.get("extensions", {}).get("KHR_materials_clearcoat", {})
+        out += [(coat, k) for k in ("clearcoatTexture", "clearcoatRoughnessTexture") if k in coat]
         return out
 
     # Textures -----------------------------------------------------------

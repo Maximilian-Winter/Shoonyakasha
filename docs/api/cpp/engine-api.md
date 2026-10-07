@@ -67,6 +67,8 @@ bool isRecording() const;
 uint64_t getRecordedFrameCount() const;
 void setRecordingPaused(bool paused);
 bool isRecordingPaused() const;
+void setRenderScale(float scale);
+float getRenderScale() const;
 GltfResult loadGltfScene(const std::string& path, const GltfOptions& opts = {});
 EntityHandle createDirectionalLight(const glm::vec3& direction, const glm::vec3& color = glm::vec3(1.f), float intensity = 2.f);
 EntityHandle createPointLight(const glm::vec3& position, const glm::vec3& color = glm::vec3(1.f), float intensity = 5.f, float range = 15.f);

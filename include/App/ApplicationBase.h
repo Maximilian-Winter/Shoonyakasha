@@ -244,6 +244,19 @@ protected:
     /// Frames written to the current or most recent recording.
     uint64_t getRecordedFrameCount() const;
 
+    // ─── Render Scale ──────────────────────────────────────────
+    //
+    // The scene renders at the window's size times this scale, and the passes
+    // that write the swapchain scale it to the window. 2 renders four times
+    // the pixels: supersampling, for captures. Pipelines read the render size
+    // as scene.screen.renderResolution; scene.screen.resolution stays the
+    // window's. A change recompiles the graph before the next frame.
+
+    void setRenderScale(float scale);
+    float getRenderScale() const { return m_renderScale; }
+    /// The size the scene renders at.
+    VkExtent2D getRenderExtent() const;
+
 private:
     ApplicationConfig m_config;
 
@@ -292,6 +305,8 @@ private:
     // ─── Frame Capture ─────────────────────────────────────────
     VideoRecorder m_videoRecorder;
     bool m_recordingPaused = false;
+    float m_renderScale = 1.0f;
+    bool m_renderScaleChanged = false;
     // Index of the swapchain image most recently handed to vkQueuePresentKHR.
     // Capture reads that one: reading the image currently being rendered into
     // would show a half-drawn frame.
@@ -334,6 +349,7 @@ private:
     /// copying from it.
     std::vector<uint8_t> readPresentedFrame(VkExtent2D& extentOut);
     void handleSwapChainRecreation();
+    void recompileForRenderScale();
     void cleanup();
 };
 

@@ -312,6 +312,9 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
         if (parts[1] == "width") return ResolvedValue(scene.screenWidth);
         if (parts[1] == "height") return ResolvedValue(scene.screenHeight);
         if (parts[1] == "resolution") return ResolvedValue(glm::vec2(scene.screenWidth, scene.screenHeight));
+        if (parts[1] == "renderWidth") return ResolvedValue(scene.renderWidth);
+        if (parts[1] == "renderHeight") return ResolvedValue(scene.renderHeight);
+        if (parts[1] == "renderResolution") return ResolvedValue(glm::vec2(scene.renderWidth, scene.renderHeight));
     }
 
     // ─── Light paths ────────────────────────────────────────────

@@ -1117,6 +1117,9 @@ public:
 
     // Set screen extent for screen buffer updates
     void setScreenExtent(VkExtent2D extent) { m_screenExtent = extent; }
+    // Set the size the graph renders at (scene.screen.renderResolution); the
+    // screen extent when unset
+    void setRenderExtent(VkExtent2D extent) { m_renderExtent = extent; }
 
 
     // ═══════════════════════════════════════════════════════════════
@@ -1500,6 +1503,7 @@ private:
     ECS::Scene* m_boundScene = nullptr;
     ResourceManager* m_resourceManager = nullptr;
     VkExtent2D m_screenExtent = {};
+    VkExtent2D m_renderExtent = {};
     float m_lastDeltaTime = 0.0f;
 
     uint32_t m_maxFramesInFlight = 2;

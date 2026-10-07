@@ -144,6 +144,13 @@ public:
     void setRecordingPaused(bool paused);
     bool isRecordingPaused() const;
 
+    /// Render the scene at the window's size times `scale` and scale it to
+    /// the window: 2 supersamples, four samples per pixel. Pipelines read the
+    /// render size as scene.screen.renderResolution. Takes effect at the next
+    /// frame, which recompiles the graph.
+    void setRenderScale(float scale);
+    float getRenderScale() const;
+
     GltfResult loadGltfScene(const std::string& path,
                              const GltfOptions& opts = {});
 

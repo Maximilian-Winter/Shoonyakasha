@@ -1252,6 +1252,23 @@ cdef class Engine:
         self._ptr.setRecordingPaused(value)
 
     @property
+    def render_scale(self):
+        """The scene renders at the window's size times this, scaled to the
+        window when it is shown.
+
+        2 supersamples: four samples per pixel, for crisper captures at four
+        times the cost. Between 0.25 and 4; a change recompiles the graph
+        before the next frame. Pipelines read the render size as
+        scene.screen.renderResolution, the window's as
+        scene.screen.resolution.
+        """
+        return self._ptr.getRenderScale()
+
+    @render_scale.setter
+    def render_scale(self, float value):
+        self._ptr.setRenderScale(value)
+
+    @property
     def is_recording(self):
         """Whether a recording is in progress.
 

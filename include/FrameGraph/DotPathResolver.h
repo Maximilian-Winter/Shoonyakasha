@@ -195,6 +195,10 @@ struct SceneContext {
     // Screen/viewport
     float screenWidth = 1920.0f;
     float screenHeight = 1080.0f;
+    // The size the scene renders at: the screen's times the render scale.
+    // Passes that write the screen run at the screen's size.
+    float renderWidth = 1920.0f;
+    float renderHeight = 1080.0f;
 
     // ─── Lights ─────────────────────────────────────────────────
     // Collected each frame from entities with LightComponent + TransformComponent

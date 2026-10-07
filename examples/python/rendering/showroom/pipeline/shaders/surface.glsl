@@ -11,6 +11,8 @@ layout(set = 1, binding = 1) uniform sampler2D normalMap;
 layout(set = 1, binding = 2) uniform sampler2D metallicRoughnessMap;
 layout(set = 1, binding = 3) uniform sampler2D aoMap;
 layout(set = 1, binding = 4) uniform sampler2D emissiveMap;
+layout(set = 1, binding = 5) uniform sampler2D clearcoatMap;            // KHR_materials_clearcoat: r amount
+layout(set = 1, binding = 6) uniform sampler2D clearcoatRoughnessMap;   // g roughness
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragWorldNormal;
@@ -71,8 +73,15 @@ Surface evaluateSurface(vec4 baseColor) {
 
     s.occlusion = texture(aoMap, fragTexCoord).r;   // no texture: the fallback is 1
     s.emissive = texture(emissiveMap, fragTexCoord).rgb * draw.emissiveFactor.rgb;
+    // The coat maps scale the factors; without them the fallback is white.
+    // Most materials have no coat, and skip the fetches.
     s.clearcoat = clamp(draw.clearcoatFactor, 0.0, 1.0);
-    s.clearcoatRoughness = clamp(draw.clearcoatRoughness, 0.045, 1.0);
+    s.clearcoatRoughness = draw.clearcoatRoughness;
+    if (s.clearcoat > 0.0) {
+        s.clearcoat *= texture(clearcoatMap, fragTexCoord).r;
+        s.clearcoatRoughness *= texture(clearcoatRoughnessMap, fragTexCoord).g;
+    }
+    s.clearcoatRoughness = clamp(s.clearcoatRoughness, 0.045, 1.0);
     return s;
 }
 

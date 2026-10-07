@@ -58,14 +58,16 @@ struct GltfPrimitive {
     Shoonyakasha::GPUTexture metallicRoughnessMap;
     Shoonyakasha::GPUTexture aoMap;
     Shoonyakasha::GPUTexture emissiveMap;
+    Shoonyakasha::GPUTexture clearcoatMap;            // KHR_materials_clearcoat: r amount
+    Shoonyakasha::GPUTexture clearcoatRoughnessMap;   // g roughness
 
     // ─── Material Parameters ────────────────────────────────
     glm::vec4 baseColorFactor   = glm::vec4(1.0f);
     float metallicFactor        = 0.0f;
     float roughnessFactor       = 0.5f;
     glm::vec3 emissiveFactor    = glm::vec3(0.0f);
-    // KHR_materials_clearcoat factors, when the material has the extension
-    // (its coat textures are not read).
+    // KHR_materials_clearcoat factors, when the material has the extension.
+    // Its coat normal map is not read: the coat takes the base normal.
     bool hasClearcoat           = false;
     float clearcoatFactor       = 0.0f;
     float clearcoatRoughnessFactor = 0.0f;

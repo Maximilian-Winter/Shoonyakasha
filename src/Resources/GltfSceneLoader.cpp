@@ -487,6 +487,15 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             result.hasClearcoat = true;
             result.clearcoatFactor = material->clearcoat.clearcoat_factor;
             result.clearcoatRoughnessFactor = material->clearcoat.clearcoat_roughness_factor;
+            if (m_options.loadTextures) {
+                if (material->clearcoat.clearcoat_texture.texture) {
+                    result.clearcoatMap = loadTexture(data, material->clearcoat.clearcoat_texture, false);
+                }
+                if (material->clearcoat.clearcoat_roughness_texture.texture) {
+                    result.clearcoatRoughnessMap =
+                        loadTexture(data, material->clearcoat.clearcoat_roughness_texture, false);
+                }
+            }
         }
 
         result.alphaMode = extractAlphaMode(material);
@@ -867,6 +876,12 @@ entt::entity GltfSceneLoader::createEntity(
     }
     if (primitive.emissiveMap.isValid()) {
         material.textures["emissiveMap"] = primitive.emissiveMap;
+    }
+    if (primitive.clearcoatMap.isValid()) {
+        material.textures["clearcoatMap"] = primitive.clearcoatMap;
+    }
+    if (primitive.clearcoatRoughnessMap.isValid()) {
+        material.textures["clearcoatRoughnessMap"] = primitive.clearcoatRoughnessMap;
     }
 
     // Add RenderableTagComponent
@@ -1258,6 +1273,9 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     if (primitive.metallicRoughnessMap.isValid()) material.textures["metallicRoughnessMap"] = primitive.metallicRoughnessMap;
     if (primitive.aoMap.isValid()) material.textures["aoMap"] = primitive.aoMap;
     if (primitive.emissiveMap.isValid()) material.textures["emissiveMap"] = primitive.emissiveMap;
+    if (primitive.clearcoatMap.isValid()) material.textures["clearcoatMap"] = primitive.clearcoatMap;
+    if (primitive.clearcoatRoughnessMap.isValid())
+        material.textures["clearcoatRoughnessMap"] = primitive.clearcoatRoughnessMap;
 
     // Add SkeletonComponent
     auto& skelComp = scene->addComponent<SkeletonComponent>(entity);

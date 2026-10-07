@@ -24,11 +24,21 @@ Check the booleans and application log for failures. Recording is also finalized
 
 While `recording_paused` (C++ `setRecordingPaused`) is set, presented frames are not written. Set it from the update callback to render several frames for each recorded one: the [showroom](../../examples/python/rendering/showroom/README.md) averages eight sub-frames into each frame of its videos for motion blur, writing only the last.
 
+## Supersampling
+
+`render_scale` (C++ `setRenderScale`) renders the scene at the window's size times the scale; the passes that write the swapchain bring it back to the window's size. At 2 every window pixel gets four scene pixels: thin edges and fine texture detail come out crisper, at four times the cost. The change recompiles the render graph before the next frame.
+
+```python
+engine.render_scale = 2.0     # 0.25 to 4; 1 renders at the window's size
+```
+
+A pipeline reads the render size as `scene.screen.renderResolution` and the window's as `scene.screen.resolution`. Shaders that work in scene pixels (TAA's jitter, screen-space effects) want the first; screen-space UI the second. The default pipeline's tonemap pass filters the larger image bilinearly; the showroom's tone maps every scene pixel a window pixel covers and averages them.
+
 ## Formats and dependencies
 
 Screenshots support `.png`, `.jpg`, `.bmp`, `.tga`, and `.hdr`. Saving the presented image to HDR does not recover pre-tonemapping scene radiance. For an intermediate HDR target, use [render-target readback](compute-and-data-flow.md).
 
-Video is piped to ffmpeg instead of linking an encoder library. Discovery uses an explicit path, `FFMPEG`, `PATH`, and known install locations. Query `sk.find_ffmpeg()` / `findFfmpeg()` to inspect discovery. Defaults are 30 fps, quality 18, codec `libx264`, and automatic executable discovery; select a codec/container combination available in your ffmpeg installation, for example H.264 in `.mkv` or `.mp4`.
+Video is piped to ffmpeg instead of linking an encoder library. A window whose size is odd, which 4:2:0 video cannot encode, is recorded one row or column smaller. Discovery uses an explicit path, `FFMPEG`, `PATH`, and known install locations. Query `sk.find_ffmpeg()` / `findFfmpeg()` to inspect discovery. Defaults are 30 fps, quality 18, codec `libx264`, and automatic executable discovery; select a codec/container combination available in your ffmpeg installation, for example H.264 in `.mkv` or `.mp4`.
 
 Readback is synchronous and stalls for GPU copies; recording reduces rendering throughput. The selected fps describes the encoded stream, not a guarantee that the application renders at that rate. Treat resize and encoder failure as cases to check in the application's log and recording status.
 

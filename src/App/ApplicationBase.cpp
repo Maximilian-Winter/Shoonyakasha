@@ -258,6 +258,7 @@ void ApplicationBase::initializeRenderGraph() {
     m_renderGraph->loadFromFile(m_config.pipelineJsonPath);
     m_renderGraph->bindScene(m_activeScene.get(), m_resourceManager.get());
     m_renderGraph->setScreenExtent(m_swapChain->getSwapChainExtent());
+    m_renderGraph->setRenderExtent(getRenderExtent());
 
     // Apply render graph parameters before compile (drives SSBO sizing, dispatch counts, etc.)
     for (const auto& [name, value] : m_config.renderGraphParameters) {
@@ -277,9 +278,10 @@ void ApplicationBase::initializeRenderGraph() {
             extent);
     }
 
-    if (!m_renderGraph->compile(extent, imageCount, m_config.maxFramesInFlight)) {
+    if (!m_renderGraph->compile(getRenderExtent(), imageCount, m_config.maxFramesInFlight)) {
         throw std::runtime_error("Failed to compile render graph: " + m_renderGraph->getLastError());
     }
+    m_renderScaleChanged = false;
 
     m_logger->log(LogLevel::Info, "Render graph compiled successfully");
 }
@@ -444,6 +446,11 @@ void ApplicationBase::update() {
 // ═══════════════════════════════════════════════════════════════
 
 void ApplicationBase::render() {
+    if (m_renderScaleChanged) {
+        m_renderScaleChanged = false;
+        recompileForRenderScale();
+    }
+
     vkWaitForFences(m_device->getLogicalDevice(), 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
 
     // Release GPU buffers that were dropped long enough ago that no in-flight
@@ -464,6 +471,7 @@ void ApplicationBase::render() {
     }
 
     m_renderGraph->setScreenExtent(m_swapChain->getSwapChainExtent());
+    m_renderGraph->setRenderExtent(getRenderExtent());
     m_renderGraph->updateSceneContext(m_deltaTime);
     m_renderGraph->updateStandardBuffers(m_deltaTime, m_currentFrame);
 
@@ -635,6 +643,38 @@ uint64_t ApplicationBase::getRecordedFrameCount() const {
     return m_videoRecorder.frameCount();
 }
 
+void ApplicationBase::setRenderScale(float scale) {
+    scale = std::clamp(scale, 0.25f, 4.0f);
+    if (scale == m_renderScale) return;
+    m_renderScale = scale;
+    // Before the graph is compiled, the first compile picks the scale up.
+    m_renderScaleChanged = m_renderGraph && m_renderGraph->isCompiled();
+}
+
+VkExtent2D ApplicationBase::getRenderExtent() const {
+    const VkExtent2D screen = m_swapChain ? m_swapChain->getSwapChainExtent() : VkExtent2D{0, 0};
+    if (m_renderScale == 1.0f) return screen;
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(m_device->getPhysicalDevice(), &properties);
+    const uint32_t limit = properties.limits.maxImageDimension2D;
+    auto scaled = [&](uint32_t size) {
+        return std::clamp(static_cast<uint32_t>(std::lround(size * m_renderScale)), 1u, limit);
+    };
+    return {scaled(screen.width), scaled(screen.height)};
+}
+
+void ApplicationBase::recompileForRenderScale() {
+    vkDeviceWaitIdle(m_device->getLogicalDevice());
+    const VkExtent2D extent = getRenderExtent();
+    if (!m_renderGraph->recompile(extent, static_cast<uint32_t>(m_swapChain->getImageCount()),
+                                  m_config.maxFramesInFlight)) {
+        throw std::runtime_error("Failed to recompile render graph: " + m_renderGraph->getLastError());
+    }
+    bindIBLTextures();
+    m_logger->log(LogLevel::Info, "Rendering at %ux%u (render scale %.2f)",
+                  extent.width, extent.height, m_renderScale);
+}
+
 void ApplicationBase::handleSwapChainRecreation() {
     vkDeviceWaitIdle(m_device->getLogicalDevice());
 
@@ -656,9 +696,10 @@ void ApplicationBase::handleSwapChainRecreation() {
             newExtent);
     }
 
-    if (!m_renderGraph->recompile(newExtent, imageCount, m_config.maxFramesInFlight)) {
+    if (!m_renderGraph->recompile(getRenderExtent(), imageCount, m_config.maxFramesInFlight)) {
         throw std::runtime_error("Failed to recompile render graph: " + m_renderGraph->getLastError());
     }
+    m_renderScaleChanged = false;
 
     bindIBLTextures();
 

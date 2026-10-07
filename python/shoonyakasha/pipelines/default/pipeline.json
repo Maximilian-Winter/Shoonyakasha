@@ -77,7 +77,7 @@
         {
           "name": "resolution",
           "type": "vec2",
-          "source": "scene.screen.resolution"
+          "source": "scene.screen.renderResolution"
         },
         {
           "name": "frame",

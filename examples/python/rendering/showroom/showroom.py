@@ -26,6 +26,8 @@ Keys:
     K              next paint colour (cars)
     X              clear coat on or off (the lacquer over car paint)
     M              next tone mapper: AgX, PBR Neutral, ACES
+    B              depth of field: off, f/2.8, f/0.8 (more than a real lens),
+                   focused where the camera looks
     Y              turn the model 90 degrees (prints the catalogue yaw)
     F              floor: dark gloss or white
     V              debug views (VSM levels and pages, shadow mask, normals ...)
@@ -40,10 +42,12 @@ Keys:
 Automatic capture, for posting (the credits stay on screen unless
 --no-overlay). Stills average --samples frames each: no aliasing, no
 ray-tracing noise. Video renders --motion-blur sub-frames for each frame and
-averages them, motion-blurred over a --shutter of the frame interval:
+averages them, motion-blurred over a --shutter of the frame interval, and
+renders at --supersample times the window's size (2 for recordings):
     python showroom.py --screenshots shots/            stills of every model
     python showroom.py --record tour.mp4               a cinematic tour
     python showroom.py --record reel.mp4 --vertical --models alfa_gtv6
+    python showroom.py --record tour.mp4 --dof 1.4     with depth of field
 """
 
 import argparse
@@ -66,6 +70,10 @@ PIPELINE = os.path.join(HERE, "pipeline", "pipeline.json")
 
 # settings.toneMapper in the pipeline's tonemap.frag
 TONE_MAPPERS = {"agx": (2, "AgX"), "neutral": (1, "PBR Neutral"), "aces": (0, "ACES")}
+
+# Key B: depth of field off, then at these f-numbers. Whole-car shots need
+# more than a real lens to show much blur.
+DOF_STOPS = (0.0, 2.8, 0.8)
 
 # Body paint whose file declares no clear coat gets this one: a full coat,
 # polished almost to a mirror.
@@ -116,6 +124,14 @@ def parse_args():
                         help="darken the corners by up to this much (0.15 is subtle)")
     parser.add_argument("--grain", type=float, default=0.0,
                         help="film grain strength (0.02 is subtle; helps video compression)")
+    parser.add_argument("--dof", type=float, default=0.0, metavar="F",
+                        help="depth of field at f-number F, focused where the camera looks (0: off; "
+                             "below 1 is more than a real lens)")
+    parser.add_argument("--focus", type=float, default=0.0, metavar="METRES",
+                        help="focus distance for --dof (default: where the camera looks)")
+    parser.add_argument("--supersample", type=float, default=None, metavar="SCALE",
+                        help="render at SCALE times the window's size and scale down: crisper edges "
+                             "and detail at SCALE^2 the cost (default: 2 with --record, 1 otherwise)")
     args = parser.parse_args()
     if args.vertical:
         args.width, args.height = 1080, 1920
@@ -912,6 +928,8 @@ class Showroom:
         self.floor_white = False
         self.time = 0.0
         self.debug_view = 0
+        self.dof = args.dof
+        self.focus = 10.0         # metres to what the camera looks at
 
     @property
     def model(self):
@@ -972,9 +990,31 @@ class Showroom:
         engine.set_custom_uint("showroom.vsmEpoch", self.epoch)
 
     def update_status(self):
-        self.overlay.set_status("%s  |  %s  |  %s%s" % (
+        self.overlay.set_status("%s  |  %s  |  %s%s%s" % (
             self.rig.label, SHADOW_LABELS.get(self.preset, self.preset), TONE_MAPPERS[self.tonemapper][1],
-            "" if self.clearcoat else "  |  no clear coat"))
+            "" if self.clearcoat else "  |  no clear coat",
+            "  |  f/%g" % self.dof if self.dof > 0.0 else ""))
+
+    def next_dof(self):
+        stops = list(DOF_STOPS)
+        if self.dof not in stops:
+            stops.insert(1, self.dof)
+        self.dof = stops[(stops.index(self.dof) + 1) % len(stops)]
+        self.update_status()
+        print("[showroom] depth of field:", "f/%g" % self.dof if self.dof > 0.0 else "off")
+
+    def apply_dof(self):
+        """Focus where the camera looks: the shot's target, or in the free
+        camera the model."""
+        engine.set_custom_uint("showroom.dof", 1 if self.dof > 0.0 else 0)
+        if self.dof <= 0.0:
+            return
+        if self.camera_mode == "free":
+            eye = scene.get_world_position(engine.camera_entity)
+            c = self.model.centre()
+            self.focus = math.sqrt(sum((c[i] - eye[i]) ** 2 for i in range(3)))
+        engine.set_custom_float("showroom.dofFocus", args.focus if args.focus > 0.0 else self.focus)
+        engine.set_custom_float("showroom.dofFStop", self.dof)
 
     def apply_tonemapper(self):
         engine.set_custom_uint("default.toneMapper", TONE_MAPPERS[self.tonemapper][0])
@@ -1017,6 +1057,7 @@ class Showroom:
         else:
             engine.set_custom_vec4("showroom.vsmDirty0", (0.0, 0.0, 0.0, 0.0))
         self.update_camera(dt)
+        self.apply_dof()
 
     def update_camera(self, dt):
         model = self.model
@@ -1045,6 +1086,7 @@ class Showroom:
         if horizontal > limit:
             eye = (eye[0] * limit / horizontal, eye[1], eye[2] * limit / horizontal)
         eye = (eye[0], max(eye[1], 0.15), eye[2])
+        self.focus = math.sqrt(sum((target[i] - eye[i]) ** 2 for i in range(3)))
         scene.set_position(camera, eye)
         scene.set_rotation(camera, look_rotation(eye, target))
         scene.set_camera_fov(camera, fov)
@@ -1224,6 +1266,8 @@ class Controls:
             s.next_tonemapper()
         if self.pressed(keys.X):
             s.toggle_clearcoat()
+        if self.pressed(keys.B):
+            s.next_dof()
         s.stats.update(dt)
         if self.pressed(keys.I):
             still_capture.start()
@@ -1361,6 +1405,13 @@ def on_init():
     engine.set_custom_float("default.exposureAdaptSpeed", 2.5)
     engine.set_custom_float("showroom.vignette", args.vignette)
     engine.set_custom_float("showroom.grain", args.grain)
+    supersample = args.supersample if args.supersample is not None else (2.0 if args.record else 1.0)
+    if supersample != 1.0:
+        engine.render_scale = supersample
+        # The shadow map's pages are picked per scene pixel; keep the texels
+        # per window pixel, and the pages a frame needs, as without it.
+        engine.set_custom_float("showroom.vsmLevelBias", math.log2(engine.render_scale))
+        print("[showroom] rendering at %gx the window's size" % engine.render_scale)
     showroom.start()
     if args.screenshots:
         automation = Stills(args.screenshots)

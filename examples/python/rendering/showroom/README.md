@@ -33,8 +33,9 @@ python tools/fetch_assets.py showroom          # all eight, or showroom/alfa_gtv
 | **V**: coloured clipmap levels with their page borders, then the pages drawn this frame (red, under the turning car) against the cached ones (green) | The virtual shadow map's page table at work |
 | **G** cycles shadows: VSM + ray-traced lights, everything ray traced, VSM with shadow-mapped lights, the default pipeline's cascades | Presets `hybrid`, `raytraced`, `high`, `cascades`: a before-and-after for the same frame |
 | The LED rim of the turntable, softbox panels, neon strips | Emission and bloom |
+| **B**: the floor and background softened, the shot's subject sharp | Depth of field from the depth buffer, after TAA |
 
-**Keys:** **←/→** models · **L** lighting (studio, hard light, night, neon) · **C** camera (turntable, cinematic, free: WASD/Q/E and the right mouse button) · **G** shadow technique · **R** reflections · **T** turntable · **K** paint colour (cars) · **X** clear coat on/off · **M** tone mapper (AgX, PBR Neutral, ACES) · **Y** turn the model 90° · **F** dark or white floor · **V** debug views · **H** credits and status · **O** render stats (frame rate, GPU time per pass, draw calls) · **P** screenshot · **F9** record · **F1** help.
+**Keys:** **←/→** models · **L** lighting (studio, hard light, night, neon) · **C** camera (turntable, cinematic, free: WASD/Q/E and the right mouse button) · **G** shadow technique · **R** reflections · **T** turntable · **K** paint colour (cars) · **X** clear coat on/off · **M** tone mapper (AgX, PBR Neutral, ACES) · **B** depth of field (off, f/2.8, f/0.8) · **Y** turn the model 90° · **F** dark or white floor · **V** debug views · **H** credits and status · **O** render stats (frame rate, GPU time per pass, draw calls) · **P** screenshot · **F9** record · **F1** help.
 
 The window opens at 1920×1080; `--width`/`--height` change it, `--vertical` makes it 1080×1920 for phone-shaped video. `--lighting`, `--camera` and `--shadows` choose what it opens with, `--models alfa_gtv6,aat` which models and in what order.
 
@@ -45,11 +46,14 @@ python showroom.py --screenshots shots/                          # every model, 
 python showroom.py --screenshots shots/ --width 3840 --height 2160 --lighting night
 python showroom.py --record tour.mp4                             # every model through the cinematic shots
 python showroom.py --record reel.mp4 --vertical --models alfa_33_stradale_2024 --seconds 20
+python showroom.py --record tour.mp4 --dof 1.4 --grain 0.02 --vignette 0.15   # with depth of field, grain and vignette
 ```
 
 **Stills:** each still is held for `--settle` frames (48), so exposure settles, and then `--samples` frames (64) of it are averaged: each is offset by TAA's sub-pixel jitter and draws new ray-traced samples, so the average has no aliasing and no ray-tracing noise. `--samples 256` is cleaner still, `--samples 1` captures without averaging. They are saved as `<model>_<lighting>_<view>.png`; the views are three-quarter front, side, three-quarter rear, a long-lens hero shot, top and a detail.
 
-**Recordings:** they step the animation by exactly one frame of `--fps` (30) each frame, so the video plays smoothly however fast the machine renders, and fade through black between models. Each recorded frame is the average of `--motion-blur` sub-frames (8) spread over `--shutter` of the frame interval (0.5, a film camera's 180° shutter): motion blurs as it does on film. `--motion-blur 1` turns it off. Recording needs ffmpeg on `PATH`.
+**Recordings:** they step the animation by exactly one frame of `--fps` (30) each frame, so the video plays smoothly however fast the machine renders, and fade through black between models. Each recorded frame is the average of `--motion-blur` sub-frames (8) spread over `--shutter` of the frame interval (0.5, a film camera's 180° shutter): motion blurs as it does on film. `--motion-blur 1` turns it off. Recordings render at twice the window's width and height and scale down, for crisper edges and detail: `--supersample` sets the factor (`--supersample 1` is quicker, and stills or the interactive showroom take it too). Recording needs ffmpeg on `PATH`.
+
+**Depth of field:** `--dof 2.8` (or **B**) blurs what is nearer or further than where the camera looks, as a full-frame camera with that f-number and the shot's focal length would; `--focus` sets the distance in metres instead. It is a real lens's blur, so at real f-numbers whole-car shots stay mostly sharp and the close-ups and the floor in front of the camera blur; `--dof 0.8` goes further than a real lens. Stills and recordings average away the blur's sampling noise.
 
 **Look:** `--vignette 0.15` darkens the corners a little and `--grain 0.02` adds fine film grain, which also keeps video encoders from banding smooth gradients. Both are off unless given.
 

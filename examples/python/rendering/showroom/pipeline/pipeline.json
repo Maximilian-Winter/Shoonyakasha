@@ -91,7 +91,7 @@
         {
           "name": "resolution",
           "type": "vec2",
-          "source": "scene.screen.resolution"
+          "source": "scene.screen.renderResolution"
         },
         {
           "name": "frame",
@@ -385,6 +385,24 @@
           "type": "uint",
           "source": "scene.time.frame",
           "default": 0
+        },
+        {
+          "name": "dof",
+          "type": "uint",
+          "source": "scene.custom.showroom.dof",
+          "default": 0
+        },
+        {
+          "name": "dofFocus",
+          "type": "float",
+          "source": "scene.custom.showroom.dofFocus",
+          "default": 10.0
+        },
+        {
+          "name": "dofFStop",
+          "type": "float",
+          "source": "scene.custom.showroom.dofFStop",
+          "default": 2.8
         }
       ]
     },
@@ -1023,6 +1041,22 @@
             "fragment"
           ],
           "name": "emissiveMap"
+        },
+        {
+          "binding": 5,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "clearcoatMap"
+        },
+        {
+          "binding": 6,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "clearcoatRoughnessMap"
         }
       ]
     },
@@ -1188,7 +1222,7 @@
             "fragment"
           ],
           "name": "hdrColor",
-          "autoBindResource": "taaColor",
+          "autoBindResource": "sceneColor",
           "autoBindSampler": "linearClamp"
         },
         {
@@ -1250,25 +1284,58 @@
           "stages": [
             "compute"
           ],
+          "name": "sceneColor",
+          "autoBindResource": "sceneColor",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "uniform_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "Settings",
+          "autoBindBuffer": "Settings"
+        }
+      ]
+    },
+    "dofSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
           "name": "rawColor",
           "autoBindResource": "hdrColor",
-          "autoBindSampler": "nearestClamp"
+          "autoBindSampler": "linearClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "taaColor",
+          "autoBindResource": "taaColor",
+          "autoBindSampler": "linearClamp"
         },
         {
           "binding": 2,
           "type": "combined_image_sampler",
           "stages": [
-            "compute"
+            "fragment"
           ],
-          "name": "taaColor",
-          "autoBindResource": "taaColor",
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
           "autoBindSampler": "nearestClamp"
         },
         {
           "binding": 3,
           "type": "uniform_buffer",
           "stages": [
-            "compute"
+            "fragment"
           ],
           "name": "Settings",
           "autoBindBuffer": "Settings"
@@ -1714,6 +1781,13 @@
     },
     {
       "name": "taaColor",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "sceneColor",
       "kind": "image",
       "image": {
         "format": "R16G16B16A16_SFLOAT"
@@ -3466,6 +3540,51 @@
       ]
     },
     {
+      "name": "DepthOfField",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "taaColor",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "sceneColor",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "fragmentShader": "shaders/depth_of_field.frag.spv"
+      },
+      "descriptorSets": [
+        "dofSet",
+        "cameraSet"
+      ]
+    },
+    {
       "name": "Accumulate",
       "type": "compute",
       "enabled": false,
@@ -3479,11 +3598,7 @@
       },
       "inputs": [
         {
-          "resource": "hdrColor",
-          "usage": "shader_read"
-        },
-        {
-          "resource": "taaColor",
+          "resource": "sceneColor",
           "usage": "shader_read"
         }
       ],
@@ -3701,7 +3816,7 @@
       },
       "inputs": [
         {
-          "resource": "taaColor",
+          "resource": "sceneColor",
           "usage": "shader_read"
         },
         {

@@ -250,6 +250,27 @@ TEST(ResolvedValue, CopyTo_Mat3_ContiguousWhenStrideZero) {
 // Const Path Resolution (no ECS needed)
 // ═══════════════════════════════════════════════════════════════
 
+TEST(DotPathResolver, ScreenPaths_RenderResolutionIsSeparateFromTheWindow) {
+    // With a render scale the scene renders larger than the window: shaders
+    // working in scene pixels read renderResolution, screen-space UI resolution.
+    DotPathResolver resolver;
+    SceneContext scene;
+    scene.screenWidth = 1920.0f;
+    scene.screenHeight = 1061.0f;
+    scene.renderWidth = 3840.0f;
+    scene.renderHeight = 2122.0f;
+
+    auto window = resolver.resolveScene("scene.screen.resolution", scene);
+    ASSERT_TRUE(window.isValid());
+    EXPECT_EQ(window.as<glm::vec2>(), glm::vec2(1920.0f, 1061.0f));
+
+    auto render = resolver.resolveScene("scene.screen.renderResolution", scene);
+    ASSERT_TRUE(render.isValid());
+    EXPECT_EQ(render.as<glm::vec2>(), glm::vec2(3840.0f, 2122.0f));
+    EXPECT_FLOAT_EQ(resolver.resolveScene("scene.screen.renderWidth", scene).as<float>(), 3840.0f);
+    EXPECT_FLOAT_EQ(resolver.resolveScene("scene.screen.renderHeight", scene).as<float>(), 2122.0f);
+}
+
 TEST(DotPathResolver, ConstPath_SingleFloat) {
     DotPathResolver resolver;
     SceneContext scene;

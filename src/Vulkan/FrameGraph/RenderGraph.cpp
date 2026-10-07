@@ -2180,6 +2180,9 @@ void RenderGraph::updateSceneContext(float deltaTime) {
     // Update screen data
     m_sceneContext->screenWidth = static_cast<float>(m_screenExtent.width);
     m_sceneContext->screenHeight = static_cast<float>(m_screenExtent.height);
+    const VkExtent2D render = m_renderExtent.width ? m_renderExtent : m_screenExtent;
+    m_sceneContext->renderWidth = static_cast<float>(render.width);
+    m_sceneContext->renderHeight = static_cast<float>(render.height);
 
     // If we have a bound ECS scene, update camera from it
     if (m_boundScene) {

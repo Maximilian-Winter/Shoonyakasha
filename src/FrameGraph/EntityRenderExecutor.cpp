@@ -63,6 +63,8 @@ void EntityRenderExecutor::updateSceneContext(float deltaTime, VkExtent2D screen
     // Update screen dimensions
     m_sceneContext.screenWidth = static_cast<float>(screenExtent.width);
     m_sceneContext.screenHeight = static_cast<float>(screenExtent.height);
+    m_sceneContext.renderWidth = m_sceneContext.screenWidth;    // no render scale here
+    m_sceneContext.renderHeight = m_sceneContext.screenHeight;
 
     // Update environment reference
     m_sceneContext.environment = m_environment;

@@ -89,7 +89,10 @@
     uint accumSource;           /* 0 the TAA output, 1 the raw frame */ \
     float vignette;             \
     float grain;                \
-    uint frame;
+    uint frame;                 \
+    uint dof;                   /* 1: depth of field (depth_of_field.frag) */ \
+    float dofFocus;             /* focus distance, metres along the view */ \
+    float dofFStop;             /* f-number of the lens */
 
 // scene.custom.showroom.* and the sun (pipeline.json "Showroom"); see
 // README.md. The virtual shadow map's settings, and the sun and camera its

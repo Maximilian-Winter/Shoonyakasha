@@ -158,6 +158,8 @@ public:
     using ApplicationBase::getRecordedFrameCount;
     using ApplicationBase::setRecordingPaused;
     using ApplicationBase::isRecordingPaused;
+    using ApplicationBase::setRenderScale;
+    using ApplicationBase::getRenderScale;
     using ApplicationBase::loadGltfScene;
     using ApplicationBase::createDirectionalLight;
     using ApplicationBase::createPointLight;
@@ -599,6 +601,14 @@ void EngineAPI::setRecordingPaused(bool paused) {
 
 bool EngineAPI::isRecordingPaused() const {
     return m_impl->app->isRecordingPaused();
+}
+
+void EngineAPI::setRenderScale(float scale) {
+    m_impl->app->setRenderScale(scale);
+}
+
+float EngineAPI::getRenderScale() const {
+    return m_impl->app->getRenderScale();
 }
 
 bool assetExists(const std::string& relativePath) {

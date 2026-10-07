@@ -58,12 +58,31 @@ The pipeline starts as `high`. As in the default pipeline, ray tracing covers on
 
 ## Clear coat
 
-Materials with `KHR_materials_clearcoat` get a clear lacquer layer over their base: a dielectric with its own roughness (`clearcoatFactor`, `clearcoatRoughnessFactor` material parameters), whose sharp reflection sits on top of the base's and whose Fresnel dims the base under it, for every light, the environment, and in the `raytraced` and `hybrid` presets the traced reflections, which follow the coat rather than the base. The coat's textures are not read, only its factors. The G-buffer's `gMaterial` carries metallic, roughness, coat and coat roughness. The showroom gives car body paint a coat when its file declares none.
+Materials with `KHR_materials_clearcoat` get a clear lacquer layer over their base: a dielectric with its own roughness (`clearcoatFactor`, `clearcoatRoughnessFactor` material parameters), whose sharp reflection sits on top of the base's and whose Fresnel dims the base under it, for every light, the environment, and in the `raytraced` and `hybrid` presets the traced reflections, which follow the coat rather than the base. The coat's amount and roughness maps (`clearcoatMap`, red, and `clearcoatRoughnessMap`, green, bindings 5 and 6 of `materialSet`) scale the factors; its normal map is not read, so the coat takes the base's normal. The G-buffer's `gMaterial` carries metallic, roughness, coat and coat roughness. The showroom gives car body paint a coat when its file declares none.
 
 Two more debug views join the default pipeline's (`default.debugView`):
 
 - **1:** with the virtual shadow map on, shows its levels in colour, with page borders (and texel borders where texels are large).
 - **7:** shows each pixel's page, red if it was drawn this frame and green if it was kept from earlier ones.
+
+## Lens and capture
+
+Between TAA and tone mapping:
+
+1. **`DepthOfField`** picks the frame the rest of the chain uses, into `sceneColor`: the raw one while capture mode averages raw frames, TAA's result otherwise. With `dof` on, it blurs it as a lens would. It models a full-frame sensor (24 mm high) behind a lens with the view's focal length, at f-number `dofFStop`, focused `dofFocus` metres away. Each pixel gathers a golden-angle spiral of samples out to the largest blur, 2% of the image height. A sample counts where its own blur reaches back to the pixel, so an out-of-focus foreground spreads over what is behind it, but an out-of-focus background does not spread over a sharp foreground. While capture mode averages, the spiral turns differently per pixel and frame, so the average smooths its sampling.
+2. **`Accumulate`** (capture mode only) averages `sceneColor` into the 32-bit `accumColor`.
+3. **`Tonemap`** shows `accumColor` in capture mode and `sceneColor` otherwise. When the engine's render scale makes the scene larger than the window, each window pixel tone maps every scene pixel it covers (up to 4 × 4) and averages them, so a bright highlight does not swallow the edge beside it.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `dof` | 0 | 1 turns depth of field on (`set_custom_uint`) |
+| `dofFocus` | 10.0 | Focus distance in metres along the view |
+| `dofFStop` | 2.8 | f-number: lower blurs more. Below about 1 is more than a real lens |
+| `accumulate` | 0 | 1 shows the average in `accumColor` (`set_custom_uint`) |
+| `accumFrame` | 0 | This frame's index in the average; 0 starts it over |
+| `accumSource` | 0 | Averages TAA's output (0) or the raw, jittered frame (1) |
+| `vignette` | 0.0 | Darkens the corners by up to this much |
+| `grain` | 0.0 | Film grain strength |
 
 ## The virtual shadow map
 
@@ -113,5 +132,6 @@ The pipeline is generated from the default one plus the additions above. Edit `p
 - `VSMMark`, `VSMAllocate`, `VSMClear`, `VSM*{level}` and `ShadowMaskVSM`, in `vsm*.comp`, `vsm*.vert`, `vsm*.frag`, `vsm.glsl` and `vsm_sample.glsl`
 - `LightingRT`, in `lighting_rt.frag`, `lighting_body.glsl` and `rt_lights.glsl`
 - `Overlay`, in `overlay.vert` and `overlay.frag`
+- `DepthOfField` and `Accumulate`, in `depth_of_field.frag` and `accumulate.comp`
 
-**Shaders changed:** `lights.glsl` (sphere lights, inner cones), `forward_body.glsl`, `shadow_rt.frag` and `common.glsl`.
+**Shaders changed:** `lights.glsl` (sphere lights, inner cones, clear coat), `surface.glsl` (clear coat maps), `forward_body.glsl`, `shadow_rt.frag`, `tonemap.frag` and `common.glsl`.
