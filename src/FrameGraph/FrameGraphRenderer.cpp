@@ -9,6 +9,7 @@
 #include "Vulkan/FrameGraph/FrameGraph.h"  // For RenderGraph, CompiledPass (full definitions)
 #include "Vulkan/FrameGraph/FrameGraphPass.h"  // For PassDeclaration
 #include "GPU/GPUTypes.h"
+#include "Vulkan/FrameGraph/RenderStats.h"
 
 #include <algorithm>
 
@@ -318,8 +319,10 @@ void FrameGraphRenderer::bindAndDrawEntity(
         VkIndexType indexType = toVkIndexType(mesh.indexType);
         vkCmdBindIndexBuffer(cmd, mesh.indexHandle(), 0, indexType);
         vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
+        FrameGraph::countDraw(mesh.indexCount);
     } else {
         vkCmdDraw(cmd, mesh.vertexCount, 1, 0, 0);
+        FrameGraph::countDraw(mesh.vertexCount);
     }
 }
 

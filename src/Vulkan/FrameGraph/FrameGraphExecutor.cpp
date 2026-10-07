@@ -8,6 +8,7 @@
 #include "Vulkan/FrameGraph/FrameGraph.h"
 #include "GPU/VkFormatUtils.h"
 #include "Vulkan/FrameGraph/FrameGraphDebugger.h"
+#include "Vulkan/FrameGraph/RenderStats.h"
 #include "Vulkan/VulkanCommandBuffer.h"
 #include "Vulkan/VulkanPipeline.h"
 #include "Vulkan/VulkanComputePipeline.h"
@@ -303,11 +304,15 @@ void FrameGraphExecutor::recordPasses(
     const auto& passes = builder.getPassDeclarations();
     const auto& resources = builder.getResourceDeclarations();
     VulkanCommandBuilder cmd(m_device, commandBuffer);
+    if (m_stats) m_stats->beginRecording(commandBuffer);
 
     uint32_t execIdx = 0;
     for (uint32_t passIdx : passIndices) {
         const auto& compiledPass = compiled.compiledPasses[passIdx];
         const auto& passDecl = passes[compiledPass.declIndex];
+
+        // Draws recorded from here to the end of the pass count towards it.
+        RenderStatsCounting::active = m_stats ? m_stats->beginPass(passDecl.name) : nullptr;
 
         // Log execution order for debugging pass scheduling (throttled to every 5s)
         m_logger->logEvery(5.0f, LogLevel::Info, "  [pass %u/%u] '%s' (type=%s, exec=%s)",
@@ -406,6 +411,9 @@ void FrameGraphExecutor::recordPasses(
             vkCmdEndRendering(commandBuffer);
         }
         recordBarriers(commandBuffer, compiledPass.postBarriers, nullptr, compiled, resources, true);
+
+        RenderStatsCounting::active = nullptr;
+        if (m_stats) m_stats->endPass(commandBuffer);
 
         // Notify debugger of pass end
         if (m_debugger) {
@@ -536,6 +544,7 @@ void FrameGraphExecutor::executeAutoCallback(
     case ExecutionKind::Fullscreen:
         // Fullscreen triangle draw
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        countDraw(3);
         break;
 
     case ExecutionKind::Draw: {
@@ -557,6 +566,7 @@ void FrameGraphExecutor::executeAutoCallback(
 
         vkCmdDraw(commandBuffer, vertexCount, exec.instanceCount,
                   exec.firstVertex, exec.firstInstance);
+        countDraw(vertexCount, exec.instanceCount);
         break;
     }
 
@@ -600,6 +610,7 @@ void FrameGraphExecutor::executeAutoCallback(
             passDecl.name.c_str(), groupX, groupY, groupZ);
 
         vkCmdDispatch(commandBuffer, groupX, groupY, groupZ);
+        countDispatch();
         break;
     }
 

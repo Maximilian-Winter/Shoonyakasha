@@ -122,6 +122,38 @@ struct RecordingOptions {
     std::string ffmpegPath;
 };
 
+// ═══════════════════════════════════════════════════════════════
+// Render statistics — mirrors FrameGraph::RenderStats without Vulkan types
+// ═══════════════════════════════════════════════════════════════
+
+/// One pipeline pass, averaged over the last second.
+struct RenderPassStats {
+    std::string name;
+    double   cpuMs = 0.0;        ///< recording it on the CPU
+    double   gpuMs = 0.0;        ///< GPU time it added after the previous pass
+    bool     gpuValid = false;   ///< false without GPU timing
+    uint32_t drawCalls = 0;
+    uint32_t dispatches = 0;
+    uint64_t vertices = 0;       ///< vertex/index counts times instances
+};
+
+/// Frame rate and costs over the last whole second. GPU figures describe
+/// frames that finished one or two frames ago.
+struct RenderStatsSnapshot {
+    bool     enabled = false;    ///< false: stats are off, everything else zero
+    double   fps = 0.0;
+    double   frameTimeMs = 0.0;      ///< mean time between frames
+    double   frameTimeMaxMs = 0.0;   ///< longest time between frames
+    double   cpuRecordMs = 0.0;      ///< recording the pipeline's passes
+    double   gpuMs = 0.0;            ///< the pipeline's GPU work
+    bool     gpuValid = false;
+    uint32_t drawCalls = 0;
+    uint32_t dispatches = 0;
+    uint64_t vertices = 0;
+    std::vector<RenderPassStats> passes;   ///< in execution order
+    std::string summary;                   ///< the same, as readable text
+};
+
 struct GltfOptions {
     bool loadTextures     = true;
     bool loadMaterials    = true;

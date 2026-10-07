@@ -18,7 +18,7 @@ from cpython.ref cimport PyObject
 
 from ._facade_types cimport (
     EntityHandle, EngineConfig, GltfOptions, RecordingOptions,
-    GltfResult as CppGltfResult,
+    GltfResult as CppGltfResult, RenderStatsSnapshot,
     CameraType, LightType, UIAnchor, TextHAlign,
 )
 
@@ -414,6 +414,9 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         vector[string] getPipelinePresets() const
         uint32_t getPassDrawnCount(const string& passName)
         uint32_t getPassCulledCount(const string& passName)
+        void setRenderStatsEnabled(bint enabled, bint gpuTiming)
+        bint isRenderStatsEnabled() const
+        RenderStatsSnapshot getRenderStats() const
 
     # Free functions — available without an engine instance, so a script can
     # check for ffmpeg before it decides to record.

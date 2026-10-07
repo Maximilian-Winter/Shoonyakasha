@@ -30,6 +30,7 @@ from ._facade_types cimport (
     UIAnchor_BottomLeft, UIAnchor_BottomCenter, UIAnchor_BottomRight,
     TextHAlign, TextHAlign_Left, TextHAlign_Center, TextHAlign_Right,
     EngineConfig, GltfOptions, RecordingOptions, ClipInfo, GltfResult as CppGltfResult,
+    RenderStatsSnapshot, RenderPassStats,
 )
 
 from ._engine_api cimport (
@@ -1460,6 +1461,64 @@ cdef class Engine:
         """(drawn, culled): entities a geometry pass drew and culled as outside its view, last run."""
         name = pass_name.encode('utf-8')
         return (self._ptr.getPassDrawnCount(name), self._ptr.getPassCulledCount(name))
+
+    # ── Render statistics ──────────────────────────────────────
+
+    def enable_render_stats(self, bint gpu_timing=True):
+        """Collect frame rate, frame times, draw counts and per-pass times.
+
+        With gpu_timing, passes are also timed on the GPU with timestamp
+        queries where the device has them. May be called before run().
+        Setting SHOONYAKASHA_STATS=1 does this at startup and prints a
+        summary every second.
+        """
+        self._ptr.setRenderStatsEnabled(True, gpu_timing)
+
+    def disable_render_stats(self):
+        """Stop collecting render statistics."""
+        self._ptr.setRenderStatsEnabled(False, False)
+
+    @property
+    def render_stats_enabled(self):
+        """Whether render statistics are being collected."""
+        return self._ptr.isRenderStatsEnabled()
+
+    @property
+    def render_stats(self):
+        """Render statistics over the last whole second, or None while off.
+
+        A dict with fps, frame_time_ms, frame_time_max_ms, cpu_record_ms,
+        gpu_ms (None without GPU timing), draw_calls, dispatches, vertices,
+        summary (readable text) and passes: one dict per pass in execution
+        order with name, cpu_ms, gpu_ms, draw_calls, dispatches, vertices.
+        GPU times describe frames that finished one or two frames ago.
+        """
+        cdef RenderStatsSnapshot s = self._ptr.getRenderStats()
+        if not s.enabled:
+            return None
+        passes = []
+        cdef RenderPassStats p
+        for p in s.passes:
+            passes.append({
+                'name': p.name.decode('utf-8'),
+                'cpu_ms': p.cpuMs,
+                'gpu_ms': p.gpuMs if p.gpuValid else None,
+                'draw_calls': p.drawCalls,
+                'dispatches': p.dispatches,
+                'vertices': p.vertices,
+            })
+        return {
+            'fps': s.fps,
+            'frame_time_ms': s.frameTimeMs,
+            'frame_time_max_ms': s.frameTimeMaxMs,
+            'cpu_record_ms': s.cpuRecordMs,
+            'gpu_ms': s.gpuMs if s.gpuValid else None,
+            'draw_calls': s.drawCalls,
+            'dispatches': s.dispatches,
+            'vertices': s.vertices,
+            'passes': passes,
+            'summary': s.summary.decode('utf-8'),
+        }
 
     def is_pass_enabled(self, str pass_name):
         """Whether a pipeline pass is enabled; False if there is no such pass."""

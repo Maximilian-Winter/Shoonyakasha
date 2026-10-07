@@ -26,6 +26,7 @@ Build C++ or Python applications with JSON-defined Vulkan rendering. Begin with 
 | Add simulation | [Physics](guides/physics.md), [compute/GPU data flow](guides/compute-and-data-flow.md) |
 | Send application values to shaders | [Custom uniforms](guides/custom-shader-uniforms.md) |
 | Capture output or persist state | [Frame capture](guides/frame-capture.md), [scene snapshot limitations](guides/scene-serialization.md) |
+| Measure frame rate, draw calls and pass times | [Render statistics](guides/render-stats.md) |
 
 ## Public API references
 

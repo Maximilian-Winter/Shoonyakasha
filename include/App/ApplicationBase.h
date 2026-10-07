@@ -138,6 +138,7 @@ protected:
     VulkanWindow& getWindow();
     VulkanSwapChain& getSwapChain();
     FrameGraph::RenderGraph& getRenderGraph();
+    bool hasRenderGraph() const { return m_renderGraph != nullptr; }   // false before run() creates it
     ECS::Scene& getScene();
     entt::registry& getRegistry();
     ResourceManager& getResourceManager();

@@ -9,7 +9,7 @@ from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.pair cimport pair
 from libcpp cimport bool as cbool
-from libc.stdint cimport uint8_t, uint32_t
+from libc.stdint cimport uint8_t, uint32_t, uint64_t
 
 
 cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
@@ -91,6 +91,29 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
     cdef cppclass ClipInfo "Shoonyakasha::Facade::GltfResult::ClipInfo":
         string name
         float duration
+
+    cdef cppclass RenderPassStats:
+        string name
+        double cpuMs
+        double gpuMs
+        cbool gpuValid
+        uint32_t drawCalls
+        uint32_t dispatches
+        uint64_t vertices
+
+    cdef cppclass RenderStatsSnapshot:
+        cbool enabled
+        double fps
+        double frameTimeMs
+        double frameTimeMaxMs
+        double cpuRecordMs
+        double gpuMs
+        cbool gpuValid
+        uint32_t drawCalls
+        uint32_t dispatches
+        uint64_t vertices
+        vector[RenderPassStats] passes
+        string summary
 
     cdef cppclass GltfResult:
         cbool success

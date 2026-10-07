@@ -5,6 +5,8 @@
 //
 
 #include <algorithm>
+#include <optional>
+#include <utility>
 #include <stdexcept>
 #include <entt/entt.hpp>
 #include "ECS/Core.h"
@@ -54,6 +56,9 @@ struct EngineAPI::Impl {
     std::unique_ptr<PhysicsAPI> physicsAPI;
     std::unique_ptr<EcsAPI>     ecsAPI;
 
+    // setRenderStatsEnabled before run(): (enabled, gpuTiming), applied in onInit
+    std::optional<std::pair<bool, bool>> pendingStats;
+
     // The actual application (defined below, after Impl)
     class CallbackApp;
     std::unique_ptr<CallbackApp> app;
@@ -99,6 +104,11 @@ protected:
         PhysicsAPI::Impl::wire(*m_owner->physicsAPI,
                                m_physicsSystem,
                                &getRegistry());
+
+        if (m_owner->pendingStats) {
+            const auto [enabled, gpuTiming] = *std::exchange(m_owner->pendingStats, std::nullopt);
+            getRenderGraph().setStatsEnabled(enabled, gpuTiming);
+        }
 
         if (m_owner->onInitCb) m_owner->onInitCb();
     }
@@ -159,6 +169,7 @@ public:
     using ApplicationBase::getRenderGraph;
     using ApplicationBase::getDevice;
     using ApplicationBase::hasDevice;
+    using ApplicationBase::hasRenderGraph;
     using ApplicationBase::getScene;
     using ApplicationBase::getEventDispatcher;
     using ApplicationBase::getInputHandler;
@@ -491,6 +502,54 @@ uint32_t EngineAPI::getPassCulledCount(const std::string& passName) const {
     uint32_t drawn = 0, culled = 0;
     m_impl->app->getRenderGraph().getPassDrawStats(passName, drawn, culled);
     return culled;
+}
+
+void EngineAPI::setRenderStatsEnabled(bool enabled, bool gpuTiming) {
+    if (m_impl->app && m_impl->app->hasRenderGraph()) {
+        m_impl->app->getRenderGraph().setStatsEnabled(enabled, gpuTiming);
+    } else {
+        m_impl->pendingStats = std::make_pair(enabled, gpuTiming);
+    }
+}
+
+bool EngineAPI::isRenderStatsEnabled() const {
+    if (m_impl->app && m_impl->app->hasRenderGraph()) {
+        return m_impl->app->getRenderGraph().isStatsEnabled();
+    }
+    return m_impl->pendingStats && m_impl->pendingStats->first;
+}
+
+RenderStatsSnapshot EngineAPI::getRenderStats() const {
+    RenderStatsSnapshot out;
+    if (!m_impl->app || !m_impl->app->hasRenderGraph()) return out;
+    const FrameGraph::RenderStats* stats = m_impl->app->getRenderGraph().getStats();
+    if (!stats) return out;
+
+    const auto& avg = stats->average;
+    out.enabled = true;
+    out.fps = stats->fps;
+    out.frameTimeMs = stats->frameTimeMs;
+    out.frameTimeMaxMs = stats->frameTimeMaxMs;
+    out.cpuRecordMs = avg.cpuRecordMs;
+    out.gpuMs = avg.gpuMs;
+    out.gpuValid = avg.gpuValid;
+    out.drawCalls = avg.draws.drawCalls;
+    out.dispatches = avg.draws.dispatches;
+    out.vertices = avg.draws.vertices;
+    out.passes.reserve(avg.passes.size());
+    for (const auto& pass : avg.passes) {
+        RenderPassStats p;
+        p.name = pass.name;
+        p.cpuMs = pass.cpuMs;
+        p.gpuMs = pass.gpuMs;
+        p.gpuValid = pass.gpuValid;
+        p.drawCalls = pass.draws.drawCalls;
+        p.dispatches = pass.draws.dispatches;
+        p.vertices = pass.draws.vertices;
+        out.passes.push_back(std::move(p));
+    }
+    out.summary = FrameGraph::formatRenderStats(*stats);
+    return out;
 }
 
 

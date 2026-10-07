@@ -11,6 +11,7 @@
 #include "FrameGraphPass.h"
 #include "FrameGraphResource.h"
 #include "FrameGraphSchedule.h"  // BarrierInfo, dependency and barrier planning
+#include "RenderStats.h"  // Frame rate, draw counts and pass times
 #include "VertexFormatRegistry.h"  // Declarative vertex format definitions
 #include "FrameGraph/DotPathResolver.h"  // For Shoonyakasha::CompiledBufferLayout in DotPathUBO
 #include "FrameGraph/SharedBufferRegistry.h"  // Phase 2: cross-graph SSBO sharing
@@ -908,6 +909,9 @@ public:
     /// Set debugger for execution tracing (optional)
     void setDebugger(FrameGraphDebugger* debugger) { m_debugger = debugger; }
 
+    /// Collect render stats while recording; null turns it off.
+    void setStats(RenderStatsCollector* stats) { m_stats = stats; }
+
     /// Resolves a pass's "viewport" dot-path to (x, y, width, height) in
     /// fractions of its extent; false when the path has no value. Without
     /// one, passes render into all of their attachments.
@@ -943,6 +947,7 @@ private:
     VulkanDevice&           m_device;
     VulkanCommandManager&   m_cmdManager;
     FrameGraphDebugger*     m_debugger = nullptr;
+    RenderStatsCollector*   m_stats = nullptr;
     Logger*                 m_logger = nullptr;
     ViewportResolver        m_viewportResolver;
 
@@ -1278,6 +1283,19 @@ public:
     FrameGraphDebugger* getDebugger();
     const FrameGraphDebugger* getDebugger() const;
 
+    // ═══════════════════════════════════════════════════════════════
+    // Render statistics
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Collect frame rate, frame time, draw counts and per-pass CPU and GPU
+    /// times (see RenderStats.h). `gpuTiming` adds timestamp queries where
+    /// the device has them. SHOONYAKASHA_STATS=1 turns this on when the graph
+    /// is created and prints a summary every second.
+    void setStatsEnabled(bool enabled, bool gpuTiming = true);
+    bool isStatsEnabled() const { return m_stats != nullptr; }
+    /// Null while stats are off.
+    const RenderStats* getStats() const;
+
     // Quick debug queries (delegate to debugger)
     bool wasPassExecuted(const std::string& passName) const;
     double getPassTime(const std::string& passName) const;
@@ -1310,6 +1328,7 @@ private:
 
     // Runtime debugging support
     std::unique_ptr<FrameGraphDebugger> m_debugger;
+    std::unique_ptr<RenderStatsCollector> m_stats;
 
     // Internal helper to ensure analyzer exists
     FrameGraphAnalyzer& getOrCreateAnalyzer() const;

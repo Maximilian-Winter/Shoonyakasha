@@ -251,6 +251,19 @@ public:
     uint32_t getPassDrawnCount(const std::string& passName) const;
     uint32_t getPassCulledCount(const std::string& passName) const;
 
+    // ═══════════════════════════════════════════════════════════
+    // Render statistics
+    // ═══════════════════════════════════════════════════════════
+
+    /// Collect frame rate, frame times, draw counts and per-pass CPU and GPU
+    /// times. `gpuTiming` times passes with GPU timestamp queries where the
+    /// device has them. May be called before run(). SHOONYAKASHA_STATS=1
+    /// turns stats on at startup and prints a summary every second.
+    void setRenderStatsEnabled(bool enabled, bool gpuTiming = true);
+    bool isRenderStatsEnabled() const;
+    /// Over the last whole second; `enabled` is false while stats are off.
+    RenderStatsSnapshot getRenderStats() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

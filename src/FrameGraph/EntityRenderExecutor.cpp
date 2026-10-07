@@ -6,6 +6,7 @@
 #include "ECS/SkeletonComponents.h"
 #include "Vulkan/VulkanDevice.h"
 #include "ECS/Core.h"
+#include "Vulkan/FrameGraph/RenderStats.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -349,8 +350,10 @@ void EntityRenderExecutor::drawEntity(
 ) const {
     if (mesh.hasIndices()) {
         vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+        FrameGraph::countDraw(mesh.indexCount);
     } else {
         vkCmdDraw(commandBuffer, mesh.vertexCount, 1, 0, 0);
+        FrameGraph::countDraw(mesh.vertexCount);
     }
 }
 

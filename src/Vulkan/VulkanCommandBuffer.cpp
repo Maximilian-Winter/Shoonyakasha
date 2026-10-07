@@ -7,6 +7,7 @@
 #include "Vulkan/VulkanRenderPass.h"
 #include "Vulkan/VulkanPipeline.h"
 #include "Vulkan/VulkanDescriptorSystem.h"
+#include "Vulkan/FrameGraph/RenderStats.h"
 
 #include <stdexcept>
 #include <cstring>
@@ -216,6 +217,7 @@ VulkanCommandBuilder& VulkanCommandBuilder::draw(uint32_t vertexCount, uint32_t 
     validateRenderPassState("draw");
     validatePipelineState("draw");
     vkCmdDraw(m_commandBuffer, vertexCount, instanceCount, firstVertex, firstInstance);
+    FrameGraph::countDraw(vertexCount, instanceCount);
     return *this;
 }
 
@@ -225,6 +227,7 @@ VulkanCommandBuilder& VulkanCommandBuilder::drawIndexed(uint32_t indexCount, uin
     validateRenderPassState("drawIndexed");
     validatePipelineState("drawIndexed");
     vkCmdDrawIndexed(m_commandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+    FrameGraph::countDraw(indexCount, instanceCount);
     return *this;
 }
 
@@ -276,6 +279,7 @@ VulkanCommandBuilder& VulkanCommandBuilder::dispatch(const ComputeDispatchComman
     }
 
     vkCmdDispatch(m_commandBuffer, command.groupCountX, command.groupCountY, command.groupCountZ);
+    FrameGraph::countDispatch();
     return *this;
 }
 

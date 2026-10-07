@@ -32,6 +32,8 @@
 #include "ECS/SkeletonComponents.h"
 
 #include <stdexcept>
+#include <cstdio>
+#include <cstdlib>
 #include <random>
 #include "Vulkan/RayTracingScene.h"
 
@@ -53,6 +55,16 @@ RenderGraph::RenderGraph(VulkanDevice& device, VulkanCommandManager& cmdManager)
     m_logger->log(LogLevel::Info, "Render Graph created");
     createSyncPrimitives();
     initSystems();
+
+    // SHOONYAKASHA_STATS=1: collect render stats from the start and print a
+    // summary every second, without touching the application.
+    if (const char* env = std::getenv("SHOONYAKASHA_STATS"); env && *env && std::string(env) != "0") {
+        setStatsEnabled(true);
+        m_stats->setWindowCallback([](const RenderStats& stats) {
+            std::printf("[render stats] %s", formatRenderStats(stats).c_str());
+            std::fflush(stdout);
+        });
+    }
 }
 
 RenderGraph::~RenderGraph() {
@@ -1540,6 +1552,9 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
     // Invalidate cached analysis
     m_cachedAnalysis.reset();  // unique_ptr::reset() clears the pointer
 
+    // Frames in flight measured the passes about to be replaced.
+    if (m_stats) m_stats->invalidate();
+
     // compile() replaces m_compiled, so every cached conversion refers to
     // layouts about to be discarded. Cleared here, not in recompile(), because
     // compile() is public and can be called directly.
@@ -1654,7 +1669,12 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
     recordRayTracingScene(commandBuffer, frameIndex);
 
     // Execute all passes
+    if (m_stats) {
+        m_stats->beginFrame(frameIndex, std::max(m_maxFramesInFlight, frameIndex + 1),
+                            static_cast<uint32_t>(m_compiled.executionOrder.size()));
+    }
     m_executor.execute(m_compiled, m_builder, frameIndex, swapchainImageIndex, commandBuffer, &m_parameters);
+    if (m_stats) m_stats->endFrame();
 
     // Phase 3: Readback GPU→CPU after passes (buffers and images)
     if (m_stagingManager) {
@@ -1874,12 +1894,19 @@ void RenderGraph::executeMultiQueue(uint32_t frameIndex, uint32_t swapchainImage
 
     const auto& batches = m_compiled.queueBatches;
 
+    if (m_stats) {
+        m_stats->beginFrame(frameIndex, std::max(m_maxFramesInFlight, frameIndex + 1),
+                            static_cast<uint32_t>(m_compiled.executionOrder.size()));
+    }
+
     // For each batch, record commands into the appropriate command buffer
     for (const auto& [queueType, passIndices] : batches.batches) {
         VkCommandBuffer cmdBuf = (queueType == QueueType::Compute) ? computeCmdBuf : graphicsCmdBuf;
         m_executor.executePasses(m_compiled, m_builder, passIndices,
                                  frameIndex, swapchainImageIndex, cmdBuf, &m_parameters);
     }
+
+    if (m_stats) m_stats->endFrame();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2069,6 +2096,28 @@ void RenderGraph::disableDebugging() {
 
 bool RenderGraph::isDebuggingEnabled() const {
     return m_debugger && m_debugger->isEnabled();
+}
+
+void RenderGraph::setStatsEnabled(bool enabled, bool gpuTiming) {
+    if (!enabled) {
+        if (m_stats) {
+            // Frames in flight still write its query pool.
+            vkDeviceWaitIdle(m_device.getLogicalDevice());
+            m_executor.setStats(nullptr);
+            m_stats.reset();
+            m_logger->log(LogLevel::Info, "Render stats disabled");
+        }
+        return;
+    }
+    if (!m_stats) m_stats = std::make_unique<RenderStatsCollector>(m_device);
+    m_stats->setGpuTiming(gpuTiming);
+    m_executor.setStats(m_stats.get());
+    m_logger->log(LogLevel::Info, "Render stats enabled (GPU timing %s)",
+                  m_stats->stats().gpuTiming ? "on" : gpuTiming ? "not supported" : "off");
+}
+
+const RenderStats* RenderGraph::getStats() const {
+    return m_stats ? &m_stats->stats() : nullptr;
 }
 
 void RenderGraph::enableGpuTiming(uint32_t queryPoolSize) {

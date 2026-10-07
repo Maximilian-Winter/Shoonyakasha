@@ -7,6 +7,7 @@
 
 #include "Vulkan/VulkanComputePipeline.h"
 #include "Vulkan/VulkanDevice.h"
+#include "Vulkan/FrameGraph/RenderStats.h"
 
 #include <fstream>
 #include <stdexcept>
@@ -75,6 +76,7 @@ void VulkanComputePipeline::bind(VkCommandBuffer cmd) {
 
 void VulkanComputePipeline::dispatch(VkCommandBuffer cmd, uint32_t groupX, uint32_t groupY, uint32_t groupZ) {
     vkCmdDispatch(cmd, groupX, groupY, groupZ);
+    FrameGraph::countDispatch();
 }
 
 void VulkanComputePipeline::reloadShader() {
