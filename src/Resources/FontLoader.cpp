@@ -18,7 +18,10 @@ namespace Shoonyakasha {
 namespace {
 constexpr int kFirstChar = 32;
 constexpr int kNumChars = 96;  // ASCII 32..127
+// The atlas starts at this size and doubles, up to the largest, until every
+// glyph fits: 512 holds ASCII up to about 70 pixels high, 2048 past 200.
 constexpr int kAtlasSize = 512;
+constexpr int kMaxAtlasSize = 2048;
 }
 
 FontLoader::FontLoader(VulkanDevice& device)
@@ -62,13 +65,19 @@ BakedFont FontLoader::bakeFont(const std::string& path, float pixelHeight) {
         return font;
     }
 
-    std::vector<unsigned char> bitmap(kAtlasSize * kAtlasSize, 0);
+    int atlasSize = kAtlasSize;
+    std::vector<unsigned char> bitmap;
     std::vector<stbtt_bakedchar> chardata(kNumChars);
-
-    int result = stbtt_BakeFontBitmap(
-        fontData.data(), 0, pixelHeight,
-        bitmap.data(), kAtlasSize, kAtlasSize,
-        kFirstChar, kNumChars, chardata.data());
+    int result = 0;
+    for (;;) {
+        bitmap.assign(static_cast<size_t>(atlasSize) * atlasSize, 0);
+        result = stbtt_BakeFontBitmap(
+            fontData.data(), 0, pixelHeight,
+            bitmap.data(), atlasSize, atlasSize,
+            kFirstChar, kNumChars, chardata.data());
+        if (result >= 0 || atlasSize >= kMaxAtlasSize) break;
+        atlasSize *= 2;
+    }
 
     if (result == 0) {
         std::cerr << "[FontLoader] stbtt_BakeFontBitmap failed for: " << path << std::endl;
@@ -81,7 +90,7 @@ BakedFont FontLoader::bakeFont(const std::string& path, float pixelHeight) {
 
     // Expand single-channel coverage to RGBA8 (rgb = white, a = coverage)
     // so the sprite shader (tintColor * texture) works unchanged for text.
-    std::vector<uint8_t> rgba(static_cast<size_t>(kAtlasSize) * kAtlasSize * 4);
+    std::vector<uint8_t> rgba(static_cast<size_t>(atlasSize) * atlasSize * 4);
     for (size_t i = 0; i < bitmap.size(); ++i) {
         rgba[i * 4 + 0] = 255;
         rgba[i * 4 + 1] = 255;
@@ -94,7 +103,7 @@ BakedFont FontLoader::bakeFont(const std::string& path, float pixelHeight) {
         m_device.getLogicalDevice(),
         m_device.getGraphicsQueue(),
         m_device.getCommandPool(),
-        kAtlasSize, kAtlasSize,
+        atlasSize, atlasSize,
         VK_FORMAT_R8G8B8A8_UNORM,
         rgba.data(),
         rgba.size(),
@@ -114,10 +123,10 @@ BakedFont FontLoader::bakeFont(const std::string& path, float pixelHeight) {
         const stbtt_bakedchar& c = chardata[i];
         GlyphInfo glyph;
         glyph.uvRect = glm::vec4(
-            static_cast<float>(c.x0) / kAtlasSize,
-            static_cast<float>(c.y0) / kAtlasSize,
-            static_cast<float>(c.x1) / kAtlasSize,
-            static_cast<float>(c.y1) / kAtlasSize);
+            static_cast<float>(c.x0) / atlasSize,
+            static_cast<float>(c.y0) / atlasSize,
+            static_cast<float>(c.x1) / atlasSize,
+            static_cast<float>(c.y1) / atlasSize);
         glyph.sizePixels = glm::vec2(c.x1 - c.x0, c.y1 - c.y0);
         glyph.offsetPixels = glm::vec2(c.xoff, c.yoff);
         glyph.advancePixels = c.xadvance;

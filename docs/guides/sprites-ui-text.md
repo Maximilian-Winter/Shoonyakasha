@@ -31,7 +31,7 @@ For `sortMode: sort_key`, lower keys draw first. Set text-specific sort/layer pr
 
 ## Text limitations and lifetime
 
-Fonts are baked into an atlas and rendered as glyph sprites. The current range is ASCII 32–126; a `.ttf`/`.otf` input does not imply Unicode shaping or a complete layout engine. `set_text`, color, font size, and alignment setters update labels.
+Fonts are baked into an atlas, once per font and size, and rendered as glyph sprites. The atlas starts at 512² and doubles up to 2048² until every glyph fits, so display sizes past 200 pixels still bake whole. The current range is ASCII 32–126; a `.ttf`/`.otf` input does not imply Unicode shaping or a complete layout engine. `set_text`, color, font size, and alignment setters update labels.
 
 Use `set_text_visible(label, False)` / `setTextVisible(label, false)` to remove a label from view. Label destruction alone can leave generated glyph entities visible because they are not hierarchy children. Hide it before destroying it; this is a known engine limitation.
 
