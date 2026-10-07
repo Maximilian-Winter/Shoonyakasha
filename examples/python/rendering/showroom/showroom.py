@@ -25,7 +25,7 @@ Keys:
     T              turntable on or off
     K              next paint colour (cars)
     X              clear coat on or off (the lacquer over car paint)
-    M              next tone mapper: PBR Neutral, AgX, ACES
+    M              next tone mapper: AgX, PBR Neutral, ACES
     Y              turn the model 90 degrees (prints the catalogue yaw)
     F              floor: dark gloss or white
     V              debug views (VSM levels and pages, shadow mask, normals ...)
@@ -61,7 +61,7 @@ import studio  # noqa: E402
 PIPELINE = os.path.join(HERE, "pipeline", "pipeline.json")
 
 # settings.toneMapper in the pipeline's tonemap.frag
-TONE_MAPPERS = {"neutral": (1, "PBR Neutral"), "agx": (2, "AgX"), "aces": (0, "ACES")}
+TONE_MAPPERS = {"agx": (2, "AgX"), "neutral": (1, "PBR Neutral"), "aces": (0, "ACES")}
 
 # Body paint whose file declares no clear coat gets this one: a full coat,
 # polished almost to a mirror.
@@ -92,8 +92,8 @@ def parse_args():
     parser.add_argument("--texture-size", type=int, default=4096, help="largest texture side to load")
     parser.add_argument("--no-overlay", action="store_true", help="no credits or status on screen")
     parser.add_argument("--no-reflections", action="store_true", help="no ray-traced reflections")
-    parser.add_argument("--tonemapper", choices=list(TONE_MAPPERS), default="neutral",
-                        help="tone curve: Khronos PBR Neutral, AgX or ACES")
+    parser.add_argument("--tonemapper", choices=list(TONE_MAPPERS), default="agx",
+                        help="tone curve: AgX, Khronos PBR Neutral or ACES")
     parser.add_argument("--no-clearcoat", action="store_true", help="no clear coat over the paint")
     parser.add_argument("--screenshots", metavar="DIR", help="save stills of every model and exit")
     parser.add_argument("--record", metavar="FILE", help="record a cinematic tour (.mp4/.mkv) and exit")

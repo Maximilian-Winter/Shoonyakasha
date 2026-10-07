@@ -54,7 +54,7 @@ The pipeline starts as `high`. As in the default pipeline, ray tracing covers on
 | `lightSoftness` | 1.0 | Scales every light's source radius in the shadow rays |
 | `reflections` | 1.0 | Strength of ray-traced reflections; 0 turns them off |
 
-`default.toneMapper` (`set_custom_uint`) picks the tone curve: 0 the default pipeline's ACES fit, 1 Khronos PBR Neutral, which keeps base colours as authored and only compresses highlights, and 2 AgX, which rolls very bright light off towards white without shifting its hue. The showroom starts on PBR Neutral.
+`default.toneMapper` (`set_custom_uint`) picks the tone curve: 0 the default pipeline's ACES fit, 1 Khronos PBR Neutral, which keeps base colours as authored and only compresses highlights, and 2 AgX, which rolls very bright light off towards white without shifting its hue. The showroom starts on AgX: with auto-exposure aiming for mid-grey it keeps the mid-tones where they are, where PBR Neutral, made for exposures that put white at 1, comes out dark, and ACES adds strong contrast.
 
 ## Clear coat
 

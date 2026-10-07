@@ -34,7 +34,7 @@ python tools/fetch_assets.py showroom          # all eight, or showroom/alfa_gtv
 | **G** cycles shadows: VSM + ray-traced lights, everything ray traced, VSM with shadow-mapped lights, the default pipeline's cascades | Presets `hybrid`, `raytraced`, `high`, `cascades`: a before-and-after for the same frame |
 | The LED rim of the turntable, softbox panels, neon strips | Emission and bloom |
 
-**Keys:** **←/→** models · **L** lighting (studio, hard light, night, neon) · **C** camera (turntable, cinematic, free: WASD/Q/E and the right mouse button) · **G** shadow technique · **R** reflections · **T** turntable · **K** paint colour (cars) · **X** clear coat on/off · **M** tone mapper (PBR Neutral, AgX, ACES) · **Y** turn the model 90° · **F** dark or white floor · **V** debug views · **H** credits and status · **O** render stats (frame rate, GPU time per pass, draw calls) · **P** screenshot · **F9** record · **F1** help.
+**Keys:** **←/→** models · **L** lighting (studio, hard light, night, neon) · **C** camera (turntable, cinematic, free: WASD/Q/E and the right mouse button) · **G** shadow technique · **R** reflections · **T** turntable · **K** paint colour (cars) · **X** clear coat on/off · **M** tone mapper (AgX, PBR Neutral, ACES) · **Y** turn the model 90° · **F** dark or white floor · **V** debug views · **H** credits and status · **O** render stats (frame rate, GPU time per pass, draw calls) · **P** screenshot · **F9** record · **F1** help.
 
 The window opens at 1920×1080; `--width`/`--height` change it, `--vertical` makes it 1080×1920 for phone-shaped video. `--lighting`, `--camera` and `--shadows` choose what it opens with, `--models alfa_gtv6,aat` which models and in what order.
 
