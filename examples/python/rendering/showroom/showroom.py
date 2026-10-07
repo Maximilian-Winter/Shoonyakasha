@@ -1237,7 +1237,7 @@ class Controls:
             else:
                 path = capture_path(".mp4")
                 ok = engine.start_recording(path, fps=args.fps)
-                print("[showroom] recording ->", path if ok else "failed (is ffmpeg installed?)")
+                print("[showroom] recording ->", path if ok else "failed (see the error above)")
 
 
 class Stills:
@@ -1320,7 +1320,7 @@ class Tour:
                 showroom.update(0.0)
                 return
             if not engine.start_recording(self.path, fps=args.fps):
-                print("[showroom] could not start recording (is ffmpeg installed?)")
+                print("[showroom] could not start recording (see the error above)")
                 os._exit(1)
             print("[showroom] recording ->", self.path)
             self.started = True

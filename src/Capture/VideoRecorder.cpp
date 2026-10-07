@@ -143,11 +143,14 @@ bool VideoRecorder::start(const std::string& path, uint32_t width, uint32_t heig
         m_lastError = "zero frame size";
         return false;
     }
-    // x264 requires even dimensions for the default 4:2:0 chroma subsampling.
-    // Checked here so the failure is reported before any frame is written.
-    if ((width % 2) != 0 || (height % 2) != 0) {
+    // 4:2:0 chroma needs even dimensions. A window whose client area is odd
+    // (a 1080-high window shrunk to fit the screen, say) is encoded without
+    // its last column or row rather than refused.
+    const uint32_t encodedWidth = evenSize(width);
+    const uint32_t encodedHeight = evenSize(height);
+    if (encodedWidth == 0 || encodedHeight == 0) {
         m_lastError = "frame size " + std::to_string(width) + "x" + std::to_string(height)
-                    + " is not even, which most codecs require";
+                    + " is too small to encode";
         return false;
     }
 
@@ -164,7 +167,7 @@ bool VideoRecorder::start(const std::string& path, uint32_t width, uint32_t heig
     }
 
     std::string commandLine =
-        quote(ffmpeg) + " " + buildArguments(path, width, height, options);
+        quote(ffmpeg) + " " + buildArguments(path, encodedWidth, encodedHeight, options);
 
 #ifdef _WIN32
     // cmd.exe strips the outermost pair of quotes from its command line. This
@@ -194,6 +197,9 @@ bool VideoRecorder::start(const std::string& path, uint32_t width, uint32_t heig
 
     m_path = path;
     m_frameCount = 0;
+    m_width = width;
+    m_encodedWidth = encodedWidth;
+    m_encodedHeight = encodedHeight;
     m_expectedFrameBytes = static_cast<size_t>(width) * height * 4;
     return true;
 }
@@ -209,8 +215,21 @@ bool VideoRecorder::writeFrame(const uint8_t* rgba, size_t byteCount) {
         return false;
     }
 
-    const size_t written = std::fwrite(rgba, 1, byteCount, m_pipe);
-    if (written != byteCount) {
+    bool complete;
+    if (m_encodedWidth == m_width) {
+        // Whole rows: the frame, less any last row, in one write
+        const size_t bytes = static_cast<size_t>(m_width) * m_encodedHeight * 4;
+        complete = std::fwrite(rgba, 1, bytes, m_pipe) == bytes;
+    } else {
+        // Each row without its last pixel
+        const size_t rowBytes = static_cast<size_t>(m_encodedWidth) * 4;
+        const size_t stride = static_cast<size_t>(m_width) * 4;
+        complete = true;
+        for (uint32_t y = 0; y < m_encodedHeight && complete; ++y) {
+            complete = std::fwrite(rgba + y * stride, 1, rowBytes, m_pipe) == rowBytes;
+        }
+    }
+    if (!complete) {
         // ffmpeg has exited: an unknown codec, an unwritable path, or a full
         // disk. Close the pipe and report the command that was run.
         m_lastError = "ffmpeg stopped accepting frames after "

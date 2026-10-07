@@ -50,7 +50,9 @@ public:
     VideoRecorder& operator=(const VideoRecorder&) = delete;
 
     /// Start encoding to `path`. The container follows the file extension, so
-    /// .mkv, .mp4 and .webm all work. Fails if ffmpeg cannot be found or the
+    /// .mkv, .mp4 and .webm all work. An odd width or height is encoded one
+    /// pixel smaller, as 4:2:0 chroma needs even sizes; frames are still
+    /// written at the full size. Fails if ffmpeg cannot be found or the
     /// process cannot be started; check lastError().
     bool start(const std::string& path, uint32_t width, uint32_t height,
                const Options& options = {});
@@ -84,6 +86,9 @@ public:
                                       uint32_t width, uint32_t height,
                                       const Options& options);
 
+    /// The size a frame dimension is encoded at: rounded down to even.
+    static uint32_t evenSize(uint32_t size) { return size & ~1u; }
+
     /// Whether an ffmpeg executable could be found.
     static bool available() { return !findFfmpeg().empty(); }
 
@@ -95,6 +100,9 @@ private:
     std::string m_lastError;
     uint64_t    m_frameCount = 0;
     size_t      m_expectedFrameBytes = 0;
+    uint32_t    m_width = 0;           // of the frames written
+    uint32_t    m_encodedWidth = 0;    // of the video: even
+    uint32_t    m_encodedHeight = 0;
 };
 
 } // namespace Shoonyakasha

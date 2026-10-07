@@ -92,16 +92,22 @@ TEST(VideoRecorderCommand, ExtraArgsLandBeforeTheOutputPath) {
     EXPECT_LT(args.find("-preset ultrafast"), args.find("\"out.mkv\"")) << args;
 }
 
-TEST(VideoRecorderCommand, RejectsOddFrameSizesBeforeStarting) {
-    // 4:2:0 chroma requires even dimensions. start() reports this before
-    // opening the pipe.
+TEST(VideoRecorderCommand, EncodesOddFrameSizesOnePixelSmaller) {
+    // 4:2:0 chroma requires even dimensions. A window whose client area is
+    // odd, such as 1920x1061, is encoded without its last row rather than
+    // refused.
+    EXPECT_EQ(1920u, VideoRecorder::evenSize(1920));
+    EXPECT_EQ(1060u, VideoRecorder::evenSize(1061));
+    EXPECT_EQ(0u, VideoRecorder::evenSize(1));
+}
+
+TEST(VideoRecorderCommand, RejectsFramesTooSmallToEncode) {
     VideoRecorder recorder;
 
-    EXPECT_FALSE(recorder.start("out.mkv", 801, 500));
-    EXPECT_NE(std::string::npos, recorder.lastError().find("not even"))
-        << recorder.lastError();
-
     EXPECT_FALSE(recorder.start("out.mkv", 0, 0));
+    EXPECT_FALSE(recorder.start("out.mkv", 1, 500));
+    EXPECT_NE(std::string::npos, recorder.lastError().find("too small"))
+        << recorder.lastError();
     EXPECT_FALSE(recorder.isRecording());
 }
 
