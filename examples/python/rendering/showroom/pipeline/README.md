@@ -54,6 +54,12 @@ The pipeline starts as `high`. As in the default pipeline, ray tracing covers on
 | `lightSoftness` | 1.0 | Scales every light's source radius in the shadow rays |
 | `reflections` | 1.0 | Strength of ray-traced reflections; 0 turns them off |
 
+`default.toneMapper` (`set_custom_uint`) picks the tone curve: 0 the default pipeline's ACES fit, 1 Khronos PBR Neutral, which keeps base colours as authored and only compresses highlights, and 2 AgX, which rolls very bright light off towards white without shifting its hue. The showroom starts on PBR Neutral.
+
+## Clear coat
+
+Materials with `KHR_materials_clearcoat` get a clear lacquer layer over their base: a dielectric with its own roughness (`clearcoatFactor`, `clearcoatRoughnessFactor` material parameters), whose sharp reflection sits on top of the base's and whose Fresnel dims the base under it, for every light, the environment, and in the `raytraced` and `hybrid` presets the traced reflections, which follow the coat rather than the base. The coat's textures are not read, only its factors. The G-buffer's `gMaterial` carries metallic, roughness, coat and coat roughness. The showroom gives car body paint a coat when its file declares none.
+
 Two more debug views join the default pipeline's (`default.debugView`):
 
 - **1:** with the virtual shadow map on, shows its levels in colour, with page borders (and texel borders where texels are large).

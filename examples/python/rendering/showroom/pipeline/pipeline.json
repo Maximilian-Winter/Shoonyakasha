@@ -343,6 +343,12 @@
           "type": "float",
           "source": "scene.custom.default.sunAngle",
           "default": 0.4
+        },
+        {
+          "name": "toneMapper",
+          "type": "uint",
+          "source": "scene.custom.default.toneMapper",
+          "default": 0
         }
       ]
     },
@@ -478,6 +484,18 @@
           "name": "hasMetalRoughMap",
           "type": "float",
           "source": "entity.material.textures.metallicRoughnessMap.exists"
+        },
+        {
+          "name": "clearcoatFactor",
+          "type": "float",
+          "source": "entity.material.params.clearcoatFactor",
+          "default": 0.0
+        },
+        {
+          "name": "clearcoatRoughness",
+          "type": "float",
+          "source": "entity.material.params.clearcoatRoughnessFactor",
+          "default": 0.03
         }
       ]
     },
@@ -1582,7 +1600,7 @@
       "name": "gMaterial",
       "kind": "image",
       "image": {
-        "format": "R8G8_UNORM"
+        "format": "R8G8B8A8_UNORM"
       }
     },
     {
@@ -2268,7 +2286,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 188
         }
       ]
     },
@@ -2325,7 +2343,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 188
         }
       ]
     },
@@ -2384,7 +2402,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 188
         }
       ]
     },
@@ -2443,7 +2461,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 188
         }
       ]
     },
@@ -3225,7 +3243,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 188
         }
       ]
     },
@@ -3298,7 +3316,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 188
         }
       ]
     },

@@ -80,6 +80,9 @@ void main() {
     rtLightOffset = 0.01 + 0.002 * viewDepth;
 #endif
 
+    coatFactor = s.clearcoat;
+    coatRoughness = s.clearcoatRoughness;
+
     uint cluster = clusterIndex(gl_FragCoord.xy / camera.resolution, viewDepth, camera.params.x, camera.params.y);
     vec3 color = directLight(cluster, fragWorldPos, s.N, V, s.baseColor.rgb, s.metallic, s.roughness, F0,
                              sunIndex, sunLit)

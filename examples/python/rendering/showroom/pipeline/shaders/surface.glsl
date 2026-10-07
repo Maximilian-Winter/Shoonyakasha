@@ -24,6 +24,8 @@ struct Surface {
     float roughness;
     float occlusion;
     vec3 emissive;
+    float clearcoat;            // amount of the clear lacquer layer over the base
+    float clearcoatRoughness;
 };
 
 // Tangent frame from screen-space derivatives: meshes carry no tangents.
@@ -69,6 +71,8 @@ Surface evaluateSurface(vec4 baseColor) {
 
     s.occlusion = texture(aoMap, fragTexCoord).r;   // no texture: the fallback is 1
     s.emissive = texture(emissiveMap, fragTexCoord).rgb * draw.emissiveFactor.rgb;
+    s.clearcoat = clamp(draw.clearcoatFactor, 0.0, 1.0);
+    s.clearcoatRoughness = clamp(draw.clearcoatRoughness, 0.045, 1.0);
     return s;
 }
 

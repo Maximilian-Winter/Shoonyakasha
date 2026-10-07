@@ -11,4 +11,6 @@ layout(push_constant) uniform MaterialDraw {
     float alphaCutoff;
     float hasNormalMap;      // 1 when the material has its own texture
     float hasMetalRoughMap;
+    float clearcoatFactor;   // KHR_materials_clearcoat: coat amount, 0 for none
+    float clearcoatRoughness;
 } draw;

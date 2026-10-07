@@ -24,6 +24,8 @@ Keys:
     R              ray-traced reflections on or off (with ray-traced lights)
     T              turntable on or off
     K              next paint colour (cars)
+    X              clear coat on or off (the lacquer over car paint)
+    M              next tone mapper: PBR Neutral, AgX, ACES
     Y              turn the model 90 degrees (prints the catalogue yaw)
     F              floor: dark gloss or white
     V              debug views (VSM levels and pages, shadow mask, normals ...)
@@ -57,6 +59,13 @@ import catalogue  # noqa: E402
 import studio  # noqa: E402
 
 PIPELINE = os.path.join(HERE, "pipeline", "pipeline.json")
+
+# settings.toneMapper in the pipeline's tonemap.frag
+TONE_MAPPERS = {"neutral": (1, "PBR Neutral"), "agx": (2, "AgX"), "aces": (0, "ACES")}
+
+# Body paint whose file declares no clear coat gets this one: a full coat,
+# polished almost to a mirror.
+PAINT_COAT = (1.0, 0.03)
 FONT = "fonts/Roboto-Regular.ttf"
 
 
@@ -83,6 +92,9 @@ def parse_args():
     parser.add_argument("--texture-size", type=int, default=4096, help="largest texture side to load")
     parser.add_argument("--no-overlay", action="store_true", help="no credits or status on screen")
     parser.add_argument("--no-reflections", action="store_true", help="no ray-traced reflections")
+    parser.add_argument("--tonemapper", choices=list(TONE_MAPPERS), default="neutral",
+                        help="tone curve: Khronos PBR Neutral, AgX or ACES")
+    parser.add_argument("--no-clearcoat", action="store_true", help="no clear coat over the paint")
     parser.add_argument("--screenshots", metavar="DIR", help="save stills of every model and exit")
     parser.add_argument("--record", metavar="FILE", help="record a cinematic tour (.mp4/.mkv) and exit")
     parser.add_argument("--seconds", type=float, default=0.0,
@@ -277,6 +289,7 @@ class Model:
         self.entities = []
         self.paint = []
         self.paint_original = {}
+        self.coat = {}   # entity -> (clearcoatFactor, clearcoatRoughnessFactor) when coated
         self.fit = sk.NULL_ENTITY
         self.yaw = entry.yaw
         self.size = (1.0, 1.0, 1.0)
@@ -303,13 +316,28 @@ class Model:
                 if self.entry.paint.search(material):
                     self.paint.append(e)
                     self.paint_original[e] = scene.get_material_vec4(e, "baseColorFactor", (1, 1, 1, 1))
+        # Clear coat: what the file declares (KHR_materials_clearcoat), and on
+        # body paint that declares none.
+        for e in self.entities:
+            if scene.has_material_param(e, "clearcoatFactor"):
+                self.coat[e] = (scene.get_material_float(e, "clearcoatFactor", 0.0),
+                                scene.get_material_float(e, "clearcoatRoughnessFactor", 0.0))
+        for e in self.paint:
+            self.coat.setdefault(e, PAINT_COAT)
+        self.apply_coat(showroom.clearcoat)
         self.loaded = True
         self.place()
         lo, hi = self.bounds
         print("[showroom] %s: %d entities, %d vertices, %.1fs%s; %.2f x %.2f x %.2f in the file, shown at x%.3g" % (
             self.entry.name, len(self.entities), result.total_vertices, time.time() - started,
-            ", %d paint" % len(self.paint) if self.paint else "",
+            (", %d paint" % len(self.paint) if self.paint else "") +
+            (", %d clear-coated" % len(self.coat) if self.coat else ""),
             hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], self.scale))
+
+    def apply_coat(self, on):
+        for e, (factor, roughness) in self.coat.items():
+            scene.set_material_float(e, "clearcoatFactor", factor if on else 0.0)
+            scene.set_material_float(e, "clearcoatRoughnessFactor", roughness)
 
     def place(self):
         """Scale to the catalogue length, turn, centre on the turntable, and
@@ -865,6 +893,8 @@ class Showroom:
         self.epoch = 0
         self.preset = "high"
         self.paint = 0
+        self.clearcoat = not args.no_clearcoat
+        self.tonemapper = args.tonemapper
         self.floor_white = False
         self.time = 0.0
         self.debug_view = 0
@@ -876,6 +906,7 @@ class Showroom:
     def start(self):
         self.stage.build()
         self.overlay.build()
+        self.apply_tonemapper()
         self.stats.build(self.overlay.k)
         rt = engine.ray_query_supported()
         self.preset = {"hybrid": "hybrid", "vsm": "high", "raytraced": "raytraced", "cascades": "cascades",
@@ -927,7 +958,27 @@ class Showroom:
         engine.set_custom_uint("showroom.vsmEpoch", self.epoch)
 
     def update_status(self):
-        self.overlay.set_status("%s  |  %s" % (self.rig.label, SHADOW_LABELS.get(self.preset, self.preset)))
+        self.overlay.set_status("%s  |  %s  |  %s%s" % (
+            self.rig.label, SHADOW_LABELS.get(self.preset, self.preset), TONE_MAPPERS[self.tonemapper][1],
+            "" if self.clearcoat else "  |  no clear coat"))
+
+    def apply_tonemapper(self):
+        engine.set_custom_uint("default.toneMapper", TONE_MAPPERS[self.tonemapper][0])
+
+    def next_tonemapper(self):
+        names = list(TONE_MAPPERS)
+        self.tonemapper = names[(names.index(self.tonemapper) + 1) % len(names)]
+        self.apply_tonemapper()
+        self.update_status()
+        print("[showroom] tone mapper:", TONE_MAPPERS[self.tonemapper][1])
+
+    def toggle_clearcoat(self):
+        self.clearcoat = not self.clearcoat
+        for model in self.models:
+            if model.loaded:
+                model.apply_coat(self.clearcoat)
+        self.update_status()
+        print("[showroom] clear coat", "on" if self.clearcoat else "off")
 
     # Frame by frame ------------------------------------------------------
 
@@ -1090,6 +1141,10 @@ class Controls:
             s.overlay.apply()
         if self.pressed(keys.O):
             s.stats.toggle()
+        if self.pressed(keys.M):
+            s.next_tonemapper()
+        if self.pressed(keys.X):
+            s.toggle_clearcoat()
         s.stats.update(dt)
         if self.pressed(keys.P):
             path = capture_path(".png")

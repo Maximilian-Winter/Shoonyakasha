@@ -1,5 +1,6 @@
 #version 450
-// Bloom, exposure and ACES filmic tonemapping to the swapchain. The
+// Bloom, exposure and tonemapping to the swapchain: ACES filmic, Khronos
+// PBR Neutral or AgX, by settings.toneMapper (0, 1, 2). The
 // swapchain is sRGB, so the hardware encodes on write; the dither breaks up
 // banding in dark gradients.
 
@@ -32,7 +33,10 @@ void main() {
         if (adapted > 0.0 && !isinf(adapted)) exposure *= adapted;
     }
 
-    vec3 mapped = ACESFilm(hdr * exposure);
+    hdr *= exposure;
+    vec3 mapped = settings.toneMapper == 1u ? PBRNeutral(hdr)
+                : settings.toneMapper == 2u ? AgX(hdr)
+                                            : ACESFilm(hdr);
     float dither = (interleavedGradientNoise(gl_FragCoord.xy) - 0.5) / 255.0;
     outColor = vec4(max(mapped + dither, 0.0), 1.0);
 }

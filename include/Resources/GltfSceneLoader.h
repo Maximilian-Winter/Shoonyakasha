@@ -64,6 +64,11 @@ struct GltfPrimitive {
     float metallicFactor        = 0.0f;
     float roughnessFactor       = 0.5f;
     glm::vec3 emissiveFactor    = glm::vec3(0.0f);
+    // KHR_materials_clearcoat factors, when the material has the extension
+    // (its coat textures are not read).
+    bool hasClearcoat           = false;
+    float clearcoatFactor       = 0.0f;
+    float clearcoatRoughnessFactor = 0.0f;
 
     // ─── Rendering Properties ───────────────────────────────
     Shoonyakasha::AlphaMode alphaMode = Shoonyakasha::AlphaMode::Opaque;

@@ -128,9 +128,11 @@ void main() {
     vec3 albedo = albedoAO.rgb;
     float occlusion = albedoAO.a;
     vec3 N = octDecode(textureLod(gNormal, fragTexCoord, 0.0).xy);
-    vec2 material = textureLod(gMaterial, fragTexCoord, 0.0).rg;
+    vec4 material = textureLod(gMaterial, fragTexCoord, 0.0);
     float metallic = material.r;
     float roughness = max(material.g, 0.045);
+    coatFactor = material.b;
+    coatRoughness = max(material.a, 0.045);
     vec2 mask = textureLod(shadowMask, fragTexCoord, 0.0).rg;
     float sunVisibility = mask.r;
 
@@ -161,14 +163,20 @@ void main() {
                  * settings.iblIntensity * mix(settings.shadowAmbient, 1.0, sunVisibility);
 #ifdef RT_REFLECTIONS
     {
-        vec2 envBRDF = texture(brdfLUT, vec2(NdotV, roughness)).rg;
-        vec3 split = F0 * envBRDF.x + envBRDF.y;
+        // A clear coat is the glossiest layer, and the one whose reflection
+        // shows: trace it in place of the base's when there is one. Car
+        // paint's base is often too rough to trace at all.
+        bool coated = coatFactor > 0.0;
+        float traceRoughness = coated ? coatRoughness : roughness;
+        vec2 envBRDF = texture(brdfLUT, vec2(NdotV, traceRoughness)).rg;
+        vec3 split = coated ? vec3((COAT_F0 * envBRDF.x + envBRDF.y) * coatFactor) : F0 * envBRDF.x + envBRDF.y;
         float maxLod = float(textureQueryLevels(prefilterMap) - 1);
-        vec3 environment = textureLod(prefilterMap, reflect(-V, N), roughness * maxLod).rgb * settings.iblIntensity;
+        vec3 environment = textureLod(prefilterMap, reflect(-V, N), traceRoughness * maxLod).rgb * settings.iblIntensity;
         vec3 traced;
-        float weight = tracedReflection(worldPos, N, V, roughness, -viewPos.z, environment, traced);
+        float weight = tracedReflection(worldPos, N, V, traceRoughness, -viewPos.z, environment, traced);
         if (weight > 0.0) {
-            vec3 envSpecular = ambientSpecular * specularAO * settings.iblIntensity
+            vec3 replaced = coated ? ambientCoatSpecular : ambientSpecular;
+            vec3 envSpecular = replaced * specularAO * settings.iblIntensity
                              * mix(settings.shadowAmbient, 1.0, sunVisibility);
             ambient += (traced * split * max(specularAO, 0.5) - envSpecular) * weight;
         }

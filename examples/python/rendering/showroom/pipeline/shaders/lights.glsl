@@ -18,6 +18,22 @@
 #ifndef DEFAULT_LIGHTS_GLSL
 #define DEFAULT_LIGHTS_GLSL
 
+// Clear coat over the base (KHR_materials_clearcoat), set by the including
+// shader for the surface being lit before it calls directLight and
+// ambientLight. A dielectric layer (F0 0.04) with its own roughness, sharing
+// the base's normal: its specular is added, and the base beneath it receives
+// what the coat's Fresnel lets through (Filament's model).
+float coatFactor = 0.0;
+float coatRoughness = 0.045;
+// The coat's share of ambientLight's specular, for the ray-traced
+// reflections to replace.
+vec3 ambientCoatSpecular = vec3(0.0);
+
+const float COAT_F0 = 0.04;
+float coatFresnel(float cosTheta) {
+    return COAT_F0 + (1.0 - COAT_F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
 #ifdef LOCAL_SHADOWS
 #include "local_shadows.glsl"
 #endif
@@ -64,6 +80,7 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
     vec3 L;
     vec3 Ls;
     float energy = 1.0;
+    float coatEnergy = 1.0;
     float falloff = 1.0;
     if (type < 0.5) {                       // directional
         L = -normalize(direction);
@@ -85,6 +102,11 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
             float a = roughness * roughness;
             float widened = clamp(a + radius / (2.0 * max(dist, 1e-4)), 0.0, 1.0);
             energy = (a / widened) * (a / widened);
+            // The glossier coat widens far more, relatively: a sharp
+            // highlight the softbox's size.
+            float ac = coatRoughness * coatRoughness;
+            float widenedCoat = clamp(ac + radius / (2.0 * max(dist, 1e-4)), 0.0, 1.0);
+            coatEnergy = (ac / widenedCoat) * (ac / widenedCoat);
             dist = max(dist, radius);
         }
         falloff = 1.0 / max(attenuation.x + attenuation.y * dist + attenuation.z * dist * dist, 1e-4);
@@ -113,7 +135,18 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
     }
 
     if (falloff <= 1e-4) return vec3(0.0);
-    return sphereLightBRDF(N, V, L, Ls, energy, albedo, metallic, roughness, F0) * color * falloff;
+    vec3 brdf = sphereLightBRDF(N, V, L, Ls, energy, albedo, metallic, roughness, F0);
+    float NdotLs = dot(N, Ls);
+    if (coatFactor > 0.0 && NdotLs > 0.0) {
+        float NdotV = max(dot(N, V), 1e-4);
+        vec3 H = normalize(V + Ls);
+        float Fc = coatFresnel(max(dot(V, H), 0.0)) * coatFactor;
+        float D = distributionGGX(max(dot(N, H), 0.0), coatRoughness);
+        float G = geometrySmith(NdotV, NdotLs, coatRoughness);
+        float coat = D * G * Fc / max(4.0 * NdotV * NdotLs, 0.001) * coatEnergy * NdotLs;
+        brdf = brdf * (1.0 - Fc) + vec3(coat);
+    }
+    return brdf * color * falloff;
 }
 
 #ifdef CLUSTERED
@@ -160,6 +193,17 @@ void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, samp
     vec3 prefiltered = textureLod(prefilterMap, R, roughness * maxLod).rgb;
     vec2 brdf = texture(brdfLUT, vec2(NdotV, roughness)).rg;
     specular = prefiltered * (F0 * brdf.x + brdf.y);
+
+    ambientCoatSpecular = vec3(0.0);
+    if (coatFactor > 0.0) {
+        float Fc = coatFresnel(NdotV) * coatFactor;
+        diffuse *= 1.0 - Fc;
+        specular *= 1.0 - Fc;
+        vec3 coatPrefiltered = textureLod(prefilterMap, R, coatRoughness * maxLod).rgb;
+        vec2 coatBrdf = texture(brdfLUT, vec2(NdotV, coatRoughness)).rg;
+        ambientCoatSpecular = coatPrefiltered * (COAT_F0 * coatBrdf.x + coatBrdf.y) * coatFactor;
+        specular += ambientCoatSpecular;
+    }
 }
 
 vec3 ambientLight(samplerCube irradianceMap, samplerCube prefilterMap, sampler2D brdfLUT,

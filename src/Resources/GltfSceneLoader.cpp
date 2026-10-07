@@ -483,6 +483,12 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             material->emissive_factor[2]
         );
 
+        if (material->has_clearcoat) {
+            result.hasClearcoat = true;
+            result.clearcoatFactor = material->clearcoat.clearcoat_factor;
+            result.clearcoatRoughnessFactor = material->clearcoat.clearcoat_roughness_factor;
+        }
+
         result.alphaMode = extractAlphaMode(material);
         result.alphaCutoff = material->alpha_cutoff;
         result.doubleSided = material->double_sided;
@@ -838,6 +844,10 @@ entt::entity GltfSceneLoader::createEntity(
     material.setParam("metallicFactor", primitive.metallicFactor);
     material.setParam("roughnessFactor", primitive.roughnessFactor);
     material.setParam("emissiveFactor", glm::vec4(primitive.emissiveFactor, 1.0f));
+    if (primitive.hasClearcoat) {
+        material.setParam("clearcoatFactor", primitive.clearcoatFactor);
+        material.setParam("clearcoatRoughnessFactor", primitive.clearcoatRoughnessFactor);
+    }
     material.alphaMode = primitive.alphaMode;
     material.alphaCutoff = primitive.alphaCutoff;
     material.doubleSided = primitive.doubleSided;
@@ -1234,6 +1244,10 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     material.setParam("metallicFactor", primitive.metallicFactor);
     material.setParam("roughnessFactor", primitive.roughnessFactor);
     material.setParam("emissiveFactor", glm::vec4(primitive.emissiveFactor, 1.0f));
+    if (primitive.hasClearcoat) {
+        material.setParam("clearcoatFactor", primitive.clearcoatFactor);
+        material.setParam("clearcoatRoughnessFactor", primitive.clearcoatRoughnessFactor);
+    }
     material.alphaMode = primitive.alphaMode;
     material.alphaCutoff = primitive.alphaCutoff;
     material.doubleSided = primitive.doubleSided;
