@@ -4,7 +4,9 @@
 // 朱雀司變  熾熱而速達
 // The Vermilion Bird governs transformation — blazing heat, swift arrival
 //
-// Runtime debugging, pass execution tracking, and GPU timing.
+// Runtime debugging, pass execution tracking, and CPU pass timing. GPU pass
+// times come from render stats instead (RenderStats.h,
+// RenderGraph::setStatsEnabled).
 //
 
 #pragma once
@@ -23,7 +25,6 @@
 #include <mutex>
 
 namespace Shoonyakasha {
-class VulkanDevice;
 class Logger;
 }
 
@@ -66,10 +67,6 @@ struct PassExecutionTiming {
     double      cpuStartMs = 0.0;      // CPU time when pass began recording
     double      cpuEndMs = 0.0;        // CPU time when pass finished recording
     double      cpuDurationMs = 0.0;   // CPU-side duration
-
-    // GPU timing (only if GPU timing enabled)
-    double      gpuDurationMs = 0.0;   // GPU-side duration (0 if not available)
-    bool        gpuTimingValid = false;
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -79,7 +76,6 @@ struct PassExecutionTiming {
 struct FrameExecutionSummary {
     uint32_t    frameIndex = 0;
     double      totalCpuTimeMs = 0.0;
-    double      totalGpuTimeMs = 0.0;       // 0 if GPU timing not enabled
 
     std::vector<PassExecutionTiming>        passTimings;
     std::vector<std::string>                executedPasses;
@@ -107,22 +103,12 @@ struct FrameExecutionSummary {
         return 0.0;
     }
 
-    double getPassGpuTime(const std::string& passName) const {
-        for (const auto& timing : passTimings) {
-            if (timing.passName == passName && timing.gpuTimingValid) {
-                return timing.gpuDurationMs;
-            }
-        }
-        return 0.0;
-    }
-
     std::string getSlowestPass() const {
         std::string slowest;
         double maxTime = 0.0;
         for (const auto& timing : passTimings) {
-            double time = timing.gpuTimingValid ? timing.gpuDurationMs : timing.cpuDurationMs;
-            if (time > maxTime) {
-                maxTime = time;
+            if (timing.cpuDurationMs > maxTime) {
+                maxTime = timing.cpuDurationMs;
                 slowest = timing.passName;
             }
         }
@@ -171,12 +157,6 @@ public:
     void disable();
     bool isEnabled() const { return m_enabled; }
 
-    // Enable GPU timestamp queries (requires device support)
-    // queryPoolSize = max number of timestamp queries (2 per pass)
-    void enableGpuTiming(VulkanDevice& device, uint32_t queryPoolSize = 256);
-    void disableGpuTiming();
-    bool isGpuTimingEnabled() const { return m_gpuTimingEnabled; }
-
     // ═══════════════════════════════════════════════════════════════
     // Execution Hooks (called by FrameGraphExecutor)
     // ═══════════════════════════════════════════════════════════════
@@ -193,9 +173,6 @@ public:
                            VkImageLayout oldLayout, VkImageLayout newLayout,
                            bool isQueueTransfer);
 
-    // Called after GPU work completes to read timestamp results
-    void collectGpuTimings(VulkanDevice& device, uint32_t frameIndex);
-
     // ═══════════════════════════════════════════════════════════════
     // Query API
     // ═══════════════════════════════════════════════════════════════
@@ -209,7 +186,6 @@ public:
     // Quick queries for the most recent frame
     bool wasPassExecuted(const std::string& passName) const;
     double getPassCpuTime(const std::string& passName) const;
-    double getPassGpuTime(const std::string& passName) const;
     std::string getSlowestPass() const;
     double getFrameTime() const;
 
@@ -257,13 +233,6 @@ public:
 
 private:
     bool                        m_enabled = false;
-    bool                        m_gpuTimingEnabled = false;
-
-    // GPU timing resources
-    VkQueryPool                 m_timestampQueryPool = VK_NULL_HANDLE;
-    uint32_t                    m_queryPoolSize = 0;
-    uint32_t                    m_currentQueryIndex = 0;
-    float                       m_timestampPeriod = 0.0f;  // ns per timestamp unit
 
     // Current frame state
     uint32_t                    m_currentFrameIndex = 0;
@@ -275,8 +244,6 @@ private:
     uint32_t                    m_currentLayoutTransitions = 0;
     uint32_t                    m_currentQueueTransfers = 0;
 
-    // Pass index -> (startQueryIndex, endQueryIndex) for GPU timing
-    std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> m_passQueryIndices;
 
     // History (circular buffer of recent frames)
     static constexpr uint32_t   MAX_FRAME_HISTORY = 120;  // 2 seconds at 60fps

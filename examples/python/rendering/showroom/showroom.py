@@ -28,6 +28,7 @@ Keys:
     F              floor: dark gloss or white
     V              debug views (VSM levels and pages, shadow mask, normals ...)
     H              hide or show the credits and status
+    O              render stats: frame rate, GPU time per pass, draw calls
     P              screenshot into showroom_captures/
     F9             start or stop recording a video into showroom_captures/
     F1             help on screen
@@ -726,6 +727,118 @@ class Overlay:
             scene.set_text_visible(label, self.help_visible)
 
 
+# ── Render stats ─────────────────────────────────────────────────────────
+
+class StatsPanel:
+    """Frame rate, CPU and GPU time, draw calls and the most expensive passes
+    at the top right, on O. The engine collects them only while it is shown."""
+
+    ROWS = 10
+    REFRESH = 0.25   # seconds; the engine's figures cover the last whole second
+
+    def __init__(self):
+        self.visible = False
+        self.wait = 0.0
+
+    def build(self, k):
+        anchor = sk.UI_ANCHOR_TOP_RIGHT
+        margin, width, line = 16.0 * k, 470.0 * k, 22.0 * k
+        lines = 4 + self.ROWS
+        height = 22.0 * k + lines * line
+        self.panel = engine.create_ui_panel(anchor, (-margin - width / 2.0, margin + height / 2.0),
+                                            (width, height), color=(0.0, 0.0, 0.0, 0.6))
+        scene.set_sort_key(self.panel, 0)
+        left = -margin - width + 16.0 * k
+        right = -margin - 16.0 * k
+        time_column = right - 90.0 * k
+        y = lambda i: margin + 30.0 * k + i * line
+
+        def label(x, i, size=17.0, color=(0.9, 0.9, 0.9, 1.0), align=None):
+            text = engine.create_text("", anchor, (x, y(i)), FONT, font_size=size * k, color=color)
+            if align is not None:
+                scene.set_text_align(text, align)
+            scene.set_text_sort_key(text, 1)
+            return text
+
+        self.header = [label(left, 0, 20.0, (1.0, 1.0, 1.0, 1.0)), label(left, 1), label(left, 2)]
+        grey = (0.6, 0.6, 0.6, 1.0)
+        self.columns = (label(left, 3, 15.0, grey), label(time_column, 3, 15.0, grey, sk.TEXT_ALIGN_RIGHT),
+                        label(right, 3, 15.0, grey, sk.TEXT_ALIGN_RIGHT))
+        self.rows = [(label(left, 4 + i, 16.0), label(time_column, 4 + i, 16.0, align=sk.TEXT_ALIGN_RIGHT),
+                      label(right, 4 + i, 16.0, align=sk.TEXT_ALIGN_RIGHT)) for i in range(self.ROWS)]
+        self.apply()
+
+    def labels(self):
+        return self.header + list(self.columns) + [t for row in self.rows for t in row]
+
+    def toggle(self):
+        self.visible = not self.visible
+        if self.visible:
+            engine.enable_render_stats()
+            self.wait = 0.0
+        else:
+            engine.disable_render_stats()
+        self.apply()
+
+    def apply(self):
+        scene.set_visible(self.panel, self.visible)
+        for text in self.labels():
+            scene.set_text_visible(text, self.visible)
+        if self.visible:
+            for text in self.labels():
+                scene.set_text(text, "")
+            scene.set_text(self.header[0], "Collecting render stats ...")
+
+    def update(self, dt):
+        if not self.visible:
+            return
+        self.wait -= dt
+        if self.wait > 0.0:
+            return
+        self.wait = self.REFRESH
+        stats = engine.render_stats
+        if not stats or stats["fps"] == 0.0:
+            return
+
+        gpu = stats["gpu_ms"] is not None
+        scene.set_text(self.header[0], "%.0f FPS   %.2f ms   (worst %.2f ms)"
+                       % (stats["fps"], stats["frame_time_ms"], stats["frame_time_max_ms"]))
+        scene.set_text(self.header[1], "GPU %s   CPU record %.2f ms"
+                       % ("%.2f ms" % stats["gpu_ms"] if gpu else "n/a", stats["cpu_record_ms"]))
+        scene.set_text(self.header[2], "%d draws   %d dispatches   %s vertices"
+                       % (stats["draw_calls"], stats["dispatches"], count(stats["vertices"])))
+
+        cost = "gpu_ms" if gpu else "cpu_ms"
+        scene.set_text(self.columns[0], "pass")
+        scene.set_text(self.columns[1], "GPU ms" if gpu else "CPU ms")
+        scene.set_text(self.columns[2], "draws")
+        groups = group_passes(stats["passes"], cost)
+        for i, row in enumerate(self.rows):
+            if i < len(groups):
+                name, n, ms, draws = groups[i]
+                scene.set_text(row[0], name if n == 1 else "%s  x%d" % (name, n))
+                scene.set_text(row[1], "%.3f" % ms)
+                scene.set_text(row[2], str(draws))
+            else:
+                for text in row:
+                    scene.set_text(text, "")
+
+
+def group_passes(passes, cost):
+    """The instances of a repeated pass (Shadow0, Shadow1, ...) as one row,
+    most expensive first: (name, instances, ms, draws)."""
+    groups = {}
+    for p in passes:
+        name = p["name"].rstrip("0123456789") or p["name"]
+        n, ms, draws = groups.get(name, (0, 0.0, 0))
+        groups[name] = (n + 1, ms + (p[cost] or 0.0), draws + p["draw_calls"])
+    return sorted(((name,) + g for name, g in groups.items()), key=lambda g: -g[2])
+
+
+def count(n):
+    return "%.1fM" % (n / 1e6) if n >= 1e6 else "%.1fk" % (n / 1e3) if n >= 1e4 else str(n)
+
+
 # ── The showroom ─────────────────────────────────────────────────────────
 
 SHADOW_LABELS = {"hybrid": "Virtual shadow map + ray-traced lights", "high": "Virtual shadow map",
@@ -741,6 +854,7 @@ class Showroom:
         self.models = find_models()
         self.stage = Stage()
         self.overlay = Overlay()
+        self.stats = StatsPanel()
         self.index = 0
         self.rig = None
         self.camera_mode = args.camera
@@ -761,6 +875,7 @@ class Showroom:
     def start(self):
         self.stage.build()
         self.overlay.build()
+        self.stats.build(self.overlay.k)
         rt = engine.ray_query_supported()
         self.preset = {"hybrid": "hybrid", "vsm": "high", "raytraced": "raytraced", "cascades": "cascades",
                        None: None}[args.shadows]
@@ -972,6 +1087,9 @@ class Controls:
         if self.pressed(keys.F1):
             s.overlay.help_visible = not s.overlay.help_visible
             s.overlay.apply()
+        if self.pressed(keys.O):
+            s.stats.toggle()
+        s.stats.update(dt)
         if self.pressed(keys.P):
             path = capture_path(".png")
             print("[showroom] screenshot ->", path if engine.capture_screenshot(path) else "failed")

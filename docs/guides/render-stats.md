@@ -15,6 +15,8 @@ Set `SHOONYAKASHA_STATS=1` and run any application. Every second a summary is pr
 
 The passes listed are the ones taking the most GPU time, or CPU time without GPU timing.
 
+The [showroom](../../examples/python/rendering/showroom/showroom.py) shows the same on screen: press **O** for frame rate, GPU and CPU time, draw calls and the most expensive passes, with repeated passes (one per shadow face, say) grouped into one row. Its `StatsPanel` class is a starting point for an overlay of your own.
+
 ## From an application
 
 ```python

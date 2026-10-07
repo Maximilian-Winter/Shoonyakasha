@@ -6,7 +6,6 @@
 //
 
 #include "Vulkan/FrameGraph/FrameGraphDebugger.h"
-#include "Vulkan/VulkanDevice.h"
 #include "Core/Logger.h"
 
 #include <stdexcept>
@@ -26,7 +25,6 @@ FrameGraphDebugger::FrameGraphDebugger() {
 }
 
 FrameGraphDebugger::~FrameGraphDebugger() {
-    // Note: GPU resources must be cleaned up externally with disableGpuTiming()
     delete m_logger;
 }
 
@@ -44,49 +42,6 @@ void FrameGraphDebugger::disable() {
     m_logger->log(LogLevel::Info, "Frame graph debugger disabled");
 }
 
-void FrameGraphDebugger::enableGpuTiming(VulkanDevice& device, uint32_t queryPoolSize) {
-    if (m_gpuTimingEnabled) {
-        m_logger->log(LogLevel::Warning, "GPU timing already enabled");
-        return;
-    }
-
-    // Check if device supports timestamp queries
-    VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(device.getPhysicalDevice(), &props);
-
-    if (props.limits.timestampComputeAndGraphics == VK_FALSE) {
-        m_logger->log(LogLevel::Warning, "Device does not support timestamp queries");
-        return;
-    }
-
-    m_timestampPeriod = props.limits.timestampPeriod;
-    m_queryPoolSize = queryPoolSize;
-
-    // Create query pool
-    VkQueryPoolCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-    createInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-    createInfo.queryCount = queryPoolSize;
-
-    if (vkCreateQueryPool(device.getLogicalDevice(), &createInfo, nullptr, &m_timestampQueryPool) != VK_SUCCESS) {
-        m_logger->log(LogLevel::Error, "Failed to create timestamp query pool");
-        return;
-    }
-
-    m_gpuTimingEnabled = true;
-    m_logger->log(LogLevel::Info, "GPU timing enabled (pool size: %u, period: %.2f ns)",
-                  queryPoolSize, m_timestampPeriod);
-}
-
-void FrameGraphDebugger::disableGpuTiming() {
-    // Note: Caller must ensure the query pool is not in use (device idle)
-    // and provide the device to destroy the pool
-    m_gpuTimingEnabled = false;
-    m_timestampQueryPool = VK_NULL_HANDLE;
-    m_queryPoolSize = 0;
-    m_currentQueryIndex = 0;
-}
-
 // ═══════════════════════════════════════════════════════════════
 // Execution Hooks
 // ═══════════════════════════════════════════════════════════════
@@ -102,10 +57,6 @@ void FrameGraphDebugger::onFrameBegin(uint32_t frameIndex) {
     m_currentBarrierCount = 0;
     m_currentLayoutTransitions = 0;
     m_currentQueueTransfers = 0;
-    m_passQueryIndices.clear();
-
-    // Reset query counter for this frame
-    m_currentQueryIndex = 0;
 
     emitEvent(DebugEventType::FrameBegin, "", "", "Frame " + std::to_string(frameIndex));
 }
@@ -122,8 +73,8 @@ void FrameGraphDebugger::onFrameEnd(uint32_t frameIndex) {
     emitEvent(DebugEventType::FrameEnd, "", "", "Frame " + std::to_string(frameIndex));
 }
 
-void FrameGraphDebugger::onPassBegin(uint32_t passIndex, const std::string& passName,
-                                      VkCommandBuffer cmd) {
+void FrameGraphDebugger::onPassBegin(uint32_t /*passIndex*/, const std::string& passName,
+                                      VkCommandBuffer /*cmd*/) {
     if (!m_enabled) return;
 
     PassExecutionTiming timing;
@@ -133,25 +84,11 @@ void FrameGraphDebugger::onPassBegin(uint32_t passIndex, const std::string& pass
     m_currentPassTimings.push_back(timing);
     m_currentExecutedPasses.push_back(passName);
 
-    // Write GPU timestamp if enabled
-    if (m_gpuTimingEnabled && m_timestampQueryPool != VK_NULL_HANDLE) {
-        if (m_currentQueryIndex + 2 <= m_queryPoolSize) {
-            uint32_t startQuery = m_currentQueryIndex++;
-
-            // Reset and write start timestamp
-            vkCmdResetQueryPool(cmd, m_timestampQueryPool, startQuery, 1);
-            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                               m_timestampQueryPool, startQuery);
-
-            m_passQueryIndices[passIndex] = {startQuery, 0}; // End query set later
-        }
-    }
-
     emitEvent(DebugEventType::PassBegin, passName);
 }
 
-void FrameGraphDebugger::onPassEnd(uint32_t passIndex, const std::string& passName,
-                                    VkCommandBuffer cmd) {
+void FrameGraphDebugger::onPassEnd(uint32_t /*passIndex*/, const std::string& passName,
+                                    VkCommandBuffer /*cmd*/) {
     if (!m_enabled) return;
 
     // Update CPU timing
@@ -160,20 +97,6 @@ void FrameGraphDebugger::onPassEnd(uint32_t passIndex, const std::string& passNa
             timing.cpuEndMs = getCurrentTimeMs();
             timing.cpuDurationMs = timing.cpuEndMs - timing.cpuStartMs;
             break;
-        }
-    }
-
-    // Write GPU end timestamp if enabled
-    if (m_gpuTimingEnabled && m_timestampQueryPool != VK_NULL_HANDLE) {
-        auto it = m_passQueryIndices.find(passIndex);
-        if (it != m_passQueryIndices.end() && m_currentQueryIndex < m_queryPoolSize) {
-            uint32_t endQuery = m_currentQueryIndex++;
-
-            vkCmdResetQueryPool(cmd, m_timestampQueryPool, endQuery, 1);
-            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                               m_timestampQueryPool, endQuery);
-
-            it->second.second = endQuery;
         }
     }
 
@@ -205,79 +128,6 @@ void FrameGraphDebugger::onBarrierInserted(const std::string& resourceName,
     }
 
     emitEvent(DebugEventType::BarrierInserted, "", resourceName, details);
-}
-
-void FrameGraphDebugger::collectGpuTimings(VulkanDevice& device, uint32_t frameIndex) {
-    if (!m_gpuTimingEnabled || m_timestampQueryPool == VK_NULL_HANDLE) return;
-    if (m_passQueryIndices.empty()) return;
-
-    // Read all timestamps at once
-    std::vector<uint64_t> timestamps(m_currentQueryIndex);
-
-    VkResult result = vkGetQueryPoolResults(
-        device.getLogicalDevice(),
-        m_timestampQueryPool,
-        0, m_currentQueryIndex,
-        timestamps.size() * sizeof(uint64_t),
-        timestamps.data(),
-        sizeof(uint64_t),
-        VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT
-    );
-
-    if (result != VK_SUCCESS) {
-        m_logger->log(LogLevel::Warning, "Failed to get timestamp query results");
-        return;
-    }
-
-    // Update pass timings with GPU data
-    for (auto& [passIndex, queryPair] : m_passQueryIndices) {
-        uint32_t startQuery = queryPair.first;
-        uint32_t endQuery = queryPair.second;
-
-        if (endQuery == 0 || startQuery >= timestamps.size() || endQuery >= timestamps.size()) {
-            continue;
-        }
-
-        uint64_t startTs = timestamps[startQuery];
-        uint64_t endTs = timestamps[endQuery];
-
-        // Convert to milliseconds
-        double durationNs = static_cast<double>(endTs - startTs) * m_timestampPeriod;
-        double durationMs = durationNs / 1000000.0;
-
-        // Find the corresponding timing entry and update it
-        // We need to match by pass index, which we stored in order
-        size_t timingIdx = 0;
-        for (auto& timing : m_currentPassTimings) {
-            if (timingIdx < m_passQueryIndices.size()) {
-                // Check if this is the right pass
-                auto it = m_passQueryIndices.find(static_cast<uint32_t>(timingIdx));
-                if (it != m_passQueryIndices.end() && it->first == passIndex) {
-                    timing.gpuDurationMs = durationMs;
-                    timing.gpuTimingValid = true;
-                    break;
-                }
-            }
-            timingIdx++;
-        }
-    }
-
-    // Update the frame history with GPU timings
-    if (m_totalFramesTracked > 0) {
-        uint32_t historyIdx = (m_historyWriteIndex + MAX_FRAME_HISTORY - 1) % MAX_FRAME_HISTORY;
-        if (m_frameHistory[historyIdx].frameIndex == frameIndex) {
-            m_frameHistory[historyIdx].passTimings = m_currentPassTimings;
-
-            // Recalculate total GPU time
-            double totalGpu = 0.0;
-            for (const auto& timing : m_currentPassTimings) {
-                if (timing.gpuTimingValid) {
-                    totalGpu += timing.gpuDurationMs;
-                }
-            }
-            m_frameHistory[historyIdx].totalGpuTimeMs = totalGpu;
-        }
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -320,13 +170,6 @@ double FrameGraphDebugger::getPassCpuTime(const std::string& passName) const {
 
     uint32_t idx = (m_historyWriteIndex + MAX_FRAME_HISTORY - 1) % MAX_FRAME_HISTORY;
     return m_frameHistory[idx].getPassCpuTime(passName);
-}
-
-double FrameGraphDebugger::getPassGpuTime(const std::string& passName) const {
-    if (m_totalFramesTracked == 0) return 0.0;
-
-    uint32_t idx = (m_historyWriteIndex + MAX_FRAME_HISTORY - 1) % MAX_FRAME_HISTORY;
-    return m_frameHistory[idx].getPassGpuTime(passName);
 }
 
 std::string FrameGraphDebugger::getSlowestPass() const {
@@ -611,15 +454,6 @@ void FrameGraphDebugger::storeFrameSummary() {
     // Calculate total CPU time
     auto now = std::chrono::high_resolution_clock::now();
     summary.totalCpuTimeMs = std::chrono::duration<double, std::milli>(now - m_frameStartTime).count();
-
-    // Calculate total GPU time (if available)
-    double totalGpu = 0.0;
-    for (const auto& timing : m_currentPassTimings) {
-        if (timing.gpuTimingValid) {
-            totalGpu += timing.gpuDurationMs;
-        }
-    }
-    summary.totalGpuTimeMs = totalGpu;
 
     // Store in circular buffer
     m_frameHistory[m_historyWriteIndex] = std::move(summary);

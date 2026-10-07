@@ -2120,21 +2120,6 @@ const RenderStats* RenderGraph::getStats() const {
     return m_stats ? &m_stats->stats() : nullptr;
 }
 
-void RenderGraph::enableGpuTiming(uint32_t queryPoolSize) {
-    if (!m_debugger) {
-        m_debugger = std::make_unique<FrameGraphDebugger>();
-    }
-    m_debugger->enableGpuTiming(m_device, queryPoolSize);
-    m_executor.setDebugger(m_debugger.get());
-    m_logger->log(LogLevel::Info, "Frame graph GPU timing enabled");
-}
-
-void RenderGraph::disableGpuTiming() {
-    if (m_debugger) {
-        m_debugger->disableGpuTiming();
-    }
-}
-
 FrameGraphDebugger* RenderGraph::getDebugger() {
     return m_debugger.get();
 }

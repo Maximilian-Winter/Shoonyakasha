@@ -1277,8 +1277,6 @@ public:
     void disableDebugging();
     bool isDebuggingEnabled() const;
 
-    void enableGpuTiming(uint32_t queryPoolSize = 256);
-    void disableGpuTiming();
 
     FrameGraphDebugger* getDebugger();
     const FrameGraphDebugger* getDebugger() const;
