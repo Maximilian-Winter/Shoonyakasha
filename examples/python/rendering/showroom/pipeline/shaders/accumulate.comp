@@ -1,0 +1,29 @@
+#version 450
+// Capture mode: a running average of frames in a 32-bit image, for stills
+// without aliasing or ray-tracing noise and for motion-blurred video. Frame
+// settings.accumFrame of the average replaces it when it is 0 and otherwise
+// moves it 1/(n+1) of the way to the new frame. The raw frame (accumSource
+// 1) differs by the camera's sub-pixel jitter each time, so its average is
+// supersampled; the TAA output (0) is already smooth, which suits sub-frames
+// of a moving camera.
+
+#include "common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D accum;
+layout(set = 0, binding = 1) uniform sampler2D rawColor;
+layout(set = 0, binding = 2) uniform sampler2D taaColor;
+layout(set = 0, binding = 3) uniform Settings { DEFAULT_SETTINGS_BLOCK } settings;
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, imageSize(accum)))) return;
+
+    vec3 color = settings.accumSource == 1u ? texelFetch(rawColor, p, 0).rgb : texelFetch(taaColor, p, 0).rgb;
+    if (any(isnan(color)) || any(isinf(color))) color = vec3(0.0);
+
+    float n = float(settings.accumFrame);
+    vec3 previous = n > 0.0 ? imageLoad(accum, p).rgb : color;
+    imageStore(accum, p, vec4(previous + (color - previous) / (n + 1.0), 1.0));
+}

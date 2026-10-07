@@ -235,6 +235,12 @@ protected:
 
     bool isRecording() const;
 
+    /// While paused, presented frames are not written to the recording. For
+    /// rendering several frames per recorded one: sub-frames averaged into
+    /// motion blur, say.
+    void setRecordingPaused(bool paused) { m_recordingPaused = paused; }
+    bool isRecordingPaused() const { return m_recordingPaused; }
+
     /// Frames written to the current or most recent recording.
     uint64_t getRecordedFrameCount() const;
 
@@ -285,6 +291,7 @@ private:
 
     // ─── Frame Capture ─────────────────────────────────────────
     VideoRecorder m_videoRecorder;
+    bool m_recordingPaused = false;
     // Index of the swapchain image most recently handed to vkQueuePresentKHR.
     // Capture reads that one: reading the image currently being rendered into
     // would show a half-drawn frame.

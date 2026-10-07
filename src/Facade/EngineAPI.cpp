@@ -156,6 +156,8 @@ public:
     using ApplicationBase::stopRecording;
     using ApplicationBase::isRecording;
     using ApplicationBase::getRecordedFrameCount;
+    using ApplicationBase::setRecordingPaused;
+    using ApplicationBase::isRecordingPaused;
     using ApplicationBase::loadGltfScene;
     using ApplicationBase::createDirectionalLight;
     using ApplicationBase::createPointLight;
@@ -589,6 +591,14 @@ bool EngineAPI::isRecording() const {
 
 uint64_t EngineAPI::getRecordedFrameCount() const {
     return m_impl->app->getRecordedFrameCount();
+}
+
+void EngineAPI::setRecordingPaused(bool paused) {
+    m_impl->app->setRecordingPaused(paused);
+}
+
+bool EngineAPI::isRecordingPaused() const {
+    return m_impl->app->isRecordingPaused();
 }
 
 bool assetExists(const std::string& relativePath) {

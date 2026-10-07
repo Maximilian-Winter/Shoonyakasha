@@ -1238,6 +1238,20 @@ cdef class Engine:
         return self._ptr.stopRecording()
 
     @property
+    def recording_paused(self):
+        """While True, presented frames are not written to the recording.
+
+        For rendering several frames per recorded one, such as sub-frames
+        averaged into motion blur. Set it before the frame renders, from the
+        update callback.
+        """
+        return self._ptr.isRecordingPaused()
+
+    @recording_paused.setter
+    def recording_paused(self, bint value):
+        self._ptr.setRecordingPaused(value)
+
+    @property
     def is_recording(self):
         """Whether a recording is in progress.
 

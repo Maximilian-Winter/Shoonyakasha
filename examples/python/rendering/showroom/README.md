@@ -47,11 +47,13 @@ python showroom.py --record tour.mp4                             # every model t
 python showroom.py --record reel.mp4 --vertical --models alfa_33_stradale_2024 --seconds 20
 ```
 
-**Stills:** each still is held for `--settle` frames (48) before capture, so TAA, the ray-traced shadows and exposure settle. They are saved as `<model>_<lighting>_<view>.png`; the views are three-quarter front, side, three-quarter rear, a long-lens hero shot, top and a detail.
+**Stills:** each still is held for `--settle` frames (48), so exposure settles, and then `--samples` frames (64) of it are averaged: each is offset by TAA's sub-pixel jitter and draws new ray-traced samples, so the average has no aliasing and no ray-tracing noise. `--samples 256` is cleaner still, `--samples 1` captures without averaging. They are saved as `<model>_<lighting>_<view>.png`; the views are three-quarter front, side, three-quarter rear, a long-lens hero shot, top and a detail.
 
-**Recordings:** they step the animation by exactly one frame of `--fps` (30) each frame, so the video plays smoothly however fast the machine renders, and fade through black between models. Recording needs ffmpeg on `PATH`.
+**Recordings:** they step the animation by exactly one frame of `--fps` (30) each frame, so the video plays smoothly however fast the machine renders, and fade through black between models. Each recorded frame is the average of `--motion-blur` sub-frames (8) spread over `--shutter` of the frame interval (0.5, a film camera's 180° shutter): motion blurs as it does on film. `--motion-blur 1` turns it off. Recording needs ffmpeg on `PATH`.
 
-**Credits:** the model's credit stays on screen in both unless you pass `--no-overlay`. **P** and **F9** do the same interactively, into `showroom_captures/`.
+**Look:** `--vignette 0.15` darkens the corners a little and `--grain 0.02` adds fine film grain, which also keeps video encoders from banding smooth gradients. Both are off unless given.
+
+**Credits:** the model's credit stays on screen in both unless you pass `--no-overlay`. **P** and **F9** do the same interactively, into `showroom_captures/`; **I** takes an averaged still there, holding the view while it averages `--samples` frames.
 
 ## The models
 

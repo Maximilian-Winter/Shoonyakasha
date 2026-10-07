@@ -379,6 +379,8 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         cbool stopRecording() except +
         cbool isRecording() except +
         unsigned long long getRecordedFrameCount() except +
+        void setRecordingPaused(cbool paused)
+        cbool isRecordingPaused() const
         EntityHandle createDirectionalLight(const vec3& direction,
                                             const vec3& color, float intensity)
         EntityHandle createPointLight(const vec3& position,

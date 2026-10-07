@@ -83,7 +83,13 @@
     float exposureMaxEV;        \
     float deltaTime;            \
     float sunAngle;             \
-    uint toneMapper;            /* 0 ACES, 1 PBR Neutral, 2 AgX */
+    uint toneMapper;            /* 0 ACES, 1 PBR Neutral, 2 AgX */ \
+    uint accumulate;            /* 1: show accumColor (capture mode) */ \
+    uint accumFrame;            /* this frame's index in the average; 0 starts over */ \
+    uint accumSource;           /* 0 the TAA output, 1 the raw frame */ \
+    float vignette;             \
+    float grain;                \
+    uint frame;
 
 // scene.custom.showroom.* and the sun (pipeline.json "Showroom"); see
 // README.md. The virtual shadow map's settings, and the sun and camera its

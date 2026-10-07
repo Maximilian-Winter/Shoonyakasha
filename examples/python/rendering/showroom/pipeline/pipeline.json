@@ -349,6 +349,42 @@
           "type": "uint",
           "source": "scene.custom.default.toneMapper",
           "default": 0
+        },
+        {
+          "name": "accumulate",
+          "type": "uint",
+          "source": "scene.custom.showroom.accumulate",
+          "default": 0
+        },
+        {
+          "name": "accumFrame",
+          "type": "uint",
+          "source": "scene.custom.showroom.accumFrame",
+          "default": 0
+        },
+        {
+          "name": "accumSource",
+          "type": "uint",
+          "source": "scene.custom.showroom.accumSource",
+          "default": 0
+        },
+        {
+          "name": "vignette",
+          "type": "float",
+          "source": "scene.custom.showroom.vignette",
+          "default": 0.0
+        },
+        {
+          "name": "grain",
+          "type": "float",
+          "source": "scene.custom.showroom.grain",
+          "default": 0.0
+        },
+        {
+          "name": "frame",
+          "type": "uint",
+          "source": "scene.time.frame",
+          "default": 0
         }
       ]
     },
@@ -1184,6 +1220,58 @@
           "name": "exposureImage",
           "autoBindResource": "exposure",
           "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 4,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "accumulated",
+          "autoBindResource": "accumColor",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
+    "accumulateSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "accum",
+          "autoBindResource": "accumColor"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "rawColor",
+          "autoBindResource": "hdrColor",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "taaColor",
+          "autoBindResource": "taaColor",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 3,
+          "type": "uniform_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "Settings",
+          "autoBindBuffer": "Settings"
         }
       ]
     },
@@ -1636,6 +1724,14 @@
       "kind": "image",
       "image": {
         "format": "R16G16B16A16_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "accumColor",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
         "persistent": true
       }
     },
@@ -3370,6 +3466,41 @@
       ]
     },
     {
+      "name": "Accumulate",
+      "type": "compute",
+      "enabled": false,
+      "execution": {
+        "type": "compute_image",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ]
+      },
+      "inputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "taaColor",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "accumColor",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/accumulate.comp.spv"
+      },
+      "descriptorSets": [
+        "accumulateSet"
+      ]
+    },
+    {
       "name": "TAAHistory",
       "type": "graphics",
       "execution": {
@@ -3580,6 +3711,10 @@
         },
         {
           "resource": "exposure",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "accumColor",
           "usage": "shader_read"
         }
       ],

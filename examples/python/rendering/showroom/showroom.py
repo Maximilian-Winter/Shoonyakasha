@@ -32,11 +32,15 @@ Keys:
     H              hide or show the credits and status
     O              render stats: frame rate, GPU time per pass, draw calls
     P              screenshot into showroom_captures/
+    I              high-quality still into showroom_captures/: the view held
+                   while --samples frames are averaged
     F9             start or stop recording a video into showroom_captures/
     F1             help on screen
 
 Automatic capture, for posting (the credits stay on screen unless
---no-overlay):
+--no-overlay). Stills average --samples frames each: no aliasing, no
+ray-tracing noise. Video renders --motion-blur sub-frames for each frame and
+averages them, motion-blurred over a --shutter of the frame interval:
     python showroom.py --screenshots shots/            stills of every model
     python showroom.py --record tour.mp4               a cinematic tour
     python showroom.py --record reel.mp4 --vertical --models alfa_gtv6
@@ -102,6 +106,16 @@ def parse_args():
     parser.add_argument("--fps", type=int, default=30, help="frame rate of recordings")
     parser.add_argument("--settle", type=int, default=48,
                         help="frames to let TAA, ray-traced shadows and exposure settle before a still")
+    parser.add_argument("--samples", type=int, default=64,
+                        help="frames averaged into each still (1: none)")
+    parser.add_argument("--motion-blur", type=int, default=8,
+                        help="sub-frames averaged into each recorded frame (1: no motion blur)")
+    parser.add_argument("--shutter", type=float, default=0.5,
+                        help="fraction of the frame interval the motion blur spans (0.5: a 180 degree shutter)")
+    parser.add_argument("--vignette", type=float, default=0.0,
+                        help="darken the corners by up to this much (0.15 is subtle)")
+    parser.add_argument("--grain", type=float, default=0.0,
+                        help="film grain strength (0.02 is subtle; helps video compression)")
     args = parser.parse_args()
     if args.vertical:
         args.width, args.height = 1080, 1920
@@ -1085,6 +1099,71 @@ showroom = Showroom()
 
 # ── Interactive and automatic runs ───────────────────────────────────────
 
+class Accumulation:
+    """Capture mode: frames averaged in the pipeline's accumColor (pass
+    Accumulate, shown by Tonemap while it is on)."""
+
+    RAW, TAA = 1, 0
+
+    def __init__(self):
+        self.on = False
+
+    def begin(self, source):
+        engine.set_pass_enabled("Accumulate", True)
+        engine.set_custom_uint("showroom.accumSource", source)
+        engine.set_custom_uint("showroom.accumulate", 1)
+        engine.set_custom_uint("showroom.accumFrame", 0)
+        self.on = True
+
+    def frame(self, index):
+        """This frame is sample `index` of the average; 0 starts it over."""
+        engine.set_custom_uint("showroom.accumFrame", index)
+
+    def end(self):
+        engine.set_custom_uint("showroom.accumulate", 0)
+        engine.set_pass_enabled("Accumulate", False)
+        self.on = False
+
+
+accumulation = Accumulation()
+
+
+class StillCapture:
+    """Key I: hold the view still, average args.samples frames of it, and
+    save the result."""
+
+    def __init__(self):
+        self.frames = -1
+
+    @property
+    def active(self):
+        return self.frames >= 0
+
+    def start(self):
+        if self.active:
+            return
+        self.frames = 0
+        self.path = capture_path(".png")
+        accumulation.begin(Accumulation.RAW)
+        print("[showroom] averaging %d frames ..." % max(args.samples, 1))
+
+    def update(self):
+        samples = max(args.samples, 1)
+        if self.frames < samples:
+            accumulation.frame(self.frames)
+        else:
+            # The frame presented last holds the full average.
+            ok = engine.capture_screenshot(self.path)
+            print("[showroom] still ->", self.path if ok else "failed")
+            accumulation.end()
+            self.frames = -1
+            return
+        self.frames += 1
+
+
+still_capture = StillCapture()
+
+
 def capture_path(suffix):
     directory = os.path.join(os.getcwd(), "showroom_captures")
     os.makedirs(directory, exist_ok=True)
@@ -1146,6 +1225,8 @@ class Controls:
         if self.pressed(keys.X):
             s.toggle_clearcoat()
         s.stats.update(dt)
+        if self.pressed(keys.I):
+            still_capture.start()
         if self.pressed(keys.P):
             path = capture_path(".png")
             print("[showroom] screenshot ->", path if engine.capture_screenshot(path) else "failed")
@@ -1181,16 +1262,24 @@ class Stills:
         showroom.spinning = False
 
     def update(self, dt):
+        samples = max(args.samples, 1)
         if self.job >= 0:
             self.frames += 1
-            if self.frames == args.settle:
+            # After settling, average `samples` frames, then save the last.
+            if samples > 1 and args.settle <= self.frames < args.settle + samples:
+                if self.frames == args.settle:
+                    accumulation.begin(Accumulation.RAW)
+                accumulation.frame(self.frames - args.settle)
+            if self.frames == args.settle + (samples if samples > 1 else 0):
                 i, rig, pose = self.jobs[self.job]
                 model = showroom.models[i]
                 name = still_poses(model, args.width / args.height)[pose][0]
                 path = os.path.join(self.directory, "%s_%s_%s.png" % (model.entry.name, rig, name))
                 engine.capture_screenshot(path)
                 print("[showroom] still ->", path)
-        if self.job < 0 or self.frames >= args.settle + 1:
+                if accumulation.on:
+                    accumulation.end()
+        if self.job < 0 or self.frames >= args.settle + (samples if samples > 1 else 0) + 1:
             self.job += 1
             self.frames = 0
             if self.job >= len(self.jobs):
@@ -1218,6 +1307,7 @@ class Tour:
         self.model_time = 0.0
         self.started = False
         self.frames = 0
+        self.sub = 0      # sub-frame of the recorded frame being rendered
 
     def seconds(self):
         return args.seconds or sum(s.seconds for s in showroom.shots)
@@ -1234,18 +1324,30 @@ class Tour:
                 os._exit(1)
             print("[showroom] recording ->", self.path)
             self.started = True
-        showroom.update(self.step)
-        self.model_time += self.step
-        length = self.seconds()
-        fade = min(1.0, self.model_time / 0.6, (length - self.model_time) / 0.6)
-        engine.set_custom_float("default.exposure", showroom.rig.exposure * max(fade, 0.0) ** 2)
-        if self.model_time >= length:
-            if showroom.index + 1 >= len(showroom.models):
-                engine.stop_recording()
-                print("[showroom] tour recorded: %s" % self.path)
-                os._exit(0)
-            showroom.select(showroom.index + 1)
-            self.model_time = 0.0
+            if args.motion_blur > 1:
+                accumulation.begin(Accumulation.TAA)
+
+        # Each recorded frame is the average of `blur` sub-frames spread over
+        # the shutter; only the last is written, holding the average.
+        blur = max(args.motion_blur, 1)
+        sub_step = self.step * min(max(args.shutter, 0.0), 1.0) / blur
+        if self.sub == 0:
+            self.model_time += self.step
+            if self.model_time >= self.seconds():
+                if showroom.index + 1 >= len(showroom.models):
+                    engine.stop_recording()
+                    print("[showroom] tour recorded: %s" % self.path)
+                    os._exit(0)
+                showroom.select(showroom.index + 1)
+                self.model_time = 0.0
+            length = self.seconds()
+            fade = min(1.0, self.model_time / 0.6, (length - self.model_time) / 0.6)
+            engine.set_custom_float("default.exposure", showroom.rig.exposure * max(fade, 0.0) ** 2)
+        if blur > 1:
+            accumulation.frame(self.sub)
+            engine.recording_paused = self.sub != blur - 1
+        showroom.update(self.step - (blur - 1) * sub_step if self.sub == 0 else sub_step)
+        self.sub = (self.sub + 1) % blur
 
 
 controls = Controls()
@@ -1257,6 +1359,8 @@ def on_init():
     camera = engine.create_camera(pos=(0.0, 1.5, 8.0), fov=40.0, speed=4.0, near_plane=0.03, far_plane=300.0)
     scene.set_rotation(camera, look_rotation((0.0, 1.5, 8.0), (0.0, 0.6, 0.0)))
     engine.set_custom_float("default.exposureAdaptSpeed", 2.5)
+    engine.set_custom_float("showroom.vignette", args.vignette)
+    engine.set_custom_float("showroom.grain", args.grain)
     showroom.start()
     if args.screenshots:
         automation = Stills(args.screenshots)
@@ -1265,7 +1369,10 @@ def on_init():
         automation = Tour(os.path.abspath(args.record))
 
     def animate(dt):
-        if automation is None:
+        if automation is None and still_capture.active:
+            showroom.update(0.0)        # held still while it is averaged
+            still_capture.update()
+        elif automation is None:
             showroom.update(dt)
         elif isinstance(automation, Stills):
             showroom.update(0.0)

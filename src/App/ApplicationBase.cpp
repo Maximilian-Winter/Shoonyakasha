@@ -520,7 +520,7 @@ void ApplicationBase::presentFrame(uint32_t imageIndex) {
         return;
     }
 
-    if (m_videoRecorder.isRecording()) {
+    if (m_videoRecorder.isRecording() && !m_recordingPaused) {
         VkExtent2D extent{};
         std::vector<uint8_t> pixels = readPresentedFrame(extent);
         if (!pixels.empty() && !m_videoRecorder.writeFrame(pixels.data(), pixels.size())) {

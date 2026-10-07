@@ -36,7 +36,7 @@ Deferred PBR (glTF metallic-roughness) with:
   per-frame noise of shadow filtering and ambient occlusion
 - bloom from a six-level mip chain, with no brightness threshold
 - automatic exposure from a luminance histogram, adapting over time
-- ACES filmic tonemapping
+- AgX tonemapping (Khronos PBR Neutral and ACES selectable)
 
 ```python
 import shoonyakasha as sk
@@ -85,6 +85,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `sunAngle` | 0.4 | Angular radius of the sun in degrees, for ray-traced shadows: how quickly their penumbra widens with distance from the caster. The real sun's is 0.27 |
 | `aoRadius` | 0.6 | World-space reach of ambient occlusion; 0 turns it off |
 | `aoIntensity` | 1.0 | Power applied to the occlusion; above 1 darkens it |
+| `toneMapper` | 2 | Tone curve: 2 AgX, which keeps mid-tones as exposed and rolls bright light off to white without shifting its hue; 1 Khronos PBR Neutral, which keeps base colours as authored, for exposures that put white at 1; 0 the ACES fit, more contrast (`set_custom_uint`) |
 | `bloomIntensity` | 0.04 | How much of the bloom is mixed into the image |
 | `bloomRadius` | 1.0 | Spread of each upsampling step, in texels |
 | `taa` | 1 | 1 for temporal anti-aliasing, 0 for none (`set_custom_uint`). Turn it off here rather than turning its passes off: the passes after it read its output |

@@ -61,6 +61,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `capture_screenshot(path)` | bool | Write the last presented frame to disk. |
 | `start_recording(path, fps=30, quality=18, codec="libx264", ffmpeg_path="")` | bool | Record every presented frame to a video file. |
 | `stop_recording()` | bool | Finish the recording and finalise the file. |
+| `recording_paused (read/write property)` | bool | While True, presented frames are not written to the recording. |
 | `is_recording (read-only property)` | bool | Whether a recording is in progress. |
 | `recorded_frame_count (read-only property)` | int | Frames written to the current or most recent recording. |
 | `load_gltf_scene(path, **kwargs)` | GltfResult | Load a glTF scene. |

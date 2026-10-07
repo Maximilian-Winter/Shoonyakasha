@@ -79,7 +79,8 @@
     float exposureMinEV;        \
     float exposureMaxEV;        \
     float deltaTime;            \
-    float sunAngle;
+    float sunAngle;             \
+    uint toneMapper;            /* 0 ACES, 1 PBR Neutral, 2 AgX */
 
 // ── Normals ─────────────────────────────────────────────────────
 // Octahedral encoding of a unit vector into two values in -1..1.

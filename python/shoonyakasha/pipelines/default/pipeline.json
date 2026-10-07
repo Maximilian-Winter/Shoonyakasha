@@ -323,6 +323,12 @@
           "type": "float",
           "source": "scene.custom.default.sunAngle",
           "default": 0.4
+        },
+        {
+          "name": "toneMapper",
+          "type": "uint",
+          "source": "scene.custom.default.toneMapper",
+          "default": 2
         }
       ]
     },

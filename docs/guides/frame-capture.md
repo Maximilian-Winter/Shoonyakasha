@@ -22,6 +22,8 @@ bool finished = engine.stopRecording();
 
 Check the booleans and application log for failures. Recording is also finalized at shutdown. Python `is_recording` and `recorded_frame_count` are properties; C++ uses `isRecording()` and `getRecordedFrameCount()`.
 
+While `recording_paused` (C++ `setRecordingPaused`) is set, presented frames are not written. Set it from the update callback to render several frames for each recorded one: the [showroom](../../examples/python/rendering/showroom/README.md) averages eight sub-frames into each frame of its videos for motion blur, writing only the last.
+
 ## Formats and dependencies
 
 Screenshots support `.png`, `.jpg`, `.bmp`, `.tga`, and `.hdr`. Saving the presented image to HDR does not recover pre-tonemapping scene radiance. For an intermediate HDR target, use [render-target readback](compute-and-data-flow.md).

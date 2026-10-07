@@ -116,6 +116,7 @@ The ones most worth knowing, by symptom:
 | Corners and crevices too dark, or not dark enough | `aoIntensity`, `aoRadius` |
 | Bright highlights glow too much | `bloomIntensity` (0 turns bloom off) |
 | The sky is too detailed behind the scene | `skyBlur` |
+| Colours look too contrasty, or too flat | `toneMapper`: 2 AgX (the default), 1 Khronos PBR Neutral, 0 ACES |
 | Sky light too strong or too weak | `iblIntensity`; `shadowAmbient` below 1 also darkens sky light in the sun's shadow |
 
 The [README](../../python/shoonyakasha/pipelines/default/README.md#settings) lists all of them. Turning a feature off by its setting is usually better than turning off its passes: a disabled pass still clears its output, but other passes may read it. For example, bloom's mip chain also feeds automatic exposure, which is why bloom is turned off with `bloomIntensity`, not by disabling its passes. Passes that are safe to turn off with `engine.set_pass_enabled(name, False)`: `GTAO` (no ambient occlusion), `ShadowMask` (no sun shadows), and the shadow passes, by their declared names such as `"ShadowMasked{cascade}"`.

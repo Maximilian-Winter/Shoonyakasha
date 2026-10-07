@@ -138,6 +138,12 @@ public:
     bool isRecording() const;
     uint64_t getRecordedFrameCount() const;
 
+    /// While paused, presented frames are not written to the recording: for
+    /// rendering several frames per recorded one, such as sub-frames averaged
+    /// into motion blur. Set it before the frame renders.
+    void setRecordingPaused(bool paused);
+    bool isRecordingPaused() const;
+
     GltfResult loadGltfScene(const std::string& path,
                              const GltfOptions& opts = {});
 
