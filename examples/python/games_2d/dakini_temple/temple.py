@@ -502,15 +502,7 @@ def register_systems():
 
 class Controls:
     def __init__(self):
-        # is_key_down reports the current state, so the previous state is kept
-        # to act once per press.
-        self._was_down = {}
-
-    def pressed(self, key):
-        down = engine.input.is_key_down(key)
-        was_down = self._was_down.get(key, False)
-        self._was_down[key] = down
-        return down and not was_down
+        self.pressed = keys.KeyEdges(engine.input).pressed
 
     def update(self, dt):
         right, space = self.pressed(keys.RIGHT), self.pressed(keys.SPACE)

@@ -67,6 +67,8 @@ import time
 
 import shoonyakasha as sk
 from shoonyakasha import keys
+from shoonyakasha.mathutil import (add, lerp, look_rotation, normalize, orbit, rotation_facing,
+                                   scale, smoothstep, yaw_point)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -171,58 +173,6 @@ if ROOT is None:
 STUDIO = studio.ensure(os.path.join(str(ROOT), "showroom", "studio"))
 WHITE = os.path.join(STUDIO, "white.png")
 LIGHT_IMAGE = os.path.abspath(args.light_image) if args.light_image else os.path.join(STUDIO, "stained_glass.png")
-
-
-# ── Maths ────────────────────────────────────────────────────────────────
-
-def lerp(a, b, t):
-    return a + (b - a) * t
-
-
-def lerp3(a, b, t):
-    return tuple(lerp(x, y, t) for x, y in zip(a, b))
-
-
-def smooth(t):
-    t = min(max(t, 0.0), 1.0)
-    return t * t * (3.0 - 2.0 * t)
-
-
-def add(a, b):
-    return tuple(x + y for x, y in zip(a, b))
-
-
-def scale(a, s):
-    return tuple(x * s for x in a)
-
-
-def normalize(v):
-    n = math.sqrt(sum(x * x for x in v)) or 1.0
-    return tuple(x / n for x in v)
-
-
-def rotation_facing(direction):
-    """Euler rotation (pitch, yaw, 0) whose forward is `direction`."""
-    x, y, z = normalize(direction)
-    return (math.asin(max(-1.0, min(1.0, y))), math.atan2(-x, -z), 0.0)
-
-
-def look_rotation(eye, target):
-    return rotation_facing(tuple(t - e for t, e in zip(target, eye)))
-
-
-def yaw_point(p, degrees):
-    """Rotate p about +Y (the engine's yaw: +Z towards +X for positive angles)."""
-    a = math.radians(degrees)
-    c, s = math.cos(a), math.sin(a)
-    return (c * p[0] + s * p[2], p[1], -s * p[0] + c * p[2])
-
-
-def orbit(target, distance, azimuth, elevation):
-    """A point `distance` from target, azimuth 0 in front (+Z), 90 to the right (+X)."""
-    a, e = math.radians(azimuth), math.radians(elevation)
-    return add(target, (distance * math.cos(e) * math.sin(a), distance * math.sin(e),
-                        distance * math.cos(e) * math.cos(a)))
 
 
 # ── glTF bounds, for models that come without a showroom.json ────────────
@@ -726,24 +676,24 @@ def cinematic_shots(model, aspect):
     d = framing_distance(r, 40.0, aspect)
 
     def front_three_quarter(u):
-        u = smooth(u)
+        u = smoothstep(u)
         eye = orbit(c, lerp(d * 1.25, d * 0.95, u), lerp(42.0, 30.0, u), lerp(9.0, 6.0, u))
         return eye, add(c, (0.0, -h * 0.15, 0.0)), 40.0
 
     def side_track(u):
-        u = smooth(u)
+        u = smoothstep(u)
         x = w + max(r * 1.25, 1.6)
         eye = (x, base + h * 0.45, lerp(l * 0.9, -l * 0.9, u))
         target = (0.0, base + h * 0.4, lerp(l * 0.55, -l * 0.55, u))
         return eye, target, 45.0
 
     def crane(u):
-        u = smooth(u)
+        u = smoothstep(u)
         eye = orbit(c, d * 1.1, lerp(150.0, 230.0, u), lerp(58.0, 34.0, u))
         return eye, c, 40.0
 
     def detail(u):
-        u = smooth(u)
+        u = smoothstep(u)
         # A front corner: a wheel on a car, the nose or a wingtip on a ship.
         target = (w * 0.75, base + h * (0.45 if ship else 0.22), l * 0.62)
         away = normalize((0.9, 0.25, 0.7))
@@ -751,12 +701,12 @@ def cinematic_shots(model, aspect):
         return eye, target, 38.0
 
     def rear_pull(u):
-        u = smooth(u)
+        u = smoothstep(u)
         eye = orbit(c, lerp(d * 0.8, d * 1.2, u), lerp(205.0, 215.0, u), lerp(5.0, 12.0, u))
         return eye, c, 40.0
 
     def hero(u):
-        u = smooth(u)
+        u = smoothstep(u)
         d_tele = framing_distance(r, 24.0, aspect)
         eye = orbit(add(c, (0.0, -h * 0.25, 0.0)), lerp(d_tele * 0.95, d_tele * 1.1, u), lerp(-8.0, 8.0, u), 3.0)
         return eye, add(c, (0.0, -h * 0.1, 0.0)), 24.0
@@ -1325,13 +1275,7 @@ def capture_path(suffix):
 
 class Controls:
     def __init__(self):
-        self.down = {}
-
-    def pressed(self, key):
-        now = engine.input.is_key_down(key)
-        was = self.down.get(key, False)
-        self.down[key] = now
-        return now and not was
+        self.pressed = keys.KeyEdges(engine.input).pressed
 
     def update(self, dt):
         s = showroom

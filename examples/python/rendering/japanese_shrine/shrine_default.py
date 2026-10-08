@@ -45,6 +45,7 @@ import sys
 
 import shoonyakasha as sk
 from shoonyakasha import keys
+from shoonyakasha.mathutil import look_rotation
 
 MODEL = "models/japanese_shrine.glb"
 GROUND = "models/Box.gltf"
@@ -78,13 +79,6 @@ SETTINGS = {
     "contactShadowLength": 0.15,
     "sunAngle": 0.4,             # degrees; how quickly ray-traced shadows soften
 }
-
-
-def look_rotation(eye, target):
-    """Euler rotation (pitch, yaw, 0) that points the camera from eye at target."""
-    dx, dy, dz = (t - e for t, e in zip(target, eye))
-    length = math.sqrt(dx * dx + dy * dy + dz * dz)
-    return (math.asin(dy / length), math.atan2(-dx, -dz), 0.0)
 
 
 class Orbit:
@@ -163,20 +157,12 @@ def on_init():
 
 class Controls:
     def __init__(self):
-        # is_key_down reports the current state, so the previous state is kept
-        # to act once per press.
-        self._was_down = {}
+        self.pressed = keys.KeyEdges(engine.input).pressed
         self.shadows = True
         self.ao = True
         self.bloom = True
         self.auto_exposure = True
         self.ray_traced = False     # set in on_init, once the device exists
-
-    def pressed(self, key):
-        down = engine.input.is_key_down(key)
-        was_down = self._was_down.get(key, False)
-        self._was_down[key] = down
-        return down and not was_down
 
     def update(self, dt):
         if self.pressed(keys.SPACE):

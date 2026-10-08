@@ -41,6 +41,7 @@ import sys
 
 import shoonyakasha as sk
 from shoonyakasha import keys
+from shoonyakasha.mathutil import lerp, look_rotation, rotation_facing, smoothstep
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gltf_lights  # noqa: E402
@@ -94,7 +95,7 @@ class Glow:
 
 def switch(m, threshold):
     """0 before a light's point in the dusk, rising to 1 just after."""
-    return smooth(min(max((m - threshold) / 0.08, 0.0), 1.0))
+    return smoothstep((m - threshold) / 0.08)
 
 
 class Scene:
@@ -174,7 +175,7 @@ class Scene:
             engine.scene.set_light_intensity(self.sun, MOON * f)
             engine.scene.set_light_color(self.sun, (0.55, 0.65, 1.0))
         engine.scene.set_rotation(self.sun, rotation_facing(direction))
-        engine.set_custom_float("default.iblIntensity", lerp(0.3, 0.04, smooth(m)))
+        engine.set_custom_float("default.iblIntensity", lerp(0.3, 0.04, smoothstep(m)))
         # Exposure still adapts at night, but no further than a lit street:
         # darker than that stays dark instead of being brightened to day.
         engine.set_custom_float("default.exposureMinEV", lerp(-4.0, 0.5, m))
@@ -196,25 +197,6 @@ class Scene:
 def _hash(i):
     """A fixed pseudo-random number in [0, 1) for index i."""
     return ((i * 2654435761) % 4294967296) / 4294967296.0
-
-
-def lerp(a, b, t):
-    return a + (b - a) * t
-
-
-def smooth(t):
-    return t * t * (3.0 - 2.0 * t)
-
-
-def rotation_facing(direction):
-    """Euler rotation (pitch, yaw, 0) whose forward is `direction`."""
-    x, y, z = direction
-    length = math.sqrt(x * x + y * y + z * z)
-    return (math.asin(y / length), math.atan2(-x, -z), 0.0)
-
-
-def look_rotation(eye, target):
-    return rotation_facing(tuple(t - e for t, e in zip(target, eye)))
 
 
 # ── Camera ───────────────────────────────────────────────────────────────
@@ -308,15 +290,9 @@ DEBUG_VIEWS = ("final image", "shadow cascades", "shadow mask", "normals", "ambi
 
 class Controls:
     def __init__(self):
-        self._was_down = {}
+        self.pressed = keys.KeyEdges(engine.input).pressed
         self.ray_traced = False
         self.debug_view = 0
-
-    def pressed(self, key):
-        down = engine.input.is_key_down(key)
-        was = self._was_down.get(key, False)
-        self._was_down[key] = down
-        return down and not was
 
     def update(self, dt):
         if self.pressed(keys.N):

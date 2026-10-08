@@ -10,6 +10,7 @@ and `assets.py` restate vocabulary and rules that are defined in C++; those
 tests parse the C++ sources and fail when the copies disagree.
 """
 
+import math
 import os
 import re
 import shutil
@@ -21,7 +22,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "python"))
 
-from shoonyakasha import assets, keys, pipeline, shaders  # noqa: E402
+from shoonyakasha import assets, keys, mathutil, pipeline, shaders  # noqa: E402
 
 
 class ShaderCompilation(unittest.TestCase):
@@ -403,6 +404,109 @@ class KeyCodes(unittest.TestCase):
     def test_name_round_trips(self):
         self.assertEqual("ESCAPE", keys.name(keys.ESCAPE))
         self.assertEqual("999", keys.name(999))
+
+
+class FakeInput:
+    def __init__(self):
+        self.down = set()
+
+    def is_key_down(self, code):
+        return code in self.down
+
+
+class KeyEdgeDetection(unittest.TestCase):
+    def setUp(self):
+        self.input = FakeInput()
+        self.edges = keys.KeyEdges(self.input)
+
+    def test_a_held_key_is_reported_once(self):
+        self.input.down.add(keys.SPACE)
+        self.assertEqual([True, False, False],
+                         [self.edges.pressed(keys.SPACE) for _ in range(3)])
+
+    def test_release_and_press_again_is_reported_again(self):
+        self.input.down.add(keys.P)
+        self.assertTrue(self.edges.pressed(keys.P))
+        self.input.down.discard(keys.P)
+        self.assertFalse(self.edges.pressed(keys.P))
+        self.input.down.add(keys.P)
+        self.assertTrue(self.edges.pressed(keys.P))
+
+    def test_keys_are_tracked_separately(self):
+        self.input.down.update((keys.LEFT, keys.RIGHT))
+        self.assertTrue(self.edges.pressed(keys.LEFT))
+        self.assertTrue(self.edges.pressed(keys.RIGHT))
+        self.assertFalse(self.edges.pressed(keys.LEFT))
+
+
+def engine_forward(rotation):
+    """TransformComponent::getForward() in include/ECS/Core.h."""
+    pitch, yaw = rotation[0], rotation[1]
+    return (-math.sin(yaw) * math.cos(pitch), math.sin(pitch),
+            -math.cos(yaw) * math.cos(pitch))
+
+
+class CameraMath(unittest.TestCase):
+    def assertVecAlmostEqual(self, a, b):
+        for x, y in zip(a, b):
+            self.assertAlmostEqual(x, y, places=9)
+
+    def test_rotation_facing_points_the_engine_forward_along_the_direction(self):
+        for direction in [(0, 0, -1), (1, 0, 0), (-1, 0, 0), (0, 0, 1),
+                          (0.3, 0.8, -0.2), (-2.0, -1.0, 4.0), (0.0, 0.999, 0.01)]:
+            with self.subTest(direction=direction):
+                rotation = mathutil.rotation_facing(direction)
+                self.assertEqual(0.0, rotation[2])
+                self.assertVecAlmostEqual(mathutil.normalize(direction),
+                                          engine_forward(rotation))
+
+    def test_rotation_facing_minus_z_is_identity(self):
+        self.assertVecAlmostEqual((0.0, 0.0, 0.0), mathutil.rotation_facing((0, 0, -5)))
+
+    def test_rotation_facing_survives_degenerate_directions(self):
+        for direction in [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, -3.0, 0.0)]:
+            with self.subTest(direction=direction):
+                rotation = mathutil.rotation_facing(direction)
+                self.assertTrue(all(math.isfinite(c) for c in rotation))
+        self.assertAlmostEqual(math.pi / 2, mathutil.rotation_facing((0, 2, 0))[0])
+
+    def test_look_rotation_faces_the_target(self):
+        eye, target = (1.0, 2.0, 3.0), (-4.0, 0.5, 7.0)
+        direction = tuple(t - e for t, e in zip(target, eye))
+        self.assertVecAlmostEqual(mathutil.normalize(direction),
+                                  engine_forward(mathutil.look_rotation(eye, target)))
+
+    def test_orbit_places_the_eye_at_distance_and_angles(self):
+        target = (1.0, 2.0, 3.0)
+        self.assertVecAlmostEqual((1.0, 2.0, 8.0), mathutil.orbit(target, 5.0, 0.0, 0.0))
+        self.assertVecAlmostEqual((6.0, 2.0, 3.0), mathutil.orbit(target, 5.0, 90.0, 0.0))
+        self.assertVecAlmostEqual((1.0, 7.0, 3.0), mathutil.orbit(target, 5.0, 0.0, 90.0))
+
+    def test_yaw_point_turns_plus_z_towards_plus_x(self):
+        self.assertVecAlmostEqual((1.0, 0.5, 0.0), mathutil.yaw_point((0.0, 0.5, 1.0), 90.0))
+        # Same direction as the engine's yaw: forward -Z turns towards -X.
+        self.assertVecAlmostEqual(engine_forward((0.0, math.radians(30.0), 0.0)),
+                                  mathutil.yaw_point((0.0, 0.0, -1.0), 30.0))
+
+    def test_smoothstep_clamps_and_eases(self):
+        self.assertEqual(0.0, mathutil.smoothstep(-1.0))
+        self.assertEqual(1.0, mathutil.smoothstep(2.0))
+        self.assertEqual(0.5, mathutil.smoothstep(0.5))
+        self.assertAlmostEqual(0.15625, mathutil.smoothstep(0.25))
+
+    def test_lerp_and_vector_helpers(self):
+        self.assertEqual(2.5, mathutil.lerp(2.0, 4.0, 0.25))
+        self.assertEqual((1.0, 3.0), mathutil.lerp3((0.0, 2.0), (2.0, 4.0), 0.5))
+        self.assertEqual((4, 6), mathutil.add((1, 2), (3, 4)))
+        self.assertEqual((2, 4), mathutil.scale((1, 2), 2))
+        self.assertEqual((0.0, 0.0), mathutil.normalize((0.0, 0.0)))
+
+    def test_conventions_match_the_cpp_transform(self):
+        source = (REPO / "include/ECS/Core.h").read_text(encoding="utf-8")
+        self.assertIn("return glm::vec3(-sy * cx, sx, -cy * cx);", source,
+                      "TransformComponent::getForward changed; update engine_forward and mathutil")
+        self.assertIn("asinf(glm::clamp(d.y, -1.0f, 1.0f)), atan2f(-d.x, -d.z)", source,
+                      "TransformComponent::rotationFacing changed; update mathutil.rotation_facing")
 
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ class Pong:
         self.paddle_y = [middle, middle]
         self.ai_target = middle
         self.ai_timer = 0.0
-        self._held = {}
+        self.key_edges = keys.KeyEdges(engine.input)
 
         self.ball = [CANVAS_W * 0.5, CANVAS_H * 0.5]
         self.ball_vel = [0.0, 0.0]
@@ -441,14 +441,10 @@ class Pong:
         self.follow()
 
     def handle_keys(self):
-        # is_key_down reports the current state, so the previous state is kept to
-        # fire each action once per press.
         for code, action in ((keys.SPACE, self.on_space), (keys.R, self.restart),
                              (keys.P, self.on_screenshot), (keys.V, self.on_record)):
-            held = self.input.is_key_down(code)
-            if held and not self._held.get(code, False):
+            if self.key_edges.pressed(code):
                 action()
-            self._held[code] = held
 
     def on_space(self):
         if not self.over and self.waiting_to_serve and self.serve_timer <= 0.0:
