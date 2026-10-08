@@ -176,6 +176,10 @@ struct LightComponent {
     // it in place of the sphere.
     glm::vec2 sourceSize{0.0f};
 
+    // Image slot the rectangle shines with: 0 none, and what other numbers
+    // mean is the pipeline's to say (an "externalImage" it samples).
+    uint32_t sourceImage = 0;
+
     // Shadow casting
     bool castShadows = false;
     uint32_t shadowMapSize = 1024;

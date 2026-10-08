@@ -22,6 +22,7 @@ Both were added for it:
 
 - **Light source data.** `LightComponent::sourceRadius` and the dot-path `scene.lights[N].source`: x the radius, y 1 when the light casts shadows, z the cosine of the inner cone. Python sets them with `scene.set_light_source_radius(light, r)` and `scene.set_light_cone(light, inner, outer)`, in degrees.
 - **Light rectangles.** `LightComponent::sourceSize` and the dot-path `scene.lights[N].shape`: xyz the light's right axis times half the width, w half the height, zero for a light without one. Python sets it with `scene.set_light_source_size(light, width, height)`.
+- **Application images.** A descriptor binding with `"externalImage": "lightImage"` samples the image the application loads with `engine.set_pipeline_image("lightImage", path)`, white until it does. Lights choose it by their image slot, `scene.set_light_source_image(light, 1)`, published as `scene.lights[N].source.w`.
 - **Data files beside the pipeline.** A buffer layout filled from a file (`"source": {"type": "file", "path": "ltc.bin"}`) finds it beside `pipeline.json`, as shaders are found.
 - **Fragment-stage atomics.** `fragmentStoresAndAtomics` is enabled where the device has it, which every desktop GPU does. The virtual shadow map's casters write their depth with atomics.
 
@@ -57,6 +58,7 @@ The pipeline starts as `high`. As in the default pipeline, ray tracing covers on
 | `lightSoftness` | 1.0 | Scales every light's source radius in the shadow rays |
 | `reflections` | 1.0 | Strength of ray-traced reflections; 0 turns them off |
 | `areaLights` | 1.0 | 1 shades lights with a rectangle as the rectangle, 0 as their sphere, for comparing |
+| (image slot) | 0 | Per light, `scene.lights[N].source.w`: 1 makes its rectangle shine with `lightImage` (below) instead of the softbox pattern |
 | `softboxGrid` | -1.0 | The rectangles' pattern: -1 evenly lit, 0 a softbox diffuser's hotspot, and above that a fabric grid of that many cells across the short side |
 
 `default.toneMapper` (`set_custom_uint`) picks the tone curve: 0 the default pipeline's ACES fit, 1 Khronos PBR Neutral, which keeps base colours as authored and only compresses highlights, and 2 AgX, which rolls very bright light off towards white without shifting its hue. The showroom starts on AgX: with auto-exposure aiming for mid-grey it keeps the mid-tones where they are, where PBR Neutral, made for exposures that put white at 1, comes out dark, and ACES adds strong contrast.
@@ -128,6 +130,16 @@ A softbox is a rectangle, and on glossy paint its highlight is the rectangle, be
 
 **Softbox diffusers:** with `softboxGrid` 0 or more, a rectangle shines with a softbox's pattern (`softbox.glsl`): brighter in the middle, and with a grid of black fabric strips over it. The pattern averages to 1, so it moves the light around the panel without changing how much there is. Each of the three integrals reads it where its lobe looks at the rectangle and as blurred as the lobe is wide: the point of the rectangle's plane nearest the shading point, in the cosine's space, filtered over a footprint growing with that point's distance (Heitz et al.'s textured lights). The pattern is box-filtered analytically for any footprint, so it needs no texture or mip chain: a mirror-like coat shows the grid, a rough floor the hotspot, matte surfaces the average. The panel's own mesh draws the same pattern: a material whose `emissiveFactor.a` is 2 or more is a diffuser, with a grid of `a - 2` cells (glTF emissive materials have 1).
 
+## Images on lights
+
+A rectangle light with image slot 1 shines with a picture, like a coloured glass window: each colour of the picture lights the scene from where it is in the rectangle. Glossy surfaces reflect the picture sharply, rough ones blurred into its colours, and matte ones take its average colour.
+
+1. **The image.** `lightImageSourceSet` binds `"externalImage": "lightImage"`, which the application fills with `set_pipeline_image` (white until it does) and may change while running.
+2. **The prefiltered chain.** Every frame, `LightImage` resamples it into the top of `lightImage` (512 × 512, 16-bit float), and `LightImageDown{m}` makes each of the 6 smaller levels from the one above with a tent filter, so each level is the picture as a lobe twice as wide sees it. That is cheap enough to do every frame, so the picture could change every frame too, as a video would.
+3. **The lookup.** For each lobe, `ltcImage` (`area_lights.glsl`) reads the chain where the lobe looks at the rectangle, at the level matching its footprint: the same point and footprint the softbox pattern uses. The picture's colours multiply the light's colour and intensity, so a dark picture lets less light through, as glass does.
+
+The picture lies upright to someone in front of the rectangle, stretched over it. This is the picture's light and its reflections, not a projection: a sunbeam that paints the window's image onto the floor is a projector light, which this pipeline does not have.
+
 **Accuracy:** the diffuse integral is exact. The specular one is within a few percent of the BRDF's own integral where highlights are, and up to about a quarter off for rough surfaces seen at grazing angles, where both are dim. The table's grazing fits are its weakest, as in the paper's.
 
 ## Ray-traced lights and reflections
@@ -155,5 +167,6 @@ The pipeline is generated from the default one plus the additions above. Edit `p
 - `Overlay`, in `overlay.vert` and `overlay.frag`
 - `DepthOfField` and `Accumulate`, in `depth_of_field.frag` and `accumulate.comp`
 - Rectangular area lights, in `area_lights.glsl`, from the `LTC` buffer (`ltc.bin`, made by `ltc_fit.py`), with the softbox pattern in `softbox.glsl`
+- `LightImage` and `LightImageDown{m}`, in `light_image.frag` and `light_image_down.frag`: the prefiltered chain of the lights' picture
 
 **Shaders changed:** `lights.glsl` (sphere and rectangle lights, inner cones, clear coat), `surface.glsl` (clear coat maps), `gbuffer_body.glsl` (softbox diffusers), `forward_body.glsl`, `shadow_rt.frag`, `tonemap.frag` and `common.glsl`.

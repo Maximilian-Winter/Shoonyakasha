@@ -147,6 +147,8 @@ struct DescriptorBindingDesc {
     SubresourceRange            autoBindSubresource; // Part of autoBindResource to bind, JSON "mip"/"mips"/"layer"/"layers"
     std::string                 autoBindSampler;    // Sampler name from graph samplers
     std::string                 autoBindBuffer;     // Buffer name (for external UBOs)
+    std::string                 externalImage;      // Image the application supplies under this name
+                                                    // (RenderGraph::setExternalImage); white until it does
 };
 
 struct DescriptorSetLayoutDesc {

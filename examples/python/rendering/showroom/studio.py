@@ -12,8 +12,12 @@ regenerate it).
 - turntable.gltf: a disc of radius 1 and 6 cm high, with a light strip
   round its rim ("turntable_top", "turntable_rim").
 - softbox.gltf: a 1 x 1 light panel facing its node's forward axis (-Z),
-  with a dark frame and back ("softbox_diffuser", "softbox_frame").
+  with a dark frame and back ("softbox_diffuser", "softbox_frame"). Its UVs
+  show an image upright to someone in front of it.
 - plinth.gltf: a 1 x 1 x 1 box standing on the floor, for small models.
+- stained_glass.png: a pointed-arch window of coloured glass panes in lead,
+  for the "window" lighting, whose light shines with it; white.png, one
+  white pixel, gives the other panels back an even glow.
 - studio.hdr: an equirectangular studio environment, dark walls and floor
   with bright softboxes where the "studio" light rig has its lights, so
   reflections in paint and glass match the lights that light the car.
@@ -25,8 +29,9 @@ import json
 import math
 import os
 import struct
+import zlib
 
-VERSION = 3          # bump to regenerate existing studios
+VERSION = 4          # bump to regenerate existing studios
 
 
 # ── glTF writing ─────────────────────────────────────────────────────────
@@ -228,7 +233,9 @@ def softbox(path):
     # The diffuser faces -Z, the node's forward axis, just in front of the box.
     positions = [(-0.5, -0.5, -0.101), (0.5, -0.5, -0.101), (0.5, 0.5, -0.101), (-0.5, 0.5, -0.101)]
     normals = [(0.0, 0.0, -1.0)] * 4
-    uvs = [(0, 0), (1, 0), (1, 1), (0, 1)]
+    # Seen from the front, the node's +X is on the left and +Y up: u runs
+    # right to left in X and v top to bottom, so images read upright.
+    uvs = [(1, 1), (0, 1), (0, 0), (1, 0)]
     indices = _orient(positions, normals, [0, 1, 2, 0, 2, 3])
     panel = w.mesh("softbox_diffuser", positions, normals, uvs, indices, diffuser)
     # The box behind it, 1.04 x 1.04 x 0.2, open at the front.
@@ -364,9 +371,81 @@ def _write_hdr(path, rows, width, height):
             f.write(b"".join(_rgbe(*pixel) for pixel in row))
 
 
+# ── Stained glass ────────────────────────────────────────────────────────
+
+GLASS = [(0.06, 0.16, 0.62), (0.05, 0.28, 0.75), (0.62, 0.04, 0.08), (0.78, 0.12, 0.10),
+         (0.92, 0.62, 0.08), (0.95, 0.78, 0.25), (0.06, 0.46, 0.18), (0.38, 0.10, 0.55),
+         (0.10, 0.50, 0.62), (0.85, 0.40, 0.08)]
+
+
+def write_png(path, width, height, rows):
+    """An 8-bit RGB PNG from rows of bytes (3 per pixel)."""
+    def chunk(kind, data):
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    raw = b"".join(b"\x00" + bytes(row) for row in rows)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+        f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)))
+        f.write(chunk(b"IDAT", zlib.compress(raw, 9)))
+        f.write(chunk(b"IEND", b""))
+
+
+def stained_glass(path, width=320, height=640, cells_x=6, cells_y=12, seed=7):
+    """Panes of coloured glass between lead lines: the cells of points
+    jittered on a grid, each its own colour, under a pointed arch."""
+    import random
+    rng = random.Random(seed)
+    sx, sy = width / cells_x, height / cells_y
+    points = {}
+    for j in range(cells_y):
+        for i in range(cells_x):
+            colour = GLASS[rng.randrange(len(GLASS))]
+            shade = 0.45 + 0.4 * rng.random()
+            points[(i, j)] = ((i + 0.15 + 0.7 * rng.random()) * sx, (j + 0.15 + 0.7 * rng.random()) * sy,
+                              tuple(c * shade for c in colour))
+    lead = 2.2                       # pixels of lead either side of a border
+    arch = width * 0.62              # radius of the arch's two circles
+    spring = arch                    # the arch starts this far below the top
+    rows = []
+    for y in range(height):
+        row = bytearray()
+        cy = int(y // sy)
+        for x in range(width):
+            # Outside the window: the wall, no light.
+            inside = 3.0 <= x < width - 3.0 and y < height - 3.0
+            if inside and y < spring:
+                dy = spring - y
+                inside = (math.hypot(x - (width - arch), dy) < arch - 3.0 and
+                          math.hypot(x - arch, dy) < arch - 3.0)
+            if not inside:
+                row += b"\x00\x00\x00"
+                continue
+            cx = int(x // sx)
+            best = second = 1e9
+            colour = None
+            for j in range(max(cy - 1, 0), min(cy + 2, cells_y)):
+                for i in range(max(cx - 1, 0), min(cx + 2, cells_x)):
+                    px, py, c = points[(i, j)]
+                    d = math.hypot(x - px, y - py)
+                    if d < best:
+                        best, second, colour = d, best, c
+                    elif d < second:
+                        second = d
+            if second - best < 2.0 * lead:
+                row += b"\x08\x08\x08"
+                continue
+            # A little brighter towards each pane's middle, like hand-made glass.
+            glow = 0.85 + 0.15 * min(1.0, (second - best) / (sx * 0.5))
+            row += bytes(int(255 * min(1.0, c * glow) ** (1 / 2.2)) for c in colour)
+        rows.append(row)
+    write_png(path, width, height, rows)
+
+
 # ── Entry point ──────────────────────────────────────────────────────────
 
-FILES = ("stage.gltf", "turntable.gltf", "softbox.gltf", "plinth.gltf", "studio.hdr")
+FILES = ("stage.gltf", "turntable.gltf", "softbox.gltf", "plinth.gltf", "studio.hdr", "stained_glass.png",
+         "white.png")
 
 
 def ensure(directory):
@@ -387,6 +466,8 @@ def ensure(directory):
     softbox(os.path.join(directory, "softbox.gltf"))
     plinth(os.path.join(directory, "plinth.gltf"))
     environment(os.path.join(directory, "studio.hdr"))
+    stained_glass(os.path.join(directory, "stained_glass.png"))
+    write_png(os.path.join(directory, "white.png"), 1, 1, [b"\xff\xff\xff"])
     with open(marker, "w", encoding="utf-8") as f:
         f.write(str(VERSION))
     return directory

@@ -1595,6 +1595,13 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
         // Bind UBOs to descriptor sets after successful compilation
         bindUBOsToDescriptorSets(maxFramesInFlight);
 
+        // And the application's images: no frame is in flight yet.
+        for (uint32_t frame = 0; frame < maxFramesInFlight; ++frame) {
+            bindExternalImages(frame, false);
+        }
+        for (auto& [name, image] : m_externalImages) image.pendingFrames = 0;
+        m_externalImagesPending = false;
+
         // Set up auto geometry renderers for passes with entityDataBinding
         setupAutoGeometryRenderers();
 
@@ -1658,8 +1665,10 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
         m_stagingManager->processCompletedImageReadbacks(frameIndex, m_globalFrameNumber);
     }
 
-    // The same fence makes this frame's descriptor sets safe to free.
+    // The same fence makes this frame's descriptor sets safe to free, and to
+    // rewrite with an application image that changed.
     releaseDestroyedEntityDescriptors(frameIndex);
+    if (m_externalImagesPending) bindExternalImages(frameIndex, true);
 
     // Phase 3: Upload CPU→GPU before passes
     if (m_stagingManager) {
@@ -1893,6 +1902,7 @@ void RenderGraph::executeMultiQueue(uint32_t frameIndex, uint32_t swapchainImage
 
     // Update imported resources for this frame
     applyImports(swapchainImageIndex);
+    if (m_externalImagesPending) bindExternalImages(frameIndex, true);
 
     const auto& batches = m_compiled.queueBatches;
 
@@ -2376,6 +2386,56 @@ void RenderGraph::releaseDestroyedEntityDescriptors(uint32_t frameIndex) {
             ++it;
         }
     }
+}
+
+void RenderGraph::setExternalImage(const std::string& name, VkImageView view, VkSampler sampler) {
+    ExternalImage& image = m_externalImages[name];
+    image.view = view;
+    image.sampler = sampler;
+    image.pendingFrames = ~0u;
+    m_externalImagesPending = true;
+}
+
+void RenderGraph::bindExternalImages(uint32_t frame, bool onlyPending) {
+    for (const auto& layoutDesc : m_builder.getDescriptorSetLayouts()) {
+        auto setIt = m_compiled.namedDescriptorSets.find(layoutDesc.name);
+        if (setIt == m_compiled.namedDescriptorSets.end()) continue;
+        bool wrote = false;
+        for (const auto& binding : layoutDesc.bindings) {
+            if (binding.externalImage.empty()) continue;
+            auto imageIt = m_externalImages.find(binding.externalImage);
+            const bool supplied = imageIt != m_externalImages.end() && imageIt->second.view != VK_NULL_HANDLE;
+            if (onlyPending && (imageIt == m_externalImages.end() ||
+                                !(imageIt->second.pendingFrames & (1u << frame)))) continue;
+
+            VkImageView view;
+            VkSampler sampler;
+            if (supplied) {
+                view = imageIt->second.view;
+                sampler = imageIt->second.sampler;
+            } else {
+                ensureDefaultTextures();
+                view = m_defaultTextures.white.view;
+                sampler = m_defaultTextures.white.sampler;
+            }
+            if (!binding.autoBindSampler.empty()) {
+                auto samplerIt = m_compiled.samplers.find(binding.autoBindSampler);
+                if (samplerIt != m_compiled.samplers.end()) sampler = samplerIt->second;
+            }
+            const std::string bindingName = binding.name.empty()
+                ? "binding_" + std::to_string(binding.binding) : binding.name;
+            setIt->second->bindImage(bindingName, frame, ImageResource{view, sampler});
+            wrote = true;
+        }
+        if (wrote) setIt->second->updateSet(frame);
+    }
+    if (!onlyPending) return;
+    bool pending = false;
+    for (auto& [name, image] : m_externalImages) {
+        image.pendingFrames &= ~(1u << frame);
+        pending = pending || image.pendingFrames != 0;
+    }
+    m_externalImagesPending = pending;
 }
 
 void RenderGraph::ensureDefaultTextures() {

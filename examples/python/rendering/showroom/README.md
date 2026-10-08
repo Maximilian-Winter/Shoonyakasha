@@ -3,6 +3,7 @@
 A model showroom for cars and starships: each model on a turntable in an infinity-cove studio, lit by softboxes, hard light, spotlights or neon, with cinematic camera moves and automatic stills and video for posting. It runs on its own [showroom pipeline](pipeline/README.md), a copy of the default pipeline with four additions:
 - **Virtual shadow map for the sun.** An 8-level clipmap of 4096² virtual texels per level, 1 mm texels close up. Only the pages visible pixels need are rendered, into a cached pool.
 - **Rectangular area lights.** Each softbox lights as its panel, by linearly transformed cosines from a table fitted once: its highlight on the paint is the panel's shape, stretched along the body's curves. The panel's diffuser has a hotspot and a fabric grid, which glossy paint shows sharp and rough surfaces blurred.
+- **Images on lights.** The stained-glass lighting's window shines with a picture: its colours light the car and its panes show in the paint and the polished floor. `--light-image` takes your own.
 - **Soft ray-traced shadows.** Rays towards random points of each softbox give its shadows soft edges the shape of the panel; the spotlights are spheres, with penumbrae as wide as they are.
 - **Ray-traced reflections** in glossy floors and paint.
 
@@ -30,6 +31,7 @@ python tools/fetch_assets.py showroom          # all eight, or showroom/alfa_gtv
 |---|---|
 | Studio softboxes, their rectangular highlights stretched across the paint, the neon strips as long streaks | Rectangular area lights: linearly transformed cosines, from a 64 × 64 table in `pipeline/ltc.bin` |
 | The softboxes' grid in the paint's highlights; **U** switches to plain fabric or even panels | The diffuser's pattern in the light it casts, read where each surface's reflection lands and blurred as wide as it spreads |
+| **L** to stained glass: the window's coloured panes in the paint and the polished floor, and its colours on the car | A rectangle light shining with a picture (`lightImage`), prefiltered so each surface sees it as sharp as it reflects |
 | **J**: the same softboxes as spheres, round highlights | The representative-point sphere lights they replaced, for a before-and-after |
 | Soft shadows under the car, long beside the strip lights | Ray-traced shadows towards random points of each panel, averaged by TAA |
 | The turntable's shadow and a wheel's shadow on the floor, sharp to the millimetre in close-ups | The sun's virtual shadow map, its levels matched to pixel size |
@@ -39,9 +41,9 @@ python tools/fetch_assets.py showroom          # all eight, or showroom/alfa_gtv
 | The LED rim of the turntable, softbox panels, neon strips | Emission and bloom |
 | **B**: the floor and background softened, the shot's subject sharp | Depth of field from the depth buffer, after TAA |
 
-**Keys:** **←/→** models · **L** lighting (studio, hard light, night, neon) · **C** camera (turntable, cinematic, orbit: drag with the left mouse button and scroll, free: WASD/Q/E and the right mouse button) · **G** shadow technique · **R** reflections · **T** turntable · **K** paint colour (cars) · **X** clear coat on/off · **J** softboxes as rectangles or spheres · **U** softbox diffusers (grid, plain fabric, even) · **M** tone mapper (AgX, PBR Neutral, ACES) · **B** depth of field (off, f/2.8, f/0.8) · **Y** turn the model 90° · **F** dark or white floor · **V** debug views · **H** credits and status · **O** render stats (frame rate, GPU time per pass, draw calls) · **P** screenshot · **F9** record · **F1** help.
+**Keys:** **←/→** models · **L** lighting (studio, hard light, night, neon, stained glass) · **C** camera (turntable, cinematic, orbit: drag with the left mouse button and scroll, free: WASD/Q/E and the right mouse button) · **G** shadow technique · **R** reflections · **T** turntable · **K** paint colour (cars) · **X** clear coat on/off · **J** softboxes as rectangles or spheres · **U** softbox diffusers (grid, plain fabric, even) · **M** tone mapper (AgX, PBR Neutral, ACES) · **B** depth of field (off, f/2.8, f/0.8) · **Y** turn the model 90° · **F** dark or white floor · **V** debug views · **H** credits and status · **O** render stats (frame rate, GPU time per pass, draw calls) · **P** screenshot · **F9** record · **F1** help.
 
-The window opens at 1920×1080; `--width`/`--height` change it, `--vertical` makes it 1080×1920 for phone-shaped video. `--lighting`, `--camera`, `--shadows` and `--softbox` choose what it opens with, `--models alfa_gtv6,aat` which models and in what order.
+The window opens at 1920×1080; `--width`/`--height` change it, `--vertical` makes it 1080×1920 for phone-shaped video. `--lighting`, `--camera`, `--shadows` and `--softbox` choose what it opens with, and `--light-image picture.png` what the stained-glass window shows (stretched to its 1:2 shape), `--models alfa_gtv6,aat` which models and in what order.
 
 ## Stills and video for posting
 

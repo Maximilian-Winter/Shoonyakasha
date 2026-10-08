@@ -18,7 +18,7 @@ without them the showroom shows the bundled Fox. Any glTF can be added with
 
 Keys:
     LEFT / RIGHT   previous / next model
-    L              next lighting: studio, hard light, night, neon
+    L              next lighting: studio, hard light, night, neon, stained glass
     C              next camera: turntable, cinematic, orbit (drag with the left
                    mouse button, scroll to zoom), free (WASD/Q/E, right mouse)
     G              next shadow technique: VSM + ray-traced lights, all ray traced,
@@ -107,7 +107,7 @@ def parse_args():
     parser.add_argument("--extra", action="append", default=[], metavar="GLTF",
                         help="also show this glTF file (repeatable); LENGTH= in front scales it, "
                              "e.g. 4.5=path/car.gltf")
-    parser.add_argument("--lighting", choices=["studio", "hardlight", "night", "neon"],
+    parser.add_argument("--lighting", choices=["studio", "hardlight", "night", "neon", "window"],
                         help="lighting to open with (default: each model's own)")
     parser.add_argument("--camera", choices=["turntable", "cinematic", "orbit", "free"], default="turntable")
     parser.add_argument("--shadows", choices=["hybrid", "vsm", "raytraced", "cascades"],
@@ -127,6 +127,9 @@ def parse_args():
     parser.add_argument("--no-clearcoat", action="store_true", help="no clear coat over the paint")
     parser.add_argument("--softbox", choices=list(DIFFUSERS), default="grid",
                         help="softbox diffusers: a fabric grid, plain fabric (a hotspot), or evenly lit")
+    parser.add_argument("--light-image", metavar="IMAGE",
+                        help="picture the stained-glass window shines with (PNG, JPEG ...), stretched to "
+                             "its 1:2 shape; default a generated window")
     parser.add_argument("--sphere-lights", action="store_true",
                         help="shade softboxes as spheres, not as their rectangles")
     parser.add_argument("--screenshots", metavar="DIR", help="save stills of every model and exit")
@@ -166,6 +169,8 @@ if ROOT is None:
     print("No asset root found; run from inside the repository or set SHOONYAKASHA_ASSET_DIR.")
     sys.exit(1)
 STUDIO = studio.ensure(os.path.join(str(ROOT), "showroom", "studio"))
+WHITE = os.path.join(STUDIO, "white.png")
+LIGHT_IMAGE = os.path.abspath(args.light_image) if args.light_image else os.path.join(STUDIO, "stained_glass.png")
 
 
 # ── Maths ────────────────────────────────────────────────────────────────
@@ -476,10 +481,11 @@ def find_models():
 class LightSpec:
     """One light of a rig. `direction` points from the model's centre towards
     the light, in the stage's frame (+Z front, +X right), `distance` in units
-    of the model's size; softbox (width, height) in metres draws a panel."""
+    of the model's size; softbox (width, height) in metres draws a panel,
+    which with `image` shines with a picture, like a coloured glass window."""
 
     def __init__(self, direction, distance, color, intensity, radius=0.3, cone=(35.0, 70.0),
-                 softbox=None, shadows=True, aim_height=0.0):
+                 softbox=None, shadows=True, aim_height=0.0, image=False):
         self.direction = normalize(direction)
         self.distance = distance
         self.color = color
@@ -489,6 +495,7 @@ class LightSpec:
         self.softbox = softbox
         self.shadows = shadows
         self.aim_height = aim_height
+        self.image = image          # the panel shines with the pipeline's lightImage
 
 
 class Rig:
@@ -534,6 +541,12 @@ RIGS = [
         LightSpec((0.0, 1.0, -0.2), 1.6, (0.55, 0.3, 1.0), 16.0, radius=0.6, cone=(40.0, 70.0), softbox=(1.0, 3.0)),
     ], ibl=0.03, floor=(0.02, 0.02, 0.025), floor_roughness=0.14, cove=(0.03, 0.025, 0.04),
         rim=(1.4, 0.1, 0.9), exposure=0.8, min_ev=0.0),
+    Rig("window", "Stained glass", [
+        LightSpec((-0.9, 0.45, -0.35), 2.0, (1.0, 1.0, 1.0), 90.0, radius=0.6, cone=(70.0, 89.0),
+                  softbox=(1.5, 3.0), image=True),
+        LightSpec((0.7, 0.6, 0.6), 2.2, (0.75, 0.8, 1.0), 6.0, radius=0.8, cone=(40.0, 70.0), softbox=(1.4, 1.0)),
+    ], ibl=0.05, floor=(0.02, 0.02, 0.022), floor_roughness=0.05, cove=(0.05, 0.045, 0.04),
+        rim=(0.0, 0.0, 0.0), exposure=1.0, min_ev=1.5),
 ]
 RIG_BY_NAME = {r.name: r for r in RIGS}
 MAX_LIGHTS = max(len(r.lights) for r in RIGS)
@@ -636,6 +649,7 @@ class Stage:
             # rectangle, the sphere stays for showroom.areaLights = 0.
             panel = (spec.softbox[0] * size, spec.softbox[1] * size) if spec.softbox else (0.0, 0.0)
             scene.set_light_source_size(light, *panel)
+            scene.set_light_source_image(light, 1 if spec.image else 0)
             visible = spec.softbox is not None
             for e in parts:
                 scene.set_visible(e, visible)
@@ -644,12 +658,17 @@ class Stage:
                 scene.set_position(box, position)
                 scene.set_rotation(box, rotation)
                 scene.set_scale(box, (w * size, h * size, size))
-                glow = scale(spec.color, 3.0 + spec.intensity / 15.0)
+                # A picture keeps its colours deep: it glows less than a
+                # diffuser, which is white and may burn out.
+                glow = scale(spec.color, 5.0 if spec.image else 3.0 + spec.intensity / 15.0)
                 # emissiveFactor.a: 2 + the grid's cells marks a diffuser for
                 # the pipeline's softbox pattern, 1 is an ordinary emitter.
                 grid = DIFFUSERS[self.diffuser][0]
+                if spec.image:
+                    grid = -1               # the picture, not a diffuser's pattern
                 for e in diffusers:
                     scene.set_material_vec4(e, "emissiveFactor", glow + (2.0 + grid if grid >= 0 else 1.0,))
+                    scene.set_material_texture(e, "emissiveMap", LIGHT_IMAGE if spec.image else WHITE)
         if rig.sun:
             direction, color, intensity = rig.sun
             scene.set_rotation(self.sun, rotation_facing(direction))
@@ -969,6 +988,10 @@ class Showroom:
         return self.models[self.index]
 
     def start(self):
+        # The picture rectangle lights with image slot 1 shine with: the
+        # pipeline's "lightImage", prefiltered there for blurred reflections.
+        if not engine.set_pipeline_image("lightImage", LIGHT_IMAGE):
+            print("[showroom] could not load the window's image", LIGHT_IMAGE)
         self.stage.build()
         self.overlay.build()
         self.apply_tonemapper()

@@ -929,6 +929,13 @@
       "addressMode": "clamp_to_edge",
       "compareEnable": true,
       "compareOp": "less_or_equal"
+    },
+    "trilinearClamp": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "mipmapMode": "linear",
+      "addressMode": "clamp_to_edge",
+      "maxLod": 16.0
     }
   },
   "descriptorSetLayouts": {
@@ -995,6 +1002,16 @@
           ],
           "name": "LtcTable",
           "autoBindBuffer": "LTC"
+        },
+        {
+          "binding": 5,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "lightImage",
+          "autoBindResource": "lightImage",
+          "autoBindSampler": "trilinearClamp"
         }
       ]
     },
@@ -1754,6 +1771,40 @@
           "name": "spriteTexture"
         }
       ]
+    },
+    "lightImageSourceSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "source",
+          "externalImage": "lightImage",
+          "autoBindSampler": "linearClamp"
+        }
+      ]
+    },
+    "lightImageDown{m}": {
+      "repeat": {
+        "count": 6,
+        "index": "m",
+        "first": 1
+      },
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "source",
+          "autoBindResource": "lightImage",
+          "autoBindSampler": "linearClamp",
+          "mip": "{m-1}"
+        }
+      ]
     }
   },
   "resources": [
@@ -1883,6 +1934,16 @@
         "widthScale": 0.5,
         "heightScale": 0.5,
         "mipLevels": 6
+      }
+    },
+    {
+      "name": "lightImage",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "width": 512,
+        "height": 512,
+        "mipLevels": 7
       }
     },
     {
@@ -2994,6 +3055,68 @@
       ]
     },
     {
+      "name": "LightImage",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "outputs": [
+        {
+          "resource": "lightImage",
+          "usage": "color_write",
+          "mip": 0
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "fragmentShader": "shaders/light_image.frag.spv"
+      },
+      "descriptorSets": [
+        "lightImageSourceSet"
+      ]
+    },
+    {
+      "name": "LightImageDown{m}",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "lightImage",
+          "usage": "shader_read",
+          "mip": "{m-1}"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "lightImage",
+          "usage": "color_write",
+          "mip": "{m}"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "fragmentShader": "shaders/light_image_down.frag.spv"
+      },
+      "descriptorSets": [
+        "lightImageDown{m}"
+      ],
+      "repeat": {
+        "count": 6,
+        "index": "m",
+        "first": 1
+      }
+    },
+    {
       "name": "LightClusters",
       "type": "compute",
       "execution": {
@@ -3292,6 +3415,10 @@
         {
           "resource": "lightClusters",
           "usage": "shader_read"
+        },
+        {
+          "resource": "lightImage",
+          "usage": "shader_read"
         }
       ],
       "outputs": [
@@ -3363,6 +3490,10 @@
         {
           "resource": "taaHistory",
           "usage": "shader_read"
+        },
+        {
+          "resource": "lightImage",
+          "usage": "shader_read"
         }
       ],
       "outputs": [
@@ -3422,6 +3553,10 @@
         {
           "resource": "vsmPhysical",
           "usage": "shader_read_write"
+        },
+        {
+          "resource": "lightImage",
+          "usage": "shader_read"
         }
       ],
       "outputs": [
@@ -3494,6 +3629,10 @@
         {
           "resource": "vsmPhysical",
           "usage": "shader_read_write"
+        },
+        {
+          "resource": "lightImage",
+          "usage": "shader_read"
         }
       ],
       "outputs": [

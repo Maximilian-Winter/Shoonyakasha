@@ -32,7 +32,7 @@
     vec4 lightsColorIntensity[MAX_LIGHTS];        \
     vec4 lightsDirectionRange[MAX_LIGHTS];        \
     vec4 lightsAttenuation[MAX_LIGHTS];           \
-    vec4 lightsSource[MAX_LIGHTS];   /* x radius, y casts shadows, z cos(inner cone) */ \
+    vec4 lightsSource[MAX_LIGHTS];   /* x radius, y casts shadows, z cos(inner cone), w image slot */ \
     vec4 lightsShape[MAX_LIGHTS];    /* xyz right axis * half width, w half height; 0 for none */
 
 // scene.shadows.sun.* (pipeline.json "Cascades")

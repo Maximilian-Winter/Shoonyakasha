@@ -143,6 +143,24 @@ TEST(PipelineShaderPaths, RelativePathsOnlyResolveBesideTheJsonWhenTheFileIsTher
     fs::remove_all(dir);
 }
 
+TEST(PipelineJson, BindingsNameTheApplicationImageTheySample) {
+    const nlohmann::json graph = {
+        {"version", 1},
+        {"descriptorSetLayouts", {{"imageSet", {{"bindings", {{
+            {"binding", 0}, {"type", "combined_image_sampler"}, {"name", "picture"},
+            {"externalImage", "lightImage"}, {"autoBindSampler", "linearClamp"}}}}}}}},
+        {"resources", {{{"name", "swapchain"}, {"kind", "image"}, {"imported", true}}}},
+        {"passes", {{{"name", "P"}, {"type", "graphics"},
+                     {"outputs", {{{"resource", "swapchain"}, {"usage", "present"}}}}}}}
+    };
+    FrameGraphBuilder builder;
+    loadGraphFromJson(builder, graph);
+    ASSERT_EQ(builder.getDescriptorSetLayouts().size(), 1u);
+    const auto& binding = builder.getDescriptorSetLayouts()[0].bindings.at(0);
+    EXPECT_EQ(binding.externalImage, "lightImage");
+    EXPECT_EQ(binding.autoBindSampler, "linearClamp");
+}
+
 TEST(PipelineShaderPaths, BufferFilesResolveBesideTheJsonWhenTheFileIsThere) {
     const fs::path dir = fs::temp_directory_path() / "sk_buffer_path_test";
     fs::remove_all(dir);

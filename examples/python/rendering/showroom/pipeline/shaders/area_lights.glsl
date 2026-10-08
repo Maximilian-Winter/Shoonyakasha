@@ -1,8 +1,10 @@
 // area_lights.glsl - rectangular lights by linearly transformed cosines
 // (Heitz, Dupuy, Hill and Neubelt 2016). Included by lights.glsl. The
-// including shader declares `brdfLUT` and the fitted table, ltc.bin, as
+// including shader declares `brdfLUT`, the fitted table, ltc.bin, and the
+// prefiltered image lights can shine with (light_image*.frag), as
 //
 //     layout(std430, set = <lightsSet>, binding = 4) readonly buffer LtcTable { vec4 ltcTable[]; };
+//     layout(set = <lightsSet>, binding = 5) uniform sampler2D lightImage;
 //
 // GGX's lobe for one roughness and view angle is close to a clamped cosine
 // stretched by a 3x3 matrix, and a cosine's integral over a polygon has a
@@ -91,23 +93,46 @@ float ltcRectangle(mat3 toCosine, vec3 corners[4]) {
 // rectangle near and large, and its pattern sharp.
 const float LTC_PATTERN_BLUR = 1.5;    // footprint width in units of the distance
 
-float ltcPattern(mat3 toCosine, vec3 corners[4], vec2 cells) {
+// Where on the rectangle the lobe looks (u along corners 0 to 1, v along 0
+// to 3), and how wide a box around it it averages, both in 0..1 units of
+// the rectangle. False when the rectangle is seen edge-on.
+bool ltcLookup(mat3 toCosine, vec3 corners[4], out vec2 uv, out vec2 width) {
     vec3 p0 = toCosine * corners[0];
     vec3 e1 = toCosine * corners[1] - p0;   // along u
     vec3 e2 = toCosine * corners[3] - p0;   // along v
     vec3 n = cross(e1, e2);
     float nn = dot(n, n);
-    if (nn <= 1e-12) return 1.0;
+    uv = vec2(0.5);
+    width = vec2(1.0);
+    if (nn <= 1e-12) return false;
     vec3 foot = n * (dot(n, p0) / nn) - p0;
     float distance_ = abs(dot(n, p0)) * inversesqrt(nn);
     // uv of the foot on the parallelogram the rectangle became.
     float e11 = dot(e1, e1);
     float e12 = dot(e1, e2);
     vec3 e2o = e2 - e1 * (e12 / e11);
-    float v = dot(e2o, foot) / dot(e2o, e2o);
-    float u = (dot(e1, foot) - e12 * v) / e11;
-    vec2 width = LTC_PATTERN_BLUR * distance_ / vec2(sqrt(e11), sqrt(dot(e2, e2)));
-    return softboxPattern(vec2(u, v), width, cells);
+    uv.y = dot(e2o, foot) / dot(e2o, e2o);
+    uv.x = (dot(e1, foot) - e12 * uv.y) / e11;
+    width = LTC_PATTERN_BLUR * distance_ / vec2(sqrt(e11), sqrt(dot(e2, e2)));
+    return true;
+}
+
+float ltcPattern(mat3 toCosine, vec3 corners[4], vec2 cells) {
+    vec2 uv, width;
+    if (!ltcLookup(toCosine, corners, uv, width)) return 1.0;
+    return softboxPattern(uv, width, cells);
+}
+
+// The image the rectangle shines with, as the lobe sees it: the level of
+// lightImage's chain as blurred as the lobe's footprint. The image reads
+// upright from in front of the rectangle, where its u runs right to left
+// and v bottom to top.
+vec3 ltcImage(mat3 toCosine, vec3 corners[4]) {
+    vec2 uv, width;
+    if (!ltcLookup(toCosine, corners, uv, width)) uv = vec2(0.5);
+    float size = float(textureSize(lightImage, 0).x);
+    float lod = log2(max(max(width.x, width.y) * size, 1.0));
+    return textureLod(lightImage, vec2(1.0) - clamp(uv, 0.0, 1.0), lod).rgb;
 }
 
 // The shading frame: x towards the viewer in the surface's plane, z the
@@ -124,9 +149,9 @@ mat3 ltcFrame(vec3 N, vec3 V) {
 // half-axes relative to the shading point): diffuse plus specular, and the
 // clear coat over them (coatFactor, coatRoughness, from lights.glsl). With
 // `patterned`, the rectangle shines with softbox.glsl's pattern, a grid of
-// `cells` over it, as each lobe sees it.
+// `cells` over it, as each lobe sees it; with `imaged`, with lightImage.
 vec3 rectangleBRDF(vec3 N, vec3 V, vec3 centre, vec3 halfX, vec3 halfY, vec3 albedo, float metallic,
-                   float roughness, vec3 F0, bool patterned, vec2 cells) {
+                   float roughness, vec3 F0, bool patterned, vec2 cells, bool imaged) {
     vec3 corners[4] = vec3[](centre - halfX - halfY, centre + halfX - halfY,
                              centre + halfX + halfY, centre - halfX + halfY);
     float NdotV = clamp(dot(N, V), 1e-4, 1.0);
@@ -135,21 +160,27 @@ vec3 rectangleBRDF(vec3 N, vec3 V, vec3 centre, vec3 halfX, vec3 halfY, vec3 alb
     vec2 env = texture(brdfLUT, vec2(NdotV, roughness)).rg;
     vec3 specularAlbedo = F0 * env.x + env.y;
     mat3 toSpecular = ltcInverse(roughness, NdotV) * frame;
-    float diffuse = ltcRectangle(frame, corners);
-    float specular = ltcRectangle(toSpecular, corners);
-    if (patterned) {
-        if (diffuse > 0.0) diffuse *= ltcPattern(frame, corners, cells);
-        if (specular > 0.0) specular *= ltcPattern(toSpecular, corners, cells);
+    vec3 diffuse = vec3(ltcRectangle(frame, corners));
+    vec3 specular = vec3(ltcRectangle(toSpecular, corners));
+    if (imaged) {
+        if (diffuse.x > 0.0) diffuse *= ltcImage(frame, corners);
+        if (specular.x > 0.0) specular *= ltcImage(toSpecular, corners);
+    } else if (patterned) {
+        if (diffuse.x > 0.0) diffuse *= ltcPattern(frame, corners, cells);
+        if (specular.x > 0.0) specular *= ltcPattern(toSpecular, corners, cells);
     }
     vec3 result = (1.0 - specularAlbedo) * (1.0 - metallic) * albedo * diffuse + specularAlbedo * specular;
 
     if (coatFactor > 0.0) {
         vec2 coatEnv = texture(brdfLUT, vec2(NdotV, coatRoughness)).rg;
         mat3 toCoat = ltcInverse(coatRoughness, NdotV) * frame;
-        float coat = ltcRectangle(toCoat, corners);
-        if (patterned && coat > 0.0) coat *= ltcPattern(toCoat, corners, cells);
+        vec3 coat = vec3(ltcRectangle(toCoat, corners));
+        if (coat.x > 0.0) {
+            if (imaged) coat *= ltcImage(toCoat, corners);
+            else if (patterned) coat *= ltcPattern(toCoat, corners, cells);
+        }
         result = result * (1.0 - coatFresnel(NdotV) * coatFactor)
-               + vec3((COAT_F0 * coatEnv.x + coatEnv.y) * coatFactor * coat);
+               + (COAT_F0 * coatEnv.x + coatEnv.y) * coatFactor * coat;
     }
     return result;
 }
