@@ -19,7 +19,8 @@ without them the showroom shows the bundled Fox. Any glTF can be added with
 Keys:
     LEFT / RIGHT   previous / next model
     L              next lighting: studio, hard light, night, neon
-    C              next camera: turntable, cinematic, free (WASD/Q/E, right mouse)
+    C              next camera: turntable, cinematic, orbit (drag with the left
+                   mouse button, scroll to zoom), free (WASD/Q/E, right mouse)
     G              next shadow technique: VSM + ray-traced lights, all ray traced,
                    VSM with shadow maps, cascades
     R              ray-traced reflections on or off (with ray-traced lights)
@@ -27,6 +28,7 @@ Keys:
     K              next paint colour (cars)
     X              clear coat on or off (the lacquer over car paint)
     J              softboxes as rectangles or as spheres (before and after)
+    U              softbox diffusers: grid, plain fabric, even
     M              next tone mapper: AgX, PBR Neutral, ACES
     B              depth of field: off, f/2.8, f/0.8 (more than a real lens),
                    focused where the camera looks
@@ -76,6 +78,17 @@ PIPELINE = os.path.join(HERE, "pipeline", "pipeline.json")
 # settings.toneMapper in the pipeline's tonemap.frag
 TONE_MAPPERS = {"agx": (2, "AgX"), "neutral": (1, "PBR Neutral"), "aces": (0, "ACES")}
 
+# Key U: what the softboxes' diffusers look like, in the panels and in the
+# light they cast (the pipeline's softbox.glsl): the grid's cells across a
+# panel's short side, 0 for plain fabric (its hotspot alone), -1 for an
+# evenly lit panel.
+DIFFUSERS = {"grid": (4, "grid"), "fabric": (0, "plain fabric"), "even": (-1, "even panels")}
+
+# Orbit camera: degrees per pixel dragged, and the zoom per notch of the
+# wheel.
+ORBIT_DEGREES_PER_PIXEL = 0.25
+ORBIT_ZOOM_STEP = 0.88
+
 # Key B: depth of field off, then at these f-numbers. Whole-car shots need
 # more than a real lens to show much blur.
 DOF_STOPS = (0.0, 2.8, 0.8)
@@ -96,7 +109,7 @@ def parse_args():
                              "e.g. 4.5=path/car.gltf")
     parser.add_argument("--lighting", choices=["studio", "hardlight", "night", "neon"],
                         help="lighting to open with (default: each model's own)")
-    parser.add_argument("--camera", choices=["turntable", "cinematic", "free"], default="turntable")
+    parser.add_argument("--camera", choices=["turntable", "cinematic", "orbit", "free"], default="turntable")
     parser.add_argument("--shadows", choices=["hybrid", "vsm", "raytraced", "cascades"],
                         help="shadow technique: hybrid is the virtual shadow map for the sun with ray-traced "
                              "light shadows (the default where the GPU has ray queries), vsm the map with "
@@ -112,6 +125,8 @@ def parse_args():
     parser.add_argument("--tonemapper", choices=list(TONE_MAPPERS), default="agx",
                         help="tone curve: AgX, Khronos PBR Neutral or ACES")
     parser.add_argument("--no-clearcoat", action="store_true", help="no clear coat over the paint")
+    parser.add_argument("--softbox", choices=list(DIFFUSERS), default="grid",
+                        help="softbox diffusers: a fabric grid, plain fabric (a hotspot), or evenly lit")
     parser.add_argument("--sphere-lights", action="store_true",
                         help="shade softboxes as spheres, not as their rectangles")
     parser.add_argument("--screenshots", metavar="DIR", help="save stills of every model and exit")
@@ -534,6 +549,7 @@ class Stage:
         self.softboxes = []     # (holder, diffuser entities)
         self.sun = sk.NULL_ENTITY
         self.rig = None
+        self.diffuser = args.softbox
 
     def build(self):
         self.spin = holder("turntable_spin")
@@ -629,8 +645,11 @@ class Stage:
                 scene.set_rotation(box, rotation)
                 scene.set_scale(box, (w * size, h * size, size))
                 glow = scale(spec.color, 3.0 + spec.intensity / 15.0)
+                # emissiveFactor.a: 2 + the grid's cells marks a diffuser for
+                # the pipeline's softbox pattern, 1 is an ordinary emitter.
+                grid = DIFFUSERS[self.diffuser][0]
                 for e in diffusers:
-                    scene.set_material_vec4(e, "emissiveFactor", glow + (0.0,))
+                    scene.set_material_vec4(e, "emissiveFactor", glow + (2.0 + grid if grid >= 0 else 1.0,))
         if rig.sun:
             direction, color, intensity = rig.sun
             scene.set_rotation(self.sun, rotation_facing(direction))
@@ -936,6 +955,8 @@ class Showroom:
         self.paint = 0
         self.clearcoat = not args.no_clearcoat
         self.area_lights = not args.sphere_lights
+        self.orbit_goal = None      # azimuth, elevation (degrees), distance the orbit camera eases to
+        self.orbit_now = None
         self.tonemapper = args.tonemapper
         self.floor_white = False
         self.time = 0.0
@@ -969,6 +990,7 @@ class Showroom:
         self.reflections = not args.no_reflections
         engine.set_custom_float("showroom.reflections", 1.0 if self.reflections else 0.0)
         engine.set_custom_float("showroom.areaLights", 1.0 if self.area_lights else 0.0)
+        engine.set_custom_float("showroom.softboxGrid", float(DIFFUSERS[self.stage.diffuser][0]))
         self.select(0)
 
     def select(self, index):
@@ -981,6 +1003,7 @@ class Showroom:
             model.load(self.stage.spin)
         model.show(True)
         self.stage.stand(model)
+        self.orbit_goal = None
         self.set_rig(RIG_BY_NAME[args.lighting] if args.lighting else RIG_BY_NAME[model.entry.rig])
         self.paint = 0
         self.overlay.show_model(model)
@@ -1003,10 +1026,11 @@ class Showroom:
         engine.set_custom_uint("showroom.vsmEpoch", self.epoch)
 
     def update_status(self):
-        self.overlay.set_status("%s  |  %s  |  %s%s%s%s" % (
+        self.overlay.set_status("%s  |  %s  |  %s%s%s%s%s" % (
             self.rig.label, SHADOW_LABELS.get(self.preset, self.preset), TONE_MAPPERS[self.tonemapper][1],
             "" if self.clearcoat else "  |  no clear coat",
             "" if self.area_lights else "  |  sphere lights",
+            "" if self.stage.diffuser == "grid" else "  |  " + DIFFUSERS[self.stage.diffuser][1],
             "  |  f/%g" % self.dof if self.dof > 0.0 else ""))
 
     def next_dof(self):
@@ -1048,6 +1072,14 @@ class Showroom:
         self.update_status()
         print("[showroom] clear coat", "on" if self.clearcoat else "off")
 
+    def next_diffuser(self):
+        names = list(DIFFUSERS)
+        self.stage.diffuser = names[(names.index(self.stage.diffuser) + 1) % len(names)]
+        engine.set_custom_float("showroom.softboxGrid", float(DIFFUSERS[self.stage.diffuser][0]))
+        self.stage.light(self.rig, self.model)
+        self.update_status()
+        print("[showroom] softbox diffusers:", DIFFUSERS[self.stage.diffuser][1])
+
     def toggle_area_lights(self):
         self.area_lights = not self.area_lights
         engine.set_custom_float("showroom.areaLights", 1.0 if self.area_lights else 0.0)
@@ -1087,6 +1119,8 @@ class Showroom:
             d = framing_distance(model.radius(), 40.0, aspect)
             eye = orbit(c, d, 35.0 + 6.0 * math.sin(self.time * 0.07), 9.0)
             self.pose(eye, add(c, (0.0, -model.size[1] * 0.12, 0.0)), 40.0)
+        elif self.camera_mode == "orbit":
+            self.orbit_camera(dt)
         elif self.camera_mode == "cinematic":
             self.shot_time += dt
             total = sum(s.seconds for s in self.shots)
@@ -1097,6 +1131,40 @@ class Showroom:
                     self.pose(eye, target, fov)
                     break
                 t -= shot.seconds
+
+    def orbit_camera(self, dt):
+        """Turn around the model with the left mouse button held, and come
+        closer or go further with the wheel. The camera always looks at the
+        model's centre, and eases to where it is sent."""
+        model = self.model
+        target = add(model.centre(), (0.0, -model.size[1] * 0.12, 0.0))
+        nearest = model.radius() * 1.1
+        farthest = studio.FLOOR_RADIUS * self.stage.stage_scale - 0.6
+        if self.orbit_goal is None:
+            # Start where the camera is, so switching to it does not jump.
+            eye = scene.get_world_position(engine.camera_entity)
+            offset = tuple(eye[i] - target[i] for i in range(3))
+            distance = max(math.sqrt(sum(v * v for v in offset)), 1e-3)
+            self.orbit_goal = [math.degrees(math.atan2(offset[0], offset[2])),
+                               math.degrees(math.asin(max(-1.0, min(1.0, offset[1] / distance)))), distance]
+            self.orbit_now = None
+        goal = self.orbit_goal
+        if engine.input.is_mouse_button_down(keys.MOUSE_LEFT):
+            dx, dy = engine.input.get_mouse_delta()
+            goal[0] -= dx * ORBIT_DEGREES_PER_PIXEL
+            goal[1] += dy * ORBIT_DEGREES_PER_PIXEL
+        scroll = engine.input.get_scroll_delta()[1]
+        if scroll:
+            goal[2] *= ORBIT_ZOOM_STEP ** scroll
+        goal[1] = max(-3.0, min(80.0, goal[1]))
+        goal[2] = max(nearest, min(max(farthest, nearest), goal[2]))
+        if self.orbit_now is None:
+            self.orbit_now = list(goal)
+        ease = 1.0 - math.exp(-14.0 * dt)
+        now = self.orbit_now
+        for i in range(3):
+            now[i] += (goal[i] - now[i]) * ease
+        self.pose(orbit(target, now[2], now[0], now[1]), target, 40.0)
 
     def pose(self, eye, target, fov):
         camera = engine.camera_entity
@@ -1251,9 +1319,10 @@ class Controls:
         if self.pressed(keys.L):
             s.next_rig()
         if self.pressed(keys.C):
-            modes = ["turntable", "cinematic", "free"]
+            modes = ["turntable", "cinematic", "orbit", "free"]
             s.camera_mode = modes[(modes.index(s.camera_mode) + 1) % len(modes)]
             s.shot_time = 0.0
+            s.orbit_goal = None
             print("[showroom] camera:", s.camera_mode)
         if self.pressed(keys.G):
             s.next_shadows()
@@ -1288,6 +1357,8 @@ class Controls:
             s.toggle_clearcoat()
         if self.pressed(keys.J):
             s.toggle_area_lights()
+        if self.pressed(keys.U):
+            s.next_diffuser()
         if self.pressed(keys.B):
             s.next_dof()
         s.stats.update(dt)

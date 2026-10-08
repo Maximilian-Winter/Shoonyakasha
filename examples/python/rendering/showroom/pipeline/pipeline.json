@@ -763,6 +763,12 @@
           "type": "float",
           "source": "scene.custom.showroom.areaLights",
           "default": 1.0
+        },
+        {
+          "name": "softboxGrid",
+          "type": "float",
+          "source": "scene.custom.showroom.softboxGrid",
+          "default": -1.0
         }
       ]
     },

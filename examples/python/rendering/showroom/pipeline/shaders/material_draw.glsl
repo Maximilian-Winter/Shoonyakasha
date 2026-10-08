@@ -5,7 +5,7 @@ layout(push_constant) uniform MaterialDraw {
     mat4 model;
     mat4 prevModel;          // model last frame, for motion vectors
     vec4 baseColorFactor;
-    vec4 emissiveFactor;     // rgb, a unused
+    vec4 emissiveFactor;     // rgb; a 2 or more marks a softbox diffuser (softbox.glsl)
     float metallicFactor;
     float roughnessFactor;
     float alphaCutoff;

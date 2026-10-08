@@ -15,6 +15,8 @@
 #ifndef SHOWROOM_AREA_LIGHTS_GLSL
 #define SHOWROOM_AREA_LIGHTS_GLSL
 
+#include "softbox.glsl"
+
 const int LTC_SIZE = 64;
 
 vec4 ltcFetch(ivec2 p) {
@@ -79,6 +81,35 @@ float ltcRectangle(mat3 toCosine, vec3 corners[4]) {
     return abs(sum);
 }
 
+// How the rectangle's pattern (softbox.glsl) looks to a lobe: the light the
+// rectangle sends varies across it, and the lobe sees it blurred. In the
+// cosine's space the lobe is centred on the point of the rectangle's plane
+// nearest the shading point, and spreads as far as the plane is away
+// (Heitz et al. 2016, textured lights). So the pattern is read at that
+// point's uv, filtered over a footprint growing with the distance: a
+// glossy lobe, which the inverse matrix pushes far off, sees the
+// rectangle near and large, and its pattern sharp.
+const float LTC_PATTERN_BLUR = 1.5;    // footprint width in units of the distance
+
+float ltcPattern(mat3 toCosine, vec3 corners[4], vec2 cells) {
+    vec3 p0 = toCosine * corners[0];
+    vec3 e1 = toCosine * corners[1] - p0;   // along u
+    vec3 e2 = toCosine * corners[3] - p0;   // along v
+    vec3 n = cross(e1, e2);
+    float nn = dot(n, n);
+    if (nn <= 1e-12) return 1.0;
+    vec3 foot = n * (dot(n, p0) / nn) - p0;
+    float distance_ = abs(dot(n, p0)) * inversesqrt(nn);
+    // uv of the foot on the parallelogram the rectangle became.
+    float e11 = dot(e1, e1);
+    float e12 = dot(e1, e2);
+    vec3 e2o = e2 - e1 * (e12 / e11);
+    float v = dot(e2o, foot) / dot(e2o, e2o);
+    float u = (dot(e1, foot) - e12 * v) / e11;
+    vec2 width = LTC_PATTERN_BLUR * distance_ / vec2(sqrt(e11), sqrt(dot(e2, e2)));
+    return softboxPattern(vec2(u, v), width, cells);
+}
+
 // The shading frame: x towards the viewer in the surface's plane, z the
 // normal, as the table was fitted.
 mat3 ltcFrame(vec3 N, vec3 V) {
@@ -89,11 +120,13 @@ mat3 ltcFrame(vec3 N, vec3 V) {
     return transpose(mat3(T1, T2, N));
 }
 
-// Light reflected from a rectangle of radiance 1 (centre and half-axes
-// relative to the shading point): diffuse plus specular, and the clear coat
-// over them (coatFactor, coatRoughness, from lights.glsl).
+// Light reflected from a rectangle of average radiance 1 (centre and
+// half-axes relative to the shading point): diffuse plus specular, and the
+// clear coat over them (coatFactor, coatRoughness, from lights.glsl). With
+// `patterned`, the rectangle shines with softbox.glsl's pattern, a grid of
+// `cells` over it, as each lobe sees it.
 vec3 rectangleBRDF(vec3 N, vec3 V, vec3 centre, vec3 halfX, vec3 halfY, vec3 albedo, float metallic,
-                   float roughness, vec3 F0) {
+                   float roughness, vec3 F0, bool patterned, vec2 cells) {
     vec3 corners[4] = vec3[](centre - halfX - halfY, centre + halfX - halfY,
                              centre + halfX + halfY, centre - halfX + halfY);
     float NdotV = clamp(dot(N, V), 1e-4, 1.0);
@@ -101,13 +134,20 @@ vec3 rectangleBRDF(vec3 N, vec3 V, vec3 centre, vec3 halfX, vec3 halfY, vec3 alb
 
     vec2 env = texture(brdfLUT, vec2(NdotV, roughness)).rg;
     vec3 specularAlbedo = F0 * env.x + env.y;
+    mat3 toSpecular = ltcInverse(roughness, NdotV) * frame;
     float diffuse = ltcRectangle(frame, corners);
-    float specular = ltcRectangle(ltcInverse(roughness, NdotV) * frame, corners);
+    float specular = ltcRectangle(toSpecular, corners);
+    if (patterned) {
+        if (diffuse > 0.0) diffuse *= ltcPattern(frame, corners, cells);
+        if (specular > 0.0) specular *= ltcPattern(toSpecular, corners, cells);
+    }
     vec3 result = (1.0 - specularAlbedo) * (1.0 - metallic) * albedo * diffuse + specularAlbedo * specular;
 
     if (coatFactor > 0.0) {
         vec2 coatEnv = texture(brdfLUT, vec2(NdotV, coatRoughness)).rg;
-        float coat = ltcRectangle(ltcInverse(coatRoughness, NdotV) * frame, corners);
+        mat3 toCoat = ltcInverse(coatRoughness, NdotV) * frame;
+        float coat = ltcRectangle(toCoat, corners);
+        if (patterned && coat > 0.0) coat *= ltcPattern(toCoat, corners, cells);
         result = result * (1.0 - coatFresnel(NdotV) * coatFactor)
                + vec3((COAT_F0 * coatEnv.x + coatEnv.y) * coatFactor * coat);
     }

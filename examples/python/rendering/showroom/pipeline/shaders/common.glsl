@@ -117,7 +117,8 @@
     uint sunShadowMode;         \
     float lightSoftness;        \
     float reflections;          \
-    float areaLights;
+    float areaLights;           \
+    float softboxGrid;  /* -1 even softboxes, 0 their hotspot, n a grid of n cells across */
 
 // ── Normals ─────────────────────────────────────────────────────
 // Octahedral encoding of a unit vector into two values in -1..1.

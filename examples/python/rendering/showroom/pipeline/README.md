@@ -57,6 +57,7 @@ The pipeline starts as `high`. As in the default pipeline, ray tracing covers on
 | `lightSoftness` | 1.0 | Scales every light's source radius in the shadow rays |
 | `reflections` | 1.0 | Strength of ray-traced reflections; 0 turns them off |
 | `areaLights` | 1.0 | 1 shades lights with a rectangle as the rectangle, 0 as their sphere, for comparing |
+| `softboxGrid` | -1.0 | The rectangles' pattern: -1 evenly lit, 0 a softbox diffuser's hotspot, and above that a fabric grid of that many cells across the short side |
 
 `default.toneMapper` (`set_custom_uint`) picks the tone curve: 0 the default pipeline's ACES fit, 1 Khronos PBR Neutral, which keeps base colours as authored and only compresses highlights, and 2 AgX, which rolls very bright light off towards white without shifting its hue. The showroom starts on AgX: with auto-exposure aiming for mid-grey it keeps the mid-tones where they are, where PBR Neutral, made for exposures that put white at 1, comes out dark, and ACES adds strong contrast.
 
@@ -125,6 +126,8 @@ A softbox is a rectangle, and on glossy paint its highlight is the rectangle, be
 
 **Shadows:** with ray queries, each pixel traces one ray towards a random point of the rectangle, and TAA averages them into a penumbra the rectangle's shape: long beside a long strip light, short across it. Without them, the atlas's shadow map from the light's centre shadows it, as before.
 
+**Softbox diffusers:** with `softboxGrid` 0 or more, a rectangle shines with a softbox's pattern (`softbox.glsl`): brighter in the middle, and with a grid of black fabric strips over it. The pattern averages to 1, so it moves the light around the panel without changing how much there is. Each of the three integrals reads it where its lobe looks at the rectangle and as blurred as the lobe is wide: the point of the rectangle's plane nearest the shading point, in the cosine's space, filtered over a footprint growing with that point's distance (Heitz et al.'s textured lights). The pattern is box-filtered analytically for any footprint, so it needs no texture or mip chain: a mirror-like coat shows the grid, a rough floor the hotspot, matte surfaces the average. The panel's own mesh draws the same pattern: a material whose `emissiveFactor.a` is 2 or more is a diffuser, with a grid of `a - 2` cells (glTF emissive materials have 1).
+
 **Accuracy:** the diffuse integral is exact. The specular one is within a few percent of the BRDF's own integral where highlights are, and up to about a quarter off for rough surfaces seen at grazing angles, where both are dim. The table's grazing fits are its weakest, as in the paper's.
 
 ## Ray-traced lights and reflections
@@ -151,6 +154,6 @@ The pipeline is generated from the default one plus the additions above. Edit `p
 - `LightingRT`, in `lighting_rt.frag`, `lighting_body.glsl` and `rt_lights.glsl`
 - `Overlay`, in `overlay.vert` and `overlay.frag`
 - `DepthOfField` and `Accumulate`, in `depth_of_field.frag` and `accumulate.comp`
-- Rectangular area lights, in `area_lights.glsl`, from the `LTC` buffer (`ltc.bin`, made by `ltc_fit.py`)
+- Rectangular area lights, in `area_lights.glsl`, from the `LTC` buffer (`ltc.bin`, made by `ltc_fit.py`), with the softbox pattern in `softbox.glsl`
 
-**Shaders changed:** `lights.glsl` (sphere and rectangle lights, inner cones, clear coat), `surface.glsl` (clear coat maps), `forward_body.glsl`, `shadow_rt.frag`, `tonemap.frag` and `common.glsl`.
+**Shaders changed:** `lights.glsl` (sphere and rectangle lights, inner cones, clear coat), `surface.glsl` (clear coat maps), `gbuffer_body.glsl` (softbox diffusers), `forward_body.glsl`, `shadow_rt.frag`, `tonemap.frag` and `common.glsl`.
