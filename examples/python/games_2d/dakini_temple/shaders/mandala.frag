@@ -266,10 +266,10 @@ float palaceOutline(vec2 p) {
     return min(body, min(porch, lintel));
 }
 
-vec4 palace(vec2 p, Palette pal) {
-    vec4 acc = vec4(0.0);
+// Four-gated palace: five-coloured walls around the four coloured quarters.
+void palaceWalls(inout vec4 acc, vec2 p) {
     float outline = palaceOutline(p);
-    if (outline > 0.05) return acc;
+    if (outline > 0.05) return;
 
     // Five walls, outermost first, as successively inset copies of the outline.
     const float WALL = 0.042;
@@ -290,8 +290,108 @@ vec4 palace(vec2 p, Palette pal) {
     over(acc, ground, fill(inner));
     over(acc, GOLD, stroke(inner, 0.008));
     over(acc, GOLD * 0.8, stroke((a.x - a.y) * 0.7071, 0.006) * fill(inner));
+}
 
-    // Circular courtyard for the lotus, ringed with pearls.
+// Eight charnel grounds in a ring between radius 1.86 and 2.86. Each
+// ground is drawn upright, its ground line on the inner edge and its sky
+// towards the rim, with a tree, a stupa, a burning pyre and scattered skulls.
+// The dividers lie at the angles of the eight butter lamps; odd grounds are
+// mirrored and their trees change colour so neighbours differ.
+void charnelGrounds(inout vec4 acc, vec2 p) {
+    const float INNER = 1.86;
+    const float OUTER = 2.86;
+    const float COUNT = 8.0;
+    float r = length(p);
+    if (r > OUTER + 0.05) return;
+
+    float sector = TAU / COUNT;
+    float index = mod(floor((atan(p.y, p.x) + 0.5 * sector) / sector), COUNT);
+    vec2 f = foldPolar(p, COUNT);
+    // x runs across the ground, y from the ground line outward.
+    // SCENE_SCALE world units per scene unit, so a ground fills the band.
+    const float SCENE_SCALE = 1.45;
+    vec2 q = vec2(f.y, f.x - INNER) / SCENE_SCALE;
+    if (mod(index, 2.0) > 0.5) q.x = -q.x;
+
+    float ring = abs(r - 0.5 * (INNER + OUTER)) - 0.5 * (OUTER - INNER);
+    float inRing = fill(ring);
+
+    // Pyre position, used for the flames and for the firelight around them.
+    vec2 fq = q - vec2(0.0, 0.12);
+    float firelight = exp(-dot(fq, fq) * 9.0);
+
+    // Earth below, smoky night above, both lit by the pyre.
+    float n = fbm(p * 3.0 + vec2(index * 7.3, scene.time * 0.05));
+    vec3 earth = mix(vec3(0.16, 0.04, 0.03), vec3(0.38, 0.12, 0.06), n);
+    vec3 smoke = mix(vec3(0.08, 0.02, 0.07), vec3(0.28, 0.07, 0.10), pow(n, 2.0));
+    vec3 col = mix(earth, smoke, smoothstep(0.10, 0.30, q.y));
+    col += vec3(0.55, 0.14, 0.03) * firelight;
+    over(acc, col, inRing);
+
+    // Tree on the left: trunk, two branches and a canopy of three lobes.
+    vec2 tq = q - vec2(-0.32, 0.0);
+    float trunk = sdBox(tq - vec2(0.0, 0.20), vec2(0.022, 0.18));
+    float branchL = sdBox(rotate(tq - vec2(-0.06, 0.36), 0.7), vec2(0.012, 0.07));
+    float branchR = sdBox(rotate(tq - vec2(0.06, 0.38), -0.7), vec2(0.012, 0.07));
+    float wood = min(trunk, min(branchL, branchR));
+    float canopy = min(sdEllipse(tq - vec2(0.0, 0.56), vec2(0.17, 0.12)),
+                       min(sdEllipse(tq - vec2(-0.12, 0.47), vec2(0.11, 0.08)),
+                           sdEllipse(tq - vec2(0.12, 0.48), vec2(0.11, 0.08))));
+    vec3 leaves = mod(index, 2.0) < 0.5 ? vec3(0.06, 0.24, 0.10) : vec3(0.30, 0.08, 0.10);
+    leaves *= 0.75 + 0.5 * fbm(tq * 18.0 + index);
+    over(acc, vec3(0.16, 0.08, 0.04), fill(wood) * inRing);
+    over(acc, leaves, fill(canopy) * inRing);
+    over(acc, vec3(0.01), stroke(canopy, 0.004) * inRing);
+
+    // Stupa on the right: two steps, a dome, a spire of rings and a finial.
+    vec2 sq = q - vec2(0.32, 0.0);
+    float stupa = min(sdBox(sq - vec2(0.0, 0.08), vec2(0.12, 0.03)),
+                      sdBox(sq - vec2(0.0, 0.14), vec2(0.09, 0.03)));
+    stupa = min(stupa, sdEllipse(sq - vec2(0.0, 0.25), vec2(0.085, 0.09)));
+    stupa = min(stupa, sdBox(sq - vec2(0.0, 0.40), vec2(0.022, 0.08)));
+    stupa = min(stupa, length(sq - vec2(0.0, 0.50)) - 0.025);
+    vec3 plaster = mix(BONE * 0.55, BONE, smoothstep(-0.1, 0.1, sq.x + 0.05));
+    over(acc, plaster + vec3(0.25, 0.06, 0.0) * firelight, fill(stupa) * inRing);
+    over(acc, vec3(0.08, 0.03, 0.02), stroke(stupa, 0.004) * inRing);
+    float spireRings = stroke(fract((sq.y - 0.32) * 25.0) - 0.5, 0.12) * fill(sdBox(sq - vec2(0.0, 0.40), vec2(0.022, 0.08)));
+    over(acc, DEEP_GOLD, spireRings * inRing);
+
+    // Pyre in the middle: crossed logs and flames rising from them.
+    float logs = min(sdBox(rotate(q - vec2(0.0, 0.06), 0.15), vec2(0.12, 0.018)),
+                     sdBox(rotate(q - vec2(0.0, 0.09), -0.15), vec2(0.10, 0.018)));
+    over(acc, vec3(0.12, 0.05, 0.02), fill(logs) * inRing);
+    float heat = fbm(fq * vec2(9.0, 6.0) - vec2(0.0, scene.time * 2.2) + index * 5.1) * 1.3
+               - length(fq * vec2(5.5, 2.4)) * 1.15;
+    heat *= smoothstep(-0.04, 0.02, fq.y);
+    vec3 flame = mix(vec3(0.60, 0.04, 0.01), vec3(1.00, 0.45, 0.06), smoothstep(0.0, 0.25, heat));
+    flame = mix(flame, vec3(1.00, 0.88, 0.50), smoothstep(0.30, 0.55, heat));
+    over(acc, flame, smoothstep(0.0, 0.06, heat) * inRing);
+
+    // Skulls along the ground line, a few per ground.
+    const float CELLS = 14.0;
+    float cell = floor(q.x * CELLS);
+    float h = hash(vec2(cell, index));
+    vec2 skull = q - vec2((cell + 0.5) / CELLS, 0.035);
+    float skullD = length(skull * vec2(1.0, 1.15)) - 0.016;
+    float present = step(0.62, h) * step(0.16, abs(q.x));
+    over(acc, BONE * (0.7 + 0.3 * firelight), fill(skullD) * present * inRing);
+    over(acc, vec3(0.05), fill(length(vec2(abs(skull.x) - 0.006, skull.y)) - 0.004) * present * inRing);
+
+    // Dividers between the grounds and gold rims on both edges.
+    float halfSector = 0.5 * sector;
+    float divider = f.x * sin(halfSector) - abs(f.y) * cos(halfSector);
+    over(acc, GOLD * 0.85, stroke(divider, 0.008) * inRing);
+    over(acc, GOLD, stroke(r - OUTER, 0.012));
+}
+
+// The deity's dwelling between the petal ring and the lotus: a four-gated
+// palace, or for Vajrayogini the eight charnel grounds. Both surround a
+// circular courtyard for the lotus, ringed with pearls.
+vec4 palace(vec2 p, Palette pal, int deity) {
+    vec4 acc = vec4(0.0);
+    if (deity == DEITY_VAJRAYOGINI) charnelGrounds(acc, p);
+    else                            palaceWalls(acc, p);
+
     float r = length(p);
     over(acc, pal.courtyard, fill(r - 1.86));
     over(acc, GOLD, stroke(r - 1.86, 0.012));
@@ -482,7 +582,7 @@ void main() {
     else if (layer == LAYER_FIRE)     color = fireRing(p, pal);
     else if (layer == LAYER_VAJRA)    color = vajraRing(p, pal);
     else if (layer == LAYER_PETALS)   color = petalRing(p, pal);
-    else if (layer == LAYER_PALACE)   color = palace(p, pal);
+    else if (layer == LAYER_PALACE)   color = palace(p, pal, deity);
     else if (layer == LAYER_LOTUS)    color = lotus(p, pal);
     else if (layer == LAYER_CENTRE)   color = centre(p, deity);
     else if (layer == LAYER_GLOW)     color = glow(p, size);
