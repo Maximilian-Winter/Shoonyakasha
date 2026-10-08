@@ -430,7 +430,7 @@ def find_models():
     else:
         cars = [e for e in catalogue.CATALOGUE if e.kind == "car"]
         wanted = [e.name for e in sorted(cars, key=lambda e: exhibit_year(e))]
-    models = []
+    models, missing = [], []
     for name in wanted:
         entry = catalogue.BY_NAME.get(name)
         if entry is None:
@@ -439,10 +439,17 @@ def find_models():
         directory = os.path.join(str(ROOT), "showroom", name)
         path = os.path.join(directory, "model.gltf")
         if not os.path.exists(path):
+            missing.append(name)
             continue
         with open(os.path.join(directory, "showroom.json"), encoding="utf-8") as f:
             info = json.load(f)
         models.append(Model(entry, path, (info["boundsMin"], info["boundsMax"]), info["credit"]))
+    if missing and models:
+        print("[museum] Not fetched yet, so not shown: %s\n"
+              "    looked in %s\n"
+              "    fetch them with: python tools/fetch_assets.py %s"
+              % (", ".join(missing), os.path.join(str(ROOT), "showroom"),
+                 " ".join("showroom/" + n for n in missing)))
     for extra in args.extra:
         length, _, path = extra.rpartition("=") if "=" in extra and not os.path.exists(extra) else ("", "", extra)
         path = os.path.abspath(path)
