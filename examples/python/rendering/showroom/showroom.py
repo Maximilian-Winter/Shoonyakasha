@@ -6,9 +6,10 @@ pipeline with:
 - the sun's shadows from a virtual shadow map: 8 clipmap levels of 4096 x
   4096 virtual texels, of which only the 128 x 128 pages that visible pixels
   need are rendered, into a cached pool. Close up, a texel is a millimetre.
-- spot and point lights as glowing spheres: highlights the size of the
-  softbox, and soft shadows from rays towards random points of the sphere,
-  where the GPU has ray queries.
+- softboxes as rectangular area lights, by linearly transformed cosines:
+  highlights with the softbox's shape, stretched along curved paint as a
+  real panel's are, and soft shadows from rays towards random points of the
+  panel, where the GPU has ray queries. Spotlights are glowing spheres.
 
 Models come from Sketchfab (see README.md for their credits). Fetch them once
 with `python tools/fetch_assets.py showroom` (needs a Sketchfab API token);
@@ -25,6 +26,7 @@ Keys:
     T              turntable on or off
     K              next paint colour (cars)
     X              clear coat on or off (the lacquer over car paint)
+    J              softboxes as rectangles or as spheres (before and after)
     M              next tone mapper: AgX, PBR Neutral, ACES
     B              depth of field: off, f/2.8, f/0.8 (more than a real lens),
                    focused where the camera looks
@@ -110,6 +112,8 @@ def parse_args():
     parser.add_argument("--tonemapper", choices=list(TONE_MAPPERS), default="agx",
                         help="tone curve: AgX, Khronos PBR Neutral or ACES")
     parser.add_argument("--no-clearcoat", action="store_true", help="no clear coat over the paint")
+    parser.add_argument("--sphere-lights", action="store_true",
+                        help="shade softboxes as spheres, not as their rectangles")
     parser.add_argument("--screenshots", metavar="DIR", help="save stills of every model and exit")
     parser.add_argument("--record", metavar="FILE", help="record a cinematic tour (.mp4/.mkv) and exit")
     parser.add_argument("--seconds", type=float, default=0.0,
@@ -612,6 +616,10 @@ class Stage:
             scene.set_light_cone(light, spec.cone[0], spec.cone[1])
             scene.set_light_source_radius(light, spec.radius * size)
             scene.set_light_cast_shadows(light, spec.shadows)
+            # A softbox lights as its panel: the pipeline shades the
+            # rectangle, the sphere stays for showroom.areaLights = 0.
+            panel = (spec.softbox[0] * size, spec.softbox[1] * size) if spec.softbox else (0.0, 0.0)
+            scene.set_light_source_size(light, *panel)
             visible = spec.softbox is not None
             for e in parts:
                 scene.set_visible(e, visible)
@@ -927,6 +935,7 @@ class Showroom:
         self.preset = "high"
         self.paint = 0
         self.clearcoat = not args.no_clearcoat
+        self.area_lights = not args.sphere_lights
         self.tonemapper = args.tonemapper
         self.floor_white = False
         self.time = 0.0
@@ -959,6 +968,7 @@ class Showroom:
         engine.set_custom_float("default.sunAngle", 0.35)
         self.reflections = not args.no_reflections
         engine.set_custom_float("showroom.reflections", 1.0 if self.reflections else 0.0)
+        engine.set_custom_float("showroom.areaLights", 1.0 if self.area_lights else 0.0)
         self.select(0)
 
     def select(self, index):
@@ -993,9 +1003,10 @@ class Showroom:
         engine.set_custom_uint("showroom.vsmEpoch", self.epoch)
 
     def update_status(self):
-        self.overlay.set_status("%s  |  %s  |  %s%s%s" % (
+        self.overlay.set_status("%s  |  %s  |  %s%s%s%s" % (
             self.rig.label, SHADOW_LABELS.get(self.preset, self.preset), TONE_MAPPERS[self.tonemapper][1],
             "" if self.clearcoat else "  |  no clear coat",
+            "" if self.area_lights else "  |  sphere lights",
             "  |  f/%g" % self.dof if self.dof > 0.0 else ""))
 
     def next_dof(self):
@@ -1036,6 +1047,12 @@ class Showroom:
                 model.apply_coat(self.clearcoat)
         self.update_status()
         print("[showroom] clear coat", "on" if self.clearcoat else "off")
+
+    def toggle_area_lights(self):
+        self.area_lights = not self.area_lights
+        engine.set_custom_float("showroom.areaLights", 1.0 if self.area_lights else 0.0)
+        self.update_status()
+        print("[showroom] softboxes lit as", "rectangles" if self.area_lights else "spheres")
 
     # Frame by frame ------------------------------------------------------
 
@@ -1269,6 +1286,8 @@ class Controls:
             s.next_tonemapper()
         if self.pressed(keys.X):
             s.toggle_clearcoat()
+        if self.pressed(keys.J):
+            s.toggle_area_lights()
         if self.pressed(keys.B):
             s.next_dof()
         s.stats.update(dt)

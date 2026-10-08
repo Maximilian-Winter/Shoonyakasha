@@ -491,6 +491,18 @@ void SceneAPI::setLightSourceRadius(EntityHandle entity, float radius) {
     if (l) l->sourceRadius = glm::max(radius, 0.0f);
 }
 
+glm::vec2 SceneAPI::getLightSourceSize(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return glm::vec2(0.0f);
+    auto* l = m_impl->registry.try_get<ECS::LightComponent>(toEntt(entity));
+    return l ? l->sourceSize : glm::vec2(0.0f);
+}
+
+void SceneAPI::setLightSourceSize(EntityHandle entity, float width, float height) {
+    if (!m_impl->valid(entity)) return;
+    auto* l = m_impl->registry.try_get<ECS::LightComponent>(toEntt(entity));
+    if (l) l->sourceSize = glm::max(glm::vec2(width, height), glm::vec2(0.0f));
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Material Access
 // ═══════════════════════════════════════════════════════════════

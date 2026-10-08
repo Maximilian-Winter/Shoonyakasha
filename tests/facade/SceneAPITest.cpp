@@ -355,6 +355,19 @@ TEST_F(SceneAPIFixture, Light_SetGetSourceRadius) {
     EXPECT_FLOAT_EQ(api->getLightSourceRadius(entity), 0.0f);
 }
 
+TEST_F(SceneAPIFixture, Light_SetGetSourceSize) {
+    auto entity = api->createEntity("Light");
+    api->addComponent(entity, "Light");
+    EXPECT_FLOAT_EQ(api->getLightSourceSize(entity).x, 0.0f);
+    EXPECT_FLOAT_EQ(api->getLightSourceSize(entity).y, 0.0f);
+    api->setLightSourceSize(entity, 2.2f, 1.4f);
+    EXPECT_FLOAT_EQ(api->getLightSourceSize(entity).x, 2.2f);
+    EXPECT_FLOAT_EQ(api->getLightSourceSize(entity).y, 1.4f);
+    api->setLightSourceSize(entity, -1.0f, 0.5f);
+    EXPECT_FLOAT_EQ(api->getLightSourceSize(entity).x, 0.0f);
+    EXPECT_FLOAT_EQ(api->getLightSourceSize(entity).y, 0.5f);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Material Access
 // ═══════════════════════════════════════════════════════════════

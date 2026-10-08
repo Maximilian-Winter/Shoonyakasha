@@ -104,7 +104,7 @@ A field `source` is a dot-path. A layout-level `source` is an initialization obj
 | `scene.environment` | `irradianceMap`, `prefilterMap`, `brdfLUT`, `environmentMap` |
 | `scene.time` | `elapsed`, `delta`, `frame` |
 | `scene.screen` | `width`, `height`, `resolution`: the window's; `renderWidth`, `renderHeight`, `renderResolution`: the size the scene renders at, the window's times the [render scale](../guides/frame-capture.md#supersampling). Passes that write the swapchain run at the window's size, the others at the render size |
-| `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` (w: cos of the outer cone), `source` (x: source radius, y: 1 when it casts shadows, z: cos of the inner cone) |
+| `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` (w: cos of the outer cone), `source` (x: source radius, y: 1 when it casts shadows, z: cos of the inner cone), `shape` (the emitting rectangle facing the light's direction: xyz its right axis times half its width, w half its height; zero without one) |
 | `scene.shadows.sun` | `enabled`, `cascadeCount`, `splits`, `texelWorldSize`, `lightIndex`, `direction`; indexed `scene.shadows.sun.cascades[N].viewProj`. See [sun shadow cascades](../guides/lighting-and-ibl.md#sun-shadow-cascades) |
 | `scene.shadows.spot`, `scene.shadows.point` | `count`; indexed `scene.shadows.spot[N].viewProj`, `lightIndex`, `params`, `rect`; `scene.shadows.point[N].lightIndex`, `positionFar`, `depthParams`; `scene.shadows.point.faces[N].viewProj`, `rect` with N = slot × 6 + face. See [spot and point light shadows](../guides/lighting-and-ibl.md#spot-and-point-light-shadows) |
 | `scene.custom` | Values explicitly published under a key by the application |
@@ -232,7 +232,7 @@ A preset switches passes and sets `scene.custom` values in one call, `apply_pipe
 
 ## Initialization, memory, and readback
 
-Layout `source` accepts `type` (`initializer` by default), `seed` (42), and per-field initializers under `fields`: `constant`, `randomRange` (`min`/`max`), `gaussian` (`mean`/`stddev`), `grid` (`dimensions`/`origin`/`spacing`/`w`), or `sphere` (`center`/`radius`/`mode`/`w`). These initialize numeric components, not arbitrary structs. `type: file` uses a binary `path`; `type: buffer_ref` references a shared `ref` with `frequency` (default `per_frame`).
+Layout `source` accepts `type` (`initializer` by default), `seed` (42), and per-field initializers under `fields`: `constant`, `randomRange` (`min`/`max`), `gaussian` (`mean`/`stddev`), `grid` (`dimensions`/`origin`/`spacing`/`w`), or `sphere` (`center`/`radius`/`mode`/`w`). These initialize numeric components, not arbitrary structs. `type: file` uses a binary `path`, exactly `elementCount` elements long, which resolves beside the pipeline JSON when the file is there, as shader paths do, and against the working directory otherwise; `type: buffer_ref` references a shared `ref` with `frequency` (default `per_frame`).
 
 `memory` selects `location` (`device_local`, `host_visible`, `host_coherent`), `staging` (`auto`, `persistent`, `none`), and `transferDirection` (`gpu_only`, `cpu_to_gpu`, `gpu_to_cpu`, `bidirectional`). Defaults are the first value in each list.
 

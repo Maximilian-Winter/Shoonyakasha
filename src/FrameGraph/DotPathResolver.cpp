@@ -98,6 +98,15 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
             0.0f
         );
 
+        // The emitting rectangle. getRight() and getUp() leave out the roll,
+        // which turns the right axis towards the up one.
+        packed.shape = glm::vec4(0.0f);
+        if (light.sourceSize.x > 0.0f && light.sourceSize.y > 0.0f) {
+            const glm::vec3 right = transform.getRight() * std::cos(transform.rotation.z) +
+                                    transform.getUp() * std::sin(transform.rotation.z);
+            packed.shape = glm::vec4(right * (0.5f * light.sourceSize.x), 0.5f * light.sourceSize.y);
+        }
+
         lightCount++;
     }
 
@@ -347,6 +356,7 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
                     if (parts[1] == "directionRange")  return ResolvedValue(packed.directionRange);
                     if (parts[1] == "attenuation")     return ResolvedValue(packed.attenuation);
                     if (parts[1] == "source")          return ResolvedValue(packed.source);
+                    if (parts[1] == "shape")           return ResolvedValue(packed.shape);
                 }
             }
         }

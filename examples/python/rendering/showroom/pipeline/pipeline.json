@@ -1,7 +1,7 @@
 {
   "version": 3,
   "name": "ShowroomPipeline",
-  "description": "The default pipeline extended for a model showroom: the sun's shadows from a virtual shadow map (an 8-level clipmap of 4096x4096 virtual texels, only the pages visible pixels need backed by a cached physical pool), sphere lights with soft ray-traced shadows where the device has ray queries, and the default pipeline's cascades kept as a preset to compare against. Settings are scene.custom.default.* and scene.custom.showroom.* values; see README.md.",
+  "description": "The default pipeline extended for a model showroom: the sun's shadows from a virtual shadow map (an 8-level clipmap of 4096x4096 virtual texels, only the pages visible pixels need backed by a cached physical pool), sphere and rectangle lights (rectangles by linearly transformed cosines, from the fitted table ltc.bin) with soft ray-traced shadows where the device has ray queries, and the default pipeline's cascades kept as a preset to compare against. Settings are scene.custom.default.* and scene.custom.showroom.* values; see README.md.",
   "vertexFormats": {
     "skinned": {
       "attributes": [
@@ -159,6 +159,12 @@
           "name": "lightsSource",
           "type": "vec4",
           "source": "scene.lights[i].source",
+          "arrayCount": 128
+        },
+        {
+          "name": "lightsShape",
+          "type": "vec4",
+          "source": "scene.lights[i].shape",
           "arrayCount": 128
         }
       ]
@@ -751,6 +757,12 @@
           "type": "float",
           "source": "scene.custom.showroom.reflections",
           "default": 1.0
+        },
+        {
+          "name": "areaLights",
+          "type": "float",
+          "source": "scene.custom.showroom.areaLights",
+          "default": 1.0
         }
       ]
     },
@@ -823,6 +835,24 @@
           "source": "const.0"
         }
       ]
+    },
+    "LTC": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 4096,
+      "fields": [
+        {
+          "name": "inverseMatrix",
+          "type": "vec4"
+        }
+      ],
+      "source": {
+        "type": "file",
+        "path": "ltc.bin"
+      },
+      "memory": {
+        "location": "device_local"
+      }
     }
   },
   "entityDataBindings": {
@@ -950,6 +980,15 @@
           "name": "lightClusters",
           "autoBindResource": "lightClusters",
           "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 4,
+          "type": "storage_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "LtcTable",
+          "autoBindBuffer": "LTC"
         }
       ]
     },

@@ -437,6 +437,15 @@ cdef class Scene:
         rays use it for penumbrae; zero is a hard-edged point light."""
         self._ptr.setLightSourceRadius(entity, radius)
 
+    def get_light_source_size(self, uint32_t entity):
+        return _vec2_to_tuple(self._ptr.getLightSourceSize(entity))
+
+    def set_light_source_size(self, uint32_t entity, float width, float height):
+        """Width and height of the light's emitting rectangle, facing its
+        forward axis with its width along its right axis. Pipelines with area
+        lights shade it as that rectangle; (0, 0), the default, is none."""
+        self._ptr.setLightSourceSize(entity, width, height)
+
     # ── Material ──────────────────────────────────────────────
 
     def set_material_float(self, uint32_t entity, str param, float value):

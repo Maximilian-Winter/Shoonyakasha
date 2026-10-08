@@ -170,6 +170,12 @@ struct LightComponent {
     // true point. Pipelines that trace shadow rays use it for soft shadows.
     float sourceRadius = 0.0f;
 
+    // Width and height of an emitting rectangle (point, spot) in world
+    // units: it faces the light's forward axis, its width along the light's
+    // right axis. Zero is no rectangle. Pipelines that shade area lights use
+    // it in place of the sphere.
+    glm::vec2 sourceSize{0.0f};
+
     // Shadow casting
     bool castShadows = false;
     uint32_t shadowMapSize = 1024;

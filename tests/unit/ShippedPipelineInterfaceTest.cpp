@@ -142,3 +142,35 @@ TEST(PipelineShaderPaths, RelativePathsOnlyResolveBesideTheJsonWhenTheFileIsTher
     EXPECT_EQ(desc.fragmentShader, "shaders/elsewhere.frag.spv");   // left for the working directory
     fs::remove_all(dir);
 }
+
+TEST(PipelineShaderPaths, BufferFilesResolveBesideTheJsonWhenTheFileIsThere) {
+    const fs::path dir = fs::temp_directory_path() / "sk_buffer_path_test";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::ofstream(dir / "table.bin") << "x";
+
+    auto layout = [](const char* path) {
+        return nlohmann::json{{"usage", "storage_buffer"}, {"packing", "std430"}, {"elementCount", 1},
+                              {"fields", {{{"name", "v"}, {"type", "vec4"}}}},
+                              {"source", {{"type", "file"}, {"path", path}}}};
+    };
+    const nlohmann::json graph = {
+        {"version", 1},
+        {"bufferLayouts", {{"Present", layout("table.bin")}, {"Elsewhere", layout("data/elsewhere.bin")}}},
+        {"resources", {{{"name", "swapchain"}, {"kind", "image"}, {"imported", true}}}},
+        {"passes", {{{"name", "P"}, {"type", "graphics"},
+                     {"outputs", {{{"resource", "swapchain"}, {"usage", "present"}}}}}}}
+    };
+    std::ofstream(dir / "graph.json") << graph.dump();
+
+    FrameGraphBuilder builder;
+    loadGraphFromFile(builder, (dir / "graph.json").string());
+    for (const auto& desc : builder.getBufferLayouts()) {
+        if (desc.name == "Present") {
+            EXPECT_TRUE(fs::equivalent(desc.initConfig.filePath, dir / "table.bin"));
+        } else {
+            EXPECT_EQ(desc.initConfig.filePath, "data/elsewhere.bin");   // left for the working directory
+        }
+    }
+    fs::remove_all(dir);
+}

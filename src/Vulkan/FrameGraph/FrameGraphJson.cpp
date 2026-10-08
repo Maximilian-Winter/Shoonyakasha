@@ -1710,23 +1710,42 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
 
 namespace {
 
-/// Relative shader paths that name a file beside the pipeline JSON become
-/// paths to that file, so a pipeline and its shaders load together from any
-/// working directory. Paths that do not exist there are left as they are and
-/// resolve against the working directory, as they always have.
+/// A relative path in `value` that names a file in `dir` becomes the path to
+/// that file. Others are left as they are.
+void resolvePathAgainst(nlohmann::json& value, const std::filesystem::path& dir) {
+    if (!value.is_string()) return;
+    const std::filesystem::path path = value.get<std::string>();
+    if (path.empty() || path.is_absolute()) return;
+    std::error_code ec;
+    const std::filesystem::path beside = dir / path;
+    if (std::filesystem::exists(beside, ec)) {
+        value = beside.lexically_normal().generic_string();
+    }
+}
+
+/// Relative shader paths, and the paths of buffer layouts filled from a file
+/// (`"source": {"type": "file"}`), that name a file beside the pipeline JSON
+/// become paths to that file, so a pipeline loads with its shaders and data
+/// from any working directory. Paths that do not exist there are left as
+/// they are and resolve against the working directory, as they always have.
 void resolveShaderPathsAgainst(nlohmann::json& json, const std::filesystem::path& dir) {
-    if (dir.empty() || !json.contains("passes") || !json["passes"].is_array()) return;
-    for (auto& pass : json["passes"]) {
-        if (!pass.is_object() || !pass.contains("pipeline") || !pass["pipeline"].is_object()) continue;
-        auto& pipe = pass["pipeline"];
-        for (const char* key : {"vertexShader", "fragmentShader", "computeShader"}) {
-            if (!pipe.contains(key) || !pipe[key].is_string()) continue;
-            const std::filesystem::path shader = pipe[key].get<std::string>();
-            if (shader.empty() || shader.is_absolute()) continue;
-            std::error_code ec;
-            const std::filesystem::path beside = dir / shader;
-            if (std::filesystem::exists(beside, ec)) {
-                pipe[key] = beside.lexically_normal().generic_string();
+    if (dir.empty()) return;
+    if (json.contains("passes") && json["passes"].is_array()) {
+        for (auto& pass : json["passes"]) {
+            if (!pass.is_object() || !pass.contains("pipeline") || !pass["pipeline"].is_object()) continue;
+            auto& pipe = pass["pipeline"];
+            for (const char* key : {"vertexShader", "fragmentShader", "computeShader"}) {
+                if (pipe.contains(key)) resolvePathAgainst(pipe[key], dir);
+            }
+        }
+    }
+    if (json.contains("bufferLayouts") && json["bufferLayouts"].is_object()) {
+        for (auto& item : json["bufferLayouts"].items()) {
+            auto& layout = item.value();
+            if (!layout.is_object() || !layout.contains("source") || !layout["source"].is_object()) continue;
+            auto& source = layout["source"];
+            if (source.value("type", std::string{}) == "file" && source.contains("path")) {
+                resolvePathAgainst(source["path"], dir);
             }
         }
     }

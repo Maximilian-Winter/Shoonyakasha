@@ -4,6 +4,7 @@ A copy of the [default pipeline](../../../../../python/shoonyakasha/pipelines/de
 
 - **a virtual shadow map for the sun**, in place of the cascades: 8 clipmap levels of 4096² virtual texels around the camera, in pages of 128². Only the pages that visible pixels need are rendered, into an 8192² pool of 4096 physical pages, and a page keeps its depth from frame to frame until something invalidates it.
 - **sphere lights**: point and spot lights with a source radius. Their highlights take the light's size, and where the device has ray queries, their shadows come from a ray per pixel towards a random point of the sphere, which TAA averages into a penumbra as wide as the light.
+- **rectangular area lights**: point and spot lights with a source size are shaded as that rectangle by [linearly transformed cosines](#rectangular-area-lights), from a table fitted once and loaded from a file. Their highlights take the rectangle's shape, and their ray-traced shadows aim at random points of it.
 - **spot cones** with an inner and an outer angle.
 - **ray-traced reflections** of what is on screen, in glossy surfaces.
 - **an overlay pass**: screen-space panels and text over the finished image, as in [sprite_ui_test](../../../games_2d/sprite_ui_test).
@@ -20,6 +21,8 @@ sk.shaders.compile_dir("examples/python/rendering/showroom/pipeline/shaders")   
 Both were added for it:
 
 - **Light source data.** `LightComponent::sourceRadius` and the dot-path `scene.lights[N].source`: x the radius, y 1 when the light casts shadows, z the cosine of the inner cone. Python sets them with `scene.set_light_source_radius(light, r)` and `scene.set_light_cone(light, inner, outer)`, in degrees.
+- **Light rectangles.** `LightComponent::sourceSize` and the dot-path `scene.lights[N].shape`: xyz the light's right axis times half the width, w half the height, zero for a light without one. Python sets it with `scene.set_light_source_size(light, width, height)`.
+- **Data files beside the pipeline.** A buffer layout filled from a file (`"source": {"type": "file", "path": "ltc.bin"}`) finds it beside `pipeline.json`, as shaders are found.
 - **Fragment-stage atomics.** `fragmentStoresAndAtomics` is enabled where the device has it, which every desktop GPU does. The virtual shadow map's casters write their depth with atomics.
 
 ## Presets
@@ -53,6 +56,7 @@ The pipeline starts as `high`. As in the default pipeline, ray tracing covers on
 | `sunShadowMode` | 1 | 1 the virtual shadow map, 0 the cascades; presets set it |
 | `lightSoftness` | 1.0 | Scales every light's source radius in the shadow rays |
 | `reflections` | 1.0 | Strength of ray-traced reflections; 0 turns them off |
+| `areaLights` | 1.0 | 1 shades lights with a rectangle as the rectangle, 0 as their sphere, for comparing |
 
 `default.toneMapper` (`set_custom_uint`) picks the tone curve: 0 the default pipeline's ACES fit, 1 Khronos PBR Neutral, which keeps base colours as authored and only compresses highlights, and 2 AgX, which rolls very bright light off towards white without shifting its hue. The showroom starts on AgX: with auto-exposure aiming for mid-grey it keeps the mid-tones where they are, where PBR Neutral, made for exposures that put white at 1, comes out dark, and ACES adds strong contrast.
 
@@ -109,11 +113,25 @@ A frame runs four steps between the G-buffer and the shadow mask:
 - **Moving casters must be declared.** The map cannot know what moved: the application gives their bounding spheres (`vsmDirty0..3`), or bumps `vsmEpoch`. A skinned character walking through the scene needs a sphere too, or its shadow lags.
 - **Depth range.** `vsmDepthRange` bounds the world along the sun's axis. Larger is coarser, with 32-bit floats to spend.
 
+## Rectangular area lights
+
+A softbox is a rectangle, and on glossy paint its highlight is the rectangle, bent by the body's curves. A sphere's highlight is round however large it is. `lights.glsl` shades every point or spot light with a rectangle (`lightsShape`) by linearly transformed cosines (Heitz, Dupuy, Hill and Neubelt, 2016), in `area_lights.glsl`:
+
+1. **The fitted table.** For a given roughness and view angle, the BRDF's lobe is close to a clamped cosine distorted by a 3 × 3 matrix. `ltc_fit.py` finds that matrix for 64 × 64 roughnesses and view angles, and writes the inverses to `ltc.bin` (64 KB). It fits the pipeline's own BRDF, GGX with the Schlick-Smith term the IBL's `brdfLUT` integrates, so `brdfLUT` gives each lobe's scale and Fresnel and the table needs only the shapes. It runs once, offline, in a few minutes; `ltc.bin` is committed. Run it again (`python ltc_fit.py`) only when the BRDF changes.
+2. **Loading it.** The `LTC` buffer layout fills a storage buffer from `ltc.bin` when the pipeline loads (`"source": {"type": "file"}`), and `lightsSet` binds it at binding 4. The shader filters between the four nearest entries itself.
+3. **Shading.** Each pixel takes the rectangle's corners through the inverse matrix for its roughness and view angle, clips what falls below its horizon, and integrates the cosine over the polygon in closed form: one integral for the diffuse light, one for the specular, and one more for a clear coat, with its own roughness.
+
+**Brightness:** a rectangle light keeps its point light's falloff. Far away, it gives what the point light gave, times the cosine a flat panel dims by when seen from the side, so the rigs keep their balance. Near it, the rectangle's shape and size take over. Spot cones still apply, like a softbox's grid. Nothing behind the rectangle is lit.
+
+**Shadows:** with ray queries, each pixel traces one ray towards a random point of the rectangle, and TAA averages them into a penumbra the rectangle's shape: long beside a long strip light, short across it. Without them, the atlas's shadow map from the light's centre shadows it, as before.
+
+**Accuracy:** the diffuse integral is exact. The specular one is within a few percent of the BRDF's own integral where highlights are, and up to about a quarter off for rough surfaces seen at grazing angles, where both are dim. The table's grazing fits are its weakest, as in the paper's.
+
 ## Ray-traced lights and reflections
 
 `LightingRT` replaces `Lighting` in the `hybrid` and `raytraced` presets.
 
-- **Light shadows:** for each spot or point light whose shadow flag is set, it traces one ray towards a random point of the light's sphere.
+- **Light shadows:** for each spot or point light whose shadow flag is set, it traces one ray towards a random point of the light's sphere, or of its rectangle.
 - **Reflections:** it traces one reflection ray, spread by roughness, from every surface smoother than 0.55.
   - **Visible hit:** when the hit point is on screen and not hidden there, last frame's image (`taaHistory`) at that point is the reflected light.
   - **Hidden hit:** otherwise something blocks the reflection that the screen cannot show, such as a car's underside seen in a glossy floor, and the environment's reflection is darkened there.
@@ -133,5 +151,6 @@ The pipeline is generated from the default one plus the additions above. Edit `p
 - `LightingRT`, in `lighting_rt.frag`, `lighting_body.glsl` and `rt_lights.glsl`
 - `Overlay`, in `overlay.vert` and `overlay.frag`
 - `DepthOfField` and `Accumulate`, in `depth_of_field.frag` and `accumulate.comp`
+- Rectangular area lights, in `area_lights.glsl`, from the `LTC` buffer (`ltc.bin`, made by `ltc_fit.py`)
 
-**Shaders changed:** `lights.glsl` (sphere lights, inner cones, clear coat), `surface.glsl` (clear coat maps), `forward_body.glsl`, `shadow_rt.frag`, `tonemap.frag` and `common.glsl`.
+**Shaders changed:** `lights.glsl` (sphere and rectangle lights, inner cones, clear coat), `surface.glsl` (clear coat maps), `forward_body.glsl`, `shadow_rt.frag`, `tonemap.frag` and `common.glsl`.
