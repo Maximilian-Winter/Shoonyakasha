@@ -39,6 +39,12 @@ CATALOGUE = [
     Entry("alfa_33_stradale_2024", "Alfa Romeo 33 Stradale", "2024", "car", 4.65, paint=CAR_PAINT),
     Entry("alfa_montreal", "Alfa Romeo Montreal", "1970", "car", 4.22, paint=CAR_PAINT),
     Entry("alfa_gtv6", "Alfa Romeo GTV-6", "1986", "car", 4.26, paint=CAR_PAINT),
+    Entry("gaz13_chaika", "GAZ-13 Chaika", "1959", "car", 5.60, paint=CAR_PAINT),
+    Entry("shelby_cobra", "Shelby Cobra 289", "1963", "car", 3.85, paint=CAR_PAINT),
+    Entry("chevrolet_camaro", "Chevrolet Camaro Z/28", "1969", "car", 4.72, paint=CAR_PAINT),
+    Entry("porsche_911_turbo", "Porsche 911 Turbo (930)", "1975", "car", 4.29, paint=CAR_PAINT),
+    Entry("corvette_c8", "Chevrolet Corvette C8 Stingray", "2020", "car", 4.63, paint=CAR_PAINT),
+    Entry("lamborghini_revuelto", "Lamborghini Revuelto", "2023", "car", 4.95, paint=CAR_PAINT),
     Entry("eta2_interceptor", "Eta-2 Actis Interceptor", "Anakin's", "ship", 5.5, hover=1.4,
           rig="neon", spin=12.0),
     Entry("jedi_starfighter", "Delta-7B Jedi Starfighter", "Anakin's", "ship", 7.0, hover=1.6,
@@ -54,7 +60,9 @@ LICENCES = (
     ("CC Attribution-NonCommercial-ShareAlike", "CC BY-NC-SA 4.0"),
     ("Creative Commons Attribution-NonCommercial-ShareAlike", "CC BY-NC-SA 4.0"),
     ("CC Attribution-NonCommercial", "CC BY-NC 4.0"),
+    ("Creative Commons Attribution-NonCommercial", "CC BY-NC 4.0"),
     ("CC Attribution-ShareAlike", "CC BY-SA 4.0"),
+    ("Creative Commons Attribution-ShareAlike", "CC BY-SA 4.0"),
     ("Creative Commons Attribution", "CC BY 4.0"),
     ("CC Attribution", "CC BY 4.0"),
 )
@@ -79,4 +87,5 @@ def ascii_text(text):
     """Text the engine's glyph atlas can draw (ASCII 32-126)."""
     text = text.replace("´", "'").replace("’", "'").replace("‘", "'")
     text = text.replace("“", '"').replace("”", '"').replace("–", "-").replace("—", "-")
+    text = text.replace("™", "(TM)")
     return "".join(c if 32 <= ord(c) <= 126 else "?" for c in text)

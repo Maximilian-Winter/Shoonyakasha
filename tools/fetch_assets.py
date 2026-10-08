@@ -32,8 +32,8 @@ The showroom's models come from Sketchfab, which hands out downloads only to a
 signed-in account: set SKETCHFAB_API_TOKEN to the API token from
 https://sketchfab.com/settings/password (or pass --sketchfab-token). They are
 converted into assets/showroom/<name>/ (Pillow and numpy again; see
-tools/sketchfab.py). Most are CC BY-NC-SA 4.0, a few CC BY 4.0: credit them
-wherever they are shown, and keep NC models out of commercial use.
+tools/sketchfab.py). They are CC BY 4.0, CC BY-NC-SA 4.0 or CC BY-NC 4.0: credit
+them wherever they are shown, and keep NC models out of commercial use.
 """
 
 import argparse

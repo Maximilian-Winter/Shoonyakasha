@@ -58,7 +58,7 @@ the pages linked above.
 | Full-resolution HDRs (4k/8k, 25–99 MB each) | Size | `python tools/fetch_assets.py env` |
 | Intel Sponza (`NewSponza_*`, ~450 MB with textures) | Size **and** licence | `python tools/fetch_assets.py sponza` prints the page |
 | Poly Haven models and textures for the alley demo (`polyhaven/`, ~120 MB at 1k) | Size | `python tools/fetch_assets.py alley` (`--resolution 2k` for sharper textures). All CC0; see [polyhaven.com](https://polyhaven.com) |
-| Showroom models from Sketchfab (`showroom/`) | Size **and** licence (most are CC BY-NC-SA 4.0) | `python tools/fetch_assets.py showroom` with `SKETCHFAB_API_TOKEN` set; credits in the [showroom README](../examples/python/rendering/showroom/README.md#the-models). The studio the showroom generates on first start goes to `showroom/studio/` |
+| Showroom models from Sketchfab (`showroom/`) | Size **and** licence (CC BY, CC BY-NC-SA or CC BY-NC 4.0) | `python tools/fetch_assets.py showroom` with `SKETCHFAB_API_TOKEN` set; credits in the [showroom README](../examples/python/rendering/showroom/README.md#the-models). The studio the showroom generates on first start goes to `showroom/studio/` |
 | Amazon Lumberyard Bistro (`bistro/`, ~2 GB downloaded, ~340 MB converted at 2k) | Size | `python tools/fetch_assets.py bistro` downloads and converts it (needs Pillow and numpy). CC BY 4.0; credit below |
 | Japanese shrine (`models/japanese_shrine.glb`, 60 MB) | Size | Download the glTF archive from [Sketchfab](https://skfb.ly/pMEO8) (account required) and save its `source/*.glb` as `models/japanese_shrine.glb` |
 

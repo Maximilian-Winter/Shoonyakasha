@@ -75,6 +75,94 @@ EXHIBITS = {
         "A tribute to the 1967 car, built in a series of 33. Under the "
         "carbon-fibre body is the chassis of the Maserati MC20. Buyers chose "
         "the twin-turbo V6 shown here or an electric drive of 750 PS."),
+
+    "gaz13_chaika": Exhibit(
+        "GAZ", "Chaika", 1959,
+        "Limousine", "Seven-seat saloon, front engine",
+        [("Engine", "5.5 L V8"),
+         ("Power", "195 PS"),
+         ("Top speed", "160 km/h"),
+         ("Weight", "2,100 kg"),
+         ("Built", "1959 - 1981, about 3,200 made"),
+         ("Design", "Lev Yeremeev")],
+        "The Soviet official's car, never sold to private buyers. Its fins "
+        "and chrome follow the American cars of the late fifties, which were "
+        "studied closely at Gorky. It had a push-button automatic gearbox, "
+        "and was built largely by hand for more than twenty years with "
+        "hardly a change."),
+
+    "shelby_cobra": Exhibit(
+        "Shelby", "Cobra 289", 1963,
+        "Sports car", "Two-seat roadster, front engine",
+        [("Engine", "4.7 L Ford V8"),
+         ("Power", "275 PS"),
+         ("Top speed", "220 km/h"),
+         ("Weight", "1,050 kg"),
+         ("Built", "1962 - 1967, about 1,000 Cobras"),
+         ("Design", "AC Ace, John Tojeiro")],
+        "Carroll Shelby's idea: the light British AC Ace with a small-block "
+        "Ford V8 in place of its six. The bodies were built in England and "
+        "shipped to California for their engines. On the track it beat the "
+        "Corvettes of its day, and its Daytona coupe won the world GT "
+        "championship for Shelby in 1965."),
+
+    "chevrolet_camaro": Exhibit(
+        "Chevrolet", "Camaro Z/28", 1969,
+        "Muscle car", "2+2 coupe, front engine",
+        [("Engine", "4.9 L V8 (302 cu in)"),
+         ("Power", "294 PS"),
+         ("Top speed", "about 210 km/h"),
+         ("Weight", "1,500 kg"),
+         ("Built", "1969 Z/28s: about 20,000"),
+         ("Design", "Henry Haga's studio, GM")],
+        "Chevrolet's answer to the Mustang. The Z/28 was a package made to "
+        "qualify the car for the Trans-Am series, whose rules capped engines "
+        "at five litres: hence the high-revving 302. The 1969 car, with its "
+        "sharper creases and deep-set grille, is the one most remembered."),
+
+    "porsche_911_turbo": Exhibit(
+        "Porsche", "911 Turbo", 1975,
+        "Sports car", "2+2 coupe, rear engine",
+        [("Engine", "3.0 L turbo flat-six, air-cooled"),
+         ("Power", "260 PS"),
+         ("Top speed", "250 km/h"),
+         ("Weight", "1,140 kg"),
+         ("Built", "1975 - 1989, about 21,000 made"),
+         ("Design", "F. A. Porsche (the 911)")],
+        "Type 930, the first turbocharged production 911, built at first so "
+        "Porsche could race a turbo in Group 4. Wide arches and the whale "
+        "tail, which also cooled the engine, set it apart. Its turbo lag and "
+        "short wheelbase earned it the name widowmaker."),
+
+    "corvette_c8": Exhibit(
+        "Chevrolet", "Corvette C8", 2020,
+        "Mid-engine sports car", "Two-seat convertible, folding hardtop",
+        [("Engine", "6.2 L V8, behind the driver"),
+         ("Power", "502 PS (Z51)"),
+         ("Top speed", "312 km/h"),
+         ("0 - 100 km/h", "under 3 seconds"),
+         ("Built", "from 2020"),
+         ("Design", "Kirk Bennion, GM Design")],
+        "Zora Arkus-Duntov wanted the engine behind the seats in the sixties; "
+        "it took until the eighth generation. The Stingray kept the "
+        "pushrod V8 and a price far below the European cars it chased. The "
+        "convertible folds its hardtop away in sixteen seconds, the first "
+        "Corvette with a hardtop that does."),
+
+    "lamborghini_revuelto": Exhibit(
+        "Lamborghini", "Revuelto", 2023,
+        "Hybrid supercar", "Two-seat coupe, scissor doors",
+        [("Engine", "6.5 L V12, three electric motors"),
+         ("Power", "1,015 PS combined"),
+         ("Top speed", "over 350 km/h"),
+         ("0 - 100 km/h", "2.5 seconds"),
+         ("Built", "from 2023"),
+         ("Design", "Mitja Borkert, Centro Stile")],
+        "The successor to the Aventador and Lamborghini's first plug-in "
+        "hybrid. A new V12 sits behind the cabin; two electric motors drive "
+        "the front wheels and a third helps the gearbox, which sits across "
+        "the car behind the engine. The battery runs down the tunnel where "
+        "a gearbox used to be."),
 }
 
 

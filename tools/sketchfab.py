@@ -29,7 +29,7 @@ takes core metallic-roughness glTF with one UV set, so:
 - Every mesh primitive gets its own node named "<material>#<n>", so the
   showroom can find a model's paint or glass by material name.
 
-The models keep their licences: most are CC BY-NC-SA 4.0, a few CC BY 4.0
+The models keep their licences: CC BY 4.0, CC BY-NC-SA 4.0 or CC BY-NC 4.0
 (see MODELS). Converted files are adaptations under the same licence, and
 anything that shows them, screenshots and videos included, needs the credit.
 Converting needs Pillow and numpy.
@@ -78,6 +78,24 @@ MODELS = {
     "alkesh": ("a2c2858c553f42d7a1d0b11af4196411",
                '"Inspired By Stargate SG-1: Goa´Uld Alkesh" (https://skfb.ly/pNuWv) by Ska-Ara is licensed under '
                'CC Attribution-NonCommercial-ShareAlike (http://creativecommons.org/licenses/by-nc-sa/4.0/).'),
+    "gaz13_chaika": ("21a409682dd24f309ae1ada885f4e1ba",
+                     '"GAZ 13 Chaika" (https://skfb.ly/oIoSW) by panderlaike_design is licensed under '
+                     'Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).'),
+    "shelby_cobra": ("a9024d1c23f1490f8f40468946c14b0c",
+                     '"Shelby Cobra | www.vecarz.com" (https://skfb.ly/psAAX) by vecarz is licensed under '
+                     'Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).'),
+    "chevrolet_camaro": ("789b0af67d994306b967facf75ab2e01",
+                         '"1970 Chevrolet Camaro" (https://skfb.ly/pryVB) by DisneyCars is licensed under '
+                         'Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).'),
+    "porsche_911_turbo": ("8568d9d14a994b9cae59499f0dbed21e",
+                          '"FREE 1975 Porsche 911 (930) Turbo" (https://skfb.ly/6WZyV) by Lionsharp Studios is '
+                          'licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).'),
+    "corvette_c8": ("01d63aa7013347acbfa62bc00e0b2df6",
+                    '"2020 Chevrolet Corvette C8 Stingray Convertible" (https://skfb.ly/pr7JI) by Ddiaz Design is '
+                    'licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).'),
+    "lamborghini_revuelto": ("4258ff5b559c45f2a470344f0e04c8cd",
+                             '"Lamborghini Revuelto" (https://skfb.ly/prqBx) by Outlaw Games™ is licensed under '
+                             'Creative Commons Attribution-NonCommercial (http://creativecommons.org/licenses/by-nc/4.0/).'),
 }
 
 DIELECTRIC = 0.04

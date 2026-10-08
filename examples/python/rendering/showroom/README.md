@@ -71,6 +71,12 @@ python showroom.py --record tour.mp4 --dof 1.4 --grain 0.02 --vignette 0.15   # 
 | `jedi_starfighter` | "Anakin's Jedi Starfighter - Star Wars" ([skfb.ly/6RSHr](https://skfb.ly/6RSHr)) by Quiznos323 | [CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/) |
 | `aat` | "-Star Wars- AAT" ([skfb.ly/owYtF](https://skfb.ly/owYtF)) by ARKON MAREK | [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) |
 | `alkesh` | "Inspired By Stargate SG-1: Goa´Uld Alkesh" ([skfb.ly/pNuWv](https://skfb.ly/pNuWv)) by Ska-Ara | [CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/) |
+| `gaz13_chaika` | "GAZ 13 Chaika" ([skfb.ly/oIoSW](https://skfb.ly/oIoSW)) by panderlaike_design | [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) |
+| `shelby_cobra` | "Shelby Cobra \| www.vecarz.com" ([skfb.ly/psAAX](https://skfb.ly/psAAX)) by vecarz | [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) |
+| `chevrolet_camaro` | "1970 Chevrolet Camaro" ([skfb.ly/pryVB](https://skfb.ly/pryVB)) by DisneyCars | [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) |
+| `porsche_911_turbo` | "FREE 1975 Porsche 911 (930) Turbo" ([skfb.ly/6WZyV](https://skfb.ly/6WZyV)) by Lionsharp Studios | [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) |
+| `corvette_c8` | "2020 Chevrolet Corvette C8 Stingray Convertible" ([skfb.ly/pr7JI](https://skfb.ly/pr7JI)) by Ddiaz Design | [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/) |
+| `lamborghini_revuelto` | "Lamborghini Revuelto" ([skfb.ly/prqBx](https://skfb.ly/prqBx)) by Outlaw Games™ | [CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/) |
 
 The full attribution lines, ready to paste into a post's caption:
 
@@ -83,11 +89,17 @@ The full attribution lines, ready to paste into a post's caption:
 "Anakin's Jedi Starfighter - Star Wars" (https://skfb.ly/6RSHr) by Quiznos323 is licensed under CC Attribution-NonCommercial-ShareAlike (http://creativecommons.org/licenses/by-nc-sa/4.0/).
 "-Star Wars- AAT" (https://skfb.ly/owYtF) by ARKON MAREK is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
 "Inspired By Stargate SG-1: Goa´Uld Alkesh" (https://skfb.ly/pNuWv) by Ska-Ara is licensed under CC Attribution-NonCommercial-ShareAlike (http://creativecommons.org/licenses/by-nc-sa/4.0/).
+"GAZ 13 Chaika" (https://skfb.ly/oIoSW) by panderlaike_design is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+"Shelby Cobra | www.vecarz.com" (https://skfb.ly/psAAX) by vecarz is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+"1970 Chevrolet Camaro" (https://skfb.ly/pryVB) by DisneyCars is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+"FREE 1975 Porsche 911 (930) Turbo" (https://skfb.ly/6WZyV) by Lionsharp Studios is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+"2020 Chevrolet Corvette C8 Stingray Convertible" (https://skfb.ly/pr7JI) by Ddiaz Design is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+"Lamborghini Revuelto" (https://skfb.ly/prqBx) by Outlaw Games™ is licensed under Creative Commons Attribution-NonCommercial (http://creativecommons.org/licenses/by-nc/4.0/).
 ```
 
 **Downloaded files:** the models are not in the repository. They are fetched into `assets/showroom/`, which Git ignores.
 
-**Shipping the showroom with its models:** the converted files are adaptations, so the NC-SA ones go out under CC BY-NC-SA 4.0 again, with these credits and not for sale. `tools/sketchfab.py` records each model's credit in its `showroom.json` beside the converted file.
+**Shipping the showroom with its models:** the converted files are adaptations under their models' licences: every one with these credits, the NC-SA ones under CC BY-NC-SA 4.0 again, and none of the NC or NC-SA ones for sale. `tools/sketchfab.py` records each model's credit in its `showroom.json` beside the converted file.
 
 ## How it is put together
 
