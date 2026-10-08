@@ -89,6 +89,7 @@ void setLocalShadowSettings(uint32_t spotCount = 8, uint32_t pointCount = 4, uin
 bool setPassEnabled(const std::string& passName, bool enabled);
 bool isPassEnabled(const std::string& passName) const;
 bool applyPipelinePreset(const std::string& name);
+bool setPipelineImage(const std::string& name, const std::string& path);   // "externalImage": name bindings
 bool rayQuerySupported() const;
 std::vector<std::string> getPipelinePresets() const;
 uint32_t getPassDrawnCount(const std::string& passName) const;

@@ -111,6 +111,7 @@ TEST_F(DotPathResolverECS, SceneContext_LightSourcePacked) {
     l.sourceRadius = 0.4f;
     l.castShadows = true;
     l.innerCone = 20.0f;
+    l.sourceImage = 2;
     scene.updateFromRegistry(registry);
 
     ASSERT_EQ(scene.lightCount, 2u);
@@ -118,6 +119,7 @@ TEST_F(DotPathResolverECS, SceneContext_LightSourcePacked) {
     EXPECT_NEAR(scene.lights[i].source.x, 0.4f, 1e-5f);
     EXPECT_NEAR(scene.lights[i].source.y, 1.0f, 1e-5f);
     EXPECT_NEAR(scene.lights[i].source.z, std::cos(glm::radians(20.0f)), 1e-5f);
+    EXPECT_NEAR(scene.lights[i].source.w, 2.0f, 1e-5f);
 
     auto v = resolver.resolveScene("scene.lights[" + std::to_string(i) + "].source", scene);
     ASSERT_TRUE(v.isVec4());

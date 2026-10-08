@@ -111,8 +111,10 @@ vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float me
     // 0 for its hotspot alone, and above that the grid's cells across it.
     bool patterned = showroom.softboxGrid > -0.5;
     vec2 cells = softboxCells(vec2(length(halfX), shape.w), showroom.softboxGrid);
+    // Image slot 1 (lightsSource[i].w): it shines with lightImage instead.
+    bool imaged = lightsSource[i].w > 0.5;
     vec3 reflected = rectangleBRDF(N, V, toLight, halfX, halfY, albedo, metallic, roughness, F0,
-                                   patterned, cells);
+                                   patterned, cells, imaged);
     if (max(reflected.r, max(reflected.g, reflected.b)) <= 0.0) return vec3(0.0);
 #ifdef RT_LOCAL_SHADOWS
     if (lightsSource[i].y > 0.5 && localRayBlockedRect(i, worldPos, N, centre, halfX, halfY)) return vec3(0.0);

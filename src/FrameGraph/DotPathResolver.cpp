@@ -95,7 +95,7 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
             light.sourceRadius,
             light.castShadows ? 1.0f : 0.0f,
             glm::cos(glm::radians(light.innerCone)),
-            0.0f
+            static_cast<float>(light.sourceImage)
         );
 
         // The emitting rectangle. getRight() and getUp() leave out the roll,

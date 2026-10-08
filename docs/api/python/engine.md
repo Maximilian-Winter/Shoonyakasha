@@ -90,6 +90,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `render_stats (read-only property)` | dict or None | Render statistics over the last whole second, or None while off. |
 | `is_pass_enabled(pass_name)` | bool | Whether a pipeline pass is enabled; False if there is no such pass. |
 | `apply_pipeline_preset(name)` | bool | Apply one of the pipeline's "presets", such as the default pipeline's "low", "medium" and "high" quality tiers: switches its passes and sets its scene.custom values. May be called from the on_init callback, before the pipeline is loaded. Returns False if there is no such preset. |
+| `set_pipeline_image(name, path)` | bool | Load an image file for the pipeline's descriptor bindings with `"externalImage": name`, which sample white until one is set. Its colours are sRGB. May be called from on_init, and again while running to change it. Returns False if the file could not be loaded. The [showroom pipeline](../../../examples/python/rendering/showroom/pipeline/README.md#images-on-lights)'s `lightImage` is one. |
 | `ray_query_supported()` | bool | Whether the device traces rays with ray queries, which the default pipeline's "raytraced" preset needs. Known from the on_init callback on; False before run(). |
 | `get_pipeline_presets()` | list[str] | Names of the presets the loaded pipeline declares. |
 

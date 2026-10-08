@@ -368,6 +368,14 @@ TEST_F(SceneAPIFixture, Light_SetGetSourceSize) {
     EXPECT_FLOAT_EQ(api->getLightSourceSize(entity).y, 0.5f);
 }
 
+TEST_F(SceneAPIFixture, Light_SetGetSourceImage) {
+    auto entity = api->createEntity("Light");
+    api->addComponent(entity, "Light");
+    EXPECT_EQ(api->getLightSourceImage(entity), 0u);
+    api->setLightSourceImage(entity, 1u);
+    EXPECT_EQ(api->getLightSourceImage(entity), 1u);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Material Access
 // ═══════════════════════════════════════════════════════════════

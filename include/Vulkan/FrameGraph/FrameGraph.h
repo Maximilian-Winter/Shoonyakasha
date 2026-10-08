@@ -1042,6 +1042,15 @@ public:
     bool applyPreset(const std::string& name);
     std::vector<std::string> getPresetNames() const;
 
+    // ── Application images ──
+    // The image every descriptor binding with "externalImage": name samples,
+    // with the binding's autoBindSampler, or `sampler` when it has none.
+    // Until one is set such bindings sample white. Before the pipeline is
+    // compiled, remembered; after, each frame in flight takes it the next
+    // time it records, when its descriptor sets are no longer in use. The
+    // caller keeps the image alive as long as the graph may sample it.
+    void setExternalImage(const std::string& name, VkImageView view, VkSampler sampler);
+
     // ── Geometry pass statistics ──
     // Entities an entity geometry pass drew, and left out as outside its
     // view, the last time it ran. Returns false if it has not run.
@@ -1651,6 +1660,21 @@ private:
 
     // Bind UBOs to descriptor sets after compilation (handles autoBindBuffer)
     void bindUBOsToDescriptorSets(uint32_t maxFramesInFlight);
+
+    // Application images (setExternalImage): what each name holds, and the
+    // frames in flight whose descriptor sets do not have it yet (a bit each).
+    struct ExternalImage {
+        VkImageView view = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
+        uint32_t pendingFrames = 0;
+    };
+    std::unordered_map<std::string, ExternalImage> m_externalImages;
+    bool m_externalImagesPending = false;
+
+    // Write the application's images, or white, into frame `frame`'s
+    // descriptor sets: every "externalImage" binding, or only those whose
+    // image changed since that frame last took it.
+    void bindExternalImages(uint32_t frame, bool onlyPending);
 
     // Helper template for writing to managed UBOs
     template<typename T>

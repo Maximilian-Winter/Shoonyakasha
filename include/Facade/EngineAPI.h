@@ -253,6 +253,13 @@ public:
     /// loaded. Returns false if the pipeline has no such preset.
     bool applyPipelinePreset(const std::string& name);
 
+    /// Load an image file (PNG, JPEG ..., found as assets are) for the
+    /// pipeline's descriptor bindings with "externalImage": name, which
+    /// sample white until one is set. Its colours are sRGB. May be called
+    /// before the pipeline is loaded, and again to change it while it runs.
+    /// Returns false if the file could not be loaded.
+    bool setPipelineImage(const std::string& name, const std::string& path);
+
     /// Whether the device traces rays with ray queries, which passes that
     /// "require" them (the default pipeline's "raytraced" preset) need.
     /// Known once run() has created the device; false before.

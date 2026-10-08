@@ -237,6 +237,7 @@ public:
                 lightJson["outerCone"] = light->outerCone;
                 lightJson["sourceRadius"] = light->sourceRadius;
                 lightJson["sourceSize"] = {light->sourceSize.x, light->sourceSize.y};
+                lightJson["sourceImage"] = light->sourceImage;
                 lightJson["castShadows"] = light->castShadows;
                 componentsJson["Light"] = lightJson;
             }
@@ -388,6 +389,9 @@ public:
                             lightJson["sourceSize"].size() == 2) {
                             light.sourceSize = glm::vec2(lightJson["sourceSize"][0].get<float>(),
                                                          lightJson["sourceSize"][1].get<float>());
+                        }
+                        if (lightJson.contains("sourceImage")) {
+                            light.sourceImage = lightJson["sourceImage"].get<uint32_t>();
                         }
                         if (lightJson.contains("castShadows")) {
                             light.castShadows = lightJson["castShadows"];

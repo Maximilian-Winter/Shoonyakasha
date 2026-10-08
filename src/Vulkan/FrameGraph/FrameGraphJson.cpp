@@ -1189,6 +1189,7 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     binding.autoBindResource = bindingJson.value("autoBindResource", std::string{});
                     binding.autoBindSampler  = bindingJson.value("autoBindSampler", std::string{});
                     binding.autoBindBuffer   = bindingJson.value("autoBindBuffer", std::string{});
+                    binding.externalImage    = bindingJson.value("externalImage", std::string{});
                     binding.autoBindSubresource = parseSubresource(
                         bindingJson, "Binding '" + binding.name + "' of layout '" + layoutDesc.name + "'");
 
