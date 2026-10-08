@@ -22,6 +22,8 @@ layout(set = 3, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
 layout(set = 3, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
 layout(set = 3, binding = 2) uniform sampler2DShadow localShadowAtlas;
 layout(set = 3, binding = 3) uniform usampler2D lightClusters;
+layout(std430, set = 3, binding = 4) readonly buffer LtcTable { vec4 ltcTable[]; };
+layout(set = 3, binding = 5) uniform sampler2D lightImage;
 layout(set = 4, binding = 0) uniform Settings { DEFAULT_SETTINGS_BLOCK } settings;
 layout(set = 4, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascades;
 layout(set = 4, binding = 2) uniform Showroom { SHOWROOM_BLOCK } showroom;

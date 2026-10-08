@@ -91,6 +91,10 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_light_cone(entity, inner_degrees, outer_degrees)` | None | Full intensity within `inner` of the axis, fading to nothing at `outer`. The outer angle is clamped to 0.5–89 and the inner one to `outer`. The default pipeline uses only the outer angle; pipelines can read the inner one from `scene.lights[N].source.z`. |
 | `get_light_source_radius(entity)` | float | Calls native `getLightSourceRadius`. |
 | `set_light_source_radius(entity, radius)` | None | Radius of the light's emitting sphere; 0, the default, is a point. Published as `scene.lights[N].source.x` for pipelines that trace soft shadows or size highlights by it, such as the [showroom pipeline](../../../examples/python/rendering/showroom/pipeline/README.md). |
+| `get_light_source_image(entity)` | int | Calls native `getLightSourceImage`. |
+| `set_light_source_image(entity, slot)` | None | Which image the light's rectangle shines with: 0, the default, none; the pipeline says what other slots mean (the showroom's 1 is its `lightImage`). Published as `scene.lights[N].source.w`. |
+| `get_light_source_size(entity)` | 2-tuple | Calls native `getLightSourceSize`. |
+| `set_light_source_size(entity, width, height)` | None | Width and height of the light's emitting rectangle, facing its forward axis with its width along its right axis; (0, 0), the default, is none. Published as `scene.lights[N].shape` for pipelines with rectangular area lights, such as the [showroom pipeline](../../../examples/python/rendering/showroom/pipeline/README.md). |
 | `set_material_float(entity, param, value)` | None | Calls native `setMaterialFloat`; see the class contract above. |
 | `get_material_float(entity, param, default_val=0.0)` | float | Calls native `getMaterialFloat`; see the class contract above. |
 | `set_material_vec3(entity, param, value)` | None | Calls native `setMaterialVec3`; see the class contract above. |

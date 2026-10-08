@@ -14,6 +14,13 @@
 // casters), and the two are multiplied. RT_HARD_LIGHT_SHADOWS aims the ray
 // at the centre instead, for surfaces TAA cannot average (blended ones).
 // Spot lights fade from their inner cone (lightsSource[i].z) to the outer.
+//
+// Lights with a rectangle (lightsShape[i]: its right axis times half its
+// width, and half its height) are shaded as that rectangle by linearly
+// transformed cosines (area_lights.glsl), where showroom.areaLights is on:
+// their highlights take its shape, and the shadow rays aim at random points
+// of it. The rectangle faces the light's direction and lights nothing
+// behind it.
 
 #ifndef DEFAULT_LIGHTS_GLSL
 #define DEFAULT_LIGHTS_GLSL
@@ -43,6 +50,7 @@ float coatFresnel(float cosTheta) {
 #ifdef RT_LOCAL_SHADOWS
 #include "rt_lights.glsl"
 #endif
+#include "area_lights.glsl"
 
 // Diffuse towards L and specular towards Ls (the representative point of a
 // sphere light), the specular lobe scaled by `energy`, each times its NdotL.
@@ -66,6 +74,58 @@ vec3 sphereLightBRDF(vec3 N, vec3 V, vec3 L, vec3 Ls, float energy, vec3 albedo,
     return result;
 }
 
+// Light from scene light i, shaded as its rectangle. Its radiance keeps the
+// light's own falloff: far away the rectangle gives what the point light
+// would have, times the cosine a flat panel's brightness falls off with
+// across its face. Near it the rectangle's shape and size take over; within
+// half its diagonal the falloff stops growing.
+vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
+                    vec3 F0) {
+    vec3 centre = lightsPositionType[i].xyz;
+    vec3 forward = normalize(lightsDirectionRange[i].xyz);
+    float range = lightsDirectionRange[i].w;
+    vec4 attenuation = lightsAttenuation[i];
+    vec4 shape = lightsShape[i];
+    vec3 toLight = centre - worldPos;
+    float dist = length(toLight);
+    vec3 L = toLight / max(dist, 1e-4);
+    float theta = dot(-L, forward);
+    if (theta <= 0.0) return vec3(0.0);     // behind the panel
+
+    vec3 halfX = shape.xyz;
+    vec3 halfY = normalize(cross(halfX, forward)) * shape.w;
+    float d = max(dist, sqrt(dot(halfX, halfX) + shape.w * shape.w));
+    float falloff = 1.0 / max(attenuation.x + attenuation.y * d + attenuation.z * d * d, 1e-4);
+    if (range > 0.0) {
+        float r = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
+        falloff *= r * r;
+    }
+    if (lightsPositionType[i].w > 1.5) {    // a spot's cone: the softbox's grid
+        float cosOuter = attenuation.w;
+        float cosInner = max(lightsSource[i].z, cosOuter + 1e-3);
+        falloff *= smoothstep(cosOuter, cosInner, theta);
+    }
+    if (falloff <= 1e-4) return vec3(0.0);
+
+    // A softbox's diffuser: showroom.softboxGrid is -1 for an even panel,
+    // 0 for its hotspot alone, and above that the grid's cells across it.
+    bool patterned = showroom.softboxGrid > -0.5;
+    vec2 cells = softboxCells(vec2(length(halfX), shape.w), showroom.softboxGrid);
+    // Image slot 1 (lightsSource[i].w): it shines with lightImage instead.
+    bool imaged = lightsSource[i].w > 0.5;
+    vec3 reflected = rectangleBRDF(N, V, toLight, halfX, halfY, albedo, metallic, roughness, F0,
+                                   patterned, cells, imaged);
+    if (max(reflected.r, max(reflected.g, reflected.b)) <= 0.0) return vec3(0.0);
+#ifdef RT_LOCAL_SHADOWS
+    if (lightsSource[i].y > 0.5 && localRayBlockedRect(i, worldPos, N, centre, halfX, halfY)) return vec3(0.0);
+#endif
+#ifdef LOCAL_SHADOWS
+    falloff *= localShadowVisibility(int(i), lightsPositionType[i].w, worldPos, N, L);
+#endif
+    vec3 color = lightsColorIntensity[i].rgb * lightsColorIntensity[i].w;
+    return reflected * color * falloff * d * d / (4.0 * length(halfX) * shape.w);
+}
+
 // Light from scene light i. `sunIndex` is the light shadowed by
 // `sunVisibility`; -1 when none is.
 vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
@@ -87,6 +147,9 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
         Ls = L;
         if (int(i) == sunIndex) falloff = sunVisibility;
     } else {                                // point or spot
+        if (lightsShape[i].w > 0.0 && showroom.areaLights > 0.5) {
+            return rectangleLight(i, worldPos, N, V, albedo, metallic, roughness, F0);
+        }
         vec3 toLight = lightsPositionType[i].xyz - worldPos;
         float dist = length(toLight);
         L = toLight / max(dist, 1e-4);

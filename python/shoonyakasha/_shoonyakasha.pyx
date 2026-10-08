@@ -437,6 +437,24 @@ cdef class Scene:
         rays use it for penumbrae; zero is a hard-edged point light."""
         self._ptr.setLightSourceRadius(entity, radius)
 
+    def get_light_source_size(self, uint32_t entity):
+        return _vec2_to_tuple(self._ptr.getLightSourceSize(entity))
+
+    def set_light_source_size(self, uint32_t entity, float width, float height):
+        """Width and height of the light's emitting rectangle, facing its
+        forward axis with its width along its right axis. Pipelines with area
+        lights shade it as that rectangle; (0, 0), the default, is none."""
+        self._ptr.setLightSourceSize(entity, width, height)
+
+    def get_light_source_image(self, uint32_t entity):
+        return self._ptr.getLightSourceImage(entity)
+
+    def set_light_source_image(self, uint32_t entity, uint32_t slot):
+        """Which image the light's rectangle shines with: 0, the default,
+        none; pipelines say what other slots mean (the showroom's 1 is its
+        "lightImage"). Published as scene.lights[N].source.w."""
+        self._ptr.setLightSourceImage(entity, slot)
+
     # ── Material ──────────────────────────────────────────────
 
     def set_material_float(self, uint32_t entity, str param, float value):
@@ -1570,6 +1588,13 @@ cdef class Engine:
         before the pipeline is loaded. Returns False if there is no such preset.
         """
         return self._ptr.applyPipelinePreset(name.encode('utf-8'))
+
+    def set_pipeline_image(self, str name, str path):
+        """Load an image file for the pipeline's descriptor bindings with
+        "externalImage": name, which sample white until one is set. Its
+        colours are sRGB. May be called from on_init, and again to change it
+        while running. Returns False if the file could not be loaded."""
+        return self._ptr.setPipelineImage(name.encode('utf-8'), path.encode('utf-8'))
 
     def ray_query_supported(self):
         """Whether the device traces rays with ray queries, which the default

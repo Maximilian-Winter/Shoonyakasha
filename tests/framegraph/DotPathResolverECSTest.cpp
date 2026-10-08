@@ -111,6 +111,7 @@ TEST_F(DotPathResolverECS, SceneContext_LightSourcePacked) {
     l.sourceRadius = 0.4f;
     l.castShadows = true;
     l.innerCone = 20.0f;
+    l.sourceImage = 2;
     scene.updateFromRegistry(registry);
 
     ASSERT_EQ(scene.lightCount, 2u);
@@ -118,6 +119,7 @@ TEST_F(DotPathResolverECS, SceneContext_LightSourcePacked) {
     EXPECT_NEAR(scene.lights[i].source.x, 0.4f, 1e-5f);
     EXPECT_NEAR(scene.lights[i].source.y, 1.0f, 1e-5f);
     EXPECT_NEAR(scene.lights[i].source.z, std::cos(glm::radians(20.0f)), 1e-5f);
+    EXPECT_NEAR(scene.lights[i].source.w, 2.0f, 1e-5f);
 
     auto v = resolver.resolveScene("scene.lights[" + std::to_string(i) + "].source", scene);
     ASSERT_TRUE(v.isVec4());
@@ -126,6 +128,32 @@ TEST_F(DotPathResolverECS, SceneContext_LightSourcePacked) {
     // The fixture's directional light: no source radius, no shadow flag.
     EXPECT_NEAR(scene.lights[1u - i].source.x, 0.0f, 1e-5f);
     EXPECT_NEAR(scene.lights[1u - i].source.y, 0.0f, 1e-5f);
+}
+
+TEST_F(DotPathResolverECS, SceneContext_LightShapePacked) {
+    auto e = registry.create();
+    auto& t = registry.emplace<TransformComponent>(e);
+    t.rotation = glm::vec3(0.0f, glm::radians(90.0f), glm::radians(90.0f));    // yaw, then roll
+    auto& l = registry.emplace<LightComponent>(e);
+    l.type = LightComponent::Spot;
+    l.sourceSize = glm::vec2(2.0f, 1.0f);
+    scene.updateFromRegistry(registry);
+
+    ASSERT_EQ(scene.lightCount, 2u);
+    const uint32_t i = scene.lights[0].positionType.w > 1.5f ? 0u : 1u;    // the spot light
+    // Yawed 90 degrees the right axis is -Z; rolled 90 more it turns to the
+    // up axis, +Y. Half the width along it, half the height in w.
+    EXPECT_NEAR(scene.lights[i].shape.x, 0.0f, 1e-5f);
+    EXPECT_NEAR(scene.lights[i].shape.y, 1.0f, 1e-5f);
+    EXPECT_NEAR(scene.lights[i].shape.z, 0.0f, 1e-5f);
+    EXPECT_NEAR(scene.lights[i].shape.w, 0.5f, 1e-5f);
+
+    auto v = resolver.resolveScene("scene.lights[" + std::to_string(i) + "].shape", scene);
+    ASSERT_TRUE(v.isVec4());
+    EXPECT_NEAR(v.as<glm::vec4>().w, 0.5f, 1e-5f);
+
+    // The fixture's directional light has no rectangle.
+    EXPECT_EQ(scene.lights[1u - i].shape, glm::vec4(0.0f));
 }
 
 TEST_F(DotPathResolverECS, SceneContext_LightCountCapped) {

@@ -172,6 +172,16 @@ public:
     float getLightSourceRadius(EntityHandle entity) const;
     void setLightSourceRadius(EntityHandle entity, float radius);
 
+    // Width and height of the light's emitting rectangle, facing its forward
+    // axis with its width along its right axis; (0, 0), the default, is none.
+    glm::vec2 getLightSourceSize(EntityHandle entity) const;
+    void setLightSourceSize(EntityHandle entity, float width, float height);
+
+    // Image slot the light's rectangle shines with, 0 for none; the pipeline
+    // says what the others mean.
+    uint32_t getLightSourceImage(EntityHandle entity) const;
+    void setLightSourceImage(EntityHandle entity, uint32_t slot);
+
     // ═══════════════════════════════════════════════════════════
     // Material Access (explicit typed methods — no templates)
     // ═══════════════════════════════════════════════════════════

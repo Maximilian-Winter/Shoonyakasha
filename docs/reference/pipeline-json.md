@@ -104,7 +104,7 @@ A field `source` is a dot-path. A layout-level `source` is an initialization obj
 | `scene.environment` | `irradianceMap`, `prefilterMap`, `brdfLUT`, `environmentMap` |
 | `scene.time` | `elapsed`, `delta`, `frame` |
 | `scene.screen` | `width`, `height`, `resolution`: the window's; `renderWidth`, `renderHeight`, `renderResolution`: the size the scene renders at, the window's times the [render scale](../guides/frame-capture.md#supersampling). Passes that write the swapchain run at the window's size, the others at the render size |
-| `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` (w: cos of the outer cone), `source` (x: source radius, y: 1 when it casts shadows, z: cos of the inner cone) |
+| `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` (w: cos of the outer cone), `source` (x: source radius, y: 1 when it casts shadows, z: cos of the inner cone, w: image slot), `shape` (the emitting rectangle facing the light's direction: xyz its right axis times half its width, w half its height; zero without one) |
 | `scene.shadows.sun` | `enabled`, `cascadeCount`, `splits`, `texelWorldSize`, `lightIndex`, `direction`; indexed `scene.shadows.sun.cascades[N].viewProj`. See [sun shadow cascades](../guides/lighting-and-ibl.md#sun-shadow-cascades) |
 | `scene.shadows.spot`, `scene.shadows.point` | `count`; indexed `scene.shadows.spot[N].viewProj`, `lightIndex`, `params`, `rect`; `scene.shadows.point[N].lightIndex`, `positionFar`, `depthParams`; `scene.shadows.point.faces[N].viewProj`, `rect` with N = slot × 6 + face. See [spot and point light shadows](../guides/lighting-and-ibl.md#spot-and-point-light-shadows) |
 | `scene.custom` | Values explicitly published under a key by the application |
@@ -123,7 +123,7 @@ Each descriptor-set layout has a `bindings` array. Bindings require `binding` an
 
 `acceleration_structure` binds the engine's top-level acceleration structure of the scene, for ray queries (`GL_EXT_ray_query`; compile such a shader for Vulkan 1.2 or later). The engine keeps one only on a device with ray queries. It holds the static, opaque, shadow-casting meshes, and is rebuilt every frame from their transforms. On a device without ray queries a layout with such a binding is skipped, and only a pass that `requires` `rayQuery` may use it.
 
-`autoBindBuffer` references a named buffer, `autoBindResource` an image/resource source, and `autoBindSampler` a named sampler. Pass `descriptorSets` is an ordered list of layout names; that order supplies shader set indices.
+`autoBindBuffer` references a named buffer, `autoBindResource` an image/resource source, and `autoBindSampler` a named sampler. `externalImage` names an image the application supplies (`set_pipeline_image(name, path)`, C++ `EngineAPI::setPipelineImage` or `RenderGraph::setExternalImage`): the binding samples white until it does, and takes a new one at each frame in flight's next recording, so it can change while running. With `autoBindSampler` it uses that sampler, otherwise the image's own. Pass `descriptorSets` is an ordered list of layout names; that order supplies shader set indices.
 
 Sampler keys: `magFilter`, `minFilter`, `mipmapMode` default `linear` (also `nearest`). Use `addressMode` for all axes or `addressModeU/V/W` individually (default `repeat`; also `clamp_to_edge`, `clamp_to_border`, `mirrored_repeat`). Other keys are `borderColor` (`float_opaque_black`), `anisotropyEnable` (false; alias `anisotropy`), `maxAnisotropy` (1), `compareEnable` (false), `compareOp` (`less`), `minLod`, `maxLod`, and `mipLodBias` (all 0). Set the LOD range deliberately when sampling mipmapped textures.
 
@@ -232,7 +232,7 @@ A preset switches passes and sets `scene.custom` values in one call, `apply_pipe
 
 ## Initialization, memory, and readback
 
-Layout `source` accepts `type` (`initializer` by default), `seed` (42), and per-field initializers under `fields`: `constant`, `randomRange` (`min`/`max`), `gaussian` (`mean`/`stddev`), `grid` (`dimensions`/`origin`/`spacing`/`w`), or `sphere` (`center`/`radius`/`mode`/`w`). These initialize numeric components, not arbitrary structs. `type: file` uses a binary `path`; `type: buffer_ref` references a shared `ref` with `frequency` (default `per_frame`).
+Layout `source` accepts `type` (`initializer` by default), `seed` (42), and per-field initializers under `fields`: `constant`, `randomRange` (`min`/`max`), `gaussian` (`mean`/`stddev`), `grid` (`dimensions`/`origin`/`spacing`/`w`), or `sphere` (`center`/`radius`/`mode`/`w`). These initialize numeric components, not arbitrary structs. `type: file` uses a binary `path`, exactly `elementCount` elements long, which resolves beside the pipeline JSON when the file is there, as shader paths do, and against the working directory otherwise; `type: buffer_ref` references a shared `ref` with `frequency` (default `per_frame`).
 
 `memory` selects `location` (`device_local`, `host_visible`, `host_coherent`), `staging` (`auto`, `persistent`, `none`), and `transferDirection` (`gpu_only`, `cpu_to_gpu`, `gpu_to_cpu`, `bidirectional`). Defaults are the first value in each list.
 

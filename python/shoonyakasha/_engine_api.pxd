@@ -188,6 +188,10 @@ cdef extern from "Facade/SceneAPI.h" namespace "Shoonyakasha::Facade":
         void setLightCone(EntityHandle entity, float innerDegrees, float outerDegrees)
         float getLightSourceRadius(EntityHandle entity) const
         void setLightSourceRadius(EntityHandle entity, float radius)
+        vec2 getLightSourceSize(EntityHandle entity) const
+        void setLightSourceSize(EntityHandle entity, float width, float height)
+        uint32_t getLightSourceImage(EntityHandle entity) const
+        void setLightSourceImage(EntityHandle entity, uint32_t slot)
 
         # Material
         void setMaterialFloat(EntityHandle entity, const string& param, float value)
@@ -414,6 +418,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         bint setPassEnabled(const string& passName, bint enabled)
         bint isPassEnabled(const string& passName)
         bint applyPipelinePreset(const string& name)
+        bint setPipelineImage(const string& name, const string& path)
         bint rayQuerySupported() const
         vector[string] getPipelinePresets() const
         uint32_t getPassDrawnCount(const string& passName)

@@ -14,6 +14,7 @@
 
 #include "Facade/EngineAPI.h"
 #include "Core/AssetPaths.h"
+#include "Resources/Sprite2DManager.h"
 #include "Capture/VideoRecorder.h"
 #include <filesystem>
 #include "Facade/SceneAPI.h"
@@ -486,6 +487,17 @@ bool EngineAPI::isPassEnabled(const std::string& passName) const {
 
 bool EngineAPI::applyPipelinePreset(const std::string& name) {
     return m_impl->app->getRenderGraph().applyPreset(name);
+}
+
+bool EngineAPI::setPipelineImage(const std::string& name, const std::string& path) {
+    if (!m_impl->app) return false;
+    // The sprite manager's loader keeps the texture, cached by path, for as
+    // long as the engine runs, so the graph can sample it however often it
+    // is swapped.
+    const GPUTexture texture = m_impl->app->getSprite2DManager().loadTexture(AssetPaths::locate(path).string());
+    if (texture.view == VK_NULL_HANDLE) return false;
+    m_impl->app->getRenderGraph().setExternalImage(name, texture.view, texture.sampler);
+    return true;
 }
 
 bool EngineAPI::rayQuerySupported() const {

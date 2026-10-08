@@ -17,6 +17,8 @@ layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
 layout(set = 2, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
 layout(set = 2, binding = 2) uniform sampler2DShadow localShadowAtlas;
 layout(set = 2, binding = 3) uniform usampler2D lightClusters;
+layout(std430, set = 2, binding = 4) readonly buffer LtcTable { vec4 ltcTable[]; };
+layout(set = 2, binding = 5) uniform sampler2D lightImage;
 layout(set = 3, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 3, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 3, binding = 2) uniform sampler2D brdfLUT;
