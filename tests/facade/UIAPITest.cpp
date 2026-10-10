@@ -28,7 +28,7 @@ struct UIAPIFixture : ::testing::Test {
     UIAPI ui{registry, context};
     glm::vec2 screen{1280.0f, 720.0f};
     entt::entity input = registry.create();
-    UI::CanvasInputSystem inputSystem{&screen, nullptr, &context.pointer()};   // keeps the press between frames
+    UI::CanvasInputSystem inputSystem{&screen, nullptr, &context.pointer(), &context.focus()};   // keeps the press between frames
 
     UIAPIFixture() { registry.emplace<ECS::InputStateComponent>(input); }
 
@@ -38,6 +38,7 @@ struct UIAPIFixture : ::testing::Test {
         state.mousePosition = mouse;
         state.mouseButtons[GLFW_MOUSE_BUTTON_LEFT] = down;
         inputSystem.update(registry, 0.0f);
+        state.keyPresses.clear();   // presses last one frame
         UI::CanvasLayoutSystem(&screen, &context.fonts()).update(registry, 0.0f);
         UI::CanvasTextSystem(&context.fonts()).update(registry, 0.0f);
     }
@@ -240,6 +241,32 @@ TEST_F(UIAPIFixture, ScrollViewsScrollTheirContent) {
     frame({100.0f, 100.0f});
     EXPECT_NEAR(ui.getScrollPosition(view).y, 100.0f / 300.0f, 1e-5f);
     EXPECT_EQ(ui.getScrollContent(rows[0]), NullEntity);
+}
+
+TEST_F(UIAPIFixture, FocusMovesByCodeAndByTab) {
+    const EntityHandle canvas = ui.createCanvas({1280.0f, 720.0f});
+    const EntityHandle a = ui.createButton(canvas, "A");
+    const EntityHandle b = ui.createButton(canvas, "B");
+    const EntityHandle c = ui.createButton(canvas, "C");
+    ui.setAnchor(b, {0.0f, 0.0f});
+    ui.setAnchor(c, {1.0f, 1.0f});
+    ui.setNavigable(b, false);
+    frame();
+
+    ui.focus(a);
+    EXPECT_EQ(ui.getFocusedElement(), a);
+    registry.get<ECS::InputStateComponent>(input).keyPresses = {{GLFW_KEY_TAB, 0, false}};
+    frame();
+    EXPECT_EQ(ui.getFocusedElement(), c);   // b is not navigable
+    EXPECT_FALSE(ui.isKeyboardCaptured());
+
+    ui.focus(NullEntity);
+    EXPECT_EQ(ui.getFocusedElement(), NullEntity);
+    ui.focus(a);
+    ui.setVisible(a, false);
+    frame();
+    frame();
+    EXPECT_EQ(ui.getFocusedElement(), NullEntity);   // hidden: focus let go
 }
 
 TEST_F(UIAPIFixture, InvalidHandlesAreIgnored) {

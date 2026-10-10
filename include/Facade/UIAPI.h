@@ -279,6 +279,21 @@ public:
     void setSliderValue(EntityHandle slider, float value);
     void setSliderRange(EntityHandle slider, float minValue, float maxValue, bool wholeNumbers = false);
 
+    /// Gives `element` keyboard and gamepad focus; NullEntity clears it. An
+    /// element that cannot take focus (disabled, hidden, not interactable)
+    /// loses it on the next frame. Pressing an element focuses it too, and
+    /// Tab, the arrow keys and the D-pad move focus; Enter, Space or gamepad
+    /// A activate it, Escape or gamepad B clear it.
+    void focus(EntityHandle element);
+    EntityHandle getFocusedElement() const;
+
+    /// Does the focused element take the keyboard (a text field)? Then the
+    /// camera sees no keys and onKeyPressed is not called.
+    bool isKeyboardCaptured() const;
+
+    /// Whether Tab, the arrow keys and the D-pad can reach `element`.
+    void setNavigable(EntityHandle element, bool navigable);
+
     /// Is the pointer over a UI element, or pressing one? Check it before
     /// treating a click as one in the scene.
     bool isPointerOverUI() const;

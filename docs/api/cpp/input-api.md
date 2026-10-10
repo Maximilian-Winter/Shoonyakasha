@@ -33,6 +33,7 @@ void setOnKeyEvent(std::function<void(int keyCode, bool pressed)> cb);
 void setOnMouseMove(std::function<void(float x, float y)> cb);
 void setOnMouseButton(std::function<void(int button, bool pressed)> cb);
 void setOnMouseScroll(std::function<void(float xOffset, float yOffset)> cb);
+void setOnChar(std::function<void(uint32_t codepoint)> cb);
 ```
 
 <!-- END SOURCE API -->

@@ -195,26 +195,32 @@ struct UIText {
 // button. CanvasInputSystem writes the state below once per frame, from the
 // rects of the frame before.
 
-/// An element the pointer can hover, press and click.
+/// An element the pointer can hover, press and click, and the keyboard or a
+/// gamepad can focus and activate.
 struct UIInteractable {
     bool enabled = true;
+    bool navigable = true;          // Tab, the arrow keys and the D-pad can focus it
+    bool capturesKeyboard = false;  // while focused, keys go to it rather than the camera
 
     // Multiplied into the element's own UIPanel and UIImage colours, by state.
     glm::vec4 normalColor{1.0f};
     glm::vec4 hoverColor{0.92f, 0.92f, 0.92f, 1.0f};
     glm::vec4 pressedColor{0.75f, 0.75f, 0.75f, 1.0f};
     glm::vec4 disabledColor{0.6f, 0.6f, 0.6f, 0.5f};
+    glm::vec4 focusedColor{0.85f, 0.92f, 1.0f, 1.0f};
 
     // Written by CanvasInputSystem.
     bool hovered = false;       // the pointer is over it, or it is pressed and the pointer is over it
     bool pressed = false;       // pressed on it and not yet released
-    bool clicked = false;       // this frame: released over it after being pressed on it
-    bool valueChanged = false;  // this frame: a UIToggle or UISlider value changed by the pointer
+    bool focused = false;       // the keyboard and gamepad act on it
+    bool clicked = false;       // this frame: released over it after being pressed on it, or activated
+    bool valueChanged = false;  // this frame: a UIToggle or UISlider value changed by the user
 
     const glm::vec4& stateColor() const {
         if (!enabled) return disabledColor;
         if (pressed) return pressedColor;
         if (hovered) return hoverColor;
+        if (focused) return focusedColor;
         return normalColor;
     }
 };
@@ -287,6 +293,24 @@ struct UIScrollbar {
     // Written by CanvasInputSystem.
     float value = 0.0f;                  // the view's scroll position on this axis
     float size = 1.0f;                   // the visible fraction of the content
+};
+
+/// Which element the keyboard and gamepad act on. Owned by UIContext and
+/// written by CanvasInputSystem; code may set `focused` too, and an element
+/// that cannot take focus (disabled, hidden, not interactable) loses it on
+/// the next update.
+///
+/// Pressing an interactable focuses it, and pressing anywhere else clears
+/// focus. Tab and Shift+Tab move through the navigable interactables in draw
+/// order; the arrow keys and the D-pad move to the nearest one in that
+/// direction. Both stay on the focused element's canvas, or, with nothing
+/// focused, on the topmost screen canvas that has a navigable element, so an
+/// open dialog keeps navigation to itself. Enter, Space and gamepad A click a
+/// focused button or flip a toggle; Left and Right step a focused slider.
+/// Escape and gamepad B clear focus.
+struct UIFocusState {
+    entt::entity focused = entt::null;
+    bool keyboardCaptured = false;       // the focused element captures the keyboard
 };
 
 /// Where the pointer is, for the application. Owned by UIContext and written

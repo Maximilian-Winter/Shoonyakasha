@@ -166,8 +166,8 @@ void syncWidgets(entt::registry& registry) {
 } // namespace
 
 CanvasInputSystem::CanvasInputSystem(const glm::vec2* screenSize, const glm::vec2* windowSize,
-                                     UIPointerState* pointer)
-    : m_screenSize(screenSize), m_windowSize(windowSize), m_pointer(pointer) {
+                                     UIPointerState* pointer, UIFocusState* focus)
+    : m_screenSize(screenSize), m_windowSize(windowSize), m_pointer(pointer), m_focus(focus) {
     priority = kPriority;
     name = "CanvasInputSystem";
 }
@@ -178,6 +178,7 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
     for (auto [entity, interactable] : registry.view<UIInteractable>().each()) {
         interactable.hovered = false;
         interactable.pressed = false;
+        interactable.focused = false;
         interactable.clicked = false;
         interactable.valueChanged = false;
     }
@@ -255,6 +256,8 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
     }
     m_wasDown = down;
 
+    updateFocus(registry, *input, pressedNow, hovered);
+
     if (hit) {
         pointer.canvas = hit->canvas;
         pointer.position = hit->position;
@@ -319,6 +322,173 @@ void CanvasInputSystem::updateDrag(entt::registry& registry, glm::vec2 pixel, co
         view.velocity = glm::mix(view.velocity, velocity, 0.5f);
     }
     m_lastDragPosition = *position;
+}
+
+// ─── Focus and navigation ───────────────────────────────────────
+
+namespace {
+
+bool canFocus(const entt::registry& registry, entt::entity e) {
+    if (e == entt::null || !registry.valid(e)) return false;
+    const auto* interactable = registry.try_get<UIInteractable>(e);
+    const auto* rect = registry.try_get<UIRect>(e);
+    return interactable && interactable->enabled && rect && rect->visibleInHierarchy && rect->canvas != entt::null;
+}
+
+glm::vec2 centreOf(const entt::registry& registry, entt::entity e) {
+    const Rect& r = registry.get<UIRect>(e).rect;
+    return (r.min + r.max) * 0.5f;
+}
+
+/// The canvas navigation moves on: the focused element's, else the topmost
+/// screen canvas with a navigable element.
+entt::entity navigationCanvas(const entt::registry& registry, entt::entity focused) {
+    if (canFocus(registry, focused)) return registry.get<UIRect>(focused).canvas;
+    entt::entity best = entt::null;
+    int bestOrder = 0;
+    for (auto [entity, interactable] : registry.view<const UIInteractable>().each()) {
+        if (!interactable.navigable || !canFocus(registry, entity)) continue;
+        const entt::entity canvas = registry.get<UIRect>(entity).canvas;
+        const auto& c = registry.get<UICanvas>(canvas);
+        if (c.mode != UICanvas::Mode::ScreenOverlay) continue;
+        if (best == entt::null || c.sortOrder > bestOrder) {
+            best = canvas;
+            bestOrder = c.sortOrder;
+        }
+    }
+    return best;
+}
+
+/// Navigable elements of `canvas`, in draw order.
+std::vector<entt::entity> navigable(const entt::registry& registry, entt::entity canvas) {
+    std::vector<std::pair<uint32_t, entt::entity>> found;
+    for (auto [entity, interactable] : registry.view<const UIInteractable>().each()) {
+        if (!interactable.navigable || !canFocus(registry, entity)) continue;
+        const auto& rect = registry.get<UIRect>(entity);
+        if (rect.canvas == canvas) found.emplace_back(rect.drawOrder, entity);
+    }
+    std::sort(found.begin(), found.end());
+    std::vector<entt::entity> out;
+    for (const auto& [order, entity] : found) out.push_back(entity);
+    return out;
+}
+
+entt::entity nextInOrder(const entt::registry& registry, entt::entity focused, int step) {
+    const auto list = navigable(registry, navigationCanvas(registry, focused));
+    if (list.empty()) return focused;
+    const auto it = std::find(list.begin(), list.end(), focused);
+    if (it == list.end()) return step > 0 ? list.front() : list.back();
+    const auto n = static_cast<long>(list.size());
+    const long index = (static_cast<long>(it - list.begin()) + step + n) % n;
+    return list[static_cast<size_t>(index)];
+}
+
+/// The nearest navigable element from the focused one in `direction` (y
+/// down), weighing sideways distance double. Nothing focused: the first.
+entt::entity nextInDirection(const entt::registry& registry, entt::entity focused, glm::vec2 direction) {
+    const auto list = navigable(registry, navigationCanvas(registry, focused));
+    if (list.empty()) return focused;
+    if (!canFocus(registry, focused)) return list.front();
+    const glm::vec2 from = centreOf(registry, focused);
+    entt::entity best = focused;
+    float bestScore = 0.0f;
+    for (const entt::entity e : list) {
+        if (e == focused) continue;
+        const glm::vec2 d = centreOf(registry, e) - from;
+        const float along = glm::dot(d, direction);
+        if (along <= 0.5f) continue;
+        const float across = std::abs(d.x * direction.y - d.y * direction.x);
+        const float score = along + 2.0f * across;
+        if (best == focused || score < bestScore) {
+            best = e;
+            bestScore = score;
+        }
+    }
+    return best;
+}
+
+/// Clicks a button or flips a toggle.
+void activate(entt::registry& registry, entt::entity e) {
+    auto& interactable = registry.get<UIInteractable>(e);
+    interactable.clicked = true;
+    if (auto* toggle = registry.try_get<UIToggle>(e)) {
+        toggle->isOn = !toggle->isOn;
+        interactable.valueChanged = true;
+    }
+}
+
+/// Moves a slider a tenth of its range, or by one in whole numbers.
+void stepSlider(entt::registry& registry, entt::entity e, int direction) {
+    auto& slider = registry.get<UISlider>(e);
+    const float step = slider.wholeNumbers ? 1.0f : (slider.maxValue - slider.minValue) / 10.0f;
+    const float low = std::min(slider.minValue, slider.maxValue);
+    const float high = std::max(slider.minValue, slider.maxValue);
+    const float value = std::clamp(slider.value + static_cast<float>(direction) * step, low, high);
+    if (value == slider.value) return;
+    slider.value = value;
+    registry.get<UIInteractable>(e).valueChanged = true;
+}
+
+} // namespace
+
+void CanvasInputSystem::updateFocus(entt::registry& registry, const ECS::InputStateComponent& input,
+                                    bool pressedNow, entt::entity hovered) {
+    if (!m_focus) return;
+    UIFocusState& focus = *m_focus;
+    if (!canFocus(registry, focus.focused)) focus.focused = entt::null;
+
+    // A press focuses what it lands on, or clears focus.
+    if (pressedNow) focus.focused = canFocus(registry, hovered) ? hovered : entt::null;
+
+    auto move = [&](entt::entity to) { if (to != entt::null) focus.focused = to; };
+    auto captured = [&] {
+        return focus.focused != entt::null && registry.get<UIInteractable>(focus.focused).capturesKeyboard;
+    };
+    auto arrow = [&](glm::vec2 direction) {
+        // A focused slider takes Left and Right.
+        if (direction.y == 0.0f && focus.focused != entt::null && registry.all_of<UISlider>(focus.focused)) {
+            stepSlider(registry, focus.focused, direction.x > 0.0f ? 1 : -1);
+        } else {
+            move(nextInDirection(registry, focus.focused, direction));
+        }
+    };
+    auto activateFocused = [&] {
+        if (focus.focused != entt::null) activate(registry, focus.focused);
+    };
+
+    for (const auto& key : input.keyPresses) {
+        if (key.key == GLFW_KEY_ESCAPE) {
+            if (!key.repeat) focus.focused = entt::null;
+        } else if (key.key == GLFW_KEY_TAB) {
+            move(nextInOrder(registry, focus.focused, (key.mods & GLFW_MOD_SHIFT) ? -1 : 1));
+        } else if (captured()) {
+            continue;   // the focused element takes every other key
+        } else if (key.key == GLFW_KEY_ENTER || key.key == GLFW_KEY_KP_ENTER || key.key == GLFW_KEY_SPACE) {
+            if (!key.repeat) activateFocused();
+        } else if (key.key == GLFW_KEY_LEFT) {
+            arrow({-1.0f, 0.0f});
+        } else if (key.key == GLFW_KEY_RIGHT) {
+            arrow({1.0f, 0.0f});
+        } else if (key.key == GLFW_KEY_UP) {
+            arrow({0.0f, -1.0f});
+        } else if (key.key == GLFW_KEY_DOWN) {
+            arrow({0.0f, 1.0f});
+        }
+    }
+
+    // The gamepad, on each button's press.
+    const auto& pad = input.gamepad;
+    auto pressed = [&](int button) { return pad.connected && pad.buttons[button] && !m_lastPadButtons[button]; };
+    if (pressed(GLFW_GAMEPAD_BUTTON_DPAD_LEFT)) arrow({-1.0f, 0.0f});
+    if (pressed(GLFW_GAMEPAD_BUTTON_DPAD_RIGHT)) arrow({1.0f, 0.0f});
+    if (pressed(GLFW_GAMEPAD_BUTTON_DPAD_UP)) arrow({0.0f, -1.0f});
+    if (pressed(GLFW_GAMEPAD_BUTTON_DPAD_DOWN)) arrow({0.0f, 1.0f});
+    if (pressed(GLFW_GAMEPAD_BUTTON_A)) activateFocused();
+    if (pressed(GLFW_GAMEPAD_BUTTON_B)) focus.focused = entt::null;
+    m_lastPadButtons = pad.connected ? pad.buttons : decltype(m_lastPadButtons){};
+
+    if (focus.focused != entt::null) registry.get<UIInteractable>(focus.focused).focused = true;
+    focus.keyboardCaptured = captured();
 }
 
 bool CanvasInputSystem::dragScrollbar(entt::registry& registry, entt::entity bar, glm::vec2 pixel,

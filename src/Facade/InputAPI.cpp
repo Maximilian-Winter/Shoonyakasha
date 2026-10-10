@@ -71,5 +71,9 @@ void InputAPI::setOnMouseScroll(std::function<void(float, float)> cb) {
     m_impl->onMouseScrollCb = std::move(cb);
 }
 
+void InputAPI::setOnChar(std::function<void(uint32_t)> cb) {
+    m_impl->onCharCb = std::move(cb);
+}
+
 } // namespace Facade
 } // namespace Shoonyakasha

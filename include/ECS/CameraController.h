@@ -20,6 +20,8 @@
 #include <GLFW/glfw3.h>
 #include <array>
 #include <algorithm>
+#include <string>
+#include <vector>
 
 namespace Shoonyakasha {
 namespace ECS {
@@ -46,6 +48,30 @@ struct InputStateComponent {
     // Mouse capture state (for FPS-style control)
     bool mouseCaptured = false;
     bool firstMouseCapture = true;
+
+    // This frame's keyboard events, for text input and UI navigation.
+    struct KeyPress {
+        int key = 0;
+        int mods = 0;            // GLFW_MOD_* bits
+        bool repeat = false;     // sent while the key is held
+    };
+    std::u32string textInput;           // characters typed
+    std::vector<KeyPress> keyPresses;   // presses and repeats, in order
+
+    // The first connected gamepad, with GLFW's standard mapping
+    // (GLFW_GAMEPAD_BUTTON_*, GLFW_GAMEPAD_AXIS_*).
+    struct Gamepad {
+        bool connected = false;
+        std::array<bool, GLFW_GAMEPAD_BUTTON_LAST + 1> buttons{};
+        std::array<float, GLFW_GAMEPAD_AXIS_LAST + 1> axes{};
+    };
+    Gamepad gamepad;
+
+    // Set by the application from the canvas UI's last frame: the pointer is
+    // over the UI, so the wheel is the UI's; a text field has the keyboard,
+    // so `keys` reads as none held.
+    bool pointerOverUI = false;
+    bool keyboardCapturedByUI = false;
 
     // ─────────────────────────────────────────────────────────────
     // Query Methods - The Questions We Ask of Reality
@@ -79,9 +105,11 @@ struct InputStateComponent {
         // Note: scrollDelta is accumulated via events, reset here after reading
     }
 
-    // Reset scroll delta after it's been consumed
+    // Reset the per-frame input after it's been consumed
     void endFrame() {
         scrollDelta = glm::vec2(0.0f);
+        textInput.clear();
+        keyPresses.clear();
     }
 };
 
@@ -421,8 +449,8 @@ private:
             ctrl.orbitTarget += up * input.mouseDelta.y * panSpeed;
         }
 
-        // Scroll zoom
-        ctrl.orbitDistance -= input.scrollDelta.y * ctrl.scrollSensitivity;
+        // Scroll zoom, unless the wheel is scrolling the UI under the pointer
+        if (!input.pointerOverUI) ctrl.orbitDistance -= input.scrollDelta.y * ctrl.scrollSensitivity;
         ctrl.orbitDistance = glm::clamp(ctrl.orbitDistance, ctrl.orbitMinDistance, ctrl.orbitMaxDistance);
 
         // Keyboard zoom fallback

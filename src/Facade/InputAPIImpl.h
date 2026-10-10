@@ -28,6 +28,7 @@ struct InputAPI::Impl {
     std::function<void(float, float)> onMouseMoveCb;
     std::function<void(int, bool)>    onMouseButtonCb;
     std::function<void(float, float)> onMouseScrollCb;
+    std::function<void(uint32_t)>     onCharCb;
 
     // Wire from EngineAPI — Impl is a nested class so it can access private m_impl
     static void wire(InputAPI& api,
@@ -57,6 +58,10 @@ struct InputAPI::Impl {
         dispatcher->subscribe<MouseScrollEvent>([this](const MouseScrollEvent& e) {
             if (onMouseScrollCb) onMouseScrollCb(static_cast<float>(e.xOffset),
                                                   static_cast<float>(e.yOffset));
+        });
+
+        dispatcher->subscribe<CharEvent>([this](const CharEvent& e) {
+            if (onCharCb) onCharCb(static_cast<uint32_t>(e.codepoint));
         });
     }
 };

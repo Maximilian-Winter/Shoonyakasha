@@ -88,6 +88,19 @@ Widgets:
 
 Values set from code are shown in the next frame and do not set `value_changed`. `set_interactable(e, False)` disables a widget, and dims a button.
 
+## Keyboard and gamepad
+
+One interactable at a time has *focus*: the keyboard and gamepad act on it, and it shows its focus colour.
+- **By pointer:** pressing an element focuses it; pressing anywhere else clears focus.
+- **By keys:** Tab and Shift+Tab move through navigable interactables in draw order. The arrow keys and the gamepad D-pad move to the nearest one in that direction.
+- **Where focus stays:** both stay on the focused element's canvas or, with nothing focused, on the topmost screen canvas, so an open dialog keeps focus inside it.
+- **Activating:** Enter, Space or gamepad A clicks a focused button (`was_clicked`) or flips a toggle (`value_changed`). Left and Right step a focused slider by a tenth of its range, or by 1 with whole numbers.
+- **Clearing:** Escape or gamepad B clears focus. While something is focused, Escape does that instead of toggling mouse capture.
+
+From code, `focus(element)` moves focus, `focused_element` reads it, and `set_navigable(element, False)` keeps an element out of Tab and arrow navigation (it can still be clicked).
+
+`keyboard_captured` is true while the focused element takes the keyboard: a text field. Then the camera sees no keys held, and `on_key_pressed` is not called. Check it before treating a key as a game command in `on_update`. `engine.input.set_on_char(callback)` reports each typed character, after the keyboard layout.
+
 ## World canvases
 
 `create_world_canvas(pixel_size, world_size)` makes an entity carrying both the canvas and a quad `world_size` units across, facing +Z. Move and turn it with `engine.scene.set_position` and `set_rotation`.
@@ -169,6 +182,10 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `slider_value(slider)` | float | Calls native `getSliderValue`; see the class contract above. |
 | `set_slider_value(slider, value)` | None | Calls native `setSliderValue`; see the class contract above. |
 | `set_slider_range(slider, min, max, whole_numbers=False)` | None | Calls native `setSliderRange`; see the class contract above. |
+| `focus(element)` | None | Give element keyboard and gamepad focus; NULL_ENTITY clears it. Pressing an element focuses it too; Tab, the arrow keys and the D-pad move focus, Enter, Space or gamepad A activate it, Escape or gamepad B clear it. |
+| `focused_element (read-only property)` | int | The focused element, or NULL_ENTITY. |
+| `keyboard_captured (read-only property)` | bool | Does the focused element take the keyboard (a text field)? Then the camera sees no keys and on_key_pressed is not called; check it before acting on keys. |
+| `set_navigable(element, navigable)` | None | Whether Tab, the arrow keys and the D-pad can reach element. |
 | `pointer_over_ui (read-only property)` | bool | Is the pointer over a UI element, or pressing one? Check it before treating a click as one in the scene. |
 | `pointer_canvas (read-only property)` | int | The canvas under the pointer, or NULL_ENTITY. |
 | `pointer_position (read-only property)` | 2-tuple | The pointer on pointer_canvas, in canvas units. |

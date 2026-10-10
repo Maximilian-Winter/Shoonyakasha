@@ -280,6 +280,7 @@ cdef extern from "Facade/InputAPI.h" namespace "Shoonyakasha::Facade":
         void setOnMouseMove(function_float2 cb)
         void setOnMouseButton(function_int_bool cb)
         void setOnMouseScroll(function_float2 cb)
+        void setOnChar(function_int cb)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -440,6 +441,10 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         float getSliderValue(EntityHandle slider) const
         void setSliderValue(EntityHandle slider, float value)
         void setSliderRange(EntityHandle slider, float minValue, float maxValue, cbool wholeNumbers)
+        void focus(EntityHandle element)
+        EntityHandle getFocusedElement() const
+        cbool isKeyboardCaptured() const
+        void setNavigable(EntityHandle element, cbool navigable)
         cbool isPointerOverUI() const
         EntityHandle getPointerCanvas() const
         vec2 getPointerPosition() const

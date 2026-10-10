@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <vector>
 
 using namespace Shoonyakasha;
 using namespace Shoonyakasha::UI;
@@ -193,18 +194,25 @@ protected:
 
 private:
     /// With --screenshot: a pointer that turns spinning on, drags the angle
-    /// slider, clicks the world canvas's button twice, then rests on Reset.
-    /// It goes through the same input path as the mouse.
+    /// slider and clicks the world canvas's button twice; then Escape clears
+    /// the focus that left there, and Tab three times moves focus across the
+    /// settings to Reset. It goes through the same input path as the mouse
+    /// and keyboard.
     void scriptPointer() {
         if (m_frame < 65) return;
         auto at = [&](entt::entity e, float across = 0.5f) {
             m_scriptPixel = pixelOf(e, across);
         };
         bool down = false;
+        std::vector<ECS::InputStateComponent::KeyPress> keys;
         if (m_frame <= 67) { at(m_spin); down = m_frame == 66; }
         else if (m_frame <= 86) { at(m_angle, 0.1f + 0.65f * std::min((m_frame - 75) / 10.0f, 1.0f)); down = m_frame >= 75 && m_frame <= 85; }
         else if (m_frame <= 94) { at(m_terminalButton); down = m_frame == 91 || m_frame == 93; }
-        else { at(m_reset); }
+        else {
+            m_scriptPixel = screenSize() * glm::vec2(0.6f, 0.15f);   // over nothing
+            if (m_frame == 99) keys.push_back({GLFW_KEY_ESCAPE, 0, false});
+            if (m_frame == 100 || m_frame == 102 || m_frame == 104) keys.push_back({GLFW_KEY_TAB, 0, false});
+        }
 
         int width = 0, height = 0;
         glfwGetWindowSize(getWindow().getWindow(), &width, &height);
@@ -213,6 +221,7 @@ private:
             state.mousePosition = m_scriptPixel * glm::vec2(width, height) / screen;
             state.mouseButtons[GLFW_MOUSE_BUTTON_LEFT] = down;
             state.mouseCaptured = false;
+            state.keyPresses = keys;
         }
     }
 

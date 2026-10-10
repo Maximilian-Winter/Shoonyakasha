@@ -34,5 +34,6 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_on_mouse_move(callback)` | None | Set mouse move callback: callback(x: float, y: float). |
 | `set_on_mouse_button(callback)` | None | Set mouse button callback: callback(button: int, pressed: bool). |
 | `set_on_mouse_scroll(callback)` | None | Set mouse scroll callback: callback(x_offset: float, y_offset: float). |
+| `set_on_char(callback)` | None | Set typed-character callback: callback(char: str), after the keyboard layout and dead keys. Arrows, Enter, Backspace and the like send key events only. |
 
 <!-- END SOURCE API -->

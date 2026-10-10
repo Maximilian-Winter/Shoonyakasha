@@ -760,6 +760,12 @@ cdef class Input:
         """Set mouse scroll callback: callback(x_offset: float, y_offset: float)."""
         self._ptr.setOnMouseScroll(make_float2_callback(<PyObject*>callback))
 
+    def set_on_char(self, callback):
+        """Set typed-character callback: callback(char: str), after the keyboard layout
+        and dead keys. Arrows, Enter, Backspace and the like send key events only."""
+        wrapper = lambda codepoint: callback(chr(codepoint))
+        self._ptr.setOnChar(make_key_callback(<PyObject*>wrapper))
+
 
 # ═══════════════════════════════════════════════════════════════
 # Physics — Python wrapper for PhysicsAPI
@@ -1362,6 +1368,27 @@ cdef class UI:
 
     def set_slider_range(self, uint32_t slider, float min, float max, bint whole_numbers=False):
         self._ptr.setSliderRange(slider, min, max, whole_numbers)
+
+    def focus(self, uint32_t element):
+        """Give element keyboard and gamepad focus; NULL_ENTITY clears it. Pressing an
+        element focuses it too; Tab, the arrow keys and the D-pad move focus, Enter,
+        Space or gamepad A activate it, Escape or gamepad B clear it."""
+        self._ptr.focus(element)
+
+    @property
+    def focused_element(self):
+        """The focused element, or NULL_ENTITY."""
+        return <uint32_t>self._ptr.getFocusedElement()
+
+    @property
+    def keyboard_captured(self):
+        """Does the focused element take the keyboard (a text field)? Then the camera
+        sees no keys and on_key_pressed is not called; check it before acting on keys."""
+        return self._ptr.isKeyboardCaptured()
+
+    def set_navigable(self, uint32_t element, bint navigable):
+        """Whether Tab, the arrow keys and the D-pad can reach element."""
+        self._ptr.setNavigable(element, navigable)
 
     @property
     def pointer_over_ui(self):

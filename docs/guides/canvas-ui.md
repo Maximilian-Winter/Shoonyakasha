@@ -170,6 +170,21 @@ What stops the pointer:
 
 `set_interactable(e, False)` disables a widget: it ignores the pointer, and a disabled button is drawn dimmed.
 
+### Keyboard and gamepad
+
+Menus can be used without a mouse:
+- **Focus:** Tab moves focus through the widgets in order, and the arrow keys or a gamepad's D-pad move to the nearest one in that direction.
+- **Showing it:** a focused button turns blue. A focused toggle or slider does not show it yet: the state colour reaches only a widget's own panel, which these do not have.
+- **Activating:** Enter, Space or the A button press a focused button or flip a toggle, which reads like a click in `was_clicked` and `value_changed`. Left and Right move a focused slider.
+- **Clearing:** Escape or B clears focus. Clicking a widget focuses it too.
+- **Dialogs:** navigation stays on the topmost canvas, so a dialog keeps focus inside it.
+
+```python
+ui.focus(play)    # start a menu on its first button, for a gamepad player
+```
+
+`set_navigable(e, False)` keeps decoration or a rarely used widget out of the order.
+
 ## World canvases
 
 ```python
@@ -227,7 +242,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 ## Limits
 
 - No text input fields yet.
-- The camera also sees the mouse wheel: an orbit camera that zooms with it zooms while a list scrolls.
+- The arrow keys move focus and also turn an orbit camera, which uses them; only a focused text field takes keys from the camera.
 - Right-to-left text: each word is shaped right to left, but a line puts its words in typing order, left to right; mixed-direction lines are not reordered.
 - Thai, Lao, Khmer and Myanmar, which need a dictionary to find where words end, wrap only at spaces, or between clusters when a run does not fit.
 - World-canvas clicks ignore geometry in front of the canvas.

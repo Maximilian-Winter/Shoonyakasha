@@ -55,6 +55,7 @@ void VulkanWindow::initWindow() {
     glfwSetWindowUserPointer(m_window, this);
     glfwSetFramebufferSizeCallback(m_window, framebufferResizeCallback);
     glfwSetKeyCallback(m_window, keyCallback);
+    glfwSetCharCallback(m_window, charCallback);
     glfwSetMouseButtonCallback(m_window, mouseButtonCallback);
     glfwSetCursorPosCallback(m_window, cursorPositionCallback);
     glfwSetScrollCallback(m_window, scrollCallback);
@@ -88,11 +89,24 @@ void VulkanWindow::framebufferResizeCallback(GLFWwindow* window, int width, int 
     vulkanWindow->m_eventDispatcher->publish(WindowResizeEvent{width, height});
 }
 
-void VulkanWindow::keyCallback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/) {
+void VulkanWindow::keyCallback(GLFWwindow* window, int key, int /*scancode*/, int action, int mods) {
     auto vulkanWindow = getWindowUserPointer(window);
-    bool pressed = (action != GLFW_RELEASE);
     vulkanWindow->m_logger->log(LogLevel::Debug, "Key event: key=%d, action=%d", key, action);
-    vulkanWindow->m_eventDispatcher->publish(KeyEvent{key, pressed});
+    vulkanWindow->m_eventDispatcher->publish(KeyEvent{key, action, mods});
+}
+
+void VulkanWindow::charCallback(GLFWwindow* window, unsigned int codepoint) {
+    auto vulkanWindow = getWindowUserPointer(window);
+    vulkanWindow->m_eventDispatcher->publish(CharEvent{static_cast<char32_t>(codepoint)});
+}
+
+std::string VulkanWindow::getClipboardText() const {
+    const char* text = glfwGetClipboardString(m_window);
+    return text ? std::string(text) : std::string();
+}
+
+void VulkanWindow::setClipboardText(const std::string& text) {
+    glfwSetClipboardString(m_window, text.c_str());
 }
 
 void VulkanWindow::mouseButtonCallback(GLFWwindow* window, int button, int action, int /*mods*/) {

@@ -54,9 +54,24 @@ struct WindowResizeEvent : public Event {
 };
 
 struct KeyEvent : public Event {
+    // GLFW's values: a held key sends Repeat after its first Press.
+    enum Action { Release = 0, Press = 1, Repeat = 2 };
+
     int keyCode;
-    bool pressed;
-    KeyEvent(int code, bool isPressed) : keyCode(code), pressed(isPressed) {}
+    bool pressed;        // Press or Repeat
+    int action;
+    int mods;            // GLFW_MOD_* bits: shift, control, alt, super
+    KeyEvent(int code, bool isPressed)
+        : keyCode(code), pressed(isPressed), action(isPressed ? Press : Release), mods(0) {}
+    KeyEvent(int code, int keyAction, int modifiers)
+        : keyCode(code), pressed(keyAction != Release), action(keyAction), mods(modifiers) {}
+};
+
+/// A character typed, after the keyboard layout and dead keys: what text
+/// input inserts. Not sent for keys such as arrows, Enter or Backspace.
+struct CharEvent : public Event {
+    char32_t codepoint;
+    explicit CharEvent(char32_t c) : codepoint(c) {}
 };
 
 struct MouseMoveEvent : public Event {
@@ -82,6 +97,7 @@ using Shoonyakasha::Event;
 using Shoonyakasha::EventDispatcher;
 using Shoonyakasha::WindowResizeEvent;
 using Shoonyakasha::KeyEvent;
+using Shoonyakasha::CharEvent;
 using Shoonyakasha::MouseMoveEvent;
 using Shoonyakasha::MouseButtonEvent;
 using Shoonyakasha::MouseScrollEvent;

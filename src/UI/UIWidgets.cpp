@@ -22,6 +22,7 @@ UIInteractable& addInteractable(entt::registry& registry, entt::entity e) {
     auto& interactable = registry.emplace<UIInteractable>(e);
     interactable.hoverColor = {1.35f, 1.35f, 1.35f, 1.0f};
     interactable.pressedColor = {0.8f, 0.8f, 0.8f, 1.0f};
+    interactable.focusedColor = {1.2f, 1.45f, 2.1f, 1.0f};   // a dark surface turns blue
     return interactable;
 }
 

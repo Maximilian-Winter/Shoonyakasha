@@ -50,6 +50,8 @@ public:
     const UIDrawData& drawData() const { return m_drawData; }
     UIPointerState& pointer() { return m_pointer; }  // written by CanvasInputSystem
     const UIPointerState& pointer() const { return m_pointer; }
+    UIFocusState& focus() { return m_focus; }        // written by CanvasInputSystem
+    const UIFocusState& focus() const { return m_focus; }
     bool hasRenderer() const { return m_renderer != nullptr; }
 
     /// Builds this frame's draw data from the laid-out canvases. With a
@@ -83,6 +85,7 @@ private:
     GlyphCache m_glyphs;
     UIDrawData m_drawData;
     UIPointerState m_pointer;
+    UIFocusState m_focus;
     std::unique_ptr<UIRenderer> m_renderer;
     bool m_overlaysDrawn = false;
 };

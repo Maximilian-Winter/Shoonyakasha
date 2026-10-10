@@ -8,12 +8,14 @@
 
 #pragma once
 
+#include "ECS/CameraController.h"
 #include "ECS/CameraRay.h"
 #include "ECS/Systems.h"
 
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
+#include <array>
 #include <optional>
 
 namespace Shoonyakasha {
@@ -39,6 +41,7 @@ private:
 };
 
 struct UIPointerState;
+struct UIFocusState;
 
 /// Pointer input for the canvas UI. Runs before CanvasLayoutSystem, so it
 /// hit-tests the rects laid out the frame before, and writes:
@@ -58,12 +61,16 @@ public:
     /// `screenSize` is in framebuffer pixels and `windowSize` in the window
     /// coordinates the cursor position comes in; they differ on high-DPI
     /// displays. Both are read on each update. `windowSize` may be null when
-    /// the two are the same.
-    CanvasInputSystem(const glm::vec2* screenSize, const glm::vec2* windowSize, UIPointerState* pointer);
+    /// the two are the same. Without `focus`, the keyboard and gamepad are
+    /// not used.
+    CanvasInputSystem(const glm::vec2* screenSize, const glm::vec2* windowSize, UIPointerState* pointer,
+                      UIFocusState* focus = nullptr);
 
     void update(entt::registry& registry, float deltaTime) override;
 
 private:
+    void updateFocus(entt::registry& registry, const ECS::InputStateComponent& input, bool pressedNow,
+                     entt::entity hovered);
     void updateDrag(entt::registry& registry, glm::vec2 pixel, const std::optional<ECS::Ray>& ray,
                     bool down, bool pressedNow, entt::entity hitElement, float deltaTime);
     bool dragScrollbar(entt::registry& registry, entt::entity bar, glm::vec2 pixel,
@@ -84,6 +91,9 @@ private:
     // Dragging a scrollbar's handle: where along it the handle was taken, or
     // negative after a press on the track.
     float m_barGrab = -1.0f;
+
+    UIFocusState* m_focus;
+    std::array<bool, GLFW_GAMEPAD_BUTTON_LAST + 1> m_lastPadButtons{};  // for press edges
 };
 
 /// Lays out each UIText of a laid-out element into its UITextCache, in the

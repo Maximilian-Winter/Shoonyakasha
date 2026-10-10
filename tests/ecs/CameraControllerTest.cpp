@@ -54,6 +54,22 @@ TEST(CameraController, ResumesFromARotationSetElsewhere) {
     }
 }
 
+TEST(CameraController, OrbitZoomLeavesTheWheelToTheUIUnderThePointer) {
+    ControlledCamera c(CameraControllerComponent::Mode::Orbit);
+    c.update();
+    auto& input = c.registry.get<InputStateComponent>(*c.registry.view<InputStateComponent>().begin());
+    const float start = c.registry.get<CameraControllerComponent>(c.camera).orbitDistance;
+
+    input.pointerOverUI = true;
+    input.scrollDelta = glm::vec2(0.0f, 1.0f);
+    c.update();
+    EXPECT_FLOAT_EQ(c.registry.get<CameraControllerComponent>(c.camera).orbitDistance, start);
+
+    input.pointerOverUI = false;
+    c.update();
+    EXPECT_LT(c.registry.get<CameraControllerComponent>(c.camera).orbitDistance, start);
+}
+
 TEST(CameraController, MouseLookStillTurnsTheCamera) {
     ControlledCamera c(CameraControllerComponent::Mode::Free);
     c.update();

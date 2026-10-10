@@ -175,6 +175,9 @@ void ApplicationBase::initializeECS() {
     registerSystems();
 
     m_inputHandler = std::make_unique<ECS::StandaloneInputHandler>(*m_eventDispatcher, *m_window);
+    // With a UI element focused, Escape clears the focus instead of toggling
+    // mouse capture.
+    m_inputHandler->setEscapeTaken([this] { return m_uiContext->focus().focused != entt::null; });
 
     m_activeScene->createEntity("InputState")
         .with<ECS::InputStateComponent>()
@@ -195,7 +198,8 @@ void ApplicationBase::registerSystems() {
     m_activeScene->addSystem<ECS::TransformSystem>();
     m_activeScene->addSystem<ECS::CameraSystem>();
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
-    m_activeScene->addSystem<UI::CanvasInputSystem>(&m_screenSize, &m_windowSize, &m_uiContext->pointer());
+    m_activeScene->addSystem<UI::CanvasInputSystem>(&m_screenSize, &m_windowSize, &m_uiContext->pointer(),
+                                                    &m_uiContext->focus());
     m_activeScene->addSystem<UI::CanvasLayoutSystem>(&m_screenSize, &m_uiContext->fonts());
     m_activeScene->addSystem<UI::CanvasTextSystem>(&m_uiContext->fonts());
 }
@@ -416,6 +420,8 @@ void ApplicationBase::setupEventHandlers() {
 
     m_eventDispatcher->subscribe<KeyEvent>([this](const KeyEvent& event) {
         if (!event.pressed) return;
+        // Keys typed into a focused text field are not shortcuts.
+        if (m_uiContext->focus().keyboardCaptured) return;
 
         // Default camera mode switching (1/2/3)
         auto& registry = m_activeScene->getRegistry();
@@ -472,6 +478,15 @@ void ApplicationBase::update() {
         inputComp.mouseButtons = state.mouseButtons;
         inputComp.mouseCaptured = state.mouseCaptured;
         inputComp.firstMouseCapture = state.firstMouseCapture;
+        inputComp.textInput = state.textInput;
+        inputComp.keyPresses = state.keyPresses;
+        inputComp.gamepad = state.gamepad;
+
+        // What the canvas UI took last frame: the wheel over it, and the
+        // keyboard while a text field is focused.
+        inputComp.pointerOverUI = m_uiContext->pointer().overUI;
+        inputComp.keyboardCapturedByUI = m_uiContext->focus().keyboardCaptured;
+        if (inputComp.keyboardCapturedByUI) inputComp.keys.fill(false);
     }
 
     onUpdate(m_deltaTime);

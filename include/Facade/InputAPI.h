@@ -54,6 +54,11 @@ public:
     void setOnMouseButton(std::function<void(int button, bool pressed)> cb);
     void setOnMouseScroll(std::function<void(float xOffset, float yOffset)> cb);
 
+    /// A character typed (a Unicode code point), after the keyboard layout and
+    /// dead keys: for text entry. Arrows, Enter, Backspace and the like send
+    /// key events only.
+    void setOnChar(std::function<void(uint32_t codepoint)> cb);
+
     // Impl is forward-declared (opaque) — public so EngineAPI can wire internals
     struct Impl;
 

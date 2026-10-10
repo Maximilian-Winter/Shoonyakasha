@@ -513,6 +513,21 @@ void UIAPI::setSliderRange(EntityHandle slider, float minValue, float maxValue, 
     }
 }
 
+void UIAPI::focus(EntityHandle element) {
+    m_impl->context.focus().focused = m_impl->valid(element) ? toEntt(element) : entt::null;
+}
+
+EntityHandle UIAPI::getFocusedElement() const {
+    const entt::entity focused = m_impl->context.focus().focused;
+    return focused != entt::null && m_impl->registry.valid(focused) ? toHandle(focused) : NullEntity;
+}
+
+bool UIAPI::isKeyboardCaptured() const { return m_impl->context.focus().keyboardCaptured; }
+
+void UIAPI::setNavigable(EntityHandle element, bool navigable) {
+    if (auto* i = m_impl->get<UI::UIInteractable>(element)) i->navigable = navigable;
+}
+
 bool UIAPI::isPointerOverUI() const { return m_impl->context.pointer().overUI; }
 
 EntityHandle UIAPI::getPointerCanvas() const {

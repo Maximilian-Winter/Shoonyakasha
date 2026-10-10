@@ -15,6 +15,8 @@
 #include "Core/EventSystem.h"
 #include "Vulkan/VulkanWindow.h"
 
+#include <functional>
+
 namespace Shoonyakasha {
 namespace ECS {
 
@@ -179,13 +181,23 @@ public:
         dispatcher.subscribe<KeyEvent>([this](const KeyEvent& event) {
             if (event.keyCode >= 0 && event.keyCode <= GLFW_KEY_LAST) {
                 m_inputState.keys[event.keyCode] = event.pressed;
+                if (event.pressed) {
+                    m_inputState.keyPresses.push_back({event.keyCode, event.mods,
+                                                       event.action == KeyEvent::Repeat});
+                }
 
-                // Toggle mouse capture on Escape
-                if (event.keyCode == GLFW_KEY_ESCAPE && event.pressed) {
+                // Toggle mouse capture on Escape, unless something else
+                // (the canvas UI clearing its focus) takes the key.
+                if (event.keyCode == GLFW_KEY_ESCAPE && event.action == KeyEvent::Press &&
+                    !(m_escapeTaken && m_escapeTaken())) {
                     m_window.setMouseCaptured(!m_window.isMouseCaptured());
                     m_inputState.firstMouseCapture = true;
                 }
             }
+        });
+
+        dispatcher.subscribe<CharEvent>([this](const CharEvent& event) {
+            m_inputState.textInput.push_back(event.codepoint);
         });
 
         dispatcher.subscribe<MouseMoveEvent>([this](const MouseMoveEvent& event) {
@@ -213,19 +225,39 @@ public:
     void beginFrame() {
         m_inputState.mouseCaptured = m_window.isMouseCaptured();
         m_inputState.beginFrame();
+        pollGamepad();
     }
 
     // Call at the end of each frame
     void endFrame() {
-        m_inputState.scrollDelta = glm::vec2(0.0f);
+        m_inputState.endFrame();
     }
 
     InputStateComponent& getInputState() { return m_inputState; }
     const InputStateComponent& getInputState() const { return m_inputState; }
 
+    /// Asked when Escape is pressed: true means the key was taken, and mouse
+    /// capture is not toggled.
+    void setEscapeTaken(std::function<bool()> taken) { m_escapeTaken = std::move(taken); }
+
 private:
+    void pollGamepad() {
+        auto& pad = m_inputState.gamepad;
+        pad = {};
+        for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid) {
+            GLFWgamepadstate state;
+            if (glfwJoystickIsGamepad(jid) && glfwGetGamepadState(jid, &state)) {
+                pad.connected = true;
+                for (size_t b = 0; b < pad.buttons.size(); ++b) pad.buttons[b] = state.buttons[b] == GLFW_PRESS;
+                for (size_t a = 0; a < pad.axes.size(); ++a) pad.axes[a] = state.axes[a];
+                break;
+            }
+        }
+    }
+
     InputStateComponent m_inputState;
     VulkanWindow& m_window;
+    std::function<bool()> m_escapeTaken;
 };
 
 } // namespace ECS
