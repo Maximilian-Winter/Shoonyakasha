@@ -29,5 +29,21 @@ private:
     const glm::vec2* m_screenSize;
 };
 
+class FontLibrary;
+
+/// Lays out each UIText of a laid-out element into its UITextCache, in the
+/// element's rect, when the text, font, style or rect size changed.
+class CanvasTextSystem : public ECS::ISystem {
+public:
+    static constexpr int kPriority = 52;
+
+    explicit CanvasTextSystem(const FontLibrary* fonts);
+
+    void update(entt::registry& registry, float deltaTime) override;
+
+private:
+    const FontLibrary* m_fonts;
+};
+
 } // namespace UI
 } // namespace Shoonyakasha

@@ -12,10 +12,14 @@
 
 #pragma once
 
+#include "GPU/GPUTypes.h"
+#include "UI/TextLayout.h"
+
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <string>
 
 namespace Shoonyakasha {
 namespace UI {
@@ -76,6 +80,47 @@ struct UIRect {
 
 /// The element's descendants are clipped to its rect.
 struct UIClip {};
+
+// Colours are sRGB-encoded with straight alpha, as colour pickers give them.
+
+/// Fills the element's rect with a texture, or with `color` when the texture
+/// has no view.
+struct UIImage {
+    GPUTexture texture;
+    glm::vec4 color{1.0f};
+    glm::vec4 uvRect{0.0f, 0.0f, 1.0f, 1.0f};  // x, y, width, height in texture UVs
+};
+
+/// A 9-slice image: the corners keep their size, the edges stretch along one
+/// axis and the centre along both.
+struct UIPanel {
+    GPUTexture texture;                          // no view: a flat `color`
+    glm::vec4 color{1.0f};
+    glm::vec4 border{0.0f};                      // left, top, right, bottom, in texture pixels
+    float borderScale = 1.0f;                    // canvas units per border texture pixel
+    bool fillCenter = true;
+};
+
+struct UIText {
+    std::string text;                            // UTF-8
+    uint32_t font = 0;                           // FontLibrary id
+    float fontSize = 24.0f;                      // canvas units, ascent to descent
+    glm::vec4 color{1.0f};
+    TextAlignH alignH = TextAlignH::Left;
+    TextAlignV alignV = TextAlignV::Top;
+    bool wrap = true;
+    float lineSpacing = 1.0f;
+};
+
+/// The layout of a UIText, and the inputs it was made from. Written by
+/// CanvasTextSystem, which lays the text out again when an input changes.
+struct UITextCache {
+    std::string text;
+    uint32_t font = 0;
+    TextStyle style;
+    glm::vec2 boxSize{0.0f};
+    TextLayoutResult layout;
+};
 
 } // namespace UI
 } // namespace Shoonyakasha
