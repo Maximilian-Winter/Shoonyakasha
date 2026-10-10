@@ -1,5 +1,7 @@
 # Sprites, UI, and text
 
+For menus, HUDs and in-world screens with Unicode text, clipping and widgets, see the [canvas UI](canvas-ui.md), which the default pipeline draws. This page covers the older sprite layer, which needs a pipeline of its own.
+
 Use a pipeline with `execution.type: sprite_geometry`, compatible sprite shaders, and matching descriptor/push-constant layouts. Creating a sprite entity does not add a pass to an ordinary 3D pipeline. Start with [sprite_pipeline.json](../../examples/python/games_2d/sprite_ui_test/sprite_pipeline.json) and its [demo](../../examples/python/games_2d/sprite_ui_test/sprite_ui_demo.py).
 
 ## Create panels and labels

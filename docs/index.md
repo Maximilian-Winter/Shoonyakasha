@@ -22,6 +22,7 @@ Build C++ or Python applications with JSON-defined Vulkan rendering. Begin with 
 | Render with the built-in pipeline: presets, settings, ray-traced shadows, changing a copy | [Default pipeline](guides/default-pipeline.md) |
 | Work with surfaces and light | [Materials](guides/materials.md), [lighting/IBL](guides/lighting-and-ibl.md) |
 | Animate a character | [Skeletal animation](guides/animation.md) |
+| Build a HUD, menus or in-world screens with buttons, toggles and sliders | [Canvas UI](guides/canvas-ui.md) |
 | Draw 2D content | [Sprites, UI, and text](guides/sprites-ui-text.md) |
 | Add simulation | [Physics](guides/physics.md), [compute/GPU data flow](guides/compute-and-data-flow.md) |
 | Send application values to shaders | [Custom uniforms](guides/custom-shader-uniforms.md) |
@@ -37,6 +38,7 @@ Build C++ or Python applications with JSON-defined Vulkan rendering. Begin with 
 | Keyboard and mouse | [Input](api/python/input.md) | [InputAPI](api/cpp/input-api.md) |
 | Physics control | [Physics](api/python/physics.md) | [PhysicsAPI](api/cpp/physics-api.md) |
 | Script payloads and systems | [Ecs](api/python/ecs.md) | [EcsAPI](api/cpp/ecs-api.md) |
+| Canvas UI | [UI](api/python/ui.md) | [UIAPI](api/cpp/ui-api.md) |
 
 Also see [loading options/results](api/python/gltf-result.md), [constants](api/python/constants.md), and [Python utilities](api/python/utilities.md). Member inventories in the facade references are derived from source; surrounding prose documents runtime contracts and limitations.
 

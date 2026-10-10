@@ -42,6 +42,7 @@ import sys
 
 import shoonyakasha as sk
 from shoonyakasha import keys
+from shoonyakasha.mathutil import lerp, look_rotation, rotation_facing, smoothstep
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit  # noqa: E402
@@ -390,12 +391,12 @@ class Scene:
             direction = SUN_NIGHT
             engine.scene.set_light_intensity(self.sun, MOON * f)
             engine.scene.set_light_color(self.sun, (0.55, 0.65, 1.0))
-        engine.scene.set_rotation(self.sun, sk_rotation_facing(direction))
-        engine.set_custom_float("default.iblIntensity", lerp(0.5, 0.05, smooth(m)))
+        engine.scene.set_rotation(self.sun, rotation_facing(direction))
+        engine.set_custom_float("default.iblIntensity", lerp(0.5, 0.05, smoothstep(m)))
         # Exposure still adapts at night, but no further than a lit street:
         # darker than that stays dark instead of being brightened to day.
         engine.set_custom_float("default.exposureMinEV", lerp(-4.0, 1.0, m))
-        lamps = smooth(min(max((m - 0.35) / 0.3, 0.0), 1.0))
+        lamps = smoothstep((m - 0.35) / 0.3)
         for lamp in self.lamps:
             lamp.set(lamps)
         for entity, color, k, threshold in self.windows:
@@ -423,21 +424,6 @@ class Scene:
         engine.scene.set_rotation(self.fox_root, (0.0, math.pi if forward else 0.0, 0.0))
 
 
-def lerp(a, b, t):
-    return a + (b - a) * t
-
-
-def smooth(t):
-    return t * t * (3.0 - 2.0 * t)
-
-
-def sk_rotation_facing(direction):
-    """Euler rotation (pitch, yaw, 0) whose forward is `direction`."""
-    x, y, z = direction
-    length = math.sqrt(x * x + y * y + z * z)
-    return (math.asin(y / length), math.atan2(-x, -z), 0.0)
-
-
 # ── Camera ───────────────────────────────────────────────────────────────
 
 class Flight:
@@ -455,12 +441,6 @@ class Flight:
         eye = (x, y, z)
         target = (0.6 * math.sin(self.t * 0.07), 2.2 + 1.2 * math.sin(self.t * 0.06), z - 8.0)
         return eye, target
-
-
-def look_rotation(eye, target):
-    dx, dy, dz = (t - e for t, e in zip(target, eye))
-    length = math.sqrt(dx * dx + dy * dy + dz * dz)
-    return (math.asin(dy / length), math.atan2(-dx, -dz), 0.0)
 
 
 scene = Scene()
@@ -504,15 +484,9 @@ DEBUG_VIEWS = ("final image", "shadow cascades", "shadow mask", "normals", "ambi
 
 class Controls:
     def __init__(self):
-        self._was_down = {}
+        self.pressed = keys.KeyEdges(engine.input).pressed
         self.ray_traced = False
         self.debug_view = 0
-
-    def pressed(self, key):
-        down = engine.input.is_key_down(key)
-        was = self._was_down.get(key, False)
-        self._was_down[key] = down
-        return down and not was
 
     def update(self, dt):
         if self.pressed(keys.N):

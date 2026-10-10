@@ -119,6 +119,34 @@ TEST(DefaultPipeline, ShipsTheIBLShaders) {
     }
 }
 
+TEST(DefaultPipeline, ShipsTheUIShaders) {
+    const fs::path ui = defaultPipeline().parent_path() / "shaders" / "ui";
+    for (const char* name : {"ui.vert.spv", "ui.frag.spv"}) {
+        EXPECT_TRUE(fs::exists(ui / name)) << name;
+    }
+}
+
+TEST(DefaultPipeline, DrawsTheUIOverlayLastAndPresentsFromIt) {
+    FrameGraphBuilder builder;
+    loadGraphFromFile(builder, defaultPipeline().string());
+    const auto& passes = builder.getPassDeclarations();
+    ASSERT_FALSE(passes.empty());
+
+    const auto& overlay = passes.back();
+    EXPECT_EQ(overlay.name, "UIOverlay");
+    EXPECT_EQ(overlay.execution.type, "ui_canvas");
+    ASSERT_EQ(overlay.outputs.size(), 1u);
+    EXPECT_EQ(overlay.outputs[0].usage, ResourceUsage::ColorAttachmentBlend);
+    EXPECT_TRUE(leavesPresentable(overlay.outputs[0]));
+
+    // Only the overlay leaves the swapchain ready to present.
+    for (size_t i = 0; i + 1 < passes.size(); ++i) {
+        for (const auto& output : passes[i].outputs) {
+            EXPECT_FALSE(leavesPresentable(output)) << passes[i].name;
+        }
+    }
+}
+
 TEST(PipelineShaderPaths, RelativePathsOnlyResolveBesideTheJsonWhenTheFileIsThere) {
     const fs::path dir = fs::temp_directory_path() / "sk_shader_path_test";
     fs::remove_all(dir);

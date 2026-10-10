@@ -99,3 +99,31 @@ def name(code):
         if key.isupper() and value == code and not key.startswith("_"):
             return key
     return str(code)
+
+
+class KeyEdges:
+    """Reports each key press once, however long the key is held.
+
+        edges = keys.KeyEdges(engine.input)
+
+        def update(dt):
+            if edges.pressed(keys.SPACE):
+                ...
+
+    `input` is anything with an `is_key_down(code)` method, normally
+    `engine.input`. `pressed(code)` compares the key's state with its state at
+    the previous `pressed(code)` call for the same code, so call it once per
+    frame for every key you watch, without skipping it on some frames: a key
+    that goes down while it is not polled is reported at the next call.
+    """
+
+    def __init__(self, input):
+        self._input = input
+        self._was_down = {}
+
+    def pressed(self, code):
+        """True if the key is down now and was up at the previous call."""
+        down = bool(self._input.is_key_down(code))
+        was_down = self._was_down.get(code, False)
+        self._was_down[code] = down
+        return down and not was_down

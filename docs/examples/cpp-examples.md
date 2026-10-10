@@ -9,6 +9,7 @@ Configure with `BUILD_EXAMPLES=ON` following [BUILDING.md](../../BUILDING.md), t
 | [rendering/declarative_sponza_test](../../examples/cpp/rendering/declarative_sponza_test) | `DeclarativeSponzaTest` | Deferred PBR/IBL |
 | [rendering/bloom_test](../../examples/cpp/rendering/bloom_test) | `ShoonyakashaBloomTest` | Multipass bloom |
 | [rendering/default_pipeline](../../examples/cpp/rendering/default_pipeline) | `DefaultPipelineExample` | The default pipeline with no JSON or shaders; `low`, `medium` or `high` as its argument |
+| [rendering/canvas_ui](../../examples/cpp/rendering/canvas_ui) | `CanvasUIExample` | Canvas UI through `ApplicationBase` and the UI components: a HUD, widgets and a world canvas; `--screenshot path.png` runs a scripted pointer and saves frame 120 |
 | [compute/particle_test](../../examples/cpp/compute/particle_test) | `ShoonyakashaParticleTest` | Compute particles |
 | [compute/particle_flow_example](../../examples/cpp/compute/particle_flow_example) | `ParticleFlowExample` | Particle parameters and target saving |
 | [compute/ssbo_data_flow_example](../../examples/cpp/compute/ssbo_data_flow_example) | `SSBODataFlowExample` | Buffer initialization, sharing, readback, and files |

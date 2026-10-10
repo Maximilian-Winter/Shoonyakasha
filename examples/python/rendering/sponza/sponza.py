@@ -30,10 +30,9 @@ Sponza 2022 Scene, commissioned by Frank Meinl, sponsored by Anton Kaplanyan.
 Intel Sample Library. See assets/README.md about its licence.
 """
 
-import math
-
 import shoonyakasha as sk
 from shoonyakasha import keys
+from shoonyakasha.mathutil import look_rotation
 
 SPONZA = "models/NewSponza_Main_glTF_003.gltf"
 BOX = "models/Box.gltf"
@@ -52,13 +51,6 @@ SUN_DIRECTION = (0.3, -1.0, 0.35)
 PRESETS = {keys.NUM_1: "low", keys.NUM_2: "medium", keys.NUM_3: "high", keys.NUM_4: "raytraced"}
 DEBUG_VIEWS = ("final image", "shadow cascades", "shadow mask", "normals", "ambient occlusion",
                "lights per cluster", "motion vectors")
-
-
-def look_rotation(eye, target):
-    """Euler rotation (pitch, yaw, 0) that points the camera from eye at target."""
-    dx, dy, dz = (t - e for t, e in zip(target, eye))
-    length = math.sqrt(dx * dx + dy * dy + dz * dz)
-    return (math.asin(dy / length), math.atan2(-dx, -dz), 0.0)
 
 
 def root_of(entity):
@@ -118,17 +110,9 @@ def on_init():
 
 class Controls:
     def __init__(self):
-        # is_key_down reports the current state, so the previous state is kept
-        # to act once per press.
-        self._was_down = {}
+        self.pressed = keys.KeyEdges(engine.input).pressed
         self.debug_view = 0
         self.auto_exposure = True
-
-    def pressed(self, key):
-        down = engine.input.is_key_down(key)
-        was_down = self._was_down.get(key, False)
-        self._was_down[key] = down
-        return down and not was_down
 
     def update(self, dt):
         for key, preset in PRESETS.items():

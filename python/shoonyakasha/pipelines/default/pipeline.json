@@ -2622,7 +2622,6 @@
         {
           "resource": "swapchain",
           "usage": "color_write",
-          "present": true,
           "clear": [
             0.0,
             0.0,
@@ -2641,6 +2640,20 @@
       },
       "descriptorSets": [
         "tonemapSet"
+      ]
+    },
+    {
+      "name": "UIOverlay",
+      "type": "graphics",
+      "execution": {
+        "type": "ui_canvas"
+      },
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_blend",
+          "present": true
+        }
       ]
     }
   ],

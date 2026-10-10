@@ -265,6 +265,28 @@ TEST(SystemManager, PriorityOrdering) {
     EXPECT_NE(manager.getSystem<CameraSystem>(), nullptr);
 }
 
+TEST(SystemManager, EqualPriorities_RunInInsertionOrder) {
+    entt::registry reg;
+    SystemManager manager;
+    std::vector<int> ran;
+
+    // More systems than MSVC's std::sort handles with its stable insertion
+    // sort, so an unstable sort would show up here.
+    constexpr int kCount = 64;
+    for (int i = 0; i < kCount; ++i) {
+        manager.addSystem<CallbackSystem>("s" + std::to_string(i),
+            [&ran, i](float) { ran.push_back(i); return true; },
+            /*priority=*/i % 2);
+    }
+
+    manager.update(reg, 0.016f);
+
+    std::vector<int> expected;
+    for (int i = 0; i < kCount; i += 2) expected.push_back(i);
+    for (int i = 1; i < kCount; i += 2) expected.push_back(i);
+    EXPECT_EQ(ran, expected);
+}
+
 TEST(SystemManager, DisabledSystem_Skipped) {
     entt::registry reg;
     SystemManager manager;

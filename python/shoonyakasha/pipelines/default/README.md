@@ -130,6 +130,7 @@ own that it does not mention stay as you set them.
 | `AutoExposure` | A compute pass: a histogram of mip 2 of the chain, and the adapted exposure in a persistent 1x1 image |
 | `BloomUp4..0` | Back up the chain, each mip adding a tent-filtered copy of the one below |
 | `Tonemap` | Bloom, exposure and tonemapping, to the swapchain |
+| `UIOverlay` | Screen canvases of the canvas UI, blended over the swapchain, which it then presents. Its shaders are in `shaders/ui/` and the engine binds them itself |
 
 Any pass can be turned off at runtime, for instance for a low-quality tier:
 `engine.set_pass_enabled("ShadowMasked{cascade}", False)` turns off all four

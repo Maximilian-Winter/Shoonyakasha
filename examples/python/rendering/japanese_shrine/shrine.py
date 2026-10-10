@@ -36,6 +36,7 @@ import sys
 
 import shoonyakasha as sk
 from shoonyakasha import keys
+from shoonyakasha.mathutil import look_rotation, normalize
 
 MODEL = "models/japanese_shrine.glb"
 GROUND = "models/Box.gltf"
@@ -73,11 +74,6 @@ SHADOW_FAR = 30.0       # deep enough to reach ground in the shrine's long shado
 # ShadowPass also applies hardware slope bias (its "depthBias" block), so the
 # shader-side slope term stays at 0.
 SHADOW_PARAMS = (0.02, 0.0003, 0.0, 0.55)
-
-
-def normalize(v):
-    length = math.sqrt(sum(c * c for c in v))
-    return tuple(c / length for c in v)
 
 
 def cross(a, b):
@@ -120,13 +116,6 @@ def upload_sun_shadow():
     columns = tuple(tuple(matrix[row][column] for row in range(4)) for column in range(4))
     engine.set_custom_mat4("shadow.lightViewProj", columns)
     engine.set_custom_vec4("shadow.params", SHADOW_PARAMS)
-
-
-def look_rotation(eye, target):
-    """Euler rotation (pitch, yaw, 0) that points the camera from eye at target."""
-    dx, dy, dz = (t - e for t, e in zip(target, eye))
-    length = math.sqrt(dx * dx + dy * dy + dz * dz)
-    return (math.asin(dy / length), math.atan2(-dx, -dz), 0.0)
 
 
 class Orbit:
@@ -197,15 +186,7 @@ def on_init():
 
 class Controls:
     def __init__(self):
-        # is_key_down reports the current state, so the previous state is kept
-        # to act once per press.
-        self._was_down = {}
-
-    def pressed(self, key):
-        down = engine.input.is_key_down(key)
-        was_down = self._was_down.get(key, False)
-        self._was_down[key] = down
-        return down and not was_down
+        self.pressed = keys.KeyEdges(engine.input).pressed
 
     def update(self, dt):
         if self.pressed(keys.SPACE):

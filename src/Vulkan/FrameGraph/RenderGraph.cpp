@@ -2388,6 +2388,28 @@ void RenderGraph::releaseDestroyedEntityDescriptors(uint32_t frameIndex) {
     }
 }
 
+void RenderGraph::releaseMaterialTexture(VkImageView view) {
+    if (view == VK_NULL_HANDLE) return;
+    for (auto& [name, sets] : m_materialTextureSets) {
+        for (auto it = sets.begin(); it != sets.end();) {
+            const auto& key = it->first;
+            const bool holds = std::any_of(key.textures.begin(), key.textures.begin() + key.count,
+                                           [view](const auto& texture) { return texture.view == view; });
+            if (!holds) {
+                ++it;
+                continue;
+            }
+            VkDescriptorSet set = it->second;
+            auto pool = m_descriptorSetPools.find(set);
+            if (pool != m_descriptorSetPools.end()) {
+                vkFreeDescriptorSets(m_device.getLogicalDevice(), pool->second, 1, &set);
+                m_descriptorSetPools.erase(pool);
+            }
+            it = sets.erase(it);
+        }
+    }
+}
+
 void RenderGraph::setExternalImage(const std::string& name, VkImageView view, VkSampler sampler) {
     ExternalImage& image = m_externalImages[name];
     image.view = view;

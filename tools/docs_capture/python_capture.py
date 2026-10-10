@@ -20,4 +20,7 @@ class CaptureEngine:
             ok=self._engine.capture_screenshot(os.environ['DOCS_CAPTURE_PATH'])
             print('DOCS_CAPTURE_RESULT',ok,flush=True)
 sk.Engine=CaptureEngine
-runpy.run_path(sys.argv[1],run_name='__main__')
+# The example parses sys.argv as if run directly, so it sees only its own path.
+script=sys.argv[1]
+sys.argv=[script]
+runpy.run_path(script,run_name='__main__')

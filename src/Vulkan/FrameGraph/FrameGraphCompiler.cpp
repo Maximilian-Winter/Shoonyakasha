@@ -41,7 +41,8 @@ ExecutionKind executionKindOf(const std::string& type) {
     if (type == "compute_dispatch") return ExecutionKind::ComputeDispatch;
     if (type == "compute_image")    return ExecutionKind::ComputeImage;
     if (type == "manual" || type.empty()) return ExecutionKind::Manual;
-    if (type == "scene_geometry" || isEntityGeometryExecutionType(type)) return ExecutionKind::SceneRenderer;
+    if (type == "scene_geometry" || type == "ui_canvas" || isEntityGeometryExecutionType(type))
+        return ExecutionKind::SceneRenderer;
     return ExecutionKind::Unknown;
 }
 

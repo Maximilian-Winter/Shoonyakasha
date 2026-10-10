@@ -72,6 +72,19 @@ enum class TextHAlign : uint8_t {
     Right  = 2
 };
 
+// Vertical text alignment in a canvas UI element.
+enum class TextVAlign : uint8_t {
+    Top    = 0,
+    Middle = 1,
+    Bottom = 2
+};
+
+// How a canvas maps its units to pixels.
+enum class CanvasScaleMode : uint8_t {
+    ConstantPixel   = 0,   // a fixed number of pixels per canvas unit
+    ScaleWithScreen = 1    // scaled so the reference size fits the target
+};
+
 // ═══════════════════════════════════════════════════════════════
 // Callback Aliases
 // ═══════════════════════════════════════════════════════════════

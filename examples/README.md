@@ -47,6 +47,7 @@ directory names, see [BUILDING.md](../BUILDING.md).
 | [`declarative_sponza_test`](cpp/rendering/declarative_sponza_test) | Deferred PBR with image-based lighting, driven entirely from `pbr_ibl_pipeline_v3.json`. The reference for what the JSON frame graph can express. |
 | [`bloom_test`](cpp/rendering/bloom_test) | Multi-pass post-processing: bright-pass extraction, separable blur, composite. |
 | [`default_pipeline`](cpp/rendering/default_pipeline) | Sponza on the pipeline the engine ships, through the facade alone: no pipeline JSON or shaders, a quality preset on the command line. Falls back to a colonnade of boxes. |
+| [`canvas_ui`](cpp/rendering/canvas_ui) | Canvas UI on the default pipeline. A screen canvas has translucent panels, an image, Unicode text in two fonts, a clip rect and a counter updated every frame. A world canvas is a texture shown on a quad in the scene, with a button you can click in 3D; R switches its resolution. A toggle, a slider and a button turn the box. `--screenshot path.png` plays a scripted pointer through the widgets, saves frame 120 and closes. |
 
 ### compute
 
@@ -82,6 +83,7 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 |---|---|
 | [`demo`](python/getting_started/demo) | The Python counterpart of `facade_test`, going further: a full PBR/IBL scene, physics, and the scene graph. |
 | [`ecs_bindings_demo`](python/getting_started/ecs_bindings_demo) | Components and systems written in Python, registered with the engine's ECS. |
+| [`ui_canvas_demo`](python/getting_started/ui_canvas_demo) | The canvas UI on the default pipeline: a HUD with a toggle, an exposure slider and a reset button, and a screen in the world with its own button and slider. |
 
 ### animation
 

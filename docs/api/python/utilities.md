@@ -1,6 +1,6 @@
 # Python utilities
 
-The package's `assets`, `keys`, `pipeline`, and `shaders` modules work without the native extension. `shoonyakasha.extension_available()` returns whether the extension loaded. Importing the package alone is not an engine installation test.
+The package's `assets`, `keys`, `mathutil`, `pipeline`, and `shaders` modules work without the native extension. `shoonyakasha.extension_available()` returns whether the extension loaded. Importing the package alone is not an engine installation test.
 
 ## Shader compilation
 
@@ -59,3 +59,36 @@ Set `SHOONYAKASHA_ASSET_DIR` for external projects. Fetch requires the repositor
 The generated program still needs the extension, glslc, a Vulkan driver/device, and shared assets. See [quickstart](../../getting-started/python-quickstart.md).
 
 `keys.name(code)` returns a readable key name. Named key/button values are listed in [keys.py](../../../python/shoonyakasha/keys.py).
+
+`keys.KeyEdges(input)` reports each key press once, however long the key is held. `input` is any object with `is_key_down(code)`, normally `engine.input`. `pressed(code)` returns `True` when the key is down and was up at the previous `pressed(code)` call for the same code. Call it every frame for each key you watch:
+
+```python
+edges = keys.KeyEdges(engine.input)
+
+def update(dt):
+    if edges.pressed(keys.SPACE):
+        toggle_pause()
+```
+
+## Vector and camera maths
+
+`shoonyakasha.mathutil` works on plain tuples. Rotations use the engine's Euler angles in radians, `(pitch, yaw, roll)`, as passed to `Scene.set_rotation`: rotation `(0, 0, 0)` faces −Z, positive pitch turns up, and positive yaw turns from −Z towards −X.
+
+| Function | Result |
+|---|---|
+| `look_rotation(eye, target)` | Rotation that points an entity at `eye` towards `target` |
+| `rotation_facing(direction)` | Rotation whose forward is `direction`; same formula as `TransformComponent::rotationFacing` |
+| `orbit(target, distance, azimuth, elevation)` | Point `distance` from `target`; degrees, azimuth 0 towards +Z and 90 towards +X |
+| `yaw_point(p, degrees)` | `p` rotated about +Y, +Z towards +X for positive angles |
+| `lerp(a, b, t)`, `lerp3(a, b, t)` | Linear interpolation of numbers or of vectors component-wise |
+| `smoothstep(t)` | `3t² − 2t³` with `t` clamped to [0, 1] |
+| `add(a, b)`, `scale(v, s)`, `normalize(v)` | Component-wise sum, scaling, and unit length (a zero vector is returned unchanged) |
+
+```python
+from shoonyakasha.mathutil import look_rotation, orbit
+
+eye = orbit((0.0, 1.0, 0.0), distance=6.0, azimuth=35.0, elevation=10.0)
+engine.scene.set_rotation(camera, look_rotation(eye, (0.0, 1.0, 0.0)))
+```
+
+Source: [mathutil.py](../../../python/shoonyakasha/mathutil.py).

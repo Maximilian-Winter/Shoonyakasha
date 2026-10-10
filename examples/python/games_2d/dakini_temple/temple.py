@@ -5,7 +5,9 @@ A top-down mandala palace, seen from above:
 
   - a ring of wisdom fire, a vajra fence and a ring of lotus petals
   - a palace with five-coloured walls and a gate in each direction, its
-    ground split into the blue, yellow, red and green quarters
+    ground split into the blue, yellow, red and green quarters; for
+    Vajrayogini, a ring of the eight charnel grounds in its place, each with
+    a tree, a stupa, a burning pyre and skulls
   - an eight-petalled lotus holding the deity's symbol at the centre
   - eight butter lamps and embers that spiral out into space
 
@@ -336,7 +338,7 @@ def build_mandala():
     petals = mandala_quad(PETALS, (7.2, 7.2), sort_key=3)
     engine.ecs.set_component(petals, "Spin", Spin(0.04))
 
-    palace = mandala_quad(PALACE, (5.4, 5.4), sort_key=4)
+    palace = mandala_quad(PALACE, (6.0, 6.0), sort_key=4)
 
     lotus = mandala_quad(LOTUS, (3.6, 3.6), sort_key=5)
     engine.ecs.set_component(lotus, "Spin", Spin(0.08))
@@ -500,15 +502,7 @@ def register_systems():
 
 class Controls:
     def __init__(self):
-        # is_key_down reports the current state, so the previous state is kept
-        # to act once per press.
-        self._was_down = {}
-
-    def pressed(self, key):
-        down = engine.input.is_key_down(key)
-        was_down = self._was_down.get(key, False)
-        self._was_down[key] = down
-        return down and not was_down
+        self.pressed = keys.KeyEdges(engine.input).pressed
 
     def update(self, dt):
         right, space = self.pressed(keys.RIGHT), self.pressed(keys.SPACE)
