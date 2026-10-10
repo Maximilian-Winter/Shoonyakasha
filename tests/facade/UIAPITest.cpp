@@ -15,6 +15,7 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <vector>
 
 using namespace Shoonyakasha;
 using namespace Shoonyakasha::Facade;
@@ -37,7 +38,7 @@ struct UIAPIFixture : ::testing::Test {
         state.mousePosition = mouse;
         state.mouseButtons[GLFW_MOUSE_BUTTON_LEFT] = down;
         inputSystem.update(registry, 0.0f);
-        UI::CanvasLayoutSystem(&screen).update(registry, 0.0f);
+        UI::CanvasLayoutSystem(&screen, &context.fonts()).update(registry, 0.0f);
         UI::CanvasTextSystem(&context.fonts()).update(registry, 0.0f);
     }
 
@@ -159,6 +160,41 @@ TEST_F(UIAPIFixture, WorldCanvasesLayOutInTheirOwnPixels) {
     frame();
     EXPECT_EQ(ui.getCanvasSize(canvas), glm::vec2(512.0f, 256.0f));
     EXPECT_EQ(c.clearColor, glm::vec4(0.0f));
+}
+
+TEST_F(UIAPIFixture, LayoutGroupsPlaceAndSizeTheirChildren) {
+    const EntityHandle canvas = ui.createCanvas({1280.0f, 720.0f});
+    const EntityHandle column = ui.createVerticalLayout(canvas, {300.0f, 0.0f}, 10.0f, {8.0f, 8.0f, 8.0f, 8.0f});
+    ui.setAnchor(column, {0.0f, 0.0f});
+    ui.setPosition(column, {20.0f, 30.0f});
+    ui.setSizeToContent(column, SizeFit::Unconstrained, SizeFit::Preferred);
+    std::vector<EntityHandle> buttons;
+    for (int i = 0; i < 3; ++i) buttons.push_back(ui.createButton(canvas, "B", {160.0f, 40.0f}));
+    for (EntityHandle b : buttons) ui.setParent(b, column);
+    ui.setLayoutElement(buttons[1], {-1.0f, -1.0f}, {-1.0f, 60.0f}, {-1.0f, -1.0f});
+    frame();
+
+    EXPECT_EQ(ui.getRect(column), glm::vec4(20.0f, 30.0f, 300.0f, 8 + 40 + 10 + 60 + 10 + 40 + 8));
+    EXPECT_EQ(ui.getRect(buttons[0]), glm::vec4(28.0f, 38.0f, 160.0f, 40.0f));
+    EXPECT_EQ(ui.getRect(buttons[1]), glm::vec4(28.0f, 88.0f, 160.0f, 60.0f));
+    EXPECT_EQ(ui.getPreferredSize(column), glm::vec2(8 + 160 + 8, 176.0f));
+
+    ui.setLayoutChildSizing(column, true, true, true, false);   // children fill the width
+    ui.setLayoutAlignment(column, {0.0f, 0.0f});
+    frame();
+    EXPECT_EQ(ui.getRect(buttons[2]).z, 300.0f - 16.0f);
+
+    const EntityHandle grid = ui.createGridLayout(canvas, {300.0f, 300.0f}, {100.0f, 50.0f}, 2, {10.0f, 10.0f});
+    ui.setAnchor(grid, {1.0f, 1.0f});
+    const EntityHandle cell = ui.createImage(grid, {1.0f, 1.0f});
+    ui.createImage(grid, {1.0f, 1.0f});
+    const EntityHandle third = ui.createImage(grid, {1.0f, 1.0f});
+    frame();
+    EXPECT_EQ(ui.getRect(cell), glm::vec4(980.0f, 420.0f, 100.0f, 50.0f));
+    EXPECT_EQ(ui.getRect(third), glm::vec4(980.0f, 480.0f, 100.0f, 50.0f));
+
+    ui.setSizeToContent(column, SizeFit::Unconstrained, SizeFit::Unconstrained);
+    EXPECT_FALSE(registry.all_of<UI::UIContentSizeFitter>(e(column)));
 }
 
 TEST_F(UIAPIFixture, InvalidHandlesAreIgnored) {

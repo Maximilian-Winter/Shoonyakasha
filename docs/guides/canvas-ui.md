@@ -67,6 +67,33 @@ Common placements:
 
 When the anchors differ, the element stretches with its parent, and `size` is added to the span between them.
 
+### Rows, columns and grids
+
+Placing every element by hand gets tedious for lists and forms. A layout group places its children for you, in the order they were added:
+
+```python
+settings = ui.create_vertical_layout(hud, size=(320, 0), spacing=8, padding=(16, 16, 16, 16))
+ui.set_anchor(settings, (0, 0))
+ui.set_position(settings, (24, 24))
+ui.set_size_to_content(settings, vertical=sk.SIZE_FIT_PREFERRED)   # as tall as its rows
+
+ui.create_toggle(settings, "Shadows")
+ui.create_text(settings, "Volume", size=18)
+ui.create_slider(settings, size=(288, 24))
+
+buttons = ui.create_horizontal_layout(settings, size=(288, 40), spacing=8)
+ui.create_button(buttons, "OK", size=(100, 40))
+ui.create_button(buttons, "Cancel", size=(100, 40))
+```
+
+Things to know:
+- **Sizes:** each child keeps the size it was created with. Text takes the size of its words, wrapping at the width it gets.
+- **Stretching:** `set_layout_child_sizing(group, expand_width=True)` stretches a column's children across its width. On a row, it shares out the row's spare width.
+- **Overrides:** `set_layout_element` gives a child a different min, preferred or flexible size. A flexible size of 1 on one child of a row pushes its later siblings to the far end.
+- **Grids:** `create_grid_layout(parent, size, cell_size)` fills rows of equal cells, for inventories and swatches.
+- **Placement:** the group itself is placed like any element, by its anchors, or by a parent group.
+- **Size to content:** `set_size_to_content` lets the group size itself to its contents, as above.
+
 `set_clip(e, True)` cuts off whatever overflows an element's rect, for example a scrolling log. `get_rect(e)` reads back where an element ended up. The layout runs once a frame, so an element created this frame reports zeros until the next one.
 
 ## Text
@@ -157,7 +184,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 
 | | Sprite UI (`create_ui_panel`, `create_text`) | Canvas UI (`engine.ui`) |
 |---|---|---|
-| Placement | Nine screen anchors with a pixel offset | Anchors, pivot and stretching, relative to a parent |
+| Placement | Nine screen anchors with a pixel offset | Anchors, pivot and stretching relative to a parent; rows, columns and grids |
 | Text | ASCII bitmap glyphs, one entity per glyph | Unicode signed-distance text, one entity per label |
 | Drawing | One draw per element, in a `sprite_geometry` pass | Batched, in a `ui_canvas` pass or into a world texture |
 | Clipping, input, widgets | None | Clip rects, pointer hit testing, buttons, toggles, sliders |
@@ -166,7 +193,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 
 ## Limits
 
-- No layout groups, scroll views or text input fields yet.
+- No scroll views or text input fields yet.
 - No text shaping, so complex scripts are drawn glyph by glyph.
 - World-canvas clicks ignore geometry in front of the canvas.
 - The glyph atlas is 2048 by 2048 texels. When it fills up, it is cleared and the text on screen is rasterised again; this is rare unless a very large number of distinct characters is in use at once.

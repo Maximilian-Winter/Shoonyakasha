@@ -27,6 +27,28 @@ Colours are `(r, g, b, a)` tuples in sRGB with straight alpha. Text is a `str` a
 
 Use `set_clip(e, True)` to cut an element's descendants off at its rect. `set_visible(e, False)` hides the element and everything below it.
 
+## Layout groups
+
+`create_horizontal_layout`, `create_vertical_layout` and `create_grid_layout` make elements that place their children themselves, in child order. Their anchors and positions are ignored while they are in the group.
+- **A row or column** gives each child its *layout sizes* along its axis: at least its min, its preferred size when there is room, and a share of the rest by its flexible size.
+- **Across its axis** a child gets its preferred size, up to the group's.
+- **`set_layout_child_sizing`:**
+  - `expand` along the group's axis shares spare room between all children;
+  - `expand` across it makes each child fill the group;
+  - `control=False` leaves a child at its own size.
+- **A grid** puts children in cells of `cell_size`, row by row. It fits as many columns as the width allows, or uses a fixed `columns`.
+- **Spare room** is placed by `set_layout_alignment`.
+
+Layout sizes, without `set_layout_element`:
+- **Text:** its measured width; its height wrapped at the width it gets, with a min width of 0.
+- **An image with a texture:** the texture's size.
+- **Anything else, widgets included:** its own size.
+- **A group:** its children's sizes added up along its axis and the largest across it, with spacing and padding.
+
+`set_layout_element(e, min=, preferred=, flexible=)` overrides any of them per axis (-1 keeps its own), and `ignore=True` takes a child out of its group. Hidden children take no space.
+
+`set_size_to_content(e, horizontal, vertical)` sizes an element placed by its anchors to its own layout size, `SIZE_FIT_MIN` or `SIZE_FIT_PREFERRED` per axis. Typical uses are a column that grows with its rows, or a label as wide as its text. `get_preferred_size(e)` reads the measured size back. Text is measured only for children of a group and elements sized to content.
+
 ## Text and fonts
 
 - **Fonts:** `load_font(path)` returns a font id, or 0 if the file can't be read. Text without a font uses `default_font`, which loads `fonts/Roboto-Regular.ttf` on first use.
@@ -77,7 +99,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 |---|---|---|
 | `load_font(path)` | int | Id of the font at path, loading it on first use; 0 if it cannot be loaded. |
 | `default_font (read/write property)` | int | The font text uses when it names none: fonts/Roboto-Regular.ttf until set. |
-| `create_canvas(reference_size=(1920, 1080), scale_mode=CanvasScaleMode_ScaleWithScreen, sort_order=0)` | int | A canvas over the screen. A higher sort_order draws over, and takes the pointer first. |
+| `create_canvas(reference_size=(1920, 1080), scale_mode=CANVAS_SCALE_WITH_SCREEN, sort_order=0)` | int | A canvas over the screen. A higher sort_order draws over, and takes the pointer first. |
 | `create_world_canvas(pixel_size, world_size, emission=1.0)` | int | A canvas of pixel_size pixels on a quad of world_size units, facing +Z. |
 | `set_canvas_scaling(canvas, mode, reference_size=(1920, 1080), scale_factor=1.0, match=0.5)` | None | CANVAS_CONSTANT_PIXEL: scale_factor pixels per unit. CANVAS_SCALE_WITH_SCREEN: reference_size fitted to the target, match 0 following its width and 1 its height. |
 | `set_canvas_sort_order(canvas, sort_order)` | None | Calls native `setCanvasSortOrder`; see the class contract above. |
@@ -100,11 +122,19 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_visible(element, visible)` | None | Calls native `setVisible`; see the class contract above. |
 | `is_visible(element)` | bool | Calls native `isVisible`; see the class contract above. |
 | `set_clip(element, clip)` | None | Clip the element's descendants to its rect. |
+| `create_horizontal_layout(parent, size=(100, 100), spacing=0.0, padding=(0, 0, 0, 0))` | int | A row of children, left to right. padding is (left, top, right, bottom). |
+| `create_vertical_layout(parent, size=(100, 100), spacing=0.0, padding=(0, 0, 0, 0))` | int | A column of children, top to bottom. padding is (left, top, right, bottom). |
+| `create_grid_layout(parent, size=(100, 100), cell_size=(100, 100), columns=0, spacing=(0, 0), padding=(0, 0, 0, 0))` | int | Cells of cell_size, row by row; columns 0 fits as many as the width allows. |
+| `set_layout_alignment(group, alignment)` | None | Where a group puts children in room they leave: (0, 0) top-left, (0.5, 0.5) centre. |
+| `set_layout_child_sizing(group, control_width=True, control_height=True, expand_width=False, expand_height=False)` | None | For a row or column: control sizes children from their layout sizes; expand along the group's axis shares spare room, across it fills the group. |
+| `set_layout_element(element, min=(-1, -1), preferred=(-1, -1), flexible=(-1, -1), ignore=False)` | None | Override the layout sizes element reports; -1 keeps its own on that axis. ignore leaves it to its anchors inside a group. |
+| `set_size_to_content(element, horizontal=SIZE_FIT_UNCONSTRAINED, vertical=SIZE_FIT_UNCONSTRAINED)` | None | Size an element placed by its anchors to its own layout sizes, per axis: SIZE_FIT_UNCONSTRAINED, SIZE_FIT_MIN or SIZE_FIT_PREFERRED. |
+| `get_preferred_size(element)` | 2-tuple | (width, height): the preferred layout size as last measured. |
 | `set_text(element, text)` | None | Calls native `setText`; see the class contract above. |
 | `get_text(element)` | str | Calls native `getText`; see the class contract above. |
 | `set_font(element, font)` | None | Calls native `setFont`; see the class contract above. |
 | `set_font_size(element, size)` | None | Calls native `setFontSize`; see the class contract above. |
-| `set_text_align(element, horizontal, vertical=TextVAlign_Top)` | None | TEXT_ALIGN_LEFT/CENTER/RIGHT and TEXT_ALIGN_TOP/MIDDLE/BOTTOM. |
+| `set_text_align(element, horizontal, vertical=TEXT_ALIGN_TOP)` | None | TEXT_ALIGN_LEFT/CENTER/RIGHT and TEXT_ALIGN_TOP/MIDDLE/BOTTOM. |
 | `set_text_wrap(element, wrap)` | None | Calls native `setTextWrap`; see the class contract above. |
 | `set_color(element, color)` | None | The colour of the element's own text, image and panel. |
 | `set_texture(element, path)` | bool | The texture of the element's image or panel. False if it cannot be loaded. |

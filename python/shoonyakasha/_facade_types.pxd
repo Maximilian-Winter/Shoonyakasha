@@ -61,6 +61,11 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         TextVAlign_Middle "Shoonyakasha::Facade::TextVAlign::Middle"
         TextVAlign_Bottom "Shoonyakasha::Facade::TextVAlign::Bottom"
 
+    cpdef enum SizeFit "Shoonyakasha::Facade::SizeFit":
+        SizeFit_Unconstrained "Shoonyakasha::Facade::SizeFit::Unconstrained"
+        SizeFit_Min "Shoonyakasha::Facade::SizeFit::Min"
+        SizeFit_Preferred "Shoonyakasha::Facade::SizeFit::Preferred"
+
     cpdef enum CanvasScaleMode "Shoonyakasha::Facade::CanvasScaleMode":
         CanvasScaleMode_ConstantPixel "Shoonyakasha::Facade::CanvasScaleMode::ConstantPixel"
         CanvasScaleMode_ScaleWithScreen "Shoonyakasha::Facade::CanvasScaleMode::ScaleWithScreen"

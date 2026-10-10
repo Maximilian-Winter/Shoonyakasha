@@ -79,6 +79,9 @@ try:
         TEXT_ALIGN_BOTTOM,
         CANVAS_CONSTANT_PIXEL,
         CANVAS_SCALE_WITH_SCREEN,
+        SIZE_FIT_UNCONSTRAINED,
+        SIZE_FIT_MIN,
+        SIZE_FIT_PREFERRED,
 
         # Frame capture — usable before an Engine exists, so a script can
         # check for ffmpeg before deciding to record.
@@ -102,6 +105,7 @@ _ENGINE_SYMBOLS = frozenset({
     "TEXT_ALIGN_LEFT", "TEXT_ALIGN_CENTER", "TEXT_ALIGN_RIGHT",
     "TEXT_ALIGN_TOP", "TEXT_ALIGN_MIDDLE", "TEXT_ALIGN_BOTTOM",
     "CANVAS_CONSTANT_PIXEL", "CANVAS_SCALE_WITH_SCREEN",
+    "SIZE_FIT_UNCONSTRAINED", "SIZE_FIT_MIN", "SIZE_FIT_PREFERRED",
     "video_recording_available", "find_ffmpeg",
 })
 
@@ -141,6 +145,7 @@ __all__ = [
     "TEXT_ALIGN_LEFT", "TEXT_ALIGN_CENTER", "TEXT_ALIGN_RIGHT",
     "TEXT_ALIGN_TOP", "TEXT_ALIGN_MIDDLE", "TEXT_ALIGN_BOTTOM",
     "CANVAS_CONSTANT_PIXEL", "CANVAS_SCALE_WITH_SCREEN",
+    "SIZE_FIT_UNCONSTRAINED", "SIZE_FIT_MIN", "SIZE_FIT_PREFERRED",
     "video_recording_available", "find_ffmpeg",
     # Pure-Python utilities
     "assets", "keys", "mathutil", "pipeline", "shaders", "extension_available",

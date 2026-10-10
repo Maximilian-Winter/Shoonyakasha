@@ -4,7 +4,8 @@ Shoonyakasha Canvas UI Showcase
 A tour of engine.ui on the default pipeline, in one window:
 
 - a sidebar with three tabs, each a page of elements shown and hidden with
-  set_visible:
+  set_visible, and laid out by layout groups: the pages are columns, their
+  label-and-widget pairs rows, the alignment samples a grid:
     Scene    toggles and sliders that drive the scene: spin, sun shadows,
              sun intensity, the box's colour and the exposure
     Text     the nine text alignments, three fonts, Unicode, a font size
@@ -185,22 +186,45 @@ def build_scene():
         engine.scene.set_material_float(mesh, "roughnessFactor", 0.9)
 
 
+PAGE_WIDTH = 336
+
+
+def row(parent, height, spacing=8):
+    """A row across the whole page width, its children centred vertically."""
+    r = ui_.create_horizontal_layout(parent, size=(PAGE_WIDTH, height), spacing=spacing)
+    ui_.set_layout_element(r, preferred=(PAGE_WIDTH, -1))
+    ui_.set_layout_alignment(r, (0, 0.5))
+    return r
+
+
+def stretch(element):
+    """Make an element in a row take the row's spare width."""
+    ui_.set_layout_element(element, flexible=(1, -1))
+    return element
+
+
 def build_sidebar(hud, fonts):
+    # The frame is placed by its anchors; a column inside it, by its own,
+    # holds the title, the tab row and the page area, one under the other.
     sidebar = named("Sidebar", frame_panel(hud, 380, 0))
     ui_.set_rect(sidebar, anchor_min=(0, 0), anchor_max=(0, 1), pivot=(0, 0.5), position=(20, 0), size=(380, -40))
+    column = ui_.create_vertical_layout(sidebar, spacing=14, padding=(22, 16, 22, 16))
+    ui_.set_rect(column, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
 
-    label(sidebar, "Canvas UI", 22, 16, 330, 44, size=34, color=GOLD, font=fonts["serif"])
+    ui_.create_text(column, "Canvas UI", size=34, color=GOLD, font=fonts["serif"])
 
-    tabs = []
-    for i, title in enumerate(("Scene", "Text", "Widgets")):
-        tabs.append(named("%s tab" % title, place(ui_.create_button(sidebar, title, size=(108, 34)),
-                                                  22 + i * 114, 70)))
-    w["tabs"] = tabs
+    tab_row = row(column, 34, spacing=6)
+    w["tabs"] = [named("%s tab" % title, ui_.create_button(tab_row, title, size=(108, 34)))
+                 for title in ("Scene", "Text", "Widgets")]
 
+    # The page area takes the rest of the column's height; the three pages
+    # overlap in it, and only one is visible.
+    area = ui_.create_element(column, (PAGE_WIDTH, 0))
+    ui_.set_layout_element(area, flexible=(-1, 1))
     pages = []
     for title in ("Scene", "Text", "Widgets"):
-        page = named("%s page" % title, ui_.create_element(sidebar, (0, 0)))
-        ui_.set_rect(page, anchor_min=(0, 0), anchor_max=(1, 1), pivot=(0.5, 1), position=(0, -16), size=(-44, -136))
+        page = named("%s page" % title, ui_.create_vertical_layout(area, spacing=10))
+        ui_.set_rect(page, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
         pages.append(page)
     w["pages"] = pages
 
@@ -212,44 +236,48 @@ def build_sidebar(hud, fonts):
 
 
 def build_scene_page(page):
-    named("Spin toggle", place(ui_.create_toggle(page, "Spin the box", is_on=True, size=(330, 28)), 0, 0))
-    named("Shadows toggle", place(ui_.create_toggle(page, "Sun shadows", is_on=True, size=(330, 28)), 0, 38))
+    named("Spin toggle", ui_.create_toggle(page, "Spin the box", is_on=True, size=(PAGE_WIDTH, 28)))
+    named("Shadows toggle", ui_.create_toggle(page, "Sun shadows", is_on=True, size=(PAGE_WIDTH, 28)))
 
-    w["sun_label"] = label(page, "", 0, 86, 330)
-    named("Sun slider", place(ui_.create_slider(page, min=0.0, max=8.0, value=3.0, size=(336, 24)), 0, 112))
+    w["sun_label"] = ui_.create_text(page, "", size=18)
+    named("Sun slider", ui_.create_slider(page, min=0.0, max=8.0, value=3.0, size=(PAGE_WIDTH, 24)))
 
-    w["hue_label"] = label(page, "", 0, 150, 330)
-    named("Hue slider", place(ui_.create_slider(page, min=0.0, max=1.0, value=0.0, size=(336, 24)), 0, 176))
-    w["swatch"] = named("Colour swatch", place(ui_.create_image(page, (28, 28)), 0, 150, anchor=(1, 0)))
+    hue_row = row(page, 28)
+    w["hue_label"] = stretch(ui_.create_text(hue_row, "", size=18))
+    w["swatch"] = named("Colour swatch", ui_.create_image(hue_row, (28, 28)))
+    named("Hue slider", ui_.create_slider(page, min=0.0, max=1.0, value=0.0, size=(PAGE_WIDTH, 24)))
 
-    w["ev_label"] = label(page, "", 0, 214, 330)
-    named("Exposure slider", place(ui_.create_slider(page, min=-2.0, max=2.0, value=0.0, size=(336, 24)), 0, 240))
+    w["ev_label"] = ui_.create_text(page, "", size=18)
+    named("Exposure slider", ui_.create_slider(page, min=-2.0, max=2.0, value=0.0, size=(PAGE_WIDTH, 24)))
 
-    named("Reset button", place(ui_.create_button(page, "Reset", size=(140, 40)), 0, 290))
-    label(page, "The scene reads these each frame in on_update.", 0, 348, 336, 48, size=16, color=MUTED)
+    named("Reset button", ui_.create_button(page, "Reset", size=(140, 40)))
+    ui_.create_text(page, "The scene reads these each frame in on_update. This page is a column of "
+                          "rows placed by a vertical layout group.", size=16, color=MUTED)
 
 
 def build_text_page(page, fonts):
-    label(page, "Alignment", 0, 0, 330, size=16, color=MUTED)
+    ui_.create_text(page, "Alignment", size=16, color=MUTED)
+    grid = ui_.create_grid_layout(page, cell_size=(106, 44), columns=3, spacing=(9, 6))
     horizontal = (sk.TEXT_ALIGN_LEFT, sk.TEXT_ALIGN_CENTER, sk.TEXT_ALIGN_RIGHT)
     vertical = (sk.TEXT_ALIGN_TOP, sk.TEXT_ALIGN_MIDDLE, sk.TEXT_ALIGN_BOTTOM)
-    for row, v in enumerate(vertical):
-        for column, h in enumerate(horizontal):
-            cell = place(ui_.create_panel(page, (106, 44), color=SURFACE), column * 115, 24 + row * 50)
+    for r, v in enumerate(vertical):
+        for c, h in enumerate(horizontal):
+            cell = ui_.create_panel(grid, color=SURFACE)
             ui_.set_raycast_target(cell, False)
-            text = ui_.create_text(cell, "TMB"[row] + "LCR"[column], size=16, color=INK)
+            text = ui_.create_text(cell, "TMB"[r] + "LCR"[c], size=16, color=INK)
             ui_.set_rect(text, anchor_min=(0, 0), anchor_max=(1, 1), size=(-12, -8))
             ui_.set_text_align(text, h, v)
 
-    label(page, "Fonts and Unicode", 0, 184, 330, size=16, color=MUTED)
-    label(page, "Śūnyākāśa", 0, 206, 336, 40, size=32, color=GOLD, font=fonts["serif"])
-    label(page, "Привет · Γειά σου · Ünïcödé", 0, 248, 336, 28, size=20)
+    ui_.create_text(page, "Fonts and Unicode", size=16, color=MUTED)
+    ui_.create_text(page, "Śūnyākāśa", size=32, color=GOLD, font=fonts["serif"])
+    ui_.create_text(page, "Привет · Γειά σου · Ünïcödé", size=20)
 
-    w["size_label"] = label(page, "", 0, 286, 230, size=16, color=MUTED)
-    named("Size slider", place(ui_.create_slider(page, min=12.0, max=40.0, value=18.0, size=(336, 22)), 0, 310))
-    named("Wrap toggle", place(ui_.create_toggle(page, "Wrap", is_on=True, size=(100, 24)), 0, 284, anchor=(1, 0)))
+    size_row = row(page, 26)
+    w["size_label"] = stretch(ui_.create_text(size_row, "", size=16, color=MUTED))
+    named("Wrap toggle", ui_.create_toggle(size_row, "Wrap", is_on=True, size=(100, 24)))
+    named("Size slider", ui_.create_slider(page, min=12.0, max=40.0, value=18.0, size=(PAGE_WIDTH, 22)))
 
-    box = named("Clipped text box", place(ui_.create_panel(page, (336, 110), color=(0.06, 0.07, 0.09, 1.0)), 0, 344))
+    box = named("Clipped text box", ui_.create_panel(page, (PAGE_WIDTH, 110), color=(0.06, 0.07, 0.09, 1.0)))
     ui_.set_clip(box, True)
     w["paragraph"] = ui_.create_text(box, "Text is laid out from signed distance fields, so it stays sharp at "
                                           "any size. This box clips whatever overflows it.", size=18, color=INK)
@@ -257,24 +285,31 @@ def build_text_page(page, fonts):
 
 
 def build_widgets_page(page):
-    named("Click me", place(ui_.create_button(page, "Click me", size=(150, 40)), 0, 0))
-    w["clicks_label"] = label(page, "0 clicks", 166, 8, 170, size=20, color=GREEN)
+    click_row = row(page, 40, spacing=16)
+    named("Click me", ui_.create_button(click_row, "Click me", size=(150, 40)))
+    w["clicks_label"] = ui_.create_text(click_row, "0 clicks", size=20, color=GREEN)
 
-    named("Enable toggle", place(ui_.create_toggle(page, "Enable the button below", size=(330, 28)), 0, 56))
-    named("Gated button", place(ui_.create_button(page, "Only when enabled", size=(230, 40)), 0, 92))
+    named("Enable toggle", ui_.create_toggle(page, "Enable the button below", size=(PAGE_WIDTH, 28)))
+    named("Gated button", ui_.create_button(page, "Only when enabled", size=(230, 40)))
     set_gated(False)
 
-    w["steps_label"] = label(page, "", 0, 148, 330)
-    named("Steps slider", place(ui_.create_slider(page, min=0.0, max=10.0, value=5.0, size=(336, 24)), 0, 174))
+    w["steps_label"] = ui_.create_text(page, "", size=18)
+    named("Steps slider", ui_.create_slider(page, min=0.0, max=10.0, value=5.0, size=(PAGE_WIDTH, 24)))
     ui_.set_slider_range(w["Steps slider"], 0.0, 10.0, True)
 
-    named("Add row", place(ui_.create_button(page, "Add row", size=(140, 36)), 0, 216))
-    named("Clear rows", place(ui_.create_button(page, "Clear", size=(100, 36)), 150, 216))
+    button_row = row(page, 36, spacing=10)
+    named("Add row", ui_.create_button(button_row, "Add row", size=(140, 36)))
+    named("Clear rows", ui_.create_button(button_row, "Clear", size=(100, 36)))
 
-    log = named("Log", place(ui_.create_panel(page, (336, 170), color=(0.06, 0.07, 0.09, 1.0)), 0, 262))
+    # The log's rows go in a column that grows with them; the clipping panel
+    # shows its bottom part.
+    log = named("Log", ui_.create_panel(page, (PAGE_WIDTH, 170), color=(0.06, 0.07, 0.09, 1.0)))
     ui_.set_clip(log, True)
-    w["log_content"] = ui_.create_element(log, (0, 0))
-    ui_.set_rect(w["log_content"], anchor_min=(0, 0), anchor_max=(1, 0), pivot=(0, 0), size=(0, 0))
+    content = ui_.create_vertical_layout(log, spacing=2)
+    ui_.set_rect(content, anchor_min=(0, 0), anchor_max=(1, 0), pivot=(0, 0), size=(0, 0))
+    ui_.set_layout_child_sizing(content, expand_width=True)
+    ui_.set_size_to_content(content, vertical=sk.SIZE_FIT_PREFERRED)
+    w["log_content"] = content
 
 
 def build_pointer_readout(hud):
@@ -379,13 +414,13 @@ def add_row():
     rows = state["rows"]
     index = len(rows)
     tint = (0.16, 0.18, 0.23, 1.0) if index % 2 == 0 else (0.12, 0.13, 0.17, 1.0)
-    row = ui_.create_panel(w["log_content"], (0, 26), color=tint)
-    ui_.set_rect(row, anchor_min=(0, 0), anchor_max=(1, 0), pivot=(0, 0), position=(0, index * 28), size=(0, 26))
-    ui_.set_raycast_target(row, False)
-    text = ui_.create_text(row, "Row %d, added at frame %d" % (index + 1, state["frame"]), size=16)
+    # The column places each new row under the last and spans the log's width.
+    entry = ui_.create_panel(w["log_content"], (0, 26), color=tint)
+    ui_.set_raycast_target(entry, False)
+    text = ui_.create_text(entry, "Row %d, added at frame %d" % (index + 1, state["frame"]), size=16)
     ui_.set_rect(text, anchor_min=(0, 0), anchor_max=(1, 1), size=(-16, 0))
     ui_.set_text_align(text, sk.TEXT_ALIGN_LEFT, sk.TEXT_ALIGN_MIDDLE)
-    rows.append(row)
+    rows.append(entry)
 
 
 def update_widgets_page():
@@ -403,14 +438,14 @@ def update_widgets_page():
     if ui_.was_clicked(w["Add row"]):
         add_row()
     if ui_.was_clicked(w["Clear rows"]):
-        for row in state["rows"]:
-            engine.scene.destroy_entity(row)     # its text goes with it
+        for entry in state["rows"]:
+            engine.scene.destroy_entity(entry)     # its text goes with it
         state["rows"].clear()
 
-    # Scroll the log so the newest row is at the bottom of the clipped panel.
+    # Scroll the log so the newest row is at the bottom of the clipped panel:
+    # the column's height, from its rows, is known from the last layout.
     visible = ui_.get_rect(w["Log"])[3]
-    total = len(state["rows"]) * 28
-    ui_.set_size(w["log_content"], (0, total))
+    total = ui_.get_rect(w["log_content"])[3]
     ui_.set_position(w["log_content"], (0, min(0.0, visible - total)))
 
 

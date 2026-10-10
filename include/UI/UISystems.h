@@ -16,6 +16,8 @@
 namespace Shoonyakasha {
 namespace UI {
 
+class FontLibrary;
+
 /// Lays out every canvas each frame. Elements no longer under a canvas have
 /// visibleInHierarchy cleared and canvas set to null.
 class CanvasLayoutSystem : public ECS::ISystem {
@@ -23,12 +25,14 @@ public:
     static constexpr int kPriority = 51;
 
     /// `screenSize` is read on each update; the owner keeps it current.
-    explicit CanvasLayoutSystem(const glm::vec2* screenSize);
+    /// `fonts` measures text for layout groups and size fitters.
+    explicit CanvasLayoutSystem(const glm::vec2* screenSize, const FontLibrary* fonts = nullptr);
 
     void update(entt::registry& registry, float deltaTime) override;
 
 private:
     const glm::vec2* m_screenSize;
+    const FontLibrary* m_fonts;
 };
 
 struct UIPointerState;
@@ -63,8 +67,6 @@ private:
     entt::entity m_captured = entt::null;
     bool m_wasDown = false;
 };
-
-class FontLibrary;
 
 /// Lays out each UIText of a laid-out element into its UITextCache, in the
 /// element's rect, when the text, font, style or rect size changed.

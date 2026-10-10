@@ -149,6 +149,56 @@ public:
     void setClip(EntityHandle element, bool clip);
 
     // ═══════════════════════════════════════════════════════════
+    // Layout groups
+    //
+    // A layout group places its children itself, in order, ignoring their
+    // anchors. Each child is sized from its layout sizes: its min, its
+    // preferred size when there is room, and a share of what is left by its
+    // flexible size. Text reports its measured size, an image its texture's,
+    // anything else its own size. Hidden children take no space.
+    // ═══════════════════════════════════════════════════════════
+
+    /// A row, left to right, or a column, top to bottom, of `size`, with
+    /// `spacing` between children and `padding` (left, top, right, bottom)
+    /// inside its edges.
+    EntityHandle createHorizontalLayout(EntityHandle parent, const glm::vec2& size, float spacing = 0.0f,
+                                        const glm::vec4& padding = glm::vec4(0.0f));
+    EntityHandle createVerticalLayout(EntityHandle parent, const glm::vec2& size, float spacing = 0.0f,
+                                      const glm::vec4& padding = glm::vec4(0.0f));
+
+    /// Cells of `cellSize`, row by row from the top-left; `columns` 0 fits as
+    /// many as the width allows.
+    EntityHandle createGridLayout(EntityHandle parent, const glm::vec2& size, const glm::vec2& cellSize,
+                                  int columns = 0, const glm::vec2& spacing = glm::vec2(0.0f),
+                                  const glm::vec4& padding = glm::vec4(0.0f));
+
+    /// Where a group puts its children in room they do not use: (0, 0) the
+    /// top-left, (0.5, 0.5) the centre.
+    void setLayoutAlignment(EntityHandle group, const glm::vec2& alignment);
+
+    /// For a row or column, per axis: `control` sizes children from their
+    /// layout sizes (else they keep their own size); `expand` along the group's
+    /// axis gives every child a share of spare room, and across it makes each
+    /// child fill the group.
+    void setLayoutChildSizing(EntityHandle group, bool controlWidth, bool controlHeight,
+                              bool expandWidth, bool expandHeight);
+
+    /// Overrides the layout sizes `element` reports; -1 keeps its own on that
+    /// axis. With `ignoreLayout` its group leaves it to its anchors.
+    void setLayoutElement(EntityHandle element, const glm::vec2& minSize, const glm::vec2& preferredSize,
+                          const glm::vec2& flexibleSize, bool ignoreLayout = false);
+
+    /// Sizes an element placed by its anchors to its own layout sizes, per
+    /// axis: a column that grows with its children, a label as wide as its
+    /// text.
+    void setSizeToContent(EntityHandle element, SizeFit horizontal, SizeFit vertical);
+
+    /// The element's preferred layout size, as last measured. Measured only
+    /// for children of a group and elements sized to content; others report
+    /// their own size.
+    glm::vec2 getPreferredSize(EntityHandle element) const;
+
+    // ═══════════════════════════════════════════════════════════
     // Content
     //
     // The text functions act on the element's own text or, for a button or

@@ -138,10 +138,16 @@ protected:
         m_reset = createButton(registry, settings, "Reset", roboto, {140.0f, 40.0f});
         place(m_reset, {0, 0}, {16, 112});
 
-        // Box.gltf's mesh entity, turned by the slider.
+        // Box.gltf's root node, turned by the slider. The root turns its mesh
+        // 90 degrees about X; turning the root about Y keeps the box upright.
         const auto box = registry.view<MeshComponent, ECS::TransformComponent>();
         for (const auto entity : box) {
             if (entity != m_terminal) m_box = entity;
+        }
+        while (m_box != entt::null) {
+            const auto* hierarchy = registry.try_get<ECS::HierarchyComponent>(m_box);
+            if (!hierarchy || hierarchy->parent == entt::null) break;
+            m_box = hierarchy->parent;
         }
     }
 

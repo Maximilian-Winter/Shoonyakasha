@@ -256,6 +256,93 @@ void UIAPI::setClip(EntityHandle element, bool clip) {
     }
 }
 
+// ─── Layout groups ──────────────────────────────────────────────
+
+namespace {
+
+template<typename Layout>
+EntityHandle createLinear(entt::registry& registry, entt::entity parent, const glm::vec2& size, float spacing,
+                          const glm::vec4& padding) {
+    const entt::entity e = UI::createElement(registry, parent, size);
+    auto& layout = registry.emplace<Layout>(e);
+    layout.spacing = spacing;
+    layout.padding = padding;
+    return toHandle(e);
+}
+
+UI::UIContentSizeFitter::Fit toFit(SizeFit fit) {
+    switch (fit) {
+    case SizeFit::Min:       return UI::UIContentSizeFitter::Fit::Min;
+    case SizeFit::Preferred: return UI::UIContentSizeFitter::Fit::Preferred;
+    default:                 return UI::UIContentSizeFitter::Fit::Unconstrained;
+    }
+}
+
+} // namespace
+
+EntityHandle UIAPI::createHorizontalLayout(EntityHandle parent, const glm::vec2& size, float spacing,
+                                           const glm::vec4& padding) {
+    return createLinear<UI::UIHorizontalLayout>(m_impl->registry, m_impl->parentOf(parent), size, spacing, padding);
+}
+
+EntityHandle UIAPI::createVerticalLayout(EntityHandle parent, const glm::vec2& size, float spacing,
+                                         const glm::vec4& padding) {
+    return createLinear<UI::UIVerticalLayout>(m_impl->registry, m_impl->parentOf(parent), size, spacing, padding);
+}
+
+EntityHandle UIAPI::createGridLayout(EntityHandle parent, const glm::vec2& size, const glm::vec2& cellSize,
+                                     int columns, const glm::vec2& spacing, const glm::vec4& padding) {
+    const entt::entity e = UI::createElement(m_impl->registry, m_impl->parentOf(parent), size);
+    auto& grid = m_impl->registry.emplace<UI::UIGridLayout>(e);
+    grid.cellSize = cellSize;
+    grid.columns = columns;
+    grid.spacing = spacing;
+    grid.padding = padding;
+    return toHandle(e);
+}
+
+void UIAPI::setLayoutAlignment(EntityHandle group, const glm::vec2& alignment) {
+    if (auto* h = m_impl->get<UI::UIHorizontalLayout>(group)) h->childAlignment = alignment;
+    if (auto* v = m_impl->get<UI::UIVerticalLayout>(group)) v->childAlignment = alignment;
+    if (auto* g = m_impl->get<UI::UIGridLayout>(group)) g->childAlignment = alignment;
+}
+
+void UIAPI::setLayoutChildSizing(EntityHandle group, bool controlWidth, bool controlHeight,
+                                 bool expandWidth, bool expandHeight) {
+    UI::UILinearLayout* layout = m_impl->get<UI::UIHorizontalLayout>(group);
+    if (!layout) layout = m_impl->get<UI::UIVerticalLayout>(group);
+    if (!layout) return;
+    layout->controlChildSize = {controlWidth, controlHeight};
+    layout->childForceExpand = {expandWidth, expandHeight};
+}
+
+void UIAPI::setLayoutElement(EntityHandle element, const glm::vec2& minSize, const glm::vec2& preferredSize,
+                             const glm::vec2& flexibleSize, bool ignoreLayout) {
+    if (!m_impl->get<UI::UIRect>(element)) return;
+    auto& layout = m_impl->registry.emplace_or_replace<UI::UILayoutElement>(toEntt(element));
+    layout.minSize = minSize;
+    layout.preferredSize = preferredSize;
+    layout.flexibleSize = flexibleSize;
+    layout.ignoreLayout = ignoreLayout;
+}
+
+void UIAPI::setSizeToContent(EntityHandle element, SizeFit horizontal, SizeFit vertical) {
+    if (!m_impl->get<UI::UIRect>(element)) return;
+    const entt::entity e = toEntt(element);
+    if (horizontal == SizeFit::Unconstrained && vertical == SizeFit::Unconstrained) {
+        m_impl->registry.remove<UI::UIContentSizeFitter>(e);
+        return;
+    }
+    auto& fitter = m_impl->registry.emplace_or_replace<UI::UIContentSizeFitter>(e);
+    fitter.horizontal = toFit(horizontal);
+    fitter.vertical = toFit(vertical);
+}
+
+glm::vec2 UIAPI::getPreferredSize(EntityHandle element) const {
+    const auto* rect = m_impl->get<UI::UIRect>(element);
+    return rect ? rect->preferredSize : glm::vec2(0.0f);
+}
+
 // ─── Content ────────────────────────────────────────────────────
 
 void UIAPI::setText(EntityHandle element, const std::string& text) {

@@ -56,7 +56,8 @@ class BindingInventory(unittest.TestCase):
 
     def test_the_package_exports_the_class_and_constants(self):
         names = ["UI", "TEXT_ALIGN_TOP", "TEXT_ALIGN_MIDDLE", "TEXT_ALIGN_BOTTOM",
-                 "CANVAS_CONSTANT_PIXEL", "CANVAS_SCALE_WITH_SCREEN"]
+                 "CANVAS_CONSTANT_PIXEL", "CANVAS_SCALE_WITH_SCREEN",
+                 "SIZE_FIT_UNCONSTRAINED", "SIZE_FIT_MIN", "SIZE_FIT_PREFERRED"]
         exported = INIT.split("from ._shoonyakasha import (", 1)[1].split("\n    )", 1)[0]
         lazy = INIT.split("_ENGINE_SYMBOLS = frozenset({", 1)[1].split("})", 1)[0]
         listed = INIT.split("__all__ = [", 1)[1].split("]", 1)[0]
@@ -70,7 +71,8 @@ class BindingInventory(unittest.TestCase):
     def test_constants_follow_the_facade_enums(self):
         types = (REPO / "include/Facade/FacadeTypes.h").read_text(encoding="utf-8")
         for enum, prefix, members in (("TextVAlign", "TEXT_ALIGN_", ("Top", "Middle", "Bottom")),
-                                      ("CanvasScaleMode", "CANVAS_", ("ConstantPixel", "ScaleWithScreen"))):
+                                      ("CanvasScaleMode", "CANVAS_", ("ConstantPixel", "ScaleWithScreen")),
+                                      ("SizeFit", "SIZE_FIT_", ("Unconstrained", "Min", "Preferred"))):
             body = types.split("enum class %s" % enum, 1)[1].split("};", 1)[0]
             for member in members:
                 with self.subTest(member=member):

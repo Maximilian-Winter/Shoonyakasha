@@ -85,10 +85,72 @@ struct UIRect {
     bool visibleInHierarchy = false;           // this and every ancestor visible, inside a canvas
     entt::entity canvas = entt::null;          // the canvas the element was laid out in
     uint32_t drawOrder = 0;                    // depth-first position within its canvas
+    bool drivenByLayout = false;               // placed by its parent's layout group, not its anchors
+    glm::vec2 minSize{0.0f};                   // its layout sizes, see UILayoutElement
+    glm::vec2 preferredSize{0.0f};
+    glm::vec2 flexibleSize{0.0f};
 };
 
 /// The element's descendants are clipped to its rect.
 struct UIClip {};
+
+// ─── Layout ──────────────────────────────────────────────────────
+//
+// A layout group places its children itself, ignoring their anchors, from
+// each child's layout sizes along each axis:
+// - min: it never gets less, unless the group has less than the sum of mins;
+// - preferred: what it gets when there is room;
+// - flexible: its share of the room left once everyone has their preferred size.
+// Without a UILayoutElement an element reports its content:
+// - text: preferred width unwrapped, min width 0, and as min and preferred
+//   height its height when wrapped at its width;
+// - an image with a texture: the texture's size as preferred, min 0;
+// - anything else: its sizeDelta as both min and preferred.
+// A layout group reports its children's sizes added up along its axis and
+// the largest across it, with padding and spacing. Content is only measured
+// for a group's children and for elements with a UIContentSizeFitter. Hidden
+// children, and children with UILayoutElement::ignoreLayout, take no part and
+// keep their anchors.
+
+/// Overrides the layout sizes an element reports. -1 keeps its own.
+struct UILayoutElement {
+    glm::vec2 minSize{-1.0f};
+    glm::vec2 preferredSize{-1.0f};
+    glm::vec2 flexibleSize{-1.0f};
+    bool ignoreLayout = false;
+};
+
+/// Settings shared by the horizontal and vertical layout groups.
+struct UILinearLayout {
+    glm::vec4 padding{0.0f};                  // left, top, right, bottom
+    float spacing = 0.0f;                     // between children along the axis
+    glm::vec2 childAlignment{0.0f};           // where children sit in spare room: (0, 0) top-left, (0.5, 0.5) centre
+    glm::bvec2 controlChildSize{true, true};  // size children from their layout sizes; else they keep their sizeDelta
+    glm::bvec2 childForceExpand{false, false};// along the axis: every child flexible; across it: fill the group
+};
+
+/// Places its children in a row, left to right.
+struct UIHorizontalLayout : UILinearLayout {};
+
+/// Places its children in a column, top to bottom.
+struct UIVerticalLayout : UILinearLayout {};
+
+/// Places its children in cells of cellSize, row by row from the top-left.
+struct UIGridLayout {
+    glm::vec4 padding{0.0f};                  // left, top, right, bottom
+    glm::vec2 cellSize{100.0f, 100.0f};
+    glm::vec2 spacing{0.0f};
+    int columns = 0;                          // 0: as many as fit the width
+    glm::vec2 childAlignment{0.0f};           // where the block of cells sits in spare room
+};
+
+/// Sizes the element to its own layout sizes, per axis, in place of its
+/// sizeDelta. For an element placed by its anchors, not by a layout group.
+struct UIContentSizeFitter {
+    enum class Fit : uint8_t { Unconstrained, Min, Preferred };
+    Fit horizontal = Fit::Unconstrained;
+    Fit vertical = Fit::Unconstrained;
+};
 
 // Colours are sRGB-encoded with straight alpha, as colour pickers give them.
 
@@ -189,6 +251,18 @@ struct UIPointerState {
     glm::vec2 position{0.0f};               // on that canvas, in canvas units
     entt::entity hovered = entt::null;      // the UIInteractable it is over
     entt::entity pressed = entt::null;      // the UIInteractable it pressed, until released
+};
+
+/// Measurements of a UIText for layout, and the inputs they were made from.
+/// Written by CanvasLayoutSystem for text whose layout sizes are needed.
+struct UITextMeasure {
+    std::string text;
+    uint32_t font = 0;
+    float fontSize = 0.0f;
+    float lineSpacing = 0.0f;
+    glm::vec2 naturalSize{0.0f};          // unwrapped
+    float wrapWidth = -1.0f;              // the width wrappedHeight was measured at
+    float wrappedHeight = 0.0f;
 };
 
 /// The layout of a UIText, and the inputs it was made from. Written by

@@ -19,7 +19,7 @@ from cpython.ref cimport PyObject
 from ._facade_types cimport (
     EntityHandle, EngineConfig, GltfOptions, RecordingOptions,
     GltfResult as CppGltfResult, RenderStatsSnapshot,
-    CameraType, LightType, UIAnchor, TextHAlign, TextVAlign, CanvasScaleMode,
+    CameraType, LightType, UIAnchor, TextHAlign, TextVAlign, CanvasScaleMode, SizeFit,
 )
 
 
@@ -391,6 +391,21 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         void setVisible(EntityHandle element, cbool visible)
         cbool isVisible(EntityHandle element) const
         void setClip(EntityHandle element, cbool clip)
+
+        # Layout groups
+        EntityHandle createHorizontalLayout(EntityHandle parent, const vec2& size, float spacing,
+                                            const vec4& padding)
+        EntityHandle createVerticalLayout(EntityHandle parent, const vec2& size, float spacing,
+                                          const vec4& padding)
+        EntityHandle createGridLayout(EntityHandle parent, const vec2& size, const vec2& cellSize,
+                                      int columns, const vec2& spacing, const vec4& padding)
+        void setLayoutAlignment(EntityHandle group, const vec2& alignment)
+        void setLayoutChildSizing(EntityHandle group, cbool controlWidth, cbool controlHeight,
+                                  cbool expandWidth, cbool expandHeight)
+        void setLayoutElement(EntityHandle element, const vec2& minSize, const vec2& preferredSize,
+                              const vec2& flexibleSize, cbool ignoreLayout)
+        void setSizeToContent(EntityHandle element, SizeFit horizontal, SizeFit vertical)
+        vec2 getPreferredSize(EntityHandle element) const
 
         # Content
         void setText(EntityHandle element, const string& text)

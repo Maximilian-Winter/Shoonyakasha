@@ -31,6 +31,7 @@ from ._facade_types cimport (
     TextHAlign, TextHAlign_Left, TextHAlign_Center, TextHAlign_Right,
     TextVAlign, TextVAlign_Top, TextVAlign_Middle, TextVAlign_Bottom,
     CanvasScaleMode, CanvasScaleMode_ConstantPixel, CanvasScaleMode_ScaleWithScreen,
+    SizeFit, SizeFit_Unconstrained, SizeFit_Min, SizeFit_Preferred,
     EngineConfig, GltfOptions, RecordingOptions, ClipInfo, GltfResult as CppGltfResult,
     RenderStatsSnapshot, RenderPassStats,
 )
@@ -103,6 +104,11 @@ TEXT_ALIGN_BOTTOM = <int>TextVAlign_Bottom
 # Canvas scale modes
 CANVAS_CONSTANT_PIXEL = <int>CanvasScaleMode_ConstantPixel
 CANVAS_SCALE_WITH_SCREEN = <int>CanvasScaleMode_ScaleWithScreen
+
+# Size-to-content modes (canvas UI)
+SIZE_FIT_UNCONSTRAINED = <int>SizeFit_Unconstrained
+SIZE_FIT_MIN = <int>SizeFit_Min
+SIZE_FIT_PREFERRED = <int>SizeFit_Preferred
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1187,6 +1193,58 @@ cdef class UI:
     def set_clip(self, uint32_t element, bint clip):
         """Clip the element's descendants to its rect."""
         self._ptr.setClip(element, clip)
+
+    # ── Layout groups ─────────────────────────────────────────
+    #
+    # A layout group places its children itself, in order, ignoring their
+    # anchors, and sizes them from their layout sizes: min, preferred when
+    # there is room, and a share of what is left by flexible size. Text reports
+    # its measured size, an image its texture's, anything else its own size.
+
+    def create_horizontal_layout(self, uint32_t parent, size=(100, 100), float spacing=0.0,
+                                 padding=(0, 0, 0, 0)):
+        """A row of children, left to right. padding is (left, top, right, bottom)."""
+        return <uint32_t>self._ptr.createHorizontalLayout(parent, _tuple_to_vec2(size), spacing,
+                                                          _tuple_to_vec4(padding))
+
+    def create_vertical_layout(self, uint32_t parent, size=(100, 100), float spacing=0.0,
+                               padding=(0, 0, 0, 0)):
+        """A column of children, top to bottom. padding is (left, top, right, bottom)."""
+        return <uint32_t>self._ptr.createVerticalLayout(parent, _tuple_to_vec2(size), spacing,
+                                                        _tuple_to_vec4(padding))
+
+    def create_grid_layout(self, uint32_t parent, size=(100, 100), cell_size=(100, 100), int columns=0,
+                           spacing=(0, 0), padding=(0, 0, 0, 0)):
+        """Cells of cell_size, row by row; columns 0 fits as many as the width allows."""
+        return <uint32_t>self._ptr.createGridLayout(parent, _tuple_to_vec2(size), _tuple_to_vec2(cell_size),
+                                                    columns, _tuple_to_vec2(spacing), _tuple_to_vec4(padding))
+
+    def set_layout_alignment(self, uint32_t group, alignment):
+        """Where a group puts children in room they leave: (0, 0) top-left, (0.5, 0.5) centre."""
+        self._ptr.setLayoutAlignment(group, _tuple_to_vec2(alignment))
+
+    def set_layout_child_sizing(self, uint32_t group, bint control_width=True, bint control_height=True,
+                                bint expand_width=False, bint expand_height=False):
+        """For a row or column: control sizes children from their layout sizes; expand
+        along the group's axis shares spare room, across it fills the group."""
+        self._ptr.setLayoutChildSizing(group, control_width, control_height, expand_width, expand_height)
+
+    def set_layout_element(self, uint32_t element, min=(-1, -1), preferred=(-1, -1), flexible=(-1, -1),
+                           bint ignore=False):
+        """Override the layout sizes element reports; -1 keeps its own on that axis.
+        ignore leaves it to its anchors inside a group."""
+        self._ptr.setLayoutElement(element, _tuple_to_vec2(min), _tuple_to_vec2(preferred),
+                                   _tuple_to_vec2(flexible), ignore)
+
+    def set_size_to_content(self, uint32_t element, int horizontal=SIZE_FIT_UNCONSTRAINED,
+                            int vertical=SIZE_FIT_UNCONSTRAINED):
+        """Size an element placed by its anchors to its own layout sizes, per axis:
+        SIZE_FIT_UNCONSTRAINED, SIZE_FIT_MIN or SIZE_FIT_PREFERRED."""
+        self._ptr.setSizeToContent(element, <SizeFit>horizontal, <SizeFit>vertical)
+
+    def get_preferred_size(self, uint32_t element):
+        """(width, height): the preferred layout size as last measured."""
+        return _vec2_to_tuple(self._ptr.getPreferredSize(element))
 
     # ── Content ───────────────────────────────────────────────
     #

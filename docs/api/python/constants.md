@@ -13,6 +13,7 @@ Import native constants from `shoonyakasha` after installing the extension. Pure
 | Text alignment | `TEXT_ALIGN_LEFT = 0`, `TEXT_ALIGN_CENTER = 1`, `TEXT_ALIGN_RIGHT = 2` |
 | Vertical text alignment (canvas UI) | `TEXT_ALIGN_TOP = 0`, `TEXT_ALIGN_MIDDLE = 1`, `TEXT_ALIGN_BOTTOM = 2` |
 | Canvas scale mode | `CANVAS_CONSTANT_PIXEL = 0`, `CANVAS_SCALE_WITH_SCREEN = 1` |
+| Size to content (canvas UI) | `SIZE_FIT_UNCONSTRAINED = 0`, `SIZE_FIT_MIN = 1`, `SIZE_FIT_PREFERRED = 2` |
 
 Enum existence is not implementation support: Mesh colliders fall back to a box, and Python has no collider-shape setter. See [physics](../../guides/physics.md).
 

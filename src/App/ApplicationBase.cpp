@@ -196,7 +196,7 @@ void ApplicationBase::registerSystems() {
     m_activeScene->addSystem<ECS::CameraSystem>();
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
     m_activeScene->addSystem<UI::CanvasInputSystem>(&m_screenSize, &m_windowSize, &m_uiContext->pointer());
-    m_activeScene->addSystem<UI::CanvasLayoutSystem>(&m_screenSize);
+    m_activeScene->addSystem<UI::CanvasLayoutSystem>(&m_screenSize, &m_uiContext->fonts());
     m_activeScene->addSystem<UI::CanvasTextSystem>(&m_uiContext->fonts());
 }
 

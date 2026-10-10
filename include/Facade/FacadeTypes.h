@@ -79,6 +79,13 @@ enum class TextVAlign : uint8_t {
     Bottom = 2
 };
 
+// How a size fitter sizes an element along one axis.
+enum class SizeFit : uint8_t {
+    Unconstrained = 0,   // its own size, untouched
+    Min           = 1,   // its min layout size
+    Preferred     = 2    // its preferred layout size
+};
+
 // How a canvas maps its units to pixels.
 enum class CanvasScaleMode : uint8_t {
     ConstantPixel   = 0,   // a fixed number of pixels per canvas unit
