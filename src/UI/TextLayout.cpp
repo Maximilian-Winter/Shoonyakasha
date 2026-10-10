@@ -3,6 +3,7 @@
 //
 
 #include "UI/TextLayout.h"
+#include "UI/LineBreak.h"
 #include "UI/TextShaper.h"
 
 #include <algorithm>
@@ -14,7 +15,7 @@ namespace UI {
 namespace {
 
 bool isSpace(char32_t c) {
-    return c == U' ' || c == U'\t';
+    return isBreakingSpace(c);
 }
 
 /// A cluster of a shaped paragraph: its code points and its glyphs.
@@ -98,24 +99,38 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
         const auto& clusters = paragraphClusters.back();
 
         auto codepointAt = [&](size_t k) { return k < clusters.size() ? clusters[k].first : end; };
+        // The last place the line may break: at a space, which is dropped, or
+        // after a cluster, which stays (UI/LineBreak.h).
+        constexpr size_t kNone = static_cast<size_t>(-1);
         size_t start = 0;
-        size_t lastSpace = static_cast<size_t>(-1);
+        size_t lastBreak = kNone;
+        bool breakAtSpace = false;
         float penX = 0.0f;
         for (size_t k = 0; k < clusters.size(); ++k) {
             const Cluster& c = clusters[k];
             if (wrap && !c.space && k > start && penX + c.width > wrapWidth) {
-                if (lastSpace != static_cast<size_t>(-1)) {
-                    lines.push_back({p, start, lastSpace, codepointAt(start), codepointAt(lastSpace)});
-                    start = lastSpace + 1;
+                if (lastBreak != kNone && breakAtSpace) {
+                    lines.push_back({p, start, lastBreak, codepointAt(start), codepointAt(lastBreak)});
+                    start = lastBreak + 1;
+                } else if (lastBreak != kNone) {
+                    lines.push_back({p, start, lastBreak + 1, codepointAt(start), codepointAt(lastBreak + 1)});
+                    start = lastBreak + 1;
                 } else {
                     lines.push_back({p, start, k, codepointAt(start), codepointAt(k)});
                     start = k;
                 }
-                lastSpace = static_cast<size_t>(-1);
+                lastBreak = kNone;
                 penX = 0.0f;
                 for (size_t j = start; j < k; ++j) penX += clusters[j].width;
             }
-            if (c.space) lastSpace = k;
+            if (c.space) {
+                lastBreak = k;
+                breakAtSpace = true;
+            } else if (k + 1 < clusters.size() &&
+                       canBreakBetween(text[c.end - 1], text[clusters[k + 1].first])) {
+                lastBreak = k;
+                breakAtSpace = false;
+            }
             penX += c.width;
         }
         lines.push_back({p, start, clusters.size(), codepointAt(start), end});

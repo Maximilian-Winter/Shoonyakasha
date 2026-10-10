@@ -64,8 +64,10 @@ struct TextLayoutResult {
 
 /// Lays out `text` in a box of `boxSize` with `fonts`, the first preferred
 /// and the rest used for code points it lacks. With wrap on, a line breaks
-/// at the last space before it would exceed the box width, or between
-/// clusters when a word is wider than the box. '\n' always breaks. Text that
+/// at the last opportunity before it would exceed the box width: a space,
+/// which is dropped, or a place UI/LineBreak.h allows, such as after a
+/// Tibetan tsheg or between ideographs. Without one it breaks between
+/// clusters. '\n' always breaks. Text that
 /// does not fit is placed outside the box rather than dropped; clipping is the
 /// renderer's concern. Control characters other than '\n' and tab are not
 /// drawn; a tab is drawn as a space.

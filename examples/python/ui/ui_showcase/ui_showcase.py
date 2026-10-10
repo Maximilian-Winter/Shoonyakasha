@@ -285,8 +285,11 @@ def build_text_page(page, fonts):
 
     box = named("Clipped text box", ui_.create_panel(page, (PAGE_WIDTH, 110), color=(0.06, 0.07, 0.09, 1.0)))
     ui_.set_clip(box, True)
+    # Tibetan has no spaces between words: its lines break after the tsheg (་).
     w["paragraph"] = ui_.create_text(box, "Text is laid out from signed distance fields, so it stays sharp at "
-                                          "any size. This box clips whatever overflows it.", size=18, color=INK)
+                                          "any size. This box clips whatever overflows it. "
+                                          "བཀྲ་ཤིས་བདེ་ལེགས། ཐུགས་རྗེ་ཆེ། སེམས་ཅན་ཐམས་ཅད་བདེ་བར་གྱུར་ཅིག།",
+                                     size=18, color=INK)
     ui_.set_rect(w["paragraph"], anchor_min=(0, 0), anchor_max=(1, 1), size=(-20, -16))
 
 
