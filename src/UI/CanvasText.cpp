@@ -39,19 +39,20 @@ void CanvasTextSystem::update(entt::registry& registry, float /*deltaTime*/) {
         style.lineSpacing = text.lineSpacing;
         const glm::vec2 box = element.rect.size();
 
+        const std::vector<uint32_t> fonts = m_fonts->chain(text.font);
         auto* cache = registry.try_get<UITextCache>(entity);
-        if (cache && cache->text == text.text && cache->font == text.font &&
+        if (cache && cache->text == text.text && cache->fonts == fonts &&
             sameStyle(cache->style, style) && cache->boxSize == box) {
             continue;
         }
         if (!cache) cache = &registry.emplace<UITextCache>(entity);
 
         cache->text = text.text;
-        cache->font = text.font;
+        cache->fonts = fonts;
         cache->style = style;
         cache->boxSize = box;
-        const SdfFont* font = m_fonts->get(text.font);
-        cache->layout = font ? layoutText(*font, decodeUtf8(text.text), style, box) : TextLayoutResult{};
+        cache->layout = fonts.empty() ? TextLayoutResult{}
+                                      : layoutText(m_fonts->resolve(fonts), decodeUtf8(text.text), style, box);
     }
 }
 

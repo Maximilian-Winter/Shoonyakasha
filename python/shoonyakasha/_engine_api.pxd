@@ -356,6 +356,8 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         uint32_t loadFont(const string& path)
         uint32_t getDefaultFont()
         void setDefaultFont(uint32_t font)
+        void setFontFallbacks(uint32_t font, const vector[uint32_t]& fallbacks)
+        void setDefaultFontFallbacks(const vector[uint32_t]& fallbacks)
 
         # Canvases
         EntityHandle createCanvas(const vec2& referenceSize, CanvasScaleMode scaleMode, int sortOrder)

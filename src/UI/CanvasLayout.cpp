@@ -142,20 +142,21 @@ struct LayoutWalk {
     // ── Text measurement ──
 
     UITextMeasure* measure(entt::entity e, const UIText& text) {
-        const SdfFont* font = fonts ? fonts->get(text.font) : nullptr;
-        if (!font) return nullptr;
+        if (!fonts) return nullptr;
+        std::vector<uint32_t> chain = fonts->chain(text.font);
+        if (chain.empty()) return nullptr;
         auto& m = registry.get_or_emplace<UITextMeasure>(e);
-        if (m.text != text.text || m.font != text.font || m.fontSize != text.fontSize ||
+        if (m.text != text.text || m.fonts != chain || m.fontSize != text.fontSize ||
             m.lineSpacing != text.lineSpacing) {
             m.text = text.text;
-            m.font = text.font;
+            m.fonts = std::move(chain);
             m.fontSize = text.fontSize;
             m.lineSpacing = text.lineSpacing;
             TextStyle style;
             style.fontSize = text.fontSize;
             style.lineSpacing = text.lineSpacing;
             style.wrap = false;
-            m.naturalSize = layoutText(*font, decodeUtf8(text.text), style, glm::vec2(1e9f)).size;
+            m.naturalSize = layoutText(fonts->resolve(m.fonts), decodeUtf8(text.text), style, glm::vec2(1e9f)).size;
             m.wrapWidth = -1.0f;
         }
         return &m;
@@ -168,7 +169,7 @@ struct LayoutWalk {
             style.fontSize = text.fontSize;
             style.lineSpacing = text.lineSpacing;
             style.wrap = true;
-            m.wrappedHeight = layoutText(*fonts->get(text.font), decodeUtf8(text.text), style,
+            m.wrappedHeight = layoutText(fonts->resolve(m.fonts), decodeUtf8(text.text), style,
                                          glm::vec2(std::max(width, 0.0f), 1e9f)).size.y;
             m.wrapWidth = width;
         }

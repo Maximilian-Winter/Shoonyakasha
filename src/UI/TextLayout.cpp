@@ -3,6 +3,7 @@
 //
 
 #include "UI/TextLayout.h"
+#include "UI/TextShaper.h"
 
 #include <algorithm>
 #include <utility>
@@ -12,149 +13,174 @@ namespace UI {
 
 namespace {
 
-constexpr size_t kNone = static_cast<size_t>(-1);
-
 bool isSpace(char32_t c) {
     return c == U' ' || c == U'\t';
 }
 
-bool isSkipped(char32_t c) {
-    return (c < 0x20 && c != U'\n' && c != U'\t') || c == 0x7F;
+/// A cluster of a shaped paragraph: its code points and its glyphs.
+struct Cluster {
+    size_t first = 0;         // code points [first, end)
+    size_t end = 0;
+    size_t glyphBegin = 0;    // glyphs [glyphBegin, glyphEnd) of the paragraph
+    size_t glyphEnd = 0;
+    float width = 0.0f;       // scaled
+    bool space = false;
+};
+
+/// The clusters of a shaped paragraph ending at `end`, in glyph order.
+/// `scales` converts each font's bake-size pixels to layout units.
+std::vector<Cluster> clustersOf(const std::vector<ShapedGlyph>& glyphs, std::u32string_view text,
+                                size_t end, const std::vector<float>& scales) {
+    std::vector<Cluster> clusters;
+    for (size_t g = 0; g < glyphs.size();) {
+        Cluster c;
+        c.first = glyphs[g].cluster;
+        c.glyphBegin = g;
+        while (g < glyphs.size() && glyphs[g].cluster == c.first) {
+            c.width += glyphs[g].advance * scales[glyphs[g].font];
+            ++g;
+        }
+        c.glyphEnd = g;
+        c.space = isSpace(text[c.first]);
+        clusters.push_back(c);
+    }
+    // A cluster's code points run to the next cluster in text order.
+    std::vector<size_t> starts;
+    for (const auto& c : clusters) starts.push_back(c.first);
+    std::sort(starts.begin(), starts.end());
+    for (auto& c : clusters) {
+        const auto next = std::upper_bound(starts.begin(), starts.end(), c.first);
+        c.end = next == starts.end() ? end : *next;
+    }
+    return clusters;
 }
+
+struct LineRange {
+    size_t paragraph = 0;
+    size_t first = 0;         // clusters [first, last) of the paragraph
+    size_t last = 0;
+    size_t codepointFirst = 0;
+    size_t codepointEnd = 0;
+};
 
 } // namespace
 
-TextLayoutResult layoutText(const SdfFont& font, std::u32string_view text,
+TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32string_view text,
                             const TextStyle& style, const glm::vec2& boxSize) {
     TextLayoutResult result;
-    if (!font.valid() || text.empty()) return result;
-
+    if (fonts.empty() || !fonts[0] || !fonts[0]->valid() || text.empty()) return result;
+    const SdfFont& primary = *fonts[0];
     const float scale = style.fontSize / SdfFont::kBakeSize;
-    const size_t n = text.size();
-
-    // Glyph and scaled advance per code point; -1 for '\n' and skipped ones.
-    // Tabs are drawn as spaces.
-    std::vector<int> glyphs(n, -1);
-    std::vector<float> advances(n, 0.0f);
-    for (size_t i = 0; i < n; ++i) {
-        if (text[i] == U'\n' || isSkipped(text[i])) continue;
-        glyphs[i] = font.glyphForCodepoint(isSpace(text[i]) ? U' ' : text[i]);
-        advances[i] = font.advance(glyphs[i]) * scale;
-    }
-
-    auto kern = [&](int left, int right) {
-        return left >= 0 ? font.kerning(left, right) * scale : 0.0f;
-    };
-    auto lastGlyphBefore = [&](size_t begin, size_t end) {
-        for (size_t j = end; j > begin; --j) {
-            if (glyphs[j - 1] >= 0) return glyphs[j - 1];
-        }
-        return -1;
-    };
-    auto measure = [&](size_t begin, size_t end) {
-        float x = 0.0f;
-        int previous = -1;
-        for (size_t j = begin; j < end; ++j) {
-            if (glyphs[j] < 0) continue;
-            x += kern(previous, glyphs[j]) + advances[j];
-            previous = glyphs[j];
-        }
-        return x;
-    };
-
-    // Line breaking.
     const bool wrap = style.wrap && boxSize.x > 0.0f;
-    std::vector<std::pair<size_t, size_t>> ranges;
-    size_t start = 0;
-    size_t lastSpace = kNone;
-    float penX = 0.0f;
-    int previous = -1;
+    // A box sized to the text's own width can come back a rounding error
+    // narrower; that must not push its last cluster onto a new line.
+    const float wrapWidth = boxSize.x + 1e-3f;
 
-    for (size_t i = 0; i < n; ++i) {
-        if (text[i] == U'\n') {
-            ranges.emplace_back(start, i);
-            start = i + 1;
-            lastSpace = kNone;
-            penX = 0.0f;
-            previous = -1;
-            continue;
+    // Glyphs of a fallback font are scaled to the first font's em size, so
+    // its letters match whatever space the font reserves above and below.
+    std::vector<float> scales(fonts.size(), scale);
+    for (size_t f = 1; f < fonts.size(); ++f) {
+        if (fonts[f] && primary.heightInEms() > 0.0f) {
+            scales[f] = scale * fonts[f]->heightInEms() / primary.heightInEms();
         }
-        const int glyph = glyphs[i];
-        if (glyph < 0) continue;
-
-        float width = kern(previous, glyph) + advances[i];
-        while (wrap && !isSpace(text[i]) && i > start && penX + width > boxSize.x) {
-            if (lastSpace != kNone) {
-                ranges.emplace_back(start, lastSpace);
-                start = lastSpace + 1;
-            } else {
-                ranges.emplace_back(start, i);
-                start = i;
-            }
-            lastSpace = kNone;
-            penX = measure(start, i);
-            previous = lastGlyphBefore(start, i);
-            width = kern(previous, glyph) + advances[i];
-        }
-
-        if (isSpace(text[i])) lastSpace = i;
-        penX += width;
-        previous = glyph;
     }
-    ranges.emplace_back(start, n);
+
+    // Shape each paragraph and break it into lines of clusters.
+    std::vector<std::vector<ShapedGlyph>> paragraphGlyphs;
+    std::vector<std::vector<Cluster>> paragraphClusters;
+    std::vector<LineRange> lines;
+    for (size_t begin = 0; begin <= text.size();) {
+        const size_t newline = text.find(U'\n', begin);
+        const size_t end = newline == std::u32string_view::npos ? text.size() : newline;
+        const size_t p = paragraphGlyphs.size();
+        paragraphGlyphs.push_back(shapeText(fonts, text, begin, end));
+        paragraphClusters.push_back(clustersOf(paragraphGlyphs.back(), text, end, scales));
+        const auto& clusters = paragraphClusters.back();
+
+        auto codepointAt = [&](size_t k) { return k < clusters.size() ? clusters[k].first : end; };
+        size_t start = 0;
+        size_t lastSpace = static_cast<size_t>(-1);
+        float penX = 0.0f;
+        for (size_t k = 0; k < clusters.size(); ++k) {
+            const Cluster& c = clusters[k];
+            if (wrap && !c.space && k > start && penX + c.width > wrapWidth) {
+                if (lastSpace != static_cast<size_t>(-1)) {
+                    lines.push_back({p, start, lastSpace, codepointAt(start), codepointAt(lastSpace)});
+                    start = lastSpace + 1;
+                } else {
+                    lines.push_back({p, start, k, codepointAt(start), codepointAt(k)});
+                    start = k;
+                }
+                lastSpace = static_cast<size_t>(-1);
+                penX = 0.0f;
+                for (size_t j = start; j < k; ++j) penX += clusters[j].width;
+            }
+            if (c.space) lastSpace = k;
+            penX += c.width;
+        }
+        lines.push_back({p, start, clusters.size(), codepointAt(start), end});
+
+        if (newline == std::u32string_view::npos) break;
+        begin = newline + 1;
+    }
 
     // Vertical placement.
-    const float lineHeight = (font.ascent() - font.descent() + font.lineGap()) * scale * style.lineSpacing;
-    const float textHeight = (font.ascent() - font.descent()) * scale +
-                             static_cast<float>(ranges.size() - 1) * lineHeight;
+    const float lineHeight = (primary.ascent() - primary.descent() + primary.lineGap()) * scale * style.lineSpacing;
+    const float textHeight = (primary.ascent() - primary.descent()) * scale +
+                             static_cast<float>(lines.size() - 1) * lineHeight;
     float top = 0.0f;
     if (style.alignV == TextAlignV::Middle) top = (boxSize.y - textHeight) * 0.5f;
     else if (style.alignV == TextAlignV::Bottom) top = boxSize.y - textHeight;
 
-    result.lines.reserve(ranges.size());
+    result.lines.reserve(lines.size());
     float widest = 0.0f;
+    for (size_t l = 0; l < lines.size(); ++l) {
+        const LineRange& range = lines[l];
+        const auto& clusters = paragraphClusters[range.paragraph];
+        const auto& glyphs = paragraphGlyphs[range.paragraph];
 
-    for (size_t k = 0; k < ranges.size(); ++k) {
-        const auto [begin, end] = ranges[k];
-
-        size_t trimmed = end;
-        while (trimmed > begin && (glyphs[trimmed - 1] < 0 || isSpace(text[trimmed - 1]))) --trimmed;
+        size_t trimmed = range.last;
+        while (trimmed > range.first && clusters[trimmed - 1].space) --trimmed;
 
         TextLine line;
-        line.firstCodepoint = begin;
-        line.codepointCount = end - begin;
-        line.width = measure(begin, trimmed);
-        line.baseline = top + font.ascent() * scale + static_cast<float>(k) * lineHeight;
+        line.firstCodepoint = range.codepointFirst;
+        line.codepointCount = range.codepointEnd - range.codepointFirst;
+        for (size_t k = range.first; k < trimmed; ++k) line.width += clusters[k].width;
+        line.baseline = top + primary.ascent() * scale + static_cast<float>(l) * lineHeight;
         widest = std::max(widest, line.width);
 
         float x = 0.0f;
         if (style.alignH == TextAlignH::Center) x = (boxSize.x - line.width) * 0.5f;
         else if (style.alignH == TextAlignH::Right) x = boxSize.x - line.width;
 
-        int prev = -1;
-        for (size_t j = begin; j < end; ++j) {
-            const int glyph = glyphs[j];
-            if (glyph < 0) continue;
-            x += kern(prev, glyph);
-
-            const SdfFont::GlyphBox box = font.glyphBox(glyph);
-            if (!box.empty()) {
-                PositionedGlyph placed;
-                placed.glyph = glyph;
-                placed.min = glm::vec2(x, line.baseline) + box.offset * scale;
-                placed.max = placed.min + glm::vec2(box.size) * scale;
-                result.glyphs.push_back(placed);
+        for (size_t k = range.first; k < range.last; ++k) {
+            const Cluster& c = clusters[k];
+            result.clusters.push_back({c.first, c.end - c.first, l, x, c.width});
+            for (size_t g = c.glyphBegin; g < c.glyphEnd; ++g) {
+                const ShapedGlyph& shaped = glyphs[g];
+                const float glyphScale = scales[shaped.font];
+                const SdfFont::GlyphBox box = fonts[shaped.font]->glyphBox(shaped.glyph);
+                if (!box.empty()) {
+                    PositionedGlyph placed;
+                    placed.font = shaped.font;
+                    placed.glyph = shaped.glyph;
+                    placed.min = glm::vec2(x, line.baseline) + (shaped.offset + box.offset) * glyphScale;
+                    placed.max = placed.min + glm::vec2(box.size) * glyphScale;
+                    result.glyphs.push_back(placed);
+                }
+                x += shaped.advance * glyphScale;
             }
-
-            x += advances[j];
-            prev = glyph;
         }
-
         result.lines.push_back(line);
     }
 
     result.size = glm::vec2(widest, textHeight);
     return result;
+}
+
+TextLayoutResult layoutText(const SdfFont& font, std::u32string_view text,
+                            const TextStyle& style, const glm::vec2& boxSize) {
+    return layoutText(std::vector<const SdfFont*>{&font}, text, style, boxSize);
 }
 
 } // namespace UI

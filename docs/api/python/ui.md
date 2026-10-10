@@ -14,7 +14,7 @@ Canvases and elements are entity handles, like those `engine.scene` returns. An 
 - **Screen canvases:** created with `CANVAS_SCALE_WITH_SCREEN` (the default), a canvas is `reference_size` units, scaled to fit the window. `match` controls how width and height are balanced. With `CANVAS_CONSTANT_PIXEL`, one unit is `scale_factor` pixels.
 - **World canvases:** a world canvas is laid out in its `pixel_size` from creation. Changing its resolution with `set_canvas_pixel_size` keeps that layout.
 
-Colours are `(r, g, b, a)` tuples in sRGB with straight alpha. Text is a `str` and can use any Unicode the font has. Scripts that need shaping, such as Devanagari or Tibetan, are drawn glyph by glyph without it.
+Colours are `(r, g, b, a)` tuples in sRGB with straight alpha. Text is a `str`. It is shaped with HarfBuzz, so Devanagari, Tibetan, Arabic and other scripts that combine glyphs come out as their fonts intend. Characters a font lacks come from its fallback fonts (`set_font_fallbacks`, `set_default_font_fallbacks`).
 
 ## Layout
 
@@ -110,6 +110,8 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 |---|---|---|
 | `load_font(path)` | int | Id of the font at path, loading it on first use; 0 if it cannot be loaded. |
 | `default_font (read/write property)` | int | The font text uses when it names none: fonts/Roboto-Regular.ttf until set. |
+| `set_font_fallbacks(font, fallbacks)` | None | The fonts, in order, that text in font draws characters from when font lacks them: Devanagari or Tibetan inside Latin text, say. |
+| `set_default_font_fallbacks(fallbacks)` | None | Fallbacks for every font that has none of its own. |
 | `create_canvas(reference_size=(1920, 1080), scale_mode=CANVAS_SCALE_WITH_SCREEN, sort_order=0)` | int | A canvas over the screen. A higher sort_order draws over, and takes the pointer first. |
 | `create_world_canvas(pixel_size, world_size, emission=1.0)` | int | A canvas of pixel_size pixels on a quad of world_size units, facing +Z. |
 | `set_canvas_scaling(canvas, mode, reference_size=(1920, 1080), scale_factor=1.0, match=0.5)` | None | CANVAS_CONSTANT_PIXEL: scale_factor pixels per unit. CANVAS_SCALE_WITH_SCREEN: reference_size fitted to the target, match 0 following its width and 1 its height. |

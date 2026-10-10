@@ -124,12 +124,14 @@ struct CanvasBuilder {
     }
 
     void text(const Rect& rect, const UIText& t, const UITextCache& cache) {
-        const SdfFont* font = fonts.get(cache.font);
-        if (!font) return;
         const uint32_t color = packColor(t.color);
 
         for (const auto& glyph : cache.layout.glyphs) {
-            const auto entry = glyphs.findOrAdd(cache.font, glyph.glyph, *font);
+            if (glyph.font >= cache.fonts.size()) continue;
+            const uint32_t fontId = cache.fonts[glyph.font];
+            const SdfFont* font = fonts.get(fontId);
+            if (!font) continue;
+            const auto entry = glyphs.findOrAdd(fontId, glyph.glyph, *font);
             if (!entry) {
                 atlasFull = true;
                 continue;

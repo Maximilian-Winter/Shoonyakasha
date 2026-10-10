@@ -8,8 +8,9 @@ A tour of engine.ui on the default pipeline, in one window:
   label-and-widget pairs rows, the alignment samples a grid:
     Scene    toggles and sliders that drive the scene: spin, sun shadows,
              sun intensity, the box's colour and the exposure
-    Text     the nine text alignments, three fonts, Unicode, a font size
-             slider and wrapping in a clipped box
+    Text     the nine text alignments, fonts, Unicode with shaped Devanagari
+             and Tibetan from fallback fonts, a font size slider and
+             wrapping in a clipped box
     Widgets  a click counter, a button enabled by a toggle, a stepped
              slider, and a log whose rows are created and destroyed at
              runtime, in a scroll view: wheel, drag or scrollbar
@@ -153,6 +154,10 @@ def on_init():
     global ui_
     ui_ = engine.ui
     fonts = {"serif": ui_.load_font("fonts/PlayfairDisplay.ttf")}
+    # Characters Roboto and Playfair lack, Devanagari and Tibetan, come from
+    # these; HarfBuzz shapes their conjuncts and stacks.
+    ui_.set_default_font_fallbacks([ui_.load_font("fonts/NotoSansDevanagari-Regular.ttf"),
+                                    ui_.load_font("fonts/NotoSerifTibetan.ttf")])
 
     build_scene()
     hud = named("HUD canvas", ui_.create_canvas(reference_size=(1280, 720)))
@@ -271,6 +276,7 @@ def build_text_page(page, fonts):
     ui_.create_text(page, "Fonts and Unicode", size=16, color=MUTED)
     ui_.create_text(page, "Śūnyākāśa", size=32, color=GOLD, font=fonts["serif"])
     ui_.create_text(page, "Привет · Γειά σου · Ünïcödé", size=20)
+    ui_.create_text(page, "नमस्ते · क्षत्रिय · བཀྲ་ཤིས་བདེ་ལེགས།", size=22)
 
     size_row = row(page, 26)
     w["size_label"] = stretch(ui_.create_text(size_row, "", size=16, color=MUTED))

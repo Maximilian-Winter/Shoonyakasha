@@ -1081,6 +1081,17 @@ cdef class UI:
     def default_font(self, uint32_t font):
         self._ptr.setDefaultFont(font)
 
+    def set_font_fallbacks(self, uint32_t font, fallbacks):
+        """The fonts, in order, that text in font draws characters from when font
+        lacks them: Devanagari or Tibetan inside Latin text, say."""
+        cdef vector[uint32_t] ids = [<uint32_t>f for f in fallbacks]
+        self._ptr.setFontFallbacks(font, ids)
+
+    def set_default_font_fallbacks(self, fallbacks):
+        """Fallbacks for every font that has none of its own."""
+        cdef vector[uint32_t] ids = [<uint32_t>f for f in fallbacks]
+        self._ptr.setDefaultFontFallbacks(ids)
+
     # ── Canvases ──────────────────────────────────────────────
 
     def create_canvas(self, reference_size=(1920, 1080), int scale_mode=CANVAS_SCALE_WITH_SCREEN,

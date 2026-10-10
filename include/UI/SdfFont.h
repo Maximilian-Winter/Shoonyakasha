@@ -77,6 +77,18 @@ public:
     /// glyphs with no outline.
     Bitmap rasterize(int glyph) const;
 
+    /// Bake-size pixels per font unit.
+    float unitScale() const { return m_scale; }
+
+    /// Ascent to descent in ems. A font size is this height, so two fonts at
+    /// one size draw letters of one em size only when this is equal; text
+    /// scales fallback glyphs by the ratio to its first font's.
+    float heightInEms() const { return m_heightInEms; }
+
+    /// The same font as a HarfBuzz hb_font_t, in font units, for shaping; its
+    /// glyph ids are this font's. Null before a font is loaded.
+    void* shapingFont() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;
@@ -84,6 +96,7 @@ private:
     float m_ascent = 0.0f;
     float m_descent = 0.0f;
     float m_lineGap = 0.0f;
+    float m_heightInEms = 1.0f;
 };
 
 } // namespace UI

@@ -39,6 +39,7 @@ find_package(Bullet CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(unofficial-spirv-reflect CONFIG REQUIRED)
+find_package(harfbuzz CONFIG REQUIRED)
 
 # CONFIGURE_DEPENDS makes the build system re-glob when files appear or vanish.
 # A glob without it goes stale the moment you add a source file.
@@ -97,6 +98,8 @@ target_link_libraries(Shoonyakasha
         PRIVATE
         # Only ShaderInterfaceValidator.cpp uses it; the headers stay internal.
         unofficial::spirv-reflect
+        # Text shaping for the canvas UI (UI/SdfFont.cpp, UI/TextShaper.cpp).
+        harfbuzz::harfbuzz
 )
 
 # Where ApplicationBase finds the default pipeline when a program names none.

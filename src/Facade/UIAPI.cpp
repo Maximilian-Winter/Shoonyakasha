@@ -103,6 +103,14 @@ uint32_t UIAPI::getDefaultFont() {
 
 void UIAPI::setDefaultFont(uint32_t font) { m_impl->defaultFont = font; }
 
+void UIAPI::setFontFallbacks(uint32_t font, const std::vector<uint32_t>& fallbacks) {
+    m_impl->context.fonts().setFallbacks(font, fallbacks);
+}
+
+void UIAPI::setDefaultFontFallbacks(const std::vector<uint32_t>& fallbacks) {
+    m_impl->context.fonts().setDefaultFallbacks(fallbacks);
+}
+
 // ─── Canvases ───────────────────────────────────────────────────
 
 EntityHandle UIAPI::createCanvas(const glm::vec2& referenceSize, CanvasScaleMode scaleMode, int sortOrder) {

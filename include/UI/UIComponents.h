@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Shoonyakasha {
 namespace UI {
@@ -302,7 +303,7 @@ struct UIPointerState {
 /// Written by CanvasLayoutSystem for text whose layout sizes are needed.
 struct UITextMeasure {
     std::string text;
-    uint32_t font = 0;
+    std::vector<uint32_t> fonts;          // the font chain, see FontLibrary::chain
     float fontSize = 0.0f;
     float lineSpacing = 0.0f;
     glm::vec2 naturalSize{0.0f};          // unwrapped
@@ -314,7 +315,7 @@ struct UITextMeasure {
 /// CanvasTextSystem, which lays the text out again when an input changes.
 struct UITextCache {
     std::string text;
-    uint32_t font = 0;
+    std::vector<uint32_t> fonts;          // the font chain; PositionedGlyph::font indexes it
     TextStyle style;
     glm::vec2 boxSize{0.0f};
     TextLayoutResult layout;

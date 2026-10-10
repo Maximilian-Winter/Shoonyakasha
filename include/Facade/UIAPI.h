@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace Shoonyakasha {
 
@@ -58,6 +59,12 @@ public:
     /// loads fonts/Roboto-Regular.ttf.
     uint32_t getDefaultFont();
     void setDefaultFont(uint32_t font);
+
+    /// The fonts, in order, that text in `font` draws code points from when
+    /// `font` lacks them: Devanagari or Tibetan inside Latin text, say.
+    void setFontFallbacks(uint32_t font, const std::vector<uint32_t>& fallbacks);
+    /// Fallbacks for every font that has none of its own.
+    void setDefaultFontFallbacks(const std::vector<uint32_t>& fallbacks);
 
     // ═══════════════════════════════════════════════════════════
     // Canvases

@@ -4,6 +4,7 @@
 
 #include "UI/SdfFont.h"
 
+#include <hb.h>
 #include <stb_truetype.h>
 
 #include <cstring>
@@ -14,8 +15,20 @@ namespace Shoonyakasha {
 namespace UI {
 
 struct SdfFont::Impl {
-    std::vector<uint8_t> data;  // stbtt_fontinfo points into this
+    std::vector<uint8_t> data;  // stbtt_fontinfo and the HarfBuzz blob point into this
     stbtt_fontinfo info{};
+    hb_blob_t* blob = nullptr;
+    hb_face_t* face = nullptr;
+    hb_font_t* font = nullptr;
+
+    Impl() = default;
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    ~Impl() {
+        hb_font_destroy(font);
+        hb_face_destroy(face);
+        hb_blob_destroy(blob);
+    }
 };
 
 SdfFont::SdfFont() = default;
@@ -40,12 +53,21 @@ bool SdfFont::loadFromMemory(std::vector<uint8_t> data) {
     const int offset = stbtt_GetFontOffsetForIndex(impl->data.data(), 0);
     if (offset < 0 || !stbtt_InitFont(&impl->info, impl->data.data(), offset)) return false;
 
+    // The first face of the same bytes, at the default scale of one unit per
+    // font unit.
+    impl->blob = hb_blob_create(reinterpret_cast<const char*>(impl->data.data()),
+                                static_cast<unsigned int>(impl->data.size()), HB_MEMORY_MODE_READONLY,
+                                nullptr, nullptr);
+    impl->face = hb_face_create(impl->blob, 0);
+    impl->font = hb_font_create(impl->face);
+
     m_scale = stbtt_ScaleForPixelHeight(&impl->info, kBakeSize);
     int ascent = 0, descent = 0, lineGap = 0;
     stbtt_GetFontVMetrics(&impl->info, &ascent, &descent, &lineGap);
     m_ascent = static_cast<float>(ascent) * m_scale;
     m_descent = static_cast<float>(descent) * m_scale;
     m_lineGap = static_cast<float>(lineGap) * m_scale;
+    m_heightInEms = static_cast<float>(ascent - descent) * stbtt_ScaleForMappingEmToPixels(&impl->info, 1.0f);
 
     m_impl = std::move(impl);
     return true;
@@ -53,6 +75,10 @@ bool SdfFont::loadFromMemory(std::vector<uint8_t> data) {
 
 bool SdfFont::valid() const {
     return m_impl != nullptr;
+}
+
+void* SdfFont::shapingFont() const {
+    return m_impl ? m_impl->font : nullptr;
 }
 
 int SdfFont::findGlyph(char32_t codepoint) const {

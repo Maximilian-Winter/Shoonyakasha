@@ -91,6 +91,17 @@ TEST_F(UIAPIFixture, TextUsesTheDefaultFontAndButtonsExposeTheirLabel) {
     EXPECT_EQ(ui.loadFont("fonts/no-such-font.ttf"), 0u);
 }
 
+TEST_F(UIAPIFixture, FontFallbacksReachTheFontLibrary) {
+    const uint32_t latin = ui.getDefaultFont();
+    const uint32_t deva = ui.loadFont("fonts/NotoSansDevanagari-Regular.ttf");
+    const uint32_t tibetan = ui.loadFont("fonts/NotoSerifTibetan.ttf");
+    ASSERT_TRUE(latin && deva && tibetan);
+    ui.setDefaultFontFallbacks({deva, tibetan});
+    EXPECT_EQ(context.fonts().chain(latin), (std::vector<uint32_t>{latin, deva, tibetan}));
+    ui.setFontFallbacks(latin, {tibetan});
+    EXPECT_EQ(context.fonts().chain(latin), (std::vector<uint32_t>{latin, tibetan}));
+}
+
 TEST_F(UIAPIFixture, ClicksTogglesAndSlidersReachTheApplication) {
     const EntityHandle canvas = ui.createCanvas({1280.0f, 720.0f});
     const EntityHandle button = ui.createButton(canvas, "Go", {100.0f, 40.0f});   // 590..690, 340..380

@@ -118,7 +118,18 @@ Text is drawn from signed distance fields, so it stays sharp at any size and on 
 - **Size:** `size` is the height from ascent to descent, in canvas units.
 - **Fonts:** `load_font(path)` loads a `.ttf` or `.otf` and returns its id, for `create_text(..., font=id)` or `set_font`. Text that names no font uses `default_font`, `fonts/Roboto-Regular.ttf` from the asset folder.
 - **Wrapping:** text wraps at its rect's width unless `set_text_wrap(e, False)`. `set_text_align` aligns it horizontally and vertically in its rect.
-- **Unicode:** any character the font has is drawn, so Latin with diacritics, Cyrillic and Greek all work. There is no shaping, which scripts such as Devanagari and Tibetan need to join and reorder glyphs. A character missing from the font shows as the font's replacement character (U+FFFD), or as `?` if it has none.
+- **Unicode and shaping:** text is shaped with HarfBuzz, so scripts that join, reorder and stack glyphs come out as the font intends: Devanagari conjuncts and vowel signs, Tibetan stacks, Arabic letter forms. Latin and others get the font's kerning and ligatures. Lines break between whole clusters, never inside one.
+- **Fallback fonts:** text uses one font, and characters it lacks come from its fallbacks. Without fallbacks, a missing character shows as the font's replacement character (U+FFFD), or as `?`.
+
+```python
+latin = ui.default_font
+deva = ui.load_font("fonts/NotoSansDevanagari-Regular.ttf")
+tibetan = ui.load_font("fonts/NotoSerifTibetan.ttf")
+ui.set_default_font_fallbacks([deva, tibetan])      # for every font without its own
+ui.create_text(panel, "Om · ॐ नमः शिवाय · ཨོཾ་མ་ཎི་པདྨེ་ཧཱུྃ")
+```
+
+  `set_font_fallbacks(font, [...])` gives one font its own list. The assets folder ships Noto Sans Devanagari and Noto Serif Tibetan for these scripts.
 
 ## Widgets and the pointer
 
@@ -211,7 +222,8 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 
 - No text input fields yet.
 - The camera also sees the mouse wheel: an orbit camera that zooms with it zooms while a list scrolls.
-- No text shaping, so complex scripts are drawn glyph by glyph.
+- Right-to-left text: each word is shaped right to left, but a line puts its words in typing order, left to right; mixed-direction lines are not reordered.
+- Lines break at spaces, or between clusters when a word does not fit. Tibetan and CJK, which do not separate words with spaces, wrap between clusters until script-aware breaking arrives.
 - World-canvas clicks ignore geometry in front of the canvas.
 - The glyph atlas is 2048 by 2048 texels. When it fills up, it is cleared and the text on screen is rasterised again; this is rare unless a very large number of distinct characters is in use at once.
 

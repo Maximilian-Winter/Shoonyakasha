@@ -2,7 +2,9 @@
 // TextLayout.h - Breaking text into lines and placing glyph quads
 //
 // Layout is done in the units of the rect the text sits in (canvas units).
-// There is no shaping: each code point maps to one glyph, with pair kerning.
+// Text is shaped with HarfBuzz (UI/TextShaper.h), so glyphs, their positions
+// and kerning are the font's own, and lines break between clusters, never
+// inside one. The first font gives the line metrics.
 //
 
 #pragma once
@@ -11,6 +13,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
@@ -29,29 +32,47 @@ struct TextStyle {
 };
 
 struct PositionedGlyph {
+    uint32_t font = 0;            // index into the fonts the text was laid out with
     int glyph = 0;
     glm::vec2 min{0.0f};          // quad covering the glyph's distance field,
     glm::vec2 max{0.0f};          // relative to the box's top-left corner
 };
 
 struct TextLine {
-    size_t firstCodepoint = 0;    // range in the laid-out text, '\n' excluded
+    size_t firstCodepoint = 0;    // range in the laid-out text, '\n' and the space it broke at excluded
     size_t codepointCount = 0;
     float width = 0.0f;           // trailing spaces excluded
     float baseline = 0.0f;        // y relative to the box's top-left corner
 };
 
+/// The smallest unit text is edited and broken in: one or more code points
+/// drawn as one or more glyphs, such as a Devanagari conjunct.
+struct TextCluster {
+    size_t firstCodepoint = 0;
+    size_t codepointCount = 0;
+    size_t line = 0;
+    float x = 0.0f;               // its left edge relative to the box, aligned
+    float width = 0.0f;
+};
+
 struct TextLayoutResult {
-    std::vector<PositionedGlyph> glyphs;  // in text order; glyphs with no outline omitted
+    std::vector<PositionedGlyph> glyphs;  // in line order; glyphs with no outline omitted
     std::vector<TextLine> lines;
+    std::vector<TextCluster> clusters;    // in line order; none for '\n'
     glm::vec2 size{0.0f};                 // widest line by the height of all lines
 };
 
-/// Lays out `text` in a box of `boxSize`. With wrap on, a line breaks at the
-/// last space before it would exceed the box width, or between characters
-/// when a word is wider than the box. '\n' always breaks. Text that does not
-/// fit is placed outside the box rather than dropped; clipping is the
-/// renderer's concern. Control characters other than '\n' are skipped.
+/// Lays out `text` in a box of `boxSize` with `fonts`, the first preferred
+/// and the rest used for code points it lacks. With wrap on, a line breaks
+/// at the last space before it would exceed the box width, or between
+/// clusters when a word is wider than the box. '\n' always breaks. Text that
+/// does not fit is placed outside the box rather than dropped; clipping is the
+/// renderer's concern. Control characters other than '\n' and tab are not
+/// drawn; a tab is drawn as a space.
+TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32string_view text,
+                            const TextStyle& style, const glm::vec2& boxSize);
+
+/// The same with one font.
 TextLayoutResult layoutText(const SdfFont& font, std::u32string_view text,
                             const TextStyle& style, const glm::vec2& boxSize);
 

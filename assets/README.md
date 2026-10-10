@@ -42,7 +42,8 @@ re-scale them.
 | `models/Fox.glb` | [Khronos glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) | CC0 | Skinned, animated |
 | `textures/*.png` | Authored for `examples/python/games_2d/full_showcase` | Project licence (MIT) | |
 | `fonts/Roboto-Regular.ttf` | [Roboto](https://github.com/googlefonts/roboto-classic) | SIL Open Font License 1.1 — see `fonts/OFL.txt` | |
-| `fonts/NotoSansDevanagari-Regular.ttf` | [Noto Sans Devanagari](https://github.com/notofonts/devanagari), the static Regular from the Google Fonts download | SIL Open Font License 1.1 — see `fonts/OFL-NotoSansDevanagari.txt` | Needs a shaping text layout (HarfBuzz); the engine's own text baking is ASCII-only |
+| `fonts/NotoSansDevanagari-Regular.ttf` | [Noto Sans Devanagari](https://github.com/notofonts/devanagari), the static Regular from the Google Fonts download | SIL Open Font License 1.1 — see `fonts/OFL-NotoSansDevanagari.txt` | Shaped by the canvas UI; the older sprite text baking is ASCII-only |
+| `fonts/NotoSerifTibetan.ttf` | [Noto Serif Tibetan](https://github.com/notofonts/tibetan), the variable font from Google Fonts (the engine draws its default, regular weight) | SIL Open Font License 1.1 — see `fonts/OFL-NotoSerifTibetan.txt` | Tibetan for the canvas UI, which shapes its stacks |
 | `fonts/PlayfairDisplay.ttf` | [Playfair Display](https://github.com/clauseggers/Playfair-Display), the variable font from Google Fonts (the engine bakes its regular weight) | SIL Open Font License 1.1 — see `fonts/OFL-PlayfairDisplay.txt` | The museum example's display type |
 
 **The Poly Haven attributions are inferred from the filenames**, which match
