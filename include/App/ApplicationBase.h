@@ -40,6 +40,7 @@ class Sprite2DManager;
 class FontLoader;
 
 namespace FrameGraph { class RenderGraph; class SharedBufferRegistry; }
+namespace UI { class UIContext; }
 namespace ECS {
     class Scene;
     class SceneManager;
@@ -152,6 +153,9 @@ protected:
     Logger& getLogger();
     EventDispatcher& getEventDispatcher();
     ECS::StandaloneInputHandler& getInputHandler();
+    /// The canvas UI's fonts, glyph atlas and renderer. Exists from the start
+    /// of run(), before registerSystems().
+    UI::UIContext& getUIContext();
     entt::entity getCameraEntity() const { return m_cameraEntity; }
     float getDeltaTime() const { return m_deltaTime; }
     IBLResources& getIBLResources() { return m_iblResources; }
@@ -293,6 +297,11 @@ private:
     std::unique_ptr<FrameGraph::SharedBufferRegistry> m_sharedBufferRegistry;
     std::unique_ptr<FrameGraph::RenderGraph> m_renderGraph;
 
+    // ─── Canvas UI ─────────────────────────────────────────────
+    // Destroyed before the graph, whose "ui_canvas" renderer calls into it,
+    // and before the device its GPU resources belong to.
+    std::unique_ptr<UI::UIContext> m_uiContext;
+
     // ─── ECS ───────────────────────────────────────────────────
     std::unique_ptr<ECS::SceneManager> m_sceneManager;
     std::shared_ptr<ECS::Scene> m_activeScene;
@@ -329,6 +338,8 @@ private:
     void initializeECS();
     void loadIBLTextures();
     std::string iblShaderDirectory() const;  // empty if the IBL shaders are nowhere to be found
+    std::string uiShaderDirectory() const;   // empty if the UI shaders are nowhere to be found
+    void createUIContext();
     /// Construct the RenderGraph object. Runs before onInit() so subclasses and
     /// facade callbacks can reach getRenderGraph() there.
     void createRenderGraph();

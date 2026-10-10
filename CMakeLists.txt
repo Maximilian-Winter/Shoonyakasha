@@ -209,6 +209,7 @@ if(BUILD_EXAMPLES)
     add_subdirectory(examples/cpp/rendering/bloom_test)
     add_subdirectory(examples/cpp/rendering/declarative_sponza_test)
     add_subdirectory(examples/cpp/rendering/default_pipeline)
+    add_subdirectory(examples/cpp/rendering/canvas_ui)
 
     add_subdirectory(examples/cpp/compute/particle_test)
     add_subdirectory(examples/cpp/compute/particle_flow_example)

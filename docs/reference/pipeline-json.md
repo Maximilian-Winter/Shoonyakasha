@@ -206,6 +206,7 @@ Descriptor set layouts take the same `repeat`, for passes that bind a different 
 | `skinned_geometry`, `skinned_transparent` | Skinned rendering with matching layouts/shaders |
 | `skinned_shadow_casters` | Skinned entities with `castShadows`, opaque or masked; needs a skinned vertex shader and `skeleton` binding |
 | `sprite_geometry` | Sprite and glyph rendering |
+| `ui_canvas` | Screen canvases of the canvas UI, in ascending `sortOrder`. Needs exactly one colour output, usually the swapchain with `color_blend`, and no `pipeline` block: the engine supplies the pipeline from `shaders/ui/`, looking beside the JSON, then in the working directory, then beside the default pipeline |
 | `none`, `manual` | Native callback/manual recording use |
 
 Draw fields: `vertexCount` (integer, or `{ "parameter": "count", "divisor": 1 }`), `instanceCount` (1), `firstVertex` (0), `firstInstance` (0). The parser also accepts resource/dimension on vertexCount, but the current draw executor implements fixed/parameter counts, not resource-derived vertex counts.

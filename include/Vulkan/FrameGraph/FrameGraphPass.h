@@ -209,6 +209,11 @@ struct PassExecuteContext {
     uint32_t                frameIndex = 0;         // 0..MAX_FRAMES_IN_FLIGHT-1
     uint32_t                swapchainIndex = 0;     // Which swapchain image
     VkExtent2D              renderExtent = {};      // Pass render area
+    // Attachment formats of a graphics pass, for callbacks that build their
+    // own pipeline. UNDEFINED where the pass has no such attachment.
+    VkFormat                colorFormat = VK_FORMAT_UNDEFINED;  // first colour attachment
+    uint32_t                colorAttachmentCount = 0;
+    VkFormat                depthFormat = VK_FORMAT_UNDEFINED;
 
     // Opaque pointer to compiled physical resources (implementation accesses internals)
     const void* physicalResourcesPtr = nullptr;

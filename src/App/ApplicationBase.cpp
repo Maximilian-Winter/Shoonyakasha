@@ -27,6 +27,7 @@
 #include "ECS/Sprite2DComponents.h"
 #include "ECS/UILayoutSystem.h"
 #include "ECS/TextRenderSystem.h"
+#include "UI/UIContext.h"
 #include "UI/UISystems.h"
 #include "Resources/Sprite2DManager.h"
 #include "Resources/FontLoader.h"
@@ -145,7 +146,26 @@ void ApplicationBase::initializeVulkan() {
     m_commandBuffers = m_commandManager->createCommandBuffers(
         static_cast<uint32_t>(m_swapChain->getImageCount()));
 
+    createUIContext();
+
     m_logger->log(LogLevel::Info, "Vulkan systems initialized");
+}
+
+void ApplicationBase::createUIContext() {
+    const std::string shaderDir = uiShaderDirectory();
+    if (shaderDir.empty()) {
+        m_logger->log(LogLevel::Warning, "Canvas UI shaders not found in shaders/ui/, beside the pipeline "
+                      "or beside the default pipeline — canvases will not be drawn");
+    } else {
+        try {
+            m_uiContext = std::make_unique<UI::UIContext>(*m_device, shaderDir, m_config.maxFramesInFlight,
+                                                          m_logger.get());
+            return;
+        } catch (const std::exception& e) {
+            m_logger->log(LogLevel::Error, "Canvas UI renderer failed: %s — canvases will not be drawn", e.what());
+        }
+    }
+    m_uiContext = std::make_unique<UI::UIContext>();
 }
 
 void ApplicationBase::initializeECS() {
@@ -176,6 +196,7 @@ void ApplicationBase::registerSystems() {
     m_activeScene->addSystem<ECS::CameraSystem>();
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
     m_activeScene->addSystem<UI::CanvasLayoutSystem>(&m_screenSize);
+    m_activeScene->addSystem<UI::CanvasTextSystem>(&m_uiContext->fonts());
 }
 
 std::string ApplicationBase::defaultPipelinePath() {
@@ -201,6 +222,22 @@ std::string ApplicationBase::iblShaderDirectory() const {
         std::filesystem::absolute(m_config.pipelineJsonPath, ec).parent_path() / "shaders" / "ibl";
     if (std::filesystem::exists(beside / probe, ec)) {
         return beside.generic_string() + "/";
+    }
+    return {};
+}
+
+std::string ApplicationBase::uiShaderDirectory() const {
+    // shaders/ui/ beside the pipeline, then in the working directory, then
+    // beside the default pipeline, which ships them.
+    const char* probe = "ui.frag.spv";
+    std::error_code ec;
+    const std::filesystem::path candidates[] = {
+        std::filesystem::absolute(m_config.pipelineJsonPath, ec).parent_path() / "shaders" / "ui",
+        std::filesystem::path("shaders") / "ui",
+        std::filesystem::path(defaultPipelinePath()).parent_path() / "shaders" / "ui",
+    };
+    for (const auto& dir : candidates) {
+        if (std::filesystem::exists(dir / probe, ec)) return dir.generic_string() + "/";
     }
     return {};
 }
@@ -279,6 +316,10 @@ void ApplicationBase::initializeRenderGraph() {
             m_swapChain->getSwapChainImageFormat(),
             extent);
     }
+
+    m_renderGraph->registerGeometryRenderer("ui_canvas", [this](const FrameGraph::PassExecuteContext& ctx) {
+        m_uiContext->drawOverlays(ctx);
+    });
 
     if (!m_renderGraph->compile(getRenderExtent(), imageCount, m_config.maxFramesInFlight)) {
         throw std::runtime_error("Failed to compile render graph: " + m_renderGraph->getLastError());
@@ -490,8 +531,13 @@ void ApplicationBase::render() {
 
     VkCommandBuffer commandBuffer = m_commandBuffers[imageIndex];
     m_commandManager->record(commandBuffer);
+    m_uiContext->prepareFrame(m_activeScene->getRegistry(), commandBuffer, m_currentFrame);
     m_renderGraph->execute(m_currentFrame, imageIndex, commandBuffer);
     m_commandManager->endRecording(commandBuffer);
+    if (m_uiContext->overlaysUndrawn()) {
+        m_logger->logEvery(10.0f, LogLevel::Warning, "Canvas UI: screen canvases exist but the pipeline has "
+                           "no \"ui_canvas\" pass to draw them");
+    }
 
     m_commandManager->submitCommandBuffers(
         {commandBuffer},
@@ -748,6 +794,7 @@ GltfSceneLoader& ApplicationBase::getGltfLoader() { return *m_gltfLoader; }
 Logger& ApplicationBase::getLogger() { return *m_logger; }
 EventDispatcher& ApplicationBase::getEventDispatcher() { return *m_eventDispatcher; }
 ECS::StandaloneInputHandler& ApplicationBase::getInputHandler() { return *m_inputHandler; }
+UI::UIContext& ApplicationBase::getUIContext() { return *m_uiContext; }
 
 // ═══════════════════════════════════════════════════════════════
 // Convenience Helpers

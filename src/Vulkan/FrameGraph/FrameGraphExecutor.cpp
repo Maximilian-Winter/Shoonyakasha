@@ -344,6 +344,9 @@ void FrameGraphExecutor::recordPasses(
         ctx.frameIndex = frameIndex;
         ctx.swapchainIndex = swapchainImageIndex;
         ctx.renderExtent = compiledPass.extent;
+        if (!compiledPass.colorAttachments.empty()) ctx.colorFormat = compiledPass.colorAttachments[0].format;
+        ctx.colorAttachmentCount = static_cast<uint32_t>(compiledPass.colorAttachments.size());
+        if (compiledPass.hasDepthAttachment) ctx.depthFormat = compiledPass.depthAttachment.format;
         ctx.physicalResourcesPtr = &compiled.physicalResources;
         ctx.physicalResourceCount = static_cast<uint32_t>(compiled.physicalResources.size());
         ctx.repeatIndex = passDecl.repeatIndex;
