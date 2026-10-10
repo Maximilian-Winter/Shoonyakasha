@@ -362,8 +362,10 @@ public:
     }
 
 private:
+    /// Lower priority runs first; systems with equal priority run in the order
+    /// they were added.
     void sortByPriority() {
-        std::sort(m_systems.begin(), m_systems.end(),
+        std::stable_sort(m_systems.begin(), m_systems.end(),
                  [](const std::unique_ptr<ISystem>& a, const std::unique_ptr<ISystem>& b) {
                      return a->priority < b->priority;
                  });

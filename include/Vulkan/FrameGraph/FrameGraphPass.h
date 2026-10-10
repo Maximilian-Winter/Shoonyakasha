@@ -391,6 +391,8 @@ struct ExecutionDesc {
     //   "skinned_transparent" - Built-in: render skinned transparent entities
     //   "skinned_shadow_casters" - Built-in: render skinned shadow-casting entities
     //   "sprite_geometry"    - Built-in: render sprites and UI panels
+    //   "ui_canvas"          - Canvas UI: the renderer registered for this type
+    //                          binds its own pipeline and draws
     std::string type = "none";
 
     // For "draw" type
