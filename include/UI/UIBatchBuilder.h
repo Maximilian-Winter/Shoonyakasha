@@ -53,6 +53,7 @@ struct CanvasDraw {
     UICanvas::Mode mode = UICanvas::Mode::ScreenOverlay;
     int sortOrder = 0;
     glm::vec2 targetSize{0.0f};
+    glm::vec4 clearColor{0.0f};  // WorldTexture: UICanvas::clearColor
     uint32_t firstBatch = 0;
     uint32_t batchCount = 0;
 };

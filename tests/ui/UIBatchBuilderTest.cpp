@@ -234,6 +234,7 @@ TEST(UIBatchBuilder, CanvasesOrderedOverlaysBySortOrderThenWorld) {
     UICanvas world;
     world.mode = UICanvas::Mode::WorldTexture;
     world.pixelSize = {256, 128};
+    world.clearColor = {0.1f, 0.2f, 0.3f, 0.5f};
     const entt::entity worldCanvas = f.addCanvas(world);
     UICanvas back;
     back.sortOrder = -3;
@@ -249,6 +250,7 @@ TEST(UIBatchBuilder, CanvasesOrderedOverlaysBySortOrderThenWorld) {
     EXPECT_EQ(f.data.canvases[1].canvas, f.canvas);
     EXPECT_EQ(f.data.canvases[2].canvas, worldCanvas);
     EXPECT_EQ(f.data.canvases[2].targetSize, glm::vec2(256, 128));
+    EXPECT_EQ(f.data.canvases[2].clearColor, glm::vec4(0.1f, 0.2f, 0.3f, 0.5f));
     for (uint32_t i = 0; i < 3; ++i) {
         EXPECT_EQ(f.data.canvases[i].firstBatch, i);
         EXPECT_EQ(f.data.canvases[i].batchCount, 1u);

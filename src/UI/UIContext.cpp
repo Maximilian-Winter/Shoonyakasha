@@ -5,6 +5,9 @@
 #include "UI/UIContext.h"
 #include "UI/UIRenderer.h"
 
+#include "ECS/Core.h"
+#include "ECS/RenderComponents.h"
+
 namespace Shoonyakasha {
 namespace UI {
 
@@ -20,10 +23,40 @@ void UIContext::prepareFrame(entt::registry& registry, VkCommandBuffer cmd, uint
     m_overlaysDrawn = false;
     buildDrawData(registry, m_fonts, m_glyphs, m_drawData);
     if (m_renderer) {
-        m_renderer->prepareFrame(cmd, frameIndex, m_drawData, m_glyphs);
+        m_renderer->prepareFrame(cmd, frameIndex, registry, m_drawData, m_glyphs);
     } else {
         m_glyphs.clearPendingUploads();
     }
+}
+
+void UIContext::setTextureReleaser(std::function<void(VkImageView)> releaser) {
+    if (m_renderer) m_renderer->setTextureReleaser(std::move(releaser));
+}
+
+entt::entity UIContext::createWorldCanvas(entt::registry& registry, glm::vec2 pixelSize, glm::vec2 worldSize,
+                                          float emission) {
+    const entt::entity entity = registry.create();
+
+    UICanvas canvas;
+    canvas.mode = UICanvas::Mode::WorldTexture;
+    canvas.pixelSize = pixelSize;
+    registry.emplace<UICanvas>(entity, canvas);
+
+    auto& transform = registry.emplace<ECS::TransformComponent>(entity);
+    transform.scale = glm::vec3(worldSize, 1.0f);
+    transform.isDirty = true;
+
+    auto& material = registry.emplace<MaterialComponentV5>(entity);
+    material.setParam("baseColorFactor", glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    material.setParam("emissiveFactor", glm::vec4(glm::vec3(emission), 0.0f));
+    material.setParam("metallicFactor", 0.0f);
+    material.setParam("roughnessFactor", 1.0f);
+
+    if (m_renderer) {
+        registry.emplace<MeshComponent>(entity, m_renderer->worldQuad());
+        registry.emplace<RenderableTagComponent>(entity).castShadows = false;
+    }
+    return entity;
 }
 
 void UIContext::drawOverlays(const FrameGraph::PassExecuteContext& ctx) {

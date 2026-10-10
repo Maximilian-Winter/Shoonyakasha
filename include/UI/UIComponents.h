@@ -48,12 +48,21 @@ struct UICanvas {
     glm::vec2 referenceSize{1920.0f, 1080.0f}; // ScaleWithScreen: canvas size at scale 1
     float match = 0.5f;                        // ScaleWithScreen: 0 follows width, 1 follows height
 
-    glm::vec2 pixelSize{1024.0f, 1024.0f};     // WorldTexture: render target size in pixels
+    // WorldTexture: the canvas renders into a texture of pixelSize, cleared to
+    // clearColor (sRGB, straight alpha). The entity's MaterialComponentV5, if
+    // it has one, gets the texture in textureSlot.
+    glm::vec2 pixelSize{1024.0f, 1024.0f};
+    glm::vec4 clearColor{0.0f, 0.0f, 0.0f, 1.0f};
+    std::string textureSlot = "emissiveMap";
 
     // Written by CanvasLayoutSystem.
     glm::vec2 targetSize{0.0f};                // screen or render target, in pixels
     glm::vec2 size{0.0f};                      // in canvas units
     float scale = 1.0f;                        // target pixels per canvas unit
+
+    // Written by the renderer: the WorldTexture canvas's texture, valid from
+    // the frame after the canvas first renders. Owned by the renderer.
+    GPUTexture target;
 };
 
 /// Placement of a UI element inside its parent's rect.

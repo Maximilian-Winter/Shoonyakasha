@@ -289,6 +289,8 @@ void ApplicationBase::createRenderGraph() {
 
     m_renderGraph = std::make_unique<FrameGraph::RenderGraph>(*m_device, *m_commandManager);
     m_renderGraph->setSharedBufferRegistry(m_sharedBufferRegistry.get());
+
+    m_uiContext->setTextureReleaser([this](VkImageView view) { m_renderGraph->releaseMaterialTexture(view); });
 }
 
 void ApplicationBase::initializeRenderGraph() {

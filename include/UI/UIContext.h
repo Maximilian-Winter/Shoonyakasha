@@ -15,6 +15,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -50,9 +51,23 @@ public:
     bool hasRenderer() const { return m_renderer != nullptr; }
 
     /// Builds this frame's draw data from the laid-out canvases. With a
-    /// renderer, records the glyph uploads into `cmd` and writes the vertices
+    /// renderer, records the glyph uploads and the world canvases into `cmd`
     /// for frame `frameIndex`; without one, drops the queued glyph uploads.
     void prepareFrame(entt::registry& registry, VkCommandBuffer cmd, uint32_t frameIndex);
+
+    /// Called with a world canvas texture's view before the texture is
+    /// destroyed, so materials can let go of it. No effect without a renderer.
+    void setTextureReleaser(std::function<void(VkImageView)> releaser);
+
+    /// A world canvas: an entity with a WorldTexture UICanvas of `pixelSize`
+    /// pixels, shown on a quad of `worldSize` units centred on its transform
+    /// and facing +Z. The quad's material emits the canvas at `emission`
+    /// times its colour, over a black base colour, and casts no shadow. For a
+    /// lit canvas, set UICanvas::textureSlot to "albedoMap", the material's
+    /// baseColorFactor to white and its emissiveFactor to zero. Without a
+    /// renderer the entity has no mesh.
+    entt::entity createWorldCanvas(entt::registry& registry, glm::vec2 pixelSize, glm::vec2 worldSize,
+                                   float emission = 1.0f);
 
     /// Draws the screen overlay canvases. The renderer of "ui_canvas" passes.
     void drawOverlays(const FrameGraph::PassExecuteContext& ctx);

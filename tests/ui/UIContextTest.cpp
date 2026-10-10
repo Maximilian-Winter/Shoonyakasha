@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "ECS/Core.h"
+#include "ECS/RenderComponents.h"
 #include "FrameGraph/ShaderInterfaceValidator.h"
 #include "UI/UIComponents.h"
 #include "UI/UIContext.h"
@@ -94,6 +95,32 @@ TEST(UIContext, ReportsOverlaysThatNoPassDrew) {
     registry.get<UICanvas>(canvas).mode = UICanvas::Mode::WorldTexture;
     context.prepareFrame(registry, VK_NULL_HANDLE, 0);
     EXPECT_FALSE(context.overlaysUndrawn());   // world canvases are not drawn by ui_canvas passes
+}
+
+TEST(UIContext, CreatesAWorldCanvasWithAnEmissiveMaterial) {
+    UIContext context;
+    entt::registry registry;
+    const auto canvas = context.createWorldCanvas(registry, {512.0f, 256.0f}, {2.0f, 1.0f}, 3.0f);
+
+    const auto& c = registry.get<UICanvas>(canvas);
+    EXPECT_EQ(c.mode, UICanvas::Mode::WorldTexture);
+    EXPECT_EQ(c.pixelSize, glm::vec2(512.0f, 256.0f));
+    EXPECT_EQ(c.textureSlot, "emissiveMap");
+    EXPECT_EQ(registry.get<ECS::TransformComponent>(canvas).scale, glm::vec3(2.0f, 1.0f, 1.0f));
+
+    const auto& material = registry.get<MaterialComponentV5>(canvas);
+    EXPECT_EQ(material.getParam<glm::vec4>("baseColorFactor"), glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    EXPECT_EQ(material.getParam<glm::vec4>("emissiveFactor"), glm::vec4(3.0f, 3.0f, 3.0f, 0.0f));
+
+    // Without a renderer there is no quad to draw.
+    EXPECT_FALSE(registry.all_of<MeshComponent>(canvas));
+
+    // Its elements lay out in its pixels, not the screen's.
+    registry.emplace<UIImage>(addElement(registry, canvas));
+    update(registry, context.fonts());
+    context.prepareFrame(registry, VK_NULL_HANDLE, 0);
+    ASSERT_EQ(context.drawData().canvases.size(), 1u);
+    EXPECT_EQ(context.drawData().canvases[0].targetSize, glm::vec2(512.0f, 256.0f));
 }
 
 TEST(UIShaders, MatchTheRendererInterface) {

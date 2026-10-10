@@ -1051,6 +1051,13 @@ public:
     // caller keeps the image alive as long as the graph may sample it.
     void setExternalImage(const std::string& name, VkImageView view, VkSampler sampler);
 
+    // ── Material textures ──
+    // Material descriptor sets are shared by the textures they hold and kept
+    // for the life of the graph. Before destroying a texture that materials
+    // used, free the sets that hold its view, once no frame in flight binds
+    // them and no material still names the texture.
+    void releaseMaterialTexture(VkImageView view);
+
     // ── Geometry pass statistics ──
     // Entities an entity geometry pass drew, and left out as outside its
     // view, the last time it ran. Returns false if it has not run.

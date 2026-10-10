@@ -4,13 +4,17 @@
 // A HUD drawn by the canvas UI over a lit box: translucent panels, an image,
 // colour swatches, Unicode text in two fonts, a clip rect cutting off text
 // that overflows its panel, and a frame counter that changes every frame.
+// Beside the box, a world canvas: a texture the UI renders into, shown on a
+// quad in the scene.
 //
 // Usage:
 //     CanvasUIExample [--screenshot path.png]
 //
-// With --screenshot it saves frame 120 to the path and closes.
+// With --screenshot it switches the world canvas's resolution at frame 60,
+// saves frame 120 to the path and closes.
 //
-// Keys: WASD/Q/E + right mouse to fly.
+// Keys: WASD/Q/E + right mouse to fly, R to switch the world canvas between
+// 1024x512 and 512x256 pixels.
 //
 
 #include "App/ApplicationBase.h"
@@ -92,11 +96,41 @@ protected:
         m_counter = element(m_canvas, {1, 0}, {1, 0}, {1, 0}, {-24, 24}, {260, 36});
         text(m_counter, roboto, "frame 0", 26.0f, srgb(0.6f, 0.95f, 0.7f));
         registry.get<UIText>(m_counter).alignH = TextAlignH::Right;
+
+        // A terminal in the world, left of the box: a canvas of 1024x512
+        // canvas units on a 1.6 x 0.8 quad, turned towards the camera.
+        m_terminal = getUIContext().createWorldCanvas(registry, {1024.0f, 512.0f}, {1.6f, 0.8f}, 2.0f);
+        auto& terminal = registry.get<UICanvas>(m_terminal);
+        terminal.scaleMode = UICanvas::ScaleMode::ScaleWithScreen;
+        terminal.referenceSize = {1024.0f, 512.0f};
+        terminal.clearColor = srgb(0.03f, 0.06f, 0.1f);
+        auto& transform = registry.get<ECS::TransformComponent>(m_terminal);
+        transform.position = {-1.5f, 0.9f, 0.3f};
+        transform.rotation = {0.0f, 0.45f, 0.0f};
+
+        const auto heading = element(m_terminal, {0, 0}, {1, 0}, {0, 0}, {40, 30}, {-80, 80});
+        text(heading, playfair, "World canvas", 64.0f, srgb(0.95f, 0.85f, 0.55f));
+        const auto body = element(m_terminal, {0, 0}, {1, 1}, {0, 0}, {40, 130}, {-80, -170});
+        text(body, roboto, "Rendered into its own texture every frame, then shown on a quad by the "
+                           "default pipeline as emission. R switches its resolution.", 34.0f,
+             srgb(0.85f, 0.9f, 0.95f));
+        m_terminalCounter = element(m_terminal, {0, 1}, {1, 1}, {0, 1}, {40, -30}, {-80, 50});
+        text(m_terminalCounter, roboto, "", 40.0f, srgb(0.6f, 0.95f, 0.7f));
     }
 
     void onUpdate(float /*dt*/) override {
         ++m_frame;
-        getRegistry().get<UIText>(m_counter).text = "frame " + std::to_string(m_frame);
+        auto& registry = getRegistry();
+        registry.get<UIText>(m_counter).text = "frame " + std::to_string(m_frame);
+        const glm::vec2 pixels = registry.get<UICanvas>(m_terminal).pixelSize;
+        registry.get<UIText>(m_terminalCounter).text =
+            std::to_string(static_cast<int>(pixels.x)) + "x" + std::to_string(static_cast<int>(pixels.y)) +
+            " pixels, frame " + std::to_string(m_frame);
+        if (!m_screenshot.empty() && m_frame == 60) toggleResolution();
+    }
+
+    void onKeyPressed(int keyCode) override {
+        if (keyCode == GLFW_KEY_R) toggleResolution();
     }
 
     void onPostRender() override {
@@ -107,6 +141,11 @@ protected:
     }
 
 private:
+    void toggleResolution() {
+        auto& canvas = getRegistry().get<UICanvas>(m_terminal);
+        canvas.pixelSize = canvas.pixelSize.x > 600.0f ? glm::vec2(512.0f, 256.0f) : glm::vec2(1024.0f, 512.0f);
+    }
+
     entt::entity element(entt::entity parent, glm::vec2 anchorMin, glm::vec2 anchorMax, glm::vec2 pivot,
                          glm::vec2 position, glm::vec2 size) {
         auto& registry = getRegistry();
@@ -136,6 +175,8 @@ private:
     std::string m_screenshot;
     entt::entity m_canvas = entt::null;
     entt::entity m_counter = entt::null;
+    entt::entity m_terminal = entt::null;
+    entt::entity m_terminalCounter = entt::null;
     int m_frame = 0;
 };
 

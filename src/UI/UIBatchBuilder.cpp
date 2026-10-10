@@ -170,6 +170,7 @@ bool build(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyph
         draw.mode = canvas->mode;
         draw.sortOrder = canvas->sortOrder;
         draw.targetSize = canvas->targetSize;
+        draw.clearColor = canvas->clearColor;
         draw.firstBatch = static_cast<uint32_t>(out.batches.size());
 
         CanvasBuilder builder{fonts, glyphs, out, draw.firstBatch, canvas->scale};

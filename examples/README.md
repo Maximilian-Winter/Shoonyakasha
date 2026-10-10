@@ -47,7 +47,7 @@ directory names, see [BUILDING.md](../BUILDING.md).
 | [`declarative_sponza_test`](cpp/rendering/declarative_sponza_test) | Deferred PBR with image-based lighting, driven entirely from `pbr_ibl_pipeline_v3.json`. The reference for what the JSON frame graph can express. |
 | [`bloom_test`](cpp/rendering/bloom_test) | Multi-pass post-processing: bright-pass extraction, separable blur, composite. |
 | [`default_pipeline`](cpp/rendering/default_pipeline) | Sponza on the pipeline the engine ships, through the facade alone: no pipeline JSON or shaders, a quality preset on the command line. Falls back to a colonnade of boxes. |
-| [`canvas_ui`](cpp/rendering/canvas_ui) | A screen canvas on the default pipeline: translucent panels, an image, Unicode text in two fonts, a clip rect and a counter updated every frame. `--screenshot path.png` saves frame 120 and closes. |
+| [`canvas_ui`](cpp/rendering/canvas_ui) | Canvas UI on the default pipeline. A screen canvas has translucent panels, an image, Unicode text in two fonts, a clip rect and a counter updated every frame. A world canvas is a texture shown on a quad in the scene; R switches its resolution. `--screenshot path.png` saves frame 120 and closes. |
 
 ### compute
 
