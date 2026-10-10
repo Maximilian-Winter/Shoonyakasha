@@ -199,6 +199,35 @@ public:
     glm::vec2 getPreferredSize(EntityHandle element) const;
 
     // ═══════════════════════════════════════════════════════════
+    // Scroll views
+    //
+    // A scroll view clips a column and scrolls it: by the wheel over it, by
+    // dragging the column (a press on a button inside that turns into a drag
+    // is not a click), and by its scrollbars, which hide while everything
+    // fits. Positions run from 0 at the start (top, left) to 1 at the end.
+    // ═══════════════════════════════════════════════════════════
+
+    /// A scroll view of `size`. Add children to getScrollContent(view): they
+    /// stack top to bottom, spanning the view's width when it scrolls only
+    /// vertically.
+    EntityHandle createScrollView(EntityHandle parent, const glm::vec2& size, bool horizontal = false,
+                                  bool vertical = true);
+
+    /// The column inside the view that holds its children.
+    EntityHandle getScrollContent(EntityHandle view) const;
+
+    glm::vec2 getScrollPosition(EntityHandle view) const;
+    /// Moves the view, stopping any drift from a released drag.
+    void setScrollPosition(EntityHandle view, const glm::vec2& position);
+
+    /// Scrolls the least distance that brings `element`, inside the view's
+    /// content, fully into view, as last laid out.
+    void scrollTo(EntityHandle view, EntityHandle element);
+
+    /// Canvas units per wheel step, and whether a released drag keeps moving.
+    void setScrollSettings(EntityHandle view, float wheelSpeed, bool inertia = true);
+
+    // ═══════════════════════════════════════════════════════════
     // Content
     //
     // The text functions act on the element's own text or, for a button or

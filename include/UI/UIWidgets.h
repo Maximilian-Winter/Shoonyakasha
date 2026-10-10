@@ -44,5 +44,16 @@ entt::entity createToggle(entt::registry& registry, entt::entity parent, const s
 entt::entity createSlider(entt::registry& registry, entt::entity parent, float minValue, float maxValue,
                           float value, glm::vec2 size = {200.0f, 24.0f});
 
+/// A scroll view of `size` that clips and scrolls a column; returns the
+/// view. Add children to its content (UIScrollView::content), a column that
+/// grows with them. Scrolling only vertically, the column spans the view's
+/// width less its scrollbar; with `horizontal` it keeps its children's widths
+/// and scrolls sideways too. Scrollbars kScrollbarThickness wide run inside
+/// the right and bottom edges, hidden while the content fits.
+entt::entity createScrollView(entt::registry& registry, entt::entity parent, glm::vec2 size,
+                              bool horizontal = false, bool vertical = true);
+
+constexpr float kScrollbarThickness = 10.0f;
+
 } // namespace UI
 } // namespace Shoonyakasha

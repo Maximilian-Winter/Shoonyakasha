@@ -12,7 +12,7 @@ A tour of engine.ui on the default pipeline, in one window:
              slider and wrapping in a clipped box
     Widgets  a click counter, a button enabled by a toggle, a stepped
              slider, and a log whose rows are created and destroyed at
-             runtime, scrolled inside a clipping panel
+             runtime, in a scroll view: wheel, drag or scrollbar
 - a readout of the pointer: which canvas, where on it, what it hovers
 - an About dialog on a second canvas drawn on top, which blocks the
   pointer to everything under it while it is open
@@ -26,7 +26,7 @@ The sidebar and dialog frames are a 9-slice texture this script draws itself
 Usage:
     python ui_showcase.py [--screenshot path.png] [--tab scene|text|widgets] [--about]
 
---screenshot saves frame 120 to the path, with six rows in the log; --tab
+--screenshot saves frame 120 to the path, with twelve rows in the log; --tab
 picks the page shown first; --about opens with the About dialog showing.
 
 Controls: left mouse uses the UI, on the screen and on the kiosk. WASD/Q/E
@@ -301,15 +301,12 @@ def build_widgets_page(page):
     named("Add row", ui_.create_button(button_row, "Add row", size=(140, 36)))
     named("Clear rows", ui_.create_button(button_row, "Clear", size=(100, 36)))
 
-    # The log's rows go in a column that grows with them; the clipping panel
-    # shows its bottom part.
+    # The log is a scroll view over a dark panel: wheel, drag or scrollbar.
     log = named("Log", ui_.create_panel(page, (PAGE_WIDTH, 170), color=(0.06, 0.07, 0.09, 1.0)))
-    ui_.set_clip(log, True)
-    content = ui_.create_vertical_layout(log, spacing=2)
-    ui_.set_rect(content, anchor_min=(0, 0), anchor_max=(1, 0), pivot=(0, 0), size=(0, 0))
-    ui_.set_layout_child_sizing(content, expand_width=True)
-    ui_.set_size_to_content(content, vertical=sk.SIZE_FIT_PREFERRED)
-    w["log_content"] = content
+    view = named("Log view", ui_.create_scroll_view(log))
+    ui_.set_rect(view, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
+    w["log_view"] = view
+    w["log_content"] = ui_.scroll_content(view)
 
 
 def build_pointer_readout(hud):
@@ -414,13 +411,15 @@ def add_row():
     rows = state["rows"]
     index = len(rows)
     tint = (0.16, 0.18, 0.23, 1.0) if index % 2 == 0 else (0.12, 0.13, 0.17, 1.0)
-    # The column places each new row under the last and spans the log's width.
+    # The view's column places each new row under the last, across its width;
+    # scrolling to the end shows it once the next layout has placed it.
     entry = ui_.create_panel(w["log_content"], (0, 26), color=tint)
     ui_.set_raycast_target(entry, False)
     text = ui_.create_text(entry, "Row %d, added at frame %d" % (index + 1, state["frame"]), size=16)
     ui_.set_rect(text, anchor_min=(0, 0), anchor_max=(1, 1), size=(-16, 0))
     ui_.set_text_align(text, sk.TEXT_ALIGN_LEFT, sk.TEXT_ALIGN_MIDDLE)
     rows.append(entry)
+    ui_.set_scroll_position(w["log_view"], (0, 1))
 
 
 def update_widgets_page():
@@ -441,12 +440,6 @@ def update_widgets_page():
         for entry in state["rows"]:
             engine.scene.destroy_entity(entry)     # its text goes with it
         state["rows"].clear()
-
-    # Scroll the log so the newest row is at the bottom of the clipped panel:
-    # the column's height, from its rows, is known from the last layout.
-    visible = ui_.get_rect(w["Log"])[3]
-    total = ui_.get_rect(w["log_content"])[3]
-    ui_.set_position(w["log_content"], (0, min(0.0, visible - total)))
 
 
 def update_pointer_readout():
@@ -494,8 +487,8 @@ def on_update(dt):
     update_kiosk()
 
     if SCREENSHOT and state["frame"] == 30:
-        for _ in range(6):
-            add_row()       # something in the log for the screenshot
+        for _ in range(12):
+            add_row()       # more than the log shows, so it scrolls
 
 
 def on_post_render():

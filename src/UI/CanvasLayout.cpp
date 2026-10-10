@@ -306,14 +306,28 @@ struct LayoutWalk {
 
     void place(entt::entity parent, const Rect& parentRect, int axis) {
         const bool group = isGroup(parent);
+        auto* scrollView = registry.try_get<UIScrollView>(parent);
         forEachChild(parent, [&](entt::entity child, UIRect& element) {
             if (axis == 0) element.drivenByLayout = false;
             if (!group || !participates(child, element)) {
                 placeByAnchors(element, parentRect, axis, registry.try_get<UIContentSizeFitter>(child));
+                if (scrollView && child == scrollView->content) scroll(*scrollView, element, parentRect, axis);
             }
         });
         if (group) placeGroupChildren(parent, parentRect, axis);
         forEachChild(parent, [&](entt::entity child, UIRect& element) { place(child, element.rect, axis); });
+    }
+
+    /// Records the content and viewport sizes and moves the content, placed by
+    /// its anchors, by the scroll offset along `axis`.
+    void scroll(UIScrollView& view, UIRect& content, const Rect& viewport, int axis) {
+        view.contentSize[axis] = content.rect.max[axis] - content.rect.min[axis];
+        view.viewportSize[axis] = viewport.max[axis] - viewport.min[axis];
+        const bool enabled = axis == 0 ? view.horizontal : view.vertical;
+        view.scrollPosition[axis] = std::clamp(view.scrollPosition[axis], 0.0f, 1.0f);
+        const float offset = enabled ? view.scrollPosition[axis] * view.range()[axis] : 0.0f;
+        content.rect.min[axis] -= offset;
+        content.rect.max[axis] -= offset;
     }
 
     void placeGroupChildren(entt::entity group, const Rect& rect, int axis) {

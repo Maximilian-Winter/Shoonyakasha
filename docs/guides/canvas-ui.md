@@ -94,7 +94,23 @@ Things to know:
 - **Placement:** the group itself is placed like any element, by its anchors, or by a parent group.
 - **Size to content:** `set_size_to_content` lets the group size itself to its contents, as above.
 
-`set_clip(e, True)` cuts off whatever overflows an element's rect, for example a scrolling log. `get_rect(e)` reads back where an element ended up. The layout runs once a frame, so an element created this frame reports zeros until the next one.
+`set_clip(e, True)` cuts off whatever overflows an element's rect.
+
+### Scrolling lists
+
+A scroll view holds more than fits:
+
+```python
+log = ui.create_scroll_view(panel, size=(320, 200))
+for line in history:
+    ui.create_text(ui.scroll_content(log), line, size=16)
+ui.set_scroll_position(log, (0, 1))   # show the end
+```
+
+The content is a column that grows with its children and spans the view's width.
+- **Pointer:** the wheel, dragging the content (a phone-like flick, which keeps moving briefly) and the scrollbar all scroll it.
+- **Clicks:** a button inside still clicks; a press that turns into a drag does not.
+- **Bringing into view:** `scroll_to(view, element)` brings a row into view, for example the newest one after adding it. `get_rect(e)` reads back where an element ended up. The layout runs once a frame, so an element created this frame reports zeros until the next one.
 
 ## Text
 
@@ -193,7 +209,8 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 
 ## Limits
 
-- No scroll views or text input fields yet.
+- No text input fields yet.
+- The camera also sees the mouse wheel: an orbit camera that zooms with it zooms while a list scrolls.
 - No text shaping, so complex scripts are drawn glyph by glyph.
 - World-canvas clicks ignore geometry in front of the canvas.
 - The glyph atlas is 2048 by 2048 texels. When it fills up, it is cleared and the text on screen is rasterised again; this is rare unless a very large number of distinct characters is in use at once.

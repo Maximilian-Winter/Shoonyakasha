@@ -197,6 +197,40 @@ TEST_F(UIAPIFixture, LayoutGroupsPlaceAndSizeTheirChildren) {
     EXPECT_FALSE(registry.all_of<UI::UIContentSizeFitter>(e(column)));
 }
 
+TEST_F(UIAPIFixture, ScrollViewsScrollTheirContent) {
+    const EntityHandle canvas = ui.createCanvas({1280.0f, 720.0f});
+    const EntityHandle view = ui.createScrollView(canvas, {300.0f, 200.0f});
+    ui.setAnchor(view, {0.0f, 0.0f});
+    const EntityHandle content = ui.getScrollContent(view);
+    ASSERT_NE(content, NullEntity);
+    std::vector<EntityHandle> rows;
+    for (int i = 0; i < 10; ++i) rows.push_back(ui.createPanel(content, {0.0f, 50.0f}));
+    frame();
+    frame();
+    EXPECT_EQ(ui.getRect(rows[0]).z, 300.0f - 12.0f);   // the view's width less its scrollbar
+
+    // Rows 0..9 span 0..500; the view shows 200, so the range is 300.
+    ui.scrollTo(view, rows[6]);                          // 300..350: scroll down by 150
+    frame();
+    EXPECT_FLOAT_EQ(ui.getScrollPosition(view).y, 0.5f);
+    EXPECT_FLOAT_EQ(ui.getRect(rows[6]).y, 150.0f);
+    ui.scrollTo(view, rows[1]);                          // 50..100: back up to 50
+    EXPECT_NEAR(ui.getScrollPosition(view).y, 50.0f / 300.0f, 1e-5f);
+
+    ui.setScrollPosition(view, {0.0f, 2.0f});
+    EXPECT_FLOAT_EQ(ui.getScrollPosition(view).y, 1.0f);
+    ui.setScrollSettings(view, 100.0f, false);
+    EXPECT_EQ(registry.get<UI::UIScrollView>(e(view)).wheelSpeed, 100.0f);
+
+    // The wheel over it scrolls by its speed.
+    ui.setScrollPosition(view, {0.0f, 0.0f});
+    frame();
+    registry.get<ECS::InputStateComponent>(input).scrollDelta = {0.0f, -1.0f};
+    frame({100.0f, 100.0f});
+    EXPECT_NEAR(ui.getScrollPosition(view).y, 100.0f / 300.0f, 1e-5f);
+    EXPECT_EQ(ui.getScrollContent(rows[0]), NullEntity);
+}
+
 TEST_F(UIAPIFixture, InvalidHandlesAreIgnored) {
     ui.setText(NullEntity, "x");
     ui.setPosition(12345, {1.0f, 1.0f});

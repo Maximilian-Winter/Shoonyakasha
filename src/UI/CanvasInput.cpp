@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace Shoonyakasha {
 namespace UI {
@@ -45,7 +46,110 @@ bool dragSlider(entt::registry& registry, entt::entity entity, glm::vec2 pixel, 
     return true;
 }
 
+// ─── Scrolling ──────────────────────────────────────────────────
+
+/// The scroll views at and above `element`, innermost first.
+std::vector<entt::entity> scrollViewsAbove(const entt::registry& registry, entt::entity element) {
+    std::vector<entt::entity> views;
+    for (entt::entity e = element; e != entt::null && registry.valid(e);) {
+        if (registry.all_of<UICanvas>(e)) break;
+        if (registry.all_of<UIScrollView>(e)) views.push_back(e);
+        const auto* hierarchy = registry.try_get<ECS::HierarchyComponent>(e);
+        e = hierarchy ? hierarchy->parent : entt::null;
+    }
+    return views;
+}
+
+bool scrolls(const UIScrollView& view, int axis) {
+    return (axis == 0 ? view.horizontal : view.vertical) && view.range()[axis] > 0.0f;
+}
+
+float offsetOf(const UIScrollView& view, int axis) {
+    return view.scrollPosition[axis] * view.range()[axis];
+}
+
+/// Moves the view to `offset` canvas units along `axis`, clamped. Returns
+/// whether it moved.
+bool setOffset(UIScrollView& view, int axis, float offset) {
+    const float range = view.range()[axis];
+    if (range <= 0.0f) return false;
+    const float position = std::clamp(offset / range, 0.0f, 1.0f);
+    if (position == view.scrollPosition[axis]) return false;
+    view.scrollPosition[axis] = position;
+    return true;
+}
+
+/// Scrolls the innermost view above `element` that can move, by `steps` of
+/// its wheelSpeed along `axis`; positive steps move towards the end.
+void wheelScroll(entt::registry& registry, entt::entity element, int axis, float steps) {
+    for (const entt::entity e : scrollViewsAbove(registry, element)) {
+        auto& view = registry.get<UIScrollView>(e);
+        // A view that scrolls only sideways takes the vertical wheel too.
+        const int viewAxis = axis == 1 && !view.vertical && view.horizontal ? 0 : axis;
+        if (!scrolls(view, viewAxis)) continue;
+        if (setOffset(view, viewAxis, offsetOf(view, viewAxis) + steps * view.wheelSpeed)) {
+            view.velocity[viewAxis] = 0.0f;
+            return;
+        }
+    }
+}
+
+void coast(entt::registry& registry, entt::entity dragged, float dt) {
+    if (dt <= 0.0f) return;
+    for (auto [entity, view] : registry.view<UIScrollView>().each()) {
+        if (entity == dragged) continue;
+        for (int axis = 0; axis < 2; ++axis) {
+            float& v = view.velocity[axis];
+            if (v == 0.0f) continue;
+            if (!scrolls(view, axis) || !setOffset(view, axis, offsetOf(view, axis) + v * dt)) {
+                v = 0.0f;   // at an end, or nothing to scroll
+                continue;
+            }
+            v *= std::pow(std::clamp(view.decelerationRate, 0.0f, 1.0f), dt);
+            if (std::abs(v) < 1.0f) v = 0.0f;
+        }
+    }
+}
+
+/// The scrollbar's track span along its axis, and its handle's start.
+struct BarGeometry {
+    float trackMin = 0.0f;
+    float trackLength = 0.0f;
+    float handleMin = 0.0f;
+    float handleLength = 0.0f;
+};
+
+BarGeometry barGeometry(const UIRect& bar, const UIScrollbar& scrollbar) {
+    const int axis = scrollbar.vertical ? 1 : 0;
+    BarGeometry g;
+    g.trackMin = bar.rect.min[axis];
+    g.trackLength = bar.rect.max[axis] - bar.rect.min[axis];
+    g.handleLength = scrollbar.size * g.trackLength;
+    g.handleMin = g.trackMin + scrollbar.value * (g.trackLength - g.handleLength);
+    return g;
+}
+
+void syncScrollbars(entt::registry& registry) {
+    for (auto [entity, scrollbar] : registry.view<UIScrollbar>().each()) {
+        const auto* view = registry.try_get<UIScrollView>(scrollbar.scrollView);
+        if (!view) continue;
+        const int axis = scrollbar.vertical ? 1 : 0;
+        scrollbar.value = view->scrollPosition[axis];
+        scrollbar.size = view->contentSize[axis] > 0.0f
+            ? std::clamp(view->viewportSize[axis] / view->contentSize[axis], 0.0f, 1.0f)
+            : 1.0f;
+        if (auto* handle = registry.try_get<UIRect>(scrollbar.handle)) {
+            handle->anchorMin[axis] = scrollbar.value * (1.0f - scrollbar.size);
+            handle->anchorMax[axis] = handle->anchorMin[axis] + scrollbar.size;
+        }
+        if (scrollbar.autoHide) {
+            if (auto* bar = registry.try_get<UIRect>(entity)) bar->visible = scrollbar.size < 0.999f;
+        }
+    }
+}
+
 void syncWidgets(entt::registry& registry) {
+    syncScrollbars(registry);
     for (auto [entity, toggle] : registry.view<UIToggle>().each()) {
         if (auto* checkmark = registry.try_get<UIRect>(toggle.checkmark)) checkmark->visible = toggle.isOn;
     }
@@ -68,7 +172,7 @@ CanvasInputSystem::CanvasInputSystem(const glm::vec2* screenSize, const glm::vec
     name = "CanvasInputSystem";
 }
 
-void CanvasInputSystem::update(entt::registry& registry, float /*deltaTime*/) {
+void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
     if (!enabled) return;
 
     for (auto [entity, interactable] : registry.view<UIInteractable>().each()) {
@@ -85,7 +189,9 @@ void CanvasInputSystem::update(entt::registry& registry, float /*deltaTime*/) {
     UIPointerState pointer;
     if (!input || !m_screenSize) {
         m_captured = entt::null;
+        m_dragView = entt::null;
         m_wasDown = false;
+        coast(registry, entt::null, deltaTime);
         syncWidgets(registry);
         if (m_pointer) *m_pointer = pointer;
         return;
@@ -96,9 +202,11 @@ void CanvasInputSystem::update(entt::registry& registry, float /*deltaTime*/) {
     const glm::vec2 pixel = input->mouseCaptured ? screen * 0.5f : input->mousePosition * (screen / window);
     const auto ray = mainCameraRay(registry, pixel, screen);
     const bool down = input->isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT);
+    const bool pressedNow = down && !m_wasDown;
 
     const auto hit = findPointerHit(registry, pixel, ray);
-    entt::entity hovered = hit ? interactableFor(registry, hit->element) : entt::null;
+    const entt::entity hitElement = hit ? hit->element : entt::null;
+    entt::entity hovered = interactableFor(registry, hitElement);
     if (hovered != entt::null && !registry.get<UIInteractable>(hovered).enabled) hovered = entt::null;
 
     if (m_captured != entt::null &&
@@ -106,7 +214,17 @@ void CanvasInputSystem::update(entt::registry& registry, float /*deltaTime*/) {
          !registry.get<UIInteractable>(m_captured).enabled)) {
         m_captured = entt::null;
     }
-    if (m_captured == entt::null && down && !m_wasDown) m_captured = hovered;
+    if (m_captured == entt::null && pressedNow) m_captured = hovered;
+
+    // ── Scrolling: the wheel, then dragging the content ──
+    if (hitElement != entt::null && input->scrollDelta != glm::vec2(0.0f)) {
+        // Turning the wheel towards the user (negative y) moves on down the
+        // content; tilting it right (positive x) moves on to the right.
+        if (input->scrollDelta.x != 0.0f) wheelScroll(registry, hitElement, 0, input->scrollDelta.x);
+        if (input->scrollDelta.y != 0.0f) wheelScroll(registry, hitElement, 1, -input->scrollDelta.y);
+    }
+    updateDrag(registry, pixel, ray, down, pressedNow, hitElement, deltaTime);
+    coast(registry, m_dragging ? m_dragView : entt::null, deltaTime);
 
     if (m_captured != entt::null) {
         const entt::entity captured = m_captured;
@@ -114,6 +232,9 @@ void CanvasInputSystem::update(entt::registry& registry, float /*deltaTime*/) {
         interactable.hovered = hovered == captured;
         interactable.pressed = down;
         if (registry.all_of<UISlider>(captured) && dragSlider(registry, captured, pixel, ray)) {
+            interactable.valueChanged = true;
+        }
+        if (registry.all_of<UIScrollbar>(captured) && dragScrollbar(registry, captured, pixel, ray, pressedNow)) {
             interactable.valueChanged = true;
         }
         if (!down) {
@@ -138,10 +259,100 @@ void CanvasInputSystem::update(entt::registry& registry, float /*deltaTime*/) {
         pointer.canvas = hit->canvas;
         pointer.position = hit->position;
     }
-    pointer.overUI = (hit && hit->element != entt::null) || pointer.pressed != entt::null;
+    pointer.overUI = (hit && hit->element != entt::null) || pointer.pressed != entt::null || m_dragging;
     if (m_pointer) *m_pointer = pointer;
 
     syncWidgets(registry);
+}
+
+void CanvasInputSystem::updateDrag(entt::registry& registry, glm::vec2 pixel, const std::optional<ECS::Ray>& ray,
+                                   bool down, bool pressedNow, entt::entity hitElement, float deltaTime) {
+    if (m_dragView != entt::null && !registry.all_of<UIScrollView, UIRect>(m_dragView)) {
+        m_dragView = entt::null;
+        m_dragging = false;
+    }
+
+    if (pressedNow) {
+        // A press on a slider or scrollbar drags that, not the view.
+        const bool ownDrag = m_captured != entt::null && registry.any_of<UISlider, UIScrollbar>(m_captured);
+        const auto views = ownDrag ? std::vector<entt::entity>{} : scrollViewsAbove(registry, hitElement);
+        m_dragView = views.empty() ? entt::null : views.front();
+        m_dragging = false;
+        if (m_dragView != entt::null) {
+            const auto start = canvasPosition(registry, registry.get<UIRect>(m_dragView).canvas, pixel, ray);
+            if (start) {
+                m_pressPosition = m_lastDragPosition = *start;
+                registry.get<UIScrollView>(m_dragView).velocity = glm::vec2(0.0f);
+            } else {
+                m_dragView = entt::null;
+            }
+        }
+    }
+
+    if (m_dragView == entt::null) return;
+    auto& view = registry.get<UIScrollView>(m_dragView);
+
+    if (!down) {
+        if (!m_dragging || !view.inertia) view.velocity = glm::vec2(0.0f);
+        m_dragView = entt::null;
+        m_dragging = false;
+        return;
+    }
+
+    const auto position = canvasPosition(registry, registry.get<UIRect>(m_dragView).canvas, pixel, ray);
+    if (!position) return;
+
+    if (!m_dragging && glm::length(*position - m_pressPosition) > UIScrollView::kDragThreshold) {
+        m_dragging = true;
+        m_dragStartOffset = {offsetOf(view, 0), offsetOf(view, 1)};
+        m_captured = entt::null;   // the press on a button under it is no longer a click
+    }
+    if (!m_dragging) return;
+
+    const glm::vec2 moved = *position - m_pressPosition;
+    for (int axis = 0; axis < 2; ++axis) {
+        if (scrolls(view, axis)) setOffset(view, axis, m_dragStartOffset[axis] - moved[axis]);
+    }
+    if (deltaTime > 0.0f) {
+        // Content follows the pointer, so the offset moves against it.
+        const glm::vec2 velocity = -(*position - m_lastDragPosition) / deltaTime;
+        view.velocity = glm::mix(view.velocity, velocity, 0.5f);
+    }
+    m_lastDragPosition = *position;
+}
+
+bool CanvasInputSystem::dragScrollbar(entt::registry& registry, entt::entity bar, glm::vec2 pixel,
+                                      const std::optional<ECS::Ray>& ray, bool pressedNow) {
+    auto& scrollbar = registry.get<UIScrollbar>(bar);
+    auto* view = registry.try_get<UIScrollView>(scrollbar.scrollView);
+    const auto& rect = registry.get<UIRect>(bar);
+    if (!view || rect.canvas == entt::null) return false;
+    const auto position = canvasPosition(registry, rect.canvas, pixel, ray);
+    if (!position) return false;
+
+    const int axis = scrollbar.vertical ? 1 : 0;
+    const float p = (*position)[axis];
+    const BarGeometry g = barGeometry(rect, scrollbar);
+    const float travel = g.trackLength - g.handleLength;
+    float value = view->scrollPosition[axis];
+
+    if (pressedNow) {
+        if (p >= g.handleMin && p <= g.handleMin + g.handleLength) {
+            m_barGrab = p - g.handleMin;               // drag the handle from where it was taken
+        } else {
+            m_barGrab = -1.0f;                         // page towards the pointer, once
+            value += p < g.handleMin ? -scrollbar.size : scrollbar.size;
+        }
+    } else if (m_barGrab >= 0.0f && travel > 0.0f) {
+        value = (p - m_barGrab - g.trackMin) / travel;
+    }
+
+    value = std::clamp(value, 0.0f, 1.0f);
+    if (value == view->scrollPosition[axis]) return false;
+    view->scrollPosition[axis] = value;
+    view->velocity[axis] = 0.0f;
+    scrollbar.value = value;
+    return true;
 }
 
 } // namespace UI

@@ -343,6 +343,58 @@ glm::vec2 UIAPI::getPreferredSize(EntityHandle element) const {
     return rect ? rect->preferredSize : glm::vec2(0.0f);
 }
 
+// ─── Scroll views ───────────────────────────────────────────────
+
+EntityHandle UIAPI::createScrollView(EntityHandle parent, const glm::vec2& size, bool horizontal, bool vertical) {
+    return toHandle(UI::createScrollView(m_impl->registry, m_impl->parentOf(parent), size, horizontal, vertical));
+}
+
+EntityHandle UIAPI::getScrollContent(EntityHandle view) const {
+    const auto* v = m_impl->get<UI::UIScrollView>(view);
+    return v && v->content != entt::null ? toHandle(v->content) : NullEntity;
+}
+
+glm::vec2 UIAPI::getScrollPosition(EntityHandle view) const {
+    const auto* v = m_impl->get<UI::UIScrollView>(view);
+    return v ? v->scrollPosition : glm::vec2(0.0f);
+}
+
+void UIAPI::setScrollPosition(EntityHandle view, const glm::vec2& position) {
+    if (auto* v = m_impl->get<UI::UIScrollView>(view)) {
+        v->scrollPosition = glm::clamp(position, glm::vec2(0.0f), glm::vec2(1.0f));
+        v->velocity = glm::vec2(0.0f);
+    }
+}
+
+void UIAPI::scrollTo(EntityHandle view, EntityHandle element) {
+    auto* v = m_impl->get<UI::UIScrollView>(view);
+    const auto* target = m_impl->get<UI::UIRect>(element);
+    const auto* content = v ? m_impl->registry.try_get<UI::UIRect>(v->content) : nullptr;
+    if (!target || !content) return;
+    const glm::vec2 range = v->range();
+    for (int axis = 0; axis < 2; ++axis) {
+        if (range[axis] <= 0.0f || !(axis == 0 ? v->horizontal : v->vertical)) continue;
+        // Offsets within the content, which the scrolling moves with it.
+        const float start = target->rect.min[axis] - content->rect.min[axis];
+        const float end = target->rect.max[axis] - content->rect.min[axis];
+        float offset = v->scrollPosition[axis] * range[axis];
+        if (start < offset) {
+            offset = start;
+        } else if (end > offset + v->viewportSize[axis]) {
+            offset = end - v->viewportSize[axis];
+        }
+        v->scrollPosition[axis] = std::clamp(offset / range[axis], 0.0f, 1.0f);
+        v->velocity[axis] = 0.0f;
+    }
+}
+
+void UIAPI::setScrollSettings(EntityHandle view, float wheelSpeed, bool inertia) {
+    if (auto* v = m_impl->get<UI::UIScrollView>(view)) {
+        v->wheelSpeed = wheelSpeed;
+        v->inertia = inertia;
+    }
+}
+
 // ─── Content ────────────────────────────────────────────────────
 
 void UIAPI::setText(EntityHandle element, const std::string& text) {

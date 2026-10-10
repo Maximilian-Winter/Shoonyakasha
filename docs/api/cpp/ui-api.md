@@ -51,6 +51,12 @@ void setLayoutChildSizing(EntityHandle group, bool controlWidth, bool controlHei
 void setLayoutElement(EntityHandle element, const glm::vec2& minSize, const glm::vec2& preferredSize, const glm::vec2& flexibleSize, bool ignoreLayout = false);
 void setSizeToContent(EntityHandle element, SizeFit horizontal, SizeFit vertical);
 glm::vec2 getPreferredSize(EntityHandle element) const;
+EntityHandle createScrollView(EntityHandle parent, const glm::vec2& size, bool horizontal = false, bool vertical = true);
+EntityHandle getScrollContent(EntityHandle view) const;
+glm::vec2 getScrollPosition(EntityHandle view) const;
+void setScrollPosition(EntityHandle view, const glm::vec2& position);
+void scrollTo(EntityHandle view, EntityHandle element);
+void setScrollSettings(EntityHandle view, float wheelSpeed, bool inertia = true);
 void setText(EntityHandle element, const std::string& text);
 std::string getText(EntityHandle element) const;
 void setFont(EntityHandle element, uint32_t font);

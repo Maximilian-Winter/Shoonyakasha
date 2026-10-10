@@ -14,7 +14,7 @@ namespace Shoonyakasha {
 namespace UI {
 
 bool isRaycastTarget(const entt::registry& registry, entt::entity element) {
-    if (registry.all_of<UIInteractable>(element)) return true;
+    if (registry.any_of<UIInteractable, UIScrollView>(element)) return true;
     if (const auto* image = registry.try_get<UIImage>(element); image && image->raycastTarget) return true;
     if (const auto* panel = registry.try_get<UIPanel>(element); panel && panel->raycastTarget) return true;
     return false;

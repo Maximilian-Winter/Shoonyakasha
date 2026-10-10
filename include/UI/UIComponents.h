@@ -188,8 +188,8 @@ struct UIText {
 // ─── Pointer input ───────────────────────────────────────────────
 //
 // The pointer goes to the topmost element under it that is a raycast target:
-// an element with UIInteractable, or with a UIImage or UIPanel whose
-// raycastTarget is set. The element's nearest UIInteractable, itself or an
+// an element with UIInteractable or UIScrollView, or with a UIImage or
+// UIPanel whose raycastTarget is set. The element's nearest UIInteractable, itself or an
 // ancestor, receives it, so a button's label and background act as the
 // button. CanvasInputSystem writes the state below once per frame, from the
 // rects of the frame before.
@@ -241,6 +241,51 @@ struct UISlider {
     float normalized() const {
         return maxValue > minValue ? (value - minValue) / (maxValue - minValue) : 0.0f;
     }
+};
+
+/// Scrolls its content element inside its own rect, which it clips (give it
+/// UIClip). The content is placed by its anchors and then moved by the
+/// scroll offset; it is usually a column sized to its children. The view
+/// takes the pointer: the wheel scrolls the innermost view under it that can
+/// still move, and dragging the content scrolls it once the pointer has moved
+/// kDragThreshold canvas units from the press, cancelling the press on a
+/// button under it. A slider being dragged keeps the pointer.
+struct UIScrollView {
+    static constexpr float kDragThreshold = 8.0f;
+
+    entt::entity content = entt::null;
+    bool horizontal = false;
+    bool vertical = true;
+    glm::vec2 scrollPosition{0.0f};      // 0 at the start (left, top), 1 at the end, per axis
+    float wheelSpeed = 48.0f;            // canvas units per wheel step
+    bool inertia = true;                 // keep moving after a drag is released
+    float decelerationRate = 0.135f;     // velocity kept after one second of inertia
+    entt::entity horizontalScrollbar = entt::null;
+    entt::entity verticalScrollbar = entt::null;
+
+    // Written by CanvasLayoutSystem.
+    glm::vec2 contentSize{0.0f};
+    glm::vec2 viewportSize{0.0f};
+    // Written by CanvasInputSystem.
+    glm::vec2 velocity{0.0f};            // canvas units per second, while coasting
+
+    /// How far the content can move per axis, in canvas units.
+    glm::vec2 range() const { return glm::max(contentSize - viewportSize, glm::vec2(0.0f)); }
+};
+
+/// A bar showing a scroll view's position. Its handle's length is the
+/// visible fraction; dragging it scrolls, and pressing the track beside it
+/// pages towards the pointer. Created by createScrollView; its value follows
+/// the view each frame.
+struct UIScrollbar {
+    bool vertical = true;
+    entt::entity scrollView = entt::null;
+    entt::entity handle = entt::null;
+    bool autoHide = true;                // hidden while the content fits
+
+    // Written by CanvasInputSystem.
+    float value = 0.0f;                  // the view's scroll position on this axis
+    float size = 1.0f;                   // the visible fraction of the content
 };
 
 /// Where the pointer is, for the application. Owned by UIContext and written

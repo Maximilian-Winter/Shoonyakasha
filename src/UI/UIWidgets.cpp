@@ -140,5 +140,67 @@ entt::entity createSlider(entt::registry& registry, entt::entity parent, float m
     return slider;
 }
 
+namespace {
+
+entt::entity createScrollbar(entt::registry& registry, entt::entity view, bool vertical, bool otherBar) {
+    const float inset = otherBar ? kScrollbarThickness + 2.0f : 0.0f;
+    const entt::entity bar = createElement(registry, view, glm::vec2(0.0f));
+    auto& rect = registry.get<UIRect>(bar);
+    if (vertical) {
+        rect.anchorMin = {1.0f, 0.0f};
+        rect.anchorMax = {1.0f, 1.0f};
+        rect.pivot = {1.0f, 0.0f};
+        rect.sizeDelta = {kScrollbarThickness, -inset};
+    } else {
+        rect.anchorMin = {0.0f, 1.0f};
+        rect.anchorMax = {1.0f, 1.0f};
+        rect.pivot = {0.0f, 1.0f};
+        rect.sizeDelta = {-inset, kScrollbarThickness};
+    }
+    registry.emplace<UIPanel>(bar).color = kTrack;
+    addInteractable(registry, bar);
+
+    // Its span along the bar is set from the view's position each frame.
+    const entt::entity handle = stretched(registry, bar);
+    registry.emplace<UIPanel>(handle).color = {0.45f, 0.48f, 0.56f, 1.0f};
+
+    auto& scrollbar = registry.emplace<UIScrollbar>(bar);
+    scrollbar.vertical = vertical;
+    scrollbar.scrollView = view;
+    scrollbar.handle = handle;
+    return bar;
+}
+
+} // namespace
+
+entt::entity createScrollView(entt::registry& registry, entt::entity parent, glm::vec2 size,
+                              bool horizontal, bool vertical) {
+    const entt::entity view = createElement(registry, parent, size);
+    registry.emplace<UIClip>(view);
+
+    const entt::entity content = createElement(registry, view, glm::vec2(0.0f));
+    auto& rect = registry.get<UIRect>(content);
+    rect.anchorMin = rect.anchorMax = rect.pivot = {0.0f, 0.0f};
+    auto& column = registry.emplace<UIVerticalLayout>(content);
+    auto& fitter = registry.emplace<UIContentSizeFitter>(content);
+    fitter.vertical = UIContentSizeFitter::Fit::Preferred;
+    if (horizontal) {
+        fitter.horizontal = UIContentSizeFitter::Fit::Preferred;
+    } else {
+        // As wide as the view, less its scrollbar.
+        rect.anchorMax.x = 1.0f;
+        rect.sizeDelta.x = vertical ? -(kScrollbarThickness + 2.0f) : 0.0f;
+        column.childForceExpand.x = true;
+    }
+
+    auto& scrollView = registry.emplace<UIScrollView>(view);
+    scrollView.content = content;
+    scrollView.horizontal = horizontal;
+    scrollView.vertical = vertical;
+    if (vertical) scrollView.verticalScrollbar = createScrollbar(registry, view, true, horizontal);
+    if (horizontal) scrollView.horizontalScrollbar = createScrollbar(registry, view, false, vertical);
+    return view;
+}
+
 } // namespace UI
 } // namespace Shoonyakasha

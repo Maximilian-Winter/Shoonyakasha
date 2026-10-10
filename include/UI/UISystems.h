@@ -8,10 +8,13 @@
 
 #pragma once
 
+#include "ECS/CameraRay.h"
 #include "ECS/Systems.h"
 
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
+
+#include <optional>
 
 namespace Shoonyakasha {
 namespace UI {
@@ -61,11 +64,26 @@ public:
     void update(entt::registry& registry, float deltaTime) override;
 
 private:
+    void updateDrag(entt::registry& registry, glm::vec2 pixel, const std::optional<ECS::Ray>& ray,
+                    bool down, bool pressedNow, entt::entity hitElement, float deltaTime);
+    bool dragScrollbar(entt::registry& registry, entt::entity bar, glm::vec2 pixel,
+                       const std::optional<ECS::Ray>& ray, bool pressedNow);
+
     const glm::vec2* m_screenSize;
     const glm::vec2* m_windowSize;
     UIPointerState* m_pointer;
     entt::entity m_captured = entt::null;
     bool m_wasDown = false;
+
+    // Dragging a scroll view's content.
+    entt::entity m_dragView = entt::null;   // the view under the press, until release
+    bool m_dragging = false;                // the pointer has moved past the threshold
+    glm::vec2 m_pressPosition{0.0f};        // canvas units, on the view's canvas
+    glm::vec2 m_lastDragPosition{0.0f};
+    glm::vec2 m_dragStartOffset{0.0f};
+    // Dragging a scrollbar's handle: where along it the handle was taken, or
+    // negative after a press on the track.
+    float m_barGrab = -1.0f;
 };
 
 /// Lays out each UIText of a laid-out element into its UITextCache, in the

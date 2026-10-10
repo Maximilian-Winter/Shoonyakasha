@@ -407,6 +407,14 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         void setSizeToContent(EntityHandle element, SizeFit horizontal, SizeFit vertical)
         vec2 getPreferredSize(EntityHandle element) const
 
+        # Scroll views
+        EntityHandle createScrollView(EntityHandle parent, const vec2& size, cbool horizontal, cbool vertical)
+        EntityHandle getScrollContent(EntityHandle view) const
+        vec2 getScrollPosition(EntityHandle view) const
+        void setScrollPosition(EntityHandle view, const vec2& position)
+        void scrollTo(EntityHandle view, EntityHandle element)
+        void setScrollSettings(EntityHandle view, float wheelSpeed, cbool inertia)
+
         # Content
         void setText(EntityHandle element, const string& text)
         string getText(EntityHandle element) const

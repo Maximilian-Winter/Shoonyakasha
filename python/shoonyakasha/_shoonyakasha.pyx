@@ -1246,6 +1246,38 @@ cdef class UI:
         """(width, height): the preferred layout size as last measured."""
         return _vec2_to_tuple(self._ptr.getPreferredSize(element))
 
+    # ── Scroll views ──────────────────────────────────────────
+    #
+    # A scroll view clips a column and scrolls it: by the wheel over it, by
+    # dragging the column (a press on a button inside that turns into a drag is
+    # not a click), and by its scrollbars, hidden while everything fits.
+    # Positions run from 0 at the start (top, left) to 1 at the end.
+
+    def create_scroll_view(self, uint32_t parent, size=(300, 200), bint horizontal=False, bint vertical=True):
+        """A scroll view; add children to scroll_content(view)."""
+        return <uint32_t>self._ptr.createScrollView(parent, _tuple_to_vec2(size), horizontal, vertical)
+
+    def scroll_content(self, uint32_t view):
+        """The column inside the view that holds its children: they stack top to
+        bottom, spanning the view's width when it scrolls only vertically."""
+        return <uint32_t>self._ptr.getScrollContent(view)
+
+    def get_scroll_position(self, uint32_t view):
+        """(x, y), each 0 at the start and 1 at the end."""
+        return _vec2_to_tuple(self._ptr.getScrollPosition(view))
+
+    def set_scroll_position(self, uint32_t view, position):
+        """Move the view, stopping any drift from a released drag."""
+        self._ptr.setScrollPosition(view, _tuple_to_vec2(position))
+
+    def scroll_to(self, uint32_t view, uint32_t element):
+        """Scroll the least distance that brings element fully into view."""
+        self._ptr.scrollTo(view, element)
+
+    def set_scroll_settings(self, uint32_t view, float wheel_speed=48.0, bint inertia=True):
+        """Canvas units per wheel step, and whether a released drag keeps moving."""
+        self._ptr.setScrollSettings(view, wheel_speed, inertia)
+
     # ── Content ───────────────────────────────────────────────
     #
     # The text methods act on the element's own text or, for a button or

@@ -49,6 +49,17 @@ Layout sizes, without `set_layout_element`:
 
 `set_size_to_content(e, horizontal, vertical)` sizes an element placed by its anchors to its own layout size, `SIZE_FIT_MIN` or `SIZE_FIT_PREFERRED` per axis. Typical uses are a column that grows with its rows, or a label as wide as its text. `get_preferred_size(e)` reads the measured size back. Text is measured only for children of a group and elements sized to content.
 
+## Scroll views
+
+`create_scroll_view(parent, size)` makes a view that clips a column and scrolls it. Add children to `scroll_content(view)`. They stack top to bottom; when the view scrolls only vertically, they span its width less the scrollbar. The column grows with them, and the view scrolls once it is taller than the view.
+
+- **Wheel:** the wheel over a view scrolls the innermost view under the pointer that can still move, so a list inside a scrolling page scrolls first, then the page. A view that scrolls only sideways takes the vertical wheel too.
+- **Dragging:** the content follows the pointer once it has moved 8 canvas units from the press. A press on a button inside that turns into a drag is not a click. Sliders and scrollbars keep their own drags.
+- **Momentum:** a released drag keeps moving and slows down, unless `set_scroll_settings(view, inertia=False)`. `wheel_speed` sets the canvas units per wheel step.
+- **Scrollbars:** they run inside the right and bottom edges and are hidden while everything fits. Their handle's length is the visible fraction. Drag the handle, or press the track to move a page.
+
+`get_scroll_position` and `set_scroll_position` use 0 at the start (top, left) and 1 at the end, per axis. `scroll_to(view, element)` scrolls the least distance that brings an element fully into view, using the layout of the last frame.
+
 ## Text and fonts
 
 - **Fonts:** `load_font(path)` returns a font id, or 0 if the file can't be read. Text without a font uses `default_font`, which loads `fonts/Roboto-Regular.ttf` on first use.
@@ -130,6 +141,12 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_layout_element(element, min=(-1, -1), preferred=(-1, -1), flexible=(-1, -1), ignore=False)` | None | Override the layout sizes element reports; -1 keeps its own on that axis. ignore leaves it to its anchors inside a group. |
 | `set_size_to_content(element, horizontal=SIZE_FIT_UNCONSTRAINED, vertical=SIZE_FIT_UNCONSTRAINED)` | None | Size an element placed by its anchors to its own layout sizes, per axis: SIZE_FIT_UNCONSTRAINED, SIZE_FIT_MIN or SIZE_FIT_PREFERRED. |
 | `get_preferred_size(element)` | 2-tuple | (width, height): the preferred layout size as last measured. |
+| `create_scroll_view(parent, size=(300, 200), horizontal=False, vertical=True)` | int | A scroll view; add children to scroll_content(view). |
+| `scroll_content(view)` | int | The column inside the view that holds its children: they stack top to bottom, spanning the view's width when it scrolls only vertically. |
+| `get_scroll_position(view)` | 2-tuple | (x, y), each 0 at the start and 1 at the end. |
+| `set_scroll_position(view, position)` | None | Move the view, stopping any drift from a released drag. |
+| `scroll_to(view, element)` | None | Scroll the least distance that brings element fully into view. |
+| `set_scroll_settings(view, wheel_speed=48.0, inertia=True)` | None | Canvas units per wheel step, and whether a released drag keeps moving. |
 | `set_text(element, text)` | None | Calls native `setText`; see the class contract above. |
 | `get_text(element)` | str | Calls native `getText`; see the class contract above. |
 | `set_font(element, font)` | None | Calls native `setFont`; see the class contract above. |
