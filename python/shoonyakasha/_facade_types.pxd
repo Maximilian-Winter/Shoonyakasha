@@ -56,6 +56,15 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         TextHAlign_Center "Shoonyakasha::Facade::TextHAlign::Center"
         TextHAlign_Right "Shoonyakasha::Facade::TextHAlign::Right"
 
+    cpdef enum TextVAlign "Shoonyakasha::Facade::TextVAlign":
+        TextVAlign_Top "Shoonyakasha::Facade::TextVAlign::Top"
+        TextVAlign_Middle "Shoonyakasha::Facade::TextVAlign::Middle"
+        TextVAlign_Bottom "Shoonyakasha::Facade::TextVAlign::Bottom"
+
+    cpdef enum CanvasScaleMode "Shoonyakasha::Facade::CanvasScaleMode":
+        CanvasScaleMode_ConstantPixel "Shoonyakasha::Facade::CanvasScaleMode::ConstantPixel"
+        CanvasScaleMode_ScaleWithScreen "Shoonyakasha::Facade::CanvasScaleMode::ScaleWithScreen"
+
     # ── Structs ────────────────────────────────────────────────
     cdef cppclass EngineConfig:
         int width

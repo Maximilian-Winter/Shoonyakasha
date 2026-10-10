@@ -19,6 +19,7 @@
 #include <filesystem>
 #include "Facade/SceneAPI.h"
 #include "Facade/EcsAPI.h"
+#include "Facade/UIAPI.h"
 #include "InputAPIImpl.h"
 #include "PhysicsAPIImpl.h"
 #include "FacadeInternal.h"
@@ -56,6 +57,7 @@ struct EngineAPI::Impl {
     std::unique_ptr<InputAPI>   inputAPI;
     std::unique_ptr<PhysicsAPI> physicsAPI;
     std::unique_ptr<EcsAPI>     ecsAPI;
+    std::unique_ptr<UIAPI>      uiAPI;
 
     // setRenderStatsEnabled before run(): (enabled, gpuTiming), applied in onInit
     std::optional<std::pair<bool, bool>> pendingStats;
@@ -94,6 +96,7 @@ protected:
         m_owner->sceneAPI = std::make_unique<SceneAPI>(getScene());
         m_owner->sceneAPI->wireSprite2DManager(&getSprite2DManager());
         m_owner->ecsAPI = std::make_unique<EcsAPI>(getScene());
+        m_owner->uiAPI = std::make_unique<UIAPI>(getScene(), getUIContext(), &getSprite2DManager());
 
         // InputAPI and PhysicsAPI already exist — they are default-constructible
         // and were built in the EngineAPI constructor so callers can hold them
@@ -179,6 +182,7 @@ public:
     using ApplicationBase::getEventDispatcher;
     using ApplicationBase::getInputHandler;
     using ApplicationBase::getRegistry;
+    using ApplicationBase::getUIContext;
 
     ECS::PhysicsSystem* m_physicsSystem = nullptr;
     std::unique_ptr<SkeletalAnimationSystem> m_animationSystem;
@@ -351,6 +355,15 @@ EcsAPI& EngineAPI::getEcs() {
             "Use setOnInit() to run ECS setup at the right moment.");
     }
     return *m_impl->ecsAPI;
+}
+
+UIAPI& EngineAPI::getUI() {
+    if (!m_impl->uiAPI) {
+        throw std::logic_error(
+            "EngineAPI::getUI() is only available after run() has started. "
+            "Use setOnInit() to build the UI at the right moment.");
+    }
+    return *m_impl->uiAPI;
 }
 
 // ═══════════════════════════════════════════════════════════════

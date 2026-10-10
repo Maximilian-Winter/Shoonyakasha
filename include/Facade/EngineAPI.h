@@ -21,6 +21,7 @@ class SceneAPI;
 class InputAPI;
 class PhysicsAPI;
 class EcsAPI;
+class UIAPI;
 
 // ═══════════════════════════════════════════════════════════════
 // Assets
@@ -102,6 +103,7 @@ public:
     InputAPI&   getInput();     ///< valid immediately
     PhysicsAPI& getPhysics();   ///< valid immediately
     EcsAPI&     getEcs();       ///< throws std::logic_error before run()
+    UIAPI&      getUI();        ///< canvas UI; throws std::logic_error before run()
 
     // ═══════════════════════════════════════════════════════════
     // Convenience Helpers

@@ -29,6 +29,8 @@ from ._facade_types cimport (
     UIAnchor_MiddleLeft, UIAnchor_MiddleCenter, UIAnchor_MiddleRight,
     UIAnchor_BottomLeft, UIAnchor_BottomCenter, UIAnchor_BottomRight,
     TextHAlign, TextHAlign_Left, TextHAlign_Center, TextHAlign_Right,
+    TextVAlign, TextVAlign_Top, TextVAlign_Middle, TextVAlign_Bottom,
+    CanvasScaleMode, CanvasScaleMode_ConstantPixel, CanvasScaleMode_ScaleWithScreen,
     EngineConfig, GltfOptions, RecordingOptions, ClipInfo, GltfResult as CppGltfResult,
     RenderStatsSnapshot, RenderPassStats,
 )
@@ -44,7 +46,7 @@ from ._engine_api cimport (
     make_resize_callback, make_key_event_callback,
     make_float2_callback, make_int_bool_callback,
     wrap_py_object, unwrap_py_object, make_system_update_callback,
-    CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI,
+    CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
     videoRecordingAvailable, findFfmpeg,
 )
 from libcpp.memory cimport shared_ptr
@@ -92,6 +94,15 @@ UI_ANCHOR_BOTTOM_RIGHT = <int>UIAnchor_BottomRight
 TEXT_ALIGN_LEFT = <int>TextHAlign_Left
 TEXT_ALIGN_CENTER = <int>TextHAlign_Center
 TEXT_ALIGN_RIGHT = <int>TextHAlign_Right
+
+# Vertical text alignment (canvas UI)
+TEXT_ALIGN_TOP = <int>TextVAlign_Top
+TEXT_ALIGN_MIDDLE = <int>TextVAlign_Middle
+TEXT_ALIGN_BOTTOM = <int>TextVAlign_Bottom
+
+# Canvas scale modes
+CANVAS_CONSTANT_PIXEL = <int>CanvasScaleMode_ConstantPixel
+CANVAS_SCALE_WITH_SCREEN = <int>CanvasScaleMode_ScaleWithScreen
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1014,6 +1025,266 @@ cdef class Ecs:
 
 
 # ═══════════════════════════════════════════════════════════════
+# UI — Python wrapper for UIAPI (the canvas UI)
+# ═══════════════════════════════════════════════════════════════
+
+cdef class UI:
+    """The canvas UI: screen and world canvases, their elements and widgets.
+
+    Obtained via engine.ui from on_init on — do not construct directly.
+
+    A canvas is an entity; elements are entities below it. Positions and
+    sizes are in canvas units, from the top-left of the parent's rect with y
+    pointing down. Colours are (r, g, b, a) in sRGB with straight alpha.
+    Text is a str. Destroy an element with engine.scene.destroy_entity, which
+    destroys its children too.
+
+    Pointer state is updated once a frame, after on_update, so on_update sees
+    the frame before's: was_clicked and value_changed are true for one frame.
+    """
+
+    cdef CppUIAPI* _ptr
+    cdef bint _owned
+    # Keeps the Engine, and so the C++ object _ptr points into, alive.
+    cdef object _owner
+
+    def __cinit__(self):
+        self._ptr = NULL
+        self._owned = False
+        self._owner = None
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("UI cannot be constructed directly; obtain it from engine.ui")
+
+    def __dealloc__(self):
+        if self._owned and self._ptr != NULL:
+            del self._ptr
+
+    # ── Fonts ─────────────────────────────────────────────────
+
+    def load_font(self, str path):
+        """Id of the font at path, loading it on first use; 0 if it cannot be loaded."""
+        return self._ptr.loadFont(path.encode("utf-8"))
+
+    @property
+    def default_font(self):
+        """The font text uses when it names none: fonts/Roboto-Regular.ttf until set."""
+        return self._ptr.getDefaultFont()
+
+    @default_font.setter
+    def default_font(self, uint32_t font):
+        self._ptr.setDefaultFont(font)
+
+    # ── Canvases ──────────────────────────────────────────────
+
+    def create_canvas(self, reference_size=(1920, 1080), int scale_mode=CANVAS_SCALE_WITH_SCREEN,
+                      int sort_order=0):
+        """A canvas over the screen. A higher sort_order draws over, and takes the pointer first."""
+        return <uint32_t>self._ptr.createCanvas(_tuple_to_vec2(reference_size),
+                                                <CanvasScaleMode>scale_mode, sort_order)
+
+    def create_world_canvas(self, pixel_size, world_size, float emission=1.0):
+        """A canvas of pixel_size pixels on a quad of world_size units, facing +Z.
+
+        Place it with engine.scene.set_position and set_rotation. Its material
+        emits the canvas at emission times its colour.
+        """
+        return <uint32_t>self._ptr.createWorldCanvas(_tuple_to_vec2(pixel_size), _tuple_to_vec2(world_size),
+                                                     emission)
+
+    def set_canvas_scaling(self, uint32_t canvas, int mode, reference_size=(1920, 1080),
+                           float scale_factor=1.0, float match=0.5):
+        """CANVAS_CONSTANT_PIXEL: scale_factor pixels per unit. CANVAS_SCALE_WITH_SCREEN:
+        reference_size fitted to the target, match 0 following its width and 1 its height."""
+        self._ptr.setCanvasScaling(canvas, <CanvasScaleMode>mode, _tuple_to_vec2(reference_size),
+                                   scale_factor, match)
+
+    def set_canvas_sort_order(self, uint32_t canvas, int sort_order):
+        self._ptr.setCanvasSortOrder(canvas, sort_order)
+
+    def set_canvas_pixel_size(self, uint32_t canvas, pixel_size):
+        """World canvases: the size of the texture, in pixels."""
+        self._ptr.setCanvasPixelSize(canvas, _tuple_to_vec2(pixel_size))
+
+    def set_canvas_clear_color(self, uint32_t canvas, color):
+        """World canvases: the colour the texture is cleared to each frame."""
+        self._ptr.setCanvasClearColor(canvas, _tuple_to_vec4(color))
+
+    def get_canvas_size(self, uint32_t canvas):
+        """(width, height) in canvas units, as last laid out."""
+        return _vec2_to_tuple(self._ptr.getCanvasSize(canvas))
+
+    # ── Elements ──────────────────────────────────────────────
+    #
+    # Each is added as the last child of parent, so it draws over its earlier
+    # siblings, centred in it.
+
+    def create_element(self, uint32_t parent, size=(100, 100)):
+        """An element with no content, for grouping and placing others."""
+        return <uint32_t>self._ptr.createElement(parent, _tuple_to_vec2(size))
+
+    def create_panel(self, uint32_t parent, size=(100, 100), color=(1, 1, 1, 1), str texture="",
+                     border=(0, 0, 0, 0)):
+        """A filled rectangle, or a 9-slice of texture keeping border (left, top,
+        right, bottom texture pixels) unstretched."""
+        return <uint32_t>self._ptr.createPanel(parent, _tuple_to_vec2(size), _tuple_to_vec4(color),
+                                               texture.encode("utf-8"), _tuple_to_vec4(border))
+
+    def create_image(self, uint32_t parent, size=(100, 100), str texture="", color=(1, 1, 1, 1)):
+        """texture stretched over the rect times color; without a texture, color alone."""
+        return <uint32_t>self._ptr.createImage(parent, _tuple_to_vec2(size), texture.encode("utf-8"),
+                                               _tuple_to_vec4(color))
+
+    def create_text(self, uint32_t parent, str text, float size=24.0, color=(1, 1, 1, 1), uint32_t font=0):
+        """Text filling its parent. size is the height from ascent to descent;
+        font 0 is the default font."""
+        return <uint32_t>self._ptr.createText(parent, text.encode("utf-8"), size, _tuple_to_vec4(color), font)
+
+    def create_button(self, uint32_t parent, str label, size=(160, 40)):
+        return <uint32_t>self._ptr.createButton(parent, label.encode("utf-8"), _tuple_to_vec2(size))
+
+    def create_toggle(self, uint32_t parent, str label, bint is_on=False, size=(200, 28)):
+        return <uint32_t>self._ptr.createToggle(parent, label.encode("utf-8"), is_on, _tuple_to_vec2(size))
+
+    def create_slider(self, uint32_t parent, float min=0.0, float max=1.0, float value=0.0, size=(200, 24)):
+        return <uint32_t>self._ptr.createSlider(parent, min, max, value, _tuple_to_vec2(size))
+
+    def set_parent(self, uint32_t element, uint32_t parent):
+        """Move element to the end of parent's children."""
+        self._ptr.setParent(element, parent)
+
+    # ── Layout ────────────────────────────────────────────────
+
+    def set_rect(self, uint32_t element, anchor_min=(0.5, 0.5), anchor_max=(0.5, 0.5), pivot=(0.5, 0.5),
+                 position=(0, 0), size=(100, 100)):
+        """Anchors are fractions of the parent's rect, (0, 0) its top-left. With equal
+        anchors size is the size; with different ones it is added to the span between
+        them. position offsets the pivot, a fraction of the element's own rect."""
+        self._ptr.setRect(element, _tuple_to_vec2(anchor_min), _tuple_to_vec2(anchor_max),
+                          _tuple_to_vec2(pivot), _tuple_to_vec2(position), _tuple_to_vec2(size))
+
+    def set_anchor(self, uint32_t element, anchor):
+        """Both anchors and the pivot: (0, 0) places by the top-left corner from the
+        parent's top-left, (1, 1) by the bottom-right from its bottom-right."""
+        self._ptr.setAnchor(element, _tuple_to_vec2(anchor))
+
+    def set_position(self, uint32_t element, position):
+        self._ptr.setPosition(element, _tuple_to_vec2(position))
+
+    def set_size(self, uint32_t element, size):
+        self._ptr.setSize(element, _tuple_to_vec2(size))
+
+    def get_rect(self, uint32_t element):
+        """(x, y, width, height) in canvas units, as last laid out."""
+        return _vec4_to_tuple(self._ptr.getRect(element))
+
+    def set_visible(self, uint32_t element, bint visible):
+        self._ptr.setVisible(element, visible)
+
+    def is_visible(self, uint32_t element):
+        return self._ptr.isVisible(element)
+
+    def set_clip(self, uint32_t element, bint clip):
+        """Clip the element's descendants to its rect."""
+        self._ptr.setClip(element, clip)
+
+    # ── Content ───────────────────────────────────────────────
+    #
+    # The text methods act on the element's own text or, for a button or
+    # toggle, on its label.
+
+    def set_text(self, uint32_t element, str text):
+        self._ptr.setText(element, text.encode("utf-8"))
+
+    def get_text(self, uint32_t element):
+        return self._ptr.getText(element).decode("utf-8")
+
+    def set_font(self, uint32_t element, uint32_t font):
+        self._ptr.setFont(element, font)
+
+    def set_font_size(self, uint32_t element, float size):
+        self._ptr.setFontSize(element, size)
+
+    def set_text_align(self, uint32_t element, int horizontal, int vertical=TEXT_ALIGN_TOP):
+        """TEXT_ALIGN_LEFT/CENTER/RIGHT and TEXT_ALIGN_TOP/MIDDLE/BOTTOM."""
+        self._ptr.setTextAlign(element, <TextHAlign>horizontal, <TextVAlign>vertical)
+
+    def set_text_wrap(self, uint32_t element, bint wrap):
+        self._ptr.setTextWrap(element, wrap)
+
+    def set_color(self, uint32_t element, color):
+        """The colour of the element's own text, image and panel."""
+        self._ptr.setColor(element, _tuple_to_vec4(color))
+
+    def set_texture(self, uint32_t element, str path):
+        """The texture of the element's image or panel. False if it cannot be loaded."""
+        return self._ptr.setTexture(element, path.encode("utf-8"))
+
+    def set_panel_border(self, uint32_t element, border, float border_scale=1.0):
+        self._ptr.setPanelBorder(element, _tuple_to_vec4(border), border_scale)
+
+    def set_raycast_target(self, uint32_t element, bint target):
+        """Whether the element's image or panel stops the pointer."""
+        self._ptr.setRaycastTarget(element, target)
+
+    # ── Interaction ───────────────────────────────────────────
+
+    def set_interactable(self, uint32_t element, bint enabled=True):
+        """Make the element take the pointer, or disable it. Widgets are interactable."""
+        self._ptr.setInteractable(element, enabled)
+
+    def is_hovered(self, uint32_t element):
+        return self._ptr.isHovered(element)
+
+    def is_pressed(self, uint32_t element):
+        return self._ptr.isPressed(element)
+
+    def was_clicked(self, uint32_t element):
+        """Released over the element after being pressed on it, this frame."""
+        return self._ptr.wasClicked(element)
+
+    def value_changed(self, uint32_t element):
+        """A toggle's or slider's value was changed by the pointer, this frame."""
+        return self._ptr.valueChanged(element)
+
+    def toggle_value(self, uint32_t toggle):
+        return self._ptr.getToggle(toggle)
+
+    def set_toggle_value(self, uint32_t toggle, bint is_on):
+        self._ptr.setToggle(toggle, is_on)
+
+    def slider_value(self, uint32_t slider):
+        return self._ptr.getSliderValue(slider)
+
+    def set_slider_value(self, uint32_t slider, float value):
+        self._ptr.setSliderValue(slider, value)
+
+    def set_slider_range(self, uint32_t slider, float min, float max, bint whole_numbers=False):
+        self._ptr.setSliderRange(slider, min, max, whole_numbers)
+
+    @property
+    def pointer_over_ui(self):
+        """Is the pointer over a UI element, or pressing one? Check it before
+        treating a click as one in the scene."""
+        return self._ptr.isPointerOverUI()
+
+    @property
+    def pointer_canvas(self):
+        """The canvas under the pointer, or NULL_ENTITY."""
+        return <uint32_t>self._ptr.getPointerCanvas()
+
+    @property
+    def pointer_position(self):
+        """The pointer on pointer_canvas, in canvas units."""
+        return _vec2_to_tuple(self._ptr.getPointerPosition())
+
+    @property
+    def hovered_element(self):
+        """The interactable element under the pointer, or NULL_ENTITY."""
+        return <uint32_t>self._ptr.getHoveredElement()
+
+
+# ═══════════════════════════════════════════════════════════════
 # Engine — Python wrapper for EngineAPI (the main entry point)
 # ═══════════════════════════════════════════════════════════════
 
@@ -1039,6 +1310,7 @@ cdef class Engine:
     cdef Input _input_wrapper
     cdef Physics _physics_wrapper
     cdef Ecs _ecs_wrapper
+    cdef UI _ui_wrapper
 
     # Keep Python references to callbacks to prevent GC
     cdef list _callback_refs
@@ -1198,6 +1470,16 @@ cdef class Engine:
             self._ecs_wrapper._owned = False
             self._ecs_wrapper._owner = self
         return self._ecs_wrapper
+
+    @property
+    def ui(self):
+        """Access the canvas UI API. Available from on_init on."""
+        if self._ui_wrapper is None:
+            self._ui_wrapper = UI.__new__(UI)
+            self._ui_wrapper._ptr = &self._ptr.getUI()
+            self._ui_wrapper._owned = False
+            self._ui_wrapper._owner = self
+        return self._ui_wrapper
 
     # ── Convenience Helpers ───────────────────────────────────
 

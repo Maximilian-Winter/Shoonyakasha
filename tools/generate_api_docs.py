@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 START = "<!-- BEGIN SOURCE API -->"
 END = "<!-- END SOURCE API -->"
 APIS = {"Engine": "engine", "Scene": "scene", "Input": "input",
-        "Physics": "physics", "Ecs": "ecs"}
+        "Physics": "physics", "Ecs": "ecs", "UI": "ui"}
 
 
 def python_inventory(source, name, native_source=None):
@@ -63,7 +63,7 @@ def python_inventory(source, name, native_source=None):
             result_type = name if method_name == "__init__" else "None"
         if name == "Engine":
             result_type = {"scene": "Scene", "input": "Input", "physics": "Physics",
-                           "ecs": "Ecs", "load_gltf_scene": "GltfResult",
+                           "ecs": "Ecs", "ui": "UI", "load_gltf_scene": "GltfResult",
                            "render_stats": "dict or None"}.get(method_name, result_type)
         if name == "Ecs" and method_name == "get_component":
             result_type = "object or None"

@@ -19,7 +19,7 @@ from cpython.ref cimport PyObject
 from ._facade_types cimport (
     EntityHandle, EngineConfig, GltfOptions, RecordingOptions,
     GltfResult as CppGltfResult, RenderStatsSnapshot,
-    CameraType, LightType, UIAnchor, TextHAlign,
+    CameraType, LightType, UIAnchor, TextHAlign, TextVAlign, CanvasScaleMode,
 )
 
 
@@ -346,6 +346,82 @@ cdef extern from "Facade/EcsAPI.h" namespace "Shoonyakasha::Facade":
 
 
 # ═══════════════════════════════════════════════════════════════
+# UIAPI — full declaration
+# ═══════════════════════════════════════════════════════════════
+
+cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
+    cdef cppclass CppUIAPI "Shoonyakasha::Facade::UIAPI":
+
+        # Fonts
+        uint32_t loadFont(const string& path)
+        uint32_t getDefaultFont()
+        void setDefaultFont(uint32_t font)
+
+        # Canvases
+        EntityHandle createCanvas(const vec2& referenceSize, CanvasScaleMode scaleMode, int sortOrder)
+        EntityHandle createWorldCanvas(const vec2& pixelSize, const vec2& worldSize, float emission)
+        void setCanvasScaling(EntityHandle canvas, CanvasScaleMode mode, const vec2& referenceSize,
+                              float scaleFactor, float match)
+        void setCanvasSortOrder(EntityHandle canvas, int sortOrder)
+        void setCanvasPixelSize(EntityHandle canvas, const vec2& pixelSize)
+        void setCanvasClearColor(EntityHandle canvas, const vec4& color)
+        vec2 getCanvasSize(EntityHandle canvas) const
+
+        # Elements
+        EntityHandle createElement(EntityHandle parent, const vec2& size)
+        EntityHandle createPanel(EntityHandle parent, const vec2& size, const vec4& color,
+                                 const string& texturePath, const vec4& border)
+        EntityHandle createImage(EntityHandle parent, const vec2& size, const string& texturePath,
+                                 const vec4& color)
+        EntityHandle createText(EntityHandle parent, const string& text, float fontSize,
+                                const vec4& color, uint32_t font)
+        EntityHandle createButton(EntityHandle parent, const string& label, const vec2& size)
+        EntityHandle createToggle(EntityHandle parent, const string& label, cbool isOn, const vec2& size)
+        EntityHandle createSlider(EntityHandle parent, float minValue, float maxValue, float value,
+                                  const vec2& size)
+        void setParent(EntityHandle element, EntityHandle parent)
+
+        # Layout
+        void setRect(EntityHandle element, const vec2& anchorMin, const vec2& anchorMax,
+                     const vec2& pivot, const vec2& position, const vec2& size)
+        void setAnchor(EntityHandle element, const vec2& anchor)
+        void setPosition(EntityHandle element, const vec2& position)
+        void setSize(EntityHandle element, const vec2& size)
+        vec4 getRect(EntityHandle element) const
+        void setVisible(EntityHandle element, cbool visible)
+        cbool isVisible(EntityHandle element) const
+        void setClip(EntityHandle element, cbool clip)
+
+        # Content
+        void setText(EntityHandle element, const string& text)
+        string getText(EntityHandle element) const
+        void setFont(EntityHandle element, uint32_t font)
+        void setFontSize(EntityHandle element, float fontSize)
+        void setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign vertical)
+        void setTextWrap(EntityHandle element, cbool wrap)
+        void setColor(EntityHandle element, const vec4& color)
+        cbool setTexture(EntityHandle element, const string& path)
+        void setPanelBorder(EntityHandle element, const vec4& border, float borderScale)
+        void setRaycastTarget(EntityHandle element, cbool target)
+
+        # Interaction
+        void setInteractable(EntityHandle element, cbool enabled)
+        cbool isHovered(EntityHandle element) const
+        cbool isPressed(EntityHandle element) const
+        cbool wasClicked(EntityHandle element) const
+        cbool valueChanged(EntityHandle element) const
+        cbool getToggle(EntityHandle toggle) const
+        void setToggle(EntityHandle toggle, cbool isOn)
+        float getSliderValue(EntityHandle slider) const
+        void setSliderValue(EntityHandle slider, float value)
+        void setSliderRange(EntityHandle slider, float minValue, float maxValue, cbool wholeNumbers)
+        cbool isPointerOverUI() const
+        EntityHandle getPointerCanvas() const
+        vec2 getPointerPosition() const
+        EntityHandle getHoveredElement() const
+
+
+# ═══════════════════════════════════════════════════════════════
 # EngineAPI — full declaration
 # ═══════════════════════════════════════════════════════════════
 
@@ -371,6 +447,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         CppInputAPI& getInput()
         CppPhysicsAPI& getPhysics()
         CppEcsAPI& getEcs()
+        CppUIAPI& getUI() except +
 
         # Convenience helpers
         EntityHandle createCamera(const vec3& pos, float fov, float speed,

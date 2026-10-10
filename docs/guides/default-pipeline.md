@@ -47,7 +47,7 @@ That gives a lit, anti-aliased and tone-mapped box against the environment. With
 
 **Animated models** render once loaded with `load_gltf_scene(path, load_skins=True, load_animations=True)` and played with `engine.scene.play_animation(entity, clip)`. They are skinned in the G-buffer and in the shadows, and carry motion vectors, so TAA follows them.
 
-Not drawn by this pipeline: sprites, UI panels and text. Those need a pipeline with a `sprite_geometry` pass ([Sprites, UI and text](sprites-ui-text.md)).
+Its last pass, `UIOverlay`, draws the [canvas UI](canvas-ui.md). Not drawn by this pipeline: sprites and the older UI panels and text labels. Those need a pipeline with a `sprite_geometry` pass ([Sprites, UI and text](sprites-ui-text.md)).
 
 ## Lights and shadows
 

@@ -83,6 +83,7 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 |---|---|
 | [`demo`](python/getting_started/demo) | The Python counterpart of `facade_test`, going further: a full PBR/IBL scene, physics, and the scene graph. |
 | [`ecs_bindings_demo`](python/getting_started/ecs_bindings_demo) | Components and systems written in Python, registered with the engine's ECS. |
+| [`ui_canvas_demo`](python/getting_started/ui_canvas_demo) | The canvas UI on the default pipeline: a HUD with a toggle, an exposure slider and a reset button, and a screen in the world with its own button and slider. |
 
 ### animation
 

@@ -30,6 +30,7 @@ try:
         Input,
         Physics,
         Ecs,
+        UI,
         GltfResult,
 
         # Entity handle sentinel
@@ -68,9 +69,16 @@ try:
         UI_ANCHOR_BOTTOM_RIGHT,
 
         # Text alignment (create_text)
-            TEXT_ALIGN_LEFT,
-            TEXT_ALIGN_CENTER,
-            TEXT_ALIGN_RIGHT,
+        TEXT_ALIGN_LEFT,
+        TEXT_ALIGN_CENTER,
+        TEXT_ALIGN_RIGHT,
+
+        # Canvas UI: vertical text alignment and canvas scale modes
+        TEXT_ALIGN_TOP,
+        TEXT_ALIGN_MIDDLE,
+        TEXT_ALIGN_BOTTOM,
+        CANVAS_CONSTANT_PIXEL,
+        CANVAS_SCALE_WITH_SCREEN,
 
         # Frame capture — usable before an Engine exists, so a script can
         # check for ffmpeg before deciding to record.
@@ -82,7 +90,7 @@ except ImportError as exc:                       # pragma: no cover - environmen
 
 
 _ENGINE_SYMBOLS = frozenset({
-    "Engine", "Scene", "Input", "Physics", "Ecs", "GltfResult", "NULL_ENTITY",
+    "Engine", "Scene", "Input", "Physics", "Ecs", "UI", "GltfResult", "NULL_ENTITY",
     "CAMERA_PERSPECTIVE", "CAMERA_ORTHOGRAPHIC",
     "LIGHT_DIRECTIONAL", "LIGHT_POINT", "LIGHT_SPOT",
     "RIGIDBODY_STATIC", "RIGIDBODY_KINEMATIC", "RIGIDBODY_DYNAMIC",
@@ -92,6 +100,8 @@ _ENGINE_SYMBOLS = frozenset({
     "UI_ANCHOR_MIDDLE_LEFT", "UI_ANCHOR_MIDDLE_CENTER", "UI_ANCHOR_MIDDLE_RIGHT",
     "UI_ANCHOR_BOTTOM_LEFT", "UI_ANCHOR_BOTTOM_CENTER", "UI_ANCHOR_BOTTOM_RIGHT",
     "TEXT_ALIGN_LEFT", "TEXT_ALIGN_CENTER", "TEXT_ALIGN_RIGHT",
+    "TEXT_ALIGN_TOP", "TEXT_ALIGN_MIDDLE", "TEXT_ALIGN_BOTTOM",
+    "CANVAS_CONSTANT_PIXEL", "CANVAS_SCALE_WITH_SCREEN",
     "video_recording_available", "find_ffmpeg",
 })
 
@@ -118,7 +128,7 @@ def extension_available():
 
 __version__ = "1.0.0"
 __all__ = [
-    "Engine", "Scene", "Input", "Physics", "Ecs", "GltfResult",
+    "Engine", "Scene", "Input", "Physics", "Ecs", "UI", "GltfResult",
     "NULL_ENTITY",
     "CAMERA_PERSPECTIVE", "CAMERA_ORTHOGRAPHIC",
     "LIGHT_DIRECTIONAL", "LIGHT_POINT", "LIGHT_SPOT",
@@ -129,6 +139,8 @@ __all__ = [
     "UI_ANCHOR_MIDDLE_LEFT", "UI_ANCHOR_MIDDLE_CENTER", "UI_ANCHOR_MIDDLE_RIGHT",
     "UI_ANCHOR_BOTTOM_LEFT", "UI_ANCHOR_BOTTOM_CENTER", "UI_ANCHOR_BOTTOM_RIGHT",
     "TEXT_ALIGN_LEFT", "TEXT_ALIGN_CENTER", "TEXT_ALIGN_RIGHT",
+    "TEXT_ALIGN_TOP", "TEXT_ALIGN_MIDDLE", "TEXT_ALIGN_BOTTOM",
+    "CANVAS_CONSTANT_PIXEL", "CANVAS_SCALE_WITH_SCREEN",
     "video_recording_available", "find_ffmpeg",
     # Pure-Python utilities
     "assets", "keys", "mathutil", "pipeline", "shaders", "extension_available",

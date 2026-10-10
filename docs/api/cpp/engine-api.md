@@ -59,6 +59,7 @@ SceneAPI& getScene();
 InputAPI& getInput();
 PhysicsAPI& getPhysics();
 EcsAPI& getEcs();
+UIAPI& getUI();
 EntityHandle createCamera(const glm::vec3& pos, float fov = 60.f, float speed = 8.f, float nearPlane = 0.1f, float farPlane = 1000.f);
 bool captureScreenshot(const std::string& path);
 bool startRecording(const std::string& path, const RecordingOptions& options = {});
@@ -89,7 +90,7 @@ void setLocalShadowSettings(uint32_t spotCount = 8, uint32_t pointCount = 4, uin
 bool setPassEnabled(const std::string& passName, bool enabled);
 bool isPassEnabled(const std::string& passName) const;
 bool applyPipelinePreset(const std::string& name);
-bool setPipelineImage(const std::string& name, const std::string& path);   // "externalImage": name bindings
+bool setPipelineImage(const std::string& name, const std::string& path);
 bool rayQuerySupported() const;
 std::vector<std::string> getPipelinePresets() const;
 uint32_t getPassDrawnCount(const std::string& passName) const;
