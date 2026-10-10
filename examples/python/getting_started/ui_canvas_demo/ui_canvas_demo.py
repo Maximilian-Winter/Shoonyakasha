@@ -41,8 +41,12 @@ def on_init():
     ui = engine.ui
     engine.create_camera(pos=(0.0, 1.2, 4.0), fov=60.0, speed=4.0, near_plane=0.05, far_plane=100.0)
     engine.create_directional_light(direction=(-0.4, -0.7, -0.5), intensity=3.0)
-    box = engine.load_gltf_scene("models/Box.gltf")
-    ui_state["box"] = box.entities[0]
+    # Box.gltf's root node turns the mesh 90 degrees about X; turning the root
+    # about Y spins the box upright.
+    box = engine.load_gltf_scene("models/Box.gltf").entities[0]
+    while engine.scene.get_parent(box) != sk.NULL_ENTITY:
+        box = engine.scene.get_parent(box)
+    ui_state["box"] = box
 
     # ── HUD: a canvas laid out at 1280 x 720, scaled to the window ──
     hud = ui.create_canvas(reference_size=(1280, 720))

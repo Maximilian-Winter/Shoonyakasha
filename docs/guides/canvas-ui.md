@@ -4,7 +4,7 @@ The canvas UI builds interfaces out of entities: a canvas, and panels, images, t
 - A **screen canvas** is drawn over the finished image.
 - A **world canvas** is drawn into a texture shown on a quad in the scene, such as a terminal, a sign or a menu you walk up to. You can click on it in 3D like on the screen.
 
-[ui_canvas_demo.py](../../examples/python/getting_started/ui_canvas_demo/ui_canvas_demo.py) has both. The [UI reference](../api/python/ui.md) lists every call.
+[ui_canvas_demo.py](../../examples/python/getting_started/ui_canvas_demo/ui_canvas_demo.py) has both in under 150 lines. [ui_showcase.py](../../examples/python/ui/ui_showcase/ui_showcase.py) uses most of the API: tabs, widgets driving the scene, text alignment and fonts, a clipped log built at runtime, a modal dialog, a kiosk in the world and 9-slice frames. The [UI reference](../api/python/ui.md) lists every call.
 
 ## A first HUD
 

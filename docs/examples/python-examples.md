@@ -17,6 +17,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
 | [games_2d/pong_game](../../examples/python/games_2d/pong_game) | `python pong.py` | Complete 2D game and capture controls |
+| [ui/ui_showcase](../../examples/python/ui/ui_showcase) | `python ui_showcase.py` | Most of the canvas UI: tabs, widgets driving the scene, text, a clipped log built at runtime, a modal dialog, a clickable kiosk in the world |
 
 Pong's third-party artwork must be obtained separately; follow its [README](../../examples/python/games_2d/pong_game/README.md). Other optional assets and fallback behavior are described in the [shared asset guide](../../assets/README.md). The Fox script has an older comment suggesting the C++ directory; use its own Python directory as listed here.
 
@@ -96,6 +97,18 @@ Bundled sprites, layered blend passes, text, and Python ECS systems in motion. T
 A mandala palace with no textures. `shaders/mandala.frag` draws each layer onto its quad from a `shape` material parameter, and Python systems turn the rings, make the lotus breathe, flicker the lamps and drift the embers. **Left**/**Right** (or **Space**) dim the palace and bring it back for another deity: Vajrayogini, Green Tara, White Tara or Vajrapani. Each has its own palette, centre symbol and mantra, chosen in the shader through the `scene.custom.deity` value. The preview shows Vajrayogini, the first deity.
 
 The names and mantras are in Devanagari, which the engine's ASCII-only text baking cannot shape. `temple.py` renders them with Pillow's raqm (HarfBuzz) layout and the bundled Noto Sans Devanagari into PNGs under `generated/`, and shows them as screen-space panels that fade with the mandala. Without Pillow + raqm it shows the transliterations as engine text instead.
+
+### Canvas UI showcase (`ui_showcase`)
+
+<a href="../images/examples/python/ui_showcase.png"><img src="../images/examples/python/ui_showcase.png" alt="A rounded sidebar with Scene, Text and Widgets tabs, toggles and sliders, beside a red box on a grey floor, a glowing kiosk screen in the scene and a pointer readout panel at the top right" width="720"></a>
+
+Built entirely through `engine.ui` on the default pipeline:
+- **Scene tab** (in the preview): toggles and sliders spin the box, switch the sun's shadows and set its intensity, the box's colour and the exposure.
+- **Text tab:** the nine alignments, three fonts with Unicode, and a size slider with wrapping in a clipped box.
+- **Widgets tab:** a click counter, a button that a toggle enables, a stepped slider, and a clipped log whose rows are created and destroyed at runtime.
+- **Around the sidebar:** a pointer readout at the top right; **About** opens a dialog on a second canvas whose backdrop blocks the HUD. The kiosk in the scene is a world canvas you click in 3D, with a glow slider and a resolution switch.
+
+The rounded frames are a 9-slice of a texture the script writes to `generated/frame.png`. `--tab text`, `--tab widgets` and `--about` open on the other views.
 
 ### Pong (`pong_game`) — preview unavailable
 

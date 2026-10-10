@@ -111,6 +111,12 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 | [`full_showcase`](python/games_2d/full_showcase) | Three blend modes in one frame via render layer masks, plus custom Python ECS components and systems. |
 | [`dakini_temple`](python/games_2d/dakini_temple) | A mandala palace for Vajrayogini, Green Tara, White Tara or Vajrapani, drawn entirely in a fragment shader: each quad picks its layer through a material parameter, a custom scene value picks the deity, and Python systems animate them. |
 
+### ui
+
+| | |
+|---|---|
+| [`ui_showcase`](python/ui/ui_showcase) | A tour of the canvas UI on the default pipeline. A tabbed sidebar of toggles and sliders drives the scene, and there are text alignment and fonts, a disabled button, and a clipped log whose rows are created and destroyed at runtime. Also a pointer readout, a modal dialog on a second canvas, a kiosk in the world you can click in 3D, and 9-slice frames from a texture the script draws itself. |
+
 ---
 
 ## Assets

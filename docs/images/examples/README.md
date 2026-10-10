@@ -56,6 +56,7 @@ The delay starts after initialization (Python: after the first rendered frame). 
 | Python `dakini_temple` | Procedural shader layers; bundled Noto Sans Devanagari and Roboto fonts, labels rendered with Pillow + raqm; no input. | 3 s |
 | Python `japanese_shrine` | Hand-downloaded `models/japanese_shrine.glb` (CC BY 4.0, aumiella; see the asset README) with the bundled sunset environment; automatic orbit, no input. | 3 s |
 | Python `pong_game` | **Not captured:** separately obtained artwork; permission unresolved below. | — |
+| Python `ui_showcase` | `python ui_showcase.py --screenshot ui_showcase.png`: frame 120 of the Scene tab, bundled `Box.gltf`, Roboto and Playfair Display; no input. | 120 frames |
 
 The shared [asset guide](../../../assets/README.md) records asset locations and attribution. These captures do not redistribute model or texture source files.
 
