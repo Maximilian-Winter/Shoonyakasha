@@ -10,6 +10,7 @@ file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/ecs/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/framegraph/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/facade/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ui/*.cpp"
 )
 
 add_executable(ShoonyakashaTests ${TEST_SOURCES})

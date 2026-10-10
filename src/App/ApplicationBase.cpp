@@ -27,6 +27,7 @@
 #include "ECS/Sprite2DComponents.h"
 #include "ECS/UILayoutSystem.h"
 #include "ECS/TextRenderSystem.h"
+#include "UI/UISystems.h"
 #include "Resources/Sprite2DManager.h"
 #include "Resources/FontLoader.h"
 
@@ -174,6 +175,7 @@ void ApplicationBase::registerSystems() {
     m_activeScene->addSystem<ECS::TransformSystem>();
     m_activeScene->addSystem<ECS::CameraSystem>();
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
+    m_activeScene->addSystem<UI::CanvasLayoutSystem>(&m_screenSize);
 }
 
 std::string ApplicationBase::defaultPipelinePath() {
