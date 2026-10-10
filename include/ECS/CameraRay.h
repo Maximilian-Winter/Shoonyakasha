@@ -48,11 +48,11 @@ struct QuadHit {
     bool frontFacing = true; // the ray arrives from the quad's local +Z side
 };
 
-/// Hit of `ray` on the unit quad (local x and y in [-0.5, 0.5], z = 0) placed
-/// by `worldMatrix`. Both sides are hit. Returns nothing when the ray is
-/// parallel to the quad, the quad is behind the origin, or the hit falls
-/// outside it.
-inline std::optional<QuadHit> intersectUnitQuad(const Ray& ray, const glm::mat4& worldMatrix) {
+/// Hit of `ray` on the plane of the unit quad placed by `worldMatrix` (its
+/// local z = 0), with UVs that run past [0, 1] outside the quad. Returns
+/// nothing when the ray is parallel to the plane or the plane is behind the
+/// origin.
+inline std::optional<QuadHit> intersectQuadPlane(const Ray& ray, const glm::mat4& worldMatrix) {
     const glm::mat4 toLocal = glm::inverse(worldMatrix);
     const glm::vec3 origin = glm::vec3(toLocal * glm::vec4(ray.origin, 1.0f));
     const glm::vec3 direction = glm::vec3(toLocal * glm::vec4(ray.direction, 0.0f));
@@ -65,14 +65,22 @@ inline std::optional<QuadHit> intersectUnitQuad(const Ray& ray, const glm::mat4&
     if (t < 0.0f) return std::nullopt;
 
     const glm::vec3 local = origin + t * direction;
-    if (local.x < -0.5f || local.x > 0.5f || local.y < -0.5f || local.y > 0.5f) {
-        return std::nullopt;
-    }
-
     QuadHit hit;
     hit.distance = t;
     hit.uv = glm::vec2(local.x + 0.5f, 0.5f - local.y);
     hit.frontFacing = direction.z < 0.0f;
+    return hit;
+}
+
+/// Hit of `ray` on the unit quad (local x and y in [-0.5, 0.5], z = 0) placed
+/// by `worldMatrix`. Both sides are hit. Returns nothing when the ray is
+/// parallel to the quad, the quad is behind the origin, or the hit falls
+/// outside it.
+inline std::optional<QuadHit> intersectUnitQuad(const Ray& ray, const glm::mat4& worldMatrix) {
+    auto hit = intersectQuadPlane(ray, worldMatrix);
+    if (!hit || hit->uv.x < 0.0f || hit->uv.x > 1.0f || hit->uv.y < 0.0f || hit->uv.y > 1.0f) {
+        return std::nullopt;
+    }
     return hit;
 }
 

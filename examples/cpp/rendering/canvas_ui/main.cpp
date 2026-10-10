@@ -5,28 +5,37 @@
 // colour swatches, Unicode text in two fonts, a clip rect cutting off text
 // that overflows its panel, and a frame counter that changes every frame.
 // Beside the box, a world canvas: a texture the UI renders into, shown on a
-// quad in the scene.
+// quad in the scene, with a button that counts clicks. Bottom left, a toggle
+// spins the box, a slider sets its angle and a button resets both.
 //
 // Usage:
 //     CanvasUIExample [--screenshot path.png]
 //
 // With --screenshot it switches the world canvas's resolution at frame 60,
-// saves frame 120 to the path and closes.
+// moves and clicks a scripted pointer through the widgets, saves frame 120
+// to the path and closes.
 //
 // Keys: WASD/Q/E + right mouse to fly, R to switch the world canvas between
-// 1024x512 and 512x256 pixels.
+// 1024x512 and 512x256 pixels. Left mouse uses the widgets; with the mouse
+// captured (ESC), the centre of the screen is the pointer.
 //
 
 #include "App/ApplicationBase.h"
 #include "Core/AssetPaths.h"
+#include "ECS/CameraController.h"
 #include "ECS/Core.h"
+#include "ECS/RenderComponents.h"
 #include "Resources/Sprite2DManager.h"
 #include "UI/UIComponents.h"
 #include "UI/UIContext.h"
+#include "UI/UIWidgets.h"
+#include "Vulkan/VulkanSwapChain.h"
 #include "Vulkan/VulkanWindow.h"
 
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <string>
 
@@ -116,17 +125,53 @@ protected:
              srgb(0.85f, 0.9f, 0.95f));
         m_terminalCounter = element(m_terminal, {0, 1}, {1, 1}, {0, 1}, {40, -30}, {-80, 50});
         text(m_terminalCounter, roboto, "", 40.0f, srgb(0.6f, 0.95f, 0.7f));
+        m_terminalButton = createButton(registry, m_terminal, "Click me", roboto, {260.0f, 70.0f});
+        place(m_terminalButton, {1, 1}, {-40, -110});
+
+        // Bottom-left settings: spin the box, set its angle, reset it.
+        const auto settings = element(m_canvas, {0, 1}, {0, 1}, {0, 1}, {24, -24}, {340, 170});
+        registry.emplace<UIPanel>(settings).color = srgb(0.08f, 0.09f, 0.12f, 0.82f);
+        m_spin = createToggle(registry, settings, "Spin the box", roboto, false, {300.0f, 28.0f});
+        place(m_spin, {0, 0}, {16, 16});
+        m_angle = createSlider(registry, settings, 0.0f, 360.0f, 0.0f, {300.0f, 24.0f});
+        place(m_angle, {0, 0}, {16, 66});
+        m_reset = createButton(registry, settings, "Reset", roboto, {140.0f, 40.0f});
+        place(m_reset, {0, 0}, {16, 112});
+
+        // Box.gltf's mesh entity, turned by the slider.
+        const auto box = registry.view<MeshComponent, ECS::TransformComponent>();
+        for (const auto entity : box) {
+            if (entity != m_terminal) m_box = entity;
+        }
     }
 
-    void onUpdate(float /*dt*/) override {
+    void onUpdate(float dt) override {
         ++m_frame;
         auto& registry = getRegistry();
+        if (!m_screenshot.empty()) scriptPointer();
+
         registry.get<UIText>(m_counter).text = "frame " + std::to_string(m_frame);
         const glm::vec2 pixels = registry.get<UICanvas>(m_terminal).pixelSize;
+        if (registry.get<UIInteractable>(m_terminalButton).clicked) ++m_clicks;
         registry.get<UIText>(m_terminalCounter).text =
             std::to_string(static_cast<int>(pixels.x)) + "x" + std::to_string(static_cast<int>(pixels.y)) +
-            " pixels, frame " + std::to_string(m_frame);
+            " pixels, " + std::to_string(m_clicks) + " clicks";
         if (!m_screenshot.empty() && m_frame == 60) toggleResolution();
+
+        // The widgets' edges are from the input pass of the frame before.
+        auto& angle = registry.get<UISlider>(m_angle);
+        if (registry.get<UIInteractable>(m_reset).clicked) {
+            angle.value = 0.0f;
+            registry.get<UIToggle>(m_spin).isOn = false;
+        }
+        if (registry.get<UIToggle>(m_spin).isOn && !registry.get<UIInteractable>(m_angle).pressed) {
+            angle.value = std::fmod(angle.value + 45.0f * dt, 360.0f);
+        }
+        if (m_box != entt::null) {
+            auto& transform = registry.get<ECS::TransformComponent>(m_box);
+            transform.rotation.y = glm::radians(angle.value);
+            transform.isDirty = true;
+        }
     }
 
     void onKeyPressed(int keyCode) override {
@@ -141,6 +186,62 @@ protected:
     }
 
 private:
+    /// With --screenshot: a pointer that turns spinning on, drags the angle
+    /// slider, clicks the world canvas's button twice, then rests on Reset.
+    /// It goes through the same input path as the mouse.
+    void scriptPointer() {
+        if (m_frame < 65) return;
+        auto at = [&](entt::entity e, float across = 0.5f) {
+            m_scriptPixel = pixelOf(e, across);
+        };
+        bool down = false;
+        if (m_frame <= 67) { at(m_spin); down = m_frame == 66; }
+        else if (m_frame <= 86) { at(m_angle, 0.1f + 0.65f * std::min((m_frame - 75) / 10.0f, 1.0f)); down = m_frame >= 75 && m_frame <= 85; }
+        else if (m_frame <= 94) { at(m_terminalButton); down = m_frame == 91 || m_frame == 93; }
+        else { at(m_reset); }
+
+        int width = 0, height = 0;
+        glfwGetWindowSize(getWindow().getWindow(), &width, &height);
+        const glm::vec2 screen = screenSize();
+        for (auto [entity, state] : getRegistry().view<ECS::InputStateComponent>().each()) {
+            state.mousePosition = m_scriptPixel * glm::vec2(width, height) / screen;
+            state.mouseButtons[GLFW_MOUSE_BUTTON_LEFT] = down;
+            state.mouseCaptured = false;
+        }
+    }
+
+    glm::vec2 screenSize() {
+        const VkExtent2D extent = getSwapChain().getSwapChainExtent();
+        return {static_cast<float>(extent.width), static_cast<float>(extent.height)};
+    }
+
+    /// Screen pixel of a point `across` the way along the middle of an
+    /// element's last laid-out rect, on a screen or a world canvas.
+    glm::vec2 pixelOf(entt::entity e, float across) {
+        auto& registry = getRegistry();
+        const auto& element = registry.get<UIRect>(e);
+        const auto& canvas = registry.get<UICanvas>(element.canvas);
+        const glm::vec2 point(glm::mix(element.rect.min.x, element.rect.max.x, across),
+                              (element.rect.min.y + element.rect.max.y) * 0.5f);
+        if (canvas.mode == UICanvas::Mode::ScreenOverlay) return point * canvas.scale;
+
+        const glm::vec2 uv = point / canvas.size;
+        const glm::mat4& world = registry.get<ECS::TransformComponent>(element.canvas).worldMatrix;
+        const auto& camera = registry.get<ECS::CameraComponent>(getCameraEntity());
+        const glm::vec4 clip = camera.projectionMatrix * camera.viewMatrix * world *
+                               glm::vec4(uv.x - 0.5f, 0.5f - uv.y, 0.0f, 1.0f);
+        const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+        return glm::vec2((ndc.x + 1.0f) * 0.5f, (1.0f - ndc.y) * 0.5f) * screenSize();
+    }
+
+    /// Puts an element's corner given by `anchor` at `offset` from the same
+    /// corner of its parent.
+    void place(entt::entity e, glm::vec2 anchor, glm::vec2 offset) {
+        auto& rect = getRegistry().get<UIRect>(e);
+        rect.anchorMin = rect.anchorMax = rect.pivot = anchor;
+        rect.anchoredPosition = offset;
+    }
+
     void toggleResolution() {
         auto& canvas = getRegistry().get<UICanvas>(m_terminal);
         canvas.pixelSize = canvas.pixelSize.x > 600.0f ? glm::vec2(512.0f, 256.0f) : glm::vec2(1024.0f, 512.0f);
@@ -177,7 +278,14 @@ private:
     entt::entity m_counter = entt::null;
     entt::entity m_terminal = entt::null;
     entt::entity m_terminalCounter = entt::null;
+    entt::entity m_terminalButton = entt::null;
+    entt::entity m_spin = entt::null;
+    entt::entity m_angle = entt::null;
+    entt::entity m_reset = entt::null;
+    entt::entity m_box = entt::null;
     int m_frame = 0;
+    int m_clicks = 0;
+    glm::vec2 m_scriptPixel{0.0f};
 };
 
 int main(int argc, char** argv) {

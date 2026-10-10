@@ -71,8 +71,8 @@ struct CanvasBuilder {
         batch->indexCount += 6;
     }
 
-    void image(const Rect& rect, const UIImage& img) {
-        const uint32_t color = packColor(img.color);
+    void image(const Rect& rect, const UIImage& img, const glm::vec4& tint) {
+        const uint32_t color = packColor(img.color * tint);
         if (!hasView(img.texture)) {
             quad(rect.min, rect.max, {0, 0}, {1, 1}, color, UIDrawMode::Solid);
             return;
@@ -82,8 +82,8 @@ struct CanvasBuilder {
         quad(rect.min, rect.max, uvMin, uvMax, color, UIDrawMode::Image, &img.texture);
     }
 
-    void panel(const Rect& rect, const UIPanel& p) {
-        const uint32_t color = packColor(p.color);
+    void panel(const Rect& rect, const UIPanel& p, const glm::vec4& tint) {
+        const uint32_t color = packColor(p.color * tint);
         const glm::vec2 textureSize(static_cast<float>(p.texture.width), static_cast<float>(p.texture.height));
         const bool textured = hasView(p.texture) && textureSize.x > 0.0f && textureSize.y > 0.0f;
 
@@ -183,8 +183,11 @@ bool build(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyph
                 const auto& element = registry.get<UIRect>(entity);
                 builder.scissor = toScissor(element.clip, canvas->scale, canvas->targetSize);
 
-                if (const auto* p = registry.try_get<UIPanel>(entity)) builder.panel(element.rect, *p);
-                if (const auto* img = registry.try_get<UIImage>(entity)) builder.image(element.rect, *img);
+                // An interactable's own panel and image take its state colour.
+                const auto* interactable = registry.try_get<UIInteractable>(entity);
+                const glm::vec4 tint = interactable ? interactable->stateColor() : glm::vec4(1.0f);
+                if (const auto* p = registry.try_get<UIPanel>(entity)) builder.panel(element.rect, *p, tint);
+                if (const auto* img = registry.try_get<UIImage>(entity)) builder.image(element.rect, *img, tint);
                 const auto* t = registry.try_get<UIText>(entity);
                 const auto* cache = registry.try_get<UITextCache>(entity);
                 if (t && cache) builder.text(element.rect, *t, *cache);

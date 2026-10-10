@@ -98,6 +98,7 @@ struct UIImage {
     GPUTexture texture;
     glm::vec4 color{1.0f};
     glm::vec4 uvRect{0.0f, 0.0f, 1.0f, 1.0f};  // x, y, width, height in texture UVs
+    bool raycastTarget = true;                  // stops the pointer reaching what is under it
 };
 
 /// A 9-slice image: the corners keep their size, the edges stretch along one
@@ -108,6 +109,7 @@ struct UIPanel {
     glm::vec4 border{0.0f};                      // left, top, right, bottom, in texture pixels
     float borderScale = 1.0f;                    // canvas units per border texture pixel
     bool fillCenter = true;
+    bool raycastTarget = true;                   // stops the pointer reaching what is under it
 };
 
 struct UIText {
@@ -119,6 +121,74 @@ struct UIText {
     TextAlignV alignV = TextAlignV::Top;
     bool wrap = true;
     float lineSpacing = 1.0f;
+};
+
+// ─── Pointer input ───────────────────────────────────────────────
+//
+// The pointer goes to the topmost element under it that is a raycast target:
+// an element with UIInteractable, or with a UIImage or UIPanel whose
+// raycastTarget is set. The element's nearest UIInteractable, itself or an
+// ancestor, receives it, so a button's label and background act as the
+// button. CanvasInputSystem writes the state below once per frame, from the
+// rects of the frame before.
+
+/// An element the pointer can hover, press and click.
+struct UIInteractable {
+    bool enabled = true;
+
+    // Multiplied into the element's own UIPanel and UIImage colours, by state.
+    glm::vec4 normalColor{1.0f};
+    glm::vec4 hoverColor{0.92f, 0.92f, 0.92f, 1.0f};
+    glm::vec4 pressedColor{0.75f, 0.75f, 0.75f, 1.0f};
+    glm::vec4 disabledColor{0.6f, 0.6f, 0.6f, 0.5f};
+
+    // Written by CanvasInputSystem.
+    bool hovered = false;       // the pointer is over it, or it is pressed and the pointer is over it
+    bool pressed = false;       // pressed on it and not yet released
+    bool clicked = false;       // this frame: released over it after being pressed on it
+    bool valueChanged = false;  // this frame: a UIToggle or UISlider value changed by the pointer
+
+    const glm::vec4& stateColor() const {
+        if (!enabled) return disabledColor;
+        if (pressed) return pressedColor;
+        if (hovered) return hoverColor;
+        return normalColor;
+    }
+};
+
+/// A button: a click is UIInteractable::clicked.
+struct UIButton {};
+
+/// A click flips isOn. The checkmark element is visible while it is on.
+struct UIToggle {
+    bool isOn = false;
+    entt::entity checkmark = entt::null;
+};
+
+/// A horizontal slider. Pressing or dragging sets the value from the pointer's
+/// position across the element's rect. The fill element stretches from the
+/// left to the value, and the handle element is centred on it.
+struct UISlider {
+    float minValue = 0.0f;
+    float maxValue = 1.0f;
+    float value = 0.0f;
+    bool wholeNumbers = false;
+    entt::entity fill = entt::null;
+    entt::entity handle = entt::null;
+
+    float normalized() const {
+        return maxValue > minValue ? (value - minValue) / (maxValue - minValue) : 0.0f;
+    }
+};
+
+/// Where the pointer is, for the application. Owned by UIContext and written
+/// by CanvasInputSystem.
+struct UIPointerState {
+    bool overUI = false;                    // over a raycast target, or pressing an element
+    entt::entity canvas = entt::null;       // the canvas it is over
+    glm::vec2 position{0.0f};               // on that canvas, in canvas units
+    entt::entity hovered = entt::null;      // the UIInteractable it is over
+    entt::entity pressed = entt::null;      // the UIInteractable it pressed, until released
 };
 
 /// The layout of a UIText, and the inputs it was made from. Written by

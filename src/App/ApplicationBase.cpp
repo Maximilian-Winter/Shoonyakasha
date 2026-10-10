@@ -195,6 +195,7 @@ void ApplicationBase::registerSystems() {
     m_activeScene->addSystem<ECS::TransformSystem>();
     m_activeScene->addSystem<ECS::CameraSystem>();
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
+    m_activeScene->addSystem<UI::CanvasInputSystem>(&m_screenSize, &m_windowSize, &m_uiContext->pointer());
     m_activeScene->addSystem<UI::CanvasLayoutSystem>(&m_screenSize);
     m_activeScene->addSystem<UI::CanvasTextSystem>(&m_uiContext->fonts());
 }
@@ -478,6 +479,11 @@ void ApplicationBase::update() {
     if (m_swapChain) {
         VkExtent2D extent = m_swapChain->getSwapChainExtent();
         m_screenSize = glm::vec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
+    }
+    if (m_window) {
+        int width = 0, height = 0;
+        glfwGetWindowSize(m_window->getWindow(), &width, &height);
+        m_windowSize = glm::vec2(static_cast<float>(width), static_cast<float>(height));
     }
 
     m_activeScene->update();

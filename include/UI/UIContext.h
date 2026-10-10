@@ -48,6 +48,8 @@ public:
     const FontLibrary& fonts() const { return m_fonts; }
     GlyphCache& glyphs() { return m_glyphs; }
     const UIDrawData& drawData() const { return m_drawData; }
+    UIPointerState& pointer() { return m_pointer; }  // written by CanvasInputSystem
+    const UIPointerState& pointer() const { return m_pointer; }
     bool hasRenderer() const { return m_renderer != nullptr; }
 
     /// Builds this frame's draw data from the laid-out canvases. With a
@@ -80,6 +82,7 @@ private:
     FontLibrary m_fonts;
     GlyphCache m_glyphs;
     UIDrawData m_drawData;
+    UIPointerState m_pointer;
     std::unique_ptr<UIRenderer> m_renderer;
     bool m_overlaysDrawn = false;
 };

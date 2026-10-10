@@ -288,6 +288,7 @@ private:
     std::unique_ptr<FontLoader> m_fontLoader;
     std::vector<VkCommandBuffer> m_commandBuffers;
     glm::vec2 m_screenSize{1600.0f, 900.0f};  // Updated each frame; drives UILayoutSystem
+    glm::vec2 m_windowSize{0.0f};             // in cursor coordinates; differs from m_screenSize on high-DPI displays
 
     // ─── Frame Graph ───────────────────────────────────────────
     // The registry must outlive the graph: RenderGraph holds a raw pointer to it
