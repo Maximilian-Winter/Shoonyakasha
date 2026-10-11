@@ -259,6 +259,7 @@ void FrameGraphBuilder::clear() {
     m_bufferLayouts.clear();
     m_bufferLayoutLookup.clear();
     m_presets.clear();
+    m_uiSettings = {};
     m_unavailablePasses.clear();
 }
 

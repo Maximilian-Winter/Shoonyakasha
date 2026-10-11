@@ -362,7 +362,7 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
 
         # Canvases
         EntityHandle createCanvas(const vec2& referenceSize, CanvasScaleMode scaleMode, int sortOrder)
-        EntityHandle createWorldCanvas(const vec2& pixelSize, const vec2& worldSize, float emission)
+        EntityHandle createWorldCanvas(const vec2& pixelSize, const vec2& worldSize, float emission, bint lit)
         void setCanvasScaling(EntityHandle canvas, CanvasScaleMode mode, const vec2& referenceSize,
                               float scaleFactor, float match)
         void setCanvasSortOrder(EntityHandle canvas, int sortOrder)

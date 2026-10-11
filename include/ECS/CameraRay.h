@@ -42,6 +42,18 @@ inline Ray screenPointToRay(const glm::vec2& pixel, const glm::vec2& screenSize,
     return ray;
 }
 
+/// The world point seen at window pixel `pixel` whose depth-buffer value is
+/// `depth`, for a camera rendered with the given view and projection. The
+/// depth buffer holds the projection's clip z over w, which with this
+/// GL-style projection is the NDC z, kept where it lies in 0..1.
+inline glm::vec3 screenPointToWorld(const glm::vec2& pixel, const glm::vec2& screenSize, float depth,
+                                    const glm::mat4& view, const glm::mat4& projection) {
+    const glm::vec2 ndc(2.0f * pixel.x / screenSize.x - 1.0f,
+                        1.0f - 2.0f * pixel.y / screenSize.y);
+    glm::vec4 point = glm::inverse(projection * view) * glm::vec4(ndc, depth, 1.0f);
+    return glm::vec3(point) / point.w;
+}
+
 struct QuadHit {
     float distance = 0.0f;   // along the ray, in world units
     glm::vec2 uv{0.0f};      // u from local x = -0.5; v from local y = +0.5 (top)

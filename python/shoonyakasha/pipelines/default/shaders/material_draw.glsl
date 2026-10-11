@@ -11,4 +11,5 @@ layout(push_constant) uniform MaterialDraw {
     float alphaCutoff;
     float hasNormalMap;      // 1 when the material has its own texture
     float hasMetalRoughMap;
+    float exposureCompensation;  // 0..1: how much emission is divided by the exposure
 } draw;

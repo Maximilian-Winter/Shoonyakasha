@@ -365,6 +365,98 @@ TEST(CanvasInput, WorldSliderFollowsADragOffItsQuad) {
     EXPECT_FLOAT_EQ(f.registry.get<UISlider>(slider).value, 1.0f);
 }
 
+// ─── World canvases behind the scene ────────────────────────────
+
+namespace {
+
+/// The depth-buffer value of the world point on the axis at `z`, for the
+/// camera addCamera makes: its clip z over w.
+float depthAt(const entt::registry& registry, float z) {
+    for (auto [entity, camera] : registry.view<const ECS::CameraComponent>().each()) {
+        const glm::vec4 clip = camera.projectionMatrix * camera.viewMatrix * glm::vec4(0, 0, z, 1);
+        return clip.z / clip.w;
+    }
+    return 1.0f;
+}
+
+/// A canvas at z = 0 filled by a button, the pointer at the screen centre
+/// and the scene's depth there given by `depth`.
+struct OcclusionCase {
+    Fixture f;
+    UIPointerDepth depth;
+    CanvasInputSystem input{&f.screen, &f.window, &f.pointer, nullptr, nullptr, &depth};
+    entt::entity world = entt::null;
+    entt::entity button = entt::null;
+
+    OcclusionCase() {
+        addCamera(f.registry, f.screen);
+        world = addWorldCanvas(f.registry, 0.0f);
+        button = f.at(world, {0, 0}, {400, 200});
+        f.registry.emplace<UIInteractable>(button);
+    }
+
+    bool hovered(bool valid, float value) {
+        depth.valid = valid;
+        depth.depth = value;
+        f.registry.get<ECS::InputStateComponent>(f.inputEntity).mousePosition = {400, 300};
+        f.layout();
+        input.update(f.registry, 0.0f);
+        return f.ui(button).hovered;
+    }
+};
+
+} // namespace
+
+TEST(CanvasInput, WorldCanvasBehindTheSceneUnderThePointerIsNotHit) {
+    OcclusionCase c;
+    EXPECT_FALSE(c.hovered(true, depthAt(c.f.registry, 1.0f)));   // something a unit in front of it
+    EXPECT_TRUE(c.f.pointer.canvas == entt::null);
+    EXPECT_FALSE(c.f.pointer.overUI);
+}
+
+TEST(CanvasInput, WorldCanvasIsHitAtItsOwnDepthAndInFrontOfTheScene) {
+    OcclusionCase c;
+    EXPECT_TRUE(c.hovered(true, depthAt(c.f.registry, 0.0f)));    // the canvas's own quad
+    EXPECT_TRUE(c.hovered(true, depthAt(c.f.registry, -1.0f)));   // the scene behind it
+    EXPECT_TRUE(c.hovered(true, depthAt(c.f.registry, 0.01f)));   // within the margin
+}
+
+TEST(CanvasInput, UnknownDepthOrNothingDrawnHidesNoWorldCanvas) {
+    OcclusionCase c;
+    EXPECT_TRUE(c.hovered(false, depthAt(c.f.registry, 1.0f)));
+    EXPECT_TRUE(c.hovered(true, 1.0f));
+}
+
+TEST(CanvasInput, ScreenCanvasesIgnoreTheSceneDepth) {
+    OcclusionCase c;
+    const auto overlay = c.f.at(c.f.canvas, {350, 250}, {100, 100});
+    c.f.registry.emplace<UIInteractable>(overlay);
+    c.hovered(true, 0.0f);
+    EXPECT_TRUE(c.f.ui(overlay).hovered);
+}
+
+TEST(CanvasInput, PointerStateKeepsTheScreenPixel) {
+    Fixture f;
+    f.window = {400.0f, 300.0f};
+    f.step({100, 50}, false);
+    EXPECT_EQ(f.pointer.pixel, glm::vec2(200.0f, 100.0f));
+}
+
+TEST(CameraRay, ScreenPointToWorldUndoesTheProjection) {
+    const glm::vec2 screen(800.0f, 600.0f);
+    const glm::mat4 view = glm::lookAt(glm::vec3(1, 2, 5), glm::vec3(0), glm::vec3(0, 1, 0));
+    const glm::mat4 projection = glm::perspective(glm::radians(60.0f), screen.x / screen.y, 0.1f, 100.0f);
+    const glm::vec3 point(0.3f, -0.2f, -1.5f);
+    const glm::vec4 clip = projection * view * glm::vec4(point, 1.0f);
+    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+    const glm::vec2 pixel((ndc.x + 1.0f) * 0.5f * screen.x, (1.0f - ndc.y) * 0.5f * screen.y);
+
+    const glm::vec3 back = ECS::screenPointToWorld(pixel, screen, ndc.z, view, projection);
+    EXPECT_NEAR(back.x, point.x, 1e-3f);
+    EXPECT_NEAR(back.y, point.y, 1e-3f);
+    EXPECT_NEAR(back.z, point.z, 1e-3f);
+}
+
 TEST(CameraRay, QuadPlaneHitRunsPastTheQuad) {
     ECS::Ray ray;
     ray.origin = {1.5f, 0.0f, 5.0f};

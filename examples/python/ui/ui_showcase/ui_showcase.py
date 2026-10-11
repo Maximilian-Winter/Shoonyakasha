@@ -21,7 +21,9 @@ A tour of engine.ui on the default pipeline, in one window:
   pointer to everything under it while it is open
 - a kiosk in the world, a canvas on a quad you can click in 3D, with its
   own counter, a slider for its glow and a button that changes its
-  resolution
+  resolution. A pillar stands in front of it: where the pillar hides the
+  kiosk, the pointer is over the scene, not the kiosk. The kiosk keeps its
+  brightness when the exposure slider changes the rest of the scene
 
 The sidebar and dialog frames are a 9-slice texture this script draws itself
 (written to generated/frame.png), so panels of any size keep sharp corners.
@@ -193,6 +195,15 @@ def build_scene():
     for mesh in floor:
         engine.scene.set_material_vec4(mesh, "baseColorFactor", (0.42, 0.40, 0.37, 1.0))
         engine.scene.set_material_float(mesh, "roughnessFactor", 0.9)
+
+    # A pillar between the camera and the kiosk, hiding part of it.
+    pillar = engine.load_gltf_scene("models/Box.gltf").entities
+    root = named("Pillar", root_of(pillar[0]))
+    engine.scene.set_rotation(root, (0.0, 0.0, 0.0))
+    engine.scene.set_scale(root, (0.14, 1.6, 0.14))
+    engine.scene.set_position(root, (1.3, 0.3, 1.3))
+    for mesh in pillar:
+        engine.scene.set_material_vec4(mesh, "baseColorFactor", (0.55, 0.52, 0.48, 1.0))
 
 
 PAGE_WIDTH = 336

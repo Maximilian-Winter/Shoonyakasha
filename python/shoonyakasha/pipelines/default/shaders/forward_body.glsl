@@ -7,6 +7,7 @@
 #include "common.glsl"
 #include "sk/pbr.glsl"
 #include "material_draw.glsl"
+#define EXPOSURE_SET 6
 #include "surface.glsl"
 
 layout(set = 0, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
@@ -23,7 +24,7 @@ layout(set = 5, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascade
 
 #include "csm.glsl"
 #ifdef RAY_TRACED_SHADOWS
-layout(set = 6, binding = 0) uniform accelerationStructureEXT scene;
+layout(set = 7, binding = 0) uniform accelerationStructureEXT scene;
 #include "rt_shadows.glsl"
 const int SUN_RAYS = 4;   // more than the opaque pass: TAA cannot follow a blended surface
 #endif

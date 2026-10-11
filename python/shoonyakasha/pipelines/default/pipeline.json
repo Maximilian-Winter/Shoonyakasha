@@ -464,6 +464,12 @@
           "name": "hasMetalRoughMap",
           "type": "float",
           "source": "entity.material.textures.metallicRoughnessMap.exists"
+        },
+        {
+          "name": "exposureCompensation",
+          "type": "float",
+          "source": "entity.material.params.exposureCompensation",
+          "default": 0.0
         }
       ]
     },
@@ -684,6 +690,29 @@
           ],
           "name": "Cascades",
           "autoBindBuffer": "Cascades"
+        }
+      ]
+    },
+    "exposureReadSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "Settings",
+          "autoBindBuffer": "Settings"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "exposureImage",
+          "autoBindResource": "exposure",
+          "autoBindSampler": "nearestClamp"
         }
       ]
     },
@@ -1701,6 +1730,12 @@
         "sortMode": "front_to_back",
         "entityDataBinding": "material"
       },
+      "inputs": [
+        {
+          "resource": "exposure",
+          "usage": "shader_read"
+        }
+      ],
       "outputs": [
         {
           "resource": "gAlbedo",
@@ -1770,7 +1805,8 @@
       },
       "descriptorSets": [
         "cameraSet",
-        "materialSet"
+        "materialSet",
+        "exposureReadSet"
       ],
       "pushConstants": [
         {
@@ -1779,7 +1815,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 184
         }
       ]
     },
@@ -1792,6 +1828,12 @@
         "sortMode": "front_to_back",
         "entityDataBinding": "material"
       },
+      "inputs": [
+        {
+          "resource": "exposure",
+          "usage": "shader_read"
+        }
+      ],
       "outputs": [
         {
           "resource": "gAlbedo",
@@ -1827,7 +1869,8 @@
       },
       "descriptorSets": [
         "cameraSet",
-        "materialSet"
+        "materialSet",
+        "exposureReadSet"
       ],
       "pushConstants": [
         {
@@ -1836,7 +1879,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 184
         }
       ]
     },
@@ -1849,6 +1892,12 @@
         "entityDataBinding": "skinnedMaterial",
         "alphaFilter": "opaque"
       },
+      "inputs": [
+        {
+          "resource": "exposure",
+          "usage": "shader_read"
+        }
+      ],
       "outputs": [
         {
           "resource": "gAlbedo",
@@ -1886,6 +1935,7 @@
       "descriptorSets": [
         "cameraSet",
         "materialSet",
+        "exposureReadSet",
         "skeletonSet"
       ],
       "pushConstants": [
@@ -1895,7 +1945,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 184
         }
       ]
     },
@@ -1908,6 +1958,12 @@
         "entityDataBinding": "skinnedMaterial",
         "alphaFilter": "mask"
       },
+      "inputs": [
+        {
+          "resource": "exposure",
+          "usage": "shader_read"
+        }
+      ],
       "outputs": [
         {
           "resource": "gAlbedo",
@@ -1945,6 +2001,7 @@
       "descriptorSets": [
         "cameraSet",
         "materialSet",
+        "exposureReadSet",
         "skeletonSet"
       ],
       "pushConstants": [
@@ -1954,7 +2011,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 184
         }
       ]
     },
@@ -2252,6 +2309,10 @@
         {
           "resource": "lightClusters",
           "usage": "shader_read"
+        },
+        {
+          "resource": "exposure",
+          "usage": "shader_read"
         }
       ],
       "outputs": [
@@ -2278,7 +2339,8 @@
         "lightsSet",
         "iblSet",
         "shadowMapSet",
-        "settingsSet"
+        "settingsSet",
+        "exposureReadSet"
       ],
       "pushConstants": [
         {
@@ -2287,7 +2349,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 184
         }
       ]
     },
@@ -2314,6 +2376,10 @@
         },
         {
           "resource": "lightClusters",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "exposure",
           "usage": "shader_read"
         }
       ],
@@ -2342,6 +2408,7 @@
         "iblSet",
         "shadowMapSet",
         "settingsSet",
+        "exposureReadSet",
         "rayTracingSceneSet"
       ],
       "pushConstants": [
@@ -2351,7 +2418,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 180
+          "size": 184
         }
       ]
     },
@@ -2742,5 +2809,9 @@
         "default.cascadeBlend": null
       }
     }
+  },
+  "ui": {
+    "depth": "gDepth",
+    "afterPass": "GBufferSkinnedMasked"
   }
 }

@@ -201,7 +201,8 @@ void ApplicationBase::registerSystems() {
     m_activeScene->addSystem<ECS::CameraSystem>();
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
     m_activeScene->addSystem<UI::CanvasInputSystem>(&m_screenSize, &m_windowSize, &m_uiContext->pointer(),
-                                                    &m_uiContext->focus(), &m_uiContext->clipboard());
+                                                    &m_uiContext->focus(), &m_uiContext->clipboard(),
+                                                    &m_uiContext->pointerDepth());
     m_activeScene->addSystem<UI::CanvasLayoutSystem>(&m_screenSize, &m_uiContext->fonts());
     m_activeScene->addSystem<UI::CanvasTextSystem>(&m_uiContext->fonts());
 }
@@ -336,6 +337,19 @@ void ApplicationBase::initializeRenderGraph() {
     m_renderScaleChanged = false;
 
     m_logger->log(LogLevel::Info, "Render graph compiled successfully");
+}
+
+void ApplicationBase::requestPointerDepth() {
+    // The pipeline's "ui" block names the depth image world-canvas hits are
+    // tested against. It is at the render resolution, which the render
+    // scale can make differ from the screen's.
+    const auto& settings = m_renderGraph->getUISettings();
+    if (settings.depth.empty() || m_screenSize.x <= 0.0f || m_screenSize.y <= 0.0f) return;
+    const VkExtent2D extent = getRenderExtent();
+    const glm::vec2 pixel = m_uiContext->pointer().pixel * glm::vec2(extent.width, extent.height) / m_screenSize;
+    const VkOffset2D texel{std::clamp(static_cast<int32_t>(pixel.x), 0, static_cast<int32_t>(extent.width) - 1),
+                           std::clamp(static_cast<int32_t>(pixel.y), 0, static_cast<int32_t>(extent.height) - 1)};
+    m_renderGraph->requestPixelReadback(settings.depth, settings.afterPass, texel);
 }
 
 void ApplicationBase::bindIBLTextures() {
@@ -560,7 +574,11 @@ void ApplicationBase::render() {
     VkCommandBuffer commandBuffer = m_commandBuffers[imageIndex];
     m_commandManager->record(commandBuffer);
     m_uiContext->prepareFrame(m_activeScene->getRegistry(), commandBuffer, m_currentFrame);
+    requestPointerDepth();
     m_renderGraph->execute(m_currentFrame, imageIndex, commandBuffer);
+    const auto& depth = m_renderGraph->latestPixelReadback();
+    m_uiContext->pointerDepth().valid = depth.valid && !m_renderGraph->getUISettings().depth.empty();
+    m_uiContext->pointerDepth().depth = depth.value;
     m_commandManager->endRecording(commandBuffer);
     if (m_uiContext->overlaysUndrawn()) {
         m_logger->logEvery(10.0f, LogLevel::Warning, "Canvas UI: screen canvases exist but the pipeline has "

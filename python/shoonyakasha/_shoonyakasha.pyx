@@ -1106,14 +1106,16 @@ cdef class UI:
         return <uint32_t>self._ptr.createCanvas(_tuple_to_vec2(reference_size),
                                                 <CanvasScaleMode>scale_mode, sort_order)
 
-    def create_world_canvas(self, pixel_size, world_size, float emission=1.0):
+    def create_world_canvas(self, pixel_size, world_size, float emission=1.0, bint lit=False):
         """A canvas of pixel_size pixels on a quad of world_size units, facing +Z.
 
-        Place it with engine.scene.set_position and set_rotation. Its material
-        emits the canvas at emission times its colour.
+        Place it with engine.scene.set_position and set_rotation. Unlit, its
+        material emits the canvas at emission times its colour, at a
+        brightness exposure does not change. With lit=True the canvas is the
+        material's base colour, lit by the scene, and emission is not used.
         """
         return <uint32_t>self._ptr.createWorldCanvas(_tuple_to_vec2(pixel_size), _tuple_to_vec2(world_size),
-                                                     emission)
+                                                     emission, lit)
 
     def set_canvas_scaling(self, uint32_t canvas, int mode, reference_size=(1920, 1080),
                            float scale_factor=1.0, float match=0.5):

@@ -261,6 +261,30 @@ class PipelineValidation(unittest.TestCase):
         self.assertTrue(any("'Onyl', which is not a pass" in m for m in messages), messages)
         self.assertTrue(any("'a.d' must be" in m for m in messages), messages)
 
+    def test_the_ui_block_names_a_depth_image_and_a_pass_that_writes_it(self):
+        import copy
+        document = copy.deepcopy(self.MINIMAL)
+        document["resources"].append({"name": "depth", "kind": "image"})
+        document["passes"][0]["outputs"].append({"resource": "depth", "usage": "depth_write"})
+        document["ui"] = {"depth": "depth", "afterPass": "Only"}
+        self.assertEqual([], self.problems(document))
+
+        for ui, expected in (({"depth": "depht", "afterPass": "Only"}, "'depht', which is not a resource"),
+                             ({"depth": "depth", "afterPass": "Onyl"}, "'Onyl', which is not a pass"),
+                             ({"depth": "swapchain", "afterPass": "Only"}, None),
+                             ({"depth": "depth"}, "must be an object")):
+            document["ui"] = ui
+            messages = [p.message for p in self.problems(document)]
+            if expected is None:
+                self.assertEqual([], messages)
+            else:
+                self.assertTrue(any(expected in m for m in messages), messages)
+
+        document["passes"][0]["outputs"].pop()
+        document["ui"] = {"depth": "depth", "afterPass": "Only"}
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("does not write 'depth'" in m for m in messages), messages)
+
     def test_repeat_without_a_count_is_reported(self):
         document = dict(self.MINIMAL)
         document["passes"] = [dict(self.MINIMAL["passes"][0], repeat={"index": "i"})]

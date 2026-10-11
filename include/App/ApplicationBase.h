@@ -348,6 +348,9 @@ private:
     /// Load the JSON, bind the scene and compile. Runs after onInit() so that
     /// entities created there are present.
     void initializeRenderGraph();
+    /// Ask the graph for the depth under the canvas pointer, when the
+    /// pipeline names a depth image for the UI.
+    void requestPointerDepth();
     void bindIBLTextures();
     void createSyncObjects();
     void setupEventHandlers();

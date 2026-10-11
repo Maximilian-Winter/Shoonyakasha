@@ -174,6 +174,9 @@ TEST_F(UIAPIFixture, WorldCanvasesLayOutInTheirOwnPixels) {
     frame();
     EXPECT_EQ(ui.getCanvasSize(canvas), glm::vec2(512.0f, 256.0f));
     EXPECT_EQ(c.clearColor, glm::vec4(0.0f));
+
+    const EntityHandle lit = ui.createWorldCanvas({256.0f, 256.0f}, {1.0f, 1.0f}, 1.0f, true);
+    EXPECT_EQ(registry.get<UI::UICanvas>(e(lit)).textureSlot, "albedoMap");
 }
 
 TEST_F(UIAPIFixture, LayoutGroupsPlaceAndSizeTheirChildren) {

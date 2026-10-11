@@ -16,6 +16,7 @@
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
+#include <limits>
 #include <optional>
 
 namespace Shoonyakasha {
@@ -43,9 +44,11 @@ struct PointerHit {
 /// screen pixels; `ray` is the pointer's ray from the main camera, if there
 /// is one. A screen canvas counts only where it has a raycast target, and a
 /// world canvas wherever the ray meets its quad's front, so the nearest quad
-/// hides those behind it.
+/// hides those behind it. World canvases the ray meets farther than
+/// `maxWorldDistance` along it, from its origin, are left out.
 std::optional<PointerHit> findPointerHit(const entt::registry& registry, glm::vec2 pixel,
-                                         const std::optional<ECS::Ray>& ray);
+                                         const std::optional<ECS::Ray>& ray,
+                                         float maxWorldDistance = std::numeric_limits<float>::infinity());
 
 /// Where `pixel` or `ray` meets `canvas`, in canvas units, also outside it:
 /// for a world canvas, on its quad's plane. Nothing when they cannot meet.

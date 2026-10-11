@@ -53,6 +53,7 @@ public:
     UIFocusState& focus() { return m_focus; }        // written by CanvasInputSystem
     const UIFocusState& focus() const { return m_focus; }
     UIClipboard& clipboard() { return m_clipboard; }  // read and written by CanvasInputSystem
+    UIPointerDepth& pointerDepth() { return m_pointerDepth; }  // read by CanvasInputSystem
     bool hasRenderer() const { return m_renderer != nullptr; }
 
     /// Builds this frame's draw data from the laid-out canvases. With a
@@ -66,13 +67,14 @@ public:
 
     /// A world canvas: an entity with a WorldTexture UICanvas of `pixelSize`
     /// pixels, shown on a quad of `worldSize` units centred on its transform
-    /// and facing +Z. The quad's material emits the canvas at `emission`
-    /// times its colour, over a black base colour, and casts no shadow. For a
-    /// lit canvas, set UICanvas::textureSlot to "albedoMap", the material's
-    /// baseColorFactor to white and its emissiveFactor to zero. Without a
-    /// renderer the entity has no mesh.
+    /// and facing +Z, that casts no shadow. Unlit, the quad's material emits
+    /// the canvas at `emission` times its colour over a black base colour,
+    /// with the material parameter exposureCompensation at 1, so exposure
+    /// does not change its brightness. Lit, the canvas is the material's base
+    /// colour (UICanvas::textureSlot "albedoMap"), lit like any surface, and
+    /// `emission` is not used. Without a renderer the entity has no mesh.
     entt::entity createWorldCanvas(entt::registry& registry, glm::vec2 pixelSize, glm::vec2 worldSize,
-                                   float emission = 1.0f);
+                                   float emission = 1.0f, bool lit = false);
 
     /// Draws the screen overlay canvases. The renderer of "ui_canvas" passes.
     void drawOverlays(const FrameGraph::PassExecuteContext& ctx);
@@ -88,6 +90,7 @@ private:
     UIPointerState m_pointer;
     UIFocusState m_focus;
     UIClipboard m_clipboard;
+    UIPointerDepth m_pointerDepth;
     std::unique_ptr<UIRenderer> m_renderer;
     bool m_overlaysDrawn = false;
 };

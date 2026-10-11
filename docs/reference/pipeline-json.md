@@ -16,6 +16,7 @@ This reference describes the current [C++ parser](../../src/Vulkan/FrameGraph/Fr
 | `passes` | array | Pass declarations, analyzed for execution dependencies |
 | `uniformBuffers` | object keyed by name | Older explicit-size/offset UBO declarations; prefer `bufferLayouts` for new source-driven buffers |
 | `presets` | object keyed by name | Named sets of pass switches and scene values, such as quality tiers; below |
+| `ui` | object | The depth image the canvas UI tests world-canvas hits against; below |
 
 These sections are conditionally parsed. Their absence is not a useful runnable pipeline: normal windowed applications need resources, a rendering pass, and a final present output. `standardBuffers` is obsolete. Unknown keys are not comprehensively rejected; accepted JSON is not proof a key is implemented.
 
@@ -230,6 +231,14 @@ A preset switches passes and sets `scene.custom` values in one call, `apply_pipe
 ```
 
 `passes` maps pass names, or the declared name of a repeated pass, to `true` or `false`; a name that is not a pass fails at load. `values` maps `scene.custom` keys, without the prefix, to a number or an array of numbers, each set with the type of the buffer-layout field whose `source` reads it (so `0` above lands as a float), or as a float or vector when no field does. `null` removes the value so the field's `default` applies again, which is how a preset returns to the pipeline's defaults without repeating them. A preset that turns on a pass the device cannot run is refused whole, with a warning. Called before the pipeline is loaded, from `on_init`, the preset is applied once it is; an unknown name is then a warning at load.
+
+## Canvas UI depth
+
+```json
+{ "ui": { "depth": "gDepth", "afterPass": "GBufferSkinnedMasked" } }
+```
+
+`depth` names an image resource and `afterPass` a pass that writes it; anything else fails at load. The image is created with transfer-source usage. Each frame the engine copies the texel under the canvas pointer right after that pass (`RenderGraph::requestPixelReadback`), and the canvas UI ignores world-canvas hits behind the depth it read; the value arrives as many frames later as there are frames in flight. Without the block, world-canvas hits are not tested against the scene. See the [canvas UI guide](../guides/canvas-ui.md#geometry-in-front-of-world-canvases).
 
 ## Initialization, memory, and readback
 

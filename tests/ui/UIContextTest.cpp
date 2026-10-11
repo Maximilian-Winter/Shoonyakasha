@@ -111,6 +111,7 @@ TEST(UIContext, CreatesAWorldCanvasWithAnEmissiveMaterial) {
     const auto& material = registry.get<MaterialComponentV5>(canvas);
     EXPECT_EQ(material.getParam<glm::vec4>("baseColorFactor"), glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
     EXPECT_EQ(material.getParam<glm::vec4>("emissiveFactor"), glm::vec4(3.0f, 3.0f, 3.0f, 0.0f));
+    EXPECT_EQ(material.getParam<float>("exposureCompensation"), 1.0f);   // exposure leaves it as it is
 
     // Without a renderer there is no quad to draw.
     EXPECT_FALSE(registry.all_of<MeshComponent>(canvas));
@@ -121,6 +122,18 @@ TEST(UIContext, CreatesAWorldCanvasWithAnEmissiveMaterial) {
     context.prepareFrame(registry, VK_NULL_HANDLE, 0);
     ASSERT_EQ(context.drawData().canvases.size(), 1u);
     EXPECT_EQ(context.drawData().canvases[0].targetSize, glm::vec2(512.0f, 256.0f));
+}
+
+TEST(UIContext, CreatesALitWorldCanvasInTheBaseColour) {
+    UIContext context;
+    entt::registry registry;
+    const auto canvas = context.createWorldCanvas(registry, {512.0f, 256.0f}, {2.0f, 1.0f}, 3.0f, true);
+
+    EXPECT_EQ(registry.get<UICanvas>(canvas).textureSlot, "albedoMap");
+    const auto& material = registry.get<MaterialComponentV5>(canvas);
+    EXPECT_EQ(material.getParam<glm::vec4>("baseColorFactor"), glm::vec4(1.0f));
+    EXPECT_EQ(material.getParam<glm::vec4>("emissiveFactor"), glm::vec4(0.0f));
+    EXPECT_EQ(material.getParam<float>("exposureCompensation"), 0.0f);
 }
 
 TEST(UIShaders, MatchTheRendererInterface) {

@@ -125,8 +125,9 @@ EntityHandle UIAPI::createCanvas(const glm::vec2& referenceSize, CanvasScaleMode
     return toHandle(e);
 }
 
-EntityHandle UIAPI::createWorldCanvas(const glm::vec2& pixelSize, const glm::vec2& worldSize, float emission) {
-    const entt::entity e = m_impl->context.createWorldCanvas(m_impl->registry, pixelSize, worldSize, emission);
+EntityHandle UIAPI::createWorldCanvas(const glm::vec2& pixelSize, const glm::vec2& worldSize, float emission,
+                                      bool lit) {
+    const entt::entity e = m_impl->context.createWorldCanvas(m_impl->registry, pixelSize, worldSize, emission, lit);
     auto& canvas = m_impl->registry.get<UI::UICanvas>(e);
     canvas.scaleMode = UI::UICanvas::ScaleMode::ScaleWithScreen;
     canvas.referenceSize = pixelSize;

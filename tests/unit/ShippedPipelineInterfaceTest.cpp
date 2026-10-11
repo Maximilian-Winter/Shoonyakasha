@@ -147,6 +147,60 @@ TEST(DefaultPipeline, DrawsTheUIOverlayLastAndPresentsFromIt) {
     }
 }
 
+TEST(DefaultPipeline, TestsWorldCanvasHitsAgainstTheLastGBufferDepth) {
+    FrameGraphBuilder builder;
+    loadGraphFromFile(builder, defaultPipeline().string());
+    const auto& ui = builder.getUISettings();
+    EXPECT_EQ(ui.depth, "gDepth");
+    EXPECT_EQ(ui.afterPass, "GBufferSkinnedMasked");
+
+    // No later pass writes the depth: the opaque scene is complete there.
+    const auto depth = builder.getResource("gDepth");
+    bool after = false;
+    for (const auto& pass : builder.getPassDeclarations()) {
+        if (after) {
+            for (const auto& output : pass.outputs) {
+                EXPECT_FALSE(output.handle == depth && output.usage == ResourceUsage::DepthStencilWrite)
+                    << pass.name;
+            }
+        }
+        if (pass.name == ui.afterPass) after = true;
+    }
+    EXPECT_TRUE(after);
+}
+
+TEST(DefaultPipeline, MaterialPassesReadLastFramesExposure) {
+    FrameGraphBuilder builder;
+    loadGraphFromFile(builder, defaultPipeline().string());
+    const auto exposure = builder.getResource("exposure");
+
+    // TransparentRT is left out on a device without ray queries.
+    const std::vector<std::string> drawing = {"GBufferOpaque", "GBufferMasked", "GBufferSkinned",
+                                              "GBufferSkinnedMasked", "Transparent", "TransparentRT"};
+    bool exposureWritten = false;
+    int materialPasses = 0;
+    for (const auto& pass : builder.getPassDeclarations()) {
+        if (pass.name == "AutoExposure") exposureWritten = true;
+        if (std::find(drawing.begin(), drawing.end(), pass.name) == drawing.end()) continue;
+        ++materialPasses;
+        EXPECT_FALSE(exposureWritten) << pass.name << " comes after AutoExposure";
+        EXPECT_NE(std::find(pass.descriptorSetRefs.begin(), pass.descriptorSetRefs.end(), "exposureReadSet"),
+                  pass.descriptorSetRefs.end()) << pass.name;
+        EXPECT_TRUE(std::any_of(pass.inputs.begin(), pass.inputs.end(),
+                                [&](const ResourceAccess& a) { return a.handle == exposure; })) << pass.name;
+    }
+    EXPECT_GE(materialPasses, 5);
+
+    const auto* draw = builder.getBufferLayout("MaterialDraw");
+    ASSERT_NE(draw, nullptr);
+    const auto field = std::find_if(draw->fields.begin(), draw->fields.end(),
+                                    [](const BufferFieldDesc& f) { return f.name == "exposureCompensation"; });
+    ASSERT_NE(field, draw->fields.end());
+    EXPECT_EQ(field->source, "entity.material.params.exposureCompensation");
+    ASSERT_EQ(field->defaultValue.size(), 1u);
+    EXPECT_EQ(field->defaultValue[0], 0.0f);   // materials without it are not compensated
+}
+
 TEST(PipelineShaderPaths, RelativePathsOnlyResolveBesideTheJsonWhenTheFileIsThere) {
     const fs::path dir = fs::temp_directory_path() / "sk_shader_path_test";
     fs::remove_all(dir);

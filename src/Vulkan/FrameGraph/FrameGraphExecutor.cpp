@@ -414,6 +414,7 @@ void FrameGraphExecutor::recordPasses(
             vkCmdEndRendering(commandBuffer);
         }
         recordBarriers(commandBuffer, compiledPass.postBarriers, nullptr, compiled, resources, true);
+        if (m_postPassHook) m_postPassHook(compiledPass, passDecl, frameIndex, commandBuffer);
 
         RenderStatsCounting::active = nullptr;
         if (m_stats) m_stats->endPass(commandBuffer);

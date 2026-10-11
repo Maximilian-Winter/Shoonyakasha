@@ -23,7 +23,7 @@ void setDefaultFont(uint32_t font);
 void setFontFallbacks(uint32_t font, const std::vector<uint32_t>& fallbacks);
 void setDefaultFontFallbacks(const std::vector<uint32_t>& fallbacks);
 EntityHandle createCanvas(const glm::vec2& referenceSize = glm::vec2(1920.0f, 1080.0f), CanvasScaleMode scaleMode = CanvasScaleMode::ScaleWithScreen, int sortOrder = 0);
-EntityHandle createWorldCanvas(const glm::vec2& pixelSize, const glm::vec2& worldSize, float emission = 1.0f);
+EntityHandle createWorldCanvas(const glm::vec2& pixelSize, const glm::vec2& worldSize, float emission = 1.0f, bool lit = false);
 void setCanvasScaling(EntityHandle canvas, CanvasScaleMode mode, const glm::vec2& referenceSize, float scaleFactor = 1.0f, float match = 0.5f);
 void setCanvasSortOrder(EntityHandle canvas, int sortOrder);
 void setCanvasPixelSize(EntityHandle canvas, const glm::vec2& pixelSize);

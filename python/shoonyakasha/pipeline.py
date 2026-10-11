@@ -376,6 +376,26 @@ def validate_json(document, base_dir=None, source="<json>"):
                 problems.append(Problem(where, "value '%s' must be a number, an array of numbers or null"
                                         % key))
 
+    # ── ui ─────────────────────────────────────────────────────
+    ui = document.get("ui")
+    if ui is not None:
+        where = "%s ui" % source
+        if (not isinstance(ui, dict) or not isinstance(ui.get("depth"), str)
+                or not isinstance(ui.get("afterPass"), str)):
+            problems.append(Problem(where, "must be an object with 'depth', an image, and 'afterPass', "
+                                           "the pass after which it is read"))
+        else:
+            if ui["depth"] not in declared:
+                problems.append(Problem(where, "'depth' names '%s', which is not a resource" % ui["depth"],
+                                        hint=_suggest(ui["depth"], declared)))
+            after = next((p for p in passes if isinstance(p, dict) and p.get("name") == ui["afterPass"]), None)
+            if after is None:
+                problems.append(Problem(where, "'afterPass' names '%s', which is not a pass" % ui["afterPass"],
+                                        hint=_suggest(ui["afterPass"], pass_names)))
+            elif not any(isinstance(o, dict) and o.get("resource") == ui["depth"]
+                         for o in (after.get("outputs") or [])):
+                problems.append(Problem(where, "pass '%s' does not write '%s'" % (ui["afterPass"], ui["depth"])))
+
     # ── whole-graph checks ─────────────────────────────────────
     for resource in sorted(read - written):
         if not declared.get(resource, {}).get("imported"):

@@ -146,10 +146,21 @@ roughness), `gVelocity` (RG16F: this frame's screen position minus last
 frame's, in UV units, without the jitter), `gDepth` (D32; positions are
 reconstructed from it) and `hdrColor` (RGBA16F).
 
-The G-buffer passes push 180 bytes of constants per draw (this and last
+The G-buffer passes push 184 bytes of constants per draw (this and last
 frame's model matrix, then the material factors). Every desktop GPU allows
 256; a device that allows only Vulkan's minimum of 128 reports those passes
 at load and draws nothing in them.
+
+Materials can set `exposureCompensation`, from 0 (the default) to 1. At 1
+the material's emission is divided by the exposure before Tonemap multiplies
+by it, so it keeps its brightness whatever the exposure; canvas UI world
+canvases use this. The G-buffer and transparent passes read the exposure from
+`exposureReadSet`: the settings and last frame's adapted value from the 1x1
+`exposure` image, which `AutoExposure` updates later in the frame.
+
+The top-level `ui` block names `gDepth`, read after `GBufferSkinnedMasked`,
+as the depth the canvas UI tests world-canvas hits against: geometry in front
+of a world canvas stops the pointer.
 
 ## Ray-traced shadows
 

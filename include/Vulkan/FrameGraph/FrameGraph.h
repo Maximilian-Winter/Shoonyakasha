@@ -11,6 +11,7 @@
 #include "FrameGraphPass.h"
 #include "FrameGraphResource.h"
 #include "FrameGraphSchedule.h"  // BarrierInfo, dependency and barrier planning
+#include "PixelReadback.h"  // One texel of an image back to the CPU
 #include "RenderStats.h"  // Frame rate, draw counts and pass times
 #include "VertexFormatRegistry.h"  // Declarative vertex format definitions
 #include "FrameGraph/DotPathResolver.h"  // For Shoonyakasha::CompiledBufferLayout in DotPathUBO
@@ -582,6 +583,14 @@ struct PipelinePreset {
     std::vector<std::pair<std::string, std::optional<std::vector<float>>>> values;
 };
 
+/// What the canvas UI reads from a pipeline (JSON "ui"): the depth image it
+/// tests world-canvas hits against, read after the pass `afterPass`. Both
+/// are empty when the pipeline has no "ui" block.
+struct PipelineUISettings {
+    std::string depth;
+    std::string afterPass;
+};
+
 class FrameGraphBuilder;
 
 /// Set a preset's scene.custom values in `scene`, each with the type of the
@@ -650,6 +659,10 @@ public:
         return nullptr;
     }
 
+    // ── Canvas UI settings ──
+    void setUISettings(PipelineUISettings settings) { m_uiSettings = std::move(settings); }
+    const PipelineUISettings& getUISettings() const { return m_uiSettings; }
+
     // ── Vertex Format Declaration ──
     // 頂點之構 — The structure of vertices arises from declaration
     void setVertexFormatRegistry(const VertexFormatRegistry& registry) { m_vertexFormats = registry; }
@@ -690,6 +703,7 @@ private:
     std::unordered_map<std::string, uint32_t>       m_entityDataBindingLookup;
     std::vector<BufferLayoutDesc>                   m_bufferLayouts;
     std::vector<PipelinePreset>                     m_presets;
+    PipelineUISettings                              m_uiSettings;
     std::unordered_set<std::string>                 m_unavailablePasses;
     std::unordered_map<std::string, uint32_t>       m_bufferLayoutLookup;
 
@@ -919,6 +933,14 @@ public:
     using ViewportResolver = std::function<bool(const std::string& path, glm::vec4& fractions)>;
     void setViewportResolver(ViewportResolver resolver) { m_viewportResolver = std::move(resolver); }
 
+    /// Called after each pass's rendering has ended and its post-barriers
+    /// are recorded, with the pass, the frame in flight and the command
+    /// buffer, to record more commands there. Images are in the layouts the pass left them in, and
+    /// must be returned to them.
+    using PostPassHook = std::function<void(const CompiledPass& pass, const PassDeclaration& decl,
+                                            uint32_t frameIndex, VkCommandBuffer commandBuffer)>;
+    void setPostPassHook(PostPassHook hook) { m_postPassHook = std::move(hook); }
+
     /// The pixels of `extent` that `fractions` covers, rounded to whole
     /// texels and clamped to the extent; zero-sized when it covers none.
     static VkRect2D viewportRect(const glm::vec4& fractions, VkExtent2D extent);
@@ -951,6 +973,7 @@ private:
     RenderStatsCollector*   m_stats = nullptr;
     Logger*                 m_logger = nullptr;
     ViewportResolver        m_viewportResolver;
+    PostPassHook            m_postPassHook;
 
     /// The area a graphics pass renders into this frame: all of its extent,
     /// or its "viewport" rectangle.
@@ -1112,6 +1135,24 @@ public:
     // ── Readback API (Phase 3: GPU→CPU data transfer) ──
     void registerReadbackCallback(const std::string& bufferName, ReadbackCallbackFn cb);
     std::vector<ReadbackResult> pollReadbacks();
+
+    // ── Pixel readback: one texel of an image ──
+    // In the next frame recorded, copies the texel at `pixel` (mip 0, layer
+    // 0) of the image `resource` right after the pass `afterPass`, which
+    // must render it as an attachment. The image must allow copies from it,
+    // which the image named by the pipeline's "ui" block, and images with a
+    // readback or save policy, do. A later request replaces one not yet
+    // recorded. The value is read once the same frame in flight records
+    // again, after its fence was waited on, so latestPixelReadback() lags the
+    // request by the number of frames in flight. Returns false, with a
+    // warning, when the graph is not compiled, either name is unknown, the
+    // image does not allow copies, the pixel lies outside it or its format is
+    // not one pixelReadbackTexelSize() reads; the request is then dropped.
+    bool requestPixelReadback(const std::string& resource, const std::string& afterPass, VkOffset2D pixel);
+    const PixelReadbackResult& latestPixelReadback() const { return m_pixelReadbacks.latest(); }
+
+    /// The pipeline's "ui" block; empty names when it has none.
+    const PipelineUISettings& getUISettings() const { return m_builder.getUISettings(); }
 
     // ── Save API (Phase 4: GPU→disk persistence) ──
     void triggerSave(const std::string& bufferName);
@@ -1375,6 +1416,12 @@ private:
     /// queries.
     void recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex);
 
+    /// Records the waiting pixel readback when `decl` is its pass.
+    void recordPixelReadback(const CompiledPass& pass, const PassDeclaration& decl, uint32_t frameIndex,
+                             VkCommandBuffer cmd);
+    /// Reads frame in flight `frameIndex`'s pixel readback, if it holds one.
+    void collectPixelReadback(uint32_t frameIndex);
+
     /// Clear persistent images and put them in the layouts a frame leaves
     /// them in, which is where each frame's barriers start from for them.
     void initializePersistentImages();
@@ -1504,6 +1551,10 @@ private:
     uint64_t m_recordedFrames = 0;   // see getFrameNumber
     std::unordered_map<std::string, ReadbackCallbackFn> m_readbackCallbacks;
     void createStagingBuffers(uint32_t maxFramesInFlight);
+
+    // Pixel readback: a mapped, host-coherent buffer per frame in flight.
+    PixelReadbackQueue m_pixelReadbacks;
+    std::vector<std::unique_ptr<VulkanBuffer>> m_pixelReadbackBuffers;
 
     // Tracked render targets for readback/save/target (image data flow)
     struct TrackedRenderTarget {

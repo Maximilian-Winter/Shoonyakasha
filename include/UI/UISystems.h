@@ -43,6 +43,7 @@ private:
 struct UIPointerState;
 struct UIFocusState;
 struct UIClipboard;
+struct UIPointerDepth;
 
 /// Pointer input for the canvas UI. Runs before CanvasLayoutSystem, so it
 /// hit-tests the rects laid out the frame before, and writes:
@@ -66,8 +67,17 @@ public:
     /// displays. Both are read on each update. `windowSize` may be null when
     /// the two are the same. Without `focus`, the keyboard and gamepad are
     /// not used; without `clipboard`, text fields cannot copy or paste.
+    /// With a valid `depth`, world canvases behind the scene under the
+    /// pointer are not hit.
     CanvasInputSystem(const glm::vec2* screenSize, const glm::vec2* windowSize, UIPointerState* pointer,
-                      UIFocusState* focus = nullptr, UIClipboard* clipboard = nullptr);
+                      UIFocusState* focus = nullptr, UIClipboard* clipboard = nullptr,
+                      const UIPointerDepth* depth = nullptr);
+
+    /// A world canvas counts as in front of the scene under the pointer up to
+    /// this far behind it, in world units, plus kOcclusionMarginPerUnit of
+    /// its distance: the canvas's own quad is in the depth buffer too.
+    static constexpr float kOcclusionMargin = 0.02f;
+    static constexpr float kOcclusionMarginPerUnit = 0.01f;
 
     /// Seconds between two presses that make a double-click.
     static constexpr float kDoubleClickTime = 0.4f;
@@ -88,6 +98,7 @@ private:
     const glm::vec2* m_screenSize;
     const glm::vec2* m_windowSize;
     UIPointerState* m_pointer;
+    const UIPointerDepth* m_depth;
     entt::entity m_captured = entt::null;
     bool m_wasDown = false;
 

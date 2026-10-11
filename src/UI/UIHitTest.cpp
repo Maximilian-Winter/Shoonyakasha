@@ -57,7 +57,7 @@ std::optional<ECS::QuadHit> worldHit(const entt::registry& registry, entt::entit
 } // namespace
 
 std::optional<PointerHit> findPointerHit(const entt::registry& registry, glm::vec2 pixel,
-                                         const std::optional<ECS::Ray>& ray) {
+                                         const std::optional<ECS::Ray>& ray, float maxWorldDistance) {
     // Screen overlays, the one drawn last first.
     std::vector<std::pair<int, entt::entity>> overlays;
     for (auto [entity, canvas] : registry.view<const UICanvas>().each()) {
@@ -79,7 +79,7 @@ std::optional<PointerHit> findPointerHit(const entt::registry& registry, glm::ve
     for (auto [entity, canvas] : registry.view<const UICanvas>().each()) {
         if (canvas.mode != UICanvas::Mode::WorldTexture) continue;
         const auto hit = worldHit(registry, entity, *ray, true);
-        if (!hit || !hit->frontFacing) continue;
+        if (!hit || !hit->frontFacing || hit->distance > maxWorldDistance) continue;
         if (nearest && hit->distance >= nearestDistance) continue;
         const glm::vec2 position = hit->uv * canvas.size;
         nearest = PointerHit{entity, position, hitTestCanvas(registry, entity, position)};

@@ -384,11 +384,21 @@ struct UIClipboard {
 /// Where the pointer is, for the application. Owned by UIContext and written
 /// by CanvasInputSystem.
 struct UIPointerState {
+    glm::vec2 pixel{0.0f};                  // in screen pixels, top-left origin
     bool overUI = false;                    // over a raycast target, or pressing an element
     entt::entity canvas = entt::null;       // the canvas it is over
     glm::vec2 position{0.0f};               // on that canvas, in canvas units
     entt::entity hovered = entt::null;      // the UIInteractable it is over
     entt::entity pressed = entt::null;      // the UIInteractable it pressed, until released
+};
+
+/// The scene's depth under the pointer, read back from the depth buffer of
+/// an earlier frame. World-canvas hits farther away than it are hidden by
+/// what is in front. Written by the application each frame; `valid` is false
+/// when the pipeline names no depth image.
+struct UIPointerDepth {
+    bool valid = false;
+    float depth = 1.0f;                     // the depth buffer's value, 0..1; 1 is nothing drawn
 };
 
 /// Measurements of a UIText for layout, and the inputs they were made from.

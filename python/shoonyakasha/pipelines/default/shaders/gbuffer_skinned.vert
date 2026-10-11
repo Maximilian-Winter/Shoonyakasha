@@ -4,7 +4,7 @@
 #include "common.glsl"
 
 layout(set = 0, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
-layout(std430, set = 2, binding = 0) readonly buffer BoneMatrices { mat4 bones[]; };
+layout(std430, set = 3, binding = 0) readonly buffer BoneMatrices { mat4 bones[]; };
 
 #include "material_draw.glsl"
 

@@ -34,12 +34,13 @@ void UIContext::setTextureReleaser(std::function<void(VkImageView)> releaser) {
 }
 
 entt::entity UIContext::createWorldCanvas(entt::registry& registry, glm::vec2 pixelSize, glm::vec2 worldSize,
-                                          float emission) {
+                                          float emission, bool lit) {
     const entt::entity entity = registry.create();
 
     UICanvas canvas;
     canvas.mode = UICanvas::Mode::WorldTexture;
     canvas.pixelSize = pixelSize;
+    if (lit) canvas.textureSlot = "albedoMap";
     registry.emplace<UICanvas>(entity, canvas);
 
     auto& transform = registry.emplace<ECS::TransformComponent>(entity);
@@ -47,8 +48,9 @@ entt::entity UIContext::createWorldCanvas(entt::registry& registry, glm::vec2 pi
     transform.isDirty = true;
 
     auto& material = registry.emplace<MaterialComponentV5>(entity);
-    material.setParam("baseColorFactor", glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-    material.setParam("emissiveFactor", glm::vec4(glm::vec3(emission), 0.0f));
+    material.setParam("baseColorFactor", glm::vec4(glm::vec3(lit ? 1.0f : 0.0f), 1.0f));
+    material.setParam("emissiveFactor", glm::vec4(glm::vec3(lit ? 0.0f : emission), 0.0f));
+    material.setParam("exposureCompensation", lit ? 0.0f : 1.0f);
     material.setParam("metallicFactor", 0.0f);
     material.setParam("roughnessFactor", 1.0f);
 

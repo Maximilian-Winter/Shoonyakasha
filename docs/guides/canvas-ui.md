@@ -230,9 +230,9 @@ ui.create_button(terminal, "Open the gate", size=(400, 100))
 `create_world_canvas` returns an entity that is both the canvas and a quad of `world_size` units facing +Z.
 - **Layout and resolution:** the canvas is laid out in `pixel_size` units. `set_canvas_pixel_size` changes the texture's resolution without moving anything.
 - **Drawing:** it is drawn into its texture every frame, so the quad shows the canvas as it is now.
-- **Lighting:** the quad's material shows the texture as emission over a black base colour, so it reads the same in daylight and in the dark. `emission` scales how bright it is.
-- **Exposure:** world canvases are part of the 3D image, so automatic exposure and bloom apply to them. Raise `emission` in a bright scene. Text that changes every frame can smear slightly under TAA.
-- **Pointer:** a world canvas takes it where the camera's ray meets the front of its quad. The nearest quad wins, but the ray passes through other geometry, so a wall in front of a terminal does not stop clicks on it.
+- **Lighting:** by default the quad's material shows the texture as emission over a black base colour, so it reads the same in daylight and in the dark. `emission` scales how bright it is. With `lit=True` the texture is the material's base colour instead, lit by the scene's lights like any surface, and `emission` is not used.
+- **Exposure:** an unlit canvas's material has the parameter `exposureCompensation` set to 1, which divides its emission by the exposure before Tonemap multiplies by it again. The canvas then keeps its brightness when the exposure changes, by hand or automatically. The tone curve still applies, so colours come out close to, not exactly, as given: a grey of 0.5 shows as about 0.53. The quad's faint reflection of its surroundings is not compensated. Bloom still adds a glow in proportion to the canvas, and text that changes every frame can smear slightly under TAA. Set the parameter to 0 with `set_material_float` for a canvas that exposure should brighten and darken like the rest of the scene.
+- **Pointer:** a world canvas takes it where the camera's ray meets the front of its quad, and the nearest quad wins. Geometry in front of the canvas stops the pointer too, when the pipeline names its depth image (see [Pipelines](#pipelines)).
 
 ## Pipelines
 
@@ -248,6 +248,24 @@ Screen canvases are drawn by a pass whose execution type is `ui_canvas`. The eng
 Without such a pass, screen canvases are not drawn and the log says so every few seconds. World canvases need no pass of their own; their quads are drawn like any other material.
 
 The UI shaders ship beside the default pipeline in `shaders/ui/`. A copied pipeline can carry its own `shaders/ui/`, which is used first.
+
+### Geometry in front of world canvases
+
+A top-level `ui` block names the depth image that world-canvas hits are tested against, and the pass after which it is complete:
+
+```json
+{ "ui": { "depth": "gDepth", "afterPass": "GBufferSkinnedMasked" } }
+```
+
+Each frame the engine copies the one depth texel under the pointer, right after that pass, and reads it once the GPU has finished that frame. A world-canvas hit farther along the pointer's ray than that depth, beyond a small margin, does not count. The pass must write the image, and the image is created so that it can be copied from.
+
+- **Default pipeline:** it has the block, reading `gDepth` after the last G-buffer pass. Blended (transparent) surfaces do not write depth, so they do not stop the pointer.
+- **Without the block:** nothing hides a world canvas from the pointer except a nearer canvas.
+- **Latency:** the depth is as many frames old as there are frames in flight, two by default. A canvas or a wall that has just moved, or a pointer moving quickly across an edge, can be judged by the scene of a frame or two before.
+
+### Exposure compensation in a copied pipeline
+
+The default pipeline's G-buffer and transparent passes bind `exposureReadSet`, with the settings and the 1×1 `exposure` image, and their shaders apply `exposureCompensation` to emission. A copied pipeline without that set and those shaders ignores the parameter, and its world canvases change with the exposure like the rest of the scene.
 
 ## From C++
 
@@ -278,7 +296,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 - The arrow keys move focus and also turn an orbit camera, which uses them; only a focused text field takes keys from the camera.
 - Right-to-left text: each word is shaped right to left, but a line puts its words in typing order, left to right; mixed-direction lines are not reordered.
 - Thai, Lao, Khmer and Myanmar, which need a dictionary to find where words end, wrap only at spaces, or between clusters when a run does not fit.
-- World-canvas clicks ignore geometry in front of the canvas.
+- Geometry in front of a world canvas stops the pointer only in a pipeline with a `ui` depth block, and only as of two frames before (see [Geometry in front of world canvases](#geometry-in-front-of-world-canvases)).
 - The glyph atlas is 2048 by 2048 texels. When it fills up, it is cleared and the text on screen is rasterised again; this is rare unless a very large number of distinct characters is in use at once.
 
 ## Troubleshooting
@@ -289,5 +307,5 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 | An element does not appear | It, or a parent, is invisible or outside a clipping parent; or its size is zero. `get_rect` shows where it ended up |
 | Text is missing | The font failed to load (`load_font` returned 0), or the text's rect is too small for one line |
 | Clicks do nothing | Something above the widget stops the pointer: a panel or image drawn over it. Use `set_raycast_target(e, False)` on decoration |
-| A world canvas is too dark or blown out | Raise or lower `emission`; automatic exposure applies to it |
-| A world canvas cannot be clicked | The camera sees its back, or a screen canvas element is over it |
+| A world canvas is too dark or blown out | Raise or lower `emission`. If exposure changes it, the material's `exposureCompensation` is 0, or the pipeline was copied without exposure compensation |
+| A world canvas cannot be clicked | The camera sees its back, a screen canvas element is over it, or geometry is in front of it |

@@ -13,8 +13,10 @@
 //     CanvasUIExample [--screenshot path.png]
 //
 // With --screenshot it switches the world canvas's resolution at frame 60,
-// moves and clicks a scripted pointer and keyboard through the widgets, saves
-// frame 120 to the path and closes.
+// moves and clicks a scripted pointer and keyboard through the widgets, moves
+// the world canvas behind the box and clicks its hidden button, which does
+// not count, then saves frame 130 to the path, prints the click count and
+// closes.
 //
 // Keys: WASD/Q/E + right mouse to fly, R to switch the world canvas between
 // 1024x512 and 512x256 pixels. Left mouse uses the widgets; with the mouse
@@ -37,6 +39,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -195,7 +198,8 @@ protected:
     }
 
     void onPostRender() override {
-        if (!m_screenshot.empty() && m_frame == 120) {
+        if (!m_screenshot.empty() && m_frame == 130) {
+            std::printf("world canvas clicks: %d\n", m_clicks);
             captureScreenshot(m_screenshot);
             glfwSetWindowShouldClose(getWindow().getWindow(), GLFW_TRUE);
         }
@@ -205,9 +209,11 @@ private:
     /// With --screenshot: a pointer that turns spinning on, drags the angle
     /// slider and clicks the world canvas's button twice; then Escape clears
     /// the focus that left there, and Tab three times moves focus across the
-    /// settings to Reset. Last it clicks the name field, types a name with a
-    /// correction, submits it with Enter and selects it by word. It goes
-    /// through the same input path as the mouse and keyboard.
+    /// settings to Reset. Then it clicks the name field, types a name with a
+    /// correction, submits it with Enter and selects it by word. Last it
+    /// moves the world canvas behind the box and clicks the hidden button
+    /// twice more. It goes through the same input path as the mouse and
+    /// keyboard.
     void scriptPointer() {
         if (m_frame < 65) return;
         auto at = [&](entt::entity e, float across = 0.5f) {
@@ -223,7 +229,7 @@ private:
             m_scriptPixel = screenSize() * glm::vec2(0.6f, 0.15f);   // over nothing
             if (m_frame == 99) keys.push_back({GLFW_KEY_ESCAPE, 0, false});
             if (m_frame == 100 || m_frame == 102 || m_frame == 104) keys.push_back({GLFW_KEY_TAB, 0, false});
-        } else {
+        } else if (m_frame <= 114) {
             // Into the name field: type, correct, submit, then select a word.
             at(m_name, 0.9f);
             down = m_frame == 106;
@@ -237,6 +243,18 @@ private:
                 keys.push_back({GLFW_KEY_HOME, 0, false});
                 keys.push_back({GLFW_KEY_RIGHT, GLFW_MOD_CONTROL | GLFW_MOD_SHIFT, false});
             }
+        } else {
+            // The terminal moves behind the box, its button hidden by it: the
+            // depth under the pointer is nearer than the button, so clicks on
+            // it do not reach it.
+            if (m_frame == 116) {
+                auto& transform = getRegistry().get<ECS::TransformComponent>(m_terminal);
+                transform.position = {-0.53f, 0.08f, -1.2f};
+                transform.rotation = {0.0f, 0.0f, 0.0f};
+                transform.isDirty = true;
+            }
+            if (m_frame >= 118) at(m_terminalButton);
+            down = m_frame == 122 || m_frame == 124;
         }
 
         int width = 0, height = 0;

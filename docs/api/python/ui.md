@@ -126,7 +126,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_font_fallbacks(font, fallbacks)` | None | The fonts, in order, that text in font draws characters from when font lacks them: Devanagari or Tibetan inside Latin text, say. |
 | `set_default_font_fallbacks(fallbacks)` | None | Fallbacks for every font that has none of its own. |
 | `create_canvas(reference_size=(1920, 1080), scale_mode=CANVAS_SCALE_WITH_SCREEN, sort_order=0)` | int | A canvas over the screen. A higher sort_order draws over, and takes the pointer first. |
-| `create_world_canvas(pixel_size, world_size, emission=1.0)` | int | A canvas of pixel_size pixels on a quad of world_size units, facing +Z. |
+| `create_world_canvas(pixel_size, world_size, emission=1.0, lit=False)` | int | A canvas of pixel_size pixels on a quad of world_size units, facing +Z. |
 | `set_canvas_scaling(canvas, mode, reference_size=(1920, 1080), scale_factor=1.0, match=0.5)` | None | CANVAS_CONSTANT_PIXEL: scale_factor pixels per unit. CANVAS_SCALE_WITH_SCREEN: reference_size fitted to the target, match 0 following its width and 1 its height. |
 | `set_canvas_sort_order(canvas, sort_order)` | None | Calls native `setCanvasSortOrder`; see the class contract above. |
 | `set_canvas_pixel_size(canvas, pixel_size)` | None | World canvases: the size of the texture, in pixels. |

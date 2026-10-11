@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace Shoonyakasha {
@@ -28,6 +29,23 @@ std::optional<ECS::Ray> mainCameraRay(const entt::registry& registry, glm::vec2 
         if (camera.isMainCamera) return ECS::screenPointToRay(pixel, screen, camera.viewMatrix, camera.projectionMatrix);
     }
     return std::nullopt;
+}
+
+/// How far along `ray` a world canvas may be hit: as far as the scene seen
+/// under the pointer, plus CanvasInputSystem's occlusion margin. Without
+/// limit when the depth is not known or nothing was drawn there.
+float worldHitLimit(const entt::registry& registry, const UIPointerDepth* depth, glm::vec2 pixel, glm::vec2 screen,
+                    const std::optional<ECS::Ray>& ray) {
+    constexpr float kNone = std::numeric_limits<float>::infinity();
+    if (!depth || !depth->valid || !ray || depth->depth >= 1.0f) return kNone;
+    for (auto [entity, camera] : registry.view<const ECS::CameraComponent>().each()) {
+        if (!camera.isMainCamera) continue;
+        const glm::vec3 seen = ECS::screenPointToWorld(pixel, screen, depth->depth, camera.viewMatrix,
+                                                       camera.projectionMatrix);
+        const float distance = glm::dot(seen - ray->origin, ray->direction);
+        return distance * (1.0f + CanvasInputSystem::kOcclusionMarginPerUnit) + CanvasInputSystem::kOcclusionMargin;
+    }
+    return kNone;
 }
 
 /// Sets the slider's value from where the pointer is across its rect.
@@ -168,8 +186,9 @@ void syncWidgets(entt::registry& registry) {
 } // namespace
 
 CanvasInputSystem::CanvasInputSystem(const glm::vec2* screenSize, const glm::vec2* windowSize,
-                                     UIPointerState* pointer, UIFocusState* focus, UIClipboard* clipboard)
-    : m_screenSize(screenSize), m_windowSize(windowSize), m_pointer(pointer), m_focus(focus),
+                                     UIPointerState* pointer, UIFocusState* focus, UIClipboard* clipboard,
+                                     const UIPointerDepth* depth)
+    : m_screenSize(screenSize), m_windowSize(windowSize), m_pointer(pointer), m_depth(depth), m_focus(focus),
       m_clipboard(clipboard) {
     priority = kPriority;
     name = "CanvasInputSystem";
@@ -213,7 +232,8 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
     const bool down = input->isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT);
     const bool pressedNow = down && !m_wasDown;
 
-    const auto hit = findPointerHit(registry, pixel, ray);
+    pointer.pixel = pixel;
+    const auto hit = findPointerHit(registry, pixel, ray, worldHitLimit(registry, m_depth, pixel, screen, ray));
     const entt::entity hitElement = hit ? hit->element : entt::null;
     entt::entity hovered = interactableFor(registry, hitElement);
     if (hovered != entt::null && !registry.get<UIInteractable>(hovered).enabled) hovered = entt::null;

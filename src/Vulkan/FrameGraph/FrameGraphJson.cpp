@@ -1707,6 +1707,36 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
             builder.addPreset(std::move(preset));
         }
     }
+
+    // ── Canvas UI: the depth image world-canvas hits are tested against ──
+    if (json.contains("ui")) {
+        const auto& ui = json["ui"];
+        if (!ui.is_object() || !ui.contains("depth") || !ui["depth"].is_string() ||
+            !ui.contains("afterPass") || !ui["afterPass"].is_string()) {
+            throw std::runtime_error("\"ui\" must be an object with \"depth\", an image, and \"afterPass\", "
+                                     "the pass after which it is read");
+        }
+        PipelineUISettings settings;
+        settings.depth = ui["depth"].get<std::string>();
+        settings.afterPass = ui["afterPass"].get<std::string>();
+        const ResourceHandle depth = builder.getResource(settings.depth);
+        if (!depth.valid() || builder.getResourceDeclarations()[depth.index].kind != ResourceKind::Image) {
+            throw std::runtime_error("\"ui\": \"depth\" names '" + settings.depth + "', which is not an image");
+        }
+        const PassDeclaration* pass = builder.getPass(settings.afterPass);
+        if (!pass) {
+            throw std::runtime_error("\"ui\": \"afterPass\" names '" + settings.afterPass + "', which is not a pass");
+        }
+        const bool writes = std::any_of(pass->outputs.begin(), pass->outputs.end(),
+                                        [&](const ResourceAccess& access) { return access.handle == depth; });
+        if (!writes) {
+            throw std::runtime_error("\"ui\": pass '" + settings.afterPass + "' does not write '" +
+                                     settings.depth + "'");
+        }
+        // The canvas UI copies a texel of it out each frame.
+        builder.getMutableResource(settings.depth)->imageDesc.additionalUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        builder.setUISettings(std::move(settings));
+    }
 }
 
 namespace {

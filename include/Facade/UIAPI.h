@@ -78,10 +78,12 @@ public:
 
     /// A canvas of `pixelSize` pixels shown on a quad of `worldSize` units in
     /// the scene, facing +Z from the entity's position, laid out in its own
-    /// pixels. Its material emits the canvas at `emission` times its colour.
-    /// Move and turn it with SceneAPI::setPosition and setRotation.
+    /// pixels. Unlit, its material emits the canvas at `emission` times its
+    /// colour, at a brightness exposure does not change. Lit, the canvas is
+    /// the material's base colour, lit by the scene, and `emission` is not
+    /// used. Move and turn it with SceneAPI::setPosition and setRotation.
     EntityHandle createWorldCanvas(const glm::vec2& pixelSize, const glm::vec2& worldSize,
-                                   float emission = 1.0f);
+                                   float emission = 1.0f, bool lit = false);
 
     /// ConstantPixel: `scaleFactor` pixels per canvas unit. ScaleWithScreen:
     /// scaled so `referenceSize` fits the screen or texture, `match` 0

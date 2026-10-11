@@ -32,6 +32,7 @@
 #include "ECS/SkeletonComponents.h"
 
 #include <stdexcept>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -56,6 +57,10 @@ RenderGraph::RenderGraph(VulkanDevice& device, VulkanCommandManager& cmdManager)
     m_logger->log(LogLevel::Info, "Render Graph created");
     createSyncPrimitives();
     initSystems();
+    m_executor.setPostPassHook([this](const CompiledPass& pass, const PassDeclaration& decl, uint32_t frameIndex,
+                                      VkCommandBuffer cmd) {
+        recordPixelReadback(pass, decl, frameIndex, cmd);
+    });
 
     // SHOONYAKASHA_STATS=1: collect render stats from the start and print a
     // summary every second, without touching the application.
@@ -1664,6 +1669,7 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
         m_stagingManager->processCompletedReadbacks(frameIndex, m_globalFrameNumber);
         m_stagingManager->processCompletedImageReadbacks(frameIndex, m_globalFrameNumber);
     }
+    collectPixelReadback(frameIndex);
 
     // The same fence makes this frame's descriptor sets safe to free, and to
     // rewrite with an application image that changed.
@@ -1705,6 +1711,108 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
     }
 
     m_globalFrameNumber++;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Pixel readback
+// ═══════════════════════════════════════════════════════════════
+
+bool RenderGraph::requestPixelReadback(const std::string& resource, const std::string& afterPass, VkOffset2D pixel) {
+    const auto refuse = [&](const char* why) {
+        m_logger->logEvery(5.0f, LogLevel::Warning, "Pixel readback of '%s' after '%s': %s", resource.c_str(),
+                           afterPass.c_str(), why);
+        m_pixelReadbacks.dropNext();
+        return false;
+    };
+    if (!m_compiled.valid) return refuse("the graph is not compiled");
+    if (!m_builder.hasPass(afterPass)) return refuse("no such pass");
+    const ResourceHandle handle = m_builder.getResource(resource);
+    if (!handle.valid() || handle.index >= m_compiled.physicalResources.size()) return refuse("no such resource");
+    const auto* image = std::get_if<PhysicalImage>(&m_compiled.physicalResources[handle.index]);
+    if (!image || image->vkImage == VK_NULL_HANDLE) return refuse("not an image");
+    if (pixelReadbackTexelSize(image->format) == 0) return refuse("its format cannot be read back");
+    const ResourceDeclaration& decl = m_builder.getResourceDeclarations()[handle.index];
+    if (!(decl.imageDesc.additionalUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) && !decl.readbackPolicy.enabled &&
+        !decl.savePolicy.enabled) {
+        return refuse("the image is not copied from: name it in the pipeline's \"ui\" block");
+    }
+    if (pixel.x < 0 || pixel.y < 0 || static_cast<uint32_t>(pixel.x) >= image->extent.width ||
+        static_cast<uint32_t>(pixel.y) >= image->extent.height) {
+        return refuse("the pixel is outside the image");
+    }
+
+    if (m_pixelReadbackBuffers.size() != m_maxFramesInFlight) {
+        m_pixelReadbackBuffers.clear();
+        for (uint32_t i = 0; i < m_maxFramesInFlight; ++i) {
+            auto buffer = std::make_unique<VulkanBuffer>(m_device, 16, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            buffer->map();
+            m_pixelReadbackBuffers.push_back(std::move(buffer));
+        }
+        m_pixelReadbacks.setFramesInFlight(m_maxFramesInFlight);
+    }
+    m_pixelReadbacks.request({resource, afterPass, pixel});
+    return true;
+}
+
+void RenderGraph::recordPixelReadback(const CompiledPass& pass, const PassDeclaration& decl, uint32_t frameIndex,
+                                      VkCommandBuffer cmd) {
+    const auto& request = m_pixelReadbacks.next();
+    if (!request || request->afterPass != decl.name || frameIndex >= m_pixelReadbackBuffers.size()) return;
+
+    const ResourceHandle handle = m_builder.getResource(request->resource);
+    const auto* image = handle.valid() && handle.index < m_compiled.physicalResources.size()
+                            ? std::get_if<PhysicalImage>(&m_compiled.physicalResources[handle.index])
+                            : nullptr;
+    const auto layout = image ? layoutAfterPass(pass, handle) : std::nullopt;
+    if (!layout) {
+        m_logger->logEvery(5.0f, LogLevel::Warning, "Pixel readback: pass '%s' does not render '%s'",
+                           decl.name.c_str(), request->resource.c_str());
+        m_pixelReadbacks.dropNext();
+        return;
+    }
+
+    const VkImageAspectFlags aspect = pixelReadbackAspect(image->format);
+    const auto barriers = pixelReadbackBarriers(image->vkImage, *layout, aspect);
+
+    VkDependencyInfo toCopy{};
+    toCopy.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    toCopy.imageMemoryBarrierCount = 1;
+    toCopy.pImageMemoryBarriers = &barriers[0];
+    vkCmdPipelineBarrier2(cmd, &toCopy);
+
+    VkBufferImageCopy region{};
+    region.imageSubresource = {aspect, 0, 0, 1};
+    region.imageOffset = {request->pixel.x, request->pixel.y, 0};
+    region.imageExtent = {1, 1, 1};
+    vkCmdCopyImageToBuffer(cmd, image->vkImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           m_pixelReadbackBuffers[frameIndex]->getBuffer(), 1, &region);
+
+    // The image goes back to the layout the pass left it in, and the copy is
+    // made visible to the host that reads it after the fence.
+    VkMemoryBarrier2 toHost{};
+    toHost.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    toHost.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    toHost.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    toHost.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    toHost.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo back{};
+    back.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    back.memoryBarrierCount = 1;
+    back.pMemoryBarriers = &toHost;
+    back.imageMemoryBarrierCount = 1;
+    back.pImageMemoryBarriers = &barriers[1];
+    vkCmdPipelineBarrier2(cmd, &back);
+
+    m_pixelReadbacks.recorded(frameIndex, image->format, m_globalFrameNumber);
+}
+
+void RenderGraph::collectPixelReadback(uint32_t frameIndex) {
+    if (!m_pixelReadbacks.awaiting(frameIndex) || frameIndex >= m_pixelReadbackBuffers.size()) return;
+    std::array<std::byte, 16> texel{};
+    m_pixelReadbackBuffers[frameIndex]->copyTo(texel.data(), texel.size());
+    m_pixelReadbacks.complete(frameIndex, texel.data());
 }
 
 // ═══════════════════════════════════════════════════════════════
