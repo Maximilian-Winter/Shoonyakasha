@@ -54,6 +54,7 @@ struct InputStateComponent {
         int key = 0;
         int mods = 0;            // GLFW_MOD_* bits
         bool repeat = false;     // sent while the key is held
+        size_t textOffset = 0;   // characters in textInput typed before it
     };
     std::u32string textInput;           // characters typed
     std::vector<KeyPress> keyPresses;   // presses and repeats, in order
@@ -69,7 +70,7 @@ struct InputStateComponent {
 
     // Set by the application from the canvas UI's last frame: the pointer is
     // over the UI, so the wheel is the UI's; a text field has the keyboard,
-    // so `keys` reads as none held.
+    // so `keys` reads as none held but Shift, Ctrl, Alt and Super.
     bool pointerOverUI = false;
     bool keyboardCapturedByUI = false;
 

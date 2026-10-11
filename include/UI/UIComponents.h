@@ -14,11 +14,14 @@
 
 #include "GPU/GPUTypes.h"
 #include "UI/TextLayout.h"
+#include "UI/Utf8.h"
 
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -250,6 +253,56 @@ struct UISlider {
     }
 };
 
+/// A single line of editable text. Its elements are made by createTextField:
+/// a viewport that clips, holding the selection, the text and the caret,
+/// which CanvasTextSystem places each frame after laying out the text. The
+/// text is moved sideways to keep the caret in view.
+///
+/// While focused it takes the keyboard (give its UIInteractable
+/// capturesKeyboard): typed characters replace the selection; Backspace and
+/// Delete remove a cluster, or with Ctrl a word; Left and Right move by
+/// cluster, or with Ctrl by word; Home and End go to either end; Shift with a
+/// move extends the selection; Ctrl+A selects all, Ctrl+C, X and V copy, cut
+/// and paste through UIClipboard; Enter submits. Pressing places the caret,
+/// dragging selects, and a double-click selects a word. There is no input
+/// method composition, so text that needs an IME cannot be typed.
+struct UITextField {
+    std::string text;                        // UTF-8, one line
+    std::string placeholder;                 // shown in placeholderColor while text is empty
+    size_t caret = 0;                        // code-point index into text
+    size_t selectionAnchor = 0;              // the selection runs between it and the caret
+    size_t maxLength = 0;                    // in code points; 0: no limit
+    bool password = false;                   // drawn as one maskCharacter per code point
+    char32_t maskCharacter = 0x2022;         // bullet
+    bool readOnly = false;                   // the user can select and copy, not edit
+
+    glm::vec4 textColor{1.0f};
+    glm::vec4 placeholderColor{1.0f, 1.0f, 1.0f, 0.4f};
+    glm::vec4 selectionColor{0.35f, 0.62f, 0.95f, 0.6f};
+    glm::vec4 caretColor{1.0f};
+    float caretWidth = 2.0f;                 // canvas units
+    float blinkPeriod = 1.0f;                // seconds per on and off; 0: no blink
+
+    entt::entity textElement = entt::null;       // has the UIText
+    entt::entity selectionElement = entt::null;  // has a UIImage
+    entt::entity caretElement = entt::null;      // has a UIImage
+
+    // Written by CanvasInputSystem, for this frame.
+    bool changed = false;                    // the user changed the text
+    bool submitted = false;                  // the user pressed Enter
+    // Written by CanvasInputSystem and CanvasTextSystem.
+    float blinkTime = 0.0f;                  // seconds since the caret last moved
+    float scroll = 0.0f;                     // how far the text is moved left
+
+    /// What the text element shows: the text, or its mask, or the
+    /// placeholder while the text is empty.
+    std::string displayText() const {
+        if (text.empty()) return placeholder;
+        if (!password) return text;
+        return encodeUtf8(std::u32string(decodeUtf8(text).size(), maskCharacter));
+    }
+};
+
 /// Scrolls its content element inside its own rect, which it clips (give it
 /// UIClip). The content is placed by its anchors and then moved by the
 /// scroll offset; it is usually a column sized to its children. The view
@@ -311,6 +364,21 @@ struct UIScrollbar {
 struct UIFocusState {
     entt::entity focused = entt::null;
     bool keyboardCaptured = false;       // the focused element captures the keyboard
+};
+
+/// The clipboard text fields copy to and paste from. Owned by UIContext; the
+/// application connects it to the system clipboard. Without `get` and `set`
+/// it keeps the text itself.
+struct UIClipboard {
+    std::function<std::string()> get;
+    std::function<void(const std::string&)> set;
+    std::string local;
+
+    std::string text() const { return get ? get() : local; }
+    void setText(const std::string& text) {
+        if (set) set(text);
+        else local = text;
+    }
 };
 
 /// Where the pointer is, for the application. Owned by UIContext and written

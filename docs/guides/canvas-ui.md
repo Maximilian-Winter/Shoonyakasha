@@ -185,6 +185,38 @@ ui.focus(play)    # start a menu on its first button, for a gamepad player
 
 `set_navigable(e, False)` keeps decoration or a rarely used widget out of the order.
 
+### Text fields
+
+```python
+name = ui.create_text_field(panel, "Your name", size=(300, 36))
+ui.set_text_field_options(name, max_length=24)
+
+def on_update(dt):
+    if ui.text_submitted(name):          # Enter, this frame
+        greet(ui.get_text(name))
+    if ui.text_changed(search):          # the user edited it, this frame
+        filter_list(ui.get_text(search))
+```
+
+A text field is a single line. Clicking it or tabbing to it focuses it, and while it has focus it takes the keyboard:
+- **Typing:** characters go in at the caret, replacing any selection. Pasted line breaks and tabs become spaces.
+- **Deleting:** Backspace and Delete remove one cluster, so a Devanagari conjunct or a letter with its accents goes in one step. With Ctrl they remove a word.
+- **Moving:** Left and Right move one cluster, or with Ctrl one word. Home and End go to either end. Holding Shift extends the selection.
+- **Clipboard:** Ctrl+A selects everything. Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste through the system clipboard.
+- **Submitting:** Enter sets `text_submitted` for one frame. The field keeps focus.
+- **Leaving:** Tab moves on to the next widget, and Escape clears focus.
+- **Pointer:** a click places the caret, dragging selects, and a double-click selects a word.
+
+The text scrolls sideways to keep the caret in view, and the caret blinks. While a field has focus, `keyboard_captured` is true: the camera sees no keys but the modifiers, and `on_key_pressed` is not called.
+
+Setting and reading:
+- `set_text(field, text)` replaces the text and puts the caret at the end. It does not set `text_changed`, which reports only the user's edits.
+- `get_text` reads the text, and `select_all` selects it.
+- `set_text_field_options` takes three settings:
+  - `max_length` caps the number of characters.
+  - `password` draws a dot for each character and stops copying.
+  - `read_only` keeps selecting and copying but stops editing.
+
 ## World canvases
 
 ```python
@@ -241,7 +273,8 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 
 ## Limits
 
-- No text input fields yet.
+- Text fields are single-line, and there is no input method (IME) composition, so text that is typed through an IME, such as Chinese or Japanese, cannot be entered; it can still be pasted.
+- Text fields interpret Ctrl, not Cmd, as the word modifier, on every platform.
 - The arrow keys move focus and also turn an orbit camera, which uses them; only a focused text field takes keys from the camera.
 - Right-to-left text: each word is shaped right to left, but a line puts its words in typing order, left to right; mixed-direction lines are not reordered.
 - Thai, Lao, Khmer and Myanmar, which need a dictionary to find where words end, wrap only at spaces, or between clusters when a run does not fit.

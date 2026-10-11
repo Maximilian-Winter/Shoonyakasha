@@ -52,6 +52,7 @@ public:
     const UIPointerState& pointer() const { return m_pointer; }
     UIFocusState& focus() { return m_focus; }        // written by CanvasInputSystem
     const UIFocusState& focus() const { return m_focus; }
+    UIClipboard& clipboard() { return m_clipboard; }  // read and written by CanvasInputSystem
     bool hasRenderer() const { return m_renderer != nullptr; }
 
     /// Builds this frame's draw data from the laid-out canvases. With a
@@ -86,6 +87,7 @@ private:
     UIDrawData m_drawData;
     UIPointerState m_pointer;
     UIFocusState m_focus;
+    UIClipboard m_clipboard;
     std::unique_ptr<UIRenderer> m_renderer;
     bool m_overlaysDrawn = false;
 };

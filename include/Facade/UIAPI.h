@@ -125,6 +125,11 @@ public:
     EntityHandle createSlider(EntityHandle parent, float minValue, float maxValue, float value,
                               const glm::vec2& size = glm::vec2(200.0f, 24.0f));
 
+    /// A single-line text field showing `placeholder` while empty. Pressing
+    /// it focuses it; while focused it takes the keyboard. See Text fields.
+    EntityHandle createTextField(EntityHandle parent, const std::string& placeholder = "",
+                                 const glm::vec2& size = glm::vec2(240.0f, 36.0f));
+
     /// Moves `element` to the end of `parent`'s children.
     void setParent(EntityHandle element, EntityHandle parent);
 
@@ -238,7 +243,8 @@ public:
     // Content
     //
     // The text functions act on the element's own text or, for a button or
-    // toggle, on its label.
+    // toggle, on its label. On a text field, setText and getText act on what
+    // the user edits, and the font functions on how it is drawn.
     // ═══════════════════════════════════════════════════════════
 
     void setText(EntityHandle element, const std::string& text);
@@ -303,6 +309,29 @@ public:
     glm::vec2 getPointerPosition() const;
     /// The interactable element under the pointer, or NullEntity.
     EntityHandle getHoveredElement() const;
+
+    // ═══════════════════════════════════════════════════════════
+    // Text fields
+    //
+    // A focused field takes typed text, Backspace and Delete (with Ctrl, a
+    // word), Left and Right (with Ctrl, by word), Home and End, Shift to
+    // select, Ctrl+A, C, X and V with the system clipboard, and Enter to
+    // submit. Pressing places the caret, dragging selects and a double-click
+    // selects a word. setText puts the caret at the end. There is no input
+    // method (IME) composition.
+    // ═══════════════════════════════════════════════════════════
+
+    /// True for one frame after the user pressed Enter in the field.
+    bool textSubmitted(EntityHandle field) const;
+    /// True for one frame after the user changed the field's text.
+    bool textChanged(EntityHandle field) const;
+    void selectAll(EntityHandle field);
+
+    /// `maxLength` in characters, 0 for no limit; `password` draws a dot
+    /// per character and stops copying; `readOnly` keeps selecting and
+    /// copying but not editing.
+    void setTextFieldOptions(EntityHandle field, uint32_t maxLength = 0, bool password = false,
+                             bool readOnly = false);
 
 private:
     struct Impl;

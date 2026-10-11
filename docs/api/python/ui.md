@@ -139,6 +139,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `create_button(parent, label, size=(160, 40))` | int | Calls native `createButton`; see the class contract above. |
 | `create_toggle(parent, label, is_on=False, size=(200, 28))` | int | Calls native `createToggle`; see the class contract above. |
 | `create_slider(parent, min=0.0, max=1.0, value=0.0, size=(200, 24))` | int | Calls native `createSlider`; see the class contract above. |
+| `create_text_field(parent, placeholder="", size=(240, 36))` | int | A single-line text field showing placeholder while empty. Pressing it focuses it; while focused it takes the keyboard. |
 | `set_parent(element, parent)` | None | Move element to the end of parent's children. |
 | `set_rect(element, anchor_min=(0.5, 0.5), anchor_max=(0.5, 0.5), pivot=(0.5, 0.5), position=(0, 0), size=(100, 100))` | None | Anchors are fractions of the parent's rect, (0, 0) its top-left. With equal anchors size is the size; with different ones it is added to the span between them. position offsets the pivot, a fraction of the element's own rect. |
 | `set_anchor(element, anchor)` | None | Both anchors and the pivot: (0, 0) places by the top-left corner from the parent's top-left, (1, 1) by the bottom-right from its bottom-right. |
@@ -190,5 +191,9 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `pointer_canvas (read-only property)` | int | The canvas under the pointer, or NULL_ENTITY. |
 | `pointer_position (read-only property)` | 2-tuple | The pointer on pointer_canvas, in canvas units. |
 | `hovered_element (read-only property)` | int | The interactable element under the pointer, or NULL_ENTITY. |
+| `text_submitted(field)` | bool | The user pressed Enter in the field, this frame. |
+| `text_changed(field)` | bool | The user changed the field's text, this frame. |
+| `select_all(field)` | None | Calls native `selectAll`; see the class contract above. |
+| `set_text_field_options(field, max_length=0, password=False, read_only=False)` | None | max_length in characters, 0 for no limit; password draws a dot per character and stops copying; read_only keeps selecting and copying but not editing. |
 
 <!-- END SOURCE API -->

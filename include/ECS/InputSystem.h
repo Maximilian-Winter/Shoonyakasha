@@ -183,7 +183,8 @@ public:
                 m_inputState.keys[event.keyCode] = event.pressed;
                 if (event.pressed) {
                     m_inputState.keyPresses.push_back({event.keyCode, event.mods,
-                                                       event.action == KeyEvent::Repeat});
+                                                       event.action == KeyEvent::Repeat,
+                                                       m_inputState.textInput.size()});
                 }
 
                 // Toggle mouse capture on Escape, unless something else

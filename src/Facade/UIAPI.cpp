@@ -14,6 +14,7 @@
 #include "UI/UIComponents.h"
 #include "UI/UIContext.h"
 #include "UI/UIWidgets.h"
+#include "UI/Utf8.h"
 
 using namespace Shoonyakasha::Facade::Internal;
 
@@ -63,6 +64,7 @@ struct UIAPI::Impl {
     /// The element's own text, or its first child's: a button's or toggle's label.
     UI::UIText* text(EntityHandle h) {
         if (auto* own = get<UI::UIText>(h)) return own;
+        if (const auto* field = get<UI::UITextField>(h)) return registry.try_get<UI::UIText>(field->textElement);
         if (const auto* hierarchy = get<ECS::HierarchyComponent>(h)) {
             for (const entt::entity child : hierarchy->children) {
                 if (auto* label = registry.try_get<UI::UIText>(child)) return label;
@@ -208,6 +210,11 @@ EntityHandle UIAPI::createToggle(EntityHandle parent, const std::string& label, 
 EntityHandle UIAPI::createSlider(EntityHandle parent, float minValue, float maxValue, float value,
                                  const glm::vec2& size) {
     return toHandle(UI::createSlider(m_impl->registry, m_impl->parentOf(parent), minValue, maxValue, value, size));
+}
+
+EntityHandle UIAPI::createTextField(EntityHandle parent, const std::string& placeholder, const glm::vec2& size) {
+    return toHandle(UI::createTextField(m_impl->registry, m_impl->parentOf(parent), placeholder, getDefaultFont(),
+                                        size));
 }
 
 void UIAPI::setParent(EntityHandle element, EntityHandle parent) {
@@ -406,10 +413,16 @@ void UIAPI::setScrollSettings(EntityHandle view, float wheelSpeed, bool inertia)
 // ─── Content ────────────────────────────────────────────────────
 
 void UIAPI::setText(EntityHandle element, const std::string& text) {
+    if (auto* field = m_impl->get<UI::UITextField>(element)) {
+        field->text = text;
+        field->caret = field->selectionAnchor = UI::decodeUtf8(text).size();
+        return;
+    }
     if (auto* t = m_impl->text(element)) t->text = text;
 }
 
 std::string UIAPI::getText(EntityHandle element) const {
+    if (const auto* field = m_impl->get<UI::UITextField>(element)) return field->text;
     const auto* t = m_impl->text(element);
     return t ? t->text : std::string();
 }
@@ -540,6 +553,33 @@ glm::vec2 UIAPI::getPointerPosition() const { return m_impl->context.pointer().p
 EntityHandle UIAPI::getHoveredElement() const {
     const entt::entity hovered = m_impl->context.pointer().hovered;
     return hovered == entt::null ? NullEntity : toHandle(hovered);
+}
+
+// ─── Text fields ────────────────────────────────────────────────
+
+bool UIAPI::textSubmitted(EntityHandle field) const {
+    const auto* f = m_impl->get<UI::UITextField>(field);
+    return f && f->submitted;
+}
+
+bool UIAPI::textChanged(EntityHandle field) const {
+    const auto* f = m_impl->get<UI::UITextField>(field);
+    return f && f->changed;
+}
+
+void UIAPI::selectAll(EntityHandle field) {
+    if (auto* f = m_impl->get<UI::UITextField>(field)) {
+        f->selectionAnchor = 0;
+        f->caret = UI::decodeUtf8(f->text).size();
+    }
+}
+
+void UIAPI::setTextFieldOptions(EntityHandle field, uint32_t maxLength, bool password, bool readOnly) {
+    if (auto* f = m_impl->get<UI::UITextField>(field)) {
+        f->maxLength = maxLength;
+        f->password = password;
+        f->readOnly = readOnly;
+    }
 }
 
 } // namespace Facade

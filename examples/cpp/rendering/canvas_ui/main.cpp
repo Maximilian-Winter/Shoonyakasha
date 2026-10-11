@@ -6,14 +6,15 @@
 // that overflows its panel, and a frame counter that changes every frame.
 // Beside the box, a world canvas: a texture the UI renders into, shown on a
 // quad in the scene, with a button that counts clicks. Bottom left, a toggle
-// spins the box, a slider sets its angle and a button resets both.
+// spins the box, a slider sets its angle and a button resets both, and a
+// text field takes a name that Enter greets.
 //
 // Usage:
 //     CanvasUIExample [--screenshot path.png]
 //
 // With --screenshot it switches the world canvas's resolution at frame 60,
-// moves and clicks a scripted pointer through the widgets, saves frame 120
-// to the path and closes.
+// moves and clicks a scripted pointer and keyboard through the widgets, saves
+// frame 120 to the path and closes.
 //
 // Keys: WASD/Q/E + right mouse to fly, R to switch the world canvas between
 // 1024x512 and 512x256 pixels. Left mouse uses the widgets; with the mouse
@@ -129,8 +130,9 @@ protected:
         m_terminalButton = createButton(registry, m_terminal, "Click me", roboto, {260.0f, 70.0f});
         place(m_terminalButton, {1, 1}, {-40, -110});
 
-        // Bottom-left settings: spin the box, set its angle, reset it.
-        const auto settings = element(m_canvas, {0, 1}, {0, 1}, {0, 1}, {24, -24}, {340, 170});
+        // Bottom-left settings: spin the box, set its angle, reset it, and a
+        // name field that is greeted on Enter.
+        const auto settings = element(m_canvas, {0, 1}, {0, 1}, {0, 1}, {24, -24}, {340, 220});
         registry.emplace<UIPanel>(settings).color = srgb(0.08f, 0.09f, 0.12f, 0.82f);
         m_spin = createToggle(registry, settings, "Spin the box", roboto, false, {300.0f, 28.0f});
         place(m_spin, {0, 0}, {16, 16});
@@ -138,6 +140,11 @@ protected:
         place(m_angle, {0, 0}, {16, 66});
         m_reset = createButton(registry, settings, "Reset", roboto, {140.0f, 40.0f});
         place(m_reset, {0, 0}, {16, 112});
+        m_greeting = element(settings, {0, 0}, {0, 0}, {0, 0}, {172, 112}, {152, 40});
+        text(m_greeting, roboto, "", 20.0f, srgb(0.6f, 0.95f, 0.7f), false);
+        registry.get<UIText>(m_greeting).alignV = TextAlignV::Middle;
+        m_name = createTextField(registry, settings, "Your name", roboto, {308.0f, 40.0f});
+        place(m_name, {0, 0}, {16, 164});
 
         // Box.gltf's root node, turned by the slider. The root turns its mesh
         // 90 degrees about X; turning the root about Y keeps the box upright.
@@ -171,6 +178,8 @@ protected:
             angle.value = 0.0f;
             registry.get<UIToggle>(m_spin).isOn = false;
         }
+        const auto& name = registry.get<UITextField>(m_name);
+        if (name.submitted && !name.text.empty()) registry.get<UIText>(m_greeting).text = "Hi, " + name.text;
         if (registry.get<UIToggle>(m_spin).isOn && !registry.get<UIInteractable>(m_angle).pressed) {
             angle.value = std::fmod(angle.value + 45.0f * dt, 360.0f);
         }
@@ -196,8 +205,9 @@ private:
     /// With --screenshot: a pointer that turns spinning on, drags the angle
     /// slider and clicks the world canvas's button twice; then Escape clears
     /// the focus that left there, and Tab three times moves focus across the
-    /// settings to Reset. It goes through the same input path as the mouse
-    /// and keyboard.
+    /// settings to Reset. Last it clicks the name field, types a name with a
+    /// correction, submits it with Enter and selects it by word. It goes
+    /// through the same input path as the mouse and keyboard.
     void scriptPointer() {
         if (m_frame < 65) return;
         auto at = [&](entt::entity e, float across = 0.5f) {
@@ -205,13 +215,28 @@ private:
         };
         bool down = false;
         std::vector<ECS::InputStateComponent::KeyPress> keys;
+        std::u32string typed;
         if (m_frame <= 67) { at(m_spin); down = m_frame == 66; }
         else if (m_frame <= 86) { at(m_angle, 0.1f + 0.65f * std::min((m_frame - 75) / 10.0f, 1.0f)); down = m_frame >= 75 && m_frame <= 85; }
         else if (m_frame <= 94) { at(m_terminalButton); down = m_frame == 91 || m_frame == 93; }
-        else {
+        else if (m_frame <= 104) {
             m_scriptPixel = screenSize() * glm::vec2(0.6f, 0.15f);   // over nothing
             if (m_frame == 99) keys.push_back({GLFW_KEY_ESCAPE, 0, false});
             if (m_frame == 100 || m_frame == 102 || m_frame == 104) keys.push_back({GLFW_KEY_TAB, 0, false});
+        } else {
+            // Into the name field: type, correct, submit, then select a word.
+            at(m_name, 0.9f);
+            down = m_frame == 106;
+            if (m_frame == 108) typed = U"Shunyx";
+            if (m_frame == 110) keys.push_back({GLFW_KEY_BACKSPACE, 0, false});
+            if (m_frame == 112) {
+                typed = std::u32string{0x0101, U'k', 0x0101, 0x015B, U'a'};   // "ākāśa"
+                keys.push_back({GLFW_KEY_ENTER, 0, false, typed.size()});
+            }
+            if (m_frame == 114) {
+                keys.push_back({GLFW_KEY_HOME, 0, false});
+                keys.push_back({GLFW_KEY_RIGHT, GLFW_MOD_CONTROL | GLFW_MOD_SHIFT, false});
+            }
         }
 
         int width = 0, height = 0;
@@ -222,6 +247,7 @@ private:
             state.mouseButtons[GLFW_MOUSE_BUTTON_LEFT] = down;
             state.mouseCaptured = false;
             state.keyPresses = keys;
+            state.textInput = typed;
         }
     }
 
@@ -297,6 +323,8 @@ private:
     entt::entity m_spin = entt::null;
     entt::entity m_angle = entt::null;
     entt::entity m_reset = entt::null;
+    entt::entity m_name = entt::null;
+    entt::entity m_greeting = entt::null;
     entt::entity m_box = entt::null;
     int m_frame = 0;
     int m_clicks = 0;

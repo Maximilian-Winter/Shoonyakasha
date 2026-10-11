@@ -36,6 +36,7 @@ EntityHandle createText(EntityHandle parent, const std::string& text, float font
 EntityHandle createButton(EntityHandle parent, const std::string& label, const glm::vec2& size = glm::vec2(160.0f, 40.0f));
 EntityHandle createToggle(EntityHandle parent, const std::string& label, bool isOn = false, const glm::vec2& size = glm::vec2(200.0f, 28.0f));
 EntityHandle createSlider(EntityHandle parent, float minValue, float maxValue, float value, const glm::vec2& size = glm::vec2(200.0f, 24.0f));
+EntityHandle createTextField(EntityHandle parent, const std::string& placeholder = "", const glm::vec2& size = glm::vec2(240.0f, 36.0f));
 void setParent(EntityHandle element, EntityHandle parent);
 void setRect(EntityHandle element, const glm::vec2& anchorMin, const glm::vec2& anchorMax, const glm::vec2& pivot, const glm::vec2& position, const glm::vec2& size);
 void setAnchor(EntityHandle element, const glm::vec2& anchor);
@@ -87,6 +88,10 @@ bool isPointerOverUI() const;
 EntityHandle getPointerCanvas() const;
 glm::vec2 getPointerPosition() const;
 EntityHandle getHoveredElement() const;
+bool textSubmitted(EntityHandle field) const;
+bool textChanged(EntityHandle field) const;
+void selectAll(EntityHandle field);
+void setTextFieldOptions(EntityHandle field, uint32_t maxLength = 0, bool password = false, bool readOnly = false);
 ```
 
 <!-- END SOURCE API -->

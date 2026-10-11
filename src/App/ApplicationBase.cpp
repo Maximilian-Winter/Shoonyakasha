@@ -178,6 +178,8 @@ void ApplicationBase::initializeECS() {
     // With a UI element focused, Escape clears the focus instead of toggling
     // mouse capture.
     m_inputHandler->setEscapeTaken([this] { return m_uiContext->focus().focused != entt::null; });
+    m_uiContext->clipboard().get = [this] { return m_window->getClipboardText(); };
+    m_uiContext->clipboard().set = [this](const std::string& text) { m_window->setClipboardText(text); };
 
     m_activeScene->createEntity("InputState")
         .with<ECS::InputStateComponent>()
@@ -199,7 +201,7 @@ void ApplicationBase::registerSystems() {
     m_activeScene->addSystem<ECS::CameraSystem>();
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
     m_activeScene->addSystem<UI::CanvasInputSystem>(&m_screenSize, &m_windowSize, &m_uiContext->pointer(),
-                                                    &m_uiContext->focus());
+                                                    &m_uiContext->focus(), &m_uiContext->clipboard());
     m_activeScene->addSystem<UI::CanvasLayoutSystem>(&m_screenSize, &m_uiContext->fonts());
     m_activeScene->addSystem<UI::CanvasTextSystem>(&m_uiContext->fonts());
 }
@@ -486,7 +488,10 @@ void ApplicationBase::update() {
         // keyboard while a text field is focused.
         inputComp.pointerOverUI = m_uiContext->pointer().overUI;
         inputComp.keyboardCapturedByUI = m_uiContext->focus().keyboardCaptured;
-        if (inputComp.keyboardCapturedByUI) inputComp.keys.fill(false);
+        if (inputComp.keyboardCapturedByUI) {
+            inputComp.keys.fill(false);
+            for (int key = GLFW_KEY_LEFT_SHIFT; key <= GLFW_KEY_RIGHT_SUPER; ++key) inputComp.keys[key] = state.keys[key];
+        }
     }
 
     onUpdate(m_deltaTime);

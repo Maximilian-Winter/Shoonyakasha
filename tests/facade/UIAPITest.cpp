@@ -28,7 +28,8 @@ struct UIAPIFixture : ::testing::Test {
     UIAPI ui{registry, context};
     glm::vec2 screen{1280.0f, 720.0f};
     entt::entity input = registry.create();
-    UI::CanvasInputSystem inputSystem{&screen, nullptr, &context.pointer(), &context.focus()};   // keeps the press between frames
+    UI::CanvasInputSystem inputSystem{&screen, nullptr, &context.pointer(), &context.focus(),
+                                      &context.clipboard()};   // keeps the press between frames
 
     UIAPIFixture() { registry.emplace<ECS::InputStateComponent>(input); }
 
@@ -38,7 +39,8 @@ struct UIAPIFixture : ::testing::Test {
         state.mousePosition = mouse;
         state.mouseButtons[GLFW_MOUSE_BUTTON_LEFT] = down;
         inputSystem.update(registry, 0.0f);
-        state.keyPresses.clear();   // presses last one frame
+        state.keyPresses.clear();   // presses and typing last one frame
+        state.textInput.clear();
         UI::CanvasLayoutSystem(&screen, &context.fonts()).update(registry, 0.0f);
         UI::CanvasTextSystem(&context.fonts()).update(registry, 0.0f);
     }
@@ -267,6 +269,43 @@ TEST_F(UIAPIFixture, FocusMovesByCodeAndByTab) {
     frame();
     frame();
     EXPECT_EQ(ui.getFocusedElement(), NullEntity);   // hidden: focus let go
+}
+
+TEST_F(UIAPIFixture, TextFieldsTakeTypingAndReportItForOneFrame) {
+    const EntityHandle canvas = ui.createCanvas({1280.0f, 720.0f});
+    const EntityHandle field = ui.createTextField(canvas, "Search");
+    auto& state = registry.get<ECS::InputStateComponent>(input);
+    frame();
+    EXPECT_EQ(ui.getText(field), "");
+
+    frame({640.0f, 360.0f}, true);
+    frame({640.0f, 360.0f}, false);
+    EXPECT_EQ(ui.getFocusedElement(), field);
+    EXPECT_TRUE(ui.isKeyboardCaptured());
+
+    state.textInput = U"abc";
+    frame();
+    EXPECT_EQ(ui.getText(field), "abc");
+    EXPECT_TRUE(ui.textChanged(field));
+    state.keyPresses = {{GLFW_KEY_ENTER, 0, false}};
+    frame();
+    EXPECT_TRUE(ui.textSubmitted(field));
+    EXPECT_FALSE(ui.textChanged(field));
+
+    ui.setText(field, "hello");
+    ui.selectAll(field);
+    state.keyPresses = {{GLFW_KEY_C, GLFW_MOD_CONTROL, false}};
+    frame();
+    EXPECT_FALSE(ui.textChanged(field));        // set by code, not the user
+    EXPECT_EQ(context.clipboard().text(), "hello");
+
+    ui.setTextFieldOptions(field, 2);
+    state.textInput = U"xyz";
+    frame();
+    EXPECT_EQ(ui.getText(field), "xy");          // replaced the selection, two at most
+
+    ui.setFontSize(field, 30.0f);
+    EXPECT_EQ(registry.get<UI::UIText>(registry.get<UI::UITextField>(e(field)).textElement).fontSize, 30.0f);
 }
 
 TEST_F(UIAPIFixture, InvalidHandlesAreIgnored) {

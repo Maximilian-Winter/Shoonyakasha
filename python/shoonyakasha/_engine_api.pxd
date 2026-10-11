@@ -382,6 +382,7 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         EntityHandle createToggle(EntityHandle parent, const string& label, cbool isOn, const vec2& size)
         EntityHandle createSlider(EntityHandle parent, float minValue, float maxValue, float value,
                                   const vec2& size)
+        EntityHandle createTextField(EntityHandle parent, const string& placeholder, const vec2& size)
         void setParent(EntityHandle element, EntityHandle parent)
 
         # Layout
@@ -449,6 +450,12 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         EntityHandle getPointerCanvas() const
         vec2 getPointerPosition() const
         EntityHandle getHoveredElement() const
+
+        # Text fields
+        cbool textSubmitted(EntityHandle field) const
+        cbool textChanged(EntityHandle field) const
+        void selectAll(EntityHandle field)
+        void setTextFieldOptions(EntityHandle field, uint32_t maxLength, cbool password, cbool readOnly)
 
 
 # ═══════════════════════════════════════════════════════════════

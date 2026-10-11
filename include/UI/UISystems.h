@@ -42,12 +42,15 @@ private:
 
 struct UIPointerState;
 struct UIFocusState;
+struct UIClipboard;
 
 /// Pointer input for the canvas UI. Runs before CanvasLayoutSystem, so it
 /// hit-tests the rects laid out the frame before, and writes:
 /// - UIInteractable state and its one-frame clicked and valueChanged edges,
 ///   for the left mouse button;
 /// - UIToggle and UISlider values;
+/// - the focused UITextField's text, caret and selection, from the keyboard
+///   and the pointer;
 /// - the UIPointerState given to it.
 /// An element pressed keeps the pointer until release: a slider follows a
 /// drag outside its rect, and a release elsewhere is not a click. While the
@@ -62,15 +65,21 @@ public:
     /// coordinates the cursor position comes in; they differ on high-DPI
     /// displays. Both are read on each update. `windowSize` may be null when
     /// the two are the same. Without `focus`, the keyboard and gamepad are
-    /// not used.
+    /// not used; without `clipboard`, text fields cannot copy or paste.
     CanvasInputSystem(const glm::vec2* screenSize, const glm::vec2* windowSize, UIPointerState* pointer,
-                      UIFocusState* focus = nullptr);
+                      UIFocusState* focus = nullptr, UIClipboard* clipboard = nullptr);
+
+    /// Seconds between two presses that make a double-click.
+    static constexpr float kDoubleClickTime = 0.4f;
 
     void update(entt::registry& registry, float deltaTime) override;
 
 private:
     void updateFocus(entt::registry& registry, const ECS::InputStateComponent& input, bool pressedNow,
                      entt::entity hovered);
+    void pointTextField(entt::registry& registry, entt::entity field, glm::vec2 pixel,
+                        const std::optional<ECS::Ray>& ray, bool pressedNow, bool shift);
+    void editTextField(entt::registry& registry, entt::entity field, const ECS::InputStateComponent& input);
     void updateDrag(entt::registry& registry, glm::vec2 pixel, const std::optional<ECS::Ray>& ray,
                     bool down, bool pressedNow, entt::entity hitElement, float deltaTime);
     bool dragScrollbar(entt::registry& registry, entt::entity bar, glm::vec2 pixel,
@@ -94,10 +103,22 @@ private:
 
     UIFocusState* m_focus;
     std::array<bool, GLFW_GAMEPAD_BUTTON_LAST + 1> m_lastPadButtons{};  // for press edges
+
+    // Text fields.
+    UIClipboard* m_clipboard;
+    float m_time = 0.0f;                        // seconds of updates, for double-clicks
+    float m_lastPressTime = -1.0f;
+    entt::entity m_lastPressField = entt::null;
+    bool m_selectingWords = false;              // a double-click selected a word; dragging leaves it
+    entt::entity m_lastFocused = entt::null;    // focused at the end of the last update
 };
 
 /// Lays out each UIText of a laid-out element into its UITextCache, in the
-/// element's rect, when the text, font, style or rect size changed.
+/// element's rect, when the text, font, style or rect size changed. Before
+/// that it shows each UITextField's text, its mask or its placeholder in the
+/// field's text element; after it, it moves the text to keep the caret in
+/// view and places the caret and selection, setting their rects for this
+/// frame as well as their anchors for the next.
 class CanvasTextSystem : public ECS::ISystem {
 public:
     static constexpr int kPriority = 52;

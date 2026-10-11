@@ -1,5 +1,5 @@
 //
-// Utf8.h - UTF-8 decoding
+// Utf8.h - UTF-8 decoding and encoding
 //
 
 #pragma once
@@ -58,6 +58,32 @@ inline std::u32string decodeUtf8(std::string_view text) {
             out.push_back(kReplacementCharacter);
         } else {
             out.push_back(codepoint);
+        }
+    }
+    return out;
+}
+
+/// The UTF-8 encoding of `text`. A surrogate or a value above U+10FFFF is
+/// encoded as U+FFFD.
+inline std::string encodeUtf8(std::u32string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (char32_t c : text) {
+        if (c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)) c = kReplacementCharacter;
+        if (c < 0x80) {
+            out.push_back(static_cast<char>(c));
+        } else if (c < 0x800) {
+            out.push_back(static_cast<char>(0xC0 | (c >> 6)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        } else if (c < 0x10000) {
+            out.push_back(static_cast<char>(0xE0 | (c >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (c >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
         }
     }
     return out;

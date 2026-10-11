@@ -12,8 +12,10 @@ A tour of engine.ui on the default pipeline, in one window:
              and Tibetan from fallback fonts, a font size slider and
              wrapping in a clipped box
     Widgets  a click counter, a button enabled by a toggle, a stepped
-             slider, and a log whose rows are created and destroyed at
-             runtime, in a scroll view: wheel, drag or scrollbar
+             slider, a name field that greets in the log on Enter, and a
+             log whose rows are created and destroyed at runtime, in a
+             scroll view (wheel, drag or scrollbar), filtered by a search
+             field as you type
 - a readout of the pointer: which canvas, where on it, what it hovers
 - an About dialog on a second canvas drawn on top, which blocks the
   pointer to everything under it while it is open
@@ -27,12 +29,14 @@ The sidebar and dialog frames are a 9-slice texture this script draws itself
 Usage:
     python ui_showcase.py [--screenshot path.png] [--tab scene|text|widgets] [--about]
 
---screenshot saves frame 120 to the path, with twelve rows in the log; --tab
-picks the page shown first; --about opens with the About dialog showing.
+--screenshot saves frame 120 to the path, with twelve rows in the log, a
+name typed and the log filtered; --tab picks the page shown first; --about
+opens with the About dialog showing.
 
 Controls: left mouse uses the UI, on the screen and on the kiosk. WASD/Q/E
 and the right mouse button fly the camera; with the mouse captured (ESC),
-the centre of the screen is the pointer.
+the centre of the screen is the pointer. While a text field has focus the
+keys go to it; Tab moves on, ESC leaves it.
 
 Requirements:
     - the shoonyakasha package installed (pip install .)
@@ -306,12 +310,18 @@ def build_widgets_page(page):
     named("Steps slider", ui_.create_slider(page, min=0.0, max=10.0, value=5.0, size=(PAGE_WIDTH, 24)))
     ui_.set_slider_range(w["Steps slider"], 0.0, 10.0, True)
 
+    name_row = row(page, 36, spacing=10)
+    named("Name field", stretch(ui_.create_text_field(name_row, "Your name, then Enter", size=(200, 36))))
+    ui_.set_text_field_options(w["Name field"], max_length=24)
+    named("Greet button", ui_.create_button(name_row, "Greet", size=(100, 36)))
+
     button_row = row(page, 36, spacing=10)
     named("Add row", ui_.create_button(button_row, "Add row", size=(140, 36)))
     named("Clear rows", ui_.create_button(button_row, "Clear", size=(100, 36)))
+    named("Search field", ui_.create_text_field(page, "Filter the log", size=(PAGE_WIDTH, 32)))
 
     # The log is a scroll view over a dark panel: wheel, drag or scrollbar.
-    log = named("Log", ui_.create_panel(page, (PAGE_WIDTH, 170), color=(0.06, 0.07, 0.09, 1.0)))
+    log = named("Log", ui_.create_panel(page, (PAGE_WIDTH, 150), color=(0.06, 0.07, 0.09, 1.0)))
     view = named("Log view", ui_.create_scroll_view(log))
     ui_.set_rect(view, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
     w["log_view"] = view
@@ -416,19 +426,35 @@ def set_gated(enabled):
         ui_.set_color(child, INK if enabled else MUTED[:3] + (0.6,))
 
 
-def add_row():
+def add_row(message=None):
     rows = state["rows"]
     index = len(rows)
+    message = message or "Row %d, added at frame %d" % (index + 1, state["frame"])
     tint = (0.16, 0.18, 0.23, 1.0) if index % 2 == 0 else (0.12, 0.13, 0.17, 1.0)
     # The view's column places each new row under the last, across its width;
     # scrolling to the end shows it once the next layout has placed it.
     entry = ui_.create_panel(w["log_content"], (0, 26), color=tint)
     ui_.set_raycast_target(entry, False)
-    text = ui_.create_text(entry, "Row %d, added at frame %d" % (index + 1, state["frame"]), size=16)
+    text = ui_.create_text(entry, message, size=16)
     ui_.set_rect(text, anchor_min=(0, 0), anchor_max=(1, 1), size=(-16, 0))
     ui_.set_text_align(text, sk.TEXT_ALIGN_LEFT, sk.TEXT_ALIGN_MIDDLE)
-    rows.append(entry)
+    rows.append((entry, message))
+    filter_rows()
     ui_.set_scroll_position(w["log_view"], (0, 1))
+
+
+def filter_rows():
+    """Show the log rows that contain the search text; hidden rows take no
+    room in the column."""
+    query = ui_.get_text(w["Search field"]).casefold()
+    for entry, message in state["rows"]:
+        ui_.set_visible(entry, query in message.casefold())
+
+
+def greet():
+    name = ui_.get_text(w["Name field"]).strip()
+    if name:
+        add_row("Hello, %s!" % name)
 
 
 def update_widgets_page():
@@ -443,10 +469,15 @@ def update_widgets_page():
 
     ui_.set_text(w["steps_label"], "Steps (whole numbers)  %d" % ui_.slider_value(w["Steps slider"]))
 
+    if ui_.text_submitted(w["Name field"]) or ui_.was_clicked(w["Greet button"]):
+        greet()
+    if ui_.text_changed(w["Search field"]):
+        filter_rows()
+
     if ui_.was_clicked(w["Add row"]):
         add_row()
     if ui_.was_clicked(w["Clear rows"]):
-        for entry in state["rows"]:
+        for entry, _ in state["rows"]:
             engine.scene.destroy_entity(entry)     # its text goes with it
         state["rows"].clear()
 
@@ -498,6 +529,12 @@ def on_update(dt):
     if SCREENSHOT and state["frame"] == 30:
         for _ in range(12):
             add_row()       # more than the log shows, so it scrolls
+        ui_.set_text(w["Name field"], "Dakini")
+        greet()
+        ui_.set_text(w["Search field"], "1")
+        filter_rows()
+        ui_.focus(w["Name field"])
+        ui_.select_all(w["Name field"])
 
 
 def on_post_render():

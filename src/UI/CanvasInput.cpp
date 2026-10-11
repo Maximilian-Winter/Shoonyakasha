@@ -3,8 +3,10 @@
 //
 
 #include "UI/UISystems.h"
+#include "UI/TextEditing.h"
 #include "UI/UIComponents.h"
 #include "UI/UIHitTest.h"
+#include "UI/Utf8.h"
 
 #include "ECS/CameraController.h"
 #include "ECS/Core.h"
@@ -166,14 +168,16 @@ void syncWidgets(entt::registry& registry) {
 } // namespace
 
 CanvasInputSystem::CanvasInputSystem(const glm::vec2* screenSize, const glm::vec2* windowSize,
-                                     UIPointerState* pointer, UIFocusState* focus)
-    : m_screenSize(screenSize), m_windowSize(windowSize), m_pointer(pointer), m_focus(focus) {
+                                     UIPointerState* pointer, UIFocusState* focus, UIClipboard* clipboard)
+    : m_screenSize(screenSize), m_windowSize(windowSize), m_pointer(pointer), m_focus(focus),
+      m_clipboard(clipboard) {
     priority = kPriority;
     name = "CanvasInputSystem";
 }
 
 void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
     if (!enabled) return;
+    m_time += deltaTime;
 
     for (auto [entity, interactable] : registry.view<UIInteractable>().each()) {
         interactable.hovered = false;
@@ -181,6 +185,10 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
         interactable.focused = false;
         interactable.clicked = false;
         interactable.valueChanged = false;
+    }
+    for (auto [entity, field] : registry.view<UITextField>().each()) {
+        field.changed = false;
+        field.submitted = false;
     }
 
     const auto inputs = registry.view<const ECS::InputStateComponent>();
@@ -238,6 +246,10 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
         if (registry.all_of<UIScrollbar>(captured) && dragScrollbar(registry, captured, pixel, ray, pressedNow)) {
             interactable.valueChanged = true;
         }
+        if (down && registry.all_of<UITextField>(captured)) {
+            const bool shift = input->isKeyDown(GLFW_KEY_LEFT_SHIFT) || input->isKeyDown(GLFW_KEY_RIGHT_SHIFT);
+            pointTextField(registry, captured, pixel, ray, pressedNow, shift);
+        }
         if (!down) {
             if (interactable.hovered) {
                 interactable.clicked = true;
@@ -257,6 +269,12 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
     m_wasDown = down;
 
     updateFocus(registry, *input, pressedNow, hovered);
+    const entt::entity focused = m_focus ? m_focus->focused : entt::null;
+    if (auto* field = focused != entt::null ? registry.try_get<UITextField>(focused) : nullptr) {
+        if (focused != m_lastFocused) field->blinkTime = 0.0f;   // the caret shows at once
+        editTextField(registry, focused, *input);
+    }
+    m_lastFocused = focused;
 
     if (hit) {
         pointer.canvas = hit->canvas;
@@ -276,8 +294,9 @@ void CanvasInputSystem::updateDrag(entt::registry& registry, glm::vec2 pixel, co
     }
 
     if (pressedNow) {
-        // A press on a slider or scrollbar drags that, not the view.
-        const bool ownDrag = m_captured != entt::null && registry.any_of<UISlider, UIScrollbar>(m_captured);
+        // A press on a slider, scrollbar or text field drags that, not the view.
+        const bool ownDrag = m_captured != entt::null &&
+                             registry.any_of<UISlider, UIScrollbar, UITextField>(m_captured);
         const auto views = ownDrag ? std::vector<entt::entity>{} : scrollViewsAbove(registry, hitElement);
         m_dragView = views.empty() ? entt::null : views.front();
         m_dragging = false;
@@ -489,6 +508,172 @@ void CanvasInputSystem::updateFocus(entt::registry& registry, const ECS::InputSt
 
     if (focus.focused != entt::null) registry.get<UIInteractable>(focus.focused).focused = true;
     focus.keyboardCaptured = captured();
+}
+
+// ─── Text fields ────────────────────────────────────────────────
+
+namespace {
+
+/// The field's text, caret and selection, with caret stops from its text
+/// element's layout when that layout is of the text as it is now.
+TextEditBuffer bufferOf(const entt::registry& registry, const UITextField& field) {
+    TextEditBuffer buffer;
+    buffer.text = decodeUtf8(field.text);
+    buffer.caret = std::min(field.caret, buffer.text.size());
+    buffer.anchor = std::min(field.selectionAnchor, buffer.text.size());
+    const auto* cache = registry.try_get<UITextCache>(field.textElement);
+    if (cache && !buffer.text.empty() && cache->text == field.displayText()) {
+        buffer.stops = caretStops(cache->layout.clusters, buffer.text.size());
+    }
+    return buffer;
+}
+
+void store(UITextField& field, const TextEditBuffer& buffer, bool textChanged) {
+    if (textChanged) {
+        field.text = encodeUtf8(buffer.text);
+        field.changed = true;
+    }
+    field.caret = buffer.caret;
+    field.selectionAnchor = buffer.anchor;
+    field.blinkTime = 0.0f;
+}
+
+/// `text` for a single line: line breaks and tabs become spaces, and other
+/// control characters are dropped.
+std::u32string singleLine(std::u32string_view text) {
+    std::u32string out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        const char32_t c = text[i];
+        if (c == U'\r' && i + 1 < text.size() && text[i + 1] == U'\n') continue;
+        if (c == U'\n' || c == U'\r' || c == U'\t') out.push_back(U' ');
+        else if (c >= 0x20 && c != 0x7F) out.push_back(c);
+    }
+    return out;
+}
+
+} // namespace
+
+void CanvasInputSystem::pointTextField(entt::registry& registry, entt::entity entity, glm::vec2 pixel,
+                                       const std::optional<ECS::Ray>& ray, bool pressedNow, bool shift) {
+    auto& field = registry.get<UITextField>(entity);
+    const auto* textRect = registry.try_get<UIRect>(field.textElement);
+    if (!textRect || textRect->canvas == entt::null) return;
+    const auto position = canvasPosition(registry, textRect->canvas, pixel, ray);
+    if (!position) return;
+
+    TextEditBuffer buffer = bufferOf(registry, field);
+    size_t index = buffer.text.size();
+    const auto* cache = registry.try_get<UITextCache>(field.textElement);
+    if (cache && !buffer.stops.empty()) {
+        index = caretAt(cache->layout, buffer.text.size(), position->x - textRect->rect.min.x);
+    }
+
+    if (pressedNow) {
+        const bool doubleClick = m_lastPressField == entity && m_time - m_lastPressTime <= kDoubleClickTime;
+        m_lastPressField = entity;
+        m_lastPressTime = doubleClick ? -1.0f : m_time;   // a third press starts over
+        m_selectingWords = doubleClick;
+        if (!doubleClick) {
+            buffer.moveTo(index, shift);
+        } else if (field.password) {
+            buffer.anchor = 0;                             // a mask has no words to show
+            buffer.caret = buffer.text.size();
+        } else {
+            const auto [start, end] = buffer.wordAt(index);
+            buffer.anchor = start;
+            buffer.caret = end;
+        }
+    } else if (!m_selectingWords) {
+        if (index == buffer.caret) return;
+        buffer.moveTo(index, true);
+    } else {
+        return;
+    }
+    store(field, buffer, false);
+}
+
+void CanvasInputSystem::editTextField(entt::registry& registry, entt::entity entity,
+                                      const ECS::InputStateComponent& input) {
+    if (input.textInput.empty() && input.keyPresses.empty()) return;
+    auto& field = registry.get<UITextField>(entity);
+    TextEditBuffer buffer = bufferOf(registry, field);
+    const bool editable = !field.readOnly;
+    bool changed = false;
+
+    // Characters typed and keys pressed, in the order they came.
+    const std::u32string& typed = input.textInput;
+    size_t typedDone = 0;
+    auto typeUpTo = [&](size_t end) {
+        end = std::min(end, typed.size());
+        if (end <= typedDone) return;
+        if (editable) changed |= buffer.insert(singleLine(typed.substr(typedDone, end - typedDone)), field.maxLength);
+        typedDone = end;
+    };
+
+    for (const auto& key : input.keyPresses) {
+        typeUpTo(key.textOffset);
+        const bool shift = (key.mods & GLFW_MOD_SHIFT) != 0;
+        const bool ctrl = (key.mods & GLFW_MOD_CONTROL) != 0;
+        // Ctrl or Cmd, but not AltGr, which comes as Ctrl+Alt.
+        const bool shortcut = (key.mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER)) != 0 && !(key.mods & GLFW_MOD_ALT);
+        auto copy = [&] {
+            if (m_clipboard && buffer.hasSelection() && !field.password) {
+                m_clipboard->setText(encodeUtf8(buffer.selectedText()));
+            }
+        };
+
+        switch (key.key) {
+            case GLFW_KEY_LEFT:
+                if (buffer.hasSelection() && !shift && !ctrl) buffer.moveTo(buffer.selectionStart(), false);
+                else buffer.moveTo(ctrl ? buffer.previousWord(buffer.caret) : buffer.previousStop(buffer.caret), shift);
+                break;
+            case GLFW_KEY_RIGHT:
+                if (buffer.hasSelection() && !shift && !ctrl) buffer.moveTo(buffer.selectionEnd(), false);
+                else buffer.moveTo(ctrl ? buffer.nextWord(buffer.caret) : buffer.nextStop(buffer.caret), shift);
+                break;
+            case GLFW_KEY_HOME:
+                buffer.moveTo(0, shift);
+                break;
+            case GLFW_KEY_END:
+                buffer.moveTo(buffer.text.size(), shift);
+                break;
+            case GLFW_KEY_BACKSPACE:
+                if (editable) changed |= buffer.backspace(ctrl);
+                break;
+            case GLFW_KEY_DELETE:
+                if (editable) changed |= buffer.deleteForward(ctrl);
+                break;
+            case GLFW_KEY_ENTER:
+            case GLFW_KEY_KP_ENTER:
+                if (!key.repeat) field.submitted = true;
+                break;
+            case GLFW_KEY_A:
+                if (shortcut) {
+                    buffer.anchor = 0;
+                    buffer.caret = buffer.text.size();
+                }
+                break;
+            case GLFW_KEY_C:
+                if (shortcut) copy();
+                break;
+            case GLFW_KEY_X:
+                if (shortcut && editable && buffer.hasSelection() && !field.password) {
+                    copy();
+                    changed |= buffer.backspace();
+                }
+                break;
+            case GLFW_KEY_V:
+                if (shortcut && editable && m_clipboard) {
+                    changed |= buffer.insert(singleLine(decodeUtf8(m_clipboard->text())), field.maxLength);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    typeUpTo(typed.size());
+    store(field, buffer, changed);
 }
 
 bool CanvasInputSystem::dragScrollbar(entt::registry& registry, entt::entity bar, glm::vec2 pixel,

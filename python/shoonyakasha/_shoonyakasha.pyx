@@ -1172,6 +1172,11 @@ cdef class UI:
     def create_slider(self, uint32_t parent, float min=0.0, float max=1.0, float value=0.0, size=(200, 24)):
         return <uint32_t>self._ptr.createSlider(parent, min, max, value, _tuple_to_vec2(size))
 
+    def create_text_field(self, uint32_t parent, str placeholder="", size=(240, 36)):
+        """A single-line text field showing placeholder while empty. Pressing it
+        focuses it; while focused it takes the keyboard."""
+        return <uint32_t>self._ptr.createTextField(parent, placeholder.encode("utf-8"), _tuple_to_vec2(size))
+
     def set_parent(self, uint32_t element, uint32_t parent):
         """Move element to the end of parent's children."""
         self._ptr.setParent(element, parent)
@@ -1298,7 +1303,8 @@ cdef class UI:
     # ── Content ───────────────────────────────────────────────
     #
     # The text methods act on the element's own text or, for a button or
-    # toggle, on its label.
+    # toggle, on its label. On a text field, set_text and get_text act on what
+    # the user edits, and the font methods on how it is drawn.
 
     def set_text(self, uint32_t element, str text):
         self._ptr.setText(element, text.encode("utf-8"))
@@ -1410,6 +1416,32 @@ cdef class UI:
     def hovered_element(self):
         """The interactable element under the pointer, or NULL_ENTITY."""
         return <uint32_t>self._ptr.getHoveredElement()
+
+    # ── Text fields ───────────────────────────────────────────
+    #
+    # A focused field takes typed text, Backspace and Delete (with Ctrl, a
+    # word), Left and Right (with Ctrl, by word), Home and End, Shift to
+    # select, Ctrl+A, C, X and V with the system clipboard, and Enter to
+    # submit. Pressing places the caret, dragging selects and a double-click
+    # selects a word. set_text puts the caret at the end. There is no input
+    # method (IME) composition.
+
+    def text_submitted(self, uint32_t field):
+        """The user pressed Enter in the field, this frame."""
+        return self._ptr.textSubmitted(field)
+
+    def text_changed(self, uint32_t field):
+        """The user changed the field's text, this frame."""
+        return self._ptr.textChanged(field)
+
+    def select_all(self, uint32_t field):
+        self._ptr.selectAll(field)
+
+    def set_text_field_options(self, uint32_t field, uint32_t max_length=0, bint password=False,
+                               bint read_only=False):
+        """max_length in characters, 0 for no limit; password draws a dot per character
+        and stops copying; read_only keeps selecting and copying but not editing."""
+        self._ptr.setTextFieldOptions(field, max_length, password, read_only)
 
 
 # ═══════════════════════════════════════════════════════════════

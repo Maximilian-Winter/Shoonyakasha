@@ -203,5 +203,40 @@ entt::entity createScrollView(entt::registry& registry, entt::entity parent, glm
     return view;
 }
 
+entt::entity createTextField(entt::registry& registry, entt::entity parent, const std::string& placeholder,
+                             uint32_t font, glm::vec2 size) {
+    const entt::entity field = createElement(registry, parent, size);
+    registry.emplace<UIPanel>(field).color = kTrack;
+    addInteractable(registry, field).capturesKeyboard = true;
+
+    const entt::entity viewport = stretched(registry, field, kTextFieldPadding);
+    registry.emplace<UIClip>(viewport);
+
+    // Placed each frame by CanvasTextSystem; the selection draws behind the
+    // text and the caret over it.
+    const entt::entity selection = createElement(registry, viewport, glm::vec2(0.0f));
+    registry.emplace<UIImage>(selection).raycastTarget = false;
+    registry.get<UIRect>(selection).visible = false;
+
+    const entt::entity text = stretched(registry, viewport);
+    auto& label = registry.emplace<UIText>(text);
+    label.font = font;
+    label.fontSize = size.y * 0.5f;
+    label.alignH = TextAlignH::Left;
+    label.alignV = TextAlignV::Middle;
+    label.wrap = false;
+
+    const entt::entity caret = createElement(registry, viewport, glm::vec2(0.0f));
+    registry.emplace<UIImage>(caret).raycastTarget = false;
+    registry.get<UIRect>(caret).visible = false;
+
+    auto& state = registry.emplace<UITextField>(field);
+    state.placeholder = placeholder;
+    state.textElement = text;
+    state.selectionElement = selection;
+    state.caretElement = caret;
+    return field;
+}
+
 } // namespace UI
 } // namespace Shoonyakasha

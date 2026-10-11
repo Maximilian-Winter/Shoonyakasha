@@ -55,5 +55,14 @@ entt::entity createScrollView(entt::registry& registry, entt::entity parent, glm
 
 constexpr float kScrollbarThickness = 10.0f;
 
+/// A single-line text field: a panel with UITextField and a UIInteractable
+/// that captures the keyboard, and inside it, inset by kTextFieldPadding, a
+/// viewport that clips the selection, the text and the caret. The text is
+/// size.y * 0.5 high.
+entt::entity createTextField(entt::registry& registry, entt::entity parent, const std::string& placeholder,
+                             uint32_t font, glm::vec2 size = {240.0f, 36.0f});
+
+constexpr float kTextFieldPadding = 8.0f;
+
 } // namespace UI
 } // namespace Shoonyakasha
