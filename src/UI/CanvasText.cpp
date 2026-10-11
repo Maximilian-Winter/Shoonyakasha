@@ -24,6 +24,19 @@ bool sameStyle(const TextStyle& a, const TextStyle& b) {
            a.wrap == b.wrap && a.lineSpacing == b.lineSpacing && a.direction == b.direction;
 }
 
+/// The paragraph direction `text` is laid out with: FromLayout takes its
+/// element's layout direction, and Auto falls back to it.
+TextDirection resolvedDirection(const UIText& text, const UIRect& element) {
+    switch (text.direction) {
+    case TextDirection::FromLayout:
+        return element.rightToLeft ? TextDirection::RightToLeft : TextDirection::LeftToRight;
+    case TextDirection::Auto:
+        return element.rightToLeft ? TextDirection::AutoRightToLeft : TextDirection::Auto;
+    default:
+        return text.direction;
+    }
+}
+
 /// The selected stretches of a laid-out line, [left, right) each: one for
 /// each run of selected clusters shown side by side.
 std::vector<std::pair<float, float>> selectionSpans(const TextLayoutResult& layout, size_t start, size_t end) {
@@ -90,7 +103,10 @@ void placeTextFields(entt::registry& registry, float deltaTime) {
         const bool laidOut = !field.text.empty() && cache;
         const float width = textRect->rect.size().x;
         // An empty right-to-left field shows its caret at the right.
-        const float emptyCaret = text->direction == TextDirection::RightToLeft ? width - field.caretWidth : 0.0f;
+        const TextDirection direction = resolvedDirection(*text, *textRect);
+        const bool emptyRightToLeft = direction == TextDirection::RightToLeft ||
+                                      direction == TextDirection::AutoRightToLeft;
+        const float emptyCaret = emptyRightToLeft ? width - field.caretWidth : 0.0f;
         const float caret = laidOut ? caretX(cache->layout, field.caret) : emptyCaret;
 
         // The text's extent: from 0, or further left where right-aligned text
@@ -163,7 +179,7 @@ void CanvasTextSystem::update(entt::registry& registry, float deltaTime) {
         style.alignV = text.alignV;
         style.wrap = text.wrap;
         style.lineSpacing = text.lineSpacing;
-        style.direction = text.direction;
+        style.direction = resolvedDirection(text, element);
         const glm::vec2 box = element.rect.size();
 
         const std::vector<uint32_t> fonts = m_fonts->chain(text.font);

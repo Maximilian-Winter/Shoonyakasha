@@ -85,9 +85,19 @@ enum class TextVAlign : uint8_t {
 };
 
 // The direction of each paragraph of canvas UI text. Auto takes it from the
-// paragraph's first letter with a direction.
+// paragraph's first letter with a direction, or from the element's layout
+// direction when it has none; FromLayout always from the layout direction.
 enum class TextDirection : uint8_t {
     Auto        = 0,
+    LeftToRight = 1,
+    RightToLeft = 2,
+    FromLayout  = 3
+};
+
+// Which way a canvas UI element, or a canvas, lays out its children. Inherit
+// takes its parent's; a canvas left as Inherit lays out left to right.
+enum class LayoutDirection : uint8_t {
+    Inherit     = 0,
     LeftToRight = 1,
     RightToLeft = 2
 };

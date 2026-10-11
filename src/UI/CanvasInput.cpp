@@ -104,7 +104,9 @@ bool dragSlider(entt::registry& registry, entt::entity entity, glm::vec2 pixel, 
     const float width = element->rect.size().x;
     if (!position || width <= 0.0f) return false;
 
-    const float t = std::clamp((position->x - element->rect.min.x) / width, 0.0f, 1.0f);
+    // From the left, or from the right for a slider laid out right to left.
+    const float fromStart = element->rightToLeft ? element->rect.max.x - position->x : position->x - element->rect.min.x;
+    const float t = std::clamp(fromStart / width, 0.0f, 1.0f);
     float value = slider.minValue + t * (slider.maxValue - slider.minValue);
     if (slider.wholeNumbers) value = std::round(value);
     if (value == slider.value) return false;
@@ -150,10 +152,15 @@ bool setOffset(UIScrollView& view, int axis, float offset) {
 void wheelScroll(entt::registry& registry, entt::entity element, int axis, float steps) {
     for (const entt::entity e : scrollViewsAbove(registry, element)) {
         auto& view = registry.get<UIScrollView>(e);
-        // A view that scrolls only sideways takes the vertical wheel too.
+        // A view that scrolls only sideways takes the vertical wheel too, on
+        // through its content. Tilting the wheel moves the content's view
+        // the way it is tilted, which in a view laid out right to left is
+        // back towards its start.
         const int viewAxis = axis == 1 && !view.vertical && view.horizontal ? 0 : axis;
         if (!scrolls(view, viewAxis)) continue;
-        if (setOffset(view, viewAxis, offsetOf(view, viewAxis) + steps * view.wheelSpeed)) {
+        const auto* rect = registry.try_get<UIRect>(e);
+        const float sign = axis == 0 && rect && rect->rightToLeft ? -1.0f : 1.0f;
+        if (setOffset(view, viewAxis, offsetOf(view, viewAxis) + sign * steps * view.wheelSpeed)) {
             view.velocity[viewAxis] = 0.0f;
             return;
         }
@@ -434,7 +441,15 @@ void CanvasInputSystem::updateDrag(entt::registry& registry, glm::vec2 pixel, co
     }
     if (!m_dragging) return;
 
-    const glm::vec2 moved = *position - m_pressPosition;
+    // Content follows the pointer, so the offset moves against it. In a view
+    // laid out right to left the offset grows as the content moves right, so
+    // along x it moves with the pointer.
+    glm::vec2 moved = *position - m_pressPosition;
+    glm::vec2 pointerStep = *position - m_lastDragPosition;
+    if (registry.get<UIRect>(m_dragView).rightToLeft) {
+        moved.x = -moved.x;
+        pointerStep.x = -pointerStep.x;
+    }
     for (int axis = 0; axis < 2; ++axis) {
         if (!scrolls(view, axis)) continue;
         const float offset = m_dragStartOffset[axis] - moved[axis];
@@ -445,8 +460,7 @@ void CanvasInputSystem::updateDrag(entt::registry& registry, glm::vec2 pixel, co
         }
     }
     if (deltaTime > 0.0f) {
-        // Content follows the pointer, so the offset moves against it.
-        const glm::vec2 velocity = -(*position - m_lastDragPosition) / deltaTime;
+        const glm::vec2 velocity = -pointerStep / deltaTime;
         view.velocity = glm::mix(view.velocity, velocity, 0.5f);
     }
     m_lastDragPosition = *position;
@@ -575,7 +589,10 @@ void CanvasInputSystem::updateFocus(entt::registry& registry, const ECS::InputSt
     auto arrow = [&](glm::vec2 direction) {
         // A focused slider takes Left and Right.
         if (direction.y == 0.0f && focus.focused != entt::null && registry.all_of<UISlider>(focus.focused)) {
-            stepSlider(registry, focus.focused, direction.x > 0.0f ? 1 : -1);
+            // The handle moves the way of the arrow on screen, so Right
+            // lowers a slider that runs from the right.
+            const bool rightToLeft = registry.get<UIRect>(focus.focused).rightToLeft;
+            stepSlider(registry, focus.focused, (direction.x > 0.0f) != rightToLeft ? 1 : -1);
         } else {
             move(nextInDirection(registry, focus.focused, direction));
         }
@@ -819,7 +836,10 @@ bool CanvasInputSystem::dragScrollbar(entt::registry& registry, entt::entity bar
     if (!position) return false;
 
     const int axis = scrollbar.vertical ? 1 : 0;
-    const float p = (*position)[axis];
+    // A horizontal bar laid out right to left has its handle mirrored, so the
+    // pointer is mirrored too and the track read from the left.
+    float p = (*position)[axis];
+    if (axis == 0 && rect.rightToLeft) p = rect.rect.min.x + rect.rect.max.x - p;
     const BarGeometry g = barGeometry(rect, scrollbar);
     const float travel = g.trackLength - g.handleLength;
     float value = view->scrollPosition[axis];

@@ -30,7 +30,8 @@ from ._facade_types cimport (
     UIAnchor_BottomLeft, UIAnchor_BottomCenter, UIAnchor_BottomRight,
     TextHAlign, TextHAlign_Left, TextHAlign_Center, TextHAlign_Right, TextHAlign_Start, TextHAlign_End,
     TextVAlign, TextVAlign_Top, TextVAlign_Middle, TextVAlign_Bottom,
-    TextDirection, TextDirection_Auto, TextDirection_LeftToRight, TextDirection_RightToLeft,
+    TextDirection, TextDirection_Auto, TextDirection_LeftToRight, TextDirection_RightToLeft, TextDirection_FromLayout,
+    LayoutDirection, LayoutDirection_Inherit, LayoutDirection_LeftToRight, LayoutDirection_RightToLeft,
     CanvasScaleMode, CanvasScaleMode_ConstantPixel, CanvasScaleMode_ScaleWithScreen,
     SizeFit, SizeFit_Unconstrained, SizeFit_Min, SizeFit_Preferred,
     EngineConfig, GltfOptions, RecordingOptions, ClipInfo, GltfResult as CppGltfResult,
@@ -110,6 +111,12 @@ TEXT_ALIGN_BOTTOM = <int>TextVAlign_Bottom
 TEXT_DIRECTION_AUTO = <int>TextDirection_Auto
 TEXT_DIRECTION_LTR = <int>TextDirection_LeftToRight
 TEXT_DIRECTION_RTL = <int>TextDirection_RightToLeft
+TEXT_DIRECTION_LAYOUT = <int>TextDirection_FromLayout
+
+# Layout direction (canvas UI)
+LAYOUT_DIRECTION_INHERIT = <int>LayoutDirection_Inherit
+LAYOUT_DIRECTION_LTR = <int>LayoutDirection_LeftToRight
+LAYOUT_DIRECTION_RTL = <int>LayoutDirection_RightToLeft
 
 # Canvas scale modes
 CANVAS_CONSTANT_PIXEL = <int>CanvasScaleMode_ConstantPixel
@@ -1344,9 +1351,27 @@ cdef class UI:
 
     def set_text_direction(self, uint32_t element, int direction):
         """TEXT_DIRECTION_AUTO (the default: from each paragraph's first letter
-        with a direction), TEXT_DIRECTION_LTR or TEXT_DIRECTION_RTL. It sets
-        where START and END align and the order of words of both directions."""
+        with a direction, or the element's layout direction without one),
+        TEXT_DIRECTION_LTR, TEXT_DIRECTION_RTL or TEXT_DIRECTION_LAYOUT (always
+        the layout direction). It sets where START and END align and the order
+        of words of both directions."""
         self._ptr.setTextDirection(element, <TextDirection>direction)
+
+    def set_layout_direction(self, uint32_t element, int direction):
+        """LAYOUT_DIRECTION_INHERIT, LAYOUT_DIRECTION_LTR or LAYOUT_DIRECTION_RTL
+        for a canvas or an element: right to left mirrors how its children are
+        placed, the order of layout groups, sliders, toggles and scroll views.
+        Elements inherit it; a canvas lays out left to right unless set."""
+        self._ptr.setLayoutDirection(element, <LayoutDirection>direction)
+
+    def is_right_to_left(self, uint32_t element):
+        """Whether the element lays out right to left, as last laid out."""
+        return self._ptr.isRightToLeft(element)
+
+    def set_mirror_in_rtl(self, uint32_t element, bint mirror=True):
+        """Flip the element's image left for right where it lays out right to
+        left, for an arrow or other directional icon."""
+        self._ptr.setMirrorInRightToLeft(element, mirror)
 
     def set_text_wrap(self, uint32_t element, bint wrap):
         self._ptr.setTextWrap(element, wrap)

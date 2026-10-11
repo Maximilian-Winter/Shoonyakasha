@@ -61,17 +61,19 @@ BidiParagraph::BidiParagraph(std::u32string_view text, size_t begin, size_t end,
     m_levels.assign(length, direction == TextDirection::RightToLeft ? 1 : 0);
     m_baseLevel = direction == TextDirection::RightToLeft ? 1 : 0;
     if (length == 0) return;
-    if (direction != TextDirection::RightToLeft &&
-        std::none_of(m_impl->text.begin(), m_impl->text.end(), mayChangeDirection)) {
+    const bool fallbackLeftToRight = direction != TextDirection::RightToLeft &&
+                                     direction != TextDirection::AutoRightToLeft;
+    if (fallbackLeftToRight && std::none_of(m_impl->text.begin(), m_impl->text.end(), mayChangeDirection)) {
         return;
     }
 
     SBCodepointSequence sequence{SBStringEncodingUTF32, m_impl->text.data(), length};
     m_impl->algorithm = SBAlgorithmCreate(&sequence);
     if (!m_impl->algorithm) return;
-    const SBLevel base = direction == TextDirection::LeftToRight   ? SBLevel{0}
-                       : direction == TextDirection::RightToLeft ? SBLevel{1}
-                                                                 : SBLevelDefaultLTR;
+    const SBLevel base = direction == TextDirection::LeftToRight     ? SBLevel{0}
+                       : direction == TextDirection::RightToLeft     ? SBLevel{1}
+                       : direction == TextDirection::AutoRightToLeft ? SBLevelDefaultRTL
+                                                                     : SBLevelDefaultLTR;
     m_impl->paragraph = SBAlgorithmCreateParagraph(m_impl->algorithm, 0, length, base);
     if (!m_impl->paragraph) return;
 

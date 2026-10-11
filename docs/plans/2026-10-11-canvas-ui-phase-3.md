@@ -158,7 +158,7 @@ Under the project's rules, two parts of this plan add a new abstraction or depen
 **What a right-to-left element mirrors:**
 - anchors and pivot on x, and `anchoredPosition.x`;
 - the order of horizontal and grid layout groups, and which side `padding.left` applies to;
-- `Start` and `End` text alignment, and the paragraph direction of text set to `Auto`;
+- the paragraph direction of text set to `Auto` that has no letter with a direction, and of text set to the new `FromLayout` (which a toggle's label uses), and so where `Start` and `End` align them; `Auto` text with letters keeps the direction of its first one;
 - the slider (its minimum on the right), the toggle (box on the right), and the side of a vertical scrollbar;
 - a horizontal scroll view's starting position.
 

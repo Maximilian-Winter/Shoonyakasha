@@ -57,7 +57,8 @@ class BindingInventory(unittest.TestCase):
     def test_the_package_exports_the_class_and_constants(self):
         names = ["UI", "TEXT_ALIGN_TOP", "TEXT_ALIGN_MIDDLE", "TEXT_ALIGN_BOTTOM",
                  "TEXT_ALIGN_START", "TEXT_ALIGN_END",
-                 "TEXT_DIRECTION_AUTO", "TEXT_DIRECTION_LTR", "TEXT_DIRECTION_RTL",
+                 "TEXT_DIRECTION_AUTO", "TEXT_DIRECTION_LTR", "TEXT_DIRECTION_RTL", "TEXT_DIRECTION_LAYOUT",
+                 "LAYOUT_DIRECTION_INHERIT", "LAYOUT_DIRECTION_LTR", "LAYOUT_DIRECTION_RTL",
                  "CANVAS_CONSTANT_PIXEL", "CANVAS_SCALE_WITH_SCREEN",
                  "SIZE_FIT_UNCONSTRAINED", "SIZE_FIT_MIN", "SIZE_FIT_PREFERRED"]
         exported = INIT.split("from ._shoonyakasha import (", 1)[1].split("\n    )", 1)[0]
@@ -74,7 +75,9 @@ class BindingInventory(unittest.TestCase):
         types = (REPO / "include/Facade/FacadeTypes.h").read_text(encoding="utf-8")
         for enum, prefix, members in (("TextVAlign", "TEXT_ALIGN_", ("Top", "Middle", "Bottom")),
                                       ("TextHAlign", "TEXT_ALIGN_", ("Left", "Center", "Right", "Start", "End")),
-                                      ("TextDirection", "TEXT_DIRECTION_", ("Auto", "LeftToRight", "RightToLeft")),
+                                      ("TextDirection", "TEXT_DIRECTION_",
+                                       ("Auto", "LeftToRight", "RightToLeft", "FromLayout")),
+                                      ("LayoutDirection", "LAYOUT_DIRECTION_", ("Inherit", "LeftToRight", "RightToLeft")),
                                       ("CanvasScaleMode", "CANVAS_", ("ConstantPixel", "ScaleWithScreen")),
                                       ("SizeFit", "SIZE_FIT_", ("Unconstrained", "Min", "Preferred"))):
             body = types.split("enum class %s" % enum, 1)[1].split("};", 1)[0]

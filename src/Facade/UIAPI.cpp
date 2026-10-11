@@ -44,7 +44,16 @@ UI::TextDirection toDirection(TextDirection direction) {
     switch (direction) {
     case TextDirection::LeftToRight: return UI::TextDirection::LeftToRight;
     case TextDirection::RightToLeft: return UI::TextDirection::RightToLeft;
+    case TextDirection::FromLayout:  return UI::TextDirection::FromLayout;
     default:                         return UI::TextDirection::Auto;
+    }
+}
+
+UI::LayoutDirection toLayoutDirection(LayoutDirection direction) {
+    switch (direction) {
+    case LayoutDirection::LeftToRight: return UI::LayoutDirection::LeftToRight;
+    case LayoutDirection::RightToLeft: return UI::LayoutDirection::RightToLeft;
+    default:                           return UI::LayoutDirection::Inherit;
     }
 }
 
@@ -402,9 +411,14 @@ void UIAPI::scrollTo(EntityHandle view, EntityHandle element) {
     const glm::vec2 range = v->range();
     for (int axis = 0; axis < 2; ++axis) {
         if (range[axis] <= 0.0f || !(axis == 0 ? v->horizontal : v->vertical)) continue;
-        // Offsets within the content, which the scrolling moves with it.
-        const float start = target->rect.min[axis] - content->rect.min[axis];
-        const float end = target->rect.max[axis] - content->rect.min[axis];
+        // Offsets within the content, which the scrolling moves with it, from
+        // its start: its right edge along x in a view laid out right to left.
+        const auto* viewRect = m_impl->get<UI::UIRect>(view);
+        const bool fromRight = axis == 0 && viewRect && viewRect->rightToLeft;
+        const float start = fromRight ? content->rect.max.x - target->rect.max.x
+                                      : target->rect.min[axis] - content->rect.min[axis];
+        const float end = fromRight ? content->rect.max.x - target->rect.min.x
+                                    : target->rect.max[axis] - content->rect.min[axis];
         float offset = v->scrollPosition[axis] * range[axis];
         if (start < offset) {
             offset = start;
@@ -464,6 +478,23 @@ void UIAPI::setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign
 
 void UIAPI::setTextDirection(EntityHandle element, TextDirection direction) {
     if (auto* t = m_impl->text(element)) t->direction = toDirection(direction);
+}
+
+void UIAPI::setLayoutDirection(EntityHandle element, LayoutDirection direction) {
+    if (auto* canvas = m_impl->get<UI::UICanvas>(element)) canvas->layoutDirection = toLayoutDirection(direction);
+    else if (auto* rect = m_impl->get<UI::UIRect>(element)) rect->layoutDirection = toLayoutDirection(direction);
+}
+
+bool UIAPI::isRightToLeft(EntityHandle element) const {
+    if (const auto* canvas = m_impl->get<UI::UICanvas>(element)) {
+        return canvas->layoutDirection == UI::LayoutDirection::RightToLeft;
+    }
+    const auto* rect = m_impl->get<UI::UIRect>(element);
+    return rect && rect->rightToLeft;
+}
+
+void UIAPI::setMirrorInRightToLeft(EntityHandle element, bool mirror) {
+    if (auto* image = m_impl->get<UI::UIImage>(element)) image->mirrorInRightToLeft = mirror;
 }
 
 void UIAPI::setTextWrap(EntityHandle element, bool wrap) {

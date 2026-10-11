@@ -71,14 +71,15 @@ struct CanvasBuilder {
         batch->indexCount += 6;
     }
 
-    void image(const Rect& rect, const UIImage& img, const glm::vec4& tint) {
+    void image(const Rect& rect, const UIImage& img, const glm::vec4& tint, bool mirrored = false) {
         const uint32_t color = packColor(img.color * tint);
         if (!hasView(img.texture)) {
             quad(rect.min, rect.max, {0, 0}, {1, 1}, color, UIDrawMode::Solid);
             return;
         }
-        const glm::vec2 uvMin(img.uvRect.x, img.uvRect.y);
-        const glm::vec2 uvMax = uvMin + glm::vec2(img.uvRect.z, img.uvRect.w);
+        glm::vec2 uvMin(img.uvRect.x, img.uvRect.y);
+        glm::vec2 uvMax = uvMin + glm::vec2(img.uvRect.z, img.uvRect.w);
+        if (mirrored) std::swap(uvMin.x, uvMax.x);
         quad(rect.min, rect.max, uvMin, uvMax, color, UIDrawMode::Image, &img.texture);
     }
 
@@ -206,7 +207,7 @@ bool build(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyph
                     if (const auto* rects = registry.try_get<UIImageRects>(entity)) {
                         for (const Rect& r : rects->rects) builder.image(r, *img, tint);
                     } else {
-                        builder.image(element.rect, *img, tint);
+                        builder.image(element.rect, *img, tint, img->mirrorInRightToLeft && element.rightToLeft);
                     }
                 }
                 const auto* t = registry.try_get<UIText>(entity);

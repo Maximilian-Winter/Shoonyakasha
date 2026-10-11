@@ -41,12 +41,22 @@ struct Rect {
     }
 };
 
+/// Which way an element lays out its children. Right to left mirrors their
+/// placement left to right: anchors, pivots and anchoredPosition.x, the order
+/// of horizontal and grid layout groups and the sides their padding applies
+/// to. A slider then runs from the right, a toggle's box sits on the right,
+/// a vertical scrollbar on the left, and a horizontal scroll view starts at
+/// its right end. Text whose direction is FromLayout takes it, and Auto text
+/// with no letter that has a direction falls back to it.
+enum class LayoutDirection { Inherit, LeftToRight, RightToLeft };
+
 struct UICanvas {
     enum class Mode { ScreenOverlay, WorldTexture };
     enum class ScaleMode { ConstantPixel, ScaleWithScreen };
 
     Mode mode = Mode::ScreenOverlay;
     int sortOrder = 0;                         // overlay canvases draw in ascending order
+    LayoutDirection layoutDirection = LayoutDirection::LeftToRight;   // Inherit counts as LeftToRight
 
     ScaleMode scaleMode = ScaleMode::ConstantPixel;
     float scaleFactor = 1.0f;                  // ConstantPixel: target pixels per canvas unit
@@ -83,9 +93,11 @@ struct UIRect {
     glm::vec2 anchoredPosition{0.0f};
     glm::vec2 sizeDelta{100.0f, 100.0f};
     bool visible = true;
+    LayoutDirection layoutDirection = LayoutDirection::Inherit;   // of its children, see LayoutDirection
 
     // Written by CanvasLayoutSystem.
     Rect rect;                                 // in canvas units
+    bool rightToLeft = false;                  // its layout direction, resolved through its ancestors
     Rect clip;                                 // ancestor clips intersected with the canvas rect
     bool visibleInHierarchy = false;           // this and every ancestor visible, inside a canvas
     entt::entity canvas = entt::null;          // the canvas the element was laid out in
@@ -166,6 +178,7 @@ struct UIImage {
     glm::vec4 color{1.0f};
     glm::vec4 uvRect{0.0f, 0.0f, 1.0f, 1.0f};  // x, y, width, height in texture UVs
     bool raycastTarget = true;                  // stops the pointer reaching what is under it
+    bool mirrorInRightToLeft = false;           // drawn flipped left for right when laid out right to left, as an arrow
 };
 
 /// Draws the element's UIImage over each of these rects, in canvas units,
@@ -196,7 +209,7 @@ struct UIText {
     TextAlignV alignV = TextAlignV::Top;
     bool wrap = true;
     float lineSpacing = 1.0f;
-    TextDirection direction = TextDirection::Auto;  // of each paragraph
+    TextDirection direction = TextDirection::Auto;  // of each paragraph; FromLayout: its element's layout direction
 };
 
 // ─── Pointer input ───────────────────────────────────────────────

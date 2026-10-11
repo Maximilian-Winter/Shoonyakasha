@@ -19,7 +19,7 @@ from cpython.ref cimport PyObject
 from ._facade_types cimport (
     EntityHandle, EngineConfig, GltfOptions, RecordingOptions,
     GltfResult as CppGltfResult, RenderStatsSnapshot,
-    CameraType, LightType, UIAnchor, TextHAlign, TextVAlign, TextDirection, CanvasScaleMode, SizeFit,
+    CameraType, LightType, UIAnchor, TextHAlign, TextVAlign, TextDirection, LayoutDirection, CanvasScaleMode, SizeFit,
 )
 
 
@@ -428,6 +428,9 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         void setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign vertical)
         void setTextDirection(EntityHandle element, TextDirection direction)
         void setTextWrap(EntityHandle element, cbool wrap)
+        void setLayoutDirection(EntityHandle element, LayoutDirection direction)
+        cbool isRightToLeft(EntityHandle element) const
+        void setMirrorInRightToLeft(EntityHandle element, cbool mirror)
         void setColor(EntityHandle element, const vec4& color)
         cbool setTexture(EntityHandle element, const string& path)
         void setPanelBorder(EntityHandle element, const vec4& border, float borderScale)

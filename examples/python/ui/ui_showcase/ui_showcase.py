@@ -13,7 +13,8 @@ A tour of engine.ui on the default pipeline, in one window:
              and Hebrew with a number and a Latin word in it, a font size
              slider and wrapping in a clipped box, Thai wrapping between
              words though it has no spaces
-    Widgets  a click counter, a button enabled by a toggle, a stepped
+    Widgets  a click counter, a button enabled by a toggle, a toggle that
+             lays the whole HUD out right to left, a stepped
              slider, a name field that greets in the log on Enter, and a
              log whose rows are created and destroyed at runtime, in a
              scroll view (wheel, drag or scrollbar; a drag pulls past the
@@ -32,11 +33,12 @@ The sidebar and dialog frames are a 9-slice texture this script draws itself
 (written to generated/frame.png), so panels of any size keep sharp corners.
 
 Usage:
-    python ui_showcase.py [--screenshot path.png] [--tab scene|text|widgets] [--about]
+    python ui_showcase.py [--screenshot path.png] [--tab scene|text|widgets] [--about] [--rtl]
 
 --screenshot saves frame 120 to the path, with twelve rows in the log, a
 name typed and the log filtered; --tab picks the page shown first; --about
-opens with the About dialog showing.
+opens with the About dialog showing; --rtl starts with the HUD laid out
+right to left.
 
 Controls: left mouse uses the UI, on the screen and on the kiosk. WASD/Q/E
 and the right mouse button fly the camera; with the mouse captured (ESC),
@@ -180,6 +182,9 @@ def on_init():
     build_kiosk(fonts)
     show_tab(state["tab"])
     ui_.set_visible(w["dialog"], "--about" in sys.argv)
+    if "--rtl" in sys.argv:
+        ui_.set_toggle_value(w["RTL toggle"], True)
+        set_right_to_left(True)
 
 
 def build_scene():
@@ -330,6 +335,9 @@ def build_widgets_page(page):
     named("Enable toggle", ui_.create_toggle(page, "Enable the button below", size=(PAGE_WIDTH, 28)))
     named("Gated button", ui_.create_button(page, "Only when enabled", size=(230, 40)))
     set_gated(False)
+    # Mirrors the whole HUD: the sidebar moves right, rows and sliders run
+    # from the right, toggles put their box on the right.
+    named("RTL toggle", ui_.create_toggle(page, "Lay out right to left", size=(PAGE_WIDTH, 28)))
 
     w["steps_label"] = ui_.create_text(page, "", size=18)
     named("Steps slider", ui_.create_slider(page, min=0.0, max=10.0, value=5.0, size=(PAGE_WIDTH, 24)))
@@ -443,6 +451,10 @@ def update_text_page():
     ui_.set_text(w["size_label"], "Font size  %d" % size)
 
 
+def set_right_to_left(on):
+    ui_.set_layout_direction(w["HUD canvas"], sk.LAYOUT_DIRECTION_RTL if on else sk.LAYOUT_DIRECTION_LTR)
+
+
 def set_gated(enabled):
     """Enable or disable the gated button. Disabled, its panel and its label
     take the disabled colour."""
@@ -487,6 +499,8 @@ def update_widgets_page():
 
     if ui_.value_changed(w["Enable toggle"]):
         set_gated(ui_.toggle_value(w["Enable toggle"]))
+    if ui_.value_changed(w["RTL toggle"]):
+        set_right_to_left(ui_.toggle_value(w["RTL toggle"]))
     if ui_.was_clicked(w["Gated button"]):
         add_row()
 

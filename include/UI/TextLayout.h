@@ -31,8 +31,11 @@ enum class TextAlignH { Left, Center, Right, Start, End };
 enum class TextAlignV { Top, Middle, Bottom };
 
 /// A paragraph's direction. Auto takes it from the paragraph's first letter
-/// with a direction (UAX #9 rules P2 and P3), left to right without one.
-enum class TextDirection { Auto, LeftToRight, RightToLeft };
+/// with a direction (UAX #9 rules P2 and P3), left to right without one;
+/// AutoRightToLeft the same, right to left without one. FromLayout is for
+/// UIText: its element's layout direction, which CanvasTextSystem resolves
+/// before layout; layoutText reads it as Auto.
+enum class TextDirection { Auto, LeftToRight, RightToLeft, AutoRightToLeft, FromLayout };
 
 struct TextStyle {
     float fontSize = 24.0f;       // ascent-to-descent height

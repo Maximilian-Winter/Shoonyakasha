@@ -67,6 +67,12 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         TextDirection_Auto "Shoonyakasha::Facade::TextDirection::Auto"
         TextDirection_LeftToRight "Shoonyakasha::Facade::TextDirection::LeftToRight"
         TextDirection_RightToLeft "Shoonyakasha::Facade::TextDirection::RightToLeft"
+        TextDirection_FromLayout "Shoonyakasha::Facade::TextDirection::FromLayout"
+
+    cpdef enum LayoutDirection "Shoonyakasha::Facade::LayoutDirection":
+        LayoutDirection_Inherit "Shoonyakasha::Facade::LayoutDirection::Inherit"
+        LayoutDirection_LeftToRight "Shoonyakasha::Facade::LayoutDirection::LeftToRight"
+        LayoutDirection_RightToLeft "Shoonyakasha::Facade::LayoutDirection::RightToLeft"
 
     cpdef enum SizeFit "Shoonyakasha::Facade::SizeFit":
         SizeFit_Unconstrained "Shoonyakasha::Facade::SizeFit::Unconstrained"

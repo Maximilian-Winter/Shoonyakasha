@@ -169,7 +169,10 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_font(element, font)` | None | Calls native `setFont`; see the class contract above. |
 | `set_font_size(element, size)` | None | Calls native `setFontSize`; see the class contract above. |
 | `set_text_align(element, horizontal, vertical=TEXT_ALIGN_TOP)` | None | TEXT_ALIGN_LEFT/CENTER/RIGHT/START/END and TEXT_ALIGN_TOP/MIDDLE/BOTTOM. START and END follow each paragraph's direction. |
-| `set_text_direction(element, direction)` | None | TEXT_DIRECTION_AUTO (the default: from each paragraph's first letter with a direction), TEXT_DIRECTION_LTR or TEXT_DIRECTION_RTL. It sets where START and END align and the order of words of both directions. |
+| `set_text_direction(element, direction)` | None | TEXT_DIRECTION_AUTO (the default: from each paragraph's first letter with a direction, or the element's layout direction without one), TEXT_DIRECTION_LTR, TEXT_DIRECTION_RTL or TEXT_DIRECTION_LAYOUT (always the layout direction). It sets where START and END align and the order of words of both directions. |
+| `set_layout_direction(element, direction)` | None | LAYOUT_DIRECTION_INHERIT, LAYOUT_DIRECTION_LTR or LAYOUT_DIRECTION_RTL for a canvas or an element: right to left mirrors how its children are placed, the order of layout groups, sliders, toggles and scroll views. Elements inherit it; a canvas lays out left to right unless set. |
+| `is_right_to_left(element)` | bool | Whether the element lays out right to left, as last laid out. |
+| `set_mirror_in_rtl(element, mirror=True)` | None | Flip the element's image left for right where it lays out right to left, for an arrow or other directional icon. |
 | `set_text_wrap(element, wrap)` | None | Calls native `setTextWrap`; see the class contract above. |
 | `set_color(element, color)` | None | The colour of the element's own text, image and panel. |
 | `set_texture(element, path)` | bool | The texture of the element's image or panel. False if it cannot be loaded. |

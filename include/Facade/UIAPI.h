@@ -261,10 +261,24 @@ public:
     void setFontSize(EntityHandle element, float fontSize);
     void setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign vertical = TextVAlign::Top);
     /// The direction of each paragraph of the text: Auto, the default, takes
-    /// it from the paragraph's first letter with a direction. It sets where
-    /// Start and End align, and the order of words of the two directions.
+    /// it from the paragraph's first letter with a direction, or from the
+    /// element's layout direction without one; FromLayout always from the
+    /// layout direction. It sets where Start and End align, and the order of
+    /// words of the two directions.
     void setTextDirection(EntityHandle element, TextDirection direction);
     void setTextWrap(EntityHandle element, bool wrap);
+
+    /// Which way a canvas or an element lays out its children: right to left
+    /// mirrors their placement, the order of layout groups, sliders, toggles
+    /// and scroll views. Elements inherit it; a canvas lays out left to right
+    /// unless set.
+    void setLayoutDirection(EntityHandle element, LayoutDirection direction);
+    /// Whether the element lays out right to left, as last laid out, or for a
+    /// canvas, as set.
+    bool isRightToLeft(EntityHandle element) const;
+    /// Flips the element's image left for right where it lays out right to
+    /// left, for an arrow or other directional icon.
+    void setMirrorInRightToLeft(EntityHandle element, bool mirror);
 
     /// The colour of the element's own text, image and panel.
     void setColor(EntityHandle element, const glm::vec4& color);

@@ -146,6 +146,31 @@ TEST_F(UIAPIFixture, ClicksTogglesAndSlidersReachTheApplication) {
     EXPECT_FALSE(registry.get<UI::UIInteractable>(e(slider)).enabled);
 }
 
+TEST_F(UIAPIFixture, LayoutDirection) {
+    const EntityHandle canvas = ui.createCanvas();
+    EXPECT_FALSE(ui.isRightToLeft(canvas));
+    ui.setLayoutDirection(canvas, LayoutDirection::RightToLeft);
+    EXPECT_EQ(registry.get<UI::UICanvas>(e(canvas)).layoutDirection, UI::LayoutDirection::RightToLeft);
+    EXPECT_TRUE(ui.isRightToLeft(canvas));
+
+    const EntityHandle panel = ui.createElement(canvas, {100.0f, 100.0f});
+    const EntityHandle icon = ui.createImage(panel, {16.0f, 16.0f});
+    ui.setLayoutDirection(panel, LayoutDirection::LeftToRight);
+    EXPECT_EQ(registry.get<UI::UIRect>(e(panel)).layoutDirection, UI::LayoutDirection::LeftToRight);
+    frame();
+    EXPECT_FALSE(ui.isRightToLeft(panel));
+    EXPECT_FALSE(ui.isRightToLeft(icon));   // inherited from the panel
+    ui.setLayoutDirection(panel, LayoutDirection::Inherit);
+    frame();
+    EXPECT_TRUE(ui.isRightToLeft(icon));    // now from the canvas
+
+    ui.setMirrorInRightToLeft(icon, true);
+    EXPECT_TRUE(registry.get<UI::UIImage>(e(icon)).mirrorInRightToLeft);
+    const EntityHandle label = ui.createText(canvas, "Play");
+    ui.setTextDirection(label, TextDirection::FromLayout);
+    EXPECT_EQ(registry.get<UI::UIText>(e(label)).direction, UI::TextDirection::FromLayout);
+}
+
 TEST_F(UIAPIFixture, TintTargets) {
     const EntityHandle canvas = ui.createCanvas();
     const EntityHandle button = ui.createButton(canvas, "Go");

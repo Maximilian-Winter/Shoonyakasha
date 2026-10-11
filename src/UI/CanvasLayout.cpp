@@ -305,23 +305,51 @@ struct LayoutWalk {
         element.rect.max[axis] = element.rect.min[axis] + size;
     }
 
+    /// Whether `e`, an element or the canvas, lays out its children right to left.
+    bool rightToLeft(entt::entity e) const {
+        if (e == canvas) return registry.get<UICanvas>(canvas).layoutDirection == LayoutDirection::RightToLeft;
+        return registry.get<UIRect>(e).rightToLeft;
+    }
+
+    /// Reflects `rect` left for right across `parent`.
+    static void mirror(Rect& rect, const Rect& parent) {
+        const float left = parent.min.x + parent.max.x - rect.max.x;
+        rect.max.x = parent.min.x + parent.max.x - rect.min.x;
+        rect.min.x = left;
+    }
+
+    /// Children are placed as for left to right, and then, under a parent
+    /// that lays out right to left, reflected across it along x.
     void place(entt::entity parent, const Rect& parentRect, int axis) {
         const bool group = isGroup(parent);
+        const bool mirrored = axis == 0 && rightToLeft(parent);
         auto* scrollView = registry.try_get<UIScrollView>(parent);
         forEachChild(parent, [&](entt::entity child, UIRect& element) {
-            if (axis == 0) element.drivenByLayout = false;
+            if (axis == 0) {
+                element.drivenByLayout = false;
+                element.rightToLeft = element.layoutDirection == LayoutDirection::Inherit
+                    ? rightToLeft(parent)
+                    : element.layoutDirection == LayoutDirection::RightToLeft;
+            }
             if (!group || !participates(child, element)) {
                 placeByAnchors(element, parentRect, axis, registry.try_get<UIContentSizeFitter>(child));
-                if (scrollView && child == scrollView->content) scroll(*scrollView, element, parentRect, axis);
+                if (mirrored) mirror(element.rect, parentRect);
+                if (scrollView && child == scrollView->content) scroll(*scrollView, element, parentRect, axis, mirrored);
             }
         });
-        if (group) placeGroupChildren(parent, parentRect, axis);
+        if (group) {
+            placeGroupChildren(parent, parentRect, axis);
+            if (mirrored) {
+                for (const entt::entity child : participants(parent)) mirror(registry.get<UIRect>(child).rect, parentRect);
+            }
+        }
         forEachChild(parent, [&](entt::entity child, UIRect& element) { place(child, element.rect, axis); });
     }
 
     /// Records the content and viewport sizes and moves the content, placed by
-    /// its anchors, by the scroll offset along `axis`.
-    void scroll(UIScrollView& view, UIRect& content, const Rect& viewport, int axis) {
+    /// its anchors, by the scroll offset along `axis`: towards the start, so
+    /// leftwards, or rightwards in a view laid out right to left.
+    void scroll(UIScrollView& view, UIRect& content, const Rect& viewport, int axis, bool mirrored) {
         view.contentSize[axis] = content.rect.max[axis] - content.rect.min[axis];
         view.viewportSize[axis] = viewport.max[axis] - viewport.min[axis];
         const bool enabled = axis == 0 ? view.horizontal : view.vertical;
@@ -329,7 +357,8 @@ struct LayoutWalk {
         if (view.movement == UIScrollView::Movement::Clamped || view.range()[axis] <= 0.0f) {
             view.scrollPosition[axis] = std::clamp(view.scrollPosition[axis], 0.0f, 1.0f);
         }
-        const float offset = enabled ? view.scrollPosition[axis] * view.range()[axis] : 0.0f;
+        float offset = enabled ? view.scrollPosition[axis] * view.range()[axis] : 0.0f;
+        if (mirrored) offset = -offset;
         content.rect.min[axis] -= offset;
         content.rect.max[axis] -= offset;
     }

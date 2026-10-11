@@ -96,7 +96,10 @@ entt::entity createToggle(entt::registry& registry, entt::entity parent, const s
     // starts just past the box.
     labelRect.sizeDelta = {-(size.y + 8.0f), 0.0f};
     labelRect.anchoredPosition = {size.y * 0.5f + 4.0f, 0.0f};
-    registry.get<UIText>(label).alignH = TextAlignH::Left;
+    // Against the box, on whichever side the toggle's layout puts it.
+    auto& labelText = registry.get<UIText>(label);
+    labelText.alignH = TextAlignH::Start;
+    labelText.direction = TextDirection::FromLayout;
     registry.get<UIInteractable>(toggle).tintTargets = {box, checkmark, label};
 
     auto& state = registry.emplace<UIToggle>(toggle);

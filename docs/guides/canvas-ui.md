@@ -139,7 +139,7 @@ ui.create_text(panel, "Om · ॐ नमः शिवाय · ཨོཾ་མ་
 
   `set_font_fallbacks(font, [...])` gives one font its own list. The assets folder ships Noto fonts for Devanagari, Tibetan, Arabic, Hebrew, Thai, Lao, Khmer and Myanmar: `fonts/NotoSansThai-Regular.ttf` and so on, with Tibetan in `fonts/NotoSerifTibetan.ttf`.
 - **Right-to-left text:** Arabic and Hebrew read right to left, and a line that mixes directions is put in display order by the Unicode bidirectional algorithm: numbers and Latin words inside Arabic read left to right, and brackets are mirrored.
-  - **Paragraph direction:** each paragraph takes its direction from its first letter that has one. `set_text_direction(e, sk.TEXT_DIRECTION_RTL)` or `TEXT_DIRECTION_LTR` sets it instead.
+  - **Paragraph direction:** each paragraph takes its direction from its first letter that has one, or, with none, such as "12:30", from the layout direction (see [Right-to-left layout](#right-to-left-layout)). `set_text_direction(e, sk.TEXT_DIRECTION_RTL)` or `TEXT_DIRECTION_LTR` sets it instead, and `TEXT_DIRECTION_LAYOUT` makes it always the layout direction.
   - **Alignment:** `TEXT_ALIGN_START` and `TEXT_ALIGN_END` follow the paragraph: `START` is the left of a left-to-right paragraph and the right of a right-to-left one. `LEFT` and `RIGHT` stay left and right. Text fields align their text to the start.
   - **Control characters:** the directional formatting characters work, for example U+2067 and U+2069 to isolate a Hebrew name inside an English sentence.
 
@@ -149,6 +149,22 @@ ui.set_default_font_fallbacks([ui.load_font("fonts/NotoSansArabic-Regular.ttf"),
 line = ui.create_text(panel, "مرحبا بالعالم 2026")
 ui.set_text_align(line, sk.TEXT_ALIGN_START)    # right-aligned: the paragraph is right to left
 ```
+
+### Right-to-left layout
+
+For a right-to-left interface, mirror the layout too:
+
+```python
+ui.set_layout_direction(hud, sk.LAYOUT_DIRECTION_RTL)    # a canvas, or any element
+```
+
+The layout direction of a canvas or an element decides how its children are placed:
+- **Placement:** with right to left, each child is placed as for left to right and then reflected across its parent. Anchors, pivots and the x of `position` are measured from the right, so an element anchored top-left sits top-right.
+- **Groups:** rows and grids run from the right, and their left padding is at the right.
+- **Widgets:** a slider runs from the right, and Left raises it; a toggle's box is on the right with its label beside it; a scroll view's vertical scrollbar is on the left, and a horizontal scroll view starts at its right end.
+- **Text:** text with no letter that has a direction, and text set to `TEXT_DIRECTION_LAYOUT`, takes the layout direction, so `TEXT_ALIGN_START` aligns it right.
+- **Inheritance:** elements inherit their parent's direction, so setting it on the canvas mirrors everything. `set_layout_direction(e, sk.LAYOUT_DIRECTION_LTR)` keeps a part left to right, such as a media player's controls. `is_right_to_left(e)` reads the direction an element was last laid out with.
+- **Images:** images are not flipped, except those marked with `set_mirror_in_rtl(e)`, for arrows and other icons that point along the line.
 
 ## Widgets and the pointer
 
@@ -318,7 +334,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 - Text fields are single-line, and there is no input method (IME) composition, so text that is typed through an IME, such as Chinese or Japanese, cannot be entered; it can still be pasted.
 - Text fields interpret Ctrl, not Cmd, as the word modifier, on every platform.
 - The arrow keys move focus and also turn an orbit camera, which uses them; only a focused text field takes keys from the camera.
-- Right-to-left text: a paragraph is shaped once, before it is broken into lines, so an Arabic word too wide for its rect and split between clusters keeps the joined letter forms it would have on one line. Layout direction, such as a slider running from the right, is not mirrored yet.
+- Right-to-left text: a paragraph is shaped once, before it is broken into lines, so an Arabic word too wide for its rect and split between clusters keeps the joined letter forms it would have on one line.
 - Thai, Lao, Khmer and Myanmar words are found by matching against word lists. A word missing from its list, such as a name, is not split; it stays joined to any unknown characters next to it. Chinese characters and hiragana have no word list, so Ctrl with an arrow moves one character at a time through them.
 - Geometry in front of a world canvas stops the pointer only in a pipeline with a `ui` depth block, and only as of two frames before (see [Geometry in front of world canvases](#geometry-in-front-of-world-canvases)).
 - The glyph atlas has up to four pages of 2048 by 2048 texels, added as they are needed. When all four are full, the page drawn from least recently is cleared, and its glyphs are rasterised again when next drawn. Text that needs more than the four pages in a single frame, several thousand distinct glyphs, is partly left out.
