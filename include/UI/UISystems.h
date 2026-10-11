@@ -45,6 +45,20 @@ struct UIFocusState;
 struct UIClipboard;
 struct UIPointerDepth;
 
+/// Where an elastic scroll view shows a drag to `offset` canvas units along
+/// an axis it can move over [0, range]: unchanged within it, and past an end
+/// by a distance that grows ever more slowly and never reaches `viewSize`.
+float elasticOffset(float offset, float range, float viewSize);
+
+/// The drag offset that elasticOffset shows at `shown`, which must be less
+/// than `viewSize` past an end.
+float elasticDragOffset(float shown, float range, float viewSize);
+
+/// One step of a critically damped spring from `current` towards `target`:
+/// it gets there in roughly `smoothTime` seconds and never passes it.
+/// `velocity`, in units per second, is carried from step to step.
+float springTowards(float current, float target, float& velocity, float smoothTime, float dt);
+
 /// Pointer input for the canvas UI. Runs before CanvasLayoutSystem, so it
 /// hit-tests the rects laid out the frame before, and writes:
 /// - UIInteractable state and its one-frame clicked and valueChanged edges,

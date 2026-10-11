@@ -21,6 +21,52 @@
 namespace Shoonyakasha {
 namespace UI {
 
+// ─── Elastic scrolling ──────────────────────────────────────────
+
+namespace {
+
+// How quickly the resistance past an end grows: a drag of one view size past
+// it shows as 1 - 1 / 1.55, about a third of the view.
+constexpr float kElasticResistance = 0.55f;
+
+} // namespace
+
+float elasticOffset(float offset, float range, float viewSize) {
+    range = std::max(range, 0.0f);
+    if (offset >= 0.0f && offset <= range) return offset;
+    if (viewSize <= 0.0f) return std::clamp(offset, 0.0f, range);
+    const float past = offset < 0.0f ? -offset : offset - range;
+    const float shown = (1.0f - 1.0f / (past * kElasticResistance / viewSize + 1.0f)) * viewSize;
+    return offset < 0.0f ? -shown : range + shown;
+}
+
+float elasticDragOffset(float shown, float range, float viewSize) {
+    range = std::max(range, 0.0f);
+    if (shown >= 0.0f && shown <= range) return shown;
+    if (viewSize <= 0.0f) return std::clamp(shown, 0.0f, range);
+    const float s = std::min(shown < 0.0f ? -shown : shown - range, viewSize * 0.999f);
+    const float past = s * viewSize / (kElasticResistance * (viewSize - s));
+    return shown < 0.0f ? -past : range + past;
+}
+
+float springTowards(float current, float target, float& velocity, float smoothTime, float dt) {
+    // The critically damped spring of Game Programming Gems 4, 1.10, with its
+    // exponential approximated.
+    smoothTime = std::max(smoothTime, 1e-4f);
+    const float omega = 2.0f / smoothTime;
+    const float x = omega * dt;
+    const float decay = 1.0f / (1.0f + x + 0.48f * x * x + 0.235f * x * x * x);
+    const float change = current - target;
+    const float temp = (velocity + omega * change) * dt;
+    velocity = (velocity - omega * temp) * decay;
+    float next = target + (change + temp) * decay;
+    if ((target - current > 0.0f) == (next > target)) {   // passed the target
+        next = target;
+        velocity = 0.0f;
+    }
+    return next;
+}
+
 namespace {
 
 std::optional<ECS::Ray> mainCameraRay(const entt::registry& registry, glm::vec2 pixel, glm::vec2 screen) {
@@ -114,15 +160,45 @@ void wheelScroll(entt::registry& registry, entt::entity element, int axis, float
     }
 }
 
+bool isElastic(const UIScrollView& view) {
+    return view.movement == UIScrollView::Movement::Elastic;
+}
+
+/// Moves an elastic view to `offset` canvas units along `axis`, past its
+/// ends if need be.
+void setElasticOffset(UIScrollView& view, int axis, float offset) {
+    const float range = view.range()[axis];
+    if (range > 0.0f) view.scrollPosition[axis] = offset / range;
+}
+
+/// Lets go of views not being dragged: coasting slows down, and an elastic
+/// view past an end springs back to it.
 void coast(entt::registry& registry, entt::entity dragged, float dt) {
     if (dt <= 0.0f) return;
     for (auto [entity, view] : registry.view<UIScrollView>().each()) {
         if (entity == dragged) continue;
         for (int axis = 0; axis < 2; ++axis) {
             float& v = view.velocity[axis];
+            if (isElastic(view) && scrolls(view, axis) && view.overshoot(axis) > 0.0f) {
+                const float offset = offsetOf(view, axis);
+                const float target = offset < 0.0f ? 0.0f : view.range()[axis];
+                float next = springTowards(offset, target, v, view.elasticity, dt);
+                if (std::abs(next - target) < 0.01f && std::abs(v) < 1.0f) {
+                    next = target;
+                    v = 0.0f;
+                }
+                setElasticOffset(view, axis, next);
+                continue;
+            }
             if (v == 0.0f) continue;
-            if (!scrolls(view, axis) || !setOffset(view, axis, offsetOf(view, axis) + v * dt)) {
-                v = 0.0f;   // at an end, or nothing to scroll
+            if (!scrolls(view, axis)) {
+                v = 0.0f;   // nothing to scroll
+                continue;
+            }
+            if (isElastic(view)) {
+                setElasticOffset(view, axis, offsetOf(view, axis) + v * dt);   // may run past an end
+            } else if (!setOffset(view, axis, offsetOf(view, axis) + v * dt)) {
+                v = 0.0f;   // at an end
                 continue;
             }
             v *= std::pow(std::clamp(view.decelerationRate, 0.0f, 1.0f), dt);
@@ -154,9 +230,10 @@ void syncScrollbars(entt::registry& registry) {
         const auto* view = registry.try_get<UIScrollView>(scrollbar.scrollView);
         if (!view) continue;
         const int axis = scrollbar.vertical ? 1 : 0;
-        scrollbar.value = view->scrollPosition[axis];
+        // Past an end, the handle stays at that end and shrinks by the overshoot.
+        scrollbar.value = std::clamp(view->scrollPosition[axis], 0.0f, 1.0f);
         scrollbar.size = view->contentSize[axis] > 0.0f
-            ? std::clamp(view->viewportSize[axis] / view->contentSize[axis], 0.0f, 1.0f)
+            ? std::clamp((view->viewportSize[axis] - view->overshoot(axis)) / view->contentSize[axis], 0.0f, 1.0f)
             : 1.0f;
         if (auto* handle = registry.try_get<UIRect>(scrollbar.handle)) {
             handle->anchorMin[axis] = scrollbar.value * (1.0f - scrollbar.size);
@@ -346,14 +423,26 @@ void CanvasInputSystem::updateDrag(entt::registry& registry, glm::vec2 pixel, co
 
     if (!m_dragging && glm::length(*position - m_pressPosition) > UIScrollView::kDragThreshold) {
         m_dragging = true;
-        m_dragStartOffset = {offsetOf(view, 0), offsetOf(view, 1)};
+        // An elastic view caught past an end continues from the drag that
+        // would show it there.
+        for (int axis = 0; axis < 2; ++axis) {
+            m_dragStartOffset[axis] = isElastic(view)
+                ? elasticDragOffset(offsetOf(view, axis), view.range()[axis], view.viewportSize[axis])
+                : offsetOf(view, axis);
+        }
         m_captured = entt::null;   // the press on a button under it is no longer a click
     }
     if (!m_dragging) return;
 
     const glm::vec2 moved = *position - m_pressPosition;
     for (int axis = 0; axis < 2; ++axis) {
-        if (scrolls(view, axis)) setOffset(view, axis, m_dragStartOffset[axis] - moved[axis]);
+        if (!scrolls(view, axis)) continue;
+        const float offset = m_dragStartOffset[axis] - moved[axis];
+        if (isElastic(view)) {
+            setElasticOffset(view, axis, elasticOffset(offset, view.range()[axis], view.viewportSize[axis]));
+        } else {
+            setOffset(view, axis, offset);
+        }
     }
     if (deltaTime > 0.0f) {
         // Content follows the pointer, so the offset moves against it.

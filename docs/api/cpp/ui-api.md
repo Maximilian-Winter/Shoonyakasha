@@ -60,6 +60,7 @@ glm::vec2 getScrollPosition(EntityHandle view) const;
 void setScrollPosition(EntityHandle view, const glm::vec2& position);
 void scrollTo(EntityHandle view, EntityHandle element);
 void setScrollSettings(EntityHandle view, float wheelSpeed, bool inertia = true);
+void setScrollElastic(EntityHandle view, bool elastic, float elasticity = 0.1f);
 void setText(EntityHandle element, const std::string& text);
 std::string getText(EntityHandle element) const;
 void setFont(EntityHandle element, uint32_t font);

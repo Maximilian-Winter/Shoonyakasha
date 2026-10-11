@@ -325,7 +325,10 @@ struct LayoutWalk {
         view.contentSize[axis] = content.rect.max[axis] - content.rect.min[axis];
         view.viewportSize[axis] = viewport.max[axis] - viewport.min[axis];
         const bool enabled = axis == 0 ? view.horizontal : view.vertical;
-        view.scrollPosition[axis] = std::clamp(view.scrollPosition[axis], 0.0f, 1.0f);
+        // An elastic view may be past an end; CanvasInputSystem springs it back.
+        if (view.movement == UIScrollView::Movement::Clamped || view.range()[axis] <= 0.0f) {
+            view.scrollPosition[axis] = std::clamp(view.scrollPosition[axis], 0.0f, 1.0f);
+        }
         const float offset = enabled ? view.scrollPosition[axis] * view.range()[axis] : 0.0f;
         content.rect.min[axis] -= offset;
         content.rect.max[axis] -= offset;

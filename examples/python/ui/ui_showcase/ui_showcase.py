@@ -14,7 +14,8 @@ A tour of engine.ui on the default pipeline, in one window:
     Widgets  a click counter, a button enabled by a toggle, a stepped
              slider, a name field that greets in the log on Enter, and a
              log whose rows are created and destroyed at runtime, in a
-             scroll view (wheel, drag or scrollbar), filtered by a search
+             scroll view (wheel, drag or scrollbar; a drag pulls past the
+             ends and springs back), filtered by a search
              field as you type
 - a readout of the pointer: which canvas, where on it, what it hovers
 - an About dialog on a second canvas drawn on top, which blocks the
@@ -335,6 +336,7 @@ def build_widgets_page(page):
     log = named("Log", ui_.create_panel(page, (PAGE_WIDTH, 150), color=(0.06, 0.07, 0.09, 1.0)))
     view = named("Log view", ui_.create_scroll_view(log))
     ui_.set_rect(view, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
+    ui_.set_scroll_elastic(view, True)   # a drag pulls past the ends and springs back
     w["log_view"] = view
     w["log_content"] = ui_.scroll_content(view)
 

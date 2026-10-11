@@ -413,6 +413,13 @@ void UIAPI::setScrollSettings(EntityHandle view, float wheelSpeed, bool inertia)
     }
 }
 
+void UIAPI::setScrollElastic(EntityHandle view, bool elastic, float elasticity) {
+    if (auto* v = m_impl->get<UI::UIScrollView>(view)) {
+        v->movement = elastic ? UI::UIScrollView::Movement::Elastic : UI::UIScrollView::Movement::Clamped;
+        v->elasticity = std::max(elasticity, 0.01f);
+    }
+}
+
 // ─── Content ────────────────────────────────────────────────────
 
 void UIAPI::setText(EntityHandle element, const std::string& text) {

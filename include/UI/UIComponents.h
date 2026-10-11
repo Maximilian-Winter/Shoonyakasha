@@ -19,6 +19,7 @@
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -314,16 +315,24 @@ struct UITextField {
 /// still move, and dragging the content scrolls it once the pointer has moved
 /// kDragThreshold canvas units from the press, cancelling the press on a
 /// button under it. A slider being dragged keeps the pointer.
+///
+/// An Elastic view can be dragged, or coast, past its ends, with resistance
+/// that grows the farther it goes, and springs back once released. The wheel
+/// and the scrollbars never take it past an end.
 struct UIScrollView {
     static constexpr float kDragThreshold = 8.0f;
+
+    enum class Movement { Clamped, Elastic };
 
     entt::entity content = entt::null;
     bool horizontal = false;
     bool vertical = true;
-    glm::vec2 scrollPosition{0.0f};      // 0 at the start (left, top), 1 at the end, per axis
+    glm::vec2 scrollPosition{0.0f};      // 0 at the start (left, top), 1 at the end, per axis; past them while an elastic view overshoots
     float wheelSpeed = 48.0f;            // canvas units per wheel step
     bool inertia = true;                 // keep moving after a drag is released
     float decelerationRate = 0.135f;     // velocity kept after one second of inertia
+    Movement movement = Movement::Clamped;
+    float elasticity = 0.1f;             // seconds an elastic view takes to spring back, roughly
     entt::entity horizontalScrollbar = entt::null;
     entt::entity verticalScrollbar = entt::null;
 
@@ -335,6 +344,14 @@ struct UIScrollView {
 
     /// How far the content can move per axis, in canvas units.
     glm::vec2 range() const { return glm::max(contentSize - viewportSize, glm::vec2(0.0f)); }
+
+    /// How far past an end the view is along `axis`, in canvas units; 0
+    /// within its range.
+    float overshoot(int axis) const {
+        const float offset = scrollPosition[axis] * range()[axis];
+        if (offset < 0.0f) return -offset;
+        return std::max(offset - range()[axis], 0.0f);
+    }
 };
 
 /// A bar showing a scroll view's position. Its handle's length is the

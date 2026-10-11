@@ -163,6 +163,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_scroll_position(view, position)` | None | Move the view, stopping any drift from a released drag. |
 | `scroll_to(view, element)` | None | Scroll the least distance that brings element fully into view. |
 | `set_scroll_settings(view, wheel_speed=48.0, inertia=True)` | None | Canvas units per wheel step, and whether a released drag keeps moving. |
+| `set_scroll_elastic(view, elastic=True, elasticity=0.1)` | None | Let dragging, and coasting after a drag, take the view past its ends with growing resistance; it springs back in about elasticity seconds. Off for a new view. While past an end, get_scroll_position is below 0 or above 1. |
 | `set_text(element, text)` | None | Calls native `setText`; see the class contract above. |
 | `get_text(element)` | str | Calls native `getText`; see the class contract above. |
 | `set_font(element, font)` | None | Calls native `setFont`; see the class contract above. |

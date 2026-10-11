@@ -241,6 +241,12 @@ public:
     /// Canvas units per wheel step, and whether a released drag keeps moving.
     void setScrollSettings(EntityHandle view, float wheelSpeed, bool inertia = true);
 
+    /// Whether dragging, and coasting after a drag, can take the view past
+    /// its ends, with growing resistance, before it springs back in about
+    /// `elasticity` seconds. Off for a new view. While past an end,
+    /// getScrollPosition is below 0 or above 1.
+    void setScrollElastic(EntityHandle view, bool elastic, float elasticity = 0.1f);
+
     // ═══════════════════════════════════════════════════════════
     // Content
     //

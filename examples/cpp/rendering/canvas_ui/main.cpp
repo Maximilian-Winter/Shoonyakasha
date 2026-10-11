@@ -7,7 +7,8 @@
 // Beside the box, a world canvas: a texture the UI renders into, shown on a
 // quad in the scene, with a button that counts clicks. Bottom left, a toggle
 // spins the box, a slider sets its angle and a button resets both, and a
-// text field takes a name that Enter greets.
+// text field takes a name that Enter greets. On the right, an elastic list:
+// dragging it pulls it past its ends, and it springs back when let go.
 //
 // Usage:
 //     CanvasUIExample [--screenshot path.png]
@@ -15,8 +16,10 @@
 // With --screenshot it switches the world canvas's resolution at frame 60,
 // moves and clicks a scripted pointer and keyboard through the widgets, moves
 // the world canvas behind the box and clicks its hidden button, which does
-// not count, then saves frame 130 to the path, prints the click count and
-// closes.
+// not count, and drags the list down past its start. It saves frame 134,
+// with the list held there, to the path and prints the click count and how
+// far past its start the list is; then it lets go, prints where the list
+// settled a second later and closes.
 //
 // Keys: WASD/Q/E + right mouse to fly, R to switch the world canvas between
 // 1024x512 and 512x256 pixels. Left mouse uses the widgets; with the mouse
@@ -149,6 +152,17 @@ protected:
         m_name = createTextField(registry, settings, "Your name", roboto, {308.0f, 40.0f});
         place(m_name, {0, 0}, {16, 164});
 
+        // Right: a list of ten rows in an elastic scroll view.
+        m_list = createScrollView(registry, m_canvas, {260.0f, 180.0f});
+        place(m_list, {1, 0.5f}, {-24, 0});
+        registry.emplace<UIPanel>(m_list).color = srgb(0.08f, 0.09f, 0.12f, 0.82f);
+        registry.get<UIScrollView>(m_list).movement = UIScrollView::Movement::Elastic;
+        for (int i = 1; i <= 10; ++i) {
+            const auto row = createElement(registry, registry.get<UIScrollView>(m_list).content, {0.0f, 40.0f});
+            registry.emplace<UIPanel>(row).color = i % 2 ? srgb(0.16f, 0.18f, 0.23f) : srgb(0.12f, 0.13f, 0.17f);
+            createLabel(registry, row, "Row " + std::to_string(i), roboto, 20.0f);
+        }
+
         // Box.gltf's root node, turned by the slider. The root turns its mesh
         // 90 degrees about X; turning the root about Y keeps the box upright.
         const auto box = registry.view<MeshComponent, ECS::TransformComponent>();
@@ -164,6 +178,7 @@ protected:
 
     void onUpdate(float dt) override {
         ++m_frame;
+        if (m_frame > 135) m_sinceRelease += dt;
         auto& registry = getRegistry();
         if (!m_screenshot.empty()) scriptPointer();
 
@@ -198,9 +213,16 @@ protected:
     }
 
     void onPostRender() override {
-        if (!m_screenshot.empty() && m_frame == 130) {
+        if (m_screenshot.empty()) return;
+        const auto& list = getRegistry().get<UIScrollView>(m_list);
+        if (m_frame == 134) {
             std::printf("world canvas clicks: %d\n", m_clicks);
+            std::printf("list held %.1f past its start\n", list.overshoot(1));
             captureScreenshot(m_screenshot);
+        }
+        if (m_frame > 134 && (m_sinceRelease >= 1.0f || m_frame >= 5000)) {
+            std::printf("list %.2f s after letting go: %.1f past its start, position %.3f\n", m_sinceRelease,
+                        list.overshoot(1), list.scrollPosition.y);
             glfwSetWindowShouldClose(getWindow().getWindow(), GLFW_TRUE);
         }
     }
@@ -212,8 +234,9 @@ private:
     /// settings to Reset. Then it clicks the name field, types a name with a
     /// correction, submits it with Enter and selects it by word. Last it
     /// moves the world canvas behind the box and clicks the hidden button
-    /// twice more. It goes through the same input path as the mouse and
-    /// keyboard.
+    /// twice more, and then drags the list 150 units down from its start,
+    /// holds it and lets go. It goes through the same input path as the
+    /// mouse and keyboard.
     void scriptPointer() {
         if (m_frame < 65) return;
         auto at = [&](entt::entity e, float across = 0.5f) {
@@ -243,6 +266,12 @@ private:
                 keys.push_back({GLFW_KEY_HOME, 0, false});
                 keys.push_back({GLFW_KEY_RIGHT, GLFW_MOD_CONTROL | GLFW_MOD_SHIFT, false});
             }
+        } else if (m_frame >= 126) {
+            // Press the list, drag it 30 units a frame for five frames, hold
+            // it, then let go and move away.
+            if (m_frame == 126) m_scriptPixel = pixelOf(m_list, 0.5f);
+            if (m_frame >= 127 && m_frame <= 131) m_scriptPixel.y += 30.0f * getRegistry().get<UICanvas>(m_canvas).scale;
+            down = m_frame <= 134;
         } else {
             // The terminal moves behind the box, its button hidden by it: the
             // depth under the pointer is nearer than the button, so clicks on
@@ -344,7 +373,9 @@ private:
     entt::entity m_name = entt::null;
     entt::entity m_greeting = entt::null;
     entt::entity m_box = entt::null;
+    entt::entity m_list = entt::null;
     int m_frame = 0;
+    float m_sinceRelease = 0.0f;   // seconds since the scripted pointer let go of the list
     int m_clicks = 0;
     glm::vec2 m_scriptPixel{0.0f};
 };

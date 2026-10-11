@@ -418,6 +418,7 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         void setScrollPosition(EntityHandle view, const vec2& position)
         void scrollTo(EntityHandle view, EntityHandle element)
         void setScrollSettings(EntityHandle view, float wheelSpeed, cbool inertia)
+        void setScrollElastic(EntityHandle view, cbool elastic, float elasticity)
 
         # Content
         void setText(EntityHandle element, const string& text)

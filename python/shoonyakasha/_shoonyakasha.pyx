@@ -1302,6 +1302,13 @@ cdef class UI:
         """Canvas units per wheel step, and whether a released drag keeps moving."""
         self._ptr.setScrollSettings(view, wheel_speed, inertia)
 
+    def set_scroll_elastic(self, uint32_t view, bint elastic=True, float elasticity=0.1):
+        """Let dragging, and coasting after a drag, take the view past its
+        ends with growing resistance; it springs back in about elasticity
+        seconds. Off for a new view. While past an end, get_scroll_position
+        is below 0 or above 1."""
+        self._ptr.setScrollElastic(view, elastic, elasticity)
+
     # ── Content ───────────────────────────────────────────────
     #
     # The text methods act on the element's own text or, for a button or

@@ -110,6 +110,7 @@ ui.set_scroll_position(log, (0, 1))   # show the end
 The content is a column that grows with its children and spans the view's width.
 - **Pointer:** the wheel, dragging the content (a phone-like flick, which keeps moving briefly) and the scrollbar all scroll it.
 - **Clicks:** a button inside still clicks; a press that turns into a drag does not.
+- **Elastic ends:** `set_scroll_elastic(log, True)` lets a drag, or the flick after it, pull the content past either end with growing resistance; it springs back in about 0.1 seconds (`elasticity`). The wheel and the scrollbar still stop at the ends. While past an end, `get_scroll_position` is below 0 or above 1.
 - **Bringing into view:** `scroll_to(view, element)` brings a row into view, for example the newest one after adding it. `get_rect(e)` reads back where an element ended up. The layout runs once a frame, so an element created this frame reports zeros until the next one.
 
 ## Text

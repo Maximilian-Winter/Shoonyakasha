@@ -15,6 +15,7 @@
 
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <vector>
 
 using namespace Shoonyakasha;
@@ -210,6 +211,128 @@ TEST(ScrollView, ScrollbarHidesWhileTheContentFits) {
     const entt::entity bar = f.scrollView().verticalScrollbar;
     EXPECT_FLOAT_EQ(f.registry.get<UIScrollbar>(bar).size, 1.0f);
     EXPECT_FALSE(f.registry.get<UIRect>(bar).visible);
+}
+
+// ── Elastic movement ────────────────────────────────────────────
+
+TEST(ElasticScroll, ResistanceGrowsPastAnEndAndNeverReachesTheViewSize) {
+    EXPECT_FLOAT_EQ(elasticOffset(120.0f, 300.0f, 100.0f), 120.0f);   // within the range
+    EXPECT_FLOAT_EQ(elasticOffset(300.0f, 300.0f, 100.0f), 300.0f);
+
+    // A drag of one view size past an end shows as 1 - 1 / 1.55 of it.
+    EXPECT_NEAR(elasticOffset(-100.0f, 300.0f, 100.0f), -(1.0f - 1.0f / 1.55f) * 100.0f, 1e-3f);
+    EXPECT_NEAR(elasticOffset(400.0f, 300.0f, 100.0f), 300.0f + (1.0f - 1.0f / 1.55f) * 100.0f, 1e-3f);
+
+    float last = 0.0f;
+    for (float past = 10.0f; past <= 10000.0f; past *= 2.0f) {
+        const float shown = -elasticOffset(-past, 300.0f, 100.0f);
+        EXPECT_GT(shown, last);
+        EXPECT_LT(shown, past);                    // resisted
+        EXPECT_LT(shown, 100.0f);                  // never a whole view
+        EXPECT_NEAR(elasticDragOffset(-shown, 300.0f, 100.0f), -past, past * 1e-3f);   // and back
+        last = shown;
+    }
+}
+
+TEST(ElasticScroll, SpringSettlesWithoutPassingItsTarget) {
+    float position = -30.0f;
+    float velocity = 0.0f;
+    float t = 0.0f;
+    float remainingAt03 = 0.0f;
+    for (int i = 0; i < 120; ++i) {
+        const float next = springTowards(position, 0.0f, velocity, 0.1f, kDt);
+        EXPECT_GE(next, position);                 // only ever towards the target
+        EXPECT_LE(next, 0.0f);                     // never past it
+        position = next;
+        t += kDt;
+        if (remainingAt03 == 0.0f && t >= 0.3f) remainingAt03 = -position;
+    }
+    EXPECT_LT(remainingAt03, 30.0f * 0.05f);       // within 5% after three spring times
+    EXPECT_NEAR(position, 0.0f, 1e-3f);
+}
+
+TEST(ElasticScroll, DraggingPastTheStartResistsAndSpringsBack) {
+    Fixture f;
+    f.scrollView().movement = UIScrollView::Movement::Elastic;
+    f.scrollView().inertia = false;
+
+    f.step({200, 120}, true);
+    f.step({200, 230}, true);                      // 110 down: past the start
+    const float expected = elasticOffset(-110.0f, 300.0f, 100.0f);
+    EXPECT_NEAR(f.offset(), expected, 1e-3f);
+    EXPECT_NEAR(f.rect(f.content()).min.y, 100.0f - expected, 1e-3f);   // the layout keeps the overshoot
+
+    f.step({200, 230}, false);
+    float last = f.offset();
+    int frames = 0;
+    while (f.offset() != 0.0f && frames < 120) {
+        f.step({200, 230}, false);
+        EXPECT_GE(f.offset(), last);               // straight back, no bounce past the start
+        last = f.offset();
+        ++frames;
+    }
+    EXPECT_EQ(f.offset(), 0.0f);
+    EXPECT_EQ(f.scrollView().velocity.y, 0.0f);
+    EXPECT_LT(frames, 40);
+}
+
+TEST(ElasticScroll, AClampedViewStopsAtItsStart) {
+    Fixture f;
+    f.scrollView().inertia = false;
+    f.step({200, 120}, true);
+    f.step({200, 230}, true);
+    EXPECT_FLOAT_EQ(f.offset(), 0.0f);
+    f.scrollView().scrollPosition.y = -0.2f;
+    f.layout();
+    EXPECT_FLOAT_EQ(f.scrollView().scrollPosition.y, 0.0f);
+}
+
+TEST(ElasticScroll, ACoastRunsPastTheEndAndComesBack) {
+    Fixture f;
+    f.scrollView().movement = UIScrollView::Movement::Elastic;
+    f.scrollView().scrollPosition.y = 270.0f / 300.0f;
+    f.layout();
+
+    f.step({200, 190}, true);
+    for (int y = 180; y >= 150; y -= 10) f.step({200, static_cast<float>(y)}, true);   // 600 units/s upwards
+    f.step({200, 150}, false);
+    EXPECT_GT(f.scrollView().velocity.y, 100.0f);
+
+    float furthest = f.offset();
+    for (int i = 0; i < 240; ++i) {
+        f.step({200, 150}, false);
+        furthest = std::max(furthest, f.offset());
+    }
+    EXPECT_GT(furthest, 300.0f);
+    EXPECT_EQ(f.offset(), 300.0f);
+    EXPECT_EQ(f.scrollView().velocity.y, 0.0f);
+}
+
+TEST(ElasticScroll, TheWheelNeverTakesAViewPastAnEnd) {
+    Fixture f;
+    f.scrollView().movement = UIScrollView::Movement::Elastic;
+    for (int i = 0; i < 20; ++i) {
+        f.step({200, 150}, false, {0.0f, -1.0f});
+        EXPECT_LE(f.offset(), 300.0f);
+    }
+    EXPECT_FLOAT_EQ(f.offset(), 300.0f);
+    f.step({200, 150}, false, {0.0f, 20.0f});
+    EXPECT_FLOAT_EQ(f.offset(), 0.0f);
+}
+
+TEST(ElasticScroll, TheScrollbarHandleShrinksByTheOvershoot) {
+    Fixture f;
+    f.scrollView().movement = UIScrollView::Movement::Elastic;
+    f.scrollView().scrollPosition.y = -40.0f / 300.0f;
+    f.layout();
+    f.step({0, 0}, false);   // springs back a little, then the bar follows
+
+    const auto& view = f.scrollView();
+    const auto& scrollbar = f.registry.get<UIScrollbar>(view.verticalScrollbar);
+    ASSERT_GT(view.overshoot(1), 0.0f);
+    EXPECT_FLOAT_EQ(scrollbar.value, 0.0f);
+    EXPECT_NEAR(scrollbar.size, (100.0f - view.overshoot(1)) / 400.0f, 1e-5f);
+    EXPECT_LT(scrollbar.size, 0.25f);
 }
 
 TEST(ScrollView, HorizontalViewsScrollSidewaysWithEitherWheel) {

@@ -259,6 +259,12 @@ TEST_F(UIAPIFixture, ScrollViewsScrollTheirContent) {
     EXPECT_FLOAT_EQ(ui.getScrollPosition(view).y, 1.0f);
     ui.setScrollSettings(view, 100.0f, false);
     EXPECT_EQ(registry.get<UI::UIScrollView>(e(view)).wheelSpeed, 100.0f);
+    EXPECT_EQ(registry.get<UI::UIScrollView>(e(view)).movement, UI::UIScrollView::Movement::Clamped);
+    ui.setScrollElastic(view, true, 0.2f);
+    EXPECT_EQ(registry.get<UI::UIScrollView>(e(view)).movement, UI::UIScrollView::Movement::Elastic);
+    EXPECT_FLOAT_EQ(registry.get<UI::UIScrollView>(e(view)).elasticity, 0.2f);
+    ui.setScrollElastic(view, false);
+    EXPECT_EQ(registry.get<UI::UIScrollView>(e(view)).movement, UI::UIScrollView::Movement::Clamped);
 
     // The wheel over it scrolls by its speed.
     ui.setScrollPosition(view, {0.0f, 0.0f});

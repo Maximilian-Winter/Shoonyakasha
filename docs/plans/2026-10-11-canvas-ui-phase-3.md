@@ -83,7 +83,7 @@ Under the project's rules, two parts of this plan add a new abstraction or depen
 ## 17. Elastic scrolling
 
 - **New fields.** `UIScrollView` gains `movement` (`Clamped`, the current behaviour, or `Elastic`) and `elasticity`, the spring time in seconds.
-- **Drag.** While dragging, an elastic view moves past its edges with growing resistance: the overshoot is `range * (1 - 1 / (d / range * k + 1))` for a drag `d` past the edge.
+- **Drag.** While dragging, an elastic view moves past its edges with growing resistance: the overshoot is `view * (1 - 1 / (d / view * k + 1))` for a drag `d` past the edge, where `view` is the viewport size and `k` is 0.55.
 - **Release.** On release, or when coasting reaches an edge, the view springs back with a critically damped spring.
 - **Wheel.** The wheel never overshoots.
 - **Position past the edges.** `scrollPosition` may leave 0..1 while overshooting, so `CanvasLayoutSystem` clamps only clamped views. Scrollbars show the overshoot by shrinking the handle.
