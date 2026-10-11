@@ -165,6 +165,16 @@ TEST_F(UIAPIFixture, MultiLineTextFields) {
     EXPECT_TRUE(f.submitOnEnter);
 }
 
+TEST_F(UIAPIFixture, TextFieldComposition) {
+    const EntityHandle canvas = ui.createCanvas();
+    const EntityHandle field = ui.createTextField(canvas, "Name");
+    EXPECT_EQ(ui.getTextFieldComposition(field), "");
+    registry.get<UI::UITextField>(e(field)).composition.text = std::u32string{0x304B, 0x3093};   // ka n
+    EXPECT_EQ(ui.getTextFieldComposition(field), "\xE3\x81\x8B\xE3\x82\x93");
+    EXPECT_EQ(ui.getText(field), "");                // not part of the text
+    EXPECT_EQ(ui.getTextFieldComposition(canvas), "");
+}
+
 TEST_F(UIAPIFixture, LayoutDirection) {
     const EntityHandle canvas = ui.createCanvas();
     EXPECT_FALSE(ui.isRightToLeft(canvas));

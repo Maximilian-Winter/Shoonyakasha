@@ -262,6 +262,12 @@ ui.set_text_field_multi_line(chat, submit_on_enter=True)   # Enter: submit; Shif
 - **Moving:** Up and Down move to the line above and below and keep to the column the caret had when they started, across shorter lines. PageUp and PageDown move by the lines that fit in the field. Home and End go to the start and end of the line, and with Ctrl of the text.
 - **Limits:** `max_length` counts line breaks as characters.
 
+Input methods (IMEs), such as those for Chinese, Japanese or Korean, compose text in a field before committing it. On Windows:
+- **When:** the input method is switched on only while an editable field that is not a password field has focus. Elsewhere it is off, so keys pressed for the game never open it, and characters typed through it reach only text fields.
+- **Composing:** what is being composed is shown at the caret, in place of any selection, and underlined part by part; the part being converted is underlined more thickly. It is not part of the text yet: `get_text` and `text_changed` do not see it, and `get_text_field_composition(field)` reads it. The input method's list of candidates opens below the caret, on a world canvas too while the caret is in view.
+- **Committing:** the committed text goes in as if typed, once, and sets `text_changed`.
+- **Meanwhile:** the input method takes the keys, so Enter and Escape go to it (with most input methods they commit and cancel the composition) rather than submitting or leaving the field, and a click in the field does not move the caret. Moving focus to anything else, another field included, cancels the composition.
+
 Setting and reading:
 - `set_text(field, text)` replaces the text and puts the caret at the end. It does not set `text_changed`, which reports only the user's edits.
 - `get_text` reads the text, and `select_all` selects it.
@@ -344,7 +350,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 
 ## Limits
 
-- Text fields have no input method (IME) composition, so text that is typed through an IME, such as Chinese or Japanese, cannot be entered; it can still be pasted.
+- Input method composition is handled on Windows only. On other platforms the engine does not show a composition; text can still be pasted.
 - In a multi-line field, End on a line that wraps without a space, such as Chinese text or a word too long for the field, puts the caret at the start of the next line, since the two places are one position in the text.
 - Text fields interpret Ctrl, not Cmd, as the word modifier, on every platform.
 - The arrow keys move focus and also turn an orbit camera, which uses them; only a focused text field takes keys from the camera.

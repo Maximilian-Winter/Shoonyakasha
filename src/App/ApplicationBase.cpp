@@ -28,6 +28,7 @@
 #include "ECS/UILayoutSystem.h"
 #include "ECS/TextRenderSystem.h"
 #include "UI/UIContext.h"
+#include "UI/UIHitTest.h"
 #include "UI/UISystems.h"
 #include "Resources/Sprite2DManager.h"
 #include "Resources/FontLoader.h"
@@ -496,6 +497,7 @@ void ApplicationBase::update() {
         inputComp.firstMouseCapture = state.firstMouseCapture;
         inputComp.textInput = state.textInput;
         inputComp.keyPresses = state.keyPresses;
+        inputComp.composition = state.composition;
         inputComp.gamepad = state.gamepad;
 
         // What the canvas UI took last frame: the wheel over it, and the
@@ -521,6 +523,22 @@ void ApplicationBase::update() {
     }
 
     m_activeScene->update();
+
+    // The input method composes only in a focused text field, with its
+    // candidate list by the caret. Focus moving on cancels a composition.
+    if (m_window) {
+        const auto& focus = m_uiContext->focus();
+        auto& native = m_window->getNativeWindow();
+        if (focus.focused != m_textInputFocus) native.setTextInputActive(false);
+        m_textInputFocus = focus.focused;
+        native.setTextInputActive(focus.textInput);
+        if (focus.textInput) {
+            if (const auto rect = UI::textInputRect(m_activeScene->getRegistry(), focus.focused, m_screenSize,
+                                                    m_windowSize)) {
+                native.setTextInputRect(rect->min, rect->max);
+            }
+        }
+    }
 
     m_inputHandler->endFrame();
     m_resourceManager->update();

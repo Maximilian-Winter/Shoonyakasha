@@ -384,9 +384,22 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
 
     updateFocus(registry, *input, pressedNow, hovered);
     const entt::entity focused = m_focus ? m_focus->focused : entt::null;
+    bool textInput = false;
     if (auto* field = focused != entt::null ? registry.try_get<UITextField>(focused) : nullptr) {
         if (focused != m_lastFocused) field->blinkTime = 0.0f;   // the caret shows at once
         editTextField(registry, focused, *input);
+        textInput = !field->readOnly && !field->password;
+    }
+    if (m_focus) m_focus->textInput = textInput;
+    // The input method composes in the field that had focus when it began:
+    // a field that has just taken focus starts without a composition.
+    for (auto [entity, field] : registry.view<UITextField>().each()) {
+        const bool composing = textInput && entity == focused && focused == m_lastFocused;
+        TextComposition composition = composing ? input->composition : TextComposition{};
+        if (composition != field.composition) {
+            field.composition = std::move(composition);
+            field.revealCaret = true;
+        }
     }
     m_lastFocused = focused;
 
@@ -651,10 +664,12 @@ void CanvasInputSystem::updateFocus(entt::registry& registry, const ECS::InputSt
 namespace {
 
 /// The layout of the field's text as it is now, or null when the text has
-/// changed since it was laid out, or is empty.
+/// changed since it was laid out, is empty, or is shown with a composition.
 const TextLayoutResult* currentLayout(const entt::registry& registry, const UITextField& field) {
     const auto* cache = registry.try_get<UITextCache>(field.textElement);
-    if (!cache || field.text.empty() || cache->text != field.displayText()) return nullptr;
+    if (!cache || field.text.empty() || !field.composition.empty() || cache->text != field.displayText()) {
+        return nullptr;
+    }
     return &cache->layout;
 }
 
@@ -718,6 +733,7 @@ UITextField* multiLineFieldAt(entt::registry& registry, entt::entity element) {
 void CanvasInputSystem::pointTextField(entt::registry& registry, entt::entity entity, glm::vec2 pixel,
                                        const std::optional<ECS::Ray>& ray, bool pressedNow, bool shift) {
     auto& field = registry.get<UITextField>(entity);
+    if (!field.composition.empty()) return;   // the input method has the caret
     const auto* textRect = registry.try_get<UIRect>(field.textElement);
     if (!textRect || textRect->canvas == entt::null) return;
     const auto position = canvasPosition(registry, textRect->canvas, pixel, ray);

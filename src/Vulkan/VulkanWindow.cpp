@@ -34,6 +34,7 @@ VulkanWindow::~VulkanWindow() {
         m_logger->log(LogLevel::Info, "Destroying Vulkan Window");
     }
 
+    m_native.reset();
     vkDestroySurfaceKHR(m_instance.getInstance(), m_surface, nullptr);
     glfwDestroyWindow(m_window);
 
@@ -59,6 +60,7 @@ void VulkanWindow::initWindow() {
     glfwSetMouseButtonCallback(m_window, mouseButtonCallback);
     glfwSetCursorPosCallback(m_window, cursorPositionCallback);
     glfwSetScrollCallback(m_window, scrollCallback);
+    m_native = Platform::NativeWindow::create(m_window, m_eventDispatcher);
 
     m_logger->log(LogLevel::Info, "GLFW window created successfully");
 }

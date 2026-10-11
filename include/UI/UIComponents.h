@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "Core/TextComposition.h"
 #include "GPU/GPUTypes.h"
 #include "UI/TextLayout.h"
 #include "UI/Utf8.h"
@@ -298,8 +299,13 @@ struct UISlider {
 /// the line, and with Ctrl of the text; Enter starts a new line and
 /// Ctrl+Enter submits, or with submitOnEnter Enter submits and Shift+Enter
 /// starts a new line. Pressing places the caret, dragging selects, and a
-/// double-click selects a word; the wheel scrolls many lines. There is no
-/// input method composition, so text that needs an IME cannot be typed.
+/// double-click selects a word; the wheel scrolls many lines.
+///
+/// While an editable field that is not a password has focus, an input method
+/// can compose text in it: the composition is shown in place of the
+/// selection, underlined clause by clause, with the active clause underlined
+/// more thickly, and is not part of `text` until the input method commits
+/// it. Meanwhile the pointer does not move the caret.
 struct UITextField {
     std::string text;                        // UTF-8; line breaks are '\n' when multiLine
     std::string placeholder;                 // shown in placeholderColor while text is empty
@@ -323,10 +329,12 @@ struct UITextField {
     entt::entity textElement = entt::null;       // has the UIText
     entt::entity selectionElement = entt::null;  // has a UIImage
     entt::entity caretElement = entt::null;      // has a UIImage
+    entt::entity compositionElement = entt::null; // has a UIImage; draws the composition's underlines
 
     // Written by CanvasInputSystem, for this frame.
     bool changed = false;                    // the user changed the text
     bool submitted = false;                  // the user pressed Enter, or Ctrl+Enter
+    TextComposition composition;             // what an input method is composing; empty without focus
     // Written by CanvasInputSystem and CanvasTextSystem.
     float blinkTime = 0.0f;                  // seconds since the caret last moved
     float scroll = 0.0f;                     // how far the text is moved left
@@ -336,9 +344,24 @@ struct UITextField {
     float contentHeight = 0.0f;              // multiLine: the text's height and the viewport's, as last laid out
     float viewportHeight = 0.0f;
 
+    /// Where the composition starts in the text shown: at the start of the
+    /// selection, which it is shown in place of.
+    size_t compositionStart() const {
+        const size_t length = decodeUtf8(text).size();
+        return std::min(std::min(caret, selectionAnchor), length);
+    }
+
     /// What the text element shows: the text, or its mask, or the
-    /// placeholder while the text is empty.
+    /// placeholder while the text is empty; with a composition, the text
+    /// with the composition in place of the selection.
     std::string displayText() const {
+        if (!composition.empty()) {
+            std::u32string shown = decodeUtf8(text);
+            const size_t start = compositionStart();
+            const size_t end = std::min(std::max(caret, selectionAnchor), shown.size());
+            shown.replace(start, end - start, composition.text);
+            return encodeUtf8(shown);
+        }
         if (text.empty()) return placeholder;
         if (!password) return text;
         return encodeUtf8(std::u32string(decodeUtf8(text).size(), maskCharacter));
@@ -422,6 +445,7 @@ struct UIScrollbar {
 struct UIFocusState {
     entt::entity focused = entt::null;
     bool keyboardCaptured = false;       // the focused element captures the keyboard
+    bool textInput = false;              // it is an editable text field, not a password: an IME may compose in it
 };
 
 /// The clipboard text fields copy to and paste from. Owned by UIContext; the

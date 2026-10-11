@@ -201,6 +201,10 @@ public:
             m_inputState.textInput.push_back(event.codepoint);
         });
 
+        dispatcher.subscribe<TextCompositionEvent>([this](const TextCompositionEvent& event) {
+            m_inputState.composition = event.composition;
+        });
+
         dispatcher.subscribe<MouseMoveEvent>([this](const MouseMoveEvent& event) {
             m_inputState.mousePosition = glm::vec2(
                 static_cast<float>(event.x),

@@ -15,7 +15,8 @@ A tour of engine.ui on the default pipeline, in one window:
              words though it has no spaces
     Widgets  a click counter, a button enabled by a toggle, a toggle that
              lays the whole HUD out right to left, a stepped
-             slider, a name field that greets in the log on Enter, and a
+             slider, a name field that greets in the log on Enter and,
+             on Windows, shows what an input method composes in it, and a
              log whose rows are created and destroyed at runtime, in a
              scroll view (wheel, drag or scrollbar; a drag pulls past the
              ends and springs back), filtered by a search
@@ -348,6 +349,9 @@ def build_widgets_page(page):
     named("Name field", stretch(ui_.create_text_field(name_row, "Your name, then Enter", size=(200, 36))))
     ui_.set_text_field_options(w["Name field"], max_length=24)
     named("Greet button", ui_.create_button(name_row, "Greet", size=(100, 36)))
+    # While an input method composes in the name field, what it composes.
+    w["composition_label"] = ui_.create_text(page, "", size=16)
+    ui_.set_visible(w["composition_label"], False)
 
     button_row = row(page, 36, spacing=10)
     named("Add row", ui_.create_button(button_row, "Add row", size=(140, 36)))
@@ -518,6 +522,9 @@ def update_widgets_page():
 
     if ui_.text_submitted(w["Name field"]) or ui_.was_clicked(w["Greet button"]):
         greet()
+    composing = ui_.get_text_field_composition(w["Name field"])
+    ui_.set_text(w["composition_label"], "Composing: " + composing)
+    ui_.set_visible(w["composition_label"], bool(composing))   # takes no room while hidden
     if ui_.text_changed(w["Search field"]):
         filter_rows()
 

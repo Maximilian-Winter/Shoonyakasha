@@ -669,5 +669,10 @@ void UIAPI::setTextFieldMultiLine(EntityHandle field, bool multiLine, bool submi
     }
 }
 
+std::string UIAPI::getTextFieldComposition(EntityHandle field) const {
+    const auto* f = m_impl->get<UI::UITextField>(field);
+    return f ? UI::encodeUtf8(f->composition.text) : std::string();
+}
+
 } // namespace Facade
 } // namespace Shoonyakasha

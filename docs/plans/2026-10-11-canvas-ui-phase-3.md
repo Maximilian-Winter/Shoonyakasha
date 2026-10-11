@@ -223,6 +223,13 @@ Mirroring happens in `CanvasLayoutSystem` when rects are resolved, so input, hit
 
 **End to end:** typing Japanese with the Microsoft IME in the showcase's name field, with screenshots of the inline composition and the candidate window. This needs a Japanese IME installed on the test machine, and is reported as not run if there is none.
 
+**As built** (the shape approved before the code, with these differences):
+- The four IME events became one: `TextCompositionEvent` carries the whole composition each time it changes, empty when it ends. Committed text is published as `CharEvent`s by the hook, and `WM_IME_COMPOSITION` is not passed on, so Windows never turns it into `WM_CHAR` as well.
+- Keys the IME takes arrive as `WM_KEYDOWN` with `VK_PROCESSKEY`, which GLFW 3.4 already drops, so the hook does not filter them.
+- `UITextField` keeps the composition as one `TextComposition` (text, caret and clauses) rather than separate fields.
+- The candidate rect is computed by `UI::textInputRect` from the caret element's rect; `ApplicationBase` sets it, and turns text input off and on again when focus moves, so a composition does not follow focus into another field.
+- The Microsoft IME end-to-end run was not done: no Japanese IME is installed on the test machine. The inline drawing was checked in a real run instead, with the C++ canvas example's script setting a composition for one frame.
+
 ## 23. Rich text
 
 **Markup** (opt-in with `UIText::richText`, off by default so existing text containing `<` is unchanged):

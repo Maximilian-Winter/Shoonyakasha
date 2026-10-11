@@ -218,7 +218,7 @@ entt::entity createTextField(entt::registry& registry, entt::entity parent, cons
     registry.emplace<UIClip>(viewport);
 
     // Placed each frame by CanvasTextSystem; the selection draws behind the
-    // text and the caret over it.
+    // text, and the composition's underlines and the caret over it.
     const entt::entity selection = createElement(registry, viewport, glm::vec2(0.0f));
     registry.emplace<UIImage>(selection).raycastTarget = false;
     registry.get<UIRect>(selection).visible = false;
@@ -231,6 +231,10 @@ entt::entity createTextField(entt::registry& registry, entt::entity parent, cons
     label.alignV = TextAlignV::Middle;
     label.wrap = false;
 
+    const entt::entity composition = createElement(registry, viewport, glm::vec2(0.0f));
+    registry.emplace<UIImage>(composition).raycastTarget = false;
+    registry.get<UIRect>(composition).visible = false;
+
     const entt::entity caret = createElement(registry, viewport, glm::vec2(0.0f));
     registry.emplace<UIImage>(caret).raycastTarget = false;
     registry.get<UIRect>(caret).visible = false;
@@ -239,6 +243,7 @@ entt::entity createTextField(entt::registry& registry, entt::entity parent, cons
     state.placeholder = placeholder;
     state.textElement = text;
     state.selectionElement = selection;
+    state.compositionElement = composition;
     state.caretElement = caret;
     return field;
 }

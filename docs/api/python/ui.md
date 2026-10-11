@@ -204,5 +204,6 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `select_all(field)` | None | Calls native `selectAll`; see the class contract above. |
 | `set_text_field_options(field, max_length=0, password=False, read_only=False)` | None | max_length in characters, 0 for no limit; password draws a dot per character and stops copying; read_only keeps selecting and copying but not editing. |
 | `set_text_field_multi_line(field, multi_line=True, submit_on_enter=False)` | None | Let the field hold many lines: its text wraps and scrolls up and down, Up and Down move between lines, and Enter starts a new line while Ctrl+Enter submits. With submit_on_enter, Enter submits and Shift+Enter starts a new line. False goes back to one line. |
+| `get_text_field_composition(field)` | str | What an input method is composing in the field: shown in the field but not yet part of its text. Empty when nothing is being composed there. |
 
 <!-- END SOURCE API -->

@@ -17,6 +17,7 @@
 
 #include "Core.h"
 #include "Systems.h"
+#include "Core/TextComposition.h"
 #include <GLFW/glfw3.h>
 #include <array>
 #include <algorithm>
@@ -58,6 +59,9 @@ struct InputStateComponent {
     };
     std::u32string textInput;           // characters typed
     std::vector<KeyPress> keyPresses;   // presses and repeats, in order
+    // What the input method is composing, until it commits the text to
+    // textInput or cancels; kept from frame to frame.
+    TextComposition composition;
 
     // The first connected gamepad, with GLFW's standard mapping
     // (GLFW_GAMEPAD_BUTTON_*, GLFW_GAMEPAD_AXIS_*).

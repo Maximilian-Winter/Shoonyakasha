@@ -67,7 +67,7 @@ void showTextFields(entt::registry& registry) {
         field.selectionAnchor = std::min(field.selectionAnchor, length);
         if (auto* text = registry.try_get<UIText>(field.textElement)) {
             text->text = field.displayText();
-            text->color = field.text.empty() ? field.placeholderColor : field.textColor;
+            text->color = field.text.empty() && field.composition.empty() ? field.placeholderColor : field.textColor;
             text->wrap = field.multiLine;
             text->alignV = field.multiLine ? TextAlignV::Top : TextAlignV::Middle;
         }
@@ -105,8 +105,8 @@ void shiftText(UIRect& rect, glm::vec2 offset) {
     rect.rect.max += shift;
 }
 
-/// Moves each field's text to keep the caret in view, and places its caret
-/// and selection.
+/// Moves each field's text to keep the caret in view, and places its caret,
+/// selection and composition underlines.
 void placeTextFields(entt::registry& registry, float deltaTime) {
     for (auto [entity, field] : registry.view<UITextField>().each()) {
         auto* textRect = registry.try_get<UIRect>(field.textElement);
@@ -117,14 +117,18 @@ void placeTextFields(entt::registry& registry, float deltaTime) {
         const bool focused = interactable && interactable->focused;
         field.blinkTime += deltaTime;
 
-        const bool laidOut = !field.text.empty() && cache;
+        const bool composing = !field.composition.empty();
+        const bool laidOut = (!field.text.empty() || composing) && cache;
         const glm::vec2 view = textRect->rect.size();
         // An empty right-to-left field shows its caret at the right.
         const TextDirection direction = resolvedDirection(*text, *textRect);
         const bool emptyRightToLeft = direction == TextDirection::RightToLeft ||
                                       direction == TextDirection::AutoRightToLeft;
         const float emptyCaret = emptyRightToLeft ? view.x - field.caretWidth : 0.0f;
-        const CaretPosition caret = laidOut ? caretPosition(cache->layout, field.caret) : CaretPosition{emptyCaret, 0};
+        // While composing, the caret is the input method's, in the composition.
+        const size_t compositionStart = field.compositionStart();
+        const size_t caretIndex = composing ? compositionStart + field.composition.caret : field.caret;
+        const CaretPosition caret = laidOut ? caretPosition(cache->layout, caretIndex) : CaretPosition{emptyCaret, 0};
 
         // The caret's line, top to bottom, relative to the text's box: on one
         // line the font's height centred in it, on many the laid-out line.
@@ -179,20 +183,52 @@ void placeTextFields(entt::registry& registry, float deltaTime) {
         // further than a viewport.
         if (field.multiLine) textRect->rect.max.y = std::max(textRect->rect.max.y, origin.y + field.contentHeight);
 
-        const bool selected = laidOut && focused && field.caret != field.selectionAnchor;
-        const auto spans = selected ? selectionSpans(cache->layout, std::min(field.caret, field.selectionAnchor),
-                                                     std::max(field.caret, field.selectionAnchor))
-                                    : std::vector<Span>{};
-        auto& rects = registry.get_or_emplace<UIImageRects>(field.selectionElement).rects;
-        rects.clear();
-        Rect bounds{glm::vec2(0.0f), glm::vec2(0.0f)};
-        for (const Span& s : spans) {
-            const glm::vec2 band = lineBand(s.line);
-            const Rect r{origin + glm::vec2(s.left, band.x), origin + glm::vec2(s.right, band.y)};
-            bounds = rects.empty() ? r : Rect{glm::min(bounds.min, r.min), glm::max(bounds.max, r.max)};
-            rects.push_back(r);
+        // Fills `element` with one rect per part: a span's left and right,
+        // and a top and bottom relative to the text's box. Places it around
+        // them.
+        auto placeRects = [&](entt::entity element, const std::vector<std::pair<Span, glm::vec2>>& parts,
+                              const glm::vec4& color) {
+            if (element == entt::null) return;
+            auto& rects = registry.get_or_emplace<UIImageRects>(element).rects;
+            rects.clear();
+            Rect bounds{glm::vec2(0.0f), glm::vec2(0.0f)};
+            for (const auto& [s, extent] : parts) {
+                const Rect r{origin + glm::vec2(s.left, extent.x), origin + glm::vec2(s.right, extent.y)};
+                bounds = rects.empty() ? r : Rect{glm::min(bounds.min, r.min), glm::max(bounds.max, r.max)};
+                rects.push_back(r);
+            }
+            placeBar(registry, element, bounds.min, bounds.size(), color, !rects.empty());
+        };
+
+        // The selection, hidden while a composition is shown in its place.
+        std::vector<std::pair<Span, glm::vec2>> selection;
+        if (laidOut && focused && !composing && field.caret != field.selectionAnchor) {
+            for (const Span& s : selectionSpans(cache->layout, std::min(field.caret, field.selectionAnchor),
+                                                std::max(field.caret, field.selectionAnchor))) {
+                selection.push_back({s, lineBand(s.line)});
+            }
         }
-        placeBar(registry, field.selectionElement, bounds.min, bounds.size(), field.selectionColor, !rects.empty());
+        placeRects(field.selectionElement, selection, field.selectionColor);
+
+        // The composition underlined at the foot of its line: each clause, or
+        // all of it without clauses, the active clause twice as thick.
+        std::vector<std::pair<Span, glm::vec2>> underlines;
+        if (laidOut && composing) {
+            const float thin = std::max(1.0f, text->fontSize * 0.05f);
+            auto underline = [&](size_t begin, size_t end, bool active) {
+                const float thickness = active ? thin * 2.0f : thin;
+                for (Span s : selectionSpans(cache->layout, compositionStart + begin, compositionStart + end)) {
+                    // A gap between clauses that touch.
+                    s.right = std::max(s.left, s.right - thin);
+                    const float bottom = lineBand(s.line).y;
+                    underlines.push_back({s, glm::vec2(bottom - thickness, bottom)});
+                }
+            };
+            const auto& clauses = field.composition.clauses;
+            if (clauses.empty()) underline(0, field.composition.text.size(), false);
+            for (const auto& clause : clauses) underline(clause.begin, clause.end, clause.active);
+        }
+        placeRects(field.compositionElement, underlines, field.textColor);
 
         const bool blinkOn = field.blinkPeriod <= 0.0f ||
                              std::fmod(field.blinkTime, field.blinkPeriod) < field.blinkPeriod * 0.5f;

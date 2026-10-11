@@ -101,6 +101,7 @@ bool textChanged(EntityHandle field) const;
 void selectAll(EntityHandle field);
 void setTextFieldOptions(EntityHandle field, uint32_t maxLength = 0, bool password = false, bool readOnly = false);
 void setTextFieldMultiLine(EntityHandle field, bool multiLine = true, bool submitOnEnter = false);
+std::string getTextFieldComposition(EntityHandle field) const;
 ```
 
 <!-- END SOURCE API -->

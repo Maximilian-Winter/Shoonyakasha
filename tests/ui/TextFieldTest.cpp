@@ -632,3 +632,151 @@ TEST(TextFieldMultiLine, AMixedDirectionLineMovesInDisplayOrder) {
     f.key(GLFW_KEY_UP);
     EXPECT_EQ(caretPosition(f.layout(), f.text().caret).line, 0u);
 }
+
+// ─── Input method composition ───────────────────────────────────
+
+namespace {
+
+/// "xyz" being composed, cursor after "xy", with "xy" the active clause.
+TextComposition xyz() {
+    TextComposition c;
+    c.text = U"xyz";
+    c.caret = 2;
+    c.clauses = {{0, 2, true}, {2, 3, false}};
+    return c;
+}
+
+} // namespace
+
+TEST(TextFieldComposition, IsShownAtTheCaretWithoutChangingTheText) {
+    Fixture f;
+    f.focus.focused = f.field;
+    f.type(U"ab");
+    f.key(GLFW_KEY_LEFT);
+    EXPECT_TRUE(f.focus.textInput);
+
+    f.state().composition = xyz();
+    f.step();
+    const UITextField& field = f.text();
+    EXPECT_EQ(field.text, "ab");
+    EXPECT_FALSE(field.changed);
+    EXPECT_EQ(field.composition, xyz());
+    EXPECT_EQ(f.registry.get<UIText>(field.textElement).text, "axyzb");
+
+    // One underline per clause, the active one thicker, both at the foot of the line.
+    const auto& underlines = f.registry.get<UIImageRects>(field.compositionElement).rects;
+    ASSERT_EQ(underlines.size(), 2u);
+    EXPECT_GT(underlines[0].size().y, underlines[1].size().y);
+    EXPECT_NEAR(underlines[0].max.y, underlines[1].max.y, 1e-3f);
+    EXPECT_NEAR(underlines[0].min.x, f.pointAt(1).x, 1e-3f);
+    EXPECT_LT(underlines[0].max.x, underlines[1].min.x);   // a gap between the clauses
+    EXPECT_TRUE(f.rectOf(field.compositionElement).visibleInHierarchy);
+    EXPECT_GT(f.rectOf(field.compositionElement).drawOrder, f.rectOf(field.textElement).drawOrder);
+    // The caret is the composition's, after "xy".
+    EXPECT_NEAR(f.rectOf(field.caretElement).rect.min.x, f.pointAt(3).x, 1e-3f);
+}
+
+TEST(TextFieldComposition, CommittingInsertsTheTextOnce) {
+    Fixture f;
+    f.focus.focused = f.field;
+    f.type(U"ab");
+    f.key(GLFW_KEY_LEFT);
+    f.state().composition = xyz();
+    f.step();
+
+    // The input method commits: the text comes typed, the composition ends.
+    f.state().composition = {};
+    f.type(U"XYZ");
+    EXPECT_EQ(f.text().text, "aXYZb");
+    EXPECT_EQ(f.text().caret, 4u);
+    EXPECT_TRUE(f.text().changed);
+    EXPECT_TRUE(f.text().composition.empty());
+    EXPECT_FALSE(f.rectOf(f.text().compositionElement).visibleInHierarchy);
+    EXPECT_EQ(f.registry.get<UIText>(f.text().textElement).text, "aXYZb");
+}
+
+TEST(TextFieldComposition, CancellingLeavesTheTextAsItWas) {
+    Fixture f;
+    f.focus.focused = f.field;
+    f.type(U"ab");
+    f.state().composition = xyz();
+    f.step();
+    f.state().composition = {};
+    f.step();
+    EXPECT_EQ(f.text().text, "ab");
+    EXPECT_FALSE(f.text().changed);
+    EXPECT_EQ(f.registry.get<UIText>(f.text().textElement).text, "ab");
+}
+
+TEST(TextFieldComposition, TakesThePlaceOfTheSelectionAndThePlaceholder) {
+    Fixture f;
+    f.focus.focused = f.field;
+    f.type(U"hello world");
+    f.key(GLFW_KEY_LEFT, GLFW_MOD_CONTROL | GLFW_MOD_SHIFT);   // "world"
+    f.state().composition = xyz();
+    f.step();
+    EXPECT_EQ(f.registry.get<UIText>(f.text().textElement).text, "hello xyz");
+    EXPECT_FALSE(f.rectOf(f.text().selectionElement).visibleInHierarchy);
+    f.state().composition = {};
+    f.type(U"XYZ");
+    EXPECT_EQ(f.text().text, "hello XYZ");
+
+    // In an empty field the composition shows in the text's colour.
+    f.key(GLFW_KEY_A, GLFW_MOD_CONTROL);
+    f.key(GLFW_KEY_BACKSPACE);
+    f.state().composition = xyz();
+    f.step();
+    const auto& label = f.registry.get<UIText>(f.text().textElement);
+    EXPECT_EQ(label.text, "xyz");
+    EXPECT_EQ(label.color, f.text().textColor);
+}
+
+TEST(TextFieldComposition, ThePointerDoesNotMoveTheCaretMeanwhile) {
+    Fixture f;
+    f.focus.focused = f.field;
+    f.type(U"hello world");
+    f.state().composition = xyz();
+    f.step();
+    f.click({110.0f, 118.0f});
+    EXPECT_EQ(f.text().caret, 11u);
+    EXPECT_EQ(f.text().composition, xyz());
+}
+
+TEST(TextFieldComposition, OnlyAFocusedEditableFieldThatIsNoPasswordTakesIt) {
+    Fixture f;
+    f.state().composition = xyz();
+    f.step();
+    EXPECT_FALSE(f.focus.textInput);
+    EXPECT_TRUE(f.text().composition.empty());       // not focused
+
+    f.focus.focused = f.field;
+    f.step();
+    EXPECT_TRUE(f.text().composition.empty());       // focused only this frame
+    f.step();
+    EXPECT_EQ(f.text().composition, xyz());
+
+    f.text().password = true;
+    f.step();
+    EXPECT_FALSE(f.focus.textInput);
+    EXPECT_TRUE(f.text().composition.empty());
+    f.text().password = false;
+    f.text().readOnly = true;
+    f.step();
+    EXPECT_FALSE(f.focus.textInput);
+    EXPECT_TRUE(f.text().composition.empty());
+}
+
+TEST(TextFieldComposition, AManyLineFieldScrollsToTheCompositionCaret) {
+    MultiFixture f;
+    std::u32string text;
+    for (int i = 0; i < 20; ++i) text += U"line\n";
+    f.set(text, 0);
+    f.text().scrollY = 0.0f;
+    f.text().caret = f.text().selectionAnchor = text.size();
+    f.text().revealCaret = false;                    // moved without revealing it
+    f.step();
+    EXPECT_EQ(f.text().scrollY, 0.0f);
+    f.state().composition = xyz();
+    f.step();
+    EXPECT_GT(f.text().scrollY, 0.0f);
+}

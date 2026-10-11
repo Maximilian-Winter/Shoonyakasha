@@ -4,8 +4,11 @@
 
 #pragma once
 
+#include "Core/TextComposition.h"
+
 #include <functional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include <any>
 #include <memory>
@@ -74,6 +77,13 @@ struct CharEvent : public Event {
     explicit CharEvent(char32_t c) : codepoint(c) {}
 };
 
+/// What an input method is composing now, sent each time it changes; an
+/// empty composition when it ends. Text it commits comes as CharEvents.
+struct TextCompositionEvent : public Event {
+    TextComposition composition;
+    explicit TextCompositionEvent(TextComposition c) : composition(std::move(c)) {}
+};
+
 struct MouseMoveEvent : public Event {
     int x;
     int y;
@@ -98,6 +108,7 @@ using Shoonyakasha::EventDispatcher;
 using Shoonyakasha::WindowResizeEvent;
 using Shoonyakasha::KeyEvent;
 using Shoonyakasha::CharEvent;
+using Shoonyakasha::TextCompositionEvent;
 using Shoonyakasha::MouseMoveEvent;
 using Shoonyakasha::MouseButtonEvent;
 using Shoonyakasha::MouseScrollEvent;

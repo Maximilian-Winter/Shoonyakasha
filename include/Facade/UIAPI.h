@@ -374,6 +374,11 @@ public:
     /// line; line breaks already in the text stay.
     void setTextFieldMultiLine(EntityHandle field, bool multiLine = true, bool submitOnEnter = false);
 
+    /// What an input method is composing in the field, as UTF-8: shown in
+    /// the field but not yet part of its text. Empty when nothing is being
+    /// composed there.
+    std::string getTextFieldComposition(EntityHandle field) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

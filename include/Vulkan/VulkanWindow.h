@@ -8,6 +8,8 @@
 #include <GLFW/glfw3.h>
 #include "Core/Logger.h"
 #include "Core/EventSystem.h"
+#include "Platform/NativeWindow.h"
+#include <memory>
 #include <string>
 
 namespace Shoonyakasha {
@@ -60,8 +62,12 @@ public:
     std::string getClipboardText() const;
     void setClipboardText(const std::string& text);
 
+    // Input method composition and the window's messages.
+    Platform::NativeWindow& getNativeWindow() { return *m_native; }
+
 private:
     bool m_mouseCaptured = false;
+    std::unique_ptr<Platform::NativeWindow> m_native;
 };
 
 } // namespace Shoonyakasha

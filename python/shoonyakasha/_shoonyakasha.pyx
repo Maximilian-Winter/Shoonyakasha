@@ -1516,6 +1516,11 @@ cdef class UI:
         starts a new line. False goes back to one line."""
         self._ptr.setTextFieldMultiLine(field, multi_line, submit_on_enter)
 
+    def get_text_field_composition(self, uint32_t field):
+        """What an input method is composing in the field: shown in the field
+        but not yet part of its text. Empty when nothing is being composed there."""
+        return self._ptr.getTextFieldComposition(field).decode("utf-8")
+
 
 # ═══════════════════════════════════════════════════════════════
 # Engine — Python wrapper for EngineAPI (the main entry point)

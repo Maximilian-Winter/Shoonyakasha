@@ -16,10 +16,12 @@
 // With --screenshot it switches the world canvas's resolution at frame 60,
 // moves and clicks a scripted pointer and keyboard through the widgets, moves
 // the world canvas behind the box and clicks its hidden button, which does
-// not count, and drags the list down past its start. It saves frame 134,
-// with the list held there, to the path and prints the click count and how
-// far past its start the list is; then it lets go, prints where the list
-// settled a second later and closes.
+// not count, and drags the list down past its start. It saves frame 111,
+// with part of the name shown as an input method's composition, to the path
+// with "-composition" before its extension, and frame 134, with the list
+// held there, to the path, and prints the click count and how far past its
+// start the list is; then it lets go, prints where the list settled a second
+// later and closes.
 //
 // Keys: WASD/Q/E + right mouse to fly, R to switch the world canvas between
 // 1024x512 and 512x256 pixels. Left mouse uses the widgets; with the mouse
@@ -214,6 +216,15 @@ protected:
 
     void onPostRender() override {
         if (m_screenshot.empty()) return;
+        if (m_frame == 111) {
+            const auto& name = getRegistry().get<UITextField>(m_name);
+            std::printf("name field shows \"%s\" with \"%s\" composed\n",
+                        getRegistry().get<UIText>(name.textElement).text.c_str(), encodeUtf8(name.composition.text).c_str());
+            std::string path = m_screenshot;
+            const size_t dot = path.rfind('.');
+            path.insert(dot == std::string::npos ? path.size() : dot, "-composition");
+            captureScreenshot(path);
+        }
         const auto& list = getRegistry().get<UIScrollView>(m_list);
         if (m_frame == 134) {
             std::printf("world canvas clicks: %d\n", m_clicks);
@@ -232,7 +243,8 @@ private:
     /// slider and clicks the world canvas's button twice; then Escape clears
     /// the focus that left there, and Tab three times moves focus across the
     /// settings to Reset. Then it clicks the name field, types a name with a
-    /// correction, submits it with Enter and selects it by word. Last it
+    /// correction, composes the rest as an input method would, commits it,
+    /// submits it with Enter and selects it by word. Last it
     /// moves the world canvas behind the box and clicks the hidden button
     /// twice more, and then drags the list 150 units down from its start,
     /// holds it and lets go. It goes through the same input path as the
@@ -245,6 +257,7 @@ private:
         bool down = false;
         std::vector<ECS::InputStateComponent::KeyPress> keys;
         std::u32string typed;
+        TextComposition composing;
         if (m_frame <= 67) { at(m_spin); down = m_frame == 66; }
         else if (m_frame <= 86) { at(m_angle, 0.1f + 0.65f * std::min((m_frame - 75) / 10.0f, 1.0f)); down = m_frame >= 75 && m_frame <= 85; }
         else if (m_frame <= 94) { at(m_terminalButton); down = m_frame == 91 || m_frame == 93; }
@@ -258,7 +271,13 @@ private:
             down = m_frame == 106;
             if (m_frame == 108) typed = U"Shunyx";
             if (m_frame == 110) keys.push_back({GLFW_KEY_BACKSPACE, 0, false});
-            if (m_frame == 112) {
+            if (m_frame == 111) {
+                // "ākāśa" composed in two clauses, the second being converted.
+                composing.text = std::u32string{0x0101, U'k', 0x0101, 0x015B, U'a'};
+                composing.caret = composing.text.size();
+                composing.clauses = {{0, 2, false}, {2, 5, true}};
+            }
+            if (m_frame == 112) {   // committed, then submitted
                 typed = std::u32string{0x0101, U'k', 0x0101, 0x015B, U'a'};   // "ākāśa"
                 keys.push_back({GLFW_KEY_ENTER, 0, false, typed.size()});
             }
@@ -295,6 +314,7 @@ private:
             state.mouseCaptured = false;
             state.keyPresses = keys;
             state.textInput = typed;
+            state.composition = composing;
         }
     }
 

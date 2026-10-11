@@ -55,5 +55,19 @@ std::optional<PointerHit> findPointerHit(const entt::registry& registry, glm::ve
 std::optional<glm::vec2> canvasPosition(const entt::registry& registry, entt::entity canvas, glm::vec2 pixel,
                                         const std::optional<ECS::Ray>& ray);
 
+/// Where `point` (canvas units) of `canvas` is on the screen, in screen
+/// pixels: for a world canvas, as the main camera sees it. Nothing when there
+/// is no such canvas, a world canvas has no main camera, or the point is
+/// behind the camera.
+std::optional<glm::vec2> screenPosition(const entt::registry& registry, entt::entity canvas, glm::vec2 point,
+                                        glm::vec2 screenSize);
+
+/// The caret of text field `field`, as last placed, in window coordinates
+/// (`windowSize` over `screenSize` times screen pixels): where an input
+/// method shows its candidate list. Nothing when the field has no placed
+/// caret, or the caret is behind the camera or off the screen.
+std::optional<Rect> textInputRect(const entt::registry& registry, entt::entity field, glm::vec2 screenSize,
+                                  glm::vec2 windowSize);
+
 } // namespace UI
 } // namespace Shoonyakasha

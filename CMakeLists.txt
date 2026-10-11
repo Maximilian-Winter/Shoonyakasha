@@ -108,6 +108,11 @@ target_link_libraries(Shoonyakasha
         libunibreak::libunibreak
 )
 
+# Input method composition on Windows (Platform/NativeWindowWin32.cpp).
+if(WIN32)
+    target_link_libraries(Shoonyakasha PRIVATE imm32)
+endif()
+
 # Where ApplicationBase finds the default pipeline when a program names none.
 # A source-tree path, so it only helps programs run on the machine that built
 # the engine; installed programs set $SHOONYAKASHA_DEFAULT_PIPELINE, and the
