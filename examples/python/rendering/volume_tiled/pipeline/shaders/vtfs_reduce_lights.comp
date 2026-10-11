@@ -1,0 +1,3 @@
+#version 450
+// VTFS: bound each workgroup's share of the lights; see vtfs_reduce_body.glsl.
+#include "vtfs_reduce_body.glsl"

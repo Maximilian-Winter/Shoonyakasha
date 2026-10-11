@@ -1,0 +1,27 @@
+#version 450
+// VTFS: the lowest level of the light BVH (vtfs.glsl): each node bounds 32
+// consecutive lights of the sorted list, as the spheres they reach.
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 256) in;
+
+VTFS_LIGHTS_VIEW(readonly)
+VTFS_VALUES_A(readonly)
+VTFS_BVH_NODES_BUFFER(writeonly)
+
+void main() {
+    uint count = lightCount();
+    uint levels = bvhLevels(count);
+    uint node = gl_GlobalInvocationID.x;
+    if (node >= bvhLevelNodes(levels - 1u, levels, count)) return;
+
+    vec3 lo = vec3(3.0e38), hi = vec3(-3.0e38);
+    uint last = min(node * 32u + 32u, count);
+    for (uint i = node * 32u; i < last; ++i) {
+        vec4 light = lightsView[valuesA[i]];
+        lo = min(lo, light.xyz - light.w);
+        hi = max(hi, light.xyz + light.w);
+    }
+    bvhNodes[bvhFirstNode(levels - 1u) + node] = AABB(vec4(lo, 0.0), vec4(hi, 0.0));
+}

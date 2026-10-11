@@ -13,6 +13,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [rendering/showroom](../../examples/python/rendering/showroom) | `python showroom.py` | Cars and starships on a turntable: a virtual shadow map, ray-traced soft light shadows and reflections, studio, hard-light, night and neon lighting, stills and video for posting |
 | [rendering/bistro](../../examples/python/rendering/bistro) | `python bistro.py` | Amazon Lumberyard's Bistro on the default pipeline: 2.8M triangles, 96 point lights switching on at dusk, a walk from the lane to the plaza |
 | [rendering/sponza](../../examples/python/rendering/sponza) | `python sponza.py` | The default pipeline on Sponza, or on a colonnade of boxes without it; quality presets, ray-traced shadows |
+| [rendering/volume_tiled](../../examples/python/rendering/volume_tiled) | `python volume_tiled.py` | Volume Tiled Forward Shading (van Oosten 2015) on its own pipeline: up to a million moving point lights in Crytek Sponza, assigned to the visible clusters through a BVH of Morton-sorted lights; a benchmark of each stage |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -67,6 +68,10 @@ The cars and starships are Sketchfab models (CC BY and CC BY-NC-SA). `python too
 ### Sponza (`sponza`)
 
 Sponza lit by the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md), with no pipeline or shaders of its own: a steep sun through the open roof in four shadow cascades, two warm lamps, ambient occlusion, bloom and automatic exposure. Without the Sponza download it builds a colonnade of boxes, which still shows the shadows and occlusion. **1**, **2** and **3** apply the pipeline's `low`, `medium` and `high` presets with `apply_pipeline_preset`, **4** the `raytraced` one where `ray_query_supported()` says the device can, **V** cycles the debug views and **X** turns automatic exposure off and on.
+
+### Volume Tiled Forward Shading (`volume_tiled`)
+
+Jeremiah van Oosten's Volume Tiled Forward Shading on the [volume tiled pipeline](../../examples/python/rendering/volume_tiled/pipeline/README.md), a copy of the default pipeline that shades forward. After a depth prepass, only the clusters visible pixels lie in are listed. The lights get Morton codes, are sorted and built into a 32-ary BVH, and each listed cluster walks the BVH for its lights. Up to a million point lights move through Crytek Sponza. **B** compares the BVH with testing every light, and the panel shows each stage's GPU time. `--benchmark results.md` measures a range of light counts, as the paper did. The scene is Khronos's glTF Sponza, cloned from glTF-Sample-Assets into the repository root; without it the example lights a colonnade of boxes. See the [example's README](../../examples/python/rendering/volume_tiled/README.md).
 
 ### Japanese shrine (`japanese_shrine`)
 

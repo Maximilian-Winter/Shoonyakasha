@@ -1,0 +1,4 @@
+#version 450
+// VTFS: bound the partial boxes of vtfs_reduce_lights.comp; see vtfs_reduce_body.glsl.
+#define REDUCE_PARTIALS
+#include "vtfs_reduce_body.glsl"

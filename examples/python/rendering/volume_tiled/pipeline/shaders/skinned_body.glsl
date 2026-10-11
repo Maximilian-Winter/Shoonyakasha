@@ -1,0 +1,46 @@
+// skinned_body.glsl - the geometry of skinned meshes, for the depth prepass
+// (gbuffer_skinned.vert) and the forward passes (forward_skinned.vert). The
+// including shader defines SKELETON_SET, the set its pass binds
+// skeletonSet at. gl_Position is invariant, so both passes put a vertex at
+// the same depth and the forward pass's depth test EQUAL passes.
+
+#include "common.glsl"
+
+layout(set = 0, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
+layout(std430, set = SKELETON_SET, binding = 0) readonly buffer BoneMatrices { mat4 bones[]; };
+
+#include "material_draw.glsl"
+
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inTexCoord;
+layout(location = 3) in uvec4 inJoints;
+layout(location = 4) in vec4 inWeights;
+
+layout(location = 0) out vec3 fragWorldPos;
+layout(location = 1) out vec3 fragWorldNormal;
+layout(location = 2) out vec2 fragTexCoord;
+layout(location = 3) out vec3 fragColor;
+layout(location = 4) out vec4 fragClip;          // unjittered, for motion vectors
+layout(location = 5) out vec4 fragPrevClip;      // where it was last frame
+
+invariant gl_Position;
+
+void main() {
+    mat4 skin = inWeights.x * bones[inJoints.x] + inWeights.y * bones[inJoints.y] +
+                inWeights.z * bones[inJoints.z] + inWeights.w * bones[inJoints.w];
+    // Last frame's bone matrices follow this frame's (SkeletonComponent::ssboSize).
+    uint previous = uint(bones.length()) / 2u;
+    mat4 prevSkin = inWeights.x * bones[previous + inJoints.x] + inWeights.y * bones[previous + inJoints.y] +
+                    inWeights.z * bones[previous + inJoints.z] + inWeights.w * bones[previous + inJoints.w];
+    mat4 model = draw.model * skin;
+    vec4 worldPos = model * vec4(inPosition, 1.0);
+    fragWorldPos = worldPos.xyz;
+    fragWorldNormal = transpose(inverse(mat3(model))) * inNormal;
+    fragTexCoord = inTexCoord;
+    fragColor = vec3(1.0);
+    gl_Position = camera.proj * camera.view * worldPos;
+    fragClip = gl_Position;
+    fragPrevClip = camera.prevViewProj * (draw.prevModel * prevSkin * vec4(inPosition, 1.0));
+    gl_Position.xy += taaJitter(camera.frame, camera.taa, camera.resolution) * gl_Position.w;
+}

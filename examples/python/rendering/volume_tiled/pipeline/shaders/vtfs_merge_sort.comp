@@ -1,0 +1,126 @@
+#version 450
+// VTFS: one merge pass over the sorted runs (van Oosten, Algorithms 5.3 and
+// 5.4, Merge Path by Green et al. 2012). Pass m (pass.repeatIndex) merges
+// runs of VTFS_SORT_CHUNK << m keys in pairs into runs twice as long, from A
+// into B on even passes and from B into A on odd ones; VTFS_MERGE_PASSES of
+// them leave the whole list sorted in A. A run without a partner, or a pass
+// whose runs already hold every light, is copied across.
+//
+// Each workgroup writes one tile of the output, at most 2048 keys, and
+// never more than a pair of runs. It finds where the merge of the pair
+// crosses the tile's first and last output (a binary search along the
+// tile's diagonal of the merge matrix), loads that part of both runs into
+// shared memory, and each thread merges its own consecutive outputs.
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(push_constant) uniform MergePass { uint pass; } merge;
+
+VTFS_KEYS_A(restrict)
+VTFS_KEYS_B(restrict)
+VTFS_VALUES_A(restrict)
+VTFS_VALUES_B(restrict)
+
+const uint MAX_TILE = 2048u;
+
+shared uint sharedKeys[MAX_TILE];
+shared uint sharedValues[MAX_TILE];
+shared uint tileA[2];       // the tile's first and end positions in run A
+
+bool fromA() {
+    return (merge.pass & 1u) == 0u;
+}
+
+uint sourceKey(uint i) {
+    return fromA() ? keysA[i] : keysB[i];
+}
+
+uint sourceValue(uint i) {
+    return fromA() ? valuesA[i] : valuesB[i];
+}
+
+void store(uint i, uint key, uint value) {
+    if (fromA()) {
+        keysB[i] = key;
+        valuesB[i] = value;
+    } else {
+        keysA[i] = key;
+        valuesA[i] = value;
+    }
+}
+
+// Of the first d outputs of merging A[a0, a0 + lenA) and B[b0, b0 + lenB),
+// how many come from A. Equal keys take A first, so the merge is stable.
+uint mergePathGlobal(uint d, uint a0, uint lenA, uint b0, uint lenB) {
+    uint lo = d > lenB ? d - lenB : 0u;
+    uint hi = min(d, lenA);
+    while (lo < hi) {
+        uint mid = (lo + hi) >> 1;
+        if (sourceKey(a0 + mid) <= sourceKey(b0 + d - 1u - mid)) lo = mid + 1u;
+        else hi = mid;
+    }
+    return lo;
+}
+
+// The same in shared memory, A at [0, lenA) and B at [lenA, lenA + lenB).
+uint mergePathShared(uint d, uint lenA, uint lenB) {
+    uint lo = d > lenB ? d - lenB : 0u;
+    uint hi = min(d, lenA);
+    while (lo < hi) {
+        uint mid = (lo + hi) >> 1;
+        if (sharedKeys[mid] <= sharedKeys[lenA + d - 1u - mid]) lo = mid + 1u;
+        else hi = mid;
+    }
+    return lo;
+}
+
+void main() {
+    uint count = lightCount();
+    uint run = VTFS_SORT_CHUNK << merge.pass;
+    uint pairSpan = 2u * run;
+    uint tileSize = min(MAX_TILE, pairSpan);
+    uint perThread = tileSize / 256u;
+
+    uint tileStart = gl_WorkGroupID.x * tileSize;
+    if (tileStart >= count) return;                 // the whole workgroup leaves together
+    uint tileEnd = min(tileStart + tileSize, count);
+    uint tileLength = tileEnd - tileStart;
+
+    uint pairStart = tileStart / pairSpan * pairSpan;
+    uint a0 = pairStart;
+    uint lenA = min(run, count - pairStart);
+    uint b0 = a0 + lenA;
+    uint lenB = min(pairStart + pairSpan, count) - b0;
+
+    uint t = gl_LocalInvocationID.x;
+    if (t < 2u) {
+        uint d = (t == 0u ? tileStart : tileEnd) - pairStart;
+        tileA[t] = mergePathGlobal(d, a0, lenA, b0, lenB);
+    }
+    barrier();
+    uint aFirst = tileA[0], aEnd = tileA[1];
+    uint bFirst = (tileStart - pairStart) - aFirst;
+    uint tileLenA = aEnd - aFirst;
+    uint tileLenB = tileLength - tileLenA;
+
+    for (uint k = t; k < tileLength; k += 256u) {
+        uint source = k < tileLenA ? a0 + aFirst + k : b0 + bFirst + (k - tileLenA);
+        sharedKeys[k] = sourceKey(source);
+        sharedValues[k] = sourceValue(source);
+    }
+    barrier();
+
+    uint first = t * perThread;
+    if (first >= tileLength) return;
+    uint a = mergePathShared(first, tileLenA, tileLenB);
+    uint b = first - a;
+    for (uint k = 0u; k < perThread && first + k < tileLength; ++k) {
+        bool takeA = b >= tileLenB || (a < tileLenA && sharedKeys[a] <= sharedKeys[tileLenA + b]);
+        uint slot = takeA ? a : tileLenA + b;
+        store(tileStart + first + k, sharedKeys[slot], sharedValues[slot]);
+        if (takeA) ++a;
+        else ++b;
+    }
+}

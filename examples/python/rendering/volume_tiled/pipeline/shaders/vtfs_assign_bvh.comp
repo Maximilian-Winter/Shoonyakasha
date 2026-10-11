@@ -1,0 +1,4 @@
+#version 450
+// VTFS: lights to active clusters through the light BVH; see vtfs_assign_body.glsl.
+#define BVH
+#include "vtfs_assign_body.glsl"

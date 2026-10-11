@@ -1,0 +1,38 @@
+#version 450
+// VTFS: the view-space box of every cluster (van Oosten, Algorithm 8.1).
+// The rays from the eye through the tile's corners are cut by the planes of
+// the slice's near and far depth; the box holds the four cut points nearest
+// and farthest from the tile's centre line. Run every frame, it follows the
+// render size and the camera's planes and field of view without being told.
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 256) in;
+
+VTFS_CLUSTER_AABBS(writeonly)
+
+// The point where the ray through NDC (x, y) meets the plane at view depth z.
+vec3 onPlane(vec2 ndc, float z) {
+    vec4 p = camera.invProj * vec4(ndc, 1.0, 1.0);
+    vec3 ray = p.xyz / p.w;
+    return ray * (z / -ray.z);
+}
+
+void main() {
+    Grid g = cameraGrid();
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= vtfsClusterCount(g)) return;
+    uvec3 c = vtfsClusterCoord(g, index);
+
+    vec2 lo = vec2(c.xy * VTFS_TILE) / camera.resolution * 2.0 - 1.0;
+    vec2 hi = min(vec2((c.xy + 1u) * VTFS_TILE) / camera.resolution, vec2(1.0)) * 2.0 - 1.0;
+    float zNear = g.near * pow(g.nearK, float(c.z));
+    float zFar = g.near * pow(g.nearK, float(c.z + 1u));
+
+    vec3 a = onPlane(lo, zNear), b = onPlane(hi, zNear);
+    vec3 d = onPlane(lo, zFar), e = onPlane(hi, zFar);
+    AABB box;
+    box.lo = vec4(min(min(a, b), min(d, e)), 0.0);
+    box.hi = vec4(max(max(a, b), max(d, e)), 0.0);
+    clusterAABBs[index] = box;
+}

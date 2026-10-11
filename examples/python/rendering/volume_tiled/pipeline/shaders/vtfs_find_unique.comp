@@ -1,0 +1,25 @@
+#version 450
+// VTFS: gather the flagged clusters into uniqueClusters, one thread per
+// cluster, and clear each flag for the next frame. A cluster that is not
+// active gets an empty light list, so a pixel that lands in one by rounding
+// finds no lights rather than an old frame's.
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 256) in;
+
+VTFS_COUNTERS(restrict)
+VTFS_CLUSTER_FLAGS(restrict)
+VTFS_UNIQUE_CLUSTERS(writeonly)
+VTFS_LIGHT_GRID(writeonly)
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= vtfsClusterCount(cameraGrid())) return;
+    if (clusterFlags[index] != 0u) {
+        clusterFlags[index] = 0u;
+        uniqueClusters[atomicAdd(counters.activeClusters, 1u)] = index;
+    } else {
+        lightGrid[index] = uvec2(0u);
+    }
+}

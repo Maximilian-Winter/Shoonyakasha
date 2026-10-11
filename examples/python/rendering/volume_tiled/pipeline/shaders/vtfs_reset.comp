@@ -1,0 +1,15 @@
+#version 450
+// VTFS: clear the counters the frame's passes add to. The cluster flags
+// need no clearing: vtfs_find_unique.comp clears each one as it reads it.
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 1) in;
+
+VTFS_COUNTERS(writeonly)
+
+void main() {
+    counters.activeClusters = 0u;
+    counters.indexCount = 0u;
+    counters.overflow = 0u;
+}

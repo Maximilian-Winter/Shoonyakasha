@@ -1,0 +1,59 @@
+#version 450
+// VTFS: sort each chunk of VTFS_SORT_CHUNK Morton codes, with their light
+// indices, in place (van Oosten, Algorithm 5.1): one workgroup per chunk,
+// one key per thread, and for each of the code's 30 bits from the lowest a
+// stable split, keys with the bit clear before keys with it set, placed by
+// an exclusive scan of the clear bits. vtfs_merge_sort.comp merges the
+// sorted chunks.
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 256) in;
+
+VTFS_KEYS_A(restrict)
+VTFS_VALUES_A(restrict)
+
+const uint BITS = 30u;
+
+shared uint sharedKeys[256];
+shared uint sharedValues[256];
+shared uint scan[256];
+
+void main() {
+    uint t = gl_LocalInvocationID.x;
+    uint i = gl_WorkGroupID.x * VTFS_SORT_CHUNK + t;
+    uint count = lightCount();
+    if (gl_WorkGroupID.x * VTFS_SORT_CHUNK >= count) return;    // the whole workgroup leaves together
+
+    // Past the last light, keys with every bit set stay at the chunk's end.
+    uint key = i < count ? keysA[i] : 0xFFFFFFFFu;
+    uint value = i < count ? valuesA[i] : 0u;
+
+    for (uint bit = 0u; bit < BITS; ++bit) {
+        uint clear = ((key >> bit) & 1u) == 0u ? 1u : 0u;
+        scan[t] = clear;
+        barrier();
+        // Hillis-Steele inclusive scan; `before` turns it exclusive.
+        for (uint offset = 1u; offset < 256u; offset <<= 1) {
+            uint add = t >= offset ? scan[t - offset] : 0u;
+            barrier();
+            scan[t] += add;
+            barrier();
+        }
+        uint before = scan[t] - clear;           // clear bits before this key
+        uint totalClear = scan[255];
+        uint destination = clear == 1u ? before : totalClear + (t - before);
+        barrier();
+        sharedKeys[destination] = key;
+        sharedValues[destination] = value;
+        barrier();
+        key = sharedKeys[t];
+        value = sharedValues[t];
+        barrier();
+    }
+
+    if (i < count) {
+        keysA[i] = key;
+        valuesA[i] = value;
+    }
+}

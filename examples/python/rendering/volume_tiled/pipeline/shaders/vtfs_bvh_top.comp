@@ -1,0 +1,34 @@
+#version 450
+// VTFS: one inner level of the light BVH (vtfs.glsl), each node bounding
+// its 32 children on the level below. Pass i (pass.repeatIndex) builds the
+// parents of level i, from the second-lowest level up to the root; a pass
+// for a level the tree does not have does nothing. Only children that bound
+// lights count, so a node's box holds nothing but its lights.
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(push_constant) uniform BuildLevel { uint childLevel; } build;
+
+VTFS_BVH_NODES_BUFFER(restrict)
+
+void main() {
+    uint count = lightCount();
+    uint levels = bvhLevels(count);
+    uint childLevel = build.childLevel;
+    if (childLevel >= levels) return;
+    uint parentLevel = childLevel - 1u;
+    uint node = gl_GlobalInvocationID.x;
+    if (node >= bvhLevelNodes(parentLevel, levels, count)) return;
+
+    uint children = bvhLevelNodes(childLevel, levels, count);
+    uint first = node * 32u;
+    vec3 lo = vec3(3.0e38), hi = vec3(-3.0e38);
+    for (uint c = first; c < min(first + 32u, children); ++c) {
+        AABB child = bvhNodes[bvhFirstNode(childLevel) + c];
+        lo = min(lo, child.lo.xyz);
+        hi = max(hi, child.hi.xyz);
+    }
+    bvhNodes[bvhFirstNode(parentLevel) + node] = AABB(vec4(lo, 0.0), vec4(hi, 0.0));
+}

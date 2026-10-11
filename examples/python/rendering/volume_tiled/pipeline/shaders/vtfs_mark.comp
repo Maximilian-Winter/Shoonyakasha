@@ -1,0 +1,22 @@
+#version 450
+// VTFS: flag the cluster of every pixel the depth prepass covered. The paper
+// marks clusters by drawing the opaque geometry again with early depth
+// testing against the prepass, so only visible fragments mark; one thread
+// per depth texel marks exactly those clusters without drawing anything.
+// Transparent geometry marks its own (vtfs_mark_transparent.frag).
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 1, binding = 0) uniform sampler2D gDepth;
+
+VTFS_CLUSTER_FLAGS(writeonly)
+
+void main() {
+    uvec2 pixel = gl_GlobalInvocationID.xy;
+    if (any(greaterThanEqual(pixel, uvec2(camera.resolution)))) return;
+    float depth = texelFetch(gDepth, ivec2(pixel), 0).r;
+    if (depth >= 1.0) return;                   // sky
+    clusterFlags[vtfsCluster(cameraGrid(), camera.invProj, pixel, depth)] = 1u;
+}

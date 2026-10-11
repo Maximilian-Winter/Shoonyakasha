@@ -1,0 +1,3 @@
+#version 450
+// VTFS: lights to active clusters, testing every light; see vtfs_assign_body.glsl.
+#include "vtfs_assign_body.glsl"

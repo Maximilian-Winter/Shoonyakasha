@@ -1,0 +1,49 @@
+#version 450
+// VTFS: place this frame's lights. Each light's spot in the box, its colour
+// and its motion come from a hash of its index, so the lights need no data
+// of their own: vtfs.lightCount of them fill vtfs.boxMin..boxMax, each
+// drifting around its spot by up to vtfs.motion. Writes their world and view
+// positions and their colours.
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 256) in;
+
+VTFS_LIGHTS_WORLD(writeonly)
+VTFS_LIGHTS_COLOR(writeonly)
+VTFS_LIGHTS_VIEW(writeonly)
+
+// PCG hash (Jarzynski and Olano 2020).
+uint pcg(uint v) {
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+vec4 random4(uint i) {
+    uint a = pcg(i), b = pcg(a), c = pcg(b), d = pcg(c);
+    return vec4(uvec4(a, b, c, d) >> 8) / 16777216.0;
+}
+
+vec3 hue(float h) {
+    return clamp(abs(fract(h + vec3(0.0, 2.0, 1.0) / 3.0) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= lightCount()) return;
+    vec4 r = random4(i * 2u);
+    vec4 s = random4(i * 2u + 1u);
+
+    vec3 spot = mix(vtfs.boxMin.xyz, vtfs.boxMax.xyz, r.xyz);
+    float t = vtfs.time * (0.4 + 0.6 * s.w);
+    vec3 drift = vec3(sin(t + 6.2832 * s.x), 0.5 * sin(1.3 * t + 6.2832 * s.y), cos(t + 6.2832 * s.z));
+    vec3 position = spot + vtfs.motion * drift;
+
+    // Saturated hues, lightened a little.
+    vec3 color = mix(hue(r.w), vec3(1.0), 0.25);
+
+    lightsWorld[i] = vec4(position, vtfs.lightRange);
+    lightsColor[i] = vec4(color * vtfs.lightIntensity, 0.0);
+    lightsView[i] = vec4((camera.view * vec4(position, 1.0)).xyz, vtfs.lightRange);
+}

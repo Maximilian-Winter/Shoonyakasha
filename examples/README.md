@@ -101,6 +101,7 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 | [`museum`](python/rendering/museum) | The showroom's cars as a small museum, in the order they were made: each beside a placard with its year, name, kind of car, figures and a short text, and a timeline of the collection. Same pipeline, models, captures and keys as the showroom. |
 | [`bistro`](python/rendering/bistro) | Amazon Lumberyard's Bistro (CC BY 4.0, 2.8M triangles) on the default pipeline: a dusk that switches on 96 point lights and the café terraces' strings of coloured bulbs, and a walk from the lane to the plaza. Needs `python tools/fetch_assets.py bistro` (~2 GB, converted on download; Pillow and numpy). |
 | [`sponza`](python/rendering/sponza) | Sponza on the default pipeline: cascaded sun shadows through the open roof, lamps, ambient occlusion, quality presets on keys 1-3. Falls back to a colonnade of boxes. |
+| [`volume_tiled`](python/rendering/volume_tiled) | Volume Tiled Forward Shading (van Oosten 2015) on its own pipeline: a depth prepass, light assignment to the visible clusters only, through a 32-ary BVH of Morton-sorted lights, and forward shading of up to a million moving point lights in Crytek Sponza. `--benchmark` measures each stage. Needs Khronos's glTF-Sample-Assets cloned into the repository root for Sponza; falls back to a colonnade of boxes. |
 
 ### games_2d
 
