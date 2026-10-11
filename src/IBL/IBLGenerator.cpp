@@ -16,6 +16,7 @@
 
 #define STB_IMAGE_IMPLEMENTATION_SKIP  // Already defined elsewhere
 #include <array>
+#include <thread>
 #include <vector>
 #include <stb_image.h>
 
@@ -789,7 +790,8 @@ VulkanTexture* IBLGenerator::generateBRDFLUT(uint32_t size, uint32_t samples) {
 
     const float PI = 3.14159265359f;
 
-    for (uint32_t y = 0; y < size; ++y) {
+    // One row of the table: x is NdotV, y roughness.
+    auto computeRow = [&](uint32_t y) {
         for (uint32_t x = 0; x < size; ++x) {
             float NdotV = std::max((static_cast<float>(x) + 0.5f) / static_cast<float>(size), 0.001f);
             float roughness = std::max((static_cast<float>(y) + 0.5f) / static_cast<float>(size), 0.001f);
@@ -852,7 +854,19 @@ VulkanTexture* IBLGenerator::generateBRDFLUT(uint32_t size, uint32_t samples) {
             lutData[idx + 2] = 0.0f;
             lutData[idx + 3] = 1.0f;
         }
+    };
+
+    // The rows are independent: each worker takes every n-th row.
+    const uint32_t workers = std::clamp(std::thread::hardware_concurrency(), 1u, std::max(size, 1u));
+    std::vector<std::thread> threads;
+    threads.reserve(workers - 1);
+    for (uint32_t w = 1; w < workers; ++w) {
+        threads.emplace_back([&, w] {
+            for (uint32_t y = w; y < size; y += workers) computeRow(y);
+        });
     }
+    for (uint32_t y = 0; y < size; y += workers) computeRow(y);
+    for (std::thread& t : threads) t.join();
 
     // Create texture with computed BRDF data
     // Using R32G32B32A32 since we're providing float* data
