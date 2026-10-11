@@ -41,6 +41,7 @@ class FontLoader;
 
 namespace FrameGraph { class RenderGraph; class SharedBufferRegistry; }
 namespace UI { class UIContext; }
+namespace Platform { class AccessibilityProvider; }
 namespace ECS {
     class Scene;
     class SceneManager;
@@ -290,6 +291,8 @@ private:
     glm::vec2 m_screenSize{1600.0f, 900.0f};  // Updated each frame; drives UILayoutSystem
     glm::vec2 m_windowSize{0.0f};             // in cursor coordinates; differs from m_screenSize on high-DPI displays
     entt::entity m_textInputFocus = entt::null;  // the UI's focused element when text input was last set
+    std::unique_ptr<Platform::AccessibilityProvider> m_accessibility;   // null where the platform has none
+    int m_accessibilityHook = 0;                 // its NativeWindow message hook
 
     // ─── Frame Graph ───────────────────────────────────────────
     // The registry must outlive the graph: RenderGraph holds a raw pointer to it

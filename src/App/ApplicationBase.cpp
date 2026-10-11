@@ -27,6 +27,7 @@
 #include "ECS/Sprite2DComponents.h"
 #include "ECS/UILayoutSystem.h"
 #include "ECS/TextRenderSystem.h"
+#include "Platform/AccessibilityProvider.h"
 #include "UI/UIContext.h"
 #include "UI/UIHitTest.h"
 #include "UI/UISystems.h"
@@ -182,6 +183,17 @@ void ApplicationBase::initializeECS() {
     m_uiContext->clipboard().get = [this] { return m_window->getClipboardText(); };
     m_uiContext->clipboard().set = [this](const std::string& text) { m_window->setClipboardText(text); };
 
+    // Screen readers, where the platform has a provider: it answers the
+    // window's messages and reads the snapshot AccessibilitySystem makes.
+    auto& native = m_window->getNativeWindow();
+    m_accessibility = Platform::AccessibilityProvider::create(native.handle(), m_uiContext->accessibility());
+    if (m_accessibility) {
+        m_accessibilityHook = native.addMessageHook([provider = m_accessibility.get()](
+                                                        uint32_t message, uintptr_t wParam, intptr_t lParam) {
+            return provider->handleMessage(message, wParam, lParam);
+        });
+    }
+
     m_activeScene->createEntity("InputState")
         .with<ECS::InputStateComponent>()
         .build();
@@ -206,6 +218,8 @@ void ApplicationBase::registerSystems() {
                                                     &m_uiContext->pointerDepth());
     m_activeScene->addSystem<UI::CanvasLayoutSystem>(&m_screenSize, &m_uiContext->fonts());
     m_activeScene->addSystem<UI::CanvasTextSystem>(&m_uiContext->fonts());
+    m_activeScene->addSystem<UI::AccessibilitySystem>(&m_uiContext->accessibility(), &m_screenSize, &m_windowSize,
+                                                      &m_uiContext->focus());
 }
 
 std::string ApplicationBase::defaultPipelinePath() {
@@ -524,6 +538,9 @@ void ApplicationBase::update() {
 
     m_activeScene->update();
 
+    // Screen readers hear of what changed in this frame's snapshot.
+    if (m_accessibility && m_uiContext->accessibility().enabled) m_accessibility->snapshotPublished();
+
     // The input method composes only in a focused text field, with its
     // candidate list by the caret. Focus moving on cancels a composition.
     if (m_window) {
@@ -819,6 +836,12 @@ void ApplicationBase::handleSwapChainRecreation() {
 }
 
 void ApplicationBase::cleanup() {
+    // Screen readers let go of the UI before the window and the UI go.
+    if (m_accessibility) {
+        m_window->getNativeWindow().removeMessageHook(m_accessibilityHook);
+        m_accessibility.reset();
+    }
+
     if (m_device) {
         vkDeviceWaitIdle(m_device->getLogicalDevice());
 

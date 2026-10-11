@@ -285,6 +285,17 @@ public:
     /// only in horizontal text, and text fields are always horizontal.
     void setTextOrientation(EntityHandle element, TextOrientation orientation, bool uprightDigits = false);
 
+    /// What screen readers are told of the element (on Windows, through UI
+    /// Automation). `name` replaces the name it has without it (a button's
+    /// or toggle's label, a text's own text, a field's placeholder; sliders
+    /// and scroll views have none), and is read out with `description`. An
+    /// element given a name becomes a group if it has no role of its own.
+    /// `hidden` leaves it and its descendants out, for decoration. `role`
+    /// replaces the role its components give it. World canvases are not
+    /// described.
+    void setAccessible(EntityHandle element, const std::string& name, const std::string& description = "",
+                       bool hidden = false, AccessibleRole role = AccessibleRole::Default);
+
     /// Reads the text as markup: <color=#RRGGBB> or <color=#RRGGBBAA>, <b>,
     /// <i>, <size=N> in canvas units, <font=name>, <link=id>, <u> and <s>,
     /// each closed by </name>, with "&lt;" and "&gt;" for the brackets. A

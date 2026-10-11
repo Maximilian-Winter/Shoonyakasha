@@ -327,6 +327,26 @@ Setting and reading:
   - `password` draws a dot for each character and stops copying.
   - `read_only` keeps selecting and copying but stops editing.
 
+### Screen readers
+
+On Windows the screen canvases are described to screen readers such as Narrator through UI Automation, with nothing to set up. Nothing is built until a screen reader first asks; from then on the description is updated each frame.
+
+| Element | Role | What a screen reader can do |
+|---|---|---|
+| button | Button | press it |
+| toggle | CheckBox | flip it |
+| slider | Slider | read and set its value, step it |
+| text field | Edit | read and set its text, read and move the caret and selection |
+| scroll view | Pane | scroll it |
+| text | Text | read it |
+| canvas | Group | – |
+
+- **Names:** a button or toggle is named by its label, text by itself (rich text without its markup), and a text field by its placeholder. Sliders and scroll views have no name of their own, so give them one: `set_accessible(slider, "Volume")`.
+- **`set_accessible(e, name="", description="", hidden=False, role=ACCESSIBLE_ROLE_DEFAULT)`:** a name replaces the element's own and is read with the description. An element with no role of its own, such as an image, becomes a group when named. `hidden=True` leaves an element and everything in it out, for decoration. `role` replaces the role its components give it.
+- **Actions:** what a screen reader does happens in the next frame, as if done with the pointer or the keyboard: `was_clicked`, `value_changed` and `text_changed` report it as usual. Password fields never give their text.
+- **Following along:** focus moving, toggles flipping, values and text changing, names changing (such as a counter's text) and elements appearing or going are announced as events, so a screen reader follows Tab and the arrow keys.
+- **What is left out:** a widget's own parts, such as a button's label or a slider's handle, are part of the widget; hidden elements and canvases with nothing visible are left out.
+
 ## World canvases
 
 ```python
@@ -401,6 +421,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 
 ## Limits
 
+- Screen readers: the canvas UI is described on Windows only, and world canvases are not described, since they move with the camera and are often off screen. Ranges of text in a text field report no on-screen rectangles, so a screen reader cannot highlight them.
 - Input method composition is handled on Windows only. On other platforms the engine does not show a composition; text can still be pasted.
 - Vertical text: which characters stand upright follows the Unicode blocks, an approximation of the vertical orientations of UAX #50 rather than the per-character table. There is no caret or selection in vertical text.
 - Rich text: a link in a button's label also clicks the button. Underlines and strikethroughs are placed by the text's own font's metrics, also over characters drawn from another font.

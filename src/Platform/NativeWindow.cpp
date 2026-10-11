@@ -1,9 +1,10 @@
 //
 // NativeWindow.cpp - Reading IMM32's composition, and the platforms without
-// a native window implementation
+// a native window or accessibility implementation
 //
 
 #include "Platform/NativeWindow.h"
+#include "Platform/AccessibilityProvider.h"
 
 #include <algorithm>
 #include <map>
@@ -62,6 +63,7 @@ public:
         return m_nextId++;
     }
     void removeMessageHook(int id) override { m_hooks.erase(id); }
+    void* handle() const override { return nullptr; }
 
 private:
     bool m_active = false;
@@ -73,6 +75,10 @@ private:
 
 std::unique_ptr<NativeWindow> NativeWindow::create(GLFWwindow*, EventDispatcher*) {
     return std::make_unique<NullNativeWindow>();
+}
+
+std::unique_ptr<AccessibilityProvider> AccessibilityProvider::create(void*, UI::AccessibilityState&) {
+    return nullptr;
 }
 
 #endif

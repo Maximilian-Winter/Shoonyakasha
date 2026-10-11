@@ -353,6 +353,14 @@ Underline and strikethrough are drawn as solid quads from the font's metrics.
 
 **End to end:** Narrator reading and operating the showcase with Tab, Space and arrows, and the tree inspected with Accessibility Insights. Both are manual checks, reported as such.
 
+**As built:**
+- `UI/Accessibility.h` holds the snapshot, the action queue (`AccessibilityState`, owned by `UIContext`) and `UIAccessible`. `AccessibilitySystem` (priority 53, after text) applies the actions queued since the last frame and then publishes the snapshot. `Platform/AccessibilityProvider.h` is the platform's provider, null where there is none; on Windows `UIAutomationWin32.cpp` implements it, and `NativeWindow::handle` gives it the `HWND`.
+- The snapshot is built only once a screen reader has asked (the first `WM_GETOBJECT`), so applications pay nothing otherwise. A canvas with nothing to describe is left out, and a widget's parts are not described apart from it.
+- **Threading, checked:** the provider asks for COM threading and initialises the window's thread as a single-threaded apartment. During a session with an out-of-process client, about 2,100 provider calls all came on the window's thread and none off it. The snapshot's lock stays as a guard.
+- The Text pattern moves by character, word, line, paragraph and document; ranges report no bounding rectangles.
+- `setAccessible(element, name, description, hidden, role)` and `set_accessible`, with `ACCESSIBLE_ROLE_*`.
+- **End to end, automated:** an out-of-process UI Automation client (`System.Windows.Automation`, the API Narrator's own client uses) read the showcase's tree with roles, names, states and screen bounds. It pressed a button, flipped a toggle, set a slider and set a text field's text, and the showcase reacted. **Not run:** Narrator by ear and Accessibility Insights, which are manual.
+
 ## Verification
 
 As in the earlier phases:

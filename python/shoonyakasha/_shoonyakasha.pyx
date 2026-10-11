@@ -33,6 +33,8 @@ from ._facade_types cimport (
     TextDirection, TextDirection_Auto, TextDirection_LeftToRight, TextDirection_RightToLeft, TextDirection_FromLayout,
     TextOrientation, TextOrientation_Horizontal, TextOrientation_VerticalRightToLeft,
     TextOrientation_VerticalLeftToRight,
+    AccessibleRole, AccessibleRole_Default, AccessibleRole_Group, AccessibleRole_Button, AccessibleRole_CheckBox,
+    AccessibleRole_Slider, AccessibleRole_Edit, AccessibleRole_Pane, AccessibleRole_Text,
     LayoutDirection, LayoutDirection_Inherit, LayoutDirection_LeftToRight, LayoutDirection_RightToLeft,
     CanvasScaleMode, CanvasScaleMode_ConstantPixel, CanvasScaleMode_ScaleWithScreen,
     SizeFit, SizeFit_Unconstrained, SizeFit_Min, SizeFit_Preferred,
@@ -119,6 +121,16 @@ TEXT_DIRECTION_LAYOUT = <int>TextDirection_FromLayout
 TEXT_ORIENTATION_HORIZONTAL = <int>TextOrientation_Horizontal
 TEXT_ORIENTATION_VERTICAL_RL = <int>TextOrientation_VerticalRightToLeft
 TEXT_ORIENTATION_VERTICAL_LR = <int>TextOrientation_VerticalLeftToRight
+
+# What an element is to screen readers (canvas UI)
+ACCESSIBLE_ROLE_DEFAULT = <int>AccessibleRole_Default
+ACCESSIBLE_ROLE_GROUP = <int>AccessibleRole_Group
+ACCESSIBLE_ROLE_BUTTON = <int>AccessibleRole_Button
+ACCESSIBLE_ROLE_CHECKBOX = <int>AccessibleRole_CheckBox
+ACCESSIBLE_ROLE_SLIDER = <int>AccessibleRole_Slider
+ACCESSIBLE_ROLE_EDIT = <int>AccessibleRole_Edit
+ACCESSIBLE_ROLE_PANE = <int>AccessibleRole_Pane
+ACCESSIBLE_ROLE_TEXT = <int>AccessibleRole_Text
 
 # Layout direction (canvas UI)
 LAYOUT_DIRECTION_INHERIT = <int>LayoutDirection_Inherit
@@ -1401,6 +1413,18 @@ cdef class UI:
         turned clockwise; with upright_digits, runs of one or two digits stand
         upright side by side."""
         self._ptr.setTextOrientation(element, <TextOrientation>orientation, upright_digits)
+
+    def set_accessible(self, uint32_t element, str name="", str description="", bint hidden=False,
+                       int role=ACCESSIBLE_ROLE_DEFAULT):
+        """What screen readers are told of the element (on Windows, through UI
+        Automation). name replaces the name it has without it (a button's or
+        toggle's label, a text's own text, a field's placeholder; sliders and
+        scroll views have none) and is read out with description. An element
+        given a name becomes a group if it has no role of its own. hidden leaves
+        it and its descendants out, for decoration. role (ACCESSIBLE_ROLE_*)
+        replaces the role its components give it."""
+        self._ptr.setAccessible(element, name.encode("utf-8"), description.encode("utf-8"), hidden,
+                                <AccessibleRole>role)
 
     def set_rich_text(self, uint32_t element, bint enabled=True):
         """Read the text as markup: <color=#RRGGBB> or <color=#RRGGBBAA>, <b>, <i>,

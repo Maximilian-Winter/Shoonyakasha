@@ -55,6 +55,9 @@ public:
     using MessageHook = std::function<std::optional<intptr_t>(uint32_t message, uintptr_t wParam, intptr_t lParam)>;
     virtual int addMessageHook(MessageHook hook) = 0;
     virtual void removeMessageHook(int id) = 0;
+
+    /// The platform's window: an HWND on Windows; null elsewhere.
+    virtual void* handle() const = 0;
 };
 
 /// IMM32's attribute of a composition character (ATTR_* in imm.h).

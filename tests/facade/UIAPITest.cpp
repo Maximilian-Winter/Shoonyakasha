@@ -206,6 +206,22 @@ TEST_F(UIAPIFixture, TextOrientation) {
     EXPECT_FALSE(registry.get<UI::UITextCache>(e(label)).layout.vertical);
 }
 
+TEST_F(UIAPIFixture, Accessible) {
+    const EntityHandle canvas = ui.createCanvas();
+    const EntityHandle slider = ui.createSlider(canvas, 0.0f, 1.0f, 0.5f);
+    ui.setAccessible(slider, "Volume", "How loud the music is");
+    const auto& a = registry.get<UI::UIAccessible>(e(slider));
+    EXPECT_EQ(a.name, "Volume");
+    EXPECT_EQ(a.description, "How loud the music is");
+    EXPECT_FALSE(a.hidden);
+    EXPECT_FALSE(a.role.has_value());
+    ui.setAccessible(slider, "", "", true, AccessibleRole::Button);
+    EXPECT_TRUE(a.hidden);
+    EXPECT_EQ(a.role, UI::AccessibleRole::Button);
+    ui.setAccessible(slider, "Volume");
+    EXPECT_FALSE(a.role.has_value());
+}
+
 TEST_F(UIAPIFixture, TextFieldComposition) {
     const EntityHandle canvas = ui.createCanvas();
     const EntityHandle field = ui.createTextField(canvas, "Name");

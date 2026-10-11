@@ -102,6 +102,20 @@ enum class TextOrientation : uint8_t {
     VerticalLeftToRight = 2
 };
 
+// What a canvas UI element is to screen readers. Default keeps the role its
+// components give it: a button, a toggle (CheckBox), a slider, a text field
+// (Edit), a scroll view (Pane) or text.
+enum class AccessibleRole : uint8_t {
+    Default  = 0,
+    Group    = 1,
+    Button   = 2,
+    CheckBox = 3,
+    Slider   = 4,
+    Edit     = 5,
+    Pane     = 6,
+    Text     = 7
+};
+
 // Which way a canvas UI element, or a canvas, lays out its children. Inherit
 // takes its parent's; a canvas left as Inherit lays out left to right.
 enum class LayoutDirection : uint8_t {

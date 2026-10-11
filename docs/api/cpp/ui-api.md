@@ -71,6 +71,7 @@ void setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign vertic
 void setTextDirection(EntityHandle element, TextDirection direction);
 void setTextWrap(EntityHandle element, bool wrap);
 void setTextOrientation(EntityHandle element, TextOrientation orientation, bool uprightDigits = false);
+void setAccessible(EntityHandle element, const std::string& name, const std::string& description = "", bool hidden = false, AccessibleRole role = AccessibleRole::Default);
 void setRichText(EntityHandle element, bool richText = true);
 void setLinkColor(EntityHandle element, const glm::vec4& color);
 std::string clickedLink(EntityHandle element) const;

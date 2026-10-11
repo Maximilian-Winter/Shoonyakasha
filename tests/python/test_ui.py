@@ -59,6 +59,9 @@ class BindingInventory(unittest.TestCase):
                  "TEXT_ALIGN_START", "TEXT_ALIGN_END",
                  "TEXT_DIRECTION_AUTO", "TEXT_DIRECTION_LTR", "TEXT_DIRECTION_RTL", "TEXT_DIRECTION_LAYOUT",
                  "TEXT_ORIENTATION_HORIZONTAL", "TEXT_ORIENTATION_VERTICAL_RL", "TEXT_ORIENTATION_VERTICAL_LR",
+                 "ACCESSIBLE_ROLE_DEFAULT", "ACCESSIBLE_ROLE_GROUP", "ACCESSIBLE_ROLE_BUTTON",
+                 "ACCESSIBLE_ROLE_CHECKBOX", "ACCESSIBLE_ROLE_SLIDER", "ACCESSIBLE_ROLE_EDIT",
+                 "ACCESSIBLE_ROLE_PANE", "ACCESSIBLE_ROLE_TEXT",
                  "LAYOUT_DIRECTION_INHERIT", "LAYOUT_DIRECTION_LTR", "LAYOUT_DIRECTION_RTL",
                  "CANVAS_CONSTANT_PIXEL", "CANVAS_SCALE_WITH_SCREEN",
                  "SIZE_FIT_UNCONSTRAINED", "SIZE_FIT_MIN", "SIZE_FIT_PREFERRED"]
@@ -80,6 +83,8 @@ class BindingInventory(unittest.TestCase):
                                        ("Auto", "LeftToRight", "RightToLeft", "FromLayout")),
                                       ("TextOrientation", "TEXT_ORIENTATION_",
                                        ("Horizontal", "VerticalRightToLeft", "VerticalLeftToRight")),
+                                      ("AccessibleRole", "ACCESSIBLE_ROLE_",
+                                       ("Default", "Group", "Button", "CheckBox", "Slider", "Edit", "Pane", "Text")),
                                       ("LayoutDirection", "LAYOUT_DIRECTION_", ("Inherit", "LeftToRight", "RightToLeft")),
                                       ("CanvasScaleMode", "CANVAS_", ("ConstantPixel", "ScaleWithScreen")),
                                       ("SizeFit", "SIZE_FIT_", ("Unconstrained", "Min", "Preferred"))):

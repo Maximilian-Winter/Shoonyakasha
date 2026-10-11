@@ -108,9 +108,10 @@ target_link_libraries(Shoonyakasha
         libunibreak::libunibreak
 )
 
-# Input method composition on Windows (Platform/NativeWindowWin32.cpp).
+# Input method composition (Platform/NativeWindowWin32.cpp) and UI Automation
+# (Platform/UIAutomationWin32.cpp) on Windows.
 if(WIN32)
-    target_link_libraries(Shoonyakasha PRIVATE imm32)
+    target_link_libraries(Shoonyakasha PRIVATE imm32 uiautomationcore ole32 oleaut32)
 endif()
 
 # Where ApplicationBase finds the default pipeline when a program names none.

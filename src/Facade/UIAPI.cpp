@@ -521,6 +521,25 @@ void UIAPI::setTextOrientation(EntityHandle element, TextOrientation orientation
     }
 }
 
+void UIAPI::setAccessible(EntityHandle element, const std::string& name, const std::string& description, bool hidden,
+                          AccessibleRole role) {
+    if (!m_impl->valid(element)) return;
+    auto& accessible = m_impl->registry.get_or_emplace<UI::UIAccessible>(toEntt(element));
+    accessible.name = name;
+    accessible.description = description;
+    accessible.hidden = hidden;
+    switch (role) {
+    case AccessibleRole::Group:    accessible.role = UI::AccessibleRole::Group; break;
+    case AccessibleRole::Button:   accessible.role = UI::AccessibleRole::Button; break;
+    case AccessibleRole::CheckBox: accessible.role = UI::AccessibleRole::CheckBox; break;
+    case AccessibleRole::Slider:   accessible.role = UI::AccessibleRole::Slider; break;
+    case AccessibleRole::Edit:     accessible.role = UI::AccessibleRole::Edit; break;
+    case AccessibleRole::Pane:     accessible.role = UI::AccessibleRole::Pane; break;
+    case AccessibleRole::Text:     accessible.role = UI::AccessibleRole::Text; break;
+    default:                       accessible.role.reset(); break;
+    }
+}
+
 void UIAPI::setRichText(EntityHandle element, bool richText) {
     if (auto* t = m_impl->text(element)) t->richText = richText;
 }

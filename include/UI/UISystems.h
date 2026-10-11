@@ -144,6 +144,38 @@ private:
     std::string m_linkPress;
 };
 
+class AccessibilityState;
+
+/// Describes the screen canvases for screen readers (UI/Accessibility.h),
+/// after layout and text. First it applies the actions a screen reader
+/// queued since the last frame, as the pointer or keyboard would: invoking
+/// a button sets its clicked edge, toggling flips a toggle, and setting a
+/// value or text sets valueChanged or changed. Then, while the state is
+/// enabled, it publishes a snapshot of every visible element of the screen
+/// canvases that has a role: buttons, toggles, sliders, text fields, scroll
+/// views, text, and elements given UIAccessible, under their canvas; a
+/// canvas with none of them is left out. A widget's own parts are not
+/// described apart from it. World canvases are not described.
+class AccessibilitySystem : public ECS::ISystem {
+public:
+    static constexpr int kPriority = 53;
+
+    /// `screenSize` is in framebuffer pixels and `windowSize` in window
+    /// coordinates, which bounds are given in; `windowSize` may be null when
+    /// they are the same. Both are read on each update.
+    AccessibilitySystem(AccessibilityState* state, const glm::vec2* screenSize, const glm::vec2* windowSize,
+                        UIFocusState* focus = nullptr);
+
+    void update(entt::registry& registry, float deltaTime) override;
+
+private:
+    AccessibilityState* m_state;
+    const glm::vec2* m_screenSize;
+    const glm::vec2* m_windowSize;
+    UIFocusState* m_focus;
+    uint64_t m_frame = 0;
+};
+
 /// Lays out each UIText of a laid-out element into its UITextCache, in the
 /// element's rect, when the text, font, style or rect size changed. Before
 /// that it shows each UITextField's text, its mask or its placeholder in the

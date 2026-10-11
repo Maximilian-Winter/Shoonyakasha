@@ -119,6 +119,8 @@ public:
 
     void removeMessageHook(int id) override { m_hooks.erase(id); }
 
+    void* handle() const override { return m_hwnd; }
+
 private:
     static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
         auto* self = static_cast<Win32NativeWindow*>(GetPropW(hwnd, kProperty));

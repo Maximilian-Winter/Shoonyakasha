@@ -69,6 +69,16 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         TextDirection_RightToLeft "Shoonyakasha::Facade::TextDirection::RightToLeft"
         TextDirection_FromLayout "Shoonyakasha::Facade::TextDirection::FromLayout"
 
+    cpdef enum AccessibleRole "Shoonyakasha::Facade::AccessibleRole":
+        AccessibleRole_Default "Shoonyakasha::Facade::AccessibleRole::Default"
+        AccessibleRole_Group "Shoonyakasha::Facade::AccessibleRole::Group"
+        AccessibleRole_Button "Shoonyakasha::Facade::AccessibleRole::Button"
+        AccessibleRole_CheckBox "Shoonyakasha::Facade::AccessibleRole::CheckBox"
+        AccessibleRole_Slider "Shoonyakasha::Facade::AccessibleRole::Slider"
+        AccessibleRole_Edit "Shoonyakasha::Facade::AccessibleRole::Edit"
+        AccessibleRole_Pane "Shoonyakasha::Facade::AccessibleRole::Pane"
+        AccessibleRole_Text "Shoonyakasha::Facade::AccessibleRole::Text"
+
     cpdef enum TextOrientation "Shoonyakasha::Facade::TextOrientation":
         TextOrientation_Horizontal "Shoonyakasha::Facade::TextOrientation::Horizontal"
         TextOrientation_VerticalRightToLeft "Shoonyakasha::Facade::TextOrientation::VerticalRightToLeft"

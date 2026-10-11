@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "UI/Accessibility.h"
 #include "UI/FontLibrary.h"
 #include "UI/GlyphCache.h"
 #include "UI/UIBatchBuilder.h"
@@ -54,6 +55,7 @@ public:
     const UIFocusState& focus() const { return m_focus; }
     UIClipboard& clipboard() { return m_clipboard; }  // read and written by CanvasInputSystem
     UIPointerDepth& pointerDepth() { return m_pointerDepth; }  // read by CanvasInputSystem
+    AccessibilityState& accessibility() { return m_accessibility; }  // written by AccessibilitySystem
     bool hasRenderer() const { return m_renderer != nullptr; }
 
     /// Builds this frame's draw data from the laid-out canvases. With a
@@ -91,6 +93,7 @@ private:
     UIFocusState m_focus;
     UIClipboard m_clipboard;
     UIPointerDepth m_pointerDepth;
+    AccessibilityState m_accessibility;
     std::unique_ptr<UIRenderer> m_renderer;
     bool m_overlaysDrawn = false;
 };

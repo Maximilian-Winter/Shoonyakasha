@@ -20,7 +20,7 @@ from ._facade_types cimport (
     EntityHandle, EngineConfig, GltfOptions, RecordingOptions,
     GltfResult as CppGltfResult, RenderStatsSnapshot,
     CameraType, LightType, UIAnchor, TextHAlign, TextVAlign, TextDirection, TextOrientation, LayoutDirection,
-    CanvasScaleMode, SizeFit,
+    CanvasScaleMode, SizeFit, AccessibleRole,
 )
 
 
@@ -432,6 +432,8 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         void setTextDirection(EntityHandle element, TextDirection direction)
         void setTextWrap(EntityHandle element, cbool wrap)
         void setTextOrientation(EntityHandle element, TextOrientation orientation, cbool uprightDigits)
+        void setAccessible(EntityHandle element, const string& name, const string& description, cbool hidden,
+                           AccessibleRole role)
         void setRichText(EntityHandle element, cbool richText)
         void setLinkColor(EntityHandle element, const vec4& color)
         string clickedLink(EntityHandle element) const

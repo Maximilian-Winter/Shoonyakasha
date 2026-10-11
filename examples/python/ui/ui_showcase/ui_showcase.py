@@ -26,6 +26,9 @@ A tour of engine.ui on the default pipeline, in one window:
 - an About dialog on a second canvas drawn on top, which blocks the
   pointer to everything under it while it is open, with a notes field of
   many lines and vertical Japanese and Mongolian text
+- on Windows, the screen canvases described to screen readers such as
+  Narrator, with names for the sliders and the log, and the pointer
+  readout left out
 - a kiosk in the world, a canvas on a quad you can click in 3D, with its
   own counter, a slider for its glow and a button that changes its
   resolution. A pillar stands in front of it: where the pillar hides the
@@ -186,6 +189,14 @@ def on_init():
     build_pointer_readout(hud)
     build_dialog(fonts)
     build_kiosk(fonts)
+    # For screen readers: sliders and the log have no label of their own (the
+    # text beside a slider is a separate element), and the pointer readout
+    # only repeats what the mouse is over.
+    for key, name in (("Sun slider", "Sun intensity"), ("Hue slider", "Box colour hue"),
+                      ("Exposure slider", "Exposure"), ("Size slider", "Font size"),
+                      ("Steps slider", "Steps"), ("Log view", "Log")):
+        ui_.set_accessible(w[key], name)
+    ui_.set_accessible(w["Pointer panel"], hidden=True)
     show_tab(state["tab"])
     ui_.set_visible(w["dialog"], "--about" in sys.argv)
     if "--rtl" in sys.argv:
