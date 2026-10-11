@@ -271,32 +271,116 @@ void ApplicationBase::loadIBLTextures() {
                       "will be a uniform environment");
         return;
     }
+    if (auto resources = environmentResources(m_config.hdrEnvironmentPath)) m_iblResources = *resources;
+}
 
-    m_logger->log(LogLevel::Info, "Generating IBL textures from HDR: %s",
-                  m_config.hdrEnvironmentPath.c_str());
+IBLData ApplicationBase::environmentData(const std::filesystem::path& hdrPath, IBLResources* resources) {
+    const std::optional<uint64_t> hash = hashFile(hdrPath);
+    if (!hash) throw std::runtime_error("cannot read " + hdrPath.string());
 
-    try {
-        const std::string shaderDir = iblShaderDirectory();
-        if (shaderDir.empty()) {
-            m_logger->log(LogLevel::Error, "IBL shaders not found in shaders/ibl/ or beside the "
-                          "pipeline — skipping IBL generation");
-            return;
+    // The cache, while it was made from these bytes with these parameters.
+    const std::filesystem::path cachePath = iblCachePath(hdrPath);
+    IBLSource source;
+    if (m_config.iblCache) {
+        if (auto cached = readIBLFile(cachePath, &source); cached && iblSourceMatches(source, *hash, m_config.iblParams)) {
+            m_logger->log(LogLevel::Info, "IBL loaded from %s", cachePath.string().c_str());
+            if (resources) *resources = IBLGenerator(*m_device, iblShaderDirectory()).upload(*cached);
+            return std::move(*cached);
         }
-        IBLGenerator iblGenerator(*m_device, shaderDir);
+    }
+
+    const std::string shaderDir = iblShaderDirectory();
+    if (shaderDir.empty()) throw std::runtime_error("IBL shaders not found in shaders/ibl/ or beside the pipeline");
+    m_logger->log(LogLevel::Info, "Generating IBL textures from HDR: %s", hdrPath.string().c_str());
+    IBLData data;
+    IBLResources generated = IBLGenerator(*m_device, shaderDir).generate(hdrPath.string(), m_config.iblParams, &data);
+    if (resources) {
+        *resources = generated;
+    } else {
+        vkDeviceWaitIdle(m_device->getLogicalDevice());
+        generated.destroy();
+    }
+    if (m_config.iblCache) {
+        if (writeIBLFile(cachePath, data, {*hash, m_config.iblParams})) {
+            m_logger->log(LogLevel::Info, "IBL saved to %s", cachePath.string().c_str());
+        } else {
+            m_logger->log(LogLevel::Warning, "Could not save the IBL to %s; it will be generated again next time",
+                          cachePath.string().c_str());
+        }
+    }
+    return data;
+}
+
+std::optional<IBLResources> ApplicationBase::environmentResources(const std::string& path) {
+    try {
         // Paths go through the asset resolver, so "env/sky.hdr" finds the shared
         // assets/ directory from whatever working directory the app was launched
         // in — while a path that already resolves as given is left alone.
-        const std::string hdrPath =
-            AssetPaths::locate(m_config.hdrEnvironmentPath).string();
-        m_iblResources = iblGenerator.generate(hdrPath, m_config.iblParams);
-
-        if (m_iblResources.isValid()) {
-            m_logger->log(LogLevel::Info, "IBL textures generated successfully");
-        } else {
-            m_logger->log(LogLevel::Error, "Failed to generate IBL textures!");
+        const std::filesystem::path resolved = AssetPaths::locate(path);
+        if (resolved.extension() == ".ibl") {
+            auto data = readIBLFile(resolved);
+            if (!data) throw std::runtime_error("not a readable .ibl file of this engine's version");
+            m_logger->log(LogLevel::Info, "IBL loaded from %s", resolved.string().c_str());
+            return IBLGenerator(*m_device, iblShaderDirectory()).upload(*data);
         }
+        IBLResources resources;
+        environmentData(resolved, &resources);
+        return resources;
     } catch (const std::exception& e) {
-        m_logger->log(LogLevel::Error, "IBL generation failed: %s", e.what());
+        m_logger->log(LogLevel::Error, "IBL from %s failed: %s", path.c_str(), e.what());
+        return std::nullopt;
+    }
+}
+
+void ApplicationBase::replaceIBL(IBLResources resources) {
+    // The frames in flight may still sample the old maps.
+    vkDeviceWaitIdle(m_device->getLogicalDevice());
+    m_iblResources.destroy();
+    m_iblResources = resources;
+    if (m_renderGraph) bindIBLTextures();
+}
+
+bool ApplicationBase::setEnvironment(const std::string& path) {
+    if (!m_device) return false;
+    auto resources = environmentResources(path);
+    if (!resources) return false;
+    replaceIBL(*resources);
+    return true;
+}
+
+bool ApplicationBase::setEnvironmentColor(const glm::vec3& color) {
+    if (!m_device) return false;
+    const std::string shaderDir = iblShaderDirectory();
+    if (shaderDir.empty()) {
+        m_logger->log(LogLevel::Error, "IBL shaders not found in shaders/ibl/ or beside the pipeline");
+        return false;
+    }
+    try {
+        IBLResources resources = IBLGenerator(*m_device, shaderDir).generateUniform(color, m_config.iblParams);
+        m_config.uniformEnvironmentColor = color;
+        replaceIBL(resources);
+        return true;
+    } catch (const std::exception& e) {
+        m_logger->log(LogLevel::Error, "Uniform IBL generation failed: %s", e.what());
+        return false;
+    }
+}
+
+bool ApplicationBase::bakeEnvironment(const std::string& hdrPath, const std::string& outputPath) {
+    if (!m_device) return false;
+    try {
+        const std::filesystem::path resolved = AssetPaths::locate(hdrPath);
+        const std::optional<uint64_t> hash = hashFile(resolved);
+        if (!hash) throw std::runtime_error("cannot read " + resolved.string());
+        const IBLData data = environmentData(resolved, nullptr);
+        if (!writeIBLFile(outputPath, data, {*hash, m_config.iblParams})) {
+            throw std::runtime_error("cannot write " + outputPath);
+        }
+        m_logger->log(LogLevel::Info, "IBL of %s baked to %s", resolved.string().c_str(), outputPath.c_str());
+        return true;
+    } catch (const std::exception& e) {
+        m_logger->log(LogLevel::Error, "Baking the IBL of %s failed: %s", hdrPath.c_str(), e.what());
+        return false;
     }
 }
 

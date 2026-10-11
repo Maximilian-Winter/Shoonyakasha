@@ -129,6 +129,18 @@ public:
     /// .png, .jpg, .bmp, .tga, .hdr.
     bool captureScreenshot(const std::string& path);
 
+    /// Light the scene with an HDR environment map, or an .ibl file made by
+    /// bakeEnvironment. An HDR map's IBL is saved beside it (sky.hdr.ibl,
+    /// unless EngineConfig::iblCache is off) and loaded from there while the
+    /// map is unchanged. From onInit on; false, keeping the current
+    /// environment, when it cannot be loaded.
+    bool setEnvironment(const std::string& path);
+    /// An environment of one colour (linear RGB) in every direction.
+    bool setEnvironmentColor(const glm::vec3& color);
+    /// Write the IBL of an HDR map to an .ibl file to ship, without changing
+    /// the scene's environment. From onInit on.
+    bool bakeEnvironment(const std::string& hdrPath, const std::string& outputPath);
+
     /// Record every presented frame. Container follows the extension —
     /// .mkv, .mp4, .webm. Needs ffmpeg; see videoRecordingAvailable().
     bool startRecording(const std::string& path,

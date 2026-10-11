@@ -36,7 +36,8 @@ VulkanCubemap* VulkanCubemap::createIrradianceMap(VulkanDevice& device, uint32_t
     info.size = size;
     info.mipLevels = 1;  // Irradiance is low-frequency, no mipmaps needed
     info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+    // TRANSFER_SRC: the maps are read back to be saved (IBL/IBLCache.h).
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     info.generateMipViews = false;
     return new VulkanCubemap(device, info);
 }
@@ -46,7 +47,8 @@ VulkanCubemap* VulkanCubemap::createPrefilterMap(VulkanDevice& device, uint32_t 
     info.size = size;
     info.mipLevels = calculateMipLevels(size);  // Each mip = different roughness
     info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+    // TRANSFER_SRC: the maps are read back to be saved (IBL/IBLCache.h).
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     info.generateMipViews = true;
     return new VulkanCubemap(device, info);
 }

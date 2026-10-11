@@ -83,6 +83,21 @@ A pipeline of your own traces the same structure through an `acceleration_struct
 
 For image-based lighting, configure `hdr_environment_path` / `hdrEnvironmentPath` and use a pipeline with environment bindings. The engine generates irradiance, prefiltered environment, and BRDF lookup textures. The [PBR demo](../../examples/python/getting_started/demo/demo.py) and [deferred pipeline](../../examples/cpp/rendering/declarative_sponza_test/pbr_ibl_pipeline_v3.json) are complete examples.
 
+### Changing the environment, the cache and baking
+
+```python
+def on_init():
+    engine.set_environment("env/farm_sunset_1k.hdr")    # any time from on_init on
+    engine.set_environment_color((0.3, 0.3, 0.35))       # one colour in every direction
+    engine.bake_environment("env/sky.hdr", "sky.ibl")    # an .ibl file to ship
+```
+
+- **The cache:** generating an HDR map's IBL takes seconds; reading it back takes milliseconds. So the engine saves the maps beside the HDR file (`env/sky.hdr` gets `env/sky.hdr.ibl`) and loads them from there next time, while the HDR file's bytes and the generation parameters are unchanged; otherwise it makes them again and saves over the old cache. `Engine(ibl_cache=False)` (C++ `iblCache`) turns this off. Where the folder cannot be written, the maps are generated each time and a warning is logged.
+- **Baking:** `bake_environment(hdr, out)` writes the same file wherever you choose, without changing the scene. Ship it and point `hdr_environment_path` or `set_environment` at the `.ibl` file, and even the first launch on a new machine skips generation. A baked file is used as it is; it is not checked against an HDR map.
+- **What is saved:** the irradiance and prefiltered maps and the BRDF lookup table: about 21 MB with the default sizes. The full-size environment cubemap is only needed to make them and is not kept.
+- **What is not cached:** a uniform colour, which has no file to sit beside. Its maps are tiny; the lookup table is computed on every core in a fraction of a second.
+- **Switching** waits for the GPU to finish the frames in flight, then binds the new maps from the next frame. A path that cannot be loaded returns `False` and keeps the current environment.
+
 Dot-paths include `scene.environment.irradianceMap`, `prefilterMap`, `brdfLUT`, and `environmentMap`. Without an HDR map, or when it fails to load, a pipeline that declares an `iblSet` gets a uniform environment instead of unbound textures: every direction is `environment_color` (C++ `uniformEnvironmentColor`), default (0.25, 0.28, 0.33). The IBL compute shaders are looked for in `shaders/ibl/` under the working directory, then beside the pipeline JSON; the default pipeline ships a copy.
 
 The simple starter has analytic forward shading and does not consume every scene light/IBL property. Use the PBR example's shader/layout combination when learning lighting data bindings. Environment assets and their optional full-resolution versions are listed in the [asset guide](../../assets/README.md).

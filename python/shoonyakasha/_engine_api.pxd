@@ -513,6 +513,9 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
 
         # Frame capture
         cbool captureScreenshot(const string& path) except +
+        cbool setEnvironment(const string& path) except +
+        cbool setEnvironmentColor(const vec3& color) except +
+        cbool bakeEnvironment(const string& hdrPath, const string& outputPath) except +
         cbool startRecording(const string& path, const RecordingOptions& options) except +
         cbool stopRecording() except +
         cbool isRecording() except +

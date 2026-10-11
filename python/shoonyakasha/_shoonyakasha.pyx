@@ -1634,7 +1634,8 @@ cdef class Engine:
                  int max_frames_in_flight=2,
                  dict render_graph_parameters=None,
                  environment_color=(0.25, 0.28, 0.33),
-                 enable_validation=None):
+                 enable_validation=None,
+                 bint ibl_cache=True):
         """Create engine with configuration.
 
         Args:
@@ -1643,8 +1644,9 @@ cdef class Engine:
             height: Window height
             log_file: Log file path
             log_level: 0=Debug, 1=Info, 2=Warning, 3=Error
-            hdr_environment_path: HDR environment map. Empty: a pipeline
-                that samples IBL gets a uniform environment_color instead.
+            hdr_environment_path: HDR environment map, or an .ibl file made
+                by bake_environment. Empty: a pipeline that samples IBL gets a
+                uniform environment_color instead.
             pipeline_json_path: JSON render graph. Empty: the default
                 pipeline, shoonyakasha.pipeline.DEFAULT.
             max_frames_in_flight: Vulkan frames in flight
@@ -1654,6 +1656,8 @@ cdef class Engine:
             enable_validation: Vulkan validation layers. None follows the
                 build: off in the released package, where they would slow
                 every draw. SHOONYAKASHA_VALIDATION=1 or 0 overrides it.
+            ibl_cache: save an HDR map's lighting beside it (sky.hdr.ibl)
+                and load it from there while the map is unchanged.
         """
         if not pipeline_json_path:
             from . import pipeline as _pipeline
@@ -1667,6 +1671,7 @@ cdef class Engine:
         cfg.hdrEnvironmentPath = hdr_environment_path.encode('utf-8')
         for i in range(3):
             cfg.uniformEnvironmentColor[i] = float(environment_color[i])
+        cfg.iblCache = ibl_cache
         cfg.pipelineJsonPath = pipeline_json_path.encode('utf-8')
         cfg.maxFramesInFlight = max_frames_in_flight
         if enable_validation is not None:
@@ -1819,6 +1824,24 @@ cdef class Engine:
         Returns True on success.
         """
         return self._ptr.captureScreenshot(path.encode("utf-8"))
+
+    def set_environment(self, str path):
+        """Light the scene with an HDR environment map, or an .ibl file made by
+        bake_environment. An HDR map's lighting is saved beside it (sky.hdr.ibl,
+        unless ibl_cache=False) and loaded from there while the map is unchanged.
+        From on_init on. Returns False, keeping the current environment, when it
+        cannot be loaded."""
+        return self._ptr.setEnvironment(path.encode("utf-8"))
+
+    def set_environment_color(self, color):
+        """An environment of one colour, (r, g, b) linear, in every direction."""
+        return self._ptr.setEnvironmentColor(_tuple_to_vec3(color))
+
+    def bake_environment(self, str hdr_path, str output_path):
+        """Write the lighting of an HDR map to an .ibl file to ship with an
+        application, without changing the scene's environment. From on_init on.
+        Returns True on success."""
+        return self._ptr.bakeEnvironment(hdr_path.encode("utf-8"), output_path.encode("utf-8"))
 
     def start_recording(self, str path, int fps=30, int quality=18,
                         str codec="libx264", str ffmpeg_path=""):

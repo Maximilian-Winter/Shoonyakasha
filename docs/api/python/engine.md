@@ -43,7 +43,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 
 | Member | Returns / property value | Description |
 |---|---|---|
-| `Engine(title="Shoonyakasha Application", width=1600, height=900, log_file="application.log", log_level=1, hdr_environment_path="", pipeline_json_path="", max_frames_in_flight=2, render_graph_parameters=None, environment_color=(0.25, 0.28, 0.33), enable_validation=None)` | Engine | Create engine with configuration. |
+| `Engine(title="Shoonyakasha Application", width=1600, height=900, log_file="application.log", log_level=1, hdr_environment_path="", pipeline_json_path="", max_frames_in_flight=2, render_graph_parameters=None, environment_color=(0.25, 0.28, 0.33), enable_validation=None, ibl_cache=True)` | Engine | Create engine with configuration. |
 | `run()` | None | Run the engine. Blocks until the window is closed. |
 | `set_on_init(callback)` | None | Set initialization callback: callback(). |
 | `set_on_post_init(callback)` | None | Set post-initialization callback: callback(). |
@@ -60,6 +60,9 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `ui (read-only property)` | UI | Access the canvas UI API. Available from on_init on. |
 | `create_camera(pos, fov=60.0, speed=8.0, near_plane=0.1, far_plane=1000.0)` | int | Create a camera entity. |
 | `capture_screenshot(path)` | bool | Write the last presented frame to disk. |
+| `set_environment(path)` | bool | Light the scene with an HDR environment map, or an .ibl file made by bake_environment. An HDR map's lighting is saved beside it (sky.hdr.ibl, unless ibl_cache=False) and loaded from there while the map is unchanged. From on_init on. Returns False, keeping the current environment, when it cannot be loaded. |
+| `set_environment_color(color)` | bool | An environment of one colour, (r, g, b) linear, in every direction. |
+| `bake_environment(hdr_path, output_path)` | bool | Write the lighting of an HDR map to an .ibl file to ship with an application, without changing the scene's environment. From on_init on. Returns True on success. |
 | `start_recording(path, fps=30, quality=18, codec="libx264", ffmpeg_path="")` | bool | Record every presented frame to a video file. |
 | `stop_recording()` | bool | Finish the recording and finalise the file. |
 | `recording_paused (read/write property)` | bool | While True, presented frames are not written to the recording. |

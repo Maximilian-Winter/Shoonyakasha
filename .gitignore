@@ -4,6 +4,9 @@ cmake-build-*/
 /.idea
 *.log
 shoonyakasha_pipeline_cache.bin*
+# IBL caches written beside HDR maps (IBL/IBLCache.h); baked .ibl files are kept.
+*.hdr.ibl
+*.ibl.partial
 run.out
 
 # Frame-capture output from examples and the instancing self-test

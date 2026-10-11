@@ -12,6 +12,7 @@
 
 #include "Core/Logger.h"
 #include "Core/EventSystem.h"
+#include "IBL/IBLCache.h"
 #include "IBL/IBLGenerator.h"
 #include "Resources/GltfSceneLoader.h"
 #include "ECS/Sprite2DComponents.h"
@@ -20,7 +21,9 @@
 #include <glm/glm.hpp>
 #include <entt/entt.hpp>
 #include <vulkan/vulkan.h>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -59,12 +62,15 @@ struct ApplicationConfig {
     std::string logFile = "application.log";
     LogLevel logLevel = LogLevel::Info;
 
-    // IBL from an HDR environment map. Empty, or failing to load: a pipeline
-    // that samples IBL (declares an "iblSet") gets a uniform environment of
-    // this colour instead.
+    // IBL from an HDR environment map, or an .ibl file baked from one. Empty,
+    // or failing to load: a pipeline that samples IBL (declares an "iblSet")
+    // gets a uniform environment of this colour instead.
     std::string hdrEnvironmentPath;
     IBLGenerationParams iblParams{};
     glm::vec3 uniformEnvironmentColor{0.25f, 0.28f, 0.33f};
+    // Save an HDR map's IBL beside it (sky.hdr.ibl) and load it from there
+    // while the map and iblParams are unchanged (IBL/IBLCache.h).
+    bool iblCache = true;
 
     // Resources
     size_t resourceCacheSize = 2ULL * 1024 * 1024 * 1024;
@@ -160,6 +166,19 @@ protected:
     entt::entity getCameraEntity() const { return m_cameraEntity; }
     float getDeltaTime() const { return m_deltaTime; }
     IBLResources& getIBLResources() { return m_iblResources; }
+
+    /// Lights the scene with environment `path`: an HDR map, from its cache
+    /// when that is current, otherwise generated (and cached with iblCache);
+    /// or an .ibl file baked by bakeEnvironment. Callable any time after
+    /// startup; the new maps are bound from the next frame. False, keeping
+    /// the current environment, when it cannot be loaded.
+    bool setEnvironment(const std::string& path);
+    /// An environment of one colour in every direction.
+    bool setEnvironmentColor(const glm::vec3& color);
+    /// Writes the IBL of HDR map `hdrPath` to the .ibl file `outputPath`, to
+    /// ship and load with setEnvironment or hdrEnvironmentPath, without
+    /// changing the scene's environment. False when it fails.
+    bool bakeEnvironment(const std::string& hdrPath, const std::string& outputPath);
     uint32_t getCurrentFrame() const { return m_currentFrame; }
 
     // ─── Convenience Helpers ───────────────────────────────────
@@ -342,6 +361,13 @@ private:
     void initializeVulkan();
     void initializeECS();
     void loadIBLTextures();
+    // The maps of HDR map `hdrPath`: from its cache when current, else
+    // generated, the GPU resources kept in `resources` if given. Throws.
+    IBLData environmentData(const std::filesystem::path& hdrPath, IBLResources* resources);
+    // The resources of environment `path` (HDR or .ibl), or nothing.
+    std::optional<IBLResources> environmentResources(const std::string& path);
+    // Makes `resources` the scene's IBL, waiting for the GPU and binding them.
+    void replaceIBL(IBLResources resources);
     std::string iblShaderDirectory() const;  // empty if the IBL shaders are nowhere to be found
     std::string uiShaderDirectory() const;   // empty if the UI shaders are nowhere to be found
     void createUIContext();

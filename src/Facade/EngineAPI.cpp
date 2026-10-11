@@ -156,6 +156,9 @@ public:
     // Public forwarders — expose protected ApplicationBase methods for EngineAPI
     using ApplicationBase::createCamera;
     using ApplicationBase::captureScreenshot;
+    using ApplicationBase::setEnvironment;
+    using ApplicationBase::setEnvironmentColor;
+    using ApplicationBase::bakeEnvironment;
     using ApplicationBase::startRecording;
     using ApplicationBase::stopRecording;
     using ApplicationBase::isRecording;
@@ -224,6 +227,7 @@ static ApplicationConfig toAppConfig(const EngineConfig& fc) {
     ac.hdrEnvironmentPath = fc.hdrEnvironmentPath;
     ac.uniformEnvironmentColor = glm::vec3(fc.uniformEnvironmentColor[0], fc.uniformEnvironmentColor[1],
                                            fc.uniformEnvironmentColor[2]);
+    ac.iblCache = fc.iblCache;
     ac.pipelineJsonPath   = fc.pipelineJsonPath;
     ac.maxFramesInFlight  = fc.maxFramesInFlight;
     ac.enableValidation   = fc.enableValidation;
@@ -597,6 +601,18 @@ std::string findFfmpeg() {
 
 bool EngineAPI::captureScreenshot(const std::string& path) {
     return m_impl->app->captureScreenshot(path);
+}
+
+bool EngineAPI::setEnvironment(const std::string& path) {
+    return m_impl->app->setEnvironment(path);
+}
+
+bool EngineAPI::setEnvironmentColor(const glm::vec3& color) {
+    return m_impl->app->setEnvironmentColor(color);
+}
+
+bool EngineAPI::bakeEnvironment(const std::string& hdrPath, const std::string& outputPath) {
+    return m_impl->app->bakeEnvironment(hdrPath, outputPath);
 }
 
 bool EngineAPI::startRecording(const std::string& path, const RecordingOptions& options) {

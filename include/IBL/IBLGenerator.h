@@ -14,9 +14,13 @@
 #include "Vulkan/VulkanTexture.h"
 #include <memory>
 #include <string>
+#include <vector>
 #include <glm/glm.hpp>
 
 namespace Shoonyakasha {
+
+struct IBLCubeData;
+struct IBLData;
 
 struct IBLGenerationParams {
     uint32_t environmentSize = 1024;   // Environment cubemap face size
@@ -29,14 +33,15 @@ struct IBLGenerationParams {
 };
 
 struct IBLResources {
-    VulkanCubemap* environmentMap = nullptr;  // Converted from equirectangular
+    VulkanCubemap* environmentMap = nullptr;  // Converted from equirectangular; null when loaded from a file
     VulkanCubemap* irradianceMap = nullptr;   // Diffuse IBL
     VulkanCubemap* prefilterMap = nullptr;    // Specular IBL with roughness mips
     VulkanTexture* brdfLUT = nullptr;         // Split-sum approximation LUT
 
-    // Check if all resources are valid
+    // Has what scenes are lit with: the environment map is only needed to
+    // make the others.
     bool isValid() const {
-        return environmentMap && irradianceMap && prefilterMap && brdfLUT;
+        return irradianceMap && prefilterMap && brdfLUT;
     }
 
     // Cleanup resources (caller's responsibility)
@@ -62,9 +67,19 @@ public:
     IBLGenerator& operator=(const IBLGenerator&) = delete;
 
     // Main generation entry point
-    // Takes path to equirectangular HDR and returns all IBL resources
+    // Takes path to equirectangular HDR and returns all IBL resources. With
+    // `keep`, also reads the maps scenes are lit with back into it.
     IBLResources generate(const std::string& hdrPath,
-                          const IBLGenerationParams& params = IBLGenerationParams{});
+                          const IBLGenerationParams& params = IBLGenerationParams{},
+                          IBLData* keep = nullptr);
+
+    /// GPU maps of maps read from an .ibl file (IBL/IBLCache.h), without the
+    /// environment map. Needs no shaders.
+    IBLResources upload(const IBLData& data);
+
+    /// The BRDF lookup table's texels, RGBA32F, row by row: x is NdotV, y
+    /// roughness. Computed on every hardware thread.
+    static std::vector<float> computeBRDFLUT(uint32_t size, uint32_t samples);
 
     /// IBL for an environment of one colour in every direction, for scenes
     /// with no HDR map. Irradiance and reflections are that colour; the BRDF
@@ -105,7 +120,11 @@ private:
     // Everything after loading: cubemap, irradiance, prefilter, BRDF LUT.
     // Takes ownership of `equirect`.
     IBLResources generateFromEquirect(std::unique_ptr<VulkanTexture> equirect,
-                                      const IBLGenerationParams& params);
+                                      const IBLGenerationParams& params, IBLData* keep = nullptr);
+
+    // A cubemap's texels, read back from the GPU, and a cubemap made from them.
+    IBLCubeData downloadCube(VulkanCubemap& cube);
+    VulkanCubemap* uploadCube(const IBLCubeData& data);
 
     // Get bytes per pixel for format
     static uint32_t getBytesPerPixel(VkFormat format);

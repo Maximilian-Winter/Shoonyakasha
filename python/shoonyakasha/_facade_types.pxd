@@ -107,6 +107,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         int logLevel
         string hdrEnvironmentPath
         float uniformEnvironmentColor[3]
+        cbool iblCache
         string pipelineJsonPath
         uint32_t maxFramesInFlight
         cbool enableValidation

@@ -6,6 +6,7 @@
 //
 
 #include "IBL/IBLGenerator.h"
+#include "IBL/IBLCache.h"
 #include "Vulkan/VulkanBuffer.h"
 #include <stdexcept>
 #include <filesystem>
@@ -252,10 +253,104 @@ VulkanTexture* IBLGenerator::loadHDRTexture(const std::string& path) {
 // Main Generation
 // ═══════════════════════════════════════════════════════════════
 
-IBLResources IBLGenerator::generate(const std::string& hdrPath, const IBLGenerationParams& params) {
+IBLResources IBLGenerator::generate(const std::string& hdrPath, const IBLGenerationParams& params, IBLData* keep) {
     std::cout << "[IBL] Generating IBL textures from: " << hdrPath << std::endl;
     std::cout << "[IBL] Loading HDR texture..." << std::endl;
-    return generateFromEquirect(std::unique_ptr<VulkanTexture>(loadHDRTexture(hdrPath)), params);
+    return generateFromEquirect(std::unique_ptr<VulkanTexture>(loadHDRTexture(hdrPath)), params, keep);
+}
+
+IBLResources IBLGenerator::upload(const IBLData& data) {
+    IBLResources resources{};
+    try {
+        resources.irradianceMap = uploadCube(data.irradiance);
+        resources.prefilterMap = uploadCube(data.prefilter);
+        resources.brdfLUT = new VulkanTexture(m_device, data.brdf.data(), data.brdfSize, data.brdfSize, 4,
+                                              VK_FORMAT_R32G32B32A32_SFLOAT);
+    } catch (...) {
+        vkDeviceWaitIdle(m_device.getLogicalDevice());
+        resources.destroy();
+        throw;
+    }
+    return resources;
+}
+
+IBLCubeData IBLGenerator::downloadCube(VulkanCubemap& cube) {
+    IBLCubeData data;
+    data.size = cube.getSize();
+    data.mipLevels = cube.getMipLevels();
+    data.texels.resize(IBLCubeData::texelCount(data.size, data.mipLevels));
+    const VkDeviceSize bytes = data.texels.size() * sizeof(uint16_t);
+    VulkanBuffer staging(m_device, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    // Each mip's six faces in one region, one after another in the buffer.
+    std::vector<VkBufferImageCopy> regions;
+    VkDeviceSize offset = 0;
+    for (uint32_t mip = 0; mip < data.mipLevels; ++mip) {
+        const uint32_t s = std::max(data.size >> mip, 1u);
+        VkBufferImageCopy region{};
+        region.bufferOffset = offset;
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 6};
+        region.imageExtent = {s, s, 1};
+        regions.push_back(region);
+        offset += static_cast<VkDeviceSize>(s) * s * 6 * 4 * sizeof(uint16_t);
+    }
+
+    VkCommandBuffer cmd = m_device.beginSingleTimeCommands();
+    cube.transitionLayout(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                          VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    vkCmdCopyImageToBuffer(cmd, cube.getImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging.getBuffer(),
+                           static_cast<uint32_t>(regions.size()), regions.data());
+    cube.transitionLayout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                          VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT);
+    m_device.endSingleTimeCommands(cmd);
+
+    staging.map();
+    staging.copyTo(data.texels.data(), bytes);
+    staging.unmap();
+    return data;
+}
+
+VulkanCubemap* IBLGenerator::uploadCube(const IBLCubeData& data) {
+    CubemapCreateInfo info{};
+    info.size = data.size;
+    info.mipLevels = data.mipLevels;
+    info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    auto cube = std::make_unique<VulkanCubemap>(m_device, info);
+
+    const VkDeviceSize bytes = data.texels.size() * sizeof(uint16_t);
+    VulkanBuffer staging(m_device, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    staging.map();
+    staging.copyFrom(data.texels.data(), bytes);
+    staging.unmap();
+
+    std::vector<VkBufferImageCopy> regions;
+    VkDeviceSize offset = 0;
+    for (uint32_t mip = 0; mip < data.mipLevels; ++mip) {
+        const uint32_t s = std::max(data.size >> mip, 1u);
+        VkBufferImageCopy region{};
+        region.bufferOffset = offset;
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 6};
+        region.imageExtent = {s, s, 1};
+        regions.push_back(region);
+        offset += static_cast<VkDeviceSize>(s) * s * 6 * 4 * sizeof(uint16_t);
+    }
+
+    VkCommandBuffer cmd = m_device.beginSingleTimeCommands();
+    cube->transitionLayout(cmd, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    vkCmdCopyBufferToImage(cmd, staging.getBuffer(), cube->getImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           static_cast<uint32_t>(regions.size()), regions.data());
+    cube->transitionLayout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                           VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    m_device.endSingleTimeCommands(cmd);
+    return cube.release();
 }
 
 IBLResources IBLGenerator::generateUniform(const glm::vec3& color, const IBLGenerationParams& params) {
@@ -281,7 +376,7 @@ IBLResources IBLGenerator::generateUniform(const glm::vec3& color, const IBLGene
 }
 
 IBLResources IBLGenerator::generateFromEquirect(std::unique_ptr<VulkanTexture> equirect,
-                                                const IBLGenerationParams& params) {
+                                                const IBLGenerationParams& params, IBLData* keep) {
     IBLResources resources{};
 
     // Every step below can throw — a missing compute shader is enough, which is
@@ -315,7 +410,16 @@ IBLResources IBLGenerator::generateFromEquirect(std::unique_ptr<VulkanTexture> e
 
         // Generate BRDF LUT
         std::cout << "[IBL] Generating BRDF LUT..." << std::endl;
-        resources.brdfLUT = generateBRDFLUT(params.brdfLUTSize, params.brdfSamples);
+        std::vector<float> lut = computeBRDFLUT(params.brdfLUTSize, params.brdfSamples);
+        resources.brdfLUT = new VulkanTexture(m_device, lut.data(), params.brdfLUTSize, params.brdfLUTSize, 4,
+                                              VK_FORMAT_R32G32B32A32_SFLOAT);
+
+        if (keep) {
+            keep->irradiance = downloadCube(*resources.irradianceMap);
+            keep->prefilter = downloadCube(*resources.prefilterMap);
+            keep->brdfSize = params.brdfLUTSize;
+            keep->brdf = std::move(lut);
+        }
     } catch (...) {
         // The GPU may still be reading what we are about to free.
         vkDeviceWaitIdle(m_device.getLogicalDevice());
@@ -771,11 +875,15 @@ VulkanCubemap* IBLGenerator::generatePrefilterMap(VulkanCubemap* environment, ui
 // ═══════════════════════════════════════════════════════════════
 
 VulkanTexture* IBLGenerator::generateBRDFLUT(uint32_t size, uint32_t samples) {
-    // Generate BRDF LUT on CPU (compute shader version needs storage image support)
-    // Using RGBA16F for broader compatibility, R=scale, G=bias, BA unused
+    // R32G32B32A32, as the table is computed in floats: R scale, G bias.
+    const std::vector<float> lutData = computeBRDFLUT(size, samples);
+    return new VulkanTexture(m_device, lutData.data(), size, size, 4, VK_FORMAT_R32G32B32A32_SFLOAT);
+}
 
-    // CPU generation of BRDF LUT (more portable than compute shader version)
-    std::vector<float> lutData(size * size * 4);  // RGBA format
+std::vector<float> IBLGenerator::computeBRDFLUT(uint32_t size, uint32_t samples) {
+    // On the CPU, which is more portable than brdf_lut.comp: that needs
+    // storage image support. R is the scale, G the bias, BA unused.
+    std::vector<float> lutData(static_cast<size_t>(size) * size * 4);  // RGBA format
 
     auto hammersley = [](uint32_t i, uint32_t N) -> std::pair<float, float> {
         uint32_t bits = i;
@@ -868,13 +976,7 @@ VulkanTexture* IBLGenerator::generateBRDFLUT(uint32_t size, uint32_t samples) {
     for (uint32_t y = 0; y < size; y += workers) computeRow(y);
     for (std::thread& t : threads) t.join();
 
-    // Create texture with computed BRDF data
-    // Using R32G32B32A32 since we're providing float* data
-    std::unique_ptr<VulkanTexture> brdfLUT(
-        new VulkanTexture(m_device, lutData.data(), size, size, 4,
-                          VK_FORMAT_R32G32B32A32_SFLOAT));
-
-    return brdfLUT.release();
+    return lutData;
 }
 
 uint32_t IBLGenerator::getBytesPerPixel(VkFormat format) {
