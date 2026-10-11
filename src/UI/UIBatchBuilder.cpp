@@ -40,7 +40,7 @@ struct CanvasBuilder {
     bool atlasFull = false;
 
     void quad(glm::vec2 min, glm::vec2 max, glm::vec2 uvMin, glm::vec2 uvMax,
-              uint32_t color, UIDrawMode mode, const GPUTexture* image = nullptr) {
+              uint32_t color, UIDrawMode mode, const GPUTexture* image = nullptr, uint32_t page = 0) {
         min *= scale;
         max *= scale;
         if (max.x <= min.x || max.y <= min.y) return;
@@ -62,7 +62,7 @@ struct CanvasBuilder {
         }
 
         const auto base = static_cast<uint32_t>(out.vertices.size());
-        const auto m = static_cast<uint32_t>(mode);
+        const uint32_t m = static_cast<uint32_t>(mode) | ((page & 0xFFu) << 8);
         out.vertices.push_back({min, uvMin, color, m});
         out.vertices.push_back({{max.x, min.y}, {uvMax.x, uvMin.y}, color, m});
         out.vertices.push_back({max, uvMax, color, m});
@@ -123,8 +123,8 @@ struct CanvasBuilder {
         }
     }
 
-    void text(const Rect& rect, const UIText& t, const UITextCache& cache) {
-        const uint32_t color = packColor(t.color);
+    void text(const Rect& rect, const UIText& t, const UITextCache& cache, const glm::vec4& tint) {
+        const uint32_t color = packColor(t.color * tint);
 
         for (const auto& glyph : cache.layout.glyphs) {
             if (glyph.font >= cache.fonts.size()) continue;
@@ -137,7 +137,7 @@ struct CanvasBuilder {
                 continue;
             }
             quad(rect.min + glyph.min, rect.min + glyph.max, entry->uvMin, entry->uvMax,
-                 color, UIDrawMode::Text);
+                 color, UIDrawMode::Text, nullptr, entry->page);
         }
     }
 };
@@ -156,6 +156,15 @@ bool build(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyph
         if (aOverlay != bOverlay) return aOverlay;
         return aOverlay && a.second->sortOrder < b.second->sortOrder;
     });
+
+    // The state colours each tint target takes from the interactables naming it.
+    std::unordered_map<entt::entity, glm::vec4> targetTints;
+    for (auto [entity, interactable] : registry.view<UIInteractable>().each()) {
+        for (const entt::entity target : interactable.tintTargets) {
+            auto [it, inserted] = targetTints.try_emplace(target, glm::vec4(1.0f));
+            it->second *= interactable.stateColor();
+        }
+    }
 
     // Drawable elements per canvas, in draw order.
     std::unordered_map<entt::entity, std::vector<std::pair<uint32_t, entt::entity>>> elements;
@@ -185,14 +194,18 @@ bool build(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyph
                 const auto& element = registry.get<UIRect>(entity);
                 builder.scissor = toScissor(element.clip, canvas->scale, canvas->targetSize);
 
-                // An interactable's own panel and image take its state colour.
+                // An interactable's own panel and image take its state colour;
+                // a tint target's panel, image and text take the state colours
+                // of the interactables naming it.
                 const auto* interactable = registry.try_get<UIInteractable>(entity);
-                const glm::vec4 tint = interactable ? interactable->stateColor() : glm::vec4(1.0f);
+                const auto target = targetTints.find(entity);
+                const glm::vec4 textTint = target != targetTints.end() ? target->second : glm::vec4(1.0f);
+                const glm::vec4 tint = interactable ? interactable->stateColor() * textTint : textTint;
                 if (const auto* p = registry.try_get<UIPanel>(entity)) builder.panel(element.rect, *p, tint);
                 if (const auto* img = registry.try_get<UIImage>(entity)) builder.image(element.rect, *img, tint);
                 const auto* t = registry.try_get<UIText>(entity);
                 const auto* cache = registry.try_get<UITextCache>(entity);
-                if (t && cache) builder.text(element.rect, *t, *cache);
+                if (t && cache) builder.text(element.rect, *t, *cache, textTint);
             }
         }
 
@@ -206,6 +219,7 @@ bool build(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyph
 } // namespace
 
 void buildDrawData(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyphs, UIDrawData& out) {
+    glyphs.beginFrame();
     if (build(registry, fonts, glyphs, out)) return;
     glyphs.reset();
     build(registry, fonts, glyphs, out);

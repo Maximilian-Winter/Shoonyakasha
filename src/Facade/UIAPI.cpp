@@ -16,6 +16,8 @@
 #include "UI/UIWidgets.h"
 #include "UI/Utf8.h"
 
+#include <algorithm>
+
 using namespace Shoonyakasha::Facade::Internal;
 
 namespace Shoonyakasha {
@@ -479,6 +481,29 @@ void UIAPI::setRaycastTarget(EntityHandle element, bool target) {
 void UIAPI::setInteractable(EntityHandle element, bool enabled) {
     if (!m_impl->valid(element)) return;
     m_impl->registry.get_or_emplace<UI::UIInteractable>(toEntt(element)).enabled = enabled;
+}
+
+void UIAPI::addTintTarget(EntityHandle interactable, EntityHandle target) {
+    if (!m_impl->valid(interactable) || !m_impl->valid(target)) return;
+    auto& targets = m_impl->registry.get_or_emplace<UI::UIInteractable>(toEntt(interactable)).tintTargets;
+    if (std::find(targets.begin(), targets.end(), toEntt(target)) == targets.end()) targets.push_back(toEntt(target));
+}
+
+void UIAPI::removeTintTarget(EntityHandle interactable, EntityHandle target) {
+    auto* i = m_impl->get<UI::UIInteractable>(interactable);
+    if (!i) return;
+    i->tintTargets.erase(std::remove(i->tintTargets.begin(), i->tintTargets.end(), toEntt(target)),
+                         i->tintTargets.end());
+}
+
+std::vector<EntityHandle> UIAPI::getTintTargets(EntityHandle interactable) const {
+    std::vector<EntityHandle> result;
+    if (const auto* i = m_impl->get<UI::UIInteractable>(interactable)) {
+        for (const entt::entity e : i->tintTargets) {
+            if (m_impl->registry.valid(e)) result.push_back(toHandle(e));
+        }
+    }
+    return result;
 }
 
 bool UIAPI::isHovered(EntityHandle element) const {

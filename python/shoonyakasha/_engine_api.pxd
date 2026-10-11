@@ -433,6 +433,9 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
 
         # Interaction
         void setInteractable(EntityHandle element, cbool enabled)
+        void addTintTarget(EntityHandle interactable, EntityHandle target)
+        void removeTintTarget(EntityHandle interactable, EntityHandle target)
+        vector[EntityHandle] getTintTargets(EntityHandle interactable) const
         cbool isHovered(EntityHandle element) const
         cbool isPressed(EntityHandle element) const
         cbool wasClicked(EntityHandle element) const

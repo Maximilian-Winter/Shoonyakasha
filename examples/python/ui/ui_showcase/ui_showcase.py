@@ -429,12 +429,9 @@ def update_text_page():
 
 
 def set_gated(enabled):
-    """Enable or disable the gated button. Disabled, its own panel dims; its
-    label, a child element, is dimmed here."""
-    button = w["Gated button"]
-    ui_.set_interactable(button, enabled)
-    for child in engine.scene.get_children(button):
-        ui_.set_color(child, INK if enabled else MUTED[:3] + (0.6,))
+    """Enable or disable the gated button. Disabled, its panel and its label
+    take the disabled colour."""
+    ui_.set_interactable(w["Gated button"], enabled)
 
 
 def add_row(message=None):

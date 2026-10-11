@@ -174,6 +174,9 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_panel_border(element, border, border_scale=1.0)` | None | Calls native `setPanelBorder`; see the class contract above. |
 | `set_raycast_target(element, target)` | None | Whether the element's image or panel stops the pointer. |
 | `set_interactable(element, enabled=True)` | None | Make the element take the pointer, or disable it. Widgets are interactable. |
+| `add_tint_target(interactable, target)` | None | Make target's panel, image and text colours take the state colour of interactable (hover, pressed, focused, disabled). Buttons, toggles and sliders list their label and parts already. |
+| `remove_tint_target(interactable, target)` | None | Stop target taking interactable's state colour. |
+| `get_tint_targets(interactable)` | list[int] | The elements that take interactable's state colour. |
 | `is_hovered(element)` | bool | Calls native `isHovered`; see the class contract above. |
 | `is_pressed(element)` | bool | Calls native `isPressed`; see the class contract above. |
 | `was_clicked(element)` | bool | Released over the element after being pressed on it, this frame. |

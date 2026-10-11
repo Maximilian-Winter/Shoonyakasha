@@ -1348,6 +1348,21 @@ cdef class UI:
         """Make the element take the pointer, or disable it. Widgets are interactable."""
         self._ptr.setInteractable(element, enabled)
 
+    def add_tint_target(self, uint32_t interactable, uint32_t target):
+        """Make target's panel, image and text colours take the state colour
+        of interactable (hover, pressed, focused, disabled). Buttons, toggles
+        and sliders list their label and parts already."""
+        self._ptr.addTintTarget(interactable, target)
+
+    def remove_tint_target(self, uint32_t interactable, uint32_t target):
+        """Stop target taking interactable's state colour."""
+        self._ptr.removeTintTarget(interactable, target)
+
+    def get_tint_targets(self, uint32_t interactable):
+        """The elements that take interactable's state colour."""
+        cdef vector[EntityHandle] result = self._ptr.getTintTargets(interactable)
+        return [<uint32_t>result[i] for i in range(result.size())]
+
     def is_hovered(self, uint32_t element):
         return self._ptr.isHovered(element)
 

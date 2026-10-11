@@ -36,7 +36,7 @@ struct UIVertex {
     glm::vec2 position;  // target pixels, origin top-left, y down
     glm::vec2 uv;
     uint32_t color;      // RGBA8, sRGB-encoded, straight alpha
-    uint32_t mode;       // UIDrawMode in the low byte
+    uint32_t mode;       // UIDrawMode in the low byte, the glyph atlas page in the second
 };
 static_assert(sizeof(UIVertex) == 24, "UIVertex is read by ui.vert with a 24-byte stride");
 
@@ -73,9 +73,14 @@ struct UIDrawData {
 };
 
 /// Builds draw data for every laid-out canvas, after CanvasLayoutSystem and
-/// CanvasTextSystem have run. Glyphs missing from the atlas are added to
-/// `glyphs`. If the atlas fills up, it is reset and the build starts over
-/// once; glyphs that still do not fit are left out.
+/// CanvasTextSystem have run, and starts a frame of `glyphs`. Glyphs missing
+/// from the atlas are added to `glyphs`. If they do not fit even after
+/// evicting the pages not drawn from in this frame, the atlas is reset and
+/// the build starts over once; glyphs that still do not fit are left out.
+///
+/// An element takes the state colour of its own UIInteractable in its panel
+/// and image, and the state colour of every UIInteractable that lists it in
+/// tintTargets in its panel, image and text.
 void buildDrawData(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyphs, UIDrawData& out);
 
 /// RGBA8 packing of a colour with components in [0, 1].

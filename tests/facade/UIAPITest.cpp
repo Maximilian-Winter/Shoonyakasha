@@ -139,6 +139,27 @@ TEST_F(UIAPIFixture, ClicksTogglesAndSlidersReachTheApplication) {
     EXPECT_FALSE(registry.get<UI::UIInteractable>(e(slider)).enabled);
 }
 
+TEST_F(UIAPIFixture, TintTargets) {
+    const EntityHandle canvas = ui.createCanvas();
+    const EntityHandle button = ui.createButton(canvas, "Go");
+    const std::vector<EntityHandle> label = ui.getTintTargets(button);
+    ASSERT_EQ(label.size(), 1u);
+    EXPECT_TRUE(registry.all_of<UI::UIText>(e(label[0])));
+
+    const EntityHandle icon = ui.createImage(canvas, {16.0f, 16.0f});
+    ui.addTintTarget(button, icon);
+    ui.addTintTarget(button, icon);   // listed once
+    EXPECT_EQ(ui.getTintTargets(button), (std::vector<EntityHandle>{label[0], icon}));
+    ui.removeTintTarget(button, label[0]);
+    EXPECT_EQ(ui.getTintTargets(button), std::vector<EntityHandle>{icon});
+
+    // A plain element becomes interactable.
+    const EntityHandle row = ui.createElement(canvas, {100.0f, 20.0f});
+    ui.addTintTarget(row, icon);
+    EXPECT_TRUE(registry.all_of<UI::UIInteractable>(e(row)));
+    EXPECT_TRUE(ui.getTintTargets(canvas).empty());
+}
+
 TEST_F(UIAPIFixture, ClipColourParentAndRaycastSettings) {
     const EntityHandle canvas = ui.createCanvas();
     const EntityHandle a = ui.createElement(canvas, {10.0f, 10.0f});

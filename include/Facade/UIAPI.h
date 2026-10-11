@@ -275,6 +275,14 @@ public:
     /// are interactable from creation.
     void setInteractable(EntityHandle element, bool enabled);
 
+    /// `target`'s panel, image and text colours take the state colour of
+    /// `interactable` (hover, pressed, focused, disabled), which is made
+    /// interactable if it is not. Buttons, toggles and sliders list their
+    /// label and parts from creation.
+    void addTintTarget(EntityHandle interactable, EntityHandle target);
+    void removeTintTarget(EntityHandle interactable, EntityHandle target);
+    std::vector<EntityHandle> getTintTargets(EntityHandle interactable) const;
+
     bool isHovered(EntityHandle element) const;
     bool isPressed(EntityHandle element) const;
     bool wasClicked(EntityHandle element) const;

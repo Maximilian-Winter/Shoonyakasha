@@ -30,17 +30,19 @@ void setParent(entt::registry& registry, entt::entity element, entt::entity pare
 entt::entity createLabel(entt::registry& registry, entt::entity parent, const std::string& text, uint32_t font,
                          float fontSize = 20.0f);
 
-/// A panel with UIButton and UIInteractable, and a centred label child.
+/// A panel with UIButton and UIInteractable, and a centred label child that is
+/// a tint target.
 entt::entity createButton(entt::registry& registry, entt::entity parent, const std::string& text, uint32_t font,
                           glm::vec2 size = {160.0f, 40.0f});
 
 /// A row of a box, which shows a checkmark while on, and a label to its right.
-/// The interactable is the row, so clicking the label also flips it.
+/// The interactable is the row, so clicking the label also flips it. The box,
+/// checkmark and label are tint targets.
 entt::entity createToggle(entt::registry& registry, entt::entity parent, const std::string& text, uint32_t font,
                           bool isOn = false, glm::vec2 size = {200.0f, 28.0f});
 
 /// A horizontal slider: a track, a fill from its left to the value and a
-/// handle on the value.
+/// handle on the value. The fill and handle are tint targets.
 entt::entity createSlider(entt::registry& registry, entt::entity parent, float minValue, float maxValue,
                           float value, glm::vec2 size = {200.0f, 24.0f});
 

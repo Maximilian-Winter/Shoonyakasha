@@ -70,9 +70,9 @@ entt::entity createButton(entt::registry& registry, entt::entity parent, const s
                           glm::vec2 size) {
     const entt::entity button = createElement(registry, parent, size);
     registry.emplace<UIPanel>(button).color = kSurface;
-    addInteractable(registry, button);
+    auto& interactable = addInteractable(registry, button);
     registry.emplace<UIButton>(button);
-    createLabel(registry, button, text, font, size.y * 0.5f);
+    interactable.tintTargets.push_back(createLabel(registry, button, text, font, size.y * 0.5f));
     return button;
 }
 
@@ -97,6 +97,7 @@ entt::entity createToggle(entt::registry& registry, entt::entity parent, const s
     labelRect.sizeDelta = {-(size.y + 8.0f), 0.0f};
     labelRect.anchoredPosition = {size.y * 0.5f + 4.0f, 0.0f};
     registry.get<UIText>(label).alignH = TextAlignH::Left;
+    registry.get<UIInteractable>(toggle).tintTargets = {box, checkmark, label};
 
     auto& state = registry.emplace<UIToggle>(toggle);
     state.isOn = isOn;
@@ -128,6 +129,7 @@ entt::entity createSlider(entt::registry& registry, entt::entity parent, float m
     auto& handleRect = registry.get<UIRect>(handle);
     handleRect.anchorMin = handleRect.anchorMax = {0.0f, 0.5f};
     registry.emplace<UIPanel>(handle).color = kHandle;
+    registry.get<UIInteractable>(slider).tintTargets = {fill, handle};
 
     auto& state = registry.emplace<UISlider>(slider);
     state.minValue = minValue;

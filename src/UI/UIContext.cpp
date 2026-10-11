@@ -26,6 +26,7 @@ void UIContext::prepareFrame(entt::registry& registry, VkCommandBuffer cmd, uint
         m_renderer->prepareFrame(cmd, frameIndex, registry, m_drawData, m_glyphs);
     } else {
         m_glyphs.clearPendingUploads();
+        m_glyphs.clearPendingClears();
     }
 }
 

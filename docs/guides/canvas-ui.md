@@ -168,13 +168,24 @@ What stops the pointer:
 - **Text:** never stops it.
 - **Children:** a click on a child counts for the nearest interactable above it, so a button's label and icon act as the button.
 
-`set_interactable(e, False)` disables a widget: it ignores the pointer, and a disabled button is drawn dimmed.
+`set_interactable(e, False)` disables a widget: it ignores the pointer and is drawn dimmed, label included.
+
+The state colour (hovered, pressed, focused or disabled) multiplies an interactable's own panel and image, and the panel, image and text colours of its tint targets:
+- buttons list their label;
+- toggles list their box, checkmark and label;
+- sliders list their fill and handle.
+
+A widget built by hand can list its parts too:
+
+```python
+ui.add_tint_target(row, icon)    # the icon follows the row's hover and disabled colours
+```
 
 ### Keyboard and gamepad
 
 Menus can be used without a mouse:
 - **Focus:** Tab moves focus through the widgets in order, and the arrow keys or a gamepad's D-pad move to the nearest one in that direction.
-- **Showing it:** a focused button turns blue. A focused toggle or slider does not show it yet: the state colour reaches only a widget's own panel, which these do not have.
+- **Showing it:** a focused button's panel and a focused toggle's box turn blue, and a focused slider's fill turns lighter.
 - **Activating:** Enter, Space or the A button press a focused button or flip a toggle, which reads like a click in `was_clicked` and `value_changed`. Left and Right move a focused slider.
 - **Clearing:** Escape or B clears focus. Clicking a widget focuses it too.
 - **Dialogs:** navigation stays on the topmost canvas, so a dialog keeps focus inside it.
@@ -297,7 +308,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 - Right-to-left text: each word is shaped right to left, but a line puts its words in typing order, left to right; mixed-direction lines are not reordered.
 - Thai, Lao, Khmer and Myanmar, which need a dictionary to find where words end, wrap only at spaces, or between clusters when a run does not fit.
 - Geometry in front of a world canvas stops the pointer only in a pipeline with a `ui` depth block, and only as of two frames before (see [Geometry in front of world canvases](#geometry-in-front-of-world-canvases)).
-- The glyph atlas is 2048 by 2048 texels. When it fills up, it is cleared and the text on screen is rasterised again; this is rare unless a very large number of distinct characters is in use at once.
+- The glyph atlas has up to four pages of 2048 by 2048 texels, added as they are needed. When all four are full, the page drawn from least recently is cleared, and its glyphs are rasterised again when next drawn. Text that needs more than the four pages in a single frame, several thousand distinct glyphs, is partly left out.
 
 ## Troubleshooting
 

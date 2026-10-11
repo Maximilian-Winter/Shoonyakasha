@@ -35,7 +35,7 @@ def header_methods():
 def pxd_methods():
     block = PXD.split('cdef cppclass CppUIAPI "Shoonyakasha::Facade::UIAPI":', 1)[1]
     block = block.split("\n# ", 1)[0]
-    return set(re.findall(r"^\s+\w[\w&<>]*\s+(\w+)\(", block, re.M))
+    return set(re.findall(r"^\s+\w[\w&<>\[\]]*\s+(\w+)\(", block, re.M))
 
 
 def wrapper_class():

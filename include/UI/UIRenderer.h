@@ -1,8 +1,10 @@
 //
 // UIRenderer.h - Drawing canvas UI batches with Vulkan
 //
-// Owns the glyph atlas texture, a ring buffer for each frame's vertices,
-// indices and atlas uploads, a pipeline per attachment format, and a texture
+// Owns the glyph atlas texture (a 2D array with one layer per GlyphCache
+// page, replaced by a larger one when the cache adds a page), a ring buffer
+// for each frame's vertices, indices and atlas uploads, a pipeline per
+// attachment format, and a texture
 // for each world canvas. Each frame prepareFrame() runs before the render
 // graph records its passes: it uploads, then renders the world canvases into
 // their textures. A "ui_canvas" pass then calls drawOverlays() with rendering
@@ -47,8 +49,14 @@ public:
 
     static constexpr VkFormat kWorldFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
-    /// `shaderDirectory` holds ui.vert.spv and ui.frag.spv. The atlas is
-    /// `atlasSize` texels square, as the GlyphCache that feeds it.
+    struct Atlas {
+        GPUTexture texture;                      // its view covers every layer
+        VkImageView layerView = VK_NULL_HANDLE;  // layer 0 alone, as a 2D view
+        uint32_t layers = 0;
+    };
+
+    /// `shaderDirectory` holds ui.vert.spv and ui.frag.spv. The atlas pages
+    /// are `atlasSize` texels square, as those of the GlyphCache that feeds it.
     UIRenderer(VulkanDevice& device, std::string shaderDirectory, uint32_t framesInFlight,
                int atlasSize, Logger* logger = nullptr);
     ~UIRenderer();
@@ -58,7 +66,8 @@ public:
 
     void setTextureReleaser(TextureReleaser releaser) { m_releaser = std::move(releaser); }
 
-    /// Copies the glyphs queued in `glyphs` into the atlas, clears the queue,
+    /// Grows the atlas to the page count of `glyphs`, clears the pages and
+    /// copies the glyphs queued in `glyphs`, clears both queues,
     /// writes the vertices and indices of `drawData`, and renders its world
     /// canvases into their textures, which it creates, resizes and destroys
     /// as the canvases come and go. Each world canvas's UICanvas::target, and
@@ -78,6 +87,7 @@ public:
     const MeshComponent& worldQuad();
 
     size_t worldTextureCount() const { return m_targets.size(); }
+    uint32_t atlasPageCount() const { return m_atlas.layers; }
 
 private:
     struct PipelineKey {
@@ -94,6 +104,7 @@ private:
         uint64_t frame;
     };
 
+    Atlas createAtlas(uint32_t layers) const;
     VulkanPipeline* pipelineFor(VkFormat color, VkFormat depth);
     VkDescriptorSet descriptorSetFor(VkImageView view, VkSampler sampler);
     void uploadGlyphs(VkCommandBuffer cmd, GlyphCache& glyphs);
@@ -110,9 +121,12 @@ private:
     Logger* m_logger;
     uint32_t m_framesInFlight;
     uint32_t m_maxImageSize = 4096;
+    uint32_t m_atlasSize;
 
-    GPUTexture m_atlas;
+    Atlas m_atlas;
+    VkSampler m_atlasSampler = VK_NULL_HANDLE;
     bool m_atlasReady = false;  // cleared and in SHADER_READ_ONLY_OPTIMAL
+    std::vector<std::pair<Atlas, uint64_t>> m_retiredAtlases;  // with the frame number they were replaced in
 
     std::unique_ptr<FrameRingBuffer> m_ring;
     VkBuffer m_vertexBuffer = VK_NULL_HANDLE;

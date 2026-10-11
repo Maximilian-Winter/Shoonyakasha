@@ -40,20 +40,31 @@ VkDescriptorPool createPool(VkDevice device) {
     return pool;
 }
 
-VkImageMemoryBarrier2 imageBarrier(VkImage image, VkImageLayout from, VkImageLayout to) {
+VkImageMemoryBarrier2 imageBarrier(VkImage image, VkImageLayout from, VkImageLayout to, uint32_t layers = 1) {
     VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
     barrier.oldLayout = from;
     barrier.newLayout = to;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers};
     switch (to) {
     case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-        // Earlier frames may still sample the image.
-        barrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        if (from == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+            // One transfer's writes before the next one's.
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        } else {
+            // Earlier frames may still sample the image.
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        }
         barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
         barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        break;
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
         break;
     case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
         barrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
@@ -84,12 +95,56 @@ float srgbToLinear(float c) {
     return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
 }
 
+void destroyAtlas(VmaAllocator allocator, VkDevice device, UIRenderer::Atlas& atlas) {
+    if (atlas.layerView != VK_NULL_HANDLE) vkDestroyImageView(device, atlas.layerView, nullptr);
+    GPUResourceFactory::destroyTexture(allocator, device, atlas.texture);
+    atlas = {};
+}
+
 } // namespace
+
+UIRenderer::Atlas UIRenderer::createAtlas(uint32_t layers) const {
+    const VkDevice vkDevice = m_device.getLogicalDevice();
+    const VmaAllocator allocator = m_device.getAllocator().getHandle();
+
+    Atlas atlas;
+    atlas.layers = layers;
+    GPUTexture& texture = atlas.texture;
+    texture.width = texture.height = m_atlasSize;
+    texture.format = VK_FORMAT_R8_UNORM;
+    texture.mipLevels = 1;
+    texture.exists = true;
+
+    VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = VK_FORMAT_R8_UNORM;
+    info.extent = {m_atlasSize, m_atlasSize, 1};
+    info.mipLevels = 1;
+    info.arrayLayers = layers;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    // TRANSFER_SRC: the pages are copied into a larger atlas when it grows.
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VmaAllocationCreateInfo allocation{};
+    allocation.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    if (vmaCreateImage(allocator, &info, &allocation, &texture.image, &texture.allocation, nullptr) != VK_SUCCESS) {
+        throw std::runtime_error("UIRenderer: failed to create the glyph atlas");
+    }
+    texture.view = GPUResourceFactory::createImageView(vkDevice, texture.image, VK_FORMAT_R8_UNORM,
+                                                       VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+                                                       1, layers);
+    atlas.layerView = GPUResourceFactory::createImageView(vkDevice, texture.image, VK_FORMAT_R8_UNORM,
+                                                          VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1, 1);
+    return atlas;
+}
 
 UIRenderer::UIRenderer(VulkanDevice& device, std::string shaderDirectory, uint32_t framesInFlight,
                        int atlasSize, Logger* logger)
     : m_device(device), m_shaderDirectory(std::move(shaderDirectory)), m_logger(logger),
-      m_framesInFlight(std::max(framesInFlight, 1u)), m_descriptors(m_framesInFlight) {
+      m_framesInFlight(std::max(framesInFlight, 1u)), m_atlasSize(static_cast<uint32_t>(std::max(atlasSize, 1))),
+      m_descriptors(m_framesInFlight) {
     const VkDevice vkDevice = device.getLogicalDevice();
     const VmaAllocator allocator = device.getAllocator().getHandle();
 
@@ -97,11 +152,10 @@ UIRenderer::UIRenderer(VulkanDevice& device, std::string shaderDirectory, uint32
     vkGetPhysicalDeviceProperties(device.getPhysicalDevice(), &properties);
     m_maxImageSize = properties.limits.maxImageDimension2D;
 
-    m_atlas = GPUResourceFactory::createTexture2D(allocator, vkDevice, static_cast<uint32_t>(atlasSize),
-                                                  static_cast<uint32_t>(atlasSize), VK_FORMAT_R8_UNORM);
-    m_atlas.sampler = GPUResourceFactory::createSampler(vkDevice, VK_FILTER_LINEAR, VK_FILTER_LINEAR,
-                                                        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 1.0f,
-                                                        VK_SAMPLER_MIPMAP_MODE_NEAREST, 0.0f);
+    m_atlas = createAtlas(1);
+    m_atlasSampler = GPUResourceFactory::createSampler(vkDevice, VK_FILTER_LINEAR, VK_FILTER_LINEAR,
+                                                       VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 1.0f,
+                                                       VK_SAMPLER_MIPMAP_MODE_NEAREST, 0.0f);
 
     m_ring = std::make_unique<FrameRingBuffer>(
         allocator, device.getDeleteQueue(),
@@ -135,7 +189,9 @@ UIRenderer::~UIRenderer() {
         for (VkDescriptorPool pool : frame.pools) vkDestroyDescriptorPool(vkDevice, pool, nullptr);
     }
     if (m_setLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(vkDevice, m_setLayout, nullptr);
-    GPUResourceFactory::destroyTexture(allocator, vkDevice, m_atlas);
+    for (auto& [atlas, frame] : m_retiredAtlases) destroyAtlas(allocator, vkDevice, atlas);
+    destroyAtlas(allocator, vkDevice, m_atlas);
+    vkDestroySampler(vkDevice, m_atlasSampler, nullptr);
 }
 
 void UIRenderer::prepareFrame(VkCommandBuffer cmd, uint32_t frameIndex, entt::registry& registry,
@@ -181,37 +237,90 @@ void UIRenderer::prepareFrame(VkCommandBuffer cmd, uint32_t frameIndex, entt::re
 
 void UIRenderer::uploadGlyphs(VkCommandBuffer cmd, GlyphCache& glyphs) {
     const auto& uploads = glyphs.pendingUploads();
-    if (m_atlasReady && uploads.empty()) return;
+    const auto& clears = glyphs.pendingClears();
+    const uint32_t pages = std::max(glyphs.pageCount(), 1u);
+    const bool grow = pages > m_atlas.layers;
+    if (m_atlasReady && !grow && uploads.empty() && clears.empty()) return;
 
-    recordBarriers(cmd, {imageBarrier(m_atlas.image,
-                                      m_atlasReady ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
-                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)});
+    // Filtering at a glyph's edge reads its neighbours, which must be empty
+    // rather than whatever the memory or an evicted glyph left there.
+    const VkClearColorValue zero{};
+    const auto clearLayers = [&](VkImage image, uint32_t first, uint32_t count) {
+        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, first, count};
+        vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &range);
+    };
 
-    if (!m_atlasReady) {
-        // Filtering at a glyph's edge reads its neighbours, which must be
-        // empty rather than whatever the memory held.
-        const VkClearColorValue zero{};
-        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdClearColorImage(cmd, m_atlas.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &range);
+    if (grow) {
+        // A larger atlas: the old pages are copied over, the new ones cleared,
+        // and the old image is destroyed once no frame in flight uses it.
+        Atlas next = createAtlas(pages);
+        const uint32_t kept = m_atlasReady ? m_atlas.layers : 0;
+        std::vector<VkImageMemoryBarrier2> barriers = {
+            imageBarrier(next.texture.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, pages)};
+        if (kept > 0) {
+            barriers.push_back(imageBarrier(m_atlas.texture.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, kept));
+        }
+        recordBarriers(cmd, barriers);
+
+        if (kept > 0) {
+            VkImageCopy region{};
+            region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, kept};
+            region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, kept};
+            region.extent = {m_atlasSize, m_atlasSize, 1};
+            vkCmdCopyImage(cmd, m_atlas.texture.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, next.texture.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        }
+        clearLayers(next.texture.image, kept, pages - kept);
+
+        m_retiredAtlases.emplace_back(m_atlas, m_frameNumber);
+        m_atlas = next;
+        if (m_logger && kept > 0) m_logger->log(LogLevel::Info, "Canvas UI: the glyph atlas has %u pages", pages);
+    } else {
+        recordBarriers(cmd, {imageBarrier(m_atlas.texture.image,
+                                          m_atlasReady ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                       : VK_IMAGE_LAYOUT_UNDEFINED,
+                                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_atlas.layers)});
+        if (!m_atlasReady) clearLayers(m_atlas.texture.image, 0, m_atlas.layers);
     }
+    const VkImage image = m_atlas.texture.image;
+    const uint32_t layers = m_atlas.layers;
+    const auto betweenWrites = [&] {
+        recordBarriers(cmd, {imageBarrier(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layers)});
+    };
 
+    if (!clears.empty()) {
+        if (m_logger) {
+            m_logger->logEvery(5.0f, LogLevel::Info, "Canvas UI: %zu glyph atlas page(s) cleared to make room",
+                               clears.size());
+        }
+        betweenWrites();
+        for (const uint32_t page : clears) {
+            if (page < layers) clearLayers(image, page, 1);
+        }
+    }
+    glyphs.clearPendingClears();
+
+    if (!uploads.empty()) betweenWrites();
     for (const auto& upload : uploads) {
+        if (upload.page >= layers) continue;
         const auto slice = m_ring->allocate(upload.bitmap.pixels.size());
         if (!slice) break;
         std::memcpy(slice->data, upload.bitmap.pixels.data(), upload.bitmap.pixels.size());
 
         VkBufferImageCopy region{};
         region.bufferOffset = slice->offset;
-        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, upload.page, 1};
         region.imageOffset = {upload.position.x, upload.position.y, 0};
         region.imageExtent = {static_cast<uint32_t>(upload.bitmap.size.x),
                               static_cast<uint32_t>(upload.bitmap.size.y), 1};
-        vkCmdCopyBufferToImage(cmd, slice->buffer, m_atlas.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        vkCmdCopyBufferToImage(cmd, slice->buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     }
     glyphs.clearPendingUploads();
 
-    recordBarriers(cmd, {imageBarrier(m_atlas.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)});
+    recordBarriers(cmd, {imageBarrier(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, layers)});
     m_atlasReady = true;
 }
 
@@ -303,6 +412,14 @@ void UIRenderer::destroyRetired() {
             if (m_releaser) m_releaser(it->texture.view);
             GPUResourceFactory::destroyTexture(allocator, vkDevice, it->texture);
             it = m_retired.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = m_retiredAtlases.begin(); it != m_retiredAtlases.end();) {
+        if (m_frameNumber >= it->second + m_framesInFlight) {
+            destroyAtlas(allocator, vkDevice, it->first);
+            it = m_retiredAtlases.erase(it);
         } else {
             ++it;
         }
@@ -457,7 +574,7 @@ VkDescriptorSet UIRenderer::descriptorSetFor(VkImageView view, VkSampler sampler
     }
 
     const VkDescriptorImageInfo images[2] = {
-        {m_atlas.sampler, m_atlas.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {m_atlasSampler, m_atlas.texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         {sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
     };
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -494,11 +611,12 @@ void UIRenderer::drawCanvas(VkCommandBuffer cmd, VkPipelineLayout layout, const 
         const int32_t y1 = std::clamp(batch.scissor.y + batch.scissor.w, y0, static_cast<int32_t>(extent.height));
         if (x1 <= x0 || y1 <= y0 || batch.indexCount == 0) continue;
 
-        // A batch without Image quads still binds an image; the atlas
-        // stands in. So does the atlas sampler for a texture without one.
+        // A batch without Image quads still binds an image; the atlas's
+        // first page stands in. The atlas sampler stands in for a texture
+        // without one.
         const VkDescriptorSet set = batch.image != VK_NULL_HANDLE
-            ? descriptorSetFor(batch.image, batch.sampler != VK_NULL_HANDLE ? batch.sampler : m_atlas.sampler)
-            : descriptorSetFor(m_atlas.view, m_atlas.sampler);
+            ? descriptorSetFor(batch.image, batch.sampler != VK_NULL_HANDLE ? batch.sampler : m_atlasSampler)
+            : descriptorSetFor(m_atlas.layerView, m_atlasSampler);
         if (set == VK_NULL_HANDLE) continue;
 
         const VkRect2D scissor{{x0, y0}, {static_cast<uint32_t>(x1 - x0), static_cast<uint32_t>(y1 - y0)}};

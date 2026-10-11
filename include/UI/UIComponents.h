@@ -205,12 +205,16 @@ struct UIInteractable {
     bool navigable = true;          // Tab, the arrow keys and the D-pad can focus it
     bool capturesKeyboard = false;  // while focused, keys go to it rather than the camera
 
-    // Multiplied into the element's own UIPanel and UIImage colours, by state.
+    // Multiplied into the element's own UIPanel and UIImage colours, and into
+    // the UIPanel, UIImage and UIText colours of each tint target, by state.
     glm::vec4 normalColor{1.0f};
     glm::vec4 hoverColor{0.92f, 0.92f, 0.92f, 1.0f};
     glm::vec4 pressedColor{0.75f, 0.75f, 0.75f, 1.0f};
     glm::vec4 disabledColor{0.6f, 0.6f, 0.6f, 0.5f};
     glm::vec4 focusedColor{0.85f, 0.92f, 1.0f, 1.0f};
+
+    // Other elements that take the state colour, such as a button's label.
+    std::vector<entt::entity> tintTargets;
 
     // Written by CanvasInputSystem.
     bool hovered = false;       // the pointer is over it, or it is pressed and the pointer is over it

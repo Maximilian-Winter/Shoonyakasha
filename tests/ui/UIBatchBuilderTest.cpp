@@ -10,9 +10,11 @@
 #include "UI/UIBatchBuilder.h"
 #include "UI/CanvasLayout.h"
 #include "UI/UISystems.h"
+#include "UI/UIWidgets.h"
 #include "ECS/Core.h"
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 
 using namespace Shoonyakasha;
@@ -78,7 +80,16 @@ struct Fixture {
         buildDrawData(registry, fonts, glyphs, data);
     }
 
-    UIDrawMode mode(size_t vertex) const { return static_cast<UIDrawMode>(data.vertices.at(vertex).mode); }
+    UIDrawMode mode(size_t vertex) const { return static_cast<UIDrawMode>(data.vertices.at(vertex).mode & 0xFFu); }
+    uint32_t page(size_t vertex) const { return data.vertices.at(vertex).mode >> 8; }
+
+    /// The first vertex drawn with `drawMode`.
+    const UIVertex& first(UIDrawMode drawMode) const {
+        for (const auto& v : data.vertices) {
+            if (static_cast<UIDrawMode>(v.mode & 0xFFu) == drawMode) return v;
+        }
+        throw std::runtime_error("no vertex with that mode");
+    }
 };
 
 void expectVec2Near(glm::vec2 a, glm::vec2 b) {
@@ -280,8 +291,9 @@ TEST(UIBatchBuilder, TextQuadsAndGlyphUploads) {
     EXPECT_EQ(f.data.vertices.size(), 20u);
 }
 
-TEST(UIBatchBuilder, FullAtlasIsResetOnce) {
+TEST(UIBatchBuilder, FullAtlasEvictsAPageNotDrawnFromThisFrame) {
     Fixture f;
+    f.glyphs = GlyphCache(512, 1);
     const uint32_t font = f.fonts.load(kRoboto);
     const SdfFont& sdf = *f.fonts.get(font);
 
@@ -299,9 +311,151 @@ TEST(UIBatchBuilder, FullAtlasIsResetOnce) {
     f.registry.emplace<UIText>(e, text);
     f.build();
 
-    EXPECT_EQ(f.glyphs.generation(), 1u);
+    EXPECT_EQ(f.glyphs.evictions(), 1u);
+    EXPECT_EQ(f.glyphs.generation(), 0u);
     EXPECT_EQ(f.data.vertices.size(), 8u);
     EXPECT_EQ(f.glyphs.glyphCount(), 1u);
+}
+
+TEST(UIBatchBuilder, AtlasIsResetOnceWhenEveryPageIsInUse) {
+    Fixture f;
+    f.glyphs = GlyphCache(512, 2);
+    const uint32_t font = f.fonts.load(kRoboto);
+    const SdfFont& sdf = *f.fonts.get(font);
+    const int a = sdf.findGlyph(U'a'), b = sdf.findGlyph(U'b'), q = sdf.findGlyph(U'q');
+
+    // 'a' on the first page and 'b' on the second, both pages filled up with
+    // copies of 'q' under other font ids.
+    ASSERT_EQ(f.glyphs.findOrAdd(font, a, sdf)->page, 0u);
+    uint32_t other = 1000;
+    while (f.glyphs.pageCount() < 2) ASSERT_TRUE(f.glyphs.findOrAdd(other++, q, sdf));
+    ASSERT_EQ(f.glyphs.findOrAdd(font, b, sdf)->page, 1u);
+    while (f.glyphs.findOrAdd(other, q, sdf)) ++other;
+
+    // Drawing "abq" uses both pages before 'q' needs room, so neither can be
+    // evicted; the atlas is reset and all three are placed again.
+    const entt::entity e = f.add(f.canvas, {0, 0}, {400, 100});
+    UIText text;
+    text.text = "abq";
+    text.font = font;
+    f.registry.emplace<UIText>(e, text);
+    f.build();
+
+    EXPECT_EQ(f.glyphs.generation(), 1u);
+    EXPECT_EQ(f.glyphs.glyphCount(), 3u);
+    EXPECT_EQ(f.data.vertices.size(), 12u);
+    EXPECT_EQ(f.glyphs.pendingClears().size(), 2u);  // both pages
+}
+
+TEST(UIBatchBuilder, TextVerticesNameTheirAtlasPage) {
+    Fixture f;
+    const uint32_t font = f.fonts.load(kRoboto);
+    const SdfFont& sdf = *f.fonts.get(font);
+    const int q = sdf.findGlyph(U'q');
+    for (uint32_t other = 1000; f.glyphs.pageCount() < 2; ++other) ASSERT_TRUE(f.glyphs.findOrAdd(other, q, sdf));
+
+    // The first page is full for a 'q', so it goes on the second.
+    const entt::entity e = f.add(f.canvas, {0, 0}, {400, 100});
+    UIText text;
+    text.text = "q";
+    text.font = font;
+    f.registry.emplace<UIText>(e, text);
+    f.build();
+
+    ASSERT_EQ(f.data.vertices.size(), 4u);
+    EXPECT_EQ(f.mode(0), UIDrawMode::Text);
+    EXPECT_EQ(f.page(0), 1u);
+    EXPECT_EQ(f.glyphs.pendingUploads().back().page, 1u);
+}
+
+// ── Tint targets ────────────────────────────────────────────────
+
+namespace {
+
+struct TintState {
+    const char* name;
+    void (*apply)(UIInteractable&);
+};
+
+const TintState kTintStates[] = {
+    {"normal", [](UIInteractable&) {}},
+    {"hovered", [](UIInteractable& i) { i.hovered = true; }},
+    {"pressed", [](UIInteractable& i) { i.hovered = i.pressed = true; }},
+    {"focused", [](UIInteractable& i) { i.focused = true; }},
+    {"disabled", [](UIInteractable& i) { i.enabled = false; }},
+};
+
+} // namespace
+
+TEST(UIBatchBuilder, AButtonsLabelTakesTheStateColour) {
+    for (const auto& state : kTintStates) {
+        Fixture f;
+        const uint32_t font = f.fonts.load(kRoboto);
+        const entt::entity button = createButton(f.registry, f.canvas, "Go", font);
+        auto& interactable = f.registry.get<UIInteractable>(button);
+        state.apply(interactable);
+        f.build();
+
+        const entt::entity label = interactable.tintTargets.at(0);
+        const glm::vec4 expected = f.registry.get<UIText>(label).color * interactable.stateColor();
+        EXPECT_EQ(f.first(UIDrawMode::Text).color, packColor(expected)) << state.name;
+        EXPECT_EQ(f.first(UIDrawMode::Solid).color,
+                  packColor(f.registry.get<UIPanel>(button).color * interactable.stateColor())) << state.name;
+    }
+}
+
+TEST(UIBatchBuilder, AToggleAndASliderTintTheirParts) {
+    for (const auto& state : kTintStates) {
+        Fixture f;
+        const uint32_t font = f.fonts.load(kRoboto);
+        const entt::entity toggle = createToggle(f.registry, f.canvas, "On", font, true);
+        auto& toggleState = f.registry.get<UIInteractable>(toggle);
+        state.apply(toggleState);
+        f.build();
+
+        // Drawn in order: the box, the checkmark, then the label.
+        const auto& toggleTargets = toggleState.tintTargets;
+        ASSERT_EQ(toggleTargets.size(), 3u);
+        const glm::vec4 tint = toggleState.stateColor();
+        EXPECT_EQ(f.data.vertices.at(0).color, packColor(f.registry.get<UIPanel>(toggleTargets[0]).color * tint))
+            << state.name;
+        EXPECT_EQ(f.data.vertices.at(4).color, packColor(f.registry.get<UIImage>(toggleTargets[1]).color * tint))
+            << state.name;
+        EXPECT_EQ(f.first(UIDrawMode::Text).color, packColor(f.registry.get<UIText>(toggleTargets[2]).color * tint))
+            << state.name;
+    }
+
+    for (const auto& state : kTintStates) {
+        Fixture f;
+        const entt::entity slider = createSlider(f.registry, f.canvas, 0.0f, 1.0f, 0.5f);
+        auto& sliderState = f.registry.get<UIInteractable>(slider);
+        state.apply(sliderState);
+        f.build();
+
+        // Drawn in order: the track, which keeps its colour, the fill and the handle.
+        const auto& s = f.registry.get<UISlider>(slider);
+        const glm::vec4 tint = sliderState.stateColor();
+        ASSERT_EQ(f.data.vertices.size(), 12u);
+        EXPECT_EQ(f.data.vertices[4].color, packColor(f.registry.get<UIImage>(s.fill).color * tint)) << state.name;
+        EXPECT_EQ(f.data.vertices[8].color, packColor(f.registry.get<UIPanel>(s.handle).color * tint)) << state.name;
+    }
+}
+
+TEST(UIBatchBuilder, ATargetOfTwoInteractablesTakesBothColours) {
+    Fixture f;
+    const entt::entity target = f.image(f.canvas, {0, 0}, {10, 10});
+    const entt::entity a = f.add(f.canvas, {20, 0}, {10, 10});
+    const entt::entity b = f.add(f.canvas, {40, 0}, {10, 10});
+    auto& first = f.registry.emplace<UIInteractable>(a);
+    first.normalColor = {0.5f, 1.0f, 1.0f, 1.0f};
+    first.tintTargets = {target};
+    auto& second = f.registry.emplace<UIInteractable>(b);
+    second.normalColor = {1.0f, 0.5f, 1.0f, 1.0f};
+    second.tintTargets = {target, f.registry.create()};  // an element that draws nothing is fine
+    f.build();
+
+    ASSERT_EQ(f.data.vertices.size(), 4u);
+    EXPECT_EQ(f.data.vertices[0].color, packColor({0.5f, 0.5f, 1.0f, 1.0f}));
 }
 
 // ── CanvasTextSystem ────────────────────────────────────────────
