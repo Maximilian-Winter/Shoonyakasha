@@ -66,6 +66,7 @@ std::string getText(EntityHandle element) const;
 void setFont(EntityHandle element, uint32_t font);
 void setFontSize(EntityHandle element, float fontSize);
 void setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign vertical = TextVAlign::Top);
+void setTextDirection(EntityHandle element, TextDirection direction);
 void setTextWrap(EntityHandle element, bool wrap);
 void setColor(EntityHandle element, const glm::vec4& color);
 bool setTexture(EntityHandle element, const std::string& path);

@@ -21,7 +21,22 @@ namespace {
 
 bool sameStyle(const TextStyle& a, const TextStyle& b) {
     return a.fontSize == b.fontSize && a.alignH == b.alignH && a.alignV == b.alignV &&
-           a.wrap == b.wrap && a.lineSpacing == b.lineSpacing;
+           a.wrap == b.wrap && a.lineSpacing == b.lineSpacing && a.direction == b.direction;
+}
+
+/// The selected stretches of a laid-out line, [left, right) each: one for
+/// each run of selected clusters shown side by side.
+std::vector<std::pair<float, float>> selectionSpans(const TextLayoutResult& layout, size_t start, size_t end) {
+    std::vector<std::pair<float, float>> spans;
+    for (const TextCluster& c : layout.clusters) {   // left to right
+        if (c.firstCodepoint < start || c.firstCodepoint >= end) continue;
+        if (!spans.empty() && std::abs(spans.back().second - c.x) < 1e-3f) {
+            spans.back().second = c.x + c.width;
+        } else {
+            spans.emplace_back(c.x, c.x + c.width);
+        }
+    }
+    return spans;
 }
 
 /// Shows each field's text, mask or placeholder in its text element.
@@ -73,17 +88,27 @@ void placeTextFields(entt::registry& registry, float deltaTime) {
         field.blinkTime += deltaTime;
 
         const bool laidOut = !field.text.empty() && cache;
-        const float caret = laidOut ? caretX(cache->layout, field.caret) : 0.0f;
-        const float anchor = laidOut ? caretX(cache->layout, field.selectionAnchor) : 0.0f;
-        const float end = laidOut ? caretX(cache->layout, std::numeric_limits<size_t>::max()) : 0.0f;
+        const float width = textRect->rect.size().x;
+        // An empty right-to-left field shows its caret at the right.
+        const float emptyCaret = text->direction == TextDirection::RightToLeft ? width - field.caretWidth : 0.0f;
+        const float caret = laidOut ? caretX(cache->layout, field.caret) : emptyCaret;
+
+        // The text's extent: from 0, or further left where right-aligned text
+        // runs past the box's left edge, to its right end.
+        float low = 0.0f, high = 0.0f;
+        if (laidOut) {
+            for (const TextCluster& c : cache->layout.clusters) {
+                low = std::min(low, c.x);
+                high = std::max(high, c.x + c.width);
+            }
+        }
 
         // Scrolled no further than needed to show the caret, and no further
-        // than the end of the text.
-        const float width = textRect->rect.size().x;
+        // than the text reaches.
         float scroll = field.scroll;
         scroll = std::min(scroll, caret);
         scroll = std::max(scroll, caret + field.caretWidth - width);
-        scroll = std::clamp(scroll, 0.0f, std::max(0.0f, end + field.caretWidth - width));
+        scroll = std::clamp(scroll, low, std::max(low, high + field.caretWidth - width));
         field.scroll = scroll;
 
         const float shift = -scroll - textRect->anchoredPosition.x;
@@ -93,9 +118,21 @@ void placeTextFields(entt::registry& registry, float deltaTime) {
 
         const float left = textRect->rect.min.x;
         const float height = text->fontSize;
-        const bool selected = focused && field.caret != field.selectionAnchor;
-        placeBar(registry, field.selectionElement, left + std::min(caret, anchor), std::abs(caret - anchor), height,
-                 field.selectionColor, selected);
+        const bool selected = laidOut && focused && field.caret != field.selectionAnchor;
+        const auto spans = selected ? selectionSpans(cache->layout, std::min(field.caret, field.selectionAnchor),
+                                                     std::max(field.caret, field.selectionAnchor))
+                                    : std::vector<std::pair<float, float>>{};
+        const float selectionLeft = spans.empty() ? 0.0f : spans.front().first;
+        const float selectionRight = spans.empty() ? 0.0f : spans.back().second;
+        placeBar(registry, field.selectionElement, left + selectionLeft, selectionRight - selectionLeft, height,
+                 field.selectionColor, selected && !spans.empty());
+        if (const auto* bar = registry.try_get<UIRect>(field.selectionElement)) {
+            auto& rects = registry.get_or_emplace<UIImageRects>(field.selectionElement).rects;
+            rects.clear();
+            for (const auto& [from, to] : spans) {
+                rects.push_back({{left + from, bar->rect.min.y}, {left + to, bar->rect.max.y}});
+            }
+        }
 
         const bool blinkOn = field.blinkPeriod <= 0.0f ||
                              std::fmod(field.blinkTime, field.blinkPeriod) < field.blinkPeriod * 0.5f;
@@ -126,6 +163,7 @@ void CanvasTextSystem::update(entt::registry& registry, float deltaTime) {
         style.alignV = text.alignV;
         style.wrap = text.wrap;
         style.lineSpacing = text.lineSpacing;
+        style.direction = text.direction;
         const glm::vec2 box = element.rect.size();
 
         const std::vector<uint32_t> fonts = m_fonts->chain(text.font);

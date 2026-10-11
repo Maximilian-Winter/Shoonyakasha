@@ -110,8 +110,8 @@ Under the project's rules, two parts of this plan add a new abstraction or depen
 
 **Caret and selection:**
 - `caretX` uses the cluster's edge on its own side.
-- At a direction boundary, the caret is drawn at the position of the run being typed into; only one caret is drawn.
-- Left and Right move visually, and Home and End go to the visual ends.
+- At a direction boundary, the caret is drawn at the edge of the more deeply embedded run (the higher bidi level); only one caret is drawn. That gives every position on screen one caret index, which is what lets the arrows move visually.
+- Left and Right move visually. Home and End go to the start and end of the text, in typing order.
 - A selection in mixed text is drawn as one rectangle per visual run, so the selection element becomes a list of rects drawn by the batch builder.
 
 **Alignment.** `TextAlignH` gains `Start` and `End`, resolved against the paragraph direction. The default stays `Left`, so existing text is unchanged.

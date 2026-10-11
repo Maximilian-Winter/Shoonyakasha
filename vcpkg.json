@@ -20,6 +20,7 @@
     "glm",
     "spirv-reflect",
     "harfbuzz",
+    "sheenbidi",
     {
       "$comment": "Only because harfbuzz's CMake config requires it; the engine renders glyphs with stb_truetype.",
       "name": "freetype",

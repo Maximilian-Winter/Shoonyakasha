@@ -589,6 +589,8 @@ UIAnchor toFacadeAnchor(Shoonyakasha::UIAnchorComponent::Anchor anchor) {
     return static_cast<UIAnchor>(static_cast<uint8_t>(anchor));
 }
 Shoonyakasha::Text2DComponent::HAlign toEngineAlign(TextHAlign align) {
+    if (align == TextHAlign::Start) align = TextHAlign::Left;
+    else if (align == TextHAlign::End) align = TextHAlign::Right;
     return static_cast<Shoonyakasha::Text2DComponent::HAlign>(static_cast<uint8_t>(align));
 }
 }

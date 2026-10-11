@@ -224,7 +224,7 @@ entt::entity createTextField(entt::registry& registry, entt::entity parent, cons
     auto& label = registry.emplace<UIText>(text);
     label.font = font;
     label.fontSize = size.y * 0.5f;
-    label.alignH = TextAlignH::Left;
+    label.alignH = TextAlignH::Start;   // right-to-left text from the right
     label.alignV = TextAlignV::Middle;
     label.wrap = false;
 

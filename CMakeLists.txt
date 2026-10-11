@@ -40,6 +40,7 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(unofficial-spirv-reflect CONFIG REQUIRED)
 find_package(harfbuzz CONFIG REQUIRED)
+find_package(SheenBidi CONFIG REQUIRED)
 
 # CONFIGURE_DEPENDS makes the build system re-glob when files appear or vanish.
 # A glob without it goes stale the moment you add a source file.
@@ -100,6 +101,8 @@ target_link_libraries(Shoonyakasha
         unofficial::spirv-reflect
         # Text shaping for the canvas UI (UI/SdfFont.cpp, UI/TextShaper.cpp).
         harfbuzz::harfbuzz
+        # Bidirectional text for the canvas UI (UI/Bidi.cpp).
+        SheenBidi::SheenBidi
 )
 
 # Where ApplicationBase finds the default pipeline when a program names none.

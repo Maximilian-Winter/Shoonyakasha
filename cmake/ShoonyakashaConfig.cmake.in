@@ -16,6 +16,7 @@ find_dependency(glm CONFIG)
 # Linked privately, but a static Shoonyakasha still needs them at link time.
 find_dependency(unofficial-spirv-reflect CONFIG)
 find_dependency(harfbuzz CONFIG)
+find_dependency(SheenBidi CONFIG)
 
 include("${CMAKE_CURRENT_LIST_DIR}/ShoonyakashaTargets.cmake")
 

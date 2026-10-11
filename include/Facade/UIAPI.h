@@ -260,6 +260,10 @@ public:
     void setFont(EntityHandle element, uint32_t font);
     void setFontSize(EntityHandle element, float fontSize);
     void setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign vertical = TextVAlign::Top);
+    /// The direction of each paragraph of the text: Auto, the default, takes
+    /// it from the paragraph's first letter with a direction. It sets where
+    /// Start and End align, and the order of words of the two directions.
+    void setTextDirection(EntityHandle element, TextDirection direction);
     void setTextWrap(EntityHandle element, bool wrap);
 
     /// The colour of the element's own text, image and panel.

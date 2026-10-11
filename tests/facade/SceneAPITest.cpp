@@ -10,6 +10,7 @@
 #include <entt/entt.hpp>
 #include "ECS/Core.h"
 #include "ECS/RenderComponents.h"
+#include "ECS/Sprite2DComponents.h"
 #include "Facade/SceneAPI.h"
 #include "TestHelpers.h"
 
@@ -517,4 +518,14 @@ TEST_F(SceneAPIFixture, SaveToFile_TestMode_ReturnsFalse) {
 
 TEST_F(SceneAPIFixture, LoadFromFile_TestMode_ReturnsFalse) {
     EXPECT_FALSE(api->loadFromFile("test_scene.json"));
+}
+
+TEST_F(SceneAPIFixture, TextAlignStartAndEndAreLeftAndRightFor2DText) {
+    auto entity = api->createEntity("Label");
+    auto e = static_cast<entt::entity>(entity);
+    registry.emplace<Shoonyakasha::Text2DComponent>(e);
+    api->setTextAlign(entity, TextHAlign::Start);
+    EXPECT_EQ(registry.get<Shoonyakasha::Text2DComponent>(e).hAlign, Shoonyakasha::Text2DComponent::HAlign::Left);
+    api->setTextAlign(entity, TextHAlign::End);
+    EXPECT_EQ(registry.get<Shoonyakasha::Text2DComponent>(e).hAlign, Shoonyakasha::Text2DComponent::HAlign::Right);
 }

@@ -202,7 +202,13 @@ bool build(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyph
                 const glm::vec4 textTint = target != targetTints.end() ? target->second : glm::vec4(1.0f);
                 const glm::vec4 tint = interactable ? interactable->stateColor() * textTint : textTint;
                 if (const auto* p = registry.try_get<UIPanel>(entity)) builder.panel(element.rect, *p, tint);
-                if (const auto* img = registry.try_get<UIImage>(entity)) builder.image(element.rect, *img, tint);
+                if (const auto* img = registry.try_get<UIImage>(entity)) {
+                    if (const auto* rects = registry.try_get<UIImageRects>(entity)) {
+                        for (const Rect& r : rects->rects) builder.image(r, *img, tint);
+                    } else {
+                        builder.image(element.rect, *img, tint);
+                    }
+                }
                 const auto* t = registry.try_get<UIText>(entity);
                 const auto* cache = registry.try_get<UITextCache>(entity);
                 if (t && cache) builder.text(element.rect, *t, *cache, textTint);

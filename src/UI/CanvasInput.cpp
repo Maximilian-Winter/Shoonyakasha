@@ -625,14 +625,22 @@ namespace {
 
 /// The field's text, caret and selection, with caret stops from its text
 /// element's layout when that layout is of the text as it is now.
+/// The layout of the field's text as it is now, or null when the text has
+/// changed since it was laid out, or is empty.
+const TextLayoutResult* currentLayout(const entt::registry& registry, const UITextField& field) {
+    const auto* cache = registry.try_get<UITextCache>(field.textElement);
+    if (!cache || field.text.empty() || cache->text != field.displayText()) return nullptr;
+    return &cache->layout;
+}
+
 TextEditBuffer bufferOf(const entt::registry& registry, const UITextField& field) {
     TextEditBuffer buffer;
     buffer.text = decodeUtf8(field.text);
     buffer.caret = std::min(field.caret, buffer.text.size());
     buffer.anchor = std::min(field.selectionAnchor, buffer.text.size());
-    const auto* cache = registry.try_get<UITextCache>(field.textElement);
-    if (cache && !buffer.text.empty() && cache->text == field.displayText()) {
-        buffer.stops = caretStops(cache->layout.clusters, buffer.text.size());
+    if (const TextLayoutResult* layout = currentLayout(registry, field)) {
+        buffer.stops = caretStops(layout->clusters, buffer.text.size());
+        for (const auto& [index, x] : caretPositions(*layout, buffer.text.size())) buffer.visual.push_back(index);
     }
     return buffer;
 }
@@ -710,6 +718,20 @@ void CanvasInputSystem::editTextField(entt::registry& registry, entt::entity ent
     const bool editable = !field.readOnly;
     bool changed = false;
 
+    // Left and Right move in display order, and without Shift collapse a
+    // selection to its end on that side. With Ctrl they move by word, to the
+    // previous word with Left in a left-to-right paragraph and with Right in
+    // a right-to-left one. Once the text is edited the layout is out of date
+    // until the next frame, so later moves in this frame are in typing order.
+    const TextLayoutResult* layout = currentLayout(registry, field);
+    const bool rightToLeft = layout && !layout->lines.empty() && layout->lines.front().rightToLeft;
+    auto selectionSide = [&](bool left) {
+        const size_t start = buffer.selectionStart(), end = buffer.selectionEnd();
+        if (!layout || buffer.visual.empty()) return left ? start : end;
+        const bool startIsLeft = caretX(*layout, start) <= caretX(*layout, end);
+        return left == startIsLeft ? start : end;
+    };
+
     // Characters typed and keys pressed, in the order they came.
     const std::u32string& typed = input.textInput;
     size_t typedDone = 0;
@@ -734,12 +756,14 @@ void CanvasInputSystem::editTextField(entt::registry& registry, entt::entity ent
 
         switch (key.key) {
             case GLFW_KEY_LEFT:
-                if (buffer.hasSelection() && !shift && !ctrl) buffer.moveTo(buffer.selectionStart(), false);
-                else buffer.moveTo(ctrl ? buffer.previousWord(buffer.caret) : buffer.previousStop(buffer.caret), shift);
+                if (buffer.hasSelection() && !shift && !ctrl) buffer.moveTo(selectionSide(true), false);
+                else if (ctrl) buffer.moveTo(rightToLeft ? buffer.nextWord(buffer.caret) : buffer.previousWord(buffer.caret), shift);
+                else buffer.moveTo(buffer.leftStop(buffer.caret), shift);
                 break;
             case GLFW_KEY_RIGHT:
-                if (buffer.hasSelection() && !shift && !ctrl) buffer.moveTo(buffer.selectionEnd(), false);
-                else buffer.moveTo(ctrl ? buffer.nextWord(buffer.caret) : buffer.nextStop(buffer.caret), shift);
+                if (buffer.hasSelection() && !shift && !ctrl) buffer.moveTo(selectionSide(false), false);
+                else if (ctrl) buffer.moveTo(rightToLeft ? buffer.previousWord(buffer.caret) : buffer.nextWord(buffer.caret), shift);
+                else buffer.moveTo(buffer.rightStop(buffer.caret), shift);
                 break;
             case GLFW_KEY_HOME:
                 buffer.moveTo(0, shift);

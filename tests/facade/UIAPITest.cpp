@@ -91,6 +91,13 @@ TEST_F(UIAPIFixture, TextUsesTheDefaultFontAndButtonsExposeTheirLabel) {
     ui.setTextAlign(label, TextHAlign::Right, TextVAlign::Bottom);
     EXPECT_EQ(registry.get<UI::UIText>(e(label)).alignH, UI::TextAlignH::Right);
     EXPECT_EQ(registry.get<UI::UIText>(e(label)).alignV, UI::TextAlignV::Bottom);
+    ui.setTextAlign(label, TextHAlign::Start);
+    EXPECT_EQ(registry.get<UI::UIText>(e(label)).alignH, UI::TextAlignH::Start);
+    ui.setTextAlign(label, TextHAlign::End);
+    EXPECT_EQ(registry.get<UI::UIText>(e(label)).alignH, UI::TextAlignH::End);
+    EXPECT_EQ(registry.get<UI::UIText>(e(label)).direction, UI::TextDirection::Auto);
+    ui.setTextDirection(label, TextDirection::RightToLeft);
+    EXPECT_EQ(registry.get<UI::UIText>(e(label)).direction, UI::TextDirection::RightToLeft);
     EXPECT_EQ(ui.loadFont("fonts/no-such-font.ttf"), 0u);
 }
 

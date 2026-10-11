@@ -36,8 +36,13 @@ struct ShapedGlyph {
 /// code point no font has becomes the first font's U+FFFD, or '?'. Runs are
 /// returned in text order; a right-to-left run's glyphs are in visual order.
 /// Empty when `fonts` is empty or its first font is not loaded.
+///
+/// With `levels`, the bidi embedding level of each code point of
+/// [begin, end), runs also end where the level changes, and each is shaped
+/// in its level's direction (odd: right to left, mirroring brackets).
+/// Without, each run takes its script's direction.
 std::vector<ShapedGlyph> shapeText(const std::vector<const SdfFont*>& fonts, std::u32string_view text,
-                                   size_t begin, size_t end);
+                                   size_t begin, size_t end, const std::vector<uint8_t>* levels = nullptr);
 
 } // namespace UI
 } // namespace Shoonyakasha

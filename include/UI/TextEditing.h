@@ -3,7 +3,8 @@
 //
 // Indices are code points. The caret stands between clusters (TextCluster),
 // never inside one, so moving over or deleting a Devanagari conjunct or a
-// letter with its marks takes one step.
+// letter with its marks takes one step. Indices are in typing order; in
+// bidirectional text, where they are shown comes from the layout.
 //
 
 #pragma once
@@ -24,10 +25,19 @@ namespace UI {
 /// clusters, every code point.
 std::vector<size_t> caretStops(const std::vector<TextCluster>& clusters, size_t length);
 
-/// The caret's x for `index` in a laid-out line, relative to the box: the
-/// left edge of the cluster it stands before, or the right edge of the last
-/// cluster at the end. 0 for a text with no clusters.
+/// The caret's x for `index` in a laid-out line, relative to the box. The
+/// caret stands at the leading edge of the cluster after it (its left edge
+/// if it reads left to right, its right edge if right to left), or at the
+/// trailing edge of the cluster before it at the end of the text. Where the
+/// two edges differ, at a change of direction, it stands at the edge of the
+/// one with the higher bidi level, the more deeply embedded run; on a tie,
+/// the one after it. 0 for a text with no clusters.
 float caretX(const TextLayoutResult& layout, size_t index);
+
+/// Every caret stop of a laid-out text of `length` code points (see
+/// caretStops) with its x as caretX gives it, in display order: line by
+/// line, left to right.
+std::vector<std::pair<size_t, float>> caretPositions(const TextLayoutResult& layout, size_t length);
 
 /// The caret stop nearest to `x` in a laid-out line of `length` code points.
 size_t caretAt(const TextLayoutResult& layout, size_t length, float x);
@@ -38,6 +48,7 @@ struct TextEditBuffer {
     size_t caret = 0;
     size_t anchor = 0;               // the selection runs between the anchor and the caret
     std::vector<size_t> stops;       // see caretStops; empty: every code point is one
+    std::vector<size_t> visual;      // the stops in display order (caretPositions); emptied by edits
 
     bool hasSelection() const { return caret != anchor; }
     size_t selectionStart() const { return caret < anchor ? caret : anchor; }
@@ -51,6 +62,11 @@ struct TextEditBuffer {
     /// The stop before and after `index`, or `index` at either end.
     size_t previousStop(size_t index) const;
     size_t nextStop(size_t index) const;
+
+    /// The stop shown left and right of `index`, from `visual`; without it,
+    /// the stop before and after `index`.
+    size_t leftStop(size_t index) const;
+    size_t rightStop(size_t index) const;
 
     /// Word jumps: back to the start of the word before `index`, and on to
     /// the start of the next word. Words are runs of letters and digits, or

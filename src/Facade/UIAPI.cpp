@@ -34,7 +34,17 @@ UI::TextAlignH toAlign(TextHAlign align) {
     switch (align) {
     case TextHAlign::Center: return UI::TextAlignH::Center;
     case TextHAlign::Right:  return UI::TextAlignH::Right;
+    case TextHAlign::Start:  return UI::TextAlignH::Start;
+    case TextHAlign::End:    return UI::TextAlignH::End;
     default:                 return UI::TextAlignH::Left;
+    }
+}
+
+UI::TextDirection toDirection(TextDirection direction) {
+    switch (direction) {
+    case TextDirection::LeftToRight: return UI::TextDirection::LeftToRight;
+    case TextDirection::RightToLeft: return UI::TextDirection::RightToLeft;
+    default:                         return UI::TextDirection::Auto;
     }
 }
 
@@ -450,6 +460,10 @@ void UIAPI::setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign
         t->alignH = toAlign(horizontal);
         t->alignV = toAlign(vertical);
     }
+}
+
+void UIAPI::setTextDirection(EntityHandle element, TextDirection direction) {
+    if (auto* t = m_impl->text(element)) t->direction = toDirection(direction);
 }
 
 void UIAPI::setTextWrap(EntityHandle element, bool wrap) {

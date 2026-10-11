@@ -28,8 +28,9 @@ from ._facade_types cimport (
     UIAnchor, UIAnchor_TopLeft, UIAnchor_TopCenter, UIAnchor_TopRight,
     UIAnchor_MiddleLeft, UIAnchor_MiddleCenter, UIAnchor_MiddleRight,
     UIAnchor_BottomLeft, UIAnchor_BottomCenter, UIAnchor_BottomRight,
-    TextHAlign, TextHAlign_Left, TextHAlign_Center, TextHAlign_Right,
+    TextHAlign, TextHAlign_Left, TextHAlign_Center, TextHAlign_Right, TextHAlign_Start, TextHAlign_End,
     TextVAlign, TextVAlign_Top, TextVAlign_Middle, TextVAlign_Bottom,
+    TextDirection, TextDirection_Auto, TextDirection_LeftToRight, TextDirection_RightToLeft,
     CanvasScaleMode, CanvasScaleMode_ConstantPixel, CanvasScaleMode_ScaleWithScreen,
     SizeFit, SizeFit_Unconstrained, SizeFit_Min, SizeFit_Preferred,
     EngineConfig, GltfOptions, RecordingOptions, ClipInfo, GltfResult as CppGltfResult,
@@ -95,11 +96,20 @@ UI_ANCHOR_BOTTOM_RIGHT = <int>UIAnchor_BottomRight
 TEXT_ALIGN_LEFT = <int>TextHAlign_Left
 TEXT_ALIGN_CENTER = <int>TextHAlign_Center
 TEXT_ALIGN_RIGHT = <int>TextHAlign_Right
+# The start and end of each paragraph's direction (canvas UI); left and right
+# for 2D text labels
+TEXT_ALIGN_START = <int>TextHAlign_Start
+TEXT_ALIGN_END = <int>TextHAlign_End
 
 # Vertical text alignment (canvas UI)
 TEXT_ALIGN_TOP = <int>TextVAlign_Top
 TEXT_ALIGN_MIDDLE = <int>TextVAlign_Middle
 TEXT_ALIGN_BOTTOM = <int>TextVAlign_Bottom
+
+# Paragraph direction (canvas UI)
+TEXT_DIRECTION_AUTO = <int>TextDirection_Auto
+TEXT_DIRECTION_LTR = <int>TextDirection_LeftToRight
+TEXT_DIRECTION_RTL = <int>TextDirection_RightToLeft
 
 # Canvas scale modes
 CANVAS_CONSTANT_PIXEL = <int>CanvasScaleMode_ConstantPixel
@@ -1328,8 +1338,15 @@ cdef class UI:
         self._ptr.setFontSize(element, size)
 
     def set_text_align(self, uint32_t element, int horizontal, int vertical=TEXT_ALIGN_TOP):
-        """TEXT_ALIGN_LEFT/CENTER/RIGHT and TEXT_ALIGN_TOP/MIDDLE/BOTTOM."""
+        """TEXT_ALIGN_LEFT/CENTER/RIGHT/START/END and TEXT_ALIGN_TOP/MIDDLE/BOTTOM.
+        START and END follow each paragraph's direction."""
         self._ptr.setTextAlign(element, <TextHAlign>horizontal, <TextVAlign>vertical)
+
+    def set_text_direction(self, uint32_t element, int direction):
+        """TEXT_DIRECTION_AUTO (the default: from each paragraph's first letter
+        with a direction), TEXT_DIRECTION_LTR or TEXT_DIRECTION_RTL. It sets
+        where START and END align and the order of words of both directions."""
+        self._ptr.setTextDirection(element, <TextDirection>direction)
 
     def set_text_wrap(self, uint32_t element, bint wrap):
         self._ptr.setTextWrap(element, wrap)

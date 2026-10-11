@@ -66,10 +66,15 @@ enum class UIAnchor : uint8_t {
     BottomRight  = 8
 };
 
+// Start and End follow a canvas UI paragraph's direction: left and right for
+// left-to-right text, right and left for right-to-left text. 2D text labels,
+// which have no direction, take them as Left and Right.
 enum class TextHAlign : uint8_t {
     Left   = 0,
     Center = 1,
-    Right  = 2
+    Right  = 2,
+    Start  = 3,
+    End    = 4
 };
 
 // Vertical text alignment in a canvas UI element.
@@ -77,6 +82,14 @@ enum class TextVAlign : uint8_t {
     Top    = 0,
     Middle = 1,
     Bottom = 2
+};
+
+// The direction of each paragraph of canvas UI text. Auto takes it from the
+// paragraph's first letter with a direction.
+enum class TextDirection : uint8_t {
+    Auto        = 0,
+    LeftToRight = 1,
+    RightToLeft = 2
 };
 
 // How a size fitter sizes an element along one axis.

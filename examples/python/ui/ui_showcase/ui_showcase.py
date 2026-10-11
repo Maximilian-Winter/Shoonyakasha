@@ -9,8 +9,9 @@ A tour of engine.ui on the default pipeline, in one window:
     Scene    toggles and sliders that drive the scene: spin, sun shadows,
              sun intensity, the box's colour and the exposure
     Text     the nine text alignments, fonts, Unicode with shaped Devanagari
-             and Tibetan from fallback fonts, a font size slider and
-             wrapping in a clipped box
+             and Tibetan from fallback fonts, a right-to-left line of Arabic
+             and Hebrew with a number and a Latin word in it, a font size
+             slider and wrapping in a clipped box
     Widgets  a click counter, a button enabled by a toggle, a stepped
              slider, a name field that greets in the log on Enter, and a
              log whose rows are created and destroyed at runtime, in a
@@ -161,10 +162,13 @@ def on_init():
     global ui_
     ui_ = engine.ui
     fonts = {"serif": ui_.load_font("fonts/PlayfairDisplay.ttf")}
-    # Characters Roboto and Playfair lack, Devanagari and Tibetan, come from
-    # these; HarfBuzz shapes their conjuncts and stacks.
+    # Characters Roboto and Playfair lack, Devanagari, Tibetan, Arabic and
+    # Hebrew, come from these; HarfBuzz shapes their conjuncts, stacks and
+    # joined letters.
     ui_.set_default_font_fallbacks([ui_.load_font("fonts/NotoSansDevanagari-Regular.ttf"),
-                                    ui_.load_font("fonts/NotoSerifTibetan.ttf")])
+                                    ui_.load_font("fonts/NotoSerifTibetan.ttf"),
+                                    ui_.load_font("fonts/NotoSansArabic-Regular.ttf"),
+                                    ui_.load_font("fonts/NotoSansHebrew-Regular.ttf")])
 
     build_scene()
     hud = named("HUD canvas", ui_.create_canvas(reference_size=(1280, 720)))
@@ -293,6 +297,11 @@ def build_text_page(page, fonts):
     ui_.create_text(page, "Śūnyākāśa", size=32, color=GOLD, font=fonts["serif"])
     ui_.create_text(page, "Привет · Γειά σου · Ünïcödé", size=20)
     ui_.create_text(page, "नमस्ते · क्षत्रिय · བཀྲ་ཤིས་བདེ་ལེགས།", size=22)
+    # Arabic first, so the line reads right to left and START aligns it right;
+    # the number and the Latin word inside still read left to right, and the
+    # brackets around the Hebrew are mirrored.
+    rtl = ui_.create_text(page, "مرحبا بالعالم 2026 · Canvas UI · (שלום עולם)", size=20)
+    ui_.set_text_align(rtl, sk.TEXT_ALIGN_START)
 
     size_row = row(page, 26)
     w["size_label"] = stretch(ui_.create_text(size_row, "", size=16, color=MUTED))

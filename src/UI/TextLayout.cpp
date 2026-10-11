@@ -3,6 +3,7 @@
 //
 
 #include "UI/TextLayout.h"
+#include "UI/Bidi.h"
 #include "UI/LineBreak.h"
 #include "UI/TextShaper.h"
 
@@ -26,12 +27,14 @@ struct Cluster {
     size_t glyphEnd = 0;
     float width = 0.0f;       // scaled
     bool space = false;
+    uint8_t level = 0;
 };
 
-/// The clusters of a shaped paragraph ending at `end`, in glyph order.
+/// The clusters of a shaped paragraph [begin, end), in text order.
 /// `scales` converts each font's bake-size pixels to layout units.
 std::vector<Cluster> clustersOf(const std::vector<ShapedGlyph>& glyphs, std::u32string_view text,
-                                size_t end, const std::vector<float>& scales) {
+                                size_t begin, size_t end, const std::vector<float>& scales,
+                                const std::vector<uint8_t>& levels) {
     std::vector<Cluster> clusters;
     for (size_t g = 0; g < glyphs.size();) {
         Cluster c;
@@ -43,22 +46,27 @@ std::vector<Cluster> clustersOf(const std::vector<ShapedGlyph>& glyphs, std::u32
         }
         c.glyphEnd = g;
         c.space = isSpace(text[c.first]);
+        c.level = c.first - begin < levels.size() ? levels[c.first - begin] : 0;
         clusters.push_back(c);
     }
-    // A cluster's code points run to the next cluster in text order.
-    std::vector<size_t> starts;
-    for (const auto& c : clusters) starts.push_back(c.first);
-    std::sort(starts.begin(), starts.end());
-    for (auto& c : clusters) {
-        const auto next = std::upper_bound(starts.begin(), starts.end(), c.first);
-        c.end = next == starts.end() ? end : *next;
+    // Right-to-left runs come out of shaping in display order.
+    std::sort(clusters.begin(), clusters.end(), [](const Cluster& a, const Cluster& b) { return a.first < b.first; });
+    // A cluster's code points run to the next cluster.
+    for (size_t k = 0; k < clusters.size(); ++k) {
+        clusters[k].end = k + 1 < clusters.size() ? clusters[k + 1].first : end;
     }
     return clusters;
 }
 
+struct Paragraph {
+    BidiParagraph bidi;
+    std::vector<ShapedGlyph> glyphs;
+    std::vector<Cluster> clusters;      // text order
+};
+
 struct LineRange {
     size_t paragraph = 0;
-    size_t first = 0;         // clusters [first, last) of the paragraph
+    size_t first = 0;         // clusters [first, last) of the paragraph, in text order
     size_t last = 0;
     size_t codepointFirst = 0;
     size_t codepointEnd = 0;
@@ -86,17 +94,18 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
         }
     }
 
-    // Shape each paragraph and break it into lines of clusters.
-    std::vector<std::vector<ShapedGlyph>> paragraphGlyphs;
-    std::vector<std::vector<Cluster>> paragraphClusters;
+    // Resolve, shape and break each paragraph into lines of clusters.
+    std::vector<Paragraph> paragraphs;
     std::vector<LineRange> lines;
     for (size_t begin = 0; begin <= text.size();) {
         const size_t newline = text.find(U'\n', begin);
         const size_t end = newline == std::u32string_view::npos ? text.size() : newline;
-        const size_t p = paragraphGlyphs.size();
-        paragraphGlyphs.push_back(shapeText(fonts, text, begin, end));
-        paragraphClusters.push_back(clustersOf(paragraphGlyphs.back(), text, end, scales));
-        const auto& clusters = paragraphClusters.back();
+        const size_t p = paragraphs.size();
+        BidiParagraph bidi(text, begin, end, style.direction);
+        std::vector<ShapedGlyph> glyphs = shapeText(fonts, text, begin, end, &bidi.levels());
+        std::vector<Cluster> clusterList = clustersOf(glyphs, text, begin, end, scales, bidi.levels());
+        paragraphs.push_back({std::move(bidi), std::move(glyphs), std::move(clusterList)});
+        const auto& clusters = paragraphs.back().clusters;
 
         auto codepointAt = [&](size_t k) { return k < clusters.size() ? clusters[k].first : end; };
         // The last place the line may break: at a space, which is dropped, or
@@ -149,28 +158,61 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
 
     result.lines.reserve(lines.size());
     float widest = 0.0f;
+    std::vector<size_t> order;   // the line's clusters in display order
     for (size_t l = 0; l < lines.size(); ++l) {
         const LineRange& range = lines[l];
-        const auto& clusters = paragraphClusters[range.paragraph];
-        const auto& glyphs = paragraphGlyphs[range.paragraph];
+        const Paragraph& paragraph = paragraphs[range.paragraph];
+        const auto& clusters = paragraph.clusters;
+        const auto& glyphs = paragraph.glyphs;
+        const bool rtl = paragraph.bidi.rightToLeft();
 
+        // Spaces at the end of the line in text order: they go at its end in
+        // the paragraph's direction and are left out of its width.
         size_t trimmed = range.last;
         while (trimmed > range.first && clusters[trimmed - 1].space) --trimmed;
 
         TextLine line;
         line.firstCodepoint = range.codepointFirst;
         line.codepointCount = range.codepointEnd - range.codepointFirst;
+        line.rightToLeft = rtl;
         for (size_t k = range.first; k < trimmed; ++k) line.width += clusters[k].width;
         line.baseline = top + primary.ascent() * scale + static_cast<float>(l) * lineHeight;
         widest = std::max(widest, line.width);
 
-        float x = 0.0f;
-        if (style.alignH == TextAlignH::Center) x = (boxSize.x - line.width) * 0.5f;
-        else if (style.alignH == TextAlignH::Right) x = boxSize.x - line.width;
+        // The line's runs in display order, and each run's clusters in its
+        // direction.
+        order.clear();
+        if (trimmed > range.first) {
+            const size_t contentEnd = trimmed < clusters.size() ? clusters[trimmed].first : range.codepointEnd;
+            for (const BidiRun& run : paragraph.bidi.lineRuns(clusters[range.first].first, contentEnd)) {
+                const size_t before = order.size();
+                for (size_t k = range.first; k < trimmed; ++k) {
+                    if (clusters[k].first >= run.begin && clusters[k].first < run.end) order.push_back(k);
+                }
+                if (run.level & 1u) std::reverse(order.begin() + static_cast<std::ptrdiff_t>(before), order.end());
+            }
+        }
+        float trailing = 0.0f;
+        for (size_t k = trimmed; k < range.last; ++k) trailing += clusters[k].width;
+        if (rtl) {
+            // The first of them next to the content, on its left.
+            for (size_t k = trimmed; k < range.last; ++k) order.insert(order.begin(), k);
+        } else {
+            for (size_t k = trimmed; k < range.last; ++k) order.push_back(k);
+        }
 
-        for (size_t k = range.first; k < range.last; ++k) {
+        TextAlignH align = style.alignH;
+        if (align == TextAlignH::Start) align = rtl ? TextAlignH::Right : TextAlignH::Left;
+        else if (align == TextAlignH::End) align = rtl ? TextAlignH::Left : TextAlignH::Right;
+        float x = 0.0f;
+        if (align == TextAlignH::Center) x = (boxSize.x - line.width) * 0.5f;
+        else if (align == TextAlignH::Right) x = boxSize.x - line.width;
+        if (rtl) x -= trailing;   // the trailing spaces are left of the content
+
+        for (const size_t k : order) {
             const Cluster& c = clusters[k];
-            result.clusters.push_back({c.first, c.end - c.first, l, x, c.width});
+            const uint8_t level = k >= trimmed ? paragraph.bidi.baseLevel() : c.level;
+            result.clusters.push_back({c.first, c.end - c.first, l, x, c.width, level});
             for (size_t g = c.glyphBegin; g < c.glyphEnd; ++g) {
                 const ShapedGlyph& shaped = glyphs[g];
                 const float glyphScale = scales[shaped.font];

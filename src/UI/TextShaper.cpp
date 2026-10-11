@@ -35,7 +35,7 @@ bool followsPrevious(hb_unicode_funcs_t* unicode, char32_t c) {
 } // namespace
 
 std::vector<ShapedGlyph> shapeText(const std::vector<const SdfFont*>& fonts, std::u32string_view text,
-                                   size_t begin, size_t end) {
+                                   size_t begin, size_t end, const std::vector<uint8_t>* levels) {
     std::vector<ShapedGlyph> out;
     if (fonts.empty() || !fonts[0] || !fonts[0]->valid() || begin >= end || end > text.size()) return out;
 
@@ -102,10 +102,16 @@ std::vector<ShapedGlyph> shapeText(const std::vector<const SdfFont*>& fonts, std
         }
     }
 
+    if (levels && levels->size() < n) levels = nullptr;
+    auto levelOf = [&](size_t i) { return levels ? (*levels)[i] : uint8_t{0}; };
+
     hb_buffer_t* buffer = hb_buffer_create();
     for (size_t runStart = 0; runStart < n;) {
         size_t runEnd = runStart + 1;
-        while (runEnd < n && fontOf[runEnd] == fontOf[runStart] && scriptOf[runEnd] == scriptOf[runStart]) ++runEnd;
+        while (runEnd < n && fontOf[runEnd] == fontOf[runStart] && scriptOf[runEnd] == scriptOf[runStart] &&
+               levelOf(runEnd) == levelOf(runStart)) {
+            ++runEnd;
+        }
 
         const SdfFont& font = *fonts[fontOf[runStart]];
         hb_buffer_clear_contents(buffer);
@@ -115,6 +121,7 @@ std::vector<ShapedGlyph> shapeText(const std::vector<const SdfFont*>& fonts, std
         const hb_script_t script = scriptOf[runStart] == HB_SCRIPT_COMMON ? HB_SCRIPT_LATIN : scriptOf[runStart];
         hb_direction_t direction = hb_script_get_horizontal_direction(script);
         if (direction == HB_DIRECTION_INVALID) direction = HB_DIRECTION_LTR;
+        if (levels) direction = (levelOf(runStart) & 1u) ? HB_DIRECTION_RTL : HB_DIRECTION_LTR;
         hb_buffer_set_script(buffer, script);
         hb_buffer_set_direction(buffer, direction);
         hb_buffer_set_language(buffer, hb_language_get_default());

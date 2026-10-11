@@ -55,11 +55,18 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         TextHAlign_Left "Shoonyakasha::Facade::TextHAlign::Left"
         TextHAlign_Center "Shoonyakasha::Facade::TextHAlign::Center"
         TextHAlign_Right "Shoonyakasha::Facade::TextHAlign::Right"
+        TextHAlign_Start "Shoonyakasha::Facade::TextHAlign::Start"
+        TextHAlign_End "Shoonyakasha::Facade::TextHAlign::End"
 
     cpdef enum TextVAlign "Shoonyakasha::Facade::TextVAlign":
         TextVAlign_Top "Shoonyakasha::Facade::TextVAlign::Top"
         TextVAlign_Middle "Shoonyakasha::Facade::TextVAlign::Middle"
         TextVAlign_Bottom "Shoonyakasha::Facade::TextVAlign::Bottom"
+
+    cpdef enum TextDirection "Shoonyakasha::Facade::TextDirection":
+        TextDirection_Auto "Shoonyakasha::Facade::TextDirection::Auto"
+        TextDirection_LeftToRight "Shoonyakasha::Facade::TextDirection::LeftToRight"
+        TextDirection_RightToLeft "Shoonyakasha::Facade::TextDirection::RightToLeft"
 
     cpdef enum SizeFit "Shoonyakasha::Facade::SizeFit":
         SizeFit_Unconstrained "Shoonyakasha::Facade::SizeFit::Unconstrained"

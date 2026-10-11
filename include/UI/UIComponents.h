@@ -168,6 +168,14 @@ struct UIImage {
     bool raycastTarget = true;                  // stops the pointer reaching what is under it
 };
 
+/// Draws the element's UIImage over each of these rects, in canvas units,
+/// rather than over the element's rect, which should cover them all. A text
+/// field's selection is one rect for each stretch of selected text that is
+/// shown together, more than one in bidirectional text.
+struct UIImageRects {
+    std::vector<Rect> rects;
+};
+
 /// A 9-slice image: the corners keep their size, the edges stretch along one
 /// axis and the centre along both.
 struct UIPanel {
@@ -188,6 +196,7 @@ struct UIText {
     TextAlignV alignV = TextAlignV::Top;
     bool wrap = true;
     float lineSpacing = 1.0f;
+    TextDirection direction = TextDirection::Auto;  // of each paragraph
 };
 
 // ─── Pointer input ───────────────────────────────────────────────

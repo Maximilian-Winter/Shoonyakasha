@@ -136,7 +136,18 @@ ui.set_default_font_fallbacks([deva, tibetan])      # for every font without its
 ui.create_text(panel, "Om · ॐ नमः शिवाय · ཨོཾ་མ་ཎི་པདྨེ་ཧཱུྃ")
 ```
 
-  `set_font_fallbacks(font, [...])` gives one font its own list. The assets folder ships Noto Sans Devanagari and Noto Serif Tibetan for these scripts.
+  `set_font_fallbacks(font, [...])` gives one font its own list. The assets folder ships Noto Sans Devanagari, Noto Serif Tibetan, Noto Sans Arabic and Noto Sans Hebrew for these scripts.
+- **Right-to-left text:** Arabic and Hebrew read right to left, and a line that mixes directions is put in display order by the Unicode bidirectional algorithm: numbers and Latin words inside Arabic read left to right, and brackets are mirrored.
+  - **Paragraph direction:** each paragraph takes its direction from its first letter that has one. `set_text_direction(e, sk.TEXT_DIRECTION_RTL)` or `TEXT_DIRECTION_LTR` sets it instead.
+  - **Alignment:** `TEXT_ALIGN_START` and `TEXT_ALIGN_END` follow the paragraph: `START` is the left of a left-to-right paragraph and the right of a right-to-left one. `LEFT` and `RIGHT` stay left and right. Text fields align their text to the start.
+  - **Control characters:** the directional formatting characters work, for example U+2067 and U+2069 to isolate a Hebrew name inside an English sentence.
+
+```python
+ui.set_default_font_fallbacks([ui.load_font("fonts/NotoSansArabic-Regular.ttf"),
+                               ui.load_font("fonts/NotoSansHebrew-Regular.ttf")])
+line = ui.create_text(panel, "مرحبا بالعالم 2026")
+ui.set_text_align(line, sk.TEXT_ALIGN_START)    # right-aligned: the paragraph is right to left
+```
 
 ## Widgets and the pointer
 
@@ -213,7 +224,7 @@ def on_update(dt):
 A text field is a single line. Clicking it or tabbing to it focuses it, and while it has focus it takes the keyboard:
 - **Typing:** characters go in at the caret, replacing any selection. Pasted line breaks and tabs become spaces.
 - **Deleting:** Backspace and Delete remove one cluster, so a Devanagari conjunct or a letter with its accents goes in one step. With Ctrl they remove a word.
-- **Moving:** Left and Right move one cluster, or with Ctrl one word. Home and End go to either end. Holding Shift extends the selection.
+- **Moving:** Left and Right move one cluster to the left or right on screen, also through mixed-direction text; with Ctrl they move one word, towards the start of a right-to-left paragraph with Right. Home and End go to the start and end of the text. Holding Shift extends the selection; a selection across a change of direction is drawn in as many pieces as it covers on screen.
 - **Clipboard:** Ctrl+A selects everything. Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste through the system clipboard.
 - **Submitting:** Enter sets `text_submitted` for one frame. The field keeps focus.
 - **Leaving:** Tab moves on to the next widget, and Escape clears focus.
@@ -306,7 +317,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 - Text fields are single-line, and there is no input method (IME) composition, so text that is typed through an IME, such as Chinese or Japanese, cannot be entered; it can still be pasted.
 - Text fields interpret Ctrl, not Cmd, as the word modifier, on every platform.
 - The arrow keys move focus and also turn an orbit camera, which uses them; only a focused text field takes keys from the camera.
-- Right-to-left text: each word is shaped right to left, but a line puts its words in typing order, left to right; mixed-direction lines are not reordered.
+- Right-to-left text: a paragraph is shaped once, before it is broken into lines, so an Arabic word too wide for its rect and split between clusters keeps the joined letter forms it would have on one line. Layout direction, such as a slider running from the right, is not mirrored yet.
 - Thai, Lao, Khmer and Myanmar, which need a dictionary to find where words end, wrap only at spaces, or between clusters when a run does not fit.
 - Geometry in front of a world canvas stops the pointer only in a pipeline with a `ui` depth block, and only as of two frames before (see [Geometry in front of world canvases](#geometry-in-front-of-world-canvases)).
 - The glyph atlas has up to four pages of 2048 by 2048 texels, added as they are needed. When all four are full, the page drawn from least recently is cleared, and its glyphs are rasterised again when next drawn. Text that needs more than the four pages in a single frame, several thousand distinct glyphs, is partly left out.

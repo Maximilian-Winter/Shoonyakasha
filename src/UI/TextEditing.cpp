@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 namespace Shoonyakasha {
 namespace UI {
@@ -50,28 +51,76 @@ std::vector<size_t> caretStops(const std::vector<TextCluster>& clusters, size_t 
     return stops;
 }
 
-float caretX(const TextLayoutResult& layout, size_t index) {
-    float end = 0.0f;
-    for (const TextCluster& c : layout.clusters) {
-        if (index >= c.firstCodepoint && index < c.firstCodepoint + c.codepointCount) return c.x;
-        end = std::max(end, c.x + c.width);
+namespace {
+
+float leadingEdge(const TextCluster& c) { return c.rightToLeft() ? c.x + c.width : c.x; }
+float trailingEdge(const TextCluster& c) { return c.rightToLeft() ? c.x : c.x + c.width; }
+
+/// Where the caret stands for `index`, given the cluster starting there and
+/// the one ending there (either may be null), and the line it is on.
+std::pair<float, size_t> caretPlace(const TextCluster* after, const TextCluster* before) {
+    if (after && before && after->line == before->line && before->level > after->level) {
+        return {trailingEdge(*before), before->line};
     }
-    return end;
+    if (after) return {leadingEdge(*after), after->line};
+    if (before) return {trailingEdge(*before), before->line};
+    return {0.0f, 0};
+}
+
+} // namespace
+
+float caretX(const TextLayoutResult& layout, size_t index) {
+    const TextCluster* after = nullptr;
+    const TextCluster* before = nullptr;
+    const TextCluster* last = nullptr;   // in text order
+    for (const TextCluster& c : layout.clusters) {
+        const size_t end = c.firstCodepoint + c.codepointCount;
+        if (index > c.firstCodepoint && index < end) return leadingEdge(c);   // inside: not a caret stop
+        if (c.firstCodepoint == index) after = &c;
+        if (end == index) before = &c;
+        if (!last || c.firstCodepoint > last->firstCodepoint) last = &c;
+    }
+    if (!after && !before && last && index > last->firstCodepoint) before = last;   // past the end
+    return caretPlace(after, before).first;
+}
+
+std::vector<std::pair<size_t, float>> caretPositions(const TextLayoutResult& layout, size_t length) {
+    std::unordered_map<size_t, const TextCluster*> starting, ending;
+    for (const TextCluster& c : layout.clusters) {
+        starting[c.firstCodepoint] = &c;
+        ending[c.firstCodepoint + c.codepointCount] = &c;
+    }
+    struct Stop {
+        size_t index;
+        float x;
+        size_t line;
+    };
+    std::vector<Stop> stops;
+    for (const size_t index : caretStops(layout.clusters, length)) {
+        const auto a = starting.find(index);
+        const auto b = ending.find(index);
+        const auto [x, line] = caretPlace(a != starting.end() ? a->second : nullptr,
+                                          b != ending.end() ? b->second : nullptr);
+        stops.push_back({index, x, line});
+    }
+    std::stable_sort(stops.begin(), stops.end(), [](const Stop& a, const Stop& b) {
+        return a.line != b.line ? a.line < b.line : a.x < b.x;
+    });
+    std::vector<std::pair<size_t, float>> out;
+    out.reserve(stops.size());
+    for (const Stop& s : stops) out.emplace_back(s.index, s.x);
+    return out;
 }
 
 size_t caretAt(const TextLayoutResult& layout, size_t length, float x) {
     size_t best = 0;
     float bestDistance = -1.0f;
-    auto consider = [&](size_t index, float at) {
+    for (const auto& [index, at] : caretPositions(layout, length)) {
         const float distance = std::abs(at - x);
         if (bestDistance < 0.0f || distance < bestDistance) {
             best = std::min(index, length);
             bestDistance = distance;
         }
-    };
-    for (const TextCluster& c : layout.clusters) {
-        consider(c.firstCodepoint, c.x);
-        consider(c.firstCodepoint + c.codepointCount, c.x + c.width);
     }
     return best;
 }
@@ -99,6 +148,18 @@ size_t TextEditBuffer::nextStop(size_t index) const {
     if (stops.empty()) return std::min(index + 1, text.size());
     const auto it = std::upper_bound(stops.begin(), stops.end(), index);
     return it == stops.end() ? text.size() : *it;
+}
+
+size_t TextEditBuffer::leftStop(size_t index) const {
+    const auto it = std::find(visual.begin(), visual.end(), index);
+    if (it == visual.end()) return previousStop(index);
+    return it == visual.begin() ? index : *(it - 1);
+}
+
+size_t TextEditBuffer::rightStop(size_t index) const {
+    const auto it = std::find(visual.begin(), visual.end(), index);
+    if (it == visual.end()) return nextStop(index);
+    return it + 1 == visual.end() ? index : *(it + 1);
 }
 
 namespace {
@@ -153,6 +214,7 @@ std::pair<size_t, size_t> TextEditBuffer::wordAt(size_t index) const {
 
 void TextEditBuffer::erase(size_t start, size_t end) {
     text.erase(start, end - start);
+    visual.clear();
     // Stops inside the range go; those after it move back.
     std::vector<size_t> kept;
     kept.reserve(stops.size());
@@ -175,6 +237,7 @@ bool TextEditBuffer::insert(std::u32string_view insertion, size_t maxLength) {
 
     erase(start, end);
     text.insert(start, insertion.substr(0, count));
+    visual.clear();
     if (!stops.empty()) {
         // Until the text is laid out again, the inserted code points are a
         // stop each.
