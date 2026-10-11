@@ -46,11 +46,23 @@ struct TextStyle {
     TextDirection direction = TextDirection::Auto;
 };
 
+/// Code points [begin, end) laid out at their own size from their own fonts:
+/// `fonts` indexes the fonts layoutText is given, the first preferred and
+/// the rest used for code points it lacks. A size of 0 is the style's.
+struct TextSpan {
+    size_t begin = 0;
+    size_t end = 0;
+    std::vector<uint32_t> fonts;
+    float fontSize = 0.0f;
+};
+
 struct PositionedGlyph {
     uint32_t font = 0;            // index into the fonts the text was laid out with
     int glyph = 0;
     glm::vec2 min{0.0f};          // quad covering the glyph's distance field,
     glm::vec2 max{0.0f};          // relative to the box's top-left corner
+    size_t codepoint = 0;         // the first code point of its cluster
+    size_t line = 0;
 };
 
 struct TextLine {
@@ -59,8 +71,8 @@ struct TextLine {
     float width = 0.0f;           // trailing spaces excluded
     float left = 0.0f;            // where its content starts, aligned, relative to the box; an empty line's caret
     float baseline = 0.0f;        // y relative to the box's top-left corner
-    float top = 0.0f;             // the first font's ascent above the baseline
-    float bottom = 0.0f;          // and its descent below it
+    float top = 0.0f;             // the first font's ascent above the baseline,
+    float bottom = 0.0f;          // and its descent below it, at the line's largest size
     bool rightToLeft = false;     // its paragraph's direction
 };
 
@@ -96,8 +108,14 @@ struct TextLayoutResult {
 /// the box rather than dropped; clipping is the renderer's concern. Control
 /// characters other than '\n' and tab are not drawn; a tab is drawn as a
 /// space.
+///
+/// With `spans`, the code points of each are laid out from its fonts at its
+/// size; others from all of `fonts` at the style's size. A line is as tall
+/// as the first font at the largest size on it, and lines are spaced by
+/// their own heights.
 TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32string_view text,
-                            const TextStyle& style, const glm::vec2& boxSize);
+                            const TextStyle& style, const glm::vec2& boxSize,
+                            const std::vector<TextSpan>& spans = {});
 
 /// The same with one font.
 TextLayoutResult layoutText(const SdfFont& font, std::u32string_view text,

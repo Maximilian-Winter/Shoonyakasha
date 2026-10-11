@@ -42,8 +42,13 @@ struct ShapedGlyph {
 /// [begin, end), runs also end where the level changes, and each is shaped
 /// in its level's direction (odd: right to left, mirroring brackets).
 /// Without, each run takes its script's direction.
+///
+/// With `chains`, one entry per code point of `text`, a code point whose
+/// entry is not null draws from the fonts its entry lists, indices into
+/// `fonts`, in that order, and the first of them gives its replacement.
 std::vector<ShapedGlyph> shapeText(const std::vector<const SdfFont*>& fonts, std::u32string_view text,
-                                   size_t begin, size_t end, const std::vector<uint8_t>* levels = nullptr);
+                                   size_t begin, size_t end, const std::vector<uint8_t>* levels = nullptr,
+                                   const std::vector<const std::vector<uint32_t>*>* chains = nullptr);
 
 } // namespace UI
 } // namespace Shoonyakasha

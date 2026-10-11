@@ -69,6 +69,16 @@ public:
     float descent() const { return m_descent; }  // below the baseline, negative
     float lineGap() const { return m_lineGap; }
 
+    /// Where underlines and strikethroughs go: the top of the line below the
+    /// baseline, y down, and its thickness. From the font's post and OS/2
+    /// tables, or a fraction of the font's height where it has none.
+    struct LineMetrics {
+        float offset = 0.0f;
+        float thickness = 0.0f;
+    };
+    LineMetrics underline() const { return m_underline; }
+    LineMetrics strikeout() const { return m_strikeout; }
+
     float advance(int glyph) const;
     float kerning(int leftGlyph, int rightGlyph) const;
     GlyphBox glyphBox(int glyph) const;
@@ -97,6 +107,8 @@ private:
     float m_descent = 0.0f;
     float m_lineGap = 0.0f;
     float m_heightInEms = 1.0f;
+    LineMetrics m_underline;
+    LineMetrics m_strikeout;
 };
 
 } // namespace UI

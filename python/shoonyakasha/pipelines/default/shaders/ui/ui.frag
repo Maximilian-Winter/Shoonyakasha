@@ -1,8 +1,8 @@
 #version 450
 
 // Canvas UI quads, by mode: 0 the image times the colour, 1 a glyph's signed
-// distance field from its page of the atlas, 2 the colour alone. Output is
-// premultiplied.
+// distance field from its page of the atlas, its outline moved out by the
+// weight for faux bold, 2 the colour alone. Output is premultiplied.
 
 layout(set = 0, binding = 0) uniform sampler2DArray glyphAtlas;
 layout(set = 0, binding = 1) uniform sampler2D image;
@@ -11,6 +11,7 @@ layout(location = 0) in vec2 inUV;
 layout(location = 1) in vec4 inColor;
 layout(location = 2) flat in uint inMode;
 layout(location = 3) flat in uint inPage;
+layout(location = 4) flat in float inWeight;
 
 layout(location = 0) out vec4 outColor;
 
@@ -20,7 +21,7 @@ const float kOnEdge = 180.0 / 255.0;
 void main() {
     // Both are sampled outside the branches, so their derivatives are defined.
     vec4 texel = texture(image, inUV);
-    float distance = texture(glyphAtlas, vec3(inUV, float(inPage))).r - kOnEdge;
+    float distance = texture(glyphAtlas, vec3(inUV, float(inPage))).r - (kOnEdge - inWeight);
     float coverage = clamp(distance / max(fwidth(distance), 1e-5) + 0.5, 0.0, 1.0);
 
     vec4 color = inColor;

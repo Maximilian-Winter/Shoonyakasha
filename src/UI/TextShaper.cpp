@@ -35,26 +35,39 @@ bool followsPrevious(hb_unicode_funcs_t* unicode, char32_t c) {
 } // namespace
 
 std::vector<ShapedGlyph> shapeText(const std::vector<const SdfFont*>& fonts, std::u32string_view text,
-                                   size_t begin, size_t end, const std::vector<uint8_t>* levels) {
+                                   size_t begin, size_t end, const std::vector<uint8_t>* levels,
+                                   const std::vector<const std::vector<uint32_t>*>* chains) {
     std::vector<ShapedGlyph> out;
     if (fonts.empty() || !fonts[0] || !fonts[0]->valid() || begin >= end || end > text.size()) return out;
+    if (chains && chains->size() < end) chains = nullptr;
 
     hb_unicode_funcs_t* unicode = hb_unicode_funcs_get_default();
 
     // What HarfBuzz is given: the text with tabs as spaces, other controls
     // as zero-width spaces (drawn as nothing), and code points no font has
-    // as the first font's replacement.
+    // as their first font's replacement.
     std::u32string shaped(text);
-    const char32_t replacement = fonts[0]->findGlyph(0xFFFD) ? char32_t{0xFFFD} : char32_t{'?'};
 
     // The font and script of each code point in [begin, end).
     const size_t n = end - begin;
     std::vector<uint32_t> fontOf(n, 0);
     std::vector<hb_script_t> scriptOf(n, HB_SCRIPT_COMMON);
 
-    auto firstFontWith = [&](char32_t c) -> int {
+    // The fonts code point i may draw from: its chain, or all of them.
+    auto chainOf = [&](size_t i) { return chains ? (*chains)[begin + i] : nullptr; };
+    auto usable = [&](uint32_t f) { return f < fonts.size() && fonts[f] && fonts[f]->valid(); };
+    auto inChain = [&](uint32_t f, const std::vector<uint32_t>* chain) {
+        return !chain || std::find(chain->begin(), chain->end(), f) != chain->end();
+    };
+    auto firstFontWith = [&](char32_t c, const std::vector<uint32_t>* chain) -> int {
+        if (chain) {
+            for (const uint32_t f : *chain) {
+                if (usable(f) && fonts[f]->findGlyph(c)) return static_cast<int>(f);
+            }
+            return -1;
+        }
         for (size_t f = 0; f < fonts.size(); ++f) {
-            if (fonts[f] && fonts[f]->valid() && fonts[f]->findGlyph(c)) return static_cast<int>(f);
+            if (usable(static_cast<uint32_t>(f)) && fonts[f]->findGlyph(c)) return static_cast<int>(f);
         }
         return -1;
     };
@@ -64,18 +77,22 @@ std::vector<ShapedGlyph> shapeText(const std::vector<const SdfFont*>& fonts, std
         if (c == U'\t') c = U' ';
         else if (isControl(c)) c = 0x200B;
 
+        const std::vector<uint32_t>* chain = chainOf(i);
         const bool follows = followsPrevious(unicode, c);
-        if (follows && i > 0 && fonts[fontOf[i - 1]]->findGlyph(c)) {
+        if (follows && i > 0 && inChain(fontOf[i - 1], chain) && fonts[fontOf[i - 1]]->findGlyph(c)) {
             fontOf[i] = fontOf[i - 1];
         } else if (c == 0x200B && i > 0) {
             fontOf[i] = fontOf[i - 1];
         } else {
-            const int f = firstFontWith(c);
+            const int f = firstFontWith(c, chain);
+            const uint32_t lead = chain && !chain->empty() && usable(chain->front()) ? chain->front() : 0;
             if (f >= 0) {
                 fontOf[i] = static_cast<uint32_t>(f);
             } else if (c != 0x200B) {
-                c = replacement;
-                fontOf[i] = 0;
+                c = fonts[lead]->findGlyph(0xFFFD) ? char32_t{0xFFFD} : char32_t{'?'};
+                fontOf[i] = lead;
+            } else {
+                fontOf[i] = lead;
             }
         }
         scriptOf[i] = hb_unicode_script(unicode, c);

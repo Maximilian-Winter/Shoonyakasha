@@ -125,6 +125,8 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `default_font (read/write property)` | int | The font text uses when it names none: fonts/Roboto-Regular.ttf until set. |
 | `set_font_fallbacks(font, fallbacks)` | None | The fonts, in order, that text in font draws characters from when font lacks them: Devanagari or Tibetan inside Latin text, say. |
 | `set_default_font_fallbacks(fallbacks)` | None | Fallbacks for every font that has none of its own. |
+| `set_font_name(font, name)` | None | The name rich text's <font=name> finds the font by. A font is also named after its file without the extension, such as Roboto-Regular. |
+| `set_font_style(font, bold=0, italic=0, bold_italic=0)` | None | The fonts rich text draws font with in bold, in italic and in both; 0 for none, in which case the text is drawn thicker or slanted. |
 | `create_canvas(reference_size=(1920, 1080), scale_mode=CANVAS_SCALE_WITH_SCREEN, sort_order=0)` | int | A canvas over the screen. A higher sort_order draws over, and takes the pointer first. |
 | `create_world_canvas(pixel_size, world_size, emission=1.0, lit=False)` | int | A canvas of pixel_size pixels on a quad of world_size units, facing +Z. |
 | `set_canvas_scaling(canvas, mode, reference_size=(1920, 1080), scale_factor=1.0, match=0.5)` | None | CANVAS_CONSTANT_PIXEL: scale_factor pixels per unit. CANVAS_SCALE_WITH_SCREEN: reference_size fitted to the target, match 0 following its width and 1 its height. |
@@ -174,6 +176,10 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `is_right_to_left(element)` | bool | Whether the element lays out right to left, as last laid out. |
 | `set_mirror_in_rtl(element, mirror=True)` | None | Flip the element's image left for right where it lays out right to left, for an arrow or other directional icon. |
 | `set_text_wrap(element, wrap)` | None | Calls native `setTextWrap`; see the class contract above. |
+| `set_rich_text(element, enabled=True)` | None | Read the text as markup: <color=#RRGGBB> or <color=#RRGGBBAA>, <b>, <i>, <size=N> in canvas units, <font=name>, <link=id>, <u> and <s>, each closed by </name>, with &lt; and &gt; for the brackets. A tag that is not one of these is shown as text. |
+| `set_link_color(element, color)` | None | The colour of a link in rich text while the pointer is over it. |
+| `clicked_link(element)` | str | The id of the link in the text the user clicked this frame, or ''. |
+| `hovered_link(element)` | str | The id of the link in the text under the pointer, or ''. |
 | `set_color(element, color)` | None | The colour of the element's own text, image and panel. |
 | `set_texture(element, path)` | bool | The texture of the element's image or panel. False if it cannot be loaded. |
 | `set_panel_border(element, border, border_scale=1.0)` | None | Calls native `setPanelBorder`; see the class contract above. |

@@ -5,8 +5,10 @@
 #include "UI/SdfFont.h"
 
 #include <hb.h>
+#include <hb-ot.h>
 #include <stb_truetype.h>
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -68,6 +70,18 @@ bool SdfFont::loadFromMemory(std::vector<uint8_t> data) {
     m_descent = static_cast<float>(descent) * m_scale;
     m_lineGap = static_cast<float>(lineGap) * m_scale;
     m_heightInEms = static_cast<float>(ascent - descent) * stbtt_ScaleForMappingEmToPixels(&impl->info, 1.0f);
+
+    // The tables give the top of each line above the baseline; laid out, y
+    // runs down.
+    auto metric = [&](hb_ot_metrics_tag_t tag, float fallback) {
+        hb_position_t value = 0;
+        return hb_ot_metrics_get_position(impl->font, tag, &value) ? static_cast<float>(value) * m_scale : fallback;
+    };
+    const float height = m_ascent - m_descent;
+    m_underline.thickness = std::max(metric(HB_OT_METRICS_TAG_UNDERLINE_SIZE, height * 0.05f), 1.0f);
+    m_underline.offset = -metric(HB_OT_METRICS_TAG_UNDERLINE_OFFSET, -height * 0.1f);
+    m_strikeout.thickness = std::max(metric(HB_OT_METRICS_TAG_STRIKEOUT_SIZE, height * 0.05f), 1.0f);
+    m_strikeout.offset = -metric(HB_OT_METRICS_TAG_STRIKEOUT_OFFSET, height * 0.25f);
 
     m_impl = std::move(impl);
     return true;

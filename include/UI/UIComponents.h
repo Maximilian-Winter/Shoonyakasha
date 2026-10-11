@@ -14,6 +14,7 @@
 
 #include "Core/TextComposition.h"
 #include "GPU/GPUTypes.h"
+#include "UI/RichText.h"
 #include "UI/TextLayout.h"
 #include "UI/Utf8.h"
 
@@ -211,15 +212,22 @@ struct UIText {
     bool wrap = true;
     float lineSpacing = 1.0f;
     TextDirection direction = TextDirection::Auto;  // of each paragraph; FromLayout: its element's layout direction
+    bool richText = false;                       // read `text` as markup (UI/RichText.h)
+    glm::vec4 linkColor{0.45f, 0.7f, 1.0f, 1.0f};  // rich text: a link while the pointer is over it
+
+    // Written by CanvasInputSystem for rich text with links. The text takes
+    // the pointer where it has links.
+    std::string hoveredLink;                     // the id of the link under the pointer, or empty
+    std::string clickedLink;                     // for one frame: the link pressed and released over
 };
 
 // ─── Pointer input ───────────────────────────────────────────────
 //
 // The pointer goes to the topmost element under it that is a raycast target:
-// an element with UIInteractable or UIScrollView, or with a UIImage or
-// UIPanel whose raycastTarget is set. The element's nearest UIInteractable, itself or an
-// ancestor, receives it, so a button's label and background act as the
-// button. CanvasInputSystem writes the state below once per frame, from the
+// an element with UIInteractable or UIScrollView, with a UIImage or UIPanel
+// whose raycastTarget is set, or with rich text that has links. The
+// element's nearest UIInteractable, itself or an ancestor, receives it, so a
+// button's label and background act as the button. CanvasInputSystem writes the state below once per frame, from the
 // rects of the frame before.
 
 /// An element the pointer can hover, press and click, and the keyboard or a
@@ -487,7 +495,8 @@ struct UIPointerDepth {
 /// Written by CanvasLayoutSystem for text whose layout sizes are needed.
 struct UITextMeasure {
     std::string text;
-    std::vector<uint32_t> fonts;          // the font chain, see FontLibrary::chain
+    bool richText = false;
+    std::vector<uint32_t> fonts;          // the font chain, see FontLibrary::chain, and rich text's fonts
     float fontSize = 0.0f;
     float lineSpacing = 0.0f;
     glm::vec2 naturalSize{0.0f};          // unwrapped
@@ -499,10 +508,13 @@ struct UITextMeasure {
 /// CanvasTextSystem, which lays the text out again when an input changes.
 struct UITextCache {
     std::string text;
-    std::vector<uint32_t> fonts;          // the font chain; PositionedGlyph::font indexes it
+    bool richText = false;
+    std::vector<uint32_t> fonts;          // the font chain, and rich text's fonts; PositionedGlyph::font indexes it
     TextStyle style;
     glm::vec2 boxSize{0.0f};
     TextLayoutResult layout;
+    std::vector<TextRun> runs;            // rich text: how each stretch is drawn; empty for plain text
+    std::vector<std::string> links;       // rich text: the link ids, TextRun's style.link indexes them
 };
 
 } // namespace UI

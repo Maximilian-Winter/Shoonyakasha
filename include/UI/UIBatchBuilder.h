@@ -4,7 +4,8 @@
 // All canvases share one vertex and one index array. Each canvas owns a run
 // of batches; a batch is a range of indices drawn with one image and one
 // scissor rect. Quads are emitted in draw order (UIRect::drawOrder; within an
-// element the panel, then the image, then the text), and a quad joins the
+// element the panel, then the image, then the text, then rich text's
+// underlines and strikethroughs), and a quad joins the
 // previous batch whenever the image and scissor allow it, so the order of
 // overlapping elements is kept.
 //
@@ -36,9 +37,16 @@ struct UIVertex {
     glm::vec2 position;  // target pixels, origin top-left, y down
     glm::vec2 uv;
     uint32_t color;      // RGBA8, sRGB-encoded, straight alpha
-    uint32_t mode;       // UIDrawMode in the low byte, the glyph atlas page in the second
+    uint32_t mode;       // UIDrawMode in the low byte, the glyph atlas page in the second,
+                         // and for Text in the third how far below SdfFont::kOnEdge the outline is drawn
 };
 static_assert(sizeof(UIVertex) == 24, "UIVertex is read by ui.vert with a 24-byte stride");
+
+/// Rich text drawn bold or italic with no bold or italic font: the outline
+/// moved out by this many atlas units (UIVertex::mode's third byte), and
+/// glyph quads slanted by this much x per unit of height above the baseline.
+constexpr uint32_t kFauxBoldWeight = 40;
+constexpr float kFauxItalicSlant = 0.21f;
 
 struct UIBatch {
     VkImageView image = VK_NULL_HANDLE;  // null: no Image quads in the batch

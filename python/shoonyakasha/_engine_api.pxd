@@ -359,6 +359,8 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         void setDefaultFont(uint32_t font)
         void setFontFallbacks(uint32_t font, const vector[uint32_t]& fallbacks)
         void setDefaultFontFallbacks(const vector[uint32_t]& fallbacks)
+        void setFontName(uint32_t font, const string& name)
+        void setFontStyles(uint32_t font, uint32_t bold, uint32_t italic, uint32_t boldItalic)
 
         # Canvases
         EntityHandle createCanvas(const vec2& referenceSize, CanvasScaleMode scaleMode, int sortOrder)
@@ -428,6 +430,10 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         void setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign vertical)
         void setTextDirection(EntityHandle element, TextDirection direction)
         void setTextWrap(EntityHandle element, cbool wrap)
+        void setRichText(EntityHandle element, cbool richText)
+        void setLinkColor(EntityHandle element, const vec4& color)
+        string clickedLink(EntityHandle element) const
+        string hoveredLink(EntityHandle element) const
         void setLayoutDirection(EntityHandle element, LayoutDirection direction)
         cbool isRightToLeft(EntityHandle element) const
         void setMirrorInRightToLeft(EntityHandle element, cbool mirror)

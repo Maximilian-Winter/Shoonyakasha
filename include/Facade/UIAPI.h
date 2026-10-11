@@ -66,6 +66,13 @@ public:
     /// Fallbacks for every font that has none of its own.
     void setDefaultFontFallbacks(const std::vector<uint32_t>& fallbacks);
 
+    /// The name rich text's <font=name> finds `font` by. A font is also
+    /// named after its file without the extension, such as Roboto-Regular.
+    void setFontName(uint32_t font, const std::string& name);
+    /// The fonts rich text draws `font` with in bold, in italic and in both;
+    /// 0 for none, in which case the text is drawn thicker or slanted.
+    void setFontStyles(uint32_t font, uint32_t bold, uint32_t italic = 0, uint32_t boldItalic = 0);
+
     // ═══════════════════════════════════════════════════════════
     // Canvases
     // ═══════════════════════════════════════════════════════════
@@ -267,6 +274,18 @@ public:
     /// words of the two directions.
     void setTextDirection(EntityHandle element, TextDirection direction);
     void setTextWrap(EntityHandle element, bool wrap);
+
+    /// Reads the text as markup: <color=#RRGGBB> or <color=#RRGGBBAA>, <b>,
+    /// <i>, <size=N> in canvas units, <font=name>, <link=id>, <u> and <s>,
+    /// each closed by </name>, with "&lt;" and "&gt;" for the brackets. A
+    /// tag that is not one of these is shown as text.
+    void setRichText(EntityHandle element, bool richText = true);
+    /// The colour of a link in rich text while the pointer is over it.
+    void setLinkColor(EntityHandle element, const glm::vec4& color);
+    /// The id of the link in the text the user clicked this frame, or of
+    /// the link under the pointer; empty for none.
+    std::string clickedLink(EntityHandle element) const;
+    std::string hoveredLink(EntityHandle element) const;
 
     /// Which way a canvas or an element lays out its children: right to left
     /// mirrors their placement, the order of layout groups, sliders, toggles

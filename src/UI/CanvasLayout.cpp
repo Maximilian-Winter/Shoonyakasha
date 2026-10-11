@@ -8,6 +8,7 @@
 
 #include "UI/CanvasLayout.h"
 #include "UI/FontLibrary.h"
+#include "UI/RichText.h"
 #include "UI/TextLayout.h"
 #include "UI/UISystems.h"
 #include "UI/Utf8.h"
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 namespace Shoonyakasha {
@@ -143,12 +145,16 @@ struct LayoutWalk {
 
     UITextMeasure* measure(entt::entity e, const UIText& text) {
         if (!fonts) return nullptr;
-        std::vector<uint32_t> chain = fonts->chain(text.font);
+        // Rich text's fonts are known only once its markup is read.
+        std::optional<PreparedText> prepared;
+        if (text.richText) prepared = prepareText(text.text, true, text.font, text.fontSize, *fonts);
+        std::vector<uint32_t> chain = prepared ? prepared->fonts : fonts->chain(text.font);
         if (chain.empty()) return nullptr;
         auto& m = registry.get_or_emplace<UITextMeasure>(e);
-        if (m.text != text.text || m.fonts != chain || m.fontSize != text.fontSize ||
+        if (m.text != text.text || m.richText != text.richText || m.fonts != chain || m.fontSize != text.fontSize ||
             m.lineSpacing != text.lineSpacing) {
             m.text = text.text;
+            m.richText = text.richText;
             m.fonts = std::move(chain);
             m.fontSize = text.fontSize;
             m.lineSpacing = text.lineSpacing;
@@ -156,7 +162,9 @@ struct LayoutWalk {
             style.fontSize = text.fontSize;
             style.lineSpacing = text.lineSpacing;
             style.wrap = false;
-            m.naturalSize = layoutText(fonts->resolve(m.fonts), decodeUtf8(text.text), style, glm::vec2(1e9f)).size;
+            if (!prepared) prepared = prepareText(text.text, false, text.font, text.fontSize, *fonts);
+            m.naturalSize = layoutText(fonts->resolve(m.fonts), prepared->text, style, glm::vec2(1e9f),
+                                       prepared->spans).size;
             m.wrapWidth = -1.0f;
         }
         return &m;
@@ -169,8 +177,9 @@ struct LayoutWalk {
             style.fontSize = text.fontSize;
             style.lineSpacing = text.lineSpacing;
             style.wrap = true;
-            m.wrappedHeight = layoutText(fonts->resolve(m.fonts), decodeUtf8(text.text), style,
-                                         glm::vec2(std::max(width, 0.0f), 1e9f)).size.y;
+            const PreparedText prepared = prepareText(text.text, text.richText, text.font, text.fontSize, *fonts);
+            m.wrappedHeight = layoutText(fonts->resolve(m.fonts), prepared.text, style,
+                                         glm::vec2(std::max(width, 0.0f), 1e9f), prepared.spans).size.y;
             m.wrapWidth = width;
         }
         return m.wrappedHeight;

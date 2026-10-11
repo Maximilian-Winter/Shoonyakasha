@@ -271,6 +271,15 @@ Underline and strikethrough are drawn as solid quads from the font's metrics.
 - faux bold and italic vertex data;
 - link hit testing by cluster.
 
+**As built:**
+- `UI/RichText.h` parses the markup and `prepareText` resolves it against the fonts. `layoutText` takes `TextSpan`s, each with its own font chain and size; `shapeText` takes a font chain per code point. Glyphs record their cluster's first code point and their line, and the batch builder looks attributes up by code point.
+- `FontLibrary` gained names (a font's file name by default, or `setName`) and bold, italic and bold-italic fonts (`setStyles`); the Python call is `set_font_style(regular, bold=…, italic=…, bold_italic=…)`.
+- Link state is on `UIText`: `hoveredLink` and `clickedLink` hold the link's id. The whole rect of a text with links is a raycast target.
+- Links are drawn in `linkColor` only while hovered; they get no other style unless the markup gives one.
+- Faux bold moves the outline out by `kFauxBoldWeight` atlas units and does not change advances; faux italic slants by `kFauxItalicSlant` about the line's baseline.
+- Underline and strikethrough positions come from the text's first font (post and OS/2 tables, through HarfBuzz) at each run's size.
+- A text field's own text never reads markup.
+
 ## 24. Vertical text
 
 **Orientation.** `TextStyle` gains `orientation` (`Horizontal`, `VerticalRightToLeft` or `VerticalLeftToRight`).

@@ -31,9 +31,11 @@ struct Cluster {
 };
 
 /// The clusters of a shaped paragraph [begin, end), in text order.
-/// `scales` converts each font's bake-size pixels to layout units.
+/// `scale(font, codepoint)` converts a glyph's bake-size pixels to layout
+/// units.
+template <typename Scale>
 std::vector<Cluster> clustersOf(const std::vector<ShapedGlyph>& glyphs, std::u32string_view text,
-                                size_t begin, size_t end, const std::vector<float>& scales,
+                                size_t begin, size_t end, const Scale& scale,
                                 const std::vector<uint8_t>& levels) {
     std::vector<Cluster> clusters;
     for (size_t g = 0; g < glyphs.size();) {
@@ -41,7 +43,7 @@ std::vector<Cluster> clustersOf(const std::vector<ShapedGlyph>& glyphs, std::u32
         c.first = glyphs[g].cluster;
         c.glyphBegin = g;
         while (g < glyphs.size() && glyphs[g].cluster == c.first) {
-            c.width += glyphs[g].advance * scales[glyphs[g].font];
+            c.width += glyphs[g].advance * scale(glyphs[g].font, glyphs[g].cluster);
             ++g;
         }
         c.glyphEnd = g;
@@ -75,7 +77,7 @@ struct LineRange {
 } // namespace
 
 TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32string_view text,
-                            const TextStyle& style, const glm::vec2& boxSize) {
+                            const TextStyle& style, const glm::vec2& boxSize, const std::vector<TextSpan>& spans) {
     TextLayoutResult result;
     if (fonts.empty() || !fonts[0] || !fonts[0]->valid() || text.empty()) return result;
     const SdfFont& primary = *fonts[0];
@@ -85,14 +87,28 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
     // narrower; that must not push its last cluster onto a new line.
     const float wrapWidth = boxSize.x + 1e-3f;
 
-    // Glyphs of a fallback font are scaled to the first font's em size, so
-    // its letters match whatever space the font reserves above and below.
-    std::vector<float> scales(fonts.size(), scale);
-    for (size_t f = 1; f < fonts.size(); ++f) {
-        if (fonts[f] && primary.heightInEms() > 0.0f) {
-            scales[f] = scale * fonts[f]->heightInEms() / primary.heightInEms();
+    // Each code point's fonts and size, from the span it is in.
+    std::vector<const std::vector<uint32_t>*> chainAt(text.size(), nullptr);
+    std::vector<float> sizeAt(text.size(), style.fontSize);
+    for (const TextSpan& span : spans) {
+        for (size_t i = span.begin; i < std::min(span.end, text.size()); ++i) {
+            if (!span.fonts.empty()) chainAt[i] = &span.fonts;
+            if (span.fontSize > 0.0f) sizeAt[i] = span.fontSize;
         }
     }
+    const bool chained = std::any_of(chainAt.begin(), chainAt.end(), [](const auto* c) { return c != nullptr; });
+
+    // A glyph is scaled to its size, and a glyph of a fallback font to the
+    // em size of the first font of its code point's chain, so its letters
+    // match whatever space that font reserves above and below.
+    auto glyphScale = [&](uint32_t font, size_t codepoint) {
+        const float s = (codepoint < sizeAt.size() ? sizeAt[codepoint] : style.fontSize) / SdfFont::kBakeSize;
+        const std::vector<uint32_t>* chain = codepoint < chainAt.size() ? chainAt[codepoint] : nullptr;
+        const uint32_t lead = chain && !chain->empty() && chain->front() < fonts.size() ? chain->front() : 0;
+        const SdfFont* first = fonts[lead];
+        if (font == lead || font >= fonts.size() || !fonts[font] || !first || first->heightInEms() <= 0.0f) return s;
+        return s * fonts[font]->heightInEms() / first->heightInEms();
+    };
 
     // Resolve, shape and break each paragraph into lines of clusters.
     std::vector<Paragraph> paragraphs;
@@ -102,8 +118,9 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
         const size_t end = newline == std::u32string_view::npos ? text.size() : newline;
         const size_t p = paragraphs.size();
         BidiParagraph bidi(text, begin, end, style.direction);
-        std::vector<ShapedGlyph> glyphs = shapeText(fonts, text, begin, end, &bidi.levels());
-        std::vector<Cluster> clusterList = clustersOf(glyphs, text, begin, end, scales, bidi.levels());
+        std::vector<ShapedGlyph> glyphs = shapeText(fonts, text, begin, end, &bidi.levels(),
+                                                    chained ? &chainAt : nullptr);
+        std::vector<Cluster> clusterList = clustersOf(glyphs, text, begin, end, glyphScale, bidi.levels());
         paragraphs.push_back({std::move(bidi), std::move(glyphs), std::move(clusterList)});
         const auto& clusters = paragraphs.back().clusters;
         const std::vector<LineBreakAfter> breaks = lineBreaks(text, begin, end);
@@ -158,10 +175,26 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
         begin = newline + 1;
     }
 
-    // Vertical placement.
-    const float lineHeight = (primary.ascent() - primary.descent() + primary.lineGap()) * scale * style.lineSpacing;
-    const float textHeight = (primary.ascent() - primary.descent()) * scale +
-                             static_cast<float>(lines.size() - 1) * lineHeight;
+    // Vertical placement. Each line is as tall as the first font at the
+    // largest size on it; the step from one baseline to the next is the
+    // first line's descent and gap and the second's ascent.
+    std::vector<float> lineScale(lines.size(), scale);
+    for (size_t l = 0; l < lines.size(); ++l) {
+        const LineRange& range = lines[l];
+        const auto& clusters = paragraphs[range.paragraph].clusters;
+        float largest = 0.0f;
+        for (size_t k = range.first; k < range.last; ++k) largest = std::max(largest, sizeAt[clusters[k].first]);
+        // An empty line takes the size where it starts.
+        if (range.first == range.last) largest = sizeAt[std::min(range.codepointFirst, text.size() - 1)];
+        lineScale[l] = largest / SdfFont::kBakeSize;
+    }
+    std::vector<float> baselines(lines.size(), 0.0f);
+    for (size_t l = 0; l < lines.size(); ++l) {
+        baselines[l] = l == 0 ? primary.ascent() * lineScale[0]
+                              : baselines[l - 1] + ((primary.lineGap() - primary.descent()) * lineScale[l - 1] +
+                                                    primary.ascent() * lineScale[l]) * style.lineSpacing;
+    }
+    const float textHeight = baselines.back() - primary.descent() * lineScale.back();
     float top = 0.0f;
     if (style.alignV == TextAlignV::Middle) top = (boxSize.y - textHeight) * 0.5f;
     else if (style.alignV == TextAlignV::Bottom) top = boxSize.y - textHeight;
@@ -186,9 +219,9 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
         line.codepointCount = range.codepointEnd - range.codepointFirst;
         line.rightToLeft = rtl;
         for (size_t k = range.first; k < trimmed; ++k) line.width += clusters[k].width;
-        line.baseline = top + primary.ascent() * scale + static_cast<float>(l) * lineHeight;
-        line.top = line.baseline - primary.ascent() * scale;
-        line.bottom = line.baseline - primary.descent() * scale;
+        line.baseline = top + baselines[l];
+        line.top = line.baseline - primary.ascent() * lineScale[l];
+        line.bottom = line.baseline - primary.descent() * lineScale[l];
         widest = std::max(widest, line.width);
 
         // The line's runs in display order, and each run's clusters in its
@@ -228,17 +261,19 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
             result.clusters.push_back({c.first, c.end - c.first, l, x, c.width, level});
             for (size_t g = c.glyphBegin; g < c.glyphEnd; ++g) {
                 const ShapedGlyph& shaped = glyphs[g];
-                const float glyphScale = scales[shaped.font];
+                const float s = glyphScale(shaped.font, shaped.cluster);
                 const SdfFont::GlyphBox box = fonts[shaped.font]->glyphBox(shaped.glyph);
                 if (!box.empty()) {
                     PositionedGlyph placed;
                     placed.font = shaped.font;
                     placed.glyph = shaped.glyph;
-                    placed.min = glm::vec2(x, line.baseline) + (shaped.offset + box.offset) * glyphScale;
-                    placed.max = placed.min + glm::vec2(box.size) * glyphScale;
+                    placed.min = glm::vec2(x, line.baseline) + (shaped.offset + box.offset) * s;
+                    placed.max = placed.min + glm::vec2(box.size) * s;
+                    placed.codepoint = c.first;
+                    placed.line = l;
                     result.glyphs.push_back(placed);
                 }
-                x += shaped.advance * glyphScale;
+                x += shaped.advance * s;
             }
         }
         result.lines.push_back(line);

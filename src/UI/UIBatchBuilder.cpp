@@ -8,6 +8,7 @@
 #include <glm/gtc/packing.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <unordered_map>
 #include <utility>
 
@@ -39,8 +40,14 @@ struct CanvasBuilder {
     glm::ivec4 scissor{0};
     bool atlasFull = false;
 
+    /// A quad from `min` to `max`, in canvas units; with a `slant`, its top
+    /// moved right and its bottom left by that much per unit of height
+    /// above and below `baseline`.
     void quad(glm::vec2 min, glm::vec2 max, glm::vec2 uvMin, glm::vec2 uvMax,
-              uint32_t color, UIDrawMode mode, const GPUTexture* image = nullptr, uint32_t page = 0) {
+              uint32_t color, UIDrawMode mode, const GPUTexture* image = nullptr, uint32_t page = 0,
+              uint32_t weight = 0, float slant = 0.0f, float baseline = 0.0f) {
+        const float topShift = slant * (baseline - min.y) * scale;
+        const float bottomShift = slant * (baseline - max.y) * scale;
         min *= scale;
         max *= scale;
         if (max.x <= min.x || max.y <= min.y) return;
@@ -62,11 +69,11 @@ struct CanvasBuilder {
         }
 
         const auto base = static_cast<uint32_t>(out.vertices.size());
-        const uint32_t m = static_cast<uint32_t>(mode) | ((page & 0xFFu) << 8);
-        out.vertices.push_back({min, uvMin, color, m});
-        out.vertices.push_back({{max.x, min.y}, {uvMax.x, uvMin.y}, color, m});
-        out.vertices.push_back({max, uvMax, color, m});
-        out.vertices.push_back({{min.x, max.y}, {uvMin.x, uvMax.y}, color, m});
+        const uint32_t m = static_cast<uint32_t>(mode) | ((page & 0xFFu) << 8) | ((weight & 0xFFu) << 16);
+        out.vertices.push_back({{min.x + topShift, min.y}, uvMin, color, m});
+        out.vertices.push_back({{max.x + topShift, min.y}, {uvMax.x, uvMin.y}, color, m});
+        out.vertices.push_back({{max.x + bottomShift, max.y}, uvMax, color, m});
+        out.vertices.push_back({{min.x + bottomShift, max.y}, {uvMin.x, uvMax.y}, color, m});
         for (const uint32_t i : {0u, 1u, 2u, 0u, 2u, 3u}) out.indices.push_back(base + i);
         batch->indexCount += 6;
     }
@@ -125,7 +132,17 @@ struct CanvasBuilder {
     }
 
     void text(const Rect& rect, const UIText& t, const UITextCache& cache, const glm::vec4& tint) {
-        const uint32_t color = packColor(t.color * tint);
+        // Rich text takes its colour, weight and slant from the run each
+        // glyph is in, and a link the pointer is over the link colour.
+        auto colorOf = [&](const TextRun* run) {
+            glm::vec4 c = run && run->style.hasColor ? run->style.color : t.color;
+            if (run && run->style.link >= 0 && static_cast<size_t>(run->style.link) < cache.links.size() &&
+                !t.hoveredLink.empty() && cache.links[static_cast<size_t>(run->style.link)] == t.hoveredLink) {
+                c = t.linkColor;
+            }
+            return packColor(c * tint);
+        };
+        const uint32_t plainColor = colorOf(nullptr);
 
         for (const auto& glyph : cache.layout.glyphs) {
             if (glyph.font >= cache.fonts.size()) continue;
@@ -137,9 +154,59 @@ struct CanvasBuilder {
                 atlasFull = true;
                 continue;
             }
+            const TextRun* run = cache.runs.empty() ? nullptr : runAt(cache.runs, glyph.codepoint);
+            const float baseline = glyph.line < cache.layout.lines.size() ? cache.layout.lines[glyph.line].baseline : 0.0f;
             quad(rect.min + glyph.min, rect.min + glyph.max, entry->uvMin, entry->uvMax,
-                 color, UIDrawMode::Text, nullptr, entry->page);
+                 run ? colorOf(run) : plainColor, UIDrawMode::Text, nullptr, entry->page,
+                 run && run->fauxBold ? kFauxBoldWeight : 0u, run && run->fauxItalic ? kFauxItalicSlant : 0.0f,
+                 rect.min.y + baseline);
         }
+        if (!cache.runs.empty()) decorations(rect, cache, colorOf);
+    }
+
+    /// Rich text's underlines and strikethroughs, from its first font's
+    /// metrics at each run's size: one quad for each stretch of clusters
+    /// side by side on a line with the same line and colour.
+    template <typename ColorOf>
+    void decorations(const Rect& rect, const UITextCache& cache, const ColorOf& colorOf) {
+        const SdfFont* first = cache.fonts.empty() ? nullptr : fonts.get(cache.fonts[0]);
+        if (!first) return;
+        struct Pending {
+            Rect rect;
+            uint32_t color = 0;
+            bool open = false;
+        };
+        Pending pending[2];   // underline, strikethrough
+        auto flush = [&](Pending& p) {
+            if (p.open) quad(p.rect.min, p.rect.max, {0, 0}, {1, 1}, p.color, UIDrawMode::Solid);
+            p.open = false;
+        };
+        for (const TextCluster& cluster : cache.layout.clusters) {
+            const TextRun* run = runAt(cache.runs, cluster.firstCodepoint);
+            const float s = run ? run->fontSize / SdfFont::kBakeSize : 0.0f;
+            const float baseline = rect.min.y + cache.layout.lines[cluster.line].baseline;
+            const bool wanted[2] = {run && run->style.underline, run && run->style.strikethrough};
+            const SdfFont::LineMetrics metrics[2] = {first->underline(), first->strikeout()};
+            for (int d = 0; d < 2; ++d) {
+                Pending& p = pending[d];
+                if (!wanted[d]) {
+                    flush(p);
+                    continue;
+                }
+                const Rect r{{rect.min.x + cluster.x, baseline + metrics[d].offset * s},
+                             {rect.min.x + cluster.x + cluster.width, baseline + (metrics[d].offset + metrics[d].thickness) * s}};
+                const uint32_t color = colorOf(run);
+                if (p.open && p.color == color && std::abs(p.rect.max.x - r.min.x) < 1e-3f && p.rect.min.y == r.min.y &&
+                    p.rect.max.y == r.max.y) {
+                    p.rect.max.x = r.max.x;
+                    continue;
+                }
+                flush(p);
+                p = {r, color, true};
+            }
+        }
+        flush(pending[0]);
+        flush(pending[1]);
     }
 };
 

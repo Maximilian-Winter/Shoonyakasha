@@ -150,6 +150,38 @@ line = ui.create_text(panel, "مرحبا بالعالم 2026")
 ui.set_text_align(line, sk.TEXT_ALIGN_START)    # right-aligned: the paragraph is right to left
 ```
 
+### Rich text
+
+`set_rich_text(e)` makes a text read its string as markup. It is off by default, so text containing `<` shows as written.
+
+```python
+note = ui.create_text(panel, "Press <b>Start</b> to <color=#E8C468>begin</color>, or read "
+                             "<link=help><u>the help</u></link>.")
+ui.set_rich_text(note)
+
+def on_update(dt):
+    if ui.clicked_link(note) == "help":
+        show_help()
+```
+
+| Tag | Effect |
+|---|---|
+| `<color=#RRGGBB>`, `<color=#RRGGBBAA>` | colour |
+| `<b>`, `<i>` | bold and italic |
+| `<size=N>` | font size in canvas units |
+| `<font=name>` | another font, by name |
+| `<link=id>` | a span the pointer can click |
+| `<u>`, `<s>` | underline and strikethrough |
+
+- **Tags:** each is closed by `</name>`. Tags nest; a closing tag ends the most recent open tag of its name, and a tag left open runs to the end. Values may be in double quotes, as in `<link="two words">`. `&lt;` and `&gt;` write `<` and `>`. A tag that is not one of these, or is written wrong, such as `<color=red>`, is shown as text.
+- **Sizes:** a line is as tall as the largest size on it.
+- **Fonts:** a font is named after its file without the extension, such as `<font=PlayfairDisplay>`, and `set_font_name(font, "serif")` gives it another name. A name no loaded font has keeps the text's own font. Each font draws with its own fallbacks.
+- **Bold and italic:** `set_font_style(regular, bold=…, italic=…, bold_italic=…)` names the fonts to use. Without them, bold is drawn with a thicker outline and italic by slanting the letters; neither changes the spacing of the letters.
+- **Links:** text with links takes the pointer over its whole rect, so what is under it no longer gets the pointer there. `hovered_link(e)` is the id of the link under the pointer, and `clicked_link(e)` the id of the link pressed and released over, for one frame. The link under the pointer is drawn in the link colour, set with `set_link_color`. Links are not styled otherwise; add `<u>` or `<color>` to show them.
+- **Mixed directions:** tags apply to characters, so they survive the reordering of right-to-left text.
+
+Text fields do not read markup.
+
 ### Right-to-left layout
 
 For a right-to-left interface, mirror the layout too:
@@ -351,6 +383,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 ## Limits
 
 - Input method composition is handled on Windows only. On other platforms the engine does not show a composition; text can still be pasted.
+- Rich text: a link in a button's label also clicks the button. Underlines and strikethroughs are placed by the text's own font's metrics, also over characters drawn from another font.
 - In a multi-line field, End on a line that wraps without a space, such as Chinese text or a word too long for the field, puts the caret at the start of the next line, since the two places are one position in the text.
 - Text fields interpret Ctrl, not Cmd, as the word modifier, on every platform.
 - The arrow keys move focus and also turn an orbit camera, which uses them; only a focused text field takes keys from the camera.

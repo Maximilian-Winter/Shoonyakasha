@@ -22,8 +22,8 @@
 namespace Shoonyakasha {
 namespace UI {
 
-/// Is the element a raycast target: interactable, a scroll view, or with a
-/// UIImage or UIPanel whose raycastTarget is set?
+/// Is the element a raycast target: interactable, a scroll view, with a
+/// UIImage or UIPanel whose raycastTarget is set, or rich text with links?
 bool isRaycastTarget(const entt::registry& registry, entt::entity element);
 
 /// The topmost visible raycast target of `canvas` whose rect, clipped, holds

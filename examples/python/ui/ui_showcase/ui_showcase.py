@@ -10,7 +10,8 @@ A tour of engine.ui on the default pipeline, in one window:
              sun intensity, the box's colour and the exposure
     Text     the nine text alignments, fonts, Unicode with shaped Devanagari
              and Tibetan from fallback fonts, a right-to-left line of Arabic
-             and Hebrew with a number and a Latin word in it, a font size
+             and Hebrew with a number and a Latin word in it, rich text
+             with a link that toggles wrapping, a font size
              slider and wrapping in a clipped box, Thai wrapping between
              words though it has no spaces
     Widgets  a click counter, a button enabled by a toggle, a toggle that
@@ -311,13 +312,20 @@ def build_text_page(page, fonts):
     # brackets around the Hebrew are mirrored.
     rtl = ui_.create_text(page, "مرحبا بالعالم 2026 · Canvas UI · (שלום עולם)", size=20)
     ui_.set_text_align(rtl, sk.TEXT_ALIGN_START)
+    # Markup, read once set_rich_text is on. Roboto has no bold or italic
+    # font loaded, so those are drawn thicker and slanted; the link, a
+    # raycast target, takes the link colour under the pointer.
+    w["rich"] = ui_.create_text(page, "Rich text: <b>bold</b>, <i>italic</i>, <color=#E8C468>colour</color>, "
+                                      "<size=22>size</size>, <u>underlined</u>, <s>struck</s> and "
+                                      "<link=wrap>a link that toggles wrapping</link>", size=16)
+    ui_.set_rich_text(w["rich"])
 
     size_row = row(page, 26)
     w["size_label"] = stretch(ui_.create_text(size_row, "", size=16, color=MUTED))
     named("Wrap toggle", ui_.create_toggle(size_row, "Wrap", is_on=True, size=(100, 24)))
     named("Size slider", ui_.create_slider(page, min=12.0, max=40.0, value=18.0, size=(PAGE_WIDTH, 22)))
 
-    box = named("Clipped text box", ui_.create_panel(page, (PAGE_WIDTH, 110), color=(0.06, 0.07, 0.09, 1.0)))
+    box = named("Clipped text box", ui_.create_panel(page, (PAGE_WIDTH, 90), color=(0.06, 0.07, 0.09, 1.0)))
     ui_.set_clip(box, True)
     # Tibetan has no spaces between words: its lines break after the tsheg (་).
     # Nor does Thai, whose lines break between the words a word list finds.
@@ -459,6 +467,8 @@ def update_scene_page(dt):
 
 
 def update_text_page():
+    if ui_.clicked_link(w["rich"]) == "wrap":
+        ui_.set_toggle_value(w["Wrap toggle"], not ui_.toggle_value(w["Wrap toggle"]))
     size = ui_.slider_value(w["Size slider"])
     ui_.set_font_size(w["paragraph"], size)
     ui_.set_text_wrap(w["paragraph"], ui_.toggle_value(w["Wrap toggle"]))

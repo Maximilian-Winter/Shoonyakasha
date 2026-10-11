@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 namespace Shoonyakasha {
 namespace UI {
@@ -70,6 +71,7 @@ void showTextFields(entt::registry& registry) {
             text->color = field.text.empty() && field.composition.empty() ? field.placeholderColor : field.textColor;
             text->wrap = field.multiLine;
             text->alignV = field.multiLine ? TextAlignV::Top : TextAlignV::Middle;
+            text->richText = false;   // caret indices are into the text as typed
         }
     }
 }
@@ -262,20 +264,27 @@ void CanvasTextSystem::update(entt::registry& registry, float deltaTime) {
         style.direction = resolvedDirection(text, element);
         const glm::vec2 box = element.rect.size();
 
-        const std::vector<uint32_t> fonts = m_fonts->chain(text.font);
+        // Rich text's fonts are known only once its markup is read.
+        std::optional<PreparedText> prepared;
+        if (text.richText) prepared = prepareText(text.text, true, text.font, text.fontSize, *m_fonts);
+        const std::vector<uint32_t> fonts = prepared ? prepared->fonts : m_fonts->chain(text.font);
         auto* cache = registry.try_get<UITextCache>(entity);
-        if (cache && cache->text == text.text && cache->fonts == fonts &&
+        if (cache && cache->text == text.text && cache->richText == text.richText && cache->fonts == fonts &&
             sameStyle(cache->style, style) && cache->boxSize == box) {
             continue;
         }
         if (!cache) cache = &registry.emplace<UITextCache>(entity);
+        if (!prepared) prepared = prepareText(text.text, false, text.font, text.fontSize, *m_fonts);
 
         cache->text = text.text;
+        cache->richText = text.richText;
         cache->fonts = fonts;
         cache->style = style;
         cache->boxSize = box;
         cache->layout = fonts.empty() ? TextLayoutResult{}
-                                      : layoutText(m_fonts->resolve(fonts), decodeUtf8(text.text), style, box);
+                                      : layoutText(m_fonts->resolve(fonts), prepared->text, style, box, prepared->spans);
+        cache->runs = std::move(prepared->runs);
+        cache->links = std::move(prepared->links);
     }
 
     placeTextFields(registry, deltaTime);

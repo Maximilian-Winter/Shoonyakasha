@@ -1115,6 +1115,16 @@ cdef class UI:
         cdef vector[uint32_t] ids = [<uint32_t>f for f in fallbacks]
         self._ptr.setDefaultFontFallbacks(ids)
 
+    def set_font_name(self, uint32_t font, str name):
+        """The name rich text's <font=name> finds the font by. A font is also
+        named after its file without the extension, such as Roboto-Regular."""
+        self._ptr.setFontName(font, name.encode("utf-8"))
+
+    def set_font_style(self, uint32_t font, uint32_t bold=0, uint32_t italic=0, uint32_t bold_italic=0):
+        """The fonts rich text draws font with in bold, in italic and in both;
+        0 for none, in which case the text is drawn thicker or slanted."""
+        self._ptr.setFontStyles(font, bold, italic, bold_italic)
+
     # ── Canvases ──────────────────────────────────────────────
 
     def create_canvas(self, reference_size=(1920, 1080), int scale_mode=CANVAS_SCALE_WITH_SCREEN,
@@ -1375,6 +1385,25 @@ cdef class UI:
 
     def set_text_wrap(self, uint32_t element, bint wrap):
         self._ptr.setTextWrap(element, wrap)
+
+    def set_rich_text(self, uint32_t element, bint enabled=True):
+        """Read the text as markup: <color=#RRGGBB> or <color=#RRGGBBAA>, <b>, <i>,
+        <size=N> in canvas units, <font=name>, <link=id>, <u> and <s>, each closed
+        by </name>, with &lt; and &gt; for the brackets. A tag that is not one of
+        these is shown as text."""
+        self._ptr.setRichText(element, enabled)
+
+    def set_link_color(self, uint32_t element, color):
+        """The colour of a link in rich text while the pointer is over it."""
+        self._ptr.setLinkColor(element, _tuple_to_vec4(color))
+
+    def clicked_link(self, uint32_t element):
+        """The id of the link in the text the user clicked this frame, or ''."""
+        return self._ptr.clickedLink(element).decode("utf-8")
+
+    def hovered_link(self, uint32_t element):
+        """The id of the link in the text under the pointer, or ''."""
+        return self._ptr.hoveredLink(element).decode("utf-8")
 
     def set_color(self, uint32_t element, color):
         """The colour of the element's own text, image and panel."""

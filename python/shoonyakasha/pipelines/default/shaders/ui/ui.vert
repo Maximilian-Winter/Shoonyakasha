@@ -16,6 +16,7 @@ layout(location = 0) out vec2 outUV;
 layout(location = 1) out vec4 outColor;
 layout(location = 2) flat out uint outMode;
 layout(location = 3) flat out uint outPage;   // glyph atlas page
+layout(location = 4) flat out float outWeight; // how far below the outline value text is drawn
 
 vec3 srgbToLinear(vec3 c) {
     return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
@@ -27,4 +28,5 @@ void main() {
     outColor = vec4(srgbToLinear(inColor.rgb), inColor.a);
     outMode = inMode & 0xFFu;
     outPage = (inMode >> 8) & 0xFFu;
+    outWeight = float((inMode >> 16) & 0xFFu) / 255.0;
 }

@@ -165,6 +165,29 @@ TEST_F(UIAPIFixture, MultiLineTextFields) {
     EXPECT_TRUE(f.submitOnEnter);
 }
 
+TEST_F(UIAPIFixture, RichText) {
+    const EntityHandle canvas = ui.createCanvas();
+    const EntityHandle label = ui.createText(canvas, "<b>bold</b> <link=more>more</link>");
+    ui.setRichText(label);
+    ui.setLinkColor(label, {1.0f, 0.5f, 0.0f, 1.0f});
+    const auto& t = registry.get<UI::UIText>(e(label));
+    EXPECT_TRUE(t.richText);
+    EXPECT_EQ(t.linkColor, glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
+    frame();
+    EXPECT_EQ(registry.get<UI::UITextCache>(e(label)).links, std::vector<std::string>{"more"});
+    EXPECT_EQ(ui.clickedLink(label), "");
+    registry.get<UI::UIText>(e(label)).clickedLink = "more";
+    EXPECT_EQ(ui.clickedLink(label), "more");
+    EXPECT_EQ(ui.hoveredLink(label), "");
+
+    const uint32_t font = ui.getDefaultFont();
+    ui.setFontName(font, "body");
+    EXPECT_EQ(context.fonts().find("body"), font);
+    EXPECT_EQ(context.fonts().find("Roboto-Regular"), font);
+    ui.setFontStyles(font, font);
+    EXPECT_FALSE(context.fonts().styled(font, true, false).fauxBold);
+}
+
 TEST_F(UIAPIFixture, TextFieldComposition) {
     const EntityHandle canvas = ui.createCanvas();
     const EntityHandle field = ui.createTextField(canvas, "Name");

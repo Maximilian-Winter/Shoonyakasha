@@ -134,6 +134,14 @@ void UIAPI::setDefaultFontFallbacks(const std::vector<uint32_t>& fallbacks) {
     m_impl->context.fonts().setDefaultFallbacks(fallbacks);
 }
 
+void UIAPI::setFontName(uint32_t font, const std::string& name) {
+    m_impl->context.fonts().setName(font, name);
+}
+
+void UIAPI::setFontStyles(uint32_t font, uint32_t bold, uint32_t italic, uint32_t boldItalic) {
+    m_impl->context.fonts().setStyles(font, bold, italic, boldItalic);
+}
+
 // ─── Canvases ───────────────────────────────────────────────────
 
 EntityHandle UIAPI::createCanvas(const glm::vec2& referenceSize, CanvasScaleMode scaleMode, int sortOrder) {
@@ -500,6 +508,24 @@ void UIAPI::setMirrorInRightToLeft(EntityHandle element, bool mirror) {
 
 void UIAPI::setTextWrap(EntityHandle element, bool wrap) {
     if (auto* t = m_impl->text(element)) t->wrap = wrap;
+}
+
+void UIAPI::setRichText(EntityHandle element, bool richText) {
+    if (auto* t = m_impl->text(element)) t->richText = richText;
+}
+
+void UIAPI::setLinkColor(EntityHandle element, const glm::vec4& color) {
+    if (auto* t = m_impl->text(element)) t->linkColor = color;
+}
+
+std::string UIAPI::clickedLink(EntityHandle element) const {
+    const auto* t = m_impl->text(element);
+    return t ? t->clickedLink : std::string();
+}
+
+std::string UIAPI::hoveredLink(EntityHandle element) const {
+    const auto* t = m_impl->text(element);
+    return t ? t->hoveredLink : std::string();
 }
 
 void UIAPI::setColor(EntityHandle element, const glm::vec4& color) {

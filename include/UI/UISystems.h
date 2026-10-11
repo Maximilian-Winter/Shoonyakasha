@@ -17,6 +17,7 @@
 
 #include <array>
 #include <optional>
+#include <string>
 
 namespace Shoonyakasha {
 namespace UI {
@@ -66,6 +67,7 @@ float springTowards(float current, float target, float& velocity, float smoothTi
 /// - UIToggle and UISlider values;
 /// - the focused UITextField's text, caret and selection, from the keyboard
 ///   and the pointer;
+/// - UIText's hoveredLink and clickedLink, for rich text with links;
 /// - the UIPointerState given to it.
 /// An element pressed keeps the pointer until release: a slider follows a
 /// drag outside its rect, and a release elsewhere is not a click. While the
@@ -136,6 +138,10 @@ private:
     entt::entity m_lastPressField = entt::null;
     bool m_selectingWords = false;              // a double-click selected a word; dragging leaves it
     entt::entity m_lastFocused = entt::null;    // focused at the end of the last update
+
+    // The rich text and link the pointer was pressed over, until released.
+    entt::entity m_linkPressText = entt::null;
+    std::string m_linkPress;
 };
 
 /// Lays out each UIText of a laid-out element into its UITextCache, in the

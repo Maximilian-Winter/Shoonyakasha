@@ -295,6 +295,10 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
         field.changed = false;
         field.submitted = false;
     }
+    for (auto [entity, text] : registry.view<UIText>().each()) {
+        text.hoveredLink.clear();
+        text.clickedLink.clear();
+    }
 
     const auto inputs = registry.view<const ECS::InputStateComponent>();
     const entt::entity inputEntity = inputs.front();
@@ -379,6 +383,27 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
     } else if (hovered != entt::null) {
         registry.get<UIInteractable>(hovered).hovered = true;
         pointer.hovered = hovered;
+    }
+
+    // ── Links in rich text: the one under the pointer, and a click, pressed
+    // and released over the same link ──
+    std::string link;
+    if (const auto* cache = hitElement != entt::null ? registry.try_get<UITextCache>(hitElement) : nullptr;
+        cache && !cache->links.empty() && registry.all_of<UIText>(hitElement)) {
+        const int index = linkAt(cache->layout, cache->runs, hit->position - registry.get<UIRect>(hitElement).rect.min);
+        if (index >= 0) {
+            link = cache->links[static_cast<size_t>(index)];
+            registry.get<UIText>(hitElement).hoveredLink = link;
+        }
+    }
+    if (pressedNow) {
+        m_linkPressText = link.empty() ? entt::null : hitElement;
+        m_linkPress = link;
+    } else if (!down && m_wasDown) {
+        if (m_linkPressText != entt::null && m_linkPressText == hitElement && link == m_linkPress) {
+            registry.get<UIText>(hitElement).clickedLink = link;
+        }
+        m_linkPressText = entt::null;
     }
     m_wasDown = down;
 
