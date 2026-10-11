@@ -10,6 +10,7 @@
 
 #include "common.glsl"
 #include "material_draw.glsl"
+#define EXPOSURE_SET 2
 #include "surface.glsl"
 #include "softbox.glsl"
 

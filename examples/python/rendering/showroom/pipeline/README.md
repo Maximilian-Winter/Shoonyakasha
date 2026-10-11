@@ -164,7 +164,7 @@ The pipeline is generated from the default one plus the additions above. Edit `p
 
 - `VSMMark`, `VSMAllocate`, `VSMClear`, `VSM*{level}` and `ShadowMaskVSM`, in `vsm*.comp`, `vsm*.vert`, `vsm*.frag`, `vsm.glsl` and `vsm_sample.glsl`
 - `LightingRT`, in `lighting_rt.frag`, `lighting_body.glsl` and `rt_lights.glsl`
-- `Overlay`, in `overlay.vert` and `overlay.frag`
+- `Overlay`, in `overlay.vert` and `overlay.frag`, drawn before the default pipeline's `UIOverlay`
 - `DepthOfField` and `Accumulate`, in `depth_of_field.frag` and `accumulate.comp`
 - Rectangular area lights, in `area_lights.glsl`, from the `LTC` buffer (`ltc.bin`, made by `ltc_fit.py`), with the softbox pattern in `softbox.glsl`
 - `LightImage` and `LightImageDown{m}`, in `light_image.frag` and `light_image_down.frag`: the prefiltered chain of the lights' picture

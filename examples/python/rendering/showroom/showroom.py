@@ -16,6 +16,17 @@ with `python tools/fetch_assets.py showroom` (needs a Sketchfab API token);
 without them the showroom shows the bundled Fox. Any glTF can be added with
 --extra.
 
+Run interactively, it has two canvas UIs (engine.ui):
+- a settings panel on the screen, at the left: the lighting, the light,
+  environment and exposure levels, shadows, reflections, camera, lens and
+  tone mapper, paint and clear coat, the floor and the softboxes; it
+  scrolls (wheel, drag or scrollbar), and Tab and the arrow keys move
+  through it once a control has focus (Escape leaves it)
+- an info stand in the scene beside the turntable: a world canvas on a post
+  with the model's name, length and credit, and its own buttons for the
+  model, the paint and the turntable. The model in front of it stops the
+  pointer, and it keeps its brightness under every lighting's exposure
+
 Keys:
     LEFT / RIGHT   previous / next model
     L              next lighting: studio, hard light, night, neon, stained glass
@@ -37,6 +48,7 @@ Keys:
     V              debug views (VSM levels and pages, shadow mask, normals ...)
     H              hide or show the credits and status
     O              render stats: frame rate, GPU time per pass, draw calls
+    F2             settings panel on or off
     P              screenshot into showroom_captures/
     I              high-quality still into showroom_captures/: the view held
                    while --samples frames are averaged
@@ -513,6 +525,11 @@ class Stage:
         self.sun = sk.NULL_ENTITY
         self.rig = None
         self.diffuser = args.softbox
+        self.size = 1.0
+        # The settings panel's levels, over every rig's own.
+        self.brightness = 1.0       # the lights, their softboxes' glow and the sun
+        self.environment = 1.0      # the image-based light
+        self.exposure_ev = 0.0      # stops over the rig's exposure
 
     def build(self):
         self.spin = holder("turntable_spin")
@@ -572,7 +589,7 @@ class Stage:
         """Place and switch the rig's lights around a model; lights scale
         with it, so a bomber is lit like a coupe."""
         self.rig = rig
-        size = max(model.radius() / 2.3, 0.45)
+        size = self.size = max(model.radius() / 2.3, 0.45)
         target = model.centre()
         for i, light in enumerate(self.lights):
             box, parts, diffusers = self.softboxes[i]
@@ -590,7 +607,7 @@ class Stage:
             scene.set_position(light, position)
             scene.set_rotation(light, rotation)
             scene.set_light_color(light, spec.color)
-            scene.set_light_intensity(light, spec.intensity * size * size)
+            scene.set_light_intensity(light, spec.intensity * size * size * self.brightness)
             scene.set_light_range(light, distance * 2.5)
             scene.set_light_cone(light, spec.cone[0], spec.cone[1])
             scene.set_light_source_radius(light, spec.radius * size)
@@ -608,22 +625,14 @@ class Stage:
                 scene.set_position(box, position)
                 scene.set_rotation(box, rotation)
                 scene.set_scale(box, (w * size, h * size, size))
-                # A picture keeps its colours deep: it glows less than a
-                # diffuser, which is white and may burn out.
-                glow = scale(spec.color, 5.0 if spec.image else 3.0 + spec.intensity / 15.0)
-                # emissiveFactor.a: 2 + the grid's cells marks a diffuser for
-                # the pipeline's softbox pattern, 1 is an ordinary emitter.
-                grid = DIFFUSERS[self.diffuser][0]
-                if spec.image:
-                    grid = -1               # the picture, not a diffuser's pattern
                 for e in diffusers:
-                    scene.set_material_vec4(e, "emissiveFactor", glow + (2.0 + grid if grid >= 0 else 1.0,))
+                    scene.set_material_vec4(e, "emissiveFactor", self.diffuser_emission(spec))
                     scene.set_material_texture(e, "emissiveMap", LIGHT_IMAGE if spec.image else WHITE)
         if rig.sun:
             direction, color, intensity = rig.sun
             scene.set_rotation(self.sun, rotation_facing(direction))
             scene.set_light_color(self.sun, color)
-            scene.set_light_intensity(self.sun, intensity)
+            scene.set_light_intensity(self.sun, intensity * self.brightness)
             scene.set_light_cast_shadows(self.sun, True)
         else:
             scene.set_light_intensity(self.sun, 0.0)
@@ -640,9 +649,40 @@ class Stage:
             scene.set_material_vec4(e, "baseColorFactor", color + (1.0,))
             scene.set_material_float(e, "metallicFactor", metallic)
             scene.set_material_float(e, "roughnessFactor", roughness)
-        engine.set_custom_float("default.iblIntensity", rig.ibl)
-        engine.set_custom_float("default.exposure", rig.exposure)
+        self.set_environment(self.environment)
+        self.set_exposure(self.exposure_ev)
         engine.set_custom_float("default.exposureMinEV", rig.min_ev)
+
+    def diffuser_emission(self, spec):
+        """emissiveFactor of a softbox's diffuser."""
+        # A picture keeps its colours deep: it glows less than a diffuser,
+        # which is white and may burn out.
+        glow = scale(spec.color, (5.0 if spec.image else 3.0 + spec.intensity / 15.0) * self.brightness)
+        # emissiveFactor.a: 2 + the grid's cells marks a diffuser for the
+        # pipeline's softbox pattern, 1 is an ordinary emitter.
+        grid = DIFFUSERS[self.diffuser][0]
+        if spec.image:
+            grid = -1               # the picture, not a diffuser's pattern
+        return glow + (2.0 + grid if grid >= 0 else 1.0,)
+
+    def set_brightness(self, brightness):
+        """Scale the rig's lights, their softboxes' glow and the sun."""
+        self.brightness = brightness
+        for light, spec, (_, _, diffusers) in zip(self.lights, self.rig.lights, self.softboxes):
+            scene.set_light_intensity(light, spec.intensity * self.size * self.size * brightness)
+            if spec.softbox is not None:
+                for e in diffusers:
+                    scene.set_material_vec4(e, "emissiveFactor", self.diffuser_emission(spec))
+        if self.rig.sun:
+            scene.set_light_intensity(self.sun, self.rig.sun[2] * brightness)
+
+    def set_environment(self, environment):
+        self.environment = environment
+        engine.set_custom_float("default.iblIntensity", self.rig.ibl * environment)
+
+    def set_exposure(self, ev):
+        self.exposure_ev = ev
+        engine.set_custom_float("default.exposure", self.rig.exposure * 2.0 ** ev)
 
     def turn(self, degrees):
         self.angle = (self.angle + degrees) % 360.0
@@ -897,8 +937,391 @@ def count(n):
     return "%.1fM" % (n / 1e6) if n >= 1e6 else "%.1fk" % (n / 1e3) if n >= 1e4 else str(n)
 
 
+# ── Canvas UI: the settings panel and the info stand ─────────────────────
+
+INK = (0.92, 0.93, 0.95, 1.0)
+MUTED = (0.62, 0.66, 0.72, 1.0)
+GOLD = (0.95, 0.85, 0.55, 1.0)
+FRAME = (0.07, 0.075, 0.09, 0.9)
+SURFACE = (0.22, 0.24, 0.30, 1.0)
+ACCENT = (0.30, 0.52, 0.85, 1.0)
+
+
+def srgb(linear):
+    """A linear colour (a material's factor) as the sRGB the UI takes."""
+    return tuple(12.92 * c if c <= 0.0031308 else 1.055 * c ** (1.0 / 2.4) - 0.055 for c in linear[:3]) + (1.0,)
+
+
+class Swatches:
+    """A row of paint swatches: buttons in the paints' colours, the first,
+    labelled "Own", for the model's own paint. The chosen one is framed in
+    white."""
+
+    def __init__(self, parent, size, spacing):
+        ui = engine.ui
+        self.row = ui.create_horizontal_layout(parent, size=(0, size), spacing=spacing)
+        ui.set_layout_alignment(self.row, (0, 0.5))
+        self.frames, self.buttons = [], []
+        for i in range(len(PAINTS)):
+            frame = ui.create_panel(self.row, size=(size, size))
+            ui.set_raycast_target(frame, False)
+            button = ui.create_button(frame, "" if PAINTS[i] else "Own", size=(size, size))
+            ui.set_rect(button, anchor_min=(0, 0), anchor_max=(1, 1), size=(-8, -8))
+            ui.set_font_size(button, size * 0.34)
+            if PAINTS[i]:
+                ui.set_color(button, srgb(PAINTS[i]))
+            ui.set_accessible(button, "Original paint" if i == 0 else "Paint %d" % i)
+            self.frames.append(frame)
+            self.buttons.append(button)
+
+    def show_model(self, model):
+        for button in self.buttons:
+            engine.ui.set_interactable(button, bool(model.paint))
+
+    def clicked(self):
+        """The index of the swatch clicked this frame, or None."""
+        for i, button in enumerate(self.buttons):
+            if engine.ui.was_clicked(button):
+                return i
+        return None
+
+    def sync(self, index):
+        for i, frame in enumerate(self.frames):
+            engine.ui.set_color(frame, (1, 1, 1, 0.9) if i == index else (1, 1, 1, 0.12))
+
+
+class SettingsPanel:
+    """A screen canvas at the left: everything the keys change, as buttons,
+    toggles and sliders in a scroll view. Each frame it reads its controls
+    first, then shows the showroom's state, so changes made with the keys
+    appear on it too."""
+
+    WIDTH = 430
+
+    def __init__(self):
+        self.visible = True
+        self.built = False
+        self.sliders = {}           # slider -> (its label, name, format of its value)
+        self.texts = {}             # element -> the text last set, to set only changes
+
+    def build(self, fonts):
+        ui = engine.ui
+        self.built = True
+        reference = (1080, 1920) if args.vertical else (1920, 1080)
+        self.canvas = ui.create_canvas(reference_size=reference)
+        # Between the status line at the top and the credits at the bottom.
+        top, bottom = 72.0, 176.0
+        self.frame = ui.create_panel(self.canvas, color=FRAME)
+        ui.set_rect(self.frame, anchor_min=(0, 0), anchor_max=(0, 1), pivot=(0, 0.5),
+                    position=(24, (top - bottom) / 2.0), size=(self.WIDTH, -(top + bottom)))
+        column = ui.create_vertical_layout(self.frame, spacing=6, padding=(20, 14, 12, 14))
+        ui.set_rect(column, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
+        ui.set_layout_child_sizing(column, expand_width=True)
+        ui.create_text(column, "Showroom", size=30, color=GOLD, font=fonts["serif"])
+        ui.create_text(column, "F2 hides this panel. Once a control has focus, Tab and the arrow keys "
+                               "move between them; Escape lets go.", size=15, color=MUTED)
+        view = ui.create_scroll_view(column, size=(self.WIDTH - 32, 0))   # less the column's padding
+        ui.set_layout_element(view, flexible=(-1, 1))
+        ui.set_accessible(view, "Showroom settings")
+        page = ui.create_vertical_layout(ui.scroll_content(view), spacing=8, padding=(0, 4, 18, 12))
+        ui.set_layout_child_sizing(page, expand_width=True)
+        self.page = page
+
+        self.section("Model")
+        self.model_buttons = self.choices({"previous": "Previous", "next": "Next", "turn": "Turn 90°"}, 3)
+        self.swatches = Swatches(page, 40, 6)
+        self.clearcoat = ui.create_toggle(page, "Clear coat over the paint", size=(0, 28))
+        self.spin = ui.create_toggle(page, "Turntable turning", size=(0, 28))
+
+        self.section("Lighting")
+        self.rigs = self.choices({"studio": "Studio", "hardlight": "Hard light", "night": "Night",
+                                  "neon": "Neon", "window": "Stained glass"}, 3)
+        self.brightness = self.slider("Lights", 0.0, 2.0, 1.0, "x%.2f")
+        self.environment = self.slider("Environment light", 0.0, 2.0, 1.0, "x%.2f")
+        self.exposure = self.slider("Exposure", -3.0, 3.0, 0.0, "%+.1f EV")
+        self.area_lights = ui.create_toggle(page, "Softboxes lit as rectangles", size=(0, 28))
+        ui.create_text(page, "Softbox diffusers", size=16, color=MUTED)
+        self.diffusers = self.choices({"grid": "Grid", "fabric": "Plain fabric", "even": "Even"}, 3)
+        self.floor = ui.create_toggle(page, "White floor", size=(0, 28))
+
+        self.section("Shadows and reflections")
+        names = {"hybrid": "VSM + traced lights", "raytraced": "All ray traced", "high": "Virtual shadow map",
+                 "cascades": "Cascades"}
+        self.shadows = self.choices({p: names[p] for p in showroom.shadow_presets()}, 2)
+        self.reflections = ui.create_toggle(page, "Ray-traced reflections", size=(0, 28))
+
+        self.section("Camera and lens")
+        self.cameras = self.choices(CAMERA_MODES, 4)
+        self.dof = ui.create_toggle(page, "Depth of field", size=(0, 28))
+        self.f_number = self.slider("Aperture", 0.8, 8.0, 2.8, "f/%.1f")
+        ui.create_text(page, "Tone mapper", size=16, color=MUTED)
+        self.tonemappers = self.choices({k: v[1] for k, v in TONE_MAPPERS.items()}, 3)
+        self.bloom = self.slider("Bloom", 0.0, 0.3, 0.05, "%.3f")
+        self.vignette = self.slider("Vignette", 0.0, 0.5, args.vignette, "%.2f")
+        self.grain = self.slider("Film grain", 0.0, 0.08, args.grain, "%.3f")
+
+        self.section("On screen and in the scene")
+        self.stand = ui.create_toggle(page, "Info stand beside the turntable", is_on=True, size=(0, 28))
+        self.credits = ui.create_toggle(page, "Credits and status", size=(0, 28))
+        self.stats = ui.create_toggle(page, "Render stats", size=(0, 28))
+        self.apply()
+
+    def show_model(self, model):
+        if self.built:
+            self.swatches.show_model(model)
+
+    def section(self, title):
+        ui = engine.ui
+        ui.create_element(self.page, (0, 6))
+        ui.create_text(self.page, title, size=20, color=GOLD)
+
+    def choices(self, labels, per_row):
+        """Buttons for {key: label}, per_row to a row, sharing its width."""
+        ui = engine.ui
+        buttons = {}
+        for i, (key, label) in enumerate(labels.items()):
+            if i % per_row == 0:
+                row = ui.create_horizontal_layout(self.page, size=(0, 34), spacing=6)
+                ui.set_layout_child_sizing(row, expand_width=True)
+            buttons[key] = ui.create_button(row, label, size=(60, 34))
+            ui.set_font_size(buttons[key], 16)
+        return buttons
+
+    def slider(self, name, lo, hi, value, value_format):
+        """A label over a slider; returns the slider. The label shows its
+        name and its value in value_format."""
+        label = engine.ui.create_text(self.page, "", size=17)
+        slider = engine.ui.create_slider(self.page, min=lo, max=hi, value=value, size=(0, 22))
+        engine.ui.set_accessible(slider, name)
+        self.sliders[slider] = (label, name, value_format)
+        return slider
+
+    def apply(self):
+        if self.built:
+            engine.ui.set_visible(self.canvas, self.visible and not showroom.overlay.help_visible)
+
+    def set_text(self, element, text):
+        if self.texts.get(element) != text:
+            self.texts[element] = text
+            engine.ui.set_text(element, text)
+
+    def update(self):
+        if not self.built:
+            return
+        ui, s = engine.ui, showroom
+        clicked = lambda buttons: next((k for k, b in buttons.items() if ui.was_clicked(b)), None)
+        changed = ui.value_changed
+
+        # The controls, as of last frame's pointer and keys.
+        action = clicked(self.model_buttons)
+        if action == "previous":
+            s.select(s.index - 1)
+        elif action == "next":
+            s.select(s.index + 1)
+        elif action == "turn":
+            s.turn_model()
+        paint = self.swatches.clicked()
+        if paint is not None:
+            s.set_paint(paint)
+        if changed(self.clearcoat):
+            s.set_clearcoat(ui.toggle_value(self.clearcoat))
+        if changed(self.spin):
+            s.spinning = ui.toggle_value(self.spin)
+        rig = clicked(self.rigs)
+        if rig:
+            s.set_rig(RIG_BY_NAME[rig])
+        if changed(self.brightness):
+            s.stage.set_brightness(ui.slider_value(self.brightness))
+        if changed(self.environment):
+            s.stage.set_environment(ui.slider_value(self.environment))
+        if changed(self.exposure):
+            s.stage.set_exposure(ui.slider_value(self.exposure))
+        if changed(self.area_lights):
+            s.set_area_lights(ui.toggle_value(self.area_lights))
+        diffuser = clicked(self.diffusers)
+        if diffuser:
+            s.set_diffuser(diffuser)
+        if changed(self.floor):
+            s.floor_white = ui.toggle_value(self.floor)
+            s.apply_floor()
+        preset = clicked(self.shadows)
+        if preset:
+            s.set_shadows(preset)
+        if changed(self.reflections):
+            s.set_reflections(ui.toggle_value(self.reflections))
+        camera = clicked(self.cameras)
+        if camera:
+            s.set_camera(camera)
+        if changed(self.dof) or (changed(self.f_number) and s.dof > 0.0):
+            s.set_dof(ui.slider_value(self.f_number) if ui.toggle_value(self.dof) else 0.0)
+        tonemapper = clicked(self.tonemappers)
+        if tonemapper:
+            s.set_tonemapper(tonemapper)
+        if changed(self.bloom):
+            engine.set_custom_float("default.bloomIntensity", ui.slider_value(self.bloom))
+        if changed(self.vignette):
+            engine.set_custom_float("showroom.vignette", ui.slider_value(self.vignette))
+        if changed(self.grain):
+            engine.set_custom_float("showroom.grain", ui.slider_value(self.grain))
+        if changed(self.stand):
+            s.info_stand.set_shown(ui.toggle_value(self.stand))
+        if changed(self.credits):
+            s.overlay.visible = ui.toggle_value(self.credits)
+            s.overlay.apply()
+        if changed(self.stats):
+            s.stats.toggle()
+
+        # The showroom's state, whichever way it was changed.
+        self.swatches.sync(s.paint)
+        for toggle, on in ((self.clearcoat, s.clearcoat), (self.spin, s.spinning),
+                           (self.area_lights, s.area_lights), (self.floor, s.floor_white),
+                           (self.reflections, s.reflections), (self.dof, s.dof > 0.0),
+                           (self.credits, s.overlay.visible), (self.stats, s.stats.visible)):
+            if ui.toggle_value(toggle) != on:
+                ui.set_toggle_value(toggle, on)
+        for slider, value in ((self.brightness, s.stage.brightness), (self.environment, s.stage.environment),
+                              (self.exposure, s.stage.exposure_ev), (self.f_number, s.dof)):
+            if value > 0.0 or slider is not self.f_number:
+                if abs(ui.slider_value(slider) - value) > 1e-4:
+                    ui.set_slider_value(slider, value)
+        for buttons, chosen in ((self.rigs, s.rig.name), (self.diffusers, s.stage.diffuser),
+                                (self.shadows, s.preset), (self.cameras, s.camera_mode),
+                                (self.tonemappers, s.tonemapper)):
+            for key, button in buttons.items():
+                ui.set_color(button, ACCENT if key == chosen else SURFACE)
+        # Reflections are traced only with the ray-traced lights' presets.
+        ui.set_interactable(self.reflections, s.preset in ("hybrid", "raytraced"))
+        for slider, (label, name, value_format) in self.sliders.items():
+            self.set_text(label, "%s   %s" % (name, value_format % ui.slider_value(slider)))
+
+
+class InfoStand:
+    """A placard on a post beside the turntable: a world canvas with the
+    model's name, length and credit, and buttons for the model, its paint
+    and the turntable. It stands at the right of the turntable camera's view,
+    turned towards it, and grows with the model like the lights. The model
+    stops the pointer where it is in front of the stand (the pipeline's "ui"
+    block), and the placard keeps its brightness under every lighting's
+    exposure (exposureCompensation, which world canvases set)."""
+
+    PIXELS = (960, 640)
+    SIZE = (1.5, 1.0)       # metres, at a model scale of 1
+    HEIGHT = 1.25           # the placard's centre above the floor
+
+    def __init__(self):
+        self.built = False
+        self.shown = True
+
+    def build(self, fonts):
+        ui = engine.ui
+        self.built = True
+        self.root = holder("info_stand")
+        mount = holder("info_stand_mount")
+        scene.set_parent(mount, self.root)
+        scene.set_position(mount, (0.0, self.HEIGHT, 0.0))
+        scene.set_rotation(mount, (-0.2, 0.0, 0.0))      # leaning back, towards a camera above it
+        self.canvas = ui.create_world_canvas(pixel_size=self.PIXELS, world_size=self.SIZE, emission=1.4)
+        scene.set_parent(self.canvas, mount)
+        ui.set_canvas_clear_color(self.canvas, (0.025, 0.028, 0.035, 1.0))
+        metal = ((0.04, 0.04, 0.045), 0.8, 0.35)
+        self.parts = (self.box(mount, (0.0, 0.0, -0.03), (self.SIZE[0] + 0.06, self.SIZE[1] + 0.06, 0.04), metal)
+                      + self.box(self.root, (0.0, self.HEIGHT / 2.0, -0.08), (0.06, self.HEIGHT, 0.06), metal)
+                      + self.box(self.root, (0.0, 0.012, -0.08), (0.5, 0.024, 0.36), metal))
+
+        # A column from the top: a title of two lines moves the rest down.
+        # The buttons are placed from the bottom corners.
+        column = ui.create_vertical_layout(self.canvas, spacing=6)
+        ui.set_rect(column, anchor_min=(0, 0), anchor_max=(1, 0), pivot=(0.5, 0), position=(0, 36),
+                    size=(-96, 400))
+        ui.set_layout_child_sizing(column, expand_width=True)
+        self.year = ui.create_text(column, "", size=34, color=MUTED)
+        self.title = ui.create_text(column, "", size=72, color=GOLD, font=fonts["serif"])
+        self.length = ui.create_text(column, "", size=34)
+        self.credit = ui.create_text(column, "", size=24, color=MUTED)
+        ui.create_element(column, (0, 10))
+        self.swatches = Swatches(column, 76, 16)
+        self.previous = ui.create_button(self.canvas, "Previous", size=(250, 88))
+        self.next = ui.create_button(self.canvas, "Next", size=(250, 88))
+        self.spin = ui.create_toggle(self.canvas, "Turntable", is_on=True, size=(320, 52))
+        for element, x in ((self.previous, 48), (self.next, 314)):
+            ui.set_anchor(element, (0, 1))
+            ui.set_position(element, (x, -36))
+            ui.set_font_size(element, 36)
+        ui.set_anchor(self.spin, (1, 1))
+        ui.set_position(self.spin, (-48, -54))
+        ui.set_font_size(self.spin, 34)
+
+    @staticmethod
+    def box(parent, position, size, material):
+        """The unit Box.gltf, scaled to `size` at `position` under parent."""
+        meshes = engine.load_gltf_scene(str(ROOT / "models" / "Box.gltf"), name_prefix="info_stand").entities
+        root = root_of(meshes[0])
+        scene.set_parent(root, parent)
+        scene.set_rotation(root, (0.0, 0.0, 0.0))     # the file turns the cube about X
+        scene.set_scale(root, size)
+        scene.set_position(root, position)
+        color, metallic, roughness = material
+        for e in meshes:
+            scene.set_material_vec4(e, "baseColorFactor", color + (1.0,))
+            scene.set_material_float(e, "metallicFactor", metallic)
+            scene.set_material_float(e, "roughnessFactor", roughness)
+        return list(meshes)
+
+    def show_model(self, model):
+        """Fill the placard in, and stand it beside the model's turntable."""
+        if not self.built:
+            return
+        ui, e = engine.ui, model.entry
+        ui.set_text(self.year, e.year)
+        ui.set_text(self.title, e.title)
+        ui.set_text(self.length, "Shown %.2f m long" % model.size[2])
+        ui.set_text(self.credit, catalogue.short_credit(model.credit) if model.credit else "")
+        ui.set_visible(self.swatches.row, bool(model.paint))
+        self.swatches.show_model(model)
+
+        # At the right of the turntable camera's view (the settings panel is
+        # at the left), clear of the turntable and a little behind the model,
+        # turned to face that camera.
+        size = max(model.radius() / 2.3, 0.45)
+        c = model.centre()
+        eye = orbit(c, framing_distance(model.radius(), 40.0, args.width / args.height), 35.0, 9.0)
+        a = math.radians(35.0)
+        right, back = (math.cos(a), 0.0, -math.sin(a)), (-math.sin(a), 0.0, -math.cos(a))
+        place = add(scale(right, model.turntable_radius() + 0.85 * size), scale(back, 0.6 * size))
+        scene.set_scale(self.root, (size,) * 3)
+        scene.set_position(self.root, place)
+        scene.set_rotation(self.root, (0.0, math.atan2(eye[0] - place[0], eye[2] - place[2]), 0.0))
+
+    def set_shown(self, shown):
+        self.shown = shown
+        if self.built:
+            engine.ui.set_visible(self.canvas, shown)      # nor does it take the pointer
+            scene.set_visible(self.canvas, shown)
+            for e in self.parts:
+                scene.set_visible(e, shown)
+            showroom.bump()        # it casts a shadow into the virtual shadow map
+
+    def update(self):
+        if not self.built or not self.shown:
+            return
+        ui, s = engine.ui, showroom
+        if ui.was_clicked(self.previous):
+            s.select(s.index - 1)
+        if ui.was_clicked(self.next):
+            s.select(s.index + 1)
+        paint = self.swatches.clicked()
+        if paint is not None:
+            s.set_paint(paint)
+        if ui.value_changed(self.spin):
+            s.spinning = ui.toggle_value(self.spin)
+        self.swatches.sync(s.paint)
+        if ui.toggle_value(self.spin) != s.spinning:
+            ui.set_toggle_value(self.spin, s.spinning)
+
+
 # ── The showroom ─────────────────────────────────────────────────────────
 
+CAMERA_MODES = {"turntable": "Turntable", "cinematic": "Cinematic", "orbit": "Orbit", "free": "Free"}
 SHADOW_LABELS = {"hybrid": "Virtual shadow map + ray-traced lights", "high": "Virtual shadow map",
                  "raytraced": "Ray-traced sun and lights", "cascades": "Cascaded shadow maps"}
 DEBUG_VIEWS = ("final image", "VSM levels and pages", "shadow mask", "normals", "ambient occlusion",
@@ -913,6 +1336,8 @@ class Showroom:
         self.stage = Stage()
         self.overlay = Overlay()
         self.stats = StatsPanel()
+        self.settings = SettingsPanel()
+        self.info_stand = InfoStand()
         self.index = 0
         self.rig = None
         self.camera_mode = args.camera
@@ -926,6 +1351,7 @@ class Showroom:
         self.area_lights = not args.sphere_lights
         self.orbit_goal = None      # azimuth, elevation (degrees), distance the orbit camera eases to
         self.orbit_now = None
+        self.orbit_drag = None      # while the left button is down: whether the press turns the camera
         self.tonemapper = args.tonemapper
         self.floor_white = False
         self.time = 0.0
@@ -964,6 +1390,10 @@ class Showroom:
         engine.set_custom_float("showroom.reflections", 1.0 if self.reflections else 0.0)
         engine.set_custom_float("showroom.areaLights", 1.0 if self.area_lights else 0.0)
         engine.set_custom_float("showroom.softboxGrid", float(DIFFUSERS[self.stage.diffuser][0]))
+        if not (args.screenshots or args.record):
+            fonts = {"serif": engine.ui.load_font("fonts/PlayfairDisplay.ttf")}
+            self.settings.build(fonts)
+            self.info_stand.build(fonts)
         self.select(0)
 
     def select(self, index):
@@ -976,6 +1406,8 @@ class Showroom:
             model.load(self.stage.spin)
         model.show(True)
         self.stage.stand(model)
+        self.settings.show_model(model)
+        self.info_stand.show_model(model)
         self.orbit_goal = None
         self.set_rig(RIG_BY_NAME[args.lighting] if args.lighting else RIG_BY_NAME[model.entry.rig])
         self.paint = 0
@@ -990,6 +1422,7 @@ class Showroom:
     def set_rig(self, rig):
         self.rig = rig
         self.stage.light(rig, self.model)
+        self.apply_floor()
         self.bump()
         self.update_status()
 
@@ -1010,9 +1443,13 @@ class Showroom:
         stops = list(DOF_STOPS)
         if self.dof not in stops:
             stops.insert(1, self.dof)
-        self.dof = stops[(stops.index(self.dof) + 1) % len(stops)]
-        self.update_status()
+        self.set_dof(stops[(stops.index(self.dof) + 1) % len(stops)])
         print("[showroom] depth of field:", "f/%g" % self.dof if self.dof > 0.0 else "off")
+
+    def set_dof(self, f_number):
+        """Depth of field at f_number; 0 turns it off."""
+        self.dof = f_number
+        self.update_status()
 
     def apply_dof(self):
         """Focus where the camera looks: the shot's target, or in the free
@@ -1032,13 +1469,19 @@ class Showroom:
 
     def next_tonemapper(self):
         names = list(TONE_MAPPERS)
-        self.tonemapper = names[(names.index(self.tonemapper) + 1) % len(names)]
+        self.set_tonemapper(names[(names.index(self.tonemapper) + 1) % len(names)])
+
+    def set_tonemapper(self, name):
+        self.tonemapper = name
         self.apply_tonemapper()
         self.update_status()
         print("[showroom] tone mapper:", TONE_MAPPERS[self.tonemapper][1])
 
     def toggle_clearcoat(self):
-        self.clearcoat = not self.clearcoat
+        self.set_clearcoat(not self.clearcoat)
+
+    def set_clearcoat(self, on):
+        self.clearcoat = on
         for model in self.models:
             if model.loaded:
                 model.apply_coat(self.clearcoat)
@@ -1047,17 +1490,36 @@ class Showroom:
 
     def next_diffuser(self):
         names = list(DIFFUSERS)
-        self.stage.diffuser = names[(names.index(self.stage.diffuser) + 1) % len(names)]
+        self.set_diffuser(names[(names.index(self.stage.diffuser) + 1) % len(names)])
+
+    def set_diffuser(self, name):
+        self.stage.diffuser = name
         engine.set_custom_float("showroom.softboxGrid", float(DIFFUSERS[self.stage.diffuser][0]))
         self.stage.light(self.rig, self.model)
+        self.apply_floor()
         self.update_status()
         print("[showroom] softbox diffusers:", DIFFUSERS[self.stage.diffuser][1])
 
     def toggle_area_lights(self):
-        self.area_lights = not self.area_lights
+        self.set_area_lights(not self.area_lights)
+
+    def set_area_lights(self, on):
+        self.area_lights = on
         engine.set_custom_float("showroom.areaLights", 1.0 if self.area_lights else 0.0)
         self.update_status()
         print("[showroom] softboxes lit as", "rectangles" if self.area_lights else "spheres")
+
+    def set_reflections(self, on):
+        self.reflections = on
+        engine.set_custom_float("showroom.reflections", 1.0 if on else 0.0)
+        print("[showroom] reflections", "on" if on else "off",
+              "" if self.preset in ("hybrid", "raytraced") else "(they need ray-traced lights: G)")
+
+    def set_camera(self, mode):
+        self.camera_mode = mode
+        self.shot_time = 0.0
+        self.orbit_goal = None
+        print("[showroom] camera:", mode)
 
     # Frame by frame ------------------------------------------------------
 
@@ -1122,12 +1584,18 @@ class Showroom:
                                math.degrees(math.asin(max(-1.0, min(1.0, offset[1] / distance)))), distance]
             self.orbit_now = None
         goal = self.orbit_goal
-        if engine.input.is_mouse_button_down(keys.MOUSE_LEFT):
+        # A press on the settings panel or the info stand works the UI for as
+        # long as the button is held, and the wheel over them scrolls them.
+        if not engine.input.is_mouse_button_down(keys.MOUSE_LEFT):
+            self.orbit_drag = None
+        elif self.orbit_drag is None:
+            self.orbit_drag = not engine.ui.pointer_over_ui
+        if self.orbit_drag:
             dx, dy = engine.input.get_mouse_delta()
             goal[0] -= dx * ORBIT_DEGREES_PER_PIXEL
             goal[1] += dy * ORBIT_DEGREES_PER_PIXEL
         scroll = engine.input.get_scroll_delta()[1]
-        if scroll:
+        if scroll and not engine.ui.pointer_over_ui:
             goal[2] *= ORBIT_ZOOM_STEP ** scroll
         goal[1] = max(-3.0, min(80.0, goal[1]))
         goal[2] = max(nearest, min(max(farthest, nearest), goal[2]))
@@ -1159,21 +1627,31 @@ class Showroom:
         self.set_rig(RIGS[(i + 1) % len(RIGS)])
         print("[showroom] lighting:", self.rig.label)
 
+    def shadow_presets(self):
+        return (["hybrid", "raytraced", "high", "cascades"] if engine.ray_query_supported()
+                else ["high", "cascades"])
+
     def next_shadows(self):
-        order = (["hybrid", "raytraced", "high", "cascades"] if engine.ray_query_supported()
-                 else ["high", "cascades"])
-        self.preset = order[(order.index(self.preset) + 1) % len(order)] if self.preset in order else "high"
+        order = self.shadow_presets()
+        self.set_shadows(order[(order.index(self.preset) + 1) % len(order)] if self.preset in order else "high")
+
+    def set_shadows(self, preset):
+        self.preset = preset
         engine.apply_pipeline_preset(self.preset)
         engine.set_custom_float("default.contactShadowLength", 0.12)
         self.update_status()
         print("[showroom] shadows:", SHADOW_LABELS[self.preset])
 
     def next_paint(self):
-        model = self.model
-        if not model.paint:
+        if not self.model.paint:
             print("[showroom] no paint materials found on this model (catalogue 'paint' pattern)")
             return
-        self.paint = (self.paint + 1) % len(PAINTS)
+        self.set_paint((self.paint + 1) % len(PAINTS))
+
+    def set_paint(self, index):
+        """PAINTS[index] on the model's body paint; 0 is the file's own."""
+        model = self.model
+        self.paint = index
         for e in model.paint:
             color = PAINTS[self.paint]
             scene.set_material_vec4(e, "baseColorFactor",
@@ -1183,12 +1661,17 @@ class Showroom:
         model = self.model
         model.yaw = (model.yaw + 90.0) % 360.0
         model.place()
+        self.info_stand.show_model(model)
         self.shots = cinematic_shots(model, args.width / args.height)
         self.bump()
         print("[showroom] %s: yaw=%g in catalogue.py" % (model.entry.name, model.yaw))
 
     def toggle_floor(self):
         self.floor_white = not self.floor_white
+        self.apply_floor()
+
+    def apply_floor(self):
+        """The white floor and cove, or the rig's own."""
         floor = (0.75, 0.75, 0.74) if self.floor_white else self.rig.floor
         cove = (0.85, 0.85, 0.84) if self.floor_white else self.rig.cove
         for e in self.stage.floor:
@@ -1279,27 +1762,24 @@ class Controls:
 
     def update(self, dt):
         s = showroom
-        if self.pressed(keys.RIGHT):
+        # While a control of the canvas UI has focus, the arrow keys move
+        # between controls instead.
+        ui_focused = engine.ui.focused_element != sk.NULL_ENTITY
+        if self.pressed(keys.RIGHT) and not ui_focused:
             s.select(s.index + 1)
-        if self.pressed(keys.LEFT):
+        if self.pressed(keys.LEFT) and not ui_focused:
             s.select(s.index - 1)
         if self.pressed(keys.L):
             s.next_rig()
         if self.pressed(keys.C):
-            modes = ["turntable", "cinematic", "orbit", "free"]
-            s.camera_mode = modes[(modes.index(s.camera_mode) + 1) % len(modes)]
-            s.shot_time = 0.0
-            s.orbit_goal = None
-            print("[showroom] camera:", s.camera_mode)
+            modes = list(CAMERA_MODES)
+            s.set_camera(modes[(modes.index(s.camera_mode) + 1) % len(modes)])
         if self.pressed(keys.G):
             s.next_shadows()
         if self.pressed(keys.T):
             s.spinning = not s.spinning
         if self.pressed(keys.R):
-            s.reflections = not s.reflections
-            engine.set_custom_float("showroom.reflections", 1.0 if s.reflections else 0.0)
-            print("[showroom] reflections", "on" if s.reflections else "off",
-                  "" if s.preset in ("hybrid", "raytraced") else "(they need ray-traced lights: G)")
+            s.set_reflections(not s.reflections)
         if self.pressed(keys.K):
             s.next_paint()
         if self.pressed(keys.Y):
@@ -1316,6 +1796,10 @@ class Controls:
         if self.pressed(keys.F1):
             s.overlay.help_visible = not s.overlay.help_visible
             s.overlay.apply()
+            s.settings.apply()
+        if self.pressed(keys.F2):
+            s.settings.visible = not s.settings.visible
+            s.settings.apply()
         if self.pressed(keys.O):
             s.stats.toggle()
         if self.pressed(keys.M):
@@ -1328,6 +1812,8 @@ class Controls:
             s.next_diffuser()
         if self.pressed(keys.B):
             s.next_dof()
+        s.settings.update()
+        s.info_stand.update()
         s.stats.update(dt)
         if self.pressed(keys.I):
             still_capture.start()

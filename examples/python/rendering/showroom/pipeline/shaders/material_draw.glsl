@@ -13,4 +13,5 @@ layout(push_constant) uniform MaterialDraw {
     float hasMetalRoughMap;
     float clearcoatFactor;   // KHR_materials_clearcoat: coat amount, 0 for none
     float clearcoatRoughness;
+    float exposureCompensation;  // 0..1: how much emission is divided by the exposure
 } draw;

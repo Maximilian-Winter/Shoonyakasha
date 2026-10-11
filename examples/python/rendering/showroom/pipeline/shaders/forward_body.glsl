@@ -10,6 +10,7 @@
 #include "common.glsl"
 #include "sk/pbr.glsl"
 #include "material_draw.glsl"
+#define EXPOSURE_SET 7
 #include "surface.glsl"
 
 layout(set = 0, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
@@ -32,7 +33,7 @@ layout(set = 6, binding = 2, r32ui) uniform readonly uimage2D vsmPhysical;
 #include "csm.glsl"
 #include "vsm_sample.glsl"
 #ifdef RAY_TRACED_SHADOWS
-layout(set = 7, binding = 0) uniform accelerationStructureEXT scene;
+layout(set = 8, binding = 0) uniform accelerationStructureEXT scene;
 #include "rt_shadows.glsl"
 const int SUN_RAYS = 4;   // more than the opaque pass: TAA cannot follow a blended surface
 #define RT_LOCAL_SHADOWS

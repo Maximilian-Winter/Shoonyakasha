@@ -2,6 +2,8 @@
 //
 // The including fragment shader declares the material textures at set 1 and
 // includes material_draw.glsl, and takes the gbuffer.vert outputs as inputs.
+// It defines EXPOSURE_SET, the set where it binds pipeline.json's
+// exposureReadSet: the settings and the adapted exposure.
 
 #ifndef DEFAULT_SURFACE_GLSL
 #define DEFAULT_SURFACE_GLSL
@@ -13,6 +15,9 @@ layout(set = 1, binding = 3) uniform sampler2D aoMap;
 layout(set = 1, binding = 4) uniform sampler2D emissiveMap;
 layout(set = 1, binding = 5) uniform sampler2D clearcoatMap;            // KHR_materials_clearcoat: r amount
 layout(set = 1, binding = 6) uniform sampler2D clearcoatRoughnessMap;   // g roughness
+
+layout(set = EXPOSURE_SET, binding = 0) uniform ExposureSettings { DEFAULT_SETTINGS_BLOCK } exposureSettings;
+layout(set = EXPOSURE_SET, binding = 1) uniform sampler2D exposureImage;   // 1x1, last frame's adapted value
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragWorldNormal;
@@ -40,6 +45,17 @@ mat3 derivativeTBN(vec3 N, vec3 p, vec2 uv) {
     vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
     float invMax = inversesqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
     return mat3(T * invMax, B * invMax, N);
+}
+
+// The exposure Tonemap applies, as of last frame: settings.exposure times
+// the adapted value when automatic exposure is on.
+float sceneExposure() {
+    float exposure = exposureSettings.exposure;
+    if (exposureSettings.autoExposure != 0u) {
+        float adapted = texelFetch(exposureImage, ivec2(0), 0).r;
+        if (adapted > 0.0 && !isinf(adapted)) exposure *= adapted;
+    }
+    return max(exposure, 1e-6);
 }
 
 vec4 surfaceBaseColor() {
@@ -73,6 +89,11 @@ Surface evaluateSurface(vec4 baseColor) {
 
     s.occlusion = texture(aoMap, fragTexCoord).r;   // no texture: the fallback is 1
     s.emissive = texture(emissiveMap, fragTexCoord).rgb * draw.emissiveFactor.rgb;
+    // With compensation 1 the emission reaches the tone curve at its own
+    // value, whatever the exposure.
+    if (draw.exposureCompensation > 0.0) {
+        s.emissive *= mix(1.0, 1.0 / sceneExposure(), clamp(draw.exposureCompensation, 0.0, 1.0));
+    }
     // The coat maps scale the factors; without them the fallback is white.
     // Most materials have no coat, and skip the fetches.
     s.clearcoat = clamp(draw.clearcoatFactor, 0.0, 1.0);
