@@ -69,12 +69,14 @@ struct TextEditBuffer {
     size_t rightStop(size_t index) const;
 
     /// Word jumps: back to the start of the word before `index`, and on to
-    /// the start of the next word. Words are runs of letters and digits, or
-    /// of punctuation, separated by spaces.
+    /// the start of the next word. Words come from the Unicode word
+    /// boundaries (UAX #29), and from a dictionary in Thai, Lao, Khmer and
+    /// Myanmar (UI/LineBreak.h); a run of punctuation counts as one word,
+    /// and spaces are skipped.
     size_t previousWord(size_t index) const;
     size_t nextWord(size_t index) const;
 
-    /// The run of the same kind (word, punctuation or spaces) at `index`.
+    /// The word, run of punctuation or run of spaces at `index`.
     std::pair<size_t, size_t> wordAt(size_t index) const;
 
     /// Replaces the selection with as much of `insertion` as keeps the text

@@ -41,6 +41,7 @@ find_package(glm CONFIG REQUIRED)
 find_package(unofficial-spirv-reflect CONFIG REQUIRED)
 find_package(harfbuzz CONFIG REQUIRED)
 find_package(SheenBidi CONFIG REQUIRED)
+find_package(libunibreak CONFIG REQUIRED)
 
 # CONFIGURE_DEPENDS makes the build system re-glob when files appear or vanish.
 # A glob without it goes stale the moment you add a source file.
@@ -103,6 +104,8 @@ target_link_libraries(Shoonyakasha
         harfbuzz::harfbuzz
         # Bidirectional text for the canvas UI (UI/Bidi.cpp).
         SheenBidi::SheenBidi
+        # Line and word breaking for the canvas UI (UI/LineBreak.cpp).
+        libunibreak::libunibreak
 )
 
 # Where ApplicationBase finds the default pipeline when a program names none.

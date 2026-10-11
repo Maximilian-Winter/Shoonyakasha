@@ -96,6 +96,21 @@ TEST(TextEditing, WordsAreRunsOfLettersOrPunctuation) {
     EXPECT_EQ(b.text, U"hello,   foo");
 }
 
+TEST(TextEditing, WordsFollowTheUnicodeWordRules) {
+    // An apostrophe inside a word does not end it, and "3.5" is one number.
+    TextEditBuffer b = buffer(U"don't stop at 3.5", 0);
+    EXPECT_EQ(b.nextWord(0), 6u);
+    EXPECT_EQ(b.wordAt(2), (std::pair<size_t, size_t>{0, 5}));
+    EXPECT_EQ(b.wordAt(15), (std::pair<size_t, size_t>{14, 17}));
+
+    // Thai has no spaces: "chan rak maew" splits by its word list.
+    TextEditBuffer thai = buffer({0x0E09, 0x0E31, 0x0E19, 0x0E23, 0x0E31, 0x0E01, 0x0E41, 0x0E21, 0x0E27}, 0);
+    EXPECT_EQ(thai.nextWord(0), 3u);
+    EXPECT_EQ(thai.nextWord(3), 6u);
+    EXPECT_EQ(thai.previousWord(9), 6u);
+    EXPECT_EQ(thai.wordAt(4), (std::pair<size_t, size_t>{3, 6}));
+}
+
 TEST(TextEditing, InsertReplacesTheSelectionWithinMaxLength) {
     TextEditBuffer b = buffer(U"abcdef", 1);
     b.moveTo(4, true);

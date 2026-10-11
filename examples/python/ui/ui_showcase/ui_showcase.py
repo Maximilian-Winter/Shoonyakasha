@@ -11,7 +11,8 @@ A tour of engine.ui on the default pipeline, in one window:
     Text     the nine text alignments, fonts, Unicode with shaped Devanagari
              and Tibetan from fallback fonts, a right-to-left line of Arabic
              and Hebrew with a number and a Latin word in it, a font size
-             slider and wrapping in a clipped box
+             slider and wrapping in a clipped box, Thai wrapping between
+             words though it has no spaces
     Widgets  a click counter, a button enabled by a toggle, a stepped
              slider, a name field that greets in the log on Enter, and a
              log whose rows are created and destroyed at runtime, in a
@@ -162,13 +163,14 @@ def on_init():
     global ui_
     ui_ = engine.ui
     fonts = {"serif": ui_.load_font("fonts/PlayfairDisplay.ttf")}
-    # Characters Roboto and Playfair lack, Devanagari, Tibetan, Arabic and
-    # Hebrew, come from these; HarfBuzz shapes their conjuncts, stacks and
+    # Characters Roboto and Playfair lack, Devanagari, Tibetan, Arabic, Hebrew
+    # and Thai, come from these; HarfBuzz shapes their conjuncts, stacks and
     # joined letters.
     ui_.set_default_font_fallbacks([ui_.load_font("fonts/NotoSansDevanagari-Regular.ttf"),
                                     ui_.load_font("fonts/NotoSerifTibetan.ttf"),
                                     ui_.load_font("fonts/NotoSansArabic-Regular.ttf"),
-                                    ui_.load_font("fonts/NotoSansHebrew-Regular.ttf")])
+                                    ui_.load_font("fonts/NotoSansHebrew-Regular.ttf"),
+                                    ui_.load_font("fonts/NotoSansThai-Regular.ttf")])
 
     build_scene()
     hud = named("HUD canvas", ui_.create_canvas(reference_size=(1280, 720)))
@@ -311,9 +313,11 @@ def build_text_page(page, fonts):
     box = named("Clipped text box", ui_.create_panel(page, (PAGE_WIDTH, 110), color=(0.06, 0.07, 0.09, 1.0)))
     ui_.set_clip(box, True)
     # Tibetan has no spaces between words: its lines break after the tsheg (་).
+    # Nor does Thai, whose lines break between the words a word list finds.
     w["paragraph"] = ui_.create_text(box, "Text is laid out from signed distance fields, so it stays sharp at "
                                           "any size. This box clips whatever overflows it. "
-                                          "བཀྲ་ཤིས་བདེ་ལེགས། ཐུགས་རྗེ་ཆེ། སེམས་ཅན་ཐམས་ཅད་བདེ་བར་གྱུར་ཅིག།",
+                                          "བཀྲ་ཤིས་བདེ་ལེགས། ཐུགས་རྗེ་ཆེ། སེམས་ཅན་ཐམས་ཅད་བདེ་བར་གྱུར་ཅིག། "
+                                          "ภาษาไทยเขียนติดกันโดยไม่มีช่องว่างระหว่างคำ",
                                      size=18, color=INK)
     ui_.set_rect(w["paragraph"], anchor_min=(0, 0), anchor_max=(1, 1), size=(-20, -16))
 

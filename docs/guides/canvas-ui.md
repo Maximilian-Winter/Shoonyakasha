@@ -118,13 +118,14 @@ The content is a column that grows with its children and spans the view's width.
 Text is drawn from signed distance fields, so it stays sharp at any size and on a world canvas seen up close.
 - **Size:** `size` is the height from ascent to descent, in canvas units.
 - **Fonts:** `load_font(path)` loads a `.ttf` or `.otf` and returns its id, for `create_text(..., font=id)` or `set_font`. Text that names no font uses `default_font`, `fonts/Roboto-Regular.ttf` from the asset folder.
-- **Wrapping:** text wraps at its rect's width unless `set_text_wrap(e, False)`. `set_text_align` aligns it horizontally and vertically in its rect. Lines break where the script allows:
-  - at spaces;
+- **Wrapping:** text wraps at its rect's width unless `set_text_wrap(e, False)`. `set_text_align` aligns it horizontally and vertically in its rect. Lines break where the Unicode line breaking rules (UAX #14) allow, for example:
+  - after spaces;
   - after a hyphen;
   - after the Tibetan tsheg (་) and shad (།);
-  - between Chinese and Japanese characters and Korean syllables.
+  - between Chinese and Japanese characters and Korean syllables;
+  - between words in Thai, Lao, Khmer and Myanmar, which are written without spaces: the words come from word lists shipped in `assets/text/`.
 
-  A full stop, a closing bracket or a small kana never starts a line, and an opening bracket never ends one. A word wider than the rect breaks between clusters.
+  A full stop, a closing bracket or a small kana never starts a line, an opening bracket never ends one, and a number keeps its decimal point and percent sign. A word wider than the rect breaks between clusters. U+2028 (line separator) ends a line inside a paragraph, as `\n` does.
 - **Unicode and shaping:** text is shaped with HarfBuzz, so scripts that join, reorder and stack glyphs come out as the font intends: Devanagari conjuncts and vowel signs, Tibetan stacks, Arabic letter forms. Latin and others get the font's kerning and ligatures. Lines break between whole clusters, never inside one.
 - **Fallback fonts:** text uses one font, and characters it lacks come from its fallbacks. Without fallbacks, a missing character shows as the font's replacement character (U+FFFD), or as `?`.
 
@@ -136,7 +137,7 @@ ui.set_default_font_fallbacks([deva, tibetan])      # for every font without its
 ui.create_text(panel, "Om · ॐ नमः शिवाय · ཨོཾ་མ་ཎི་པདྨེ་ཧཱུྃ")
 ```
 
-  `set_font_fallbacks(font, [...])` gives one font its own list. The assets folder ships Noto Sans Devanagari, Noto Serif Tibetan, Noto Sans Arabic and Noto Sans Hebrew for these scripts.
+  `set_font_fallbacks(font, [...])` gives one font its own list. The assets folder ships Noto fonts for Devanagari, Tibetan, Arabic, Hebrew, Thai, Lao, Khmer and Myanmar: `fonts/NotoSansThai-Regular.ttf` and so on, with Tibetan in `fonts/NotoSerifTibetan.ttf`.
 - **Right-to-left text:** Arabic and Hebrew read right to left, and a line that mixes directions is put in display order by the Unicode bidirectional algorithm: numbers and Latin words inside Arabic read left to right, and brackets are mirrored.
   - **Paragraph direction:** each paragraph takes its direction from its first letter that has one. `set_text_direction(e, sk.TEXT_DIRECTION_RTL)` or `TEXT_DIRECTION_LTR` sets it instead.
   - **Alignment:** `TEXT_ALIGN_START` and `TEXT_ALIGN_END` follow the paragraph: `START` is the left of a left-to-right paragraph and the right of a right-to-left one. `LEFT` and `RIGHT` stay left and right. Text fields align their text to the start.
@@ -224,7 +225,7 @@ def on_update(dt):
 A text field is a single line. Clicking it or tabbing to it focuses it, and while it has focus it takes the keyboard:
 - **Typing:** characters go in at the caret, replacing any selection. Pasted line breaks and tabs become spaces.
 - **Deleting:** Backspace and Delete remove one cluster, so a Devanagari conjunct or a letter with its accents goes in one step. With Ctrl they remove a word.
-- **Moving:** Left and Right move one cluster to the left or right on screen, also through mixed-direction text; with Ctrl they move one word, towards the start of a right-to-left paragraph with Right. Home and End go to the start and end of the text. Holding Shift extends the selection; a selection across a change of direction is drawn in as many pieces as it covers on screen.
+- **Moving:** Left and Right move one cluster to the left or right on screen, also through mixed-direction text; with Ctrl they move one word, towards the start of a right-to-left paragraph with Right. Words follow the Unicode word rules, so "don't" and "3.5" are one word each, and the word lists in Thai, Lao, Khmer and Myanmar. Home and End go to the start and end of the text. Holding Shift extends the selection; a selection across a change of direction is drawn in as many pieces as it covers on screen.
 - **Clipboard:** Ctrl+A selects everything. Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste through the system clipboard.
 - **Submitting:** Enter sets `text_submitted` for one frame. The field keeps focus.
 - **Leaving:** Tab moves on to the next widget, and Escape clears focus.
@@ -318,7 +319,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 - Text fields interpret Ctrl, not Cmd, as the word modifier, on every platform.
 - The arrow keys move focus and also turn an orbit camera, which uses them; only a focused text field takes keys from the camera.
 - Right-to-left text: a paragraph is shaped once, before it is broken into lines, so an Arabic word too wide for its rect and split between clusters keeps the joined letter forms it would have on one line. Layout direction, such as a slider running from the right, is not mirrored yet.
-- Thai, Lao, Khmer and Myanmar, which need a dictionary to find where words end, wrap only at spaces, or between clusters when a run does not fit.
+- Thai, Lao, Khmer and Myanmar words are found by matching against word lists. A word missing from its list, such as a name, is not split; it stays joined to any unknown characters next to it. Chinese characters and hiragana have no word list, so Ctrl with an arrow moves one character at a time through them.
 - Geometry in front of a world canvas stops the pointer only in a pipeline with a `ui` depth block, and only as of two frames before (see [Geometry in front of world canvases](#geometry-in-front-of-world-canvases)).
 - The glyph atlas has up to four pages of 2048 by 2048 texels, added as they are needed. When all four are full, the page drawn from least recently is cleared, and its glyphs are rasterised again when next drawn. Text that needs more than the four pages in a single frame, several thousand distinct glyphs, is partly left out.
 

@@ -179,24 +179,78 @@ size_t stopAtOrAbove(const std::vector<size_t>& stops, size_t index, size_t leng
 
 } // namespace
 
-size_t TextEditBuffer::previousWord(size_t index) const {
-    size_t i = std::min(index, text.size());
-    while (i > 0 && kindOf(text[i - 1]) == Kind::Space) --i;
-    if (i > 0) {
-        const Kind kind = kindOf(text[i - 1]);
-        while (i > 0 && kindOf(text[i - 1]) == kind) --i;
+namespace {
+
+struct Segment {
+    size_t begin = 0;
+    size_t end = 0;
+    Kind kind = Kind::Word;
+};
+
+/// `text` cut at its word boundaries (UI/LineBreak.h): words, runs of
+/// spaces, and punctuation, a run of punctuation as one segment.
+std::vector<Segment> segmentsOf(const std::u32string& text) {
+    std::vector<Segment> segments;
+    const std::vector<bool> ends = wordBoundaries(text);
+    size_t begin = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (!ends[i]) continue;
+        Segment s{begin, i + 1, Kind::Space};
+        bool punctuation = false;
+        for (size_t j = s.begin; j < s.end; ++j) {
+            const Kind k = kindOf(text[j]);
+            if (k == Kind::Word) s.kind = Kind::Word;
+            else if (k == Kind::Punctuation) punctuation = true;
+        }
+        if (s.kind != Kind::Word && punctuation) s.kind = Kind::Punctuation;
+        if (s.kind == Kind::Punctuation && !segments.empty() && segments.back().kind == Kind::Punctuation) {
+            segments.back().end = s.end;
+        } else {
+            segments.push_back(s);
+        }
+        begin = i + 1;
     }
+    return segments;
+}
+
+} // namespace
+
+size_t TextEditBuffer::previousWord(size_t index) const {
+    const auto segments = segmentsOf(text);
+    size_t i = std::min(index, text.size());
+    // Back over spaces, then to the start of the segment before them.
+    auto before = [&](size_t at) {
+        for (auto it = segments.rbegin(); it != segments.rend(); ++it) {
+            if (it->begin < at) return &*it;
+        }
+        return static_cast<const Segment*>(nullptr);
+    };
+    const Segment* s = before(i);
+    if (s && s->kind == Kind::Space) {
+        i = s->begin;
+        s = before(i);
+    }
+    if (s) i = s->begin;
     return stopAtOrBelow(stops, i);
 }
 
 size_t TextEditBuffer::nextWord(size_t index) const {
+    const auto segments = segmentsOf(text);
     const size_t n = text.size();
     size_t i = std::min(index, n);
-    if (i < n && kindOf(text[i]) != Kind::Space) {
-        const Kind kind = kindOf(text[i]);
-        while (i < n && kindOf(text[i]) == kind) ++i;
+    // To the end of the segment at the caret, then on over spaces.
+    auto at = [&](size_t position) {
+        for (const Segment& s : segments) {
+            if (position >= s.begin && position < s.end) return &s;
+        }
+        return static_cast<const Segment*>(nullptr);
+    };
+    const Segment* s = at(i);
+    if (s && s->kind != Kind::Space) {
+        i = s->end;
+        s = at(i);
     }
-    while (i < n && kindOf(text[i]) == Kind::Space) ++i;
+    if (s && s->kind == Kind::Space) i = s->end;
     return stopAtOrAbove(stops, i, n);
 }
 
@@ -204,12 +258,10 @@ std::pair<size_t, size_t> TextEditBuffer::wordAt(size_t index) const {
     const size_t n = text.size();
     if (n == 0) return {0, 0};
     const size_t at = std::min(index, n - 1);
-    const Kind kind = kindOf(text[at]);
-    size_t start = at;
-    while (start > 0 && kindOf(text[start - 1]) == kind) --start;
-    size_t end = at + 1;
-    while (end < n && kindOf(text[end]) == kind) ++end;
-    return {stopAtOrBelow(stops, start), stopAtOrAbove(stops, end, n)};
+    for (const Segment& s : segmentsOf(text)) {
+        if (at >= s.begin && at < s.end) return {stopAtOrBelow(stops, s.begin), stopAtOrAbove(stops, s.end, n)};
+    }
+    return {0, n};
 }
 
 void TextEditBuffer::erase(size_t start, size_t end) {

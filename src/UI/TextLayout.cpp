@@ -106,6 +106,9 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
         std::vector<Cluster> clusterList = clustersOf(glyphs, text, begin, end, scales, bidi.levels());
         paragraphs.push_back({std::move(bidi), std::move(glyphs), std::move(clusterList)});
         const auto& clusters = paragraphs.back().clusters;
+        const std::vector<LineBreakAfter> breaks = lineBreaks(text, begin, end);
+        // The break after cluster k: that after its last code point.
+        auto breakAfter = [&](size_t k) { return breaks[clusters[k].end - 1 - begin]; };
 
         auto codepointAt = [&](size_t k) { return k < clusters.size() ? clusters[k].first : end; };
         // The last place the line may break: at a space, which is dropped, or
@@ -135,12 +138,19 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
             if (c.space) {
                 lastBreak = k;
                 breakAtSpace = true;
-            } else if (k + 1 < clusters.size() &&
-                       canBreakBetween(text[c.end - 1], text[clusters[k + 1].first])) {
+            } else if (k + 1 < clusters.size() && !clusters[k + 1].space &&
+                       breakAfter(k) != LineBreakAfter::None) {
                 lastBreak = k;
                 breakAtSpace = false;
             }
             penX += c.width;
+            // A line separator, or a lone carriage return, ends the line.
+            if (k + 1 < clusters.size() && breakAfter(k) == LineBreakAfter::Mandatory) {
+                lines.push_back({p, start, k + 1, codepointAt(start), codepointAt(k + 1)});
+                start = k + 1;
+                lastBreak = kNone;
+                penX = 0.0f;
+            }
         }
         lines.push_back({p, start, clusters.size(), codepointAt(start), end});
 

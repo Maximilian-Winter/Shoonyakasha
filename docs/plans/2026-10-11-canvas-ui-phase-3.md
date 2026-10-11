@@ -132,7 +132,7 @@ Under the project's rules, two parts of this plan add a new abstraction or depen
 
 **Line breaking:**
 - `LineBreak.cpp`'s table is replaced by libunibreak's UAX #14 line breaking (`set_linebreaks_utf32`).
-- The function names stay, so `layoutText` changes only in where it asks.
+- UAX #14 looks at more than two characters, so the pairwise `canBreakBetween` is replaced by `lineBreaks(text, begin, end)`, which gives the break after each code point of a paragraph; `layoutText` asks it once per paragraph.
 - Mandatory breaks (`\n`, U+2028, U+2029, CR LF) come from the same source.
 
 **Word breaking:**

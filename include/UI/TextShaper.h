@@ -32,7 +32,8 @@ struct ShapedGlyph {
 /// Shapes text[begin, end), the rest of `text` serving as context. Each code
 /// point goes to the first font in `fonts` that has it; spaces, punctuation
 /// and combining marks stay with the font and script of what precedes them.
-/// A tab is shaped as a space and other control characters as nothing. A
+/// A tab is shaped as a space, and other control characters and the line
+/// and paragraph separators (U+2028, U+2029) as nothing. A
 /// code point no font has becomes the first font's U+FFFD, or '?'. Runs are
 /// returned in text order; a right-to-left run's glyphs are in visual order.
 /// Empty when `fonts` is empty or its first font is not loaded.

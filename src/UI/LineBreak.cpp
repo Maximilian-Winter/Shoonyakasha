@@ -1,89 +1,128 @@
 //
-// LineBreak.cpp - Where a line of text may break
+// LineBreak.cpp - Where a line of text may break, and where words are
 //
 
 #include "UI/LineBreak.h"
+#include "UI/WordDictionary.h"
 
-#include <algorithm>
-#include <iterator>
+#include <graphemebreak.h>
+#include <linebreak.h>
+#include <wordbreak.h>
+
+#include <string>
 
 namespace Shoonyakasha {
 namespace UI {
 
 namespace {
 
-template<size_t N>
-bool contains(const char32_t (&set)[N], char32_t c) {
-    return std::find(std::begin(set), std::end(set), c) != std::end(set);
+static_assert(sizeof(utf32_t) == sizeof(char32_t), "libunibreak reads char32_t text as utf32_t");
+
+// The language libunibreak tailors line breaking for: none of its
+// languages, so UAX #14's defaults hold, and "strict", so small kana and the
+// prolonged sound mark (class CJ) do not start a line, the default of UAX #14.
+constexpr const char* kLineBreakLanguage = "und-strict";
+
+void initialise() {
+    static const bool done = [] {
+        init_linebreak();
+        init_wordbreak();
+        init_graphemebreak();
+        return true;
+    }();
+    (void)done;
 }
 
-bool inRange(char32_t c, char32_t first, char32_t last) {
-    return c >= first && c <= last;
+const utf32_t* units(std::u32string_view s) {
+    return reinterpret_cast<const utf32_t*>(s.data());
 }
 
-/// Written without spaces between words: a line may break on either side.
-bool isIdeographic(char32_t c) {
-    return inRange(c, 0x2E80, 0x2FDF) ||    // CJK radicals, Kangxi radicals
-           inRange(c, 0x3040, 0x309F) ||    // Hiragana
-           inRange(c, 0x30A0, 0x30FF) ||    // Katakana
-           inRange(c, 0x3100, 0x312F) ||    // Bopomofo
-           inRange(c, 0x31F0, 0x31FF) ||    // Katakana phonetic extensions
-           inRange(c, 0x3400, 0x4DBF) ||    // CJK extension A
-           inRange(c, 0x4E00, 0x9FFF) ||    // CJK unified ideographs
-           inRange(c, 0xAC00, 0xD7AF) ||    // Hangul syllables
-           inRange(c, 0xF900, 0xFAFF) ||    // CJK compatibility ideographs
-           inRange(c, 0x20000, 0x3FFFF);    // CJK extensions B onwards
+/// For each code point of `s`, whether a grapheme cluster ends after it.
+std::vector<bool> graphemeEnds(std::u32string_view s) {
+    std::vector<char> brks(s.size());
+    set_graphemebreaks_utf32(units(s), s.size(), nullptr, brks.data());
+    std::vector<bool> ends(s.size());
+    for (size_t i = 0; i < s.size(); ++i) ends[i] = brks[i] == GRAPHEMEBREAK_BREAK;
+    return ends;
 }
 
-/// Stays with the character before it.
-bool noBreakBefore(char32_t c) {
-    static constexpr char32_t kSet[] = {
-        U')', U']', U'}', U',', U'.', U';', U':', U'!', U'?', U'%',
-        0x2019, 0x201D, 0x2026,                                       // ’ ” …
-        0x3001, 0x3002, 0x3009, 0x300B, 0x300D, 0x300F, 0x3011, 0x3015,   // 、。〉》」』】〕
-        0x3017, 0x3019, 0x301F, 0x3005, 0x309D, 0x309E, 0x30FB, 0x30FC,   // 〗〙〟々ゝゞ・ー
-        0x30FD, 0x30FE,                                               // ヽヾ
-        0x3041, 0x3043, 0x3045, 0x3047, 0x3049, 0x3063, 0x3083, 0x3085,   // small hiragana
-        0x3087, 0x308E, 0x3095, 0x3096,
-        0x30A1, 0x30A3, 0x30A5, 0x30A7, 0x30A9, 0x30C3, 0x30E3, 0x30E5,   // small katakana
-        0x30E7, 0x30EE, 0x30F5, 0x30F6,
-        0xFF01, 0xFF09, 0xFF0C, 0xFF0E, 0xFF1A, 0xFF1B, 0xFF1F, 0xFF3D, 0xFF5D,   // fullwidth ! ) , . : ; ? ] }
-        0x0F0D, 0x0F0E, 0x0F0F, 0x0F10, 0x0F11, 0x0F12, 0x0F14,       // Tibetan shad and its kin
-    };
-    return contains(kSet, c);
-}
-
-/// Stays with the character after it.
-bool noBreakAfter(char32_t c) {
-    static constexpr char32_t kSet[] = {
-        U'(', U'[', U'{', 0x2018, 0x201C,                             // ( [ { ‘ “
-        0x3008, 0x300A, 0x300C, 0x300E, 0x3010, 0x3014, 0x3016, 0x3018, 0x301D,   // 〈《「『【〔〖〘〝
-        0xFF08, 0xFF3B, 0xFF5B,                                       // fullwidth ( [ {
-        0x0F0C,                                                       // Tibetan non-breaking tsheg
-    };
-    return contains(kSet, c);
-}
-
-/// A line may break after it; it stays at the end of the line.
-bool breakAfter(char32_t c) {
-    static constexpr char32_t kSet[] = {
-        U'-', 0x2010, 0x2012, 0x2013,                                 // hyphens, figure and en dash
-        0x0F0B,                                                       // Tibetan tsheg
-        0x0F0D, 0x0F0E, 0x0F0F, 0x0F10, 0x0F11, 0x0F12, 0x0F14,       // Tibetan shad and its kin
-    };
-    return contains(kSet, c);
+/// Calls `f(begin, end, starts)` for each run of a script split by a
+/// dictionary in `s`, with where words start inside it (offsets from the
+/// run's start); `starts` is null for a script without a word list.
+template<typename F>
+void forEachDictionaryRun(std::u32string_view s, F&& f) {
+    for (size_t i = 0; i < s.size();) {
+        const auto script = dictionaryScriptOf(s[i]);
+        if (!script) {
+            ++i;
+            continue;
+        }
+        size_t end = i + 1;
+        while (end < s.size() && dictionaryScriptOf(s[end]) == script) ++end;
+        const std::u32string_view run = s.substr(i, end - i);
+        if (const WordDictionary* dictionary = wordDictionary(*script)) {
+            const std::vector<bool> ends = graphemeEnds(run);
+            const std::vector<size_t> starts = dictionary->split(run, &ends);
+            f(i, end, &starts);
+        } else {
+            f(i, end, nullptr);
+        }
+        i = end;
+    }
 }
 
 } // namespace
 
-bool isBreakingSpace(char32_t c) {
-    return c == U' ' || c == U'\t';
+std::vector<LineBreakAfter> lineBreaks(std::u32string_view text, size_t begin, size_t end) {
+    std::vector<LineBreakAfter> out;
+    if (end > text.size()) end = text.size();
+    if (begin >= end) return out;
+    initialise();
+    const std::u32string_view s = text.substr(begin, end - begin);
+
+    std::vector<char> brks(s.size());
+    set_linebreaks_utf32(units(s), s.size(), kLineBreakLanguage, brks.data());
+    out.resize(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        out[i] = brks[i] == LINEBREAK_MUSTBREAK  ? LineBreakAfter::Mandatory
+               : brks[i] == LINEBREAK_ALLOWBREAK ? LineBreakAfter::Allowed
+                                                 : LineBreakAfter::None;
+    }
+    out.back() = LineBreakAfter::Mandatory;
+
+    forEachDictionaryRun(s, [&](size_t runBegin, size_t, const std::vector<size_t>* starts) {
+        if (!starts) return;
+        for (const size_t start : *starts) {
+            LineBreakAfter& b = out[runBegin + start - 1];
+            if (b == LineBreakAfter::None) b = LineBreakAfter::Allowed;
+        }
+    });
+    return out;
 }
 
-bool canBreakBetween(char32_t before, char32_t after) {
-    if (isBreakingSpace(before) || isBreakingSpace(after)) return false;
-    if (noBreakBefore(after) || noBreakAfter(before)) return false;
-    return breakAfter(before) || isIdeographic(before) || isIdeographic(after);
+std::vector<bool> wordBoundaries(std::u32string_view text) {
+    std::vector<bool> out;
+    if (text.empty()) return out;
+    initialise();
+
+    std::vector<char> brks(text.size());
+    set_wordbreaks_utf32(units(text), text.size(), nullptr, brks.data());
+    out.resize(text.size());
+    for (size_t i = 0; i < text.size(); ++i) out[i] = brks[i] == WORDBREAK_BREAK;
+
+    // Inside a run of a dictionary script, the words are the dictionary's;
+    // without one, the run is one word.
+    forEachDictionaryRun(text, [&](size_t runBegin, size_t runEnd, const std::vector<size_t>* starts) {
+        for (size_t i = runBegin; i + 1 < runEnd; ++i) out[i] = false;
+        if (!starts) return;
+        for (const size_t start : *starts) out[runBegin + start - 1] = true;
+    });
+    out.back() = true;
+    return out;
+}
+
+bool isBreakingSpace(char32_t c) {
+    return c == U' ' || c == U'\t';
 }
 
 } // namespace UI

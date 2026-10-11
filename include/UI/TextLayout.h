@@ -81,8 +81,10 @@ struct TextLayoutResult {
 /// and the rest used for code points it lacks. With wrap on, a line breaks
 /// at the last opportunity before it would exceed the box width: a space,
 /// which is dropped, or a place UI/LineBreak.h allows, such as after a
-/// Tibetan tsheg or between ideographs. Without one it breaks between
-/// clusters. '\n' always breaks and starts a new paragraph. Spaces a line
+/// Tibetan tsheg, between ideographs or between Thai words. Without one it
+/// breaks between clusters. '\n' always breaks and starts a new paragraph;
+/// U+2028, a lone carriage return and the other mandatory breaks of UAX #14
+/// end a line within the paragraph. Spaces a line
 /// breaks at stay at its end in the paragraph's direction and do not count
 /// towards its width or alignment. Text that does not fit is placed outside
 /// the box rather than dropped; clipping is the renderer's concern. Control

@@ -1,32 +1,42 @@
 //
-// LineBreak.h - Where a line of text may break
+// LineBreak.h - Where a line of text may break, and where words are
 //
-// A small, table-driven part of Unicode line breaking (UAX #14), enough for
-// the scripts the canvas UI shapes:
-// - after spaces, which are dropped at the break;
-// - after the Tibetan tsheg and shad, and after hyphens, which stay at the
-//   end of the line;
-// - before and after CJK ideographs, kana and Hangul syllables, which are
-//   written without spaces;
-// - never before closing punctuation, the ideographic comma and full stop,
-//   small kana and the shad, and never after opening punctuation, so these
-//   stay with the character they belong to.
-// Thai, Lao, Khmer and Myanmar, which need a dictionary to find words, are
-// not covered: they break only at spaces.
+// Line breaks follow the Unicode line breaking algorithm (UAX #14) and word
+// boundaries the Unicode word boundary rules (UAX #29), both from
+// libunibreak. Thai, Lao, Khmer and Myanmar, which those rules do not split,
+// are split into words by UI/WordDictionary.h, for both.
 //
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
+#include <vector>
+
 namespace Shoonyakasha {
 namespace UI {
 
+enum class LineBreakAfter : uint8_t {
+    None,        // the line may not break here
+    Allowed,     // it may
+    Mandatory,   // it must: after U+2028, a lone carriage return, a vertical tab and the like
+};
+
+/// For each code point of text[begin, end), whether a line may break after
+/// it. A line may break after a space, never before one; after a hyphen,
+/// the Tibetan tsheg and shad; between ideographs; at word ends in Thai,
+/// Lao, Khmer and Myanmar; never before closing punctuation or after opening
+/// punctuation. The break after the last code point is that of the end of
+/// the text: Mandatory.
+std::vector<LineBreakAfter> lineBreaks(std::u32string_view text, size_t begin, size_t end);
+
+/// For each code point of `text`, whether a word, a run of spaces or a
+/// piece of punctuation ends after it. True after the last.
+std::vector<bool> wordBoundaries(std::u32string_view text);
+
 /// Space and tab: a line may break at them, and they are dropped there.
 bool isBreakingSpace(char32_t c);
-
-/// May a line break between a character `before` and the character `after`
-/// that follows it (the last code point of one cluster and the first of the
-/// next)? Not at a space: that break is at the space itself.
-bool canBreakBetween(char32_t before, char32_t after);
 
 } // namespace UI
 } // namespace Shoonyakasha

@@ -15,7 +15,7 @@ namespace UI {
 namespace {
 
 bool isControl(char32_t c) {
-    return (c < 0x20 && c != U'\n') || c == 0x7F;
+    return (c < 0x20 && c != U'\n') || (c >= 0x7F && c <= 0x9F) || c == 0x2028 || c == 0x2029;
 }
 
 /// Characters that belong with whatever precedes them.
