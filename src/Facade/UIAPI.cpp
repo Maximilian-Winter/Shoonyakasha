@@ -510,6 +510,17 @@ void UIAPI::setTextWrap(EntityHandle element, bool wrap) {
     if (auto* t = m_impl->text(element)) t->wrap = wrap;
 }
 
+void UIAPI::setTextOrientation(EntityHandle element, TextOrientation orientation, bool uprightDigits) {
+    if (auto* t = m_impl->text(element)) {
+        switch (orientation) {
+        case TextOrientation::VerticalRightToLeft: t->orientation = UI::TextOrientation::VerticalRightToLeft; break;
+        case TextOrientation::VerticalLeftToRight: t->orientation = UI::TextOrientation::VerticalLeftToRight; break;
+        default:                                   t->orientation = UI::TextOrientation::Horizontal; break;
+        }
+        t->uprightDigits = uprightDigits;
+    }
+}
+
 void UIAPI::setRichText(EntityHandle element, bool richText) {
     if (auto* t = m_impl->text(element)) t->richText = richText;
 }

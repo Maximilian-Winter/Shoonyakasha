@@ -137,7 +137,7 @@ ui.set_default_font_fallbacks([deva, tibetan])      # for every font without its
 ui.create_text(panel, "Om · ॐ नमः शिवाय · ཨོཾ་མ་ཎི་པདྨེ་ཧཱུྃ")
 ```
 
-  `set_font_fallbacks(font, [...])` gives one font its own list. The assets folder ships Noto fonts for Devanagari, Tibetan, Arabic, Hebrew, Thai, Lao, Khmer and Myanmar: `fonts/NotoSansThai-Regular.ttf` and so on, with Tibetan in `fonts/NotoSerifTibetan.ttf`.
+  `set_font_fallbacks(font, [...])` gives one font its own list. The assets folder ships Noto fonts for Devanagari, Tibetan, Arabic, Hebrew, Thai, Lao, Khmer, Myanmar and Mongolian: `fonts/NotoSansThai-Regular.ttf` and so on, with Tibetan in `fonts/NotoSerifTibetan.ttf`. For Japanese it ships `fonts/NotoSansJP-Subset.ttf`, a subset of Noto Sans JP with kana, CJK punctuation, fullwidth forms and only the 65 kanji the examples and tests use. For other kanji and for Chinese, load a full font such as Noto Sans CJK; `.otf` fonts with CFF outlines work as well as `.ttf`.
 - **Right-to-left text:** Arabic and Hebrew read right to left, and a line that mixes directions is put in display order by the Unicode bidirectional algorithm: numbers and Latin words inside Arabic read left to right, and brackets are mirrored.
   - **Paragraph direction:** each paragraph takes its direction from its first letter that has one, or, with none, such as "12:30", from the layout direction (see [Right-to-left layout](#right-to-left-layout)). `set_text_direction(e, sk.TEXT_DIRECTION_RTL)` or `TEXT_DIRECTION_LTR` sets it instead, and `TEXT_DIRECTION_LAYOUT` makes it always the layout direction.
   - **Alignment:** `TEXT_ALIGN_START` and `TEXT_ALIGN_END` follow the paragraph: `START` is the left of a left-to-right paragraph and the right of a right-to-left one. `LEFT` and `RIGHT` stay left and right. Text fields align their text to the start.
@@ -149,6 +149,25 @@ ui.set_default_font_fallbacks([ui.load_font("fonts/NotoSansArabic-Regular.ttf"),
 line = ui.create_text(panel, "مرحبا بالعالم 2026")
 ui.set_text_align(line, sk.TEXT_ALIGN_START)    # right-aligned: the paragraph is right to left
 ```
+
+### Vertical text
+
+```python
+ui.set_default_font_fallbacks([ui.load_font("fonts/NotoSansJP-Subset.ttf"),
+                               ui.load_font("fonts/NotoSansMongolian-Regular.ttf")])
+column = ui.create_text(panel, "縦書きの日本語、12月。", size=24)
+ui.set_text_orientation(column, sk.TEXT_ORIENTATION_VERTICAL_RL, upright_digits=True)
+ui.set_text_align(column, sk.TEXT_ALIGN_START, sk.TEXT_ALIGN_TOP)
+```
+
+`set_text_orientation` lays text out in columns that run down the rect:
+- **Directions:** `TEXT_ORIENTATION_VERTICAL_RL` stacks the columns from the right, as Chinese and Japanese are written; `TEXT_ORIENTATION_VERTICAL_LR` from the left, as Mongolian is. `TEXT_ORIENTATION_HORIZONTAL` goes back to lines.
+- **Characters:** Chinese, Japanese and Korean characters and fullwidth forms stand upright and take the font's vertical forms, so 、 and 。 sit in the top right and brackets turn. Other characters, such as Latin, digits and Mongolian, are turned 90 degrees clockwise.
+- **Digits:** with `upright_digits=True`, a run of one or two digits stands upright side by side in one character's height (tate-chū-yoko), as in 12月. Longer numbers stay turned.
+- **Wrapping and alignment:** columns wrap at the rect's height. The vertical alignment places each column's text along it, and the horizontal alignment places the columns as a block: `TEXT_ALIGN_START` is the side they start from.
+- **Sizes:** layout groups and size fitters measure vertical text unwrapped, as wide as its columns and as tall as the longest.
+
+Rich text's colours, sizes and fonts work in vertical text; links, underlines, strikethroughs and faux italic do not. Text fields stay horizontal.
 
 ### Rich text
 
@@ -383,6 +402,7 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 ## Limits
 
 - Input method composition is handled on Windows only. On other platforms the engine does not show a composition; text can still be pasted.
+- Vertical text: which characters stand upright follows the Unicode blocks, an approximation of the vertical orientations of UAX #50 rather than the per-character table. There is no caret or selection in vertical text.
 - Rich text: a link in a button's label also clicks the button. Underlines and strikethroughs are placed by the text's own font's metrics, also over characters drawn from another font.
 - In a multi-line field, End on a line that wraps without a space, such as Chinese text or a word too long for the field, puts the caret at the start of the next line, since the two places are one position in the text.
 - Text fields interpret Ctrl, not Cmd, as the word modifier, on every platform.

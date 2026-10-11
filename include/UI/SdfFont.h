@@ -12,6 +12,10 @@
 // Sizes follow stbtt_ScaleForPixelHeight: a font size is the distance from
 // the font's ascent to its descent.
 //
+// TrueType (quadratic) and CFF (cubic) outlines are both read. Glyphs with
+// cubic curves have their distance field computed from the outline split
+// into short lines, the rest by stb_truetype.
+//
 
 #pragma once
 

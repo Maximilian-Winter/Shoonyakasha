@@ -152,15 +152,20 @@ struct LayoutWalk {
         if (chain.empty()) return nullptr;
         auto& m = registry.get_or_emplace<UITextMeasure>(e);
         if (m.text != text.text || m.richText != text.richText || m.fonts != chain || m.fontSize != text.fontSize ||
-            m.lineSpacing != text.lineSpacing) {
+            m.lineSpacing != text.lineSpacing || m.orientation != text.orientation ||
+            m.uprightDigits != text.uprightDigits) {
             m.text = text.text;
             m.richText = text.richText;
             m.fonts = std::move(chain);
             m.fontSize = text.fontSize;
             m.lineSpacing = text.lineSpacing;
+            m.orientation = text.orientation;
+            m.uprightDigits = text.uprightDigits;
             TextStyle style;
             style.fontSize = text.fontSize;
             style.lineSpacing = text.lineSpacing;
+            style.orientation = text.orientation;
+            style.uprightDigits = text.uprightDigits;
             style.wrap = false;
             if (!prepared) prepared = prepareText(text.text, false, text.font, text.fontSize, *fonts);
             m.naturalSize = layoutText(fonts->resolve(m.fonts), prepared->text, style, glm::vec2(1e9f),
@@ -171,7 +176,9 @@ struct LayoutWalk {
     }
 
     float wrappedHeight(const UIText& text, UITextMeasure& m, float width) {
-        if (!text.wrap || width >= m.naturalSize.x) return m.naturalSize.y;
+        if (!text.wrap || width >= m.naturalSize.x || text.orientation != TextOrientation::Horizontal) {
+            return m.naturalSize.y;
+        }
         if (m.wrapWidth != width) {
             TextStyle style;
             style.fontSize = text.fontSize;

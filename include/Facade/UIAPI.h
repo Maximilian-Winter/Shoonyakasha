@@ -275,6 +275,16 @@ public:
     void setTextDirection(EntityHandle element, TextDirection direction);
     void setTextWrap(EntityHandle element, bool wrap);
 
+    /// Lines across, or columns down: Chinese, Japanese and Korean stand
+    /// upright with their vertical forms, other characters (Latin, digits,
+    /// Mongolian) are turned clockwise, and columns wrap at the rect's
+    /// height. The vertical alignment places each column's text along it,
+    /// and the horizontal alignment the columns, Start being the side they
+    /// start from. With `uprightDigits`, runs of one or two digits stand
+    /// upright side by side. Links, underlines and strikethroughs are drawn
+    /// only in horizontal text, and text fields are always horizontal.
+    void setTextOrientation(EntityHandle element, TextOrientation orientation, bool uprightDigits = false);
+
     /// Reads the text as markup: <color=#RRGGBB> or <color=#RRGGBBAA>, <b>,
     /// <i>, <size=N> in canvas units, <font=name>, <link=id>, <u> and <s>,
     /// each closed by </name>, with "&lt;" and "&gt;" for the brackets. A

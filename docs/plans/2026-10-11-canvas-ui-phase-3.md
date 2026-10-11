@@ -308,6 +308,16 @@ Underline and strikethrough are drawn as solid quads from the font's metrics.
 - a Mongolian line;
 - column wrapping and alignment.
 
+**As built:**
+- **Fonts** (sizes approved before they were added): `assets/fonts/NotoSansJP-Subset.ttf`, 291 KB, with kana, CJK punctuation, fullwidth forms, ASCII and 65 kanji; and `assets/fonts/NotoSansMongolian-Regular.ttf`, 254 KB, cut to the Mongolian blocks and ASCII. Both keep every OpenType feature. `tools/build_font_subsets.py` makes them, and a three-glyph CFF sample in `tests/data/`.
+- **CFF outlines.** Noto CJK's outlines are CFF cubic curves, which `stbtt_GetGlyphSDF` leaves out, so those glyphs were drawn broken. The shipped subset is converted to TrueType quadratics, and `SdfFont` computes the distance field of glyphs with cubic curves itself, from the outline flattened into short lines, so full `.otf` CJK fonts load too. A test compares the field of CFF glyphs with the same glyphs in quadratics, and fails without the change.
+- **Orientation.** `uprightInVerticalText` decides by Unicode block, an approximation of UAX #50.
+- **Mongolian** is not shaped top to bottom: like Latin it is shaped horizontally and its line turned clockwise, which is how the font draws it.
+- **Tate-chū-yoko** squeezes a run wider than the column to fit, and takes one character's height.
+- **Alignment:** vertical text aligns each column along it with `alignV`, and the columns as a block with `alignH`, Start being the side they start from.
+- **Not supported in vertical text:** clusters are not reported, so links, underlines, strikethroughs and the caret do not apply; faux italic is not slanted.
+- **API:** `setTextOrientation(element, orientation, uprightDigits)`, `set_text_orientation`, and `TEXT_ORIENTATION_HORIZONTAL`, `_VERTICAL_RL` and `_VERTICAL_LR`.
+
 ## 25. Accessibility through UI Automation (Windows)
 
 **A snapshot.**

@@ -22,7 +22,8 @@ namespace {
 
 bool sameStyle(const TextStyle& a, const TextStyle& b) {
     return a.fontSize == b.fontSize && a.alignH == b.alignH && a.alignV == b.alignV &&
-           a.wrap == b.wrap && a.lineSpacing == b.lineSpacing && a.direction == b.direction;
+           a.wrap == b.wrap && a.lineSpacing == b.lineSpacing && a.direction == b.direction &&
+           a.orientation == b.orientation && a.uprightDigits == b.uprightDigits;
 }
 
 /// The paragraph direction `text` is laid out with: FromLayout takes its
@@ -71,7 +72,8 @@ void showTextFields(entt::registry& registry) {
             text->color = field.text.empty() && field.composition.empty() ? field.placeholderColor : field.textColor;
             text->wrap = field.multiLine;
             text->alignV = field.multiLine ? TextAlignV::Top : TextAlignV::Middle;
-            text->richText = false;   // caret indices are into the text as typed
+            text->richText = false;   // caret indices are into the text as typed,
+            text->orientation = TextOrientation::Horizontal;   // and caret positions are on lines across
         }
     }
 }
@@ -262,6 +264,8 @@ void CanvasTextSystem::update(entt::registry& registry, float deltaTime) {
         style.wrap = text.wrap;
         style.lineSpacing = text.lineSpacing;
         style.direction = resolvedDirection(text, element);
+        style.orientation = text.orientation;
+        style.uprightDigits = text.uprightDigits;
         const glm::vec2 box = element.rect.size();
 
         // Rich text's fonts are known only once its markup is read.

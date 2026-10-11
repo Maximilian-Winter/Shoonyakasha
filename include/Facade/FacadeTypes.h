@@ -94,6 +94,14 @@ enum class TextDirection : uint8_t {
     FromLayout  = 3
 };
 
+// How canvas UI text runs: in horizontal lines, or in vertical columns
+// stacked from the right (Chinese, Japanese) or from the left (Mongolian).
+enum class TextOrientation : uint8_t {
+    Horizontal          = 0,
+    VerticalRightToLeft = 1,
+    VerticalLeftToRight = 2
+};
+
 // Which way a canvas UI element, or a canvas, lays out its children. Inherit
 // takes its parent's; a canvas left as Inherit lays out left to right.
 enum class LayoutDirection : uint8_t {

@@ -25,7 +25,7 @@ A tour of engine.ui on the default pipeline, in one window:
 - a readout of the pointer: which canvas, where on it, what it hovers
 - an About dialog on a second canvas drawn on top, which blocks the
   pointer to everything under it while it is open, with a notes field of
-  many lines
+  many lines and vertical Japanese and Mongolian text
 - a kiosk in the world, a canvas on a quad you can click in 3D, with its
   own counter, a slider for its glow and a button that changes its
   resolution. A pillar stands in front of it: where the pillar hides the
@@ -168,14 +168,17 @@ def on_init():
     global ui_
     ui_ = engine.ui
     fonts = {"serif": ui_.load_font("fonts/PlayfairDisplay.ttf")}
-    # Characters Roboto and Playfair lack, Devanagari, Tibetan, Arabic, Hebrew
-    # and Thai, come from these; HarfBuzz shapes their conjuncts, stacks and
-    # joined letters.
+    # Characters Roboto and Playfair lack, Devanagari, Tibetan, Arabic, Hebrew,
+    # Thai, Japanese and Mongolian, come from these; HarfBuzz shapes their
+    # conjuncts, stacks and joined letters. The Japanese font is a subset:
+    # kana and the kanji the showcase and tests use.
     ui_.set_default_font_fallbacks([ui_.load_font("fonts/NotoSansDevanagari-Regular.ttf"),
                                     ui_.load_font("fonts/NotoSerifTibetan.ttf"),
                                     ui_.load_font("fonts/NotoSansArabic-Regular.ttf"),
                                     ui_.load_font("fonts/NotoSansHebrew-Regular.ttf"),
-                                    ui_.load_font("fonts/NotoSansThai-Regular.ttf")])
+                                    ui_.load_font("fonts/NotoSansThai-Regular.ttf"),
+                                    ui_.load_font("fonts/NotoSansJP-Subset.ttf"),
+                                    ui_.load_font("fonts/NotoSansMongolian-Regular.ttf")])
 
     build_scene()
     hud = named("HUD canvas", ui_.create_canvas(reference_size=(1280, 720)))
@@ -387,7 +390,7 @@ def build_dialog(fonts):
     # nothing below takes the pointer while the dialog is open.
     dim = named("Dialog backdrop", ui_.create_image(dialog_canvas, (0, 0), color=(0.0, 0.0, 0.0, 0.55)))
     ui_.set_rect(dim, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
-    box = named("Dialog", frame_panel(dim, 560, 400, color=FRAME[:3] + (1.0,)))
+    box = named("Dialog", frame_panel(dim, 700, 400, color=FRAME[:3] + (1.0,)))
     label(box, "About this showcase", 30, 24, 500, 44, size=30, color=GOLD, font=fonts["serif"])
     label(box, "Everything here is built from Python with engine.ui: canvases, panels, text and "
                "widgets, on the screen and on a quad in the world. This dialog is a second "
@@ -402,6 +405,14 @@ def build_dialog(fonts):
     ui_.set_text(notes, "Enter starts a new line, Ctrl+Enter would submit.\n"
                         "Up and Down move between lines and keep to their column.\n"
                         "Long lines wrap at the width of the field instead of scrolling sideways.")
+    # Vertical text: Japanese in columns from the right, its characters
+    # upright and the digits of 2026 turned; Mongolian in a column from the
+    # left, turned clockwise as it is written.
+    tategaki = label(box, "縦書き：日本語は上から下へ、右から左へ。2026年", 560, 78, 70, 230, size=20)
+    ui_.set_text_orientation(tategaki, sk.TEXT_ORIENTATION_VERTICAL_RL)
+    ui_.set_text_align(tategaki, sk.TEXT_ALIGN_START, sk.TEXT_ALIGN_TOP)
+    mongolian = label(box, "ᠮᠣᠩᠭᠣᠯ ᠪᠢᠴᠢᠭ", 644, 78, 30, 230, size=20)
+    ui_.set_text_orientation(mongolian, sk.TEXT_ORIENTATION_VERTICAL_LR)
     named("Close button", place(ui_.create_button(box, "Close", size=(130, 40)), -30, -24, anchor=(1, 1)))
     w["dialog"] = dim
 

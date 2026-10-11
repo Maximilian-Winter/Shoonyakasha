@@ -58,6 +58,7 @@ class BindingInventory(unittest.TestCase):
         names = ["UI", "TEXT_ALIGN_TOP", "TEXT_ALIGN_MIDDLE", "TEXT_ALIGN_BOTTOM",
                  "TEXT_ALIGN_START", "TEXT_ALIGN_END",
                  "TEXT_DIRECTION_AUTO", "TEXT_DIRECTION_LTR", "TEXT_DIRECTION_RTL", "TEXT_DIRECTION_LAYOUT",
+                 "TEXT_ORIENTATION_HORIZONTAL", "TEXT_ORIENTATION_VERTICAL_RL", "TEXT_ORIENTATION_VERTICAL_LR",
                  "LAYOUT_DIRECTION_INHERIT", "LAYOUT_DIRECTION_LTR", "LAYOUT_DIRECTION_RTL",
                  "CANVAS_CONSTANT_PIXEL", "CANVAS_SCALE_WITH_SCREEN",
                  "SIZE_FIT_UNCONSTRAINED", "SIZE_FIT_MIN", "SIZE_FIT_PREFERRED"]
@@ -77,6 +78,8 @@ class BindingInventory(unittest.TestCase):
                                       ("TextHAlign", "TEXT_ALIGN_", ("Left", "Center", "Right", "Start", "End")),
                                       ("TextDirection", "TEXT_DIRECTION_",
                                        ("Auto", "LeftToRight", "RightToLeft", "FromLayout")),
+                                      ("TextOrientation", "TEXT_ORIENTATION_",
+                                       ("Horizontal", "VerticalRightToLeft", "VerticalLeftToRight")),
                                       ("LayoutDirection", "LAYOUT_DIRECTION_", ("Inherit", "LeftToRight", "RightToLeft")),
                                       ("CanvasScaleMode", "CANVAS_", ("ConstantPixel", "ScaleWithScreen")),
                                       ("SizeFit", "SIZE_FIT_", ("Unconstrained", "Min", "Preferred"))):

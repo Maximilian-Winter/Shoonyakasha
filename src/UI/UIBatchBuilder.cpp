@@ -42,10 +42,11 @@ struct CanvasBuilder {
 
     /// A quad from `min` to `max`, in canvas units; with a `slant`, its top
     /// moved right and its bottom left by that much per unit of height
-    /// above and below `baseline`.
+    /// above and below `baseline`. A `turned` quad shows its texture turned
+    /// 90 degrees clockwise.
     void quad(glm::vec2 min, glm::vec2 max, glm::vec2 uvMin, glm::vec2 uvMax,
               uint32_t color, UIDrawMode mode, const GPUTexture* image = nullptr, uint32_t page = 0,
-              uint32_t weight = 0, float slant = 0.0f, float baseline = 0.0f) {
+              uint32_t weight = 0, float slant = 0.0f, float baseline = 0.0f, bool turned = false) {
         const float topShift = slant * (baseline - min.y) * scale;
         const float bottomShift = slant * (baseline - max.y) * scale;
         min *= scale;
@@ -70,10 +71,19 @@ struct CanvasBuilder {
 
         const auto base = static_cast<uint32_t>(out.vertices.size());
         const uint32_t m = static_cast<uint32_t>(mode) | ((page & 0xFFu) << 8) | ((weight & 0xFFu) << 16);
-        out.vertices.push_back({{min.x + topShift, min.y}, uvMin, color, m});
-        out.vertices.push_back({{max.x + topShift, min.y}, {uvMax.x, uvMin.y}, color, m});
-        out.vertices.push_back({{max.x + bottomShift, max.y}, uvMax, color, m});
-        out.vertices.push_back({{min.x + bottomShift, max.y}, {uvMin.x, uvMax.y}, color, m});
+        // Texture corners for the quad's top-left, top-right, bottom-right
+        // and bottom-left; turned, the texture's bottom-left is at the top-left.
+        glm::vec2 uv[4] = {uvMin, {uvMax.x, uvMin.y}, uvMax, {uvMin.x, uvMax.y}};
+        if (turned) {
+            uv[0] = {uvMin.x, uvMax.y};
+            uv[1] = uvMin;
+            uv[2] = {uvMax.x, uvMin.y};
+            uv[3] = uvMax;
+        }
+        out.vertices.push_back({{min.x + topShift, min.y}, uv[0], color, m});
+        out.vertices.push_back({{max.x + topShift, min.y}, uv[1], color, m});
+        out.vertices.push_back({{max.x + bottomShift, max.y}, uv[2], color, m});
+        out.vertices.push_back({{min.x + bottomShift, max.y}, uv[3], color, m});
         for (const uint32_t i : {0u, 1u, 2u, 0u, 2u, 3u}) out.indices.push_back(base + i);
         batch->indexCount += 6;
     }
@@ -156,10 +166,12 @@ struct CanvasBuilder {
             }
             const TextRun* run = cache.runs.empty() ? nullptr : runAt(cache.runs, glyph.codepoint);
             const float baseline = glyph.line < cache.layout.lines.size() ? cache.layout.lines[glyph.line].baseline : 0.0f;
+            // Vertical text is not slanted.
+            const bool slanted = run && run->fauxItalic && !cache.layout.vertical;
             quad(rect.min + glyph.min, rect.min + glyph.max, entry->uvMin, entry->uvMax,
                  run ? colorOf(run) : plainColor, UIDrawMode::Text, nullptr, entry->page,
-                 run && run->fauxBold ? kFauxBoldWeight : 0u, run && run->fauxItalic ? kFauxItalicSlant : 0.0f,
-                 rect.min.y + baseline);
+                 run && run->fauxBold ? kFauxBoldWeight : 0u, slanted ? kFauxItalicSlant : 0.0f,
+                 rect.min.y + baseline, glyph.sideways);
         }
         if (!cache.runs.empty()) decorations(rect, cache, colorOf);
     }

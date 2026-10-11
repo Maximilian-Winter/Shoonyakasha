@@ -37,13 +37,20 @@ enum class TextAlignV { Top, Middle, Bottom };
 /// before layout; layoutText reads it as Auto.
 enum class TextDirection { Auto, LeftToRight, RightToLeft, AutoRightToLeft, FromLayout };
 
+/// Horizontal lines run left to right and stack downwards. Vertical lines
+/// are columns that run downwards, stacked from the right (Chinese and
+/// Japanese) or from the left (Mongolian).
+enum class TextOrientation { Horizontal, VerticalRightToLeft, VerticalLeftToRight };
+
 struct TextStyle {
     float fontSize = 24.0f;       // ascent-to-descent height
     TextAlignH alignH = TextAlignH::Left;
     TextAlignV alignV = TextAlignV::Top;
-    bool wrap = true;             // break lines at the box width
+    bool wrap = true;             // break lines at the box width, or for vertical text its height
     float lineSpacing = 1.0f;     // multiple of the font's line height
     TextDirection direction = TextDirection::Auto;
+    TextOrientation orientation = TextOrientation::Horizontal;
+    bool uprightDigits = false;   // vertical: runs of one or two digits upright side by side (tate-chu-yoko)
 };
 
 /// Code points [begin, end) laid out at their own size from their own fonts:
@@ -63,8 +70,12 @@ struct PositionedGlyph {
     glm::vec2 max{0.0f};          // relative to the box's top-left corner
     size_t codepoint = 0;         // the first code point of its cluster
     size_t line = 0;
+    bool sideways = false;        // vertical text: turned 90 degrees clockwise, min and max its turned box
 };
 
+/// For vertical text a line is a column: `baseline` is its centre's x,
+/// `top` and `bottom` its left and right edges, `left` where its content
+/// starts down it, and `width` its content's length.
 struct TextLine {
     size_t firstCodepoint = 0;    // range in the laid-out text, '\n' and the space it broke at excluded
     size_t codepointCount = 0;
@@ -91,8 +102,9 @@ struct TextCluster {
 struct TextLayoutResult {
     std::vector<PositionedGlyph> glyphs;  // line by line, left to right; glyphs with no outline omitted
     std::vector<TextLine> lines;
-    std::vector<TextCluster> clusters;    // line by line, left to right; none for '\n'
-    glm::vec2 size{0.0f};                 // widest line by the height of all lines
+    std::vector<TextCluster> clusters;    // line by line, left to right; none for '\n', nor in vertical text
+    glm::vec2 size{0.0f};                 // widest line by the height of all lines; vertical: all columns by the longest
+    bool vertical = false;
 };
 
 /// Lays out `text` in a box of `boxSize` with `fonts`, the first preferred
@@ -113,6 +125,16 @@ struct TextLayoutResult {
 /// size; others from all of `fonts` at the style's size. A line is as tall
 /// as the first font at the largest size on it, and lines are spaced by
 /// their own heights.
+///
+/// Vertical text breaks and aligns in the same way down columns as the box
+/// is tall: alignV places each column's content along it, and alignH the
+/// columns as a block (Start: the side they start from). Chinese, Japanese
+/// and Korean characters and fullwidth forms stand upright, shaped top to
+/// bottom with the font's vertical forms; other characters, such as Latin,
+/// digits and Mongolian, are turned 90 degrees clockwise, as the Unicode
+/// vertical orientations (UAX #50) of those blocks give. With uprightDigits
+/// a run of one or two ASCII digits stands upright side by side in one
+/// character's height, squeezed to the column's width.
 TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32string_view text,
                             const TextStyle& style, const glm::vec2& boxSize,
                             const std::vector<TextSpan>& spans = {});
@@ -120,6 +142,9 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
 /// The same with one font.
 TextLayoutResult layoutText(const SdfFont& font, std::u32string_view text,
                             const TextStyle& style, const glm::vec2& boxSize);
+
+/// Is `c` set upright in vertical text?
+bool uprightInVerticalText(char32_t c);
 
 } // namespace UI
 } // namespace Shoonyakasha

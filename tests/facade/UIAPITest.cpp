@@ -188,6 +188,24 @@ TEST_F(UIAPIFixture, RichText) {
     EXPECT_FALSE(context.fonts().styled(font, true, false).fauxBold);
 }
 
+TEST_F(UIAPIFixture, TextOrientation) {
+    const EntityHandle canvas = ui.createCanvas();
+    const EntityHandle label = ui.createText(canvas, "12");
+    const auto& t = registry.get<UI::UIText>(e(label));
+    EXPECT_EQ(t.orientation, UI::TextOrientation::Horizontal);
+    ui.setTextOrientation(label, TextOrientation::VerticalRightToLeft, true);
+    EXPECT_EQ(t.orientation, UI::TextOrientation::VerticalRightToLeft);
+    EXPECT_TRUE(t.uprightDigits);
+    ui.setTextOrientation(label, TextOrientation::VerticalLeftToRight);
+    EXPECT_EQ(t.orientation, UI::TextOrientation::VerticalLeftToRight);
+    EXPECT_FALSE(t.uprightDigits);
+    frame();
+    EXPECT_TRUE(registry.get<UI::UITextCache>(e(label)).layout.vertical);
+    ui.setTextOrientation(label, TextOrientation::Horizontal);
+    frame();
+    EXPECT_FALSE(registry.get<UI::UITextCache>(e(label)).layout.vertical);
+}
+
 TEST_F(UIAPIFixture, TextFieldComposition) {
     const EntityHandle canvas = ui.createCanvas();
     const EntityHandle field = ui.createTextField(canvas, "Name");

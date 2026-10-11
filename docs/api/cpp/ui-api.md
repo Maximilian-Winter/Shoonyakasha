@@ -70,6 +70,7 @@ void setFontSize(EntityHandle element, float fontSize);
 void setTextAlign(EntityHandle element, TextHAlign horizontal, TextVAlign vertical = TextVAlign::Top);
 void setTextDirection(EntityHandle element, TextDirection direction);
 void setTextWrap(EntityHandle element, bool wrap);
+void setTextOrientation(EntityHandle element, TextOrientation orientation, bool uprightDigits = false);
 void setRichText(EntityHandle element, bool richText = true);
 void setLinkColor(EntityHandle element, const glm::vec4& color);
 std::string clickedLink(EntityHandle element) const;

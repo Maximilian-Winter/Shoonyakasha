@@ -31,6 +31,8 @@ from ._facade_types cimport (
     TextHAlign, TextHAlign_Left, TextHAlign_Center, TextHAlign_Right, TextHAlign_Start, TextHAlign_End,
     TextVAlign, TextVAlign_Top, TextVAlign_Middle, TextVAlign_Bottom,
     TextDirection, TextDirection_Auto, TextDirection_LeftToRight, TextDirection_RightToLeft, TextDirection_FromLayout,
+    TextOrientation, TextOrientation_Horizontal, TextOrientation_VerticalRightToLeft,
+    TextOrientation_VerticalLeftToRight,
     LayoutDirection, LayoutDirection_Inherit, LayoutDirection_LeftToRight, LayoutDirection_RightToLeft,
     CanvasScaleMode, CanvasScaleMode_ConstantPixel, CanvasScaleMode_ScaleWithScreen,
     SizeFit, SizeFit_Unconstrained, SizeFit_Min, SizeFit_Preferred,
@@ -112,6 +114,11 @@ TEXT_DIRECTION_AUTO = <int>TextDirection_Auto
 TEXT_DIRECTION_LTR = <int>TextDirection_LeftToRight
 TEXT_DIRECTION_RTL = <int>TextDirection_RightToLeft
 TEXT_DIRECTION_LAYOUT = <int>TextDirection_FromLayout
+
+# Text orientation (canvas UI)
+TEXT_ORIENTATION_HORIZONTAL = <int>TextOrientation_Horizontal
+TEXT_ORIENTATION_VERTICAL_RL = <int>TextOrientation_VerticalRightToLeft
+TEXT_ORIENTATION_VERTICAL_LR = <int>TextOrientation_VerticalLeftToRight
 
 # Layout direction (canvas UI)
 LAYOUT_DIRECTION_INHERIT = <int>LayoutDirection_Inherit
@@ -1385,6 +1392,15 @@ cdef class UI:
 
     def set_text_wrap(self, uint32_t element, bint wrap):
         self._ptr.setTextWrap(element, wrap)
+
+    def set_text_orientation(self, uint32_t element, int orientation, bint upright_digits=False):
+        """TEXT_ORIENTATION_HORIZONTAL, or columns down the rect stacked from the
+        right (TEXT_ORIENTATION_VERTICAL_RL, Chinese and Japanese) or from the left
+        (TEXT_ORIENTATION_VERTICAL_LR, Mongolian). In columns, Chinese, Japanese and
+        Korean stand upright with their vertical forms and other characters are
+        turned clockwise; with upright_digits, runs of one or two digits stand
+        upright side by side."""
+        self._ptr.setTextOrientation(element, <TextOrientation>orientation, upright_digits)
 
     def set_rich_text(self, uint32_t element, bint enabled=True):
         """Read the text as markup: <color=#RRGGBB> or <color=#RRGGBBAA>, <b>, <i>,

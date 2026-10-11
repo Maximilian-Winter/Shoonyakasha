@@ -69,6 +69,11 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         TextDirection_RightToLeft "Shoonyakasha::Facade::TextDirection::RightToLeft"
         TextDirection_FromLayout "Shoonyakasha::Facade::TextDirection::FromLayout"
 
+    cpdef enum TextOrientation "Shoonyakasha::Facade::TextOrientation":
+        TextOrientation_Horizontal "Shoonyakasha::Facade::TextOrientation::Horizontal"
+        TextOrientation_VerticalRightToLeft "Shoonyakasha::Facade::TextOrientation::VerticalRightToLeft"
+        TextOrientation_VerticalLeftToRight "Shoonyakasha::Facade::TextOrientation::VerticalLeftToRight"
+
     cpdef enum LayoutDirection "Shoonyakasha::Facade::LayoutDirection":
         LayoutDirection_Inherit "Shoonyakasha::Facade::LayoutDirection::Inherit"
         LayoutDirection_LeftToRight "Shoonyakasha::Facade::LayoutDirection::LeftToRight"

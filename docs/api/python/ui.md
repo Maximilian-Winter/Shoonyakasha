@@ -176,6 +176,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `is_right_to_left(element)` | bool | Whether the element lays out right to left, as last laid out. |
 | `set_mirror_in_rtl(element, mirror=True)` | None | Flip the element's image left for right where it lays out right to left, for an arrow or other directional icon. |
 | `set_text_wrap(element, wrap)` | None | Calls native `setTextWrap`; see the class contract above. |
+| `set_text_orientation(element, orientation, upright_digits=False)` | None | TEXT_ORIENTATION_HORIZONTAL, or columns down the rect stacked from the right (TEXT_ORIENTATION_VERTICAL_RL, Chinese and Japanese) or from the left (TEXT_ORIENTATION_VERTICAL_LR, Mongolian). In columns, Chinese, Japanese and Korean stand upright with their vertical forms and other characters are turned clockwise; with upright_digits, runs of one or two digits stand upright side by side. |
 | `set_rich_text(element, enabled=True)` | None | Read the text as markup: <color=#RRGGBB> or <color=#RRGGBBAA>, <b>, <i>, <size=N> in canvas units, <font=name>, <link=id>, <u> and <s>, each closed by </name>, with &lt; and &gt; for the brackets. A tag that is not one of these is shown as text. |
 | `set_link_color(element, color)` | None | The colour of a link in rich text while the pointer is over it. |
 | `clicked_link(element)` | str | The id of the link in the text the user clicked this frame, or ''. |

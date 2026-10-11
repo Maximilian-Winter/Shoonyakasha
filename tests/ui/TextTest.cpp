@@ -170,6 +170,46 @@ TEST(SdfFont, NonLatinFontCoversItsScript) {
     EXPECT_FALSE(font.rasterize(ka).pixels.empty());
 }
 
+TEST(SdfFont, CubicOutlinesGiveTheFieldOfTheSameGlyphInQuadratics) {
+    // The same glyphs of Noto Sans JP with CFF (cubic) outlines, and
+    // converted to TrueType (quadratic) ones.
+    SdfFont cff, ttf;
+    ASSERT_TRUE(cff.loadFromFile(std::string(SHOONYAKASHA_SOURCE_DIR) + "/tests/data/NotoSansJP-cff-sample.otf"));
+    ASSERT_TRUE(ttf.loadFromFile(kFontDir + "NotoSansJP-Subset.ttf"));
+    for (const char32_t c : {char32_t{0x65E5}, char32_t{0x3042}, char32_t{0x6F22}}) {   // 日 あ 漢
+        const int a = cff.findGlyph(c);
+        const int b = ttf.findGlyph(c);
+        ASSERT_NE(a, 0);
+        ASSERT_NE(b, 0);
+        const auto boxA = cff.glyphBox(a);
+        const auto boxB = ttf.glyphBox(b);
+        const auto fieldA = cff.rasterize(a);
+        const auto fieldB = ttf.rasterize(b);
+        ASSERT_EQ(fieldA.size, boxA.size);
+        ASSERT_FALSE(fieldB.pixels.empty());
+
+        // Pixel by pixel where both fields reach: inside and outside agree,
+        // and the distances are close.
+        size_t compared = 0, agree = 0;
+        double difference = 0.0;
+        for (int y = 0; y < fieldA.size.y; ++y) {
+            for (int x = 0; x < fieldA.size.x; ++x) {
+                const int bx = x + static_cast<int>(boxA.offset.x - boxB.offset.x);
+                const int by = y + static_cast<int>(boxA.offset.y - boxB.offset.y);
+                if (bx < 0 || by < 0 || bx >= fieldB.size.x || by >= fieldB.size.y) continue;
+                const int va = fieldA.pixels[static_cast<size_t>(y * fieldA.size.x + x)];
+                const int vb = fieldB.pixels[static_cast<size_t>(by * fieldB.size.x + bx)];
+                ++compared;
+                agree += (va >= SdfFont::kOnEdge) == (vb >= SdfFont::kOnEdge);
+                difference += std::abs(va - vb);
+            }
+        }
+        ASSERT_GT(compared, 0u);
+        EXPECT_GT(static_cast<double>(agree) / static_cast<double>(compared), 0.98) << static_cast<uint32_t>(c);
+        EXPECT_LT(difference / static_cast<double>(compared), 6.0) << static_cast<uint32_t>(c);
+    }
+}
+
 // ── TextLayout ──────────────────────────────────────────────────
 
 namespace {

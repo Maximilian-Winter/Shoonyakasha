@@ -212,6 +212,8 @@ struct UIText {
     bool wrap = true;
     float lineSpacing = 1.0f;
     TextDirection direction = TextDirection::Auto;  // of each paragraph; FromLayout: its element's layout direction
+    TextOrientation orientation = TextOrientation::Horizontal;  // vertical: columns down the rect
+    bool uprightDigits = false;                  // vertical: one or two digits upright side by side
     bool richText = false;                       // read `text` as markup (UI/RichText.h)
     glm::vec4 linkColor{0.45f, 0.7f, 1.0f, 1.0f};  // rich text: a link while the pointer is over it
 
@@ -493,12 +495,16 @@ struct UIPointerDepth {
 
 /// Measurements of a UIText for layout, and the inputs they were made from.
 /// Written by CanvasLayoutSystem for text whose layout sizes are needed.
+/// Vertical text is measured unwrapped: as wide as its columns and as tall
+/// as the longest.
 struct UITextMeasure {
     std::string text;
     bool richText = false;
     std::vector<uint32_t> fonts;          // the font chain, see FontLibrary::chain, and rich text's fonts
     float fontSize = 0.0f;
     float lineSpacing = 0.0f;
+    TextOrientation orientation = TextOrientation::Horizontal;
+    bool uprightDigits = false;
     glm::vec2 naturalSize{0.0f};          // unwrapped
     float wrapWidth = -1.0f;              // the width wrappedHeight was measured at
     float wrappedHeight = 0.0f;
