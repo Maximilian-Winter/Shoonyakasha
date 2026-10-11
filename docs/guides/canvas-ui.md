@@ -238,8 +238,8 @@ def on_update(dt):
         filter_list(ui.get_text(search))
 ```
 
-A text field is a single line. Clicking it or tabbing to it focuses it, and while it has focus it takes the keyboard:
-- **Typing:** characters go in at the caret, replacing any selection. Pasted line breaks and tabs become spaces.
+A text field is a single line unless made multi-line (below). Clicking it or tabbing to it focuses it, and while it has focus it takes the keyboard:
+- **Typing:** characters go in at the caret, replacing any selection. Pasted tabs become spaces, and pasted line breaks become spaces on a single line.
 - **Deleting:** Backspace and Delete remove one cluster, so a Devanagari conjunct or a letter with its accents goes in one step. With Ctrl they remove a word.
 - **Moving:** Left and Right move one cluster to the left or right on screen, also through mixed-direction text; with Ctrl they move one word, towards the start of a right-to-left paragraph with Right. Words follow the Unicode word rules, so "don't" and "3.5" are one word each, and the word lists in Thai, Lao, Khmer and Myanmar. Home and End go to the start and end of the text. Holding Shift extends the selection; a selection across a change of direction is drawn in as many pieces as it covers on screen.
 - **Clipboard:** Ctrl+A selects everything. Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste through the system clipboard.
@@ -248,6 +248,19 @@ A text field is a single line. Clicking it or tabbing to it focuses it, and whil
 - **Pointer:** a click places the caret, dragging selects, and a double-click selects a word.
 
 The text scrolls sideways to keep the caret in view, and the caret blinks. While a field has focus, `keyboard_captured` is true: the camera sees no keys but the modifiers, and `on_key_pressed` is not called.
+
+`set_text_field_multi_line(field)` makes a field hold many lines, for notes or a chat message:
+
+```python
+notes = ui.create_text_field(panel, "Notes", size=(400, 120))
+ui.set_text_field_multi_line(notes)                        # Enter: a new line; Ctrl+Enter: submit
+ui.set_font_size(notes, 18)                                # the text starts at half the field's height
+ui.set_text_field_multi_line(chat, submit_on_enter=True)   # Enter: submit; Shift+Enter: a new line
+```
+
+- **Lines:** the text wraps at the field's width and scrolls up and down to keep the caret in view; the wheel over it scrolls it too. Pasted line breaks stay, as `\n` in `get_text`.
+- **Moving:** Up and Down move to the line above and below and keep to the column the caret had when they started, across shorter lines. PageUp and PageDown move by the lines that fit in the field. Home and End go to the start and end of the line, and with Ctrl of the text.
+- **Limits:** `max_length` counts line breaks as characters.
 
 Setting and reading:
 - `set_text(field, text)` replaces the text and puts the caret at the end. It does not set `text_changed`, which reports only the user's edits.
@@ -331,7 +344,8 @@ The older 2D layer, [sprites, UI and text](sprites-ui-text.md), is unchanged and
 
 ## Limits
 
-- Text fields are single-line, and there is no input method (IME) composition, so text that is typed through an IME, such as Chinese or Japanese, cannot be entered; it can still be pasted.
+- Text fields have no input method (IME) composition, so text that is typed through an IME, such as Chinese or Japanese, cannot be entered; it can still be pasted.
+- In a multi-line field, End on a line that wraps without a space, such as Chinese text or a word too long for the field, puts the caret at the start of the next line, since the two places are one position in the text.
 - Text fields interpret Ctrl, not Cmd, as the word modifier, on every platform.
 - The arrow keys move focus and also turn an orbit camera, which uses them; only a focused text field takes keys from the camera.
 - Right-to-left text: a paragraph is shaped once, before it is broken into lines, so an Arabic word too wide for its rect and split between clusters keeps the joined letter forms it would have on one line.

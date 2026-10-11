@@ -146,6 +146,25 @@ TEST_F(UIAPIFixture, ClicksTogglesAndSlidersReachTheApplication) {
     EXPECT_FALSE(registry.get<UI::UIInteractable>(e(slider)).enabled);
 }
 
+TEST_F(UIAPIFixture, MultiLineTextFields) {
+    const EntityHandle canvas = ui.createCanvas();
+    const EntityHandle field = ui.createTextField(canvas, "Notes", {240.0f, 120.0f});
+    const auto& f = registry.get<UI::UITextField>(e(field));
+    EXPECT_FALSE(f.multiLine);
+    ui.setTextFieldMultiLine(field);
+    EXPECT_TRUE(f.multiLine);
+    EXPECT_FALSE(f.submitOnEnter);
+    ui.setTextFieldMultiLine(field, true, true);
+    EXPECT_TRUE(f.submitOnEnter);
+    ui.setText(field, "one\ntwo");
+    frame();
+    EXPECT_EQ(ui.getText(field), "one\ntwo");
+    EXPECT_TRUE(registry.get<UI::UIText>(f.textElement).wrap);
+    ui.setTextFieldMultiLine(field, false);
+    EXPECT_FALSE(f.multiLine);
+    EXPECT_TRUE(f.submitOnEnter);
+}
+
 TEST_F(UIAPIFixture, LayoutDirection) {
     const EntityHandle canvas = ui.createCanvas();
     EXPECT_FALSE(ui.isRightToLeft(canvas));

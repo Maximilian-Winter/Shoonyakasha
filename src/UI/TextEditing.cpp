@@ -57,72 +57,114 @@ float leadingEdge(const TextCluster& c) { return c.rightToLeft() ? c.x + c.width
 float trailingEdge(const TextCluster& c) { return c.rightToLeft() ? c.x : c.x + c.width; }
 
 /// Where the caret stands for `index`, given the cluster starting there and
-/// the one ending there (either may be null), and the line it is on.
-std::pair<float, size_t> caretPlace(const TextCluster* after, const TextCluster* before) {
+/// the one ending there (either may be null). Without either, on the line
+/// whose code points reach `index`, at its start: an empty line.
+CaretPosition caretPlace(const TextLayoutResult& layout, size_t index, const TextCluster* after,
+                         const TextCluster* before) {
     if (after && before && after->line == before->line && before->level > after->level) {
         return {trailingEdge(*before), before->line};
     }
     if (after) return {leadingEdge(*after), after->line};
     if (before) return {trailingEdge(*before), before->line};
-    return {0.0f, 0};
+    for (size_t l = layout.lines.size(); l-- > 0;) {
+        if (layout.lines[l].firstCodepoint <= index) return {layout.lines[l].left, l};
+    }
+    return {};
 }
 
 } // namespace
 
-float caretX(const TextLayoutResult& layout, size_t index) {
+std::vector<size_t> caretStopsOf(const TextLayoutResult& layout, size_t length) {
+    std::vector<size_t> stops = caretStops(layout.clusters, length);
+    if (layout.clusters.empty()) return stops;
+    for (const TextLine& line : layout.lines) {
+        stops.push_back(std::min(line.firstCodepoint, length));
+        stops.push_back(std::min(line.firstCodepoint + line.codepointCount, length));
+    }
+    std::sort(stops.begin(), stops.end());
+    stops.erase(std::unique(stops.begin(), stops.end()), stops.end());
+    return stops;
+}
+
+CaretPosition caretPosition(const TextLayoutResult& layout, size_t index) {
     const TextCluster* after = nullptr;
     const TextCluster* before = nullptr;
     const TextCluster* last = nullptr;   // in text order
     for (const TextCluster& c : layout.clusters) {
         const size_t end = c.firstCodepoint + c.codepointCount;
-        if (index > c.firstCodepoint && index < end) return leadingEdge(c);   // inside: not a caret stop
+        if (index > c.firstCodepoint && index < end) return {leadingEdge(c), c.line};   // inside: not a caret stop
         if (c.firstCodepoint == index) after = &c;
         if (end == index) before = &c;
         if (!last || c.firstCodepoint > last->firstCodepoint) last = &c;
     }
-    if (!after && !before && last && index > last->firstCodepoint) before = last;   // past the end
-    return caretPlace(after, before).first;
+    const bool pastEnd = last && index > last->firstCodepoint + last->codepointCount &&
+                         (layout.lines.empty() || last->line + 1 == layout.lines.size());
+    if (!after && !before && pastEnd) before = last;
+    return caretPlace(layout, index, after, before);
 }
 
-std::vector<std::pair<size_t, float>> caretPositions(const TextLayoutResult& layout, size_t length) {
+float caretX(const TextLayoutResult& layout, size_t index) {
+    return caretPosition(layout, index).x;
+}
+
+std::vector<CaretStop> caretPositions(const TextLayoutResult& layout, size_t length) {
     std::unordered_map<size_t, const TextCluster*> starting, ending;
     for (const TextCluster& c : layout.clusters) {
         starting[c.firstCodepoint] = &c;
         ending[c.firstCodepoint + c.codepointCount] = &c;
     }
-    struct Stop {
-        size_t index;
-        float x;
-        size_t line;
-    };
-    std::vector<Stop> stops;
-    for (const size_t index : caretStops(layout.clusters, length)) {
+    std::vector<CaretStop> stops;
+    for (const size_t index : caretStopsOf(layout, length)) {
         const auto a = starting.find(index);
         const auto b = ending.find(index);
-        const auto [x, line] = caretPlace(a != starting.end() ? a->second : nullptr,
-                                          b != ending.end() ? b->second : nullptr);
-        stops.push_back({index, x, line});
+        const CaretPosition p = caretPlace(layout, index, a != starting.end() ? a->second : nullptr,
+                                           b != ending.end() ? b->second : nullptr);
+        stops.push_back({index, p.x, p.line});
     }
-    std::stable_sort(stops.begin(), stops.end(), [](const Stop& a, const Stop& b) {
+    std::stable_sort(stops.begin(), stops.end(), [](const CaretStop& a, const CaretStop& b) {
         return a.line != b.line ? a.line < b.line : a.x < b.x;
     });
-    std::vector<std::pair<size_t, float>> out;
-    out.reserve(stops.size());
-    for (const Stop& s : stops) out.emplace_back(s.index, s.x);
-    return out;
+    return stops;
 }
 
-size_t caretAt(const TextLayoutResult& layout, size_t length, float x) {
+namespace {
+
+/// The stop of `stops` nearest to `x`, among those on `line` unless it is
+/// SIZE_MAX.
+size_t nearest(const std::vector<CaretStop>& stops, size_t length, size_t line, float x) {
     size_t best = 0;
     float bestDistance = -1.0f;
-    for (const auto& [index, at] : caretPositions(layout, length)) {
-        const float distance = std::abs(at - x);
+    for (const CaretStop& s : stops) {
+        if (line != static_cast<size_t>(-1) && s.line != line) continue;
+        const float distance = std::abs(s.x - x);
         if (bestDistance < 0.0f || distance < bestDistance) {
-            best = std::min(index, length);
+            best = std::min(s.index, length);
             bestDistance = distance;
         }
     }
     return best;
+}
+
+} // namespace
+
+size_t caretAt(const TextLayoutResult& layout, size_t length, float x) {
+    return nearest(caretPositions(layout, length), length, static_cast<size_t>(-1), x);
+}
+
+size_t caretAt(const TextLayoutResult& layout, size_t length, glm::vec2 point) {
+    if (layout.lines.empty()) return caretAt(layout, length, point.x);
+    size_t line = layout.lines.size() - 1;
+    for (size_t l = 0; l < layout.lines.size(); ++l) {
+        if (point.y < layout.lines[l].bottom) {
+            line = l;
+            break;
+        }
+    }
+    return caretOnLine(layout, length, line, point.x);
+}
+
+size_t caretOnLine(const TextLayoutResult& layout, size_t length, size_t line, float x) {
+    return nearest(caretPositions(layout, length), length, line, x);
 }
 
 // ─── TextEditBuffer ─────────────────────────────────────────────

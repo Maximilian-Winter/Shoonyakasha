@@ -254,7 +254,7 @@ TEST(BidiCaret, StandsOnTheMoreDeeplyEmbeddedSide) {
 
     // In display order: 0 1 2 3, then the Hebrew from its end, then 4 at the right.
     std::vector<size_t> visual;
-    for (const auto& [index, x] : caretPositions(layout, text.size())) visual.push_back(index);
+    for (const CaretStop& stop : caretPositions(layout, text.size())) visual.push_back(stop.index);
     EXPECT_EQ(visual, (std::vector<size_t>{0, 1, 2, 3, 7, 6, 5, 4}));
 
     EXPECT_EQ(caretAt(layout, text.size(), alef.x + alef.width + 50.0f), 4u);

@@ -177,7 +177,7 @@ Mirroring happens in `CanvasLayoutSystem` when rects are resolved, so input, hit
 
 **The field:**
 - `UITextField` gains `multiLine`, plus `submitOnEnter` (default true for one line; for many lines, Enter inserts a line break and Ctrl+Enter submits).
-- A multi-line field wraps, and scrolls vertically to keep the caret in view; its viewport becomes a scroll view.
+- A multi-line field wraps, and scrolls vertically to keep the caret in view, and with the wheel. It scrolls itself, as a single line scrolls sideways, rather than putting a scroll view in the viewport: a scroll view would take drags that select text and would need its content sized to the text each frame.
 - `TextEditBuffer` works on the whole text.
 
 **Movement:**

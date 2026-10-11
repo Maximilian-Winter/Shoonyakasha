@@ -464,6 +464,7 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         cbool textChanged(EntityHandle field) const
         void selectAll(EntityHandle field)
         void setTextFieldOptions(EntityHandle field, uint32_t maxLength, cbool password, cbool readOnly)
+        void setTextFieldMultiLine(EntityHandle field, cbool multiLine, cbool submitOnEnter)
 
 
 # ═══════════════════════════════════════════════════════════════

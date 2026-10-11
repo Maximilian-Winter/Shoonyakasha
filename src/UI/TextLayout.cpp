@@ -187,6 +187,8 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
         line.rightToLeft = rtl;
         for (size_t k = range.first; k < trimmed; ++k) line.width += clusters[k].width;
         line.baseline = top + primary.ascent() * scale + static_cast<float>(l) * lineHeight;
+        line.top = line.baseline - primary.ascent() * scale;
+        line.bottom = line.baseline - primary.descent() * scale;
         widest = std::max(widest, line.width);
 
         // The line's runs in display order, and each run's clusters in its
@@ -217,6 +219,7 @@ TextLayoutResult layoutText(const std::vector<const SdfFont*>& fonts, std::u32st
         float x = 0.0f;
         if (align == TextAlignH::Center) x = (boxSize.x - line.width) * 0.5f;
         else if (align == TextAlignH::Right) x = boxSize.x - line.width;
+        line.left = x;
         if (rtl) x -= trailing;   // the trailing spaces are left of the content
 
         for (const size_t k : order) {

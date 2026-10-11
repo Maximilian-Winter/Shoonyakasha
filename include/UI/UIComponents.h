@@ -280,28 +280,38 @@ struct UISlider {
     }
 };
 
-/// A single line of editable text. Its elements are made by createTextField:
+/// Editable text, one line or many. Its elements are made by createTextField:
 /// a viewport that clips, holding the selection, the text and the caret,
-/// which CanvasTextSystem places each frame after laying out the text. The
-/// text is moved sideways to keep the caret in view.
+/// which CanvasTextSystem places each frame after laying out the text. A
+/// single line is moved sideways to keep the caret in view; many lines wrap
+/// at the viewport's width and are moved up and down.
 ///
 /// While focused it takes the keyboard (give its UIInteractable
 /// capturesKeyboard): typed characters replace the selection; Backspace and
 /// Delete remove a cluster, or with Ctrl a word; Left and Right move by
-/// cluster, or with Ctrl by word; Home and End go to either end; Shift with a
-/// move extends the selection; Ctrl+A selects all, Ctrl+C, X and V copy, cut
-/// and paste through UIClipboard; Enter submits. Pressing places the caret,
-/// dragging selects, and a double-click selects a word. There is no input
-/// method composition, so text that needs an IME cannot be typed.
+/// cluster, or with Ctrl by word; Shift with a move extends the selection;
+/// Ctrl+A selects all, Ctrl+C, X and V copy, cut and paste through
+/// UIClipboard. On one line, Home and End go to either end and Enter submits.
+/// On many lines, Up and Down move to the line above and below, keeping to
+/// the x the caret had when they started; PageUp and PageDown move by the
+/// lines that fit in the viewport; Home and End go to the start and end of
+/// the line, and with Ctrl of the text; Enter starts a new line and
+/// Ctrl+Enter submits, or with submitOnEnter Enter submits and Shift+Enter
+/// starts a new line. Pressing places the caret, dragging selects, and a
+/// double-click selects a word; the wheel scrolls many lines. There is no
+/// input method composition, so text that needs an IME cannot be typed.
 struct UITextField {
-    std::string text;                        // UTF-8, one line
+    std::string text;                        // UTF-8; line breaks are '\n' when multiLine
     std::string placeholder;                 // shown in placeholderColor while text is empty
     size_t caret = 0;                        // code-point index into text
     size_t selectionAnchor = 0;              // the selection runs between it and the caret
-    size_t maxLength = 0;                    // in code points; 0: no limit
+    size_t maxLength = 0;                    // in code points, line breaks counted; 0: no limit
     bool password = false;                   // drawn as one maskCharacter per code point
     char32_t maskCharacter = 0x2022;         // bullet
     bool readOnly = false;                   // the user can select and copy, not edit
+    bool multiLine = false;                  // wraps and takes line breaks
+    bool submitOnEnter = true;               // with multiLine: Enter submits rather than starting a line
+    float wheelSpeed = 48.0f;                // with multiLine: canvas units per wheel step
 
     glm::vec4 textColor{1.0f};
     glm::vec4 placeholderColor{1.0f, 1.0f, 1.0f, 0.4f};
@@ -316,10 +326,15 @@ struct UITextField {
 
     // Written by CanvasInputSystem, for this frame.
     bool changed = false;                    // the user changed the text
-    bool submitted = false;                  // the user pressed Enter
+    bool submitted = false;                  // the user pressed Enter, or Ctrl+Enter
     // Written by CanvasInputSystem and CanvasTextSystem.
     float blinkTime = 0.0f;                  // seconds since the caret last moved
     float scroll = 0.0f;                     // how far the text is moved left
+    float scrollY = 0.0f;                    // multiLine: how far the text is moved up
+    float goalX = -1.0f;                     // multiLine: the x Up and Down keep to; negative: none
+    bool revealCaret = true;                 // multiLine: scroll to show the caret at the next layout
+    float contentHeight = 0.0f;              // multiLine: the text's height and the viewport's, as last laid out
+    float viewportHeight = 0.0f;
 
     /// What the text element shows: the text, or its mask, or the
     /// placeholder while the text is empty.

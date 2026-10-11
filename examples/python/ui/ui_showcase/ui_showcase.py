@@ -22,7 +22,8 @@ A tour of engine.ui on the default pipeline, in one window:
              field as you type
 - a readout of the pointer: which canvas, where on it, what it hovers
 - an About dialog on a second canvas drawn on top, which blocks the
-  pointer to everything under it while it is open
+  pointer to everything under it while it is open, with a notes field of
+  many lines
 - a kiosk in the world, a canvas on a quad you can click in 3D, with its
   own counter, a slider for its glow and a button that changes its
   resolution. A pillar stands in front of it: where the pillar hides the
@@ -374,12 +375,21 @@ def build_dialog(fonts):
     # nothing below takes the pointer while the dialog is open.
     dim = named("Dialog backdrop", ui_.create_image(dialog_canvas, (0, 0), color=(0.0, 0.0, 0.0, 0.55)))
     ui_.set_rect(dim, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
-    box = named("Dialog", frame_panel(dim, 560, 280, color=FRAME[:3] + (1.0,)))
+    box = named("Dialog", frame_panel(dim, 560, 400, color=FRAME[:3] + (1.0,)))
     label(box, "About this showcase", 30, 24, 500, 44, size=30, color=GOLD, font=fonts["serif"])
     label(box, "Everything here is built from Python with engine.ui: canvases, panels, text and "
                "widgets, on the screen and on a quad in the world. This dialog is a second "
                "canvas with a higher sort order; its backdrop stops clicks reaching the HUD.",
-          30, 78, 500, 120, size=18)
+          30, 78, 500, 90, size=18)
+    # A field of many lines: Enter starts a line, Up and Down move between
+    # them, the wheel scrolls it.
+    label(box, "Notes", 30, 172, 500, 22, size=16, color=MUTED)
+    notes = named("Notes field", place(ui_.create_text_field(box, "Write some notes", size=(500, 110)), 30, 198))
+    ui_.set_text_field_multi_line(notes)
+    ui_.set_font_size(notes, 18)   # a field's text starts at half its height, sized for one line
+    ui_.set_text(notes, "Enter starts a new line, Ctrl+Enter would submit.\n"
+                        "Up and Down move between lines and keep to their column.\n"
+                        "Long lines wrap at the width of the field instead of scrolling sideways.")
     named("Close button", place(ui_.create_button(box, "Close", size=(130, 40)), -30, -24, anchor=(1, 1)))
     w["dialog"] = dim
 

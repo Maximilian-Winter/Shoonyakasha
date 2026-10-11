@@ -37,22 +37,29 @@ TextDirection resolvedDirection(const UIText& text, const UIRect& element) {
     }
 }
 
-/// The selected stretches of a laid-out line, [left, right) each: one for
-/// each run of selected clusters shown side by side.
-std::vector<std::pair<float, float>> selectionSpans(const TextLayoutResult& layout, size_t start, size_t end) {
-    std::vector<std::pair<float, float>> spans;
-    for (const TextCluster& c : layout.clusters) {   // left to right
+struct Span {
+    size_t line = 0;
+    float left = 0.0f;
+    float right = 0.0f;
+};
+
+/// The selected stretches of laid-out text: one for each run of selected
+/// clusters shown side by side on a line.
+std::vector<Span> selectionSpans(const TextLayoutResult& layout, size_t start, size_t end) {
+    std::vector<Span> spans;
+    for (const TextCluster& c : layout.clusters) {   // line by line, left to right
         if (c.firstCodepoint < start || c.firstCodepoint >= end) continue;
-        if (!spans.empty() && std::abs(spans.back().second - c.x) < 1e-3f) {
-            spans.back().second = c.x + c.width;
+        if (!spans.empty() && spans.back().line == c.line && std::abs(spans.back().right - c.x) < 1e-3f) {
+            spans.back().right = c.x + c.width;
         } else {
-            spans.emplace_back(c.x, c.x + c.width);
+            spans.push_back({c.line, c.x, c.x + c.width});
         }
     }
     return spans;
 }
 
-/// Shows each field's text, mask or placeholder in its text element.
+/// Shows each field's text, mask or placeholder in its text element, wrapped
+/// from the top for many lines and centred on one.
 void showTextFields(entt::registry& registry) {
     for (auto [entity, field] : registry.view<UITextField>().each()) {
         const size_t length = decodeUtf8(field.text).size();
@@ -61,6 +68,8 @@ void showTextFields(entt::registry& registry) {
         if (auto* text = registry.try_get<UIText>(field.textElement)) {
             text->text = field.displayText();
             text->color = field.text.empty() ? field.placeholderColor : field.textColor;
+            text->wrap = field.multiLine;
+            text->alignV = field.multiLine ? TextAlignV::Top : TextAlignV::Middle;
         }
     }
 }
@@ -70,22 +79,30 @@ const UIRect* parentRect(const entt::registry& registry, entt::entity e) {
     return hierarchy ? registry.try_get<UIRect>(hierarchy->parent) : nullptr;
 }
 
-/// Puts `e` at canvas x `left`, `width` wide and `height` high, centred
-/// vertically in its parent: its rect for this frame, and its anchors for
-/// the layout of the next.
-void placeBar(entt::registry& registry, entt::entity e, float left, float width, float height,
+/// Puts `e` at canvas `min`, `size` big: its rect for this frame, and its
+/// anchors for the layout of the next.
+void placeBar(entt::registry& registry, entt::entity e, glm::vec2 min, glm::vec2 size,
               const glm::vec4& color, bool visible) {
     auto* rect = registry.try_get<UIRect>(e);
     const UIRect* parent = parentRect(registry, e);
     if (!rect || !parent) return;
-    rect->anchorMin = rect->anchorMax = rect->pivot = {0.0f, 0.5f};
-    rect->anchoredPosition = {left - parent->rect.min.x, 0.0f};
-    rect->sizeDelta = {width, height};
+    rect->anchorMin = rect->anchorMax = rect->pivot = {0.0f, 0.0f};
+    rect->anchoredPosition = min - parent->rect.min;
+    rect->sizeDelta = size;
     rect->visible = visible;
-    rect->rect.min = {left, parent->rect.min.y + (parent->rect.size().y - height) * 0.5f};
-    rect->rect.max = rect->rect.min + glm::vec2(width, height);
+    rect->rect.min = min;
+    rect->rect.max = min + size;
     rect->visibleInHierarchy = visible && parent->visibleInHierarchy;
     if (auto* image = registry.try_get<UIImage>(e)) image->color = color;
+}
+
+/// Moves `rect`, placed by anchors, by `offset` from where its anchors put
+/// it: for this frame, and for the layout of the next.
+void shiftText(UIRect& rect, glm::vec2 offset) {
+    const glm::vec2 shift = offset - rect.anchoredPosition;
+    rect.anchoredPosition = offset;
+    rect.rect.min += shift;
+    rect.rect.max += shift;
 }
 
 /// Moves each field's text to keep the caret in view, and places its caret
@@ -101,59 +118,86 @@ void placeTextFields(entt::registry& registry, float deltaTime) {
         field.blinkTime += deltaTime;
 
         const bool laidOut = !field.text.empty() && cache;
-        const float width = textRect->rect.size().x;
+        const glm::vec2 view = textRect->rect.size();
         // An empty right-to-left field shows its caret at the right.
         const TextDirection direction = resolvedDirection(*text, *textRect);
         const bool emptyRightToLeft = direction == TextDirection::RightToLeft ||
                                       direction == TextDirection::AutoRightToLeft;
-        const float emptyCaret = emptyRightToLeft ? width - field.caretWidth : 0.0f;
-        const float caret = laidOut ? caretX(cache->layout, field.caret) : emptyCaret;
+        const float emptyCaret = emptyRightToLeft ? view.x - field.caretWidth : 0.0f;
+        const CaretPosition caret = laidOut ? caretPosition(cache->layout, field.caret) : CaretPosition{emptyCaret, 0};
 
-        // The text's extent: from 0, or further left where right-aligned text
-        // runs past the box's left edge, to its right end.
-        float low = 0.0f, high = 0.0f;
-        if (laidOut) {
-            for (const TextCluster& c : cache->layout.clusters) {
-                low = std::min(low, c.x);
-                high = std::max(high, c.x + c.width);
+        // The caret's line, top to bottom, relative to the text's box: on one
+        // line the font's height centred in it, on many the laid-out line.
+        auto lineBand = [&](size_t line) -> glm::vec2 {
+            if (field.multiLine && laidOut && line < cache->layout.lines.size()) {
+                return {cache->layout.lines[line].top, cache->layout.lines[line].bottom};
             }
+            if (field.multiLine) return {0.0f, text->fontSize};
+            const float top = (view.y - text->fontSize) * 0.5f;
+            return {top, top + text->fontSize};
+        };
+        const glm::vec2 caretBand = lineBand(caret.line);
+
+        glm::vec2 offset(0.0f);
+        if (field.multiLine) {
+            // Moved up no further than needed to show the caret after it
+            // moved, and no further than the text reaches.
+            field.scroll = 0.0f;
+            field.contentHeight = laidOut ? cache->layout.size.y : 0.0f;
+            field.viewportHeight = view.y;
+            float scrollY = field.scrollY;
+            if (field.revealCaret) {
+                scrollY = std::min(scrollY, caretBand.x);
+                scrollY = std::max(scrollY, caretBand.y - view.y);
+                field.revealCaret = false;
+            }
+            field.scrollY = std::clamp(scrollY, 0.0f, std::max(0.0f, field.contentHeight - view.y));
+            offset.y = -field.scrollY;
+        } else {
+            // The text's extent: from 0, or further left where right-aligned
+            // text runs past the box's left edge, to its right end.
+            float low = 0.0f, high = 0.0f;
+            if (laidOut) {
+                for (const TextCluster& c : cache->layout.clusters) {
+                    low = std::min(low, c.x);
+                    high = std::max(high, c.x + c.width);
+                }
+            }
+            // Moved sideways no further than needed to show the caret, and no
+            // further than the text reaches.
+            float scroll = field.scroll;
+            scroll = std::min(scroll, caret.x);
+            scroll = std::max(scroll, caret.x + field.caretWidth - view.x);
+            field.scroll = std::clamp(scroll, low, std::max(low, high + field.caretWidth - view.x));
+            field.scrollY = 0.0f;
+            offset.x = -field.scroll;
         }
+        shiftText(*textRect, offset);
+        const glm::vec2 origin = textRect->rect.min;
+        // Many lines run on below the box the text is laid out in. Its rect
+        // covers them for this frame, so it is still drawn when scrolled
+        // further than a viewport.
+        if (field.multiLine) textRect->rect.max.y = std::max(textRect->rect.max.y, origin.y + field.contentHeight);
 
-        // Scrolled no further than needed to show the caret, and no further
-        // than the text reaches.
-        float scroll = field.scroll;
-        scroll = std::min(scroll, caret);
-        scroll = std::max(scroll, caret + field.caretWidth - width);
-        scroll = std::clamp(scroll, low, std::max(low, high + field.caretWidth - width));
-        field.scroll = scroll;
-
-        const float shift = -scroll - textRect->anchoredPosition.x;
-        textRect->anchoredPosition.x = -scroll;
-        textRect->rect.min.x += shift;
-        textRect->rect.max.x += shift;
-
-        const float left = textRect->rect.min.x;
-        const float height = text->fontSize;
         const bool selected = laidOut && focused && field.caret != field.selectionAnchor;
         const auto spans = selected ? selectionSpans(cache->layout, std::min(field.caret, field.selectionAnchor),
                                                      std::max(field.caret, field.selectionAnchor))
-                                    : std::vector<std::pair<float, float>>{};
-        const float selectionLeft = spans.empty() ? 0.0f : spans.front().first;
-        const float selectionRight = spans.empty() ? 0.0f : spans.back().second;
-        placeBar(registry, field.selectionElement, left + selectionLeft, selectionRight - selectionLeft, height,
-                 field.selectionColor, selected && !spans.empty());
-        if (const auto* bar = registry.try_get<UIRect>(field.selectionElement)) {
-            auto& rects = registry.get_or_emplace<UIImageRects>(field.selectionElement).rects;
-            rects.clear();
-            for (const auto& [from, to] : spans) {
-                rects.push_back({{left + from, bar->rect.min.y}, {left + to, bar->rect.max.y}});
-            }
+                                    : std::vector<Span>{};
+        auto& rects = registry.get_or_emplace<UIImageRects>(field.selectionElement).rects;
+        rects.clear();
+        Rect bounds{glm::vec2(0.0f), glm::vec2(0.0f)};
+        for (const Span& s : spans) {
+            const glm::vec2 band = lineBand(s.line);
+            const Rect r{origin + glm::vec2(s.left, band.x), origin + glm::vec2(s.right, band.y)};
+            bounds = rects.empty() ? r : Rect{glm::min(bounds.min, r.min), glm::max(bounds.max, r.max)};
+            rects.push_back(r);
         }
+        placeBar(registry, field.selectionElement, bounds.min, bounds.size(), field.selectionColor, !rects.empty());
 
         const bool blinkOn = field.blinkPeriod <= 0.0f ||
                              std::fmod(field.blinkTime, field.blinkPeriod) < field.blinkPeriod * 0.5f;
-        placeBar(registry, field.caretElement, left + caret, field.caretWidth, height, field.caretColor,
-                 focused && blinkOn);
+        placeBar(registry, field.caretElement, origin + glm::vec2(caret.x, caretBand.x),
+                 {field.caretWidth, caretBand.y - caretBand.x}, field.caretColor, focused && blinkOn);
     }
 }
 

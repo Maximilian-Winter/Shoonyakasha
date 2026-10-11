@@ -450,6 +450,7 @@ void UIAPI::setText(EntityHandle element, const std::string& text) {
     if (auto* field = m_impl->get<UI::UITextField>(element)) {
         field->text = text;
         field->caret = field->selectionAnchor = UI::decodeUtf8(text).size();
+        field->revealCaret = true;
         return;
     }
     if (auto* t = m_impl->text(element)) t->text = text;
@@ -657,6 +658,14 @@ void UIAPI::setTextFieldOptions(EntityHandle field, uint32_t maxLength, bool pas
         f->maxLength = maxLength;
         f->password = password;
         f->readOnly = readOnly;
+    }
+}
+
+void UIAPI::setTextFieldMultiLine(EntityHandle field, bool multiLine, bool submitOnEnter) {
+    if (auto* f = m_impl->get<UI::UITextField>(field)) {
+        f->multiLine = multiLine;
+        f->submitOnEnter = multiLine ? submitOnEnter : true;
+        f->revealCaret = true;
     }
 }
 

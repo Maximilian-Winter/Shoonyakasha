@@ -1509,6 +1509,13 @@ cdef class UI:
         and stops copying; read_only keeps selecting and copying but not editing."""
         self._ptr.setTextFieldOptions(field, max_length, password, read_only)
 
+    def set_text_field_multi_line(self, uint32_t field, bint multi_line=True, bint submit_on_enter=False):
+        """Let the field hold many lines: its text wraps and scrolls up and
+        down, Up and Down move between lines, and Enter starts a new line while
+        Ctrl+Enter submits. With submit_on_enter, Enter submits and Shift+Enter
+        starts a new line. False goes back to one line."""
+        self._ptr.setTextFieldMultiLine(field, multi_line, submit_on_enter)
+
 
 # ═══════════════════════════════════════════════════════════════
 # Engine — Python wrapper for EngineAPI (the main entry point)

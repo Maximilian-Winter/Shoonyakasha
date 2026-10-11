@@ -57,7 +57,10 @@ struct TextLine {
     size_t firstCodepoint = 0;    // range in the laid-out text, '\n' and the space it broke at excluded
     size_t codepointCount = 0;
     float width = 0.0f;           // trailing spaces excluded
+    float left = 0.0f;            // where its content starts, aligned, relative to the box; an empty line's caret
     float baseline = 0.0f;        // y relative to the box's top-left corner
+    float top = 0.0f;             // the first font's ascent above the baseline
+    float bottom = 0.0f;          // and its descent below it
     bool rightToLeft = false;     // its paragraph's direction
 };
 

@@ -25,24 +25,52 @@ namespace UI {
 /// clusters, every code point.
 std::vector<size_t> caretStops(const std::vector<TextCluster>& clusters, size_t length);
 
-/// The caret's x for `index` in a laid-out line, relative to the box. The
-/// caret stands at the leading edge of the cluster after it (its left edge
-/// if it reads left to right, its right edge if right to left), or at the
-/// trailing edge of the cluster before it at the end of the text. Where the
-/// two edges differ, at a change of direction, it stands at the edge of the
-/// one with the higher bidi level, the more deeply embedded run; on a tie,
-/// the one after it. 0 for a text with no clusters.
+/// The same, and each line's start and end, so the caret can stand before a
+/// line break and on an empty line.
+std::vector<size_t> caretStopsOf(const TextLayoutResult& layout, size_t length);
+
+struct CaretPosition {
+    float x = 0.0f;       // relative to the box
+    size_t line = 0;      // index into TextLayoutResult::lines
+};
+
+/// Where the caret stands for `index` in laid-out text. It stands at the
+/// leading edge of the cluster after it (its left edge if it reads left to
+/// right, its right edge if right to left), or at the trailing edge of the
+/// cluster before it at the end of the text or of a line. Where the two
+/// edges differ, at a change of direction, it stands at the edge of the one
+/// with the higher bidi level, the more deeply embedded run; on a tie, the
+/// one after it. Between lines, it starts the next. At 0 for a text with no
+/// clusters.
+CaretPosition caretPosition(const TextLayoutResult& layout, size_t index);
+
+/// caretPosition(layout, index).x.
 float caretX(const TextLayoutResult& layout, size_t index);
 
-/// Every caret stop of a laid-out text of `length` code points (see
-/// caretStops) with its x as caretX gives it, in display order: line by
-/// line, left to right.
-std::vector<std::pair<size_t, float>> caretPositions(const TextLayoutResult& layout, size_t length);
+struct CaretStop {
+    size_t index = 0;
+    float x = 0.0f;
+    size_t line = 0;
+};
 
-/// The caret stop nearest to `x` in a laid-out line of `length` code points.
+/// Every caret stop of a laid-out text of `length` code points (see
+/// caretStopsOf) where caretPosition puts it, in display order: line by line,
+/// left to right.
+std::vector<CaretStop> caretPositions(const TextLayoutResult& layout, size_t length);
+
+/// The caret stop nearest to `x` on any line of a laid-out text of `length`
+/// code points.
 size_t caretAt(const TextLayoutResult& layout, size_t length, float x);
 
-/// A line of text with a caret and a selection, and its edits.
+/// The caret stop nearest to `point`, relative to the box: on the line at
+/// its height (the first line reaching below it, or the last), nearest to
+/// its x.
+size_t caretAt(const TextLayoutResult& layout, size_t length, glm::vec2 point);
+
+/// The caret stop on `line` nearest to `x`.
+size_t caretOnLine(const TextLayoutResult& layout, size_t length, size_t line, float x);
+
+/// Text with a caret and a selection, and its edits.
 struct TextEditBuffer {
     std::u32string text;
     size_t caret = 0;

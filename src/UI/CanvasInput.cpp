@@ -69,6 +69,8 @@ float springTowards(float current, float target, float& velocity, float smoothTi
 
 namespace {
 
+UITextField* multiLineFieldAt(entt::registry& registry, entt::entity element);   // with the text fields, below
+
 std::optional<ECS::Ray> mainCameraRay(const entt::registry& registry, glm::vec2 pixel, glm::vec2 screen) {
     if (screen.x <= 0.0f || screen.y <= 0.0f) return std::nullopt;
     for (auto [entity, camera] : registry.view<const ECS::CameraComponent>().each()) {
@@ -333,8 +335,16 @@ void CanvasInputSystem::update(entt::registry& registry, float deltaTime) {
     if (hitElement != entt::null && input->scrollDelta != glm::vec2(0.0f)) {
         // Turning the wheel towards the user (negative y) moves on down the
         // content; tilting it right (positive x) moves on to the right.
+        // A field of many lines under the pointer scrolls first, while it can.
+        bool fieldScrolled = false;
+        if (UITextField* field = multiLineFieldAt(registry, hitElement); field && input->scrollDelta.y != 0.0f) {
+            const float range = std::max(field->contentHeight - field->viewportHeight, 0.0f);
+            const float scrollY = std::clamp(field->scrollY - input->scrollDelta.y * field->wheelSpeed, 0.0f, range);
+            fieldScrolled = scrollY != field->scrollY;
+            field->scrollY = scrollY;
+        }
         if (input->scrollDelta.x != 0.0f) wheelScroll(registry, hitElement, 0, input->scrollDelta.x);
-        if (input->scrollDelta.y != 0.0f) wheelScroll(registry, hitElement, 1, -input->scrollDelta.y);
+        if (input->scrollDelta.y != 0.0f && !fieldScrolled) wheelScroll(registry, hitElement, 1, -input->scrollDelta.y);
     }
     updateDrag(registry, pixel, ray, down, pressedNow, hitElement, deltaTime);
     coast(registry, m_dragging ? m_dragView : entt::null, deltaTime);
@@ -640,8 +650,6 @@ void CanvasInputSystem::updateFocus(entt::registry& registry, const ECS::InputSt
 
 namespace {
 
-/// The field's text, caret and selection, with caret stops from its text
-/// element's layout when that layout is of the text as it is now.
 /// The layout of the field's text as it is now, or null when the text has
 /// changed since it was laid out, or is empty.
 const TextLayoutResult* currentLayout(const entt::registry& registry, const UITextField& field) {
@@ -650,19 +658,23 @@ const TextLayoutResult* currentLayout(const entt::registry& registry, const UITe
     return &cache->layout;
 }
 
+/// The field's text, caret and selection, with caret stops from its text
+/// element's layout when that layout is of the text as it is now.
 TextEditBuffer bufferOf(const entt::registry& registry, const UITextField& field) {
     TextEditBuffer buffer;
     buffer.text = decodeUtf8(field.text);
     buffer.caret = std::min(field.caret, buffer.text.size());
     buffer.anchor = std::min(field.selectionAnchor, buffer.text.size());
     if (const TextLayoutResult* layout = currentLayout(registry, field)) {
-        buffer.stops = caretStops(layout->clusters, buffer.text.size());
-        for (const auto& [index, x] : caretPositions(*layout, buffer.text.size())) buffer.visual.push_back(index);
+        buffer.stops = caretStopsOf(*layout, buffer.text.size());
+        for (const CaretStop& stop : caretPositions(*layout, buffer.text.size())) buffer.visual.push_back(stop.index);
     }
     return buffer;
 }
 
-void store(UITextField& field, const TextEditBuffer& buffer, bool textChanged) {
+/// Writes the buffer back. A move that does not keep to the goal x forgets
+/// it, and any move or edit scrolls a field of many lines to the caret.
+void store(UITextField& field, const TextEditBuffer& buffer, bool textChanged, bool keepGoal = false) {
     if (textChanged) {
         field.text = encodeUtf8(buffer.text);
         field.changed = true;
@@ -670,20 +682,35 @@ void store(UITextField& field, const TextEditBuffer& buffer, bool textChanged) {
     field.caret = buffer.caret;
     field.selectionAnchor = buffer.anchor;
     field.blinkTime = 0.0f;
+    field.revealCaret = true;
+    if (!keepGoal) field.goalX = -1.0f;
 }
 
-/// `text` for a single line: line breaks and tabs become spaces, and other
+/// Typed or pasted `text` as the field takes it: on many lines, line breaks
+/// as '\n'; on one, line breaks as spaces. Tabs become spaces and other
 /// control characters are dropped.
-std::u32string singleLine(std::u32string_view text) {
+std::u32string fieldText(std::u32string_view text, bool multiLine) {
     std::u32string out;
     out.reserve(text.size());
     for (size_t i = 0; i < text.size(); ++i) {
         const char32_t c = text[i];
         if (c == U'\r' && i + 1 < text.size() && text[i + 1] == U'\n') continue;
-        if (c == U'\n' || c == U'\r' || c == U'\t') out.push_back(U' ');
+        if (c == U'\n' || c == U'\r' || c == 0x2028 || c == 0x2029) out.push_back(multiLine ? U'\n' : U' ');
+        else if (c == U'\t') out.push_back(U' ');
         else if (c >= 0x20 && c != 0x7F) out.push_back(c);
     }
     return out;
+}
+
+/// The innermost text field of many lines at or above `element`.
+UITextField* multiLineFieldAt(entt::registry& registry, entt::entity element) {
+    for (entt::entity e = element; e != entt::null && registry.valid(e);) {
+        if (auto* field = registry.try_get<UITextField>(e); field && field->multiLine) return field;
+        if (registry.all_of<UICanvas>(e)) break;
+        const auto* hierarchy = registry.try_get<ECS::HierarchyComponent>(e);
+        e = hierarchy ? hierarchy->parent : entt::null;
+    }
+    return nullptr;
 }
 
 } // namespace
@@ -700,7 +727,9 @@ void CanvasInputSystem::pointTextField(entt::registry& registry, entt::entity en
     size_t index = buffer.text.size();
     const auto* cache = registry.try_get<UITextCache>(field.textElement);
     if (cache && !buffer.stops.empty()) {
-        index = caretAt(cache->layout, buffer.text.size(), position->x - textRect->rect.min.x);
+        const glm::vec2 point = *position - textRect->rect.min;
+        index = field.multiLine ? caretAt(cache->layout, buffer.text.size(), point)
+                                : caretAt(cache->layout, buffer.text.size(), point.x);
     }
 
     if (pressedNow) {
@@ -749,18 +778,56 @@ void CanvasInputSystem::editTextField(entt::registry& registry, entt::entity ent
         return left == startIsLeft ? start : end;
     };
 
+    // On many lines, Up, Down, PageUp and PageDown move to the stop nearest
+    // the goal x on another line, and keep it for the next of them. The
+    // layout must be current: after an edit in this frame they wait.
+    bool keepGoal = false;
+    auto moveLines = [&](long lines, bool extend) {
+        if (!layout || buffer.visual.empty() || layout->lines.empty()) return;
+        const CaretPosition at = caretPosition(*layout, buffer.caret);
+        const float x = field.goalX >= 0.0f ? field.goalX : at.x;
+        const long target = static_cast<long>(at.line) + lines;
+        size_t index = 0;
+        if (target >= static_cast<long>(layout->lines.size())) index = buffer.text.size();
+        else if (target >= 0) index = caretOnLine(*layout, buffer.text.size(), static_cast<size_t>(target), x);
+        buffer.moveTo(index, extend);
+        field.goalX = x;
+        keepGoal = true;
+    };
+    auto pageLines = [&]() -> long {
+        if (!layout || layout->lines.empty()) return 1;
+        const TextLine& first = layout->lines.front();
+        const float step = layout->lines.size() > 1 ? layout->lines[1].baseline - first.baseline
+                                                    : first.bottom - first.top;
+        return step > 0.0f ? std::max(1L, static_cast<long>(field.viewportHeight / step)) : 1L;
+    };
+    // The start and end of the caret's line, on many lines without Ctrl;
+    // otherwise of the text.
+    auto lineEnd = [&](bool end, bool ctrl) -> size_t {
+        if (!field.multiLine || ctrl || !layout || buffer.visual.empty() || layout->lines.empty()) {
+            return end ? buffer.text.size() : 0;
+        }
+        const TextLine& line = layout->lines[caretPosition(*layout, buffer.caret).line];
+        return std::min(end ? line.firstCodepoint + line.codepointCount : line.firstCodepoint, buffer.text.size());
+    };
+
     // Characters typed and keys pressed, in the order they came.
     const std::u32string& typed = input.textInput;
     size_t typedDone = 0;
     auto typeUpTo = [&](size_t end) {
         end = std::min(end, typed.size());
         if (end <= typedDone) return;
-        if (editable) changed |= buffer.insert(singleLine(typed.substr(typedDone, end - typedDone)), field.maxLength);
+        if (editable) {
+            changed |= buffer.insert(fieldText(typed.substr(typedDone, end - typedDone), field.multiLine),
+                                     field.maxLength);
+        }
+        keepGoal = false;
         typedDone = end;
     };
 
     for (const auto& key : input.keyPresses) {
         typeUpTo(key.textOffset);
+        keepGoal = false;
         const bool shift = (key.mods & GLFW_MOD_SHIFT) != 0;
         const bool ctrl = (key.mods & GLFW_MOD_CONTROL) != 0;
         // Ctrl or Cmd, but not AltGr, which comes as Ctrl+Alt.
@@ -783,10 +850,22 @@ void CanvasInputSystem::editTextField(entt::registry& registry, entt::entity ent
                 else buffer.moveTo(buffer.rightStop(buffer.caret), shift);
                 break;
             case GLFW_KEY_HOME:
-                buffer.moveTo(0, shift);
+                buffer.moveTo(lineEnd(false, ctrl), shift);
                 break;
             case GLFW_KEY_END:
-                buffer.moveTo(buffer.text.size(), shift);
+                buffer.moveTo(lineEnd(true, ctrl), shift);
+                break;
+            case GLFW_KEY_UP:
+                if (field.multiLine) moveLines(-1, shift);
+                break;
+            case GLFW_KEY_DOWN:
+                if (field.multiLine) moveLines(1, shift);
+                break;
+            case GLFW_KEY_PAGE_UP:
+                if (field.multiLine) moveLines(-pageLines(), shift);
+                break;
+            case GLFW_KEY_PAGE_DOWN:
+                if (field.multiLine) moveLines(pageLines(), shift);
                 break;
             case GLFW_KEY_BACKSPACE:
                 if (editable) changed |= buffer.backspace(ctrl);
@@ -795,9 +874,17 @@ void CanvasInputSystem::editTextField(entt::registry& registry, entt::entity ent
                 if (editable) changed |= buffer.deleteForward(ctrl);
                 break;
             case GLFW_KEY_ENTER:
-            case GLFW_KEY_KP_ENTER:
-                if (!key.repeat) field.submitted = true;
+            case GLFW_KEY_KP_ENTER: {
+                // A new line on many lines: Enter, or Shift+Enter where Enter
+                // submits. Ctrl+Enter always submits.
+                const bool newLine = field.multiLine && !ctrl && (field.submitOnEnter ? shift : true);
+                if (newLine) {
+                    if (editable) changed |= buffer.insert(U"\n", field.maxLength);
+                } else if (!key.repeat) {
+                    field.submitted = true;
+                }
                 break;
+            }
             case GLFW_KEY_A:
                 if (shortcut) {
                     buffer.anchor = 0;
@@ -815,7 +902,7 @@ void CanvasInputSystem::editTextField(entt::registry& registry, entt::entity ent
                 break;
             case GLFW_KEY_V:
                 if (shortcut && editable && m_clipboard) {
-                    changed |= buffer.insert(singleLine(decodeUtf8(m_clipboard->text())), field.maxLength);
+                    changed |= buffer.insert(fieldText(decodeUtf8(m_clipboard->text()), field.multiLine), field.maxLength);
                 }
                 break;
             default:
@@ -823,7 +910,7 @@ void CanvasInputSystem::editTextField(entt::registry& registry, entt::entity ent
         }
     }
     typeUpTo(typed.size());
-    store(field, buffer, changed);
+    store(field, buffer, changed, keepGoal);
 }
 
 bool CanvasInputSystem::dragScrollbar(entt::registry& registry, entt::entity bar, glm::vec2 pixel,

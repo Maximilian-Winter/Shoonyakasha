@@ -10,8 +10,10 @@
 
 #include "ECS/CameraController.h"
 #include "ECS/Core.h"
+#include "UI/CanvasLayout.h"
 #include "UI/FontLibrary.h"
 #include "UI/TextEditing.h"
+#include "UI/UIBatchBuilder.h"
 #include "UI/UISystems.h"
 #include "UI/UIWidgets.h"
 #include "UI/Utf8.h"
@@ -430,3 +432,203 @@ TEST(TextField, PasswordIsMaskedAndNotCopied) {
     EXPECT_EQ(f.text().text, "s\xC3\xA9" "cret");
 }
 
+
+// ─── Many lines ─────────────────────────────────────────────────
+
+TEST(TextEditing, CaretStopsAndPositionsAcrossLines) {
+    SdfFont font;
+    ASSERT_TRUE(font.loadFromFile(kFonts + "Roboto-Regular.ttf"));
+    TextStyle style;
+    style.wrap = false;
+    const std::u32string text = U"ab\n\ncd";   // an empty second line
+    const TextLayoutResult layout = layoutText(font, text, style, {400.0f, 400.0f});
+    ASSERT_EQ(layout.lines.size(), 3u);
+
+    // Before the line break and on the empty line, too.
+    EXPECT_EQ(caretStopsOf(layout, text.size()), (std::vector<size_t>{0, 1, 2, 3, 4, 5, 6}));
+    EXPECT_EQ(caretPosition(layout, 2).line, 0u);
+    EXPECT_EQ(caretPosition(layout, 3).line, 1u);
+    EXPECT_FLOAT_EQ(caretPosition(layout, 3).x, 0.0f);
+    EXPECT_EQ(caretPosition(layout, 4).line, 2u);
+    EXPECT_EQ(caretPosition(layout, 6).line, 2u);
+
+    // A point picks its line by height, then the nearest stop on it.
+    const float middle1 = (layout.lines[1].top + layout.lines[1].bottom) * 0.5f;
+    EXPECT_EQ(caretAt(layout, text.size(), glm::vec2(100.0f, middle1)), 3u);
+    EXPECT_EQ(caretAt(layout, text.size(), glm::vec2(100.0f, 1000.0f)), 6u);   // below everything: the last line
+    EXPECT_EQ(caretOnLine(layout, text.size(), 0, 1000.0f), 2u);
+}
+
+namespace {
+
+/// A field of many lines, 240 x 120 at (100, 100), with Hebrew as fallback.
+struct MultiFixture : Fixture {
+    MultiFixture() {
+        const uint32_t latin = fonts.load(kFonts + "Roboto-Regular.ttf");
+        fonts.setFallbacks(latin, {fonts.load(kFonts + "NotoSansHebrew-Regular.ttf")});
+        registry.get<UIRect>(field).sizeDelta = {240.0f, 120.0f};
+        text().multiLine = true;
+        text().submitOnEnter = false;
+        step();
+        focus.focused = field;
+        step();
+    }
+
+    const TextLayoutResult& layout() { return registry.get<UITextCache>(text().textElement).layout; }
+    void set(const std::u32string& value, size_t caret) {
+        text().text = encodeUtf8(value);
+        text().caret = text().selectionAnchor = caret;
+        step();
+    }
+};
+
+} // namespace
+
+TEST(TextFieldMultiLine, EnterStartsALineAndCtrlEnterSubmits) {
+    MultiFixture f;
+    f.type(U"one");
+    f.key(GLFW_KEY_ENTER);
+    f.type(U"two");
+    EXPECT_EQ(f.text().text, "one\ntwo");
+    EXPECT_FALSE(f.text().submitted);
+    EXPECT_EQ(f.layout().lines.size(), 2u);
+    f.key(GLFW_KEY_ENTER, GLFW_MOD_CONTROL);
+    EXPECT_TRUE(f.text().submitted);
+    EXPECT_EQ(f.text().text, "one\ntwo");
+
+    // With submitOnEnter, Enter submits and Shift+Enter starts a line.
+    f.text().submitOnEnter = true;
+    f.key(GLFW_KEY_ENTER);
+    EXPECT_TRUE(f.text().submitted);
+    f.key(GLFW_KEY_ENTER, GLFW_MOD_SHIFT);
+    EXPECT_EQ(f.text().text, "one\ntwo\n");
+}
+
+TEST(TextFieldMultiLine, TypedTextWrapsAndPastedLineBreaksStay) {
+    MultiFixture f;
+    f.type(U"a long line of words that cannot fit on one line of this field");
+    EXPECT_GT(f.layout().lines.size(), 1u);
+    EXPECT_EQ(f.text().scroll, 0.0f);   // no sideways scrolling
+
+    f.clipboard.setText("x\r\ny\rz");
+    f.key(GLFW_KEY_V, GLFW_MOD_CONTROL);
+    EXPECT_NE(f.text().text.find("x\ny\nz"), std::string::npos);
+}
+
+TEST(TextFieldMultiLine, UpAndDownKeepTheirXAcrossAShortLine) {
+    MultiFixture f;
+    f.set(U"abcdefgh\nab\nabcdefgh", 7);   // before the h of the first line
+    const float x = caretPosition(f.layout(), 7).x;
+    f.key(GLFW_KEY_DOWN);
+    EXPECT_EQ(f.text().caret, 11u);       // the end of the short line
+    f.key(GLFW_KEY_DOWN);
+    EXPECT_EQ(f.text().caret, 19u);       // back at the x it started from
+    EXPECT_NEAR(caretPosition(f.layout(), 19).x, x, 1e-3f);
+    f.key(GLFW_KEY_UP, GLFW_MOD_SHIFT);
+    EXPECT_EQ(f.text().caret, 11u);
+    EXPECT_EQ(f.text().selectionAnchor, 19u);
+    f.key(GLFW_KEY_UP);
+    f.key(GLFW_KEY_UP);
+    EXPECT_EQ(f.text().caret, 0u);        // above the first line: its start
+
+    f.key(GLFW_KEY_RIGHT);                 // a sideways move forgets the x
+    EXPECT_LT(f.text().goalX, 0.0f);
+}
+
+TEST(TextFieldMultiLine, PageDownMovesByTheLinesThatFit) {
+    MultiFixture f;
+    std::u32string text;
+    for (int i = 0; i < 20; ++i) text += U"line\n";
+    f.set(text, 0);
+    const auto& lines = f.layout().lines;
+    const float step = lines[1].baseline - lines[0].baseline;
+    const auto fit = static_cast<size_t>(f.text().viewportHeight / step);
+    ASSERT_GE(fit, 2u);
+    f.key(GLFW_KEY_PAGE_DOWN);
+    EXPECT_EQ(caretPosition(f.layout(), f.text().caret).line, fit);
+    f.key(GLFW_KEY_PAGE_UP);
+    EXPECT_EQ(caretPosition(f.layout(), f.text().caret).line, 0u);
+}
+
+TEST(TextFieldMultiLine, HomeAndEndGoToTheLineCtrlToTheText) {
+    MultiFixture f;
+    f.set(U"first\nsecond\nthird", 8);   // in "second"
+    f.key(GLFW_KEY_HOME);
+    EXPECT_EQ(f.text().caret, 6u);
+    f.key(GLFW_KEY_END);
+    EXPECT_EQ(f.text().caret, 12u);
+    f.key(GLFW_KEY_END, GLFW_MOD_CONTROL);
+    EXPECT_EQ(f.text().caret, 18u);
+    f.key(GLFW_KEY_HOME, GLFW_MOD_CONTROL);
+    EXPECT_EQ(f.text().caret, 0u);
+}
+
+TEST(TextFieldMultiLine, ASelectionOverThreeLinesIsThreeRects) {
+    MultiFixture f;
+    f.set(U"first\nsecond\nthird", 2);
+    f.text().selectionAnchor = 2;
+    f.text().caret = 15;
+    f.step();
+    const auto& rects = f.registry.get<UIImageRects>(f.text().selectionElement).rects;
+    ASSERT_EQ(rects.size(), 3u);
+    EXPECT_LT(rects[0].max.y, rects[1].max.y);
+    EXPECT_LT(rects[1].max.y, rects[2].max.y);
+    // The caret stands on the third line.
+    const UIRect& caret = f.rectOf(f.text().caretElement);
+    EXPECT_NEAR(caret.rect.min.y, rects[2].min.y, 1e-3f);
+}
+
+TEST(TextFieldMultiLine, MaxLengthCountsLineBreaks) {
+    MultiFixture f;
+    f.text().maxLength = 5;
+    f.type(U"ab");
+    f.key(GLFW_KEY_ENTER);
+    f.type(U"cdef");
+    EXPECT_EQ(f.text().text, "ab\ncd");
+}
+
+TEST(TextFieldMultiLine, ScrollsToTheCaretAndWithTheWheel) {
+    MultiFixture f;
+    std::u32string text;
+    for (int i = 0; i < 20; ++i) text += U"line\n";
+    f.set(text, 0);
+    EXPECT_EQ(f.text().scrollY, 0.0f);
+    f.key(GLFW_KEY_END, GLFW_MOD_CONTROL);   // down to the last line: the text moves up
+    const float bottom = f.text().scrollY;
+    EXPECT_GT(bottom, 0.0f);
+    EXPECT_NEAR(bottom, f.text().contentHeight - f.text().viewportHeight, 1e-3f);
+    const UIRect& caret = f.rectOf(f.text().caretElement);
+    const UIRect& view = f.rectOf(f.registry.get<ECS::HierarchyComponent>(f.text().textElement).parent);
+    EXPECT_LE(caret.rect.max.y, view.rect.max.y + 1e-3f);
+    ASSERT_GT(bottom, view.rect.size().y);   // moved up by more than the viewport
+    // The text is still drawn: its rect reaches into the viewport.
+    const UIRect& textRect = f.rectOf(f.text().textElement);
+    EXPECT_FALSE(intersect(textRect.rect, textRect.clip).empty());
+    GlyphCache glyphs(512);
+    UIDrawData data;
+    buildDrawData(f.registry, f.fonts, glyphs, data);
+    size_t textQuads = 0;
+    for (const UIVertex& v : data.vertices) textQuads += (v.mode & 0xFFu) == static_cast<uint32_t>(UIDrawMode::Text);
+    EXPECT_GT(textQuads, 0u);
+
+    // The wheel over the field scrolls it, and the caret does not pull it back.
+    f.state().mousePosition = {200.0f, 150.0f};
+    f.state().scrollDelta = {0.0f, 2.0f};
+    f.step();
+    f.state().scrollDelta = {0.0f, 0.0f};
+    EXPECT_NEAR(f.text().scrollY, bottom - 2.0f * f.text().wheelSpeed, 1e-3f);
+    f.step();
+    EXPECT_NEAR(f.text().scrollY, bottom - 2.0f * f.text().wheelSpeed, 1e-3f);
+}
+
+TEST(TextFieldMultiLine, AMixedDirectionLineMovesInDisplayOrder) {
+    MultiFixture f;
+    // "ab", then a line of Latin then Hebrew: x y ' ' bet alef shown left to right.
+    f.set(std::u32string{U'a', U'b', U'\n', U'x', U'y', U' ', 0x05D0, 0x05D1}, 5);   // before the space
+    f.key(GLFW_KEY_RIGHT);
+    EXPECT_EQ(f.text().caret, 8u);   // past the space: the end, shown left of bet
+    f.key(GLFW_KEY_RIGHT);
+    EXPECT_EQ(f.text().caret, 7u);
+    f.key(GLFW_KEY_UP);
+    EXPECT_EQ(caretPosition(f.layout(), f.text().caret).line, 0u);
+}

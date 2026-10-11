@@ -367,6 +367,13 @@ public:
     void setTextFieldOptions(EntityHandle field, uint32_t maxLength = 0, bool password = false,
                              bool readOnly = false);
 
+    /// Lets the field hold many lines: its text wraps at its width and
+    /// scrolls up and down, Up and Down move between lines, and Enter starts
+    /// a new line while Ctrl+Enter submits. With `submitOnEnter`, Enter
+    /// submits and Shift+Enter starts a new line. False goes back to one
+    /// line; line breaks already in the text stay.
+    void setTextFieldMultiLine(EntityHandle field, bool multiLine = true, bool submitOnEnter = false);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;
