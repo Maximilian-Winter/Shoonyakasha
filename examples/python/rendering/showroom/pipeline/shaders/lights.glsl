@@ -1,21 +1,22 @@
 // lights.glsl - direct light from scene.lights[i], shared by the lighting
 // and forward passes. The including shader declares the Lights block
-// without an instance name (DEFAULT_LIGHTS_BLOCK) and includes sk/pbr.glsl.
+// without an instance name (DEFAULT_LIGHTS_BLOCK) and the lights themselves
+// (DEFAULT_SCENE_LIGHTS), and includes sk/pbr.glsl.
 // With CLUSTERED defined, directLight takes the fragment's cluster and loops
 // over its lights only; with LOCAL_SHADOWS, spot and point lights are
 // shadowed from the atlas.
 //
 // The showroom's copy treats point and spot lights as spheres of
-// lightsSource[i].x radius: their highlights take the sphere's size (Karis
+// sceneLights[i].source.x radius: their highlights take the sphere's size (Karis
 // 2013, representative point), and with RT_LOCAL_SHADOWS defined, lights
-// whose shadow flag is set (lightsSource[i].y) are shadowed by a ray to a
+// whose shadow flag is set (sceneLights[i].source.y) are shadowed by a ray to a
 // random point of the sphere, which TAA averages into a soft shadow. The
 // atlas then holds only what the rays cannot see (alpha-tested and skinned
 // casters), and the two are multiplied. RT_HARD_LIGHT_SHADOWS aims the ray
 // at the centre instead, for surfaces TAA cannot average (blended ones).
-// Spot lights fade from their inner cone (lightsSource[i].z) to the outer.
+// Spot lights fade from their inner cone (sceneLights[i].source.z) to the outer.
 //
-// Lights with a rectangle (lightsShape[i]: its right axis times half its
+// Lights with a rectangle (sceneLights[i].shape: its right axis times half its
 // width, and half its height) are shaded as that rectangle by linearly
 // transformed cosines (area_lights.glsl), where showroom.areaLights is on:
 // their highlights take its shape, and the shadow rays aim at random points
@@ -81,11 +82,11 @@ vec3 sphereLightBRDF(vec3 N, vec3 V, vec3 L, vec3 Ls, float energy, vec3 albedo,
 // half its diagonal the falloff stops growing.
 vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
                     vec3 F0) {
-    vec3 centre = lightsPositionType[i].xyz;
-    vec3 forward = normalize(lightsDirectionRange[i].xyz);
-    float range = lightsDirectionRange[i].w;
-    vec4 attenuation = lightsAttenuation[i];
-    vec4 shape = lightsShape[i];
+    vec3 centre = sceneLights[i].positionType.xyz;
+    vec3 forward = normalize(sceneLights[i].directionRange.xyz);
+    float range = sceneLights[i].directionRange.w;
+    vec4 attenuation = sceneLights[i].attenuation;
+    vec4 shape = sceneLights[i].shape;
     vec3 toLight = centre - worldPos;
     float dist = length(toLight);
     vec3 L = toLight / max(dist, 1e-4);
@@ -100,9 +101,9 @@ vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float me
         float r = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
         falloff *= r * r;
     }
-    if (lightsPositionType[i].w > 1.5) {    // a spot's cone: the softbox's grid
+    if (sceneLights[i].positionType.w > 1.5) {    // a spot's cone: the softbox's grid
         float cosOuter = attenuation.w;
-        float cosInner = max(lightsSource[i].z, cosOuter + 1e-3);
+        float cosInner = max(sceneLights[i].source.z, cosOuter + 1e-3);
         falloff *= smoothstep(cosOuter, cosInner, theta);
     }
     if (falloff <= 1e-4) return vec3(0.0);
@@ -111,18 +112,18 @@ vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float me
     // 0 for its hotspot alone, and above that the grid's cells across it.
     bool patterned = showroom.softboxGrid > -0.5;
     vec2 cells = softboxCells(vec2(length(halfX), shape.w), showroom.softboxGrid);
-    // Image slot 1 (lightsSource[i].w): it shines with lightImage instead.
-    bool imaged = lightsSource[i].w > 0.5;
+    // Image slot 1 (sceneLights[i].source.w): it shines with lightImage instead.
+    bool imaged = sceneLights[i].source.w > 0.5;
     vec3 reflected = rectangleBRDF(N, V, toLight, halfX, halfY, albedo, metallic, roughness, F0,
                                    patterned, cells, imaged);
     if (max(reflected.r, max(reflected.g, reflected.b)) <= 0.0) return vec3(0.0);
 #ifdef RT_LOCAL_SHADOWS
-    if (lightsSource[i].y > 0.5 && localRayBlockedRect(i, worldPos, N, centre, halfX, halfY)) return vec3(0.0);
+    if (sceneLights[i].source.y > 0.5 && localRayBlockedRect(i, worldPos, N, centre, halfX, halfY)) return vec3(0.0);
 #endif
 #ifdef LOCAL_SHADOWS
-    falloff *= localShadowVisibility(int(i), lightsPositionType[i].w, worldPos, N, L);
+    falloff *= localShadowVisibility(int(i), sceneLights[i].positionType.w, worldPos, N, L);
 #endif
-    vec3 color = lightsColorIntensity[i].rgb * lightsColorIntensity[i].w;
+    vec3 color = sceneLights[i].colorIntensity.rgb * sceneLights[i].colorIntensity.w;
     return reflected * color * falloff * d * d / (4.0 * length(halfX) * shape.w);
 }
 
@@ -130,12 +131,12 @@ vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float me
 // `sunVisibility`; -1 when none is.
 vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
                vec3 F0, int sunIndex, float sunVisibility) {
-    float type = lightsPositionType[i].w;
-    vec3 color = lightsColorIntensity[i].rgb * lightsColorIntensity[i].w;
-    vec3 direction = lightsDirectionRange[i].xyz;
-    float range = lightsDirectionRange[i].w;
-    vec4 attenuation = lightsAttenuation[i];
-    vec4 source = lightsSource[i];
+    float type = sceneLights[i].positionType.w;
+    vec3 color = sceneLights[i].colorIntensity.rgb * sceneLights[i].colorIntensity.w;
+    vec3 direction = sceneLights[i].directionRange.xyz;
+    float range = sceneLights[i].directionRange.w;
+    vec4 attenuation = sceneLights[i].attenuation;
+    vec4 source = sceneLights[i].source;
 
     vec3 L;
     vec3 Ls;
@@ -147,10 +148,10 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
         Ls = L;
         if (int(i) == sunIndex) falloff = sunVisibility;
     } else {                                // point or spot
-        if (lightsShape[i].w > 0.0 && showroom.areaLights > 0.5) {
+        if (sceneLights[i].shape.w > 0.0 && showroom.areaLights > 0.5) {
             return rectangleLight(i, worldPos, N, V, albedo, metallic, roughness, F0);
         }
-        vec3 toLight = lightsPositionType[i].xyz - worldPos;
+        vec3 toLight = sceneLights[i].positionType.xyz - worldPos;
         float dist = length(toLight);
         L = toLight / max(dist, 1e-4);
         Ls = L;
@@ -187,7 +188,7 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
         bool facing = dot(N, L) > 0.0 || dot(N, Ls) > 0.0;
 #ifdef RT_LOCAL_SHADOWS
         if (falloff > 1e-4 && facing && source.y > 0.5) {
-            if (localRayBlocked(i, worldPos, N, lightsPositionType[i].xyz, radius)) return vec3(0.0);
+            if (localRayBlocked(i, worldPos, N, sceneLights[i].positionType.xyz, radius)) return vec3(0.0);
         }
 #endif
 #ifdef LOCAL_SHADOWS
@@ -234,7 +235,7 @@ vec3 directLight(uint cluster, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float
 vec3 directLight(vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
                  vec3 F0, int sunIndex, float sunVisibility) {
     vec3 total = vec3(0.0);
-    for (uint i = 0u; i < min(lightCount, uint(MAX_LIGHTS)); ++i) {
+    for (uint i = 0u; i < SCENE_LIGHT_COUNT; ++i) {
         total += lightFrom(i, worldPos, N, V, albedo, metallic, roughness, F0, sunIndex, sunVisibility);
     }
     return total;

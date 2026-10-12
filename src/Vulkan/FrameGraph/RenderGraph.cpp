@@ -333,6 +333,7 @@ void RenderGraph::updateStandardBuffers(float deltaTime, uint32_t frameIndex) {
 
     // Fill dot-path UBOs from SceneContext via dot-path resolution
     updateDotPathUBOs(frameIndex);
+    fillSceneSSBOs(frameIndex);
 }
 
 // createStandardBuffers removed — replaced by createDotPathUBOs
@@ -434,12 +435,62 @@ void RenderGraph::updateDotPathUBOs(uint32_t frameIndex) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Scene SSBOs — storage buffers the scene fills every frame
+// ═══════════════════════════════════════════════════════════════
+
+void RenderGraph::createSceneSSBO(const BufferLayoutDesc& desc, const CompiledBufferLayout& layout,
+                                  uint32_t maxFramesInFlight) {
+    SceneSSBO ssbo;
+    ssbo.data = desc.initConfig.sceneData;
+    ssbo.capacity = desc.elementCount;
+    ssbo.elementSize = layout.totalSize;
+    const VkDeviceSize size = static_cast<VkDeviceSize>(layout.totalSize) * desc.elementCount;
+
+    RegisteredSSBO registered;
+    registered.size = size;
+    for (uint32_t i = 0; i < std::max(maxFramesInFlight, 1u); ++i) {
+        auto buffer = std::make_unique<VulkanBuffer>(
+            m_device, size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        buffer->map();
+        std::memset(buffer->getMappedData(), 0, static_cast<size_t>(size));
+        registered.buffers.push_back(buffer->getBuffer());
+        ssbo.perFrame.push_back(std::move(buffer));
+    }
+    m_registeredSSBOs[desc.name] = registered;
+    m_logger->log(LogLevel::Info, "Scene storage buffer '%s': %s, up to %u (%.2f MB, %zu frames)",
+                  desc.name.c_str(), ssbo.data.c_str(), ssbo.capacity, size / (1024.0 * 1024.0),
+                  ssbo.perFrame.size());
+    m_sceneSSBOs[desc.name] = std::move(ssbo);
+}
+
+void RenderGraph::fillSceneSSBOs(uint32_t frameIndex) {
+    if (!m_sceneContext) return;
+    for (auto& [name, ssbo] : m_sceneSSBOs) {
+        if (ssbo.perFrame.empty()) continue;
+        auto& buffer = *ssbo.perFrame[frameIndex < ssbo.perFrame.size() ? frameIndex : 0];
+        // This frame's fence has passed, so the GPU is done with this
+        // frame's buffer; host-coherent writes reach it at the next submit.
+        const auto& lights = m_sceneContext->lights;
+        const size_t count = std::min<size_t>(lights.size(), ssbo.capacity);
+        if (lights.size() > ssbo.capacity) {
+            m_logger->logEvery(5.0f, LogLevel::Warning,
+                               "The scene has %zu lights; '%s' holds %u, so the rest are left out",
+                               lights.size(), name.c_str(), ssbo.capacity);
+        }
+        if (count > 0) {
+            std::memcpy(buffer.getMappedData(), lights.data(), count * sizeof(SceneContext::PackedLight));
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Dot-Path SSBOs — Declarative storage buffer creation with initialization
 // JSON declares struct layout, element count, and init strategy.
 // Engine creates device-local buffers, generates initial data, uploads via staging.
 // ═══════════════════════════════════════════════════════════════
 
-void RenderGraph::createDotPathSSBOs(uint32_t /*maxFramesInFlight*/) {
+void RenderGraph::createDotPathSSBOs(uint32_t maxFramesInFlight) {
     const auto& compiledLayouts = m_compiled.bufferLayouts;
     const auto& builderLayouts = m_builder.getBufferLayouts();
 
@@ -456,6 +507,10 @@ void RenderGraph::createDotPathSSBOs(uint32_t /*maxFramesInFlight*/) {
         if (desc.initConfig.type == "buffer_ref") continue;  // Handled by resolveBufferRefs()
         if (desc.elementCount == 0) continue;   // Not an SSBO array
         if (layout.totalSize == 0) continue;     // No fields
+        if (desc.initConfig.type == "scene") {
+            createSceneSSBO(desc, layout, maxFramesInFlight);
+            continue;
+        }
 
         uint32_t elementStride = layout.totalSize;
         VkDeviceSize bufferSize = static_cast<VkDeviceSize>(elementStride) * desc.elementCount;

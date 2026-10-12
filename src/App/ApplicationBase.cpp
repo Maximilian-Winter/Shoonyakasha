@@ -1035,7 +1035,7 @@ entt::entity ApplicationBase::createDirectionalLight(const glm::vec3& direction,
     light.color = color;
     light.intensity = intensity;
 
-    m_logger->log(LogLevel::Info, "Created directional light (intensity=%.1f)", intensity);
+    m_logger->log(LogLevel::Debug, "Created directional light (intensity=%.1f)", intensity);
     return entity;
 }
 
@@ -1054,7 +1054,7 @@ entt::entity ApplicationBase::createPointLight(const glm::vec3& position,
     light.intensity = intensity;
     light.range = range;
 
-    m_logger->log(LogLevel::Info, "Created point light at (%.1f, %.1f, %.1f) range=%.1f",
+    m_logger->log(LogLevel::Debug, "Created point light at (%.1f, %.1f, %.1f) range=%.1f",
                   position.x, position.y, position.z, range);
     return entity;
 }

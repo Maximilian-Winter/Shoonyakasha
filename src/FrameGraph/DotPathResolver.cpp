@@ -60,78 +60,77 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
     }
 
     // ─── Collect lights ─────────────────────────────────────────
-    lightCount = 0;
+    // One pass over the lights packs them all, finds the sun, and gathers
+    // the spot and point lights that may get a shadow slot. A light with a
+    // parent is placed and turned by its world matrix; one without, by its
+    // own transform, which is the same thing.
+    lights.clear();
+    sunShadow.lightIndex = -1;
+    sunShadow.cascades = SunShadowCascades{};
+    std::vector<LocalShadowCandidate> shadowCandidates;
     auto lightEntities = registry.view<ECS::LightComponent, ECS::TransformComponent>();
     for (auto entity : lightEntities) {
-        if (lightCount >= MAX_SCENE_LIGHTS) break;
-
         const auto& light = lightEntities.get<ECS::LightComponent>(entity);
         const auto& transform = lightEntities.get<ECS::TransformComponent>(entity);
+        const uint32_t index = static_cast<uint32_t>(lights.size());
+        auto& packed = lights.emplace_back();
 
-        auto& packed = lights[lightCount];
+        const auto* hierarchy = registry.try_get<ECS::HierarchyComponent>(entity);
+        const bool parented = hierarchy && hierarchy->parent != entt::null;
+        glm::vec3 position = transform.position;
+        glm::vec3 direction = transform.getForward();
+        // getRight() and getUp() leave out the roll, which turns the right
+        // axis towards the up one.
+        glm::vec3 right = transform.getRight() * std::cos(transform.rotation.z) +
+                          transform.getUp() * std::sin(transform.rotation.z);
+        if (parented) {
+            const glm::mat3 axes(transform.worldMatrix);
+            position = glm::vec3(transform.worldMatrix[3]);
+            const glm::vec3 forward = axes * glm::vec3(0.0f, 0.0f, -1.0f);
+            const glm::vec3 side = axes * glm::vec3(1.0f, 0.0f, 0.0f);
+            if (glm::dot(forward, forward) > 1e-12f) direction = glm::normalize(forward);
+            if (glm::dot(side, side) > 1e-12f) right = glm::normalize(side);
+        }
 
         // Position + type (0=Directional, 1=Point, 2=Spot)
-        packed.positionType = glm::vec4(
-            transform.position,
-            static_cast<float>(light.type)
-        );
-
+        packed.positionType = glm::vec4(position, static_cast<float>(light.type));
         // Color + intensity
         packed.colorIntensity = glm::vec4(light.color, light.intensity);
-
-        // Direction (forward vector from transform) + range
-        glm::vec3 direction = transform.getForward();
+        // Direction the light points + range
         packed.directionRange = glm::vec4(direction, light.range);
-
         // Attenuation params + cos(outerCone)
-        packed.attenuation = glm::vec4(
-            light.constant,
-            light.linear,
-            light.quadratic,
-            glm::cos(glm::radians(light.outerCone))
-        );
-
-        packed.source = glm::vec4(
-            light.sourceRadius,
-            light.castShadows ? 1.0f : 0.0f,
-            glm::cos(glm::radians(light.innerCone)),
-            static_cast<float>(light.sourceImage)
-        );
-
-        // The emitting rectangle. getRight() and getUp() leave out the roll,
-        // which turns the right axis towards the up one.
+        packed.attenuation = glm::vec4(light.constant, light.linear, light.quadratic,
+                                       glm::cos(glm::radians(light.outerCone)));
+        packed.source = glm::vec4(light.sourceRadius, light.castShadows ? 1.0f : 0.0f,
+                                  glm::cos(glm::radians(light.innerCone)),
+                                  static_cast<float>(light.sourceImage));
+        // The emitting rectangle.
         packed.shape = glm::vec4(0.0f);
         if (light.sourceSize.x > 0.0f && light.sourceSize.y > 0.0f) {
-            const glm::vec3 right = transform.getRight() * std::cos(transform.rotation.z) +
-                                    transform.getUp() * std::sin(transform.rotation.z);
             packed.shape = glm::vec4(right * (0.5f * light.sourceSize.x), 0.5f * light.sourceSize.y);
         }
 
-        lightCount++;
-    }
+        // The sun: the first directional light that casts shadows.
+        if (sunShadow.lightIndex < 0 && light.type == ECS::LightComponent::Directional && light.castShadows) {
+            sunShadow.lightIndex = static_cast<int32_t>(index);
+        }
 
-    // Zero out unused light slots
-    for (uint32_t i = lightCount; i < MAX_SCENE_LIGHTS; i++) {
-        lights[i] = PackedLight{};
-    }
-
-    // ─── Sun shadow ─────────────────────────────────────────────
-    // The first directional light that casts shadows, in the order lights[]
-    // was filled, so lightIndex points at its packed entry.
-    sunShadow.lightIndex = -1;
-    sunShadow.cascades = SunShadowCascades{};
-    {
-        uint32_t packedIndex = 0;
-        for (auto entity : lightEntities) {
-            if (packedIndex >= MAX_SCENE_LIGHTS) break;
-            const auto& light = lightEntities.get<ECS::LightComponent>(entity);
-            if (light.type == ECS::LightComponent::Directional && light.castShadows) {
-                sunShadow.lightIndex = static_cast<int32_t>(packedIndex);
-                break;
-            }
-            ++packedIndex;
+        const bool spot = light.type == ECS::LightComponent::Spot;
+        if (light.castShadows && (spot || light.type == ECS::LightComponent::Point)) {
+            LocalShadowCandidate c;
+            c.lightIndex = index;
+            c.spot = spot;
+            c.position = position;
+            c.direction = direction;
+            c.range = light.range;
+            c.cosOuterCone = packed.attenuation.w;
+            c.intensity = light.intensity * glm::max(light.color.x, glm::max(light.color.y, light.color.z));
+            shadowCandidates.push_back(c);
         }
     }
+    lightCount = static_cast<uint32_t>(lights.size());
+
+    // ─── Sun shadow ─────────────────────────────────────────────
     if (sunShadow.lightIndex >= 0 && foundCamera) {
         const glm::vec3 direction = glm::vec3(lights[sunShadow.lightIndex].directionRange);
         sunShadow.direction = glm::vec4(direction, 0.0f);
@@ -141,32 +140,9 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
     }
 
     // ─── Spot and point light shadows ───────────────────────────
-    {
-        std::vector<LocalShadowCandidate> candidates;
-        uint32_t packedIndex = 0;
-        for (auto entity : lightEntities) {
-            if (packedIndex >= MAX_SCENE_LIGHTS) break;
-            const auto& light = lightEntities.get<ECS::LightComponent>(entity);
-            const bool spot = light.type == ECS::LightComponent::Spot;
-            if (light.castShadows && (spot || light.type == ECS::LightComponent::Point)) {
-                const auto& packed = lights[packedIndex];
-                LocalShadowCandidate c;
-                c.lightIndex = packedIndex;
-                c.spot = spot;
-                c.position = glm::vec3(packed.positionType);
-                c.direction = glm::vec3(packed.directionRange);
-                c.range = packed.directionRange.w;
-                c.cosOuterCone = packed.attenuation.w;
-                c.intensity = packed.colorIntensity.w * glm::max(packed.colorIntensity.x,
-                                  glm::max(packed.colorIntensity.y, packed.colorIntensity.z));
-                candidates.push_back(c);
-            }
-            ++packedIndex;
-        }
-        localShadow.shadows = assignLocalShadows(
-            candidates, cameraPosition, foundCamera ? cameraViewProjection : glm::mat4(1.0f),
-            /*cameraMinusOneToOne=*/true, localShadow.settings);
-    }
+    localShadow.shadows = assignLocalShadows(
+        shadowCandidates, cameraPosition, foundCamera ? cameraViewProjection : glm::mat4(1.0f),
+        /*cameraMinusOneToOne=*/true, localShadow.settings);
 }
 
 // ============================================================================
@@ -347,7 +323,7 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
 
                 if (ec == std::errc()) {
                     // Out-of-bounds returns zero vec4 (safe fallback for unused slots)
-                    if (index >= SceneContext::MAX_SCENE_LIGHTS) {
+                    if (index >= scene.lights.size()) {
                         return ResolvedValue(glm::vec4(0.f));
                     }
                     const auto& packed = scene.lights[index];

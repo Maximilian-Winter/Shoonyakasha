@@ -21,15 +21,27 @@
     uint frame;              \
     uint taa;
 
-// scene.lights[i].* (pipeline.json "Lights")
-#define MAX_LIGHTS 128
+// scene.lights.count (pipeline.json "Lights"): how many lights the scene
+// has. The lights themselves are in the SceneLights storage buffer.
 #define DEFAULT_LIGHTS_BLOCK                      \
     uint lightCount;                              \
-    float _lightsPad0, _lightsPad1, _lightsPad2;  \
-    vec4 lightsPositionType[MAX_LIGHTS];          \
-    vec4 lightsColorIntensity[MAX_LIGHTS];        \
-    vec4 lightsDirectionRange[MAX_LIGHTS];        \
-    vec4 lightsAttenuation[MAX_LIGHTS];
+    float _lightsPad0, _lightsPad1, _lightsPad2;
+
+// The scene's lights (pipeline.json "SceneLights", a storage buffer filled
+// from the scene every frame), as many as it holds. A shader declares them
+// with DEFAULT_SCENE_LIGHTS(set, binding) beside the Lights block, and
+// loops over SCENE_LIGHT_COUNT of them.
+struct SceneLight {
+    vec4 positionType;      // xyz position, w type: 0 directional, 1 point, 2 spot
+    vec4 colorIntensity;    // rgb colour, w intensity
+    vec4 directionRange;    // xyz direction the light points, w range
+    vec4 attenuation;       // constant, linear, quadratic, cos(outer cone)
+    vec4 source;            // x radius, y casts shadows, z cos(inner cone), w image slot
+    vec4 shape;             // xyz right axis * half width, w half height; 0 for none
+};
+#define DEFAULT_SCENE_LIGHTS(SET, BINDING) \
+    layout(std430, set = SET, binding = BINDING) readonly buffer SceneLights { SceneLight sceneLights[]; };
+#define SCENE_LIGHT_COUNT min(lightCount, uint(sceneLights.length()))
 
 // scene.shadows.sun.* (pipeline.json "Cascades")
 #define DEFAULT_CASCADES_BLOCK \

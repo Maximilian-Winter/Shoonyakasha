@@ -72,6 +72,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `load_gltf_scene(path, **kwargs)` | GltfResult | Load a glTF scene. |
 | `create_directional_light(direction, color=(1.0, 1.0, 1.0), intensity=2.0)` | int | Create a directional light entity. |
 | `create_point_light(pos, color=(1.0, 1.0, 1.0), intensity=5.0, range=15.0)` | int | Create a point light entity. |
+| `create_point_lights(positions, colors=(1.0, 1.0, 1.0), intensity=5.0, range=15.0)` | list[int] | Create many point lights in one call. |
 | `create_sprite(world_pos, texture_path, size=(1.0, 1.0), tint=(1.0, 1.0, 1.0, 1.0))` | int | Create a world-space sprite (billboard quad in 3D world coordinates). |
 | `create_ui_panel(anchor, offset_pixels, size_pixels, texture_path="", color=(1.0, 1.0, 1.0, 1.0))` | int | Create a screen-space UI panel anchored to a viewport corner/edge/center. |
 | `create_text(text, anchor, offset_pixels, font_path, font_size=24.0, color=(1.0, 1.0, 1.0, 1.0))` | int | Create a screen-space text label anchored to a viewport corner/edge/center. |

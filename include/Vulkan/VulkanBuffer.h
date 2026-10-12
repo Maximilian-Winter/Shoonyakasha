@@ -28,6 +28,9 @@ public:
 
     void update(const void* data, VkDeviceSize size, VkDeviceSize offset = 0);
 
+    /// Where map() put the buffer, or null while it is not mapped.
+    void* getMappedData() const { return m_mappedData; }
+
 private:
     VulkanDevice& m_device;
     VkBuffer m_buffer;

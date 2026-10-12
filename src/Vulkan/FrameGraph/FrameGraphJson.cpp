@@ -1082,6 +1082,19 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     layout.initConfig.filePath = srcJson.value("path", std::string{});
                 }
 
+                // Filled from the scene every frame.
+                if (layout.initConfig.type == "scene") {
+                    layout.initConfig.sceneData = srcJson.value("data", std::string{});
+                    if (layout.initConfig.sceneData != "lights") {
+                        throw std::runtime_error("Buffer layout '" + layout.name + "': a \"scene\" source needs "
+                                                 "\"data\": \"lights\", the only scene data a buffer can hold");
+                    }
+                    if (layout.usage != BufferUsageType::StorageBuffer || layout.elementCount == 0) {
+                        throw std::runtime_error("Buffer layout '" + layout.name + "': a \"scene\" source fills "
+                                                 "a storage_buffer with an \"elementCount\", its capacity");
+                    }
+                }
+
                 if (srcJson.contains("fields")) {
                     const auto& fieldsInitJson = srcJson["fields"];
                     for (auto fit = fieldsInitJson.begin(); fit != fieldsInitJson.end(); ++fit) {

@@ -105,7 +105,7 @@ A field `source` is a dot-path. A layout-level `source` is an initialization obj
 | `scene.environment` | `irradianceMap`, `prefilterMap`, `brdfLUT`, `environmentMap` |
 | `scene.time` | `elapsed`, `delta`, `frame` |
 | `scene.screen` | `width`, `height`, `resolution`: the window's; `renderWidth`, `renderHeight`, `renderResolution`: the size the scene renders at, the window's times the [render scale](../guides/frame-capture.md#supersampling). Passes that write the swapchain run at the window's size, the others at the render size |
-| `scene.lights` | `count`; indexed `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` (w: cos of the outer cone), `source` (x: source radius, y: 1 when it casts shadows, z: cos of the inner cone, w: image slot), `shape` (the emitting rectangle facing the light's direction: xyz its right axis times half its width, w half its height; zero without one) |
+| `scene.lights` | `count` (all of the scene's); indexed, for fixed arrays (past the last light a field reads zero), `scene.lights[N].positionType`, `colorIntensity`, `directionRange`, `attenuation` (w: cos of the outer cone), `source` (x: source radius, y: 1 when it casts shadows, z: cos of the inner cone, w: image slot), `shape` (the emitting rectangle facing the light's direction: xyz its right axis times half its width, w half its height; zero without one) |
 | `scene.shadows.sun` | `enabled`, `cascadeCount`, `splits`, `texelWorldSize`, `lightIndex`, `direction`; indexed `scene.shadows.sun.cascades[N].viewProj`. See [sun shadow cascades](../guides/lighting-and-ibl.md#sun-shadow-cascades) |
 | `scene.shadows.spot`, `scene.shadows.point` | `count`; indexed `scene.shadows.spot[N].viewProj`, `lightIndex`, `params`, `rect`; `scene.shadows.point[N].lightIndex`, `positionFar`, `depthParams`; `scene.shadows.point.faces[N].viewProj`, `rect` with N = slot × 6 + face. See [spot and point light shadows](../guides/lighting-and-ibl.md#spot-and-point-light-shadows) |
 | `scene.custom` | Values explicitly published under a key by the application |
@@ -219,11 +219,13 @@ Compute dispatch uses `dispatch.x/y/z`, each a fixed group count, a parameter/di
 Indirect execution reads its arguments from a storage buffer that an earlier pass writes on the GPU, so the work can follow a count the CPU never sees:
 
 ```json
-{ "type": "dispatch_indirect", "arguments": { "buffer": "DispatchArgs", "offset": 0 } }
-{ "type": "draw_indirect", "arguments": { "buffer": "DrawArgs", "offset": 0, "drawCount": 4, "stride": 16 } }
-{ "type": "draw_indirect", "arguments": { "buffer": "DrawArgs", "offset": 16 },
-  "count": { "buffer": "DrawArgs", "offset": 0, "maxDrawCount": 1024 } }
+[ { "type": "dispatch_indirect", "arguments": { "buffer": "DispatchArgs", "offset": 0 } },
+  { "type": "draw_indirect", "arguments": { "buffer": "DrawArgs", "offset": 0, "drawCount": 4, "stride": 16 } },
+  { "type": "draw_indirect", "arguments": { "buffer": "DrawArgs", "offset": 16 },
+    "count": { "buffer": "DrawArgs", "offset": 0, "maxDrawCount": 1024 } } ]
 ```
+
+Three `execution` objects: a dispatch, four draws, and up to 1024 draws whose number the buffer holds.
 
 - **Arguments:** `arguments.buffer` names a storage buffer of `bufferLayouts`, or one the application registered. At `offset` (a multiple of 4) a `dispatch_indirect` finds a `VkDispatchIndirectCommand` (x, y, z: 3 uints), a `draw_indirect` `drawCount` `VkDrawIndirectCommand`s (vertexCount, instanceCount, firstVertex, firstInstance) `stride` bytes apart (default 16, at least 16). A `dispatch_indirect` must be a compute pass, a `draw_indirect` a graphics pass.
 - **Count:** with `count`, the number of draws is the uint at `count.offset` in `count.buffer`, at most `maxDrawCount`. That needs the device feature `drawIndirectCount`; declare `"requires": ["drawIndirectCount"]` to leave the pass out where it is missing, since a pass with a count on such a device fails at load. More than one draw per call needs the device feature `multiDrawIndirect`; without it such a pass fails at load too.
@@ -260,6 +262,16 @@ A preset switches passes and sets `scene.custom` values in one call, `apply_pipe
 ## Initialization, memory, and readback
 
 Layout `source` accepts `type` (`initializer` by default), `seed` (42), and per-field initializers under `fields`: `constant`, `randomRange` (`min`/`max`), `gaussian` (`mean`/`stddev`), `grid` (`dimensions`/`origin`/`spacing`/`w`), or `sphere` (`center`/`radius`/`mode`/`w`). These initialize numeric components, not arbitrary structs. `type: file` uses a binary `path`, exactly `elementCount` elements long, which resolves beside the pipeline JSON when the file is there, as shader paths do, and against the working directory otherwise; `type: buffer_ref` references a shared `ref` with `frequency` (default `per_frame`).
+
+`type: scene` with `"data": "lights"` makes a storage buffer the engine refills from the scene every frame: every light, in the order and form of `scene.lights[N]`, as many as `elementCount` holds (the rest are left out, with a warning). Its fields must be the six `vec4`s `positionType`, `colorIntensity`, `directionRange`, `attenuation`, `source` and `shape`, or compilation fails. It is one host-visible buffer per frame in flight, written after that frame's fence, so it needs no barrier. `scene.lights.count` in a uniform buffer says how many there are; a shader declares the buffer `readonly` with a runtime array and reads `min(count, array length)` of them:
+
+```json
+{ "SceneLights": { "usage": "storage_buffer", "packing": "std430", "elementCount": 8192,
+    "fields": [ { "name": "positionType", "type": "vec4" }, { "name": "colorIntensity", "type": "vec4" },
+                { "name": "directionRange", "type": "vec4" }, { "name": "attenuation", "type": "vec4" },
+                { "name": "source", "type": "vec4" }, { "name": "shape", "type": "vec4" } ],
+    "source": { "type": "scene", "data": "lights" } } }
+```
 
 `memory` selects `location` (`device_local`, `host_visible`, `host_coherent`), `staging` (`auto`, `persistent`, `none`), and `transferDirection` (`gpu_only`, `cpu_to_gpu`, `gpu_to_cpu`, `bidirectional`). Defaults are the first value in each list.
 

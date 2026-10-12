@@ -401,6 +401,39 @@ EntityHandle EngineAPI::createPointLight(const glm::vec3& position,
     return toHandle(e);
 }
 
+std::vector<EntityHandle> EngineAPI::createPointLights(const std::vector<float>& positions,
+                                                      const std::vector<float>& colors,
+                                                      const std::vector<float>& intensities,
+                                                      const std::vector<float>& ranges) {
+    if (positions.size() % 3 != 0) {
+        throw std::invalid_argument("createPointLights: positions must hold x, y, z for each light");
+    }
+    const size_t count = positions.size() / 3;
+    auto perLight = [count](const std::vector<float>& values, size_t width, const char* what) {
+        if (values.size() != width && values.size() != width * count) {
+            throw std::invalid_argument(std::string("createPointLights: ") + what + " must hold " +
+                                        std::to_string(width) + " values for all lights or " +
+                                        std::to_string(width) + " for each of " + std::to_string(count));
+        }
+        return values.size() != width;
+    };
+    const bool eachColor = perLight(colors, 3, "colors");
+    const bool eachIntensity = perLight(intensities, 1, "intensities");
+    const bool eachRange = perLight(ranges, 1, "ranges");
+
+    std::vector<EntityHandle> out;
+    out.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        const size_t c = eachColor ? 3 * i : 0;
+        auto e = m_impl->app->createPointLight(
+            glm::vec3(positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]),
+            glm::vec3(colors[c], colors[c + 1], colors[c + 2]),
+            intensities[eachIntensity ? i : 0], ranges[eachRange ? i : 0]);
+        out.push_back(toHandle(e));
+    }
+    return out;
+}
+
 EntityHandle EngineAPI::createSprite(const glm::vec3& worldPos,
                                       const std::string& texturePath,
                                       const glm::vec2& size,

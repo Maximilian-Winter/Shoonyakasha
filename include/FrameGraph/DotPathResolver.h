@@ -201,11 +201,11 @@ struct SceneContext {
     float renderHeight = 1080.0f;
 
     // ─── Lights ─────────────────────────────────────────────────
-    // Collected each frame from entities with LightComponent + TransformComponent
-    // A pipeline's light arrays may be shorter: shaders that declare 16
-    // read the first 16.
-    static constexpr uint32_t MAX_SCENE_LIGHTS = 128;
-
+    // Collected each frame from entities with LightComponent + TransformComponent,
+    // as many as there are. Pipelines read them through "scene.lights[N]"
+    // dot-paths into fixed arrays (the first N of them), or all of them from
+    // a storage buffer whose "source" is {"type": "scene", "data": "lights"},
+    // which holds these structs as they are.
     struct PackedLight {
         glm::vec4 positionType{0.f};      // xyz=world position, w=type (0=dir,1=point,2=spot)
         glm::vec4 colorIntensity{0.f};    // xyz=color, w=intensity
@@ -214,9 +214,12 @@ struct SceneContext {
         glm::vec4 source{0.f};            // x=source radius, y=casts shadows (0/1), z=cos(innerCone), w=image slot
         glm::vec4 shape{0.f};             // xyz=right axis * half width, w=half height; 0 when not a rectangle
     };
+    // Six vec4s, the same under std140 and std430: a storage buffer holds
+    // the array as it is.
+    static_assert(sizeof(PackedLight) == 96, "PackedLight is copied to the GPU as 6 vec4s");
 
-    std::array<PackedLight, MAX_SCENE_LIGHTS> lights{};
-    uint32_t lightCount = 0;
+    std::vector<PackedLight> lights;
+    uint32_t lightCount = 0;   // lights.size()
 
     // ─── Sun shadow ─────────────────────────────────────────────
     // Cascades for the first directional light with castShadows, refitted to

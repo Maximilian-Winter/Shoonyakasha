@@ -20,10 +20,11 @@ Deferred PBR (glTF metallic-roughness) with:
   faces up to 1024²), filtered with 3x3 hardware comparisons
 - opaque, alpha-tested (glTF `MASK`) and skinned geometry, in the G-buffer
   and in the shadows
-- up to 128 directional, point and spot lights, clustered: a compute pass
-  sorts the point and spot lights into 16 x 9 screen tiles x 24 depth slices
-  by range, and each pixel shades only its cluster's (at most 63) and the
-  directional lights
+- up to 8192 directional, point and spot lights, read from the `SceneLights`
+  storage buffer the engine refills every frame, and clustered: a compute
+  pass sorts the point and spot lights into 16 x 9 screen tiles x 24 depth
+  slices by range, testing each light against each cluster, and each pixel
+  shades only its cluster's (at most 63) and the directional lights
 - image-based light from the HDR environment, or from a uniform environment
   when there is none
 - ground-truth ambient occlusion (GTAO), with the light that bounces between

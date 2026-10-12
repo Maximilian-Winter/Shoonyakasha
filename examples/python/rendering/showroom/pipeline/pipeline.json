@@ -130,42 +130,6 @@
           "name": "pad2",
           "type": "float",
           "source": "const.0"
-        },
-        {
-          "name": "lightsPositionType",
-          "type": "vec4",
-          "source": "scene.lights[i].positionType",
-          "arrayCount": 128
-        },
-        {
-          "name": "lightsColorIntensity",
-          "type": "vec4",
-          "source": "scene.lights[i].colorIntensity",
-          "arrayCount": 128
-        },
-        {
-          "name": "lightsDirectionRange",
-          "type": "vec4",
-          "source": "scene.lights[i].directionRange",
-          "arrayCount": 128
-        },
-        {
-          "name": "lightsAttenuation",
-          "type": "vec4",
-          "source": "scene.lights[i].attenuation",
-          "arrayCount": 128
-        },
-        {
-          "name": "lightsSource",
-          "type": "vec4",
-          "source": "scene.lights[i].source",
-          "arrayCount": 128
-        },
-        {
-          "name": "lightsShape",
-          "type": "vec4",
-          "source": "scene.lights[i].shape",
-          "arrayCount": 128
         }
       ]
     },
@@ -865,6 +829,41 @@
       "memory": {
         "location": "device_local"
       }
+    },
+    "SceneLights": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 8192,
+      "fields": [
+        {
+          "name": "positionType",
+          "type": "vec4"
+        },
+        {
+          "name": "colorIntensity",
+          "type": "vec4"
+        },
+        {
+          "name": "directionRange",
+          "type": "vec4"
+        },
+        {
+          "name": "attenuation",
+          "type": "vec4"
+        },
+        {
+          "name": "source",
+          "type": "vec4"
+        },
+        {
+          "name": "shape",
+          "type": "vec4"
+        }
+      ],
+      "source": {
+        "type": "scene",
+        "data": "lights"
+      }
     }
   },
   "entityDataBindings": {
@@ -1018,6 +1017,15 @@
           "name": "lightImage",
           "autoBindResource": "lightImage",
           "autoBindSampler": "trilinearClamp"
+        },
+        {
+          "binding": 6,
+          "type": "storage_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "SceneLights",
+          "autoBindBuffer": "SceneLights"
         }
       ]
     },
@@ -1630,6 +1638,15 @@
           ],
           "name": "Lights",
           "autoBindBuffer": "Lights"
+        },
+        {
+          "binding": 1,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "SceneLights",
+          "autoBindBuffer": "SceneLights"
         }
       ]
     },

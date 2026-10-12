@@ -179,6 +179,15 @@ public:
                                   float intensity = 5.f,
                                   float range = 15.f);
 
+    /// Create one point light entity per position, in one call: `positions`
+    /// holds x, y, z for each. `colors` holds one r, g, b for all of them or
+    /// one for each, `intensities` and `ranges` one value for all or one for
+    /// each. Throws std::invalid_argument when a list has another length.
+    std::vector<EntityHandle> createPointLights(const std::vector<float>& positions,
+                                                const std::vector<float>& colors,
+                                                const std::vector<float>& intensities,
+                                                const std::vector<float>& ranges);
+
     /// Create a world-space sprite (billboard quad in 3D world coordinates).
     EntityHandle createSprite(const glm::vec3& worldPos,
                               const std::string& texturePath,

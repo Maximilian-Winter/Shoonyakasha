@@ -15,6 +15,7 @@
 
 layout(set = 0, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
+DEFAULT_SCENE_LIGHTS(2, 6)
 layout(set = 2, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
 layout(set = 2, binding = 2) uniform sampler2DShadow localShadowAtlas;
 layout(set = 2, binding = 3) uniform usampler2D lightClusters;

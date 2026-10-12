@@ -20,8 +20,8 @@ sk.shaders.compile_dir("examples/python/rendering/showroom/pipeline/shaders")   
 
 Both were added for it:
 
-- **Light source data.** `LightComponent::sourceRadius` and the dot-path `scene.lights[N].source`: x the radius, y 1 when the light casts shadows, z the cosine of the inner cone. Python sets them with `scene.set_light_source_radius(light, r)` and `scene.set_light_cone(light, inner, outer)`, in degrees.
-- **Light rectangles.** `LightComponent::sourceSize` and the dot-path `scene.lights[N].shape`: xyz the light's right axis times half the width, w half the height, zero for a light without one. Python sets it with `scene.set_light_source_size(light, width, height)`.
+- **Light source data.** `LightComponent::sourceRadius`, in the `source` field of each light in the `SceneLights` storage buffer (and the dot-path `scene.lights[N].source`): x the radius, y 1 when the light casts shadows, z the cosine of the inner cone. Python sets them with `scene.set_light_source_radius(light, r)` and `scene.set_light_cone(light, inner, outer)`, in degrees.
+- **Light rectangles.** `LightComponent::sourceSize`, in the `shape` field of each light in `SceneLights` (and the dot-path `scene.lights[N].shape`): xyz the light's right axis times half the width, w half the height, zero for a light without one. Python sets it with `scene.set_light_source_size(light, width, height)`.
 - **Application images.** A descriptor binding with `"externalImage": "lightImage"` samples the image the application loads with `engine.set_pipeline_image("lightImage", path)`, white until it does. Lights choose it by their image slot, `scene.set_light_source_image(light, 1)`, published as `scene.lights[N].source.w`.
 - **Data files beside the pipeline.** A buffer layout filled from a file (`"source": {"type": "file", "path": "ltc.bin"}`) finds it beside `pipeline.json`, as shaders are found.
 - **Fragment-stage atomics.** `fragmentStoresAndAtomics` is enabled where the device has it, which every desktop GPU does. The virtual shadow map's casters write their depth with atomics.

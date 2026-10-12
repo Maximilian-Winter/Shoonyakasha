@@ -76,6 +76,7 @@ float getRenderScale() const;
 GltfResult loadGltfScene(const std::string& path, const GltfOptions& opts = {});
 EntityHandle createDirectionalLight(const glm::vec3& direction, const glm::vec3& color = glm::vec3(1.f), float intensity = 2.f);
 EntityHandle createPointLight(const glm::vec3& position, const glm::vec3& color = glm::vec3(1.f), float intensity = 5.f, float range = 15.f);
+std::vector<EntityHandle> createPointLights(const std::vector<float>& positions, const std::vector<float>& colors, const std::vector<float>& intensities, const std::vector<float>& ranges);
 EntityHandle createSprite(const glm::vec3& worldPos, const std::string& texturePath, const glm::vec2& size = glm::vec2(1.f), const glm::vec4& tint = glm::vec4(1.f));
 EntityHandle createUIPanel(UIAnchor anchor, const glm::vec2& offsetPixels, const glm::vec2& sizePixels, const std::string& texturePath = "", const glm::vec4& color = glm::vec4(1.f));
 EntityHandle createText(const std::string& text, UIAnchor anchor, const glm::vec2& offsetPixels, const std::string& fontPath, float fontSize = 24.f, const glm::vec4& color = glm::vec4(1.f));

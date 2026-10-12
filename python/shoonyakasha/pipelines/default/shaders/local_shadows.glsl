@@ -73,7 +73,7 @@ float localShadowVisibility(int lightIndex, float type, vec3 worldPos, vec3 N, v
     if (type > 1.5) {
         for (int s = 0; s < SPOT_SHADOW_SLOTS; ++s)
             if (localShadows.spotLightIndex[s] == lightIndex)
-                return spotShadow(s, lightsPositionType[lightIndex].xyz, worldPos, N, L);
+                return spotShadow(s, sceneLights[lightIndex].positionType.xyz, worldPos, N, L);
     } else {
         for (int s = 0; s < POINT_SHADOW_SLOTS; ++s)
             if (localShadows.pointLightIndex[s] == lightIndex) return pointShadow(s, worldPos, N, L);

@@ -1,6 +1,7 @@
 // lights.glsl - direct light from scene.lights[i], shared by the lighting
 // and forward passes. The including shader declares the Lights block
-// without an instance name (DEFAULT_LIGHTS_BLOCK) and includes sk/pbr.glsl.
+// without an instance name (DEFAULT_LIGHTS_BLOCK) and the lights themselves
+// (DEFAULT_SCENE_LIGHTS), and includes sk/pbr.glsl.
 // With CLUSTERED defined, directLight takes the fragment's cluster and loops
 // over its lights only; with LOCAL_SHADOWS, spot and point lights are
 // shadowed.
@@ -19,11 +20,11 @@
 // `sunVisibility`; -1 when none is.
 vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
                vec3 F0, int sunIndex, float sunVisibility) {
-    float type = lightsPositionType[i].w;
-    vec3 color = lightsColorIntensity[i].rgb * lightsColorIntensity[i].w;
-    vec3 direction = lightsDirectionRange[i].xyz;
-    float range = lightsDirectionRange[i].w;
-    vec4 attenuation = lightsAttenuation[i];
+    float type = sceneLights[i].positionType.w;
+    vec3 color = sceneLights[i].colorIntensity.rgb * sceneLights[i].colorIntensity.w;
+    vec3 direction = sceneLights[i].directionRange.xyz;
+    float range = sceneLights[i].directionRange.w;
+    vec4 attenuation = sceneLights[i].attenuation;
 
     vec3 L;
     float falloff = 1.0;
@@ -31,7 +32,7 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
         L = -normalize(direction);
         if (int(i) == sunIndex) falloff = sunVisibility;
     } else {                                // point or spot
-        vec3 toLight = lightsPositionType[i].xyz - worldPos;
+        vec3 toLight = sceneLights[i].positionType.xyz - worldPos;
         float dist = length(toLight);
         L = toLight / max(dist, 1e-4);
         falloff = 1.0 / max(attenuation.x + attenuation.y * dist + attenuation.z * dist * dist, 1e-4);
@@ -79,7 +80,7 @@ vec3 directLight(uint cluster, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float
 vec3 directLight(vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
                  vec3 F0, int sunIndex, float sunVisibility) {
     vec3 total = vec3(0.0);
-    for (uint i = 0u; i < min(lightCount, uint(MAX_LIGHTS)); ++i) {
+    for (uint i = 0u; i < SCENE_LIGHT_COUNT; ++i) {
         total += lightFrom(i, worldPos, N, V, albedo, metallic, roughness, F0, sunIndex, sunVisibility);
     }
     return total;

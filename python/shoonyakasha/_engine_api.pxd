@@ -528,6 +528,9 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
                                             const vec3& color, float intensity)
         EntityHandle createPointLight(const vec3& position,
                                       const vec3& color, float intensity, float range)
+        vector[EntityHandle] createPointLights(const vector[float]& positions, const vector[float]& colors,
+                                               const vector[float]& intensities,
+                                               const vector[float]& ranges) except +
         EntityHandle createSprite(const vec3& worldPos, const string& texturePath,
                                   const vec2& size, const vec4& tint)
         EntityHandle createUIPanel(UIAnchor anchor, const vec2& offsetPixels,

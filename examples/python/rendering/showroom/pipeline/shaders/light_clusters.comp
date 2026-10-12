@@ -16,6 +16,7 @@ layout(local_size_x = 64) in;
 layout(set = 0, binding = 0, r32ui) uniform writeonly uimage2D clusters;
 layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
+DEFAULT_SCENE_LIGHTS(2, 1)
 
 // View-space point on the ray through NDC xy, at view depth -z.
 vec3 onRay(vec2 ndc, float depth) {
@@ -28,13 +29,13 @@ void main() {
     uint cluster = gl_GlobalInvocationID.x;
     if (cluster > uint(CLUSTER_COUNT)) return;
 
-    uint count = min(lightCount, uint(MAX_LIGHTS));
+    uint count = SCENE_LIGHT_COUNT;
     uint found = 0u;
 
     if (cluster == uint(CLUSTER_COUNT)) {
         // The directional lights' column.
         for (uint i = 0u; i < count && found < uint(MAX_PER_CLUSTER); ++i) {
-            if (lightsPositionType[i].w < 0.5) imageStore(clusters, ivec2(cluster, 1u + found++), uvec4(i));
+            if (sceneLights[i].positionType.w < 0.5) imageStore(clusters, ivec2(cluster, 1u + found++), uvec4(i));
         }
         imageStore(clusters, ivec2(cluster, 0), uvec4(found));
         return;
@@ -57,12 +58,12 @@ void main() {
     }
 
     for (uint i = 0u; i < count && found < uint(MAX_PER_CLUSTER); ++i) {
-        float type = lightsPositionType[i].w;
+        float type = sceneLights[i].positionType.w;
         if (type < 0.5) continue;   // directional: in their own column
-        float range = lightsDirectionRange[i].w;
+        float range = sceneLights[i].directionRange.w;
         bool reaches = range <= 0.0;   // no range: everywhere
         if (!reaches) {
-            vec3 center = (camera.view * vec4(lightsPositionType[i].xyz, 1.0)).xyz;
+            vec3 center = (camera.view * vec4(sceneLights[i].positionType.xyz, 1.0)).xyz;
             vec3 nearest = clamp(center, lo, hi);
             reaches = dot(nearest - center, nearest - center) <= range * range;
         }

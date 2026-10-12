@@ -38,7 +38,7 @@ That gives a lit, anti-aliased and tone-mapped box against the environment. With
 
 **A camera.** Create one first: without a main camera the log warns and there is no view to render. Keep `near_plane` as large as the scene allows (0.05 to 0.1 for human-scale scenes): depth precision, contact shadows and ambient occlusion all depend on it.
 
-**Light.** Every directional, point and spot light counts, up to 128. Point and spot lights are sorted into screen clusters by their `range`, so give each one a range that fits: a lamp with a range of 50 lights, and costs, far more of the screen than one of 8. Image-based light comes from the HDR environment (`hdr_environment_path`), or from a single colour (`environment_color`) when there is none; the environment is also drawn as the sky.
+**Light.** Every directional, point and spot light counts, up to 8192. Point and spot lights are sorted into screen clusters by their `range`, so give each one a range that fits: a lamp with a range of 50 lights, and costs, far more of the screen than one of 8. A cluster lists at most 63 lights, so thousands of lights with long ranges lose some where they crowd; the lights-per-cluster debug view shows where (the [scene lights example](../../examples/python/rendering/scene_lights/README.md) has 4096). Image-based light comes from the HDR environment (`hdr_environment_path`), or from a single colour (`environment_color`) when there is none; the environment is also drawn as the sky.
 
 **glTF materials.** Metallic-roughness materials are used as glTF defines them:
 - **Textures:** base colour, normal, metallic-roughness, occlusion and emissive.

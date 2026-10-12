@@ -48,6 +48,26 @@ ExecutionKind executionKindOf(const std::string& type) {
     return ExecutionKind::Unknown;
 }
 
+std::string sceneBuffersError(const std::vector<BufferLayoutDesc>& layouts,
+                              const std::unordered_map<std::string, CompiledBufferLayout>& compiled) {
+    for (const auto& desc : layouts) {
+        if (desc.initConfig.type != "scene") continue;
+        const auto it = compiled.find(desc.name);
+        if (it == compiled.end()) continue;
+        const auto& fields = it->second.fields;
+        const bool sixVec4 = fields.size() == 6 &&
+            std::all_of(fields.begin(), fields.end(), [](const BufferFieldDesc& f) {
+                return f.type == BufferFieldType::Vec4 && f.arrayCount == 1;
+            });
+        if (!sixVec4 || it->second.totalSize != sizeof(SceneContext::PackedLight)) {
+            return "Buffer layout '" + desc.name + "': scene lights are six vec4 fields (positionType, "
+                   "colorIntensity, directionRange, attenuation, source, shape), " +
+                   std::to_string(sizeof(SceneContext::PackedLight)) + " bytes each";
+        }
+    }
+    return "";
+}
+
 std::string indirectArgumentsError(const std::vector<PassDeclaration>& passes,
                                    const std::vector<BufferLayoutDesc>& layouts,
                                    const std::unordered_map<std::string, CompiledBufferLayout>& compiled) {
@@ -680,8 +700,12 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         }
     }
 
-    // Stage 11.1: Indirect passes' argument buffers hold their arguments
-    result.errorMessage = indirectArgumentsError(passes, bufferLayoutDescs, result.bufferLayouts);
+    // Stage 11.1: Scene-filled buffers hold what the scene gives them, and
+    // indirect passes' argument buffers their arguments
+    result.errorMessage = sceneBuffersError(bufferLayoutDescs, result.bufferLayouts);
+    if (result.errorMessage.empty()) {
+        result.errorMessage = indirectArgumentsError(passes, bufferLayoutDescs, result.bufferLayouts);
+    }
     if (!result.errorMessage.empty()) {
         m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
         return result;

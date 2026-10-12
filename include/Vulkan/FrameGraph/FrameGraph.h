@@ -208,7 +208,7 @@ struct SSBOFieldInit {
 
 /// Complete SSBO initialization config (parsed from JSON "source" section)
 struct SSBOInitConfig {
-    std::string type = "none";       // "none", "initializer", "buffer_ref", "file"
+    std::string type = "none";       // "none", "initializer", "buffer_ref", "file", "scene"
     uint32_t seed = 42;
     std::vector<SSBOFieldInit> fieldInits;
 
@@ -218,6 +218,10 @@ struct SSBOInitConfig {
 
     // Phase 4: file source — load binary data from disk
     std::string filePath;                         // Path for "file" source type
+
+    // "scene" source: filled from the scene every frame. "lights": the
+    // scene's lights as SceneContext::PackedLight, as many as fit.
+    std::string sceneData;
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -526,6 +530,13 @@ ExecutionKind executionKindOf(const std::string& type);
 /// its offset, the VkDispatchIndirectCommand, every VkDrawIndirectCommand
 /// the pass may draw, or the count. Buffers not in `layouts` are registered
 /// by the application, which is answerable for them.
+/// What is wrong with the storage buffers filled from the scene ("source":
+/// {"type": "scene"}), or "" when nothing is: a "lights" buffer's fields must
+/// be the six vec4s of SceneContext::PackedLight, so each element is one
+/// light as the engine packs it.
+std::string sceneBuffersError(const std::vector<BufferLayoutDesc>& layouts,
+                              const std::unordered_map<std::string, CompiledBufferLayout>& compiled);
+
 std::string indirectArgumentsError(const std::vector<PassDeclaration>& passes,
                                    const std::vector<BufferLayoutDesc>& layouts,
                                    const std::unordered_map<std::string, CompiledBufferLayout>& compiled);
@@ -1557,6 +1568,20 @@ private:
     };
     std::unordered_map<std::string, DotPathSSBO> m_dotPathSSBOs;
     void createDotPathSSBOs(uint32_t maxFramesInFlight);
+
+    // Storage buffers filled from the scene every frame ("source": {"type":
+    // "scene"}): one host-visible, host-coherent buffer per frame in flight,
+    // mapped while it lives, written after that frame's fence.
+    struct SceneSSBO {
+        std::string data;               // "lights"
+        uint32_t capacity = 0;          // elements it holds
+        uint32_t elementSize = 0;
+        std::vector<std::unique_ptr<VulkanBuffer>> perFrame;
+    };
+    std::unordered_map<std::string, SceneSSBO> m_sceneSSBOs;
+    void createSceneSSBO(const BufferLayoutDesc& desc, const CompiledBufferLayout& layout,
+                         uint32_t maxFramesInFlight);
+    void fillSceneSSBOs(uint32_t frameIndex);
 
     // Phase 2: Shared buffer registry for cross-graph SSBO/UBO/image targets/references
     SharedBufferRegistry* m_sharedBufferRegistry = nullptr;

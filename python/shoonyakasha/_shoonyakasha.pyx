@@ -1980,6 +1980,47 @@ cdef class Engine:
         return <uint32_t>self._ptr.createPointLight(
             _tuple_to_vec3(pos), _tuple_to_vec3(color), intensity, range)
 
+    def create_point_lights(self, positions, colors=(1.0, 1.0, 1.0), intensity=5.0, range=15.0):
+        """Create many point lights in one call.
+
+        Args:
+            positions: a sequence of (x, y, z), one per light (a list of
+                tuples, or an N x 3 array)
+            colors: one (r, g, b) for every light, or a sequence of one per
+                light
+            intensity: one intensity for every light, or a sequence of one
+                per light
+            range: one range for every light, or a sequence of one per light
+
+        Returns:
+            The lights' entity handles (ints), in the order of `positions`.
+        """
+        cdef vector[float] pos, col, inten, rng
+        for p in positions:
+            pos.push_back(<float>p[0])
+            pos.push_back(<float>p[1])
+            pos.push_back(<float>p[2])
+        def one_or_each(value, width):
+            try:
+                first = value[0]
+            except (TypeError, IndexError):
+                return [value] if width == 1 else list(value)
+            if width == 1:
+                return list(value)
+            try:
+                first[0]
+            except (TypeError, IndexError):
+                return list(value[:width])
+            return [c for v in value for c in v[:width]]
+        for v in one_or_each(colors, 3):
+            col.push_back(<float>v)
+        for v in one_or_each(intensity, 1):
+            inten.push_back(<float>v)
+        for v in one_or_each(range, 1):
+            rng.push_back(<float>v)
+        cdef vector[EntityHandle] made = self._ptr.createPointLights(pos, col, inten, rng)
+        return [<uint32_t>e for e in made]
+
     def create_sprite(self, world_pos, str texture_path, size=(1.0, 1.0),
                        tint=(1.0, 1.0, 1.0, 1.0)):
         """Create a world-space sprite (billboard quad in 3D world coordinates).

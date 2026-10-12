@@ -145,8 +145,13 @@ LocalShadows assignLocalShadows(const std::vector<LocalShadowCandidate>& candida
     auto byScore = [](const Ranked& a, const Ranked& b) {
         return a.score != b.score ? a.score > b.score : a.light->lightIndex < b.light->lightIndex;
     };
-    std::sort(spots.begin(), spots.end(), byScore);
-    std::sort(points.begin(), points.end(), byScore);
+    // Only the first of each, up to their budgets, are used: the order of
+    // the rest does not matter, and there may be thousands.
+    const uint32_t spotBudget = std::min(settings.spotCount, MAX_SPOT_SHADOWS);
+    const uint32_t pointBudget = std::min(settings.pointCount, MAX_POINT_SHADOWS);
+    std::partial_sort(spots.begin(), spots.begin() + std::min<size_t>(spotBudget, spots.size()), spots.end(), byScore);
+    std::partial_sort(points.begin(), points.begin() + std::min<size_t>(pointBudget, points.size()), points.end(),
+                      byScore);
 
     // How large each chosen light's range looks from the camera, 1 from
     // inside it, and its rank, for sizing atlas tiles.
@@ -158,7 +163,6 @@ LocalShadows assignLocalShadows(const std::vector<LocalShadowCandidate>& candida
     std::array<Ranked, MAX_POINT_SHADOWS> chosenPoints{};
 
     const float nearPlane = settings.nearPlane;
-    const uint32_t spotBudget = std::min(settings.spotCount, MAX_SPOT_SHADOWS);
     for (const auto& r : spots) {
         if (out.spotCount >= spotBudget) break;
         chosenSpots[out.spotCount] = r;
@@ -173,7 +177,6 @@ LocalShadows assignLocalShadows(const std::vector<LocalShadowCandidate>& candida
                              nearPlane, farPlane, 0.0f);
     }
 
-    const uint32_t pointBudget = std::min(settings.pointCount, MAX_POINT_SHADOWS);
     for (const auto& r : points) {
         if (out.pointCount >= pointBudget) break;
         chosenPoints[out.pointCount] = r;

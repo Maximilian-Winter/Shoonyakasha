@@ -39,7 +39,7 @@ engine = sk.Engine(pipeline_json_path="examples/python/rendering/volume_tiled/pi
 | `VtfsClusterBoxes` | Debug overlay, off unless enabled: the active clusters' boxes as lines, one instance per cluster through `draw_indirect` |
 | `TAA` … `UIOverlay` | As in the default pipeline |
 
-The prepass and the forward passes draw with the same vertex shaders, whose `gl_Position` is `invariant`, so the depth test EQUAL passes. The lights in the `Lights` block (the sun and up to 128 more) are shaded as in the default pipeline, but every pixel loops over all of them: the `LightClusters` pass is gone.
+The prepass and the forward passes draw with the same vertex shaders, whose `gl_Position` is `invariant`, so the depth test EQUAL passes. The scene's own lights (the sun and any others, up to 8192 in the `SceneLights` buffer) are shaded as in the default pipeline, but every pixel loops over all of them: the `LightClusters` pass is gone.
 
 ## Presets
 

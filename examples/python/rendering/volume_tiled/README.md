@@ -80,7 +80,7 @@ The paper's algorithm, with these differences:
 - **Marking opaque clusters.** The paper draws the opaque geometry a second time with early depth testing to mark clusters. Here one compute thread per depth texel marks the same clusters without drawing. Transparent geometry is drawn, as in the paper, with early depth testing against the prepass.
 - **Assignment workgroups.** As in the paper, one workgroup per active cluster, dispatched indirectly (`dispatch_indirect`) from the count the cluster gathering wrote. Past 65,535 active clusters the workgroups continue in a second dimension, since Vulkan only promises 65,535 across one.
 - **A thin prepass.** Besides depth it writes normals and motion vectors, so the default pipeline's sun shadow mask, ambient occlusion and TAA run unchanged.
-- **Point lights.** The VTFS lights are point lights without shadows, made on the GPU from their index. The scene's own lights (a sun and up to 128 more) are shaded as in the default pipeline, without clusters.
+- **Point lights.** The VTFS lights are point lights without shadows, made on the GPU from their index. The scene's own lights (a sun and any others, up to 8192) are shaded as in the default pipeline, but without clusters.
 
 Problems of the earlier DirectX 12 implementation that this one avoids:
 - **Occluded fragments:** clusters are marked only by visible pixels, not by every rasterised fragment.

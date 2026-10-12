@@ -156,19 +156,56 @@ TEST_F(DotPathResolverECS, SceneContext_LightShapePacked) {
     EXPECT_EQ(scene.lights[1u - i].shape, glm::vec4(0.0f));
 }
 
-TEST_F(DotPathResolverECS, SceneContext_LightCountCapped) {
-    // Add MAX_SCENE_LIGHTS + 1 lights
-    for (uint32_t i = 0; i < SceneContext::MAX_SCENE_LIGHTS + 5; ++i) {
+TEST_F(DotPathResolverECS, SceneContext_EveryLightCollected) {
+    for (uint32_t i = 0; i < 1000; ++i) {
         auto e = registry.create();
-        registry.emplace<TransformComponent>(e);
+        auto& t = registry.emplace<TransformComponent>(e);
+        t.position = glm::vec3(static_cast<float>(i), 0.0f, 0.0f);
         auto& l = registry.emplace<LightComponent>(e);
         l.type = LightComponent::Point;
+        l.intensity = 3.0f;
     }
 
     scene.updateFromRegistry(registry);
 
-    // Should be capped at MAX_SCENE_LIGHTS
-    EXPECT_LE(scene.lightCount, SceneContext::MAX_SCENE_LIGHTS);
+    // The fixture's directional light and the thousand points.
+    EXPECT_EQ(scene.lightCount, 1001u);
+    EXPECT_EQ(scene.lights.size(), 1001u);
+    auto v = resolver.resolveScene("scene.lights.count", scene);
+    EXPECT_EQ(v.as<uint32_t>(), 1001u);
+    // Past the last light, a dot-path into a fixed array reads zero.
+    auto last = resolver.resolveScene("scene.lights[1000].colorIntensity", scene);
+    ASSERT_TRUE(last.isVec4());
+    // In the registry's order, so the last is whichever light that is.
+    EXPECT_EQ(last.as<glm::vec4>(), scene.lights[1000].colorIntensity);
+    EXPECT_GT(last.as<glm::vec4>().w, 0.0f);
+    auto past = resolver.resolveScene("scene.lights[1001].colorIntensity", scene);
+    ASSERT_TRUE(past.isVec4());
+    EXPECT_EQ(past.as<glm::vec4>(), glm::vec4(0.0f));
+}
+
+TEST_F(DotPathResolverECS, SceneContext_ParentedLightAtWorldPosition) {
+    // A parent at (10, 0, 0) turned 90 degrees about Y carries a spot light
+    // 2 units in front of it: the light lands at (8, 0, 0), pointing along -X.
+    auto parent = registry.create();
+    auto& pt = registry.emplace<TransformComponent>(parent);
+    pt.position = glm::vec3(10.0f, 0.0f, 0.0f);
+    pt.rotation = glm::vec3(0.0f, glm::radians(90.0f), 0.0f);
+    auto child = registry.create();
+    auto& ct = registry.emplace<TransformComponent>(child);
+    ct.position = glm::vec3(0.0f, 0.0f, -2.0f);
+    auto& l = registry.emplace<LightComponent>(child);
+    l.type = LightComponent::Spot;
+    registry.emplace<HierarchyComponent>(parent).addChild(child);
+    registry.emplace<HierarchyComponent>(child).parent = parent;
+
+    TransformSystem().update(registry, 0.0f);
+    scene.updateFromRegistry(registry);
+
+    ASSERT_EQ(scene.lightCount, 2u);
+    const uint32_t i = scene.lights[0].positionType.w > 1.5f ? 0u : 1u;    // the spot light
+    TestHelpers::ExpectVec3Near(glm::vec3(scene.lights[i].positionType), glm::vec3(8.0f, 0.0f, 0.0f));
+    TestHelpers::ExpectVec3Near(glm::vec3(scene.lights[i].directionRange), glm::vec3(-1.0f, 0.0f, 0.0f));
 }
 
 // ═══════════════════════════════════════════════════════════════
