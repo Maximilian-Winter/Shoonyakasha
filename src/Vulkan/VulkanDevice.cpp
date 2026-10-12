@@ -227,6 +227,10 @@ void VulkanDevice::createLogicalDevice() {
     // Fragment shaders that write storage images, or use image atomics: a
     // virtual shadow map's casters write their depth into its pages that way.
     deviceFeatures.fragmentStoresAndAtomics = supportedFeatures.fragmentStoresAndAtomics;
+    // Indirect draws whose arguments a compute pass writes: several draws in
+    // one call, each with its own firstInstance.
+    deviceFeatures.multiDrawIndirect = supportedFeatures.multiDrawIndirect;
+    deviceFeatures.drawIndirectFirstInstance = supportedFeatures.drawIndirectFirstInstance;
     m_enabledFeatures = deviceFeatures;
 
     // Enable timeline semaphore feature for multi-queue synchronization
@@ -244,6 +248,16 @@ void VulkanDevice::createLogicalDevice() {
     vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     vulkan12Features.pNext = &vulkan13Features;
     vulkan12Features.timelineSemaphore = VK_TRUE;
+
+    // vkCmdDrawIndirectCount, where the device has it.
+    VkPhysicalDeviceVulkan12Features supported12{};
+    supported12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceFeatures2 supported2{};
+    supported2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    supported2.pNext = &supported12;
+    vkGetPhysicalDeviceFeatures2(m_physicalDevice, &supported2);
+    m_drawIndirectCount = supported12.drawIndirectCount == VK_TRUE;
+    vulkan12Features.drawIndirectCount = supported12.drawIndirectCount;
 
     VkPhysicalDeviceProperties deviceProperties;
     vkGetPhysicalDeviceProperties(m_physicalDevice, &deviceProperties);

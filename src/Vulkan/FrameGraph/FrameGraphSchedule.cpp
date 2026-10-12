@@ -842,6 +842,16 @@ BufferAccessTable describeBufferAccesses(
                 }
             }
         }
+
+        // The arguments of an indirect dispatch or draw, which the command
+        // itself reads.
+        if (readsIndirectArguments(pass)) {
+            for (const std::string* name : {&pass.execution.argumentBuffer, &pass.execution.countBuffer}) {
+                if (!name->empty()) {
+                    add(pi, key(*name), VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+                }
+            }
+        }
     }
 
     // Opaque passes touch every buffer, including those no pass names.
@@ -855,6 +865,43 @@ BufferAccessTable describeBufferAccesses(
         for (const auto& [buffer, access] : merged[pi]) table.passes[pi].push_back(access);
     }
     return table;
+}
+
+bool readsIndirectArguments(const PassDeclaration& pass) {
+    return pass.execution.type == "dispatch_indirect" || pass.execution.type == "draw_indirect";
+}
+
+void addIndirectArgumentDependencies(const std::vector<PassDeclaration>& passes,
+                                     const BufferAccessTable& table,
+                                     std::vector<std::vector<uint32_t>>& dependencies)
+{
+    std::unordered_map<std::string, uint32_t> byName;
+    for (uint32_t b = 0; b < table.buffers.size(); ++b) byName.emplace(table.buffers[b], b);
+
+    auto writes = [&](uint32_t pi, uint32_t buffer) {
+        if (pi >= table.passes.size()) return false;
+        for (const auto& a : table.passes[pi]) {
+            if (a.buffer == buffer && (a.access & kWriteAccess) != 0) return true;
+        }
+        return false;
+    };
+
+    for (uint32_t pi = 0; pi < passes.size() && pi < dependencies.size(); ++pi) {
+        if (!readsIndirectArguments(passes[pi])) continue;
+        auto& deps = dependencies[pi];
+        for (const std::string* name : {&passes[pi].execution.argumentBuffer, &passes[pi].execution.countBuffer}) {
+            const auto it = byName.find(*name);
+            if (name->empty() || it == byName.end()) continue;
+            for (uint32_t pj = pi; pj-- > 0;) {
+                if (writes(pj, it->second)) {
+                    deps.push_back(pj);
+                    break;
+                }
+            }
+        }
+        std::sort(deps.begin(), deps.end());
+        deps.erase(std::unique(deps.begin(), deps.end()), deps.end());
+    }
 }
 
 std::vector<MemoryBarrierInfo> planBufferBarriers(

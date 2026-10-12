@@ -536,6 +536,98 @@ std::optional<uint32_t> indexedView(const std::string& view, const std::string& 
     return static_cast<uint32_t>(std::stoul(digits));
 }
 
+/// "arguments" and "count" of dispatch_indirect and draw_indirect: where in
+/// which buffer the GPU reads them. Checks what can be checked before the
+/// buffers exist; the compiler checks the buffers.
+void parseIndirectExecution(PassDeclaration& pass, const nlohmann::json& execJson,
+                            const PipelineCapabilities& capabilities) {
+    const std::string& type = pass.execution.type;
+    const bool dispatch = type == "dispatch_indirect";
+    const bool draw = type == "draw_indirect";
+    const std::string where = "Pass '" + pass.name + "'";
+    if (!dispatch && !draw) {
+        for (const char* key : {"arguments", "count"}) {
+            if (execJson.contains(key)) {
+                throw std::runtime_error(where + ": \"" + key + "\" applies only to dispatch_indirect and "
+                                         "draw_indirect, not '" + type + "'");
+            }
+        }
+        return;
+    }
+    if (dispatch && pass.type != PassType::Compute) {
+        throw std::runtime_error(where + ": dispatch_indirect needs a compute pass");
+    }
+    if (draw && pass.type != PassType::Graphics) {
+        throw std::runtime_error(where + ": draw_indirect needs a graphics pass");
+    }
+
+    auto readUint = [&](const nlohmann::json& j, const char* key, uint32_t fallback, const std::string& in) {
+        if (!j.contains(key)) return fallback;
+        const auto& v = j[key];
+        if (!v.is_number_integer() || v.get<int64_t>() < 0 || v.get<int64_t>() > static_cast<int64_t>(UINT32_MAX)) {
+            throw std::runtime_error(where + ": " + in + " \"" + key + "\" must be a non-negative integer");
+        }
+        return static_cast<uint32_t>(v.get<int64_t>());
+    };
+    auto readBuffer = [&](const char* key, std::string& buffer, uint32_t& offset) -> const nlohmann::json* {
+        if (!execJson.contains(key)) return nullptr;
+        const auto& j = execJson[key];
+        if (!j.is_object() || !j.contains("buffer") || !j["buffer"].is_string() ||
+            j["buffer"].get<std::string>().empty()) {
+            throw std::runtime_error(where + ": \"" + key + "\" must be an object naming a \"buffer\"");
+        }
+        buffer = j["buffer"].get<std::string>();
+        offset = readUint(j, "offset", 0, std::string("\"") + key + "\"");
+        if (offset % 4 != 0) {
+            throw std::runtime_error(where + ": \"" + key + "\" \"offset\" must be a multiple of 4");
+        }
+        return &j;
+    };
+
+    const nlohmann::json* arguments = readBuffer("arguments", pass.execution.argumentBuffer,
+                                                 pass.execution.argumentOffset);
+    if (!arguments) {
+        throw std::runtime_error(where + ": " + type + " needs \"arguments\": {\"buffer\": ..., \"offset\": ...}");
+    }
+    if (dispatch) {
+        if (execJson.contains("count") || arguments->contains("drawCount") || arguments->contains("stride")) {
+            throw std::runtime_error(where + ": dispatch_indirect takes one set of arguments: no \"count\", "
+                                     "\"drawCount\" or \"stride\"");
+        }
+        return;
+    }
+
+    pass.execution.drawCount = readUint(*arguments, "drawCount", 1, "\"arguments\"");
+    pass.execution.drawStride = readUint(*arguments, "stride", 16, "\"arguments\"");
+    if (pass.execution.drawStride % 4 != 0 || pass.execution.drawStride < 16) {
+        throw std::runtime_error(where + ": \"arguments\" \"stride\" must be a multiple of 4 and at least 16, "
+                                 "the size of VkDrawIndirectCommand");
+    }
+    uint32_t most = pass.execution.drawCount;
+    if (const nlohmann::json* count = readBuffer("count", pass.execution.countBuffer, pass.execution.countOffset)) {
+        if (arguments->contains("drawCount")) {
+            throw std::runtime_error(where + ": with \"count\", the number of draws comes from the count "
+                                     "buffer; give \"maxDrawCount\" there instead of \"drawCount\"");
+        }
+        pass.execution.maxDrawCount = readUint(*count, "maxDrawCount", 0, "\"count\"");
+        if (pass.execution.maxDrawCount == 0) {
+            throw std::runtime_error(where + ": \"count\" needs a \"maxDrawCount\" of at least 1");
+        }
+        if (!capabilities.drawIndirectCount) {
+            throw std::runtime_error(where + ": \"count\" needs the device feature drawIndirectCount, which "
+                                     "this device lacks; declare \"requires\": [\"drawIndirectCount\"] to leave "
+                                     "the pass out instead");
+        }
+        most = pass.execution.maxDrawCount;
+    } else if (pass.execution.drawCount == 0) {
+        throw std::runtime_error(where + ": \"arguments\" \"drawCount\" must be at least 1");
+    }
+    if (most > 1 && !capabilities.multiDrawIndirect) {
+        throw std::runtime_error(where + ": more than one draw per draw_indirect needs the device feature "
+                                 "multiDrawIndirect, which this device lacks");
+    }
+}
+
 /// Replace every {index}, {index+N} and {index-N} in `text` with the
 /// instance's value. A string that is nothing but one such placeholder
 /// becomes a number, so "layer": "{cascade}" reads as an integer. Braces
@@ -1363,9 +1455,12 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     const std::string what = r.is_string() ? r.get<std::string>() : r.dump();
                     if (what == "rayQuery") {
                         met = met && capabilities.rayQuery;
+                    } else if (what == "drawIndirectCount") {
+                        met = met && capabilities.drawIndirectCount;
                     } else {
                         throw std::runtime_error("Pass '" + name + "' requires '" + what +
-                                                 "', which is not a capability (expected rayQuery)");
+                                                 "', which is not a capability (expected rayQuery or "
+                                                 "drawIndirectCount)");
                     }
                 }
                 if (!met) {
@@ -1550,6 +1645,8 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     if (dispJson.contains("y")) pass.execution.dispatch[1] = parseDispatchDim(dispJson["y"]);
                     if (dispJson.contains("z")) pass.execution.dispatch[2] = parseDispatchDim(dispJson["z"]);
                 }
+
+                parseIndirectExecution(pass, execJson, capabilities);
 
                 // For built-in geometry types (opaque_geometry, transparent_geometry, shadow_casters)
                 pass.execution.sortMode = execJson.value("sortMode", std::string{"none"});

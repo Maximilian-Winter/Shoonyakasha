@@ -1,8 +1,8 @@
 // vtfs_assign_body.glsl - list the lights that reach each active cluster
-// (van Oosten, Algorithm 8.4). A workgroup takes one cluster of
-// uniqueClusters at a time: the frame graph cannot dispatch from a count
-// the GPU wrote, so a fixed number of workgroups step through however many
-// clusters are active. The cluster's lights are gathered in shared memory,
+// (van Oosten, Algorithm 8.4). One workgroup per cluster of uniqueClusters,
+// dispatched indirectly from the count vtfs_indirect_args.comp wrote, and
+// numbered across x and y as it spreads them. The cluster's lights are
+// gathered in shared memory,
 // then one atomic add on indexCount reserves their place in the global
 // lightIndexList, and lightGrid[cluster] records (offset, count).
 //
@@ -59,7 +59,9 @@ void main() {
     uint levels = bvhLevels(count);
 #endif
 
-    for (uint slot = gl_WorkGroupID.x; slot < activeClusters; slot += gl_NumWorkGroups.x) {
+    uint groups = gl_NumWorkGroups.x * gl_NumWorkGroups.y;
+    for (uint slot = gl_WorkGroupID.x + gl_WorkGroupID.y * gl_NumWorkGroups.x; slot < activeClusters;
+         slot += groups) {
         uint cluster = uniqueClusters[slot];
         AABB box = clusterAABBs[cluster];
         if (t == 0u) {

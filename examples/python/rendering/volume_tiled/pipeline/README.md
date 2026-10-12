@@ -29,12 +29,14 @@ engine = sk.Engine(pipeline_json_path="examples/python/rendering/volume_tiled/pi
 | `VtfsMark` | Flags the cluster of every pixel the prepass covered |
 | `VtfsMarkTransparent` | Flags the clusters of blended fragments in front of the prepass depth |
 | `VtfsFindUnique` | Gathers the flagged clusters into a list, clears the flags |
-| `VtfsAssignBvh` | Lights of each active cluster, through the BVH |
+| `VtfsIndirectArgs` | The arguments that follow the number of active clusters: the assignment's group counts, one workgroup per cluster, and the box overlay's instance count |
+| `VtfsAssignBvh` | Lights of each active cluster, through the BVH; `dispatch_indirect` |
 | `VtfsAssignAll` | The same, testing every light; off unless the preset `all` is applied |
 | `ShadowMask`, `GTAO`, `AODenoise` | As in the default pipeline, from the prepass |
 | `Sky` | The sky where the prepass left the far plane, black elsewhere |
 | `ForwardOpaque`, `…Masked`, `…Skinned`, `…SkinnedMasked` | Forward shading with depth test EQUAL against the prepass |
 | `Transparent`, `TransparentRT` | Forward shading of blended materials, as in the default pipeline, plus the VTFS lights |
+| `VtfsClusterBoxes` | Debug overlay, off unless enabled: the active clusters' boxes as lines, one instance per cluster through `draw_indirect` |
 | `TAA` … `UIOverlay` | As in the default pipeline |
 
 The prepass and the forward passes draw with the same vertex shaders, whose `gl_Position` is `invariant`, so the depth test EQUAL passes. The lights in the `Lights` block (the sun and up to 128 more) are shaded as in the default pipeline, but every pixel loops over all of them: the `LightClusters` pass is gone.
@@ -80,8 +82,9 @@ Storage buffers in `bufferLayouts`, with capacities from `shaders/vtfs.glsl`. Th
 | `VtfsLightBounds` | 513 | 512 partial boxes, then the box of all lights |
 | `VtfsKeysA/B`, `VtfsValuesA/B` | 1,048,576 | Morton codes and light indices, sorted from A into B and back, ending in A |
 | `VtfsBvhNodes` | 33,825 | The BVH's inner nodes, level by level, root first |
+| `VtfsIndirectArgs` | 1 | The light assignment's `dispatch_indirect` arguments at offset 0, the box overlay's `draw_indirect` arguments at 16 |
 
-The frame graph cannot dispatch from a count the GPU writes, nor repeat a pass a varying number of times. Passes over lights or clusters therefore dispatch for the capacity, and their workgroups past this frame's count return at once. `VtfsAssignBvh` and `VtfsAssignAll` run 4,096 workgroups that step through the active clusters.
+`VtfsAssignBvh` and `VtfsAssignAll` are dispatched indirectly, one workgroup per active cluster, from the counts `VtfsIndirectArgs` writes. The other passes over lights or clusters dispatch for the capacity, and their workgroups past this frame's count return at once; the sort and the BVH build always run their 12 and 3 passes, since the frame graph cannot repeat a pass a varying number of times.
 
 ## Changing it
 

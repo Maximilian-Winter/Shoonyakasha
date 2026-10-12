@@ -45,7 +45,7 @@ if (stats.enabled) std::printf("%s", stats.summary.c_str());
 - **Every other number** is the mean over the frames of that second. Draw counts are rounded.
 - **CPU record time** is the time spent recording the pipeline's passes into the command buffer. Game logic, physics and presentation are not included.
 - **GPU times** come from timestamp queries. Each pass's time runs from the end of the previous pass to the end of this one: the time it added to the frame. The passes of a frame add up to its GPU time. Passes overlap on the GPU, so a cheap pass that waits on an expensive one can show some of that wait. The figures describe frames that finished one or two frames earlier, because they are read without waiting. `gpu_ms` is `None` when the device has no timestamp support, or when GPU timing was turned off.
-- **Draw calls** count the engine's own draws: fullscreen and `draw` passes, the entity renderers, dispatches, and the `VulkanCommandBuilder` draw methods. A pass callback that calls `vkCmdDraw*` directly can report its draws with `FrameGraph::countDraw(vertices, instances)`.
+- **Draw calls** count the engine's own draws: fullscreen and `draw` passes, the entity renderers, dispatches, and the `VulkanCommandBuilder` draw methods. A pass callback that calls `vkCmdDraw*` directly can report its draws with `FrameGraph::countDraw(vertices, instances)`. A `draw_indirect` pass counts as `drawCount` draws, one with a count buffer, and adds no vertices: the GPU writes how many there are. A `dispatch_indirect` pass counts as one dispatch.
 
 Disabled passes are listed too: they still clear their attachments, which costs GPU time.
 

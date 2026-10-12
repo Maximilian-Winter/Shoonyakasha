@@ -25,6 +25,7 @@ Keys:
                              reference (every light at every pixel, no
                              clusters: slow, for a few thousand lights)
     M                        lights moving or still
+    C                        the active clusters' boxes over the image
     F2                       the panel on or off
     P                        screenshot into volume_tiled_captures/
 
@@ -87,7 +88,7 @@ STAGES = [
     ("Cluster boxes", ("VtfsClusterAABBs",)),
     ("Mark clusters", ("VtfsReset", "VtfsMark")),
     ("Find unique", ("VtfsFindUnique",)),
-    ("Assign lights", ("VtfsAssign",)),
+    ("Assign lights", ("VtfsIndirectArgs", "VtfsAssign")),
     ("Forward shading", ("Sky", "Forward", "Transparent")),
 ]
 
@@ -240,7 +241,8 @@ def load_scene():
 class Lights:
     """What the pipeline's VTFS passes read from scene.custom.vtfs.*: how
     many lights, how far they reach, how bright, where, and whether they
-    move. The lights themselves are made on the GPU (vtfs_update_lights.comp)."""
+    move. The lights themselves are made on the GPU (vtfs_update_lights.comp).
+    Also whether the active clusters' boxes are drawn over the image."""
 
     def __init__(self):
         self.count = args.lights
@@ -249,6 +251,7 @@ class Lights:
         self.intensity = args.intensity
         self.moving = True
         self.bvh = not args.no_bvh
+        self.boxes = False
 
     def volume(self):
         lo, hi = self.box
@@ -271,6 +274,7 @@ class Lights:
         engine.set_custom_float("vtfs.motion", 0.5 * min(self.range, 1.0) if self.moving else 0.0)
         engine.set_custom_float("vtfs.heatScale", 4.0 * OVERLAP)
         engine.apply_pipeline_preset("bvh" if self.bvh else "all")
+        engine.set_pass_enabled("VtfsClusterBoxes", self.boxes)
 
 
 lights = Lights()
@@ -344,6 +348,7 @@ class Panel:
         self.moving = ui.create_toggle(column, "Lights moving", is_on=lights.moving, size=(0, 28))
         self.bvh = ui.create_toggle(column, "Light BVH (off: every light tested)", is_on=lights.bvh,
                                     size=(0, 28))
+        self.boxes = ui.create_toggle(column, "Active clusters' boxes", is_on=lights.boxes, size=(0, 28))
 
         ui.create_text(column, "View", size=16, color=MUTED)
         row = ui.create_horizontal_layout(column, size=(0, 34), spacing=6)
@@ -396,6 +401,9 @@ class Panel:
         if ui.value_changed(self.bvh):
             lights.bvh = ui.toggle_value(self.bvh)
             changed = True
+        if ui.value_changed(self.boxes):
+            lights.boxes = ui.toggle_value(self.boxes)
+            changed = True
         for value, button in self.views:
             if ui.was_clicked(button):
                 view = value
@@ -408,7 +416,7 @@ class Panel:
             ui.set_slider_value(self.count, log2)
         if abs(ui.slider_value(self.range) - lights.range) > 1e-4:
             ui.set_slider_value(self.range, lights.range)
-        for toggle, on in ((self.moving, lights.moving), (self.bvh, lights.bvh)):
+        for toggle, on in ((self.moving, lights.moving), (self.bvh, lights.bvh), (self.boxes, lights.boxes)):
             if ui.toggle_value(toggle) != on:
                 ui.set_toggle_value(toggle, on)
         for value, button in self.views:
@@ -471,6 +479,9 @@ class Controls:
             lights.apply()
         if self.pressed(keys.M):
             lights.moving = not lights.moving
+            lights.apply()
+        if self.pressed(keys.C):
+            lights.boxes = not lights.boxes
             lights.apply()
         view = self.view
         if self.pressed(keys.V):

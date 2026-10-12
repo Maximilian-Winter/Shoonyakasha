@@ -18,6 +18,12 @@ Some passes record through code the graph cannot see: those with an execute call
 
 For a side-effect-only compute pass, set `hasSideEffects: true` if otherwise unused outputs would allow culling. JSON `queue: compute` only selects queue intent: the default ApplicationBase/facade render loop records through single-queue `execute`. Native `executeMultiQueue` requires appropriate command buffers and synchronized queue submission by its caller.
 
+## Indirect dispatches and draws
+
+A compute pass can decide how much work a later pass does: it writes the arguments of a `dispatch_indirect` or `draw_indirect` pass into a storage buffer (see the [reference](../reference/pipeline-json.md#execution)). Bind that buffer to the writer with `autoBindBuffer` and without `readonly` in its shader, so the graph knows who writes it, and declare the writer first. The indirect pass then depends on it, waits for its writes, and keeps it from being culled.
+
+A one-thread pass after the one that counts the work is the usual way to fill in the arguments, for instance a group count rounded up from an item count. The [Volume Tiled Forward Shading example](../../examples/python/rendering/volume_tiled/pipeline/README.md) dispatches one workgroup per active cluster that way.
+
 ## Initialization and sharing
 
 [ssbo_pipeline.json](../../examples/cpp/compute/ssbo_data_flow_example/ssbo_pipeline.json) demonstrates seeded sphere/gaussian initialization and publishing a target named `particles.currentState`. A consumer can use a `buffer_ref` source referring to a target in `SharedBufferRegistry`. Native application code must arrange graph lifetimes, registration, and execution order.

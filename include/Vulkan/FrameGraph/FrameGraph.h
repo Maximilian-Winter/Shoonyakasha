@@ -511,12 +511,24 @@ enum class ExecutionKind : uint8_t {
     Draw,            // "draw"
     ComputeDispatch, // "compute_dispatch"
     ComputeImage,    // "compute_image"
+    DispatchIndirect,// "dispatch_indirect"
+    DrawIndirect,    // "draw_indirect", with or without a count buffer
     SceneRenderer,   // "scene_geometry" and the entity geometry types
     Manual,          // "manual"
     Unknown          // anything else; warned about while recording
 };
 
 ExecutionKind executionKindOf(const std::string& type);
+
+/// What is wrong with the indirect arguments of the dispatch_indirect and
+/// draw_indirect passes, or "" when nothing is: an argument or count buffer
+/// declared in `layouts` must be a storage buffer large enough to hold, from
+/// its offset, the VkDispatchIndirectCommand, every VkDrawIndirectCommand
+/// the pass may draw, or the count. Buffers not in `layouts` are registered
+/// by the application, which is answerable for them.
+std::string indirectArgumentsError(const std::vector<PassDeclaration>& passes,
+                                   const std::vector<BufferLayoutDesc>& layouts,
+                                   const std::unordered_map<std::string, CompiledBufferLayout>& compiled);
 
 struct CompiledPass {
     uint32_t                            declIndex;          // into pass declarations
@@ -933,6 +945,13 @@ public:
     using ViewportResolver = std::function<bool(const std::string& path, glm::vec4& fractions)>;
     void setViewportResolver(ViewportResolver resolver) { m_viewportResolver = std::move(resolver); }
 
+    /// Finds the storage buffer named `name` (a bufferLayouts entry or a
+    /// registered one) for frame in flight `frameIndex`, for the arguments
+    /// of dispatch_indirect and draw_indirect passes; VK_NULL_HANDLE when
+    /// there is none.
+    using BufferLookup = std::function<VkBuffer(const std::string& name, uint32_t frameIndex)>;
+    void setBufferLookup(BufferLookup lookup) { m_bufferLookup = std::move(lookup); }
+
     /// Called after each pass's rendering has ended and its post-barriers
     /// are recorded, with the pass, the frame in flight and the command
     /// buffer, to record more commands there. Images are in the layouts the pass left them in, and
@@ -973,6 +992,7 @@ private:
     RenderStatsCollector*   m_stats = nullptr;
     Logger*                 m_logger = nullptr;
     ViewportResolver        m_viewportResolver;
+    BufferLookup            m_bufferLookup;
     PostPassHook            m_postPassHook;
 
     /// The area a graphics pass renders into this frame: all of its extent,

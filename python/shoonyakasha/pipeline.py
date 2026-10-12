@@ -52,7 +52,7 @@ RESOURCE_USAGES = frozenset({
 PASS_TYPES = frozenset({"graphics", "compute", "transfer"})
 
 #: What a pass may "require"; a device without it leaves the pass out.
-CAPABILITIES = frozenset({"rayQuery"})
+CAPABILITIES = frozenset({"rayQuery", "drawIndirectCount"})
 RESOURCE_KINDS = frozenset({"image", "buffer"})
 
 FIELD_TYPES = frozenset({

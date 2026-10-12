@@ -74,7 +74,9 @@ namespace JsonUtils {
 /// requires something missing is left out of the graph (its name is kept, so
 /// presets may still switch it off).
 struct PipelineCapabilities {
-    bool rayQuery = true;   // "rayQuery": VulkanDevice::hasRayQuery
+    bool rayQuery = true;            // "rayQuery": VulkanDevice::hasRayQuery
+    bool drawIndirectCount = true;   // "drawIndirectCount": VulkanDevice::hasDrawIndirectCount
+    bool multiDrawIndirect = true;   // several draws in one draw_indirect: the device feature
 };
 
 void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,

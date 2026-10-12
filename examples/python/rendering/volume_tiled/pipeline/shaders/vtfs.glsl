@@ -24,6 +24,7 @@
 #define VTFS_REDUCE_GROUPS 512u         // partial light bounds; the total is at [VTFS_REDUCE_GROUPS]
 #define VTFS_SORT_CHUNK 256u            // keys the radix sort orders per workgroup
 #define VTFS_MERGE_PASSES 12u           // 256 << 12 = VTFS_MAX_LIGHTS
+#define VTFS_MAX_GROUPS_X 65535u        // workgroups across x every Vulkan device allows
 
 // scene.custom.vtfs.* and the time (pipeline.json "Vtfs")
 #define VTFS_BLOCK          \

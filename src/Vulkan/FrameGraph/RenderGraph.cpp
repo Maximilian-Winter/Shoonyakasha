@@ -131,6 +131,8 @@ void RenderGraph::loadFromFile(const std::string& filePath) {
     m_logger->log(LogLevel::Info, "Loading render graph from '%s'", filePath.c_str());
     PipelineCapabilities capabilities;
     capabilities.rayQuery = m_device.hasRayQuery();
+    capabilities.drawIndirectCount = m_device.hasDrawIndirectCount();
+    capabilities.multiDrawIndirect = m_device.getEnabledFeatures().multiDrawIndirect == VK_TRUE;
     loadGraphFromFile(m_builder, filePath, capabilities);
     m_logger->log(LogLevel::Info, "Loaded %zu resources, %zu passes from JSON",
                   m_builder.getResourceDeclarations().size(),
@@ -614,7 +616,10 @@ void RenderGraph::createDotPathSSBOs(uint32_t /*maxFramesInFlight*/) {
         ssbo.savePolicy = desc.savePolicy;
 
         // Phase 3: Add TRANSFER_SRC_BIT when readback or gpu_to_cpu/bidirectional is needed
-        VkBufferUsageFlags usageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        // Any of them may hold the arguments of dispatch_indirect and
+        // draw_indirect passes.
+        VkBufferUsageFlags usageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
         if (desc.readbackPolicy.enabled ||
             desc.memoryPolicy.transferDirection == TransferDirection::GpuToCpu ||
             desc.memoryPolicy.transferDirection == TransferDirection::Bidirectional) {
@@ -2282,6 +2287,15 @@ void RenderGraph::initSystems() {
         if (!value) return false;
         fractions = *value;
         return true;
+    });
+
+    // Indirect arguments come from storage buffers, found as autoBindBuffer
+    // finds them: one per frame in flight where there are several.
+    m_executor.setBufferLookup([this](const std::string& name, uint32_t frameIndex) -> VkBuffer {
+        const auto it = m_registeredSSBOs.find(name);
+        if (it == m_registeredSSBOs.end() || it->second.buffers.empty()) return VK_NULL_HANDLE;
+        const auto& buffers = it->second.buffers;
+        return buffers[frameIndex < buffers.size() ? frameIndex : 0];
     });
 
     m_logger->log(LogLevel::Info, "DotPathResolver integration initialized");

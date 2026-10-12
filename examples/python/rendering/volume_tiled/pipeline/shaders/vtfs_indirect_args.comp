@@ -1,0 +1,24 @@
+#version 450
+// VTFS: the arguments of the passes that follow the number of active
+// clusters, which only the GPU knows:
+// - the light assignment's dispatch_indirect, one workgroup per active
+//   cluster. Vulkan promises 65535 workgroups across x; more active
+//   clusters than that continue in y, and vtfs_assign_body.glsl numbers the
+//   workgroups across both;
+// - the cluster box overlay's draw_indirect, 24 line vertices (a box's 12
+//   edges) for each active cluster.
+
+#include "vtfs_compute.glsl"
+
+layout(local_size_x = 1) in;
+
+VTFS_COUNTERS(readonly)
+VTFS_INDIRECT_ARGS(writeonly)
+
+void main() {
+    uint clusters = counters.activeClusters;
+    indirectArgs.assignGroups = clusters == 0u
+        ? uvec3(0u, 1u, 1u)
+        : uvec3(min(clusters, VTFS_MAX_GROUPS_X), (clusters + VTFS_MAX_GROUPS_X - 1u) / VTFS_MAX_GROUPS_X, 1u);
+    indirectArgs.boxDraw = uvec4(24u, clusters, 0u, 0u);   // vertices, instances, first vertex, first instance
+}

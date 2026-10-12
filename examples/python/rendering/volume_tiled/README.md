@@ -28,6 +28,7 @@ Then the scene is shaded forward: each pixel finds its cluster and loops over th
 | **B** | Light assignment through the BVH, or testing every light (the paper's method without the BVH) |
 | **V** | Image, lights per cluster, clusters, reference |
 | **M** | Lights moving or still |
+| **C** | The active clusters' boxes over the image, as lines |
 | **F2** | The panel on or off |
 | **P** | Screenshot into `volume_tiled_captures/` |
 
@@ -36,6 +37,7 @@ The panel at the left does the same and shows each stage's GPU time, from the en
 The views:
 - **Lights per cluster:** blue for none, green and red for more. Magenta is a cluster whose list is full: more than 1,024 lights reach it.
 - **Clusters:** each cluster in its own colour.
+- **Active clusters' boxes** (**C**): each active cluster's view-space box, drawn with one instance per cluster through an indirect draw whose instance count the GPU writes.
 - **Reference:** every light at every pixel, without clusters. It is as slow as forward shading without culling, so use it with a few thousand lights. It should look exactly like the image, which is how the culling was checked (below).
 
 ## Benchmark
@@ -49,19 +51,19 @@ One run of it, on an NVIDIA GeForce RTX 4060 Ti at 1920 × 1080 (selected column
 
 | Lights | Assignment | Range (m) | Sort | BVH build | Assign lights | Forward shading | Frame |
 |---:|---|---:|---:|---:|---:|---:|---:|
-| 1,024 | BVH | 1.851 | 0.144 | 0.026 | 0.020 | 0.777 | 3.75 |
-| 1,024 | every light | 1.851 | 0.025 | 0.007 | 0.020 | 0.755 | 3.54 |
-| 16,384 | BVH | 0.734 | 0.196 | 0.037 | 0.040 | 0.906 | 3.96 |
-| 16,384 | every light | 0.734 | 0.024 | 0.009 | 0.117 | 0.899 | 3.78 |
-| 65,536 | BVH | 0.463 | 0.242 | 0.046 | 0.057 | 1.226 | 4.34 |
-| 65,536 | every light | 0.463 | 0.024 | 0.007 | 0.443 | 1.219 | 4.52 |
-| 262,144 | BVH | 0.291 | 0.535 | 0.050 | 0.079 | 2.317 | 5.83 |
-| 1,048,576 | BVH | 0.184 | 1.747 | 0.086 | 0.167 | 4.699 | 9.75 |
+| 1,024 | BVH | 1.851 | 0.154 | 0.026 | 0.028 | 0.780 | 3.79 |
+| 1,024 | every light | 1.851 | 0.025 | 0.010 | 0.027 | 0.772 | 3.62 |
+| 16,384 | BVH | 0.734 | 0.173 | 0.039 | 0.047 | 0.915 | 4.06 |
+| 16,384 | every light | 0.734 | 0.023 | 0.007 | 0.127 | 0.938 | 3.94 |
+| 65,536 | BVH | 0.463 | 0.216 | 0.064 | 0.064 | 1.287 | 4.50 |
+| 65,536 | every light | 0.463 | 0.025 | 0.010 | 0.463 | 1.237 | 4.61 |
+| 262,144 | BVH | 0.291 | 0.554 | 0.050 | 0.098 | 2.393 | 5.99 |
+| 1,048,576 | BVH | 0.184 | 1.824 | 0.109 | 0.140 | 4.891 | 10.07 |
 
 What it shows:
-- **Assignment with and without the BVH.** Through the BVH, assignment grows from 0.02 to 0.17 ms while the lights grow a thousandfold. Testing every light grows with the count: 0.44 ms at 65,536 already, and the rest of the frame is the same.
+- **Assignment with and without the BVH.** Through the BVH, assignment grows from 0.03 to 0.14 ms while the lights grow a thousandfold. Testing every light grows with the count: 0.46 ms at 65,536 already, and the rest of the frame is the same.
 - **Up to 16,384 lights,** testing every light is cheaper overall: the sort costs more than the BVH saves. By 65,536 the BVH is cheaper.
-- **At a million lights, the sort is the largest part of building the tree,** as in the paper. There, VTFS with the BVH took 9.50 ms for a million lights on a GTX Titan X; the numbers are not comparable beyond that, with other GPUs, shading and settings.
+- **At a million lights, the sort is the largest part of building the tree,** as in the paper. There, VTFS with the BVH took 9.50 ms for a million lights on a GTX Titan X, here 10.07 ms; the numbers are not comparable beyond that, with other GPUs, shading and settings.
 - **Forward shading grows even at a fixed density.** The clusters stay the size of a screen tile while the lights shrink, so each cluster lists more lights that reach only part of it.
 
 In the "every light" rows, the sort and BVH build columns are those passes disabled: a disabled pass still runs its barriers.
@@ -76,7 +78,7 @@ In the "every light" rows, the sort and BVH build columns are those passes disab
 
 The paper's algorithm, with these differences:
 - **Marking opaque clusters.** The paper draws the opaque geometry a second time with early depth testing to mark clusters. Here one compute thread per depth texel marks the same clusters without drawing. Transparent geometry is drawn, as in the paper, with early depth testing against the prepass.
-- **Assignment workgroups.** The engine cannot dispatch from a count the GPU wrote, so a fixed 4,096 workgroups step through however many clusters are active, instead of one workgroup per active cluster.
+- **Assignment workgroups.** As in the paper, one workgroup per active cluster, dispatched indirectly (`dispatch_indirect`) from the count the cluster gathering wrote. Past 65,535 active clusters the workgroups continue in a second dimension, since Vulkan only promises 65,535 across one.
 - **A thin prepass.** Besides depth it writes normals and motion vectors, so the default pipeline's sun shadow mask, ambient occlusion and TAA run unchanged.
 - **Point lights.** The VTFS lights are point lights without shadows, made on the GPU from their index. The scene's own lights (a sun and up to 128 more) are shaded as in the default pipeline, without clusters.
 

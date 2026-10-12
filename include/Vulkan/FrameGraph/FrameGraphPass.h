@@ -388,6 +388,8 @@ struct ExecutionDesc {
     //   "draw"               - Draw with specified vertex count
     //   "compute_dispatch"   - Compute shader dispatch
     //   "compute_image"      - Compute dispatch based on image dimensions
+    //   "dispatch_indirect"  - Compute dispatch whose group counts a buffer holds
+    //   "draw_indirect"      - Draws whose arguments (and count) a buffer holds
     //   "scene_geometry"     - Hybrid: framework binds, callback draws
     //   "opaque_geometry"    - Built-in: render opaque entities
     //   "transparent_geometry" - Built-in: render transparent entities (back-to-front)
@@ -409,6 +411,20 @@ struct ExecutionDesc {
     // For "compute_dispatch" type
     std::array<uint32_t, 3>     workgroupSize = {16, 16, 1};
     std::array<DispatchDimension, 3> dispatch;      // x, y, z group counts
+
+    // For "dispatch_indirect" and "draw_indirect": the arguments, in a
+    // storage buffer of the pipeline's bufferLayouts that an earlier pass
+    // writes. A VkDispatchIndirectCommand, or drawCount VkDrawIndirectCommands
+    // drawStride bytes apart.
+    std::string argumentBuffer;
+    uint32_t    argumentOffset = 0;
+    uint32_t    drawCount = 1;
+    uint32_t    drawStride = 16;
+    // For "draw_indirect" with "count": vkCmdDrawIndirectCount reads the
+    // number of draws, at most maxDrawCount, from countBuffer.
+    std::string countBuffer;
+    uint32_t    countOffset = 0;
+    uint32_t    maxDrawCount = 0;
 
     // For built-in geometry types (opaque_geometry, transparent_geometry, shadow_casters)
     std::string sortMode = "none";          // "none", "front_to_back", "back_to_front"

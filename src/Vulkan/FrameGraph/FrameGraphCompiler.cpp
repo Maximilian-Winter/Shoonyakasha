@@ -40,10 +40,49 @@ ExecutionKind executionKindOf(const std::string& type) {
     if (type == "draw")             return ExecutionKind::Draw;
     if (type == "compute_dispatch") return ExecutionKind::ComputeDispatch;
     if (type == "compute_image")    return ExecutionKind::ComputeImage;
+    if (type == "dispatch_indirect") return ExecutionKind::DispatchIndirect;
+    if (type == "draw_indirect")    return ExecutionKind::DrawIndirect;
     if (type == "manual" || type.empty()) return ExecutionKind::Manual;
     if (type == "scene_geometry" || type == "ui_canvas" || isEntityGeometryExecutionType(type))
         return ExecutionKind::SceneRenderer;
     return ExecutionKind::Unknown;
+}
+
+std::string indirectArgumentsError(const std::vector<PassDeclaration>& passes,
+                                   const std::vector<BufferLayoutDesc>& layouts,
+                                   const std::unordered_map<std::string, CompiledBufferLayout>& compiled) {
+    auto check = [&](const PassDeclaration& pass, const std::string& name, uint64_t needed) -> std::string {
+        const auto desc = std::find_if(layouts.begin(), layouts.end(),
+                                       [&](const BufferLayoutDesc& d) { return d.name == name; });
+        if (desc == layouts.end()) return "";
+        const auto it = compiled.find(name);
+        if (it == compiled.end() || it->second.usage != BufferUsageType::StorageBuffer) {
+            return "Pass '" + pass.name + "': indirect arguments come from '" + name +
+                   "', which is not a storage buffer";
+        }
+        const uint64_t size = static_cast<uint64_t>(it->second.totalSize) * std::max(desc->elementCount, 1u);
+        if (size < needed) {
+            return "Pass '" + pass.name + "': '" + name + "' holds " + std::to_string(size) +
+                   " bytes; its indirect arguments need " + std::to_string(needed);
+        }
+        return "";
+    };
+    for (const auto& pass : passes) {
+        const auto& exec = pass.execution;
+        std::string error;
+        if (exec.type == "dispatch_indirect") {
+            error = check(pass, exec.argumentBuffer, uint64_t{exec.argumentOffset} + 12);
+        } else if (exec.type == "draw_indirect") {
+            const uint32_t draws = exec.countBuffer.empty() ? exec.drawCount : exec.maxDrawCount;
+            error = check(pass, exec.argumentBuffer,
+                          uint64_t{exec.argumentOffset} + uint64_t{std::max(draws, 1u) - 1} * exec.drawStride + 16);
+            if (error.empty() && !exec.countBuffer.empty()) {
+                error = check(pass, exec.countBuffer, uint64_t{exec.countOffset} + 4);
+            }
+        }
+        if (!error.empty()) return error;
+    }
+    return "";
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -465,8 +504,17 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         return result;
     }
 
-    // Stage 3: Order passes by the subresources they read and write
-    const auto dependencies = passDependencies(passes, scheduled);
+    // The buffers each pass's descriptors and declared accesses touch, for
+    // the indirect passes' order (stage 3) and the buffer barriers (5.1).
+    const auto bufferAccesses = describeBufferAccesses(passes, resources, builder.getDescriptorSetLayouts(),
+                                                       reflectShaderBufferUse(passes, [&](const std::string& name) {
+                                                           return manualPipelines.count(name) > 0;
+                                                       }));
+
+    // Stage 3: Order passes by the subresources they read and write, and
+    // indirect passes after the writers of their arguments
+    auto dependencies = passDependencies(passes, scheduled);
+    addIndirectArgumentDependencies(passes, bufferAccesses, dependencies);
     if (!sortPasses(passes, dependencies, result.executionOrder, result.errorMessage)) {
         m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
         return result;
@@ -551,11 +599,7 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     // Stage 5.1: Buffer barriers, from the buffers each pass's descriptors
     // and declared accesses touch
     {
-        const auto table = describeBufferAccesses(passes, resources, builder.getDescriptorSetLayouts(),
-                                                  reflectShaderBufferUse(passes, [&](const std::string& name) {
-                                                      return manualPipelines.count(name) > 0;
-                                                  }));
-        const auto memoryBarriers = planBufferBarriers(result.executionOrder, table);
+        const auto memoryBarriers = planBufferBarriers(result.executionOrder, bufferAccesses);
         for (uint32_t pi = 0; pi < passes.size(); ++pi) {
             result.compiledPasses[pi].memoryBarrier = memoryBarriers[pi];
         }
@@ -634,6 +678,13 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
                 return result;
             }
         }
+    }
+
+    // Stage 11.1: Indirect passes' argument buffers hold their arguments
+    result.errorMessage = indirectArgumentsError(passes, bufferLayoutDescs, result.bufferLayouts);
+    if (!result.errorMessage.empty()) {
+        m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+        return result;
     }
 
     // Stage 12: Check each shader's declared interface against the JSON

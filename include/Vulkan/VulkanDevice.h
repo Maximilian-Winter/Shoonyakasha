@@ -79,6 +79,13 @@ public:
     /// them off, to try the fallbacks.
     bool hasRayQuery() const { return m_rayQuery; }
 
+    /// vkCmdDrawIndirectCount, which reads the number of draws from a buffer
+    /// (the Vulkan 1.2 feature drawIndirectCount), enabled when the device
+    /// has it. multiDrawIndirect and drawIndirectFirstInstance, which let one
+    /// indirect call make several draws and the GPU choose firstInstance, are
+    /// in getEnabledFeatures().
+    bool hasDrawIndirectCount() const { return m_drawIndirectCount; }
+
     /// The physical device's limits, such as maxPushConstantsSize.
     const VkPhysicalDeviceLimits& getLimits() const { return m_limits; }
 
@@ -106,6 +113,7 @@ private:
     QueueFamilyIndices m_queueFamilyIndices;
     VkPhysicalDeviceFeatures m_enabledFeatures{};
     bool m_rayQuery = false;
+    bool m_drawIndirectCount = false;
     VkPhysicalDeviceLimits m_limits{};
     VkPipelineCache m_pipelineCache = VK_NULL_HANDLE;
     std::string m_pipelineCachePath;

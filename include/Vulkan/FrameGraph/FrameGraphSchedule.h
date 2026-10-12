@@ -224,6 +224,19 @@ BufferAccessTable describeBufferAccesses(
     const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
     const ShaderBufferQuery& query = {});
 
+/// Whether the pass's command reads its arguments from a buffer:
+/// dispatch_indirect and draw_indirect.
+bool readsIndirectArguments(const PassDeclaration& pass);
+
+/// Make each indirect pass depend on the last earlier-declared pass that
+/// writes its argument or count buffer, as `table` records them. The buffer
+/// is bound through descriptors, which passDependencies does not see; with
+/// the edge, the writer is ordered first and is not culled while the
+/// indirect pass runs. Lists stay sorted and free of duplicates.
+void addIndirectArgumentDependencies(const std::vector<PassDeclaration>& passes,
+                                     const BufferAccessTable& table,
+                                     std::vector<std::vector<uint32_t>>& dependencies);
+
 /// A global memory barrier. Empty (no stages) when none is needed.
 struct MemoryBarrierInfo {
     VkPipelineStageFlags srcStage  = 0;

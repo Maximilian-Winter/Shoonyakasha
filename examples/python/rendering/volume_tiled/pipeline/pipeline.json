@@ -833,6 +833,24 @@
       "memory": {
         "location": "device_local"
       }
+    },
+    "VtfsIndirectArgs": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 1,
+      "fields": [
+        {
+          "name": "assignGroups",
+          "type": "uvec3"
+        },
+        {
+          "name": "boxDraw",
+          "type": "uvec4"
+        }
+      ],
+      "memory": {
+        "location": "device_local"
+      }
     }
   },
   "entityDataBindings": {
@@ -1511,6 +1529,15 @@
           ],
           "name": "Camera",
           "autoBindBuffer": "Camera"
+        },
+        {
+          "binding": 17,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "VtfsIndirectArgs",
+          "autoBindBuffer": "VtfsIndirectArgs"
         }
       ]
     },
@@ -1635,6 +1662,37 @@
           "name": "gDepth",
           "autoBindResource": "gDepth",
           "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
+    "vtfsBoxesSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "vertex"
+          ],
+          "name": "Camera",
+          "autoBindBuffer": "Camera"
+        },
+        {
+          "binding": 1,
+          "type": "storage_buffer",
+          "stages": [
+            "vertex"
+          ],
+          "name": "VtfsUniqueClusters",
+          "autoBindBuffer": "VtfsUniqueClusters"
+        },
+        {
+          "binding": 2,
+          "type": "storage_buffer",
+          "stages": [
+            "vertex"
+          ],
+          "name": "VtfsClusterAABBs",
+          "autoBindBuffer": "VtfsClusterAABBs"
         }
       ]
     }
@@ -2779,19 +2837,37 @@
       "hasSideEffects": true
     },
     {
-      "name": "VtfsAssignBvh",
+      "name": "VtfsIndirectArgs",
       "type": "compute",
       "execution": {
         "type": "compute_dispatch",
         "workgroupSize": [
-          32,
+          1,
           1,
           1
         ],
         "dispatch": {
-          "x": 4096,
+          "x": 1,
           "y": 1,
           "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/vtfs_indirect_args.comp.spv"
+      },
+      "descriptorSets": [
+        "vtfsComputeSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "VtfsAssignBvh",
+      "type": "compute",
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "VtfsIndirectArgs",
+          "offset": 0
         }
       },
       "pipeline": {
@@ -2806,16 +2882,10 @@
       "name": "VtfsAssignAll",
       "type": "compute",
       "execution": {
-        "type": "compute_dispatch",
-        "workgroupSize": [
-          256,
-          1,
-          1
-        ],
-        "dispatch": {
-          "x": 4096,
-          "y": 1,
-          "z": 1
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "VtfsIndirectArgs",
+          "offset": 0
         }
       },
       "pipeline": {
@@ -3445,6 +3515,41 @@
           "offset": 0,
           "size": 184
         }
+      ]
+    },
+    {
+      "name": "VtfsClusterBoxes",
+      "type": "graphics",
+      "enabled": false,
+      "execution": {
+        "type": "draw_indirect",
+        "arguments": {
+          "buffer": "VtfsIndirectArgs",
+          "offset": 16
+        }
+      },
+      "outputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "color_blend"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_read"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/vtfs_cluster_boxes.vert.spv",
+        "fragmentShader": "shaders/vtfs_cluster_boxes.frag.spv",
+        "vertexInput": "none",
+        "topology": "line_list",
+        "depthTest": true,
+        "depthWrite": false,
+        "depthCompareOp": "less_or_equal",
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "vtfsBoxesSet"
       ]
     },
     {

@@ -44,6 +44,10 @@ layout(set = 0, binding = 16) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 #define VTFS_KEYS_B(q) layout(std430, set = 0, binding = 12) q buffer VtfsKeysB { uint keysB[]; };
 #define VTFS_VALUES_A(q) layout(std430, set = 0, binding = 13) q buffer VtfsValuesA { uint valuesA[]; };
 #define VTFS_VALUES_B(q) layout(std430, set = 0, binding = 14) q buffer VtfsValuesB { uint valuesB[]; };
+// Arguments for the passes that follow the number of active clusters
+// (vtfs_indirect_args.comp): the light assignment's dispatch_indirect at
+// offset 0, the cluster box overlay's draw_indirect at offset 16.
+#define VTFS_INDIRECT_ARGS(q) layout(std430, set = 0, binding = 17) q buffer VtfsIndirectArgs {     uvec3 assignGroups;    /* VkDispatchIndirectCommand */     uvec4 boxDraw;         /* VkDrawIndirectCommand */ } indirectArgs;
 // The light BVH's inner nodes (vtfs.glsl).
 #define VTFS_BVH_NODES_BUFFER(q) layout(std430, set = 0, binding = 15) q buffer VtfsBvhNodes { AABB bvhNodes[]; };
 

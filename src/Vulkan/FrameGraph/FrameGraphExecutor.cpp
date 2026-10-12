@@ -618,6 +618,37 @@ void FrameGraphExecutor::executeAutoCallback(
         break;
     }
 
+    case ExecutionKind::DispatchIndirect:
+    case ExecutionKind::DrawIndirect: {
+        // Arguments an earlier pass wrote into a storage buffer; the graph
+        // has ordered this pass after it and planned the barrier.
+        auto lookup = [&](const std::string& name) -> VkBuffer {
+            VkBuffer buffer = m_bufferLookup ? m_bufferLookup(name, ctx.frameIndex) : VK_NULL_HANDLE;
+            if (buffer == VK_NULL_HANDLE) {
+                m_logger->logEvery(5.0f, LogLevel::Error,
+                    "Pass '%s': no storage buffer '%s' for its indirect arguments; nothing recorded",
+                    passDecl.name.c_str(), name.c_str());
+            }
+            return buffer;
+        };
+        VkBuffer arguments = lookup(exec.argumentBuffer);
+        if (arguments == VK_NULL_HANDLE) break;
+        if (compiledPass.executionKind == ExecutionKind::DispatchIndirect) {
+            vkCmdDispatchIndirect(commandBuffer, arguments, exec.argumentOffset);
+            countDispatch();
+        } else if (!exec.countBuffer.empty()) {
+            VkBuffer count = lookup(exec.countBuffer);
+            if (count == VK_NULL_HANDLE) break;
+            vkCmdDrawIndirectCount(commandBuffer, arguments, exec.argumentOffset, count, exec.countOffset,
+                                   exec.maxDrawCount, exec.drawStride);
+            countIndirectDraws(1);
+        } else {
+            vkCmdDrawIndirect(commandBuffer, arguments, exec.argumentOffset, exec.drawCount, exec.drawStride);
+            countIndirectDraws(exec.drawCount);
+        }
+        break;
+    }
+
     case ExecutionKind::SceneRenderer:
         // Call scene renderer callback if registered. For the entity geometry
         // types RenderGraph auto-registers it, using the same

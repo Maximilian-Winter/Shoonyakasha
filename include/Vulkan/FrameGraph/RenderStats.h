@@ -38,7 +38,8 @@ struct DrawCounts {
     uint32_t drawCalls  = 0;
     uint32_t dispatches = 0;
     /// Vertex (or, for indexed draws, index) count times instance count,
-    /// summed over the draws.
+    /// summed over the draws. Draws whose arguments the GPU writes
+    /// (draw_indirect) add nothing: their counts are not known on the CPU.
     uint64_t vertices   = 0;
 
     DrawCounts& operator+=(const DrawCounts& o) {
@@ -63,6 +64,12 @@ inline void countDraw(uint32_t vertexCount, uint32_t instanceCount = 1) {
         ++counts->drawCalls;
         counts->vertices += static_cast<uint64_t>(vertexCount) * instanceCount;
     }
+}
+
+/// Count `draws` draws whose arguments the GPU writes into the pass being
+/// recorded: draw calls without vertices.
+inline void countIndirectDraws(uint32_t draws) {
+    if (auto* counts = RenderStatsCounting::active) counts->drawCalls += draws;
 }
 
 /// Count a compute dispatch into the pass being recorded.
