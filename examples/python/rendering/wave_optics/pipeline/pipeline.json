@@ -1,0 +1,184 @@
+{
+  "version": 3,
+  "name": "WaveOptics",
+  "description": "A spectral, polarised path tracer whose diffraction gratings and thin films respond to the coherence of the light that reaches them. Settings are scene.custom.wo.* values; see README.md.",
+  "bufferLayouts": {
+    "Camera": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "invView", "type": "mat4", "source": "scene.camera.invView" },
+        { "name": "invProj", "type": "mat4", "source": "scene.camera.invProj" },
+        { "name": "position", "type": "vec4", "source": "scene.camera.positionVec4" },
+        { "name": "resolution", "type": "vec2", "source": "scene.screen.renderResolution" },
+        { "name": "frame", "type": "uint", "source": "scene.time.frame" }
+      ]
+    },
+    "Settings": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "reset", "type": "uint", "source": "scene.custom.wo.reset", "default": 0 },
+        { "name": "maxBounces", "type": "uint", "source": "scene.custom.wo.maxBounces", "default": 6 },
+        { "name": "view", "type": "uint", "source": "scene.custom.wo.view", "default": 0 },
+        { "name": "toneMapper", "type": "uint", "source": "scene.custom.wo.toneMapper", "default": 2 },
+        { "name": "exposure", "type": "float", "source": "scene.custom.wo.exposure", "default": 1.0 },
+        { "name": "environmentIntensity", "type": "float", "source": "scene.custom.wo.environmentIntensity", "default": 1.0 },
+        { "name": "sunAngle", "type": "float", "source": "scene.custom.wo.sunAngle", "default": 0.27 },
+        { "name": "maxSamples", "type": "float", "source": "scene.custom.wo.maxSamples", "default": 0.0 },
+        { "name": "polariser", "type": "float", "source": "scene.custom.wo.polariser", "default": -1000.0 },
+        { "name": "indirectAngle", "type": "float", "source": "scene.custom.wo.indirectAngle", "default": 5.0 },
+        { "name": "pad0", "type": "float", "source": "const.0" },
+        { "name": "pad1", "type": "float", "source": "const.0" }
+      ]
+    },
+    "Materials": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "slots", "type": "vec4", "source": "scene.custom.wo.slot[i]", "arrayCount": 24 }
+      ]
+    },
+    "Lights": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "lightCount", "type": "uint", "source": "scene.lights.count" },
+        { "name": "pad0", "type": "float", "source": "const.0" },
+        { "name": "pad1", "type": "float", "source": "const.0" },
+        { "name": "pad2", "type": "float", "source": "const.0" }
+      ]
+    },
+    "SceneLights": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 8192,
+      "fields": [
+        { "name": "positionType", "type": "vec4" },
+        { "name": "colorIntensity", "type": "vec4" },
+        { "name": "directionRange", "type": "vec4" },
+        { "name": "attenuation", "type": "vec4" },
+        { "name": "source", "type": "vec4" },
+        { "name": "shape", "type": "vec4" }
+      ],
+      "source": { "type": "scene", "data": "lights" }
+    },
+    "RayInstances": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 16384,
+      "fields": [
+        { "name": "geometry", "type": "uvec4" },
+        { "name": "vertexLayout", "type": "uvec4" },
+        { "name": "baseColor", "type": "vec4" },
+        { "name": "emissive", "type": "vec4" },
+        { "name": "surface", "type": "vec4" },
+        { "name": "textures", "type": "uvec4" }
+      ],
+      "source": { "type": "scene", "data": "rayInstances" }
+    }
+  },
+  "samplers": {
+    "nearestClamp": {
+      "magFilter": "nearest",
+      "minFilter": "nearest",
+      "mipmapMode": "nearest",
+      "addressMode": "clamp_to_edge"
+    }
+  },
+  "descriptorSetLayouts": {
+    "accumulationWriteSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_image", "stages": ["compute"], "name": "accumulation",
+          "autoBindResource": "accumulation" }
+      ]
+    },
+    "settingsSet": {
+      "bindings": [
+        { "binding": 0, "type": "uniform_buffer", "stages": ["compute"], "name": "Camera", "autoBindBuffer": "Camera" },
+        { "binding": 1, "type": "uniform_buffer", "stages": ["compute"], "name": "Settings", "autoBindBuffer": "Settings" },
+        { "binding": 2, "type": "uniform_buffer", "stages": ["compute"], "name": "Materials",
+          "autoBindBuffer": "Materials" }
+      ]
+    },
+    "lightsSet": {
+      "bindings": [
+        { "binding": 0, "type": "uniform_buffer", "stages": ["compute"], "name": "Lights", "autoBindBuffer": "Lights" },
+        { "binding": 1, "type": "storage_buffer", "stages": ["compute"], "name": "SceneLights",
+          "autoBindBuffer": "SceneLights" }
+      ]
+    },
+    "sceneHitsSet": {
+      "bindings": [
+        { "binding": 0, "type": "acceleration_structure", "stages": ["compute"], "name": "scene" },
+        { "binding": 1, "type": "storage_buffer", "stages": ["compute"], "name": "RayInstances",
+          "autoBindBuffer": "RayInstances" },
+        { "binding": 2, "type": "combined_image_sampler", "stages": ["compute"], "name": "sceneTextures",
+          "count": 4096, "source": "sceneTextures" }
+      ]
+    },
+    "iblSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["compute"], "name": "irradianceMap" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": ["compute"], "name": "prefilterMap" },
+        { "binding": 2, "type": "combined_image_sampler", "stages": ["compute"], "name": "brdfLUT" }
+      ]
+    },
+    "displaySet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "accumulation",
+          "autoBindResource": "accumulation", "autoBindSampler": "nearestClamp" },
+        { "binding": 1, "type": "uniform_buffer", "stages": ["fragment"], "name": "Settings", "autoBindBuffer": "Settings" }
+      ]
+    }
+  },
+  "resources": [
+    { "name": "swapchain", "kind": "image", "imported": true },
+    { "name": "accumulation", "kind": "image", "image": { "format": "R32G32B32A32_SFLOAT", "persistent": true } }
+  ],
+  "passes": [
+    {
+      "name": "WaveTrace",
+      "type": "compute",
+      "requires": ["rayQuery"],
+      "execution": { "type": "compute_image", "workgroupSize": [8, 8, 1] },
+      "outputs": [
+        { "resource": "accumulation", "usage": "shader_read_write" }
+      ],
+      "pipeline": { "computeShader": "shaders/wave.comp.spv" },
+      "descriptorSets": ["accumulationWriteSet", "settingsSet", "lightsSet", "sceneHitsSet", "iblSet"]
+    },
+    {
+      "name": "Display",
+      "type": "graphics",
+      "execution": { "type": "fullscreen" },
+      "inputs": [
+        { "resource": "accumulation", "usage": "shader_read" }
+      ],
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_write", "clear": [0.0, 0.0, 0.0, 1.0] }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/display.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": ["displaySet"]
+    },
+    {
+      "name": "UIOverlay",
+      "type": "graphics",
+      "execution": { "type": "ui_canvas" },
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_blend", "present": true }
+      ]
+    }
+  ]
+}

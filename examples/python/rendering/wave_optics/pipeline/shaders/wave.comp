@@ -1,0 +1,545 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// A spectral, polarised path tracer with coherence-aware materials, one path
+// per pixel per frame averaged into `accumulation` (rgb the mean, a the
+// number of paths).
+//
+// Each path carries four wavelengths (spectral.glsl) and, for each, the
+// first row of the Mueller matrix chain from the camera back to the current
+// surface: what the camera (through its polariser, when there is one)
+// measures of a Stokes vector arriving there, in the frame of the light's
+// travel. Light from the scene lights is connected at every surface towards
+// the light's centre, with the transverse coherence its source size and
+// distance give (optics.glsl): diffraction gratings spread each order into
+// a lobe as wide as the source appears, glossy lobes widen with it, and thin
+// films show interference fringes only as far as that coherence reaches
+// across the film. The path continues in a direction drawn from the
+// surface, for light that is coherent as if from a source of angular radius
+// settings.indirectAngle. A grating that bends the path for the hero
+// wavelength alone keeps only that wavelength from there on. Emissive
+// surfaces count only where the camera sees them directly.
+
+#extension GL_EXT_ray_query : require
+
+#include "spectral.glsl"
+#include "optics.glsl"
+#include "metals.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D accumulation;
+
+layout(set = 1, binding = 0) uniform Camera {
+    mat4 invView;
+    mat4 invProj;
+    vec4 position;
+    vec2 resolution;
+    uint frame;
+} camera;
+layout(set = 1, binding = 1) uniform Settings {
+    uint reset;            // 1: start the average over
+    uint maxBounces;
+    uint view;             // 0 image, 1 coherence width of the lamps' light
+    uint toneMapper;
+    float exposure;
+    float environmentIntensity;
+    float sunAngle;        // angular radius of directional lights, degrees
+    float maxSamples;
+    float polariser;       // angle of the camera's polariser in degrees; below -360 none
+    float indirectAngle;   // angular radius of the sources of light that is not a scene light, degrees
+    float pad0;
+    float pad1;
+} settings;
+layout(set = 1, binding = 2) uniform Materials {
+    vec4 slots[24];        // per slot: (entity, type, metal, roughness), (pitch, depth, film index,
+                           // film thickness), (grating centre xyz, substrate index)
+} materials;
+
+struct SceneLight {
+    vec4 positionType;
+    vec4 colorIntensity;
+    vec4 directionRange;
+    vec4 attenuation;
+    vec4 source;
+    vec4 shape;
+};
+layout(set = 2, binding = 0) uniform Lights { uint lightCount; } lights;
+layout(set = 2, binding = 1, std430) readonly buffer SceneLights { SceneLight sceneLights[]; };
+
+layout(set = 3, binding = 0) uniform accelerationStructureEXT scene;
+#define SK_SCENE_HITS_SET 3
+#define SK_RAY_INSTANCES_BINDING 1
+#define SK_SCENE_TEXTURES_BINDING 2
+#include "sk/scene_hits.glsl"
+
+layout(set = 4, binding = 1) uniform samplerCube prefilterMap;
+
+const uint TYPE_DIFFUSE = 0u;
+const uint TYPE_CONDUCTOR = 1u;
+const uint TYPE_GRATING = 2u;
+const uint TYPE_FILM = 3u;
+const int MAX_ORDER = 4;
+const float RAY_FAR = 1e4;
+
+// ── Random numbers ───────────────────────────────────────────────────────
+
+uint rngState;
+uint pcg(uint v) {
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+float random() {
+    rngState = pcg(rngState);
+    return float(rngState >> 8) * (1.0 / 16777216.0);
+}
+vec2 gaussian2() {
+    float r = sqrt(-2.0 * log(max(random(), 1e-9)));
+    float phi = 2.0 * PI * random();
+    return r * vec2(cos(phi), sin(phi));
+}
+
+// ── Materials ────────────────────────────────────────────────────────────
+
+struct Material {
+    uint type;
+    vec3 albedo;
+    int metal;             // 0 gold, 1 silver, 2 copper, 3 aluminium; -1 none
+    float roughness;
+    float pitch;           // grating period, micrometres
+    float depth;           // grating depth peak to valley, micrometres
+    float filmIndex;
+    float filmThickness;   // micrometres
+    vec3 center;           // a grating's grooves are circles about this point
+    float substrateIndex;
+};
+
+Material materialOf(SkHit hit) {
+    Material m;
+    m.type = TYPE_DIFFUSE;
+    m.albedo = hit.baseColor;
+    m.metal = -1;
+    m.roughness = hit.roughness;
+    for (int i = 0; i < 8; ++i) {
+        vec4 a = materials.slots[3 * i];
+        if (a.y < 0.5 || uint(a.x + 0.5) != hit.entity) continue;
+        vec4 b = materials.slots[3 * i + 1], c = materials.slots[3 * i + 2];
+        m.type = uint(a.y + 0.5);
+        m.metal = int(a.z + 0.5) - 1;
+        m.roughness = a.w;
+        m.pitch = b.x;
+        m.depth = b.y;
+        m.filmIndex = b.z;
+        m.filmThickness = b.w;
+        m.center = c.xyz;
+        m.substrateIndex = c.w;
+    }
+    return m;
+}
+
+vec2 metalIor(int metal, float lambda) {
+    float x = clamp((lambda - 380.0) / 20.0, 0.0, 19.999);
+    int i = int(x);
+    float t = x - float(i);
+    if (metal == 0) return mix(GOLD_IOR[i], GOLD_IOR[i + 1], t);
+    if (metal == 1) return mix(SILVER_IOR[i], SILVER_IOR[i + 1], t);
+    if (metal == 2) return mix(COPPER_IOR[i], COPPER_IOR[i + 1], t);
+    return mix(ALUMINIUM_IOR[i], ALUMINIUM_IOR[i + 1], t);
+}
+
+vec2 substrateIor(Material m, float lambda) {
+    return m.metal >= 0 ? metalIor(m.metal, lambda) : vec2(m.substrateIndex, 0.0);
+}
+
+// The reflection Mueller matrix (s-p frame) of a surface's interface for
+// light arriving at cosine cosI, coherent over sigma micrometres.
+mat4 interfaceMueller(Material m, float cosI, float lambda, float sigma) {
+    if (m.type != TYPE_FILM) {
+        Fresnel f = fresnel(vec2(1.0, 0.0), metalIor(max(m.metal, 0), lambda), cosI);
+        return muellerFromAmplitudes(f.rs, f.rp);
+    }
+    // A film over a substrate: the reflection from its top, and the one from
+    // its bottom, delayed by the optical path through the film. Coherently
+    // they interfere; their fringes are as visible as the light is coherent
+    // across the lateral shear between them (Steinberg & Yan 2021, Eq. 18).
+    vec2 n1 = vec2(m.filmIndex, 0.0);
+    Fresnel top = fresnel(vec2(1.0, 0.0), n1, cosI);
+    float cos1 = max(top.cosT.x, 1e-4);
+    Fresnel bottom = fresnel(n1, substrateIor(m, lambda), cos1);
+    Fresnel back = fresnel(n1, vec2(1.0, 0.0), cos1);
+    float k = 2.0 * PI / (lambda * 1e-3);
+    vec2 delay = cexpi(2.0 * k * m.filmIndex * m.filmThickness * cos1);
+    vec2 rs2 = cmul(cmul(cmul(top.ts, bottom.rs), back.ts), delay);
+    vec2 rp2 = cmul(cmul(cmul(top.tp, bottom.rp), back.tp), delay);
+    float sin1 = sqrt(max(0.0, 1.0 - cos1 * cos1));
+    float shear = 2.0 * m.filmThickness * sin1 / cos1 * cosI;
+    float visibility = exp(-0.5 * shear * shear / max(sigma * sigma, 1e-12));
+    mat4 together = muellerFromAmplitudes(top.rs + rs2, top.rp + rp2);
+    mat4 apart = muellerFromAmplitudes(top.rs, top.rp) + muellerFromAmplitudes(rs2, rp2);
+    return visibility * together + (1.0 - visibility) * apart;
+}
+
+// GGX, of alpha = roughness^2, with Smith masking.
+float ggxD(float alpha, float cosH) {
+    float a2 = alpha * alpha;
+    float d = cosH * cosH * (a2 - 1.0) + 1.0;
+    return a2 / (PI * d * d);
+}
+float smithG1(float alpha, float cosV) {
+    float a2 = alpha * alpha;
+    return 2.0 * cosV / (cosV + sqrt(a2 + (1.0 - a2) * cosV * cosV));
+}
+
+// The grating's direction across its grooves at a point.
+vec3 gratingDirection(Material m, vec3 position, vec3 N, vec3 fallback) {
+    vec3 radial = position - m.center;
+    radial -= N * dot(radial, N);
+    float len = length(radial);
+    return len > 1e-6 ? radial / len : fallback;
+}
+
+// The diffraction efficiency of order n of a sinusoidal grating of depth d
+// (peak to valley), in Kirchhoff's scalar theory: J_n(k d / 2 (cos i + cos o))^2.
+float orderEfficiency(int n, float k, float depth, float cosI, float cosO) {
+    float j = besselJ(abs(n), k * 0.5 * depth * (cosI + cosO));
+    return j * j;
+}
+
+// The value (BRDF times cosI, a scalar times the Mueller matrix in the
+// frame of `s`) of light from wi reflected towards wo, coherent over sigma,
+// from a source of angular radius a, which widens the lobes.
+struct Response {
+    mat4 mueller;
+    vec3 s;
+};
+
+Response evaluate(Material m, vec3 N, vec3 position, vec3 wi, vec3 wo, float lambda, float sigma, float a,
+                  vec3 fallback) {
+    Response r;
+    r.mueller = mat4(0.0);
+    vec3 h = normalize(wi + wo);
+    r.s = sAxis(wi, h, fallback);
+    float cosI = dot(N, wi), cosO = dot(N, wo);
+    if (cosI <= 0.0 || cosO <= 0.0) return r;
+
+    if (m.type == TYPE_DIFFUSE) {
+        float albedo = rgbToSpectrum(m.albedo, lambda);
+        r.mueller = mat4(0.0);
+        r.mueller[0][0] = albedo / PI * cosI;
+        return r;
+    }
+    float cosH = max(dot(wi, h), 1e-4);
+    mat4 fresnelMueller = interfaceMueller(m, cosH, lambda, sigma);
+
+    if (m.type == TYPE_GRATING) {
+        // Each order n leaves where the tangential direction cosines satisfy
+        // the grating equation u_o + u_i = n lambda / pitch along the grating
+        // direction, spread by a Gaussian of deviation a / 2 (the source's
+        // angular spread) through the light's coherence.
+        vec3 e = gratingDirection(m, position, N, fallback);
+        vec3 ui = wi - N * cosI, uo = wo - N * cosO;
+        float k = 2.0 * PI / (lambda * 1e-3);
+        float spread = max(0.5 * a, 1e-4);
+        float sum = 0.0;
+        for (int n = -MAX_ORDER; n <= MAX_ORDER; ++n) {
+            vec3 center = -ui + float(n) * (lambda * 1e-3 / m.pitch) * e;
+            if (dot(center, center) >= 1.0) continue;
+            vec3 d = uo - center;
+            float g = exp(-0.5 * dot(d, d) / (spread * spread)) / (2.0 * PI * spread * spread);
+            sum += orderEfficiency(n, k, m.depth, cosI, sqrt(1.0 - dot(center, center))) * g;
+        }
+        // The sum is a density over the direction cosines of wo, which is
+        // the radiance per unit of irradiance; times cosI.
+        r.mueller = fresnelMueller * (sum * cosI);
+        return r;
+    }
+
+    // The lobe widened by the source's size: the half vector spreads half
+    // as far as the reflected direction.
+    float alpha = min(max(m.roughness * m.roughness, 1e-3) + 0.25 * a, 1.0);
+    float D = ggxD(alpha, dot(N, h));
+    float G = smithG1(alpha, cosI) * smithG1(alpha, cosO);
+    r.mueller = fresnelMueller * (D * G / (4.0 * cosO));
+    return r;
+}
+
+// ── Lights ───────────────────────────────────────────────────────────────
+
+bool visible(vec3 origin, vec3 direction, float distance) {
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                          0xFF, origin, 0.0, direction, distance);
+    while (rayQueryProceedEXT(query)) {}
+    return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+struct LightSample {
+    vec3 direction;     // towards the light's centre
+    float distance;
+    vec3 color;         // colour times intensity times falloff
+    float angle;        // angular radius of the source as seen from here
+    float radius;       // the source's radius; shadow rays end at its surface
+};
+
+// Scene light i seen from P, towards the light's centre (its size enters
+// through coherence). Point and spot lights fall off with the inverse square
+// of the distance; spot lights' cones are the default pipeline's.
+bool sampleLight(uint i, vec3 P, out LightSample s) {
+    SceneLight light = sceneLights[i];
+    float type = light.positionType.w;
+    s.color = light.colorIntensity.rgb * light.colorIntensity.w;
+    s.radius = 0.0;
+    if (type < 0.5) {
+        s.direction = -normalize(light.directionRange.xyz);
+        s.distance = RAY_FAR;
+        s.angle = radians(settings.sunAngle);
+        return true;
+    }
+    vec3 toLight = light.positionType.xyz - P;
+    s.distance = length(toLight);
+    s.direction = toLight / max(s.distance, 1e-4);
+    float falloff = 1.0 / max(s.distance * s.distance, 1e-8);
+    if (type > 1.5) {
+        float cosOuter = light.attenuation.w;
+        float theta = dot(s.direction, -normalize(light.directionRange.xyz));
+        falloff *= smoothstep(cosOuter, mix(cosOuter, 1.0, 0.1), theta);
+    }
+    s.color *= falloff;
+    s.radius = min(light.source.x, 0.99 * s.distance);
+    s.angle = asin(clamp(light.source.x / max(s.distance, 1e-4), 0.0, 1.0));
+    return falloff > 1e-5;
+}
+
+// The environment, sharp or (behind a diffuse bounce) blurred.
+vec3 environmentRgb(vec3 direction, bool blurred) {
+    float lod = blurred ? 0.6 * float(textureQueryLevels(prefilterMap) - 1) : 0.0;
+    return textureLod(prefilterMap, direction, lod).rgb * settings.environmentIntensity;
+}
+
+// ── The path ─────────────────────────────────────────────────────────────
+
+void basis(vec3 n, out vec3 t, out vec3 b) {
+    float s = n.z >= 0.0 ? 1.0 : -1.0;
+    float a = -1.0 / (s + n.z);
+    float c = n.x * n.y * a;
+    t = vec3(1.0 + s * n.x * n.x * a, s * c, -s * n.x);
+    b = vec3(c, s + n.y * n.y * a, -n.y);
+}
+
+vec3 sampleGgxVisibleNormal(vec3 ve, float alpha, float u1, float u2) {
+    vec3 vh = normalize(vec3(alpha * ve.x, alpha * ve.y, ve.z));
+    float lensq = vh.x * vh.x + vh.y * vh.y;
+    vec3 t1 = lensq > 0.0 ? vec3(-vh.y, vh.x, 0.0) * inversesqrt(lensq) : vec3(1.0, 0.0, 0.0);
+    vec3 t2 = cross(vh, t1);
+    float r = sqrt(u1), phi = 2.0 * PI * u2;
+    float p1 = r * cos(phi), p2 = r * sin(phi);
+    float s = 0.5 * (1.0 + vh.z);
+    p2 = (1.0 - s) * sqrt(max(1.0 - p1 * p1, 0.0)) + s * p2;
+    vec3 nh = p1 * t1 + p2 * t2 + sqrt(max(1.0 - p1 * p1 - p2 * p2, 0.0)) * vh;
+    return normalize(vec3(alpha * nh.x, alpha * nh.y, max(nh.z, 0.0)));
+}
+
+// Radiance at four wavelengths measured by the camera along a ray, and (for
+// the coherence view) the coherence width at 550 nm of the first point or
+// spot light's light at the first surface, in micrometres.
+vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float firstSigma) {
+    vec4 radiance = vec4(0.0);
+    // rows[j]: what the camera measures of a Stokes vector at wavelength j,
+    // in frame `frameX` of the light travelling along -direction.
+    vec4 row0 = settings.polariser < -360.0 ? vec4(1.0, 0.0, 0.0, 0.0) : polariserRow(radians(settings.polariser));
+    vec4 rows[4] = vec4[4](row0, row0, row0, row0);
+    bool heroOnly = false;
+    bool diffuseSeen = false;   // the path has bounced off a diffuse surface
+    firstSigma = 0.0;
+
+    for (uint bounce = 0u; bounce <= settings.maxBounces; ++bounce) {
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, scene, gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, direction, RAY_FAR);
+        while (rayQueryProceedEXT(query)) {}
+        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
+            vec4 sky = rgbToSpectrum4(environmentRgb(direction, diffuseSeen), lambdas);
+            for (int j = 0; j < 4; ++j) radiance[j] += rows[j].x * sky[j];
+            break;
+        }
+
+        SkHit hit = skFetchHit(query, 0.0);
+        Material m = materialOf(hit);
+        // Behind a diffuse bounce, glossy lobes are widened (path
+        // regularisation), so the lamp's caustics on diffuse surfaces are
+        // blurred instead of sampled as sparse bright points.
+        float minAngle = diffuseSeen ? radians(settings.indirectAngle) : 0.0;
+        if (diffuseSeen) m.roughness = max(m.roughness, 0.3);
+        vec3 wo = -direction;
+        vec3 N = hit.normal, Ng = hit.geometricNormal;
+        if (dot(N, wo) <= 0.0) N = Ng;
+        vec3 P = hit.position + Ng * 1e-3;
+
+        // Emissive surfaces show where the camera sees them; the light in
+        // the scene comes from the scene lights.
+        if (bounce == 0u) {
+            vec4 emitted = rgbToSpectrum4(hit.emissive, lambdas);
+            for (int j = 0; j < 4; ++j) radiance[j] += rows[j].x * emitted[j];
+        }
+        if (bounce == settings.maxBounces) break;
+
+        // The scene lights, each with its own coherence.
+        uint count = min(lights.lightCount, uint(sceneLights.length()));
+        for (uint i = 0u; i < count; ++i) {
+            LightSample ls;
+            if (!sampleLight(i, P, ls)) continue;
+            if (bounce == 0u && firstSigma == 0.0 && sceneLights[i].positionType.w > 0.5) {
+                firstSigma = coherenceWidth(0.55, ls.angle);
+            }
+            if (dot(Ng, ls.direction) <= 0.0) continue;
+            vec4 irradiance = rgbToSpectrum4(ls.color, lambdas);
+            bool shadowChecked = false, lit = false;
+            for (int j = 0; j < 4; ++j) {
+                if (heroOnly && j > 0) break;
+                float sigma = coherenceWidth(lambdas[j] * 1e-3, ls.angle);
+                Response r = evaluate(m, N, hit.position, ls.direction, wo, lambdas[j], sigma,
+                                      max(ls.angle, minAngle), frameX);
+                vec4 w = rows[j] * stokesRotation(r.s, frameX, wo);
+                float measured = dot(w, r.mueller[0]);   // unpolarised light: the first column
+                if (measured <= 0.0) continue;
+                if (!shadowChecked) {
+                    lit = visible(P, ls.direction, max(ls.distance - ls.radius - 2e-3, 1e-3));
+                    shadowChecked = true;
+                }
+                if (lit) radiance[j] += measured * irradiance[j];
+            }
+        }
+
+        // The next direction.
+        float cosO = dot(N, wo);
+        vec3 wi;
+        vec4 scale;   // the sample's weight at each wavelength, without the Mueller matrix
+        if (m.type == TYPE_DIFFUSE) {
+            vec3 t, b;
+            basis(N, t, b);
+            float u = random(), phi = 2.0 * PI * random();
+            wi = t * (sqrt(u) * cos(phi)) + b * (sqrt(u) * sin(phi)) + N * sqrt(1.0 - u);
+            if (dot(Ng, wi) <= 0.0) break;
+            for (int j = 0; j < 4; ++j) {
+                float albedo = rgbToSpectrum(m.albedo, lambdas[j]);
+                rows[j] = vec4(rows[j].x * albedo, 0.0, 0.0, 0.0);   // depolarising
+            }
+            diffuseSeen = true;
+            vec3 t2, b2;
+            basis(-wi, t2, b2);
+            frameX = t2;
+        } else {
+            if (m.type == TYPE_GRATING) {
+                // An order drawn by its efficiency, spread for indirect light.
+                vec3 e = gratingDirection(m, hit.position, N, frameX);
+                vec3 uo = wo - N * cosO;
+                float k = 2.0 * PI / (lambdas.x * 1e-3);
+                float efficiencies[2 * MAX_ORDER + 1];
+                float total = 0.0;
+                for (int n = -MAX_ORDER; n <= MAX_ORDER; ++n) {
+                    vec3 center = -uo + float(n) * (lambdas.x * 1e-3 / m.pitch) * e;
+                    float ef = dot(center, center) < 1.0
+                        ? orderEfficiency(n, k, m.depth, cosO, sqrt(1.0 - dot(center, center))) : 0.0;
+                    efficiencies[n + MAX_ORDER] = ef;
+                    total += ef;
+                }
+                if (total <= 0.0) break;
+                float pick = random() * total;
+                int order = MAX_ORDER;
+                for (int n = 0; n < 2 * MAX_ORDER + 1; ++n) {
+                    pick -= efficiencies[n];
+                    if (pick <= 0.0) { order = n; break; }
+                }
+                vec3 t, b;
+                basis(N, t, b);
+                vec2 g = gaussian2() * 0.5 * radians(settings.indirectAngle);
+                vec3 ui = -uo + float(order - MAX_ORDER) * (lambdas.x * 1e-3 / m.pitch) * e + t * g.x + b * g.y;
+                if (dot(ui, ui) >= 1.0) break;
+                wi = ui + N * sqrt(1.0 - dot(ui, ui));
+                scale = vec4(total);
+                if (order == MAX_ORDER) {
+                    // The zeroth order leaves in the same direction at every
+                    // wavelength, each with its own efficiency.
+                    float picked = efficiencies[MAX_ORDER] / total;
+                    for (int j = 1; j < 4; ++j) {
+                        float kj = 2.0 * PI / (lambdas[j] * 1e-3);
+                        scale[j] = orderEfficiency(0, kj, m.depth, cosO, cosO) / picked;
+                    }
+                } else if (!heroOnly) {
+                    heroOnly = true;
+                    rows[0] *= 4.0;
+                    rows[1] = rows[2] = rows[3] = vec4(0.0);
+                }
+            } else {
+                vec3 t, b;
+                basis(N, t, b);
+                float alpha = max(m.roughness * m.roughness, 1e-3);
+                vec3 woLocal = vec3(dot(wo, t), dot(wo, b), cosO);
+                vec3 hl = sampleGgxVisibleNormal(woLocal, alpha, random(), random());
+                vec3 h = t * hl.x + b * hl.y + N * hl.z;
+                wi = reflect(-wo, h);
+                float cosI = dot(N, wi);
+                if (cosI <= 0.0) break;
+                scale = vec4(smithG1(alpha, cosI));   // the visible-normal sampling leaves G1 of wi
+            }
+            if (dot(Ng, wi) <= 0.0) break;
+            vec3 h = normalize(wi + wo);
+            vec3 s = sAxis(wi, h, frameX);
+            float cosH = max(dot(wi, h), 1e-4);
+            for (int j = 0; j < 4; ++j) {
+                if (heroOnly && j > 0) break;
+                float sigma = coherenceWidth(lambdas[j] * 1e-3, radians(settings.indirectAngle));
+                mat4 M = interfaceMueller(m, cosH, lambdas[j], sigma);
+                rows[j] = (rows[j] * stokesRotation(s, frameX, wo)) * M * scale[j];
+            }
+            frameX = s;
+        }
+
+        // Russian roulette from the third bounce.
+        if (bounce >= 2u) {
+            float strength = max(max(rows[0].x, rows[1].x), max(rows[2].x, rows[3].x));
+            float survive = min(strength, 0.95);
+            if (random() >= survive) break;
+            for (int j = 0; j < 4; ++j) rows[j] /= survive;
+        }
+        origin = P;
+        direction = wi;
+    }
+    return radiance;
+}
+
+vec3 viewDirection(vec2 uv) {
+    vec4 target = camera.invProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    return normalize(target.xyz / target.w);
+}
+
+vec3 heat(float t) {
+    t = clamp(t, 0.0, 1.0);
+    return clamp(vec3(1.5 - abs(4.0 * t - 3.0), 1.5 - abs(4.0 * t - 2.0), 1.5 - abs(4.0 * t - 1.0)), 0.0, 1.0);
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(accumulation);
+    if (pixel.x >= size.x || pixel.y >= size.y) return;
+
+    vec4 previous = imageLoad(accumulation, pixel);
+    float count = settings.reset != 0u ? 0.0 : previous.a;
+    if (settings.maxSamples > 0.0 && count >= settings.maxSamples) return;
+
+    rngState = pcg(uint(pixel.x) + uint(pixel.y) * 65536u) ^ pcg(camera.frame * 9781u + uint(count));
+    vec2 uv = (vec2(pixel) + vec2(random(), random())) / vec2(size);
+    vec3 view = viewDirection(uv);
+    vec3 direction = normalize((camera.invView * vec4(view, 0.0)).xyz);
+    vec3 right = normalize(vec3(camera.invView[0]));
+    vec3 frameX = normalize(right - direction * dot(right, direction));
+    vec4 lambdas = wavelengths(380.0 + 400.0 * random());
+
+    float firstSigma;
+    vec4 radiance = tracePath(camera.position.xyz, direction, frameX, lambdas, firstSigma);
+    vec3 value = settings.view == 1u
+        ? (firstSigma > 0.0 ? heat(log2(firstSigma) / 8.0) : vec3(0.0))
+        : spectrumToRgb(radiance, lambdas);
+    if (any(isnan(value)) || any(isinf(value))) value = vec3(0.0);
+    vec3 mean = count > 0.0 ? previous.rgb + (value - previous.rgb) / (count + 1.0) : value;
+    imageStore(accumulation, pixel, vec4(mean, count + 1.0));
+}

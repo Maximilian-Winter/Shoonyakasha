@@ -19,6 +19,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [rendering/irradiance_cache](../../examples/python/rendering/irradiance_cache) | `python irradiance_cache.py` | Kajiya's irradiance cache on its own pipeline: sparse cascades of cells around the camera, allocated where surfaces are seen, tracing into reservoirs of the sphere and kept as spherical harmonics, with multiple bounces from looking themselves up; the reference path tracer's scene |
 | [rendering/restir_gi](../../examples/python/rendering/restir_gi) | `python restir_gi.py` | Kajiya's ray-traced diffuse GI on its own pipeline: half resolution diffuse rays reused through temporal and spatial ReSTIR reservoirs, validated every third frame, resolved with a near-field split and filtered, with the irradiance cache beyond the first bounce; each stage can be switched off |
 | [rendering/rt_reflections](../../examples/python/rendering/rt_reflections) | `python rt_reflections.py` | Kajiya's ray-traced reflections on top of its diffuse GI: half resolution GGX rays reused through temporal ReSTIR and validated, resolved with a ratio estimator over a lobe-shaped kernel, filtered with surface and reflection reprojection |
+| [rendering/wave_optics](../../examples/python/rendering/wave_optics) | `python wave_optics.py` | A spectral, polarised path tracer on its own pipeline in which a compact disc's rainbows and a thin film's colours depend on the coherence of the light, set by the lamp's size and distance; measured metals and a polariser in front of the camera |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -111,6 +112,15 @@ Kajiya's ray-traced reflections, on top of the ReSTIR GI example's diffuse light
 - **Filters:** a temporal filter follows both the surface and the reflected image.
 
 A small table of the lobe's directional albedo, computed for the engine's BRDF, scales the reflections into the image. The reference path tracer's `--mode 4` converges to the same reflections for comparison. See the [example's README](../../examples/python/rendering/rt_reflections/README.md).
+
+### Wave optics (`wave_optics`)
+
+A spectral, polarised path tracer on its own pipeline, after the physical light transport papers of Steinberg and coauthors:
+- **Spectrum and polarisation:** each path carries four wavelengths, and for each the Mueller row that turns the light arriving at a surface into what the camera measures, through an optional polariser.
+- **Coherence:** each light's coherence width at a surface follows from how large the light's source appears there. A compact disc's grating spreads its diffraction orders, and glossy lobes widen, as far as the source appears; a thin film's fringes are as visible as the coherence across the film's shear.
+- **Materials:** gold and silver with measured refractive indices, the disc's circular grating with scalar efficiencies per order, a film on aluminium.
+
+The panel sets the lamp's radius and distance, the film's thickness, the grooves' spacing and the polariser, and **2** shows the coherence width. Needs a GPU with ray queries. See the [example's README](../../examples/python/rendering/wave_optics/README.md).
 
 ### Japanese shrine (`japanese_shrine`)
 
