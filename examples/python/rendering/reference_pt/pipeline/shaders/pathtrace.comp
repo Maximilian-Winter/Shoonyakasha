@@ -1,0 +1,328 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// One path per pixel per frame, averaged into `accumulation` (rgb: the mean,
+// a: how many paths it holds). Paths start at the camera through a random
+// point of the pixel, and at every surface they hit:
+//   - add the surface's emission
+//   - add each scene light, through a shadow ray (next event estimation)
+//   - continue in a direction drawn from the BRDF, or end by Russian roulette
+// A path that leaves the scene adds the environment. Scene lights are only
+// reached by their shadow rays, emissive surfaces and the environment only by
+// the path, so nothing is counted twice.
+
+#extension GL_EXT_ray_query : require
+
+#include "sk/pbr.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform image2D accumulation;
+
+layout(set = 1, binding = 0) uniform Camera {
+    mat4 invView;
+    mat4 invProj;
+    vec4 position;
+    vec2 resolution;
+    uint frame;
+} camera;
+layout(set = 1, binding = 1) uniform PathTracer {
+    uint reset;          // 1: start the average over
+    uint maxBounces;
+    uint mode;           // 0 everything, 1 indirect light only, 2 white furnace
+    uint toneMapper;
+    float exposure;
+    float environmentIntensity;
+    float sunAngle;      // angular radius of directional lights, degrees
+    float maxSamples;
+} settings;
+
+struct SceneLight {
+    vec4 positionType;
+    vec4 colorIntensity;
+    vec4 directionRange;
+    vec4 attenuation;
+    vec4 source;
+    vec4 shape;
+};
+layout(set = 2, binding = 0) uniform Lights { uint lightCount; } lights;
+layout(set = 2, binding = 1, std430) readonly buffer SceneLights { SceneLight sceneLights[]; };
+
+layout(set = 3, binding = 0) uniform accelerationStructureEXT scene;
+#define SK_SCENE_HITS_SET 3
+#define SK_RAY_INSTANCES_BINDING 1
+#define SK_SCENE_TEXTURES_BINDING 2
+#include "sk/scene_hits.glsl"
+
+layout(set = 4, binding = 1) uniform samplerCube prefilterMap;
+
+const uint MODE_INDIRECT = 1u;
+const uint MODE_FURNACE = 2u;
+const float RAY_FAR = 10000.0;
+
+// ── Random numbers ───────────────────────────────────────────────
+
+uint rngState;
+
+uint pcg(uint v) {
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float random() {
+    rngState = pcg(rngState);
+    return float(rngState >> 8) * (1.0 / 16777216.0);
+}
+
+// ── Sampling ─────────────────────────────────────────────────────
+
+// An orthonormal basis around n (Duff et al. 2017).
+void basis(vec3 n, out vec3 t, out vec3 b) {
+    float s = n.z >= 0.0 ? 1.0 : -1.0;
+    float a = -1.0 / (s + n.z);
+    float c = n.x * n.y * a;
+    t = vec3(1.0 + s * n.x * n.x * a, s * c, -s * n.x);
+    b = vec3(c, s + n.y * n.y * a, -n.y);
+}
+
+vec3 toWorld(vec3 v, vec3 n) {
+    vec3 t, b;
+    basis(n, t, b);
+    return t * v.x + b * v.y + n * v.z;
+}
+
+vec3 toLocal(vec3 v, vec3 n) {
+    vec3 t, b;
+    basis(n, t, b);
+    return vec3(dot(v, t), dot(v, b), dot(v, n));
+}
+
+vec3 cosineHemisphere(float u, float v) {
+    float r = sqrt(u), phi = 2.0 * SK_PI * v;
+    return vec3(r * cos(phi), r * sin(phi), sqrt(max(1.0 - u, 0.0)));
+}
+
+// A normal visible from Ve (local, z up), for GGX of width alpha (Heitz 2018).
+vec3 sampleGgxVisibleNormal(vec3 Ve, float alpha, float u, float v) {
+    vec3 Vh = normalize(vec3(alpha * Ve.x, alpha * Ve.y, Ve.z));
+    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
+    vec3 T1 = lensq > 0.0 ? vec3(-Vh.y, Vh.x, 0.0) * inversesqrt(lensq) : vec3(1.0, 0.0, 0.0);
+    vec3 T2 = cross(Vh, T1);
+    float r = sqrt(u), phi = 2.0 * SK_PI * v;
+    float t1 = r * cos(phi), t2 = r * sin(phi);
+    float s = 0.5 * (1.0 + Vh.z);
+    t2 = (1.0 - s) * sqrt(max(1.0 - t1 * t1, 0.0)) + s * t2;
+    vec3 Nh = t1 * T1 + t2 * T2 + sqrt(max(1.0 - t1 * t1 - t2 * t2, 0.0)) * Vh;
+    return normalize(vec3(alpha * Nh.x, alpha * Nh.y, max(Nh.z, 0.0)));
+}
+
+float smithG1(float NdotV, float alpha) {
+    float a2 = alpha * alpha;
+    return 2.0 * NdotV / (NdotV + sqrt(a2 + (1.0 - a2) * NdotV * NdotV));
+}
+
+// The chance of drawing the specular lobe rather than the diffuse one.
+float specularChance(vec3 albedo, float metallic, float NdotV) {
+    vec3 F0 = baseReflectivity(albedo, metallic);
+    float specular = dot(fresnelSchlick(NdotV, F0), vec3(1.0 / 3.0));
+    float diffuse = (1.0 - metallic) * dot(albedo, vec3(1.0 / 3.0));
+    return clamp(specular / max(specular + diffuse, 1e-4), 0.1, 0.9);
+}
+
+// The density of drawing L from the mix of the two lobes.
+float brdfPdf(vec3 N, vec3 V, vec3 L, float roughness, float chance) {
+    float NdotL = dot(N, L), NdotV = dot(N, V);
+    if (NdotL <= 0.0 || NdotV <= 0.0) return 0.0;
+    vec3 H = normalize(V + L);
+    float alpha = roughness * roughness;
+    float specularPdf = smithG1(NdotV, alpha) * distributionGGX(max(dot(N, H), 0.0), roughness) / (4.0 * NdotV);
+    return chance * specularPdf + (1.0 - chance) * NdotL / SK_PI;
+}
+
+// ── Lights ───────────────────────────────────────────────────────
+
+bool visible(vec3 origin, vec3 direction, float distance) {
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                          0xFF, origin, 0.0, direction, distance);
+    while (rayQueryProceedEXT(query)) {}
+    return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+// Light from scene light i reaching the surface: the light model of the
+// default pipeline (lights.glsl), with shadow rays. Directional lights are
+// discs of angular radius settings.sunAngle; point and spot lights with a
+// source radius are spheres.
+vec3 lightFrom(uint i, vec3 P, vec3 N, vec3 Ng, vec3 V, vec3 albedo, float metallic, float roughness) {
+    SceneLight light = sceneLights[i];
+    float type = light.positionType.w;
+    vec3 color = light.colorIntensity.rgb * light.colorIntensity.w;
+    vec3 direction = light.directionRange.xyz;
+    float range = light.directionRange.w;
+    vec4 attenuation = light.attenuation;
+
+    vec3 L;
+    float distance;
+    float falloff = 1.0;
+    if (type < 0.5) {
+        vec3 toSun = -normalize(direction);
+        float radius = tan(radians(settings.sunAngle)) * sqrt(random());
+        float angle = 2.0 * SK_PI * random();
+        vec3 t, b;
+        basis(toSun, t, b);
+        L = normalize(toSun + (t * cos(angle) + b * sin(angle)) * radius);
+        distance = RAY_FAR;
+    } else {
+        vec3 center = light.positionType.xyz;
+        vec3 target = center;
+        float sourceRadius = light.source.x;
+        if (sourceRadius > 0.0) {
+            // A point of the sphere's disc as seen from P.
+            vec3 axis = normalize(P - center);
+            vec3 t, b;
+            basis(axis, t, b);
+            float r = sourceRadius * sqrt(random()), angle = 2.0 * SK_PI * random();
+            target = center + (t * cos(angle) + b * sin(angle)) * r;
+        }
+        vec3 toLight = target - P;
+        float centerDistance = length(center - P);
+        distance = length(toLight);
+        L = toLight / max(distance, 1e-4);
+        falloff = 1.0 / max(attenuation.x + attenuation.y * centerDistance +
+                            attenuation.z * centerDistance * centerDistance, 1e-4);
+        if (range > 0.0) {
+            float r = clamp(1.0 - pow(centerDistance / range, 4.0), 0.0, 1.0);
+            falloff *= r * r;
+        }
+        if (type > 1.5) {
+            float cosOuter = attenuation.w;
+            float theta = dot(normalize(center - P), -normalize(direction));
+            falloff *= smoothstep(cosOuter, mix(cosOuter, 1.0, 0.1), theta);
+        }
+    }
+
+    float NdotL = dot(N, L);
+    if (NdotL <= 0.0 || dot(Ng, L) <= 0.0 || falloff <= 1e-4) return vec3(0.0);
+    vec3 F0 = baseReflectivity(albedo, metallic);
+    vec3 contribution = cookTorrance(N, V, L, albedo, metallic, roughness, F0) * color * NdotL * falloff;
+    if (dot(contribution, contribution) <= 0.0) return vec3(0.0);
+    return visible(P + Ng * 1e-3, L, max(distance - 2e-3, 1e-3)) ? contribution : vec3(0.0);
+}
+
+vec3 directLight(vec3 P, vec3 N, vec3 Ng, vec3 V, vec3 albedo, float metallic, float roughness) {
+    vec3 total = vec3(0.0);
+    uint count = min(lights.lightCount, uint(sceneLights.length()));
+    for (uint i = 0u; i < count; ++i) total += lightFrom(i, P, N, Ng, V, albedo, metallic, roughness);
+    return total;
+}
+
+vec3 environment(vec3 direction) {
+    if (settings.mode == MODE_FURNACE) return vec3(1.0);
+    return textureLod(prefilterMap, direction, 0.0).rgb * settings.environmentIntensity;
+}
+
+// ── The path ─────────────────────────────────────────────────────
+
+vec3 tracePath(vec3 origin, vec3 direction, float pixelSpread) {
+    vec3 radiance = vec3(0.0);
+    vec3 throughput = vec3(1.0);
+    float coneWidth = 0.0;          // width of the ray cone, for texture detail
+    float coneSpread = pixelSpread;
+    bool furnace = settings.mode == MODE_FURNACE;
+    uint maxBounces = furnace ? 64u : min(settings.maxBounces, 16u);
+
+    for (uint bounce = 0u; bounce <= maxBounces; ++bounce) {
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, scene, gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, direction, RAY_FAR);
+        while (rayQueryProceedEXT(query)) {}
+        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
+            if (bounce > 0u || settings.mode != MODE_INDIRECT) radiance += throughput * environment(direction);
+            break;
+        }
+
+        coneWidth += coneSpread * rayQueryGetIntersectionTEXT(query, true);
+        SkHit hit = skFetchHit(query, coneWidth);
+        vec3 albedo = hit.baseColor;
+        float metallic = hit.metallic, roughness = hit.roughness;
+        vec3 V = -direction;
+        vec3 N = hit.normal, Ng = hit.geometricNormal;
+        if (furnace) {
+            albedo = vec3(1.0);
+            metallic = 0.0;
+            N = Ng;
+        }
+        if (dot(N, V) <= 0.0) N = Ng;   // a normal map leaning away from the viewer
+
+        if (!furnace && (bounce > 0u || settings.mode != MODE_INDIRECT)) {
+            radiance += throughput * hit.emissive;
+        }
+        if (bounce == maxBounces) break;
+
+        // Next event estimation: the scene lights.
+        if (!furnace && (bounce > 0u || settings.mode != MODE_INDIRECT)) {
+            radiance += throughput * directLight(hit.position, N, Ng, V, albedo, metallic, roughness);
+        }
+
+        // The next direction, from the diffuse or the specular lobe.
+        float NdotV = max(dot(N, V), 1e-4);
+        float chance = furnace ? 0.0 : specularChance(albedo, metallic, NdotV);
+        vec3 L;
+        if (random() < chance) {
+            vec3 H = toWorld(sampleGgxVisibleNormal(toLocal(V, N), roughness * roughness, random(), random()), N);
+            L = reflect(-V, H);
+        } else {
+            L = toWorld(cosineHemisphere(random(), random()), N);
+        }
+        float NdotL = dot(N, L);
+        if (NdotL <= 0.0 || dot(Ng, L) <= 0.0) break;
+        if (furnace) {
+            throughput *= albedo;   // Lambertian, drawn by its cosine: the weight is the albedo
+        } else {
+            float pdf = brdfPdf(N, V, L, roughness, chance);
+            if (pdf <= 1e-8) break;
+            vec3 F0 = baseReflectivity(albedo, metallic);
+            throughput *= cookTorrance(N, V, L, albedo, metallic, roughness, F0) * NdotL / pdf;
+        }
+        coneSpread += roughness * roughness;   // rough bounces widen the cone
+
+        // Russian roulette from the third bounce.
+        if (bounce >= 2u) {
+            float survive = min(max(throughput.r, max(throughput.g, throughput.b)), 0.95);
+            if (random() >= survive) break;
+            throughput /= survive;
+        }
+        origin = hit.position + Ng * 1e-3;
+        direction = L;
+    }
+    return radiance;
+}
+
+// The view-space direction through uv ((0, 0) the top-left corner).
+vec3 viewDirection(vec2 uv) {
+    vec4 target = camera.invProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    return normalize(target.xyz / target.w);
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(accumulation);
+    if (pixel.x >= size.x || pixel.y >= size.y) return;
+
+    vec4 previous = imageLoad(accumulation, pixel);
+    float count = settings.reset != 0u ? 0.0 : previous.a;
+    if (settings.maxSamples > 0.0 && count >= settings.maxSamples) return;
+
+    rngState = pcg(uint(pixel.x) + uint(pixel.y) * 65536u) ^ pcg(camera.frame * 9781u + uint(count));
+    vec2 uv = (vec2(pixel) + vec2(random(), random())) / vec2(size);
+    vec3 view = viewDirection(uv);
+    vec3 direction = normalize((camera.invView * vec4(view, 0.0)).xyz);
+    vec3 origin = camera.position.xyz;
+    // The angle one pixel spans, for the ray cone.
+    float pixelSpread = length(viewDirection(uv + vec2(0.0, 1.0 / float(size.y))) - view);
+
+    vec3 sampleValue = tracePath(origin, direction, pixelSpread);
+    // A NaN or infinity would poison the average for good.
+    if (any(isnan(sampleValue)) || any(isinf(sampleValue))) sampleValue = vec3(0.0);
+    vec3 mean = count > 0.0 ? previous.rgb + (sampleValue - previous.rgb) / (count + 1.0) : sampleValue;
+    imageStore(accumulation, pixel, vec4(mean, count + 1.0));
+}

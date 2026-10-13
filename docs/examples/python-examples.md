@@ -15,6 +15,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [rendering/sponza](../../examples/python/rendering/sponza) | `python sponza.py` | The default pipeline on Sponza, or on a colonnade of boxes without it; quality presets, ray-traced shadows |
 | [rendering/scene_lights](../../examples/python/rendering/scene_lights) | `python scene_lights.py` | Thousands of scene lights on the default pipeline, read from a storage buffer the engine refills every frame; a benchmark of what they cost |
 | [rendering/volume_tiled](../../examples/python/rendering/volume_tiled) | `python volume_tiled.py` | Volume Tiled Forward Shading (van Oosten 2015) on its own pipeline: up to a million moving point lights in Crytek Sponza, assigned to the visible clusters through a BVH of Morton-sorted lights; a benchmark of each stage |
+| [rendering/reference_pt](../../examples/python/rendering/reference_pt) | `python reference_pt.py` | A path tracer on its own pipeline that averages one path per pixel per frame in Crytek Sponza, reading the surfaces it hits through the scene's ray instances and texture array; a white furnace view, and the same scene on the default pipeline to compare |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -73,6 +74,10 @@ Sponza lit by the [default pipeline](../../python/shoonyakasha/pipelines/default
 ### Volume Tiled Forward Shading (`volume_tiled`)
 
 Jeremiah van Oosten's Volume Tiled Forward Shading on the [volume tiled pipeline](../../examples/python/rendering/volume_tiled/pipeline/README.md), a copy of the default pipeline that shades forward. After a depth prepass, only the clusters visible pixels lie in are listed. The lights get Morton codes, are sorted and built into a 32-ary BVH, and each listed cluster walks the BVH for its lights. Up to a million point lights move through Crytek Sponza. **B** compares the BVH with testing every light, and the panel shows each stage's GPU time. `--benchmark results.md` measures a range of light counts, as the paper did. The scene is Khronos's glTF Sponza, cloned from glTF-Sample-Assets into the repository root; without it the example lights a colonnade of boxes. See the [example's README](../../examples/python/rendering/volume_tiled/README.md).
+
+### Reference path tracer (`reference_pt`)
+
+A path tracer that traces with ray queries in a compute pass and averages one path per pixel per frame while the camera stands still. At every hit it adds the surface's emission and the scene lights through shadow rays, then continues in a direction drawn from the BRDF. At each hit it reads the triangle and its glTF material through [`sk/scene_hits.glsl`](../../python/shoonyakasha/glsl/sk/scene_hits.glsl), from the rows and textures the engine keeps for the acceleration structure. The BRDF and light model are the default pipeline's, so `--pipeline default` shows the same scene to compare against. Key **3** is a white furnace test. Needs a GPU with ray queries and glTF-Sample-Assets for Sponza; falls back to a colonnade of boxes. See the [example's README](../../examples/python/rendering/reference_pt/README.md).
 
 ### Japanese shrine (`japanese_shrine`)
 
