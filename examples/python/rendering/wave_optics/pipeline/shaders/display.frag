@@ -17,8 +17,8 @@ layout(set = 0, binding = 1) uniform Settings {
     float maxSamples;
     float polariser;
     float indirectAngle;
-    float pad0;
-    float pad1;
+    uint lampSpectrum;
+    float lampEntity;
 } settings;
 
 layout(location = 0) in vec2 fragTexCoord;

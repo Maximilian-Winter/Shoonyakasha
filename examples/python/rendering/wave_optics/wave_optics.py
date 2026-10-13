@@ -5,13 +5,17 @@ A spectral, polarised path tracer in which a compact disc's grooves split the
 light into rainbows and a thin film on a sphere shows interference colours,
 each as far as the light reaching it is coherent. The light's coherence
 comes from the size of its source as seen from the surface: a small, distant
-lamp gives crisp rainbows, a large, close one blurs them. Gold and silver
-spheres reflect with their measured refractive indices, and a polariser in
-front of the camera shows the polarisation of what reaches it.
+lamp gives crisp rainbows, a large, close one blurs them. The lamp can shine
+with the spectrum of a light bulb, a sodium or mercury lamp or an RGB LED:
+the disc splits its lines into separate coloured spots, and sodium light
+shows rings on films too thick to show colours under white light. Gold and silver spheres reflect with
+their measured refractive indices, and a polariser in front of the camera
+shows the polarisation of what reaches it.
 
 Keys:
     WASD/Q/E + right mouse   fly the camera; moving starts the average over
     1 / 2                    the image / the coherence width of the lamp's light
+    L                        the next lamp spectrum
     R                        start the average over
     F2                       hide or show the panel
     P                        save a screenshot to wave_optics_captures/
@@ -19,6 +23,7 @@ Keys:
 Usage:
     python wave_optics.py
     python wave_optics.py --lamp-radius 0.2 --lamp-distance 1.0
+    python wave_optics.py --lamp sodium --film 5
     python wave_optics.py --polariser 90 --samples 512 --screenshot out.png   # converge, save, quit
 
 Requirements:
@@ -50,6 +55,9 @@ LAMP_TOWARDS = (0.35, 0.8, 1.0)         # from the disc's centre towards the lam
 LAMP_IRRADIANCE = 3.0                   # at the disc's centre
 SUN_DIRECTION = (-0.6, -1.0, -0.4)
 VIEWS = ("Image", "Coherence")
+# The lamp's spectra, in the order of lamps.glsl's LAMP_* values.
+SPECTRA = ("white", "bulb", "sodium", "mercury", "led")
+SPECTRUM_LABELS = ("White", "Bulb", "Sodium", "Mercury", "LED")
 
 # Material types of the pipeline's Materials buffer.
 CONDUCTOR, GRATING, FILM = 1, 2, 3
@@ -60,7 +68,10 @@ parser = argparse.ArgumentParser(description="Wave optics", formatter_class=argp
 parser.add_argument("--lamp-radius", type=float, default=0.02, help="radius of the lamp in metres (0.002 to 0.4)")
 parser.add_argument("--lamp-distance", type=float, default=2.0,
                     help="distance from the disc's centre to the lamp in metres (0.6 to 8)")
-parser.add_argument("--film", type=float, default=0.45, help="thickness of the sphere's film in micrometres")
+parser.add_argument("--lamp", choices=SPECTRA, default="white",
+                    help="the lamp's spectrum: white (its RGB colour), bulb (2700 K), sodium, mercury, led (RGB)")
+parser.add_argument("--film", type=float, default=0.45,
+                    help="thickness of the sphere's film in micrometres (0.1 to 30)")
 parser.add_argument("--pitch", type=float, default=1.6, help="spacing of the disc's grooves in micrometres")
 parser.add_argument("--polariser", type=float, default=None,
                     help="angle in degrees of a polariser in front of the camera, from the image's horizontal")
@@ -83,7 +94,7 @@ engine = sk.Engine(title="Shoonyakasha - Wave optics", width=args.width, height=
                    hdr_environment_path="env/kloofendal_misty_1k.hdr", pipeline_json_path=PIPELINE)
 
 
-# â”€â”€ Shapes, written as glTF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Shapes, written as glTF ──────────────────────────────────────────────
 
 def write_gltf(path, positions, normals, uvs, indices):
     """One mesh of one primitive, its buffer next to it, under a single node."""
@@ -165,7 +176,7 @@ write_gltf(SPHERE, *sphere())
 write_gltf(DISC, *annulus())
 
 
-# â”€â”€ The scene â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── The scene ────────────────────────────────────────────────────────────
 
 def root_of(entity):
     parent = engine.scene.get_parent(entity)
@@ -203,6 +214,8 @@ class Scene:
                                               range=100.0)
         engine.create_directional_light(direction=SUN_DIRECTION, color=(1.0, 0.95, 0.88), intensity=0.3)
         self.lamp_shape = place(SPHERE, (0.0, 2.0, 0.0), (1.0, 1.0, 1.0))
+        # The lamp's sphere glows with the lamp's spectrum.
+        engine.set_custom_float("wo.lampEntity", float(self.lamp_shape[0]))
 
         place(BOX, (0.0, -0.05, 0.0), (8.0, 0.1, 8.0), color=(0.2, 0.2, 0.22))
         place(BOX, (0.0, 2.0, -2.2), (8.0, 4.0, 0.1), color=(0.12, 0.13, 0.16))
@@ -247,7 +260,7 @@ class Scene:
             engine.set_custom_vec4("wo.slot[%d]" % i, tuple(float(c) for c in value))
 
 
-# â”€â”€ The panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── The panel ────────────────────────────────────────────────────────────
 
 GOLDEN = (0.95, 0.85, 0.55, 1.0)
 MUTED = (0.62, 0.66, 0.72, 1.0)
@@ -262,7 +275,8 @@ class Settings:
     def __init__(self):
         self.lamp_radius = min(max(args.lamp_radius, 0.002), 0.4)
         self.lamp_distance = min(max(args.lamp_distance, 0.6), 8.0)
-        self.film = args.film
+        self.spectrum = SPECTRA.index(args.lamp)
+        self.film = min(max(args.film, 0.1), 30.0)
         self.pitch = args.pitch
         self.polariser = args.polariser
         self.view = args.view
@@ -271,8 +285,8 @@ class Settings:
         self.environment = args.sky
 
     def key(self):
-        return (self.lamp_radius, self.lamp_distance, self.film, self.pitch, self.polariser, self.view,
-                self.bounces, self.environment)
+        return (self.lamp_radius, self.lamp_distance, self.spectrum, self.film, self.pitch, self.polariser,
+                self.view, self.bounces, self.environment)
 
     def apply(self, scene):
         engine.set_custom_uint("wo.maxBounces", self.bounces)
@@ -282,6 +296,7 @@ class Settings:
         engine.set_custom_float("wo.polariser", -1000.0 if self.polariser is None else self.polariser)
         engine.set_custom_float("wo.maxSamples", float(args.samples))
         engine.set_custom_float("wo.indirectAngle", args.indirect)
+        engine.set_custom_uint("wo.lampSpectrum", self.spectrum)
         scene.apply(self)
 
 
@@ -309,7 +324,7 @@ class Panel:
         self.canvas = ui.create_canvas(reference_size=(1920, 1080))
         frame = ui.create_panel(self.canvas, color=FRAME)
         ui.set_rect(frame, anchor_min=(0, 1), anchor_max=(0, 1), pivot=(0, 1), position=(20, -20),
-                    size=(self.WIDTH, 520))
+                    size=(self.WIDTH, 590))
         column = ui.create_vertical_layout(frame, spacing=7, padding=(20, 16, 20, 16))
         ui.set_rect(column, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
         ui.set_layout_child_sizing(column, expand_width=True)
@@ -320,11 +335,20 @@ class Panel:
         self.radius_label, self.radius = self.slider(column, "Lamp radius", math.log10(0.002), math.log10(0.4),
                                                      math.log10(s.lamp_radius))
         self.distance_label, self.distance = self.slider(column, "Lamp distance", 0.6, 8.0, s.lamp_distance)
-        self.film_label, self.film = self.slider(column, "Film thickness", 0.1, 2.0, s.film)
+        self.film_label, self.film = self.slider(column, "Film thickness", math.log10(0.1), math.log10(30.0),
+                                                 math.log10(s.film))
         self.pitch_label, self.pitch = self.slider(column, "Groove spacing", 0.8, 4.0, s.pitch)
         self.polariser_label, self.polariser = self.slider(column, "Polariser angle", -90.0, 90.0,
                                                            s.polariser or 0.0)
         self.exposure_label, self.exposure = self.slider(column, "Exposure", -4.0, 4.0, math.log2(s.exposure))
+        ui.create_text(column, "Lamp", size=18)
+        row = ui.create_horizontal_layout(column, size=(0, 34), spacing=4)
+        ui.set_layout_child_sizing(row, expand_width=True)
+        self.spectra = []
+        for value, label in enumerate(SPECTRUM_LABELS):
+            button = ui.create_button(row, label, size=(60, 34))
+            ui.set_font_size(button, 14)
+            self.spectra.append((value, button))
         row = ui.create_horizontal_layout(column, size=(0, 34), spacing=6)
         ui.set_layout_child_sizing(row, expand_width=True)
         self.polariser_button = ui.create_button(row, "", size=(60, 34))
@@ -347,7 +371,7 @@ class Panel:
         if ui.value_changed(self.distance):
             s.lamp_distance = ui.slider_value(self.distance)
         if ui.value_changed(self.film):
-            s.film = ui.slider_value(self.film)
+            s.film = 10.0 ** ui.slider_value(self.film)
         if ui.value_changed(self.pitch):
             s.pitch = ui.slider_value(self.pitch)
         if ui.value_changed(self.polariser) and s.polariser is not None:
@@ -359,9 +383,14 @@ class Panel:
         for value, button in self.views:
             if ui.was_clicked(button):
                 s.view = value
+        for value, button in self.spectra:
+            if ui.was_clicked(button):
+                s.spectrum = value
 
         for value, button in self.views:
             ui.set_color(button, ACCENT if value == s.view else SURFACE)
+        for value, button in self.spectra:
+            ui.set_color(button, ACCENT if value == s.spectrum else SURFACE)
         ui.set_color(self.polariser_button, ACCENT if s.polariser is not None else SURFACE)
         self.set_text(self.polariser_button, "Polariser")
         self.set_text(self.samples, "%d paths per pixel   %.0f per second" % (samples, rate))
@@ -380,7 +409,7 @@ class Panel:
         engine.ui.set_visible(self.canvas, self.visible)
 
 
-# â”€â”€ Accumulation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Accumulation ─────────────────────────────────────────────────────────
 
 class Controls:
     """Starts the average over whenever the camera or a setting changes:
@@ -406,6 +435,8 @@ class Controls:
         for key, view in ((keys.NUM_1, 0), (keys.NUM_2, 1)):
             if self.pressed(key):
                 self.settings.view = view
+        if self.pressed(keys.L):
+            self.settings.spectrum = (self.settings.spectrum + 1) % len(SPECTRA)
         restart = self.pressed(keys.R)
         if self.pressed(keys.F2) and args.screenshot is None:
             self.panel.toggle()

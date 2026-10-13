@@ -1,10 +1,7 @@
-// spectral.glsl - wavelengths, colour matching and spectra.
+// spectral.glsl - colour matching and spectra over 380-780 nm.
 //
-// Four wavelengths per path, after Wilkie et al. 2014 ("Hero wavelength
-// spectral sampling"): a hero wavelength uniform over 380-780 nm, and three
-// more a quarter of the range apart, wrapped around. Colour matching uses
-// the multi-lobe Gaussian fit of the CIE 1931 2-degree functions by Wyman,
-// Sloan and Shirley 2013. Linear sRGB is normalised so that the
+// Colour matching uses the multi-lobe Gaussian fit of the CIE 1931 2-degree
+// functions by Wyman, Sloan and Shirley 2013. Linear sRGB is normalised so that the
 // equal-energy spectrum is white: a spectrum of 1 everywhere is (1, 1, 1).
 // RGB colours become spectra through three smooth bands that sum to one at
 // every wavelength (red above 560-620 nm, blue below 470-530 nm, green
@@ -15,11 +12,6 @@
 
 const float LAMBDA_MIN = 380.0;
 const float LAMBDA_RANGE = 400.0;
-
-vec4 wavelengths(float hero) {
-    vec4 offsets = vec4(0.0, 0.25, 0.5, 0.75);
-    return LAMBDA_MIN + fract((hero - LAMBDA_MIN) / LAMBDA_RANGE + offsets) * LAMBDA_RANGE;
-}
 
 float cmfLobe(float x, float mu, float s1, float s2) {
     float t = (x - mu) / (x < mu ? s1 : s2);
