@@ -305,6 +305,26 @@ void VulkanDescriptorSet::bindAccelerationStructure(const std::string& name, uin
     vkUpdateDescriptorSets(m_device.getLogicalDevice(), 1, &write, 0, nullptr);
 }
 
+void VulkanDescriptorSet::bindImageElements(const std::string& name, uint32_t set, uint32_t first,
+                                            const std::vector<ImageResource>& images) {
+    if (set >= m_maxSets) {
+        throw std::runtime_error("Set index out of range: " + std::to_string(set));
+    }
+    if (images.empty()) return;
+    std::vector<VkDescriptorImageInfo> infos;
+    infos.reserve(images.size());
+    for (const auto& image : images) infos.push_back({image.sampler, image.imageView, image.layout});
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_sets[set];
+    write.dstBinding = getBindingIndex(name);
+    write.dstArrayElement = first;
+    write.descriptorCount = static_cast<uint32_t>(infos.size());
+    write.descriptorType = getBindingType(name);
+    write.pImageInfo = infos.data();
+    vkUpdateDescriptorSets(m_device.getLogicalDevice(), 1, &write, 0, nullptr);
+}
+
 void VulkanDescriptorSet::updateSet(uint32_t set) {
     if (set >= m_maxSets) {
         throw std::runtime_error("Set index out of range: " + std::to_string(set));
@@ -380,7 +400,9 @@ const std::vector<std::string>& VulkanDescriptorSet::getBindingNames() const {
 
 void VulkanDescriptorSet::createLayout() {
     std::vector<VkDescriptorSetLayoutBinding> layoutBindings;
+    std::vector<VkDescriptorBindingFlags> bindingFlags;
     layoutBindings.reserve(m_config.bindings.size());
+    bool anyFlags = false;
 
     for (const auto& binding : m_config.bindings) {
         VkDescriptorSetLayoutBinding layoutBinding{};
@@ -393,11 +415,21 @@ void VulkanDescriptorSet::createLayout() {
             layoutBinding.pImmutableSamplers = nullptr;
         }, binding);
 
+        const auto* image = std::get_if<ImageBinding>(&binding);
+        const bool partial = image && image->partiallyBound;
+        bindingFlags.push_back(partial ? VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT : 0);
+        anyFlags = anyFlags || partial;
         layoutBindings.push_back(layoutBinding);
     }
 
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo{};
+    flagsInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    flagsInfo.bindingCount = static_cast<uint32_t>(bindingFlags.size());
+    flagsInfo.pBindingFlags = bindingFlags.data();
+
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.pNext = anyFlags ? &flagsInfo : nullptr;
     layoutInfo.bindingCount = static_cast<uint32_t>(layoutBindings.size());
     layoutInfo.pBindings = layoutBindings.data();
 

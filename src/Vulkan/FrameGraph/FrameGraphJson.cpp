@@ -1085,9 +1085,9 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 // Filled from the scene every frame.
                 if (layout.initConfig.type == "scene") {
                     layout.initConfig.sceneData = srcJson.value("data", std::string{});
-                    if (layout.initConfig.sceneData != "lights") {
+                    if (layout.initConfig.sceneData != "lights" && layout.initConfig.sceneData != "rayInstances") {
                         throw std::runtime_error("Buffer layout '" + layout.name + "': a \"scene\" source needs "
-                                                 "\"data\": \"lights\", the only scene data a buffer can hold");
+                                                 "\"data\": \"lights\" or \"rayInstances\"");
                     }
                     if (layout.usage != BufferUsageType::StorageBuffer || layout.elementCount == 0) {
                         throw std::runtime_error("Buffer layout '" + layout.name + "': a \"scene\" source fills "
@@ -1295,6 +1295,13 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     binding.autoBindSampler  = bindingJson.value("autoBindSampler", std::string{});
                     binding.autoBindBuffer   = bindingJson.value("autoBindBuffer", std::string{});
                     binding.externalImage    = bindingJson.value("externalImage", std::string{});
+                    binding.source           = bindingJson.value("source", std::string{});
+                    if (!binding.source.empty() &&
+                        (binding.source != "sceneTextures" || binding.type != "combined_image_sampler")) {
+                        throw std::runtime_error("Binding '" + binding.name + "' of layout '" + layoutDesc.name +
+                                                 "': \"source\": \"sceneTextures\" is the only binding source, "
+                                                 "on a combined_image_sampler");
+                    }
                     binding.autoBindSubresource = parseSubresource(
                         bindingJson, "Binding '" + binding.name + "' of layout '" + layoutDesc.name + "'");
 

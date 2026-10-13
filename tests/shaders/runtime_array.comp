@@ -8,6 +8,7 @@
 layout(local_size_x = 64) in;
 
 struct Particle {
+    uvec4 flags;
     vec4 position;
     vec4 velocity;
 };

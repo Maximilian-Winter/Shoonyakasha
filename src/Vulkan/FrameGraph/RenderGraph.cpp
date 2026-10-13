@@ -467,7 +467,7 @@ void RenderGraph::createSceneSSBO(const BufferLayoutDesc& desc, const CompiledBu
 void RenderGraph::fillSceneSSBOs(uint32_t frameIndex) {
     if (!m_sceneContext) return;
     for (auto& [name, ssbo] : m_sceneSSBOs) {
-        if (ssbo.perFrame.empty()) continue;
+        if (ssbo.perFrame.empty() || ssbo.data != "lights") continue;
         auto& buffer = *ssbo.perFrame[frameIndex < ssbo.perFrame.size() ? frameIndex : 0];
         // This frame's fence has passed, so the GPU is done with this
         // frame's buffer; host-coherent writes reach it at the next submit.
@@ -2909,15 +2909,73 @@ void RenderGraph::recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex
             }
         }
         if (m_accelerationBindings.empty()) return;
+        for (const auto& layout : m_builder.getDescriptorSetLayouts()) {
+            auto set = getDescriptorSet(layout.name);
+            if (!set) continue;
+            for (const auto& binding : layout.bindings) {
+                if (binding.source != "sceneTextures") continue;
+                SceneTextureBinding textures;
+                textures.layout = layout.name;
+                textures.binding = binding.name.empty() ? "binding_" + std::to_string(binding.binding) : binding.name;
+                // The count the layout was made with, which the device's limits may have lowered.
+                for (const auto& made : set->getConfiguration().bindings) {
+                    if (const auto* image = std::get_if<ImageBinding>(&made); image && image->name == textures.binding) {
+                        textures.count = image->count;
+                    }
+                }
+                textures.written.resize(m_maxFramesInFlight);
+                m_sceneTextureBindings.push_back(std::move(textures));
+            }
+        }
     }
     if (!m_rayTracingScene) {
         m_rayTracingScene = std::make_unique<RayTracingScene>(m_device, m_maxFramesInFlight);
     }
-    m_rayTracingScene->recordBuild(cmd, frameIndex, m_boundScene->getRegistry());
+    uint32_t textureCapacity = m_sceneTextureBindings.empty() ? 0 : ~0u;
+    for (const auto& textures : m_sceneTextureBindings) textureCapacity = std::min(textureCapacity, textures.count);
+    m_rayTracingScene->recordBuild(cmd, frameIndex, m_boundScene->getRegistry(), textureCapacity);
     const VkAccelerationStructureKHR scene = m_rayTracingScene->topLevel(frameIndex);
     for (const auto& [layout, binding] : m_accelerationBindings) {
         if (auto set = getDescriptorSet(layout)) {
             set->bindAccelerationStructure(binding, frameIndex % m_maxFramesInFlight, scene);
+        }
+    }
+    writeRayTracingSceneData(frameIndex);
+}
+
+void RenderGraph::writeRayTracingSceneData(uint32_t frameIndex) {
+    const uint32_t frame = frameIndex % m_maxFramesInFlight;
+    // The rows of this frame's instances, in their order. This frame's fence
+    // has passed, so the GPU is done with this frame's buffer.
+    const auto& rows = m_rayTracingScene->instances(frameIndex);
+    for (auto& [name, ssbo] : m_sceneSSBOs) {
+        if (ssbo.data != "rayInstances" || ssbo.perFrame.empty()) continue;
+        const size_t count = std::min<size_t>(rows.size(), ssbo.capacity);
+        if (rows.size() > ssbo.capacity) {
+            m_logger->logEvery(5.0f, LogLevel::Warning,
+                               "The acceleration structure has %zu instances; '%s' holds %u, so rays that hit "
+                               "the rest read no surface", rows.size(), name.c_str(), ssbo.capacity);
+        }
+        if (count > 0) {
+            std::memcpy(ssbo.perFrame[frame < ssbo.perFrame.size() ? frame : 0]->getMappedData(), rows.data(),
+                        count * sizeof(PackedRayInstance));
+        }
+    }
+
+    // The textures they name, written into the slots that changed.
+    const auto& slots = m_rayTracingScene->textures(frameIndex);
+    for (auto& textures : m_sceneTextureBindings) {
+        auto set = getDescriptorSet(textures.layout);
+        if (!set) continue;
+        auto& written = textures.written[frame];
+        const size_t count = std::min<size_t>(slots.size(), textures.count);
+        if (written.size() < count) written.resize(count, {VK_NULL_HANDLE, VK_NULL_HANDLE});
+        for (size_t i = 0; i < count; ++i) {
+            const std::pair<VkImageView, VkSampler> slot{slots[i].view, slots[i].sampler};
+            if (written[i] == slot) continue;
+            set->bindImageElements(textures.binding, frame, static_cast<uint32_t>(i),
+                                   {ImageResource{slot.first, slot.second}});
+            written[i] = slot;
         }
     }
 }

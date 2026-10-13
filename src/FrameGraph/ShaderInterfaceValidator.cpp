@@ -93,9 +93,17 @@ bool flatten(const SpvReflectBlockVariable& v, const std::string& prefix, std::v
         if (v.array.dims[d] == SPV_REFLECT_ARRAY_DIM_RUNTIME) return false;
         arrayCount *= v.array.dims[d];
     }
+    // A runtime array appears only in the type's own description.
+    if (flags & SPV_REFLECT_TYPE_FLAG_ARRAY) {
+        const auto& dims = v.type_description->traits.array;
+        if (dims.dims_count == 0) return false;
+        for (uint32_t d = 0; d < dims.dims_count; ++d) {
+            if (dims.dims[d] == SPV_REFLECT_ARRAY_DIM_RUNTIME || dims.dims[d] == 0) return false;
+        }
+    }
 
     if (flags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
-        if (v.array.dims_count > 0) return false;
+        if (v.array.dims_count > 0 || (flags & SPV_REFLECT_TYPE_FLAG_ARRAY)) return false;
         for (uint32_t m = 0; m < v.member_count; ++m) {
             if (!flatten(v.members[m], name, out)) return false;
         }

@@ -124,6 +124,13 @@ Each descriptor-set layout has a `bindings` array. Bindings require `binding` an
 
 `acceleration_structure` binds the engine's top-level acceleration structure of the scene, for ray queries (`GL_EXT_ray_query`; compile such a shader for Vulkan 1.2 or later). The engine keeps one only on a device with ray queries. It holds the static, opaque, shadow-casting meshes, and is rebuilt every frame from their transforms. On a device without ray queries a layout with such a binding is skipped, and only a pass that `requires` `rayQuery` may use it.
 
+A `combined_image_sampler` binding with `"source": "sceneTextures"` and a `count` holds the textures that the instances of that structure use, in the slots their [`rayInstances`](#initialization-memory-and-readback) rows name. Each texture keeps its own sampler. Slots are given in order of first use every frame, and only the slots that changed are written. Slots past the scene's textures stay unwritten: the binding is partially bound, so a shader may only read the slots a row names. The `count` is lowered, with a warning, when it would not leave room for 256 other samplers within the device's limits. Textures past the count read as no texture. Without ray queries, a layout with such a binding is skipped as well. Shaders declare it as an unsized array and index it with `nonuniformEXT`:
+
+```json
+{ "binding": 2, "type": "combined_image_sampler", "stages": ["compute"], "name": "sceneTextures",
+  "count": 4096, "source": "sceneTextures" }
+```
+
 `autoBindBuffer` references a named buffer, `autoBindResource` an image/resource source, and `autoBindSampler` a named sampler. `externalImage` names an image the application supplies (`set_pipeline_image(name, path)`, C++ `EngineAPI::setPipelineImage` or `RenderGraph::setExternalImage`): the binding samples white until it does, and takes a new one at each frame in flight's next recording, so it can change while running. With `autoBindSampler` it uses that sampler, otherwise the image's own. Pass `descriptorSets` is an ordered list of layout names; that order supplies shader set indices.
 
 Sampler keys: `magFilter`, `minFilter`, `mipmapMode` default `linear` (also `nearest`). Use `addressMode` for all axes or `addressModeU/V/W` individually (default `repeat`; also `clamp_to_edge`, `clamp_to_border`, `mirrored_repeat`). Other keys are `borderColor` (`float_opaque_black`), `anisotropyEnable` (false; alias `anisotropy`), `maxAnisotropy` (1), `compareEnable` (false), `compareOp` (`less`), `minLod`, `maxLod`, and `mipLodBias` (all 0). Set the LOD range deliberately when sampling mipmapped textures.
@@ -271,6 +278,29 @@ Layout `source` accepts `type` (`initializer` by default), `seed` (42), and per-
                 { "name": "directionRange", "type": "vec4" }, { "name": "attenuation", "type": "vec4" },
                 { "name": "source", "type": "vec4" }, { "name": "shape", "type": "vec4" } ],
     "source": { "type": "scene", "data": "lights" } } }
+```
+
+`type: scene` with `"data": "rayInstances"` holds a row for each instance of the scene's [acceleration structure](#descriptors-and-samplers), in the structure's order. A ray query that hits instance `rayQueryGetIntersectionInstanceIdEXT` reads that row for the surface it hit. The rows are written with the structure, so a pipeline with such a buffer also needs an `acceleration_structure` binding. As for lights, there is one host-visible buffer per frame in flight, holding as many rows as `elementCount` (the rest are left out, with a warning).
+
+Its fields must be, in this order:
+
+| Field | Type | Holds |
+|---|---|---|
+| `geometry` | `uvec4` | The device addresses of the vertex buffer (x low, y high bits) and the index buffer (z, w; zero when the mesh is not indexed) |
+| `vertexLayout` | `uvec4` | x: the vertex stride in bytes; y: the index type (0 16-bit, 1 32-bit, 2 not indexed); z: byte offsets in the vertex (normal in bits 0-7, uv in 8-15, colour in 16-23); w: flags (1 double-sided) |
+| `baseColor` | `vec4` | `baseColorFactor` |
+| `emissive` | `vec4` | `emissiveFactor` in rgb |
+| `surface` | `vec4` | `metallicFactor`, `roughnessFactor`, `alphaCutoff`, and the entity id's bits in w |
+| `textures` | `uvec4` | The slots of `albedoMap`, `normalMap`, `metallicRoughnessMap` and `emissiveMap` in the `sceneTextures` binding; `0xFFFFFFFF` for none |
+
+Otherwise compilation fails. The GLSL library's [`sk/scene_hits.glsl`](../../python/shoonyakasha/glsl/sk/scene_hits.glsl) declares the buffer and the texture array, and turns a committed hit into its position, normals, uv and material:
+
+```json
+{ "RayInstances": { "usage": "storage_buffer", "packing": "std430", "elementCount": 16384,
+    "fields": [ { "name": "geometry", "type": "uvec4" }, { "name": "vertexLayout", "type": "uvec4" },
+                { "name": "baseColor", "type": "vec4" }, { "name": "emissive", "type": "vec4" },
+                { "name": "surface", "type": "vec4" }, { "name": "textures", "type": "uvec4" } ],
+    "source": { "type": "scene", "data": "rayInstances" } } }
 ```
 
 `memory` selects `location` (`device_local`, `host_visible`, `host_coherent`), `staging` (`auto`, `persistent`, `none`), and `transferDirection` (`gpu_only`, `cpu_to_gpu`, `gpu_to_cpu`, `bidirectional`). Defaults are the first value in each list.

@@ -149,6 +149,8 @@ struct DescriptorBindingDesc {
     std::string                 autoBindBuffer;     // Buffer name (for external UBOs)
     std::string                 externalImage;      // Image the application supplies under this name
                                                     // (RenderGraph::setExternalImage); white until it does
+    std::string                 source;             // "sceneTextures": the array of the textures the
+                                                    // ray-traced scene's instances use, by slot
 };
 
 struct DescriptorSetLayoutDesc {

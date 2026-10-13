@@ -53,6 +53,12 @@ PASS_TYPES = frozenset({"graphics", "compute", "transfer"})
 
 #: What a pass may "require"; a device without it leaves the pass out.
 CAPABILITIES = frozenset({"rayQuery", "drawIndirectCount"})
+
+#: What a buffer layout with "source": {"type": "scene"} holds ("data").
+SCENE_DATA = frozenset({"lights", "rayInstances"})
+
+#: What a descriptor binding's "source" may name.
+BINDING_SOURCES = frozenset({"sceneTextures"})
 RESOURCE_KINDS = frozenset({"image", "buffer"})
 
 FIELD_TYPES = frozenset({
@@ -230,6 +236,10 @@ def validate_json(document, base_dir=None, source="<json>"):
         if usage is not None:
             _check_enum(usage, BUFFER_USAGES, where, "usage", problems)
 
+        layout_source = layout.get("source")
+        if isinstance(layout_source, dict) and layout_source.get("type") == "scene":
+            _check_enum(str(layout_source.get("data")), SCENE_DATA, where, "source data", problems)
+
         fields = layout.get("fields", [])
         if not isinstance(fields, list):
             problems.append(Problem(where, "'fields' must be an array"))
@@ -248,6 +258,18 @@ def validate_json(document, base_dir=None, source="<json>"):
                 # "vec4[16]" -> "vec4"; the array suffix is checked separately.
                 base_type = str(field_type).split("[", 1)[0]
                 _check_enum(base_type, FIELD_TYPES, field_where, "type", problems)
+
+    # ── descriptor set layouts ─────────────────────────────────
+    set_layouts = document.get("descriptorSetLayouts", {})
+    for layout_name, set_layout in (set_layouts.items() if isinstance(set_layouts, dict) else []):
+        bindings = set_layout.get("bindings", []) if isinstance(set_layout, dict) else []
+        for binding in bindings if isinstance(bindings, list) else []:
+            if not isinstance(binding, dict) or "source" not in binding:
+                continue
+            where = "%s descriptorSetLayouts '%s' binding %s" % (source, layout_name, binding.get("binding"))
+            if _check_enum(str(binding["source"]), BINDING_SOURCES, where, "source", problems) and \
+                    binding.get("type") != "combined_image_sampler":
+                problems.append(Problem(where, "a 'sceneTextures' binding is a combined_image_sampler"))
 
     # ── passes ─────────────────────────────────────────────────
     written, read, presents = set(), set(), []

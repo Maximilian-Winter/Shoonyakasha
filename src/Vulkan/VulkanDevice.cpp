@@ -276,6 +276,12 @@ void VulkanDevice::createLogicalDevice() {
         extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
         extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
         vulkan12Features.bufferDeviceAddress = VK_TRUE;
+        // Ray-query shaders look up the textures of the surface they hit in an
+        // array of the scene's textures, of which only some elements are written.
+        vulkan12Features.descriptorIndexing = VK_TRUE;
+        vulkan12Features.runtimeDescriptorArray = VK_TRUE;
+        vulkan12Features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+        vulkan12Features.descriptorBindingPartiallyBound = VK_TRUE;
         accelerationFeatures.accelerationStructure = VK_TRUE;
         rayQueryFeatures.rayQuery = VK_TRUE;
         accelerationFeatures.pNext = &rayQueryFeatures;
@@ -464,7 +470,9 @@ bool VulkanDevice::supportsRayQuery(VkPhysicalDevice device) const {
     features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features.pNext = &vulkan12;
     vkGetPhysicalDeviceFeatures2(device, &features);
-    return vulkan12.bufferDeviceAddress && acceleration.accelerationStructure && rayQuery.rayQuery;
+    return vulkan12.bufferDeviceAddress && acceleration.accelerationStructure && rayQuery.rayQuery &&
+           vulkan12.descriptorIndexing && vulkan12.runtimeDescriptorArray &&
+           vulkan12.shaderSampledImageArrayNonUniformIndexing && vulkan12.descriptorBindingPartiallyBound;
 }
 
 QueueFamilyIndices VulkanDevice::findQueueFamilies(VkPhysicalDevice device) {

@@ -14,6 +14,12 @@
 //
 // Only exists on a device with ray queries (VulkanDevice::hasRayQuery).
 //
+// Alongside each top-level structure, one PackedRayInstance per instance, in
+// the same order, describes the surface: a shader that hits instance i
+// (rayQueryGetIntersectionInstanceIdEXT) reads row i for its vertices,
+// indices and material. The textures the rows name are listed in slots, for
+// a pipeline's array of the scene's textures.
+//
 
 #pragma once
 
@@ -21,6 +27,7 @@
 #include "GPU/GpuDeleteQueue.h"
 
 #include <entt/entt.hpp>
+#include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -33,9 +40,33 @@ namespace Shoonyakasha {
 class VulkanDevice;
 class Logger;
 struct MeshComponent;
+struct MaterialComponentV5;
+
+/// One instance of the top-level structure, as shaders read it. Six vec4s;
+/// the GLSL side is python/shoonyakasha/glsl/scene_hits.glsl.
+struct PackedRayInstance {
+    static constexpr uint32_t kNoTexture = 0xFFFFFFFFu;
+    static constexpr uint32_t kIndexNone = 2;   // indexType: 0 16-bit, 1 32-bit, 2 not indexed
+    static constexpr uint32_t kDoubleSided = 1;  // flags
+
+    glm::uvec4 geometry{0};   // vertex buffer address (lo, hi), index buffer address (lo, hi)
+    glm::uvec4 layout{0};     // vertex stride, index type, byte offsets (normal | uv << 8 | color << 16), flags
+    glm::vec4  baseColor{1.0f};   // baseColorFactor
+    glm::vec4  emissive{0.0f};    // emissiveFactor rgb, w 0
+    glm::vec4  surface{0.0f};     // metallicFactor, roughnessFactor, alphaCutoff, entity id (bits)
+    glm::uvec4 textures{kNoTexture};   // slots of albedoMap, normalMap, metallicRoughnessMap, emissiveMap
+};
+static_assert(sizeof(PackedRayInstance) == 96, "PackedRayInstance is six vec4s");
 
 class RayTracingScene {
 public:
+    /// A texture the instances use, at the slot that is its index in textures().
+    struct TextureSlot {
+        VkImageView view = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
+        bool operator==(const TextureSlot& o) const { return view == o.view && sampler == o.sampler; }
+    };
+
     RayTracingScene(VulkanDevice& device, uint32_t framesInFlight);
     ~RayTracingScene();
 
@@ -44,13 +75,33 @@ public:
 
     /// Record this frame's top-level build into `cmd`, followed by a barrier
     /// that makes it visible to fragment and compute shaders. Builds any
-    /// bottom-level structures it needs first, synchronously.
-    void recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt::registry& registry);
+    /// bottom-level structures it needs first, synchronously. Also fills this
+    /// frame's instances() and textures(), giving at most `textureCapacity`
+    /// textures a slot; the rest read as kNoTexture.
+    void recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt::registry& registry,
+                     uint32_t textureCapacity = 0);
 
     /// The top-level structure `recordBuild` last built for `frameIndex`.
     VkAccelerationStructureKHR topLevel(uint32_t frameIndex) const;
     uint32_t instanceCount(uint32_t frameIndex) const;
     size_t bottomLevelCount() const { return m_bottomLevels.size(); }
+
+    /// The rows of `frameIndex`'s top-level instances, in their order.
+    const std::vector<PackedRayInstance>& instances(uint32_t frameIndex) const;
+    /// The textures those rows name, by slot.
+    const std::vector<TextureSlot>& textures(uint32_t frameIndex) const;
+
+    /// The row of one instance. `textureSlots` holds the slots of albedoMap,
+    /// normalMap, metallicRoughnessMap and emissiveMap (kNoTexture for none).
+    /// The vertex layout is the 44-byte glTF vertex every mesh in the
+    /// structure has: position at 0, color at 12, uv at 24, normal at 32.
+    static PackedRayInstance packInstance(const MaterialComponentV5& material, uint32_t entity,
+                                          const MeshComponent& mesh, VkDeviceAddress vertices,
+                                          VkDeviceAddress indices, const glm::uvec4& textureSlots);
+
+    /// The material texture slots a row names, in PackedRayInstance::textures order.
+    static constexpr const char* kTextureNames[4] = {"albedoMap", "normalMap", "metallicRoughnessMap",
+                                                     "emissiveMap"};
 
 private:
     struct AccelerationStructure {
@@ -69,6 +120,8 @@ private:
         void* mapped = nullptr;
         uint32_t capacity = 0;
         uint32_t count = 0;
+        std::vector<PackedRayInstance> rows;
+        std::vector<TextureSlot> textures;
     };
     struct MeshKey {
         VkBuffer vertices, indices;

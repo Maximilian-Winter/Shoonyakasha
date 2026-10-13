@@ -242,9 +242,45 @@ void RayTracingScene::ensureTopLevelCapacity(TopLevel& top, uint32_t count) {
     m_logger->log(LogLevel::Info, "Top-level structure sized for %u instances", capacity);
 }
 
-void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt::registry& registry) {
+PackedRayInstance RayTracingScene::packInstance(const MaterialComponentV5& material, uint32_t entity,
+                                                const MeshComponent& mesh, VkDeviceAddress vertices,
+                                                VkDeviceAddress indices, const glm::uvec4& textureSlots) {
+    constexpr uint32_t kColorOffset = 12, kUvOffset = 24, kNormalOffset = 32;
+    PackedRayInstance row;
+    row.geometry = glm::uvec4(static_cast<uint32_t>(vertices), static_cast<uint32_t>(vertices >> 32),
+                              static_cast<uint32_t>(indices), static_cast<uint32_t>(indices >> 32));
+    const uint32_t indexType = !mesh.hasIndices() ? PackedRayInstance::kIndexNone
+                             : mesh.indexType == IndexType::UInt16 ? 0u : 1u;
+    row.layout = glm::uvec4(mesh.vertexStride, indexType, kNormalOffset | (kUvOffset << 8) | (kColorOffset << 16),
+                            material.doubleSided ? PackedRayInstance::kDoubleSided : 0u);
+    row.baseColor = material.getParam<glm::vec4>("baseColorFactor", glm::vec4(1.0f));
+    row.emissive = glm::vec4(material.getParam<glm::vec3>("emissiveFactor", glm::vec3(0.0f)), 0.0f);
+    float entityBits;
+    std::memcpy(&entityBits, &entity, sizeof(entityBits));
+    row.surface = glm::vec4(material.getParam<float>("metallicFactor", 0.0f),
+                            material.getParam<float>("roughnessFactor", 0.5f), material.alphaCutoff, entityBits);
+    row.textures = textureSlots;
+    return row;
+}
+
+void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt::registry& registry,
+                                  uint32_t textureCapacity) {
     releaseExpired();
     TopLevel& top = m_topLevels[frameIndex % m_framesInFlight];
+    top.rows.clear();
+    top.textures.clear();
+    // Slots in order of first use, so they stay put while the scene does.
+    std::unordered_map<VkImageView, uint32_t> slotOfView;
+    auto slotOf = [&](const MaterialComponentV5& material, const char* name) -> uint32_t {
+        const GPUTexture* texture = material.getTexture(name);
+        if (!texture || !texture->exists || texture->view == VK_NULL_HANDLE) return PackedRayInstance::kNoTexture;
+        if (auto it = slotOfView.find(texture->view); it != slotOfView.end()) return it->second;
+        if (top.textures.size() >= textureCapacity) return PackedRayInstance::kNoTexture;
+        const auto slot = static_cast<uint32_t>(top.textures.size());
+        top.textures.push_back({texture->view, texture->sampler});
+        slotOfView.emplace(texture->view, slot);
+        return slot;
+    };
 
     // The static, opaque shadow casters.
     std::vector<VkAccelerationStructureInstanceKHR> instances;
@@ -255,10 +291,16 @@ void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt
         if (!mesh.rayTracingInput || !mesh.isValid() || !tag.shouldRender() || !tag.castShadows) continue;
         // Opaque materials only: alpha-tested ones need their texture to cut
         // the right holes, which a pipeline can leave to its shadow maps.
-        if (!view.get<MaterialComponentV5>(entity).isOpaque()) continue;
+        const auto& material = view.get<MaterialComponentV5>(entity);
+        if (!material.isOpaque()) continue;
         if (registry.all_of<SkeletonComponent>(entity) || registry.all_of<Sprite2DComponent>(entity)) continue;
 
         const BottomLevel* bottom = bottomLevelFor(mesh);
+        glm::uvec4 slots;
+        for (int t = 0; t < 4; ++t) slots[t] = slotOf(material, kTextureNames[t]);
+        top.rows.push_back(packInstance(material, static_cast<uint32_t>(entity), mesh,
+                                        addressOf(mesh.vertexHandle()),
+                                        mesh.hasIndices() ? addressOf(mesh.indexHandle()) : 0, slots));
         const glm::mat4& world = view.get<ECS::TransformComponent>(entity).worldMatrix;
         VkAccelerationStructureInstanceKHR instance{};
         for (int r = 0; r < 3; ++r)
@@ -322,6 +364,14 @@ VkAccelerationStructureKHR RayTracingScene::topLevel(uint32_t frameIndex) const 
 
 uint32_t RayTracingScene::instanceCount(uint32_t frameIndex) const {
     return m_topLevels[frameIndex % m_framesInFlight].count;
+}
+
+const std::vector<PackedRayInstance>& RayTracingScene::instances(uint32_t frameIndex) const {
+    return m_topLevels[frameIndex % m_framesInFlight].rows;
+}
+
+const std::vector<RayTracingScene::TextureSlot>& RayTracingScene::textures(uint32_t frameIndex) const {
+    return m_topLevels[frameIndex % m_framesInFlight].textures;
 }
 
 } // namespace Shoonyakasha

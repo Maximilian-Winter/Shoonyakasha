@@ -128,8 +128,11 @@ class ShaderCompilation(unittest.TestCase):
         self.assertTrue(headers, "no headers under %s" % shaders.include_dir())
         for header in headers:
             with self.subTest(header=header.name):
+                # A header's own `// glslc:` first line goes where a shader names its arguments.
+                first = header.read_text(encoding="utf-8").splitlines()[0]
+                arguments = first + "\n" if first.startswith("// glslc:") else ""
                 source = self.write(header.stem + ".frag",
-                                    '#version 450\n#include "sk/%s"\n' % header.name
+                                    "#version 460\n" + arguments + '#include "sk/%s"\n' % header.name
                                     + "layout(location = 0) out vec4 c;\n"
                                     + "void main() { c = vec4(1.0); }\n")
                 self.assertTrue(shaders.compile(source, force=True).exists())
@@ -249,6 +252,26 @@ class PipelineValidation(unittest.TestCase):
         document["passes"][0]["requires"] = ["rayQuerry"]
         messages = [p.message for p in self.problems(document)]
         self.assertTrue(any("'rayQuerry', which is not a capability" in m for m in messages), messages)
+
+    def test_scene_sources_must_be_known(self):
+        import copy
+        document = copy.deepcopy(self.MINIMAL)
+        document["bufferLayouts"] = {"Rows": {
+            "usage": "storage_buffer", "elementCount": 16, "fields": [],
+            "source": {"type": "scene", "data": "rayInstances"}}}
+        document["descriptorSetLayouts"] = {"hits": {"bindings": [
+            {"binding": 0, "type": "combined_image_sampler", "count": 64, "source": "sceneTextures"}]}}
+        self.assertEqual([], self.problems(document))
+
+        document["bufferLayouts"]["Rows"]["source"]["data"] = "rayInstance"
+        document["descriptorSetLayouts"]["hits"]["bindings"][0]["type"] = "storage_image"
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("'rayInstance' is not known" in m for m in messages), messages)
+        self.assertTrue(any("combined_image_sampler" in m for m in messages), messages)
+
+        document["descriptorSetLayouts"]["hits"]["bindings"][0]["source"] = "sceneTexture"
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("'sceneTexture' is not known" in m for m in messages), messages)
 
     def test_presets_are_checked_against_the_passes(self):
         import copy

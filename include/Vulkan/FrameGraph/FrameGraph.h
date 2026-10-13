@@ -1573,7 +1573,7 @@ private:
     // "scene"}): one host-visible, host-coherent buffer per frame in flight,
     // mapped while it lives, written after that frame's fence.
     struct SceneSSBO {
-        std::string data;               // "lights"
+        std::string data;               // "lights", or "rayInstances" (filled with the acceleration structure)
         uint32_t capacity = 0;          // elements it holds
         uint32_t elementSize = 0;
         std::vector<std::unique_ptr<VulkanBuffer>> perFrame;
@@ -1592,6 +1592,15 @@ private:
     std::unique_ptr<StagingBufferManager> m_stagingManager;
     std::unique_ptr<Shoonyakasha::RayTracingScene> m_rayTracingScene;
     std::vector<std::pair<std::string, std::string>> m_accelerationBindings;   // (layout, binding)
+    // Bindings with "source": "sceneTextures", and per frame in flight the
+    // (view, sampler) last written to each of their slots.
+    struct SceneTextureBinding {
+        std::string layout, binding;
+        uint32_t count = 0;
+        std::vector<std::vector<std::pair<VkImageView, VkSampler>>> written;
+    };
+    std::vector<SceneTextureBinding> m_sceneTextureBindings;
+    void writeRayTracingSceneData(uint32_t frameIndex);
     uint64_t m_globalFrameNumber = 0;
     uint64_t m_recordedFrames = 0;   // see getFrameNumber
     std::unordered_map<std::string, ReadbackCallbackFn> m_readbackCallbacks;

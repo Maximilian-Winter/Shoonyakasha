@@ -206,11 +206,14 @@ TEST(ShaderInterfaceValidator, ReportsPushConstantFieldMismatch) {
 
 TEST(ShaderInterfaceValidator, SkipsRuntimeArrayBlocks) {
     // The JSON describes one particle; the shader declares an unsized array.
+    // Its members have different types, so comparing them at the wrong
+    // offsets would report mismatches.
     BufferLayoutDesc desc;
     desc.name = "Particles";
     desc.usage = BufferUsageType::StorageBuffer;
     desc.packing = BufferPackingRule::Std430;
-    desc.fields = {field("position", BufferFieldType::Vec4), field("velocity", BufferFieldType::Vec4)};
+    desc.fields = {field("flags", BufferFieldType::UVec4), field("position", BufferFieldType::Vec4),
+                   field("velocity", BufferFieldType::Vec4)};
     const auto layouts = compileLayouts({desc});
 
     ShaderInterfaceExpectation e;

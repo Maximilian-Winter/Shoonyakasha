@@ -14,6 +14,7 @@
 #include "Vulkan/VulkanComputePipeline.h"
 #include "Vulkan/VulkanDescriptorSystem.h"
 #include "Vulkan/VulkanMemoryAllocator.h"
+#include "Vulkan/RayTracingScene.h"
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
 #include "FrameGraph/ShaderInterfaceValidator.h"
 #include "Core/Logger.h"
@@ -55,6 +56,20 @@ std::string sceneBuffersError(const std::vector<BufferLayoutDesc>& layouts,
         const auto it = compiled.find(desc.name);
         if (it == compiled.end()) continue;
         const auto& fields = it->second.fields;
+        if (desc.initConfig.sceneData == "rayInstances") {
+            using T = BufferFieldType;
+            const T expected[6] = {T::UVec4, T::UVec4, T::Vec4, T::Vec4, T::Vec4, T::UVec4};
+            bool matches = fields.size() == 6 && it->second.totalSize == sizeof(PackedRayInstance);
+            for (size_t i = 0; matches && i < 6; ++i) {
+                matches = fields[i].type == expected[i] && fields[i].arrayCount == 1;
+            }
+            if (!matches) {
+                return "Buffer layout '" + desc.name + "': ray instances are the fields geometry (uvec4), "
+                       "vertexLayout (uvec4), baseColor, emissive, surface (vec4) and textures (uvec4), " +
+                       std::to_string(sizeof(PackedRayInstance)) + " bytes each";
+            }
+            continue;
+        }
         const bool sixVec4 = fields.size() == 6 &&
             std::all_of(fields.begin(), fields.end(), [](const BufferFieldDesc& f) {
                 return f.type == BufferFieldType::Vec4 && f.arrayCount == 1;
@@ -746,9 +761,11 @@ void FrameGraphCompiler::createDescriptorSetLayouts(
     for (const auto& desc : layoutDescs) {
         // A layout with an acceleration structure cannot exist without ray
         // queries; only passes left out for lacking them ("requires") use one.
+        // The scene's texture array is filled from that same structure.
         if (!device.hasRayQuery() &&
-            std::any_of(desc.bindings.begin(), desc.bindings.end(),
-                        [](const auto& b) { return b.type == "acceleration_structure"; })) {
+            std::any_of(desc.bindings.begin(), desc.bindings.end(), [](const auto& b) {
+                return b.type == "acceleration_structure" || b.source == "sceneTextures";
+            })) {
             m_logger->log(LogLevel::Info, "  Skipped descriptor set layout '%s': it needs ray queries",
                           desc.name.c_str());
             continue;
@@ -792,6 +809,22 @@ void FrameGraphCompiler::createDescriptorSetLayouts(
                     img.stages = stageFlags;
                     img.binding = binding.binding;
                     img.count = binding.count;
+                    if (binding.source == "sceneTextures") {
+                        // Slots past the scene's textures stay unwritten. The
+                        // count leaves room for the stage's other samplers.
+                        const auto& limits = device.getLimits();
+                        const uint32_t room = std::min({limits.maxPerStageDescriptorSamplers,
+                                                        limits.maxPerStageDescriptorSampledImages,
+                                                        limits.maxDescriptorSetSamplers,
+                                                        limits.maxDescriptorSetSampledImages});
+                        const uint32_t fits = room > 256 ? room - 256 : 1;
+                        if (img.count > fits) {
+                            m_logger->log(LogLevel::Warning, "  Scene textures '%s': %u slots, the device has room "
+                                          "for %u", bindingName.c_str(), img.count, fits);
+                            img.count = fits;
+                        }
+                        img.partiallyBound = true;
+                    }
                     builder.addImage(img);
                     break;
                 }

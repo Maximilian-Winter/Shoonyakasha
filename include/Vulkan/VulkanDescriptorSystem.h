@@ -49,6 +49,9 @@ struct ImageBinding {
     VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT;
     uint32_t binding = 0;
     uint32_t count = 1;
+    // Elements a shader does not use may be left unwritten
+    // (VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT; needs descriptor indexing).
+    bool partiallyBound = false;
 
     // Factory methods for common patterns
     static ImageBinding createTexture(const std::string& name, uint32_t binding,
@@ -166,6 +169,9 @@ public:
     void bindResource(const std::string& name, uint32_t set, const Resource& resource);
     /// Write an acceleration structure binding now (not a pending write).
     void bindAccelerationStructure(const std::string& name, uint32_t set, VkAccelerationStructureKHR structure);
+    /// Write elements [first, first + images.size()) of an image array binding now.
+    void bindImageElements(const std::string& name, uint32_t set, uint32_t first,
+                           const std::vector<ImageResource>& images);
 
     // Bulk operations for efficiency
     void bindResources(uint32_t set, const std::unordered_map<std::string, Resource>& resources);
