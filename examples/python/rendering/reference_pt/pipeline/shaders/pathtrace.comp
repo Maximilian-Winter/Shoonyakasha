@@ -28,7 +28,7 @@ layout(set = 1, binding = 0) uniform Camera {
 layout(set = 1, binding = 1) uniform PathTracer {
     uint reset;          // 1: start the average over
     uint maxBounces;
-    uint mode;           // 0 everything, 1 indirect light only, 2 white furnace, 3 indirect irradiance
+    uint mode;           // 0 everything, 1 indirect only, 2 white furnace, 3 indirect irradiance, 4 reflections
     uint toneMapper;
     float exposure;
     float environmentIntensity;
@@ -58,6 +58,7 @@ layout(set = 4, binding = 1) uniform samplerCube prefilterMap;
 const uint MODE_INDIRECT = 1u;
 const uint MODE_FURNACE = 2u;
 const uint MODE_IRRADIANCE = 3u;   // the first surface white: the light arriving there, over pi
+const uint MODE_REFLECTIONS = 4u;  // the first surface's specular lobe alone, without the lights' direct light
 const float RAY_FAR = 10000.0;
 
 // ── Random numbers ───────────────────────────────────────────────
@@ -236,7 +237,9 @@ vec3 tracePath(vec3 origin, vec3 direction, float pixelSpread) {
         rayQueryEXT query;
         rayQueryInitializeEXT(query, scene, gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, direction, RAY_FAR);
         while (rayQueryProceedEXT(query)) {}
-        bool firstOnly = bounce == 0u && (settings.mode == MODE_INDIRECT || settings.mode == MODE_IRRADIANCE);
+        bool firstOnly = bounce == 0u && (settings.mode == MODE_INDIRECT || settings.mode == MODE_IRRADIANCE ||
+                                          settings.mode == MODE_REFLECTIONS);
+        bool specularOnly = bounce == 0u && settings.mode == MODE_REFLECTIONS;
         if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
             if (!firstOnly) radiance += throughput * environment(direction);
             break;
@@ -269,7 +272,7 @@ vec3 tracePath(vec3 origin, vec3 direction, float pixelSpread) {
 
         // The next direction, from the diffuse or the specular lobe.
         float NdotV = max(dot(N, V), 1e-4);
-        float chance = white ? 0.0 : specularChance(albedo, metallic, NdotV);
+        float chance = white ? 0.0 : specularOnly ? 1.0 : specularChance(albedo, metallic, NdotV);
         vec3 L;
         if (random() < chance) {
             vec3 H = toWorld(sampleGgxVisibleNormal(toLocal(V, N), roughness * roughness, random(), random()), N);
@@ -281,6 +284,15 @@ vec3 tracePath(vec3 origin, vec3 direction, float pixelSpread) {
         if (NdotL <= 0.0 || dot(Ng, L) <= 0.0) break;
         if (white) {
             throughput *= albedo;   // Lambertian, drawn by its cosine: the weight is the albedo
+        } else if (specularOnly) {
+            // cookTorrance's specular term alone, drawn from its own lobe.
+            float pdf = brdfPdf(N, V, L, roughness, 1.0);
+            if (pdf <= 1e-8) break;
+            vec3 H = normalize(V + L);
+            vec3 F = fresnelSchlick(max(dot(V, H), 0.0), baseReflectivity(albedo, metallic));
+            float D = distributionGGX(max(dot(N, H), 0.0), roughness);
+            float G = geometrySmith(max(dot(N, V), 0.0), NdotL, roughness);
+            throughput *= D * G * F / max(4.0 * max(dot(N, V), 0.0) * NdotL, 0.001) * NdotL / pdf;
         } else {
             float pdf = brdfPdf(N, V, L, roughness, chance);
             if (pdf <= 1e-8) break;

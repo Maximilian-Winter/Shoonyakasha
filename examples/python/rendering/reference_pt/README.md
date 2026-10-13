@@ -44,6 +44,7 @@ The views:
 - **Indirect only:** what reaches the camera after at least one bounce. Leaves out the light and emission seen at the first hit.
 - **White furnace:** every surface white and Lambertian, shaded with its triangle's normal, under a sky of 1, with up to 64 bounces. A path loses nothing at a bounce, so the image converges to 1 everywhere, shown as mid grey (the view writes half the value). Where light needs more than 64 bounces to get out, as under Sponza's covered arcades, the image stays darker. The colonnade converges to 1 within the 64.
 - **Indirect irradiance** (`--mode 3` only): the first surface is white and Lambertian, without its emission or the scene lights' direct light, so each pixel converges to the light that reaches its surface from the rest of the scene and the sky, over pi. Pixels showing the sky are black. This is what the [ReSTIR GI](../restir_gi/README.md) example's **Indirect** view estimates.
+- **Reflections** (`--mode 4` only): only the first surface's specular lobe (`cookTorrance`'s specular term, drawn from its own lobe) reflects, without its emission or the scene lights' direct light, so each pixel converges to the light the surface reflects from the rest of the scene and the sky. Pixels showing the sky are black. This is what the [ray-traced reflections](../rt_reflections/README.md) example's **Reflections** view estimates.
 
 ## Options
 
@@ -52,8 +53,9 @@ The views:
 | `--pipeline pt` / `default` | `pt` | The path tracer, or the scene on the default pipeline |
 | `--scene sponza` / `colonnade` | `sponza` | |
 | `--bounces N` | 8 | Bounces after the first hit, 1 to 16; 1 is direct light only |
-| `--mode 0` / `1` / `2` / `3` | 0 | Everything, indirect only, white furnace, indirect irradiance |
+| `--mode 0` to `4` | 0 | Everything, indirect only, white furnace, indirect irradiance, reflections |
 | `--sky X` | 1.0 | Intensity of the sky's light, on both pipelines |
+| `--exposure X` | 1.0 | Multiplies the image before the tone curve, on both pipelines |
 | `--samples N` | 0 | Paths per pixel to stop at; 0 never stops |
 | `--screenshot FILE` | | Save once `--samples` paths are in, or after `--settle` seconds without `--samples`, then quit |
 | `--settle S` | 3.0 | |
@@ -73,7 +75,7 @@ Settings are `scene.custom.pt.*` values, read through the `PathTracer` uniform b
 |---|---|---|
 | `reset` (uint) | 0 | 1 starts the average over in that frame |
 | `maxBounces` (uint) | 8 | Bounces after the first hit, at most 16 |
-| `mode` (uint) | 0 | 0 everything, 1 indirect only, 2 white furnace, 3 indirect irradiance |
+| `mode` (uint) | 0 | 0 everything, 1 indirect only, 2 white furnace, 3 indirect irradiance, 4 reflections |
 | `toneMapper` (uint) | 2 | 2 AgX, 1 Khronos PBR Neutral, 0 ACES, as in the default pipeline |
 | `exposure` | 1.0 | Multiplies the mean before the tone curve |
 | `environmentIntensity` | 1.0 | Multiplies the sky |
