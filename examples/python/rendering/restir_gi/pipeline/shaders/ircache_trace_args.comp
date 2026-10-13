@@ -1,0 +1,18 @@
+#version 460
+// Freezes this frame's count of live entries and writes the group counts of
+// the passes over them: one thread per entry, per sample, and per stratum.
+// Frozen, nothing is traced.
+
+#define IRCACHE_SET 0
+#include "common.glsl"
+#include "ircache.glsl"
+
+layout(local_size_x = 1) in;
+
+void main() {
+    uint live = settings.freeze != 0u ? 0u : ircacheMeta[META_LIVE_COUNT];
+    ircacheMeta[META_TRACING_COUNT] = live;
+    ircacheArgs[ARGS_PER_ENTRY] = uvec4((live + 63u) / 64u, 1u, 1u, 0u);
+    ircacheArgs[ARGS_PER_SAMPLE] = uvec4((live * IRCACHE_SAMPLES_PER_FRAME + 63u) / 64u, 1u, 1u, 0u);
+    ircacheArgs[ARGS_PER_OCTA] = uvec4((live * IRCACHE_OCTA_DIMS2 + 63u) / 64u, 1u, 1u, 0u);
+}

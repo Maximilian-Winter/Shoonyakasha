@@ -1,0 +1,52 @@
+#version 460
+// Spatial filter of the temporally filtered indirect light: where the
+// temporal filter is not yet settled, up to 8 taps on a spiral (radius 16
+// pixels for no history, 2 when nearly settled), weighed by depth
+// similarity, averaged in a tone-mapped space that favours dimmer values.
+
+#include "common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 2, binding = 0, rgba16f) uniform readonly image2D temporalOut;
+layout(set = 2, binding = 1, rgba32f) uniform readonly image2D gPosition;
+layout(set = 2, binding = 2, rgba16f) uniform readonly image2D gGeoNormal;
+layout(set = 2, binding = 3, rgba16f) uniform writeonly image2D indirect;
+
+vec3 crunch(vec3 v) { return v / (max(v.r, max(v.g, v.b)) + 1.0); }
+vec3 uncrunch(vec3 v) { return v / (1.0 - max(v.r, max(v.g, v.b))); }
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(camera.resolution);
+    if (any(greaterThanEqual(px, size))) return;
+
+    vec4 center = imageLoad(temporalOut, px);
+    float validity = center.a;
+    if (validity >= 1.0 || (settings.stages & STAGE_SPATIAL_FILTER) == 0u) {
+        imageStore(indirect, px, vec4(center.rgb, 1.0));
+        return;
+    }
+    float centerDepth = imageLoad(gPosition, px).w;
+    vec3 centerNormalVs = directionWorldToView(imageLoad(gGeoNormal, px).xyz);
+
+    float angleOffset = float((camera.frame * 23u) % 32u) * TAU + interleavedGradientNoise(vec2(px)) * 3.14159265;
+    const uint MAX_SAMPLES = 8u;
+    float maxRadius = sqrt(mix(16.0 * 16.0, 2.0 * 2.0, validity));
+    uint sampleCount = clamp(uint(exp2(4.0 * (1.0 - validity) * (1.0 - validity))), 2u, MAX_SAMPLES);
+    float radiusStep = maxRadius / pow(float(MAX_SAMPLES - 1u), 0.666);
+
+    vec4 sum = vec4(crunch(center.rgb), 1.0);
+    for (uint i = 1u; i < MAX_SAMPLES; ++i) {
+        if (i >= sampleCount) break;
+        float angle = (float(i) + angleOffset) * GOLDEN_ANGLE;
+        float radius = pow(float(i), 0.666) * radiusStep;
+        ivec2 tap = px + ivec2(vec2(cos(angle), sin(angle)) * radius);
+        if (any(lessThan(tap, ivec2(0))) || any(greaterThanEqual(tap, size))) continue;
+        float depth = imageLoad(gPosition, tap).w;
+        if (depth == 0.0) continue;
+        float w = exp2(-100.0 * abs(centerNormalVs.z * (depth / centerDepth - 1.0)));
+        sum += vec4(crunch(imageLoad(temporalOut, tap).rgb), 1.0) * w;
+    }
+    imageStore(indirect, px, vec4(uncrunch(sum.rgb / max(1e-5, sum.a)), 1.0));
+}

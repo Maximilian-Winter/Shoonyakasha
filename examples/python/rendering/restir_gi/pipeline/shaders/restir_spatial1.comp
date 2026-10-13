@@ -1,0 +1,5 @@
+#version 460
+// The second spatial resampling pass, with the occlusion march (restir_spatial.glsl).
+
+#define SPATIAL_PASS 1
+#include "restir_spatial.glsl"

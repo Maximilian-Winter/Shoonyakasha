@@ -1,0 +1,42 @@
+#version 460
+// Last frame's indirect light, at the place each pixel's surface had on
+// screen: a bilinear fetch of the history that leaves out the texels whose
+// depth does not match the surface. reprojectedGi: rgb the irradiance
+// (over pi), a the history's sample count; zero where nothing matched.
+
+#include "common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 2, binding = 0, rgba32f) uniform readonly image2D reproj;
+layout(set = 2, binding = 1, r32f) uniform readonly image2D prevDepth;
+layout(set = 2, binding = 2, rgba16f) uniform readonly image2D giHistory;
+layout(set = 2, binding = 3, rgba16f) uniform writeonly image2D reprojectedGi;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(camera.resolution);
+    if (any(greaterThanEqual(px, size))) return;
+
+    vec4 r = imageLoad(reproj, px);
+    if (r.z == 0.0) {
+        imageStore(reprojectedGi, px, vec4(0.0));
+        return;
+    }
+
+    vec2 texel = (pixelUv(px) + r.xy) * camera.resolution - 0.5;
+    ivec2 origin = ivec2(floor(texel));
+    vec2 f = texel - vec2(origin);
+    vec4 sum = vec4(0.0);
+    float weightSum = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        ivec2 tap = clamp(origin + ivec2(i & 1, i >> 1), ivec2(0), size - 1);
+        float w = ((i & 1) != 0 ? f.x : 1.0 - f.x) * ((i >> 1) != 0 ? f.y : 1.0 - f.y);
+        float depth = imageLoad(prevDepth, tap).r;
+        if (depth > 0.0 && depthRelativeDiff(r.w, depth) < 0.05) {
+            sum += imageLoad(giHistory, tap) * w;
+            weightSum += w;
+        }
+    }
+    imageStore(reprojectedGi, px, weightSum > 1e-5 ? max(sum / weightSum, vec4(0.0)) : vec4(0.0));
+}

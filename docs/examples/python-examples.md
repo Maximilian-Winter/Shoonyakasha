@@ -17,6 +17,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [rendering/volume_tiled](../../examples/python/rendering/volume_tiled) | `python volume_tiled.py` | Volume Tiled Forward Shading (van Oosten 2015) on its own pipeline: up to a million moving point lights in Crytek Sponza, assigned to the visible clusters through a BVH of Morton-sorted lights; a benchmark of each stage |
 | [rendering/reference_pt](../../examples/python/rendering/reference_pt) | `python reference_pt.py` | A path tracer on its own pipeline that averages one path per pixel per frame in Crytek Sponza, reading the surfaces it hits through the scene's ray instances and texture array; a white furnace view, and the same scene on the default pipeline to compare |
 | [rendering/irradiance_cache](../../examples/python/rendering/irradiance_cache) | `python irradiance_cache.py` | Kajiya's irradiance cache on its own pipeline: sparse cascades of cells around the camera, allocated where surfaces are seen, tracing into reservoirs of the sphere and kept as spherical harmonics, with multiple bounces from looking themselves up; the reference path tracer's scene |
+| [rendering/restir_gi](../../examples/python/rendering/restir_gi) | `python restir_gi.py` | Kajiya's ray-traced diffuse GI on its own pipeline: half resolution diffuse rays reused through temporal and spatial ReSTIR reservoirs, validated every third frame, resolved with a near-field split and filtered, with the irradiance cache beyond the first bounce; each stage can be switched off |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -88,6 +89,17 @@ The irradiance cache of Embark's kajiya, on its own pipeline of compute passes w
 - **Bounces:** rays of the cache look the cache up where they land, so light bounces on. Ranks and votes on each entry's trace origin keep light from leaking through walls.
 
 Camera rays are lit by the scene lights and the cache. The scene, lights and camera are the reference path tracer's, for comparison. **1**-**4** switch between the image, the cache alone, its entries and direct light; `--walk` moves the camera down the nave. See the [example's README](../../examples/python/rendering/irradiance_cache/README.md).
+
+### ReSTIR GI (`restir_gi`)
+
+The ray-traced diffuse global illumination of Embark's kajiya, on its own pipeline of compute passes with ray queries:
+- **G-buffer:** camera rays find each pixel's surface and its direct light.
+- **Candidates:** at half resolution, each pixel traces one diffuse ray a frame. At its hit the ray takes last frame's indirect light when the hit is on screen, and the irradiance cache otherwise.
+- **Reuse:** reservoirs reuse the best samples over time (with a permutation of neighbours) and across two spatial passes, the second checked for occlusion through the depth buffer.
+- **Validation:** every third frame the reservoirs' samples are traced again, so the history follows changes in the light.
+- **Resolve and filters:** a full resolution resolve takes near hits from the raw candidates and far ones from the reservoirs, then temporal and spatial filters.
+
+`--stages` switches each stage on or off, and the reference path tracer's `--mode 3` converges to the same indirect irradiance for comparison. See the [example's README](../../examples/python/rendering/restir_gi/README.md).
 
 ### Japanese shrine (`japanese_shrine`)
 
