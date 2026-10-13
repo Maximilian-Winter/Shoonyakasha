@@ -92,3 +92,8 @@ examples/python/rendering/showroom/tour.mp4
 examples/python/rendering/showroom/reel.mp4
 /examples/python/rendering/showroom/showroom_captures
 /old_dx12_engine_code/
+/cool-gfx-repos/
+/examples/python/rendering/irradiance_cache/irradiance_cache_captures
+/examples/python/rendering/volume_tiled/volume_tiled_captures
+/examples/python/rendering/wave_optics/wave_optics_captures
+/examples/python/rendering/rt_reflections/rt_reflections_captures
