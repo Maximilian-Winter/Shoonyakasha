@@ -1,0 +1,38 @@
+#version 460
+// Projects each live entry's sixteen samples (radiance times the
+// reservoir's W, in the sample's direction) onto L1 spherical harmonics and
+// blends them into its irradiance, a quarter new each frame. The
+// projection's 4 rather than 4 pi leaves the irradiance divided by pi, so a
+// lookup times the albedo is the diffuse light a surface reflects.
+
+#define IRCACHE_SET 0
+#include "ircache.glsl"
+
+layout(local_size_x = 64) in;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= ircacheMeta[META_TRACING_COUNT]) return;
+    uint entry = ircacheIndirection[i];
+
+    vec4 sh[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
+    float validSamples = 0.0;
+    for (uint octa = 0u; octa < IRCACHE_OCTA_DIMS2; ++octa) {
+        uint index = entry * IRCACHE_AUX_STRIDE + octa;
+        Reservoir r = reservoirFromRaw(ircacheAux[index].xy);
+        vec3 direction = sampleDirection(r.payload);
+        vec3 radiance = auxValue(index + IRCACHE_OCTA_DIMS2) * auxWeight(index + IRCACHE_OCTA_DIMS2);
+        vec4 basis = vec4(0.282095, direction * 0.488603) * 4.0;
+        sh[0] += basis * radiance.r;
+        sh[1] += basis * radiance.g;
+        sh[2] += basis * radiance.b;
+        validSamples += auxWeight(index + IRCACHE_OCTA_DIMS2) > 0.0 ? 1.0 : 0.0;
+    }
+
+    for (uint c = 0u; c < IRCACHE_IRRADIANCE_STRIDE; ++c) {
+        vec4 current = sh[c] / max(1.0, validSamples);
+        vec4 previous = ircacheIrradiance[entry * IRCACHE_IRRADIANCE_STRIDE + c];
+        if (all(equal(previous, vec4(0.0)))) previous = current;
+        ircacheIrradiance[entry * IRCACHE_IRRADIANCE_STRIDE + c] = mix(previous, current, 0.25);
+    }
+}

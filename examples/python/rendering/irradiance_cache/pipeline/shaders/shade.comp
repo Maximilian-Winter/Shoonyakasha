@@ -1,0 +1,89 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// One camera ray per pixel, through a random point of it. The surface it
+// hits is lit by the scene lights through shadow rays, its emission, and
+// for the light that bounced, its diffuse albedo times the irradiance cache
+// looked up there (rank 0: the queries that allocate entries and choose
+// where they trace from). A ray that misses sees the sky. The result is
+// averaged into `image` (rgb the mean, a the frames in it), a new frame
+// weighing at least settings.history, so the average follows the cache as
+// it changes.
+
+#extension GL_EXT_ray_query : require
+
+#define IRCACHE_SET 0
+#include "common.glsl"
+#include "ircache.glsl"
+#include "lighting.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 5, binding = 0, rgba32f) uniform image2D image;
+
+vec3 viewDirection(vec2 uv) {
+    vec4 target = camera.invProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    return normalize(target.xyz / target.w);
+}
+
+vec3 entryColor(uint entry) {
+    uint h = hash1(entry * 7919u + 1u);
+    return vec3(h & 255u, (h >> 8) & 255u, (h >> 16) & 255u) / 255.0;
+}
+
+vec3 shade(vec3 origin, vec3 direction, float pixelSpread, inout uint rng) {
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, scene, gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, direction, RAY_FAR);
+    while (rayQueryProceedEXT(query)) {}
+    if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
+        return settings.view == VIEW_ENTRIES ? vec3(0.0) : environment(direction);
+    }
+
+    SkHit hit = skFetchHit(query, pixelSpread * rayQueryGetIntersectionTEXT(query, true));
+    vec3 V = -direction;
+    vec3 N = hit.normal, Ng = hit.geometricNormal;
+    if (dot(N, V) <= 0.0) N = Ng;
+
+    IrcacheQuery q;
+    q.from = origin;
+    q.position = hit.position;
+    q.normal = N;
+    q.rank = 0u;
+    q.jitter = true;
+    vec3 irradiance = ircacheLookup(q, rng);
+
+    if (settings.view == VIEW_CACHE) return irradiance;
+    if (settings.view == VIEW_ENTRIES) {
+        uint entry = ircacheEntryAt(hit.position, N);
+        return entry == ~0u ? vec3(0.0) : entryColor(entry);
+    }
+
+    vec3 radiance = directLight(hit.position, N, Ng, V, hit.baseColor, hit.metallic, hit.roughness, rng);
+    radiance += hit.emissive;
+    if (settings.view != VIEW_DIRECT) {
+        // The diffuse share of the BRDF, as cookTorrance has it: what Fresnel
+        // and metalness leave of the albedo.
+        vec3 F = fresnelSchlick(max(dot(N, V), 0.0), baseReflectivity(hit.baseColor, hit.metallic));
+        radiance += irradiance * (1.0 - F) * (1.0 - hit.metallic) * hit.baseColor;
+    }
+    return radiance;
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(image);
+    if (pixel.x >= size.x || pixel.y >= size.y) return;
+
+    uint rng = hash1(uint(pixel.x) + uint(pixel.y) * 65536u) ^ hash1(camera.frame * 9781u + 17u);
+    vec2 uv = (vec2(pixel) + vec2(randomU01(rng), randomU01(rng))) / vec2(size);
+    vec3 view = viewDirection(uv);
+    vec3 direction = normalize((camera.invView * vec4(view, 0.0)).xyz);
+    float pixelSpread = length(viewDirection(uv + vec2(0.0, 1.0 / float(size.y))) - view);
+
+    vec3 value = shade(camera.position.xyz, direction, pixelSpread, rng);
+    if (any(isnan(value)) || any(isinf(value))) value = vec3(0.0);
+
+    vec4 previous = imageLoad(image, pixel);
+    float count = settings.reset != 0u ? 0.0 : previous.a;
+    float weight = max(1.0 / (count + 1.0), settings.history);
+    imageStore(image, pixel, vec4(count > 0.0 ? mix(previous.rgb, value, weight) : value, count + 1.0));
+}

@@ -16,6 +16,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [rendering/scene_lights](../../examples/python/rendering/scene_lights) | `python scene_lights.py` | Thousands of scene lights on the default pipeline, read from a storage buffer the engine refills every frame; a benchmark of what they cost |
 | [rendering/volume_tiled](../../examples/python/rendering/volume_tiled) | `python volume_tiled.py` | Volume Tiled Forward Shading (van Oosten 2015) on its own pipeline: up to a million moving point lights in Crytek Sponza, assigned to the visible clusters through a BVH of Morton-sorted lights; a benchmark of each stage |
 | [rendering/reference_pt](../../examples/python/rendering/reference_pt) | `python reference_pt.py` | A path tracer on its own pipeline that averages one path per pixel per frame in Crytek Sponza, reading the surfaces it hits through the scene's ray instances and texture array; a white furnace view, and the same scene on the default pipeline to compare |
+| [rendering/irradiance_cache](../../examples/python/rendering/irradiance_cache) | `python irradiance_cache.py` | Kajiya's irradiance cache on its own pipeline: sparse cascades of cells around the camera, allocated where surfaces are seen, tracing into reservoirs of the sphere and kept as spherical harmonics, with multiple bounces from looking themselves up; the reference path tracer's scene |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -78,6 +79,15 @@ Jeremiah van Oosten's Volume Tiled Forward Shading on the [volume tiled pipeline
 ### Reference path tracer (`reference_pt`)
 
 A path tracer that traces with ray queries in a compute pass and averages one path per pixel per frame while the camera stands still. At every hit it adds the surface's emission and the scene lights through shadow rays, then continues in a direction drawn from the BRDF. At each hit it reads the triangle and its glTF material through [`sk/scene_hits.glsl`](../../python/shoonyakasha/glsl/sk/scene_hits.glsl), from the rows and textures the engine keeps for the acceleration structure. The BRDF and light model are the default pipeline's, so `--pipeline default` shows the same scene to compare against. Key **3** is a white furnace test. Needs a GPU with ray queries and glTF-Sample-Assets for Sponza; falls back to a colonnade of boxes. See the [example's README](../../examples/python/rendering/reference_pt/README.md).
+
+### Irradiance cache (`irradiance_cache`)
+
+The irradiance cache of Embark's kajiya, on its own pipeline of compute passes with ray queries:
+- **Cells:** twelve cascades of 32³ cells follow the camera. A cell gets an entry from a pool of 65,536 when a surface in it is looked up, and loses it a few frames after the last lookup.
+- **Samples:** each frame, every entry traces four new rays and four validation rays into a 4 × 4 octahedral map of the sphere. It keeps one sample per stratum through reservoir resampling, and sums them into L1 spherical harmonics.
+- **Bounces:** rays of the cache look the cache up where they land, so light bounces on. Ranks and votes on each entry's trace origin keep light from leaking through walls.
+
+Camera rays are lit by the scene lights and the cache. The scene, lights and camera are the reference path tracer's, for comparison. **1**-**4** switch between the image, the cache alone, its entries and direct light; `--walk` moves the camera down the nave. See the [example's README](../../examples/python/rendering/irradiance_cache/README.md).
 
 ### Japanese shrine (`japanese_shrine`)
 

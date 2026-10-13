@@ -1,0 +1,38 @@
+#version 460
+// One frame older for every entry. An entry whose life reaches 12 is freed:
+// back into the pool, its cell emptied. The others take the trace origin
+// voted for last frame and are listed for this frame's passes.
+
+#define IRCACHE_SET 0
+#include "common.glsl"
+#include "ircache.glsl"
+
+layout(local_size_x = 64) in;
+
+void main() {
+    uint entry = gl_GlobalInvocationID.x;
+    if (entry >= ircacheMeta[META_ENTRY_COUNT]) return;
+
+    uint life = ircacheLife[entry];
+    if (settings.freeze == 0u && life != IRCACHE_LIFE_RECYCLED) {
+        uint cell = ircacheEntryCell[entry];
+        if (ircacheLifeValid(life + 1u)) {
+            ircacheLife[entry] = life + 1u;
+            atomicAnd(ircacheGrid[2u * cell + 1u], ~IRCACHE_JUST_ALLOCATED);
+        } else {
+            ircacheLife[entry] = IRCACHE_LIFE_RECYCLED;
+            for (uint i = 0u; i < IRCACHE_IRRADIANCE_STRIDE; ++i) {
+                ircacheIrradiance[entry * IRCACHE_IRRADIANCE_STRIDE + i] = vec4(0.0);
+            }
+            uint allocated = atomicAdd(ircacheMeta[META_ALLOC_COUNT], uint(-1));
+            ircachePool[allocated - 1u] = entry;
+            atomicAnd(ircacheGrid[2u * cell + 1u], ~(IRCACHE_OCCUPIED | IRCACHE_JUST_ALLOCATED));
+        }
+        ircacheSpatial[entry] = ircacheProposal[entry];
+        ircacheProposalCount[entry] = 0u;
+    }
+
+    if (ircacheLifeValid(ircacheLife[entry])) {
+        ircacheIndirection[atomicAdd(ircacheMeta[META_LIVE_COUNT], 1u)] = entry;
+    }
+}
