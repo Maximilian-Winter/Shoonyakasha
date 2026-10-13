@@ -61,6 +61,8 @@ INSTANTIATE_TEST_SUITE_P(VkFormats, FormatConversion, testing::Values(
     FormatPair{"R8_UINT",              VK_FORMAT_R8_UINT},
     FormatPair{"R16_UINT",             VK_FORMAT_R16_UINT},
     FormatPair{"R32_UINT",             VK_FORMAT_R32_UINT},
+    FormatPair{"R32G32_UINT",          VK_FORMAT_R32G32_UINT},
+    FormatPair{"R32G32B32A32_UINT",    VK_FORMAT_R32G32B32A32_UINT},
     FormatPair{"R8_SINT",              VK_FORMAT_R8_SINT},
     FormatPair{"R16_SINT",             VK_FORMAT_R16_SINT},
     FormatPair{"R32_SINT",             VK_FORMAT_R32_SINT},

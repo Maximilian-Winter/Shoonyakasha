@@ -69,6 +69,8 @@ static const std::unordered_map<std::string, VkFormat> s_formatMap = {
     {"R8_UINT",                 VK_FORMAT_R8_UINT},
     {"R16_UINT",                VK_FORMAT_R16_UINT},
     {"R32_UINT",                VK_FORMAT_R32_UINT},
+    {"R32G32_UINT",             VK_FORMAT_R32G32_UINT},
+    {"R32G32B32A32_UINT",       VK_FORMAT_R32G32B32A32_UINT},
     {"R8_SINT",                 VK_FORMAT_R8_SINT},
     {"R16_SINT",                VK_FORMAT_R16_SINT},
     {"R32_SINT",                VK_FORMAT_R32_SINT},
