@@ -28,7 +28,7 @@ layout(set = 1, binding = 0) uniform Camera {
 layout(set = 1, binding = 1) uniform PathTracer {
     uint reset;          // 1: start the average over
     uint maxBounces;
-    uint mode;           // 0 everything, 1 indirect light only, 2 white furnace
+    uint mode;           // 0 everything, 1 indirect light only, 2 white furnace, 3 indirect irradiance
     uint toneMapper;
     float exposure;
     float environmentIntensity;
@@ -57,6 +57,7 @@ layout(set = 4, binding = 1) uniform samplerCube prefilterMap;
 
 const uint MODE_INDIRECT = 1u;
 const uint MODE_FURNACE = 2u;
+const uint MODE_IRRADIANCE = 3u;   // the first surface white: the light arriving there, over pi
 const float RAY_FAR = 10000.0;
 
 // ── Random numbers ───────────────────────────────────────────────
@@ -235,8 +236,9 @@ vec3 tracePath(vec3 origin, vec3 direction, float pixelSpread) {
         rayQueryEXT query;
         rayQueryInitializeEXT(query, scene, gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, direction, RAY_FAR);
         while (rayQueryProceedEXT(query)) {}
+        bool firstOnly = bounce == 0u && (settings.mode == MODE_INDIRECT || settings.mode == MODE_IRRADIANCE);
         if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
-            if (bounce > 0u || settings.mode != MODE_INDIRECT) radiance += throughput * environment(direction);
+            if (!firstOnly) radiance += throughput * environment(direction);
             break;
         }
 
@@ -246,26 +248,28 @@ vec3 tracePath(vec3 origin, vec3 direction, float pixelSpread) {
         float metallic = hit.metallic, roughness = hit.roughness;
         vec3 V = -direction;
         vec3 N = hit.normal, Ng = hit.geometricNormal;
-        if (furnace) {
+        if (dot(N, V) <= 0.0) N = Ng;   // a normal map leaning away from the viewer
+        // White Lambertian: everywhere in the furnace, at the first surface for irradiance.
+        bool white = furnace || (bounce == 0u && settings.mode == MODE_IRRADIANCE);
+        if (white) {
             albedo = vec3(1.0);
             metallic = 0.0;
-            N = Ng;
         }
-        if (dot(N, V) <= 0.0) N = Ng;   // a normal map leaning away from the viewer
+        if (furnace) N = Ng;
 
-        if (!furnace && (bounce > 0u || settings.mode != MODE_INDIRECT)) {
+        if (!furnace && !firstOnly) {
             radiance += throughput * hit.emissive;
         }
         if (bounce == maxBounces) break;
 
         // Next event estimation: the scene lights.
-        if (!furnace && (bounce > 0u || settings.mode != MODE_INDIRECT)) {
+        if (!furnace && !firstOnly) {
             radiance += throughput * directLight(hit.position, N, Ng, V, albedo, metallic, roughness);
         }
 
         // The next direction, from the diffuse or the specular lobe.
         float NdotV = max(dot(N, V), 1e-4);
-        float chance = furnace ? 0.0 : specularChance(albedo, metallic, NdotV);
+        float chance = white ? 0.0 : specularChance(albedo, metallic, NdotV);
         vec3 L;
         if (random() < chance) {
             vec3 H = toWorld(sampleGgxVisibleNormal(toLocal(V, N), roughness * roughness, random(), random()), N);
@@ -275,7 +279,7 @@ vec3 tracePath(vec3 origin, vec3 direction, float pixelSpread) {
         }
         float NdotL = dot(N, L);
         if (NdotL <= 0.0 || dot(Ng, L) <= 0.0) break;
-        if (furnace) {
+        if (white) {
             throughput *= albedo;   // Lambertian, drawn by its cosine: the weight is the albedo
         } else {
             float pdf = brdfPdf(N, V, L, roughness, chance);

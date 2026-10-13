@@ -43,6 +43,7 @@ The panel shows the paths per pixel and sets the bounces, the exposure and the s
 The views:
 - **Indirect only:** what reaches the camera after at least one bounce. Leaves out the light and emission seen at the first hit.
 - **White furnace:** every surface white and Lambertian, shaded with its triangle's normal, under a sky of 1, with up to 64 bounces. A path loses nothing at a bounce, so the image converges to 1 everywhere, shown as mid grey (the view writes half the value). Where light needs more than 64 bounces to get out, as under Sponza's covered arcades, the image stays darker. The colonnade converges to 1 within the 64.
+- **Indirect irradiance** (`--mode 3` only): the first surface is white and Lambertian, without its emission or the scene lights' direct light, so each pixel converges to the light that reaches its surface from the rest of the scene and the sky, over pi. Pixels showing the sky are black. This is what the [ReSTIR GI](../restir_gi/README.md) example's **Indirect** view estimates.
 
 ## Options
 
@@ -51,7 +52,7 @@ The views:
 | `--pipeline pt` / `default` | `pt` | The path tracer, or the scene on the default pipeline |
 | `--scene sponza` / `colonnade` | `sponza` | |
 | `--bounces N` | 8 | Bounces after the first hit, 1 to 16; 1 is direct light only |
-| `--mode 0` / `1` / `2` | 0 | Everything, indirect only, white furnace |
+| `--mode 0` / `1` / `2` / `3` | 0 | Everything, indirect only, white furnace, indirect irradiance |
 | `--sky X` | 1.0 | Intensity of the sky's light, on both pipelines |
 | `--samples N` | 0 | Paths per pixel to stop at; 0 never stops |
 | `--screenshot FILE` | | Save once `--samples` paths are in, or after `--settle` seconds without `--samples`, then quit |
@@ -72,7 +73,7 @@ Settings are `scene.custom.pt.*` values, read through the `PathTracer` uniform b
 |---|---|---|
 | `reset` (uint) | 0 | 1 starts the average over in that frame |
 | `maxBounces` (uint) | 8 | Bounces after the first hit, at most 16 |
-| `mode` (uint) | 0 | 0 everything, 1 indirect only, 2 white furnace |
+| `mode` (uint) | 0 | 0 everything, 1 indirect only, 2 white furnace, 3 indirect irradiance |
 | `toneMapper` (uint) | 2 | 2 AgX, 1 Khronos PBR Neutral, 0 ACES, as in the default pipeline |
 | `exposure` | 1.0 | Multiplies the mean before the tone curve |
 | `environmentIntensity` | 1.0 | Multiplies the sky |

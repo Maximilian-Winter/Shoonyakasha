@@ -57,8 +57,9 @@ parser.add_argument("--pipeline", choices=("pt", "default"), default="pt",
 parser.add_argument("--scene", choices=("sponza", "colonnade"), default="sponza",
                     help="Sponza (when glTF-Sample-Assets is there), or a colonnade of boxes")
 parser.add_argument("--bounces", type=int, default=8, help="bounces after the first hit (1 to 16)")
-parser.add_argument("--mode", type=int, choices=(0, 1, 2), default=0,
-                    help="0 everything, 1 indirect light only, 2 white furnace")
+parser.add_argument("--mode", type=int, choices=(0, 1, 2, 3), default=0,
+                    help="0 everything, 1 indirect light only, 2 white furnace, "
+                         "3 indirect irradiance (the light reaching each visible surface, over pi)")
 parser.add_argument("--sky", type=float, default=1.0, help="intensity of the sky's light (both pipelines)")
 parser.add_argument("--samples", type=int, default=0,
                     help="stop averaging at this many paths per pixel (0: never)")
