@@ -1,0 +1,96 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// Reflection candidates, at half resolution: each pixel draws a direction
+// from the specular lobe of the surface it stands for (through the visible
+// normals, biased slightly away from grazing directions, drawn again up to
+// four times while invalid) and traces it.
+//
+// rtrCandRadiance: rgb the light the ray brought back, a 1 - cos theta of the
+// half vector. rtrCandHit: xyz the offset from the ray's origin to its hit,
+// w the direction's density (per projected solid angle) over the fraction
+// of valid draws; 0 for none. rtrCandNormal: the normal at the hit.
+// rtrCandRng: the random state the trace started from, for validation.
+
+#extension GL_EXT_ray_query : require
+
+#define IRCACHE_SET 0
+#define SPEC_LUT_IMAGE
+#include "common.glsl"
+#include "ircache.glsl"
+#include "lighting.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 5, binding = 0, rgba32f) uniform readonly image2D gPosition;
+layout(set = 5, binding = 1, rgba16f) uniform readonly image2D gNormal;
+layout(set = 5, binding = 2, rgba16f) uniform readonly image2D gGeoNormal;
+layout(set = 5, binding = 3, rgba16f) uniform readonly image2D gAlbedo;
+layout(set = 5, binding = 4, rgba16f) uniform readonly image2D indirect;
+layout(set = 5, binding = 5, rgba16f) uniform readonly image2D specLut;
+layout(set = 5, binding = 6, rgba16f) uniform writeonly image2D rtrCandRadiance;
+layout(set = 5, binding = 7, rgba32f) uniform writeonly image2D rtrCandHit;
+layout(set = 5, binding = 8, rgba16f) uniform writeonly image2D rtrCandNormal;
+layout(set = 5, binding = 9, r32ui) uniform writeonly uimage2D rtrCandRng;
+
+#include "specular.glsl"
+#include "rtr_trace.glsl"
+
+const float SAMPLING_BIAS = 0.15;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(px, imageSize(rtrCandRadiance)))) return;
+    ivec2 hi = min(hiPixel(px), ivec2(camera.resolution) - 1);
+
+    vec4 position = imageLoad(gPosition, hi);
+    if (position.w == 0.0) {
+        imageStore(rtrCandRadiance, px, vec4(0.0, 0.0, 0.0, -SKY_DIST));
+        imageStore(rtrCandHit, px, vec4(0.0));
+        return;
+    }
+    vec4 normalMetal = imageLoad(gNormal, hi);
+    vec4 geoRough = imageLoad(gGeoNormal, hi);
+    vec3 N = normalMetal.xyz;
+    float alpha = specularAlpha(geoRough.w);
+    vec3 F0 = baseReflectivity(imageLoad(gAlbedo, hi).rgb, normalMetal.w);
+    vec3 origin = secondaryRayOrigin(position.xyz, geoRough.xyz, position.w);
+
+    vec3 t, b;
+    basis(N, t, b);
+    vec3 view = normalize(position.xyz - camera.position.xyz);
+    vec3 wo = vec3(dot(-view, t), dot(-view, b), dot(-view, N));
+    // A shading normal facing away from the viewer: the reflection keeps
+    // curving, more slowly.
+    if (wo.z < 0.0) {
+        wo.z *= -0.25;
+        wo = normalize(wo);
+    }
+
+    uint rng = hashPixel(px, camera.frame);
+    vec2 u = fract(r2Sequence(camera.frame % 4096u) +
+                   vec2(interleavedGradientNoise(vec2(px)), interleavedGradientNoise(vec2(px) + vec2(31.0, 59.0))));
+    u.x = mix(u.x, 0.0, SAMPLING_BIAS);
+    SpecularSample s = specularSample(alpha, F0, wo, u);
+    for (uint retry = 0u; retry < 4u && !s.valid; ++retry) {
+        u = vec2(randomU01(rng), randomU01(rng));
+        u.x = mix(u.x, 0.0, SAMPLING_BIAS);
+        s = specularSample(alpha, F0, wo, u);
+    }
+
+    if (!s.valid) {
+        imageStore(rtrCandRadiance, px, vec4(0.0));
+        imageStore(rtrCandHit, px, vec4(0.0));
+        imageStore(rtrCandNormal, px, vec4(0.0));
+        return;
+    }
+
+    vec3 direction = normalize(t * s.wi.x + b * s.wi.y + N * s.wi.z);
+    imageStore(rtrCandRng, px, uvec4(rng));
+    ReflectionTrace result = traceReflection(origin, direction, alpha, rng);
+
+    float validFraction = max(specularLutAt(wo.z, geoRough.w).z, 1e-3);
+    float cosTheta = normalize(wo + s.wi).z;
+    imageStore(rtrCandRadiance, px, vec4(result.radiance, encodeCosTheta(cosTheta)));
+    imageStore(rtrCandHit, px, vec4(direction * result.hitT, s.pdf / validFraction));
+    imageStore(rtrCandNormal, px, vec4(result.hitNormal, 0.0));
+}

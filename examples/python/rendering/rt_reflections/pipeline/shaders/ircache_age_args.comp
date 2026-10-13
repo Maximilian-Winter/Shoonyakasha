@@ -1,0 +1,14 @@
+#version 460
+// The aging pass's group count, one thread per entry ever allocated, and an
+// empty list of live entries for it to fill.
+
+#define IRCACHE_SET 0
+#include "ircache.glsl"
+
+layout(local_size_x = 1) in;
+
+void main() {
+    uint entries = ircacheMeta[META_ENTRY_COUNT];
+    ircacheArgs[ARGS_AGE] = uvec4((entries + 63u) / 64u, 1u, 1u, 0u);
+    ircacheMeta[META_LIVE_COUNT] = 0u;
+}

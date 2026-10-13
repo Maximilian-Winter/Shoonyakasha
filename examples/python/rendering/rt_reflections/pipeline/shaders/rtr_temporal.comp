@@ -1,0 +1,200 @@
+#version 460
+// Temporal reservoir resampling of the reflections, at half resolution. A
+// pixel's reservoir starts from its candidate, weighed by luminance times
+// the direction's density, and merges last frame's reservoir at the
+// reprojected place, looking among the nearest pixels for the ray origin
+// closest to its own. Until it holds 8 candidates, and while its surface
+// was not fully seen last frame, it also merges up to four reprojected
+// neighbours on a spiral. A history sample is weighed by its luminance
+// times its density times the jacobian of reaching its hit from here, and
+// dropped when that jacobian is far from 1; its history counts for less
+// where the view direction changed and the surface is smooth and flat.
+
+#include "common.glsl"
+#define IRCACHE_SET 0
+#include "ircache.glsl"
+#include "specular.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 2, binding = 0, rgba32f) uniform readonly image2D gPosition;
+layout(set = 2, binding = 1, rgba16f) uniform readonly image2D gNormal;
+layout(set = 2, binding = 2, rgba16f) uniform readonly image2D gGeoNormal;
+layout(set = 2, binding = 3, rgba32f) uniform readonly image2D reproj;
+layout(set = 2, binding = 4, rgba16f) uniform readonly image2D rtrCandRadiance;
+layout(set = 2, binding = 5, rgba32f) uniform readonly image2D rtrCandHit;
+layout(set = 2, binding = 6, rgba16f) uniform readonly image2D rtrCandNormal;
+layout(set = 2, binding = 7, r32ui) uniform readonly uimage2D rtrCandRng;
+layout(set = 2, binding = 8, rgba16f) uniform readonly image2D rtrRadianceHistory;
+layout(set = 2, binding = 9, rgba32f) uniform readonly image2D rtrRayOrigHistory;
+layout(set = 2, binding = 10, rgba32f) uniform readonly image2D rtrRayHistory;
+layout(set = 2, binding = 11, r32ui) uniform readonly uimage2D rtrRngHistory;
+layout(set = 2, binding = 12, rg32ui) uniform readonly uimage2D rtrReservoirHistory;
+layout(set = 2, binding = 13, rgba16f) uniform readonly image2D rtrHitNormalHistory;
+layout(set = 2, binding = 14, rgba16f) uniform writeonly image2D rtrRadianceOut;   // rgb, 1 - cos theta
+layout(set = 2, binding = 15, rgba32f) uniform writeonly image2D rtrRayOrigOut;    // origin, alpha
+layout(set = 2, binding = 16, rgba32f) uniform writeonly image2D rtrRayOut;        // hit - origin, density
+layout(set = 2, binding = 17, r32ui) uniform writeonly uimage2D rtrRngOut;
+layout(set = 2, binding = 18, rgba16f) uniform writeonly image2D rtrHitNormalOut;  // normal, -dot(normal, ray)
+layout(set = 2, binding = 19, rg32ui) uniform writeonly uimage2D rtrReservoirOut;
+
+const float M_CLAMP = 8.0;
+const float MAX_PDF_CLAMP = 200.0;
+
+// The pixel near `base` whose last ray started closest to `origin`.
+ivec2 closestOrigin(vec2 base, vec3 origin, bool wide, ivec2 halfSize) {
+    ivec2 best = ivec2(floor(base + 0.5));
+    float bestDistance = 1e10;
+    int start = wide ? -1 : 0;
+    for (int y = start; y <= 1; ++y) {
+        for (int x = start; x <= 1; ++x) {
+            ivec2 p = ivec2(floor(base + vec2(x, y)));
+            if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, halfSize))) continue;
+            float d = length(imageLoad(rtrRayOrigHistory, p).xyz - origin);
+            if (d < bestDistance) {
+                bestDistance = d;
+                best = p;
+            }
+        }
+    }
+    return best;
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 halfSize = imageSize(rtrReservoirOut);
+    if (any(greaterThanEqual(px, halfSize))) return;
+    ivec2 fullSize = ivec2(camera.resolution);
+    ivec2 hi = min(hiPixel(px), fullSize - 1);
+
+    vec4 position = imageLoad(gPosition, hi);
+    if (position.w == 0.0) {
+        imageStore(rtrRadianceOut, px, vec4(0.0, 0.0, 0.0, -SKY_DIST));
+        imageStore(rtrHitNormalOut, px, vec4(0.0));
+        imageStore(rtrReservoirOut, px, uvec4(0u));
+        imageStore(rtrRayOrigOut, px, vec4(position.xyz, 1.0));
+        imageStore(rtrRayOut, px, vec4(0.0));
+        return;
+    }
+    vec3 normal = imageLoad(gNormal, hi).xyz;
+    vec4 geoRough = imageLoad(gGeoNormal, hi);
+    float alpha = specularAlpha(geoRough.w);
+    float a2 = alpha * alpha;
+    vec3 origin = secondaryRayOrigin(position.xyz, geoRough.xyz, position.w);
+
+    float flatness = 1.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            ivec2 n = clamp(px + ivec2(x, y), ivec2(0), halfSize - 1);
+            flatness *= clamp(dot(normal, imageLoad(gNormal, min(hiPixel(n), fullSize - 1)).xyz), 0.0, 1.0);
+        }
+    }
+    float stability = 1.0;
+    for (int y = 0; y <= 1; ++y) {
+        for (int x = 0; x <= 1; ++x) stability *= imageLoad(reproj, min(px * 2 + ivec2(x, y), fullSize - 1)).z;
+    }
+
+    uint rng = hashPixel(px, camera.frame);
+    vec3 radianceSel = vec3(0.0);
+    vec4 originSel = vec4(origin, alpha);
+    vec3 hitSel = origin + normal;
+    vec3 hitNormalSel = vec3(1.0);
+    vec3 direction = normal;
+    float pdfSel = 0.0, cosThetaSel = 0.0;
+    uint rngSel = imageLoad(rtrCandRng, px).x;
+
+    Reservoir reservoir = Reservoir(0.0, 0u, 0.0, 0.0);
+    ReservoirStream stream = ReservoirStream(0.0, 0.0);
+    uint payload = pixelPayload(px);
+    reservoir.payload = payload;
+
+    vec4 candHit = imageLoad(rtrCandHit, px);
+    float candPdf = min(candHit.w, MAX_PDF_CLAMP);
+    if (candPdf > 0.0) {
+        vec4 cand = imageLoad(rtrCandRadiance, px);
+        direction = normalize(candHit.xyz);
+        float p = max(1e-3, luminance(cand.rgb)) * candPdf;
+        radianceSel = cand.rgb;
+        pdfSel = candPdf;
+        cosThetaSel = decodeCosTheta(cand.a);
+        hitSel = origin + candHit.xyz;
+        hitNormalSel = imageLoad(rtrCandNormal, px).xyz;
+        reservoirInit(reservoir, p, 1.0 / candPdf, stream, payload);
+    }
+
+    vec3 previousEye = previousEyePosition();
+    vec4 centerReproj = imageLoad(reproj, hi);
+    uint sampleCount = (settings.stages & STAGE_RTR_RESTIR) == 0u ? 0u : (centerReproj.z < 1.0 ? 5u : 1u);
+    float angleOffset = float(((camera.frame + 7u) * 11u) % 32u) * TAU;
+
+    for (uint i = 0u; i < sampleCount && stream.mSum < M_CLAMP; ++i) {
+        float angle = (float(i) + angleOffset) * GOLDEN_ANGLE;
+        float radius = sqrt(float(((i - 1u) + camera.frame) & 3u) + 1.0) * clamp(8.0 - stream.mSum, 1.0, 7.0);
+        ivec2 offset = i == 0u ? ivec2(0) : ivec2(vec2(cos(angle), sin(angle)) * radius);
+
+        vec4 r = imageLoad(reproj, clamp(hi + offset * 2, ivec2(0), fullSize - 1));
+        vec2 base = vec2(px) + camera.resolution * r.xy * 0.5;
+        ivec2 reprojected = ivec2(floor(base + 0.5));
+        if (stability >= 1.0) {
+            if (any(greaterThan(abs(camera.resolution * r.xy), vec2(0.1)))) {
+                reprojected = closestOrigin(base, origin, false, halfSize);
+            }
+        } else {
+            reprojected = closestOrigin(base, origin, true, halfSize);
+        }
+        ivec2 rpx = reprojected + offset;
+        if (any(lessThan(rpx, ivec2(0))) || any(greaterThanEqual(rpx, halfSize))) continue;
+
+        Reservoir h = reservoirFromRaw(imageLoad(rtrReservoirHistory, rpx).xy);
+        ivec2 spx = payloadPixel(h.payload);
+        if (any(greaterThanEqual(spx, halfSize))) continue;
+        vec4 previousOrigin = imageLoad(rtrRayOrigHistory, spx);
+        vec3 toOrigin = origin - previousOrigin.xyz;
+        if (dot(toOrigin, toOrigin) > 0.05 * position.w * position.w) continue;
+
+        vec4 previousRadiance = imageLoad(rtrRadianceHistory, spx);
+        vec4 previousRay = imageLoad(rtrRayHistory, spx);
+        vec3 sampleHit = previousRay.xyz + previousOrigin.xyz;
+        float previousDistance = length(previousRay.xyz);
+        vec4 sampleHitNormal = imageLoad(rtrHitNormalHistory, spx);
+        vec3 toHit = sampleHit - origin;
+        float distanceToHit = length(toHit);
+        vec3 dirToHit = toHit / max(distanceToHit, 1e-8);
+
+        h.M = min(h.M, M_CLAMP);
+        // Smooth, flat surfaces trust history less as the view direction turns.
+        vec3 currentWo = normalize(position.xyz - camera.position.xyz);
+        vec3 previousWo = normalize(position.xyz - previousEye);
+        float woSimilarity = pow(clamp(ggxNdf01(max(3e-5, a2), clamp(dot(currentWo, previousWo), 0.0, 1.0)), 0.0, 1.0), 64.0);
+        float mult = mix(woSimilarity, 1.0, smoothstep(0.05, 0.5, sqrt(alpha)));
+        h.M *= mix(1.0, mult, flatness);
+
+        float p = max(1e-3, luminance(previousRadiance.rgb)) * step(0.0, dot(dirToHit, normal)) * previousRay.w;
+        float jacobian = clamp(previousDistance / max(distanceToHit, 1e-8), 1e-4, 1e4);
+        jacobian *= jacobian;
+        jacobian *= max(0.0, -dot(sampleHitNormal.xyz, dirToHit)) / max(1e-5, sampleHitNormal.w);
+        float threshold = mix(1.1, 4.0, alpha * alpha);
+        if (!(jacobian < threshold && jacobian > 1.0 / threshold)) continue;
+        p *= jacobian;
+
+        if (reservoirMerge(reservoir, h, p, 1.0, stream, payload, rng)) {
+            direction = dirToHit;
+            pdfSel = previousRay.w;
+            cosThetaSel = decodeCosTheta(previousRadiance.a);
+            radianceSel = previousRadiance.rgb;
+            originSel = previousOrigin;
+            hitSel = sampleHit;
+            hitNormalSel = sampleHitNormal.xyz;
+            rngSel = imageLoad(rtrRngHistory, spx).x;
+        }
+    }
+    reservoirFinish(reservoir, stream);
+    reservoir.W = min(reservoir.W, 6e4);   // stored as a half float
+
+    imageStore(rtrRadianceOut, px, vec4(radianceSel, encodeCosTheta(cosThetaSel)));
+    imageStore(rtrRayOrigOut, px, originSel);
+    imageStore(rtrHitNormalOut, px, vec4(hitNormalSel, -dot(hitNormalSel, direction)));
+    imageStore(rtrRayOut, px, vec4(hitSel - originSel.xyz, pdfSel));
+    imageStore(rtrRngOut, px, uvec4(rngSel));
+    imageStore(rtrReservoirOut, px, uvec4(reservoirRaw(reservoir), 0u, 0u));
+}

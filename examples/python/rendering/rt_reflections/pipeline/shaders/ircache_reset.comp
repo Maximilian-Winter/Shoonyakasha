@@ -1,0 +1,17 @@
+#version 460
+// Clears the samples of entries with no irradiance yet: those allocated
+// since the last sum, whose samples belong to an earlier use of the entry.
+
+#define IRCACHE_SET 0
+#include "ircache.glsl"
+
+layout(local_size_x = 64) in;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= ircacheMeta[META_TRACING_COUNT]) return;
+    uint entry = ircacheIndirection[i];
+    if (all(equal(ircacheIrradiance[entry * IRCACHE_IRRADIANCE_STRIDE], vec4(0.0)))) {
+        for (uint k = 0u; k < IRCACHE_AUX_STRIDE; ++k) ircacheAux[entry * IRCACHE_AUX_STRIDE + k] = uvec4(0u);
+    }
+}

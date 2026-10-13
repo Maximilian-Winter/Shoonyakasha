@@ -1,0 +1,166 @@
+#version 460
+// Temporal reservoir resampling, at half resolution. Each pixel's
+// reservoir starts from this frame's candidate (on tracing frames) and
+// merges last frame's reservoir at its reprojected place, plus up to four
+// neighbours chosen through a per-frame permutation of the pixels, until
+// it holds about 25 candidates. A history sample is weighed by its
+// luminance (zero below the surface), by how alike its surface is in depth
+// and normal, and by a jacobian (squared distance and the hit's facing)
+// for being seen from here rather than from where it was traced. History
+// is trusted less (M shrinks) where validation found the light changed.
+//
+// The pixel keeps the chosen sample's radiance, ray and hit; the reservoir's
+// payload is the pixel itself.
+
+#include "common.glsl"
+#define IRCACHE_SET 0
+#include "ircache.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 2, binding = 0, rgba32f) uniform readonly image2D gPosition;
+layout(set = 2, binding = 1, rgba16f) uniform readonly image2D gNormal;
+layout(set = 2, binding = 2, rgba32f) uniform readonly image2D reproj;
+layout(set = 2, binding = 3, rgba16f) uniform readonly image2D candRadiance;
+layout(set = 2, binding = 4, rgba32f) uniform readonly image2D candHit;
+layout(set = 2, binding = 5, rgba16f) uniform readonly image2D candNormal;
+layout(set = 2, binding = 6, rgba16f) uniform readonly image2D radianceHistory;
+layout(set = 2, binding = 7, rgba32f) uniform readonly image2D rayOrigHistory;
+layout(set = 2, binding = 8, rgba32f) uniform readonly image2D rayHistory;
+layout(set = 2, binding = 9, rg32ui) uniform readonly uimage2D reservoirHistory;
+layout(set = 2, binding = 10, rgba16f) uniform readonly image2D hitNormalHistory;
+layout(set = 2, binding = 11, rg16f) uniform readonly image2D invalidity;
+layout(set = 2, binding = 12, rgba16f) uniform writeonly image2D radianceOut;     // rgb, cos to the normal
+layout(set = 2, binding = 13, rgba32f) uniform writeonly image2D rayOrigOut;      // xyz
+layout(set = 2, binding = 14, rgba32f) uniform writeonly image2D rayOut;          // hit - origin, distance from here
+layout(set = 2, binding = 15, rgba16f) uniform writeonly image2D hitNormalOut;    // normal, -dot(normal, ray)
+layout(set = 2, binding = 16, rg32ui) uniform writeonly uimage2D reservoirOut;
+layout(set = 2, binding = 17, rgba32f) uniform writeonly image2D trHit;           // hit, luminance
+layout(set = 2, binding = 18, rgba16f) uniform writeonly image2D trNormal;        // hit normal
+layout(set = 2, binding = 19, rgba16f) uniform readonly image2D gGeoNormal;
+
+const float M_CLAMP = 20.0;
+const float W_CLAMP = 10.0;
+
+ivec2 permutationOffset(uint sampleIndex, uint frame) {
+    const ivec2 offsets[4] = ivec2[4](ivec2(-1, -1), ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1));
+    if (sampleIndex == 0u) return ivec2(0);
+    return offsets[frame & 3u] + offsets[(sampleIndex + (frame ^ 1u)) & 3u];
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 halfSize = imageSize(reservoirOut);
+    if (any(greaterThanEqual(px, halfSize))) return;
+    ivec2 fullSize = ivec2(camera.resolution);
+    ivec2 hi = min(hiPixel(px), fullSize - 1);
+
+    vec4 position = imageLoad(gPosition, hi);
+    if (position.w == 0.0) {
+        imageStore(radianceOut, px, vec4(0.0, 0.0, 0.0, -SKY_DIST));
+        imageStore(hitNormalOut, px, vec4(0.0));
+        imageStore(reservoirOut, px, uvec4(0u));
+        imageStore(trHit, px, vec4(position.xyz, 0.0));
+        imageStore(trNormal, px, vec4(0.0));
+        return;
+    }
+    vec3 normal = imageLoad(gNormal, hi).xyz;
+    vec3 origin = secondaryRayOrigin(position.xyz, imageLoad(gGeoNormal, hi).xyz, position.w);
+
+    vec4 candidateHit = imageLoad(candHit, px);
+    vec3 direction = normalize(candidateHit.xyz);
+    uint rng = hashPixel(px, camera.frame);
+
+    vec3 radianceSel = vec3(0.0);
+    vec3 rayOrigSel = origin;
+    vec3 rayHitSel = origin + normal;
+    vec3 hitNormalSel = vec3(1.0);
+
+    Reservoir reservoir = Reservoir(0.0, 0u, 0.0, 0.0);
+    ReservoirStream stream = ReservoirStream(0.0, 0.0);
+    uint payload = pixelPayload(px);
+
+    if (isTracingFrame()) {
+        vec3 radiance = imageLoad(candRadiance, px).rgb;
+        float p = max(0.0, luminance(radiance)) * step(0.0, dot(direction, normal));
+        radianceSel = radiance;
+        rayHitSel = origin + candidateHit.xyz;
+        hitNormalSel = imageLoad(candNormal, px).xyz;
+        reservoirInit(reservoir, p, 1.0, stream, payload);
+    }
+
+    float rtInvalidity = sqrt(clamp(imageLoad(invalidity, px).y, 0.0, 1.0));
+    const uvec2 xorSequence[4] = uvec2[4](uvec2(3, 3), uvec2(2, 1), uvec2(1, 2), uvec2(3, 3));
+    ivec2 permutationXor = ivec2(xorSequence[camera.frame & 3u]);
+    float centerM = 0.0;
+    uint sampleCount = (settings.stages & STAGE_TEMPORAL) != 0u ? 5u : 0u;
+
+    for (uint i = 0u; i < sampleCount && stream.mSum < 1.25 * M_CLAMP; ++i) {
+        ivec2 offset = permutationOffset(i, camera.frame);
+        if (i > 0u && offset == ivec2(0)) continue;
+
+        vec4 r = imageLoad(reproj, clamp(hi + offset * 2, ivec2(0), fullSize - 1));
+        ivec2 permuted = i == 0u ? px : ((px + offset) ^ permutationXor);
+        ivec2 rpx = ivec2(floor(vec2(permuted) + camera.resolution * r.xy * 0.5 + 0.5)) + offset;
+        ivec2 neighbor = permuted + offset;
+        if (any(lessThan(rpx, ivec2(0))) || any(greaterThanEqual(rpx, halfSize)) ||
+            any(lessThan(neighbor, ivec2(0))) || any(greaterThanEqual(neighbor, halfSize))) continue;
+        ivec2 neighborHi = min(hiPixel(neighbor), fullSize - 1);
+
+        Reservoir h = reservoirFromRaw(imageLoad(reservoirHistory, rpx).xy);
+        ivec2 spx = payloadPixel(h.payload);
+        if (any(greaterThanEqual(spx, halfSize))) continue;
+
+        float sampleDepth = imageLoad(gPosition, neighborHi).w;
+        vec3 previousOrigin = imageLoad(rayOrigHistory, spx).xyz;
+        // A surface the history did not see (it was traced from elsewhere).
+        if (length(previousOrigin - origin) > 0.1 * position.w) continue;
+        if (sampleDepth == 0.0 || r.z == 0.0) continue;
+
+        float relevance = 1.0 - smoothstep(0.0, 0.1, depthRelativeDiff(position.w, sampleDepth));
+        float similarity = max(0.0, dot(imageLoad(gNormal, neighborHi).xyz, normal));
+        if (i != 0u && similarity < 0.2) continue;
+        relevance *= pow(similarity, 4.0);
+
+        vec4 previousRay = imageLoad(rayHistory, spx);
+        vec3 sampleHit = previousRay.xyz + previousOrigin;
+        float previousDistance = previousRay.w;
+        vec4 sampleHitNormal = imageLoad(hitNormalHistory, spx);
+        vec3 toHit = sampleHit - origin;
+        float distanceToHit = length(toHit);
+        vec3 dirToHit = toHit / max(distanceToHit, 1e-8);
+        float centerToHitVis = -dot(sampleHitNormal.xyz, dirToHit);
+        vec3 previousRadiance = imageLoad(radianceHistory, spx).rgb;
+
+        h.M = max(0.0, min(h.M, exp2(log2(M_CLAMP) * (1.0 - rtInvalidity))));
+        float p = max(0.0, luminance(previousRadiance)) * step(0.0, dot(dirToHit, normal));
+
+        float jacobian = clamp(previousDistance / max(distanceToHit, 1e-8), 1e-4, 1e4);
+        jacobian *= jacobian;
+        jacobian *= clamp(centerToHitVis / max(sampleHitNormal.w, 1e-8), 0.0, 1e4);
+
+        h.M *= relevance;
+        if (i == 0u) centerM = h.M;
+
+        if (reservoirMerge(reservoir, h, p, jacobian, stream, payload, rng)) {
+            direction = dirToHit;
+            radianceSel = previousRadiance;
+            rayOrigSel = previousOrigin;
+            rayHitSel = sampleHit;
+            hitNormalSel = sampleHitNormal.xyz;
+        }
+    }
+    reservoirFinish(reservoir, stream);
+    reservoir.W = min(reservoir.W, W_CLAMP);
+    // M grows more slowly, so the spatial passes narrow their kernels gradually.
+    reservoir.M = centerM + 0.5;
+
+    vec3 rayFromHere = rayHitSel - origin;
+    imageStore(radianceOut, px, vec4(radianceSel, dot(normal, direction)));
+    imageStore(rayOrigOut, px, vec4(rayOrigSel, 0.0));
+    imageStore(rayOut, px, vec4(rayHitSel - rayOrigSel, length(rayFromHere)));
+    imageStore(hitNormalOut, px, vec4(hitNormalSel, -dot(hitNormalSel, direction)));
+    imageStore(reservoirOut, px, uvec4(reservoirRaw(reservoir), 0u, 0u));
+    imageStore(trHit, px, vec4(rayHitSel, max(0.0, luminance(radianceSel))));
+    imageStore(trNormal, px, vec4(hitNormalSel, 0.0));
+}

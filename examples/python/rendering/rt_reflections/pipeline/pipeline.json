@@ -1,0 +1,4957 @@
+{
+  "version": 3,
+  "name": "RtReflections",
+  "description": "Kajiya's ray-traced reflections on top of its diffuse global illumination: half resolution GGX rays reused through temporal ReSTIR reservoirs and validated, resolved to full resolution with a ratio estimator over a lobe-shaped kernel, and filtered with surface and reflection reprojection; the diffuse light is the ReSTIR GI example's, with the irradiance cache. Settings are scene.custom.rr.* values; see README.md.",
+  "bufferLayouts": {
+    "Camera": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "view",
+          "type": "mat4",
+          "source": "scene.camera.view"
+        },
+        {
+          "name": "invView",
+          "type": "mat4",
+          "source": "scene.camera.invView"
+        },
+        {
+          "name": "invProj",
+          "type": "mat4",
+          "source": "scene.camera.invProj"
+        },
+        {
+          "name": "viewProj",
+          "type": "mat4",
+          "source": "scene.camera.viewProjection"
+        },
+        {
+          "name": "prevViewProj",
+          "type": "mat4",
+          "source": "scene.camera.prevViewProjection"
+        },
+        {
+          "name": "position",
+          "type": "vec4",
+          "source": "scene.camera.positionVec4"
+        },
+        {
+          "name": "resolution",
+          "type": "vec2",
+          "source": "scene.screen.renderResolution"
+        },
+        {
+          "name": "frame",
+          "type": "uint",
+          "source": "scene.time.frame"
+        }
+      ]
+    },
+    "Settings": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "view",
+          "type": "uint",
+          "source": "scene.custom.rr.view",
+          "default": 0
+        },
+        {
+          "name": "toneMapper",
+          "type": "uint",
+          "source": "scene.custom.rr.toneMapper",
+          "default": 2
+        },
+        {
+          "name": "freeze",
+          "type": "uint",
+          "source": "scene.custom.rr.freeze",
+          "default": 0
+        },
+        {
+          "name": "stages",
+          "type": "uint",
+          "source": "scene.custom.rr.stages",
+          "default": 127
+        },
+        {
+          "name": "exposure",
+          "type": "float",
+          "source": "scene.custom.rr.exposure",
+          "default": 1.0
+        },
+        {
+          "name": "environmentIntensity",
+          "type": "float",
+          "source": "scene.custom.rr.environmentIntensity",
+          "default": 1.0
+        },
+        {
+          "name": "sunAngle",
+          "type": "float",
+          "source": "scene.custom.rr.sunAngle",
+          "default": 0.27
+        },
+        {
+          "name": "pad",
+          "type": "float",
+          "source": "const.0"
+        }
+      ]
+    },
+    "Lights": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "lightCount",
+          "type": "uint",
+          "source": "scene.lights.count"
+        },
+        {
+          "name": "pad0",
+          "type": "float",
+          "source": "const.0"
+        },
+        {
+          "name": "pad1",
+          "type": "float",
+          "source": "const.0"
+        },
+        {
+          "name": "pad2",
+          "type": "float",
+          "source": "const.0"
+        }
+      ]
+    },
+    "SceneLights": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 8192,
+      "fields": [
+        {
+          "name": "positionType",
+          "type": "vec4"
+        },
+        {
+          "name": "colorIntensity",
+          "type": "vec4"
+        },
+        {
+          "name": "directionRange",
+          "type": "vec4"
+        },
+        {
+          "name": "attenuation",
+          "type": "vec4"
+        },
+        {
+          "name": "source",
+          "type": "vec4"
+        },
+        {
+          "name": "shape",
+          "type": "vec4"
+        }
+      ],
+      "source": {
+        "type": "scene",
+        "data": "lights"
+      }
+    },
+    "RayInstances": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 16384,
+      "fields": [
+        {
+          "name": "geometry",
+          "type": "uvec4"
+        },
+        {
+          "name": "vertexLayout",
+          "type": "uvec4"
+        },
+        {
+          "name": "baseColor",
+          "type": "vec4"
+        },
+        {
+          "name": "emissive",
+          "type": "vec4"
+        },
+        {
+          "name": "surface",
+          "type": "vec4"
+        },
+        {
+          "name": "textures",
+          "type": "uvec4"
+        }
+      ],
+      "source": {
+        "type": "scene",
+        "data": "rayInstances"
+      }
+    },
+    "IrcacheMeta": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 16,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheCascades": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 26,
+      "fields": [
+        {
+          "name": "value",
+          "type": "ivec4"
+        }
+      ]
+    },
+    "IrcacheGrid": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 786432,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheGridScrolled": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 786432,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheEntryCell": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheSpatial": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uvec4"
+        }
+      ]
+    },
+    "IrcacheIrradiance": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 196608,
+      "fields": [
+        {
+          "name": "value",
+          "type": "vec4"
+        }
+      ]
+    },
+    "IrcacheAux": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 4194304,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uvec4"
+        }
+      ]
+    },
+    "IrcacheLife": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcachePool": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheProposal": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uvec4"
+        }
+      ]
+    },
+    "IrcacheProposalCount": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheIndirection": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheArgs": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 8,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uvec4"
+        }
+      ]
+    }
+  },
+  "samplers": {
+    "nearestClamp": {
+      "magFilter": "nearest",
+      "minFilter": "nearest",
+      "mipmapMode": "nearest",
+      "addressMode": "clamp_to_edge"
+    }
+  },
+  "descriptorSetLayouts": {
+    "ircacheSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheMeta",
+          "autoBindBuffer": "IrcacheMeta"
+        },
+        {
+          "binding": 1,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheCascades",
+          "autoBindBuffer": "IrcacheCascades"
+        },
+        {
+          "binding": 2,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheGrid",
+          "autoBindBuffer": "IrcacheGrid"
+        },
+        {
+          "binding": 3,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheGridScrolled",
+          "autoBindBuffer": "IrcacheGridScrolled"
+        },
+        {
+          "binding": 4,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheEntryCell",
+          "autoBindBuffer": "IrcacheEntryCell"
+        },
+        {
+          "binding": 5,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheSpatial",
+          "autoBindBuffer": "IrcacheSpatial"
+        },
+        {
+          "binding": 6,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheIrradiance",
+          "autoBindBuffer": "IrcacheIrradiance"
+        },
+        {
+          "binding": 7,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheAux",
+          "autoBindBuffer": "IrcacheAux"
+        },
+        {
+          "binding": 8,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheLife",
+          "autoBindBuffer": "IrcacheLife"
+        },
+        {
+          "binding": 9,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcachePool",
+          "autoBindBuffer": "IrcachePool"
+        },
+        {
+          "binding": 10,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheProposal",
+          "autoBindBuffer": "IrcacheProposal"
+        },
+        {
+          "binding": 11,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheProposalCount",
+          "autoBindBuffer": "IrcacheProposalCount"
+        },
+        {
+          "binding": 12,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheIndirection",
+          "autoBindBuffer": "IrcacheIndirection"
+        },
+        {
+          "binding": 13,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheArgs",
+          "autoBindBuffer": "IrcacheArgs"
+        }
+      ]
+    },
+    "settingsSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "compute",
+            "fragment"
+          ],
+          "name": "Camera",
+          "autoBindBuffer": "Camera"
+        },
+        {
+          "binding": 1,
+          "type": "uniform_buffer",
+          "stages": [
+            "compute",
+            "fragment"
+          ],
+          "name": "Settings",
+          "autoBindBuffer": "Settings"
+        }
+      ]
+    },
+    "lightsSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "Lights",
+          "autoBindBuffer": "Lights"
+        },
+        {
+          "binding": 1,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "SceneLights",
+          "autoBindBuffer": "SceneLights"
+        }
+      ]
+    },
+    "sceneHitsSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "acceleration_structure",
+          "stages": [
+            "compute"
+          ],
+          "name": "scene"
+        },
+        {
+          "binding": 1,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "RayInstances",
+          "autoBindBuffer": "RayInstances"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "sceneTextures",
+          "count": 4096,
+          "source": "sceneTextures"
+        }
+      ]
+    },
+    "iblSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "irradianceMap"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "prefilterMap"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "brdfLUT"
+        }
+      ]
+    },
+    "gBufferImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gAlbedo",
+          "autoBindResource": "gAlbedo"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gDirect",
+          "autoBindResource": "gDirect"
+        }
+      ]
+    },
+    "reprojectImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "prevDepth",
+          "autoBindResource": "prevDepth"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        }
+      ]
+    },
+    "giReprojectImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "prevDepth",
+          "autoBindResource": "prevDepth"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giHistory",
+          "autoBindResource": "giHistory"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reprojectedGi",
+          "autoBindResource": "reprojectedGi"
+        }
+      ]
+    },
+    "rtdgiValidateImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reprojectedGi",
+          "autoBindResource": "reprojectedGi"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirHistory",
+          "autoBindResource": "reservoirHistory"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceHistory",
+          "autoBindResource": "radianceHistory"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigHistory",
+          "autoBindResource": "rayOrigHistory"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayHistory",
+          "autoBindResource": "rayHistory"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "validityPre",
+          "autoBindResource": "validityPre"
+        }
+      ]
+    },
+    "rtdgiTraceImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reprojectedGi",
+          "autoBindResource": "reprojectedGi"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "validityPre",
+          "autoBindResource": "validityPre"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candRadiance",
+          "autoBindResource": "candRadiance"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candHit",
+          "autoBindResource": "candHit"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candNormal",
+          "autoBindResource": "candNormal"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "validityIn",
+          "autoBindResource": "validityIn"
+        }
+      ]
+    },
+    "validityIntegrateImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "validityIn",
+          "autoBindResource": "validityIn"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityHistory",
+          "autoBindResource": "invalidityHistory"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityOut",
+          "autoBindResource": "invalidityOut"
+        }
+      ]
+    },
+    "restirTemporalImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candRadiance",
+          "autoBindResource": "candRadiance"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candHit",
+          "autoBindResource": "candHit"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candNormal",
+          "autoBindResource": "candNormal"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceHistory",
+          "autoBindResource": "radianceHistory"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigHistory",
+          "autoBindResource": "rayOrigHistory"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayHistory",
+          "autoBindResource": "rayHistory"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirHistory",
+          "autoBindResource": "reservoirHistory"
+        },
+        {
+          "binding": 10,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "hitNormalHistory",
+          "autoBindResource": "hitNormalHistory"
+        },
+        {
+          "binding": 11,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityOut",
+          "autoBindResource": "invalidityOut"
+        },
+        {
+          "binding": 12,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceOut",
+          "autoBindResource": "radianceOut"
+        },
+        {
+          "binding": 13,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigOut",
+          "autoBindResource": "rayOrigOut"
+        },
+        {
+          "binding": 14,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOut",
+          "autoBindResource": "rayOut"
+        },
+        {
+          "binding": 15,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "hitNormalOut",
+          "autoBindResource": "hitNormalOut"
+        },
+        {
+          "binding": 16,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirOut",
+          "autoBindResource": "reservoirOut"
+        },
+        {
+          "binding": 17,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trHit",
+          "autoBindResource": "trHit"
+        },
+        {
+          "binding": 18,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trNormal",
+          "autoBindResource": "trNormal"
+        },
+        {
+          "binding": 19,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal"
+        }
+      ]
+    },
+    "restirSpatial0Images": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirOut",
+          "autoBindResource": "reservoirOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trHit",
+          "autoBindResource": "trHit"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trNormal",
+          "autoBindResource": "trNormal"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "spatialA",
+          "autoBindResource": "spatialA"
+        }
+      ]
+    },
+    "restirSpatial1Images": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "spatialA",
+          "autoBindResource": "spatialA"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trHit",
+          "autoBindResource": "trHit"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trNormal",
+          "autoBindResource": "trNormal"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "spatialB",
+          "autoBindResource": "spatialB"
+        }
+      ]
+    },
+    "restirResolveImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceOut",
+          "autoBindResource": "radianceOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "spatialB",
+          "autoBindResource": "spatialB"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candRadiance",
+          "autoBindResource": "candRadiance"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candHit",
+          "autoBindResource": "candHit"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trHit",
+          "autoBindResource": "trHit"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "resolved",
+          "autoBindResource": "resolved"
+        }
+      ]
+    },
+    "temporalFilterImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "resolved",
+          "autoBindResource": "resolved"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reprojectedGi",
+          "autoBindResource": "reprojectedGi"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "varianceHistory",
+          "autoBindResource": "varianceHistory"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityOut",
+          "autoBindResource": "invalidityOut"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "temporalOut",
+          "autoBindResource": "temporalOut"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giHistoryOut",
+          "autoBindResource": "giHistoryOut"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "varianceOut",
+          "autoBindResource": "varianceOut"
+        }
+      ]
+    },
+    "spatialFilterImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "temporalOut",
+          "autoBindResource": "temporalOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "indirect",
+          "autoBindResource": "indirect"
+        }
+      ]
+    },
+    "specLutImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "specLut",
+          "autoBindResource": "specLut"
+        }
+      ]
+    },
+    "rtrTraceImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gAlbedo",
+          "autoBindResource": "gAlbedo"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "indirect",
+          "autoBindResource": "indirect"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "specLut",
+          "autoBindResource": "specLut"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrCandRadiance",
+          "autoBindResource": "rtrCandRadiance"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrCandHit",
+          "autoBindResource": "rtrCandHit"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrCandNormal",
+          "autoBindResource": "rtrCandNormal"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrCandRng",
+          "autoBindResource": "rtrCandRng"
+        }
+      ]
+    },
+    "rtrValidateImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "indirect",
+          "autoBindResource": "indirect"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayOrigHistory",
+          "autoBindResource": "rtrRayOrigHistory"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayHistory",
+          "autoBindResource": "rtrRayHistory"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRngHistory",
+          "autoBindResource": "rtrRngHistory"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRadianceHistory",
+          "autoBindResource": "rtrRadianceHistory"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrReservoirHistory",
+          "autoBindResource": "rtrReservoirHistory"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrInvalidity",
+          "autoBindResource": "rtrInvalidity"
+        }
+      ]
+    },
+    "rtrTemporalImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrCandRadiance",
+          "autoBindResource": "rtrCandRadiance"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrCandHit",
+          "autoBindResource": "rtrCandHit"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrCandNormal",
+          "autoBindResource": "rtrCandNormal"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrCandRng",
+          "autoBindResource": "rtrCandRng"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRadianceHistory",
+          "autoBindResource": "rtrRadianceHistory"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayOrigHistory",
+          "autoBindResource": "rtrRayOrigHistory"
+        },
+        {
+          "binding": 10,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayHistory",
+          "autoBindResource": "rtrRayHistory"
+        },
+        {
+          "binding": 11,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRngHistory",
+          "autoBindResource": "rtrRngHistory"
+        },
+        {
+          "binding": 12,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrReservoirHistory",
+          "autoBindResource": "rtrReservoirHistory"
+        },
+        {
+          "binding": 13,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrHitNormalHistory",
+          "autoBindResource": "rtrHitNormalHistory"
+        },
+        {
+          "binding": 14,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRadianceOut",
+          "autoBindResource": "rtrRadianceOut"
+        },
+        {
+          "binding": 15,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayOrigOut",
+          "autoBindResource": "rtrRayOrigOut"
+        },
+        {
+          "binding": 16,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayOut",
+          "autoBindResource": "rtrRayOut"
+        },
+        {
+          "binding": 17,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRngOut",
+          "autoBindResource": "rtrRngOut"
+        },
+        {
+          "binding": 18,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrHitNormalOut",
+          "autoBindResource": "rtrHitNormalOut"
+        },
+        {
+          "binding": 19,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrReservoirOut",
+          "autoBindResource": "rtrReservoirOut"
+        }
+      ]
+    },
+    "rtrResolveImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gAlbedo",
+          "autoBindResource": "gAlbedo"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrCandHit",
+          "autoBindResource": "rtrCandHit"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayLenHistory",
+          "autoBindResource": "rtrRayLenHistory"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRadianceOut",
+          "autoBindResource": "rtrRadianceOut"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayOut",
+          "autoBindResource": "rtrRayOut"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrReservoirOut",
+          "autoBindResource": "rtrReservoirOut"
+        },
+        {
+          "binding": 10,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayOrigOut",
+          "autoBindResource": "rtrRayOrigOut"
+        },
+        {
+          "binding": 11,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "specLut",
+          "autoBindResource": "specLut"
+        },
+        {
+          "binding": 12,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrResolved",
+          "autoBindResource": "rtrResolved"
+        },
+        {
+          "binding": 13,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayLenOut",
+          "autoBindResource": "rtrRayLenOut"
+        }
+      ]
+    },
+    "rtrTemporalFilterImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrResolved",
+          "autoBindResource": "rtrResolved"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrHistory",
+          "autoBindResource": "rtrHistory"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayLenOut",
+          "autoBindResource": "rtrRayLenOut"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "prevDepth",
+          "autoBindResource": "prevDepth"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrInvalidity",
+          "autoBindResource": "rtrInvalidity"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrTemporalOut",
+          "autoBindResource": "rtrTemporalOut"
+        }
+      ]
+    },
+    "rtrCleanupImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrTemporalOut",
+          "autoBindResource": "rtrTemporalOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reflections",
+          "autoBindResource": "reflections"
+        }
+      ]
+    },
+    "copyRtrHalfImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRadianceOut",
+          "autoBindResource": "rtrRadianceOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayOrigOut",
+          "autoBindResource": "rtrRayOrigOut"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayOut",
+          "autoBindResource": "rtrRayOut"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRngOut",
+          "autoBindResource": "rtrRngOut"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrReservoirOut",
+          "autoBindResource": "rtrReservoirOut"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrHitNormalOut",
+          "autoBindResource": "rtrHitNormalOut"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRadianceHistory",
+          "autoBindResource": "rtrRadianceHistory"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayOrigHistory",
+          "autoBindResource": "rtrRayOrigHistory"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayHistory",
+          "autoBindResource": "rtrRayHistory"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRngHistory",
+          "autoBindResource": "rtrRngHistory"
+        },
+        {
+          "binding": 10,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrReservoirHistory",
+          "autoBindResource": "rtrReservoirHistory"
+        },
+        {
+          "binding": 11,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrHitNormalHistory",
+          "autoBindResource": "rtrHitNormalHistory"
+        }
+      ]
+    },
+    "copyRtrFullImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrTemporalOut",
+          "autoBindResource": "rtrTemporalOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayLenOut",
+          "autoBindResource": "rtrRayLenOut"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrHistory",
+          "autoBindResource": "rtrHistory"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rtrRayLenHistory",
+          "autoBindResource": "rtrRayLenHistory"
+        }
+      ]
+    },
+    "copyHistoryHalfImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceOut",
+          "autoBindResource": "radianceOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigOut",
+          "autoBindResource": "rayOrigOut"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOut",
+          "autoBindResource": "rayOut"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirOut",
+          "autoBindResource": "reservoirOut"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "hitNormalOut",
+          "autoBindResource": "hitNormalOut"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityOut",
+          "autoBindResource": "invalidityOut"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceHistory",
+          "autoBindResource": "radianceHistory"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigHistory",
+          "autoBindResource": "rayOrigHistory"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayHistory",
+          "autoBindResource": "rayHistory"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirHistory",
+          "autoBindResource": "reservoirHistory"
+        },
+        {
+          "binding": 10,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "hitNormalHistory",
+          "autoBindResource": "hitNormalHistory"
+        },
+        {
+          "binding": 11,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityHistory",
+          "autoBindResource": "invalidityHistory"
+        }
+      ]
+    },
+    "copyHistoryFullImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giHistoryOut",
+          "autoBindResource": "giHistoryOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "varianceOut",
+          "autoBindResource": "varianceOut"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giHistory",
+          "autoBindResource": "giHistory"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "varianceHistory",
+          "autoBindResource": "varianceHistory"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "prevDepth",
+          "autoBindResource": "prevDepth"
+        }
+      ]
+    },
+    "displaySet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDirect",
+          "autoBindResource": "gDirect",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gAlbedo",
+          "autoBindResource": "gAlbedo",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 3,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gPosition",
+          "autoBindResource": "gPosition",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 4,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "indirect",
+          "autoBindResource": "indirect",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 5,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "reflections",
+          "autoBindResource": "reflections",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 6,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gGeoNormal",
+          "autoBindResource": "gGeoNormal",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 7,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "specLut",
+          "autoBindResource": "specLut",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    }
+  },
+  "resources": [
+    {
+      "name": "swapchain",
+      "kind": "image",
+      "imported": true
+    },
+    {
+      "name": "gPosition",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT"
+      }
+    },
+    {
+      "name": "gNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "gGeoNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "gAlbedo",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "gDirect",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "reproj",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT"
+      }
+    },
+    {
+      "name": "prevDepth",
+      "kind": "image",
+      "image": {
+        "format": "R32_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "giHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "varianceHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "reprojectedGi",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "resolved",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "temporalOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "giHistoryOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "varianceOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT"
+      }
+    },
+    {
+      "name": "indirect",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "radianceHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rayOrigHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rayHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "reservoirHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "hitNormalHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "invalidityHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "candRadiance",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "candHit",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "candNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "validityPre",
+      "kind": "image",
+      "image": {
+        "format": "R16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "validityIn",
+      "kind": "image",
+      "image": {
+        "format": "R16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "invalidityOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "radianceOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rayOrigOut",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rayOut",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "hitNormalOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "reservoirOut",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "trHit",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "trNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "spatialA",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "spatialB",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "specLut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "name": "rtrCandRadiance",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrCandHit",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrCandNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrCandRng",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrRadianceHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rtrRayOrigHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rtrRayHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rtrRngHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rtrReservoirHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rtrHitNormalHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rtrRadianceOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrRayOrigOut",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrRayOut",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrRngOut",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrReservoirOut",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrHitNormalOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrInvalidity",
+      "kind": "image",
+      "image": {
+        "format": "R16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5
+      }
+    },
+    {
+      "name": "rtrRayLenHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "rtrRayLenOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT"
+      }
+    },
+    {
+      "name": "rtrResolved",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "rtrHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "rtrTemporalOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "reflections",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    }
+  ],
+  "passes": [
+    {
+      "name": "IrcacheInit",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          64,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1024,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_init.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheCascades",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          1,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_cascades.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheScroll",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          32,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 32,
+          "z": 384
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_scroll.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheCopyGrid",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          64,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 12288,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_copy_grid.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheAgeArgs",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          1,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_age_args.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheAge",
+      "type": "compute",
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 0
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_age.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheTraceArgs",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          1,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_trace_args.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheReset",
+      "type": "compute",
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 16
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_reset.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheAccessibility",
+      "type": "compute",
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 48
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_accessibility.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "lightsSet",
+        "sceneHitsSet",
+        "iblSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheValidate",
+      "type": "compute",
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 32
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_validate.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "lightsSet",
+        "sceneHitsSet",
+        "iblSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheTrace",
+      "type": "compute",
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 32
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_trace.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "lightsSet",
+        "sceneHitsSet",
+        "iblSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheSum",
+      "type": "compute",
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 16
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_sum.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "GBuffer",
+      "type": "compute",
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "gPosition",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "gPosition",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [],
+      "outputs": [
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gAlbedo",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gDirect",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/gbuffer.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "lightsSet",
+        "sceneHitsSet",
+        "iblSet",
+        "gBufferImages"
+      ]
+    },
+    {
+      "name": "Reproject",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "gPosition",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "gPosition",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "prevDepth",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/reproject.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "reprojectImages"
+      ]
+    },
+    {
+      "name": "GiReproject",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "reproj",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "reproj",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "prevDepth",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "reprojectedGi",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/gi_reproject.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "giReprojectImages"
+      ]
+    },
+    {
+      "name": "RtdgiValidate",
+      "type": "compute",
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "reservoirHistory",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "reservoirHistory",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reprojectedGi",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "reservoirHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "radianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "validityPre",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_validate.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "lightsSet",
+        "sceneHitsSet",
+        "iblSet",
+        "rtdgiValidateImages"
+      ]
+    },
+    {
+      "name": "RtdgiTrace",
+      "type": "compute",
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "validityPre",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "validityPre",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reprojectedGi",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "validityPre",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "candRadiance",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "validityIn",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_trace.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "lightsSet",
+        "sceneHitsSet",
+        "iblSet",
+        "rtdgiTraceImages"
+      ]
+    },
+    {
+      "name": "ValidityIntegrate",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "validityIn",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "validityIn",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "validityIn",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "invalidityOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/validity_integrate.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "validityIntegrateImages"
+      ]
+    },
+    {
+      "name": "RestirTemporal",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "candRadiance",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "candRadiance",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candRadiance",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "radianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reservoirHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "hitNormalHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "radianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "hitNormalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reservoirOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/restir_temporal.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "restirTemporalImages"
+      ]
+    },
+    {
+      "name": "RestirSpatial0",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "reservoirOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "reservoirOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "reservoirOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "spatialA",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/restir_spatial0.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "restirSpatial0Images"
+      ]
+    },
+    {
+      "name": "RestirSpatial1",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "spatialA",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "spatialA",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "spatialA",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "spatialB",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/restir_spatial1.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "restirSpatial1Images"
+      ]
+    },
+    {
+      "name": "RestirResolve",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "gPosition",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "gPosition",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "radianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "spatialB",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candRadiance",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trHit",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "resolved",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/restir_resolve.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "restirResolveImages"
+      ]
+    },
+    {
+      "name": "TemporalFilter",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "resolved",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "resolved",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "resolved",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reprojectedGi",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "varianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "temporalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giHistoryOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "varianceOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/temporal_filter.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "temporalFilterImages"
+      ]
+    },
+    {
+      "name": "SpatialFilter",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "temporalOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "temporalOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "temporalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "indirect",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/spatial_filter.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "spatialFilterImages"
+      ]
+    },
+    {
+      "name": "SpecLut",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": 8,
+          "y": 8,
+          "z": 1
+        }
+      },
+      "inputs": [],
+      "outputs": [
+        {
+          "resource": "specLut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/spec_lut.comp.spv"
+      },
+      "descriptorSets": [
+        "specLutImages"
+      ]
+    },
+    {
+      "name": "RtrTrace",
+      "type": "compute",
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "rtrCandRadiance",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "rtrCandRadiance",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gAlbedo",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "indirect",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "specLut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "rtrCandRadiance",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrCandHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrCandNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrCandRng",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtr_trace.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "lightsSet",
+        "sceneHitsSet",
+        "iblSet",
+        "rtrTraceImages"
+      ]
+    },
+    {
+      "name": "RtrValidate",
+      "type": "compute",
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "rtrRayOrigHistory",
+            "dimension": "width",
+            "divisor": 16
+          },
+          "y": {
+            "resource": "rtrRayOrigHistory",
+            "dimension": "height",
+            "divisor": 16
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "indirect",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayOrigHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRngHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "rtrRadianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrReservoirHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrInvalidity",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtr_validate.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "lightsSet",
+        "sceneHitsSet",
+        "iblSet",
+        "rtrValidateImages"
+      ]
+    },
+    {
+      "name": "RtrTemporal",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "rtrCandRadiance",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "rtrCandRadiance",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrCandRadiance",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrCandHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrCandNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrCandRng",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRadianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayOrigHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRngHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrReservoirHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrHitNormalHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "rtrRadianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayOrigOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRngOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrHitNormalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrReservoirOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtr_temporal.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "rtrTemporalImages"
+      ]
+    },
+    {
+      "name": "RtrResolve",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "gPosition",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "gPosition",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gAlbedo",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrCandHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayLenHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRadianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrReservoirOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayOrigOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "specLut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "rtrResolved",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayLenOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtr_resolve.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "rtrResolveImages"
+      ]
+    },
+    {
+      "name": "RtrTemporalFilter",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "rtrResolved",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "rtrResolved",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "rtrResolved",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayLenOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "prevDepth",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrInvalidity",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "rtrTemporalOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtr_temporal_filter.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "rtrTemporalFilterImages"
+      ]
+    },
+    {
+      "name": "RtrCleanup",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "rtrTemporalOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "rtrTemporalOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "rtrTemporalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "reflections",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtr_cleanup.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "settingsSet",
+        "rtrCleanupImages"
+      ]
+    },
+    {
+      "name": "CopyRtrHalf",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "rtrRadianceOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "rtrRadianceOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "rtrRadianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayOrigOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRngOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrReservoirOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrHitNormalOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "rtrRadianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayOrigHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRngHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrReservoirHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrHitNormalHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/copy_rtr_half.comp.spv"
+      },
+      "descriptorSets": [
+        "copyRtrHalfImages"
+      ]
+    },
+    {
+      "name": "CopyRtrFull",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "rtrTemporalOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "rtrTemporalOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "rtrTemporalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayLenOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "rtrHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rtrRayLenHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/copy_rtr_full.comp.spv"
+      },
+      "descriptorSets": [
+        "copyRtrFullImages"
+      ]
+    },
+    {
+      "name": "CopyHistoryHalf",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "radianceOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "radianceOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "radianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reservoirOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "hitNormalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "radianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reservoirHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "hitNormalHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/copy_history_half.comp.spv"
+      },
+      "descriptorSets": [
+        "copyHistoryHalfImages"
+      ]
+    },
+    {
+      "name": "CopyHistoryFull",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "giHistoryOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "giHistoryOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "giHistoryOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "varianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gPosition",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "giHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "varianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "prevDepth",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/copy_history_full.comp.spv"
+      },
+      "descriptorSets": [
+        "copyHistoryFullImages"
+      ]
+    },
+    {
+      "name": "Display",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gDirect",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gAlbedo",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gPosition",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "indirect",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "reflections",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gGeoNormal",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "specLut",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/display.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "displaySet",
+        "settingsSet"
+      ]
+    },
+    {
+      "name": "UIOverlay",
+      "type": "graphics",
+      "execution": {
+        "type": "ui_canvas"
+      },
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_blend",
+          "present": true
+        }
+      ]
+    }
+  ]
+}

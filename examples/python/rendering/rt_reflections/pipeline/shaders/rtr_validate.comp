@@ -1,0 +1,81 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// Reflection validation, every frame for one half resolution pixel in each
+// 2 x 2 group (a different one each frame): its reservoir's ray is traced
+// again from where it started, with the random state it had. The new
+// radiance replaces the old; where they differ, the reservoir forgets
+// history (M times 1 - invalidity). The group's other pixels take the new
+// radiance too where theirs was alike, and the same invalidity.
+
+#extension GL_EXT_ray_query : require
+
+#define IRCACHE_SET 0
+#include "common.glsl"
+#include "ircache.glsl"
+#include "lighting.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 5, binding = 0, rgba32f) uniform readonly image2D gPosition;
+layout(set = 5, binding = 1, rgba16f) uniform readonly image2D gNormal;
+layout(set = 5, binding = 2, rgba16f) uniform readonly image2D indirect;
+layout(set = 5, binding = 3, rgba32f) uniform readonly image2D rtrRayOrigHistory;
+layout(set = 5, binding = 4, rgba32f) uniform readonly image2D rtrRayHistory;
+layout(set = 5, binding = 5, r32ui) uniform readonly uimage2D rtrRngHistory;
+layout(set = 5, binding = 6, rgba16f) uniform image2D rtrRadianceHistory;
+layout(set = 5, binding = 7, rg32ui) uniform uimage2D rtrReservoirHistory;
+layout(set = 5, binding = 8, r16f) uniform writeonly image2D rtrInvalidity;
+
+#include "rtr_trace.glsl"
+
+const ivec2 SUBPIXELS[4] = ivec2[4](ivec2(1, 1), ivec2(1, 0), ivec2(0, 0), ivec2(0, 1));
+
+void main() {
+    ivec2 group = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 halfSize = imageSize(rtrInvalidity);
+    ivec2 px = group * 2 + halfresOffset();
+    if (any(greaterThanEqual(px, halfSize))) return;
+    ivec2 hi = min(hiPixel(px), ivec2(camera.resolution) - 1);
+    bool sky = imageLoad(gPosition, hi).w == 0.0;
+    if (sky || (settings.stages & STAGE_RTR_RESTIR) == 0u) {
+        for (int i = 0; i < 4; ++i) {
+            ivec2 p = group * 2 + SUBPIXELS[i];
+            if (all(lessThan(p, halfSize))) imageStore(rtrInvalidity, p, vec4(sky && p == px ? 1.0 : 0.0));
+        }
+        return;
+    }
+
+    vec4 originAlpha = imageLoad(rtrRayOrigHistory, px);
+    vec3 hitPoint = imageLoad(rtrRayHistory, px).xyz + originAlpha.xyz;
+    uint rng = imageLoad(rtrRngHistory, px).x;
+    ReflectionTrace result = traceReflection(originAlpha.xyz, normalize(hitPoint - originAlpha.xyz),
+                                             max(originAlpha.w, 6e-4), rng);
+
+    vec4 previousPacked = imageLoad(rtrRadianceHistory, px);
+    vec3 previous = max(vec3(0.0), previousPacked.rgb);
+    vec3 check = max(vec3(0.0), result.radiance);
+    float difference = length(abs(previous - check) / max(vec3(1e-3), previous + check));
+    float invalidity = smoothstep(0.1, 0.5, difference / length(vec3(1.0)));
+
+    Reservoir r = reservoirFromRaw(imageLoad(rtrReservoirHistory, px).xy);
+    r.M *= 1.0 - invalidity;
+    imageStore(rtrRadianceHistory, px, vec4(check, previousPacked.a));
+    imageStore(rtrInvalidity, px, vec4(invalidity));
+    imageStore(rtrReservoirHistory, px, uvec4(reservoirRaw(r), 0u, 0u));
+
+    for (uint i = 1u; i <= 3u; ++i) {
+        ivec2 other = group * 2 + SUBPIXELS[(camera.frame + i) & 3u];
+        if (any(greaterThanEqual(other, halfSize))) continue;
+        vec4 otherPacked = imageLoad(rtrRadianceHistory, other);
+        vec3 a = max(vec3(0.0), otherPacked.rgb);
+        if (length(abs(a - previous) / max(vec3(1e-8), a + previous)) < 0.2) {
+            imageStore(rtrRadianceHistory, other, vec4(check, otherPacked.a));
+        }
+        imageStore(rtrInvalidity, other, vec4(invalidity));
+        if (invalidity > 0.0) {
+            Reservoir o = reservoirFromRaw(imageLoad(rtrReservoirHistory, other).xy);
+            o.M *= 1.0 - invalidity;
+            imageStore(rtrReservoirHistory, other, uvec4(reservoirRaw(o), 0u, 0u));
+        }
+    }
+}

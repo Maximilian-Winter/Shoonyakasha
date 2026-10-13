@@ -1,0 +1,33 @@
+#version 460
+// The specular lobe's directional albedo, 64 x 64 over NdotV (x) and
+// perceptual roughness (y), from 256 directions drawn through the visible
+// normals: x and y such that the lobe reflects F0 * x + y of uniform
+// light, z the fraction of drawn directions that are valid.
+
+#include "specular.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba16f) uniform writeonly image2D specLut;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(px, ivec2(64)))) return;
+    float NdotV = max(float(px.x) / 63.0, 1e-3);
+    float alpha = specularAlpha(float(px.y) / 63.0);
+    vec3 wo = vec3(sqrt(1.0 - NdotV * NdotV), 0.0, NdotV);
+
+    const uint COUNT = 256u;
+    float scale = 0.0, bias = 0.0, valid = 0.0;
+    for (uint i = 0u; i < COUNT; ++i) {
+        vec2 u = vec2((float(i) + 0.5) / float(COUNT), fract(float(i) * 0.6180339887));
+        SpecularSample withF0 = specularSample(alpha, vec3(1.0), wo, u);
+        SpecularSample withoutF0 = specularSample(alpha, vec3(0.0), wo, u);
+        if (withF0.valid) {
+            bias += withoutF0.valueOverPdf.x;
+            scale += withF0.valueOverPdf.x - withoutF0.valueOverPdf.x;
+            valid += 1.0;
+        }
+    }
+    imageStore(specLut, px, vec4(scale, bias, valid, 0.0) / float(COUNT));
+}

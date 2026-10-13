@@ -1,0 +1,52 @@
+#version 460
+// Spatial cleanup of the reflections where the temporal filter holds fewer
+// than 8 frames: 2 to 8 taps on a spiral (twice as wide below 4 frames),
+// weighed by depth and normal similarity, averaged in a tone-mapped space
+// that favours dimmer values.
+
+#include "common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 2, binding = 0, rgba16f) uniform readonly image2D rtrTemporalOut;
+layout(set = 2, binding = 1, rgba32f) uniform readonly image2D gPosition;
+layout(set = 2, binding = 2, rgba16f) uniform readonly image2D gGeoNormal;
+layout(set = 2, binding = 3, rgba16f) uniform writeonly image2D reflections;
+
+vec3 crunch(vec3 v) { return v / (max(v.r, max(v.g, v.b)) + 1.0); }
+vec3 uncrunch(vec3 v) { return v / (1.0 - max(v.r, max(v.g, v.b))); }
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(camera.resolution);
+    if (any(greaterThanEqual(px, size))) return;
+
+    vec4 center = imageLoad(rtrTemporalOut, px);
+    float depth = imageLoad(gPosition, px).w;
+    float count = center.w;
+    if (count >= 8.0 || depth == 0.0 || (settings.stages & STAGE_RTR_FILTERS) == 0u) {
+        imageStore(reflections, px, center);
+        return;
+    }
+    vec3 centerNormalVs = directionWorldToView(imageLoad(gGeoNormal, px).xyz);
+    uint sampleCount = uint(clamp(8.0 - count / 2.0, 2.0, 8.0));
+    float kernelScale = count < 4.0 ? 2.0 : 1.0;
+    uint quadIndex = uint(((px.x & 1) | (px.y & 1) * 2) + int(camera.frame)) & 3u;
+
+    vec3 vsum = vec3(0.0);
+    float wsum = 0.0;
+    for (uint i = 0u; i < sampleCount; ++i) {
+        float angle = (float(i) + float(quadIndex) * 0.25) * GOLDEN_ANGLE;
+        float radius = i == 0u ? 0.0 : sqrt(float(i)) * 1.5 * kernelScale;
+        ivec2 tap = clamp(px + ivec2(vec2(cos(angle), sin(angle)) * radius), ivec2(0), size - 1);
+        float sampleDepth = imageLoad(gPosition, tap).w;
+        if (sampleDepth == 0.0) continue;
+        vec3 sampleNormalVs = directionWorldToView(imageLoad(gGeoNormal, tap).xyz);
+        float w = exp2(-50.0 * abs(centerNormalVs.z * (depth / sampleDepth - 1.0)));
+        float dp = clamp(dot(centerNormalVs, sampleNormalVs), 0.0, 1.0);
+        w *= dp * dp * dp;
+        vsum += crunch(imageLoad(rtrTemporalOut, tap).rgb) * w;
+        wsum += w;
+    }
+    imageStore(reflections, px, vec4(wsum > 0.0 ? uncrunch(vsum / wsum) : center.rgb, count));
+}

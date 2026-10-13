@@ -1,0 +1,77 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// One camera ray through each pixel's centre. Writes the surface it hits
+// (position and view depth, shading and geometric normals, material) and
+// the light it sends to the camera directly: the scene lights through
+// shadow rays (towards the centre of area lights) and its emission. A ray
+// that misses writes depth 0 and the sky. In the irradiance cache view,
+// the direct light is replaced by the cache looked up at the surface.
+
+#extension GL_EXT_ray_query : require
+
+#define IRCACHE_SET 0
+#include "common.glsl"
+#include "ircache.glsl"
+#include "lighting.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 5, binding = 0, rgba32f) uniform writeonly image2D gPosition;   // xyz world, w view depth (0: sky)
+layout(set = 5, binding = 1, rgba16f) uniform writeonly image2D gNormal;     // shading normal, metallic
+layout(set = 5, binding = 2, rgba16f) uniform writeonly image2D gGeoNormal;  // geometric normal, roughness
+layout(set = 5, binding = 3, rgba16f) uniform writeonly image2D gAlbedo;
+layout(set = 5, binding = 4, rgba16f) uniform writeonly image2D gDirect;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(px, ivec2(camera.resolution)))) return;
+
+    vec2 uv = pixelUv(px);
+    vec3 direction = viewDirectionAt(uv);
+    vec3 origin = camera.position.xyz;
+
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, scene, gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, direction, RAY_FAR);
+    while (rayQueryProceedEXT(query)) {}
+    if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
+        imageStore(gPosition, px, vec4(origin + direction * SKY_DIST, 0.0));
+        imageStore(gNormal, px, vec4(-direction, 0.0));
+        imageStore(gGeoNormal, px, vec4(-direction, 1.0));
+        imageStore(gAlbedo, px, vec4(0.0));
+        imageStore(gDirect, px, vec4(environment(direction), 1.0));
+        return;
+    }
+
+    float t = rayQueryGetIntersectionTEXT(query, true);
+    vec3 nextView = viewDirectionAt(uv + vec2(0.0, 1.0 / camera.resolution.y));
+    SkHit hit = skFetchHit(query, length(nextView - direction) * t);
+    vec3 V = -direction;
+    vec3 N = hit.normal, Ng = hit.geometricNormal;
+    if (dot(N, V) <= 0.0) N = Ng;
+
+    vec3 radiance;
+    if (settings.view == VIEW_CACHE) {
+        uint rng = hashPixel(px, camera.frame);
+        IrcacheQuery q;
+        q.from = origin;
+        q.position = hit.position;
+        q.normal = N;
+        q.rank = 0u;
+        q.jitter = true;
+        radiance = ircacheLookup(q, rng);
+    } else {
+        radiance = vec3(0.0);
+        uint count = min(lights.lightCount, uint(sceneLights.length()));
+        for (uint i = 0u; i < count; ++i) {
+            radiance += lightFrom(i, hit.position, N, Ng, V, hit.baseColor, hit.metallic, hit.roughness, 0.0, 0.0);
+        }
+        radiance += hit.emissive;
+    }
+
+    float viewDepth = dot(hit.position - origin, -vec3(camera.invView[2]));
+    imageStore(gPosition, px, vec4(hit.position, viewDepth));
+    imageStore(gNormal, px, vec4(N, hit.metallic));
+    imageStore(gGeoNormal, px, vec4(Ng, hit.roughness));
+    imageStore(gAlbedo, px, vec4(hit.baseColor, 1.0));
+    imageStore(gDirect, px, vec4(radiance, 1.0));
+}

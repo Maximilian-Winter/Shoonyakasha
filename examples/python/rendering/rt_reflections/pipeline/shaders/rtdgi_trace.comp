@@ -1,0 +1,85 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// New candidates, at half resolution: each pixel traces one ray from the
+// surface of the full resolution pixel it stands for, in a direction
+// uniform over the hemisphere around its normal. On validation frames the
+// rays are short, only reaching the near field. Also carries the
+// validation's invalidity over into this frame's layout of the pixels.
+//
+// candRadiance: rgb the radiance the ray brought back. candHit: xyz the
+// offset from the ray's origin to its hit, w the uniform pdf.
+// candNormal: xyz the normal at the hit.
+
+#extension GL_EXT_ray_query : require
+
+#define IRCACHE_SET 0
+#include "common.glsl"
+#include "ircache.glsl"
+#include "lighting.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 5, binding = 0, rgba32f) uniform readonly image2D gPosition;
+layout(set = 5, binding = 1, rgba16f) uniform readonly image2D reprojectedGi;
+layout(set = 5, binding = 2, rgba16f) uniform readonly image2D gNormal;
+layout(set = 5, binding = 3, rgba16f) uniform readonly image2D gGeoNormal;
+layout(set = 5, binding = 4, rgba32f) uniform readonly image2D reproj;
+layout(set = 5, binding = 5, r16f) uniform readonly image2D validityPre;
+layout(set = 5, binding = 6, rgba16f) uniform writeonly image2D candRadiance;
+layout(set = 5, binding = 7, rgba32f) uniform writeonly image2D candHit;
+layout(set = 5, binding = 8, rgba16f) uniform writeonly image2D candNormal;
+layout(set = 5, binding = 9, r16f) uniform writeonly image2D validityIn;
+
+#include "rtdgi_trace.glsl"
+
+// Hemisphere directions, uniform in solid angle, from a low-discrepancy
+// sequence offset per pixel.
+vec3 candidateDirection(ivec2 px, vec3 normal) {
+    vec2 u = fract(r2Sequence(camera.frame % 4096u) +
+                   vec2(interleavedGradientNoise(vec2(px)), interleavedGradientNoise(vec2(px) + vec2(47.0, 17.0))));
+    float z = u.x;
+    float r = sqrt(max(0.0, 1.0 - z * z));
+    float phi = TAU * u.y;
+    vec3 t, b;
+    basis(normal, t, b);
+    return t * (r * cos(phi)) + b * (r * sin(phi)) + normal * z;
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 halfSize = imageSize(candRadiance);
+    if (any(greaterThanEqual(px, halfSize))) return;
+    ivec2 hi = min(hiPixel(px), ivec2(camera.resolution) - 1);
+
+    vec4 position = imageLoad(gPosition, hi);
+    vec4 r = imageLoad(reproj, hi);
+    ivec2 reprojPx = ivec2(floor(vec2(px) + camera.resolution * r.xy * 0.5 + 0.5));
+    imageStore(validityIn, px, vec4(imageLoad(validityPre, clamp(reprojPx, ivec2(0), halfSize - 1)).r));
+
+    if (position.w == 0.0) {
+        imageStore(candRadiance, px, vec4(0.0));
+        imageStore(candHit, px, vec4(0.0));
+        imageStore(candNormal, px, vec4(0.0, 0.0, 1.0, 0.0));
+        return;
+    }
+
+    vec3 N = imageLoad(gNormal, hi).xyz;
+    vec3 Ng = imageLoad(gGeoNormal, hi).xyz;
+    vec3 direction = candidateDirection(px, N);
+    vec3 origin = secondaryRayOrigin(position.xyz, Ng, position.w);
+    float nearFieldEnd = position.w * 80.0 * 0.5 / camera.resolution.y;
+
+    uint rng = hashPixel(px, camera.frame & 31u);
+    DiffuseTrace result = traceDiffuse(origin, direction, isTracingFrame() ? SKY_DIST : nearFieldEnd,
+                                       0.03, rng);
+    if (!isTracingFrame() && !result.isHit) {
+        // Short rays that reach nothing bring back no sky.
+        result.radiance = vec3(0.0);
+        result.hitT = SKY_DIST;
+    }
+
+    float pdf = max(0.0, 1.0 / (dot(N, direction) * TAU));
+    imageStore(candRadiance, px, vec4(result.radiance, 0.0));
+    imageStore(candHit, px, vec4(direction * result.hitT, pdf));
+    imageStore(candNormal, px, vec4(result.hitNormal, 0.0));
+}

@@ -1,0 +1,20 @@
+#version 460
+// This frame's full resolution results become next frame's history: the
+// filtered indirect light, its luminance moments, and the view depth.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba16f) uniform readonly image2D giHistoryOut;
+layout(set = 0, binding = 1, rg16f) uniform readonly image2D varianceOut;
+layout(set = 0, binding = 2, rgba32f) uniform readonly image2D gPosition;
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D giHistory;
+layout(set = 0, binding = 4, rg16f) uniform writeonly image2D varianceHistory;
+layout(set = 0, binding = 5, r32f) uniform writeonly image2D prevDepth;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(px, imageSize(giHistoryOut)))) return;
+    imageStore(giHistory, px, imageLoad(giHistoryOut, px));
+    imageStore(varianceHistory, px, imageLoad(varianceOut, px));
+    imageStore(prevDepth, px, vec4(imageLoad(gPosition, px).w));
+}

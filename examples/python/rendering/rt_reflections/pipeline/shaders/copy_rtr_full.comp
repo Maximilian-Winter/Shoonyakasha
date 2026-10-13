@@ -1,0 +1,16 @@
+#version 460
+// This frame's filtered reflections and ray lengths become next frame's history.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, rgba16f) uniform readonly image2D rtrTemporalOut;
+layout(set = 0, binding = 1, rg16f) uniform readonly image2D rtrRayLenOut;
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D rtrHistory;
+layout(set = 0, binding = 3, rg16f) uniform writeonly image2D rtrRayLenHistory;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(px, imageSize(rtrTemporalOut)))) return;
+    imageStore(rtrHistory, px, imageLoad(rtrTemporalOut, px));
+    imageStore(rtrRayLenHistory, px, imageLoad(rtrRayLenOut, px));
+}

@@ -1,0 +1,15 @@
+#version 460
+// Fills the pool with every entry and marks them recycled, once: until the
+// cascades pass has set META_INITIALIZED.
+
+#define IRCACHE_SET 0
+#include "ircache.glsl"
+
+layout(local_size_x = 64) in;
+
+void main() {
+    uint entry = gl_GlobalInvocationID.x;
+    if (ircacheMeta[META_INITIALIZED] != 0u || entry >= IRCACHE_MAX_ENTRIES) return;
+    ircachePool[entry] = entry;
+    ircacheLife[entry] = IRCACHE_LIFE_RECYCLED;
+}

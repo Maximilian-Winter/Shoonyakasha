@@ -1,0 +1,37 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// For each stratum of each live entry: when the entry's new trace origin
+// cannot see the origin its reservoir's sample was traced from, the
+// reservoir keeps less of its history (its candidate count times 0.8). This
+// lets entries that span a wall follow the side the queries come from.
+
+#extension GL_EXT_ray_query : require
+
+#define IRCACHE_SET 0
+#include "ircache.glsl"
+
+layout(set = 3, binding = 0) uniform accelerationStructureEXT scene;
+
+layout(local_size_x = 64) in;
+
+void main() {
+    uint dispatch = gl_GlobalInvocationID.x;
+    if (dispatch >= ircacheMeta[META_TRACING_COUNT] * IRCACHE_OCTA_DIMS2) return;
+    uint entry = ircacheIndirection[dispatch / IRCACHE_OCTA_DIMS2];
+    if (!ircacheLifeValid(ircacheLife[entry])) return;
+    uint index = entry * IRCACHE_AUX_STRIDE + dispatch % IRCACHE_OCTA_DIMS2;
+
+    Reservoir r = reservoirFromRaw(ircacheAux[index].xy);
+    if (r.M <= 0.0) return;
+    vec3 origin = unpackVertex(ircacheSpatial[entry]).position;
+    vec3 previous = unpackVertex(ircacheAux[index + 2u * IRCACHE_OCTA_DIMS2]).position;
+
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFF,
+                          origin, 0.001, previous - origin, 0.999);
+    while (rayQueryProceedEXT(query)) {}
+    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+        r.M *= 0.8;
+        ircacheAux[index].xy = reservoirRaw(r);
+    }
+}

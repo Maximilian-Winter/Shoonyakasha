@@ -18,6 +18,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [rendering/reference_pt](../../examples/python/rendering/reference_pt) | `python reference_pt.py` | A path tracer on its own pipeline that averages one path per pixel per frame in Crytek Sponza, reading the surfaces it hits through the scene's ray instances and texture array; a white furnace view, and the same scene on the default pipeline to compare |
 | [rendering/irradiance_cache](../../examples/python/rendering/irradiance_cache) | `python irradiance_cache.py` | Kajiya's irradiance cache on its own pipeline: sparse cascades of cells around the camera, allocated where surfaces are seen, tracing into reservoirs of the sphere and kept as spherical harmonics, with multiple bounces from looking themselves up; the reference path tracer's scene |
 | [rendering/restir_gi](../../examples/python/rendering/restir_gi) | `python restir_gi.py` | Kajiya's ray-traced diffuse GI on its own pipeline: half resolution diffuse rays reused through temporal and spatial ReSTIR reservoirs, validated every third frame, resolved with a near-field split and filtered, with the irradiance cache beyond the first bounce; each stage can be switched off |
+| [rendering/rt_reflections](../../examples/python/rendering/rt_reflections) | `python rt_reflections.py` | Kajiya's ray-traced reflections on top of its diffuse GI: half resolution GGX rays reused through temporal ReSTIR and validated, resolved with a ratio estimator over a lobe-shaped kernel, filtered with surface and reflection reprojection |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -100,6 +101,16 @@ The ray-traced diffuse global illumination of Embark's kajiya, on its own pipeli
 - **Resolve and filters:** a full resolution resolve takes near hits from the raw candidates and far ones from the reservoirs, then temporal and spatial filters.
 
 `--stages` switches each stage on or off, and the reference path tracer's `--mode 3` converges to the same indirect irradiance for comparison. See the [example's README](../../examples/python/rendering/restir_gi/README.md).
+
+### Ray-traced reflections (`rt_reflections`)
+
+Kajiya's ray-traced reflections, on top of the ReSTIR GI example's diffuse light:
+- **Candidates:** at half resolution, each pixel draws a ray from its surface's GGX lobe, through the visible normals. At its hit the ray takes the lights, the emission, and the hit's diffuse light: from the ReSTIR GI result on screen, from the irradiance cache elsewhere.
+- **Reuse:** reservoirs reuse the rays over time, weighed by luminance and the rays' densities. Every frame a quarter of them is traced again, so they follow changes in the light.
+- **Resolve:** a ratio estimator over a world-space kernel shaped like the lobe gives full resolution reflections.
+- **Filters:** a temporal filter follows both the surface and the reflected image.
+
+A small table of the lobe's directional albedo, computed for the engine's BRDF, scales the reflections into the image. The reference path tracer's `--mode 4` converges to the same reflections for comparison. See the [example's README](../../examples/python/rendering/rt_reflections/README.md).
 
 ### Japanese shrine (`japanese_shrine`)
 

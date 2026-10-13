@@ -1,0 +1,5 @@
+#version 460
+// The first spatial resampling pass (restir_spatial.glsl).
+
+#define SPATIAL_PASS 0
+#include "restir_spatial.glsl"
