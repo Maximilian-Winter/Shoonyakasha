@@ -194,6 +194,14 @@
         {
           "name": "textures",
           "type": "uvec4"
+        },
+        {
+          "name": "optics",
+          "type": "vec4"
+        },
+        {
+          "name": "film",
+          "type": "vec4"
         }
       ],
       "source": {

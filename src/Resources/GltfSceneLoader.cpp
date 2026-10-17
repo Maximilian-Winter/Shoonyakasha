@@ -498,6 +498,26 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             }
         }
 
+        if (material->has_transmission) result.transmissionFactor = material->transmission.transmission_factor;
+        if (material->has_ior) result.ior = material->ior.ior;
+
+        if (material->has_iridescence) {
+            const auto& film = material->iridescence;
+            result.hasIridescence = true;
+            result.iridescenceFactor = film.iridescence_factor;
+            result.iridescenceIor = film.iridescence_ior;
+            result.iridescenceThicknessMinimum = film.iridescence_thickness_min;
+            result.iridescenceThicknessMaximum = film.iridescence_thickness_max;
+            if (m_options.loadTextures) {
+                if (film.iridescence_texture.texture) {
+                    result.iridescenceMap = loadTexture(data, film.iridescence_texture, false);
+                }
+                if (film.iridescence_thickness_texture.texture) {
+                    result.iridescenceThicknessMap = loadTexture(data, film.iridescence_thickness_texture, false);
+                }
+            }
+        }
+
         result.alphaMode = extractAlphaMode(material);
         result.alphaCutoff = material->alpha_cutoff;
         result.doubleSided = material->double_sided;
@@ -857,6 +877,14 @@ entt::entity GltfSceneLoader::createEntity(
         material.setParam("clearcoatFactor", primitive.clearcoatFactor);
         material.setParam("clearcoatRoughnessFactor", primitive.clearcoatRoughnessFactor);
     }
+    material.setParam("transmissionFactor", primitive.transmissionFactor);
+    material.setParam("ior", primitive.ior);
+    if (primitive.hasIridescence) {
+        material.setParam("iridescenceFactor", primitive.iridescenceFactor);
+        material.setParam("iridescenceIor", primitive.iridescenceIor);
+        material.setParam("iridescenceThicknessMinimum", primitive.iridescenceThicknessMinimum);
+        material.setParam("iridescenceThicknessMaximum", primitive.iridescenceThicknessMaximum);
+    }
     material.alphaMode = primitive.alphaMode;
     material.alphaCutoff = primitive.alphaCutoff;
     material.doubleSided = primitive.doubleSided;
@@ -882,6 +910,12 @@ entt::entity GltfSceneLoader::createEntity(
     }
     if (primitive.clearcoatRoughnessMap.isValid()) {
         material.textures["clearcoatRoughnessMap"] = primitive.clearcoatRoughnessMap;
+    }
+    if (primitive.iridescenceMap.isValid()) {
+        material.textures["iridescenceMap"] = primitive.iridescenceMap;
+    }
+    if (primitive.iridescenceThicknessMap.isValid()) {
+        material.textures["iridescenceThicknessMap"] = primitive.iridescenceThicknessMap;
     }
 
     // Add RenderableTagComponent

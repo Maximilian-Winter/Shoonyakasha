@@ -30,6 +30,7 @@
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 
+#include <bit>
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
@@ -42,8 +43,8 @@ class Logger;
 struct MeshComponent;
 struct MaterialComponentV5;
 
-/// One instance of the top-level structure, as shaders read it. Six vec4s;
-/// the GLSL side is python/shoonyakasha/glsl/scene_hits.glsl.
+/// One instance of the top-level structure, as shaders read it. Eight vec4s;
+/// the GLSL side is python/shoonyakasha/glsl/sk/scene_hits.glsl.
 struct PackedRayInstance {
     static constexpr uint32_t kNoTexture = 0xFFFFFFFFu;
     static constexpr uint32_t kIndexNone = 2;   // indexType: 0 16-bit, 1 32-bit, 2 not indexed
@@ -55,8 +56,12 @@ struct PackedRayInstance {
     glm::vec4  emissive{0.0f};    // emissiveFactor rgb, w 0
     glm::vec4  surface{0.0f};     // metallicFactor, roughnessFactor, alphaCutoff, entity id (bits)
     glm::uvec4 textures{kNoTexture};   // slots of albedoMap, normalMap, metallicRoughnessMap, emissiveMap
+    glm::vec4  optics{0.0f, 1.5f, 0.0f, 1.3f};   // transmissionFactor, ior, iridescenceFactor, iridescenceIor
+    // iridescenceThicknessMinimum, iridescenceThicknessMaximum (nanometres),
+    // slots of iridescenceThicknessMap and iridescenceMap (bits)
+    glm::vec4  film{100.0f, 400.0f, std::bit_cast<float>(kNoTexture), std::bit_cast<float>(kNoTexture)};
 };
-static_assert(sizeof(PackedRayInstance) == 96, "PackedRayInstance is six vec4s");
+static_assert(sizeof(PackedRayInstance) == 128, "PackedRayInstance is eight vec4s");
 
 class RayTracingScene {
 public:
@@ -92,16 +97,20 @@ public:
     const std::vector<TextureSlot>& textures(uint32_t frameIndex) const;
 
     /// The row of one instance. `textureSlots` holds the slots of albedoMap,
-    /// normalMap, metallicRoughnessMap and emissiveMap (kNoTexture for none).
+    /// normalMap, metallicRoughnessMap and emissiveMap, `filmSlots` those of
+    /// iridescenceThicknessMap and iridescenceMap (kNoTexture for none).
     /// The vertex layout is the 44-byte glTF vertex every mesh in the
     /// structure has: position at 0, color at 12, uv at 24, normal at 32.
     static PackedRayInstance packInstance(const MaterialComponentV5& material, uint32_t entity,
                                           const MeshComponent& mesh, VkDeviceAddress vertices,
-                                          VkDeviceAddress indices, const glm::uvec4& textureSlots);
+                                          VkDeviceAddress indices, const glm::uvec4& textureSlots,
+                                          const glm::uvec2& filmSlots = glm::uvec2(PackedRayInstance::kNoTexture));
 
     /// The material texture slots a row names, in PackedRayInstance::textures order.
     static constexpr const char* kTextureNames[4] = {"albedoMap", "normalMap", "metallicRoughnessMap",
                                                      "emissiveMap"};
+    /// The film's texture slots, in PackedRayInstance::film.zw order.
+    static constexpr const char* kFilmTextureNames[2] = {"iridescenceThicknessMap", "iridescenceMap"};
 
 private:
     struct AccelerationStructure {

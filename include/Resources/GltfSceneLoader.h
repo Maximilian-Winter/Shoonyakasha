@@ -60,6 +60,8 @@ struct GltfPrimitive {
     Shoonyakasha::GPUTexture emissiveMap;
     Shoonyakasha::GPUTexture clearcoatMap;            // KHR_materials_clearcoat: r amount
     Shoonyakasha::GPUTexture clearcoatRoughnessMap;   // g roughness
+    Shoonyakasha::GPUTexture iridescenceMap;           // KHR_materials_iridescence: r amount
+    Shoonyakasha::GPUTexture iridescenceThicknessMap;  // g thickness, from minimum to maximum
 
     // ─── Material Parameters ────────────────────────────────
     glm::vec4 baseColorFactor   = glm::vec4(1.0f);
@@ -71,6 +73,17 @@ struct GltfPrimitive {
     bool hasClearcoat           = false;
     float clearcoatFactor       = 0.0f;
     float clearcoatRoughnessFactor = 0.0f;
+    // KHR_materials_transmission and KHR_materials_ior, with the extensions'
+    // defaults when a material has neither.
+    float transmissionFactor    = 0.0f;
+    float ior                   = 1.5f;
+    // KHR_materials_iridescence, when the material has the extension: a thin
+    // film of index iridescenceIor, thicknesses in nanometres.
+    bool hasIridescence         = false;
+    float iridescenceFactor     = 0.0f;
+    float iridescenceIor        = 1.3f;
+    float iridescenceThicknessMinimum = 100.0f;
+    float iridescenceThicknessMaximum = 400.0f;
 
     // ─── Rendering Properties ───────────────────────────────
     Shoonyakasha::AlphaMode alphaMode = Shoonyakasha::AlphaMode::Opaque;

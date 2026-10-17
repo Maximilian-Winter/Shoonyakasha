@@ -292,14 +292,17 @@ Its fields must be, in this order:
 | `emissive` | `vec4` | `emissiveFactor` in rgb |
 | `surface` | `vec4` | `metallicFactor`, `roughnessFactor`, `alphaCutoff`, and the entity id's bits in w |
 | `textures` | `uvec4` | The slots of `albedoMap`, `normalMap`, `metallicRoughnessMap` and `emissiveMap` in the `sceneTextures` binding; `0xFFFFFFFF` for none |
+| `optics` | `vec4` | `transmissionFactor` (`KHR_materials_transmission`, 0 without), `ior` (`KHR_materials_ior`, 1.5 without), `iridescenceFactor` and `iridescenceIor` (`KHR_materials_iridescence`; 0 and 1.3 without) |
+| `film` | `vec4` | The iridescence's minimum and maximum thickness in nanometres (100 and 400 without), and the bits of the slots of `iridescenceThicknessMap` (z) and `iridescenceMap` (w); `0xFFFFFFFF` for none |
 
-Otherwise compilation fails. The GLSL library's [`sk/scene_hits.glsl`](../../python/shoonyakasha/glsl/sk/scene_hits.glsl) declares the buffer and the texture array, and turns a committed hit into its position, normals, uv and material:
+Otherwise compilation fails. The GLSL library's [`sk/scene_hits.glsl`](../../python/shoonyakasha/glsl/sk/scene_hits.glsl) declares the buffer and the texture array, and turns a committed hit into its position, normals, uv, material, transmission, index of refraction and thin film:
 
 ```json
 { "RayInstances": { "usage": "storage_buffer", "packing": "std430", "elementCount": 16384,
     "fields": [ { "name": "geometry", "type": "uvec4" }, { "name": "vertexLayout", "type": "uvec4" },
                 { "name": "baseColor", "type": "vec4" }, { "name": "emissive", "type": "vec4" },
-                { "name": "surface", "type": "vec4" }, { "name": "textures", "type": "uvec4" } ],
+                { "name": "surface", "type": "vec4" }, { "name": "textures", "type": "uvec4" },
+                { "name": "optics", "type": "vec4" }, { "name": "film", "type": "vec4" } ],
     "source": { "type": "scene", "data": "rayInstances" } } }
 ```
 

@@ -65,7 +65,9 @@
         { "name": "baseColor", "type": "vec4" },
         { "name": "emissive", "type": "vec4" },
         { "name": "surface", "type": "vec4" },
-        { "name": "textures", "type": "uvec4" }
+        { "name": "textures", "type": "uvec4" },
+        { "name": "optics", "type": "vec4" },
+        { "name": "film", "type": "vec4" }
       ],
       "source": { "type": "scene", "data": "rayInstances" }
     }

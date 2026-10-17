@@ -244,7 +244,8 @@ void RayTracingScene::ensureTopLevelCapacity(TopLevel& top, uint32_t count) {
 
 PackedRayInstance RayTracingScene::packInstance(const MaterialComponentV5& material, uint32_t entity,
                                                 const MeshComponent& mesh, VkDeviceAddress vertices,
-                                                VkDeviceAddress indices, const glm::uvec4& textureSlots) {
+                                                VkDeviceAddress indices, const glm::uvec4& textureSlots,
+                                                const glm::uvec2& filmSlots) {
     constexpr uint32_t kColorOffset = 12, kUvOffset = 24, kNormalOffset = 32;
     PackedRayInstance row;
     row.geometry = glm::uvec4(static_cast<uint32_t>(vertices), static_cast<uint32_t>(vertices >> 32),
@@ -260,6 +261,13 @@ PackedRayInstance RayTracingScene::packInstance(const MaterialComponentV5& mater
     row.surface = glm::vec4(material.getParam<float>("metallicFactor", 0.0f),
                             material.getParam<float>("roughnessFactor", 0.5f), material.alphaCutoff, entityBits);
     row.textures = textureSlots;
+    row.optics = glm::vec4(material.getParam<float>("transmissionFactor", 0.0f), material.getParam<float>("ior", 1.5f),
+                           material.getParam<float>("iridescenceFactor", 0.0f),
+                           material.getParam<float>("iridescenceIor", 1.3f));
+    float slotBits[2];
+    std::memcpy(slotBits, &filmSlots, sizeof(slotBits));
+    row.film = glm::vec4(material.getParam<float>("iridescenceThicknessMinimum", 100.0f),
+                         material.getParam<float>("iridescenceThicknessMaximum", 400.0f), slotBits[0], slotBits[1]);
     return row;
 }
 
@@ -298,9 +306,11 @@ void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt
         const BottomLevel* bottom = bottomLevelFor(mesh);
         glm::uvec4 slots;
         for (int t = 0; t < 4; ++t) slots[t] = slotOf(material, kTextureNames[t]);
+        glm::uvec2 filmSlots;
+        for (int t = 0; t < 2; ++t) filmSlots[t] = slotOf(material, kFilmTextureNames[t]);
         top.rows.push_back(packInstance(material, static_cast<uint32_t>(entity), mesh,
                                         addressOf(mesh.vertexHandle()),
-                                        mesh.hasIndices() ? addressOf(mesh.indexHandle()) : 0, slots));
+                                        mesh.hasIndices() ? addressOf(mesh.indexHandle()) : 0, slots, filmSlots));
         const glm::mat4& world = view.get<ECS::TransformComponent>(entity).worldMatrix;
         VkAccelerationStructureInstanceKHR instance{};
         for (int r = 0; r < 3; ++r)

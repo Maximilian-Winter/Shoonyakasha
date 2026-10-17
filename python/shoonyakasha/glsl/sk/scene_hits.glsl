@@ -1,6 +1,7 @@
 // glslc: --target-env=vulkan1.2
-// sk/scene_hits.glsl - the surface a ray query hit: position, normals, uv and
-// glTF metallic-roughness material
+// sk/scene_hits.glsl - the surface a ray query hit: position, normals, uv,
+// glTF metallic-roughness material, transmission, index of refraction and
+// thin-film iridescence
 //
 //     #define SK_SCENE_HITS_SET 2              // set of the two bindings below (default 0)
 //     #define SK_RAY_INSTANCES_BINDING 0       // "source": {"type": "scene", "data": "rayInstances"} (default 0)
@@ -44,6 +45,8 @@ struct SkRayInstance {
     vec4 emissive;
     vec4 surface;      // metallic, roughness, alpha cutoff, entity id (bits)
     uvec4 textures;    // albedo, normal, metallicRoughness, emissive slots
+    vec4 optics;       // transmission, ior, iridescence factor, iridescence ior
+    vec4 film;         // thickness minimum, maximum (nm), iridescence thickness and iridescence slots (bits)
 };
 
 layout(set = SK_SCENE_HITS_SET, binding = SK_RAY_INSTANCES_BINDING, std430) readonly buffer SkRayInstances {
@@ -67,6 +70,11 @@ struct SkHit {
     bool frontFace;
     uint instance;          // row of skRayInstances
     uint entity;
+    float transmission;     // KHR_materials_transmission factor
+    float ior;              // KHR_materials_ior
+    float iridescence;      // KHR_materials_iridescence: amount of the thin film (0 none)
+    float filmIor;          // the film's index of refraction
+    float filmThickness;    // the film's thickness here, nanometres
 };
 
 uint skIndex(SkRayInstance row, uint i) {
@@ -174,6 +182,23 @@ SkHit skFetchHit(rayQueryEXT query, float coneWidth) {
     hit.emissive = row.emissive.rgb;
     if (row.textures.w != SK_NO_TEXTURE) {
         hit.emissive *= skSceneTexture(row.textures.w, hit.uv, lodBase, coneWidth, cosine).rgb;
+    }
+
+    // The thin film: thickness from minimum to maximum by the thickness
+    // texture's g (the maximum without one), amount by the factor times the
+    // iridescence texture's r.
+    hit.transmission = row.optics.x;
+    hit.ior = row.optics.y;
+    hit.iridescence = row.optics.z;
+    hit.filmIor = row.optics.w;
+    hit.filmThickness = row.film.y;
+    uint thicknessSlot = floatBitsToUint(row.film.z), iridescenceSlot = floatBitsToUint(row.film.w);
+    if (hit.iridescence > 0.0 && thicknessSlot != SK_NO_TEXTURE) {
+        float g = skSceneTexture(thicknessSlot, hit.uv, lodBase, coneWidth, cosine).g;
+        hit.filmThickness = mix(row.film.x, row.film.y, g);
+    }
+    if (hit.iridescence > 0.0 && iridescenceSlot != SK_NO_TEXTURE) {
+        hit.iridescence *= skSceneTexture(iridescenceSlot, hit.uv, lodBase, coneWidth, cosine).r;
     }
 
     // Normal map, in the tangent frame of the triangle's uvs.

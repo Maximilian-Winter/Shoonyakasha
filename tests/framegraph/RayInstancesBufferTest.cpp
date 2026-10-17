@@ -34,7 +34,8 @@ json field(const char* name, const char* type) {
 
 json instanceFields() {
     return json::array({field("geometry", "uvec4"), field("vertexLayout", "uvec4"), field("baseColor", "vec4"),
-                        field("emissive", "vec4"), field("surface", "vec4"), field("textures", "uvec4")});
+                        field("emissive", "vec4"), field("surface", "vec4"), field("textures", "uvec4"),
+                        field("optics", "vec4"), field("film", "vec4")});
 }
 
 json instancesLayout(json fields = instanceFields()) {
@@ -93,6 +94,11 @@ TEST(RayInstancesBuffer, FieldsMustBeThePackedRow) {
     fewer.erase(fewer.size() - 1);
     EXPECT_NE(compileError(instancesLayout(fewer)), "");
 
+    json six = instanceFields();   // the row without its optics and film
+    six.erase(six.size() - 1);
+    six.erase(six.size() - 1);
+    EXPECT_NE(compileError(instancesLayout(six)), "");
+
     json lights = json::array();
     for (const char* name : {"positionType", "colorIntensity", "directionRange", "attenuation", "source", "shape"}) {
         lights.push_back(field(name, "vec4"));
@@ -100,14 +106,38 @@ TEST(RayInstancesBuffer, FieldsMustBeThePackedRow) {
     EXPECT_NE(compileError(instancesLayout(lights)), "");
 }
 
-TEST(RayInstancesBuffer, PackedRowIsSixVec4s) {
-    EXPECT_EQ(sizeof(PackedRayInstance), 6 * sizeof(glm::vec4));
+TEST(RayInstancesBuffer, PackedRowIsEightVec4s) {
+    EXPECT_EQ(sizeof(PackedRayInstance), 8 * sizeof(glm::vec4));
     EXPECT_EQ(offsetof(PackedRayInstance, geometry), 0u);
     EXPECT_EQ(offsetof(PackedRayInstance, layout), 16u);
     EXPECT_EQ(offsetof(PackedRayInstance, baseColor), 32u);
     EXPECT_EQ(offsetof(PackedRayInstance, emissive), 48u);
     EXPECT_EQ(offsetof(PackedRayInstance, surface), 64u);
     EXPECT_EQ(offsetof(PackedRayInstance, textures), 80u);
+    EXPECT_EQ(offsetof(PackedRayInstance, optics), 96u);
+    EXPECT_EQ(offsetof(PackedRayInstance, film), 112u);
+}
+
+TEST(RayInstancesBuffer, RowHoldsTransmissionAndThinFilm) {
+    MaterialComponentV5 material;
+    material.setParam("transmissionFactor", 0.5f);
+    material.setParam("ior", 1.33f);
+    material.setParam("iridescenceFactor", 0.75f);
+    material.setParam("iridescenceIor", 1.8f);
+    material.setParam("iridescenceThicknessMinimum", 200.0f);
+    material.setParam("iridescenceThicknessMaximum", 600.0f);
+    MeshComponent mesh;
+    mesh.vertexStride = 44;
+    const PackedRayInstance row = RayTracingScene::packInstance(
+        material, 0u, mesh, 0, 0, glm::uvec4(PackedRayInstance::kNoTexture), glm::uvec2(3, 9));
+
+    EXPECT_EQ(row.optics, glm::vec4(0.5f, 1.33f, 0.75f, 1.8f));
+    EXPECT_EQ(row.film.x, 200.0f);
+    EXPECT_EQ(row.film.y, 600.0f);
+    uint32_t slots[2];
+    std::memcpy(slots, &row.film.z, sizeof(slots));
+    EXPECT_EQ(slots[0], 3u);   // iridescenceThicknessMap
+    EXPECT_EQ(slots[1], 9u);   // iridescenceMap
 }
 
 TEST(RayInstancesBuffer, RowHoldsTheMeshAndMaterial) {
@@ -161,6 +191,14 @@ TEST(RayInstancesBuffer, MissingFactorsReadAsGltfDefaults) {
     EXPECT_EQ(row.emissive, glm::vec4(0.0f));
     EXPECT_EQ(row.surface.x, 0.0f);   // metallic
     EXPECT_EQ(row.surface.y, 0.5f);   // roughness, as the glTF loader defaults it
+    // No transmission, the extensions' default indices, no film and no film textures.
+    EXPECT_EQ(row.optics, glm::vec4(0.0f, 1.5f, 0.0f, 1.3f));
+    EXPECT_EQ(row.film.x, 100.0f);
+    EXPECT_EQ(row.film.y, 400.0f);
+    uint32_t slots[2];
+    std::memcpy(slots, &row.film.z, sizeof(slots));
+    EXPECT_EQ(slots[0], PackedRayInstance::kNoTexture);
+    EXPECT_EQ(slots[1], PackedRayInstance::kNoTexture);
 }
 
 TEST(SceneTexturesBinding, SourceIsParsed) {

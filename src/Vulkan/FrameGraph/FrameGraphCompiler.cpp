@@ -58,15 +58,15 @@ std::string sceneBuffersError(const std::vector<BufferLayoutDesc>& layouts,
         const auto& fields = it->second.fields;
         if (desc.initConfig.sceneData == "rayInstances") {
             using T = BufferFieldType;
-            const T expected[6] = {T::UVec4, T::UVec4, T::Vec4, T::Vec4, T::Vec4, T::UVec4};
-            bool matches = fields.size() == 6 && it->second.totalSize == sizeof(PackedRayInstance);
-            for (size_t i = 0; matches && i < 6; ++i) {
+            const T expected[8] = {T::UVec4, T::UVec4, T::Vec4, T::Vec4, T::Vec4, T::UVec4, T::Vec4, T::Vec4};
+            bool matches = fields.size() == 8 && it->second.totalSize == sizeof(PackedRayInstance);
+            for (size_t i = 0; matches && i < 8; ++i) {
                 matches = fields[i].type == expected[i] && fields[i].arrayCount == 1;
             }
             if (!matches) {
                 return "Buffer layout '" + desc.name + "': ray instances are the fields geometry (uvec4), "
-                       "vertexLayout (uvec4), baseColor, emissive, surface (vec4) and textures (uvec4), " +
-                       std::to_string(sizeof(PackedRayInstance)) + " bytes each";
+                       "vertexLayout (uvec4), baseColor, emissive, surface (vec4), textures (uvec4), optics "
+                       "and film (vec4), " + std::to_string(sizeof(PackedRayInstance)) + " bytes each";
             }
             continue;
         }

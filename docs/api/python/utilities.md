@@ -24,7 +24,7 @@ Shaders compiled by `sk.shaders` or by CMake's `target_compile_shaders` can incl
 | `sk/pbr.glsl` | `fresnelSchlick`, `fresnelSchlickRoughness`, `baseReflectivity`, `distributionGGX`, `geometrySmith`, `cookTorrance`, `SK_PI` |
 | `sk/tonemap.glsl` | `ACESFilm`, `Reinhard`, `Uncharted2Tonemap`, `Uncharted2` |
 | `sk/noise.glsl` | integer `hash`, value `noise`, five-octave `fbm` |
-| `sk/scene_hits.glsl` | `SkHit skFetchHit(rayQueryEXT, coneWidth)`: the position, shading and geometric normals, uv and glTF material of a ray query's committed hit, read through a [`rayInstances`](../../reference/pipeline-json.md#initialization-memory-and-readback) buffer and a [`sceneTextures`](../../reference/pipeline-json.md#descriptors-and-samplers) array, which it declares at the set and bindings `SK_SCENE_HITS_SET`, `SK_RAY_INSTANCES_BINDING` and `SK_SCENE_TEXTURES_BINDING` the including shader defines |
+| `sk/scene_hits.glsl` | `SkHit skFetchHit(rayQueryEXT, coneWidth)`: the position, shading and geometric normals, uv and glTF material of a ray query's committed hit, with its transmission, index of refraction and thin film (`KHR_materials_iridescence`: amount, index and thickness in nanometres at the hit), read through a [`rayInstances`](../../reference/pipeline-json.md#initialization-memory-and-readback) buffer and a [`sceneTextures`](../../reference/pipeline-json.md#descriptors-and-samplers) array, which it declares at the set and bindings `SK_SCENE_HITS_SET`, `SK_RAY_INSTANCES_BINDING` and `SK_SCENE_TEXTURES_BINDING` the including shader defines |
 | `sk/shapes2d.glsl` | antialiased `fill`/`stroke`, premultiplied `over`, 2D distances (`sdBox`, `sdTriangle`, `sdVesica`, `sdPetal`, `sdEllipse`), `foldPolar`, `rotate`, `SK_TAU` |
 
 ```glsl
