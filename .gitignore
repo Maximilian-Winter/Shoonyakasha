@@ -48,6 +48,7 @@ examples/**/cubemaps_hdrs/
 /assets/polyhaven/
 /assets/bistro/
 /assets/showroom/
+/assets/kajiya/
 # Downloaded by hand from Sketchfab; see assets/README.md.
 /assets/models/japanese_shrine.glb
 /.claude

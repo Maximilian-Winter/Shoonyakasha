@@ -21,12 +21,14 @@ Usage:
     python reference_pt.py
     python reference_pt.py --samples 1024 --screenshot out.png   # converge, save, quit
     python reference_pt.py --pipeline default --screenshot raster.png
+    python reference_pt.py --scene viziers                       # one of kajiya's scenes
 
 Requirements:
     - the shoonyakasha package installed (pip install .)
     - a GPU with ray queries
     - optionally glTF-Sample-Assets in the repository root, for Sponza;
       without it a colonnade of boxes stands in
+    - for kajiya's scenes, python tools/fetch_assets.py kajiya
 """
 
 import argparse
@@ -49,14 +51,27 @@ TARGET = (8.0, 3.5, 0.5)
 SUN_DIRECTION = (0.3, -1.0, 0.35)
 # Two warm lamps in the open nave, clear of the pillars and curtains.
 LAMPS = ((-4.0, 2.2, 1.2), (4.0, 2.2, -1.2))
+# The scenes of Embark's kajiya renderer (python tools/fetch_assets.py kajiya):
+# the model's scale and offset as kajiya places it, the camera's eye and
+# target, the sun's direction and the lamps.
+KAJIYA = os.path.join(REPOSITORY, "assets", "kajiya")
+KAJIYA_SCENES = {
+    "viziers": (0.0075, (0.0, -11.25, 0.0), (9.0, 3.0, 9.0), (-1.5, 0.3, 1.0), (0.4, -1.0, 0.3), ()),
+    "gas_stations": (0.005, (-4.5, -1.0, -1.0), (1.0, 0.9, 3.5), (-0.6, 0.1, -0.5), (0.5, -1.0, -0.4), ()),
+    "battle": (0.001875, (11.0, -3.0, -0.75), (7.0, 2.0, 8.0), (0.0, -0.5, 0.0), (0.3, -1.0, 0.5), ()),
+    "warhammer": (0.05, (0.0, 0.0, 0.0), (3.5, 2.2, 4.5), (0.0, 0.2, 0.0), (0.4, -1.0, 0.2), ()),
+    "conference": (1.0, (0.0, 0.0, 0.0), (1.2, 1.6, 0.8), (-4.0, 1.2, -1.5), (0.3, -1.0, 0.35),
+                   ((-1.0, 1.9, -0.8), (-3.2, 1.9, -0.8))),
+}
 MODES = ("Everything", "Indirect only", "White furnace")
 
 parser = argparse.ArgumentParser(description="Reference path tracer",
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
 parser.add_argument("--pipeline", choices=("pt", "default"), default="pt",
                     help="pt: the path tracer; default: the same scene on the default pipeline")
-parser.add_argument("--scene", choices=("sponza", "colonnade"), default="sponza",
-                    help="Sponza (when glTF-Sample-Assets is there), or a colonnade of boxes")
+parser.add_argument("--scene", choices=("sponza", "colonnade") + tuple(KAJIYA_SCENES), default="sponza",
+                    help="Sponza (when glTF-Sample-Assets is there), a colonnade of boxes, or one of kajiya's "
+                         "scenes (python tools/fetch_assets.py kajiya)")
 parser.add_argument("--bounces", type=int, default=8, help="bounces after the first hit (1 to 16)")
 parser.add_argument("--mode", type=int, choices=(0, 1, 2, 3, 4), default=0,
                     help="0 everything, 1 indirect light only, 2 white furnace, "
@@ -121,16 +136,35 @@ def build_colonnade():
     box((1.0, 0.5, 0.8), (1.0, 1.0, 1.0), (0.7, 0.2, 0.15, 1.0), roughness=0.5)
 
 
+def place_kajiya_scene(name):
+    """One of kajiya's scenes, scaled and offset as kajiya places it."""
+    scale, offset = KAJIYA_SCENES[name][:2]
+    path = os.path.join(KAJIYA, name, "scene.gltf")
+    if not os.path.isfile(path):
+        print("[reference_pt] %s is not there; python tools/fetch_assets.py kajiya/%s fetches it." % (path, name))
+        os._exit(1)
+    result = engine.load_gltf_scene(path, max_texture_size=2048)
+    for root in {root_of(entity) for entity in result.entities}:
+        position = engine.scene.get_position(root)
+        engine.scene.set_position(root, tuple(o + scale * p for o, p in zip(offset, position)))
+        engine.scene.set_scale(root, tuple(scale * s for s in engine.scene.get_scale(root)))
+    print("[reference_pt] %d entities, %d textures" % (len(result.entities), result.total_textures))
+
+
 def build_scene():
-    camera = engine.create_camera(pos=EYE, fov=60.0, speed=4.0, near_plane=0.05, far_plane=300.0)
-    engine.scene.set_rotation(camera, look_rotation(EYE, TARGET))
-    sun = engine.create_directional_light(direction=SUN_DIRECTION, color=(1.0, 0.93, 0.82), intensity=6.0)
+    eye, target, sun_direction, lamps = KAJIYA_SCENES[args.scene][2:] if args.scene in KAJIYA_SCENES \
+        else (EYE, TARGET, SUN_DIRECTION, LAMPS)
+    camera = engine.create_camera(pos=eye, fov=60.0, speed=4.0, near_plane=0.05, far_plane=300.0)
+    engine.scene.set_rotation(camera, look_rotation(eye, target))
+    sun = engine.create_directional_light(direction=sun_direction, color=(1.0, 0.93, 0.82), intensity=6.0)
     engine.scene.set_light_cast_shadows(sun, True)
     engine.set_sun_shadows(cascades=4, max_distance=40.0, split_lambda=0.7, resolution=2048)
-    for position in LAMPS:
+    for position in lamps:
         lamp = engine.create_point_light(pos=position, color=(1.0, 0.62, 0.3), intensity=4.0, range=8.0)
         engine.scene.set_light_cast_shadows(lamp, True)
-    if args.scene == "sponza" and os.path.isfile(SPONZA):
+    if args.scene in KAJIYA_SCENES:
+        place_kajiya_scene(args.scene)
+    elif args.scene == "sponza" and os.path.isfile(SPONZA):
         result = engine.load_gltf_scene(SPONZA, max_texture_size=2048)
         print("[reference_pt] %d entities, %d textures" % (len(result.entities), result.total_textures))
     else:

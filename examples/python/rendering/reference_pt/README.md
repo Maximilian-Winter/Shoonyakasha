@@ -10,6 +10,8 @@ python reference_pt.py --pipeline default --screenshot raster.png
 
 **Sponza:** the scene is Khronos's glTF version of Crytek Sponza. Clone [glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) into the repository root, where git ignores it. Without it, or with `--scene colonnade`, the example builds a colonnade of boxes.
 
+**kajiya's scenes:** `--scene viziers`, `gas_stations`, `battle`, `warhammer` or `conference` loads one of the scenes in Embark's kajiya repository, scaled and placed as kajiya places it, with a camera and a sun of its own; two lamps hang under the conference room's ceiling. `python tools/fetch_assets.py kajiya` fetches them into `assets/kajiya/`; their credits are in the [asset README](../../../../assets/README.md#not-committed).
+
 ## The paths
 
 Each frame, every pixel traces one path. It starts at the camera through a random point of the pixel, and at every surface it hits it:
@@ -51,7 +53,7 @@ The views:
 | Option | Default | |
 |---|---|---|
 | `--pipeline pt` / `default` | `pt` | The path tracer, or the scene on the default pipeline |
-| `--scene sponza` / `colonnade` | `sponza` | |
+| `--scene NAME` | `sponza` | `sponza`, `colonnade`, or one of kajiya's scenes: `viziers`, `gas_stations`, `battle`, `warhammer`, `conference` |
 | `--bounces N` | 8 | Bounces after the first hit, 1 to 16; 1 is direct light only |
 | `--mode 0` to `4` | 0 | Everything, indirect only, white furnace, indirect irradiance, reflections |
 | `--sky X` | 1.0 | Intensity of the sky's light, on both pipelines |

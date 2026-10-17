@@ -11,6 +11,8 @@ python restir_gi.py --view 1 --stages 0                 # the raw candidates' in
 
 **Sponza:** the scene is Khronos's glTF version of Crytek Sponza. Clone [glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) into the repository root, where git ignores it. Without it, or with `--scene colonnade`, the example builds a colonnade of boxes.
 
+**kajiya's scenes:** `--scene viziers`, `gas_stations`, `battle`, `warhammer` or `conference` loads one of the scenes in Embark's kajiya repository, scaled and placed as kajiya places it, with a camera and a sun of its own; two lamps hang under the conference room's ceiling. `python tools/fetch_assets.py kajiya` fetches them into `assets/kajiya/`; their credits are in the [asset README](../../../../assets/README.md#not-committed).
+
 ## The technique
 
 **G-buffer.** A camera ray through each pixel's centre finds the surface the pixel shows. The pass stores its position, view depth, normals and material, and the light it sends straight to the camera: the scene lights through shadow rays (towards the centre of area lights) and its emission.
@@ -76,11 +78,11 @@ The panel shows the GPU time and sets the exposure, the sky's intensity, the vie
 
 | Option | Default | |
 |---|---|---|
-| `--scene sponza` / `colonnade` | `sponza` | |
+| `--scene NAME` | `sponza` | `sponza`, `colonnade`, or one of kajiya's scenes: `viziers`, `gas_stations`, `battle`, `warhammer`, `conference` |
 | `--view 0` / `1` / `2` / `3` | 0 | Image, indirect light, irradiance cache, direct light only |
 | `--stages N` | 31 | The stages that run, a sum of: 1 temporal resampling, 2 spatial resampling, 4 near-field split, 8 temporal filter, 16 spatial filter |
 | `--sky X` | 1.0 | Intensity of the sky's light |
-| `--walk SPEED` | 0 | Walk the camera along the nave at SPEED metres a second |
+| `--walk SPEED` | 0 | Walk the camera along the nave at SPEED metres a second; in kajiya's scenes, level towards what it looks at |
 | `--frames N` | 300 | Frames before `--screenshot` |
 | `--screenshot FILE` | | Save after `--frames` frames, print the GPU time, quit |
 | `--width`, `--height` | 1600, 900 | |

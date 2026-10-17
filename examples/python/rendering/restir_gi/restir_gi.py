@@ -23,15 +23,18 @@ Usage:
     python restir_gi.py
     python restir_gi.py --frames 300 --screenshot gi.png   # run 300 frames, save, quit
     python restir_gi.py --walk 1.5                         # walk the camera down the nave
+    python restir_gi.py --scene viziers                    # one of kajiya's scenes (tools/fetch_assets.py kajiya)
 
 Requirements:
     - the shoonyakasha package installed (pip install .)
     - a GPU with ray queries
     - optionally glTF-Sample-Assets in the repository root, for Sponza;
       without it a colonnade of boxes stands in
+    - for kajiya's scenes, python tools/fetch_assets.py kajiya
 """
 
 import argparse
+import math
 import os
 import time
 
@@ -49,13 +52,26 @@ EYE = (-11.0, 2.0, -0.5)
 TARGET = (8.0, 3.5, 0.5)
 SUN_DIRECTION = (0.3, -1.0, 0.35)
 LAMPS = ((-4.0, 2.2, 1.2), (4.0, 2.2, -1.2))
+# The scenes of Embark's kajiya renderer (python tools/fetch_assets.py kajiya):
+# the model's scale and offset as kajiya places it, the camera's eye and
+# target, the sun's direction and the lamps.
+KAJIYA = os.path.join(REPOSITORY, "assets", "kajiya")
+KAJIYA_SCENES = {
+    "viziers": (0.0075, (0.0, -11.25, 0.0), (9.0, 3.0, 9.0), (-1.5, 0.3, 1.0), (0.4, -1.0, 0.3), ()),
+    "gas_stations": (0.005, (-4.5, -1.0, -1.0), (1.0, 0.9, 3.5), (-0.6, 0.1, -0.5), (0.5, -1.0, -0.4), ()),
+    "battle": (0.001875, (11.0, -3.0, -0.75), (7.0, 2.0, 8.0), (0.0, -0.5, 0.0), (0.3, -1.0, 0.5), ()),
+    "warhammer": (0.05, (0.0, 0.0, 0.0), (3.5, 2.2, 4.5), (0.0, 0.2, 0.0), (0.4, -1.0, 0.2), ()),
+    "conference": (1.0, (0.0, 0.0, 0.0), (1.2, 1.6, 0.8), (-4.0, 1.2, -1.5), (0.3, -1.0, 0.35),
+                   ((-1.0, 1.9, -0.8), (-3.2, 1.9, -0.8))),
+}
 VIEWS = ("Image", "Indirect", "Cache", "Direct")
 ALL_STAGES = 31   # temporal and spatial resampling, the near-field split, both filters
 
 parser = argparse.ArgumentParser(description="ReSTIR GI",
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
-parser.add_argument("--scene", choices=("sponza", "colonnade"), default="sponza",
-                    help="Sponza (when glTF-Sample-Assets is there), or a colonnade of boxes")
+parser.add_argument("--scene", choices=("sponza", "colonnade") + tuple(KAJIYA_SCENES), default="sponza",
+                    help="Sponza (when glTF-Sample-Assets is there), a colonnade of boxes, or one of kajiya's "
+                         "scenes (python tools/fetch_assets.py kajiya)")
 parser.add_argument("--view", type=int, choices=(0, 1, 2, 3), default=0,
                     help="0 image, 1 indirect light, 2 irradiance cache, 3 direct light only")
 parser.add_argument("--stages", type=int, default=ALL_STAGES,
@@ -63,7 +79,8 @@ parser.add_argument("--stages", type=int, default=ALL_STAGES,
                          "4 near-field split, 8 temporal filter, 16 spatial filter (default 31; 0: raw candidates)")
 parser.add_argument("--sky", type=float, default=1.0, help="intensity of the sky's light")
 parser.add_argument("--walk", type=float, default=0.0, metavar="SPEED",
-                    help="walk the camera along the nave at SPEED metres a second")
+                    help="walk the camera along the nave (in kajiya's scenes, level towards what it looks at) "
+                         "at SPEED metres a second")
 parser.add_argument("--frames", type=int, default=300, help="frames before --screenshot")
 parser.add_argument("--screenshot", metavar="FILE", help="save a screenshot after --frames frames, then quit")
 parser.add_argument("--width", type=int, default=1600)
@@ -114,15 +131,45 @@ def build_colonnade():
     box((1.0, 0.5, 0.8), (1.0, 1.0, 1.0), (0.7, 0.2, 0.15, 1.0), roughness=0.5)
 
 
+def place_kajiya_scene(name):
+    """One of kajiya's scenes, scaled and offset as kajiya places it."""
+    scale, offset = KAJIYA_SCENES[name][:2]
+    path = os.path.join(KAJIYA, name, "scene.gltf")
+    if not os.path.isfile(path):
+        print("[restir_gi] %s is not there; python tools/fetch_assets.py kajiya/%s fetches it." % (path, name))
+        os._exit(1)
+    result = engine.load_gltf_scene(path, max_texture_size=2048)
+    for root in {root_of(entity) for entity in result.entities}:
+        position = engine.scene.get_position(root)
+        engine.scene.set_position(root, tuple(o + scale * p for o, p in zip(offset, position)))
+        engine.scene.set_scale(root, tuple(scale * s for s in engine.scene.get_scale(root)))
+    print("[restir_gi] %d entities, %d textures" % (len(result.entities), result.total_textures))
+
+
+def walk_position(distance):
+    """Where --walk has taken the camera after `distance` metres: down the
+    nave, or in kajiya's scenes level towards what the camera looks at."""
+    if args.scene not in KAJIYA_SCENES:
+        return (EYE[0] + distance, EYE[1], EYE[2])
+    eye, target = KAJIYA_SCENES[args.scene][2:4]
+    dx, dz = target[0] - eye[0], target[2] - eye[2]
+    length = math.hypot(dx, dz)
+    return (eye[0] + distance * dx / length, eye[1], eye[2] + distance * dz / length)
+
+
 def build_scene():
-    camera = engine.create_camera(pos=EYE, fov=60.0, speed=4.0, near_plane=0.05, far_plane=300.0)
-    engine.scene.set_rotation(camera, look_rotation(EYE, TARGET))
-    sun = engine.create_directional_light(direction=SUN_DIRECTION, color=(1.0, 0.93, 0.82), intensity=6.0)
+    eye, target, sun_direction, lamps = KAJIYA_SCENES[args.scene][2:] if args.scene in KAJIYA_SCENES \
+        else (EYE, TARGET, SUN_DIRECTION, LAMPS)
+    camera = engine.create_camera(pos=eye, fov=60.0, speed=4.0, near_plane=0.05, far_plane=300.0)
+    engine.scene.set_rotation(camera, look_rotation(eye, target))
+    sun = engine.create_directional_light(direction=sun_direction, color=(1.0, 0.93, 0.82), intensity=6.0)
     engine.scene.set_light_cast_shadows(sun, True)
-    for position in LAMPS:
+    for position in lamps:
         lamp = engine.create_point_light(pos=position, color=(1.0, 0.62, 0.3), intensity=4.0, range=8.0)
         engine.scene.set_light_cast_shadows(lamp, True)
-    if args.scene == "sponza" and os.path.isfile(SPONZA):
+    if args.scene in KAJIYA_SCENES:
+        place_kajiya_scene(args.scene)
+    elif args.scene == "sponza" and os.path.isfile(SPONZA):
         result = engine.load_gltf_scene(SPONZA, max_texture_size=2048)
         print("[restir_gi] %d entities, %d textures" % (len(result.entities), result.total_textures))
     else:
@@ -269,7 +316,7 @@ class Controls:
         if args.walk:
             self.walked += args.walk * dt
             camera = engine.scene.get_main_camera()
-            engine.scene.set_position(camera, (EYE[0] + self.walked, EYE[1], EYE[2]))
+            engine.scene.set_position(camera, walk_position(self.walked))
 
         self.frames += 1
         if args.screenshot and self.frames >= args.frames:

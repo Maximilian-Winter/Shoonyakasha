@@ -61,6 +61,7 @@ the pages linked above.
 | Poly Haven models and textures for the alley demo (`polyhaven/`, ~120 MB at 1k) | Size | `python tools/fetch_assets.py alley` (`--resolution 2k` for sharper textures). All CC0; see [polyhaven.com](https://polyhaven.com) |
 | Showroom models from Sketchfab (`showroom/`) | Size **and** licence (CC BY, CC BY-NC-SA or CC BY-NC 4.0) | `python tools/fetch_assets.py showroom` with `SKETCHFAB_API_TOKEN` set; credits in the [showroom README](../examples/python/rendering/showroom/README.md#the-models). The studio the showroom generates on first start goes to `showroom/studio/` |
 | Amazon Lumberyard Bistro (`bistro/`, ~2 GB downloaded, ~340 MB converted at 2k) | Size | `python tools/fetch_assets.py bistro` downloads and converts it (needs Pillow and numpy). CC BY 4.0; credit below |
+| kajiya's scenes for the GI examples (`kajiya/`, ~83 MB) | Size | `python tools/fetch_assets.py kajiya` (or `kajiya/<name>`), from [Embark's kajiya repository](https://github.com/EmbarkStudios/kajiya); each directory keeps its `license.txt`. Credits below |
 | Japanese shrine (`models/japanese_shrine.glb`, 60 MB) | Size | Download the glTF archive from [Sketchfab](https://skfb.ly/pMEO8) (account required) and save its `source/*.glb` as `models/japanese_shrine.glb` |
 
 The shrine is CC BY 4.0, so anything that shows or redistributes it must credit it:
@@ -78,6 +79,19 @@ Amazon Lumberyard Bistro, Open Research Content Archive (ORCA),
 https://developer.nvidia.com/orca/amazon-lumberyard-bistro, licensed under
 Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
 glTF edit: NVIDIA RTXDI assets (https://github.com/NVIDIAGameWorks/rtxdi-assets), MIT.
+```
+
+kajiya's scenes carry these credits (CC BY 4.0 unless noted; the conference room's licence asks for credit):
+
+```
+"Vizier's observation deck" (https://sketchfab.com/3d-models/viziers-observation-deck-6b444842b498499ea5d38e822bfceefc)
+by winion, licensed under CC BY 4.0.
+"gas stations fixed" (https://skfb.ly/6RGDX) by John_Constantine, licensed under CC BY 4.0.
+"Flying world - Battle of the Trash god" (https://skfb.ly/6SMIE) by burunduk, licensed under CC BY 4.0;
+materials modified by Embark Studios.
+"Warhammer scene." (https://sketchfab.com/3d-models/warhammer-scene-8fffdf4ed0d543fdbb50fae52b002b8f)
+by sheffrator, licensed under CC BY 4.0.
+Conference room, (c) Anat Grynberg and Greg Ward, via https://casual-effects.com/data/ (credit required).
 ```
 
 **Read Sponza's licence before redistributing anything built on it.** The

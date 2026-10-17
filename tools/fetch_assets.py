@@ -17,6 +17,9 @@ full-resolution environment maps, or the Sponza scene.
     python tools/fetch_assets.py showroom     # the showroom demo's Sketchfab models (needs an API token)
     python tools/fetch_assets.py showroom/alfa_gtv6 showroom/aat
 
+    python tools/fetch_assets.py kajiya       # the scenes of Embark's kajiya renderer, for the GI examples
+    python tools/fetch_assets.py kajiya/viziers
+
 Sponza is deliberately not downloaded automatically: its licence terms are worth
 reading before you accept them, so the script prints the page to get it from.
 
@@ -34,6 +37,11 @@ https://sketchfab.com/settings/password (or pass --sketchfab-token). They are
 converted into assets/showroom/<name>/ (Pillow and numpy again; see
 tools/sketchfab.py). They are CC BY 4.0, CC BY-NC-SA 4.0 or CC BY-NC 4.0: credit
 them wherever they are shown, and keep NC models out of commercial use.
+
+The kajiya scenes are the glTF scenes in the repository of Embark's kajiya
+renderer (https://github.com/EmbarkStudios/kajiya), at a fixed commit, that
+carry an attribution licence (CC BY 4.0, or credit required for the
+conference room); each goes into assets/kajiya/<name>/ with its licence file.
 """
 
 import argparse
@@ -84,6 +92,22 @@ POLYHAVEN_SETS = {
     ], ["asphalt_02"]),
 }
 TEXTURE_MAPS = {"Diffuse": "diff", "nor_gl": "nor_gl", "arm": "arm"}
+
+# Scenes from kajiya's repository: name -> (directory in assets/meshes, files, licence, credit, approx MB).
+KAJIYA_RAW = ("https://raw.githubusercontent.com/EmbarkStudios/kajiya/"
+              "9fdec0f074f9f822d395f9cfd041b58749e32303/assets/meshes/")
+KAJIYA_SCENES = {
+    "viziers": ("viziers_observation_deck", ["scene.gltf", "scene.bin", "license.txt"], "CC BY 4.0",
+                "\"Vizier's observation deck\" by winion", 5),
+    "gas_stations": ("gas_stations_fixed", ["scene.gltf", "scene.bin", "license.txt"], "CC BY 4.0",
+                     "\"gas stations fixed\" by John_Constantine", 6),
+    "battle": ("flying_world_-_battle_of_the_trash_god", ["scene.gltf", "scene.bin", "license.txt"], "CC BY 4.0",
+               "\"Flying world - Battle of the Trash god\" by burunduk (materials modified by Embark)", 31),
+    "warhammer": ("dp3_homework_4", ["scene.gltf", "scene.bin", "license.txt"], "CC BY 4.0",
+                  "\"Warhammer scene.\" by sheffrator", 7),
+    "conference": ("conference", ["scene.gltf", "scene.bin", "jake.jpg", "license.txt"], "credit required",
+                   "Conference room by Anat Grynberg and Greg Ward", 34),
+}
 
 
 def _json(url):
@@ -169,6 +193,23 @@ def fetch_showroom(names, resolution, token):
     print("Showroom models from Sketchfab, into assets/showroom/ (textures at most %s):" % resolution)
     return sketchfab.fetch(names, ASSETS, token,
                            max_size={"1k": 1024, "2k": 2048, "4k": 4096}[resolution]) == 0
+
+
+def fetch_kajiya(names):
+    """kajiya's scenes into assets/kajiya/<name>/."""
+    print("Scenes from Embark's kajiya repository, into assets/kajiya/:")
+    failures = 0
+    for name in names:
+        directory, files, licence, credit, mb = KAJIYA_SCENES[name]
+        try:
+            for file in files:
+                _download(KAJIYA_RAW + directory + "/" + file, os.path.join(ASSETS, "kajiya", name, file))
+        except Exception as exc:                  # noqa: BLE001 - report and continue
+            print("  %-22s FAILED: %s" % (name, exc))
+            failures += 1
+            continue
+        print("  %-22s -> assets/kajiya/%s  (~%d MB, %s: %s)" % (name, name, mb, licence, credit))
+    return failures == 0
 
 
 def fetch_bistro(resolution):
@@ -268,6 +309,10 @@ def main():
         for name, (_, credit) in sketchfab.MODELS.items():
             here = "present" if os.path.exists(os.path.join(ASSETS, "showroom", name, "model.gltf")) else "missing"
             print("  %-22s %s\n    %s" % ("showroom/" + name, here, credit))
+        print("\nkajiya scenes (into assets/kajiya/):")
+        for name, (_, _, licence, credit, mb) in KAJIYA_SCENES.items():
+            here = "present" if os.path.exists(os.path.join(ASSETS, "kajiya", name, "scene.gltf")) else "missing"
+            print("  %-22s ~%4d MB  %s  %s\n    %s" % ("kajiya/" + name, mb, licence, here, credit))
         print("\nManual (licence needs reading first):")
         for name, (relative, url, note) in MANUAL.items():
             print("  %-22s %s\n    %s\n    %s" % (name, relative, url, note))
@@ -285,6 +330,15 @@ def main():
                 print("Unknown showroom model: %s (try --list)" % ", ".join(unknown))
                 return 1
             showroom += names
+            continue
+        if item == "kajiya" or item.startswith("kajiya/"):
+            names = list(KAJIYA_SCENES) if item == "kajiya" else [item.split("/", 1)[1]]
+            unknown = [n for n in names if n not in KAJIYA_SCENES]
+            if unknown:
+                print("Unknown kajiya scene: %s (try --list)" % ", ".join(unknown))
+                return 1
+            if not fetch_kajiya(names):
+                return 1
             continue
         if item == "bistro":
             if not fetch_bistro(args.resolution or "2k"):

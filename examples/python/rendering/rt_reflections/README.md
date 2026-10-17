@@ -11,6 +11,8 @@ python rt_reflections.py --walk 1.5                          # walk the camera d
 
 **Sponza:** the scene is Khronos's glTF version of Crytek Sponza. Clone [glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) into the repository root, where git ignores it. Without it, or with `--scene colonnade`, the example builds a colonnade of boxes.
 
+**kajiya's scenes:** `--scene viziers`, `gas_stations`, `battle`, `warhammer` or `conference` loads one of the scenes in Embark's kajiya repository, scaled and placed as kajiya places it, with a camera and a sun of its own; two lamps hang under the conference room's ceiling. `python tools/fetch_assets.py kajiya` fetches them into `assets/kajiya/`; their credits are in the [asset README](../../../../assets/README.md#not-committed).
+
 ## The technique
 
 The specular lobe is the materials' BRDF's (`sk/pbr.glsl`'s `cookTorrance`): GGX of alpha = roughness², Schlick-GGX geometry, Schlick Fresnel. `specular.glsl` samples it through GGX's visible normals and keeps densities per projected solid angle, as kajiya does. Reflections use an alpha of at least 6e-4.
@@ -67,12 +69,12 @@ The panel shows the GPU time and sets the exposure, the sky's intensity, the vie
 
 | Option | Default | |
 |---|---|---|
-| `--scene sponza` / `colonnade` | `sponza` | |
+| `--scene NAME` | `sponza` | `sponza`, `colonnade`, or one of kajiya's scenes: `viziers`, `gas_stations`, `battle`, `warhammer`, `conference` |
 | `--view 0` to `4` | 0 | Image, indirect diffuse light, irradiance cache, direct light, reflections |
 | `--stages N` | 127 | The stages that run, a sum of: for the diffuse light 1 temporal resampling, 2 spatial resampling, 4 near-field split, 8 temporal filter, 16 spatial filter; for the reflections 32 temporal resampling and validation, 64 the temporal filter and cleanup |
 | `--sky X` | 1.0 | Intensity of the sky's light |
 | `--exposure X` | 1.0 | Multiplies the image before the tone curve |
-| `--walk SPEED` | 0 | Walk the camera along the nave at SPEED metres a second |
+| `--walk SPEED` | 0 | Walk the camera along the nave at SPEED metres a second; in kajiya's scenes, level towards what it looks at |
 | `--frames N` | 300 | Frames before `--screenshot` |
 | `--screenshot FILE` | | Save after `--frames` frames, print the GPU time, quit |
 | `--width`, `--height` | 1600, 900 | |
