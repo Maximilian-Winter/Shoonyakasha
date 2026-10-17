@@ -109,12 +109,18 @@ vec2 gaussian2() {
 // `albedo` takes the light the interface lets through. The metal's complex
 // index comes from its base colour (Gulbrandsen 2014, the colour as both
 // reflectivity and edge tint). `film` blends in a thin film on the interface
-// (KHR_materials_iridescence).
+// (KHR_materials_iridescence). `transmission` of the dielectric part
+// refracts through the interface instead of reaching the diffuse base
+// (KHR_materials_transmission): the object is a solid of index `ior`, which
+// a ray enters at a front face and leaves at a back face. Seen from inside
+// (`inside`), the surface is the interface from the solid to air alone.
 struct Material {
     uint type;
     vec3 albedo;
     float metallic;
     float ior;
+    float transmission;
+    bool inside;
     float film;            // amount of the thin film, 0 to 1
     int metal;             // 0 gold, 1 silver, 2 copper, 3 aluminium; -1 none
     float roughness;
@@ -132,6 +138,8 @@ Material materialOf(SkHit hit) {
     m.albedo = hit.baseColor;
     m.metallic = hit.metallic;
     m.ior = hit.ior;
+    m.transmission = hit.transmission * (1.0 - hit.metallic);
+    m.inside = m.transmission > 0.0 && !hit.frontFace;
     m.film = hit.iridescence;
     m.filmIndex = hit.filmIor;
     m.filmThickness = hit.filmThickness * 1e-3;
@@ -151,6 +159,8 @@ Material materialOf(SkHit hit) {
         m.center = c.xyz;
         m.substrateIndex = c.w;
         m.film = m.type == TYPE_FILM ? 1.0 : 0.0;
+        m.transmission = 0.0;
+        m.inside = false;
     }
     return m;
 }
@@ -179,13 +189,14 @@ vec2 artistMetalIor(float r, float g) {
     return vec2(n, sqrt(max(k2, 0.0)));
 }
 
-// The reflection Mueller matrix (s-p frame) of an interface onto a substrate
-// of complex index `substrate`, for light arriving at cosine cosI, coherent
-// over sigma micrometres, with `film` of a thin film of index filmIndex and
-// thickness micrometres on it.
-mat4 reflectionMueller(vec2 substrate, float film, float filmIndex, float thickness, float cosI, float lambda,
-                       float sigma) {
-    Fresnel f = fresnel(vec2(1.0, 0.0), substrate, cosI);
+// The reflection Mueller matrix (s-p frame) of an interface from a medium of
+// index `ambient` onto a substrate of complex index `substrate`, for light
+// arriving at cosine cosI, coherent over sigma micrometres, with `film` of a
+// thin film of index filmIndex and thickness micrometres between them.
+mat4 reflectionMueller(float ambient, vec2 substrate, float film, float filmIndex, float thickness, float cosI,
+                       float lambda, float sigma) {
+    vec2 n0 = vec2(ambient, 0.0);
+    Fresnel f = fresnel(n0, substrate, cosI);
     mat4 plain = muellerFromAmplitudes(f.rs, f.rp);
     if (film <= 0.0) return plain;
     // A film over the substrate: the reflection from its top, and the one
@@ -194,10 +205,10 @@ mat4 reflectionMueller(vec2 substrate, float film, float filmIndex, float thickn
     // coherent across the lateral shear between them (Steinberg & Yan 2021,
     // Eq. 18).
     vec2 n1 = vec2(filmIndex, 0.0);
-    Fresnel top = fresnel(vec2(1.0, 0.0), n1, cosI);
+    Fresnel top = fresnel(n0, n1, cosI);
     float cos1 = max(top.cosT.x, 1e-4);
     Fresnel bottom = fresnel(n1, substrate, cos1);
-    Fresnel back = fresnel(n1, vec2(1.0, 0.0), cos1);
+    Fresnel back = fresnel(n1, n0, cos1);
     float k = 2.0 * PI / (lambda * 1e-3);
     vec2 delay = cexpi(2.0 * k * filmIndex * thickness * cos1);
     vec2 rs2 = cmul(cmul(cmul(top.ts, bottom.rs), back.ts), delay);
@@ -211,36 +222,63 @@ mat4 reflectionMueller(vec2 substrate, float film, float filmIndex, float thickn
     return film >= 1.0 ? filmed : (1.0 - film) * plain + film * filmed;
 }
 
-// The reflection of a glTF material's dielectric part: its interface onto
-// the index `ior`, with its film.
+// The reflection of a glTF material's dielectric part: its interface from
+// air onto the index `ior` (from `ior` onto air seen from inside), with its
+// film.
 mat4 dielectricMueller(Material m, float cosI, float lambda, float sigma) {
-    return reflectionMueller(vec2(m.ior, 0.0), m.film, m.filmIndex, m.filmThickness, cosI, lambda, sigma);
+    float ambient = m.inside ? m.ior : 1.0;
+    vec2 substrate = vec2(m.inside ? 1.0 : m.ior, 0.0);
+    return reflectionMueller(ambient, substrate, m.film, m.filmIndex, m.filmThickness, cosI, lambda, sigma);
+}
+
+// The transmission Mueller matrix of a lossless interface whose reflection
+// Mueller matrix is R: what it does not reflect of each of s and p it lets
+// through, with no phase between them.
+mat4 transmissionMueller(mat4 R) {
+    float ts = clamp(1.0 - (R[0][0] + R[0][1]), 0.0, 1.0);
+    float tp = clamp(1.0 - (R[0][0] - R[0][1]), 0.0, 1.0);
+    float c = sqrt(ts * tp);
+    return mat4(0.5 * (ts + tp), 0.5 * (ts - tp), 0.0, 0.0,
+                0.5 * (ts - tp), 0.5 * (ts + tp), 0.0, 0.0,
+                0.0, 0.0, c, 0.0,
+                0.0, 0.0, 0.0, c);
 }
 
 // The reflection Mueller matrix of a surface's interface for light arriving
 // at cosine cosI, coherent over sigma micrometres.
 mat4 interfaceMueller(Material m, float cosI, float lambda, float sigma) {
     if (m.type == TYPE_GLTF) {
+        if (m.inside) return dielectricMueller(m, cosI, lambda, sigma);
         mat4 result = mat4(0.0);
         if (m.metallic > 0.0) {
             float r = rgbToSpectrum(m.albedo, lambda);
-            result += m.metallic * reflectionMueller(artistMetalIor(r, r), m.film, m.filmIndex, m.filmThickness,
-                                                     cosI, lambda, sigma);
+            result += m.metallic * reflectionMueller(1.0, artistMetalIor(r, r), m.film, m.filmIndex,
+                                                     m.filmThickness, cosI, lambda, sigma);
         }
         if (m.metallic < 1.0) result += (1.0 - m.metallic) * dielectricMueller(m, cosI, lambda, sigma);
         return result;
     }
     vec2 substrate = m.type == TYPE_FILM ? substrateIor(m, lambda) : metalIor(max(m.metal, 0), lambda);
-    return reflectionMueller(substrate, m.film, m.filmIndex, m.filmThickness, cosI, lambda, sigma);
+    return reflectionMueller(1.0, substrate, m.film, m.filmIndex, m.filmThickness, cosI, lambda, sigma);
 }
 
 // The diffuse base of a glTF material at a wavelength, for light that
 // crosses its interface at cosine cosI: the base colour, times the share of
-// the dielectric part, times what the interface lets through.
+// the dielectric part that does not transmit, times what the interface lets
+// through.
 float diffuseWeight(Material m, float cosI, float lambda, float sigma) {
-    if (m.type != TYPE_GLTF || m.metallic >= 1.0) return 0.0;
+    if (m.type != TYPE_GLTF || m.inside || m.metallic >= 1.0 || m.transmission >= 1.0) return 0.0;
     float through = 1.0 - dielectricMueller(m, max(cosI, 1e-4), lambda, sigma)[0][0];
-    return (1.0 - m.metallic) * rgbToSpectrum(m.albedo, lambda) * max(through, 0.0);
+    return (1.0 - m.metallic - m.transmission) * rgbToSpectrum(m.albedo, lambda) * max(through, 0.0);
+}
+
+// The microfacet normal (facing N) of a transmission from direction wi, on
+// the side of index etaI, to wo, on the side of etaO (Walter et al. 2007).
+vec3 refractionHalfVector(vec3 wi, vec3 wo, float etaI, float etaO, vec3 N) {
+    vec3 h = -(etaI * wi + etaO * wo);
+    float len = length(h);
+    h = len > 1e-6 ? h / len : N;
+    return dot(h, N) < 0.0 ? -h : h;
 }
 
 // GGX, of alpha = roughness^2, with Smith masking.
@@ -281,9 +319,26 @@ Response evaluate(Material m, vec3 N, vec3 position, vec3 wi, vec3 wo, float lam
                   vec3 fallback) {
     Response r;
     r.mueller = mat4(0.0);
+    float cosI = dot(N, wi), cosO = dot(N, wo);
+    // A transmissive glTF material lets light from the far side through: a
+    // GGX microfacet transmission (Walter et al. 2007), widened as below.
+    if (m.type == TYPE_GLTF && m.transmission > 0.0 && cosI < 0.0 && cosO > 0.0) {
+        float etaI = m.inside ? 1.0 : m.ior, etaO = m.inside ? m.ior : 1.0;
+        vec3 ht = refractionHalfVector(wi, wo, etaI, etaO, N);
+        float wih = dot(wi, ht), woh = dot(wo, ht);
+        r.s = sAxis(wo, ht, fallback);
+        if (wih * woh >= 0.0) return r;
+        float alphaT = min(max(m.roughness * m.roughness, 1e-3) + 0.25 * a, 1.0);
+        float D = ggxD(alphaT, dot(N, ht));
+        float G = smithG1(alphaT, -cosI) * smithG1(alphaT, cosO);
+        float denom = etaI * wih + etaO * woh;
+        float value = abs(wih) * abs(woh) * etaO * etaO * D * G / (cosO * denom * denom);
+        float share = m.inside ? 1.0 : m.transmission;
+        r.mueller = transmissionMueller(dielectricMueller(m, abs(woh), lambda, sigma)) * (share * value);
+        return r;
+    }
     vec3 h = normalize(wi + wo);
     r.s = sAxis(wi, h, fallback);
-    float cosI = dot(N, wi), cosO = dot(N, wo);
     if (cosI <= 0.0 || cosO <= 0.0) return r;
 
     float cosH = max(dot(wi, h), 1e-4);
@@ -325,12 +380,39 @@ Response evaluate(Material m, vec3 N, vec3 position, vec3 wi, vec3 wo, float lam
 
 // ── Lights ───────────────────────────────────────────────────────────────
 
-bool visible(vec3 origin, vec3 direction, float distance) {
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+// What reaches `origin` from `distance` along `direction`, at each
+// wavelength: 1 when nothing is in the way, 0 behind an opaque surface.
+// Transmissive surfaces let through, in a straight line, what their
+// interface does not reflect (their film colours it); light coherent over
+// sigma micrometres at 550 nm.
+vec4 shadowTransmittance(vec3 origin, vec3 direction, float distance, vec4 lambdas, float sigma) {
+    rayQueryEXT probe;
+    rayQueryInitializeEXT(probe, scene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
                           0xFF, origin, 0.0, direction, distance);
-    while (rayQueryProceedEXT(query)) {}
-    return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
+    while (rayQueryProceedEXT(probe)) {}
+    if (rayQueryGetIntersectionTypeEXT(probe, true) == gl_RayQueryCommittedIntersectionNoneEXT) return vec4(1.0);
+
+    vec4 through = vec4(1.0);
+    for (int crossing = 0; crossing < 8; ++crossing) {
+        rayQueryEXT query;
+        rayQueryInitializeEXT(query, scene, gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, direction, distance);
+        while (rayQueryProceedEXT(query)) {}
+        if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) return through;
+        SkHit hit = skFetchHit(query, 0.0);
+        Material m = materialOf(hit);
+        if (m.transmission <= 0.0) return vec4(0.0);
+        float cosI = max(abs(dot(direction, hit.geometricNormal)), 1e-4);
+        float share = m.inside ? 1.0 : m.transmission;
+        for (int j = 0; j < 4; ++j) {
+            float sigmaJ = sigma * lambdas[j] / 550.0;
+            through[j] *= share * max(1.0 - dielectricMueller(m, cosI, lambdas[j], sigmaJ)[0][0], 0.0);
+        }
+        float t = rayQueryGetIntersectionTEXT(query, true) + 1e-3;
+        origin += direction * t;
+        distance -= t;
+        if (distance <= 0.0) return through;
+    }
+    return vec4(0.0);
 }
 
 struct LightSample {
@@ -464,14 +546,21 @@ vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float
         }
         if (bounce == settings.maxBounces) break;
 
-        // The scene lights, each with its own coherence.
-        for (uint i = 0u; i < count; ++i) {
+        // The scene lights, each with its own coherence. Seen from inside a
+        // transmissive solid, a surface lets in the lights beyond it; seen
+        // from outside, it reflects the lights on its side. Behind a diffuse
+        // bounce, light through a solid comes from the shadow rays alone,
+        // which pass through it, so it is not counted twice.
+        vec3 Pfar = hit.position - Ng * 1e-3;
+        for (uint i = 0u; i < count && !(m.inside && diffuseSeen); ++i) {
             LightSample ls;
             if (!sampleLight(i, P, ls)) continue;
             if (bounce == 0u && i == lamp) firstSigma = coherenceWidth(0.55, ls.angle);
-            if (dot(Ng, ls.direction) <= 0.0) continue;
+            bool beyond = dot(Ng, ls.direction) <= 0.0;
+            if (beyond != m.inside) continue;
             vec4 irradiance = lightSpectrum(ls.color, lambdas, i == lamp);
-            bool shadowChecked = false, lit = false;
+            bool shadowChecked = false;
+            vec4 through = vec4(0.0);
             for (int j = 0; j < 4; ++j) {
                 if (heroOnly && j > 0) break;
                 float sigma = coherenceWidth(lambdas[j] * 1e-3, ls.angle);
@@ -481,10 +570,12 @@ vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float
                 float measured = dot(w, r.mueller[0]);   // unpolarised light: the first column
                 if (measured <= 0.0) continue;
                 if (!shadowChecked) {
-                    lit = visible(P, ls.direction, max(ls.distance - ls.radius - 2e-3, 1e-3));
+                    through = shadowTransmittance(beyond ? Pfar : P, ls.direction,
+                                                  max(ls.distance - ls.radius - 2e-3, 1e-3), lambdas,
+                                                  coherenceWidth(0.55, ls.angle));
                     shadowChecked = true;
                 }
-                if (lit) radiance[j] += measured * irradiance[j];
+                radiance[j] += measured * irradiance[j] * through[j];
             }
         }
 
@@ -493,24 +584,34 @@ vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float
         vec3 wi;
         vec4 scale;   // the sample's weight at each wavelength, without the Mueller matrix
         float sigmaIndirect = coherenceWidth(lambdas.x * 1e-3, radians(settings.indirectAngle));
-        // A glTF material continues off its interface or through to its
-        // diffuse base, picked by how much its interface reflects.
-        float specularShare = 1.0;
+        // A glTF material continues off its interface, through it (into or
+        // out of a transmissive solid), or to its diffuse base, picked by how
+        // much its interface reflects at the hero wavelength.
+        float specularShare = 1.0, refractShare = 0.0;
         if (m.type == TYPE_GLTF && m.metallic < 1.0) {
             float reflected = dielectricMueller(m, max(cosO, 1e-4), lambdas.x, sigmaIndirect)[0][0];
-            specularShare = clamp(m.metallic + (1.0 - m.metallic) * reflected, 0.1, 0.9);
+            if (m.inside) {
+                specularShare = reflected >= 0.999 ? 1.0 : clamp(reflected, 0.05, 0.95);
+                refractShare = 1.0 - specularShare;
+            } else {
+                specularShare = clamp(m.metallic + (1.0 - m.metallic) * reflected, 0.1, 0.9);
+                refractShare = (1.0 - specularShare) * m.transmission / (1.0 - m.metallic);
+            }
         }
-        if (random() >= specularShare) {
+        float diffuseShare = 1.0 - specularShare - refractShare;
+        vec3 next = P;
+        float pick = random();
+        if (pick >= specularShare + refractShare) {
             vec3 t, b;
             basis(N, t, b);
             float u = random(), phi = 2.0 * PI * random();
             wi = t * (sqrt(u) * cos(phi)) + b * (sqrt(u) * sin(phi)) + N * sqrt(1.0 - u);
-            if (dot(Ng, wi) <= 0.0) break;
+            if (dot(Ng, wi) <= 0.0 || diffuseShare <= 0.0) break;
             float cosI = dot(N, wi);
             for (int j = 0; j < 4; ++j) {
                 if (heroOnly && j > 0) break;
                 float sigma = coherenceWidth(lambdas[j] * 1e-3, radians(settings.indirectAngle));
-                float weight = diffuseWeight(m, cosI, lambdas[j], sigma) / (1.0 - specularShare);
+                float weight = diffuseWeight(m, cosI, lambdas[j], sigma) / diffuseShare;
                 rows[j] = vec4(rows[j].x * weight, 0.0, 0.0, 0.0);   // depolarising
             }
             diffuseSeen = true;
@@ -518,6 +619,32 @@ vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float
             vec3 t2, b2;
             basis(-wi, t2, b2);
             frameX = t2;
+        } else if (pick >= specularShare) {
+            // Through the interface (Walter et al. 2007), by a microfacet
+            // normal drawn from the visible normals: the weight is the
+            // transmission Mueller matrix times (etaO / etaI)^2 G1(wi).
+            float etaI = m.inside ? 1.0 : m.ior, etaO = m.inside ? m.ior : 1.0;
+            vec3 t, b;
+            basis(N, t, b);
+            float alpha = max(m.roughness * m.roughness, 1e-3);
+            vec3 woLocal = vec3(dot(wo, t), dot(wo, b), cosO);
+            vec3 hl = sampleGgxVisibleNormal(woLocal, alpha, random(), random());
+            vec3 h = t * hl.x + b * hl.y + N * hl.z;
+            wi = refract(-wo, h, etaO / etaI);
+            if (dot(wi, wi) < 0.5 || dot(N, wi) >= 0.0 || dot(Ng, wi) >= 0.0) break;
+            float share = m.inside ? 1.0 : m.transmission;
+            float weight = share * smithG1(alpha, -dot(N, wi)) * (etaO * etaO) / (etaI * etaI) / refractShare;
+            vec3 s = sAxis(wo, h, frameX);
+            float cosH = max(dot(wo, h), 1e-4);
+            for (int j = 0; j < 4; ++j) {
+                if (heroOnly && j > 0) break;
+                float sigma = coherenceWidth(lambdas[j] * 1e-3, radians(settings.indirectAngle));
+                mat4 T = transmissionMueller(dielectricMueller(m, cosH, lambdas[j], sigma));
+                rows[j] = (rows[j] * stokesRotation(s, frameX, wo)) * T * weight;
+            }
+            frameX = s;
+            next = Pfar;
+            skyBlur = max(skyBlur, m.roughness);
         } else {
             if (m.type == TYPE_GRATING) {
                 // An order drawn by its efficiency, spread for indirect light.
@@ -593,7 +720,7 @@ vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float
             if (random() >= survive) break;
             for (int j = 0; j < 4; ++j) rows[j] /= survive;
         }
-        origin = P;
+        origin = next;
         direction = wi;
     }
     return radiance;

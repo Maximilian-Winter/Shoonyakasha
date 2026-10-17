@@ -64,6 +64,10 @@ MODELS = {
                 (0.0, 1.0, 3.2), (0.0, 0.3, 0.0)),
     "metal-spheres": ("IridescenceMetallicSpheres/glTF/IridescenceMetallicSpheres.gltf", 0.07, (0.0, 0.82, 0.0),
                       (0.0, 0.95, 3.6), (0.0, 0.8, 0.0)),
+    "lamp": ("IridescenceLamp/glTF/IridescenceLamp.gltf", 2.5, (0.0, 0.0, 0.0),
+             (0.0, 1.0, 2.6), (0.0, 0.6, 0.0)),
+    "dish": ("IridescentDishWithOlives/glTF/IridescentDishWithOlives.gltf", 3.0, (0.0, 0.0, 0.0),
+             (0.0, 1.3, 2.3), (0.0, 0.25, 0.0)),
 }
 SCENES = ("spheres",) + tuple(MODELS)
 DISC_TILT = math.radians(62.0)          # from lying flat, towards the camera
@@ -82,8 +86,8 @@ GOLD, SILVER, COPPER, ALUMINIUM = 0, 1, 2, 3
 parser = argparse.ArgumentParser(description="Wave optics", formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog=__doc__)
 parser.add_argument("--scene", choices=SCENES, default="spheres",
-                    help="spheres: the disc, the film sphere and the metals; abalone, suzanne, metal-spheres: a "
-                         "Khronos sample model with thin films, from glTF-Sample-Assets")
+                    help="spheres: the disc, the film sphere and the metals; abalone, suzanne, metal-spheres, lamp, "
+                         "dish: a Khronos sample model with thin films, from glTF-Sample-Assets")
 parser.add_argument("--lamp-radius", type=float, default=0.02, help="radius of the lamp in metres (0.002 to 0.4)")
 parser.add_argument("--lamp-distance", type=float, default=2.0,
                     help="distance from the centre of the scene (the disc or the model) to the lamp in metres "
@@ -258,7 +262,7 @@ class Scene:
                 print("[wave_optics] %s is not there; clone glTF-Sample-Assets into the repository root." % path)
                 os._exit(1)
             place_model(path, model[1], model[2])
-            self.center = model[2]
+            self.center = model[4]
             return
         self.center = DISC_CENTER
         self.disc = place(DISC, DISC_CENTER, (0.6, 0.6, 0.6), rotation=(DISC_TILT, 0.0, 0.0))
