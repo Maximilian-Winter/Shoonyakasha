@@ -1,6 +1,6 @@
 # Wave optics
 
-A spectral, polarised path tracer in which light keeps a little of its wave nature: how coherent it is when it reaches a surface. A compact disc's grooves split the lamp's light into rainbows, and a sphere with a thin film shows interference colours. The rainbows are as sharp as the lamp is small and far away; a large, close lamp blurs them, as it widens every highlight. The lamp can shine with the spectrum of a light bulb, a sodium or mercury lamp or an RGB LED: their lines leave the disc as separate coloured spots, and sodium light shows rings on films too thick to show colours under white light. Gold and silver spheres reflect with their measured refractive indices, and a polariser in front of the camera shows the polarisation of what reaches it. It runs on its own [pipeline](pipeline/pipeline.json): one compute pass that traces with ray queries and averages one path per pixel per frame, as the [reference path tracer](../reference_pt/README.md) does. It needs a GPU with ray queries.
+A spectral, polarised path tracer in which light keeps a little of its wave nature: how coherent it is when it reaches a surface. A compact disc's grooves split the lamp's light into rainbows, and a sphere with a thin film shows interference colours. The rainbows are as sharp as the lamp is small and far away; a large, close lamp blurs them, as it widens every highlight. The lamp can shine with the spectrum of a light bulb, a sodium or mercury lamp or an RGB LED: their lines leave the disc as separate coloured spots, and sodium light shows rings on films too thick to show colours under white light. Gold and silver spheres reflect with their measured refractive indices, and a polariser in front of the camera shows the polarisation of what reaches it. In place of these objects, `--scene` shows one of Khronos's glTF sample models with thin films (`KHR_materials_iridescence`): an abalone shell, three Suzannes or a grid of filmed spheres. It runs on its own [pipeline](pipeline/pipeline.json): one compute pass that traces with ray queries and averages one path per pixel per frame, as the [reference path tracer](../reference_pt/README.md) does. It needs a GPU with ray queries.
 
 The light transport follows the papers on physical light transport by Shlomi Steinberg and coauthors (references below), in a reduced form described here; it is written from the papers and standard optics.
 
@@ -11,8 +11,11 @@ python wave_optics.py --polariser 90                            # a vertical pol
 python wave_optics.py --view 1                                  # the coherence width of the lamp's light
 python wave_optics.py --lamp mercury                            # the disc splits mercury's lines apart
 python wave_optics.py --lamp sodium --film 5                    # rings on a 5 um film
+python wave_optics.py --scene abalone                           # a Khronos sample model with a thin film
 python wave_optics.py --samples 512 --screenshot out.png        # converge, save, quit
 ```
+
+**Sample models:** `--scene abalone`, `suzanne` and `metal-spheres` load `IridescenceAbalone`, `IridescenceSuzanne` and `IridescenceMetallicSpheres` from Khronos's [glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets), cloned into the repository root, where git ignores it.
 
 ## The technique
 
@@ -24,7 +27,7 @@ python wave_optics.py --samples 512 --screenshot out.png        # converge, save
 
   σ = λ / (π a),
 
-for which the coherence blur of a specular reflection, λ / (2π σ) in direction cosines, is a / 2: as wide as the source appears (the relation |Θ| = λ² / Ω of the generalized ray formulation, Eq. 41 of its arXiv version). A lamp of radius *r* at distance *d* has *a* = asin(*r* / *d*); a directional light has the sun's angular radius (0.27°). The panel shows σ at 550 nm for the lamp's light at the disc. At every surface each scene light is connected towards its centre through a shadow ray, with its own σ:
+for which the coherence blur of a specular reflection, λ / (2π σ) in direction cosines, is a / 2: as wide as the source appears (the relation |Θ| = λ² / Ω of the generalized ray formulation, Eq. 41 of its arXiv version). A lamp of radius *r* at distance *d* has *a* = asin(*r* / *d*); a directional light has the sun's angular radius (0.27°). The panel shows σ at 550 nm for the lamp's light at the centre of the scene (the disc's, or the model's origin). At every surface each scene light is connected towards its centre through a shadow ray, with its own σ:
 
 - a **grating** spreads each diffraction order into a Gaussian lobe of deviation a / 2;
 - glossy lobes widen with the source: GGX alpha + a / 4;
@@ -32,7 +35,9 @@ for which the coherence blur of a specular reflection, λ / (2π σ) in directio
 
 The path continues in a direction drawn from the surface, for light coherent as if from a source of angular radius `--indirect` (5° by default): the sky and light from other surfaces.
 
-**Materials.** Surfaces are diffuse unless the example gives them one of these materials:
+**Materials.** A surface has its glTF material, read through the ray instances (`sk/scene_hits.glsl`), unless the example gives it one of the materials after it:
+
+- **glTF material:** a GGX interface with the material's roughness. By `metallic` it reflects as a metal or as a dielectric of the material's index of refraction (`KHR_materials_ior`, 1.5 without). The metal's complex index at each wavelength comes from its base colour, taken as both its reflectivity and its edge tint (Gulbrandsen 2014). Under the dielectric part, a diffuse base of the base colour takes the light the interface lets through at the incoming angle, and depolarises it. With `KHR_materials_iridescence`, a thin film of the extension's index and of the thickness its texture gives at each point lies on the interface, metal or dielectric, blended in by its amount; it is the thin film described below. A path continues off the interface or into the diffuse base, picked by how much the interface reflects at the hero wavelength (at least 10% each, for a material that is not wholly metal).
 
 - **Conductor** (gold, silver): GGX microfacets with the Fresnel equations for the metal's complex refractive index, from 380 to 780 nm in 20 nm steps (`metals.glsl`: gold, silver and copper from Johnson & Christy 1972, aluminium from Rakić 1995, through the refractiveindex.info database).
 - **Grating** (the disc): an aluminium surface with circular grooves about the disc's centre, a sinusoidal profile of 0.1 µm depth and the set spacing (1.6 µm, a CD's). Order *n* leaves where the tangential direction cosines satisfy the grating equation u_o + u_i = n λ / Λ across the grooves, with Kirchhoff's scalar efficiency J_n(k h (cos θ_i + cos θ_o) / 2)² for depth *h*; orders up to |n| = 4 that propagate. The interface's Fresnel Mueller matrix at the half vector multiplies the sum. A path continues into an order drawn by its efficiency at the hero wavelength. A non-zero order bends each wavelength differently, so from there the path keeps the hero wavelength alone.
@@ -52,7 +57,9 @@ The lines are Gaussians of 0.3 nm deviation.
 
 **What it shows.** With a small, distant lamp the disc shows thin radial rainbows beside the lamp's reflection. As the lamp grows or comes closer they widen and wash out, and so does the lamp's reflection in the disc and the spheres. Film colours fade as the film thickens: across the visible range a thick film's fringes are so close together in wavelength that they average out. The film's shear stays well below a micrometre for films that show colours under white light, so its colours outlast even a large, close lamp. Under the mercury lamp or the LED, the disc's rainbows break into separate spots of each line's colour. Under sodium light the scene loses its colours, and a film of a few micrometres, plain silver under white light, shows dark rings of equal inclination around the sphere's centre, the reflections of the room it faces. Towards the sphere's edge the shear grows past the room light's coherence width and the rings fade; at 12 µm none are left. Under a polariser the metals' and the film's edges brighten and darken as the polariser turns, opposite at edges a quarter turn apart.
 
-**Light.** The scene lights fall off with the inverse square of the distance. The lamp's sphere has the light's radiance, *I* / (π r²), and shadow rays towards a light end at its radius. Emissive surfaces count where the camera sees them directly. The lamp's intensity follows its distance squared, so the disc is lit equally from any distance. Behind a diffuse bounce, glossy lobes widen to a roughness of at least 0.3 and the grating's to the indirect source size, and the sky is read from a blurred level of the prefiltered environment. This blurs the caustics and the sky's sun that a diffuse surface would otherwise only reach by chance.
+Of the sample models, the middle Suzanne, a metal under a 400 nm film, shows the strongest colours. The outer two are dielectrics under films (the left of index 1.33; the right of index 1.8, glass in the file, which this tracer renders opaque), and their white diffuse bases outshine the films' tints. The grid of spheres shows a film of index 2.0 on metal, across thickness from 100 nm (left) to 700 nm (right) and base reflectivity from 0 (bottom) to 1 (top). The abalone's colours follow its thickness texture. Its film varies from 600 to 800 nm, which shifts the optical path by about half a micrometre, less than one sodium wavelength, so under sodium light it shows no fringes.
+
+**Light.** The scene lights fall off with the inverse square of the distance. The lamp's sphere has the light's radiance, *I* / (π r²), and shadow rays towards a light end at its radius. Emissive surfaces count where the camera sees them directly. The lamp's intensity follows its distance squared, so the centre of the scene is lit equally from any distance. Behind a diffuse bounce, glossy lobes widen to a roughness of at least 0.3 and the grating's to the indirect source size. The sky is read from the prefiltered environment at the roughness of the roughest lobe the path has come through (0.6 for a diffuse bounce). This blurs the caustics and the sky's sun that rough surfaces would otherwise only reach by chance.
 
 ## Using it
 
@@ -72,7 +79,8 @@ The panel sets the lamp's radius and distance, the film's thickness, the grooves
 | Option | Default | |
 |---|---|---|
 | `--lamp-radius R` | 0.02 | The lamp's radius in metres, 0.002 to 0.4 |
-| `--lamp-distance D` | 2.0 | From the disc's centre to the lamp in metres, 0.6 to 8 |
+| `--scene NAME` | `spheres` | `spheres` (the disc, the film sphere, the metals), `abalone`, `suzanne`, `metal-spheres` |
+| `--lamp-distance D` | 2.0 | From the centre of the scene (the disc's, or the model's origin) to the lamp in metres, 0.6 to 8 |
 | `--lamp NAME` | `white` | The lamp's spectrum: `white`, `bulb`, `sodium`, `mercury`, `led` |
 | `--film T` | 0.45 | The film's thickness in micrometres, 0.1 to 30 |
 | `--pitch P` | 1.6 | The grooves' spacing in micrometres |
@@ -101,7 +109,14 @@ Settings are `scene.custom.wo.*` values in the `Settings` uniform block; `lampSp
 | 1 | groove spacing, µm | groove depth, µm | film index | film thickness, µm |
 | 2 | grating centre x | y | z | substrate index (without a metal) |
 
-The shapes (a sphere and a ring for the disc) are written as glTF into a temporary directory at start. Shaders recompile with `sk.shaders.compile_dir("pipeline/shaders")`, which the example runs at start.
+The material slots name the built-in objects; the sample models keep their glTF materials. The shapes (a sphere and a ring for the disc) are written as glTF into a temporary directory at start. Shaders recompile with `sk.shaders.compile_dir("pipeline/shaders")`, which the example runs at start.
+
+## Credits
+
+The sample models are from Khronos's glTF-Sample-Assets:
+- *IridescenceAbalone* by Abby Crawford and Eric Chadwick, CC BY 4.0.
+- *Iridescence Suzanne* by Pascal Schoen and Mathias Kanzler (UX3D), CC0.
+- *Iridescence Metallic Spheres* by UX3D, CC0.
 
 ## References
 
@@ -111,4 +126,5 @@ The shapes (a sphere and a ring for the disc) are written as glTF into a tempora
 - S. Steinberg, L.-Q. Yan. *A Generic Framework for Physical Light Transport.* ACM TOG 40(4), 2021.
 - A. Wilkie, S. Nawaz, M. Droske, A. Weidlich, J. Hanika. *Hero Wavelength Spectral Sampling.* EGSR 2014.
 - C. Wyman, P.-P. Sloan, P. Shirley. *Simple Analytic Approximations to the CIE XYZ Color Matching Functions.* JCGT 2(2), 2013.
+- O. Gulbrandsen. *Artist Friendly Metallic Fresnel.* JCGT 3(4), 2014.
 - M. Born, E. Wolf. *Principles of Optics*, sections 1.5 (Fresnel) and 1.6 (thin films).

@@ -10,7 +10,9 @@ with the spectrum of a light bulb, a sodium or mercury lamp or an RGB LED:
 the disc splits its lines into separate coloured spots, and sodium light
 shows rings on films too thick to show colours under white light. Gold and silver spheres reflect with
 their measured refractive indices, and a polariser in front of the camera
-shows the polarisation of what reaches it.
+shows the polarisation of what reaches it. --scene puts one of Khronos's
+glTF sample models with thin films (KHR_materials_iridescence) in their
+place.
 
 Keys:
     WASD/Q/E + right mouse   fly the camera; moving starts the average over
@@ -24,6 +26,7 @@ Usage:
     python wave_optics.py
     python wave_optics.py --lamp-radius 0.2 --lamp-distance 1.0
     python wave_optics.py --lamp sodium --film 5
+    python wave_optics.py --scene abalone      # needs glTF-Sample-Assets in the repository root
     python wave_optics.py --polariser 90 --samples 512 --screenshot out.png   # converge, save, quit
 
 Requirements:
@@ -45,11 +48,24 @@ from shoonyakasha.mathutil import look_rotation
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PIPELINE = os.path.join(HERE, "pipeline", "pipeline.json")
+REPOSITORY = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
+SAMPLES = os.path.join(REPOSITORY, "glTF-Sample-Assets", "Models")
 BOX = "models/Box.gltf"
 
 EYE = (0.0, 1.35, 3.6)
 TARGET = (0.0, 0.55, 0.0)
 DISC_CENTER = (0.0, 0.62, -0.35)
+# Khronos glTF sample models with thin films (KHR_materials_iridescence):
+# the model's file, its scale, where its origin goes, the camera's eye and target.
+MODELS = {
+    "abalone": ("IridescenceAbalone/glTF/IridescenceAbalone.gltf", 5.0, (0.0, 0.4, 0.0),
+                (0.0, 1.15, 2.1), (0.0, 0.35, 0.0)),
+    "suzanne": ("IridescenceSuzanne/glTF/IridescenceSuzanne.gltf", 0.3, (0.0, 0.3, 0.0),
+                (0.0, 1.0, 3.2), (0.0, 0.3, 0.0)),
+    "metal-spheres": ("IridescenceMetallicSpheres/glTF/IridescenceMetallicSpheres.gltf", 0.07, (0.0, 0.82, 0.0),
+                      (0.0, 0.95, 3.6), (0.0, 0.8, 0.0)),
+}
+SCENES = ("spheres",) + tuple(MODELS)
 DISC_TILT = math.radians(62.0)          # from lying flat, towards the camera
 LAMP_TOWARDS = (0.35, 0.8, 1.0)         # from the disc's centre towards the lamp
 LAMP_IRRADIANCE = 3.0                   # at the disc's centre
@@ -65,9 +81,13 @@ GOLD, SILVER, COPPER, ALUMINIUM = 0, 1, 2, 3
 
 parser = argparse.ArgumentParser(description="Wave optics", formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog=__doc__)
+parser.add_argument("--scene", choices=SCENES, default="spheres",
+                    help="spheres: the disc, the film sphere and the metals; abalone, suzanne, metal-spheres: a "
+                         "Khronos sample model with thin films, from glTF-Sample-Assets")
 parser.add_argument("--lamp-radius", type=float, default=0.02, help="radius of the lamp in metres (0.002 to 0.4)")
 parser.add_argument("--lamp-distance", type=float, default=2.0,
-                    help="distance from the disc's centre to the lamp in metres (0.6 to 8)")
+                    help="distance from the centre of the scene (the disc or the model) to the lamp in metres "
+                         "(0.6 to 8)")
 parser.add_argument("--lamp", choices=SPECTRA, default="white",
                     help="the lamp's spectrum: white (its RGB colour), bulb (2700 K), sodium, mercury, led (RGB)")
 parser.add_argument("--film", type=float, default=0.45,
@@ -199,6 +219,16 @@ def place(path, position, scale, rotation=(0.0, 0.0, 0.0), color=(0.8, 0.8, 0.8)
     return list(result.entities)
 
 
+def place_model(path, scale, origin):
+    """A glTF model with its own materials, scaled about `origin`; returns its entities."""
+    result = engine.load_gltf_scene(path)
+    for root in {root_of(entity) for entity in result.entities}:
+        position = engine.scene.get_position(root)
+        engine.scene.set_position(root, tuple(o + scale * p for o, p in zip(origin, position)))
+        engine.scene.set_scale(root, tuple(scale * s for s in engine.scene.get_scale(root)))
+    return list(result.entities)
+
+
 def normalized(v):
     length = math.sqrt(sum(c * c for c in v))
     return tuple(c / length for c in v)
@@ -208,8 +238,10 @@ class Scene:
     """The room, the objects with wave-optical materials, and the lamp."""
 
     def build(self):
-        camera = engine.create_camera(pos=EYE, fov=50.0, speed=2.0, near_plane=0.02, far_plane=100.0)
-        engine.scene.set_rotation(camera, look_rotation(EYE, TARGET))
+        model = MODELS.get(args.scene)
+        eye, target = (model[3], model[4]) if model else (EYE, TARGET)
+        camera = engine.create_camera(pos=eye, fov=50.0, speed=2.0, near_plane=0.02, far_plane=100.0)
+        engine.scene.set_rotation(camera, look_rotation(eye, target))
         self.lamp = engine.create_point_light(pos=(0.0, 2.0, 0.0), color=(1.0, 0.97, 0.92), intensity=1.0,
                                               range=100.0)
         engine.create_directional_light(direction=SUN_DIRECTION, color=(1.0, 0.95, 0.88), intensity=0.3)
@@ -219,6 +251,16 @@ class Scene:
 
         place(BOX, (0.0, -0.05, 0.0), (8.0, 0.1, 8.0), color=(0.2, 0.2, 0.22))
         place(BOX, (0.0, 2.0, -2.2), (8.0, 4.0, 0.1), color=(0.12, 0.13, 0.16))
+        self.disc, self.film, self.gold, self.silver = [], [], [], []
+        if model:
+            path = os.path.join(SAMPLES, model[0])
+            if not os.path.isfile(path):
+                print("[wave_optics] %s is not there; clone glTF-Sample-Assets into the repository root." % path)
+                os._exit(1)
+            place_model(path, model[1], model[2])
+            self.center = model[2]
+            return
+        self.center = DISC_CENTER
         self.disc = place(DISC, DISC_CENTER, (0.6, 0.6, 0.6), rotation=(DISC_TILT, 0.0, 0.0))
         self.film = place(SPHERE, (-1.25, 0.42, 0.25), (0.42, 0.42, 0.42))
         self.gold = place(SPHERE, (1.2, 0.36, 0.3), (0.36, 0.36, 0.36))
@@ -232,7 +274,7 @@ class Scene:
             return
         self.state = state
         offset = normalized(LAMP_TOWARDS)
-        position = tuple(c + o * s.lamp_distance for c, o in zip(DISC_CENTER, offset))
+        position = tuple(c + o * s.lamp_distance for c, o in zip(self.center, offset))
         engine.scene.set_position(self.lamp, position)
         engine.scene.set_light_source_radius(self.lamp, s.lamp_radius)
         # As bright at the disc from any distance; its surface has the
@@ -394,7 +436,7 @@ class Panel:
         ui.set_color(self.polariser_button, ACCENT if s.polariser is not None else SURFACE)
         self.set_text(self.polariser_button, "Polariser")
         self.set_text(self.samples, "%d paths per pixel   %.0f per second" % (samples, rate))
-        self.set_text(self.coherence, "The lamp's light at the disc: coherent over %.1f um"
+        self.set_text(self.coherence, "The lamp's light at the centre: coherent over %.1f um"
                       % coherence_width(s.lamp_radius, s.lamp_distance))
         self.set_text(self.radius_label, "Lamp radius   %.1f cm" % (s.lamp_radius * 100.0))
         self.set_text(self.distance_label, "Lamp distance   %.2f m" % s.lamp_distance)

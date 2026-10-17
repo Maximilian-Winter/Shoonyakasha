@@ -76,7 +76,7 @@ layout(set = 3, binding = 0) uniform accelerationStructureEXT scene;
 
 layout(set = 4, binding = 1) uniform samplerCube prefilterMap;
 
-const uint TYPE_DIFFUSE = 0u;
+const uint TYPE_GLTF = 0u;   // the surface's glTF material (no slot names it)
 const uint TYPE_CONDUCTOR = 1u;
 const uint TYPE_GRATING = 2u;
 const uint TYPE_FILM = 3u;
@@ -103,9 +103,19 @@ vec2 gaussian2() {
 
 // ── Materials ────────────────────────────────────────────────────────────
 
+// A glTF material (TYPE_GLTF) is its metallic-roughness model made physical:
+// a GGX interface whose reflection is, by `metallic`, that of a metal or of
+// a dielectric of index `ior`; under the dielectric, a diffuse base of colour
+// `albedo` takes the light the interface lets through. The metal's complex
+// index comes from its base colour (Gulbrandsen 2014, the colour as both
+// reflectivity and edge tint). `film` blends in a thin film on the interface
+// (KHR_materials_iridescence).
 struct Material {
     uint type;
     vec3 albedo;
+    float metallic;
+    float ior;
+    float film;            // amount of the thin film, 0 to 1
     int metal;             // 0 gold, 1 silver, 2 copper, 3 aluminium; -1 none
     float roughness;
     float pitch;           // grating period, micrometres
@@ -118,8 +128,13 @@ struct Material {
 
 Material materialOf(SkHit hit) {
     Material m;
-    m.type = TYPE_DIFFUSE;
+    m.type = TYPE_GLTF;
     m.albedo = hit.baseColor;
+    m.metallic = hit.metallic;
+    m.ior = hit.ior;
+    m.film = hit.iridescence;
+    m.filmIndex = hit.filmIor;
+    m.filmThickness = hit.filmThickness * 1e-3;
     m.metal = -1;
     m.roughness = hit.roughness;
     for (int i = 0; i < 8; ++i) {
@@ -135,6 +150,7 @@ Material materialOf(SkHit hit) {
         m.filmThickness = b.w;
         m.center = c.xyz;
         m.substrateIndex = c.w;
+        m.film = m.type == TYPE_FILM ? 1.0 : 0.0;
     }
     return m;
 }
@@ -153,32 +169,78 @@ vec2 substrateIor(Material m, float lambda) {
     return m.metal >= 0 ? metalIor(m.metal, lambda) : vec2(m.substrateIndex, 0.0);
 }
 
-// The reflection Mueller matrix (s-p frame) of a surface's interface for
-// light arriving at cosine cosI, coherent over sigma micrometres.
-mat4 interfaceMueller(Material m, float cosI, float lambda, float sigma) {
-    if (m.type != TYPE_FILM) {
-        Fresnel f = fresnel(vec2(1.0, 0.0), metalIor(max(m.metal, 0), lambda), cosI);
-        return muellerFromAmplitudes(f.rs, f.rp);
-    }
-    // A film over a substrate: the reflection from its top, and the one from
-    // its bottom, delayed by the optical path through the film. Coherently
-    // they interfere; their fringes are as visible as the light is coherent
-    // across the lateral shear between them (Steinberg & Yan 2021, Eq. 18).
-    vec2 n1 = vec2(m.filmIndex, 0.0);
+// The complex index of a metal of reflectivity r and edge tint g at normal
+// incidence (Gulbrandsen, "Artist Friendly Metallic Fresnel", JCGT 2014).
+vec2 artistMetalIor(float r, float g) {
+    r = clamp(r, 0.0, 0.99);
+    float sr = sqrt(r);
+    float n = g * (1.0 - r) / (1.0 + r) + (1.0 - g) * (1.0 + sr) / (1.0 - sr);
+    float k2 = ((n + 1.0) * (n + 1.0) * r - (n - 1.0) * (n - 1.0)) / (1.0 - r);
+    return vec2(n, sqrt(max(k2, 0.0)));
+}
+
+// The reflection Mueller matrix (s-p frame) of an interface onto a substrate
+// of complex index `substrate`, for light arriving at cosine cosI, coherent
+// over sigma micrometres, with `film` of a thin film of index filmIndex and
+// thickness micrometres on it.
+mat4 reflectionMueller(vec2 substrate, float film, float filmIndex, float thickness, float cosI, float lambda,
+                       float sigma) {
+    Fresnel f = fresnel(vec2(1.0, 0.0), substrate, cosI);
+    mat4 plain = muellerFromAmplitudes(f.rs, f.rp);
+    if (film <= 0.0) return plain;
+    // A film over the substrate: the reflection from its top, and the one
+    // from its bottom, delayed by the optical path through the film.
+    // Coherently they interfere; their fringes are as visible as the light is
+    // coherent across the lateral shear between them (Steinberg & Yan 2021,
+    // Eq. 18).
+    vec2 n1 = vec2(filmIndex, 0.0);
     Fresnel top = fresnel(vec2(1.0, 0.0), n1, cosI);
     float cos1 = max(top.cosT.x, 1e-4);
-    Fresnel bottom = fresnel(n1, substrateIor(m, lambda), cos1);
+    Fresnel bottom = fresnel(n1, substrate, cos1);
     Fresnel back = fresnel(n1, vec2(1.0, 0.0), cos1);
     float k = 2.0 * PI / (lambda * 1e-3);
-    vec2 delay = cexpi(2.0 * k * m.filmIndex * m.filmThickness * cos1);
+    vec2 delay = cexpi(2.0 * k * filmIndex * thickness * cos1);
     vec2 rs2 = cmul(cmul(cmul(top.ts, bottom.rs), back.ts), delay);
     vec2 rp2 = cmul(cmul(cmul(top.tp, bottom.rp), back.tp), delay);
     float sin1 = sqrt(max(0.0, 1.0 - cos1 * cos1));
-    float shear = 2.0 * m.filmThickness * sin1 / cos1 * cosI;
+    float shear = 2.0 * thickness * sin1 / cos1 * cosI;
     float visibility = exp(-0.5 * shear * shear / max(sigma * sigma, 1e-12));
     mat4 together = muellerFromAmplitudes(top.rs + rs2, top.rp + rp2);
     mat4 apart = muellerFromAmplitudes(top.rs, top.rp) + muellerFromAmplitudes(rs2, rp2);
-    return visibility * together + (1.0 - visibility) * apart;
+    mat4 filmed = visibility * together + (1.0 - visibility) * apart;
+    return film >= 1.0 ? filmed : (1.0 - film) * plain + film * filmed;
+}
+
+// The reflection of a glTF material's dielectric part: its interface onto
+// the index `ior`, with its film.
+mat4 dielectricMueller(Material m, float cosI, float lambda, float sigma) {
+    return reflectionMueller(vec2(m.ior, 0.0), m.film, m.filmIndex, m.filmThickness, cosI, lambda, sigma);
+}
+
+// The reflection Mueller matrix of a surface's interface for light arriving
+// at cosine cosI, coherent over sigma micrometres.
+mat4 interfaceMueller(Material m, float cosI, float lambda, float sigma) {
+    if (m.type == TYPE_GLTF) {
+        mat4 result = mat4(0.0);
+        if (m.metallic > 0.0) {
+            float r = rgbToSpectrum(m.albedo, lambda);
+            result += m.metallic * reflectionMueller(artistMetalIor(r, r), m.film, m.filmIndex, m.filmThickness,
+                                                     cosI, lambda, sigma);
+        }
+        if (m.metallic < 1.0) result += (1.0 - m.metallic) * dielectricMueller(m, cosI, lambda, sigma);
+        return result;
+    }
+    vec2 substrate = m.type == TYPE_FILM ? substrateIor(m, lambda) : metalIor(max(m.metal, 0), lambda);
+    return reflectionMueller(substrate, m.film, m.filmIndex, m.filmThickness, cosI, lambda, sigma);
+}
+
+// The diffuse base of a glTF material at a wavelength, for light that
+// crosses its interface at cosine cosI: the base colour, times the share of
+// the dielectric part, times what the interface lets through.
+float diffuseWeight(Material m, float cosI, float lambda, float sigma) {
+    if (m.type != TYPE_GLTF || m.metallic >= 1.0) return 0.0;
+    float through = 1.0 - dielectricMueller(m, max(cosI, 1e-4), lambda, sigma)[0][0];
+    return (1.0 - m.metallic) * rgbToSpectrum(m.albedo, lambda) * max(through, 0.0);
 }
 
 // GGX, of alpha = roughness^2, with Smith masking.
@@ -224,12 +286,6 @@ Response evaluate(Material m, vec3 N, vec3 position, vec3 wi, vec3 wo, float lam
     float cosI = dot(N, wi), cosO = dot(N, wo);
     if (cosI <= 0.0 || cosO <= 0.0) return r;
 
-    if (m.type == TYPE_DIFFUSE) {
-        float albedo = rgbToSpectrum(m.albedo, lambda);
-        r.mueller = mat4(0.0);
-        r.mueller[0][0] = albedo / PI * cosI;
-        return r;
-    }
     float cosH = max(dot(wi, h), 1e-4);
     mat4 fresnelMueller = interfaceMueller(m, cosH, lambda, sigma);
 
@@ -262,6 +318,8 @@ Response evaluate(Material m, vec3 N, vec3 position, vec3 wi, vec3 wo, float lam
     float D = ggxD(alpha, dot(N, h));
     float G = smithG1(alpha, cosI) * smithG1(alpha, cosO);
     r.mueller = fresnelMueller * (D * G / (4.0 * cosO));
+    // A glTF material's diffuse base, which depolarises.
+    r.mueller[0][0] += diffuseWeight(m, cosI, lambda, sigma) / PI * cosI;
     return r;
 }
 
@@ -312,9 +370,9 @@ bool sampleLight(uint i, vec3 P, out LightSample s) {
     return falloff > 1e-5;
 }
 
-// The environment, sharp or (behind a diffuse bounce) blurred.
-vec3 environmentRgb(vec3 direction, bool blurred) {
-    float lod = blurred ? 0.6 * float(textureQueryLevels(prefilterMap) - 1) : 0.0;
+// The environment, prefiltered for a roughness of `blur` (0 sharp).
+vec3 environmentRgb(vec3 direction, float blur) {
+    float lod = blur * float(textureQueryLevels(prefilterMap) - 1);
     return textureLod(prefilterMap, direction, lod).rgb * settings.environmentIntensity;
 }
 
@@ -363,6 +421,10 @@ vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float
     vec4 rows[4] = vec4[4](row0, row0, row0, row0);
     bool heroOnly = false;
     bool diffuseSeen = false;   // the path has bounced off a diffuse surface
+    // The environment is read prefiltered for the roughest lobe the path has
+    // come through (0.6 for a diffuse bounce), which blurs the sky's sun that
+    // rough lobes would otherwise only reach by chance.
+    float skyBlur = 0.0;
     firstSigma = 0.0;
     // The lamp: the first point or spot light.
     uint count = min(lights.lightCount, uint(sceneLights.length()));
@@ -376,7 +438,7 @@ vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float
         rayQueryInitializeEXT(query, scene, gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, direction, RAY_FAR);
         while (rayQueryProceedEXT(query)) {}
         if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
-            vec4 sky = rgbToSpectrum4(environmentRgb(direction, diffuseSeen), lambdas);
+            vec4 sky = rgbToSpectrum4(environmentRgb(direction, skyBlur), lambdas);
             for (int j = 0; j < 4; ++j) radiance[j] += rows[j].x * sky[j];
             break;
         }
@@ -430,17 +492,29 @@ vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float
         float cosO = dot(N, wo);
         vec3 wi;
         vec4 scale;   // the sample's weight at each wavelength, without the Mueller matrix
-        if (m.type == TYPE_DIFFUSE) {
+        float sigmaIndirect = coherenceWidth(lambdas.x * 1e-3, radians(settings.indirectAngle));
+        // A glTF material continues off its interface or through to its
+        // diffuse base, picked by how much its interface reflects.
+        float specularShare = 1.0;
+        if (m.type == TYPE_GLTF && m.metallic < 1.0) {
+            float reflected = dielectricMueller(m, max(cosO, 1e-4), lambdas.x, sigmaIndirect)[0][0];
+            specularShare = clamp(m.metallic + (1.0 - m.metallic) * reflected, 0.1, 0.9);
+        }
+        if (random() >= specularShare) {
             vec3 t, b;
             basis(N, t, b);
             float u = random(), phi = 2.0 * PI * random();
             wi = t * (sqrt(u) * cos(phi)) + b * (sqrt(u) * sin(phi)) + N * sqrt(1.0 - u);
             if (dot(Ng, wi) <= 0.0) break;
+            float cosI = dot(N, wi);
             for (int j = 0; j < 4; ++j) {
-                float albedo = rgbToSpectrum(m.albedo, lambdas[j]);
-                rows[j] = vec4(rows[j].x * albedo, 0.0, 0.0, 0.0);   // depolarising
+                if (heroOnly && j > 0) break;
+                float sigma = coherenceWidth(lambdas[j] * 1e-3, radians(settings.indirectAngle));
+                float weight = diffuseWeight(m, cosI, lambdas[j], sigma) / (1.0 - specularShare);
+                rows[j] = vec4(rows[j].x * weight, 0.0, 0.0, 0.0);   // depolarising
             }
             diffuseSeen = true;
+            skyBlur = max(skyBlur, 0.6);
             vec3 t2, b2;
             basis(-wi, t2, b2);
             frameX = t2;
@@ -496,7 +570,8 @@ vec4 tracePath(vec3 origin, vec3 direction, vec3 frameX, vec4 lambdas, out float
                 wi = reflect(-wo, h);
                 float cosI = dot(N, wi);
                 if (cosI <= 0.0) break;
-                scale = vec4(smithG1(alpha, cosI));   // the visible-normal sampling leaves G1 of wi
+                scale = vec4(smithG1(alpha, cosI) / specularShare);   // the visible-normal sampling leaves G1 of wi
+                skyBlur = max(skyBlur, m.roughness);
             }
             if (dot(Ng, wi) <= 0.0) break;
             vec3 h = normalize(wi + wo);
