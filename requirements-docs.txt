@@ -1,0 +1,2 @@
+# The site is independent of the native engine and Python extension.
+mkdocs==1.6.1

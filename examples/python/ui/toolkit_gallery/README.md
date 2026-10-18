@@ -1,6 +1,13 @@
 # Toolkit gallery
 
-Run from the repository root after rebuilding the Python extension:
+Run with the installed `shoonyakasha` package, like the other Python examples.
+From this directory:
+
+```sh
+python toolkit_gallery.py
+```
+
+Or from the repository root:
 
 ```sh
 python examples/python/ui/toolkit_gallery/toolkit_gallery.py

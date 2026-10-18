@@ -1,6 +1,7 @@
 # Driven oscillator lesson
 
-Run from the repository root after rebuilding the Python extension:
+Run with the installed `shoonyakasha` package, like the other Python examples.
+From this directory, run `python oscillator.py`. From the repository root:
 
 ```sh
 python examples/python/simulations/oscillator/oscillator.py

@@ -3,9 +3,6 @@ import argparse
 from collections import deque
 import math
 from pathlib import Path
-import sys
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "python"))
 from shoonyakasha.toolkit.app import Application, Screen
 from shoonyakasha.toolkit import ui
 from shoonyakasha.toolkit.state import Parameter, ParameterSet

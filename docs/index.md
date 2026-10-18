@@ -1,9 +1,16 @@
 # Shoonyakasha documentation
 
-Build C++ or Python applications with JSON-defined Vulkan rendering. Begin with a working example, then use the guides to change one subsystem at a time. Current behavior is documented here; APIs are still evolving.
+Shoonyakasha is a C++20 Vulkan engine with Python bindings and JSON-defined render pipelines. Build an application through the facade, author rendering passes in JSON, or extend the native renderer.
+
+**New to the engine?** [Choose your learning path](getting-started/index.md), then follow the [C++ quickstart](getting-started/cpp-quickstart.md) or [Python quickstart](getting-started/python-quickstart.md).
+
+![Shared geometry and independent transforms in the C++ instancing example](images/examples/cpp/instancing_test.png)
+
+Current behavior is documented here; the engine is in early development and APIs are still evolving. Use docs from the same revision as your checkout.
 
 ## Start here
 
+- [Choose your path](getting-started/index.md): C++ applications, Python applications, or engine development.
 - [Prerequisites](getting-started/prerequisites.md) and [build/install guide](../BUILDING.md).
 - [Python quickstart](getting-started/python-quickstart.md): generate and run a starter.
 - [C++ quickstart](getting-started/cpp-quickstart.md): build and run the facade example.

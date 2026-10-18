@@ -86,6 +86,8 @@ For C++, build and run `FacadeTest` following the [C++ quickstart](docs/getting-
 
 ## Documentation and examples
 
+- [Documentation website](https://maximilian-winter.github.io/Shoonyakasha/) (available after the first GitHub Pages deployment), with search and a structured sidebar. [Choose your path](docs/getting-started/index.md) for C++, Python, or engine development.
+- Preview locally with `python -m pip install -r requirements-docs.txt` and `python -m mkdocs serve`. See [documentation maintenance](docs/maintenance.md) for an isolated environment and publishing setup.
 - [Python application and content toolkit](docs/guides/python-toolkit.md): compose UI, plot live data, replay simulations and export lessons as video.
 
 - [Documentation index](docs/index.md): guides, C++/Python references, and architecture.

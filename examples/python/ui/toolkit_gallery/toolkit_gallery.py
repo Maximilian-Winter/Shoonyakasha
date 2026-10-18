@@ -1,11 +1,8 @@
-"""Run from the repository root, with the rebuilt Python extension installed."""
+"""Run with the shoonyakasha package installed, like the other examples."""
 import argparse
 from dataclasses import replace
 import math
 from pathlib import Path
-import sys
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "python"))
 import shoonyakasha as sk
 from shoonyakasha.toolkit.app import Application, Context, Screen
 from shoonyakasha.toolkit import ui

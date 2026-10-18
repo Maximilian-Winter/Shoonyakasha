@@ -1,0 +1,141 @@
+site_name: Shoonyakasha
+site_description: Build and extend a C++20 Vulkan engine with JSON render pipelines and Python bindings.
+site_url: https://maximilian-winter.github.io/Shoonyakasha/
+repo_url: https://github.com/Maximilian-Winter/Shoonyakasha
+repo_name: GitHub
+edit_uri: edit/master/
+copyright: Shoonyakasha contributors · Engine code licensed under MIT
+
+theme:
+  name: readthedocs
+  locale: en
+  logo: images/logo.png
+  navigation_depth: 4
+  collapse_navigation: true
+  sticky_navigation: true
+  titles_only: true
+  highlightjs: true
+  hljs_languages:
+    - cpp
+    - cmake
+    - glsl
+    - json
+    - python
+    - powershell
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - fenced_code
+  - toc:
+      permalink: true
+
+hooks:
+  - tools/docs_site.py
+
+watch:
+  - BUILDING.md
+  - examples/README.md
+  - assets/README.md
+  - logo.png
+
+extra:
+  source_branch: master
+
+extra_css:
+  - stylesheets/extra.css
+
+# Keep design history in GitHub, out of current navigation and search results.
+exclude_docs: |
+  /old/
+  /plans/
+  /reviews/
+  /images/examples/README.md
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+
+nav:
+  - Home: index.md
+  - Get started:
+      - Choose your path: getting-started/index.md
+      - Prerequisites: getting-started/prerequisites.md
+      - Build and install: getting-started/building.md
+      - C++ quickstart: getting-started/cpp-quickstart.md
+      - Python quickstart: getting-started/python-quickstart.md
+      - Troubleshooting: faq.md
+  - Guides:
+      - Scenes and gameplay:
+          - Entities and components: guides/entities-and-components.md
+          - Loading scenes: guides/loading-scenes.md
+          - Geometry sharing and instancing: guides/instancing.md
+          - Cameras and controllers: guides/cameras-and-controllers.md
+          - Materials: guides/materials.md
+          - Lighting and IBL: guides/lighting-and-ibl.md
+          - Animation: guides/animation.md
+          - Physics: guides/physics.md
+          - Scene serialization: guides/scene-serialization.md
+      - Rendering and GPU data:
+          - Default render pipeline: guides/default-pipeline.md
+          - Author a JSON pipeline: guides/json-render-pipeline.md
+          - Custom shader uniforms: guides/custom-shader-uniforms.md
+          - Compute and data flow: guides/compute-and-data-flow.md
+          - Render statistics: guides/render-stats.md
+          - Frame and video capture: guides/frame-capture.md
+      - UI and Python applications:
+          - Canvas UI: guides/canvas-ui.md
+          - Sprites, UI and text: guides/sprites-ui-text.md
+          - Python script ECS: guides/script-ecs.md
+          - Python application toolkit: guides/python-toolkit.md
+  - Examples:
+      - Catalog: examples/index.md
+      - C++ examples: examples/cpp-examples.md
+      - Python examples: examples/python-examples.md
+      - Assets and licenses: reference/assets.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Facade pattern: architecture/facade-pattern.md
+      - ECS design: architecture/ecs-design.md
+      - Frame graph and pipeline: architecture/frame-graph-pipeline.md
+      - Cython bridge: architecture/cython-bridge.md
+      - Philosophy: philosophy.md
+  - Reference:
+      - Pipeline JSON: reference/pipeline-json.md
+      - C++ facade:
+          - EngineAPI: api/cpp/engine-api.md
+          - SceneAPI: api/cpp/scene-api.md
+          - InputAPI: api/cpp/input-api.md
+          - PhysicsAPI: api/cpp/physics-api.md
+          - EcsAPI: api/cpp/ecs-api.md
+          - UIAPI: api/cpp/ui-api.md
+      - C++ internals:
+          - ApplicationBase: api/cpp/application-base.md
+          - ECS components: api/cpp/ecs-components.md
+          - Frame graph: api/cpp/frame-graph.md
+          - GPU types and ownership: api/cpp/gpu-types.md
+          - glTF loader: api/cpp/gltf-loader.md
+          - IBL generator: api/cpp/ibl-generator.md
+      - Python:
+          - Engine: api/python/engine.md
+          - Scene: api/python/scene.md
+          - Input: api/python/input.md
+          - Physics: api/python/physics.md
+          - Ecs: api/python/ecs.md
+          - UI: api/python/ui.md
+          - glTF results: api/python/gltf-result.md
+          - Constants: api/python/constants.md
+          - Utilities: api/python/utilities.md
+  - Contributing:
+      - Documentation workflow: maintenance.md
+      - Refresh audit: audit.md
+      - Historical archive: archive.md

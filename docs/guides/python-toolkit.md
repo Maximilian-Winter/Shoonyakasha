@@ -5,6 +5,10 @@ plots, playback, lessons and video export inside the Python package. It requires
 no additional Python dependencies. Rebuild the native extension after updating:
 retained geometry, widget styling and `engine.request_quit()` are new native APIs.
 
+The examples import the installed `shoonyakasha` package, like the existing
+examples. They run from their own directories or the repository root without
+overriding Python's package search path.
+
 ## Existing callbacks
 
 ```python

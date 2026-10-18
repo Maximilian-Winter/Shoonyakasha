@@ -65,6 +65,8 @@ __pycache__/
 /build/
 *.egg-info/
 /.venv
+/.venv-docs/
+/site/
 /python/shoonyakasha/vulkan-1.dll
 /python/shoonyakasha/glfw3.dll
 /python/shoonyakasha/harfbuzz.dll
