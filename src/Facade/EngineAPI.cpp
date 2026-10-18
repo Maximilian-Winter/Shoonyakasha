@@ -654,6 +654,7 @@ bool EngineAPI::startRecording(const std::string& path, const RecordingOptions& 
     engineOptions.quality = options.quality;
     engineOptions.codec = options.codec;
     engineOptions.ffmpegPath = options.ffmpegPath;
+    engineOptions.fixedStep = options.fixedStep;
     return m_impl->app->startRecording(path, engineOptions);
 }
 

@@ -63,7 +63,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_environment(path)` | bool | Light the scene with an HDR environment map, or an .ibl file made by bake_environment. An HDR map's lighting is saved beside it (sky.hdr.ibl, unless ibl_cache=False) and loaded from there while the map is unchanged. From on_init on. Returns False, keeping the current environment, when it cannot be loaded. |
 | `set_environment_color(color)` | bool | An environment of one colour, (r, g, b) linear, in every direction. |
 | `bake_environment(hdr_path, output_path)` | bool | Write the lighting of an HDR map to an .ibl file to ship with an application, without changing the scene's environment. From on_init on. Returns True on success. |
-| `start_recording(path, fps=30, quality=18, codec="libx264", ffmpeg_path="")` | bool | Record every presented frame to a video file. |
+| `start_recording(path, fps=30, quality=18, codec="libx264", ffmpeg_path="", fixed_step=False)` | bool | Record every presented frame to a video file. |
 | `stop_recording()` | bool | Finish the recording and finalise the file. |
 | `recording_paused (read/write property)` | bool | While True, presented frames are not written to the recording. |
 | `render_scale (read/write property)` | float | The scene renders at the window's size times this, scaled to the window when it is shown. |

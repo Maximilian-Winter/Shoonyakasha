@@ -192,6 +192,9 @@ struct RecordingOptions {
     std::string codec = "libx264";
     /// Empty searches $FFMPEG, then PATH, then the usual install locations.
     std::string ffmpegPath;
+    /// While recording, every frame advances the clock by exactly 1/fps, so
+    /// the video plays motion at its own speed however fast frames render.
+    bool fixedStep = false;
 };
 
 // ═══════════════════════════════════════════════════════════════

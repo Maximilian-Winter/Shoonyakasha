@@ -1844,19 +1844,23 @@ cdef class Engine:
         return self._ptr.bakeEnvironment(hdr_path.encode("utf-8"), output_path.encode("utf-8"))
 
     def start_recording(self, str path, int fps=30, int quality=18,
-                        str codec="libx264", str ffmpeg_path=""):
+                        str codec="libx264", str ffmpeg_path="", bint fixed_step=False):
         """Record every presented frame to a video file.
 
         The container follows the extension -- .mkv, .mp4, .webm. Needs ffmpeg
         on PATH or in $FFMPEG; see shoonyakasha.video_recording_available().
 
         quality is x264's CRF: 0 lossless, 18 visually lossless, 51 worst.
+        With fixed_step, every frame passes exactly 1/fps seconds as its dt
+        until the recording stops, so the video plays motion at its own
+        speed however fast the frames render.
         """
         cdef RecordingOptions opts
         opts.fps = fps
         opts.quality = quality
         opts.codec = codec.encode("utf-8")
         opts.ffmpegPath = ffmpeg_path.encode("utf-8")
+        opts.fixedStep = fixed_step
         return self._ptr.startRecording(path.encode("utf-8"), opts)
 
     def stop_recording(self):

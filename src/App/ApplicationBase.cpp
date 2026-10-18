@@ -576,6 +576,9 @@ void ApplicationBase::update() {
     m_deltaTime = std::chrono::duration<float>(currentTime - m_lastFrameTime).count();
     m_lastFrameTime = currentTime;
     m_deltaTime = std::min(m_deltaTime, 0.1f);  // Clamp to prevent physics explosion
+    if (m_recordingStep > 0.0f && m_videoRecorder.isRecording()) {
+        m_deltaTime = m_recordingStep;
+    }
 
     m_inputHandler->beginFrame();
 
@@ -822,6 +825,7 @@ bool ApplicationBase::startRecording(const std::string& path,
                       m_videoRecorder.lastError().c_str());
         return false;
     }
+    m_recordingStep = options.fixedStep && options.fps > 0 ? 1.0f / static_cast<float>(options.fps) : 0.0f;
 
     m_logger->log(LogLevel::Info, "Recording %ux%u at %d fps to '%s' via %s",
                   extent.width, extent.height, options.fps, path.c_str(),

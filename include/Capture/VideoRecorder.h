@@ -37,6 +37,11 @@ struct VideoRecorderOptions {
 
     /// Extra arguments inserted before the output path.
     std::string extraArgs;
+
+    /// ApplicationBase::startRecording: while this recording runs, every frame
+    /// advances the application clock by exactly 1/fps, so the video plays
+    /// motion at its own speed however fast the frames render.
+    bool fixedStep = false;
 };
 
 class VideoRecorder {

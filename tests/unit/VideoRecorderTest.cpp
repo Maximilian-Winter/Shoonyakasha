@@ -65,6 +65,15 @@ TEST(VideoRecorderCommand, CarriesTheRequestedEncodingOptions) {
     EXPECT_TRUE(contains(args, "-c:v libx265")) << args;
 }
 
+TEST(VideoRecorderCommand, FixedStepLeavesTheCommandAlone) {
+    // fixedStep sets the application's clock; the stream is the same either way.
+    VideoRecorder::Options fixed;
+    fixed.fixedStep = true;
+
+    EXPECT_EQ(argumentsFor(1920, 1080, fixed), argumentsFor());
+    EXPECT_FALSE(VideoRecorder::Options{}.fixedStep);
+}
+
 TEST(VideoRecorderCommand, EncodesToSomethingPlayersAccept) {
     EXPECT_TRUE(contains(argumentsFor(), "-pix_fmt yuv420p"));
     EXPECT_TRUE(contains(argumentsFor(), "-an"));  // no audio stream

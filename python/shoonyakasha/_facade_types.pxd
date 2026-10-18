@@ -119,6 +119,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         int quality
         string codec
         string ffmpegPath
+        cbool fixedStep
 
     cdef cppclass GltfOptions:
         cbool loadTextures

@@ -22,6 +22,12 @@ bool finished = engine.stopRecording();
 
 Check the booleans and application log for failures. Recording is also finalized at shutdown. Python `is_recording` and `recorded_frame_count` are properties; C++ uses `isRecording()` and `getRecordedFrameCount()`.
 
+With `fixed_step=True` (C++ `options.fixedStep = true`), every frame passes exactly 1/fps seconds as its delta time until the recording stops, so animation, particles, physics and update callbacks advance one video frame per rendered frame, and the clip plays at its own speed however fast or slowly it renders.
+
+```python
+engine.start_recording("clip.mp4", fps=30, fixed_step=True)
+```
+
 While `recording_paused` (C++ `setRecordingPaused`) is set, presented frames are not written. Set it from the update callback to render several frames for each recorded one: the [showroom](../../examples/python/rendering/showroom/README.md) averages eight sub-frames into each frame of its videos for motion blur, writing only the last.
 
 ## Supersampling

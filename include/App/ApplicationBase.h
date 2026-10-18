@@ -249,7 +249,8 @@ protected:
 
     /// Begin recording every presented frame. The container follows the
     /// extension — .mkv, .mp4, .webm. Needs ffmpeg on PATH or in $FFMPEG;
-    /// returns false and logs why if it is missing.
+    /// returns false and logs why if it is missing. With options.fixedStep,
+    /// each frame advances getDeltaTime() by 1/fps until the recording stops.
     bool startRecording(const std::string& path,
                         const VideoRecorder::Options& options = {});
 
@@ -338,6 +339,7 @@ private:
     // ─── Frame Capture ─────────────────────────────────────────
     VideoRecorder m_videoRecorder;
     bool m_recordingPaused = false;
+    float m_recordingStep = 0.0f;     ///< seconds per frame while recording; 0: wall clock
     float m_renderScale = 1.0f;
     bool m_renderScaleChanged = false;
     // Index of the swapchain image most recently handed to vkQueuePresentKHR.
