@@ -190,4 +190,6 @@ class CaptureEngine:
 sk.Engine = CaptureEngine
 script = sys.argv[1]
 sys.argv = [script] + sys.argv[2:]
+# As `python script.py` does: the script's directory first on the import path.
+sys.path[0] = os.path.dirname(os.path.abspath(script))
 runpy.run_path(script, run_name="__main__")

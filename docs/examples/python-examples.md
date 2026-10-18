@@ -21,7 +21,8 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [rendering/restir_gi](../../examples/python/rendering/restir_gi) | `python restir_gi.py` | Kajiya's ray-traced diffuse GI on its own pipeline: half resolution diffuse rays reused through temporal and spatial ReSTIR reservoirs, validated every third frame, resolved with a near-field split and filtered, with the irradiance cache beyond the first bounce; each stage can be switched off |
 | [rendering/rt_reflections](../../examples/python/rendering/rt_reflections) | `python rt_reflections.py` | Kajiya's ray-traced reflections on top of its diffuse GI: half resolution GGX rays reused through temporal ReSTIR and validated, resolved with a ratio estimator over a lobe-shaped kernel, filtered with surface and reflection reprojection |
 | [rendering/wave_optics](../../examples/python/rendering/wave_optics) | `python wave_optics.py` | A spectral, polarised path tracer on its own pipeline in which a compact disc's rainbows and a thin film's colours depend on the coherence of the light, set by the lamp's size and distance; lamp spectra from a bulb to sodium and mercury lines, measured metals, a polariser in front of the camera |
-| [rendering/gold](../../examples/python/rendering/gold) | `python gold.py` | Why gold is gold: spheres of four metals on the wave optics pipeline beside plots of their reflectance and refractive indices, with a wavelength cursor |
+| [rendering/optics](../../examples/python/rendering/optics) | `python gold.py` | Why gold is gold: spheres of four metals on the wave optics pipeline beside plots of their reflectance and refractive indices, with a wavelength cursor |
+| [rendering/optics](../../examples/python/rendering/optics) | `python brewster.py` | Brewster's angle: a glass slab whose reflection a polariser on the camera takes away, beside the reflectance of s and p light against the angle of incidence |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -193,7 +194,19 @@ Polished spheres of gold, copper, silver and aluminium on the wave optics pipeli
 
 **V** renders the light at the cursor's wavelength alone, in grey.
 
-Needs a GPU with ray queries. See the [example's README](../../examples/python/rendering/gold/README.md).
+Needs a GPU with ray queries. See the [example's README](../../examples/python/rendering/optics/README.md#why-gold-is-gold).
+
+### Brewster's angle (`brewster`)
+
+<a href="../images/examples/python/brewster.png"><img src="../images/examples/python/brewster.png" alt="A glass slab over a mosaic of coloured tiles at Brewster's angle, its reflection removed by a vertical polariser, beside a panel plotting the reflectance of s and p light against the angle of incidence" width="720"></a>
+
+1024 paths per pixel at Brewster's angle for glass, with the polariser at 90°.
+
+A glass slab over coloured tiles on the wave optics pipeline, with a lamp where the glass reflects it into the camera. The glass reflects with the Fresnel equations as Mueller matrices, and a polariser in front of the camera turns. At Brewster's angle the reflection is wholly s-polarised, and a vertical polariser removes it. The panel plots:
+- **Rs and Rp** against the angle of incidence for water, glass or diamond, with Brewster's angle marked.
+- **A cursor** at the camera's angle of incidence, with the reflected light that reaches the camera with and without the polariser.
+
+**B** goes to Brewster's angle, **T** turns the polariser on and off. Needs a GPU with ray queries. See the [example's README](../../examples/python/rendering/optics/README.md#brewsters-angle).
 
 ### Japanese shrine (`japanese_shrine`)
 
