@@ -36,6 +36,15 @@ vec3 spectrumToRgb(vec4 radiance, vec4 lambdas) {
     return toRgb * xyz / vec3(128.3627, 101.5486, 97.0496);
 }
 
+// The colour of light of one wavelength in linear sRGB at full saturation,
+// its largest component 1: the hue of the colour matching functions there,
+// that of 420 or 660 nm beyond them.
+vec3 wavelengthHue(float lambda) {
+    mat3 toRgb = mat3(3.2406, -0.9689, 0.0557, -1.5372, 1.8758, -0.2040, -0.4986, 0.0415, 1.0570);
+    vec3 rgb = max(toRgb * cieXyz(clamp(lambda, 420.0, 660.0)), vec3(0.0));
+    return rgb / max(max(rgb.r, rgb.g), max(rgb.b, 1e-6));
+}
+
 // The value at a wavelength of the spectrum an RGB colour stands for.
 float rgbToSpectrum(vec3 rgb, float lambda) {
     float blue = 1.0 - smoothstep(470.0, 530.0, lambda);

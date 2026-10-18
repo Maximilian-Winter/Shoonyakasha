@@ -6,13 +6,14 @@ the wave optics example's spectral pipeline from each metal's measured
 complex refractive index n + ik. A panel plots each metal's reflectance at
 normal incidence, and the n and k of one of them, from the same tables the
 renderer reads, with a wavelength cursor that reads off n, k and the
-reflectance of each metal there. The single wavelength view renders the
-light at the cursor's wavelength alone, in grey.
+reflectance of each metal there. The scene is lit by white light, or by
+light of the cursor's wavelength alone, shown in its colour; moving the
+cursor switches to the latter.
 
 Keys:
     WASD/Q/E + right mouse   fly the camera; moving starts the average over
-    Left / Right             move the wavelength cursor by 5 nm
-    V                        the full spectrum / the cursor's wavelength alone
+    Left / Right             move the wavelength cursor by 5 nm, in light of that wavelength
+    V                        white light / light of the cursor's wavelength
     M                        plot n and k of the next metal
     R                        start the average over
     F2                       hide or show the panel
@@ -21,7 +22,7 @@ Keys:
 Usage:
     python gold.py
     python gold.py --metal copper --wavelength 560
-    python gold.py --single --wavelength 450           # the light at 450 nm alone
+    python gold.py --single --wavelength 450           # light of 450 nm alone
     python gold.py --samples 512 --screenshot out.png   # converge, save, quit
 
 Requirements:
@@ -68,6 +69,7 @@ EYE = (0.82, 0.78, 3.7)
 TARGET = (0.82, 0.30, 0.0)
 FOV = 40.0
 LAMP = (1.6, 2.6, 2.4)
+SINGLE_EXPOSURE = 0.5
 
 parser = argparse.ArgumentParser(description="Why gold is gold", formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog=__doc__)
@@ -75,7 +77,7 @@ parser.add_argument("--metal", choices=[m.lower() for m in METALS], default="gol
                     help="the metal whose n and k the panel plots")
 parser.add_argument("--wavelength", type=float, default=450.0, help="the cursor's wavelength in nm (380 to 780)")
 parser.add_argument("--single", action="store_true",
-                    help="render the light at the cursor's wavelength alone, in grey")
+                    help="start in light of the cursor's wavelength alone, shown in its colour")
 parser.add_argument("--roughness", type=float, default=0.04, help="GGX roughness of the spheres")
 parser.add_argument("--sky", type=float, default=0.4, help="intensity of the sky's light")
 parser.add_argument("--exposure", type=float, default=1.0, help="multiplies the image before the tone curve")
@@ -237,14 +239,9 @@ class Panel:
             self.nk_dots[metal] = (self.nk[metal].dot(CURVE[metal] + (1.0,)), self.nk[metal].dot((1, 1, 1, 1)))
         ui.create_text(column, "R = ((n - 1)² + k²) / ((n + 1)² + k²)", size=16, color=oc.TEXT)
 
-        row = ui.create_horizontal_layout(column, size=(0, 32), spacing=10)
-        ui.set_layout_child_sizing(row, expand_width=True)
-        self.wavelength_label = ui.create_text(row, "", size=18)
+        self.white_button, self.single_button = oc.button_row(ui, column, ["White light", "One wavelength"])
+        self.wavelength_label = ui.create_text(column, "", size=18)
         ui.set_rich_text(self.wavelength_label)
-        ui.set_text_align(self.wavelength_label, sk.TEXT_ALIGN_LEFT, sk.TEXT_ALIGN_MIDDLE)
-        self.single_button = ui.create_button(row, "Single wavelength", size=(190, 32))
-        ui.set_font_size(self.single_button, 15)
-        ui.set_layout_element(self.single_button, min=(190, 32), preferred=(190, 32), flexible=(0, 0))
         self.slider = ui.create_slider(column, min=LAMBDA_MIN, max=LAMBDA_MAX, value=self.wavelength, size=(0, 22))
         ui.set_accessible(self.slider, "Wavelength")
         self.readout = {}
@@ -273,13 +270,17 @@ class Panel:
         ui = engine.ui
         if ui.value_changed(self.slider):
             self.wavelength = ui.slider_value(self.slider)
+            self.single = True
         for metal, button in self.buttons.items():
             if ui.was_clicked(button):
                 self.metal = metal
+        if ui.was_clicked(self.white_button):
+            self.single = False
         if ui.was_clicked(self.single_button):
-            self.toggle_single()
+            self.single = True
         w = self.wavelength
         ui.set_slider_value(self.slider, w)
+        ui.set_color(self.white_button, oc.SURFACE if self.single else oc.ACCENT)
         ui.set_color(self.single_button, oc.ACCENT if self.single else oc.SURFACE)
 
         hue = oc.wavelength_colour(w) + (1.0,)
@@ -295,7 +296,8 @@ class Panel:
         for metal, button in self.buttons.items():
             ui.set_color(button, oc.ACCENT if metal == self.metal else oc.SURFACE)
 
-        self.texts.set(self.wavelength_label, "Wavelength   <b>%.0f nm</b>   %.2f eV" % (w, 1239.84 / w))
+        self.texts.set(self.wavelength_label, "Wavelength   <b>%.0f nm</b>   %.2f eV%s"
+                       % (w, 1239.84 / w, "   the scene in this light alone" if self.single else ""))
         for metal, cells in self.readout.items():
             n, k = ior(metal, w)
             texts = (NAMES[metal], "n  %.2f" % n, "k  %.2f" % k, "R  %.2f" % reflectance(n, k))
@@ -314,6 +316,7 @@ class Panel:
 
     def step(self, nanometres):
         self.wavelength = min(max(self.wavelength + nanometres, LAMBDA_MIN), LAMBDA_MAX)
+        self.single = True
 
     def next_metal(self):
         self.metal = ORDER[(ORDER.index(self.metal) + 1) % len(ORDER)]
@@ -359,6 +362,9 @@ class Controls:
             self.start_state = state
         self.panel.update(state != self.start_state)
         engine.set_custom_float("wo.wavelength", self.panel.wavelength if self.panel.single else 0.0)
+        # In light of one wavelength the exposure halves, which keeps the
+        # sky's reflections below the tone curve's shoulder.
+        engine.set_custom_float("wo.exposure", args.exposure * (SINGLE_EXPOSURE if self.panel.single else 1.0))
         self.accumulation.update(state + self.panel.key(), restart=self.pressed(keys.R))
 
 

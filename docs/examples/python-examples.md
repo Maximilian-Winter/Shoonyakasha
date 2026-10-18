@@ -192,7 +192,7 @@ Polished spheres of gold, copper, silver and aluminium on the wave optics pipeli
 - **n and k** of the selected metal.
 - **A wavelength cursor** (slider, or **Left** / **Right**) that reads off n, k and the reflectance of every metal.
 
-**V** renders the light at the cursor's wavelength alone, in grey.
+Moving the cursor lights the scene with its wavelength alone, shown in that colour, so each sphere is as bright as its reflectance there; **White light** returns to the full spectrum.
 
 Needs a GPU with ray queries. See the [example's README](../../examples/python/rendering/optics/README.md#why-gold-is-gold).
 

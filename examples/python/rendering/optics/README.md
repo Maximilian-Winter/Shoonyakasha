@@ -27,12 +27,12 @@ All episodes share these keys and options:
 
 ## Why gold is gold
 
-Four polished spheres of gold, copper, silver and aluminium, path traced from each metal's measured complex refractive index n + ik. A panel plots each metal's reflectance at normal incidence and the n and k of one of them, from the same tables the renderer reads, with a wavelength cursor that reads off n, k and the reflectance of every metal there. The single wavelength view renders the light at the cursor's wavelength alone.
+Four polished spheres of gold, copper, silver and aluminium, path traced from each metal's measured complex refractive index n + ik. A panel plots each metal's reflectance at normal incidence and the n and k of one of them, from the same tables the renderer reads, with a wavelength cursor that reads off n, k and the reflectance of every metal there. The scene is lit by white light, or by light of the cursor's wavelength alone; moving the cursor switches to the latter, so the spheres follow it.
 
 ```
 python gold.py
 python gold.py --metal copper --wavelength 560                  # copper's n and k, the cursor at 560 nm
-python gold.py --single --wavelength 450                        # the light at 450 nm alone
+python gold.py --single --wavelength 450                        # light of 450 nm alone
 python gold.py --samples 512 --screenshot out.png               # converge, save, quit
 ```
 
@@ -47,7 +47,7 @@ The panel reads `metals.glsl` and interpolates it linearly, as the shader does. 
 
 Below them, the cursor's wavelength and photon energy (1239.84 / λ eV), n, k and R of each metal there, and a note on the selected metal. The swatch on each metal's button is the sRGB colour of its normal reflectance under the flat spectrum, through the CIE 1931 fit the renderer uses.
 
-**Single wavelength.** With the **Single wavelength** button (or **V**, or `--single`), every path carries the cursor's wavelength alone (the pipeline's `wo.wavelength`), and the image shows the spectral radiance there in grey: 1 where a white surface would be under light of 1 at every wavelength. Moving the cursor starts the average over.
+**Light of one wavelength.** Moving the cursor, the **One wavelength** button, **V** or `--single` light the scene with the cursor's wavelength alone: every path carries that wavelength (the pipeline's `wo.wavelength`), and the image shows the spectral radiance there in the wavelength's colour, at half the exposure. Each sphere is then as bright as its reflectance at that wavelength: at 450 nm gold and copper reflect the sky dimly and silver and aluminium brightly; at 650 nm all four alike. **White light** returns to the full spectrum.
 
 The names under the spheres are placed for the starting camera and hide once it moves.
 
@@ -55,17 +55,17 @@ The names under the spheres are placed for the starting camera and hide once it 
 
 | Key | |
 |---|---|
-| **Left** / **Right** | Move the wavelength cursor by 5 nm |
-| **V** | The full spectrum / the cursor's wavelength alone |
+| **Left** / **Right** | Move the wavelength cursor by 5 nm, in light of that wavelength |
+| **V** | White light / light of the cursor's wavelength |
 | **M** | Plot n and k of the next metal |
 
-The slider moves the cursor; the buttons pick the metal whose n and k are plotted.
+The slider moves the cursor, in light of its wavelength; **White light** and **One wavelength** switch the light; the metal buttons pick the metal whose n and k are plotted.
 
 | Option | Default | |
 |---|---|---|
 | `--metal NAME` | `gold` | The metal whose n and k are plotted: `gold`, `silver`, `copper`, `aluminium` |
 | `--wavelength NM` | 450 | The cursor's wavelength, 380 to 780 nm |
-| `--single` | off | Start in the single wavelength view |
+| `--single` | off | Start in light of the cursor's wavelength |
 | `--roughness X` | 0.04 | GGX roughness of the spheres |
 | `--sky X` | 0.4 | Intensity of the sky's light |
 
