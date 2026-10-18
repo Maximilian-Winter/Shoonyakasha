@@ -98,3 +98,5 @@ examples/python/rendering/showroom/reel.mp4
 /examples/python/rendering/volume_tiled/volume_tiled_captures
 /examples/python/rendering/wave_optics/wave_optics_captures
 /examples/python/rendering/rt_reflections/rt_reflections_captures
+/examples/python/rendering/optics/brewster_captures
+/examples/python/rendering/optics/gold_captures
