@@ -50,18 +50,18 @@ BOX = "models/Box.gltf"
 
 EYE = (-11.0, 2.0, -0.5)
 TARGET = (8.0, 3.5, 0.5)
-SUN_DIRECTION = (0.3, -1.0, 0.35)
+SUN_DIRECTION = (-0.5, -1.0, 0.05)
 LAMPS = ((-4.0, 2.2, 1.2), (4.0, 2.2, -1.2))
 # The scenes of Embark's kajiya renderer (python tools/fetch_assets.py kajiya):
 # the model's scale and offset as kajiya places it, the camera's eye and
 # target, the sun's direction and the lamps.
 KAJIYA = os.path.join(REPOSITORY, "assets", "kajiya")
 KAJIYA_SCENES = {
-    "viziers": (0.0075, (0.0, -11.25, 0.0), (9.0, 3.0, 9.0), (-1.5, 0.3, 1.0), (0.4, -1.0, 0.3), ()),
-    "gas_stations": (0.005, (-4.5, -1.0, -1.0), (1.0, 0.9, 3.5), (-0.6, 0.1, -0.5), (0.5, -1.0, -0.4), ()),
-    "battle": (0.001875, (11.0, -3.0, -0.75), (7.0, 2.0, 8.0), (0.0, -0.5, 0.0), (0.3, -1.0, 0.5), ()),
-    "warhammer": (0.05, (0.0, 0.0, 0.0), (3.5, 2.2, 4.5), (0.0, 0.2, 0.0), (0.4, -1.0, 0.2), ()),
-    "conference": (1.0, (0.0, 0.0, 0.0), (1.2, 1.6, 0.8), (-4.0, 1.2, -1.5), (0.3, -1.0, 0.35),
+    "viziers": (0.0075, (0.0, -11.25, 0.0), (9.0, 3.0, 9.0), (-1.5, 0.3, 1.0), (-0.76, -0.64, 0.1), ()),
+    "gas_stations": (0.005, (-4.5, -1.0, -1.0), (1.0, 0.9, 3.5), (-0.6, 0.1, -0.5), (-0.7, -0.64, -0.3), ()),
+    "battle": (0.001875, (11.0, -3.0, -0.75), (7.0, 2.0, 8.0), (0.0, -0.5, 0.0), (-0.76, -0.64, -0.05), ()),
+    "warhammer": (0.05, (0.0, 0.0, 0.0), (3.5, 2.2, 4.5), (0.0, 0.2, 0.0), (-0.76, -0.64, -0.1), ()),
+    "conference": (1.0, (0.0, 0.0, 0.0), (1.2, 1.6, 0.8), (-4.0, 1.2, -1.5), (-0.28, -0.64, -0.71),
                    ((-1.0, 1.9, -0.8), (-3.2, 1.9, -0.8))),
 }
 VIEWS = ("Image", "Indirect", "Cache", "Direct")
@@ -77,7 +77,8 @@ parser.add_argument("--view", type=int, choices=(0, 1, 2, 3), default=0,
 parser.add_argument("--stages", type=int, default=ALL_STAGES,
                     help="the stages that run, a sum of: 1 temporal resampling, 2 spatial resampling, "
                          "4 near-field split, 8 temporal filter, 16 spatial filter (default 31; 0: raw candidates)")
-parser.add_argument("--sky", type=float, default=1.0, help="intensity of the sky's light")
+parser.add_argument("--sky", type=float, default=None,
+                    help="intensity of the sky's light (default: 0.5 in kajiya's scenes, 1 in Sponza)")
 parser.add_argument("--walk", type=float, default=0.0, metavar="SPEED",
                     help="walk the camera along the nave (in kajiya's scenes, level towards what it looks at) "
                          "at SPEED metres a second")
@@ -86,12 +87,14 @@ parser.add_argument("--screenshot", metavar="FILE", help="save a screenshot afte
 parser.add_argument("--width", type=int, default=1600)
 parser.add_argument("--height", type=int, default=900)
 args = parser.parse_args()
+if args.sky is None:
+    args.sky = 0.5 if args.scene in KAJIYA_SCENES else 1.0
 
 sk.shaders.compile_dir(os.path.join(HERE, "pipeline", "shaders"))
 engine = sk.Engine(
     title="Shoonyakasha - ReSTIR GI",
     width=args.width, height=args.height,
-    hdr_environment_path="env/kloofendal_misty_1k.hdr",
+    hdr_environment_path="env/farm_sunset_1k.hdr",
     pipeline_json_path=PIPELINE,
 )
 
@@ -162,7 +165,7 @@ def build_scene():
         else (EYE, TARGET, SUN_DIRECTION, LAMPS)
     camera = engine.create_camera(pos=eye, fov=60.0, speed=4.0, near_plane=0.05, far_plane=300.0)
     engine.scene.set_rotation(camera, look_rotation(eye, target))
-    sun = engine.create_directional_light(direction=sun_direction, color=(1.0, 0.93, 0.82), intensity=6.0)
+    sun = engine.create_directional_light(direction=sun_direction, color=(1.0, 0.93, 0.82), intensity=12.0)
     engine.scene.set_light_cast_shadows(sun, True)
     for position in lamps:
         lamp = engine.create_point_light(pos=position, color=(1.0, 0.62, 0.3), intensity=4.0, range=8.0)

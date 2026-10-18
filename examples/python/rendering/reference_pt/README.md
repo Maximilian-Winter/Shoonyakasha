@@ -56,7 +56,7 @@ The views:
 | `--scene NAME` | `sponza` | `sponza`, `colonnade`, or one of kajiya's scenes: `viziers`, `gas_stations`, `battle`, `warhammer`, `conference` |
 | `--bounces N` | 8 | Bounces after the first hit, 1 to 16; 1 is direct light only |
 | `--mode 0` to `4` | 0 | Everything, indirect only, white furnace, indirect irradiance, reflections |
-| `--sky X` | 1.0 | Intensity of the sky's light, on both pipelines |
+| `--sky X` | 0.5 in kajiya's scenes, 1.0 in Sponza | Intensity of the sky's light, on both pipelines |
 | `--exposure X` | 1.0 | Multiplies the image before the tone curve, on both pipelines |
 | `--samples N` | 0 | Paths per pixel to stop at; 0 never stops |
 | `--screenshot FILE` | | Save once `--samples` paths are in, or after `--settle` seconds without `--samples`, then quit |

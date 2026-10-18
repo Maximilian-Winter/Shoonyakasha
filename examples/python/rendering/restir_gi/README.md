@@ -81,7 +81,7 @@ The panel shows the GPU time and sets the exposure, the sky's intensity, the vie
 | `--scene NAME` | `sponza` | `sponza`, `colonnade`, or one of kajiya's scenes: `viziers`, `gas_stations`, `battle`, `warhammer`, `conference` |
 | `--view 0` / `1` / `2` / `3` | 0 | Image, indirect light, irradiance cache, direct light only |
 | `--stages N` | 31 | The stages that run, a sum of: 1 temporal resampling, 2 spatial resampling, 4 near-field split, 8 temporal filter, 16 spatial filter |
-| `--sky X` | 1.0 | Intensity of the sky's light |
+| `--sky X` | 0.5 in kajiya's scenes, 1.0 in Sponza | Intensity of the sky's light |
 | `--walk SPEED` | 0 | Walk the camera along the nave at SPEED metres a second; in kajiya's scenes, level towards what it looks at |
 | `--frames N` | 300 | Frames before `--screenshot` |
 | `--screenshot FILE` | | Save after `--frames` frames, print the GPU time, quit |
