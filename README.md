@@ -86,6 +86,8 @@ For C++, build and run `FacadeTest` following the [C++ quickstart](docs/getting-
 
 ## Documentation and examples
 
+- [Python application and content toolkit](docs/guides/python-toolkit.md): compose UI, plot live data, replay simulations and export lessons as video.
+
 - [Documentation index](docs/index.md): guides, C++/Python references, and architecture.
 - [Example catalog](examples/README.md): rendering, compute, animation, physics, and 2D games.
 - [Asset guide](assets/README.md): bundled assets, optional downloads, and licenses.

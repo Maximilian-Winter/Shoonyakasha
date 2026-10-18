@@ -1449,6 +1449,30 @@ cdef class UI:
         """The colour of the element's own text, image and panel."""
         self._ptr.setColor(element, _tuple_to_vec4(color))
 
+    def set_geometry(self, uint32_t element, positions, indices, colors):
+        """Replace solid triangles in element-local units; empty arrays clear them."""
+        cdef vector[vec2] points
+        cdef vector[vec4] tint
+        cdef vector[uint32_t] triangles
+        for p in positions:
+            points.push_back(_tuple_to_vec2(p))
+        for c in colors:
+            tint.push_back(_tuple_to_vec4(c))
+        for i in indices:
+            if not isinstance(i, int) or i < 0 or i >= len(positions):
+                raise ValueError("geometry index out of bounds")
+            triangles.push_back(i)
+        self._ptr.setGeometry(element, points, triangles, tint)
+
+    def set_widget_part_color(self, uint32_t element, str part, color):
+        """Style surface, text, track, fill, or handle without child-order assumptions."""
+        self._ptr.setWidgetPartColor(element, part.encode('utf-8'), _tuple_to_vec4(color))
+
+    def set_interaction_colors(self, uint32_t element, normal, hover, pressed, focused, disabled):
+        """Set multiplicative normal, hover, pressed, focused and disabled colors."""
+        self._ptr.setInteractionColors(element, _tuple_to_vec4(normal), _tuple_to_vec4(hover),
+            _tuple_to_vec4(pressed), _tuple_to_vec4(focused), _tuple_to_vec4(disabled))
+
     def set_texture(self, uint32_t element, str path):
         """The texture of the element's image or panel. False if it cannot be loaded."""
         return self._ptr.setTexture(element, path.encode("utf-8"))
@@ -1700,6 +1724,16 @@ cdef class Engine:
             self._ptr.run()
 
     # ── Callback Registration ─────────────────────────────────
+
+    def request_quit(self):
+        """Exit after this frame, finalizing recording and running cleanup."""
+        self._ptr.requestQuit()
+
+    @property
+    def framebuffer_size(self):
+        """Actual framebuffer pixels, or (0, 0) before initialization."""
+        cdef tuple size = _vec2_to_tuple(self._ptr.getFramebufferSize())
+        return (int(size[0]), int(size[1]))
 
     def set_on_init(self, callback):
         """Set initialization callback: callback()."""

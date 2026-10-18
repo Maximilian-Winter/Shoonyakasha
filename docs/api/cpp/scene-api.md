@@ -88,14 +88,14 @@ float getLightRange(EntityHandle entity) const;
 void setLightRange(EntityHandle entity, float range);
 bool getLightCastShadows(EntityHandle entity) const;
 void setLightCastShadows(EntityHandle entity, bool castShadows);
-glm::vec2 getLightCone(EntityHandle entity) const;               // (inner, outer) half-angles, degrees
+glm::vec2 getLightCone(EntityHandle entity) const;
 void setLightCone(EntityHandle entity, float innerDegrees, float outerDegrees);
 float getLightSourceRadius(EntityHandle entity) const;
-void setLightSourceRadius(EntityHandle entity, float radius);    // scene.lights[N].source.x
+void setLightSourceRadius(EntityHandle entity, float radius);
 glm::vec2 getLightSourceSize(EntityHandle entity) const;
-void setLightSourceSize(EntityHandle entity, float width, float height);   // scene.lights[N].shape
+void setLightSourceSize(EntityHandle entity, float width, float height);
 uint32_t getLightSourceImage(EntityHandle entity) const;
-void setLightSourceImage(EntityHandle entity, uint32_t slot);   // scene.lights[N].source.w
+void setLightSourceImage(EntityHandle entity, uint32_t slot);
 void setMaterialFloat(EntityHandle entity, const std::string& param, float value);
 float getMaterialFloat(EntityHandle entity, const std::string& param, float defaultVal = 0.0f) const;
 void setMaterialVec3(EntityHandle entity, const std::string& param, const glm::vec3& value);

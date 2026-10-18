@@ -17,6 +17,8 @@
 #include "UI/Utf8.h"
 
 #include <algorithm>
+#include <cmath>
+#include <stdexcept>
 
 using namespace Shoonyakasha::Facade::Internal;
 
@@ -564,6 +566,40 @@ void UIAPI::setColor(EntityHandle element, const glm::vec4& color) {
     if (auto* t = m_impl->get<UI::UIText>(element)) t->color = color;
     if (auto* image = m_impl->get<UI::UIImage>(element)) image->color = color;
     if (auto* panel = m_impl->get<UI::UIPanel>(element)) panel->color = color;
+}
+
+void UIAPI::setGeometry(EntityHandle element, const std::vector<glm::vec2>& positions,
+                        const std::vector<uint32_t>& indices, const std::vector<glm::vec4>& colors) {
+    if (!m_impl->valid(element) || !m_impl->get<UI::UIRect>(element))
+        throw std::invalid_argument("geometry requires a live UI element");
+    if (positions.size() != colors.size() || indices.size() % 3 != 0)
+        throw std::invalid_argument("geometry needs per-vertex colors and triangle indices");
+    for (const auto& p : positions)
+        if (!std::isfinite(p.x) || !std::isfinite(p.y)) throw std::invalid_argument("nonfinite position");
+    for (const auto& c : colors)
+        for (int i = 0; i < 4; ++i)
+            if (!std::isfinite(c[i])) throw std::invalid_argument("nonfinite color");
+    for (auto index : indices)
+        if (index >= positions.size()) throw std::invalid_argument("geometry index out of bounds");
+    m_impl->registry.emplace_or_replace<UI::UIGeometry>(toEntt(element), positions, indices, colors);
+}
+
+void UIAPI::setWidgetPartColor(EntityHandle element, const std::string& part, const glm::vec4& color) {
+    if (part != "surface" && part != "text" && part != "track" && part != "fill" && part != "handle")
+        throw std::invalid_argument("unknown widget part");
+    auto* parts = m_impl->get<UI::UIWidgetParts>(element);
+    if (!parts) return;
+    const auto target = part == "surface" ? parts->surface : part == "text" ? parts->text :
+                        part == "track" ? parts->track : part == "fill" ? parts->fill : parts->handle;
+    setColor(toHandle(target), color);
+}
+
+void UIAPI::setInteractionColors(EntityHandle element, const glm::vec4& normal, const glm::vec4& hover,
+                                 const glm::vec4& pressed, const glm::vec4& focused, const glm::vec4& disabled) {
+    if (auto* state = m_impl->get<UI::UIInteractable>(element)) {
+        state->normalColor = normal; state->hoverColor = hover; state->pressedColor = pressed;
+        state->focusedColor = focused; state->disabledColor = disabled;
+    }
 }
 
 bool UIAPI::setTexture(EntityHandle element, const std::string& path) {

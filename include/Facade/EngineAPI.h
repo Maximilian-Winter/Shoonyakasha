@@ -70,6 +70,10 @@ public:
 
     /// Run the engine. Blocks until the window is closed.
     void run();
+    /// Request orderly exit after the current frame.
+    void requestQuit();
+    /// Actual framebuffer pixels, or (0,0) before initialization.
+    glm::vec2 getFramebufferSize() const;
 
     // ═══════════════════════════════════════════════════════════
     // Callback Registration (set before or during run)

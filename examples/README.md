@@ -27,6 +27,10 @@ anywhere in the tree.
 
 Browse every preview in the [C++ guide](../docs/examples/cpp-examples.md) and [Python guide](../docs/examples/python-examples.md). These are native runtime captures; the guides explain asset substitutions and the missing Pong preview.
 
+Python toolkit applications: [component gallery](python/ui/toolkit_gallery/README.md)
+and [driven oscillator lesson](python/simulations/oscillator/README.md). Both use
+the default JSON pipeline and support automated smoke captures.
+
 ## C++
 
 Built when `-DBUILD_EXAMPLES=ON` (default: `OFF`). Executables land in

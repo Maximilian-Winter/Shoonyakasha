@@ -31,6 +31,19 @@
 namespace Shoonyakasha {
 namespace UI {
 
+/// Retained solid triangles relative to the element's rect, with per-vertex color.
+struct UIGeometry {
+    std::vector<glm::vec2> positions;
+    std::vector<uint32_t> indices;
+    std::vector<glm::vec4> colors;
+};
+
+/// Semantic styling targets recorded by widget constructors.
+struct UIWidgetParts {
+    entt::entity surface{entt::null}, text{entt::null}, track{entt::null};
+    entt::entity fill{entt::null}, handle{entt::null};
+};
+
 /// Axis-aligned rectangle, y down.
 struct Rect {
     glm::vec2 min{0.0f};

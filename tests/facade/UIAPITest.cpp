@@ -16,6 +16,38 @@
 
 #include <algorithm>
 #include <vector>
+#include <limits>
+
+TEST(ToolkitGeometry, ValidationIsAtomicAndPartsHaveStableMeaning) {
+    using namespace Shoonyakasha;
+    using namespace Shoonyakasha::Facade;
+    entt::registry registry;
+    UI::UIContext context;
+    UIAPI ui{registry, context};
+    auto canvas = ui.createCanvas();
+    auto e = ui.createElement(canvas, {100, 100});
+    std::vector<glm::vec2> points{{0, 0}, {10, 0}, {0, 10}};
+    std::vector<uint32_t> indices{0, 1, 2};
+    std::vector<glm::vec4> colors(3, glm::vec4(1));
+    ui.setGeometry(e, points, indices, colors);
+    EXPECT_THROW(ui.setGeometry(e, points, {0, 1, 9}, colors), std::invalid_argument);
+    EXPECT_THROW(ui.setGeometry(e, points, {0, 1}, colors), std::invalid_argument);
+    points[0].x = std::numeric_limits<float>::infinity();
+    EXPECT_THROW(ui.setGeometry(e, points, indices, colors), std::invalid_argument);
+    EXPECT_EQ(registry.get<UI::UIGeometry>(static_cast<entt::entity>(e)).positions[0].x, 0);
+    ui.setGeometry(e, {}, {}, {});
+    EXPECT_TRUE(registry.get<UI::UIGeometry>(static_cast<entt::entity>(e)).indices.empty());
+
+    auto slider = ui.createSlider(canvas, 0, 1, 0.5f);
+    ui.setWidgetPartColor(slider, "track", {1, 0, 0, 1});
+    ui.setWidgetPartColor(slider, "fill", {0, 1, 0, 1});
+    const auto& parts = registry.get<UI::UIWidgetParts>(static_cast<entt::entity>(slider));
+    EXPECT_EQ(registry.get<UI::UIPanel>(parts.track).color, glm::vec4(1, 0, 0, 1));
+    EXPECT_EQ(registry.get<UI::UIImage>(parts.fill).color, glm::vec4(0, 1, 0, 1));
+    EXPECT_THROW(ui.setWidgetPartColor(slider, "unknown", glm::vec4(1)), std::invalid_argument);
+    ui.setInteractionColors(slider, glm::vec4(1), glm::vec4(2), glm::vec4(3), glm::vec4(4), glm::vec4(5));
+    EXPECT_EQ(registry.get<UI::UIInteractable>(static_cast<entt::entity>(slider)).focusedColor, glm::vec4(4));
+}
 
 using namespace Shoonyakasha;
 using namespace Shoonyakasha::Facade;

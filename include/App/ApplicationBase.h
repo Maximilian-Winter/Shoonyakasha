@@ -106,6 +106,8 @@ public:
 
     // Main entry point — initializes everything, runs loop, cleans up
     void run();
+    /// Leave the loop after this frame, finalizing recording and cleanup.
+    void requestQuit() { m_quitRequested = true; }
 
     /// The pipeline an empty ApplicationConfig::pipelineJsonPath loads:
     /// $SHOONYAKASHA_DEFAULT_PIPELINE if set, otherwise the default pipeline
@@ -358,6 +360,7 @@ private:
     std::chrono::high_resolution_clock::time_point m_startTime;
     std::chrono::high_resolution_clock::time_point m_lastFrameTime;
     float m_deltaTime = 0.0f;
+    bool m_quitRequested = false;
 
     // ─── Internal Methods ──────────────────────────────────────
     void initializeVulkan();

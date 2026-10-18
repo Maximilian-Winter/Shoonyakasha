@@ -40,6 +40,23 @@ struct CanvasBuilder {
     glm::ivec4 scissor{0};
     bool atlasFull = false;
 
+    void geometry(const Rect& rect, const UIGeometry& geometry, const glm::vec4& tint) {
+        if (geometry.indices.empty()) return;
+        if (out.batches.size() == firstBatch || out.batches.back().scissor != scissor) {
+            UIBatch batch;
+            batch.scissor = scissor;
+            batch.firstIndex = static_cast<uint32_t>(out.indices.size());
+            out.batches.push_back(batch);
+        }
+        const auto base = static_cast<uint32_t>(out.vertices.size());
+        for (size_t i = 0; i < geometry.positions.size(); ++i) {
+            out.vertices.push_back({(rect.min + geometry.positions[i]) * scale, glm::vec2(0),
+                packColor(geometry.colors[i] * tint), static_cast<uint32_t>(UIDrawMode::Solid)});
+        }
+        for (auto index : geometry.indices) out.indices.push_back(base + index);
+        out.batches.back().indexCount += static_cast<uint32_t>(geometry.indices.size());
+    }
+
     /// A quad from `min` to `max`, in canvas units; with a `slant`, its top
     /// moved right and its bottom left by that much per unit of height
     /// above and below `baseline`. A `turned` quad shows its texture turned
@@ -282,6 +299,7 @@ bool build(entt::registry& registry, const FontLibrary& fonts, GlyphCache& glyph
                 const glm::vec4 textTint = target != targetTints.end() ? target->second : glm::vec4(1.0f);
                 const glm::vec4 tint = interactable ? interactable->stateColor() * textTint : textTint;
                 if (const auto* p = registry.try_get<UIPanel>(entity)) builder.panel(element.rect, *p, tint);
+                if (const auto* g = registry.try_get<UIGeometry>(entity)) builder.geometry(element.rect, *g, tint);
                 if (const auto* img = registry.try_get<UIImage>(entity)) {
                     if (const auto* rects = registry.try_get<UIImageRects>(entity)) {
                         for (const Rect& r : rects->rects) builder.image(r, *img, tint);

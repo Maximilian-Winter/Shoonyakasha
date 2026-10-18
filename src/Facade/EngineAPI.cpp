@@ -25,6 +25,7 @@
 #include "FacadeInternal.h"
 
 #include "App/ApplicationBase.h"
+#include "Vulkan/VulkanSwapChain.h"
 #include "ECS/Scene.h"
 #include "ECS/PhysicsSystem.h"
 #include "ECS/SkeletalAnimationSystem.h"
@@ -155,6 +156,7 @@ private:
 public:
     // Public forwarders — expose protected ApplicationBase methods for EngineAPI
     using ApplicationBase::createCamera;
+    using ApplicationBase::getSwapChain;
     using ApplicationBase::captureScreenshot;
     using ApplicationBase::setEnvironment;
     using ApplicationBase::setEnvironmentColor;
@@ -321,6 +323,12 @@ void EngineAPI::run() {
 
 void EngineAPI::setOnInit(VoidCallback cb)         { m_impl->onInitCb       = std::move(cb); }
 void EngineAPI::setOnPostInit(VoidCallback cb)     { m_impl->onPostInitCb   = std::move(cb); }
+void EngineAPI::requestQuit() { if (m_impl->app) m_impl->app->requestQuit(); }
+glm::vec2 EngineAPI::getFramebufferSize() const {
+    if (!m_impl->sceneAPI) return glm::vec2(0);
+    const auto extent = m_impl->app->getSwapChain().getSwapChainExtent();
+    return {static_cast<float>(extent.width), static_cast<float>(extent.height)};
+}
 void EngineAPI::setOnUpdate(UpdateCallback cb)     { m_impl->onUpdateCb     = std::move(cb); }
 void EngineAPI::setOnPreRender(UpdateCallback cb)  { m_impl->onPreRenderCb  = std::move(cb); }
 void EngineAPI::setOnPostRender(VoidCallback cb)   { m_impl->onPostRenderCb = std::move(cb); }

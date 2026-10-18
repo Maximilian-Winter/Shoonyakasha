@@ -103,7 +103,7 @@ void ApplicationBase::run() {
     m_logger->log(LogLevel::Info, "Starting main loop...");
     m_logger->log(LogLevel::Info, "Controls: WASD=move, Q/E=down/up, RMB=look, ESC=capture, 1/2/3=mode");
 
-    while (!m_window->shouldClose()) {
+    while (!m_quitRequested && !m_window->shouldClose()) {
         m_window->pollEvents();
         update();
         render();

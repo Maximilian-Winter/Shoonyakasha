@@ -1,5 +1,8 @@
 # Frame capture
 
+The [Python toolkit exporter](python-toolkit.md#capture) adds timeline sampling,
+frame confirmation, cancellation and lesson export over these native methods.
+
 Capture reads the last presented swapchain frame, including final composition and UI. Use a post-render callback or input event after at least one frame has been presented.
 
 ```python

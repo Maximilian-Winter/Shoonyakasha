@@ -73,6 +73,8 @@ entt::entity createButton(entt::registry& registry, entt::entity parent, const s
     auto& interactable = addInteractable(registry, button);
     registry.emplace<UIButton>(button);
     interactable.tintTargets.push_back(createLabel(registry, button, text, font, size.y * 0.5f));
+    auto& parts = registry.emplace<UIWidgetParts>(button);
+    parts.surface = button; parts.text = interactable.tintTargets.back();
     return button;
 }
 
@@ -101,6 +103,8 @@ entt::entity createToggle(entt::registry& registry, entt::entity parent, const s
     labelText.alignH = TextAlignH::Start;
     labelText.direction = TextDirection::FromLayout;
     registry.get<UIInteractable>(toggle).tintTargets = {box, checkmark, label};
+    auto& parts = registry.emplace<UIWidgetParts>(toggle);
+    parts.surface = box; parts.fill = checkmark; parts.text = label;
 
     auto& state = registry.emplace<UIToggle>(toggle);
     state.isOn = isOn;
@@ -140,6 +144,8 @@ entt::entity createSlider(entt::registry& registry, entt::entity parent, float m
     state.value = value;
     state.fill = fill;
     state.handle = handle;
+    auto& parts = registry.emplace<UIWidgetParts>(slider);
+    parts.track = track; parts.fill = fill; parts.handle = handle;
     const float t = state.normalized();
     fillRect.anchorMax.x = t;
     handleRect.anchorMin.x = handleRect.anchorMax.x = t;
@@ -245,6 +251,8 @@ entt::entity createTextField(entt::registry& registry, entt::entity parent, cons
     state.selectionElement = selection;
     state.compositionElement = composition;
     state.caretElement = caret;
+    auto& parts = registry.emplace<UIWidgetParts>(field);
+    parts.surface = field; parts.text = text; parts.fill = selection; parts.handle = caret;
     return field;
 }
 

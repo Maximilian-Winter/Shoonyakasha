@@ -1,5 +1,8 @@
 # Canvas UI
 
+For reusable Python components, themes, plots and application lifecycle support,
+see the [Python toolkit](python-toolkit.md). The native API below remains available.
+
 The canvas UI builds interfaces out of entities: a canvas, and panels, images, text, buttons, toggles and sliders below it. There are two kinds of canvas:
 - A **screen canvas** is drawn over the finished image.
 - A **world canvas** is drawn into a texture shown on a quad in the scene, such as a terminal, a sign or a menu you walk up to. You can click on it in 3D like on the screen.

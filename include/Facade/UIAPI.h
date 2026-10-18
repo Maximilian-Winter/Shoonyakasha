@@ -322,6 +322,13 @@ public:
 
     /// The colour of the element's own text, image and panel.
     void setColor(EntityHandle element, const glm::vec4& color);
+    /// Replace solid triangles. Invalid data throws without changing old geometry.
+    void setGeometry(EntityHandle element, const std::vector<glm::vec2>& positions,
+                     const std::vector<uint32_t>& indices, const std::vector<glm::vec4>& colors);
+    /// Parts: surface, text, track, fill, handle. An absent part is ignored.
+    void setWidgetPartColor(EntityHandle element, const std::string& part, const glm::vec4& color);
+    void setInteractionColors(EntityHandle element, const glm::vec4& normal, const glm::vec4& hover,
+                              const glm::vec4& pressed, const glm::vec4& focused, const glm::vec4& disabled);
 
     /// The texture of the element's image or panel. False when it cannot be
     /// loaded.

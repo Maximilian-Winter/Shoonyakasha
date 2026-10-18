@@ -442,6 +442,9 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         cbool isRightToLeft(EntityHandle element) const
         void setMirrorInRightToLeft(EntityHandle element, cbool mirror)
         void setColor(EntityHandle element, const vec4& color)
+        void setGeometry(EntityHandle element, const vector[vec2]& positions, const vector[uint32_t]& indices, const vector[vec4]& colors) except +
+        void setWidgetPartColor(EntityHandle element, const string& part, const vec4& color) except +
+        void setInteractionColors(EntityHandle element, const vec4& normal, const vec4& hover, const vec4& pressed, const vec4& focused, const vec4& disabled)
         cbool setTexture(EntityHandle element, const string& path)
         void setPanelBorder(EntityHandle element, const vec4& border, float borderScale)
         void setRaycastTarget(EntityHandle element, cbool target)
@@ -488,6 +491,8 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
 
         # Lifecycle
         void run() except + nogil
+        void requestQuit()
+        vec2 getFramebufferSize() const
 
         # Callback registration
         void setOnInit(function_void cb)

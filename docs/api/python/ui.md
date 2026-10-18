@@ -183,6 +183,9 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `clicked_link(element)` | str | The id of the link in the text the user clicked this frame, or ''. |
 | `hovered_link(element)` | str | The id of the link in the text under the pointer, or ''. |
 | `set_color(element, color)` | None | The colour of the element's own text, image and panel. |
+| `set_geometry(element, positions, indices, colors)` | None | Replace solid triangles in element-local units; empty arrays clear them. |
+| `set_widget_part_color(element, part, color)` | None | Style surface, text, track, fill, or handle without child-order assumptions. |
+| `set_interaction_colors(element, normal, hover, pressed, focused, disabled)` | None | Set multiplicative normal, hover, pressed, focused and disabled colors. |
 | `set_texture(element, path)` | bool | The texture of the element's image or panel. False if it cannot be loaded. |
 | `set_panel_border(element, border, border_scale=1.0)` | None | Calls native `setPanelBorder`; see the class contract above. |
 | `set_raycast_target(element, target)` | None | Whether the element's image or panel stops the pointer. |

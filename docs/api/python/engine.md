@@ -45,6 +45,8 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 |---|---|---|
 | `Engine(title="Shoonyakasha Application", width=1600, height=900, log_file="application.log", log_level=1, hdr_environment_path="", pipeline_json_path="", max_frames_in_flight=2, render_graph_parameters=None, environment_color=(0.25, 0.28, 0.33), enable_validation=None, ibl_cache=True)` | Engine | Create engine with configuration. |
 | `run()` | None | Run the engine. Blocks until the window is closed. |
+| `request_quit()` | None | Exit after this frame, finalizing recording and running cleanup. |
+| `framebuffer_size (read-only property)` | 2-tuple | Actual framebuffer pixels, or (0, 0) before initialization. |
 | `set_on_init(callback)` | None | Set initialization callback: callback(). |
 | `set_on_post_init(callback)` | None | Set post-initialization callback: callback(). |
 | `set_on_update(callback)` | None | Set per-frame update callback: callback(dt: float). |

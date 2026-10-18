@@ -46,6 +46,8 @@ Native extension references: [ApplicationBase](api/cpp/application-base.md), [fr
 
 ## Examples and architecture
 
+- [Python application and content toolkit](guides/python-toolkit.md): components, parameters, live plots, replay, lessons and video export.
+
 - [Example catalog](../examples/README.md), [C++ targets](examples/cpp-examples.md), [Python commands](examples/python-examples.md), [assets](../assets/README.md).
 - [Architecture overview](architecture/overview.md), [frame graph](architecture/frame-graph-pipeline.md), [ECS](architecture/ecs-design.md), [facade](architecture/facade-pattern.md), [Cython bridge](architecture/cython-bridge.md).
 - [Documentation maintenance](maintenance.md), [refresh audit](audit.md), [historical archive](archive.md), [philosophy](philosophy.md).

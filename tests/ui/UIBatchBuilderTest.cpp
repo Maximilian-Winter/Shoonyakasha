@@ -99,6 +99,28 @@ void expectVec2Near(glm::vec2 a, glm::vec2 b) {
 
 } // namespace
 
+TEST(ToolkitGeometry, LocalCoordinatesScaleAndClipAndKeepBatchOrder) {
+    Fixture f(2.0f);
+    auto parent = f.add(f.canvas, {10, 20}, {50, 40});
+    f.registry.emplace<UIClip>(parent);
+    for (int n = 0; n < 2; ++n) {
+        auto e = f.add(parent, {5, 6}, {30, 20});
+        f.registry.emplace<UIGeometry>(e,
+            std::vector<glm::vec2>{{0, 0}, {10, 0}, {0, 10}},
+            std::vector<uint32_t>{0, 1, 2}, std::vector<glm::vec4>(3, glm::vec4(1)));
+    }
+    f.build();
+    ASSERT_EQ(f.data.vertices.size(), 6u);
+    ASSERT_EQ(f.data.batches.size(), 1u);
+    expectVec2Near(f.data.vertices[0].position, {30, 52});
+    EXPECT_EQ(f.data.batches[0].scissor, glm::ivec4(20, 40, 100, 80));
+    EXPECT_EQ(f.data.indices[3], 3u);
+    EXPECT_EQ(f.mode(0), UIDrawMode::Solid);
+    f.registry.get<UIRect>(parent).visible = false;
+    f.build();
+    EXPECT_TRUE(f.data.vertices.empty());
+}
+
 TEST(UIBatchBuilder, PackColorPutsRedInTheLowByte) {
     EXPECT_EQ(packColor({1, 0, 0, 1}), 0xFF0000FFu);
     EXPECT_EQ(packColor({0, 0, 1, 0.5f}), 0x80FF0000u);

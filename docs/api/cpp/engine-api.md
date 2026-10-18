@@ -47,6 +47,8 @@ Declarations below are extracted from the public facade header; test constructor
 explicit EngineAPI(const EngineConfig& config);
 ~EngineAPI();
 void run();
+void requestQuit();
+glm::vec2 getFramebufferSize() const;
 void setOnInit(VoidCallback cb);
 void setOnPostInit(VoidCallback cb);
 void setOnUpdate(UpdateCallback cb);
