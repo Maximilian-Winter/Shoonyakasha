@@ -28,6 +28,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes doxygen
+          doxygen --version
           python -m pip install -r requirements-docs.txt
       - name: Check repository documentation
         run: |

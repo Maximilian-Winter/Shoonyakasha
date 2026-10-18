@@ -10,6 +10,27 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "build/docs-api"
 
 
+def repair_nested_class_summary(html):
+    """Remove Doxygen 1.9.8's link to an omitted private-nested-type section.
+
+    Only the generated summary navigation is changed. Keep real nested-type
+    sections and all other links intact so the site checker still catches
+    unrelated broken anchors.
+    """
+    if '#nested-classes' not in html or re.search(
+        r'\b(?:id|name)\s*=\s*[\"\']nested-classes[\"\']', html
+    ):
+        return html
+    return re.sub(
+        r'(<div class="summary">)(.*?)(</div>)',
+        lambda summary: summary[1] + re.sub(
+            r'<a href="#nested-classes">[^<]*</a>\s*(?:&#124;\s*)?',
+            '', summary[2],
+        ) + summary[3],
+        html, flags=re.DOTALL,
+    )
+
+
 def build_native_api():
     doxygen = shutil.which("doxygen")
     if not doxygen:
@@ -48,6 +69,15 @@ def build_native_api():
         raise RuntimeError("Doxygen failed; see build/docs-api/warnings.log")
     if not (OUTPUT / "html/index.html").is_file():
         raise RuntimeError("Doxygen did not generate its HTML entry point")
+    repaired = 0
+    for page in (OUTPUT / "html").rglob("*.html"):
+        html = page.read_text(encoding="utf-8")
+        fixed = repair_nested_class_summary(html)
+        if fixed != html:
+            page.write_text(fixed, encoding="utf-8")
+            repaired += 1
+    if repaired:
+        print(f"Repaired {repaired} Doxygen summary links for hidden nested types.")
     return OUTPUT / "html"
 
 

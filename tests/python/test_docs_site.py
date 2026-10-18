@@ -10,11 +10,47 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 from docs_site import on_page_markdown, rewrite_markdown, rewrite_target
 from check_docs_site import check_site
+from build_native_api import repair_nested_class_summary
 
 REPO = "https://github.com/Maximilian-Winter/Shoonyakasha"
 
 
 class DocumentationSiteLinks(unittest.TestCase):
+    def test_doxygen_hidden_nested_types_do_not_leave_broken_summary_links(self):
+        # Doxygen 1.9.8 emits this summary even when all nested types are private.
+        summary = ('<div class="summary">\n'
+                   '<a href="#nested-classes">Classes</a> &#124;\n'
+                   '<a href="#pub-methods">Public Member Functions</a> &#124;\n'
+                   '<a href="class-members.html">List of all members</a></div>')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            page = root / "index.html"
+            (root / "class-members.html").write_text('<p>Members</p>', encoding="utf-8")
+            original = summary + '<h2 id="pub-methods">Public Member Functions</h2>'
+            page.write_text(original, encoding="utf-8")
+            self.assertEqual(["index.html: missing anchor #nested-classes"], check_site(root))
+            fixed = repair_nested_class_summary(original)
+            page.write_text(fixed, encoding="utf-8")
+            self.assertEqual([], check_site(root))
+            self.assertNotIn('#nested-classes', fixed)
+            self.assertIn('<a href="#pub-methods">Public Member Functions</a> &#124;', fixed)
+            self.assertIn('<a href="class-members.html">List of all members</a>', fixed)
+            self.assertEqual(fixed, repair_nested_class_summary(fixed))
+
+    def test_real_nested_class_sections_and_other_broken_links_are_preserved(self):
+        link = '<div class="summary"><a href="#nested-classes">Classes</a></div>'
+        for anchor in ('<a id="nested-classes"></a>', '<a name="nested-classes"></a>'):
+            html = link + anchor + '<p>Public nested types</p>'
+            self.assertEqual(html, repair_nested_class_summary(html))
+        outside_summary = '<p><a href="#nested-classes">Authored link</a></p>'
+        self.assertEqual(outside_summary, repair_nested_class_summary(outside_summary))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "index.html").write_text(repair_nested_class_summary(
+                link + '<a href="#missing-method">Other broken anchor</a>'
+            ), encoding="utf-8")
+            self.assertEqual(["index.html: missing anchor #missing-method"], check_site(root))
+
     def test_built_native_links_sources_and_project_base_are_checked(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
