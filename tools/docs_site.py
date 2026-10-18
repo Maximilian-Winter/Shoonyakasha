@@ -20,10 +20,20 @@ REPO_PAGES = {
 HISTORY = {"old", "plans", "reviews"}
 
 
-def rewrite_target(target, source, site_uri, site_files, repo_url, branch):
+def rewrite_target(target, source, site_uri, site_files, repo_url, branch, site_url=None):
     """Resolve a link against its repository source, then its published page."""
     url = urlsplit(target)
-    if url.scheme or url.netloc or not url.path:
+    if url.scheme or url.netloc:
+        # Published links are also readable in GitHub Markdown. On the site,
+        # translate links to generated native pages into local preview URLs.
+        canonical = urlsplit(site_url or "")
+        if (url.scheme, url.netloc) == (canonical.scheme, canonical.netloc) and url.path.startswith(canonical.path):
+            destination = unquote(url.path[len(canonical.path):])
+            if destination in site_files:
+                relative = posixpath.relpath(site_files[destination], posixpath.dirname(site_uri) or ".")
+                return urlunsplit(("", "", quote(relative, safe="/"), url.query, url.fragment))
+        return target
+    if not url.path:
         return target
     path = posixpath.normpath(
         unquote(url.path).lstrip("/") if url.path.startswith("/")
@@ -93,6 +103,16 @@ def rewrite_markdown(markdown, rewrite):
     return "".join(output)
 
 
+def on_pre_build(config):
+    # Keep the dependency optional when importing link helpers in unit tests.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("build_native_api", ROOT / "tools/build_native_api.py")
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    builder.build_native_api()
+
+
 def on_files(files, config):
     from mkdocs.structure.files import File
 
@@ -102,6 +122,10 @@ def on_files(files, config):
         file = File.generated(config, destination, content=(ROOT / source).read_bytes())
         file.edit_uri = source
         files.append(file)
+    for path in sorted((ROOT / "build/docs-api/html").rglob("*")):
+        if path.is_file():
+            destination = "api/native/" + path.relative_to(ROOT / "build/docs-api/html").as_posix()
+            files.append(File.generated(config, destination, abs_src_path=str(path)))
     return files
 
 
@@ -119,5 +143,5 @@ def on_page_markdown(markdown, page, config, files):
     return rewrite_markdown(markdown, lambda target, is_html: rewrite_target(
         target, source, page.file.dest_uri if is_html else page.file.src_uri,
         html_paths if is_html else markdown_paths,
-        config.repo_url, config.extra["source_branch"],
+        config.repo_url, config.extra["source_branch"], config.extra["published_site_url"],
     ))

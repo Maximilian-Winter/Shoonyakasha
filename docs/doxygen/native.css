@@ -1,0 +1,21 @@
+/* Keep long C++ signatures usable in a narrow documentation preview. */
+@media (max-width: 1100px) {
+  #page-nav {
+    display: none !important;
+  }
+
+  #container {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  #side-nav {
+    display: none !important;
+  }
+
+  #doc-content,
+  #nav-path {
+    margin-left: 0 !important;
+  }
+}

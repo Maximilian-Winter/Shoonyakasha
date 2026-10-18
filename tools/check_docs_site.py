@@ -5,6 +5,7 @@ external URLs are not fetched.
 """
 
 import argparse
+from functools import cache
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -38,6 +39,18 @@ def check_site(root):
     if root / "index.html" not in pages:
         return ["No built index.html found. Run python -m mkdocs build --strict first."]
     base_path = urlsplit(pages[root / "index.html"].canonical or "/").path
+
+    # Generated API pages share thousands of links. Resolve and stat each
+    # distinct destination once, rather than once per referring member.
+    @cache
+    def resolve_path(path):
+        return path.resolve()
+
+    @cache
+    def html_destination(path):
+        target = path / "index.html" if path.is_dir() else path
+        return target, target.exists()
+
     errors = []
     for path, parser in pages.items():
         for link in parser.links:
@@ -50,15 +63,14 @@ def check_site(root):
                 if not url.path.startswith(base_path):
                     errors.append(f"{path.relative_to(root)}: URL outside site base {link}")
                     continue
-                target = (root / unquote(url.path[len(base_path):])).resolve()
+                target = resolve_path(root / unquote(url.path[len(base_path):]))
             else:
-                target = (path.parent / unquote(url.path)).resolve() if url.path else path
+                target = resolve_path(path.parent / unquote(url.path)) if url.path else path
             if not target.is_relative_to(root):
                 errors.append(f"{path.relative_to(root)}: non-portable local URL {link}")
                 continue
-            if target.is_dir():
-                target /= "index.html"
-            if not target.exists():
+            target, exists = html_destination(target)
+            if not exists:
                 errors.append(f"{path.relative_to(root)}: missing target {link}")
             elif url.fragment and target in pages and unquote(url.fragment) not in pages[target].anchors:
                 errors.append(f"{path.relative_to(root)}: missing anchor {link}")

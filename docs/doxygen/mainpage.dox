@@ -1,0 +1,42 @@
+/**
+@mainpage Shoonyakasha C++ technical reference
+
+This reference is generated from the engine's own headers. It includes public
+and protected declarations, overloads, default arguments, enums, aliases, and
+header source listings. Use the search box to find a symbol by name.
+
+<a href="../../">Documentation home</a> |
+<a href="../">API guide and entry points</a>
+
+@section native_start Application development
+
+Begin with Shoonyakasha::Facade::EngineAPI and
+Shoonyakasha::Facade::EngineConfig. The facade owns the application and exposes
+SceneAPI, InputAPI, PhysicsAPI, EcsAPI, and UIAPI from the
+Shoonyakasha::Facade namespace. Keep borrowed API references inside the owning
+engine's lifetime. Create scene content from EngineAPI::setOnInit().
+
+For inheritance-based native applications, see Shoonyakasha::ApplicationBase.
+The <a href="annotated.html">class index</a>,
+<a href="namespaces.html">namespace index</a>, and
+<a href="files.html">header index</a> cover the rest of the engine.
+
+@section native_scope Scope and interpretation
+
+Only the repository's include/ headers are parsed. Third-party implementations,
+private members, and SHOONYAKASHA_TESTING-only declarations are excluded.
+Preprocessing uses NDEBUG, so conditional defaults describe a release build.
+
+Some declarations do not yet have detailed comments; their signatures are
+included so the symbol catalog remains complete. An extracted declaration alone
+does not establish supported runtime behavior or feature parity. Consult the
+task guides and curated C++ and Python contract pages for subsystem limitations.
+
+@section native_contribute Keeping this reference current
+
+Every site build runs Doxygen against the current checkout. Document APIs beside
+their declarations with brief descriptions, parameter units and valid ranges,
+return values, ownership, lifecycle requirements, and failure behavior. Use
+<code>\@param</code>, <code>\@return</code>, <code>\@throws</code>, and
+<code>\@see</code> commands where they apply.
+*/

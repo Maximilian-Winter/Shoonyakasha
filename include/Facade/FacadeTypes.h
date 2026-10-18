@@ -21,7 +21,9 @@ namespace Facade {
 // Entity Handle — uint32_t matching entt::entity's underlying type
 // ═══════════════════════════════════════════════════════════════
 
+/// Opaque facade entity identifier matching the native registry's entity value.
 using EntityHandle = uint32_t;
+/// Sentinel representing no entity. A non-null handle can still be stale.
 static constexpr EntityHandle NullEntity = UINT32_MAX;
 
 // ═══════════════════════════════════════════════════════════════
@@ -141,15 +143,23 @@ enum class CanvasScaleMode : uint8_t {
 // Callback Aliases
 // ═══════════════════════════════════════════════════════════════
 
+/// Lifecycle callback with no arguments.
 using VoidCallback   = std::function<void()>;
+/// Per-frame callback receiving elapsed time in seconds.
 using UpdateCallback = std::function<void(float dt)>;
+/// Keyboard callback receiving an integer key code.
 using KeyCallback    = std::function<void(int keyCode)>;
+/// Window resize callback receiving width and height.
 using ResizeCallback = std::function<void(uint32_t width, uint32_t height)>;
 
 // ═══════════════════════════════════════════════════════════════
 // Engine Configuration — clean mirror of ApplicationConfig
 // ═══════════════════════════════════════════════════════════════
 
+/// Application settings copied when EngineAPI is constructed.
+/// Leave pipelineJsonPath empty to select the built-in render pipeline.
+/// Validation defaults depend on NDEBUG and may be overridden at runtime by
+/// the SHOONYAKASHA_VALIDATION environment variable.
 struct EngineConfig {
     int width  = 1600;
     int height = 900;
@@ -230,6 +240,8 @@ struct RenderStatsSnapshot {
     std::string summary;                   ///< the same, as readable text
 };
 
+/// Facade glTF import flags, translated to native GltfLoadOptions.
+/// Some options have implementation limits; consult the scene-loading guide.
 struct GltfOptions {
     bool loadTextures     = true;
     bool loadMaterials    = true;
@@ -243,6 +255,7 @@ struct GltfOptions {
     std::string namePrefix;
 };
 
+/// Result of EngineAPI::loadGltfScene(). Check success before using entities.
 struct GltfResult {
     bool success = false;
     std::string error;

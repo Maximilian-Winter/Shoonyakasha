@@ -85,7 +85,7 @@ struct PreparedText {
 };
 
 /// Plain `text` in `font`'s chain; or, with `rich`, its markup resolved: a
-/// <font> name FontLibrary does not know keeps the text's font, and bold or
+/// `<font>` name FontLibrary does not know keeps the text's font, and bold or
 /// italic take the font's bold or italic font where one is set
 /// (FontLibrary::setStyles), and are drawn faux otherwise.
 PreparedText prepareText(std::string_view text, bool rich, uint32_t font, float fontSize, const FontLibrary& fonts);

@@ -38,6 +38,8 @@ Current behavior is documented here; the engine is in early development and APIs
 
 ## Public API references
 
+[Technical API overview](api/index.md): browse the generated C++ classes, namespaces, inheritance hierarchy, and header source. The curated references below describe lifecycle contracts and language differences.
+
 | Interface | Python | C++ |
 |---|---|---|
 | Engine and lifecycle | [Engine](api/python/engine.md) | [EngineAPI](api/cpp/engine-api.md) |

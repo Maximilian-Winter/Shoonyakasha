@@ -1,6 +1,6 @@
 site_name: Shoonyakasha
 site_description: Build and extend a C++20 Vulkan engine with JSON render pipelines and Python bindings.
-site_url: https://maximilian-winter.github.io/Shoonyakasha/
+site_url: &published_site_url https://maximilian-winter.github.io/Shoonyakasha/
 repo_url: https://github.com/Maximilian-Winter/Shoonyakasha
 repo_name: GitHub
 edit_uri: edit/master/
@@ -42,9 +42,12 @@ watch:
   - examples/README.md
   - assets/README.md
   - logo.png
+  - include
+  - Doxyfile
 
 extra:
   source_branch: master
+  published_site_url: *published_site_url
 
 extra_css:
   - stylesheets/extra.css
@@ -55,6 +58,7 @@ exclude_docs: |
   /plans/
   /reviews/
   /images/examples/README.md
+  /doxygen/
 
 validation:
   nav:
@@ -110,6 +114,7 @@ nav:
       - Cython bridge: architecture/cython-bridge.md
       - Philosophy: philosophy.md
   - Reference:
+      - API overview: api/index.md
       - Pipeline JSON: reference/pipeline-json.md
       - C++ facade:
           - EngineAPI: api/cpp/engine-api.md

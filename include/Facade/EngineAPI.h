@@ -55,8 +55,21 @@ bool videoRecordingAvailable();
 std::string findFfmpeg();
 
 
+/**
+ * @brief Owns a callback-driven engine application and its facade APIs.
+ *
+ * Construction stores configuration; run() initializes Vulkan and scene
+ * services and enters the frame loop. Register setOnInit() to create scene
+ * content before render-graph compilation. References returned by getScene(),
+ * getInput(), getPhysics(), getEcs(), and getUI() are borrowed and must not
+ * outlive this object.
+ *
+ * @see EngineConfig, ApplicationBase
+ */
 class EngineAPI {
 public:
+    /// Store application configuration without starting the frame loop.
+    /// @param config Window, rendering, asset, and validation settings.
     explicit EngineAPI(const EngineConfig& config);
     ~EngineAPI();
 
@@ -79,21 +92,39 @@ public:
     // Callback Registration (set before or during run)
     // ═══════════════════════════════════════════════════════════
 
+    /// Replace the callback run after scene services exist, before graph compilation.
+    /// @param cb Initialization function; an empty function clears the callback.
+    /// @see getScene(), setOnPostInit()
     void setOnInit(VoidCallback cb);
+    /// Replace the callback run after render-graph compilation and event setup.
+    /// @param cb Post-initialization function, or empty to clear it.
     void setOnPostInit(VoidCallback cb);
+    /// Replace the per-frame application update callback, before standard GPU uploads.
+    /// @param cb Receives elapsed frame time in seconds, or empty to clear it.
     void setOnUpdate(UpdateCallback cb);
+    /// Replace the callback after standard GPU uploads and skeletal animation updates.
+    /// @param cb Receives elapsed frame time in seconds, or empty to clear it.
+    /// @note Use setOnUpdate() for values consumed by that frame's automatic uploads.
     void setOnPreRender(UpdateCallback cb);
+    /// Replace the callback run after frame presentation.
+    /// @param cb Post-presentation function, or empty to clear it.
     void setOnPostRender(VoidCallback cb);
+    /// Replace the application's key-press event callback.
+    /// @param cb Receives the integer key code, or empty to clear it.
     void setOnKeyPressed(KeyCallback cb);
+    /// Replace the application's window-resize callback.
+    /// @param cb Receives width and height, or empty to clear it.
     void setOnResize(ResizeCallback cb);
+    /// Replace the callback invoked by the application's shutdown hook.
+    /// @param cb Cleanup function, or empty to clear it.
     void setOnCleanup(VoidCallback cb);
 
     // ═══════════════════════════════════════════════════════════
     // Sub-API Access
     //
     // getInput() and getPhysics() are usable as soon as the EngineAPI exists —
-    // register input callbacks or set gravity before run() if you like. They
-    // become connected to the running engine during onInit.
+    // register input callbacks before run(). Physics setters need a connected
+    // physics system and should be called from onInit, after wiring.
     //
     // getScene() and getEcs() need a live ECS::Scene, which only exists once
     // run() has started, and throw std::logic_error before that. Do scene setup
@@ -103,11 +134,25 @@ public:
     // construction", and the getters dereferenced null unique_ptrs.)
     // ═══════════════════════════════════════════════════════════
 
-    SceneAPI&   getScene();     ///< throws std::logic_error before run()
-    InputAPI&   getInput();     ///< valid immediately
-    PhysicsAPI& getPhysics();   ///< valid immediately
-    EcsAPI&     getEcs();       ///< throws std::logic_error before run()
-    UIAPI&      getUI();        ///< canvas UI; throws std::logic_error before run()
+    /// Access the initialized scene facade.
+    /// @return Borrowed facade owned by this engine.
+    /// @throws std::logic_error Before scene initialization; call from setOnInit().
+    SceneAPI&   getScene();
+    /// Access input; callbacks may be registered before run().
+    /// @return Borrowed facade owned by this engine, valid immediately.
+    InputAPI&   getInput();
+    /// Access physics; configure it from setOnInit() once the system is wired.
+    /// @return Borrowed facade owned by this engine, valid immediately.
+    /// @note Native setters are no-ops before initialization.
+    PhysicsAPI& getPhysics();
+    /// Access the initialized script/component facade.
+    /// @return Borrowed facade owned by this engine.
+    /// @throws std::logic_error Before scene initialization; call from setOnInit().
+    EcsAPI&     getEcs();
+    /// Access the initialized canvas UI facade.
+    /// @return Borrowed facade owned by this engine.
+    /// @throws std::logic_error Before scene initialization; call from setOnInit().
+    UIAPI&      getUI();
 
     // ═══════════════════════════════════════════════════════════
     // Convenience Helpers
@@ -120,7 +165,6 @@ public:
                               float nearPlane = 0.1f,
                               float farPlane = 1000.f);
 
-    /// Load a glTF scene into the active ECS scene.
     // ═══════════════════════════════════════════════════════════
     // Frame capture
     // ═══════════════════════════════════════════════════════════
@@ -169,6 +213,11 @@ public:
     void setRenderScale(float scale);
     float getRenderScale() const;
 
+    /// Load a glTF scene into the active ECS scene and prepare loaded skin buffers.
+    /// @param path Model path, resolved through the shared asset resolver.
+    /// @param opts Loading flags; see GltfOptions and the scene-loading guide.
+    /// @return Loading status, error text, created entities, and animation metadata.
+    /// @pre Scene services are initialized; call from setOnInit() or later.
     GltfResult loadGltfScene(const std::string& path,
                              const GltfOptions& opts = {});
 

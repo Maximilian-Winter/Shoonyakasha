@@ -296,9 +296,9 @@ public:
     void setAccessible(EntityHandle element, const std::string& name, const std::string& description = "",
                        bool hidden = false, AccessibleRole role = AccessibleRole::Default);
 
-    /// Reads the text as markup: <color=#RRGGBB> or <color=#RRGGBBAA>, <b>,
-    /// <i>, <size=N> in canvas units, <font=name>, <link=id>, <u> and <s>,
-    /// each closed by </name>, with "&lt;" and "&gt;" for the brackets. A
+    /// Reads the text as markup: `<color=#RRGGBB>` or `<color=#RRGGBBAA>`, `<b>`,
+    /// `<i>`, `<size=N>` in canvas units, `<font=name>`, `<link=id>`, `<u>` and `<s>`,
+    /// each closed by `</name>`, with `&lt;` and `&gt;` for the brackets. A
     /// tag that is not one of these is shown as text.
     void setRichText(EntityHandle element, bool richText = true);
     /// The colour of a link in rich text while the pointer is over it.

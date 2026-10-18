@@ -1,0 +1,66 @@
+# Native reference, built by tools/build_native_api.py during every MkDocs build.
+# Parse only engine headers; do not publish vendored libraries or examples.
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "Shoonyakasha C++ API"
+PROJECT_BRIEF          = "Vulkan engine technical reference"
+OUTPUT_DIRECTORY       = build/docs-api
+INPUT                  = include docs/doxygen/mainpage.dox
+FILE_PATTERNS          = *.h *.hpp *.dox
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */third_party/*
+STRIP_FROM_PATH        = include
+STRIP_FROM_INC_PATH    = include
+FULL_PATH_NAMES        = YES
+USE_MDFILE_AS_MAINPAGE  =
+
+# Include the complete declared surface, even where prose is still missing.
+# Private state and testing-only constructors are outside the reference.
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_PRIV_VIRTUAL   = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+INTERNAL_DOCS          = NO
+EXCLUDE_SYMBOLS        = *::Impl
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+SEARCH_INCLUDES        = NO
+PREDEFINED             = NDEBUG
+SORT_MEMBER_DOCS       = YES
+JAVADOC_AUTOBRIEF      = YES
+MULTILINE_CPP_IS_BRIEF = YES
+
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+WARN_LOGFILE           = build/docs-api/warnings.log
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_COLORSTYLE        = AUTO_LIGHT
+HTML_COLORSTYLE_HUE    = 275
+HTML_EXTRA_STYLESHEET  = docs/doxygen/native.css
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+LAYOUT_FILE            = build/docs-api/layout.xml
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+VERBATIM_HEADERS       = YES
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+XML_PROGRAMLISTING     = NO
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_RTF           = NO
+GENERATE_DOCBOOK       = NO
+
+# Doxygen's built-in inheritance diagrams keep previews self-contained.
+HAVE_DOT               = NO
+CLASS_GRAPH            = YES

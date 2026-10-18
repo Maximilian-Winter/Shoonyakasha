@@ -4,6 +4,8 @@ Access: `EngineAPI(config)`. [Other language reference](../python/engine.md).
 
 Include `Facade/EngineAPI.h`; namespace `Shoonyakasha::Facade`. [Source declaration](../../../include/Facade/EngineAPI.h).
 
+For linked native types, overloads, member documentation, and header source, open the [generated C++ technical reference](../index.md).
+
 Owns the application and provides callbacks and convenience constructors. `run()` blocks until the window closes. Keep sub-API access and scene setup in the engine's lifetime.
 
 ## Initialization and callbacks

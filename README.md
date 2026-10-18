@@ -91,6 +91,7 @@ For C++, build and run `FacadeTest` following the [C++ quickstart](docs/getting-
 - [Python application and content toolkit](docs/guides/python-toolkit.md): compose UI, plot live data, replay simulations and export lessons as video.
 
 - [Documentation index](docs/index.md): guides, C++/Python references, and architecture.
+- [Technical API reference](docs/api/index.md): generated C++ classes, members, enums, inheritance, and header source, built with Doxygen as part of the documentation site.
 - [Example catalog](examples/README.md): rendering, compute, animation, physics, and 2D games.
 - [Asset guide](assets/README.md): bundled assets, optional downloads, and licenses.
 - [Documentation maintenance](docs/maintenance.md): checks and source-of-truth checklist.

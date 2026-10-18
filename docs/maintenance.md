@@ -2,7 +2,15 @@
 
 ## Preview and build the site
 
-The site uses [MkDocs](https://www.mkdocs.org/) with its built-in Read the Docs theme. It needs Python 3.10 or newer and does not require a Vulkan SDK, a GPU, or a compiled engine. Run from the repository root:
+The site uses [MkDocs](https://www.mkdocs.org/) with its built-in Read the Docs theme, plus Doxygen for the native API reference. It needs Python 3.10 or newer and does not require a Vulkan SDK, a GPU, or a compiled engine.
+
+Install **Doxygen 1.9.8 or newer** and make sure `doxygen` is on `PATH`. On Ubuntu/Debian:
+
+```sh
+sudo apt-get install doxygen
+```
+
+On Windows, install [Doxygen](https://www.doxygen.nl/download.html), adding its executable directory to `PATH`. Verify `doxygen --version` in the shell used for previewing. Inheritance diagrams use Doxygen's built-in renderer. Then run from the repository root:
 
 ```sh
 python -m venv .venv-docs
@@ -27,7 +35,7 @@ python -m pip install -r requirements-docs.txt
 python -m mkdocs serve
 ```
 
-Open [the local preview](http://127.0.0.1:8000/Shoonyakasha/). MkDocs watches documentation changes. Restart it after changing the build hook. To produce the same static output as CI:
+Open [the local preview](http://127.0.0.1:8000/Shoonyakasha/). MkDocs watches documentation and header changes and regenerates the C++ reference on each build. Restart it after changing the build hook. Run one preview/build at a time, because Doxygen writes to a shared generated directory. To produce the same static output as CI:
 
 ```sh
 python -m mkdocs build --strict
@@ -78,11 +86,42 @@ python tools/check_docs_site.py
 python -m unittest discover -s tests/python -v
 ```
 
-The API generator updates only marked inventories in five C++ and five Python references. Maintain the surrounding explanatory prose by hand. It is tailored to this repository's header/wrapper style, so changes to those declaration styles may require extractor changes.
+The lightweight API inventory generator updates only marked inventories in six C++ and six Python contract pages. Maintain the surrounding explanatory prose by hand. It is tailored to this repository's header/wrapper style, so changes to those declaration styles may require extractor changes. The full native symbol reference is built separately with Doxygen.
 
 The documentation checker validates active local Markdown paths/anchors and Python/JSON fence syntax. It does not fetch external URLs or execute snippets. Complete pipelines need the existing validator and native compilation/runtime checks; excerpts need context and must be labeled as fragments. Keep generated member signatures separate from runnable code examples.
 
 For quickstart changes, build FacadeTest and launch the Python starter from the documented working directory. Check required assets and shaders. For renderer contracts, exercise the matching GPU example; headless tests are not a rendering test. Record checks that could not run.
+
+## Technical C++ API
+
+[Doxyfile](../Doxyfile) defines the native API extraction. Each MkDocs build invokes [the native reference builder](../tools/build_native_api.py), which generates HTML and XML under the ignored `build/docs-api/` directory. The HTML is included in the site at `api/native/`; XML is available locally for tooling. Doxygen runs with documentation warnings treated as errors; details are recorded in `build/docs-api/warnings.log`.
+
+To generate only the native reference:
+
+```sh
+python tools/build_native_api.py
+```
+
+The normal `python -m mkdocs build --strict` command includes this step automatically. CI installs Doxygen and publishes the native reference in the same Pages artifact as the guides. No separately deployed API site is required.
+
+The builder derives a navigation layout from the installed Doxygen version and adds a **Documentation** link back to MkDocs on API pages. Symbol search runs entirely in the browser. The generated-site checker validates native HTML links, source anchors, and diagram assets alongside the guide pages.
+
+Write technical documentation beside declarations using `///` or `/** ... */`:
+
+```cpp
+/**
+ * @brief Load a resource from a path relative to the asset root.
+ * @param path Resource path; must not be empty.
+ * @return True when the resource was loaded successfully.
+ * @throws std::invalid_argument If path is empty.
+ */
+```
+
+This is a comment-format example, not a description of an existing loader. Document actual behavior checked against the implementation. Include units, defaults, ownership, required initialization phase, error behavior, and relevant `@see` links. Use backticks around literal markup such as `<font=name>` so it is not interpreted as HTML.
+
+The generated reference includes undocumented public/protected declarations to keep the catalog complete; it does not claim every member has explanatory prose. It excludes private members, implementation translation units, dependencies, examples, and testing-only APIs. Preprocessing defines `NDEBUG`, so build-dependent defaults reflect release configuration. Extend comments incrementally when changing APIs.
+
+The [API overview](api/index.md) contains canonical published links to the symbol indexes. The build hook converts links pointing to generated files into relative local links, preserving the repository subpath and local preview. MkDocs search covers authored pages; Doxygen's own search indexes C++ symbols.
 
 ## Organization
 
