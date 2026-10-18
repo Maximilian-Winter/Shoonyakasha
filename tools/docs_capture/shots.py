@@ -35,6 +35,8 @@ PYTHON = [
 
 KAJIYA = ['viziers', 'gas_stations', 'battle', 'warhammer', 'conference']
 CARS = ['corvette_c8', 'porsche_911_turbo', 'eta2_interceptor']
+SHOWROOM_CARS = ['gaz13_chaika', 'shelby_cobra', 'alfa_33_stradale_1968', 'chevrolet_camaro', 'alfa_montreal',
+                 'porsche_911_turbo', 'alfa_gtv6', 'corvette_c8', 'lamborghini_revuelto', 'alfa_33_stradale_2024']
 PANEL_OFF = 'F2@30'
 
 
@@ -102,8 +104,9 @@ CLIPS = [
          keys=PANEL_OFF, seconds=4, gif=(0, 4)),
     clip('showroom_tour', 'showroom', 'showroom.py', 0, ['--record', '{out}', '--models', 'corvette_c8',
          '--seconds', '20'], ['showroom:corvette_c8'], own=True, timeout=3600),
-    clip('showroom_tour', 'showroom', 'showroom.py', 0, ['--record', '{out}', '--models', 'corvette_c8',
-         '--seconds', '20', '--vertical'], ['showroom:corvette_c8'], own=True, vertical=True, timeout=3600),
+    *[clip('showroom_' + car, 'showroom', 'showroom.py', 0, ['--record', '{out}', '--models', car,
+           '--seconds', '20', '--vertical'], ['showroom:' + car], own=True, vertical=True, timeout=3600)
+      for car in SHOWROOM_CARS],
     clip('museum_tour', 'museum', 'museum.py', 0, ['--record', '{out}', '--models', 'gaz13_chaika,corvette_c8',
          '--seconds', '12'], ['showroom:gaz13_chaika', 'showroom:corvette_c8'], own=True, timeout=3600),
 ]
