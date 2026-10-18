@@ -11,6 +11,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [rendering/japanese_shrine](../../examples/python/rendering/japanese_shrine) | `python shrine.py`, `python shrine_default.py` | Deferred PBR of a downloaded glTF model with IBL, sun shadows, sky and fog; the second on the default pipeline |
 | [rendering/alley](../../examples/python/rendering/alley) | `python alley.py` | A tech demo on the default pipeline, built from Poly Haven models: dusk to night, ray-traced and local-light shadows, lit windows, a walking fox |
 | [rendering/showroom](../../examples/python/rendering/showroom) | `python showroom.py` | Cars and starships on a turntable: a virtual shadow map, ray-traced soft light shadows and reflections, studio, hard-light, night and neon lighting, stills and video for posting |
+| [rendering/museum](../../examples/python/rendering/museum) | `python museum.py` | The showroom's cars as a small museum, oldest first, each beside a placard with its figures and a timeline of the collection |
 | [rendering/bistro](../../examples/python/rendering/bistro) | `python bistro.py` | Amazon Lumberyard's Bistro on the default pipeline: 2.8M triangles, 96 point lights switching on at dusk, a walk from the lane to the plaza |
 | [rendering/sponza](../../examples/python/rendering/sponza) | `python sponza.py` | The default pipeline on Sponza, or on a colonnade of boxes without it; quality presets, ray-traced shadows |
 | [rendering/scene_lights](../../examples/python/rendering/scene_lights) | `python scene_lights.py` | Thousands of scene lights on the default pipeline, read from a storage buffer the engine refills every frame; a benchmark of what they cost |
@@ -32,7 +33,7 @@ For a minimal first project, prefer the [generated starter](../getting-started/p
 
 ## Runtime previews
 
-Native frame captures using bundled assets. See [capture recipes and asset choices](../images/examples/README.md) for refresh instructions. Click an image to view it at full resolution.
+Native frame captures, with each example's optional download installed where it has one. See [capture recipes and asset choices](../images/examples/README.md) for refresh instructions. Click an image to view it at full resolution.
 
 ### Facade demo (`demo`)
 
@@ -46,6 +47,12 @@ The Python facade demo with its bundled `Box.gltf` fallback and active compute p
 
 This example intentionally creates no meshes or sprites. Its custom components and systems run without visible objects; the deliberately failing system reports its auto-disable in the console. The empty viewport is expected, not a loading failure.
 
+### Canvas UI (`ui_canvas_demo`)
+
+<a href="../images/examples/python/ui_canvas_demo.png"><img src="../images/examples/python/ui_canvas_demo.png" alt="A HUD titled Śūnyākāśa with a spin toggle, exposure slider and reset button, beside a red box and a small world-space panel with a button and a slider" width="720"></a>
+
+A HUD canvas laid out at 1280 × 720 and a canvas in the world, both on the default pipeline; the world panel is clicked in 3D.
+
 ### Animated Fox (`skinned_fox_demo`)
 
 <a href="../images/examples/python/skinned_fox_demo.png"><img src="../images/examples/python/skinned_fox_demo.png" alt="Low-poly orange and white fox in an animated pose" width="720"></a>
@@ -54,13 +61,21 @@ Bundled `Fox.glb` during playback of the first animation clip, driven through th
 
 ### Alley (`alley`)
 
+<a href="../images/examples/python/alley.png"><img src="../images/examples/python/alley.png" alt="A back alley between plaster and brick buildings in afternoon sun, a fox walking towards a covered car" width="720"></a>
+
 A back alley between an apartment block and an old factory, assembled from [Poly Haven](https://polyhaven.com)'s CC0 modular facades and props, on the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md). **N** turns late afternoon into night over a few seconds: the sun reddens and sets, windows light up one by one, wall lanterns, a security light and a street lamp come on with their own shadows, and exposure follows. **R** switches the sun between ray-traced and cascaded shadows. The models are not in the repository: `python tools/fetch_assets.py alley` downloads them (~120 MB), and the [example's README](../../examples/python/rendering/alley/README.md) explains how the buildings are put together from the modular kits.
 
 ### Bistro (`bistro`)
 
+<a href="../images/examples/python/bistro.png"><img src="../images/examples/python/bistro.png" alt="A Paris street corner at dusk, red awnings and the first street lamps lit" width="720"></a>
+
 Amazon Lumberyard's Bistro, a Paris street corner of 2.8 million triangles, on the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md). It opens at dusk: the sun leaves the rooftops, then the scene's 96 lights come on one by one, street lamps and lanterns first, then the strings of coloured bulbs over the café terraces. The shadow atlas keeps choosing which lamps near the camera get point shadows as the camera walks from the north lane to the plaza. **N** goes back to day, **R** switches the sun between ray-traced and cascaded shadows. The scene is CC BY 4.0 and not in the repository: `python tools/fetch_assets.py bistro` downloads it (~2 GB) and converts its DDS textures and specular-glossiness materials, as the [example's README](../../examples/python/rendering/bistro/README.md) describes.
 
 ### Showroom (`showroom`)
+
+<a href="../images/examples/python/showroom.png"><img src="../images/examples/python/showroom.png" alt="An orange Corvette convertible on a turntable under studio softboxes, the control panel at the left and a placard with paint swatches at the right" width="720"></a>
+
+Model: "2020 Chevrolet Corvette C8 Stingray Convertible" (https://skfb.ly/pr7JI) by Ddiaz Design, CC BY 4.0.
 
 A studio for showing models off: each model on a turntable in an infinity cove, on the [showroom pipeline](../../examples/python/rendering/showroom/pipeline/README.md), a copy of the default pipeline.
 - **The sun:** its shadows come from a virtual shadow map, eight clipmap levels whose pages are rendered only where visible pixels need them and cached between frames.
@@ -71,19 +86,47 @@ A studio for showing models off: each model on a turntable in an infinity cove, 
 
 The cars and starships are Sketchfab models (CC BY and CC BY-NC-SA). `python tools/fetch_assets.py showroom` fetches and converts them with a Sketchfab API token, as the [example's README](../../examples/python/rendering/showroom/README.md) describes; without them it shows the Fox.
 
+### Museum (`museum`)
+
+<a href="../images/examples/python/museum.png"><img src="../images/examples/python/museum.png" alt="A teal 1959 GAZ Chaika on a turntable beside a placard with its engine, power, top speed, weight and a short text, and a timeline of the collection along the bottom" width="720"></a>
+
+The showroom's cars in the order they were made, on the showroom's pipeline, each beside a placard with its year, maker, figures and a few lines about it. See the [example's README](../../examples/python/rendering/museum/README.md).
+
+Model: "GAZ 13 Chaika" (https://skfb.ly/oIoSW) by panderlaike_design, CC BY 4.0.
+
 ### Sponza (`sponza`)
+
+<a href="../images/examples/python/sponza.png"><img src="../images/examples/python/sponza.png" alt="A colonnade of grey box pillars with sun shadows across the floor and a red box at the far end" width="720"></a>
+
+Without the Sponza download: the colonnade of boxes.
 
 Sponza lit by the [default pipeline](../../python/shoonyakasha/pipelines/default/README.md), with no pipeline or shaders of its own: a steep sun through the open roof in four shadow cascades, two warm lamps, ambient occlusion, bloom and automatic exposure. Without the Sponza download it builds a colonnade of boxes, which still shows the shadows and occlusion. **1**, **2** and **3** apply the pipeline's `low`, `medium` and `high` presets with `apply_pipeline_preset`, **4** the `raytraced` one where `ray_query_supported()` says the device can, **V** cycles the debug views and **X** turns automatic exposure off and on.
 
+### Scene lights (`scene_lights`)
+
+<a href="../images/examples/python/scene_lights.png"><img src="../images/examples/python/scene_lights.png" alt="Sponza's arches lit in patches of pink, green and blue by thousands of point lights, with a statistics panel" width="720"></a>
+
+2048 point lights and four shadowed spots in Crytek Sponza, on the default pipeline, from a storage buffer the engine refills every frame. `--benchmark results.md` measures what each light count costs. See the [example's README](../../examples/python/rendering/scene_lights/README.md).
+
 ### Volume Tiled Forward Shading (`volume_tiled`)
+
+<a href="../images/examples/python/volume_tiled.png"><img src="../images/examples/python/volume_tiled.png" alt="Sponza's colonnade under thousands of small coloured lights, with a panel of stage timings" width="720"></a>
 
 Jeremiah van Oosten's Volume Tiled Forward Shading on the [volume tiled pipeline](../../examples/python/rendering/volume_tiled/pipeline/README.md), a copy of the default pipeline that shades forward. After a depth prepass, only the clusters visible pixels lie in are listed. The lights get Morton codes, are sorted and built into a 32-ary BVH, and each listed cluster walks the BVH for its lights. Up to a million point lights move through Crytek Sponza. **B** compares the BVH with testing every light, and the panel shows each stage's GPU time. `--benchmark results.md` measures a range of light counts, as the paper did. The scene is Khronos's glTF Sponza, cloned from glTF-Sample-Assets into the repository root; without it the example lights a colonnade of boxes. See the [example's README](../../examples/python/rendering/volume_tiled/README.md).
 
 ### Reference path tracer (`reference_pt`)
 
+<a href="../images/examples/python/reference_pt.png"><img src="../images/examples/python/reference_pt.png" alt="Sponza's atrium seen through an arch, lit by the sun and sky, with the path tracer's panel" width="720"></a>
+
+1024 paths per pixel.
+
 A path tracer that traces with ray queries in a compute pass and averages one path per pixel per frame while the camera stands still. At every hit it adds the surface's emission and the scene lights through shadow rays, then continues in a direction drawn from the BRDF. At each hit it reads the triangle and its glTF material through [`sk/scene_hits.glsl`](../../python/shoonyakasha/glsl/sk/scene_hits.glsl), from the rows and textures the engine keeps for the acceleration structure. The BRDF and light model are the default pipeline's, so `--pipeline default` shows the same scene to compare against. Key **3** is a white furnace test. Needs a GPU with ray queries and glTF-Sample-Assets for Sponza; falls back to a colonnade of boxes. In it and the three kajiya examples below, `--scene` also loads the scenes of kajiya's own repository (an observation deck, gas stations, a floating island, a Warhammer diorama, the conference room), which `python tools/fetch_assets.py kajiya` fetches. See the [example's README](../../examples/python/rendering/reference_pt/README.md).
 
 ### Irradiance cache (`irradiance_cache`)
+
+<a href="../images/examples/python/irradiance_cache.png"><img src="../images/examples/python/irradiance_cache.png" alt="A conference room with a long table and red chairs, lit through its windows" width="720"></a>
+
+kajiya's conference room (`--scene conference`), 300 frames in. Conference room, (c) Anat Grynberg and Greg Ward.
 
 The irradiance cache of Embark's kajiya, on its own pipeline of compute passes with ray queries:
 - **Cells:** twelve cascades of 32³ cells follow the camera. A cell gets an entry from a pool of 65,536 when a surface in it is looked up, and loses it a few frames after the last lookup.
@@ -93,6 +136,10 @@ The irradiance cache of Embark's kajiya, on its own pipeline of compute passes w
 Camera rays are lit by the scene lights and the cache. The scene, lights and camera are the reference path tracer's, for comparison. **1**-**4** switch between the image, the cache alone, its entries and direct light; `--walk` moves the camera down the nave. See the [example's README](../../examples/python/rendering/irradiance_cache/README.md).
 
 ### ReSTIR GI (`restir_gi`)
+
+<a href="../images/examples/python/restir_gi.png"><img src="../images/examples/python/restir_gi.png" alt="An ornate tower with a blue dome and balconies on a rock, against a hazy landscape" width="720"></a>
+
+kajiya's observation deck (`--scene viziers`), 300 frames in. "Vizier's observation deck" by winion, CC BY 4.0.
 
 The ray-traced diffuse global illumination of Embark's kajiya, on its own pipeline of compute passes with ray queries:
 - **G-buffer:** camera rays find each pixel's surface and its direct light.
@@ -105,6 +152,10 @@ The ray-traced diffuse global illumination of Embark's kajiya, on its own pipeli
 
 ### Ray-traced reflections (`rt_reflections`)
 
+<a href="../images/examples/python/rt_reflections.png"><img src="../images/examples/python/rt_reflections.png" alt="Pink and white retro gas stations with tall GAS signs, pumps and a vintage car" width="720"></a>
+
+kajiya's gas stations (`--scene gas_stations`), 300 frames in. "gas stations fixed" (https://skfb.ly/6RGDX) by John_Constantine, CC BY 4.0.
+
 Kajiya's ray-traced reflections, on top of the ReSTIR GI example's diffuse light:
 - **Candidates:** at half resolution, each pixel draws a ray from its surface's GGX lobe, through the visible normals. At its hit the ray takes the lights, the emission, and the hit's diffuse light: from the ReSTIR GI result on screen, from the irradiance cache elsewhere.
 - **Reuse:** reservoirs reuse the rays over time, weighed by luminance and the rays' densities. Every frame a quarter of them is traced again, so they follow changes in the light.
@@ -114,6 +165,10 @@ Kajiya's ray-traced reflections, on top of the ReSTIR GI example's diffuse light
 A small table of the lobe's directional albedo, computed for the engine's BRDF, scales the reflections into the image. The reference path tracer's `--mode 4` converges to the same reflections for comparison. See the [example's README](../../examples/python/rendering/rt_reflections/README.md).
 
 ### Wave optics (`wave_optics`)
+
+<a href="../images/examples/python/wave_optics.png"><img src="../images/examples/python/wave_optics.png" alt="Gold, silver and thin-film spheres, a cube and a compact disc with rainbow diffraction under a small lamp, with the panel" width="720"></a>
+
+1024 paths per pixel of the default scene.
 
 A spectral, polarised path tracer on its own pipeline, after the physical light transport papers of Steinberg and coauthors:
 - **Spectrum and polarisation:** each path carries four wavelengths, and for each the Mueller row that turns the light arriving at a surface into what the camera measures, through an optional polariser.

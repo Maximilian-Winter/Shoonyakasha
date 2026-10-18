@@ -1,10 +1,10 @@
 # Example screenshot capture record
 
-These PNGs are authentic native frame captures, made on Windows on 2026-09-07. They contain the rendered client area only: no desktop, window borders, terminal, image generation, or compositing. Each example has its own file; the galleries reuse those files. Frames are captured at 1280×720 and displayed at 720 px in the guides and 400 px in the galleries, without stretching or duplicate thumbnails.
+These PNGs are authentic native frame captures, made on Windows: the C++ set and the first Python ones on 2026-09-07, the Python rendering examples and the canvas UI demo on 2026-10-18. They contain the rendered client area only: no desktop, window borders, terminal, image generation, or compositing. Each example has its own file; the galleries reuse those files. Frames are captured at 1280×720 and displayed at 720 px in the guides and 400 px in the galleries, without stretching or duplicate thumbnails.
 
 ## Refresh
 
-A Vulkan-capable desktop, the [C++ build dependencies](../../../BUILDING.md), and an installed native Python package are required. Run commands below from the repository root. Keep `assets/` limited to the bundled assets for this capture pass: if optional `models/NewSponza_Main_glTF_003.gltf` is installed there, the facade, particle-flow, and Python demo choose it instead of their box fallback.
+A Vulkan-capable desktop, the [C++ build dependencies](../../../BUILDING.md), and an installed native Python package are required. Run commands below from the repository root. Keep `assets/` limited to the bundled assets for this capture pass: if optional `models/NewSponza_Main_glTF_003.gltf` is installed there, the facade, particle-flow, Python demo and Sponza examples choose it instead of their box fallback. The other rendering examples need the downloads named in the table below.
 
 The opt-in [preparation script](../../../tools/docs_capture/prepare.py) writes modified **copies** into ignored `build/docs-capture/`. A CMake project hook substitutes those copies in a separate build. Normal engine sources, APIs, examples, and builds are untouched. The copies add native frame saving and automatic exit, set a 1280×720 viewport, and apply the camera/asset choices below. Do not distribute these capture executables as the normal examples.
 
@@ -28,7 +28,7 @@ python tools/docs_capture/run.py cpp --only physics_test
 python tools/docs_capture/run.py python --python .venv/Scripts/python.exe --only skinned_fox_demo
 ```
 
-The [runner](../../../tools/docs_capture/run.py) changes into each documented source directory and invokes its executable or script. It sets `SHOONYAKASHA_ASSET_DIR` to the repository's `assets/`, retains logs and temporary PNGs in `build/docs-capture/`, and replaces a published image only after successful capture. A failed run leaves the existing image intact and returns a failure status. Python uses a [wrapper](../../../tools/docs_capture/python_capture.py) that chains the example's post-render callback and calls `engine.capture_screenshot()`. Since Python has no public quit method, the runner terminates only its own Python child after the screenshot callback confirms success.
+The [runner](../../../tools/docs_capture/run.py) changes into each documented source directory and invokes its executable or script. It sets `SHOONYAKASHA_ASSET_DIR` to the repository's `assets/`, retains logs and temporary PNGs in `build/docs-capture/`, and replaces a published image only after successful capture. A failed run leaves the existing image intact and returns a failure status. Python uses a [wrapper](../../../tools/docs_capture/python_capture.py) that runs the unchanged example with the arguments in [`shots.py`](../../../tools/docs_capture/shots.py), chains its post-render callback, calls `engine.capture_screenshot()` after a delay or a number of frames, and exits the process. The runner stops a run that outlasts the shot's timeout.
 
 C++ uses `ApplicationBase::captureScreenshot()` after rendering; the older standalone bloom and particle examples call `RenderTargetSaver` on the presented swapchain image. The isolated C++ copies exit through their normal cleanup path. No keyboard or mouse automation is needed. The physics copies call their existing **P** key handler once before the loop.
 
@@ -56,9 +56,35 @@ The delay starts after initialization (Python: after the first rendered frame). 
 | Python `dakini_temple` | Procedural shader layers; bundled Noto Sans Devanagari and Roboto fonts, labels rendered with Pillow + raqm; no input. | 3 s |
 | Python `japanese_shrine` | Hand-downloaded `models/japanese_shrine.glb` (CC BY 4.0, aumiella; see the asset README) with the bundled sunset environment; automatic orbit, no input. | 3 s |
 | Python `pong_game` | **Not captured:** separately obtained artwork; permission unresolved below. | — |
+| Python `ui_canvas_demo` | Bundled `Box.gltf`, Roboto and Playfair Display; no input. | 3 s |
+| Python `sponza` | Without Sponza: the colonnade of boxes. | 5 s |
+| Python `alley` | `python tools/fetch_assets.py alley`; the fox's walk, before nightfall. | 8 s |
+| Python `bistro` | `python tools/fetch_assets.py bistro`; the walk at dusk, as the lamps come on. | 8 s |
+| Python `scene_lights` | glTF-Sample-Assets Sponza in the repository root; 2048 lights. | 5 s |
+| Python `volume_tiled` | glTF-Sample-Assets Sponza; 16,384 moving lights. | 5 s |
+| Python `showroom` | `python tools/fetch_assets.py showroom`; `--models corvette_c8 --width 1280 --height 720`, studio lighting, panel open. | 20 s |
+| Python `museum` | The showroom's models; `--width 1280 --height 720`, the first exhibit. | 20 s |
+| Python `reference_pt` | glTF-Sample-Assets Sponza. | 1024 frames |
+| Python `irradiance_cache` | `python tools/fetch_assets.py kajiya`; `--scene conference`. | 300 frames |
+| Python `restir_gi` | kajiya's scenes; `--scene viziers`. | 300 frames |
+| Python `rt_reflections` | kajiya's scenes; `--scene gas_stations`. | 300 frames |
+| Python `wave_optics` | The default scene. | 1024 frames |
 | Python `ui_showcase` | `python ui_showcase.py --screenshot ui_showcase.png`: frame 120 of the Scene tab, bundled `Box.gltf`, Roboto and Playfair Display; no input. | 120 frames |
 
 The shared [asset guide](../../../assets/README.md) records asset locations and attribution. These captures do not redistribute model or texture source files.
+
+## Stills and clips for posting
+
+The same runner makes larger stills and video clips into the ignored `build/docs-capture/social/`:
+
+```powershell
+python tools/docs_capture/run.py social --python .venv/Scripts/python.exe   # 1920x1080 stills in stills/
+python tools/docs_capture/run.py clips --python .venv/Scripts/python.exe    # clips/, vertical/ and gifs/
+python tools/docs_capture/run.py clips --only bistro_walk --python .venv/Scripts/python.exe
+python tools/docs_capture/run.py gifs --python .venv/Scripts/python.exe     # GIFs from the clips in clips/
+```
+
+The shots are listed in [`shots.py`](../../../tools/docs_capture/shots.py). Clips are H.264 MP4 at 30 fps, 1920×1080 or, in `vertical/`, 1080×1920. They record with `start_recording(..., fixed_step=True)`, so each rendered frame advances the example by 1/30 s and the clip plays at the example's speed however slowly it renders. A window larger than the screen gets its full size: the wrapper answers Windows' size-limit message for it with a larger limit. Turn off game overlays, such as the NVIDIA overlay, while capturing: they draw their notices into large windows, and those land in the captures. A shot can press keys on given frames, such as F2 to hide an example's panel or N to bring on the night. A GIF loop of part of a clip goes to `gifs/`, 480 pixels wide at 12 fps; `run.py gifs` makes them again from the recorded clips. Showroom and museum shots run those examples' own `--screenshots` and `--record` modes. `CREDITS.md` beside the captures lists the attribution each file needs.
 
 ## Pong artwork permission
 
@@ -68,7 +94,7 @@ Pong requires **Simple Ping Pong Assets by Esoe B.Studios**, obtained separately
 
 ## Validation
 
-The published set contains **17 PNGs for 18 examples**, with Pong explicitly blocked. Inspect every full-size capture for correct content and framing before replacing images. The ECS viewport is intentionally empty; bloom's diffuse light shapes and the UI texture's checkerboard are actual example output.
+The published set contains **31 PNGs**, 10 C++ and 21 Python, with Pong explicitly blocked. Inspect every full-size capture for correct content and framing before replacing images. The ECS viewport is intentionally empty; bloom's diffuse light shapes and the UI texture's checkerboard are actual example output.
 
 ```powershell
 python tools/check_docs.py
