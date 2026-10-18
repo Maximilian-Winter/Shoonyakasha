@@ -25,7 +25,7 @@ Colours are `(r, g, b, a)` tuples in sRGB with straight alpha. Text is a `str`. 
 
 `get_rect` and `get_canvas_size` report the layout as of the last frame. An element created this frame reports zeros until the next frame lays it out.
 
-Use `set_clip(e, True)` to cut an element's descendants off at its rect. `set_visible(e, False)` hides the element and everything below it.
+Use `set_clip(e, True)` to cut an element's descendants off at its rect. `set_visible(e, False)` hides the element and everything below it; on a canvas, everything on the canvas.
 
 ## Layout groups
 

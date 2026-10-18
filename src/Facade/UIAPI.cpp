@@ -285,9 +285,11 @@ glm::vec4 UIAPI::getRect(EntityHandle element) const {
 
 void UIAPI::setVisible(EntityHandle element, bool visible) {
     if (auto* rect = m_impl->get<UI::UIRect>(element)) rect->visible = visible;
+    if (auto* canvas = m_impl->get<UI::UICanvas>(element)) canvas->visible = visible;
 }
 
 bool UIAPI::isVisible(EntityHandle element) const {
+    if (const auto* canvas = m_impl->get<UI::UICanvas>(element)) return canvas->visible;
     const auto* rect = m_impl->get<UI::UIRect>(element);
     return rect && rect->visible;
 }

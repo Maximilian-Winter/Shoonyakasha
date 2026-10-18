@@ -242,6 +242,24 @@ TEST(CanvasLayout, HiddenParentHidesSubtree) {
     expectRectNear(registry.get<UIRect>(child).rect, {0, 0}, {800, 600});
 }
 
+TEST(CanvasLayout, HiddenCanvasHidesEveryElement) {
+    entt::registry registry;
+    const entt::entity root = canvas(registry);
+    const entt::entity parent = stretch(registry, root);
+    const entt::entity child = stretch(registry, parent);
+    registry.get<UICanvas>(root).visible = false;
+
+    layoutCanvas(registry, root, {800, 600});
+
+    EXPECT_FALSE(registry.get<UIRect>(parent).visibleInHierarchy);
+    EXPECT_FALSE(registry.get<UIRect>(child).visibleInHierarchy);
+
+    registry.get<UICanvas>(root).visible = true;
+    layoutCanvas(registry, root, {800, 600});
+
+    EXPECT_TRUE(registry.get<UIRect>(child).visibleInHierarchy);
+}
+
 TEST(CanvasLayout, WalkSkipsNonUiEntitiesAndNestedCanvases) {
     entt::registry registry;
     const entt::entity root = canvas(registry);

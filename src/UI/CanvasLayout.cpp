@@ -474,7 +474,7 @@ void layoutCanvas(entt::registry& registry, entt::entity canvasEntity, const glm
         walk.computeSizes(canvasEntity, axis);
         walk.place(canvasEntity, canvasRect, axis);
     }
-    walk.finish(canvasEntity, canvasRect, true);
+    walk.finish(canvasEntity, canvasRect, canvas.visible);
 }
 
 CanvasLayoutSystem::CanvasLayoutSystem(const glm::vec2* screenSize, const FontLibrary* fonts)

@@ -57,6 +57,7 @@ struct UICanvas {
     enum class ScaleMode { ConstantPixel, ScaleWithScreen };
 
     Mode mode = Mode::ScreenOverlay;
+    bool visible = true;                       // false hides every element on the canvas
     int sortOrder = 0;                         // overlay canvases draw in ascending order
     LayoutDirection layoutDirection = LayoutDirection::LeftToRight;   // Inherit counts as LeftToRight
 
