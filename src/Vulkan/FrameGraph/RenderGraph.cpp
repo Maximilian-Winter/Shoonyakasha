@@ -1626,6 +1626,11 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
     // compile() is public and can be called directly.
     m_resolvedLayoutCache.clear();
 
+    // The descriptor sets about to be made hold none of the scene's textures;
+    // the next frame finds their bindings again and writes every slot.
+    m_accelerationBindings.clear();
+    m_sceneTextureBindings.clear();
+
     // Apply callbacks to pass declarations before compilation
     applyCallbacks();
 
