@@ -51,6 +51,7 @@ layout(set = 1, binding = 1) uniform Settings {
     float indirectAngle;   // angular radius of the sources of light that is not a scene light, degrees
     uint lampSpectrum;     // lamps.glsl's LAMP_*: the first point or spot light's spectrum
     float lampEntity;      // the entity whose emission has that spectrum too
+    float wavelength;      // above 0: every path carries this wavelength alone, in nm, shown in grey
 } settings;
 layout(set = 1, binding = 2) uniform Materials {
     vec4 slots[24];        // per slot: (entity, type, metal, roughness), (pitch, depth, film index,
@@ -780,15 +781,18 @@ void main() {
     vec3 direction = normalize((camera.invView * vec4(view, 0.0)).xyz);
     vec3 right = normalize(vec3(camera.invView[0]));
     vec3 frameX = normalize(right - direction * dot(right, direction));
-    vec4 density;
-    vec4 lambdas = sampleWavelengths(density);
+    bool single = settings.wavelength > 0.0;
+    vec4 density = vec4(1.0 / LAMBDA_RANGE);
+    vec4 lambdas = single ? vec4(settings.wavelength) : sampleWavelengths(density);
 
     float firstSigma;
     vec4 radiance = tracePath(camera.position.xyz, direction, frameX, lambdas, firstSigma);
     radiance /= LAMBDA_RANGE * density;   // spectrumToRgb takes densities of 1 / 400 nm
+    // A single wavelength is shown as grey: the spectral radiance there, 1
+    // for the spectrum that is 1 at every wavelength.
     vec3 value = settings.view == 1u
         ? (firstSigma > 0.0 ? heat(log2(firstSigma) / 8.0) : vec3(0.0))
-        : spectrumToRgb(radiance, lambdas);
+        : single ? vec3(dot(radiance, vec4(0.25))) : spectrumToRgb(radiance, lambdas);
     if (any(isnan(value)) || any(isinf(value))) value = vec3(0.0);
     vec3 mean = count > 0.0 ? previous.rgb + (value - previous.rgb) / (count + 1.0) : value;
     imageStore(accumulation, pixel, vec4(mean, count + 1.0));

@@ -31,6 +31,7 @@ PYTHON = [
     dict(folder='rendering/restir_gi', script='restir_gi.py', args=['--scene', 'viziers'], frames=300, timeout=300),
     dict(folder='rendering/rt_reflections', script='rt_reflections.py', args=['--scene', 'gas_stations'], frames=300, timeout=300),
     dict(folder='rendering/wave_optics', script='wave_optics.py', frames=1024, timeout=600),
+    dict(folder='rendering/gold', script='gold.py', frames=1024, timeout=600),
 ]
 
 KAJIYA = ['viziers', 'gas_stations', 'battle', 'warhammer', 'conference']

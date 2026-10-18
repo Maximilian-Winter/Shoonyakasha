@@ -19,6 +19,7 @@ layout(set = 0, binding = 1) uniform Settings {
     float indirectAngle;
     uint lampSpectrum;
     float lampEntity;
+    float wavelength;
 } settings;
 
 layout(location = 0) in vec2 fragTexCoord;

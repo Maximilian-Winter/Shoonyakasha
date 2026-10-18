@@ -31,7 +31,8 @@
         { "name": "polariser", "type": "float", "source": "scene.custom.wo.polariser", "default": -1000.0 },
         { "name": "indirectAngle", "type": "float", "source": "scene.custom.wo.indirectAngle", "default": 5.0 },
         { "name": "lampSpectrum", "type": "uint", "source": "scene.custom.wo.lampSpectrum", "default": 0 },
-        { "name": "lampEntity", "type": "float", "source": "scene.custom.wo.lampEntity", "default": -1.0 }
+        { "name": "lampEntity", "type": "float", "source": "scene.custom.wo.lampEntity", "default": -1.0 },
+        { "name": "wavelength", "type": "float", "source": "scene.custom.wo.wavelength", "default": 0.0 }
       ]
     },
     "Materials": {

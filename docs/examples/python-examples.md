@@ -21,6 +21,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [rendering/restir_gi](../../examples/python/rendering/restir_gi) | `python restir_gi.py` | Kajiya's ray-traced diffuse GI on its own pipeline: half resolution diffuse rays reused through temporal and spatial ReSTIR reservoirs, validated every third frame, resolved with a near-field split and filtered, with the irradiance cache beyond the first bounce; each stage can be switched off |
 | [rendering/rt_reflections](../../examples/python/rendering/rt_reflections) | `python rt_reflections.py` | Kajiya's ray-traced reflections on top of its diffuse GI: half resolution GGX rays reused through temporal ReSTIR and validated, resolved with a ratio estimator over a lobe-shaped kernel, filtered with surface and reflection reprojection |
 | [rendering/wave_optics](../../examples/python/rendering/wave_optics) | `python wave_optics.py` | A spectral, polarised path tracer on its own pipeline in which a compact disc's rainbows and a thin film's colours depend on the coherence of the light, set by the lamp's size and distance; lamp spectra from a bulb to sodium and mercury lines, measured metals, a polariser in front of the camera |
+| [rendering/gold](../../examples/python/rendering/gold) | `python gold.py` | Why gold is gold: spheres of four metals on the wave optics pipeline beside plots of their reflectance and refractive indices, with a wavelength cursor |
 | [games_2d/sprite_ui_test](../../examples/python/games_2d/sprite_ui_test) | `python sprite_ui_demo.py` | Sprites, panels, and text |
 | [games_2d/full_showcase](../../examples/python/games_2d/full_showcase) | `python showcase_demo.py` | Layer masks, blend modes, and script ECS |
 | [games_2d/dakini_temple](../../examples/python/games_2d/dakini_temple) | `python temple.py` | Procedural shader layers driven by material parameters and custom scene values |
@@ -178,6 +179,21 @@ A spectral, polarised path tracer on its own pipeline, after the physical light 
 - **Lamp spectra:** white, a 2700 K bulb, low-pressure sodium, mercury or an RGB LED, with wavelengths drawn towards the lamp's lines. The disc splits the lines into separate spots, and under sodium light films a few micrometres thick show rings.
 
 The panel sets the lamp's radius, distance and spectrum, the film's thickness, the grooves' spacing and the polariser, and **2** shows the coherence width. Needs a GPU with ray queries. See the [example's README](../../examples/python/rendering/wave_optics/README.md).
+
+### Why gold is gold (`gold`)
+
+<a href="../images/examples/python/gold.png"><img src="../images/examples/python/gold.png" alt="Polished spheres of gold, copper, silver and aluminium on a dark floor, beside a panel plotting each metal's reflectance and gold's n and k against wavelength" width="720"></a>
+
+1024 paths per pixel at the default settings.
+
+Polished spheres of gold, copper, silver and aluminium on the wave optics pipeline, each reflecting with its measured complex refractive index at every wavelength. The panel plots, from the same tables:
+- **Reflectance** of each metal at normal incidence, over the visible spectrum.
+- **n and k** of the selected metal.
+- **A wavelength cursor** (slider, or **Left** / **Right**) that reads off n, k and the reflectance of every metal.
+
+**V** renders the light at the cursor's wavelength alone, in grey.
+
+Needs a GPU with ray queries. See the [example's README](../../examples/python/rendering/gold/README.md).
 
 ### Japanese shrine (`japanese_shrine`)
 

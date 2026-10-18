@@ -105,7 +105,7 @@ The panel sets the lamp's radius and distance, the film's thickness, the grooves
 | `WaveTrace` | `wave.comp` (with `spectral.glsl`, `optics.glsl`, `metals.glsl`, `lamps.glsl`) | One path per pixel, averaged into `accumulation` (rgb the mean, a the count) |
 | `Display` | `display.frag` | Exposure and tone curve (AgX by default) |
 
-Settings are `scene.custom.wo.*` values in the `Settings` uniform block; `lampSpectrum` is the spectrum's index in the table above (0 `white` to 4 `led`), and `lampEntity` the entity whose emission has it. The `Materials` block holds eight material slots of three vec4s each, `scene.custom.wo.slot[0]` to `slot[23]`:
+Settings are `scene.custom.wo.*` values in the `Settings` uniform block; `lampSpectrum` is the spectrum's index in the table above (0 `white` to 4 `led`), and `lampEntity` the entity whose emission has it. `wavelength` above 0 makes every path carry that wavelength alone, in nm, and shows the spectral radiance there in grey, 1 for the spectrum that is 1 at every wavelength; the [gold](../gold/README.md) example uses it. The `Materials` block holds eight material slots of three vec4s each, `scene.custom.wo.slot[0]` to `slot[23]`:
 
 | vec4 | x | y | z | w |
 |---|---|---|---|---|
