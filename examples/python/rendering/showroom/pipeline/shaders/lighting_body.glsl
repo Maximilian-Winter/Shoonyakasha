@@ -4,7 +4,9 @@
 // (light shadows from the atlas) and lighting_rt.frag (RT_LOCAL_SHADOWS:
 // shadow rays towards each shadowed spot and point light). lighting_rt.frag
 // also traces reflections; it writes them to two more targets, which
-// reflection_denoise.frag filters and adds to the HDR target.
+// reflection_denoise.frag filters and adds to the HDR target. The light of
+// the ray-shadowed lights goes to two targets of its own, which
+// shadow_denoise.frag filters and adds.
 
 #include "common.glsl"
 #include "sk/pbr.glsl"
@@ -34,6 +36,7 @@ layout(set = 4, binding = 2) uniform Showroom { SHOWROOM_BLOCK } showroom;
 layout(set = 5, binding = 0) uniform accelerationStructureEXT scene;
 layout(set = 6, binding = 0) uniform sampler2D taaHistory;
 #define RT_REFLECTIONS
+#define RT_SHADOW_SPLIT
 #endif
 
 #include "vsm.glsl"
@@ -112,6 +115,14 @@ layout(location = 1) out vec4 outReflection;
 // rgb: the reflectance that multiplies it back; a: the roughness traced.
 layout(location = 2) out vec4 outReflectionScale;
 #endif
+#ifdef RT_SHADOW_SPLIT
+// The light of the ray-shadowed lights, for shadow_denoise.frag. rgb: what
+// reached the pixel past its shadow rays; a: the narrowest penumbra of the
+// lights whose rays were blocked, in pixels, 0 where none was.
+layout(location = 3) out vec4 outShadowLit;
+// rgb: the light those lights would give unshadowed; a: 1 where any did.
+layout(location = 4) out vec4 outShadowTotal;
+#endif
 
 const vec3 CASCADE_COLORS[5] = vec3[](vec3(1.0, 0.3, 0.3), vec3(0.3, 1.0, 0.3), vec3(0.3, 0.5, 1.0),
                                       vec3(1.0, 1.0, 0.3), vec3(1.0));
@@ -137,6 +148,10 @@ void main() {
 #ifdef RT_REFLECTIONS
     outReflection = vec4(0.0);
     outReflectionScale = vec4(0.0);
+#endif
+#ifdef RT_SHADOW_SPLIT
+    outShadowLit = vec4(0.0);
+    outShadowTotal = vec4(0.0);
 #endif
     float depth = textureLod(gDepth, fragTexCoord, 0.0).r;
     vec3 viewPos = viewPositionFromDepth(camera.invProj, fragTexCoord, depth);
@@ -170,6 +185,15 @@ void main() {
 #endif
     uint cluster = clusterIndex(fragTexCoord, -viewPos.z, camera.params.x, camera.params.y);
     vec3 direct = directLight(cluster, worldPos, N, V, albedo, metallic, roughness, F0, sunIndex, sunVisibility);
+#ifdef RT_SHADOW_SPLIT
+    if (max(rtShadowTotal.r, max(rtShadowTotal.g, rtShadowTotal.b)) > 0.0 && settings.debugView == 0u) {
+        // World units to pixels at this depth.
+        float pixelWorld = 2.0 * -viewPos.z / (abs(camera.proj[1][1]) * camera.resolution.y);
+        // Kept within the targets' half-float range.
+        outShadowLit = vec4(min(rtShadowLit, vec3(65000.0)), min(rtPenumbra / pixelWorld, 65000.0));
+        outShadowTotal = vec4(min(rtShadowTotal, vec3(65000.0)), 1.0);
+    }
+#endif
     // Screen-space and material occlusion, with the light that bounces
     // between occluders added back for bright albedo (Jimenez 2016), and
     // occlusion of reflections from it (Lagarde 2014).

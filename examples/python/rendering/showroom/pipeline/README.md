@@ -147,6 +147,7 @@ The picture lies upright to someone in front of the rectangle, stretched over it
 `LightingRT` replaces `Lighting` in the `hybrid` and `raytraced` presets.
 
 - **Light shadows:** for each spot or point light whose shadow flag is set, it traces one ray towards a random point of the light's sphere, or of its rectangle.
+- **Light shadow filter:** `LightingRT` writes the light of those lights to `shadowLit` (past the rays) and `shadowTotal` (unshadowed), not into the image, and `ShadowDenoise` adds it after filtering. It averages the share of the unshadowed light that got past the rays over the neighbours on the same surface (near the pixel's plane, with a similar normal and nearly the same unshadowed light), keeps the average within the shares of the 5 × 5 pixels around, and gives the pixel its own unshadowed light times it. Each blocked ray estimates its penumbra from the light's size and the distances to the blocker and the light; the radius is half the narrowest penumbra at the pixel, or, where no ray was blocked, of the blocked pixels within 8 pixels, up to 8 pixels, so hard shadow edges stay sharp.
 - **Reflections:** it traces one reflection ray, spread by roughness, from every surface smoother than 0.55.
   - **Visible hit:** when the hit point is on screen and not hidden there, last frame's image (`taaHistory`) at that point is the reflected light.
   - **Hidden hit:** otherwise something blocks the reflection that the screen cannot show, such as a car's underside seen in a glossy floor, and the environment's reflection is darkened there.
@@ -166,6 +167,7 @@ The pipeline is generated from the default one plus the additions above. Edit `p
 - `VSMMark`, `VSMAllocate`, `VSMClear`, `VSM*{level}` and `ShadowMaskVSM`, in `vsm*.comp`, `vsm*.vert`, `vsm*.frag`, `vsm.glsl` and `vsm_sample.glsl`
 - `LightingRT`, in `lighting_rt.frag`, `lighting_body.glsl` and `rt_lights.glsl`
 - `ReflectionDenoise`, in `reflection_denoise.frag`
+- `ShadowDenoise`, in `shadow_denoise.frag`
 - `Overlay`, in `overlay.vert` and `overlay.frag`, drawn before the default pipeline's `UIOverlay`
 - `DepthOfField` and `Accumulate`, in `depth_of_field.frag` and `accumulate.comp`
 - Rectangular area lights, in `area_lights.glsl`, from the `LTC` buffer (`ltc.bin`, made by `ltc_fit.py`), with the softbox pattern in `softbox.glsl`

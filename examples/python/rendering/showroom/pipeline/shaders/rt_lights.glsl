@@ -18,17 +18,36 @@ vec2 lightRayNoise(uint i) {
     return temporalNoise2(rtLightPixel + vec2(37.0, 11.0) * float(i + 1u), camera.frame + i, camera.taa);
 }
 
-// Whether anything lies between origin and target.
-bool segmentBlocked(vec3 origin, vec3 target) {
+// The narrowest penumbra, in world units, of the lights whose rays were
+// blocked at this pixel (the light's size times the blocker's distance from
+// the surface over its distance from the light); 0 when none was.
+float rtPenumbra = 0.0;
+
+// Whether anything lies between origin and target, and if so, how far from
+// origin (the first hit found, not necessarily the nearest); -1 when nothing
+// does.
+float segmentHit(vec3 origin, vec3 target) {
     vec3 toTarget = target - origin;
     float length_ = length(toTarget);
-    if (length_ <= 1e-3) return false;
+    if (length_ <= 1e-3) return -1.0;
 
     rayQueryEXT query;
     rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
                           0xFF, origin, 0.0, toTarget / length_, max(length_ - 0.01, 0.0));
     while (rayQueryProceedEXT(query)) {}
-    return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT;
+    if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) return -1.0;
+    return rayQueryGetIntersectionTEXT(query, true);
+}
+
+// Whether the ray from origin to a light `size` across is blocked; narrows
+// rtPenumbra to the penumbra this blocker casts.
+bool lightRayBlocked(vec3 origin, vec3 target, float size) {
+    float hit = segmentHit(origin, target);
+    if (hit < 0.0) return false;
+    float toLight = distance(origin, target);
+    float penumbra = size * hit / max(toLight - hit, 1e-3);
+    rtPenumbra = rtPenumbra > 0.0 ? min(rtPenumbra, penumbra) : penumbra;
+    return true;
 }
 
 // Whether light i's sphere (centre lightPos, `radius`) is hidden from
@@ -43,8 +62,8 @@ bool localRayBlocked(uint i, vec3 worldPos, vec3 N, vec3 lightPos, float radius)
     vec3 w = toLight / max(dist, 1e-4);
 
     vec3 target = lightPos;
-#ifndef RT_HARD_LIGHT_SHADOWS
     float spread = radius * showroom.lightSoftness;
+#ifndef RT_HARD_LIGHT_SHADOWS
     if (spread > 0.0) {
         vec2 uv = lightRayNoise(i);
         vec3 t = normalize(cross(w, abs(w.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
@@ -54,7 +73,7 @@ bool localRayBlocked(uint i, vec3 worldPos, vec3 N, vec3 lightPos, float radius)
         target += (t * cos(angle) + b * sin(angle)) * r;
     }
 #endif
-    return segmentBlocked(origin, target);
+    return lightRayBlocked(origin, target, 2.0 * spread);
 }
 
 // The same for a rectangular light (centre lightPos, half-axes halfX and
@@ -67,7 +86,7 @@ bool localRayBlockedRect(uint i, vec3 worldPos, vec3 N, vec3 lightPos, vec3 half
     vec2 uv = lightRayNoise(i) * 2.0 - 1.0;
     target += (halfX * uv.x + halfY * uv.y) * showroom.lightSoftness;
 #endif
-    return segmentBlocked(origin, target);
+    return lightRayBlocked(origin, target, 2.0 * max(length(halfX), length(halfY)) * showroom.lightSoftness);
 }
 
 #endif

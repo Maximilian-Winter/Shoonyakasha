@@ -51,6 +51,20 @@ float coatFresnel(float cosTheta) {
 #ifdef RT_LOCAL_SHADOWS
 #include "rt_lights.glsl"
 #endif
+
+#ifdef RT_SHADOW_SPLIT
+// With RT_SHADOW_SPLIT defined, the lights shadowed by rays add nothing to
+// what lightFrom returns: their light goes to rtShadowTotal, and where the
+// ray is clear also to rtShadowLit, for shadow_denoise.frag to filter.
+vec3 rtShadowLit = vec3(0.0);
+vec3 rtShadowTotal = vec3(0.0);
+
+vec3 splitTraced(vec3 light, bool blocked) {
+    rtShadowTotal += light;
+    if (!blocked) rtShadowLit += light;
+    return vec3(0.0);
+}
+#endif
 #include "area_lights.glsl"
 
 // Diffuse towards L and specular towards Ls (the representative point of a
@@ -117,14 +131,23 @@ vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float me
     vec3 reflected = rectangleBRDF(N, V, toLight, halfX, halfY, albedo, metallic, roughness, F0,
                                    patterned, cells, imaged);
     if (max(reflected.r, max(reflected.g, reflected.b)) <= 0.0) return vec3(0.0);
+    bool traced = false, blocked = false;
 #ifdef RT_LOCAL_SHADOWS
-    if (sceneLights[i].source.y > 0.5 && localRayBlockedRect(i, worldPos, N, centre, halfX, halfY)) return vec3(0.0);
+    traced = sceneLights[i].source.y > 0.5;
+    blocked = traced && localRayBlockedRect(i, worldPos, N, centre, halfX, halfY);
+#ifndef RT_SHADOW_SPLIT
+    if (blocked) return vec3(0.0);
+#endif
 #endif
 #ifdef LOCAL_SHADOWS
     falloff *= localShadowVisibility(int(i), sceneLights[i].positionType.w, worldPos, N, L);
 #endif
     vec3 color = sceneLights[i].colorIntensity.rgb * sceneLights[i].colorIntensity.w;
-    return reflected * color * falloff * d * d / (4.0 * length(halfX) * shape.w);
+    vec3 light = reflected * color * falloff * d * d / (4.0 * length(halfX) * shape.w);
+#ifdef RT_SHADOW_SPLIT
+    if (traced) return splitTraced(light, blocked);
+#endif
+    return light;
 }
 
 // Light from scene light i. `sunIndex` is the light shadowed by
@@ -140,6 +163,7 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
 
     vec3 L;
     vec3 Ls;
+    bool traced = false, blocked = false;
     float energy = 1.0;
     float coatEnergy = 1.0;
     float falloff = 1.0;
@@ -188,7 +212,11 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
         bool facing = dot(N, L) > 0.0 || dot(N, Ls) > 0.0;
 #ifdef RT_LOCAL_SHADOWS
         if (falloff > 1e-4 && facing && source.y > 0.5) {
-            if (localRayBlocked(i, worldPos, N, sceneLights[i].positionType.xyz, radius)) return vec3(0.0);
+            traced = true;
+            blocked = localRayBlocked(i, worldPos, N, sceneLights[i].positionType.xyz, radius);
+#ifndef RT_SHADOW_SPLIT
+            if (blocked) return vec3(0.0);
+#endif
         }
 #endif
 #ifdef LOCAL_SHADOWS
@@ -210,6 +238,9 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
         float coat = D * G * Fc / max(4.0 * NdotV * NdotLs, 0.001) * coatEnergy * NdotLs;
         brdf = brdf * (1.0 - Fc) + vec3(coat);
     }
+#ifdef RT_SHADOW_SPLIT
+    if (traced) return splitTraced(brdf * color * falloff, blocked);
+#endif
     return brdf * color * falloff;
 }
 
