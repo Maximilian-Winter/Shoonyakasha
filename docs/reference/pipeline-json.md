@@ -32,7 +32,7 @@ Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defau
 | `mipLevels` | 1 | Mip levels, or `"full"` for a complete chain at the resolved size |
 | `arrayLayers` | 1 (6 for `cube`) | Array layers, e.g. one per shadow cascade |
 | `viewType` | `auto` | How shaders sampling the whole image see it: `auto` (`2d` for one layer, `2d_array` for more), `2d`, `2d_array`, `cube` (6 square layers), `cube_array` (a multiple of 6) |
-| `samples` | 1 | Vulkan sample count; must match the rendering configuration |
+| `samples` | 1 | Read but not used: every image is created single-sampled, and passes have no resolve |
 | `transient` | false | Transient image declaration |
 | `persistent` | false | Contents carry over from one frame to the next, for state a pass accumulates (an adapted exposure, a history). For last frame's image of a result, read a persistent image in the pass that makes the result, then copy the result into it in a pass after: the default pipeline's `TAA` and `TAAHistory` do this. Normally a frame's first access discards an image's contents; a persistent image's first barrier instead waits on and keeps the previous frame's. Cleared to zero (depth to 1) whenever the graph is compiled, including after a resize. A pass that writes a persistent image is never culled as unused: the next frame reads what it wrote |
 
