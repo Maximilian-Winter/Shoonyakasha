@@ -1,8 +1,9 @@
 #version 450
 // Bloom, exposure and tonemapping to the swapchain: ACES filmic, Khronos
 // PBR Neutral or AgX, by settings.toneMapper (0, 1, 2). The
-// swapchain is sRGB, so the hardware encodes on write; the dither breaks up
-// banding in dark gradients.
+// swapchain is sRGB, so the hardware encodes on write; the dither, half an
+// 8-bit sRGB step either way at every brightness, breaks up banding in dark
+// gradients.
 //
 // When the scene renders larger than the window (the engine's render scale),
 // each window pixel tone maps the scene pixels it covers and averages them:
@@ -22,6 +23,14 @@ layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
 const float BLOOM_LEVELS = 6.0;   // mips of bloomChain in pipeline.json
+
+// The sRGB transfer function and its inverse, for values in 0..1 and up.
+vec3 encodeSrgb(vec3 c) {
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+vec3 decodeSrgb(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
 
 vec3 sceneAt(vec2 uv) {
     return settings.accumulate != 0u ? textureLod(accumulated, uv, 0.0).rgb
@@ -80,5 +89,8 @@ void main() {
         float lum = dot(mapped, vec3(0.2126, 0.7152, 0.0722));
         mapped += n * settings.grain * (1.0 - 0.7 * lum);
     }
-    outColor = vec4(max(mapped + dither, 0.0), 1.0);
+    // Dithered in the encoded values the swapchain stores, then decoded for
+    // the hardware to encode again.
+    vec3 encoded = encodeSrgb(max(mapped, 0.0)) + dither;
+    outColor = vec4(decodeSrgb(max(encoded, 0.0)), 1.0);
 }

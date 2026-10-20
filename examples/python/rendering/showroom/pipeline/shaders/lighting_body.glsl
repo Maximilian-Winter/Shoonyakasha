@@ -2,7 +2,9 @@
 // light for each G-buffer pixel, the sky where there is none. Added onto the
 // emission the G-buffer pass left in the HDR target. Built as lighting.frag
 // (light shadows from the atlas) and lighting_rt.frag (RT_LOCAL_SHADOWS:
-// shadow rays towards each shadowed spot and point light).
+// shadow rays towards each shadowed spot and point light). lighting_rt.frag
+// also traces reflections; it writes them to two more targets, which
+// reflection_denoise.frag filters and adds to the HDR target.
 
 #include "common.glsl"
 #include "sk/pbr.glsl"
@@ -49,17 +51,23 @@ layout(set = 6, binding = 0) uniform sampler2D taaHistory;
 // (a car's underside in a glossy floor) and the environment behind it is
 // darkened instead. Rays that hit nothing keep the environment.
 //
+// How much traced light replaces the environment's on a surface this rough:
+// 0 where reflections are off or the surface is too rough to trace.
+float reflectionWeight(float roughness) {
+    return (1.0 - smoothstep(0.3, 0.55, roughness)) * showroom.reflections;
+}
+
 // Returns the weight to give the traced light over the environment's, and
 // the light in `radiance`.
 float tracedReflection(vec3 worldPos, vec3 N, vec3 V, float roughness, float viewDepth, vec3 environment,
                        out vec3 radiance) {
     radiance = vec3(0.0);
-    float weight = (1.0 - smoothstep(0.3, 0.55, roughness)) * showroom.reflections;
+    float weight = reflectionWeight(roughness);
     if (weight <= 0.0) return 0.0;
 
     vec3 R = reflect(-V, N);
-    float u = temporalNoise(gl_FragCoord.xy + vec2(91.0, 13.0), camera.frame + 11u, camera.taa);
-    float v = temporalNoise(gl_FragCoord.yx + vec2(7.0, 53.0), camera.frame + 29u, camera.taa);
+    vec2 n = temporalNoise2(gl_FragCoord.xy + vec2(91.0, 13.0), camera.frame, camera.taa);
+    float u = n.x, v = n.y;
     float spread = roughness * roughness;
     float z = 1.0 - 2.0 * u, r = sqrt(max(1.0 - z * z, 0.0)), a = 6.28318531 * v;
     vec3 dir = normalize(R + spread * vec3(r * cos(a), r * sin(a), z));
@@ -96,6 +104,14 @@ float tracedReflection(vec3 worldPos, vec3 N, vec3 V, float roughness, float vie
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
+#ifdef RT_REFLECTIONS
+// The traced reflection, for reflection_denoise.frag. rgb: the traced light
+// minus the environment's reflection it replaces, divided by the
+// reflectance, times the trace's weight; a: 1 where the surface is traced.
+layout(location = 1) out vec4 outReflection;
+// rgb: the reflectance that multiplies it back; a: the roughness traced.
+layout(location = 2) out vec4 outReflectionScale;
+#endif
 
 const vec3 CASCADE_COLORS[5] = vec3[](vec3(1.0, 0.3, 0.3), vec3(0.3, 1.0, 0.3), vec3(0.3, 0.5, 1.0),
                                       vec3(1.0, 1.0, 0.3), vec3(1.0));
@@ -118,6 +134,10 @@ float pageGrid(vec3 worldPos, int level) {
 }
 
 void main() {
+#ifdef RT_REFLECTIONS
+    outReflection = vec4(0.0);
+    outReflectionScale = vec4(0.0);
+#endif
     float depth = textureLod(gDepth, fragTexCoord, 0.0).r;
     vec3 viewPos = viewPositionFromDepth(camera.invProj, fragTexCoord, depth);
 
@@ -175,13 +195,17 @@ void main() {
         vec3 split = coated ? vec3((COAT_F0 * envBRDF.x + envBRDF.y) * coatFactor) : F0 * envBRDF.x + envBRDF.y;
         float maxLod = float(textureQueryLevels(prefilterMap) - 1);
         vec3 environment = textureLod(prefilterMap, reflect(-V, N), traceRoughness * maxLod).rgb * settings.iblIntensity;
-        vec3 traced;
-        float weight = tracedReflection(worldPos, N, V, traceRoughness, -viewPos.z, environment, traced);
-        if (weight > 0.0) {
+        if (reflectionWeight(traceRoughness) > 0.0 && settings.debugView == 0u) {
+            vec3 traced;
+            float weight = tracedReflection(worldPos, N, V, traceRoughness, -viewPos.z, environment, traced);
             vec3 replaced = coated ? ambientCoatSpecular : ambientSpecular;
             vec3 envSpecular = replaced * specularAO * settings.iblIntensity
                              * mix(settings.shadowAmbient, 1.0, sunVisibility);
-            ambient += (traced * split * max(specularAO, 0.5) - envSpecular) * weight;
+            // reflection_denoise.frag adds (traced * scale - envSpecular) * weight,
+            // averaged over the surface around the pixel.
+            vec3 scale = max(split * max(specularAO, 0.5), vec3(1e-4));
+            outReflection = vec4(weight * (traced - envSpecular / scale), 1.0);
+            outReflectionScale = vec4(scale, traceRoughness);
         }
     }
 #endif

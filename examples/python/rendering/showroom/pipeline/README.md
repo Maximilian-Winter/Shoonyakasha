@@ -151,6 +151,7 @@ The picture lies upright to someone in front of the rectangle, stretched over it
   - **Visible hit:** when the hit point is on screen and not hidden there, last frame's image (`taaHistory`) at that point is the reflected light.
   - **Hidden hit:** otherwise something blocks the reflection that the screen cannot show, such as a car's underside seen in a glossy floor, and the environment's reflection is darkened there.
   - **No hit:** rays that hit nothing keep the environment.
+- **Reflection filter:** `LightingRT` writes the reflections to `reflection` and `reflectionScale`, not into the image, and `ReflectionDenoise` adds them after averaging each pixel's ray with its neighbours on the same surface: near its plane, with a similar normal, also traced. The radius grows with the spread of the rays (roughness squared), up to 6 pixels, so mirror-like surfaces stay sharp. The average is of the reflected light alone, divided by each pixel's reflectance and multiplied back by the centre's, so it does not blur the surface's texture.
 
 Like the shadow rays, the acceleration structure holds only static, opaque, shadow-casting meshes, so anything with its shadow flag off is invisible to reflections too.
 
@@ -164,6 +165,7 @@ The pipeline is generated from the default one plus the additions above. Edit `p
 
 - `VSMMark`, `VSMAllocate`, `VSMClear`, `VSM*{level}` and `ShadowMaskVSM`, in `vsm*.comp`, `vsm*.vert`, `vsm*.frag`, `vsm.glsl` and `vsm_sample.glsl`
 - `LightingRT`, in `lighting_rt.frag`, `lighting_body.glsl` and `rt_lights.glsl`
+- `ReflectionDenoise`, in `reflection_denoise.frag`
 - `Overlay`, in `overlay.vert` and `overlay.frag`, drawn before the default pipeline's `UIOverlay`
 - `DepthOfField` and `Accumulate`, in `depth_of_field.frag` and `accumulate.comp`
 - Rectangular area lights, in `area_lights.glsl`, from the `LTC` buffer (`ltc.bin`, made by `ltc_fit.py`), with the softbox pattern in `softbox.glsl`

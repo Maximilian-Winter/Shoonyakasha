@@ -70,9 +70,10 @@ void main() {
         // and seen from both sides.
         vec3 origin = fragWorldPos + (dot(s.N, L) < 0.0 ? -s.N : s.N) * sunRayOffset(viewDepth);
         int open = 0;
+        vec2 uv = temporalNoise2(gl_FragCoord.xy, camera.frame, camera.taa);
         for (int r = 0; r < SUN_RAYS; ++r) {
-            float u = fract(noise + float(r) / float(SUN_RAYS));
-            float v = temporalNoise(gl_FragCoord.yx + 17.0 * float(r + 1), camera.frame + 3u, camera.taa);
+            float u = fract(uv.x + float(r) / float(SUN_RAYS));
+            float v = fract(uv.y + 0.618033989 * float(r));
             if (!sunRayBlocked(origin, L, u, v)) ++open;
         }
         sunLit *= float(open) / float(SUN_RAYS);

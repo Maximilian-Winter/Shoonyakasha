@@ -15,9 +15,7 @@ float rtLightOffset = 0.01;
 
 // Two numbers in 0..1 for light i's ray from this pixel, new each frame.
 vec2 lightRayNoise(uint i) {
-    float u = temporalNoise(rtLightPixel + vec2(37.0, 11.0) * float(i + 1u), camera.frame + i, camera.taa);
-    float v = temporalNoise(rtLightPixel.yx + vec2(5.0, 71.0) * float(i + 1u), camera.frame + 7u * i + 3u, camera.taa);
-    return vec2(u, v);
+    return temporalNoise2(rtLightPixel + vec2(37.0, 11.0) * float(i + 1u), camera.frame + i, camera.taa);
 }
 
 // Whether anything lies between origin and target.

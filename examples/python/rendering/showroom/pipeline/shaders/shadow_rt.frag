@@ -50,14 +50,13 @@ void main() {
     }
 
     // A point on the sun's disc, different every pixel and frame.
-    float u = temporalNoise(gl_FragCoord.xy, camera.frame, camera.taa);
-    float v = temporalNoise(gl_FragCoord.yx + 17.0, camera.frame + 3u, camera.taa);
-    bool shadowed = sunRayBlocked(worldPos + N * sunRayOffset(-viewPos.z), L, u, v);
+    vec2 uv = temporalNoise2(gl_FragCoord.xy, camera.frame, camera.taa);
+    bool shadowed = sunRayBlocked(worldPos + N * sunRayOffset(-viewPos.z), L, uv.x, uv.y);
 
     // The casters that are not in the acceleration structure.
     int level;
     bool drawn;
     float pixelWorld = vsmPixelWorld(-viewPos.z, camera.proj, camera.resolution.y);
-    float mapped = vsmVisibility(worldPos, N, pixelWorld, u, level, drawn);
+    float mapped = vsmVisibility(worldPos, N, pixelWorld, uv.x, level, drawn);
     outMask = vec2(shadowed ? 0.0 : mapped, vsmDebugCode(level, drawn));
 }

@@ -190,9 +190,21 @@ float interleavedGradientNoise(vec2 pixel) {
 }
 
 // The same, moving every frame when TAA is on, so the temporal filter
-// averages the noise of filtered shadows and occlusion away.
+// averages the noise of filtered shadows and occlusion away. Each frame adds
+// the golden ratio: a pixel's values over successive frames spread evenly
+// over 0..1, so their average converges to the noiseless result.
 float temporalNoise(vec2 pixel, uint frame, uint taa) {
-    return interleavedGradientNoise(pixel + (taa != 0u ? 5.588238 * float(frame % 64u) : 0.0));
+    float n = interleavedGradientNoise(pixel);
+    return taa != 0u ? fract(n + 0.618033989 * float(frame % 4096u)) : n;
+}
+
+// Two numbers in 0..1, for a point in a square (on a light's disc or panel):
+// interleaved gradient noise across pixels, and with TAA on, each frame adds
+// the next step of the R2 sequence, so a pixel's points over successive
+// frames cover the square evenly.
+vec2 temporalNoise2(vec2 pixel, uint frame, uint taa) {
+    vec2 n = vec2(interleavedGradientNoise(pixel), interleavedGradientNoise(pixel.yx + vec2(47.0, 17.0)));
+    return taa != 0u ? fract(n + vec2(0.7548776662, 0.5698402910) * float(frame % 4096u)) : n;
 }
 
 #endif

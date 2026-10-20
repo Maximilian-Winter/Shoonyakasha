@@ -1851,6 +1851,50 @@
           "mip": "{m-1}"
         }
       ]
+    },
+    "reflectionDenoiseSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "reflection",
+          "autoBindResource": "reflection",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "reflectionScale",
+          "autoBindResource": "reflectionScale",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 3,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
     }
   },
   "resources": [
@@ -1916,6 +1960,20 @@
     },
     {
       "name": "hdrColor",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "reflection",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "reflectionScale",
       "kind": "image",
       "image": {
         "format": "R16G16B16A16_SFLOAT"
@@ -3574,6 +3632,26 @@
         {
           "resource": "hdrColor",
           "usage": "color_blend"
+        },
+        {
+          "resource": "reflection",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "reflectionScale",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
         }
       ],
       "pipeline": {
@@ -3593,6 +3671,54 @@
         "settingsSet",
         "rayTracingSceneSet",
         "reflectionSet"
+      ],
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ]
+    },
+    {
+      "name": "ReflectionDenoise",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "reflection",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "reflectionScale",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "color_blend"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/reflection_denoise.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": [
+        "reflectionDenoiseSet",
+        "cameraSet"
       ],
       "enabled": false,
       "requires": [
@@ -4196,6 +4322,7 @@
         "ShadowMaskRT": false,
         "Lighting": true,
         "LightingRT": false,
+        "ReflectionDenoise": false,
         "Transparent": true,
         "TransparentRT": false,
         "GTAO": false,
@@ -4230,6 +4357,7 @@
         "ShadowMaskRT": false,
         "Lighting": true,
         "LightingRT": false,
+        "ReflectionDenoise": false,
         "Transparent": true,
         "TransparentRT": false,
         "GTAO": true,
@@ -4264,6 +4392,7 @@
         "ShadowMaskRT": false,
         "Lighting": true,
         "LightingRT": false,
+        "ReflectionDenoise": false,
         "Transparent": true,
         "TransparentRT": false,
         "GTAO": true,
@@ -4298,6 +4427,7 @@
         "ShadowMaskRT": false,
         "Lighting": true,
         "LightingRT": false,
+        "ReflectionDenoise": false,
         "Transparent": true,
         "TransparentRT": false,
         "GTAO": true,
@@ -4332,6 +4462,7 @@
         "ShadowMaskRT": false,
         "Lighting": false,
         "LightingRT": true,
+        "ReflectionDenoise": true,
         "Transparent": false,
         "TransparentRT": true,
         "GTAO": true,
@@ -4366,6 +4497,7 @@
         "ShadowMaskRT": true,
         "Lighting": false,
         "LightingRT": true,
+        "ReflectionDenoise": true,
         "Transparent": false,
         "TransparentRT": true,
         "GTAO": true,
