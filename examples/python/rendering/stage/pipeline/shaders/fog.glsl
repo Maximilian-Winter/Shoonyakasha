@@ -1,5 +1,5 @@
 // fog.glsl - the stage's smoke and haze, shared by fog_scatter.comp,
-// fog_integrate.comp and fog_apply.frag.
+// fog_integrate.comp, fog_apply.frag and lasers.frag.
 //
 // The fog lives in a grid that follows the camera: fogScatter and
 // fogIntegrated are 2D-array images whose width and height divide the view
@@ -34,6 +34,17 @@ float sliceDepth(float t, float slices, vec4 grid) {
 // The (continuous) slice at view depth d.
 float depthSlice(float d, float slices, vec4 grid) {
     return log(max(d, 1e-4) / grid.x) / log(grid.y / grid.x) * slices;
+}
+
+// fogIntegrated at uv, after `t` slices (continuous) of `slices`: layer k
+// holds the fog up to the end of slice k, so between layers the value is
+// interpolated, and before the first it is none (rgb 0, transmittance 1).
+vec4 fogAt(sampler2DArray integrated, vec2 uv, float t, float slices) {
+    float k = clamp(t - 1.0, -1.0, slices - 1.0);
+    float k0 = floor(k);
+    vec4 a = k0 < 0.0 ? vec4(0.0, 0.0, 0.0, 1.0) : textureLod(integrated, vec3(uv, k0), 0.0);
+    vec4 b = textureLod(integrated, vec3(uv, min(k0 + 1.0, slices - 1.0)), 0.0);
+    return mix(a, b, k - k0);
 }
 
 // ── Noise ───────────────────────────────────────────────────────

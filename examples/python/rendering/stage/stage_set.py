@@ -18,6 +18,8 @@ fits a car; stage.py scales the set for larger models.
   head's centre at the origin ("yoke_base", "yoke_arms").
 - smoke_machine.gltf: a box with a nozzle facing -Z ("smoke_body",
   "smoke_nozzle", "smoke_led"), standing on the origin.
+- laser.gltf: a laser projector's housing behind its aperture, a window at
+  the origin facing -Z ("laser_body", "laser_window").
 - hall.hdr: an almost black environment.
 
 The layout, in set units: the deck is DECK wide, deep and high, centred at
@@ -34,7 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "showroom"))
 import studio  # noqa: E402
 
-VERSION = 1          # bump to regenerate existing sets
+VERSION = 2          # bump to regenerate existing sets
 
 HALL = (18.0, 12.0, 18.0)            # half width, height, half depth
 DECK = (14.0, 0.5, 10.0)             # width, height, depth
@@ -272,6 +274,17 @@ def smoke_machine(path):
 NOZZLE = (0.0, 0.17, -0.42)          # where the smoke leaves, from the machine's origin
 
 
+def laser(path):
+    w = studio.GltfWriter()
+    body_m = w.material("laser_body", (0.03, 0.03, 0.035), metallic=0.5, roughness=0.4)
+    window_m = w.material("laser_window", (0.02, 0.05, 0.03), roughness=0.05, emissive=(0.05, 0.25, 0.08))
+    body = Mesh().add(*cuboid((0.0, 0.0, 0.205), (0.34, 0.16, 0.4)))
+    window = Mesh().add(*cuboid((0.0, 0.0, 0.0), (0.12, 0.06, 0.012)))
+    w.node("laser_body", w.mesh("laser_body", *body.parts(), body_m))
+    w.node("laser_window", w.mesh("laser_window", *window.parts(), window_m))
+    w.write(path)
+
+
 def environment(path, width=256, height=128):
     rows = []
     for j in range(height):
@@ -283,7 +296,8 @@ def environment(path, width=256, height=128):
 
 # ── Entry point ──────────────────────────────────────────────────────────
 
-FILES = ("hall.gltf", "head.gltf", "yoke_floor.gltf", "yoke_hung.gltf", "smoke_machine.gltf", "hall.hdr")
+FILES = ("hall.gltf", "head.gltf", "yoke_floor.gltf", "yoke_hung.gltf", "smoke_machine.gltf", "laser.gltf",
+         "hall.hdr")
 
 
 def ensure(directory):
@@ -304,6 +318,7 @@ def ensure(directory):
     yoke(os.path.join(directory, "yoke_floor.gltf"), hung=False)
     yoke(os.path.join(directory, "yoke_hung.gltf"), hung=True)
     smoke_machine(os.path.join(directory, "smoke_machine.gltf"))
+    laser(os.path.join(directory, "laser.gltf"))
     environment(os.path.join(directory, "hall.hdr"))
     with open(marker, "w", encoding="utf-8") as f:
         f.write(str(VERSION))

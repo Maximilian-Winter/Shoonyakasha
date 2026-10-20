@@ -1014,6 +1014,200 @@
           ]
         }
       ]
+    },
+    "Lasers": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "origin0",
+          "type": "vec4",
+          "source": "scene.custom.laser.origin0",
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "axis0",
+          "type": "vec4",
+          "source": "scene.custom.laser.axis0",
+          "default": [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "name": "up0",
+          "type": "vec4",
+          "source": "scene.custom.laser.up0",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "color0",
+          "type": "vec4",
+          "source": "scene.custom.laser.color0",
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "origin1",
+          "type": "vec4",
+          "source": "scene.custom.laser.origin1",
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "axis1",
+          "type": "vec4",
+          "source": "scene.custom.laser.axis1",
+          "default": [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "name": "up1",
+          "type": "vec4",
+          "source": "scene.custom.laser.up1",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "color1",
+          "type": "vec4",
+          "source": "scene.custom.laser.color1",
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "origin2",
+          "type": "vec4",
+          "source": "scene.custom.laser.origin2",
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "axis2",
+          "type": "vec4",
+          "source": "scene.custom.laser.axis2",
+          "default": [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "name": "up2",
+          "type": "vec4",
+          "source": "scene.custom.laser.up2",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "color2",
+          "type": "vec4",
+          "source": "scene.custom.laser.color2",
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "origin3",
+          "type": "vec4",
+          "source": "scene.custom.laser.origin3",
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "axis3",
+          "type": "vec4",
+          "source": "scene.custom.laser.axis3",
+          "default": [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "name": "up3",
+          "type": "vec4",
+          "source": "scene.custom.laser.up3",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "color3",
+          "type": "vec4",
+          "source": "scene.custom.laser.color3",
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "params",
+          "type": "vec4",
+          "source": "scene.custom.laser.params",
+          "default": [
+            0.0,
+            0.003,
+            1.0,
+            80.0
+          ]
+        }
+      ]
     }
   },
   "entityDataBindings": {
@@ -2221,6 +2415,100 @@
           "name": "scene"
         }
       ]
+    },
+    "laserTraceSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "laserBeams",
+          "autoBindResource": "laserBeams"
+        },
+        {
+          "binding": 1,
+          "type": "uniform_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "Lasers",
+          "autoBindBuffer": "Lasers"
+        }
+      ]
+    },
+    "laserSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "laserBeams",
+          "autoBindResource": "laserBeams",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gAlbedo",
+          "autoBindResource": "gAlbedo",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 3,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 4,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "fogIntegrated",
+          "autoBindResource": "fogIntegrated",
+          "autoBindSampler": "linearClamp"
+        },
+        {
+          "binding": 5,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "Fog",
+          "autoBindBuffer": "Fog"
+        },
+        {
+          "binding": 6,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "Lasers",
+          "autoBindBuffer": "Lasers"
+        }
+      ]
     }
   },
   "resources": [
@@ -2320,6 +2608,15 @@
         "widthScale": 0.16666666666666666,
         "heightScale": 0.16666666666666666,
         "arrayLayers": 96
+      }
+    },
+    {
+      "name": "laserBeams",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "width": 2,
+        "height": 64
       }
     },
     {
@@ -4506,6 +4803,93 @@
       ]
     },
     {
+      "name": "LaserTrace",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          64,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "outputs": [
+        {
+          "resource": "laserBeams",
+          "usage": "storage_image_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/laser_trace.comp.spv"
+      },
+      "descriptorSets": [
+        "laserTraceSet",
+        "rayTracingSceneComputeSet"
+      ]
+    },
+    {
+      "name": "Lasers",
+      "type": "graphics",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "laserBeams",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gAlbedo",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "fogIntegrated",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "color_blend"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/lasers.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": [
+        "laserSet",
+        "cameraSet",
+        "rayTracingSceneSet"
+      ]
+    },
+    {
       "name": "TAA",
       "type": "graphics",
       "execution": {
@@ -4956,7 +5340,9 @@
         "FogScatter": false,
         "FogHistory": false,
         "FogIntegrate": false,
-        "FogApply": false
+        "FogApply": false,
+        "LaserTrace": false,
+        "Lasers": false
       },
       "values": {
         "default.contactShadowLength": 0,
@@ -4996,7 +5382,9 @@
         "FogScatter": false,
         "FogHistory": false,
         "FogIntegrate": false,
-        "FogApply": false
+        "FogApply": false,
+        "LaserTrace": false,
+        "Lasers": false
       },
       "values": {
         "default.contactShadowLength": 0,
@@ -5036,7 +5424,9 @@
         "FogScatter": false,
         "FogHistory": false,
         "FogIntegrate": false,
-        "FogApply": false
+        "FogApply": false,
+        "LaserTrace": false,
+        "Lasers": false
       },
       "values": {
         "default.contactShadowLength": null,
@@ -5076,7 +5466,9 @@
         "FogScatter": false,
         "FogHistory": false,
         "FogIntegrate": false,
-        "FogApply": false
+        "FogApply": false,
+        "LaserTrace": false,
+        "Lasers": false
       },
       "values": {
         "default.contactShadowLength": null,
@@ -5116,7 +5508,9 @@
         "FogScatter": true,
         "FogHistory": true,
         "FogIntegrate": true,
-        "FogApply": true
+        "FogApply": true,
+        "LaserTrace": true,
+        "Lasers": true
       },
       "values": {
         "default.contactShadowLength": null,
@@ -5156,7 +5550,9 @@
         "FogScatter": true,
         "FogHistory": true,
         "FogIntegrate": true,
-        "FogApply": true
+        "FogApply": true,
+        "LaserTrace": true,
+        "Lasers": true
       },
       "values": {
         "default.contactShadowLength": null,

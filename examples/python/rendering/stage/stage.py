@@ -11,6 +11,10 @@ grid of fog that follows the camera:
   air and objects cut gaps into them;
 - along each view ray the cells are summed from the eye outwards, and each
   pixel takes the fog up to its surface.
+Four laser projectors draw fans, waves, tunnels of beams and sheets of
+light into the same haze: each beam is traced to what it hits, and every
+pixel adds the light the fog scatters from the beams its view ray passes,
+and the dots and lines they leave on surfaces.
 It needs a GPU with ray queries.
 
 Models are the showroom's (python tools/fetch_assets.py showroom); without
@@ -24,6 +28,8 @@ Keys:
     LEFT / RIGHT   previous / next model
     SPACE          next programme
     K              next colours
+    L              next laser show
+    J              next laser colours
     C              next camera: audience, stage, orbit (drag with the left
                    mouse button, scroll to zoom), free (WASD/Q/E, right mouse)
     T              turntable on or off
@@ -80,6 +86,9 @@ def parse_args():
                         "(default: every fetched model)")
     parser.add_argument("--programme", choices=list(PROGRAMMES), default="sweep", help="movement to open with")
     parser.add_argument("--colours", choices=list(PALETTES), default="ice", help="colours to open with")
+    parser.add_argument("--lasers", choices=list(LASER_SHOWS), default="fans", help="laser show to open with")
+    parser.add_argument("--laser-colours", choices=list(LASER_COLOURS), default="rgb",
+                        help="laser colours to open with")
     parser.add_argument("--camera", choices=list(CAMERA_MODES), default="audience")
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
@@ -144,6 +153,34 @@ PALETTES = {
     "rainbow": ("Rainbow", lambda t, i, n: _hue(i / float(n) + 0.04 * t)),
     "ultraviolet": ("Ultraviolet", lambda t, i, n: (0.42, 0.12, 1.0) if i % 2 else (0.12, 0.3, 1.0)),
 }
+
+# Laser shows: for each of the four projectors (two on the deck behind the
+# model, then the truss's front and back centres), (pattern, beams, spread
+# in degrees) or None. Patterns as in the pipeline's lasers.glsl: 1 a fan
+# that tilts and rolls, 2 a fan whose beams wave, 3 a tunnel of beams on a
+# turning cone, 4 a sheet of light.
+LASER_SHOWS = {
+    "off": ("Off", [None, None, None, None]),
+    "fans": ("Fans", [(1, 12, 28.0), (1, 12, 28.0), (1, 10, 35.0), None]),
+    "waves": ("Waves", [(2, 12, 30.0), (2, 12, 30.0), (2, 14, 40.0), None]),
+    "tunnel": ("Tunnel", [(3, 12, 6.0), (3, 12, 6.0), (3, 16, 9.0), None]),
+    "sky": ("Sky", [(1, 6, 20.0), (1, 6, 20.0), None, (4, 0, 38.0)]),
+    "everything": ("Everything", [(2, 10, 30.0), (2, 10, 30.0), (3, 16, 9.0), (4, 0, 38.0)]),
+}
+
+LASER_COLOURS = {
+    "green": ("Green", lambda t, j: (0.1, 1.0, 0.15)),
+    "rgb": ("RGB", lambda t, j: ((1.0, 0.05, 0.05), (0.15, 0.25, 1.0), (0.1, 1.0, 0.15), (0.2, 0.9, 1.0))[j]),
+    "cyan_magenta": ("Cyan/magenta", lambda t, j: (0.1, 0.9, 1.0) if j % 2 else (1.0, 0.1, 0.8)),
+    "rainbow": ("Rainbow", lambda t, j: _hue(0.25 * j + 0.06 * t)),
+    "heads": ("As the heads", None),
+}
+
+# Laser power at the brightness slider's 1, and how bright their dots are on
+# surfaces.
+LASER_BEAM_WATTS = 1.0
+LASER_SHEET_WATTS = 6.0
+LASER_DOT_GAIN = 40.0
 
 CAMERA_MODES = {"audience": "Audience", "stage": "Stage", "orbit": "Orbit", "free": "Free"}
 
@@ -326,6 +363,15 @@ HEADS = ([(x, stage_set.TRUSS_Z1, True) for x in (-4.5, -1.5, 1.5, 4.5)]
 MACHINES = [(-5.9, stage_set.DECK[1], -5.6, (0.55, 0.0, 0.85)), (5.9, stage_set.DECK[1], -5.6, (-0.55, 0.0, 0.85)),
             (-8.5, 0.0, 5.0, (0.92, 0.0, -0.4)), (8.5, 0.0, 5.0, (-0.92, 0.0, -0.4))]
 
+# Laser projectors, in set units: (x, y, z of the aperture, the direction it
+# points). Two on the deck behind the model, aiming over the audience; one
+# under the middle of the truss's front beam and one under its back beam.
+_HUNG_LASER = stage_set.TRUSS_HEIGHT - stage_set.TRUSS_SECTION / 2.0 - 0.12
+LASERS = [(-3.0, stage_set.DECK[1] + 0.1, -5.6, (0.0, 0.18, 1.0)),
+          (3.0, stage_set.DECK[1] + 0.1, -5.6, (0.0, 0.18, 1.0)),
+          (0.0, _HUNG_LASER, stage_set.TRUSS_Z1, (0.0, -0.25, 1.0)),
+          (0.0, _HUNG_LASER, stage_set.TRUSS_Z0, (0.0, -0.05, 1.0))]
+
 
 class MovingHead:
     """A moving head: base and yoke turning about the vertical, and the head
@@ -423,6 +469,12 @@ class StageSet:
             machine = holder("smoke%d" % i)
             load(os.path.join(SET, "smoke_machine.gltf"), "smoke%d" % i, machine)
             self.machines.append(machine)
+        self.lasers = []
+        for i, _ in enumerate(LASERS):
+            housing = holder("laser%d" % i)
+            for e in load(os.path.join(SET, "laser.gltf"), "laser%d" % i, housing):
+                scene.set_cast_shadows(e, False)       # the beams leave through it
+            self.lasers.append(housing)
 
     def stand(self, model):
         """Scale the set to the model and stand it on the turntable."""
@@ -450,6 +502,15 @@ class StageSet:
             scene.set_position(machine, (x * s, y * s, z * s))
             scene.set_rotation(machine, rotation_facing(direction))
             scene.set_scale(machine, (s,) * 3)
+        for housing, (origin, axis) in zip(self.lasers, self.apertures()):
+            scene.set_position(housing, origin)
+            scene.set_rotation(housing, rotation_facing(axis))
+            scene.set_scale(housing, (s,) * 3)
+
+    def apertures(self):
+        """Each laser projector's aperture and the direction it points, in world space."""
+        s = self.scale
+        return [((x * s, y * s, z * s), normalize(direction)) for x, y, z, direction in LASERS]
 
     def nozzles(self):
         """Each smoke machine's nozzle and jet direction, in world space."""
@@ -487,6 +548,9 @@ class Show:
         self.forward = 0.6           # Henyey-Greenstein g
         self.glow = 1.8              # light the fog scatters, times
         self.aims = {}               # moving head -> its current direction, eased towards the programme's
+        self.laser_show = args.lasers
+        self.laser_palette = args.laser_colours
+        self.laser_power = 1.0
 
     def target(self, head, i, n, model, s):
         """Where the programme points head i (of n of its kind) now."""
@@ -532,6 +596,28 @@ class Show:
         for e in stage.rim:
             scene.set_material_vec4(e, "emissiveFactor", scale(strip, 1.2 * self.brightness) + (0.0,))
         self.apply_fog(stage)
+        self.apply_lasers(stage, colour)
+
+    def apply_lasers(self, stage, head_colour):
+        """Each projector's pattern, aim and colour times power, for the
+        pipeline's LaserTrace and Lasers passes."""
+        s = stage.scale
+        _, plan = LASER_SHOWS[self.laser_show]
+        _, colour = LASER_COLOURS[self.laser_palette]
+        for j, ((origin, axis), spec) in enumerate(zip(stage.apertures(), plan)):
+            if spec is None or self.laser_power <= 0.0:
+                engine.set_custom_vec4("laser.origin%d" % j, origin + (0.0,))
+                engine.set_custom_vec4("laser.color%d" % j, (0.0, 0.0, 0.0, 0.0))
+                continue
+            pattern, beams, spread = spec
+            c = colour(self.beats, j) if colour else head_colour(self.beats, 3 * j, len(stage.heads))
+            # Watts per beam; a sheet spreads its power over its whole arc.
+            power = (LASER_SHEET_WATTS if pattern == 4 else LASER_BEAM_WATTS) * self.laser_power * s
+            engine.set_custom_vec4("laser.origin%d" % j, origin + (float(pattern),))
+            engine.set_custom_vec4("laser.axis%d" % j, axis + (float(beams),))
+            engine.set_custom_vec4("laser.up%d" % j, (0.0, 1.0, 0.0, math.radians(spread)))
+            engine.set_custom_vec4("laser.color%d" % j, scale(c, power) + (1.3 * j,))
+        engine.set_custom_vec4("laser.params", (self.beats, 0.003 * s, LASER_DOT_GAIN, 80.0 * s))
 
     def apply_fog(self, stage):
         s = stage.scale
@@ -596,9 +682,9 @@ class StatusLine:
     def update(self, dt):
         s = stage
         model = s.model
-        text = "%s  |  %s  |  %s  |  %s camera" % (
+        text = "%s  |  %s  |  %s  |  lasers: %s  |  %s camera" % (
             catalogue.ascii_text(model.entry.title), PROGRAMMES[s.show.programme][0],
-            PALETTES[s.show.palette][0], CAMERA_MODES[s.camera_mode])
+            PALETTES[s.show.palette][0], LASER_SHOWS[s.show.laser_show][0], CAMERA_MODES[s.camera_mode])
         if self.stats:
             self.wait -= dt
             stats = engine.render_stats
@@ -657,6 +743,11 @@ class SettingsPanel:
         self.brightness = self.slider("Brightness", 0.0, 2.0, 1.0, "x%.2f")
         self.beam = self.slider("Beam width", 2.0, 20.0, 7.0, "%.1f°")
         self.key = self.slider("Key light on the model", 0.0, 2.0, 1.0, "x%.2f")
+
+        self.section("Lasers")
+        self.laser_shows = self.choices({k: v[0] for k, v in LASER_SHOWS.items()}, 3)
+        self.laser_palettes = self.choices({k: v[0] for k, v in LASER_COLOURS.items()}, 3)
+        self.laser_power = self.slider("Laser power", 0.0, 3.0, 1.0, "x%.2f")
 
         self.section("Smoke")
         self.fog = ui.create_toggle(page, "Fog", is_on=True, size=(0, 28))
@@ -725,8 +816,14 @@ class SettingsPanel:
         palette = clicked(self.palettes)
         if palette:
             show.palette = palette
+        laser_show = clicked(self.laser_shows)
+        if laser_show:
+            show.laser_show = laser_show
+        laser_palette = clicked(self.laser_palettes)
+        if laser_palette:
+            show.laser_palette = laser_palette
         for slider, attribute in ((self.speed, "speed"), (self.brightness, "brightness"), (self.beam, "beam"),
-                                  (self.key, "key"),
+                                  (self.key, "key"), (self.laser_power, "laser_power"),
                                   (self.haze, "haze"), (self.smoke, "smoke"), (self.ground, "ground"),
                                   (self.glow, "glow"), (self.forward, "forward")):
             if changed(slider):
@@ -745,6 +842,7 @@ class SettingsPanel:
             if ui.toggle_value(toggle) != on:
                 ui.set_toggle_value(toggle, on)
         for buttons, chosen in ((self.programmes, show.programme), (self.palettes, show.palette),
+                                (self.laser_shows, show.laser_show), (self.laser_palettes, show.laser_palette),
                                 (self.cameras, s.camera_mode)):
             for key, button in buttons.items():
                 ui.set_color(button, ACCENT if key == chosen else SURFACE)
@@ -921,6 +1019,12 @@ class Controls:
         if self.pressed(keys.K):
             names = list(PALETTES)
             s.show.palette = names[(names.index(s.show.palette) + 1) % len(names)]
+        if self.pressed(keys.L):
+            names = list(LASER_SHOWS)
+            s.show.laser_show = names[(names.index(s.show.laser_show) + 1) % len(names)]
+        if self.pressed(keys.J):
+            names = list(LASER_COLOURS)
+            s.show.laser_palette = names[(names.index(s.show.laser_palette) + 1) % len(names)]
         if self.pressed(keys.C):
             modes = list(CAMERA_MODES)
             s.set_camera(modes[(modes.index(s.camera_mode) + 1) % len(modes)])
@@ -949,13 +1053,15 @@ class Controls:
 
 
 class Stills:
-    """--screenshots: the first model, every programme, from the audience and
-    from the stage; each still after --settle frames of 1/60 s."""
+    """--screenshots: the first model in every programme, from the audience
+    and from the stage, with the laser show --lasers; then every laser show
+    from the audience. Each still after --settle frames of 1/60 s."""
 
     def __init__(self, directory):
         self.directory = directory
         os.makedirs(directory, exist_ok=True)
-        self.jobs = [(p, c) for p in PROGRAMMES for c in ("audience", "stage")]
+        self.jobs = ([(p, args.lasers, c) for p in PROGRAMMES for c in ("audience", "stage")]
+                     + [(args.programme, l, "audience") for l in LASER_SHOWS if l != args.lasers])
         self.job = -1
         self.frames = 0
         engine.enable_render_stats()
@@ -964,21 +1070,26 @@ class Stills:
         if self.job >= 0:
             self.frames += 1
             if self.frames == args.settle:
-                programme, camera = self.jobs[self.job]
-                path = os.path.join(self.directory, "%s_%s_%s.png" % (stage.model.entry.name, programme, camera))
+                programme, lasers, camera = self.jobs[self.job]
+                path = os.path.join(self.directory, "%s_%s_lasers-%s_%s.png" % (
+                    stage.model.entry.name, programme, lasers, camera))
                 engine.capture_screenshot(path)
                 stats = engine.render_stats or {}
-                fog = sum((p["gpu_ms"] or 0.0) for p in stats.get("passes", []) if p["name"].startswith("Fog"))
+                passes = stats.get("passes", [])
+                fog = sum((p["gpu_ms"] or 0.0) for p in passes if p["name"].startswith("Fog"))
+                laser = sum((p["gpu_ms"] or 0.0) for p in passes if p["name"].startswith("Laser"))
                 gpu = stats.get("gpu_ms")
-                print("[stage] still -> %s  (GPU %s, fog %.2f ms)" % (path, "%.2f ms" % gpu if gpu else "n/a", fog), flush=True)
+                print("[stage] still -> %s  (GPU %s, fog %.2f ms, lasers %.2f ms)" % (
+                    path, "%.2f ms" % gpu if gpu else "n/a", fog, laser), flush=True)
         if self.job < 0 or self.frames > args.settle:
             self.job += 1
             self.frames = 0
             if self.job >= len(self.jobs):
                 print("[stage] %d stills in %s" % (len(self.jobs), self.directory), flush=True)
                 os._exit(0)        # the engine has no quit call
-            programme, camera = self.jobs[self.job]
+            programme, lasers, camera = self.jobs[self.job]
             stage.show.programme = programme
+            stage.show.laser_show = lasers
             stage.set_camera(camera)
 
 

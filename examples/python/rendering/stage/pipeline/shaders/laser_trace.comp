@@ -1,0 +1,42 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// The laser beams (pass LaserTrace): each projector's beams for this frame,
+// traced through the scene to the first surface they hit. One invocation
+// per beam.
+//
+//   laserBeams  row b, texel 0  xyz the aperture, w the beam's length (0: no beam)
+//               row b, texel 1  xyz its direction, w its projector
+
+#extension GL_EXT_ray_query : require
+
+#include "lasers_block.glsl"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform writeonly image2D laserBeams;
+layout(set = 0, binding = 1) uniform Lasers { LASERS_BLOCK } lasers;
+layout(set = 1, binding = 0) uniform accelerationStructureEXT scene;
+
+#include "lasers.glsl"
+
+void main() {
+    int b = int(gl_LocalInvocationID.x);
+    int j = b / LASER_BEAMS, k = b % LASER_BEAMS;
+    Projector p = laserProjector(j);
+    if (p.pattern < 1 || p.pattern > 3 || k >= p.beams || dot(p.color, p.color) <= 0.0) {
+        imageStore(laserBeams, ivec2(0, b), vec4(0.0));
+        imageStore(laserBeams, ivec2(1, b), vec4(0.0));
+        return;
+    }
+    vec3 direction = laserBeamDirection(p, k, lasers.params.x);
+    float longest = lasers.params.w;
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, scene, gl_RayFlagsOpaqueEXT, 0xFF, p.origin, 0.02, direction, longest);
+    while (rayQueryProceedEXT(query)) {}
+    float length_ = longest;
+    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+        length_ = rayQueryGetIntersectionTEXT(query, true);
+    }
+    imageStore(laserBeams, ivec2(0, b), vec4(p.origin, length_));
+    imageStore(laserBeams, ivec2(1, b), vec4(direction, float(j)));
+}
