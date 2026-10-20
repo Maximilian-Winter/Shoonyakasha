@@ -21,17 +21,26 @@ Models are the showroom's (python tools/fetch_assets.py showroom); without
 them the stage shows the bundled Fox. The set itself is generated on first
 start into assets/stage/set/.
 
-Run interactively, a settings panel at the left sets the show (movement
-programme, colours, speed, brightness, beam width), the smoke and the camera.
+Everything runs on a beat clock (BPM, or tapped in). A show steps through
+its cues, a few bars each, setting the heads' movement and colours, the
+lasers, and effects on the beat: dimmer pulses and chases, strobes, lasers
+blanking on the off-beat, and the smoke machines bursting on the bar. A
+settings panel at the left runs the shows and sets everything by hand,
+which stops a running show.
 
 Keys:
     LEFT / RIGHT   previous / next model
-    SPACE          next programme
+    R              run the show or stop it
+    N              next show
+    B              tap the tempo (four taps or more)
+    SPACE          next movement programme
     K              next colours
     L              next laser show
     J              next laser colours
-    C              next camera: audience, stage, orbit (drag with the left
-                   mouse button, scroll to zoom), free (WASD/Q/E, right mouse)
+    C              next camera: director (cuts between the others with the
+                   music), seats in the tribune, the side, the stage, orbit
+                   (drag with the left mouse button, scroll to zoom), free
+                   (WASD/Q/E, right mouse)
     T              turntable on or off
     G              fog on or off
     O              frame rate and the fog passes' GPU time in the status line
@@ -89,7 +98,10 @@ def parse_args():
     parser.add_argument("--lasers", choices=list(LASER_SHOWS), default="fans", help="laser show to open with")
     parser.add_argument("--laser-colours", choices=list(LASER_COLOURS), default="rgb",
                         help="laser colours to open with")
-    parser.add_argument("--camera", choices=list(CAMERA_MODES), default="audience")
+    parser.add_argument("--show", choices=list(SHOWS) + ["none"], default="reveal",
+                        help="show to run from the start; none starts by hand")
+    parser.add_argument("--bpm", type=float, default=124.0, help="tempo of the beat clock")
+    parser.add_argument("--camera", choices=list(CAMERA_MODES), default="director")
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--texture-size", type=int, default=4096, help="largest texture side to load")
@@ -101,10 +113,10 @@ def parse_args():
 
 
 # ── The show: movement programmes and colours ────────────────────────────
-# A programme gives each moving head a (pan, tilt) in degrees at time t (in
-# beats of the speed slider). Tilt is measured from the head's rest, straight
-# down when hung and straight up on the floor; pan 0 points it towards the
-# audience (+Z), 90 towards +X.
+# A programme gives each moving head a (pan, tilt) in degrees at time t (the
+# show's motion time: seconds at 120 BPM and the speed slider's 1). Tilt is
+# measured from the head's rest, straight down when hung and straight up on
+# the floor; pan 0 points it towards the audience (+Z), 90 towards +X.
 
 def _sweep(t, i, n, hung):
     if hung:
@@ -135,11 +147,63 @@ def _audience(t, i, n, hung):
 
 
 def _focus(t, i, n, hung):
-    return None        # every head on the model: see Show.aim
+    return None        # every head on the model: see Show.target
+
+
+def _manual(t, i, n, hung):
+    return None        # the panel's pan and tilt: see Show.target
 
 
 PROGRAMMES = {"sweep": ("Sweep", _sweep), "fan": ("Fan", _fan), "circles": ("Circles", _circles),
-              "columns": ("Columns", _columns), "audience": ("Audience", _audience), "focus": ("Focus", _focus)}
+              "columns": ("Columns", _columns), "audience": ("Audience", _audience), "focus": ("Focus", _focus),
+              "manual": ("Manual", _manual)}
+
+# Effects on the beat. The dimmer: each head's level at beat b; the strobe:
+# flashes per beat (0 none).
+DIMMERS = {"steady": "Steady", "pulse": "Pulse", "chase": "Chase", "alternate": "Alternate"}
+STROBES = {"off": ("Off", 0), "half": ("1/2", 2), "quarter": ("1/4", 4)}
+
+
+class Cue:
+    """A show's step: `bars` bars of these settings."""
+
+    def __init__(self, bars, heads, colours, lasers, laser_colours, dimmer="steady", strobe="off",
+                 laser_beat=False, bursts=False, level=1.0):
+        self.bars = bars
+        self.heads = heads              # movement programme
+        self.colours = colours
+        self.lasers = lasers
+        self.laser_colours = laser_colours
+        self.dimmer = dimmer
+        self.strobe = strobe
+        self.laser_beat = laser_beat    # lasers blank on the off-beat
+        self.bursts = bursts            # smoke machines burst on the bar
+        self.level = level              # the heads' brightness, times
+
+
+SHOWS = {
+    "reveal": ("Reveal", [
+        Cue(4, "columns", "ultraviolet", "off", "green", dimmer="pulse", bursts=True, level=0.4),
+        Cue(4, "focus", "white", "off", "green", bursts=True),
+        Cue(4, "sweep", "ice", "sky", "rgb", dimmer="pulse"),
+        Cue(4, "circles", "rainbow", "fans", "rgb", dimmer="chase", bursts=True),
+        Cue(4, "fan", "sunset", "tunnel", "cyan_magenta", dimmer="alternate", laser_beat=True),
+        Cue(2, "audience", "white", "everything", "rainbow", strobe="quarter"),
+        Cue(4, "sweep", "rainbow", "waves", "heads", dimmer="pulse", laser_beat=True, bursts=True),
+    ]),
+    "club": ("Club", [
+        Cue(2, "circles", "rainbow", "waves", "rgb", dimmer="chase", laser_beat=True),
+        Cue(2, "audience", "ultraviolet", "tunnel", "green", dimmer="alternate", strobe="half"),
+        Cue(2, "sweep", "sunset", "fans", "cyan_magenta", dimmer="pulse", bursts=True),
+        Cue(2, "fan", "ice", "everything", "rainbow", dimmer="chase", strobe="quarter"),
+        Cue(2, "columns", "rainbow", "sky", "heads", dimmer="alternate", laser_beat=True, bursts=True),
+    ]),
+    "calm": ("Calm", [
+        Cue(8, "sweep", "ice", "sky", "rgb"),
+        Cue(8, "focus", "white", "off", "green", bursts=True),
+        Cue(8, "fan", "ultraviolet", "fans", "cyan_magenta", dimmer="pulse"),
+    ]),
+}
 
 
 def _hue(h, s=1.0, v=1.0):
@@ -182,7 +246,11 @@ LASER_BEAM_WATTS = 1.0
 LASER_SHEET_WATTS = 6.0
 LASER_DOT_GAIN = 40.0
 
-CAMERA_MODES = {"audience": "Audience", "stage": "Stage", "orbit": "Orbit", "free": "Free"}
+CAMERA_MODES = {"director": "Director", "audience": "Middle seats", "front_row": "Front row",
+                "back_row": "Back row", "side": "Side", "stage": "Stage", "orbit": "Orbit", "free": "Free"}
+# The director's shots, a few bars each, in turn.
+DIRECTOR_SHOTS = ["audience", "stage", "front_row", "side", "back_row", "stage"]
+DIRECTOR_BARS = 4
 
 
 # ── The engine ───────────────────────────────────────────────────────────
@@ -530,39 +598,130 @@ class StageSet:
 
 # ── The show ─────────────────────────────────────────────────────────────
 
+class BeatClock:
+    """Beats since the start at `bpm`, which taps set: the average interval
+    of the last taps, and the beat lands on the latest."""
+
+    TAPS = 8
+
+    def __init__(self, bpm):
+        self.bpm = bpm
+        self.beats = 0.0
+        self.taps = []
+
+    def advance(self, dt):
+        self.beats += dt * self.bpm / 60.0
+
+    @property
+    def bar(self):
+        return int(self.beats // 4)
+
+    def tap(self, now):
+        """A tap at `now` seconds; returns the tempo once four or more taps
+        less than two seconds apart have set it."""
+        if self.taps and now - self.taps[-1] > 2.0:
+            self.taps = []
+        self.taps = (self.taps + [now])[-self.TAPS:]
+        if len(self.taps) >= 4:
+            interval = (self.taps[-1] - self.taps[0]) / (len(self.taps) - 1)
+            self.bpm = min(max(60.0 / interval, 40.0), 220.0)
+            self.beats = math.floor(self.beats + 0.5)
+            return self.bpm
+        return None
+
+
 class Show:
-    """Moves and colours the moving heads, and sets the fog."""
+    """Moves and colours the moving heads, drives the lasers and the fog,
+    and runs the shows' cues on the beat clock."""
 
     def __init__(self):
+        self.clock = BeatClock(args.bpm)
+        self.motion = 0.0            # the programmes' time: seconds at 120 BPM and speed 1
         self.programme = args.programme
         self.palette = args.colours
         self.speed = 1.0
         self.brightness = 1.0
         self.beam = 7.0              # half-angle of the beams, degrees
         self.key = 1.0               # the key lights, times
-        self.beats = 0.0
+        self.pan = 0.0               # the Manual programme's pan and tilt, degrees
+        self.tilt = 30.0
+        self.dimmer = "steady"
+        self.strobe = "off"
+        self.level = 1.0             # the running cue's brightness, times
         self.fog_on = True
         self.haze = 0.007
         self.smoke = 1.0
         self.ground = 0.07
         self.forward = 0.6           # Henyey-Greenstein g
         self.glow = 1.8              # light the fog scatters, times
+        self.bursts = False          # the smoke machines burst on the bar
+        self.burst_time = -1000.0    # seconds of the last burst
+        self.last_bar = -1
         self.aims = {}               # moving head -> its current direction, eased towards the programme's
         self.laser_show = args.lasers
         self.laser_palette = args.laser_colours
         self.laser_power = 1.0
+        self.laser_beat = False      # lasers blank on the off-beat
+        self.running = None          # the show running, or None
+        self.last = next(iter(SHOWS))   # the show the panel's toggle runs
+        self.started = 0.0           # beats at which it started
+        self.cue = -1
+
+    # The shows ----------------------------------------------------------
+
+    def run(self, name):
+        """Run show `name` from its first cue; None stops it."""
+        self.running = name
+        self.last = name or self.last
+        self.cue = -1
+        self.started = math.floor(self.clock.beats / 4.0 + 0.999) * 4.0 if name else 0.0
+        print("[stage] show:", SHOWS[name][0] if name else "stopped, by hand")
+
+    def stop(self):
+        """Stop the show, keeping its last cue's settings, as a control set by
+        hand does."""
+        if self.running:
+            self.run(None)
+
+    def cue_at(self):
+        """The running show's cue now, and the bar within it."""
+        _, cues = SHOWS[self.running]
+        bars = max((self.clock.beats - self.started) / 4.0, 0.0) % sum(c.bars for c in cues)
+        for index, cue in enumerate(cues):
+            if bars < cue.bars:
+                return index, bars
+            bars -= cue.bars
+        return len(cues) - 1, 0.0
+
+    def follow_cues(self):
+        if not self.running:
+            self.level = 1.0
+            return
+        index, _ = self.cue_at()
+        if index == self.cue:
+            return
+        self.cue = index
+        cue = SHOWS[self.running][1][index]
+        self.programme, self.palette = cue.heads, cue.colours
+        self.laser_show, self.laser_palette = cue.lasers, cue.laser_colours
+        self.dimmer, self.strobe = cue.dimmer, cue.strobe
+        self.laser_beat, self.bursts, self.level = cue.laser_beat, cue.bursts, cue.level
+
+    # The heads ----------------------------------------------------------
 
     def target(self, head, i, n, model, s):
         """Where the programme points head i (of n of its kind) now."""
-        _, programme = PROGRAMMES[self.programme]
-        pan_tilt = programme(self.beats, i, n, head.hung)
-        if pan_tilt is None:
+        if self.programme == "focus":
             # On the model, each head on its own point around it.
             c = model.centre()
             r = model.radius() * 0.45
-            a = self.beats * 0.4 + head.index * 1.7
+            a = self.motion * 0.4 + head.index * 1.7
             goal = add(c, (r * math.cos(a), -model.size[1] * 0.3, r * math.sin(a)))
             return normalize(tuple(g - p for g, p in zip(goal, head.centre)))
+        if self.programme == "manual":
+            pan_tilt = (self.pan, self.tilt)
+        else:
+            pan_tilt = PROGRAMMES[self.programme][1](self.motion, i, n, head.hung)
         pan, tilt = (math.radians(v) for v in pan_tilt)
         # Sweeping, the front row of the truss faces back over the deck, so
         # its beams cross the back row's above the model.
@@ -571,8 +730,33 @@ class Show:
         up = -1.0 if head.hung else 1.0
         return normalize((math.sin(tilt) * math.sin(pan), up * math.cos(tilt), math.sin(tilt) * math.cos(pan)))
 
+    def head_level(self, i, n):
+        """Head i's (of n) brightness from the dimmer effect and the strobe."""
+        b = self.clock.beats
+        phase = b % 1.0
+        if self.dimmer == "pulse":
+            level = 0.3 + 0.7 * math.exp(-5.0 * phase)
+        elif self.dimmer == "chase":
+            step = b * 2.0
+            level = 0.08 + 0.92 * math.exp(-3.0 * (step % 1.0)) if int(step) % n == i else 0.08
+        elif self.dimmer == "alternate":
+            level = 1.0 if (i + int(b)) % 2 == 0 else 0.1
+        else:
+            level = 1.0
+        rate = STROBES[self.strobe][1]
+        if rate and (b * rate) % 1.0 >= 0.3:
+            level = 0.0
+        return level
+
     def update(self, dt, stage, model):
-        self.beats += dt * self.speed
+        self.clock.advance(dt)
+        self.motion += dt * self.speed * self.clock.bpm / 120.0
+        self.follow_cues()
+        bar = self.clock.bar
+        if bar != self.last_bar:
+            self.last_bar = bar
+            if self.bursts:
+                self.burst_time = showtime.seconds
         s = stage.scale
         hung = [h for h in stage.heads if h.hung]
         floor = [h for h in stage.heads if not h.hung]
@@ -585,12 +769,14 @@ class Show:
                 now = normalize(tuple(a + (b - a) * ease for a, b in zip(now, goal)))
                 self.aims[head] = now
                 head.aim(now, s)
+        n = len(stage.heads)
         for head in stage.heads:
-            color = colour(self.beats, head.index, len(stage.heads))
-            head.shine(color, 500.0 * s * s * self.brightness, self.beam, s)
+            color = colour(self.motion, head.index, n)
+            level = self.brightness * self.level * self.head_level(head.index, n)
+            head.shine(color, 500.0 * s * s * level, self.beam, s)
         for light in stage.keys:
             scene.set_light_intensity(light, 110.0 * s * s * self.key)
-        strip = colour(self.beats, 0, len(stage.heads))
+        strip = colour(self.motion, 0, n)
         for e in stage.strip:
             scene.set_material_vec4(e, "emissiveFactor", scale(strip, 2.0 * self.brightness) + (1.0,))
         for e in stage.rim:
@@ -598,26 +784,29 @@ class Show:
         self.apply_fog(stage)
         self.apply_lasers(stage, colour)
 
+    # The lasers and the fog ---------------------------------------------
+
     def apply_lasers(self, stage, head_colour):
         """Each projector's pattern, aim and colour times power, for the
         pipeline's LaserTrace and Lasers passes."""
         s = stage.scale
         _, plan = LASER_SHOWS[self.laser_show]
         _, colour = LASER_COLOURS[self.laser_palette]
+        blank = self.laser_beat and self.clock.beats % 1.0 >= 0.5
         for j, ((origin, axis), spec) in enumerate(zip(stage.apertures(), plan)):
-            if spec is None or self.laser_power <= 0.0:
+            if spec is None or self.laser_power <= 0.0 or blank:
                 engine.set_custom_vec4("laser.origin%d" % j, origin + (0.0,))
                 engine.set_custom_vec4("laser.color%d" % j, (0.0, 0.0, 0.0, 0.0))
                 continue
             pattern, beams, spread = spec
-            c = colour(self.beats, j) if colour else head_colour(self.beats, 3 * j, len(stage.heads))
+            c = colour(self.motion, j) if colour else head_colour(self.motion, 3 * j, len(stage.heads))
             # Watts per beam; a sheet spreads its power over its whole arc.
             power = (LASER_SHEET_WATTS if pattern == 4 else LASER_BEAM_WATTS) * self.laser_power * s
             engine.set_custom_vec4("laser.origin%d" % j, origin + (float(pattern),))
             engine.set_custom_vec4("laser.axis%d" % j, axis + (float(beams),))
             engine.set_custom_vec4("laser.up%d" % j, (0.0, 1.0, 0.0, math.radians(spread)))
             engine.set_custom_vec4("laser.color%d" % j, scale(c, power) + (1.3 * j,))
-        engine.set_custom_vec4("laser.params", (self.beats, 0.003 * s, LASER_DOT_GAIN, 80.0 * s))
+        engine.set_custom_vec4("laser.params", (self.motion, 0.003 * s, LASER_DOT_GAIN, 80.0 * s))
 
     def apply_fog(self, stage):
         s = stage.scale
@@ -627,6 +816,7 @@ class Show:
         engine.set_custom_vec4("fog.motion", (showtime.seconds, self.glow, 0.5 * s, 1.0 / s))
         engine.set_custom_vec4("fog.wind", (0.12 * s, 0.0, 0.05 * s, 0.0))
         engine.set_custom_vec4("fog.hall", (hx * s, hy * s, hz * s, 0.0))
+        engine.set_custom_vec4("fog.burst", (self.burst_time, 3.0, 1.2, 0.0))
         for i, (nozzle, direction) in enumerate(stage.nozzles()):
             engine.set_custom_vec4("fog.machine%d" % i, nozzle + (1.0,))
             engine.set_custom_vec4("fog.machineDir%d" % i, direction + (2.2 * s,))
@@ -658,13 +848,13 @@ ACCENT = (0.30, 0.52, 0.85, 1.0)
 
 
 class StatusLine:
-    """The model and the show at the top left; with O, the frame rate and
-    the fog passes' GPU time."""
+    """The model, the show and the beat at the top left; with O, the frame
+    rate and the fog's and lasers' GPU time."""
 
     def __init__(self):
         self.stats = False
-        self.wait = 0.0
         self.text = ""
+        self.extra = ""
 
     def build(self):
         k = args.height / 1080.0
@@ -681,30 +871,45 @@ class StatusLine:
 
     def update(self, dt):
         s = stage
-        model = s.model
-        text = "%s  |  %s  |  %s  |  lasers: %s  |  %s camera" % (
-            catalogue.ascii_text(model.entry.title), PROGRAMMES[s.show.programme][0],
-            PALETTES[s.show.palette][0], LASER_SHOWS[s.show.laser_show][0], CAMERA_MODES[s.camera_mode])
+        show = s.show
+        beat = int(show.clock.beats) % 4
+        text = "%s  |  %.0f BPM  %s  |  %s" % (
+            catalogue.ascii_text(s.model.entry.title), show.clock.bpm,
+            "".join("*" if i == beat else "." for i in range(4)), cue_text(show))
+        text += "  |  %s camera" % CAMERA_MODES[s.camera_mode]
         if self.stats:
-            self.wait -= dt
             stats = engine.render_stats
             if stats and stats["fps"] > 0.0:
-                fog = sum((p["gpu_ms"] or 0.0) for p in stats["passes"] if p["name"].startswith("Fog"))
+                passes = stats["passes"]
+                fog = sum((p["gpu_ms"] or 0.0) for p in passes if p["name"].startswith("Fog"))
+                laser = sum((p["gpu_ms"] or 0.0) for p in passes if p["name"].startswith("Laser"))
                 gpu = stats["gpu_ms"]
-                self.extra = "  |  %.0f FPS, GPU %s, fog %.2f ms" % (
-                    stats["fps"], "%.2f ms" % gpu if gpu is not None else "n/a", fog)
-            text += getattr(self, "extra", "")
+                self.extra = "  |  %.0f FPS, GPU %s, fog %.2f ms, lasers %.2f ms" % (
+                    stats["fps"], "%.2f ms" % gpu if gpu is not None else "n/a", fog, laser)
+            text += self.extra
         if text != self.text:
             self.text = text
             scene.set_text(self.label, text)
 
 
+def cue_text(show):
+    """The running show and its cue, or what is set by hand."""
+    if show.running:
+        index, bars = show.cue_at()
+        cues = SHOWS[show.running][1]
+        return "%s, cue %d of %d, bar %d of %d" % (SHOWS[show.running][0], index + 1, len(cues),
+                                                   int(bars) + 1, cues[index].bars)
+    return "by hand: %s, %s, lasers %s" % (PROGRAMMES[show.programme][0], PALETTES[show.palette][0],
+                                           LASER_SHOWS[show.laser_show][0])
+
+
 class SettingsPanel:
     """A screen canvas at the left with the show's controls. Each frame it
     reads its controls first, then shows the stage's state, so changes made
-    with the keys appear on it too."""
+    with the keys, and by a running show, appear on it too. Setting the
+    heads, lasers or effects by hand stops a running show."""
 
-    WIDTH = 400
+    WIDTH = 410
 
     def __init__(self):
         self.visible = True
@@ -724,7 +929,8 @@ class SettingsPanel:
         ui.set_rect(column, anchor_min=(0, 0), anchor_max=(1, 1), size=(0, 0))
         ui.set_layout_child_sizing(column, expand_width=True)
         ui.create_text(column, "Stage", size=30, color=GOLD)
-        ui.create_text(column, "F2 hides this panel.", size=15, color=MUTED)
+        ui.create_text(column, "F2 hides this panel. Setting the heads, lasers or effects by hand stops "
+                               "the show.", size=15, color=MUTED)
         view = ui.create_scroll_view(column, size=(self.WIDTH - 32, 0))
         ui.set_layout_element(view, flexible=(-1, 1))
         ui.set_accessible(view, "Stage settings")
@@ -732,35 +938,48 @@ class SettingsPanel:
         ui.set_layout_child_sizing(page, expand_width=True)
         self.page = page
 
-        self.section("Model")
-        self.model_buttons = self.choices({"previous": "Previous", "next": "Next"}, 2)
-        self.spin = ui.create_toggle(page, "Turntable turning", size=(0, 28))
-
         self.section("Show")
-        self.programmes = self.choices({k: v[0] for k, v in PROGRAMMES.items()}, 3)
+        self.running = ui.create_toggle(page, "Run the show", size=(0, 28))
+        self.shows = self.choices({k: v[0] for k, v in SHOWS.items()}, 3)
+        self.cue = ui.create_text(page, "", size=16, color=MUTED)
+        self.bpm = self.slider("Tempo", 60.0, 180.0, args.bpm, "%.0f BPM")
+        self.tap = self.choices({"tap": "Tap the tempo (B)"}, 1)["tap"]
+
+        self.section("Moving heads")
+        self.programmes = self.choices({k: v[0] for k, v in PROGRAMMES.items()}, 4)
         self.palettes = self.choices({k: v[0] for k, v in PALETTES.items()}, 3)
-        self.speed = self.slider("Speed", 0.0, 3.0, 1.0, "x%.2f")
+        ui.create_text(page, "Dimmer on the beat", size=16, color=MUTED)
+        self.dimmers = self.choices(DIMMERS, 4)
+        ui.create_text(page, "Strobe", size=16, color=MUTED)
+        self.strobes = self.choices({k: v[0] for k, v in STROBES.items()}, 3)
+        self.speed = self.slider("Movement speed", 0.0, 3.0, 1.0, "x%.2f")
         self.brightness = self.slider("Brightness", 0.0, 2.0, 1.0, "x%.2f")
         self.beam = self.slider("Beam width", 2.0, 20.0, 7.0, "%.1f°")
+        self.pan = self.slider("Manual pan", -90.0, 90.0, 0.0, "%.0f°")
+        self.tilt = self.slider("Manual tilt", 0.0, 80.0, 30.0, "%.0f°")
         self.key = self.slider("Key light on the model", 0.0, 2.0, 1.0, "x%.2f")
 
         self.section("Lasers")
         self.laser_shows = self.choices({k: v[0] for k, v in LASER_SHOWS.items()}, 3)
         self.laser_palettes = self.choices({k: v[0] for k, v in LASER_COLOURS.items()}, 3)
+        self.laser_beat = ui.create_toggle(page, "Blank on the off-beat", size=(0, 28))
         self.laser_power = self.slider("Laser power", 0.0, 3.0, 1.0, "x%.2f")
 
         self.section("Smoke")
         self.fog = ui.create_toggle(page, "Fog", is_on=True, size=(0, 28))
+        self.bursts = ui.create_toggle(page, "Machines burst on the bar", size=(0, 28))
         self.haze = self.slider("Haze", 0.0, 0.05, 0.007, "%.3f")
         self.smoke = self.slider("Smoke machines", 0.0, 3.0, 1.0, "x%.2f")
         self.ground = self.slider("Ground fog", 0.0, 0.6, 0.07, "%.2f")
         self.glow = self.slider("Beam glow", 0.0, 3.0, 1.8, "x%.2f")
         self.forward = self.slider("Forward scattering", 0.0, 0.9, 0.6, "%.2f")
 
-        self.section("Camera")
-        self.cameras = self.choices(CAMERA_MODES, 4)
+        self.section("Model and camera")
+        self.model_buttons = self.choices({"previous": "Previous model", "next": "Next model"}, 2)
+        self.spin = ui.create_toggle(page, "Turntable turning", size=(0, 28))
+        self.cameras = self.choices(CAMERA_MODES, 2)
         self.exposure = self.slider("Exposure", -3.0, 3.0, 0.0, "%+.1f EV")
-        self.stats = ui.create_toggle(page, "Frame rate and fog time", size=(0, 28))
+        self.stats = ui.create_toggle(page, "Frame rate and GPU time", size=(0, 28))
         self.apply()
 
     def section(self, title):
@@ -803,25 +1022,37 @@ class SettingsPanel:
         clicked = lambda buttons: next((k for k, b in buttons.items() if ui.was_clicked(b)), None)
         changed = ui.value_changed
 
-        action = clicked(self.model_buttons)
-        if action == "previous":
-            s.select(s.index - 1)
-        elif action == "next":
-            s.select(s.index + 1)
-        if changed(self.spin):
-            s.spinning = ui.toggle_value(self.spin)
-        programme = clicked(self.programmes)
-        if programme:
-            show.programme = programme
-        palette = clicked(self.palettes)
-        if palette:
-            show.palette = palette
-        laser_show = clicked(self.laser_shows)
-        if laser_show:
-            show.laser_show = laser_show
-        laser_palette = clicked(self.laser_palettes)
-        if laser_palette:
-            show.laser_palette = laser_palette
+        # The show.
+        if changed(self.running):
+            if ui.toggle_value(self.running):
+                show.run(show.last)
+            else:
+                show.stop()
+        name = clicked(self.shows)
+        if name:
+            show.run(name)
+        if changed(self.bpm):
+            show.clock.bpm = ui.slider_value(self.bpm)
+        if ui.was_clicked(self.tap):
+            show.clock.tap(time.monotonic())
+
+        # Set by hand: these stop a running show.
+        for buttons, attribute in ((self.programmes, "programme"), (self.palettes, "palette"),
+                                   (self.dimmers, "dimmer"), (self.strobes, "strobe"),
+                                   (self.laser_shows, "laser_show"), (self.laser_palettes, "laser_palette")):
+            key = clicked(buttons)
+            if key:
+                show.stop()
+                setattr(show, attribute, key)
+        for toggle, attribute in ((self.laser_beat, "laser_beat"), (self.bursts, "bursts")):
+            if changed(toggle):
+                show.stop()
+                setattr(show, attribute, ui.toggle_value(toggle))
+        for slider, attribute in ((self.pan, "pan"), (self.tilt, "tilt")):
+            if changed(slider):
+                show.stop()
+                show.programme = "manual"
+                setattr(show, attribute, ui.slider_value(slider))
         for slider, attribute in ((self.speed, "speed"), (self.brightness, "brightness"), (self.beam, "beam"),
                                   (self.key, "key"), (self.laser_power, "laser_power"),
                                   (self.haze, "haze"), (self.smoke, "smoke"), (self.ground, "ground"),
@@ -830,6 +1061,15 @@ class SettingsPanel:
                 setattr(show, attribute, ui.slider_value(slider))
         if changed(self.fog):
             show.set_fog(ui.toggle_value(self.fog))
+
+        # The model and the camera.
+        action = clicked(self.model_buttons)
+        if action == "previous":
+            s.select(s.index - 1)
+        elif action == "next":
+            s.select(s.index + 1)
+        if changed(self.spin):
+            s.spinning = ui.toggle_value(self.spin)
         camera = clicked(self.cameras)
         if camera:
             s.set_camera(camera)
@@ -838,14 +1078,21 @@ class SettingsPanel:
         if changed(self.stats):
             s.status.toggle_stats()
 
-        for toggle, on in ((self.spin, s.spinning), (self.fog, show.fog_on), (self.stats, s.status.stats)):
+        # The stage's state, whichever way it was set.
+        for toggle, on in ((self.running, bool(show.running)), (self.laser_beat, show.laser_beat),
+                           (self.bursts, show.bursts), (self.fog, show.fog_on), (self.spin, s.spinning),
+                           (self.stats, s.status.stats)):
             if ui.toggle_value(toggle) != on:
                 ui.set_toggle_value(toggle, on)
-        for buttons, chosen in ((self.programmes, show.programme), (self.palettes, show.palette),
-                                (self.laser_shows, show.laser_show), (self.laser_palettes, show.laser_palette),
-                                (self.cameras, s.camera_mode)):
+        if abs(ui.slider_value(self.bpm) - show.clock.bpm) > 0.5:
+            ui.set_slider_value(self.bpm, show.clock.bpm)
+        for buttons, chosen in ((self.shows, show.running), (self.programmes, show.programme),
+                                (self.palettes, show.palette), (self.dimmers, show.dimmer),
+                                (self.strobes, show.strobe), (self.laser_shows, show.laser_show),
+                                (self.laser_palettes, show.laser_palette), (self.cameras, s.camera_mode)):
             for key, button in buttons.items():
                 ui.set_color(button, ACCENT if key == chosen else SURFACE)
+        self.set_text(self.cue, cue_text(show))
         for slider, (label, name, value_format) in self.sliders.items():
             self.set_text(label, "%s   %s" % (name, value_format % ui.slider_value(slider)))
 
@@ -890,6 +1137,8 @@ class Stage:
         if not args.screenshots:
             self.settings.build()
         self.select(0)
+        if args.show != "none" and not args.screenshots:
+            self.show.run(args.show)
 
     def select(self, index):
         old = self.model if self.model.loaded else None
@@ -927,14 +1176,20 @@ class Stage:
 
     # Cameras -----------------------------------------------------------
 
-    def audience_pose(self, u=0.0):
-        """From the tribune's middle rows, looking at the model."""
+    def seat_pose(self, row, x, u=0.0):
+        """From the tribune's row `row` (0 at the front), `x` metres off its
+        middle, looking at the model, drifting sideways with u."""
         s = self.set.scale
-        row = 3
-        eye = ((math.sin(u) * 2.5) * s, (stage_set.TRIBUNE_RISE * (row + 1) + 1.2) * s,
+        eye = ((x + math.sin(u) * 1.5) * s, (stage_set.TRIBUNE_RISE * (row + 1) + 1.2) * s,
                (stage_set.TRIBUNE_Z + stage_set.TRIBUNE_DEPTH * (row + 0.4)) * s)
-        target = add(self.model.centre(), (0.0, 1.2 * s, 0.0))
-        return eye, target, 55.0
+        target = add(self.model.centre(), (0.0, (0.9 + 0.25 * row) * s, 0.0))
+        return eye, target, 52.0 if row < 3 else 58.0
+
+    def side_pose(self, u=0.0):
+        """From the side of the hall, level with the truss's lower half."""
+        s = self.set.scale
+        eye = (12.5 * s, 2.6 * s, (1.0 + 2.0 * math.sin(u)) * s)
+        return eye, add(self.model.centre(), (0.0, 1.0 * s, 0.0)), 50.0
 
     def stage_pose(self, u=0.0):
         """Slowly round the deck, low, near the model."""
@@ -942,13 +1197,27 @@ class Stage:
         d = self.model.radius() * 2.6
         return orbit(c, d, 35.0 + u * 8.0, 6.0), add(c, (0.0, 0.6 * self.set.scale, 0.0)), 50.0
 
+    def view_pose(self, mode):
+        """The pose of camera mode `mode` (not orbit or free) now."""
+        u = 0.05 * self.time
+        if mode == "audience":
+            return self.seat_pose(3, 0.0, u)
+        if mode == "front_row":
+            return self.seat_pose(0, -2.0, u)
+        if mode == "back_row":
+            return self.seat_pose(5, 3.0, u)
+        if mode == "side":
+            return self.side_pose(u)
+        return self.stage_pose(self.time)
+
     def update_camera(self, dt):
-        if self.camera_mode == "audience":
-            self.pose(*self.audience_pose(0.05 * self.time))
-        elif self.camera_mode == "stage":
-            self.pose(*self.stage_pose(self.time))
+        if self.camera_mode == "director":
+            shot = DIRECTOR_SHOTS[(self.show.clock.bar // DIRECTOR_BARS) % len(DIRECTOR_SHOTS)]
+            self.pose(*self.view_pose(shot))
         elif self.camera_mode == "orbit":
             self.orbit_camera(dt)
+        elif self.camera_mode != "free":
+            self.pose(*self.view_pose(self.camera_mode))
 
     def orbit_camera(self, dt):
         model = self.model
@@ -1013,17 +1282,31 @@ class Controls:
             s.select(s.index + 1)
         if self.pressed(keys.LEFT) and not ui_focused:
             s.select(s.index - 1)
+        if self.pressed(keys.R):
+            s.show.run(None if s.show.running else s.show.last)
+        if self.pressed(keys.N):
+            names = list(SHOWS)
+            current = s.show.running or s.show.last
+            s.show.run(names[(names.index(current) + 1) % len(names)])
+        if self.pressed(keys.B):
+            bpm = s.show.clock.tap(time.monotonic())
+            if bpm:
+                print("[stage] tempo: %.0f BPM" % bpm)
         if self.pressed(keys.SPACE) and not ui_focused:
             names = list(PROGRAMMES)
+            s.show.stop()
             s.show.programme = names[(names.index(s.show.programme) + 1) % len(names)]
         if self.pressed(keys.K):
             names = list(PALETTES)
+            s.show.stop()
             s.show.palette = names[(names.index(s.show.palette) + 1) % len(names)]
         if self.pressed(keys.L):
             names = list(LASER_SHOWS)
+            s.show.stop()
             s.show.laser_show = names[(names.index(s.show.laser_show) + 1) % len(names)]
         if self.pressed(keys.J):
             names = list(LASER_COLOURS)
+            s.show.stop()
             s.show.laser_palette = names[(names.index(s.show.laser_palette) + 1) % len(names)]
         if self.pressed(keys.C):
             modes = list(CAMERA_MODES)

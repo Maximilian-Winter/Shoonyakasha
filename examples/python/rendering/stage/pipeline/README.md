@@ -7,7 +7,7 @@ A copy of the [showroom pipeline](../../showroom/pipeline/README.md), with its v
 The fog lives in a grid that follows the camera: three 2D-array images, `fogScatter`, `fogHistory` and `fogIntegrated`, at a sixth of the render size, whose 96 layers are slices of view depth, spaced exponentially from `fog.grid.x` to `fog.grid.y` metres. Four passes run after `TransparentRT`, before `TAA`, in the `hybrid` and `raytraced` presets:
 
 - **`FogScatter`** (`fog_scatter.comp`, needs ray queries) fills `fogScatter`. Each cell holds the fog's density at one point in it, which moves within the cell every frame while TAA is on, and the light scattered towards the eye there:
-  - **Density:** haze that drifts with `fog.wind`, ground fog that thins out above `fog.motion.z` metres, and the plumes of up to four smoke machines: jets that widen, slow and rise as they leave the nozzle, carrying puffs. The fog fills the hall, a box `fog.hall` across, and fades over its last metre.
+  - **Density:** haze that drifts with `fog.wind`, ground fog that thins out above `fog.motion.z` metres, and the plumes of up to four smoke machines: jets that widen, slow and rise as they leave the nozzle, carrying puffs. A burst (`fog.burst`) adds to the smoke that leaves the nozzles from then on, fading, so it travels out along the plumes. The fog fills the hall, a box `fog.hall` across, and fades over its last metre.
   - **Light:** every point and spot light reaching the point through its falloff and cone, scattered by a Henyey-Greenstein phase function of `g = fog.media.w`. For lights whose shadow flag is set, a ray to the light decides whether it gets there, so objects cut shadows into the beams. Lights with image slot 2 (`set_light_source_image`) light surfaces only. Directional lights do not light the fog.
   - **Over frames:** the result is blended with last frame's value where the point was then (`fogHistory`), keeping `fog.grid.z` of it.
 - **`FogHistory`** (`fog_history.comp`) copies `fogScatter` into the persistent `fogHistory`.
@@ -27,6 +27,7 @@ The fog lives in a grid that follows the camera: three 2D-array images, `fogScat
 | `hall` | 20, 14, 20 | x half width, y height, z half depth of the box the fog fills, centred on the origin, on the floor |
 | `machine0` ... `machine3` | 0 | xyz the nozzle, w its output; 0 turns the machine off |
 | `machineDir0` ... `machineDir3` | 0, 0, 1, 2 | xyz the direction the jet leaves in, w its speed (metres per second) |
+| `burst` | -1000, 0, 1, 0 | x when the machines last burst (seconds, on `motion.x`'s clock); y how much more smoke they give then, times; z how fast that fades, per second |
 
 ## Lasers
 

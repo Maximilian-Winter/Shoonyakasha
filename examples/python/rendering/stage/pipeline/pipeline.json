@@ -1012,6 +1012,17 @@
             1.0,
             2.0
           ]
+        },
+        {
+          "name": "burst",
+          "type": "vec4",
+          "source": "scene.custom.fog.burst",
+          "default": [
+            -1000.0,
+            0.0,
+            1.0,
+            0.0
+          ]
         }
       ]
     },

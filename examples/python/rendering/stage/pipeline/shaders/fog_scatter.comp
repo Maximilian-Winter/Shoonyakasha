@@ -92,7 +92,7 @@ void main() {
 
     float density = fogDensity(worldPos, fog.media, fog.motion, fog.wind, fog.hall,
                                fog.machine0, fog.machine1, fog.machine2, fog.machine3,
-                               fog.machineDir0, fog.machineDir1, fog.machineDir2, fog.machineDir3);
+                               fog.machineDir0, fog.machineDir1, fog.machineDir2, fog.machineDir3, fog.burst);
     vec4 value = vec4(0.0);
     if (density > 1e-5) {
         vec3 towards = normalize(camera.position.xyz - worldPos);

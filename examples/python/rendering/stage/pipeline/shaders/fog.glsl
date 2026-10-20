@@ -24,7 +24,8 @@
     vec4 machineDir0; /* xyz direction the jet leaves in, w its speed (m/s) */   \
     vec4 machineDir1;                                                             \
     vec4 machineDir2;                                                             \
-    vec4 machineDir3;
+    vec4 machineDir3;                                                             \
+    vec4 burst;     /* x when the machines last burst (seconds), y how much more they give, z how fast it fades */
 
 // View depth at the start of slice t (continuous) of `slices`.
 float sliceDepth(float t, float slices, vec4 grid) {
@@ -74,8 +75,10 @@ float fbm(vec3 p) {
 // ── Density ─────────────────────────────────────────────────────
 
 // One smoke machine's plume at p: a jet from `nozzle` along `dir` that
-// widens, slows and rises as it goes, carrying puffs of noise.
-float plume(vec3 p, vec4 nozzle, vec4 dir, float time, float noiseScale) {
+// widens, slows and rises as it goes, carrying puffs of noise. A burst
+// (burst.x seconds, burst.y more, fading at burst.z) travels out along it
+// with the smoke that left the nozzle then.
+float plume(vec3 p, vec4 nozzle, vec4 dir, float time, float noiseScale, vec4 burst) {
     if (nozzle.w <= 0.0) return 0.0;
     vec3 d = p - nozzle.xyz;
     float s = dot(d, dir.xyz);                  // metres along the jet
@@ -90,7 +93,10 @@ float plume(vec3 p, vec4 nozzle, vec4 dir, float time, float noiseScale) {
     // long ago this part left, for the puffs and the noise it carries.
     float speed = max(dir.w, 0.1);
     float age = s / speed * (1.0 + 0.25 * s);
-    float puffs = 0.55 + 0.45 * sin(6.2831853 * (time - age) * 0.35 + nozzle.x * 1.7);
+    float left = time - age;                     // when this smoke left the nozzle
+    float puffs = 0.55 + 0.45 * sin(6.2831853 * left * 0.35 + nozzle.x * 1.7);
+    float since = left - burst.x;
+    puffs *= 1.0 + (since >= 0.0 ? burst.y * exp(-since * burst.z) : 0.0);
     vec3 carried = (p - dir.xyz * speed * time * 0.6) * noiseScale * 1.6;
     float n = fbm(carried + vec3(0.0, -time * 0.2, 0.0));
     float core = exp(-r2) * nozzle.w / (1.0 + 0.6 * s * s);
@@ -99,7 +105,7 @@ float plume(vec3 p, vec4 nozzle, vec4 dir, float time, float noiseScale) {
 
 // Haze, ground fog and the machines' plumes at p (world space), per metre.
 float fogDensity(vec3 p, vec4 media, vec4 motion, vec4 wind, vec4 hall,
-                 vec4 m0, vec4 m1, vec4 m2, vec4 m3, vec4 d0, vec4 d1, vec4 d2, vec4 d3) {
+                 vec4 m0, vec4 m1, vec4 m2, vec4 m3, vec4 d0, vec4 d1, vec4 d2, vec4 d3, vec4 burst) {
     // Inside the hall only, fading out over its last metre.
     vec3 inside = vec3(hall.x, hall.y, hall.z) - vec3(abs(p.x), max(p.y - 0.0, 0.0), abs(p.z));
     float walls = clamp(min(min(inside.x, inside.z), inside.y), 0.0, 1.0);
@@ -111,8 +117,8 @@ float fogDensity(vec3 p, vec4 media, vec4 motion, vec4 wind, vec4 hall,
     float haze = media.x * (0.45 + 1.1 * fbm(drifted * noiseScale * 0.35));
     float ground = media.z * exp(-p.y / max(motion.z, 0.05))
                  * (0.3 + 1.4 * fbm(drifted * noiseScale * 0.9 + vec3(0.0, time * 0.05, 0.0)));
-    float smoke = media.y * (plume(p, m0, d0, time, noiseScale) + plume(p, m1, d1, time, noiseScale)
-                           + plume(p, m2, d2, time, noiseScale) + plume(p, m3, d3, time, noiseScale));
+    float smoke = media.y * (plume(p, m0, d0, time, noiseScale, burst) + plume(p, m1, d1, time, noiseScale, burst)
+                           + plume(p, m2, d2, time, noiseScale, burst) + plume(p, m3, d3, time, noiseScale, burst));
     return (haze + ground + smoke) * walls;
 }
 
