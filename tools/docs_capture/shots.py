@@ -121,6 +121,8 @@ CLIPS = [
          '--seconds', '12'], ['showroom:gaz13_chaika', 'showroom:corvette_c8'], own=True, timeout=3600),
     clip('stage_show', 'stage', 'stage.py', 0, ['--record', '{out}', '--models', 'corvette_c8', '--seconds', '40'],
          ['showroom:corvette_c8'], own=True, gif=(20, 4), timeout=3600),
+    clip('stage_show', 'stage', 'stage.py', 0, ['--record', '{out}', '--models', 'corvette_c8', '--seconds', '40',
+         '--vertical'], ['showroom:corvette_c8'], own=True, vertical=True, timeout=3600),
 ]
 
 CREDITS = {

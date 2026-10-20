@@ -108,6 +108,7 @@ def parse_args():
     parser.add_argument("--camera", choices=list(CAMERA_MODES), default="director")
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument("--vertical", action="store_true", help="1080 x 1920, for phone-shaped video")
     parser.add_argument("--texture-size", type=int, default=4096, help="largest texture side to load")
     parser.add_argument("--screenshots", metavar="DIR", help="save a still of every programme and exit")
     parser.add_argument("--settle", type=int, default=150,
@@ -116,7 +117,10 @@ def parse_args():
     parser.add_argument("--record", metavar="FILE", help="record the show (.mp4/.mkv) and exit")
     parser.add_argument("--seconds", type=float, default=40.0, help="length of the recording")
     parser.add_argument("--fps", type=int, default=30, help="frame rate of recordings")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.vertical:
+        args.width, args.height = 1080, 1920
+    return args
 
 
 # ── The show: movement programmes and colours ────────────────────────────
@@ -864,7 +868,7 @@ class StatusLine:
         self.extra = ""
 
     def build(self):
-        k = args.height / 1080.0
+        k = min(args.width, args.height) / 1080.0
         self.label = engine.create_text("", sk.UI_ANCHOR_TOP_LEFT, (28.0 * k, 34.0 * k), FONT,
                                         font_size=17.0 * k, color=(0.8, 0.8, 0.8, 0.9))
         scene.set_text_sort_key(self.label, 1)
@@ -1270,6 +1274,16 @@ class Stage:
         self.pose(orbit(target, now[2], now[0], now[1]), target, 45.0)
 
     def pose(self, eye, target, fov):
+        """Place the camera. `fov` is the vertical field of view. In a window
+        taller than wide, 0.85 of it is the horizontal one instead, so the
+        model keeps its width in the frame, and the camera looks above the
+        target, so the model sits low with the beams over it."""
+        aspect = args.width / args.height
+        if aspect < 1.0:
+            half = math.atan(math.tan(math.radians(fov * 0.85) / 2.0) / aspect)
+            fov = math.degrees(2.0 * half)
+            distance = math.sqrt(sum((t - e) ** 2 for t, e in zip(target, eye)))
+            target = add(target, (0.0, distance * math.tan(half * 0.45), 0.0))
         camera = engine.camera_entity
         scene.set_position(camera, eye)
         scene.set_rotation(camera, look_rotation(eye, target))

@@ -93,6 +93,7 @@ The settings panel at the left runs the shows and sets the tempo, the heads (pro
 | `--laser-colours` | `rgb` | Laser colours to open with |
 | `--camera` | `director` | Camera to open with |
 | `--width`, `--height` | 1920, 1080 | Window size |
+| `--vertical` | | 1080 x 1920, for phone-shaped video; the cameras keep the model's width in the frame |
 | `--texture-size` | 4096 | Largest texture side to load |
 | `--screenshots DIR` | | Save stills of the first model, then exit: every programme from the middle seats and from the stage with the `--lasers` show, then every other laser show from the middle seats; each with its GPU time and the fog's and lasers' share. No show runs |
 | `--record FILE` | | Record the show (`.mp4`, `.mkv`), then exit |
