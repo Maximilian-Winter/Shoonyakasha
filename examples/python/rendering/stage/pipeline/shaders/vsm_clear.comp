@@ -1,0 +1,30 @@
+#version 450
+// Virtual shadow map, step 3 of 4: clear the physical pages that will be
+// drawn this frame to the far depth. One workgroup per physical page; pages
+// that keep their depth from earlier frames are left alone.
+
+#include "common.glsl"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 2) uniform Showroom { SHOWROOM_BLOCK } showroom;
+layout(set = 1, binding = 0, r32ui) uniform readonly uimage2D vsmPageTable;
+layout(set = 1, binding = 2, r32ui) uniform writeonly uimage2D vsmPhysical;
+layout(set = 1, binding = 3, r32ui) uniform readonly uimage2D vsmOwner;
+
+#include "vsm.glsl"
+
+void main() {
+    ivec2 physicalPage = ivec2(gl_WorkGroupID.xy);
+    uint owner = imageLoad(vsmOwner, physicalPage).r;
+    if (owner == 0u) return;
+    uint entry = imageLoad(vsmPageTable, vsmEntryCoordOf(owner - 1u)).r;
+    if ((entry & VSM_DIRTY) == 0u) return;
+
+    // 16 x 16 threads, 8 x 8 texels each.
+    ivec2 base = physicalPage * VSM_PAGE_SIZE + ivec2(gl_LocalInvocationID.xy) * 8;
+    uvec4 far = uvec4(floatBitsToUint(1.0));
+    for (int y = 0; y < 8; ++y)
+        for (int x = 0; x < 8; ++x)
+            imageStore(vsmPhysical, base + ivec2(x, y), far);
+}

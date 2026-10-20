@@ -48,6 +48,8 @@ examples/**/cubemaps_hdrs/
 /assets/polyhaven/
 /assets/bistro/
 /assets/showroom/
+# Generated on first start by examples/python/rendering/stage/stage_set.py.
+/assets/stage/
 /assets/kajiya/
 # Downloaded by hand from Sketchfab; see assets/README.md.
 /assets/models/japanese_shrine.glb
@@ -97,6 +99,7 @@ examples/python/rendering/museum/museum.mp4
 examples/python/rendering/showroom/tour.mp4
 examples/python/rendering/showroom/reel.mp4
 /examples/python/rendering/showroom/showroom_captures
+/examples/python/rendering/stage/stage_captures
 /old_dx12_engine_code/
 /cool-gfx-repos/
 /examples/python/rendering/irradiance_cache/irradiance_cache_captures

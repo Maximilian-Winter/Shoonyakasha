@@ -1,0 +1,44 @@
+#version 450
+// The fog along each view ray (pass FogIntegrate): for every column of the
+// grid, from the eye outwards, the light the fog scatters towards the eye
+// and the share of what lies behind it that gets through, up to the far
+// end of each slice.
+//
+//   fogIntegrated  rgb  light from the fog between the eye and the slice's end
+//                  a    transmittance from the eye to the slice's end
+
+#include "common.glsl"
+#include "fog.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2DArray fogScatter;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2DArray fogIntegrated;
+layout(set = 0, binding = 2) uniform Fog { FOG_BLOCK } fog;
+layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
+
+void main() {
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    ivec3 size = imageSize(fogIntegrated);
+    if (any(greaterThanEqual(id, size.xy))) return;
+    float slices = float(size.z);
+
+    // Metres along the ray per metre of view depth, through the column's centre.
+    vec2 uv = (vec2(id) + 0.5) / vec2(size.xy);
+    vec4 ray = camera.invProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 direction = ray.xyz / ray.w;
+    float stretch = length(direction) / max(-direction.z, 1e-4);
+
+    vec3 light = vec3(0.0);
+    float transmittance = 1.0;
+    for (int k = 0; k < size.z; ++k) {
+        vec4 cell = texelFetch(fogScatter, ivec3(id, k), 0);
+        float thickness = (sliceDepth(float(k + 1), slices, fog.grid) - sliceDepth(float(k), slices, fog.grid)) * stretch;
+        float extinction = max(cell.a, 1e-6);
+        float through = exp(-extinction * thickness);
+        // The cell's scattered light, integrated over its thickness as it fades.
+        light += transmittance * cell.rgb * (1.0 - through) / extinction;
+        transmittance *= through;
+        imageStore(fogIntegrated, ivec3(id, k), vec4(light, transmittance));
+    }
+}

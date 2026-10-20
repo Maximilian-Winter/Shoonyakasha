@@ -13,7 +13,10 @@ the cinematic shots start); Y in the showroom turns the current model by 90
 degrees and prints the value to put here.
 """
 
+import json
+import math
 import re
+import struct
 
 
 class Entry:
@@ -81,6 +84,61 @@ def short_credit(credit):
             break
     url = re.sub(r"^https?://", "", m.group("url"))
     return ascii_text('"%s" by %s - %s - %s' % (m.group("title"), m.group("author"), licence, url))
+
+
+def gltf_bounds(path):
+    """World-space bounds of a glTF or GLB's meshes, from their accessors'
+    min/max (which glTF requires for positions)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:4] == b"glTF":
+        length = struct.unpack_from("<I", data, 12)[0]
+        gltf = json.loads(data[20:20 + length].decode("utf-8"))
+    else:
+        gltf = json.loads(data.decode("utf-8"))
+    nodes = gltf.get("nodes", [])
+    lo, hi = [math.inf] * 3, [-math.inf] * 3
+
+    def matmul(a, b):
+        return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)] for i in range(4)]
+
+    def local(node):
+        if "matrix" in node:
+            m = node["matrix"]
+            return [[m[c * 4 + r] for c in range(4)] for r in range(4)]
+        t = node.get("translation", [0, 0, 0])
+        x, y, z, w = node.get("rotation", [0, 0, 0, 1])
+        s = node.get("scale", [1, 1, 1])
+        r = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+             [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+             [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+        return [[r[i][0] * s[0], r[i][1] * s[1], r[i][2] * s[2], t[i]] for i in range(3)] + [[0, 0, 0, 1]]
+
+    def walk(index, parent):
+        node = nodes[index]
+        m = matmul(parent, local(node))
+        if "mesh" in node:
+            for primitive in gltf["meshes"][node["mesh"]]["primitives"]:
+                a = gltf["accessors"][primitive["attributes"]["POSITION"]]
+                if "min" not in a:
+                    continue
+                for x in (a["min"][0], a["max"][0]):
+                    for y in (a["min"][1], a["max"][1]):
+                        for z in (a["min"][2], a["max"][2]):
+                            p = [sum(m[i][k] * v for k, v in enumerate((x, y, z, 1.0))) for i in range(3)]
+                            for i in range(3):
+                                lo[i] = min(lo[i], p[i])
+                                hi[i] = max(hi[i], p[i])
+        for child in node.get("children", []):
+            walk(child, m)
+
+    identity = [[1.0 if i == j else 0.0 for j in range(4)] for i in range(4)]
+    scene = gltf.get("scenes", [{}])[gltf.get("scene", 0)] if gltf.get("scenes") else {"nodes": list(range(len(nodes)))}
+    for root in scene.get("nodes", []):
+        walk(root, identity)
+    if lo[0] == math.inf:
+        return [-0.5, 0.0, -0.5], [0.5, 1.0, 0.5]
+    return lo, hi
 
 
 def ascii_text(text):

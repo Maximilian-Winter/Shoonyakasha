@@ -1,0 +1,210 @@
+// common.glsl - shared by the showroom pipeline's shaders. A copy of the
+// default pipeline's, with each light's source (radius, shadow flag, inner
+// cone) and the Showroom block added.
+//
+// Buffer blocks are declared by the shaders themselves, since each puts them
+// at a different set; the DEFAULT_*_BLOCK macros below keep the member lists
+// in one place so they cannot drift from pipeline.json.
+
+#ifndef DEFAULT_COMMON_GLSL
+#define DEFAULT_COMMON_GLSL
+
+// scene.camera.* (pipeline.json "Camera"). prevViewProj is last frame's;
+// frame counts frames, and taa is scene.custom.default.taa.
+#define DEFAULT_CAMERA_BLOCK \
+    mat4 view;               \
+    mat4 proj;               \
+    mat4 invView;            \
+    mat4 invProj;            \
+    vec4 position;           \
+    vec4 params;             \
+    mat4 prevViewProj;       \
+    vec2 resolution;         \
+    uint frame;              \
+    uint taa;
+
+// scene.lights.count (pipeline.json "Lights"): how many lights the scene
+// has. The lights themselves are in the SceneLights storage buffer.
+#define DEFAULT_LIGHTS_BLOCK                      \
+    uint lightCount;                              \
+    float _lightsPad0, _lightsPad1, _lightsPad2;
+
+// The scene's lights (pipeline.json "SceneLights", a storage buffer filled
+// from the scene every frame), as many as it holds. A shader declares them
+// with DEFAULT_SCENE_LIGHTS(set, binding) beside the Lights block, and
+// loops over SCENE_LIGHT_COUNT of them.
+struct SceneLight {
+    vec4 positionType;      // xyz position, w type: 0 directional, 1 point, 2 spot
+    vec4 colorIntensity;    // rgb colour, w intensity
+    vec4 directionRange;    // xyz direction the light points, w range
+    vec4 attenuation;       // constant, linear, quadratic, cos(outer cone)
+    vec4 source;            // x radius, y casts shadows, z cos(inner cone), w image slot
+    vec4 shape;             // xyz right axis * half width, w half height; 0 for none
+};
+#define DEFAULT_SCENE_LIGHTS(SET, BINDING) \
+    layout(std430, set = SET, binding = BINDING) readonly buffer SceneLights { SceneLight sceneLights[]; };
+#define SCENE_LIGHT_COUNT min(lightCount, uint(sceneLights.length()))
+
+// scene.shadows.sun.* (pipeline.json "Cascades")
+#define DEFAULT_CASCADES_BLOCK \
+    mat4 cascadeViewProj[4];   \
+    vec4 splits;               \
+    vec4 texelWorldSize;       \
+    vec4 sunDirection;         \
+    uint sunEnabled;           \
+    int sunLightIndex;         \
+    uint cascadeCount;
+
+// scene.shadows.spot* and scene.shadows.point* (pipeline.json
+// "LocalShadowMatrices"): 8 spot slots, 4 point slots of 6 faces each, all
+// tiles of one atlas
+#define SPOT_SHADOW_SLOTS 8
+#define POINT_SHADOW_SLOTS 4
+#define DEFAULT_LOCAL_SHADOWS_BLOCK                          \
+    mat4 spotViewProj[SPOT_SHADOW_SLOTS];                    \
+    mat4 pointFaceViewProj[POINT_SHADOW_SLOTS * 6];          \
+    vec4 spotParams[SPOT_SHADOW_SLOTS];      /* x = texel size one unit away */ \
+    vec4 pointPositionFar[POINT_SHADOW_SLOTS];                \
+    vec4 pointDepthParams[POINT_SHADOW_SLOTS]; /* depth = x + y / m; z = texel size one unit away */ \
+    vec4 spotRect[SPOT_SHADOW_SLOTS];        /* tile in the atlas: x, y, width, height in fractions */ \
+    vec4 pointFaceRect[POINT_SHADOW_SLOTS * 6];               \
+    int spotLightIndex[SPOT_SHADOW_SLOTS];   /* -1: empty slot */ \
+    int pointLightIndex[POINT_SHADOW_SLOTS];
+
+// scene.custom.default.* (pipeline.json "Settings"); see README.md
+#define DEFAULT_SETTINGS_BLOCK  \
+    float exposure;             \
+    float iblIntensity;         \
+    float skyBlur;              \
+    float shadowSoftness;       \
+    float shadowNormalBias;     \
+    float shadowDepthBias;      \
+    float cascadeBlend;         \
+    float contactShadowLength;  \
+    float contactShadowThickness; \
+    float shadowAmbient;        \
+    uint debugView;             \
+    float aoRadius;             \
+    float aoIntensity;          \
+    float bloomIntensity;       \
+    float bloomRadius;          \
+    uint autoExposure;          \
+    float exposureAdaptSpeed;   \
+    float exposureMinEV;        \
+    float exposureMaxEV;        \
+    float deltaTime;            \
+    float sunAngle;             \
+    uint toneMapper;            /* 0 ACES, 1 PBR Neutral, 2 AgX */ \
+    uint accumulate;            /* 1: show accumColor (capture mode) */ \
+    uint accumFrame;            /* this frame's index in the average; 0 starts over */ \
+    uint accumSource;           /* 0 the TAA output, 1 the raw frame */ \
+    float vignette;             \
+    float grain;                \
+    uint frame;                 \
+    uint dof;                   /* 1: depth of field (depth_of_field.frag) */ \
+    float dofFocus;             /* focus distance, metres along the view */ \
+    float dofFStop;             /* f-number of the lens */
+
+// scene.custom.showroom.* and the sun (pipeline.json "Showroom"); see
+// README.md. The virtual shadow map's settings, and the sun and camera its
+// passes place their clipmap levels around.
+#define SHOWROOM_BLOCK          \
+    vec4 sunDirection;          \
+    vec4 cameraPosition;        \
+    vec4 vsmDirty0;     /* bounding spheres of moving casters: xyz centre, w radius (0 unused) */ \
+    vec4 vsmDirty1;             \
+    vec4 vsmDirty2;             \
+    vec4 vsmDirty3;             \
+    float vsmFirstLevel;        \
+    float vsmDepthRange;        \
+    float vsmLevelBias;         \
+    float vsmSoftness;          \
+    float vsmNormalBias;        \
+    float vsmDepthBias;         \
+    uint vsmEpoch;              \
+    uint vsmContent;            \
+    uint sunEnabled;            \
+    uint sunShadowMode;         \
+    float lightSoftness;        \
+    float reflections;          \
+    float areaLights;           \
+    float softboxGrid;  /* -1 even softboxes, 0 their hotspot, n a grid of n cells across */
+
+// ── Normals ─────────────────────────────────────────────────────
+// Octahedral encoding of a unit vector into two values in -1..1.
+
+vec2 octWrap(vec2 v) {
+    return (1.0 - abs(v.yx)) * vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);
+}
+
+vec2 octEncode(vec3 n) {
+    n /= abs(n.x) + abs(n.y) + abs(n.z);
+    return n.z >= 0.0 ? n.xy : octWrap(n.xy);
+}
+
+vec3 octDecode(vec2 f) {
+    vec3 n = vec3(f, 1.0 - abs(f.x) - abs(f.y));
+    float t = clamp(-n.z, 0.0, 1.0);
+    n.x += n.x >= 0.0 ? -t : t;
+    n.y += n.y >= 0.0 ? -t : t;
+    return normalize(n);
+}
+
+// ── Positions from depth ────────────────────────────────────────
+// The camera's projection is OpenGL style (-1..1 depth) and the depth buffer
+// stores that NDC depth as is, so a texel's depth goes straight back through
+// the inverse projection. The far plane (cleared depth) is 1.
+
+vec3 viewPositionFromDepth(mat4 invProj, vec2 uv, float depth) {
+    vec4 p = invProj * vec4(uv * 2.0 - 1.0, depth, 1.0);
+    return p.xyz / p.w;
+}
+
+// ── Temporal anti-aliasing ──────────────────────────────────────
+
+float halton(uint index, uint base) {
+    float f = 1.0, r = 0.0;
+    while (index > 0u) {
+        f /= float(base);
+        r += f * float(index % base);
+        index /= base;
+    }
+    return r;
+}
+
+// This frame's sub-pixel camera offset in NDC: 8 points of the (2, 3)
+// Halton sequence, so the temporal filter sees each pixel's area sampled
+// evenly. Zero with TAA off.
+vec2 taaJitter(uint frame, uint taa, vec2 resolution) {
+    if (taa == 0u) return vec2(0.0);
+    uint i = frame % 8u + 1u;
+    return (vec2(halton(i, 2u), halton(i, 3u)) - 0.5) * 2.0 / resolution;
+}
+
+// ── Noise ───────────────────────────────────────────────────────
+// Interleaved gradient noise (Jimenez 2014): per-pixel values in 0..1 whose
+// neighbours differ as much as possible, so few filter taps look smooth.
+
+float interleavedGradientNoise(vec2 pixel) {
+    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+}
+
+// The same, moving every frame when TAA is on, so the temporal filter
+// averages the noise of filtered shadows and occlusion away. Each frame adds
+// the golden ratio: a pixel's values over successive frames spread evenly
+// over 0..1, so their average converges to the noiseless result.
+float temporalNoise(vec2 pixel, uint frame, uint taa) {
+    float n = interleavedGradientNoise(pixel);
+    return taa != 0u ? fract(n + 0.618033989 * float(frame % 4096u)) : n;
+}
+
+// Two numbers in 0..1, for a point in a square (on a light's disc or panel):
+// interleaved gradient noise across pixels, and with TAA on, each frame adds
+// the next step of the R2 sequence, so a pixel's points over successive
+// frames cover the square evenly.
+vec2 temporalNoise2(vec2 pixel, uint frame, uint taa) {
+    vec2 n = vec2(interleavedGradientNoise(pixel), interleavedGradientNoise(pixel.yx + vec2(47.0, 17.0)));
+    return taa != 0u ? fract(n + vec2(0.7548776662, 0.5698402910) * float(frame % 4096u)) : n;
+}
+
+#endif

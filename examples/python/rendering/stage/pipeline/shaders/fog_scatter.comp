@@ -1,0 +1,116 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// The fog grid's cells (pass FogScatter): each cell's density of haze,
+// ground fog and smoke, and the light its smoke scatters towards the eye
+// from every point and spot light, with a ray to the light for its shadow.
+// Lights with image slot 2 (sceneLights[i].source.w) light surfaces only.
+// One point per cell, at a place in it that changes every frame, blended
+// with the cell's value from last frame (fogHistory, where this point was
+// then) for a smooth average.
+//
+//   fogScatter  rgb  light scattered towards the eye, per metre
+//               a    extinction, per metre (the density)
+
+#extension GL_EXT_ray_query : require
+
+#include "common.glsl"
+#include "fog.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba16f) uniform writeonly image2DArray fogScatter;
+layout(set = 0, binding = 1) uniform sampler2DArray fogHistory;
+layout(set = 0, binding = 2) uniform Fog { FOG_BLOCK } fog;
+layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
+layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
+DEFAULT_SCENE_LIGHTS(2, 1)
+layout(set = 3, binding = 0) uniform accelerationStructureEXT scene;
+
+// Whether anything lies between p and the light at `target`.
+bool lightBlocked(vec3 p, vec3 target) {
+    vec3 toTarget = target - p;
+    float length_ = length(toTarget);
+    if (length_ <= 0.05) return false;
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                          0xFF, p, 0.0, toTarget / length_, length_ - 0.05);
+    while (rayQueryProceedEXT(query)) {}
+    return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+// The light of point and spot lights reaching p and scattered towards the
+// eye (towards: unit vector from p to the eye).
+vec3 inScattered(vec3 p, vec3 towards, float g) {
+    vec3 total = vec3(0.0);
+    for (uint i = 0u; i < SCENE_LIGHT_COUNT; ++i) {
+        float type = sceneLights[i].positionType.w;
+        if (type < 0.5) continue;                       // directional lights: none in the stage
+        if (sceneLights[i].source.w > 1.5) continue;    // image slot 2: kept out of the fog
+        vec3 position = sceneLights[i].positionType.xyz;
+        vec3 toLight = position - p;
+        float dist = length(toLight);
+        vec3 L = toLight / max(dist, 1e-4);
+        vec4 attenuation = sceneLights[i].attenuation;
+        float range = sceneLights[i].directionRange.w;
+        float d = max(dist, sceneLights[i].source.x);
+        float falloff = 1.0 / max(attenuation.x + attenuation.y * d + attenuation.z * d * d, 1e-4);
+        if (range > 0.0) {
+            float r = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
+            falloff *= r * r;
+        }
+        if (type > 1.5) {
+            float cosOuter = attenuation.w;
+            float cosInner = max(sceneLights[i].source.z, cosOuter + 1e-3);
+            float theta = dot(-L, normalize(sceneLights[i].directionRange.xyz));
+            falloff *= smoothstep(cosOuter, cosInner, theta);
+        }
+        vec3 radiance = sceneLights[i].colorIntensity.rgb * sceneLights[i].colorIntensity.w * falloff;
+        if (max(radiance.r, max(radiance.g, radiance.b)) < 1e-4) continue;
+        if (sceneLights[i].source.y > 0.5 && lightBlocked(p, position)) continue;
+        total += radiance * phaseHG(dot(-L, towards), g);
+    }
+    return total;
+}
+
+void main() {
+    ivec3 id = ivec3(gl_GlobalInvocationID);
+    ivec3 size = imageSize(fogScatter);
+    if (any(greaterThanEqual(id, size))) return;
+    float slices = float(size.z);
+
+    // A point in the cell, somewhere else every frame.
+    vec2 pixel = vec2(id.xy) + vec2(float(id.z) * 17.0, float(id.z) * 29.0);
+    vec2 jitterXY = temporalNoise2(pixel, camera.frame, camera.taa);
+    float jitterZ = temporalNoise(pixel + vec2(53.0, 7.0), camera.frame, camera.taa);
+    vec2 uv = (vec2(id.xy) + jitterXY) / vec2(size.xy);
+    float depth = sliceDepth(float(id.z) + jitterZ, slices, fog.grid);
+
+    vec4 ray = camera.invProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 direction = ray.xyz / ray.w;
+    vec3 viewPos = direction * (depth / -direction.z);
+    vec3 worldPos = (camera.invView * vec4(viewPos, 1.0)).xyz;
+
+    float density = fogDensity(worldPos, fog.media, fog.motion, fog.wind, fog.hall,
+                               fog.machine0, fog.machine1, fog.machine2, fog.machine3,
+                               fog.machineDir0, fog.machineDir1, fog.machineDir2, fog.machineDir3);
+    vec4 value = vec4(0.0);
+    if (density > 1e-5) {
+        vec3 towards = normalize(camera.position.xyz - worldPos);
+        value = vec4(inScattered(worldPos, towards, fog.media.w) * density * fog.motion.y, density);
+    }
+
+    // Last frame's value where this point was then.
+    vec4 previous = camera.prevViewProj * vec4(worldPos, 1.0);
+    if (previous.w > 0.0 && fog.grid.z > 0.0) {
+        vec2 prevUV = previous.xy / previous.w * 0.5 + 0.5;
+        float layer = depthSlice(previous.w, slices, fog.grid) - 0.5;
+        if (all(greaterThanEqual(prevUV, vec2(0.0))) && all(lessThanEqual(prevUV, vec2(1.0)))
+            && layer >= 0.0 && layer <= slices - 1.0) {
+            float k = floor(layer);
+            vec4 a = textureLod(fogHistory, vec3(prevUV, k), 0.0);
+            vec4 b = textureLod(fogHistory, vec3(prevUV, min(k + 1.0, slices - 1.0)), 0.0);
+            value = mix(value, mix(a, b, layer - k), fog.grid.z);
+        }
+    }
+    imageStore(fogScatter, id, value);
+}
