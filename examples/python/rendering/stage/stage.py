@@ -48,8 +48,12 @@ Keys:
     P              screenshot into stage_captures/
     F9             start or stop recording a video into stage_captures/
 
-Stills of every programme, for checking a change:
+Stills of every programme, for checking a change, and a recording of the
+show from the director's camera:
     python stage.py --screenshots shots/
+    python stage.py --record show.mp4 --seconds 60
+Recording plays the show at its own speed however slowly it renders; Esc or
+Ctrl+C stops it early and keeps what is recorded.
 """
 
 import argparse
@@ -107,7 +111,10 @@ def parse_args():
     parser.add_argument("--texture-size", type=int, default=4096, help="largest texture side to load")
     parser.add_argument("--screenshots", metavar="DIR", help="save a still of every programme and exit")
     parser.add_argument("--settle", type=int, default=150,
-                        help="frames each still runs before it is saved (the fog and TAA settle)")
+                        help="frames each still runs before it is saved, and a recording before it starts "
+                             "(the fog and TAA settle)")
+    parser.add_argument("--record", metavar="FILE", help="record the show (.mp4/.mkv) and exit")
+    parser.add_argument("--seconds", type=float, default=40.0, help="length of the recording")
     parser.add_argument("--fps", type=int, default=30, help="frame rate of recordings")
     return parser.parse_args()
 
@@ -861,6 +868,14 @@ class StatusLine:
         self.label = engine.create_text("", sk.UI_ANCHOR_TOP_LEFT, (28.0 * k, 34.0 * k), FONT,
                                         font_size=17.0 * k, color=(0.8, 0.8, 0.8, 0.9))
         scene.set_text_sort_key(self.label, 1)
+        scene.set_text_visible(self.label, not (args.screenshots or args.record))
+        self.credit = engine.create_text("", sk.UI_ANCHOR_BOTTOM_LEFT, (28.0 * k, -24.0 * k), FONT,
+                                         font_size=15.0 * k, color=(0.75, 0.75, 0.75, 0.85))
+        scene.set_text_sort_key(self.credit, 1)
+
+    def show_model(self, model):
+        """The model's credit at the bottom left."""
+        scene.set_text(self.credit, "Model: " + catalogue.short_credit(model.credit) if model.credit else "")
 
     def toggle_stats(self):
         self.stats = not self.stats
@@ -1134,7 +1149,7 @@ class Stage:
         self.set_exposure(0.0)
         self.set.build()
         self.status.build()
-        if not args.screenshots:
+        if not (args.screenshots or args.record):
             self.settings.build()
         self.select(0)
         if args.show != "none" and not args.screenshots:
@@ -1152,6 +1167,7 @@ class Stage:
         self.set.stand(model)
         self.show.aims.clear()
         self.orbit_goal = None
+        self.status.show_model(model)
         print("[stage] %s" % " ".join(p for p in (model.entry.year, model.entry.title) if p))
 
     def set_camera(self, mode):
@@ -1376,6 +1392,49 @@ class Stills:
             stage.set_camera(camera)
 
 
+class Recording:
+    """--record: the show from the start, settled for --settle frames, then
+    recorded for --seconds at --fps with a fixed step; then exit."""
+
+    def __init__(self, path):
+        self.path = path
+        self.frames = 0
+        self.started = False
+        self.total = int(round(args.seconds * args.fps))
+        self.last_report = 0.0
+
+    def update(self, dt):
+        if engine.input.is_key_down(keys.ESCAPE):
+            finish("stopped")
+        if not self.started:
+            self.frames += 1
+            stage.update(1.0 / args.fps)
+            if self.frames >= args.settle:
+                if not engine.start_recording(self.path, fps=args.fps, fixed_step=True):
+                    print("[stage] could not start recording (see the error above)", flush=True)
+                    os._exit(1)
+                self.started = True
+                print("[stage] recording ->", self.path, flush=True)
+            return
+        stage.update(dt)
+        done = engine.recorded_frame_count
+        if time.monotonic() - self.last_report > 5.0:
+            self.last_report = time.monotonic()
+            print("[stage] recording: %d / %d frames" % (done, self.total), flush=True)
+        if done >= self.total:
+            finish("finished")
+
+
+def finish(reason):
+    """Finish any recording, so the file plays, and quit."""
+    if engine.is_recording:
+        frames = engine.recorded_frame_count
+        ok = engine.stop_recording()
+        print("[stage] recording %s after %d frames: %s" % (reason, frames, "saved" if ok else "could not be finished"),
+              flush=True)
+    os._exit(0)        # the engine has no quit call
+
+
 quit_requested = False
 
 
@@ -1398,15 +1457,17 @@ def on_init():
     stage.start()
     if args.screenshots:
         automation = Stills(args.screenshots)
+    elif args.record:
+        automation = Recording(os.path.abspath(args.record))
 
     def animate(dt):
         if quit_requested:
-            if engine.is_recording:
-                engine.stop_recording()
-            os._exit(0)
-        if automation is not None:
+            finish("stopped")
+        if isinstance(automation, Stills):
             stage.update(1.0 / 60.0)
             automation.update()
+        elif automation is not None:
+            automation.update(dt)
         else:
             stage.update(dt)
         return True

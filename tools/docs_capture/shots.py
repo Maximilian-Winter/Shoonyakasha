@@ -26,6 +26,10 @@ PYTHON = [
          seconds=20, timeout=600),
     dict(folder='rendering/museum', script='museum.py', args=['--width', '1280', '--height', '720'],
          seconds=20, timeout=600),
+    dict(folder='rendering/stage', script='stage.py',
+         args=['--models', 'corvette_c8', '--width', '1280', '--height', '720', '--show', 'none',
+               '--programme', 'circles', '--colours', 'rainbow', '--lasers', 'fans', '--laser-colours', 'green',
+               '--camera', 'audience'], seconds=12, timeout=600),
     dict(folder='rendering/reference_pt', script='reference_pt.py', frames=1024, timeout=600),
     dict(folder='rendering/irradiance_cache', script='irradiance_cache.py', args=['--scene', 'conference'], frames=300, timeout=300),
     dict(folder='rendering/restir_gi', script='restir_gi.py', args=['--scene', 'viziers'], frames=300, timeout=300),
@@ -78,6 +82,9 @@ SOCIAL = [
     dict(name='museum', folder='rendering/museum', script='museum.py', own=True,
          args=['--screenshots', '{out}', '--models', 'gaz13_chaika'], timeout=1800,
          assets=['showroom:gaz13_chaika']),
+    dict(name='stage', folder='rendering/stage', script='stage.py', own=True,
+         args=['--screenshots', '{out}', '--models', 'corvette_c8'], timeout=1800,
+         assets=['showroom:corvette_c8']),
 ]
 
 
@@ -112,6 +119,8 @@ CLIPS = [
       for car in SHOWROOM_CARS],
     clip('museum_tour', 'museum', 'museum.py', 0, ['--record', '{out}', '--models', 'gaz13_chaika,corvette_c8',
          '--seconds', '12'], ['showroom:gaz13_chaika', 'showroom:corvette_c8'], own=True, timeout=3600),
+    clip('stage_show', 'stage', 'stage.py', 0, ['--record', '{out}', '--models', 'corvette_c8', '--seconds', '40'],
+         ['showroom:corvette_c8'], own=True, gif=(20, 4), timeout=3600),
 ]
 
 CREDITS = {

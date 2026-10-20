@@ -89,6 +89,20 @@ A studio for showing models off: each model on a turntable in an infinity cove, 
 
 The cars and starships are Sketchfab models (CC BY and CC BY-NC-SA). `python tools/fetch_assets.py showroom` fetches and converts them with a Sketchfab API token, as the [example's README](../../examples/python/rendering/showroom/README.md) describes; without them it shows the Fox.
 
+### Stage (`stage`)
+
+<a href="../images/examples/python/stage.png"><img src="../images/examples/python/stage.png" alt="An orange Corvette convertible on a turntable in a dark hazy hall, under rainbow-coloured moving-head beams and green laser fans, the control panel at the left" width="720"></a>
+
+Model: "2020 Chevrolet Corvette C8 Stingray Convertible" (https://skfb.ly/pr7JI) by Ddiaz Design, CC BY 4.0.
+
+A light show over the showroom's turntable, on the [stage pipeline](../../examples/python/rendering/stage/pipeline/README.md), the showroom pipeline plus smoke and lasers.
+- **Fog:** haze, ground fog and four smoke machines fill a grid that follows the camera, lit by every spot light with a ray to the light, so beams show in the air and the truss and the model cut shadows into them.
+- **Moving heads and lasers:** twelve moving heads on a truss and the deck, and four laser projectors whose beams are traced to what they hit and drawn per pixel through the haze: fans, waves, tunnels and a sheet of light.
+- **Shows:** cues on a beat clock (a tempo slider, or **B** to tap it) with dimmer chases, strobes, lasers on the beat and smoke bursts on the bar; the director camera cuts between seats in the tribune, the side and the stage with the music.
+- **Capture:** `--screenshots` saves stills of every programme and laser show, `--record` films the show.
+
+It shows the showroom's models, fetched with `python tools/fetch_assets.py showroom`, and needs a GPU with ray queries. See the [example's README](../../examples/python/rendering/stage/README.md).
+
 ### Museum (`museum`)
 
 <a href="../images/examples/python/museum.png"><img src="../images/examples/python/museum.png" alt="A teal 1959 GAZ Chaika on a turntable beside a placard with its engine, power, top speed, weight and a short text, and a timeline of the collection along the bottom" width="720"></a>

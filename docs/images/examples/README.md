@@ -1,6 +1,6 @@
 # Example screenshot capture record
 
-These PNGs are authentic native frame captures, made on Windows: the C++ set and the first Python ones on 2026-09-07, the Python rendering examples and the canvas UI demo on 2026-10-18. They contain the rendered client area only: no desktop, window borders, terminal, image generation, or compositing. Each example has its own file; the galleries reuse those files. Frames are captured at 1280×720 and displayed at 720 px in the guides and 400 px in the galleries, without stretching or duplicate thumbnails.
+These PNGs are authentic native frame captures, made on Windows: the C++ set and the first Python ones on 2026-09-07, the Python rendering examples and the canvas UI demo on 2026-10-18, the stage on 2026-10-21. They contain the rendered client area only: no desktop, window borders, terminal, image generation, or compositing. Each example has its own file; the galleries reuse those files. Frames are captured at 1280×720 and displayed at 720 px in the guides and 400 px in the galleries, without stretching or duplicate thumbnails.
 
 ## Refresh
 
@@ -64,6 +64,7 @@ The delay starts after initialization (Python: after the first rendered frame). 
 | Python `volume_tiled` | glTF-Sample-Assets Sponza; 16,384 moving lights. | 5 s |
 | Python `showroom` | `python tools/fetch_assets.py showroom`; `--models corvette_c8 --width 1280 --height 720`, studio lighting, panel open. | 20 s |
 | Python `museum` | The showroom's models; `--width 1280 --height 720`, the first exhibit. | 20 s |
+| Python `stage` | The showroom's models; `--models corvette_c8 --width 1280 --height 720 --show none --programme circles --colours rainbow --lasers fans --laser-colours green --camera audience`, panel open. | 12 s |
 | Python `reference_pt` | glTF-Sample-Assets Sponza. | 1024 frames |
 | Python `irradiance_cache` | `python tools/fetch_assets.py kajiya`; `--scene conference`. | 300 frames |
 | Python `restir_gi` | kajiya's scenes; `--scene viziers`. | 300 frames |

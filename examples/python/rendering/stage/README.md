@@ -7,6 +7,7 @@ python stage.py
 python stage.py --show club --bpm 128
 python stage.py --show none --programme circles --colours rainbow --lasers tunnel
 python stage.py --screenshots shots/       stills of every programme and laser show, then exit
+python stage.py --record show.mp4 --seconds 60
 ```
 
 It needs a GPU with ray queries: the fog's light comes through rays to each light.
@@ -42,7 +43,11 @@ Everything runs on a beat clock: the tempo slider sets it, or four taps or more 
 
 A show starts on the next bar. Setting the movement, colours, effects or lasers by hand, on the panel or with the keys, stops it and keeps what it had set.
 
-The settings panel at the left runs the shows and sets the tempo, the heads (programme, colours, dimmer, strobe, movement speed, brightness, beam width, manual pan and tilt), the key lights, the lasers (show, colours, blanking, power), the smoke (bursts, haze, the machines' output, ground fog, how brightly the fog glows and how much it scatters forward), the model, the camera and the exposure. The status line at the top shows the tempo, the beat in the bar, and the show's cue.
+The settings panel at the left runs the shows and sets the tempo, the heads (programme, colours, dimmer, strobe, movement speed, brightness, beam width, manual pan and tilt), the key lights, the lasers (show, colours, blanking, power), the smoke (bursts, haze, the machines' output, ground fog, how brightly the fog glows and how much it scatters forward), the model, the camera and the exposure. The status line at the top shows the tempo, the beat in the bar, and the show's cue; the model's credit is at the bottom left.
+
+## Recording
+
+`--record FILE` runs the show for `--settle` frames, then records `--seconds` of it at `--fps` with a fixed step: every frame moves the show on by exactly one frame's time, so the video plays at the show's own speed however slowly it renders. The panel and the status line are hidden; the model's credit stays. Esc or Ctrl+C stops early and keeps what is recorded. **F9** records the window as it is, in real time.
 
 ## Cameras
 
@@ -90,5 +95,7 @@ The settings panel at the left runs the shows and sets the tempo, the heads (pro
 | `--width`, `--height` | 1920, 1080 | Window size |
 | `--texture-size` | 4096 | Largest texture side to load |
 | `--screenshots DIR` | | Save stills of the first model, then exit: every programme from the middle seats and from the stage with the `--lasers` show, then every other laser show from the middle seats; each with its GPU time and the fog's and lasers' share. No show runs |
-| `--settle` | 150 | Frames each still runs, at 1/60 s each, before it is saved |
+| `--record FILE` | | Record the show (`.mp4`, `.mkv`), then exit |
+| `--seconds` | 40 | Length of the recording |
+| `--settle` | 150 | Frames each still runs (at 1/60 s each) before it is saved, and a recording (at 1/`--fps` s each) before it starts |
 | `--fps` | 30 | Frame rate of recordings |
