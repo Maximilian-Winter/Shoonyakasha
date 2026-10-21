@@ -2327,29 +2327,6 @@
         }
       ]
     },
-    "fogHistorySet": {
-      "bindings": [
-        {
-          "binding": 0,
-          "type": "combined_image_sampler",
-          "stages": [
-            "compute"
-          ],
-          "name": "fogScatter",
-          "autoBindResource": "fogScatter",
-          "autoBindSampler": "nearestClamp"
-        },
-        {
-          "binding": 1,
-          "type": "storage_image",
-          "stages": [
-            "compute"
-          ],
-          "name": "fogHistory",
-          "autoBindResource": "fogHistory"
-        }
-      ]
-    },
     "fogIntegrateSet": {
       "bindings": [
         {
@@ -4689,49 +4666,22 @@
     },
     {
       "name": "FogHistory",
-      "type": "compute",
+      "type": "transfer",
       "enabled": false,
       "execution": {
-        "type": "compute_dispatch",
-        "workgroupSize": [
-          8,
-          8,
-          1
-        ],
-        "dispatch": {
-          "x": {
-            "resource": "fogScatter",
-            "dimension": "width",
-            "divisor": 8
-          },
-          "y": {
-            "resource": "fogScatter",
-            "dimension": "height",
-            "divisor": 8
-          },
-          "z": {
-            "resource": "fogScatter",
-            "dimension": "depth"
-          }
-        }
+        "type": "copy"
       },
       "inputs": [
         {
           "resource": "fogScatter",
-          "usage": "shader_read"
+          "usage": "transfer_src"
         }
       ],
       "outputs": [
         {
           "resource": "fogHistory",
-          "usage": "storage_image_write"
+          "usage": "transfer_dst"
         }
-      ],
-      "pipeline": {
-        "computeShader": "shaders/fog_history.comp.spv"
-      },
-      "descriptorSets": [
-        "fogHistorySet"
       ]
     },
     {

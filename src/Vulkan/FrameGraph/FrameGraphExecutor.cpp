@@ -663,6 +663,24 @@ void FrameGraphExecutor::executeAutoCallback(
         }
         break;
 
+    case ExecutionKind::Copy:
+    case ExecutionKind::Blit: {
+        const auto* src = std::get_if<PhysicalImage>(&compiled.physicalResources[compiledPass.transferSrc.index]);
+        const auto* dst = std::get_if<PhysicalImage>(&compiled.physicalResources[compiledPass.transferDst.index]);
+        if (!src || !dst) break;
+        if (compiledPass.executionKind == ExecutionKind::Copy) {
+            vkCmdCopyImage(commandBuffer, src->vkImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           dst->vkImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           static_cast<uint32_t>(compiledPass.copyRegions.size()), compiledPass.copyRegions.data());
+        } else {
+            vkCmdBlitImage(commandBuffer, src->vkImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           dst->vkImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           static_cast<uint32_t>(compiledPass.blitRegions.size()), compiledPass.blitRegions.data(),
+                           compiledPass.blitFilter);
+        }
+        break;
+    }
+
     case ExecutionKind::Unknown:
         // Falling off the end of this chain used to be silent: a pass with a
         // typo'd or unsupported execution type simply drew nothing, with no

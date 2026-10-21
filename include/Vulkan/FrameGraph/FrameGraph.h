@@ -521,11 +521,24 @@ enum class ExecutionKind : uint8_t {
     DispatchIndirect,// "dispatch_indirect"
     DrawIndirect,    // "draw_indirect", with or without a count buffer
     SceneRenderer,   // "scene_geometry" and the entity geometry types
+    Copy,            // "copy": vkCmdCopyImage from the transfer_src input to the transfer_dst output
+    Blit,            // "blit": vkCmdBlitImage, the same, scaled and filtered
     Manual,          // "manual"
     Unknown          // anything else; warned about while recording
 };
 
 ExecutionKind executionKindOf(const std::string& type);
+
+struct CompiledPass;
+
+/// The regions of a copy or blit pass, from its transfer_src input and
+/// transfer_dst output as created. Both are images the graph creates, and
+/// name the same number of mips and layers, copied level by level; a copy
+/// also needs equal formats and extents. Returns false with the reason
+/// otherwise.
+bool compileTransferRegions(const PassDeclaration& pass, const std::vector<PhysicalResource>& resources,
+                            const std::vector<ResourceDeclaration>& declarations,
+                            CompiledPass& compiled, std::string& outError);
 
 /// What is wrong with the indirect arguments of the dispatch_indirect and
 /// draw_indirect passes, or "" when nothing is: an argument or count buffer
@@ -557,6 +570,13 @@ struct CompiledPass {
     VkExtent2D                          extent{};
     /// Slices at that mip level when the image is 3d; 1 otherwise.
     uint32_t                            extentDepth = 1;
+
+    /// Copy and blit passes: the images and one region per mip level.
+    ResourceHandle                      transferSrc;
+    ResourceHandle                      transferDst;
+    std::vector<VkImageCopy>            copyRegions;
+    std::vector<VkImageBlit>            blitRegions;
+    VkFilter                            blitFilter = VK_FILTER_LINEAR;
 
     bool rendersAttachments() const { return !colorAttachments.empty() || hasDepthAttachment; }
 

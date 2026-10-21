@@ -402,7 +402,13 @@ struct ExecutionDesc {
     //   "sprite_geometry"    - Built-in: render sprites and UI panels
     //   "ui_canvas"          - Canvas UI: the renderer registered for this type
     //                          binds its own pipeline and draws
+    //   "copy"               - Transfer: copy the transfer_src input into the
+    //                          transfer_dst output, mip by mip
+    //   "blit"               - Transfer: the same, scaled with `filter`
     std::string type = "none";
+
+    // For "blit": "linear" or "nearest"
+    std::string filter = "linear";
 
     // For "draw" type
     DispatchDimension vertexCount;

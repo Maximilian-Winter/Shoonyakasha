@@ -43,10 +43,92 @@ ExecutionKind executionKindOf(const std::string& type) {
     if (type == "compute_image")    return ExecutionKind::ComputeImage;
     if (type == "dispatch_indirect") return ExecutionKind::DispatchIndirect;
     if (type == "draw_indirect")    return ExecutionKind::DrawIndirect;
+    if (type == "copy")             return ExecutionKind::Copy;
+    if (type == "blit")             return ExecutionKind::Blit;
     if (type == "manual" || type.empty()) return ExecutionKind::Manual;
     if (type == "scene_geometry" || type == "ui_canvas" || isEntityGeometryExecutionType(type))
         return ExecutionKind::SceneRenderer;
     return ExecutionKind::Unknown;
+}
+
+bool compileTransferRegions(const PassDeclaration& pass, const std::vector<PhysicalResource>& resources,
+                            const std::vector<ResourceDeclaration>& declarations,
+                            CompiledPass& compiled, std::string& outError)
+{
+    const std::string where = "Pass '" + pass.name + "'";
+    const auto& src = pass.inputs.at(0);
+    const auto& dst = pass.outputs.at(0);
+    const auto* srcImg = std::get_if<PhysicalImage>(&resources.at(src.handle.index));
+    const auto* dstImg = std::get_if<PhysicalImage>(&resources.at(dst.handle.index));
+    if (!srcImg || !dstImg) {
+        outError = where + ": copy and blit take images, not buffers";
+        return false;
+    }
+    const std::string& srcName = declarations[src.handle.index].name;
+    const std::string& dstName = declarations[dst.handle.index].name;
+    for (const auto* decl : {&declarations[src.handle.index], &declarations[dst.handle.index]}) {
+        if (decl->imported) {
+            outError = where + ": '" + decl->name + "' is imported; copy and blit take images the graph creates";
+            return false;
+        }
+    }
+    const auto s = srcImg->shape.resolve(src.subresource);
+    const auto d = dstImg->shape.resolve(dst.subresource);
+    if (s.mipCount != d.mipCount || s.layerCount != d.layerCount) {
+        outError = where + ": '" + srcName + "' gives " + std::to_string(s.mipCount) + " mip(s) and " +
+                   std::to_string(s.layerCount) + " layer(s), but '" + dstName + "' takes " +
+                   std::to_string(d.mipCount) + " and " + std::to_string(d.layerCount);
+        return false;
+    }
+    if (srcImg->aspect != dstImg->aspect) {
+        outError = where + ": '" + srcName + "' and '" + dstName + "' have different aspects (colour, depth, stencil)";
+        return false;
+    }
+
+    const bool blit = compiled.executionKind == ExecutionKind::Blit;
+    if (!blit && srcImg->format != dstImg->format) {
+        outError = where + ": a copy needs '" + srcName + "' and '" + dstName + "' in one format; use blit";
+        return false;
+    }
+
+    compiled.transferSrc = src.handle;
+    compiled.transferDst = dst.handle;
+    compiled.copyRegions.clear();
+    compiled.blitRegions.clear();
+    compiled.blitFilter = pass.execution.filter == "nearest" ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+
+    for (uint32_t i = 0; i < s.mipCount; ++i) {
+        const uint32_t sm = s.baseMip + i, dm = d.baseMip + i;
+        const VkExtent2D se = srcImg->mipExtent(sm), de = dstImg->mipExtent(dm);
+        const uint32_t sd = srcImg->mipDepth(sm), dd = dstImg->mipDepth(dm);
+        const VkImageSubresourceLayers sl{srcImg->aspect, sm, s.baseLayer, s.layerCount};
+        const VkImageSubresourceLayers dl{dstImg->aspect, dm, d.baseLayer, d.layerCount};
+        if (blit) {
+            VkImageBlit region{};
+            region.srcSubresource = sl;
+            region.srcOffsets[1] = {static_cast<int32_t>(se.width), static_cast<int32_t>(se.height),
+                                    static_cast<int32_t>(sd)};
+            region.dstSubresource = dl;
+            region.dstOffsets[1] = {static_cast<int32_t>(de.width), static_cast<int32_t>(de.height),
+                                    static_cast<int32_t>(dd)};
+            compiled.blitRegions.push_back(region);
+        } else {
+            if (se.width != de.width || se.height != de.height || sd != dd) {
+                outError = where + ": mip " + std::to_string(sm) + " of '" + srcName + "' is " +
+                           std::to_string(se.width) + "x" + std::to_string(se.height) + "x" + std::to_string(sd) +
+                           ", mip " + std::to_string(dm) + " of '" + dstName + "' is " +
+                           std::to_string(de.width) + "x" + std::to_string(de.height) + "x" + std::to_string(dd) +
+                           "; a copy needs equal sizes; use blit";
+                return false;
+            }
+            VkImageCopy region{};
+            region.srcSubresource = sl;
+            region.dstSubresource = dl;
+            region.extent = {se.width, se.height, sd};
+            compiled.copyRegions.push_back(region);
+        }
+    }
+    return true;
 }
 
 std::string sceneBuffersError(const std::vector<BufferLayoutDesc>& layouts,
@@ -267,12 +349,16 @@ bool FrameGraphCompiler::createPhysicalResources(
 
             // The whole-image view shaders sample. A sampled depth/stencil view
             // may name only one aspect, so depth formats are viewed as depth.
+            // An image only copied to and from has no view.
             const VkImageAspectFlags fullAspect = Shoonyakasha::formatToAspectMask(format);
             const VkImageAspectFlags sampledAspect =
                 Shoonyakasha::isDepthFormat(format) ? VkImageAspectFlags{VK_IMAGE_ASPECT_DEPTH_BIT} : fullAspect;
             SubresourceRange whole;
             const VkImageViewType viewType = sampledViewType(desc.viewType, shape, shape.resolve(whole));
-            image->createImageView(sampledAspect, viewType);
+            constexpr VkImageUsageFlags kViewUsages =
+                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+            if (usage & kViewUsages) image->createImageView(sampledAspect, viewType);
 
             PhysicalImage physImg;
             physImg.vkImage = image->getImage();
@@ -678,6 +764,17 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         }
         m_logger->log(LogLevel::Info, "Attachments: %zu load(s) and %zu store(s) discarded",
                       discardedLoads, discardedStores);
+    }
+
+    // Stage 6.5: Regions of copy and blit passes
+    for (uint32_t pi : result.executionOrder) {
+        auto& compiled = result.compiledPasses[pi];
+        if (compiled.executionKind != ExecutionKind::Copy && compiled.executionKind != ExecutionKind::Blit) continue;
+        if (!compileTransferRegions(passes[pi], result.physicalResources, resources, compiled,
+                                    result.errorMessage)) {
+            m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+            return result;
+        }
     }
 
     // Stage 8: Create descriptor set layouts

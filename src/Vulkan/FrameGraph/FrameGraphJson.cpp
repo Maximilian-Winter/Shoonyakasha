@@ -545,6 +545,37 @@ std::optional<uint32_t> indexedView(const std::string& view, const std::string& 
     return static_cast<uint32_t>(std::stoul(digits));
 }
 
+/// "copy" and "blit": a transfer pass with one transfer_src input and one
+/// transfer_dst output, and for a blit its "filter".
+void parseTransferExecution(PassDeclaration& pass, const nlohmann::json& execJson) {
+    const std::string& type = pass.execution.type;
+    const bool copy = type == "copy";
+    const bool blit = type == "blit";
+    const std::string where = "Pass '" + pass.name + "'";
+    if (execJson.contains("filter") && !blit) {
+        throw std::runtime_error(where + ": \"filter\" applies only to blit, not '" + type + "'");
+    }
+    if (!copy && !blit) return;
+
+    if (pass.type != PassType::Transfer) {
+        throw std::runtime_error(where + ": " + type + " needs a transfer pass (\"type\": \"transfer\")");
+    }
+    const bool shape = pass.inputs.size() == 1 && pass.outputs.size() == 1 &&
+                       pass.inputs[0].usage == ResourceUsage::TransferSrc &&
+                       pass.outputs[0].usage == ResourceUsage::TransferDst;
+    if (!shape) {
+        throw std::runtime_error(where + ": " + type + " takes one input with usage transfer_src and "
+                                 "one output with usage transfer_dst");
+    }
+    if (blit) {
+        pass.execution.filter = execJson.value("filter", std::string{"linear"});
+        if (pass.execution.filter != "linear" && pass.execution.filter != "nearest") {
+            throw std::runtime_error(where + ": unknown filter '" + pass.execution.filter +
+                                     "' (expected linear or nearest)");
+        }
+    }
+}
+
 /// "arguments" and "count" of dispatch_indirect and draw_indirect: where in
 /// which buffer the GPU reads them. Checks what can be checked before the
 /// buffers exist; the compiler checks the buffers.
@@ -1695,6 +1726,7 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 }
 
                 parseIndirectExecution(pass, execJson, capabilities);
+                parseTransferExecution(pass, execJson);
 
                 // For built-in geometry types (opaque_geometry, transparent_geometry, shadow_casters)
                 pass.execution.sortMode = execJson.value("sortMode", std::string{"none"});
