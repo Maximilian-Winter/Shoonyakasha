@@ -408,6 +408,18 @@ void FrameGraphExecutor::recordPasses(
                                                     static_cast<float>(area.extent.height)))
                .setScissor(ScissorState::fromRect(area.offset.x, area.offset.y,
                                                   area.extent.width, area.extent.height));
+            // Blend constants from a dot-path, resolved this frame.
+            const auto& constantsPath = passDecl.pipelineDesc.blendConstantsPath;
+            if (!constantsPath.empty()) {
+                glm::vec4 constants(0.0f);
+                if (!m_viewportResolver || !m_viewportResolver(constantsPath, constants)) {
+                    m_logger->logEvery(5.0f, LogLevel::Warning, "Pass '%s': blendConstants '%s' has no vec4 "
+                                       "value; using 0", passDecl.name.c_str(), constantsPath.c_str());
+                    constants = glm::vec4(0.0f);
+                }
+                const float values[4] = {constants.x, constants.y, constants.z, constants.w};
+                vkCmdSetBlendConstants(commandBuffer, values);
+            }
         }
         else if (active && passDecl.type == PassType::Compute && compiledPass.computePipeline) {
             // Auto-bind compute pipeline before callback

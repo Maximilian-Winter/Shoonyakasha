@@ -7,6 +7,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <array>
 #include <string>
 #include <vector>
 #include <memory>
@@ -72,6 +73,11 @@ public:
 
     // Color blending configuration
     PipelineStateBuilder& withBlending(bool enable = true);
+    /// One blend state per colour attachment, in place of the single state
+    /// the other blending calls set for all of them.
+    PipelineStateBuilder& withAttachmentBlends(std::vector<VkPipelineColorBlendAttachmentState> blends);
+    /// Constants of the constant_color and constant_alpha blend factors.
+    PipelineStateBuilder& withBlendConstants(const std::array<float, 4>& constants);
     PipelineStateBuilder& withAlphaBlending();
     PipelineStateBuilder& withAdditiveBlending();
     PipelineStateBuilder& withCustomBlending(VkBlendFactor srcColor, VkBlendFactor dstColor, VkBlendOp op);
@@ -141,6 +147,8 @@ public:
         VkBlendFactor srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         VkBlendFactor dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         VkBlendOp alphaBlendOp = VK_BLEND_OP_ADD;
+        std::vector<VkPipelineColorBlendAttachmentState> attachmentBlends;  // one per attachment, or empty
+        std::array<float, 4> blendConstants{};
 
         // Unused since pipelines take RenderingFormats: the colour
         // attachment count is formats.color.size().

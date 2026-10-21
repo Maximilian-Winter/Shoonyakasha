@@ -4286,7 +4286,8 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "blending": "none"
         },
         {
           "resource": "reflectionScale",
@@ -4296,7 +4297,8 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "blending": "none"
         },
         {
           "resource": "shadowLit",
@@ -4306,7 +4308,8 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "blending": "none"
         },
         {
           "resource": "shadowTotal",
@@ -4316,7 +4319,8 @@
             0.0,
             0.0,
             0.0
-          ]
+          ],
+          "blending": "none"
         }
       ],
       "pipeline": {

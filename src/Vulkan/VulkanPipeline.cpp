@@ -120,6 +120,17 @@ PipelineStateBuilder& PipelineStateBuilder::withBlending(bool enable) {
     return *this;
 }
 
+PipelineStateBuilder& PipelineStateBuilder::withAttachmentBlends(
+    std::vector<VkPipelineColorBlendAttachmentState> blends) {
+    m_state.attachmentBlends = std::move(blends);
+    return *this;
+}
+
+PipelineStateBuilder& PipelineStateBuilder::withBlendConstants(const std::array<float, 4>& constants) {
+    m_state.blendConstants = constants;
+    return *this;
+}
+
 PipelineStateBuilder& PipelineStateBuilder::withAlphaBlending() {
     m_state.blending = true;
     m_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -459,13 +470,17 @@ void VulkanPipeline::createPipeline() {
     colorBlendTemplate.dstAlphaBlendFactor = m_state.dstAlphaBlendFactor;
     colorBlendTemplate.alphaBlendOp = m_state.alphaBlendOp;
 
-    std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorCount, colorBlendTemplate);
+    std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments =
+        m_state.attachmentBlends.size() == colorCount ? m_state.attachmentBlends
+                                                      : std::vector<VkPipelineColorBlendAttachmentState>(
+                                                            colorCount, colorBlendTemplate);
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.logicOpEnable = VK_FALSE;
     colorBlending.attachmentCount = colorCount;
     colorBlending.pAttachments = colorBlendAttachments.data();
+    for (int i = 0; i < 4; ++i) colorBlending.blendConstants[i] = m_state.blendConstants[i];
 
     // Dynamic state
     VkPipelineDynamicStateCreateInfo dynamicState{};

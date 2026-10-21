@@ -543,6 +543,10 @@ ExecutionKind executionKindOf(const std::string& type);
 
 struct CompiledPass;
 
+/// The blend state of each colour attachment of a graphics pass, in output
+/// order: the output's own "blending" and "writeMask", or the pipeline's.
+std::vector<VkPipelineColorBlendAttachmentState> colorBlendStates(const PassDeclaration& pass);
+
 /// Why a multisampled colour attachment, `sourceRange` of `source`, cannot
 /// resolve into `target`: the target must be a single-sampled colour image
 /// of the same format, one mip as large as the rendered one, with as many
@@ -965,14 +969,16 @@ private:
         uint32_t maxFramesInFlight);
 
     // ── Stage 9: Automatic pipeline creation ──
-    void createPipelines(
+    /// Returns false and sets outError when a pass's pipeline cannot be made.
+    bool createPipelines(
         VulkanDevice& device,
         std::vector<CompiledPass>& compiledPasses,
         const std::vector<uint32_t>& executionOrder,
         const std::vector<PassDeclaration>& passes,
         const std::vector<PhysicalResource>& physResources,
         const std::unordered_map<std::string, std::shared_ptr<VulkanPipeline>>& manualOverrides,
-        const VertexFormatRegistry& vertexFormats);
+        const VertexFormatRegistry& vertexFormats,
+        std::string& outError);
 
     // ── Stage 10: Multi-queue batch generation ──
     void generateQueueBatches(
@@ -988,10 +994,6 @@ private:
     void ensureLogger();
 
     static VkImageUsageFlags usageToImageUsageFlags(ResourceUsage usage);
-    static VkCullModeFlags stringToCullMode(const std::string& str);
-    static VkPrimitiveTopology stringToTopology(const std::string& str);
-    static VkBlendFactor stringToBlendFactor(const std::string& str);
-    static VkBlendOp stringToBlendOp(const std::string& str);
 
     Logger* m_logger = nullptr;
 };
@@ -1029,9 +1031,10 @@ public:
     /// Collect render stats while recording; null turns it off.
     void setStats(RenderStatsCollector* stats) { m_stats = stats; }
 
-    /// Resolves a pass's "viewport" dot-path to (x, y, width, height) in
-    /// fractions of its extent; false when the path has no value. Without
-    /// one, passes render into all of their attachments.
+    /// Resolves a vec4 dot-path; false when the path has no value. It gives a
+    /// pass's "viewport", (x, y, width, height) in fractions of its extent,
+    /// and its pipeline's "blendConstants". Without one, passes render into
+    /// all of their attachments and dot-path blend constants are 0.
     using ViewportResolver = std::function<bool(const std::string& path, glm::vec4& fractions)>;
     void setViewportResolver(ViewportResolver resolver) { m_viewportResolver = std::move(resolver); }
 

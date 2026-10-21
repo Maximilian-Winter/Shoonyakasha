@@ -231,6 +231,10 @@ void VulkanDevice::createLogicalDevice() {
     // one call, each with its own firstInstance.
     deviceFeatures.multiDrawIndirect = supportedFeatures.multiDrawIndirect;
     deviceFeatures.drawIndirectFirstInstance = supportedFeatures.drawIndirectFirstInstance;
+    // Pipeline JSON: a different blend state per colour attachment, and the
+    // depth bounds test.
+    deviceFeatures.independentBlend = supportedFeatures.independentBlend;
+    deviceFeatures.depthBounds = supportedFeatures.depthBounds;
     m_enabledFeatures = deviceFeatures;
 
     // Enable timeline semaphore feature for multi-queue synchronization

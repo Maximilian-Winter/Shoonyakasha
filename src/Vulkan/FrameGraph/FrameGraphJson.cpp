@@ -349,6 +349,56 @@ VkCompareOp stringToCompareOp(const std::string& str) {
     throw std::runtime_error("Unknown VkCompareOp: '" + str + "'");
 }
 
+VkCullModeFlags stringToCullMode(const std::string& str) {
+    if (str == "none")           return VK_CULL_MODE_NONE;
+    if (str == "front")          return VK_CULL_MODE_FRONT_BIT;
+    if (str == "back")           return VK_CULL_MODE_BACK_BIT;
+    if (str == "front_and_back") return VK_CULL_MODE_FRONT_AND_BACK;
+    throw std::runtime_error("Unknown cullMode: '" + str + "' (expected none, front, back or front_and_back)");
+}
+
+VkPrimitiveTopology stringToTopology(const std::string& str) {
+    if (str == "triangle_list")  return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    if (str == "triangle_strip") return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    if (str == "line_list")      return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    if (str == "line_strip")     return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+    if (str == "point_list")     return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    throw std::runtime_error("Unknown topology: '" + str + "' (expected triangle_list, triangle_strip, "
+                             "line_list, line_strip or point_list)");
+}
+
+VkBlendFactor stringToBlendFactor(const std::string& str) {
+    static const std::unordered_map<std::string, VkBlendFactor> map = {
+        {"zero",                     VK_BLEND_FACTOR_ZERO},
+        {"one",                      VK_BLEND_FACTOR_ONE},
+        {"src_color",                VK_BLEND_FACTOR_SRC_COLOR},
+        {"one_minus_src_color",      VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR},
+        {"dst_color",                VK_BLEND_FACTOR_DST_COLOR},
+        {"one_minus_dst_color",      VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR},
+        {"src_alpha",                VK_BLEND_FACTOR_SRC_ALPHA},
+        {"one_minus_src_alpha",      VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA},
+        {"dst_alpha",                VK_BLEND_FACTOR_DST_ALPHA},
+        {"one_minus_dst_alpha",      VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA},
+        {"constant_color",           VK_BLEND_FACTOR_CONSTANT_COLOR},
+        {"one_minus_constant_color", VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR},
+        {"constant_alpha",           VK_BLEND_FACTOR_CONSTANT_ALPHA},
+        {"one_minus_constant_alpha", VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA},
+        {"src_alpha_saturate",       VK_BLEND_FACTOR_SRC_ALPHA_SATURATE},
+    };
+    auto it = map.find(str);
+    if (it != map.end()) return it->second;
+    throw std::runtime_error("Unknown blend factor: '" + str + "'");
+}
+
+VkBlendOp stringToBlendOp(const std::string& str) {
+    if (str == "add")              return VK_BLEND_OP_ADD;
+    if (str == "subtract")         return VK_BLEND_OP_SUBTRACT;
+    if (str == "reverse_subtract") return VK_BLEND_OP_REVERSE_SUBTRACT;
+    if (str == "min")              return VK_BLEND_OP_MIN;
+    if (str == "max")              return VK_BLEND_OP_MAX;
+    throw std::runtime_error("Unknown blend op: '" + str + "' (expected add, subtract, reverse_subtract, min or max)");
+}
+
 VkStencilOp stringToStencilOp(const std::string& str) {
     static const std::unordered_map<std::string, VkStencilOp> map = {
         {"keep",                VK_STENCIL_OP_KEEP},
@@ -458,6 +508,60 @@ static const char* imageViewKindToString(ImageViewKind kind) {
     return "auto";
 }
 
+/// "writeMask": the channels written, a string of "r", "g", "b" and "a".
+static VkColorComponentFlags parseWriteMask(const nlohmann::json& j, const std::string& where) {
+    if (!j.is_string()) throw std::runtime_error(where + ": writeMask must be a string such as \"rgb\"");
+    VkColorComponentFlags mask = 0;
+    for (char c : j.get<std::string>()) {
+        const VkColorComponentFlags bit = c == 'r' ? VK_COLOR_COMPONENT_R_BIT
+                                        : c == 'g' ? VK_COLOR_COMPONENT_G_BIT
+                                        : c == 'b' ? VK_COLOR_COMPONENT_B_BIT
+                                        : c == 'a' ? VK_COLOR_COMPONENT_A_BIT : 0;
+        if (bit == 0 || (mask & bit)) {
+            throw std::runtime_error(where + ": writeMask names each of r, g, b and a at most once");
+        }
+        mask |= bit;
+    }
+    return mask;
+}
+
+static std::string writeMaskToString(VkColorComponentFlags mask) {
+    std::string out;
+    if (mask & VK_COLOR_COMPONENT_R_BIT) out += 'r';
+    if (mask & VK_COLOR_COMPONENT_G_BIT) out += 'g';
+    if (mask & VK_COLOR_COMPONENT_B_BIT) out += 'b';
+    if (mask & VK_COLOR_COMPONENT_A_BIT) out += 'a';
+    return out;
+}
+
+/// "blending" and, for "custom", its factor and operation keys, checked.
+static BlendDesc parseBlend(const nlohmann::json& j, const std::string& where) {
+    BlendDesc blend;
+    blend.blending       = j.value("blending", std::string{"none"});
+    blend.srcColorFactor = j.value("srcColorFactor", blend.srcColorFactor);
+    blend.dstColorFactor = j.value("dstColorFactor", blend.dstColorFactor);
+    blend.colorBlendOp   = j.value("colorBlendOp", blend.colorBlendOp);
+    blend.srcAlphaFactor = j.value("srcAlphaFactor", blend.srcAlphaFactor);
+    blend.dstAlphaFactor = j.value("dstAlphaFactor", blend.dstAlphaFactor);
+    blend.alphaBlendOp   = j.value("alphaBlendOp", blend.alphaBlendOp);
+    try {
+        if (blend.blending != "none" && blend.blending != "alpha" && blend.blending != "additive" &&
+            blend.blending != "custom") {
+            throw std::runtime_error("Unknown blending: '" + blend.blending +
+                                     "' (expected none, alpha, additive or custom)");
+        }
+        for (const auto* factor : {&blend.srcColorFactor, &blend.dstColorFactor,
+                                   &blend.srcAlphaFactor, &blend.dstAlphaFactor}) {
+            JsonUtils::stringToBlendFactor(*factor);
+        }
+        JsonUtils::stringToBlendOp(blend.colorBlendOp);
+        JsonUtils::stringToBlendOp(blend.alphaBlendOp);
+    } catch (const std::runtime_error& e) {
+        throw std::runtime_error(where + ": " + e.what());
+    }
+    return blend;
+}
+
 static ResourceAccess parseResourceAccess(
     const nlohmann::json& j,
     const FrameGraphBuilder& builder)
@@ -503,6 +607,28 @@ static ResourceAccess parseResourceAccess(
             access.clearValue.depthStencil.stencil = clear.value("stencil", 0u);
         }
     }
+
+    // "blending" and "writeMask": this colour attachment's own.
+    const bool colour = access.usage == ResourceUsage::ColorAttachmentWrite ||
+                        access.usage == ResourceUsage::ColorAttachmentBlend;
+    const std::string where = "Access to '" + resourceName + "'";
+    for (const char* key : {"blending", "writeMask", "srcColorFactor", "dstColorFactor", "colorBlendOp",
+                            "srcAlphaFactor", "dstAlphaFactor", "alphaBlendOp"}) {
+        if (j.contains(key) && !colour) {
+            throw std::runtime_error(where + ": \"" + key + "\" applies to colour attachments");
+        }
+    }
+    if (j.contains("blending")) {
+        access.blend = parseBlend(j, where);
+    } else {
+        for (const char* key : {"srcColorFactor", "dstColorFactor", "colorBlendOp",
+                                "srcAlphaFactor", "dstAlphaFactor", "alphaBlendOp"}) {
+            if (j.contains(key)) {
+                throw std::runtime_error(where + ": \"" + key + "\" needs \"blending\": \"custom\" beside it");
+            }
+        }
+    }
+    if (j.contains("writeMask")) access.writeMask = parseWriteMask(j["writeMask"], where);
 
     // "resolve": the image a multisampled colour attachment resolves into.
     if (j.contains("resolve")) {
@@ -1675,6 +1801,44 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     pass.pipelineDesc.depthBiasClamp    = biasJson.value("clamp", 0.0f);
                 }
 
+                const std::string pipeWhere = "Pass '" + pass.name + "'";
+                if (pipeJson.contains("writeMask")) {
+                    pass.pipelineDesc.writeMask = parseWriteMask(pipeJson["writeMask"], pipeWhere);
+                }
+                if (pipeJson.contains("blendConstants")) {
+                    const auto& bc = pipeJson["blendConstants"];
+                    pass.pipelineDesc.hasBlendConstants = true;
+                    if (bc.is_string() && !bc.get<std::string>().empty()) {
+                        pass.pipelineDesc.blendConstantsPath = bc.get<std::string>();
+                    } else if (bc.is_array() && bc.size() == 4 &&
+                               std::all_of(bc.begin(), bc.end(), [](const auto& v) { return v.is_number(); })) {
+                        for (size_t k = 0; k < 4; ++k) pass.pipelineDesc.blendConstants[k] = bc[k].get<float>();
+                    } else {
+                        throw std::runtime_error(pipeWhere + ": blendConstants must be [r, g, b, a] or a "
+                                                 "dot-path to a vec4");
+                    }
+                }
+                pass.pipelineDesc.frontFace = pipeJson.value("frontFace", std::string{"counter_clockwise"});
+                if (pass.pipelineDesc.frontFace != "counter_clockwise" && pass.pipelineDesc.frontFace != "clockwise") {
+                    throw std::runtime_error(pipeWhere + ": unknown frontFace '" + pass.pipelineDesc.frontFace +
+                                             "' (expected counter_clockwise or clockwise)");
+                }
+                pass.pipelineDesc.lineWidth = pipeJson.value("lineWidth", 1.0f);
+                if (!(pass.pipelineDesc.lineWidth > 0.0f)) {
+                    throw std::runtime_error(pipeWhere + ": lineWidth must be above 0");
+                }
+                pass.pipelineDesc.primitiveRestart = pipeJson.value("primitiveRestart", false);
+                if (pipeJson.contains("depthBounds")) {
+                    const auto& db = pipeJson["depthBounds"];
+                    if (!db.is_array() || db.size() != 2 || !db[0].is_number() || !db[1].is_number() ||
+                        db[0].get<float>() > db[1].get<float>()) {
+                        throw std::runtime_error(pipeWhere + ": depthBounds must be [min, max] with min <= max");
+                    }
+                    pass.pipelineDesc.depthBoundsTest = true;
+                    pass.pipelineDesc.minDepthBounds = db[0].get<float>();
+                    pass.pipelineDesc.maxDepthBounds = db[1].get<float>();
+                }
+
                 if (pipeJson.contains("stencil")) {
                     const auto& stencilJson = pipeJson["stencil"];
                     const std::string where = "Pass '" + pass.name + "': stencil";
@@ -1717,6 +1881,26 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 pass.pipelineDesc.srcAlphaBlendFactor = pipeJson.value("srcAlphaFactor", std::string{"one"});
                 pass.pipelineDesc.dstAlphaBlendFactor = pipeJson.value("dstAlphaFactor", std::string{"zero"});
                 pass.pipelineDesc.alphaBlendOp        = pipeJson.value("alphaBlendOp", std::string{"add"});
+
+                // Unknown names fail here, at load, rather than drawing wrongly.
+                const auto& pd = pass.pipelineDesc;
+                try {
+                    JsonUtils::stringToCullMode(pd.cullMode);
+                    JsonUtils::stringToTopology(pd.topology);
+                    if (pd.blending != "none" && pd.blending != "alpha" && pd.blending != "additive" &&
+                        pd.blending != "custom") {
+                        throw std::runtime_error("Unknown blending: '" + pd.blending +
+                                                 "' (expected none, alpha, additive or custom)");
+                    }
+                    for (const auto* factor : {&pd.srcColorBlendFactor, &pd.dstColorBlendFactor,
+                                               &pd.srcAlphaBlendFactor, &pd.dstAlphaBlendFactor}) {
+                        JsonUtils::stringToBlendFactor(*factor);
+                    }
+                    JsonUtils::stringToBlendOp(pd.colorBlendOp);
+                    JsonUtils::stringToBlendOp(pd.alphaBlendOp);
+                } catch (const std::runtime_error& e) {
+                    throw std::runtime_error("Pass '" + pass.name + "': " + e.what());
+                }
             }
 
             // Parse descriptor set references
@@ -2175,6 +2359,18 @@ static nlohmann::json serializeResourceAccess(const ResourceAccess& access,
     if (access.resolveTarget.valid() && access.resolveTarget.index < resources.size()) {
         j["resolve"] = resources[access.resolveTarget.index].name;
     }
+    if (access.blend) {
+        j["blending"] = access.blend->blending;
+        if (access.blend->blending == "custom") {
+            j["srcColorFactor"] = access.blend->srcColorFactor;
+            j["dstColorFactor"] = access.blend->dstColorFactor;
+            j["colorBlendOp"]   = access.blend->colorBlendOp;
+            j["srcAlphaFactor"] = access.blend->srcAlphaFactor;
+            j["dstAlphaFactor"] = access.blend->dstAlphaFactor;
+            j["alphaBlendOp"]   = access.blend->alphaBlendOp;
+        }
+    }
+    if (access.writeMask) j["writeMask"] = writeMaskToString(*access.writeMask);
 
     return j;
 }
@@ -2317,6 +2513,17 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
                     {"clamp",    pd.depthBiasClamp}
                 };
             }
+            constexpr VkColorComponentFlags kAll = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                                   VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+            if (pd.writeMask != kAll) pipeJson["writeMask"] = writeMaskToString(pd.writeMask);
+            if (pd.hasBlendConstants) {
+                if (!pd.blendConstantsPath.empty()) pipeJson["blendConstants"] = pd.blendConstantsPath;
+                else pipeJson["blendConstants"] = pd.blendConstants;
+            }
+            if (pd.frontFace != "counter_clockwise") pipeJson["frontFace"] = pd.frontFace;
+            if (pd.lineWidth != 1.0f) pipeJson["lineWidth"] = pd.lineWidth;
+            if (pd.primitiveRestart) pipeJson["primitiveRestart"] = true;
+            if (pd.depthBoundsTest) pipeJson["depthBounds"] = {pd.minDepthBounds, pd.maxDepthBounds};
             if (pd.stencilTest) {
                 auto compareName = [](VkCompareOp op) {
                     for (const char* name : {"never", "less", "equal", "less_or_equal", "greater",

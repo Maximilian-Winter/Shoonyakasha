@@ -39,7 +39,7 @@ Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defau
 
 Image properties live inside `image`. Buffer properties live inside `buffer`: `size` in bytes (default 0), `persistentlyMapped` (false). Creating buffers through `bufferLayouts` is separate from declaring graph resource accesses; follow the SSBO examples for imported layout-backed buffers.
 
-Each pass input/output has a required `resource` name and `usage`. Optional `clear` is `[r,g,b,a]` or `{ "depth": 1.0, "stencil": 0 }`. Optional `present` marks the post-render presentation transition. Optional `resolve` on a `color_write` or `color_blend` output names the image a multisampled attachment resolves into; see [multisampling](#multisampling).
+Each pass input/output has a required `resource` name and `usage`. Optional `clear` is `[r,g,b,a]` or `{ "depth": 1.0, "stencil": 0 }`. Optional `present` marks the post-render presentation transition. Optional `resolve` on a `color_write` or `color_blend` output names the image a multisampled attachment resolves into; see [multisampling](#multisampling). Optional `blending` (with the `custom` factor keys) and `writeMask` on a colour output replace the pipeline's for that attachment; see [blending](#blending).
 
 ### Multisampling
 
@@ -169,9 +169,15 @@ Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` de
 | `depthCompareOp` | `less`; `never`, `equal`, `less_or_equal`, `greater`, `not_equal`, `greater_or_equal`, `always`. An unknown name fails at load |
 | `depthClamp` | false; clamps depth instead of clipping at the near and far planes (directional shadow passes). Requires the `depthClamp` device feature and is ignored with a warning without it |
 | `cullMode` | `back`; `front`, `none`, `front_and_back` |
-| `blending` | `none`; `alpha`, `additive`, `custom` |
+| `frontFace` | `counter_clockwise`; `clockwise` |
+| `blending` | `none`; `alpha`, `additive`, `custom`; see [blending](#blending) |
+| `writeMask` | `rgba`; the channels written to colour attachments, any of `r`, `g`, `b` and `a` once each (`""` writes none) |
+| `blendConstants` | absent = 0; `[r, g, b, a]`, or a dot-path to a vec4 resolved every frame (0 while it has no value), for the `constant_color` and `constant_alpha` factors |
 | `topology` | `triangle_list`; `triangle_strip`, `line_list`, `line_strip`, `point_list` |
+| `primitiveRestart` | false; in indexed draws of a strip topology, an index of all ones starts a new strip |
+| `lineWidth` | 1; widths above 1 use the `wideLines` device feature |
 | `wireframe` | false; requires device support |
+| `depthBounds` | absent = off; `[min, max]`, drawing only where the stored depth lies between them. Requires the `depthBounds` device feature and is ignored with a warning without it |
 | `depthBias` | absent = off; object `{constant, slope, clamp}`, each default 0. A non-zero `clamp` requires the `depthBiasClamp` device feature and is ignored with a warning without it |
 | `stencil` | absent = off; the stencil test, below |
 
@@ -188,7 +194,19 @@ Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` de
                 "stencil": { "compareOp": "equal", "reference": 1 } } }
 ```
 
-For `custom` blending: `srcColorFactor=src_alpha`, `dstColorFactor=one_minus_src_alpha`, `colorBlendOp=add`, `srcAlphaFactor=one`, `dstAlphaFactor=zero`, `alphaBlendOp=add`. Operations are `add`, `subtract`, `reverse_subtract`, `min`, `max`. Factors include zero/one, source/destination color/alpha and their complements, constant color/alpha and complements, and `src_alpha_saturate`; native blend constants need appropriate setup. Unknown blend strings can fall back rather than fail, so use verified spellings.
+### Blending
+
+`alpha` blends colour by source alpha (`src_alpha`, `one_minus_src_alpha`) and writes the source alpha; `additive` adds the colour (`one`, `one`) and writes the source alpha. For `custom` blending: `srcColorFactor=src_alpha`, `dstColorFactor=one_minus_src_alpha`, `colorBlendOp=add`, `srcAlphaFactor=one`, `dstAlphaFactor=zero`, `alphaBlendOp=add`. Operations are `add`, `subtract`, `reverse_subtract`, `min`, `max`. Factors are `zero`, `one`, `src_color`, `one_minus_src_color`, `dst_color`, `one_minus_dst_color`, `src_alpha`, `one_minus_src_alpha`, `dst_alpha`, `one_minus_dst_alpha`, `constant_color`, `one_minus_constant_color`, `constant_alpha`, `one_minus_constant_alpha` and `src_alpha_saturate`; the constants are `blendConstants`. An unknown name for blending, a factor, an operation, `cullMode`, `frontFace` or `topology` fails at load.
+
+The pipeline's `blending` and `writeMask` apply to every colour attachment. A colour output can set its own `blending`, with the custom keys beside it when it is `custom`, and its own `writeMask`; the others keep the pipeline's. Different blending per attachment needs the `independentBlend` device feature, and compiling fails without it. Here the light is added onto `hdrColor` while `shadowMask` is written as it is:
+
+```json
+"outputs": [{ "resource": "hdrColor", "usage": "color_blend" },
+            { "resource": "shadowMask", "usage": "color_write", "blending": "none", "writeMask": "rg" }],
+"pipeline": { "blending": "additive" }
+```
+
+A pass whose graphics or compute pipeline cannot be created (a missing or invalid shader, for example) makes compiling fail with the reason. A graphics pass whose push constants exceed the device's limit still loads, and draws nothing.
 
 `pushConstants` accepts one object or an array. Each range requires `size`; `offset` defaults 0, `stages` selects visibility. Optional `bindings` map named graph parameters using `name`, `offset` (0), and `type` (`float`). A binding named `pass.repeatIndex`, `pass.repeatCount`, `pass.extent` or `pass.texelSize` pushes that value of the pass instead, which is how a fullscreen or compute pass learns its mip level. These graph parameters are distinct from per-entity layout sources.
 

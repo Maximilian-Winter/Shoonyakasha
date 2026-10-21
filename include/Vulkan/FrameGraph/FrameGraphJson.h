@@ -63,6 +63,13 @@ namespace JsonUtils {
     VkBorderColor         stringToBorderColor(const std::string& str);
     VkCompareOp           stringToCompareOp(const std::string& str);
 
+    // Pipeline state names; each throws on a name it does not know
+    VkCullModeFlags       stringToCullMode(const std::string& str);     // none, front, back, front_and_back
+    VkPrimitiveTopology   stringToTopology(const std::string& str);     // triangle_list, triangle_strip,
+                                                                        // line_list, line_strip, point_list
+    VkBlendFactor         stringToBlendFactor(const std::string& str);  // zero, one, src_color, ...
+    VkBlendOp             stringToBlendOp(const std::string& str);      // add, subtract, reverse_subtract, min, max
+
     // Stencil operations: "keep", "zero", "replace", "increment_and_clamp",
     // "decrement_and_clamp", "invert", "increment_and_wrap", "decrement_and_wrap"
     VkStencilOp           stringToStencilOp(const std::string& str);

@@ -13,6 +13,7 @@
 #include <vector>
 #include <string>
 #include <array>
+#include <optional>
 #include <memory>
 
 namespace Shoonyakasha {
@@ -160,6 +161,18 @@ struct DescriptorSetLayoutDesc {
     std::vector<DescriptorBindingDesc>  bindings;
 };
 
+/// Blending of one colour attachment, as the JSON names it: "blending" and,
+/// for "custom", the factor and operation names with PipelineDesc's defaults.
+struct BlendDesc {
+    std::string blending       = "none";
+    std::string srcColorFactor = "src_alpha";
+    std::string dstColorFactor = "one_minus_src_alpha";
+    std::string colorBlendOp   = "add";
+    std::string srcAlphaFactor = "one";
+    std::string dstAlphaFactor = "zero";
+    std::string alphaBlendOp   = "add";
+};
+
 // ═══════════════════════════════════════════════════════════════
 // Resource Access — a pass's reference to a resource + how it uses it
 // ═══════════════════════════════════════════════════════════════
@@ -186,6 +199,12 @@ struct ResourceAccess {
     // Clear value (only meaningful for attachment writes)
     bool            hasClearValue = false;
     VkClearValue    clearValue{};
+
+    /// Colour attachments: blending and channels written that differ from the
+    /// pass's pipeline, JSON "blending" (with the custom factor keys) and
+    /// "writeMask" on the output. Empty to use the pipeline's.
+    std::optional<BlendDesc>             blend;
+    std::optional<VkColorComponentFlags> writeMask;
 
     /// JSON "resolve": the single-sampled image this multisampled colour
     /// attachment resolves into at the end of the pass. The loader also adds
@@ -313,6 +332,31 @@ struct PipelineDesc {
     std::string srcAlphaBlendFactor = "one";
     std::string dstAlphaBlendFactor = "zero";
     std::string alphaBlendOp        = "add";
+
+    // Channels written to every colour attachment an output does not set its
+    // own for, JSON "writeMask": a string of "r", "g", "b" and "a".
+    VkColorComponentFlags writeMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    // Constants of the constant_color and constant_alpha blend factors, JSON
+    // "blendConstants": [r, g, b, a], or a dot-path to a vec4 resolved every
+    // frame (blendConstantsPath).
+    bool                 hasBlendConstants = false;
+    std::array<float, 4> blendConstants{};
+    std::string          blendConstantsPath;
+
+    // Rasterization and input assembly: JSON "frontFace" ("counter_clockwise"
+    // or "clockwise"), "lineWidth" (other than 1 needs the wideLines device
+    // feature), "primitiveRestart" (strip topologies)
+    std::string frontFace        = "counter_clockwise";
+    float       lineWidth        = 1.0f;
+    bool        primitiveRestart = false;
+
+    // Depth bounds test, JSON "depthBounds": [min, max]. Needs the
+    // depthBounds device feature.
+    bool  depthBoundsTest = false;
+    float minDepthBounds  = 0.0f;
+    float maxDepthBounds  = 1.0f;
 };
 
 // ═══════════════════════════════════════════════════════════════

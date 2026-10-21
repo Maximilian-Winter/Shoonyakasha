@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <cassert>
+#include <cstring>
 
 namespace Shoonyakasha {
 namespace FrameGraph {
@@ -137,6 +138,57 @@ bool compileTransferRegions(const PassDeclaration& pass, const std::vector<Physi
         }
     }
     return true;
+}
+
+std::vector<VkPipelineColorBlendAttachmentState> colorBlendStates(const PassDeclaration& pass) {
+    const auto& pd = pass.pipelineDesc;
+    BlendDesc shared;
+    shared.blending       = pd.blending;
+    shared.srcColorFactor = pd.srcColorBlendFactor;
+    shared.dstColorFactor = pd.dstColorBlendFactor;
+    shared.colorBlendOp   = pd.colorBlendOp;
+    shared.srcAlphaFactor = pd.srcAlphaBlendFactor;
+    shared.dstAlphaFactor = pd.dstAlphaBlendFactor;
+    shared.alphaBlendOp   = pd.alphaBlendOp;
+
+    auto state = [](const BlendDesc& b, VkColorComponentFlags mask) {
+        VkPipelineColorBlendAttachmentState s{};
+        s.colorWriteMask      = mask;
+        s.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        s.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+        s.colorBlendOp        = VK_BLEND_OP_ADD;
+        s.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        s.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        s.alphaBlendOp        = VK_BLEND_OP_ADD;
+        if (b.blending == "alpha") {
+            s.blendEnable = VK_TRUE;
+            s.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            s.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        } else if (b.blending == "additive") {
+            s.blendEnable = VK_TRUE;
+            s.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        } else if (b.blending == "custom") {
+            s.blendEnable = VK_TRUE;
+            s.srcColorBlendFactor = JsonUtils::stringToBlendFactor(b.srcColorFactor);
+            s.dstColorBlendFactor = JsonUtils::stringToBlendFactor(b.dstColorFactor);
+            s.colorBlendOp        = JsonUtils::stringToBlendOp(b.colorBlendOp);
+            s.srcAlphaBlendFactor = JsonUtils::stringToBlendFactor(b.srcAlphaFactor);
+            s.dstAlphaBlendFactor = JsonUtils::stringToBlendFactor(b.dstAlphaFactor);
+            s.alphaBlendOp        = JsonUtils::stringToBlendOp(b.alphaBlendOp);
+        }
+        return s;
+    };
+
+    std::vector<VkPipelineColorBlendAttachmentState> out;
+    for (const auto& output : pass.outputs) {
+        const bool colour = output.usage == ResourceUsage::ColorAttachmentWrite ||
+                            output.usage == ResourceUsage::ColorAttachmentBlend ||
+                            output.usage == ResourceUsage::Present;
+        if (!colour || !output.handle.valid()) continue;
+        out.push_back(state(output.blend ? *output.blend : shared,
+                            output.writeMask ? *output.writeMask : pd.writeMask));
+    }
+    return out;
 }
 
 std::string resolveTargetError(const PhysicalImage& source, const SubresourceRange& sourceRange,
@@ -1011,9 +1063,12 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     }
 
     // Stage 9: Create pipelines (auto-create from PipelineDesc, skip manual overrides)
-    createPipelines(device, result.compiledPasses, result.executionOrder,
-                    passes, result.physicalResources, manualPipelines,
-                    builder.getVertexFormatRegistry());
+    if (!createPipelines(device, result.compiledPasses, result.executionOrder,
+                         passes, result.physicalResources, manualPipelines,
+                         builder.getVertexFormatRegistry(), result.errorMessage)) {
+        m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+        return result;
+    }
     m_logger->log(LogLevel::Info, "Pipelines created");
 
     // Stage 10: Generate multi-queue execution batches
@@ -1195,59 +1250,15 @@ void FrameGraphCompiler::createDescriptorSetLayouts(
 // 朱雀之焰煉其精純 — The Vermilion Bird's flame refines to purity
 // ═══════════════════════════════════════════════════════════════
 
-VkCullModeFlags FrameGraphCompiler::stringToCullMode(const std::string& str) {
-    if (str == "none")           return VK_CULL_MODE_NONE;
-    if (str == "front")          return VK_CULL_MODE_FRONT_BIT;
-    if (str == "back")           return VK_CULL_MODE_BACK_BIT;
-    if (str == "front_and_back") return VK_CULL_MODE_FRONT_AND_BACK;
-    return VK_CULL_MODE_BACK_BIT;  // default
-}
-
-VkPrimitiveTopology FrameGraphCompiler::stringToTopology(const std::string& str) {
-    if (str == "triangle_list")  return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    if (str == "triangle_strip") return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-    if (str == "line_list")      return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-    if (str == "line_strip")     return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-    if (str == "point_list")     return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-    return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;  // default
-}
-
-VkBlendFactor FrameGraphCompiler::stringToBlendFactor(const std::string& str) {
-    if (str == "zero")                       return VK_BLEND_FACTOR_ZERO;
-    if (str == "one")                        return VK_BLEND_FACTOR_ONE;
-    if (str == "src_color")                  return VK_BLEND_FACTOR_SRC_COLOR;
-    if (str == "one_minus_src_color")        return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
-    if (str == "dst_color")                  return VK_BLEND_FACTOR_DST_COLOR;
-    if (str == "one_minus_dst_color")        return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
-    if (str == "src_alpha")                  return VK_BLEND_FACTOR_SRC_ALPHA;
-    if (str == "one_minus_src_alpha")        return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    if (str == "dst_alpha")                  return VK_BLEND_FACTOR_DST_ALPHA;
-    if (str == "one_minus_dst_alpha")        return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
-    if (str == "constant_color")             return VK_BLEND_FACTOR_CONSTANT_COLOR;
-    if (str == "one_minus_constant_color")   return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
-    if (str == "constant_alpha")             return VK_BLEND_FACTOR_CONSTANT_ALPHA;
-    if (str == "one_minus_constant_alpha")   return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
-    if (str == "src_alpha_saturate")         return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
-    return VK_BLEND_FACTOR_ONE;  // default
-}
-
-VkBlendOp FrameGraphCompiler::stringToBlendOp(const std::string& str) {
-    if (str == "add")              return VK_BLEND_OP_ADD;
-    if (str == "subtract")         return VK_BLEND_OP_SUBTRACT;
-    if (str == "reverse_subtract") return VK_BLEND_OP_REVERSE_SUBTRACT;
-    if (str == "min")              return VK_BLEND_OP_MIN;
-    if (str == "max")              return VK_BLEND_OP_MAX;
-    return VK_BLEND_OP_ADD;  // default
-}
-
-void FrameGraphCompiler::createPipelines(
+bool FrameGraphCompiler::createPipelines(
     VulkanDevice& device,
     std::vector<CompiledPass>& compiledPasses,
     const std::vector<uint32_t>& executionOrder,
     const std::vector<PassDeclaration>& passes,
     const std::vector<PhysicalResource>& /*physResources*/,
     const std::unordered_map<std::string, std::shared_ptr<VulkanPipeline>>& manualOverrides,
-    const VertexFormatRegistry& vertexFormats)
+    const VertexFormatRegistry& vertexFormats,
+    std::string& outError)
 {
     for (uint32_t execIdx : executionOrder) {
         auto& compiled = compiledPasses[execIdx];
@@ -1287,9 +1298,8 @@ void FrameGraphCompiler::createPipelines(
                     m_logger->log(LogLevel::Info, "  Auto-created compute pipeline for pass '%s'",
                                   passDecl.name.c_str());
                 } catch (const std::exception& e) {
-                    m_logger->log(LogLevel::Warning,
-                        "  Failed to auto-create compute pipeline for pass '%s': %s",
-                        passDecl.name.c_str(), e.what());
+                    outError = "Pass '" + passDecl.name + "': no compute pipeline: " + e.what();
+                    return false;
                 }
             }
             continue;  // Skip graphics pipeline creation for compute passes
@@ -1339,10 +1349,13 @@ void FrameGraphCompiler::createPipelines(
         // "none" = no vertex input (fullscreen triangle), don't call withVertexType
 
         // Topology
-        builder.withTopology(stringToTopology(pd.topology));
+        builder.withTopology(JsonUtils::stringToTopology(pd.topology));
 
-        // Rasterization
-        builder.withCulling(stringToCullMode(pd.cullMode));
+        // Input assembly and rasterization
+        builder.withPrimitiveRestart(pd.primitiveRestart);
+        builder.withCulling(JsonUtils::stringToCullMode(pd.cullMode),
+                            pd.frontFace == "clockwise" ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
+        builder.withLineWidth(pd.lineWidth);
         if (pd.wireframe) builder.withWireframe();
         const VkPhysicalDeviceFeatures& features = device.getEnabledFeatures();
         if (pd.depthBias) {
@@ -1369,19 +1382,30 @@ void FrameGraphCompiler::createPipelines(
         builder.withDepthTest(pd.depthTest, JsonUtils::stringToCompareOp(pd.depthCompareOp));
         builder.withDepthWrite(pd.depthWrite);
         if (pd.stencilTest) builder.withStencil(pd.stencilFront, pd.stencilBack);
-
-        // Blending
-        if (pd.blending == "alpha") builder.withAlphaBlending();
-        else if (pd.blending == "additive") builder.withAdditiveBlending();
-        else if (pd.blending == "custom") {
-            builder.withCustomBlending(
-                stringToBlendFactor(pd.srcColorBlendFactor),
-                stringToBlendFactor(pd.dstColorBlendFactor),
-                stringToBlendOp(pd.colorBlendOp),
-                stringToBlendFactor(pd.srcAlphaBlendFactor),
-                stringToBlendFactor(pd.dstAlphaBlendFactor),
-                stringToBlendOp(pd.alphaBlendOp));
+        if (pd.depthBoundsTest) {
+            if (features.depthBounds) {
+                builder.withDepthBounds(pd.minDepthBounds, pd.maxDepthBounds);
+            } else {
+                m_logger->log(LogLevel::Warning,
+                    "Pass '%s': depthBounds ignored, the device lacks the depthBounds feature",
+                    passDecl.name.c_str());
+            }
         }
+
+        // Blending, one state per colour attachment in output order: an
+        // output's own blending and write mask, or the pipeline's
+        const auto blends = colorBlendStates(passDecl);
+        for (size_t k = 1; k < blends.size(); ++k) {
+            if (std::memcmp(&blends[k], &blends[0], sizeof(VkPipelineColorBlendAttachmentState)) != 0 &&
+                !features.independentBlend) {
+                outError = "Pass '" + passDecl.name + "' blends its colour attachments differently, and this "
+                           "device lacks the independentBlend feature";
+                return false;
+            }
+        }
+        builder.withAttachmentBlends(blends);
+        builder.withBlendConstants(pd.blendConstants);
+        if (!pd.blendConstantsPath.empty()) builder.withDynamicState(VK_DYNAMIC_STATE_BLEND_CONSTANTS);
 
         // Attachment formats, which dynamic rendering takes in place of a
         // render pass
@@ -1424,12 +1448,11 @@ void FrameGraphCompiler::createPipelines(
             m_logger->log(LogLevel::Info, "  Auto-created pipeline for pass '%s'",
                           passDecl.name.c_str());
         } catch (const std::exception& e) {
-            m_logger->log(LogLevel::Warning,
-                "  Failed to auto-create pipeline for pass '%s': %s",
-                passDecl.name.c_str(), e.what());
-            // Non-fatal: user can still bind a pipeline in their callback
+            outError = "Pass '" + passDecl.name + "': no graphics pipeline: " + e.what();
+            return false;
         }
     }
+    return true;
 }
 
 // ═══════════════════════════════════════════════════════════════
