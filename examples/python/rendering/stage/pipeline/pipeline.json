@@ -926,9 +926,10 @@
           ]
         },
         {
-          "name": "machine0",
+          "name": "machine",
           "type": "vec4",
-          "source": "scene.custom.fog.machine0",
+          "arrayCount": 4,
+          "source": "scene.custom.fog.machine[i]",
           "default": [
             0.0,
             0.0,
@@ -937,75 +938,10 @@
           ]
         },
         {
-          "name": "machine1",
+          "name": "machineDir",
           "type": "vec4",
-          "source": "scene.custom.fog.machine1",
-          "default": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "machine2",
-          "type": "vec4",
-          "source": "scene.custom.fog.machine2",
-          "default": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "machine3",
-          "type": "vec4",
-          "source": "scene.custom.fog.machine3",
-          "default": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "machineDir0",
-          "type": "vec4",
-          "source": "scene.custom.fog.machineDir0",
-          "default": [
-            0.0,
-            0.0,
-            1.0,
-            2.0
-          ]
-        },
-        {
-          "name": "machineDir1",
-          "type": "vec4",
-          "source": "scene.custom.fog.machineDir1",
-          "default": [
-            0.0,
-            0.0,
-            1.0,
-            2.0
-          ]
-        },
-        {
-          "name": "machineDir2",
-          "type": "vec4",
-          "source": "scene.custom.fog.machineDir2",
-          "default": [
-            0.0,
-            0.0,
-            1.0,
-            2.0
-          ]
-        },
-        {
-          "name": "machineDir3",
-          "type": "vec4",
-          "source": "scene.custom.fog.machineDir3",
+          "arrayCount": 4,
+          "source": "scene.custom.fog.machineDir[i]",
           "default": [
             0.0,
             0.0,
@@ -1032,9 +968,10 @@
       "updateFrequency": "per_frame",
       "fields": [
         {
-          "name": "origin0",
+          "name": "origin",
           "type": "vec4",
-          "source": "scene.custom.laser.origin0",
+          "arrayCount": 4,
+          "source": "scene.custom.laser.origin[i]",
           "default": [
             0.0,
             0.0,
@@ -1043,53 +980,10 @@
           ]
         },
         {
-          "name": "axis0",
+          "name": "axis",
           "type": "vec4",
-          "source": "scene.custom.laser.axis0",
-          "default": [
-            0.0,
-            0.0,
-            1.0,
-            0.0
-          ]
-        },
-        {
-          "name": "up0",
-          "type": "vec4",
-          "source": "scene.custom.laser.up0",
-          "default": [
-            0.0,
-            1.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "color0",
-          "type": "vec4",
-          "source": "scene.custom.laser.color0",
-          "default": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "origin1",
-          "type": "vec4",
-          "source": "scene.custom.laser.origin1",
-          "default": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "axis1",
-          "type": "vec4",
-          "source": "scene.custom.laser.axis1",
+          "arrayCount": 4,
+          "source": "scene.custom.laser.axis[i]",
           "default": [
             0.0,
             0.0,
@@ -1098,9 +992,10 @@
           ]
         },
         {
-          "name": "up1",
+          "name": "up",
           "type": "vec4",
-          "source": "scene.custom.laser.up1",
+          "arrayCount": 4,
+          "source": "scene.custom.laser.up[i]",
           "default": [
             0.0,
             1.0,
@@ -1109,97 +1004,10 @@
           ]
         },
         {
-          "name": "color1",
+          "name": "color",
           "type": "vec4",
-          "source": "scene.custom.laser.color1",
-          "default": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "origin2",
-          "type": "vec4",
-          "source": "scene.custom.laser.origin2",
-          "default": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "axis2",
-          "type": "vec4",
-          "source": "scene.custom.laser.axis2",
-          "default": [
-            0.0,
-            0.0,
-            1.0,
-            0.0
-          ]
-        },
-        {
-          "name": "up2",
-          "type": "vec4",
-          "source": "scene.custom.laser.up2",
-          "default": [
-            0.0,
-            1.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "color2",
-          "type": "vec4",
-          "source": "scene.custom.laser.color2",
-          "default": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "origin3",
-          "type": "vec4",
-          "source": "scene.custom.laser.origin3",
-          "default": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "axis3",
-          "type": "vec4",
-          "source": "scene.custom.laser.axis3",
-          "default": [
-            0.0,
-            0.0,
-            1.0,
-            0.0
-          ]
-        },
-        {
-          "name": "up3",
-          "type": "vec4",
-          "source": "scene.custom.laser.up3",
-          "default": [
-            0.0,
-            1.0,
-            0.0,
-            0.0
-          ]
-        },
-        {
-          "name": "color3",
-          "type": "vec4",
-          "source": "scene.custom.laser.color3",
+          "arrayCount": 4,
+          "source": "scene.custom.laser.color[i]",
           "default": [
             0.0,
             0.0,

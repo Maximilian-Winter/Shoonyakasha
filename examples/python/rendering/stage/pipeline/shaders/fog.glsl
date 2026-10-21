@@ -10,6 +10,8 @@
 #ifndef STAGE_FOG_GLSL
 #define STAGE_FOG_GLSL
 
+#define FOG_MACHINES 4
+
 // scene.custom.fog.* (pipeline.json "Fog"); see README.md.
 #define FOG_BLOCK                                                                 \
     vec4 grid;      /* x first depth, y last depth (metres), z history kept, w on */ \
@@ -17,14 +19,8 @@
     vec4 motion;    /* x seconds, y light scattered, z ground fog height, w noise scale */ \
     vec4 wind;      /* xyz drift (m/s) */                                         \
     vec4 hall;      /* x half width, y height, z half depth of the room the fog fills */ \
-    vec4 machine0;  /* xyz nozzle, w output (0 off) */                            \
-    vec4 machine1;                                                                \
-    vec4 machine2;                                                                \
-    vec4 machine3;                                                                \
-    vec4 machineDir0; /* xyz direction the jet leaves in, w its speed (m/s) */   \
-    vec4 machineDir1;                                                             \
-    vec4 machineDir2;                                                             \
-    vec4 machineDir3;                                                             \
+    vec4 machine[FOG_MACHINES];    /* xyz nozzle, w output (0 off) */            \
+    vec4 machineDir[FOG_MACHINES]; /* xyz direction the jet leaves in, w its speed (m/s) */ \
     vec4 burst;     /* x when the machines last burst (seconds), y how much more they give, z how fast it fades */
 
 // View depth at the start of slice t (continuous) of `slices`.
@@ -104,7 +100,7 @@ float plume(vec3 p, vec4 nozzle, vec4 dir, float time, float noiseScale, vec4 bu
 
 // Haze, ground fog and the machines' plumes at p (world space), per metre.
 float fogDensity(vec3 p, vec4 media, vec4 motion, vec4 wind, vec4 hall,
-                 vec4 m0, vec4 m1, vec4 m2, vec4 m3, vec4 d0, vec4 d1, vec4 d2, vec4 d3, vec4 burst) {
+                 vec4 machine[FOG_MACHINES], vec4 machineDir[FOG_MACHINES], vec4 burst) {
     // Inside the hall only, fading out over its last metre.
     vec3 inside = vec3(hall.x, hall.y, hall.z) - vec3(abs(p.x), max(p.y - 0.0, 0.0), abs(p.z));
     float walls = clamp(min(min(inside.x, inside.z), inside.y), 0.0, 1.0);
@@ -116,8 +112,9 @@ float fogDensity(vec3 p, vec4 media, vec4 motion, vec4 wind, vec4 hall,
     float haze = media.x * (0.45 + 1.1 * fbm(drifted * noiseScale * 0.35));
     float ground = media.z * exp(-p.y / max(motion.z, 0.05))
                  * (0.3 + 1.4 * fbm(drifted * noiseScale * 0.9 + vec3(0.0, time * 0.05, 0.0)));
-    float smoke = media.y * (plume(p, m0, d0, time, noiseScale, burst) + plume(p, m1, d1, time, noiseScale, burst)
-                           + plume(p, m2, d2, time, noiseScale, burst) + plume(p, m3, d3, time, noiseScale, burst));
+    float plumes = 0.0;
+    for (int i = 0; i < FOG_MACHINES; ++i) plumes += plume(p, machine[i], machineDir[i], time, noiseScale, burst);
+    float smoke = media.y * plumes;
     return (haze + ground + smoke) * walls;
 }
 

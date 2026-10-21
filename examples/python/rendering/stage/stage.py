@@ -804,19 +804,27 @@ class Show:
         _, plan = LASER_SHOWS[self.laser_show]
         _, colour = LASER_COLOURS[self.laser_palette]
         blank = self.laser_beat and self.clock.beats % 1.0 >= 0.5
+        origins, axes, ups, colours = [], [], [], []
         for j, ((origin, axis), spec) in enumerate(zip(stage.apertures(), plan)):
             if spec is None or self.laser_power <= 0.0 or blank:
-                engine.set_custom_vec4("laser.origin%d" % j, origin + (0.0,))
-                engine.set_custom_vec4("laser.color%d" % j, (0.0, 0.0, 0.0, 0.0))
+                # No beams: the projector is off.
+                origins.append(origin + (0.0,))
+                axes.append(axis + (0.0,))
+                ups.append((0.0, 1.0, 0.0, 0.0))
+                colours.append((0.0, 0.0, 0.0, 0.0))
                 continue
             pattern, beams, spread = spec
             c = colour(self.motion, j) if colour else head_colour(self.motion, 3 * j, len(stage.heads))
             # Watts per beam; a sheet spreads its power over its whole arc.
             power = (LASER_SHEET_WATTS if pattern == 4 else LASER_BEAM_WATTS) * self.laser_power * s
-            engine.set_custom_vec4("laser.origin%d" % j, origin + (float(pattern),))
-            engine.set_custom_vec4("laser.axis%d" % j, axis + (float(beams),))
-            engine.set_custom_vec4("laser.up%d" % j, (0.0, 1.0, 0.0, math.radians(spread)))
-            engine.set_custom_vec4("laser.color%d" % j, scale(c, power) + (1.3 * j,))
+            origins.append(origin + (float(pattern),))
+            axes.append(axis + (float(beams),))
+            ups.append((0.0, 1.0, 0.0, math.radians(spread)))
+            colours.append(scale(c, power) + (1.3 * j,))
+        engine.set_custom_vec4_array("laser.origin", origins)
+        engine.set_custom_vec4_array("laser.axis", axes)
+        engine.set_custom_vec4_array("laser.up", ups)
+        engine.set_custom_vec4_array("laser.color", colours)
         engine.set_custom_vec4("laser.params", (self.motion, 0.003 * s, LASER_DOT_GAIN, 80.0 * s))
 
     def apply_fog(self, stage):
@@ -828,9 +836,9 @@ class Show:
         engine.set_custom_vec4("fog.wind", (0.12 * s, 0.0, 0.05 * s, 0.0))
         engine.set_custom_vec4("fog.hall", (hx * s, hy * s, hz * s, 0.0))
         engine.set_custom_vec4("fog.burst", (self.burst_time, 3.0, 1.2, 0.0))
-        for i, (nozzle, direction) in enumerate(stage.nozzles()):
-            engine.set_custom_vec4("fog.machine%d" % i, nozzle + (1.0,))
-            engine.set_custom_vec4("fog.machineDir%d" % i, direction + (2.2 * s,))
+        nozzles = stage.nozzles()
+        engine.set_custom_vec4_array("fog.machine", [nozzle + (1.0,) for nozzle, _ in nozzles])
+        engine.set_custom_vec4_array("fog.machineDir", [direction + (2.2 * s,) for _, direction in nozzles])
 
     def set_fog(self, on):
         self.fog_on = on

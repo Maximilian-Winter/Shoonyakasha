@@ -37,8 +37,7 @@ layout(location = 0) out vec4 outColor;
 
 float density(vec3 p) {
     return fogDensity(p, fog.media, fog.motion, fog.wind, fog.hall,
-                      fog.machine0, fog.machine1, fog.machine2, fog.machine3,
-                      fog.machineDir0, fog.machineDir1, fog.machineDir2, fog.machineDir3, fog.burst) * fog.grid.w;
+                      fog.machine, fog.machineDir, fog.burst) * fog.grid.w;
 }
 
 // The share of light from p that reaches the eye through the fog.

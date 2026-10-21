@@ -26,11 +26,7 @@ struct Projector {
 };
 
 Projector laserProjector(int j) {
-    vec4 o, a, u, c;
-    if (j == 0)      { o = lasers.origin0; a = lasers.axis0; u = lasers.up0; c = lasers.color0; }
-    else if (j == 1) { o = lasers.origin1; a = lasers.axis1; u = lasers.up1; c = lasers.color1; }
-    else if (j == 2) { o = lasers.origin2; a = lasers.axis2; u = lasers.up2; c = lasers.color2; }
-    else             { o = lasers.origin3; a = lasers.axis3; u = lasers.up3; c = lasers.color3; }
+    vec4 o = lasers.origin[j], a = lasers.axis[j], u = lasers.up[j], c = lasers.color[j];
     Projector p;
     p.origin = o.xyz;
     p.pattern = int(o.w + 0.5);

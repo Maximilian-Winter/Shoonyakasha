@@ -18,7 +18,7 @@ The fog lives in a grid that follows the camera: three 3D images, `fogScatter`, 
 
 ## The `Fog` block
 
-`scene.custom.fog.*`, all `vec4`, set with `set_custom_vec4`:
+`scene.custom.fog.*`, all `vec4`, set with `set_custom_vec4`, the arrays with `set_custom_vec4_array`:
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -27,8 +27,8 @@ The fog lives in a grid that follows the camera: three 3D images, `fogScatter`, 
 | `motion` | 0, 1, 0.6, 1 | x seconds, for the motion of haze and smoke; y light the fog scatters, times; z height of the ground fog; w noise frequency, times |
 | `wind` | 0.15, 0, 0.05 | xyz drift of the haze, metres per second |
 | `hall` | 20, 14, 20 | x half width, y height, z half depth of the box the fog fills, centred on the origin, on the floor |
-| `machine0` ... `machine3` | 0 | xyz the nozzle, w its output; 0 turns the machine off |
-| `machineDir0` ... `machineDir3` | 0, 0, 1, 2 | xyz the direction the jet leaves in, w its speed (metres per second) |
+| `machine[0]` ... `machine[3]` | 0 | xyz the nozzle, w its output; 0 turns the machine off |
+| `machineDir[0]` ... `machineDir[3]` | 0, 0, 1, 2 | xyz the direction the jet leaves in, w its speed (metres per second) |
 | `burst` | -1000, 0, 1, 0 | x when the machines last burst (seconds, on `motion.x`'s clock); y how much more smoke they give then, times; z how fast that fades, per second |
 
 ## Lasers
@@ -55,14 +55,14 @@ With `fog.grid.w` at 0 the beams and sheets have no fog to light, and only the d
 
 ## The `Lasers` block
 
-`scene.custom.laser.*`, all `vec4`, set with `set_custom_vec4`:
+`scene.custom.laser.*`, all `vec4`, set with `set_custom_vec4`, the arrays with `set_custom_vec4_array`:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `origin0` ... `origin3` | 0 | xyz the aperture; w the pattern |
-| `axis0` ... `axis3` | 0, 0, 1, 0 | xyz the direction the projector points; w its beams (patterns 1 to 3) |
-| `up0` ... `up3` | 0, 1, 0, 0 | xyz its up; w the spread, radians |
-| `color0` ... `color3` | 0 | rgb colour times power, per beam, or for the whole sheet; w the phase of its motion |
+| `origin[0]` ... `origin[3]` | 0 | xyz the aperture; w the pattern |
+| `axis[0]` ... `axis[3]` | 0, 0, 1, 0 | xyz the direction the projector points; w its beams (patterns 1 to 3) |
+| `up[0]` ... `up[3]` | 0, 1, 0, 0 | xyz its up; w the spread, radians |
+| `color[0]` ... `color[3]` | 0 | rgb colour times power, per beam, or for the whole sheet; w the phase of its motion |
 | `params` | 0, 0.003, 1, 80 | x seconds, for the patterns' motion; y beam radius (metres); z brightness of dots and lines on surfaces; w longest beam (metres) |
 
 ## Changing it
