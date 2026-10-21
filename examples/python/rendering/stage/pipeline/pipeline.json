@@ -1956,20 +1956,6 @@
         }
       ]
     },
-    "taaCopySet": {
-      "bindings": [
-        {
-          "binding": 0,
-          "type": "combined_image_sampler",
-          "stages": [
-            "fragment"
-          ],
-          "name": "source",
-          "autoBindResource": "taaColor",
-          "autoBindSampler": "nearestClamp"
-        }
-      ]
-    },
     "lightClusterWriteSet": {
       "bindings": [
         {
@@ -4986,38 +4972,21 @@
     },
     {
       "name": "TAAHistory",
-      "type": "graphics",
+      "type": "transfer",
       "execution": {
-        "type": "fullscreen"
+        "type": "copy"
       },
       "inputs": [
         {
           "resource": "taaColor",
-          "usage": "shader_read"
+          "usage": "transfer_src"
         }
       ],
       "outputs": [
         {
           "resource": "taaHistory",
-          "usage": "color_write",
-          "clear": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ]
+          "usage": "transfer_dst"
         }
-      ],
-      "pipeline": {
-        "vertexShader": "shaders/fullscreen.vert.spv",
-        "depthTest": false,
-        "depthWrite": false,
-        "cullMode": "none",
-        "vertexInput": "none",
-        "fragmentShader": "shaders/copy.frag.spv"
-      },
-      "descriptorSets": [
-        "taaCopySet"
       ]
     },
     {

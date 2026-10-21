@@ -126,7 +126,7 @@ own that it does not mention stay as you set them.
 | `Lighting` | Lights, image-based light and the sky, added onto the emission |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
 | `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with sun shadow rays. `"requires": ["rayQuery"]`; off by default |
-| `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which is then copied into the persistent `taaHistory` for the next frame |
+| `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |
 | `BloomDown0`, `BloomDown1..5` | The HDR image down a half-resolution mip chain, with a 13-tap filter |
 | `AutoExposure` | A compute pass: a histogram of mip 2 of the chain, and the adapted exposure in a persistent 1x1 image |
 | `BloomUp4..0` | Back up the chain, each mip adding a tent-filtered copy of the one below |
