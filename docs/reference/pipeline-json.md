@@ -26,7 +26,7 @@ Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defau
 
 | Image key | Default | Meaning |
 |---|---|---|
-| `format` | native descriptor default if omitted | Use an explicit format for created targets |
+| `format` | native descriptor default if omitted | Use an explicit format for created targets. The Vulkan format name without `VK_FORMAT_`: `R8_UNORM`, `R8G8_UNORM`, `R8G8B8_UNORM`, `R8G8B8A8_UNORM`, `B8G8R8A8_UNORM`, `R8G8B8A8_SRGB`, `B8G8R8A8_SRGB`, `R8_SNORM`, `R8G8_SNORM`, `R8G8B8A8_SNORM`, `R16_SFLOAT`, `R16G16_SFLOAT`, `R16G16B16_SFLOAT`, `R16G16B16A16_SFLOAT`, `R32_SFLOAT`, `R32G32_SFLOAT`, `R32G32B32_SFLOAT`, `R32G32B32A32_SFLOAT`, `R8_UINT`, `R16_UINT`, `R32_UINT`, `R32G32_UINT`, `R32G32B32A32_UINT`, `R8_SINT`, `R16_SINT`, `R32_SINT`, `R16_UNORM`, `R16G16_UNORM`, `R16G16B16A16_UNORM`, `B10G11R11_UFLOAT_PACK32`, `A2B10G10R10_UNORM_PACK32`, `D16_UNORM`, `D32_SFLOAT`, `D16_UNORM_S8_UINT`, `D24_UNORM_S8_UINT`, `D32_SFLOAT_S8_UINT`. `B10G11R11_UFLOAT_PACK32` holds HDR colour without alpha in 4 bytes a texel (`r11f_g11f_b10f` as a storage image); `A2B10G10R10_UNORM_PACK32` holds 10 bits per colour channel and 2 of alpha (`rgb10_a2`). Whether a format can be an attachment or storage image depends on the device |
 | `width`, `height` | 0 | Reference-size dimensions when zero |
 | `widthScale`, `heightScale` | 1.0 | Scale reference-size dimensions, e.g. 0.5 for bloom |
 | `mipLevels` | 1 | Mip levels, or `"full"` for a complete chain at the resolved size |

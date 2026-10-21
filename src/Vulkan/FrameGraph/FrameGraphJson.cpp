@@ -81,6 +81,10 @@ static const std::unordered_map<std::string, VkFormat> s_formatMap = {
     {"R16G16_UNORM",            VK_FORMAT_R16G16_UNORM},
     {"R16G16B16A16_UNORM",      VK_FORMAT_R16G16B16A16_UNORM},
 
+    // Packed, 4 bytes a texel
+    {"B10G11R11_UFLOAT_PACK32", VK_FORMAT_B10G11R11_UFLOAT_PACK32},
+    {"A2B10G10R10_UNORM_PACK32", VK_FORMAT_A2B10G10R10_UNORM_PACK32},
+
     // Depth formats
     {"D16_UNORM",               VK_FORMAT_D16_UNORM},
     {"D32_SFLOAT",              VK_FORMAT_D32_SFLOAT},

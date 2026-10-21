@@ -403,6 +403,22 @@ std::vector<uint8_t> RenderTargetSaver::convertToRGBA8(const void* data, VkForma
             break;
         }
 
+        case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+        case VK_FORMAT_A2B10G10R10_UNORM_PACK32: {
+            // Packed -> uint8 (clamp to [0,1]); B10G11R11 has no alpha
+            const uint32_t* src = static_cast<const uint32_t*>(data);
+            for (uint32_t i = 0; i < pixelCount; i++) {
+                float rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+                if (srcFormat == VK_FORMAT_B10G11R11_UFLOAT_PACK32) unpackB10G11R11(src[i], rgba);
+                else unpackA2B10G10R10(src[i], rgba);
+                for (uint32_t c = 0; c < 4; c++) {
+                    float val = std::max(0.0f, std::min(1.0f, rgba[c]));
+                    result[i * 4 + c] = static_cast<uint8_t>(val * 255.0f + 0.5f);
+                }
+            }
+            break;
+        }
+
         default: {
             // Unknown format — try to read as raw RGBA8
             std::memcpy(result.data(), data, std::min<size_t>(pixelCount * 4, pixelCount * getBytesPerPixel(srcFormat)));
@@ -466,6 +482,18 @@ std::vector<float> RenderTargetSaver::convertToRGBAFloat(const void* data, VkFor
                 result[i * 4 + 1] = src[i];
                 result[i * 4 + 2] = src[i];
                 result[i * 4 + 3] = 1.0f;
+            }
+            break;
+        }
+
+        case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+        case VK_FORMAT_A2B10G10R10_UNORM_PACK32: {
+            const uint32_t* src = static_cast<const uint32_t*>(data);
+            for (uint32_t i = 0; i < pixelCount; i++) {
+                float* rgba = &result[i * 4];
+                rgba[3] = 1.0f;
+                if (srcFormat == VK_FORMAT_B10G11R11_UFLOAT_PACK32) unpackB10G11R11(src[i], rgba);
+                else unpackA2B10G10R10(src[i], rgba);
             }
             break;
         }

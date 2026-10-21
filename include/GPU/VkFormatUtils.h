@@ -75,4 +75,33 @@ constexpr VkImageSubresourceRange fullSubresourceRange(VkFormat format,
     return range;
 }
 
+/// One unsigned float of a packed format: `mantissaBits` of mantissa above
+/// five of exponent with a bias of 15, as in B10G11R11_UFLOAT_PACK32.
+inline float unpackUnsignedSmallFloat(uint32_t bits, uint32_t mantissaBits) {
+    const uint32_t mantissa = bits & ((1u << mantissaBits) - 1u);
+    const uint32_t exponent = (bits >> mantissaBits) & 0x1Fu;
+    const float fraction = static_cast<float>(mantissa) / static_cast<float>(1u << mantissaBits);
+    if (exponent == 0) return fraction * (1.0f / 16384.0f);  // denormal: 2^-14
+    if (exponent == 31) return mantissa == 0 ? 3.4028235e38f : 0.0f;  // infinity clamps, NaN reads 0
+    const float scale = exponent >= 15 ? static_cast<float>(1u << (exponent - 15))
+                                       : 1.0f / static_cast<float>(1u << (15 - exponent));
+    return (1.0f + fraction) * scale;
+}
+
+/// A B10G11R11_UFLOAT_PACK32 texel as rgb: R in bits 0-10, G in 11-21, B in 22-31.
+inline void unpackB10G11R11(uint32_t texel, float rgb[3]) {
+    rgb[0] = unpackUnsignedSmallFloat(texel & 0x7FFu, 6);
+    rgb[1] = unpackUnsignedSmallFloat((texel >> 11) & 0x7FFu, 6);
+    rgb[2] = unpackUnsignedSmallFloat((texel >> 22) & 0x3FFu, 5);
+}
+
+/// An A2B10G10R10_UNORM_PACK32 texel as rgba in 0..1: R in bits 0-9, G in
+/// 10-19, B in 20-29, A in 30-31.
+inline void unpackA2B10G10R10(uint32_t texel, float rgba[4]) {
+    rgba[0] = static_cast<float>(texel & 0x3FFu) / 1023.0f;
+    rgba[1] = static_cast<float>((texel >> 10) & 0x3FFu) / 1023.0f;
+    rgba[2] = static_cast<float>((texel >> 20) & 0x3FFu) / 1023.0f;
+    rgba[3] = static_cast<float>(texel >> 30) / 3.0f;
+}
+
 } // namespace Shoonyakasha

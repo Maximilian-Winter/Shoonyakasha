@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
+#include "GPU/VkFormatUtils.h"
 
 using namespace Shoonyakasha::FrameGraph;
 
@@ -70,6 +71,9 @@ INSTANTIATE_TEST_SUITE_P(VkFormats, FormatConversion, testing::Values(
     FormatPair{"R16_UNORM",            VK_FORMAT_R16_UNORM},
     FormatPair{"R16G16_UNORM",         VK_FORMAT_R16G16_UNORM},
     FormatPair{"R16G16B16A16_UNORM",   VK_FORMAT_R16G16B16A16_UNORM},
+    // Packed
+    FormatPair{"B10G11R11_UFLOAT_PACK32",  VK_FORMAT_B10G11R11_UFLOAT_PACK32},
+    FormatPair{"A2B10G10R10_UNORM_PACK32", VK_FORMAT_A2B10G10R10_UNORM_PACK32},
     // Depth
     FormatPair{"D16_UNORM",            VK_FORMAT_D16_UNORM},
     FormatPair{"D32_SFLOAT",           VK_FORMAT_D32_SFLOAT},
@@ -87,6 +91,32 @@ TEST(FrameGraphJson, StringToFormat_Unknown_Throws) {
 TEST(FrameGraphJson, FormatToString_UnknownEnum_ReturnsUndefined) {
     // An unmapped VkFormat value should return "UNDEFINED"
     EXPECT_EQ(JsonUtils::formatToString(static_cast<VkFormat>(99999)), "UNDEFINED");
+}
+
+TEST(PackedFormats, B10G11R11Unpacks) {
+    // R = 1.0 (exponent 15), G = 2.5 (exponent 16, mantissa 0.25), B = 0.5 (exponent 14).
+    const uint32_t r = 15u << 6;
+    const uint32_t g = (16u << 6) | 16u;
+    const uint32_t b = 14u << 5;
+    float rgb[3];
+    Shoonyakasha::unpackB10G11R11(r | (g << 11) | (b << 22), rgb);
+    EXPECT_FLOAT_EQ(rgb[0], 1.0f);
+    EXPECT_FLOAT_EQ(rgb[1], 2.5f);
+    EXPECT_FLOAT_EQ(rgb[2], 0.5f);
+
+    Shoonyakasha::unpackB10G11R11(0u, rgb);
+    EXPECT_FLOAT_EQ(rgb[0], 0.0f);
+    // The smallest denormal of the 6-bit mantissa: 2^-14 / 64.
+    EXPECT_FLOAT_EQ(Shoonyakasha::unpackUnsignedSmallFloat(1u, 6), 1.0f / 16384.0f / 64.0f);
+}
+
+TEST(PackedFormats, A2B10G10R10Unpacks) {
+    float rgba[4];
+    Shoonyakasha::unpackA2B10G10R10(1023u | (0u << 10) | (511u << 20) | (3u << 30), rgba);
+    EXPECT_FLOAT_EQ(rgba[0], 1.0f);
+    EXPECT_FLOAT_EQ(rgba[1], 0.0f);
+    EXPECT_FLOAT_EQ(rgba[2], 511.0f / 1023.0f);
+    EXPECT_FLOAT_EQ(rgba[3], 1.0f);
 }
 
 // ═══════════════════════════════════════════════════════════════
