@@ -94,6 +94,7 @@ struct PipelineCapabilities {
     bool tessellationShader = true;  // "tessellationShader": the device feature
     bool meshShader = true;          // "meshShader": VulkanDevice::hasMeshShader
     bool taskShader = true;          // "taskShader": VulkanDevice::hasTaskShader
+    bool rayTracingPipeline = true;  // "rayTracingPipeline": VulkanDevice::hasRayTracingPipeline
 };
 
 void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,

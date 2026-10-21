@@ -424,6 +424,7 @@ std::string exportToJson(
         json << indent << indent << "\"graphicsPasses\": " << analysis.statistics.graphicsPasses << "," << nl;
         json << indent << indent << "\"computePasses\": " << analysis.statistics.computePasses << "," << nl;
         json << indent << indent << "\"transferPasses\": " << analysis.statistics.transferPasses << "," << nl;
+        json << indent << indent << "\"rayTracingPasses\": " << analysis.statistics.rayTracingPasses << "," << nl;
         json << indent << indent << "\"totalResources\": " << analysis.statistics.totalResources << "," << nl;
         json << indent << indent << "\"imageResources\": " << analysis.statistics.imageResources << "," << nl;
         json << indent << indent << "\"bufferResources\": " << analysis.statistics.bufferResources << "," << nl;

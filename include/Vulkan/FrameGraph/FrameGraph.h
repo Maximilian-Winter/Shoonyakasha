@@ -39,6 +39,7 @@ class VulkanDevice;
 class VulkanRenderPass;
 class VulkanPipeline;
 class VulkanComputePipeline;
+class VulkanRayTracingPipeline;
 class VulkanCommandBuilder;
 class VulkanCommandManager;
 class VulkanSwapChain;
@@ -536,6 +537,7 @@ enum class ExecutionKind : uint8_t {
     Copy,            // "copy": vkCmdCopyImage from the transfer_src input to the transfer_dst output
     Blit,            // "blit": vkCmdBlitImage, the same, scaled and filtered
     DrawMeshTasks,   // "draw_mesh_tasks": vkCmdDrawMeshTasksEXT
+    TraceRays,       // "trace_rays": vkCmdTraceRaysKHR
     Manual,          // "manual"
     Unknown          // anything else; warned about while recording
 };
@@ -634,6 +636,9 @@ struct CompiledPass {
 
     // Compute pipeline (for compute passes — separate from graphics pipeline)
     std::shared_ptr<VulkanComputePipeline> computePipeline;
+
+    // Ray tracing pipeline and its shader binding table (ray tracing passes)
+    std::shared_ptr<VulkanRayTracingPipeline> rayTracingPipeline;
 
     // Queue type this pass runs on
     QueueType                           queueType = QueueType::Graphics;

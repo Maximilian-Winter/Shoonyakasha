@@ -49,11 +49,11 @@ RESOURCE_USAGES = frozenset({
     "input_attachment", "transfer_src", "transfer_dst", "present",
 })
 
-PASS_TYPES = frozenset({"graphics", "compute", "transfer"})
+PASS_TYPES = frozenset({"graphics", "compute", "transfer", "ray_tracing"})
 
 #: What a pass may "require"; a device without it leaves the pass out.
 CAPABILITIES = frozenset({"rayQuery", "drawIndirectCount", "geometryShader", "tessellationShader",
-                          "meshShader", "taskShader"})
+                          "meshShader", "taskShader", "rayTracingPipeline"})
 
 #: What a buffer layout with "source": {"type": "scene"} holds ("data").
 SCENE_DATA = frozenset({"lights", "rayInstances"})
@@ -361,11 +361,22 @@ def validate_json(document, base_dir=None, source="<json>"):
             problems.append(Problem("%s pipeline" % where, "must be an object"))
             pipeline_state = {}
 
-        for key in ("vertexShader", "fragmentShader", "computeShader",
-                    "geometryShader", "tessControlShader", "tessEvaluationShader",
-                    "taskShader", "meshShader"):
-            reference = pipeline_state.get(key)
-            if not reference or base_dir is None:
+        references = [(key, pipeline_state.get(key)) for key in (
+            "vertexShader", "fragmentShader", "computeShader", "geometryShader",
+            "tessControlShader", "tessEvaluationShader", "taskShader", "meshShader",
+            "rayGenShader")]
+        misses = pipeline_state.get("missShaders")
+        if isinstance(misses, list):
+            references += [("missShaders[%d]" % i, m) for i, m in enumerate(misses)]
+        groups = pipeline_state.get("hitGroups")
+        if isinstance(groups, list):
+            for i, group in enumerate(groups):
+                if isinstance(group, dict):
+                    references += [("hitGroups[%d].%s" % (i, k), group.get(k))
+                                   for k in ("closestHit", "anyHit", "intersection")]
+
+        for key, reference in references:
+            if not isinstance(reference, str) or not reference or base_dir is None:
                 continue
             if not (base_dir / reference).exists():
                 hint = None

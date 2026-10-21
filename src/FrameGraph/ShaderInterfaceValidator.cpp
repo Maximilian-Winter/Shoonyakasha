@@ -326,7 +326,7 @@ ShaderBufferQuery reflectShaderBufferUse(
         const auto& pass = passes[pi];
         if (hasManualPipeline && hasManualPipeline(pass.name)) return std::nullopt;
         const auto& pd = pass.pipelineDesc;
-        const std::pair<const std::string*, VkPipelineStageFlags> shaders[] = {
+        std::vector<std::pair<const std::string*, VkPipelineStageFlags>> shaders = {
             {&pd.vertexShader,         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT},
             {&pd.tessControlShader,    VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT},
             {&pd.tessEvaluationShader, VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT},
@@ -336,6 +336,12 @@ ShaderBufferQuery reflectShaderBufferUse(
             {&pd.fragmentShader,       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT},
             {&pd.computeShader,        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT},
         };
+        if (pass.type == PassType::RayTracing) {
+            shaders.clear();
+            pd.forEachShader([&](const std::string& path, VkShaderStageFlagBits) {
+                shaders.emplace_back(&path, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+            });
+        }
         ShaderBufferUse use;
         bool any = false;
         for (const auto& [path, stage] : shaders) {

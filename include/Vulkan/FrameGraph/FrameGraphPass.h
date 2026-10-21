@@ -34,7 +34,8 @@ namespace FrameGraph {
 enum class PassType {
     Graphics,   // Needs a VkRenderPass + framebuffer
     Compute,    // Dispatches only, no render pass
-    Transfer    // Copies / blits (future: readback, mipmap gen)
+    Transfer,   // Copies and blits
+    RayTracing  // A ray tracing pipeline's vkCmdTraceRaysKHR
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -315,6 +316,35 @@ struct PipelineDesc {
     std::string taskShader;
     std::string meshShader;
 
+    // A ray tracing pass's pipeline: JSON "rayGenShader", "missShaders" (in
+    // miss index order), "hitGroups" (each "closestHit", "anyHit" and
+    // "intersection"; in hit group order) and "maxRecursionDepth".
+    struct HitGroupDesc {
+        std::string closestHit;
+        std::string anyHit;
+        std::string intersection;
+    };
+    std::string               rayGenShader;
+    std::vector<std::string>  missShaders;
+    std::vector<HitGroupDesc> hitGroups;
+    uint32_t                  maxRecursionDepth = 1;
+
+    /// Every shader path set, with its stage: the kShaderKeys ones, then the
+    /// ray tracing ones.
+    template <typename Fn>
+    void forEachShader(Fn&& fn) const {
+        for (const auto& key : kShaderKeys) {
+            if (!shader(key.stage).empty()) fn(shader(key.stage), key.stage);
+        }
+        if (!rayGenShader.empty()) fn(rayGenShader, VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+        for (const auto& miss : missShaders) fn(miss, VK_SHADER_STAGE_MISS_BIT_KHR);
+        for (const auto& group : hitGroups) {
+            if (!group.closestHit.empty()) fn(group.closestHit, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
+            if (!group.anyHit.empty()) fn(group.anyHit, VK_SHADER_STAGE_ANY_HIT_BIT_KHR);
+            if (!group.intersection.empty()) fn(group.intersection, VK_SHADER_STAGE_INTERSECTION_BIT_KHR);
+        }
+    }
+
     /// The path a shader key names (kShaderKeys), empty for none.
     const std::string& shader(VkShaderStageFlagBits stage) const {
         switch (stage) {
@@ -514,6 +544,8 @@ struct ExecutionDesc {
     //   "blit"               - Transfer: the same, scaled with `filter`
     //   "draw_mesh_tasks"    - Mesh pipeline: vkCmdDrawMeshTasksEXT with the
     //                          group counts of `dispatch`
+    //   "trace_rays"         - Ray tracing pass: vkCmdTraceRaysKHR with the
+    //                          ray counts of `dispatch`
     std::string type = "none";
 
     // For "blit": "linear" or "nearest"

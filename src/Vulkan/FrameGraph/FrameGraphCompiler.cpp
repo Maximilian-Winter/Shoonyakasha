@@ -12,6 +12,7 @@
 #include "Vulkan/VulkanBuffer.h"
 #include "Vulkan/VulkanPipeline.h"
 #include "Vulkan/VulkanComputePipeline.h"
+#include "Vulkan/VulkanRayTracingPipeline.h"
 #include "Vulkan/VulkanDescriptorSystem.h"
 #include "Vulkan/VulkanMemoryAllocator.h"
 #include "Vulkan/RayTracingScene.h"
@@ -47,6 +48,7 @@ ExecutionKind executionKindOf(const std::string& type) {
     if (type == "copy")             return ExecutionKind::Copy;
     if (type == "blit")             return ExecutionKind::Blit;
     if (type == "draw_mesh_tasks")  return ExecutionKind::DrawMeshTasks;
+    if (type == "trace_rays")       return ExecutionKind::TraceRays;
     if (type == "manual" || type.empty()) return ExecutionKind::Manual;
     if (type == "scene_geometry" || type == "ui_canvas" || isEntityGeometryExecutionType(type))
         return ExecutionKind::SceneRenderer;
@@ -1306,6 +1308,30 @@ bool FrameGraphCompiler::createPipelines(
             continue;  // Skip graphics pipeline creation for compute passes
         }
 
+        // ── Ray tracing pass: its pipeline and shader binding table ──
+        if (passDecl.type == PassType::RayTracing) {
+            const auto& pd = passDecl.pipelineDesc;
+            RayTracingShaders shaders;
+            shaders.rayGen = pd.rayGenShader;
+            shaders.miss = pd.missShaders;
+            for (const auto& g : pd.hitGroups) shaders.hitGroups.push_back({g.closestHit, g.anyHit, g.intersection});
+            shaders.maxRecursionDepth = pd.maxRecursionDepth;
+            std::vector<VkPushConstantRange> pushRanges;
+            for (const auto& pc : passDecl.pushConstants) {
+                pushRanges.push_back({JsonUtils::stringsToShaderStages(pc.stages), pc.offset, pc.size});
+            }
+            try {
+                compiled.rayTracingPipeline = std::make_shared<VulkanRayTracingPipeline>(
+                    device, shaders, compiled.descriptorSetLayouts, pushRanges);
+                compiled.pipelineLayout = compiled.rayTracingPipeline->getLayout();
+                m_logger->log(LogLevel::Info, "  Created ray tracing pipeline for pass '%s'", passDecl.name.c_str());
+            } catch (const std::exception& e) {
+                outError = "Pass '" + passDecl.name + "': no ray tracing pipeline: " + e.what();
+                return false;
+            }
+            continue;
+        }
+
         // Skip non-graphics passes
         if (passDecl.type != PassType::Graphics) continue;
 
@@ -1809,7 +1835,7 @@ bool FrameGraphCompiler::validateShaderInterfaces(
     for (const auto& pass : builder.getPassDeclarations()) {
         const auto& pd = pass.pipelineDesc;
         std::vector<const std::string*> shaders;
-        for (const auto& key : kShaderKeys) shaders.push_back(&pd.shader(key.stage));
+        pd.forEachShader([&](const std::string& path, VkShaderStageFlagBits) { shaders.push_back(&path); });
 
         ShaderInterfaceExpectation expected;
         expected.setCount = static_cast<uint32_t>(pass.descriptorSetRefs.size());

@@ -204,6 +204,7 @@ struct AnalysisStatistics {
     uint32_t graphicsPasses = 0;
     uint32_t computePasses = 0;
     uint32_t transferPasses = 0;
+    uint32_t rayTracingPasses = 0;
 
     // Resource counts
     uint32_t totalResources = 0;

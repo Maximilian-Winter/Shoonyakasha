@@ -79,6 +79,20 @@ public:
     /// them off, to try the fallbacks.
     bool hasRayQuery() const { return m_rayQuery; }
 
+    /// Ray tracing pipelines (VK_KHR_ray_tracing_pipeline), enabled with
+    /// ray queries when the device has them; the functions they use and the
+    /// device's shader group handle sizes and recursion limit.
+    struct RayTracingPipelineFunctions {
+        PFN_vkCreateRayTracingPipelinesKHR       createPipelines = nullptr;
+        PFN_vkGetRayTracingShaderGroupHandlesKHR getShaderGroupHandles = nullptr;
+        PFN_vkCmdTraceRaysKHR                    traceRays = nullptr;
+    };
+    bool hasRayTracingPipeline() const { return m_rayTracingPipeline; }
+    const RayTracingPipelineFunctions& rayTracingPipelineFunctions() const { return m_rayTracingFunctions; }
+    const VkPhysicalDeviceRayTracingPipelinePropertiesKHR& rayTracingPipelineProperties() const {
+        return m_rayTracingProperties;
+    }
+
     /// vkCmdDrawIndirectCount, which reads the number of draws from a buffer
     /// (the Vulkan 1.2 feature drawIndirectCount), enabled when the device
     /// has it. multiDrawIndirect and drawIndirectFirstInstance, which let one
@@ -122,6 +136,9 @@ private:
     bool m_rayQuery = false;
     bool m_drawIndirectCount = false;
     bool m_meshShader = false;
+    bool m_rayTracingPipeline = false;
+    RayTracingPipelineFunctions m_rayTracingFunctions;
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rayTracingProperties{};
     bool m_taskShader = false;
     PFN_vkCmdDrawMeshTasksEXT m_drawMeshTasks = nullptr;
     VkPhysicalDeviceLimits m_limits{};

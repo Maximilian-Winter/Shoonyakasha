@@ -136,6 +136,7 @@ void RenderGraph::loadFromFile(const std::string& filePath) {
     capabilities.tessellationShader = m_device.getEnabledFeatures().tessellationShader == VK_TRUE;
     capabilities.meshShader = m_device.hasMeshShader();
     capabilities.taskShader = m_device.hasTaskShader();
+    capabilities.rayTracingPipeline = m_device.hasRayTracingPipeline();
     capabilities.multiDrawIndirect = m_device.getEnabledFeatures().multiDrawIndirect == VK_TRUE;
     loadGraphFromFile(m_builder, filePath, capabilities);
     m_logger->log(LogLevel::Info, "Loaded %zu resources, %zu passes from JSON",

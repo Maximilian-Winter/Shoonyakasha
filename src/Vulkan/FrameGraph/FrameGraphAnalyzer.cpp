@@ -134,6 +134,7 @@ std::string FrameGraphAnalyzer::passTypeToString(PassType type) {
         case PassType::Graphics:    return "graphics";
         case PassType::Compute:     return "compute";
         case PassType::Transfer:    return "transfer";
+        case PassType::RayTracing:  return "ray_tracing";
         default:                    return "unknown";
     }
 }
@@ -445,6 +446,7 @@ AnalysisResult FrameGraphAnalyzer::analyzeDeclarations(const FrameGraphBuilder& 
             case PassType::Graphics: result.statistics.graphicsPasses++; break;
             case PassType::Compute:  result.statistics.computePasses++; break;
             case PassType::Transfer: result.statistics.transferPasses++; break;
+            case PassType::RayTracing: result.statistics.rayTracingPasses++; break;
         }
     }
 
@@ -1044,6 +1046,7 @@ void FrameGraphAnalyzer::computeStatistics(
             case PassType::Graphics: outStats.graphicsPasses++; break;
             case PassType::Compute:  outStats.computePasses++; break;
             case PassType::Transfer: outStats.transferPasses++; break;
+            case PassType::RayTracing: outStats.rayTracingPasses++; break;
         }
     }
 

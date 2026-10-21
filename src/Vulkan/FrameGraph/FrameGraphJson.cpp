@@ -169,6 +169,7 @@ PassType stringToPassType(const std::string& str) {
         {"graphics",    PassType::Graphics},
         {"compute",     PassType::Compute},
         {"transfer",    PassType::Transfer},
+        {"ray_tracing", PassType::RayTracing},
     };
     auto it = map.find(str);
     if (it != map.end()) return it->second;
@@ -180,6 +181,7 @@ std::string passTypeToString(PassType type) {
         case PassType::Graphics:    return "graphics";
         case PassType::Compute:     return "compute";
         case PassType::Transfer:    return "transfer";
+        case PassType::RayTracing:  return "ray_tracing";
         default:                    return "unknown";
     }
 }
@@ -216,6 +218,11 @@ VkShaderStageFlags stringToShaderStage(const std::string& str) {
         {"tess_eval",       VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT},
         {"task",        VK_SHADER_STAGE_TASK_BIT_EXT},
         {"mesh",        VK_SHADER_STAGE_MESH_BIT_EXT},
+        {"raygen",      VK_SHADER_STAGE_RAYGEN_BIT_KHR},
+        {"miss",        VK_SHADER_STAGE_MISS_BIT_KHR},
+        {"closest_hit", VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR},
+        {"any_hit",     VK_SHADER_STAGE_ANY_HIT_BIT_KHR},
+        {"intersection", VK_SHADER_STAGE_INTERSECTION_BIT_KHR},
         {"all",         VK_SHADER_STAGE_ALL},
     };
     auto it = map.find(str);
@@ -1739,11 +1746,13 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                         met = met && capabilities.meshShader;
                     } else if (what == "taskShader") {
                         met = met && capabilities.taskShader;
+                    } else if (what == "rayTracingPipeline") {
+                        met = met && capabilities.rayTracingPipeline;
                     } else {
                         throw std::runtime_error("Pass '" + name + "' requires '" + what +
                                                  "', which is not a capability (expected rayQuery, "
                                                  "drawIndirectCount, geometryShader, tessellationShader, "
-                                                 "meshShader or taskShader)");
+                                                 "meshShader, taskShader or rayTracingPipeline)");
                     }
                 }
                 if (!met) {
@@ -1798,6 +1807,57 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 pass.pipelineDesc.patchControlPoints   = pipeJson.value("patchControlPoints", 0u);
                 pass.pipelineDesc.taskShader           = pipeJson.value("taskShader", std::string{});
                 pass.pipelineDesc.meshShader           = pipeJson.value("meshShader", std::string{});
+                {
+                    // A ray tracing pass's shaders, and only its.
+                    auto& pd = pass.pipelineDesc;
+                    const std::string where = "Pass '" + pass.name + "'";
+                    const bool rt = pass.type == PassType::RayTracing;
+                    pd.rayGenShader = pipeJson.value("rayGenShader", std::string{});
+                    if (pipeJson.contains("missShaders")) {
+                        if (!pipeJson["missShaders"].is_array()) {
+                            throw std::runtime_error(where + ": missShaders must be an array of paths");
+                        }
+                        for (const auto& m : pipeJson["missShaders"]) pd.missShaders.push_back(m.get<std::string>());
+                    }
+                    if (pipeJson.contains("hitGroups")) {
+                        if (!pipeJson["hitGroups"].is_array()) {
+                            throw std::runtime_error(where + ": hitGroups must be an array of objects");
+                        }
+                        for (const auto& g : pipeJson["hitGroups"]) {
+                            PipelineDesc::HitGroupDesc group;
+                            group.closestHit   = g.value("closestHit", std::string{});
+                            group.anyHit       = g.value("anyHit", std::string{});
+                            group.intersection = g.value("intersection", std::string{});
+                            if (group.closestHit.empty() && group.anyHit.empty() && group.intersection.empty()) {
+                                throw std::runtime_error(where + ": a hit group names closestHit, anyHit or "
+                                                         "intersection");
+                            }
+                            pd.hitGroups.push_back(group);
+                        }
+                    }
+                    pd.maxRecursionDepth = pipeJson.value("maxRecursionDepth", 1u);
+                    const bool rtKeys = !pd.rayGenShader.empty() || !pd.missShaders.empty() || !pd.hitGroups.empty();
+                    if (rtKeys && !rt) {
+                        throw std::runtime_error(where + ": rayGenShader, missShaders and hitGroups belong to a "
+                                                 "ray_tracing pass");
+                    }
+                    if (rt) {
+                        bool other = false;
+                        for (const auto& key : kShaderKeys) other = other || !pd.shader(key.stage).empty();
+                        if (pd.rayGenShader.empty() || other) {
+                            throw std::runtime_error(where + ": a ray_tracing pass takes a rayGenShader, and "
+                                                     "missShaders and hitGroups, but no other shaders");
+                        }
+                        if (pd.maxRecursionDepth < 1) {
+                            throw std::runtime_error(where + ": maxRecursionDepth must be at least 1");
+                        }
+                        if (!capabilities.rayTracingPipeline) {
+                            throw std::runtime_error(where + " is a ray_tracing pass, which this device lacks; "
+                                                     "declare \"requires\": [\"rayTracingPipeline\"] to leave "
+                                                     "the pass out on such devices");
+                        }
+                    }
+                }
                 {
                     const auto& pd = pass.pipelineDesc;
                     const std::string where = "Pass '" + pass.name + "'";
@@ -2172,6 +2232,13 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 }
             }
 
+            // A ray tracing pass traces with trace_rays, and only it does.
+            if ((pass.type == PassType::RayTracing) != (pass.execution.type == "trace_rays") ||
+                (pass.type == PassType::RayTracing && pass.pipelineDesc.rayGenShader.empty())) {
+                throw std::runtime_error("Pass '" + pass.name + "': a ray_tracing pass has execution type "
+                                         "\"trace_rays\" and a rayGenShader, and that type needs a ray_tracing pass");
+            }
+
             // A mesh pipeline draws with draw_mesh_tasks, and only it does.
             if (pass.pipelineDesc.meshShader.empty() != (pass.execution.type != "draw_mesh_tasks")) {
                 throw std::runtime_error("Pass '" + pass.name + "': a meshShader goes with execution type "
@@ -2321,6 +2388,18 @@ void resolveShaderPathsAgainst(nlohmann::json& json, const std::filesystem::path
             auto& pipe = pass["pipeline"];
             for (const auto& shader : kShaderKeys) {
                 if (pipe.contains(shader.key)) resolvePathAgainst(pipe[shader.key], dir);
+            }
+            if (pipe.contains("rayGenShader")) resolvePathAgainst(pipe["rayGenShader"], dir);
+            if (pipe.contains("missShaders") && pipe["missShaders"].is_array()) {
+                for (auto& miss : pipe["missShaders"]) resolvePathAgainst(miss, dir);
+            }
+            if (pipe.contains("hitGroups") && pipe["hitGroups"].is_array()) {
+                for (auto& group : pipe["hitGroups"]) {
+                    if (!group.is_object()) continue;
+                    for (const char* key : {"closestHit", "anyHit", "intersection"}) {
+                        if (group.contains(key)) resolvePathAgainst(group[key], dir);
+                    }
+                }
             }
         }
     }
@@ -2576,8 +2655,20 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
         // Pipeline
         const auto& pd = pass.pipelineDesc;
         if (!pd.vertexShader.empty() || !pd.fragmentShader.empty() || !pd.computeShader.empty() ||
-            !pd.meshShader.empty()) {
+            !pd.meshShader.empty() || !pd.rayGenShader.empty()) {
             nlohmann::json pipeJson;
+            if (!pd.rayGenShader.empty()) {
+                pipeJson["rayGenShader"] = pd.rayGenShader;
+                if (!pd.missShaders.empty()) pipeJson["missShaders"] = pd.missShaders;
+                for (const auto& group : pd.hitGroups) {
+                    nlohmann::json g = nlohmann::json::object();
+                    if (!group.closestHit.empty())   g["closestHit"] = group.closestHit;
+                    if (!group.anyHit.empty())       g["anyHit"] = group.anyHit;
+                    if (!group.intersection.empty()) g["intersection"] = group.intersection;
+                    pipeJson["hitGroups"].push_back(g);
+                }
+                if (pd.maxRecursionDepth != 1) pipeJson["maxRecursionDepth"] = pd.maxRecursionDepth;
+            }
             if (!pd.vertexShader.empty())   pipeJson["vertexShader"] = pd.vertexShader;
             if (!pd.fragmentShader.empty()) pipeJson["fragmentShader"] = pd.fragmentShader;
             if (!pd.computeShader.empty())  pipeJson["computeShader"] = pd.computeShader;

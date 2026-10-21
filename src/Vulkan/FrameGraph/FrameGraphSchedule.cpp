@@ -91,6 +91,7 @@ VkPipelineStageFlags usageToStageMask(ResourceUsage usage, PassType passType) {
         case ResourceUsage::StorageImageWrite:
         case ResourceUsage::InputAttachment:
             if (passType == PassType::Compute) return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            if (passType == PassType::RayTracing) return VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
             return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         case ResourceUsage::TransferSrc:
         case ResourceUsage::TransferDst:
@@ -755,11 +756,17 @@ VkPipelineStageFlags shaderPipelineStages(const std::vector<std::string>& stages
             if (s == "compute" || s == "all") out |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
             continue;
         }
+        if (type == PassType::RayTracing) {
+            out |= VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+            continue;
+        }
         if (s == "vertex")            out |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
         else if (s == "fragment")     out |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         else if (s == "geometry")     out |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
         else if (s == "tess_control") out |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT;
         else if (s == "tess_eval")    out |= VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
+        else if (s == "task")         out |= VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT;
+        else if (s == "mesh")         out |= VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT;
         else if (s == "all")          out |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
                                              VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     }
@@ -820,13 +827,15 @@ BufferAccessTable describeBufferAccesses(
         const auto& pass = passes[pi];
         const bool compute = pass.type == PassType::Compute;
         const bool transfer = pass.type == PassType::Transfer;
+        const bool rayTracing = pass.type == PassType::RayTracing;
 
         const VkPipelineStageFlags passStages =
             compute ? VkPipelineStageFlags{VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT}
           : transfer ? VkPipelineStageFlags{VK_PIPELINE_STAGE_TRANSFER_BIT}
+          : rayTracing ? VkPipelineStageFlags{VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR}
           : kGraphicsBufferStages;
         const VkAccessFlags passReads =
-            compute ? kComputeBufferReads
+            compute || rayTracing ? kComputeBufferReads
           : transfer ? VkAccessFlags{VK_ACCESS_TRANSFER_READ_BIT}
           : kGraphicsBufferReads;
         const VkAccessFlags passWrites =

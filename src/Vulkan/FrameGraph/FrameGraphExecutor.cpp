@@ -12,6 +12,7 @@
 #include "Vulkan/VulkanCommandBuffer.h"
 #include "Vulkan/VulkanPipeline.h"
 #include "Vulkan/VulkanComputePipeline.h"
+#include "Vulkan/VulkanRayTracingPipeline.h"
 #include "Vulkan/VulkanDescriptorSystem.h"
 #include "Vulkan/VulkanImage.h"
 #include "Vulkan/VulkanDevice.h"
@@ -337,7 +338,7 @@ void FrameGraphExecutor::recordPasses(
         m_logger->logEvery(5.0f, LogLevel::Info, "  [pass %u/%u] '%s' (type=%s, exec=%s)",
             execIdx++, static_cast<uint32_t>(passIndices.size()),
             passDecl.name.c_str(),
-            passDecl.type == PassType::Compute ? "compute" : "graphics",
+            JsonUtils::passTypeToString(passDecl.type).c_str(),
             passDecl.execution.type.c_str());
 
         // Debug label for RenderDoc / validation layers
@@ -425,6 +426,9 @@ void FrameGraphExecutor::recordPasses(
             // Auto-bind compute pipeline before callback
             compiledPass.computePipeline->bind(commandBuffer);
         }
+        else if (active && passDecl.type == PassType::RayTracing && compiledPass.rayTracingPipeline) {
+            compiledPass.rayTracingPipeline->bind(commandBuffer);
+        }
 
         // ── Execute pass (manual callback or auto-execution) ──
         if (!active) {
@@ -479,9 +483,9 @@ void FrameGraphExecutor::executeAutoCallback(
     // ── Auto-bind descriptor sets if enabled ──
     // Consecutive sets go down in one call; a missing set ends a run.
     if (exec.bindDescriptorSets && !compiledPass.descriptorSets.empty()) {
-        VkPipelineBindPoint bindPoint = (passDecl.type == PassType::Compute)
-            ? VK_PIPELINE_BIND_POINT_COMPUTE
-            : VK_PIPELINE_BIND_POINT_GRAPHICS;
+        VkPipelineBindPoint bindPoint = passDecl.type == PassType::Compute    ? VK_PIPELINE_BIND_POINT_COMPUTE
+                                      : passDecl.type == PassType::RayTracing ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
+                                                                               : VK_PIPELINE_BIND_POINT_GRAPHICS;
 
         uint32_t first = 0;
         m_descriptorSets.clear();
@@ -608,7 +612,8 @@ void FrameGraphExecutor::executeAutoCallback(
 
     case ExecutionKind::ComputeDispatch:
     case ExecutionKind::ComputeImage:
-    case ExecutionKind::DrawMeshTasks: {
+    case ExecutionKind::DrawMeshTasks:
+    case ExecutionKind::TraceRays: {
         // Calculate dispatch dimensions
         uint32_t groupX = 1, groupY = 1, groupZ = 1;
 
@@ -643,6 +648,13 @@ void FrameGraphExecutor::executeAutoCallback(
             groupZ = calcDim(exec.dispatch[2]);
         }
 
+        if (compiledPass.executionKind == ExecutionKind::TraceRays) {
+            // The dispatch counts rays here, not workgroups.
+            if (compiledPass.rayTracingPipeline) {
+                compiledPass.rayTracingPipeline->traceRays(commandBuffer, groupX, groupY, groupZ);
+            }
+            break;
+        }
         if (compiledPass.executionKind == ExecutionKind::DrawMeshTasks) {
             // Mesh pipelines exist only on devices with mesh shaders.
             if (const auto drawMeshTasks = m_device.drawMeshTasks()) {

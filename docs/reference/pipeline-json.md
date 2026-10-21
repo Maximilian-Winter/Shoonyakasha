@@ -132,7 +132,7 @@ The constant parser uses dots as vector separators: `const.0.5` is not a reliabl
 
 ## Descriptors and samplers
 
-Each descriptor-set layout has a `bindings` array. Bindings require `binding` and `type`; optional `count` defaults 1, `name` defaults `binding_<index>`, and `stages` selects shader visibility: any of `vertex`, `tess_control`, `tess_eval`, `geometry`, `task`, `mesh`, `fragment`, `compute` and `all` (push constant `stages` take the same names). Use the descriptor types accepted by [JsonUtils](../../src/Vulkan/FrameGraph/FrameGraphJson.cpp), such as `uniform_buffer`, `storage_buffer`, and `combined_image_sampler`.
+Each descriptor-set layout has a `bindings` array. Bindings require `binding` and `type`; optional `count` defaults 1, `name` defaults `binding_<index>`, and `stages` selects shader visibility: any of `vertex`, `tess_control`, `tess_eval`, `geometry`, `task`, `mesh`, `fragment`, `compute`, `raygen`, `miss`, `closest_hit`, `any_hit`, `intersection` and `all` (push constant `stages` take the same names). Use the descriptor types accepted by [JsonUtils](../../src/Vulkan/FrameGraph/FrameGraphJson.cpp), such as `uniform_buffer`, `storage_buffer`, and `combined_image_sampler`.
 
 `acceleration_structure` binds the engine's top-level acceleration structure of the scene, for ray queries (`GL_EXT_ray_query`; compile such a shader for Vulkan 1.2 or later). The engine keeps one only on a device with ray queries. It holds the static, opaque, shadow-casting meshes, and is rebuilt every frame from their transforms. On a device without ray queries a layout with such a binding is skipped, and only a pass that `requires` `rayQuery` may use it.
 
@@ -159,7 +159,7 @@ Use a matching `execution.entityDataBinding`. The parser accepting a method stri
 
 ## Passes and pipeline state
 
-Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` defaults `graphics`; `compute` requests the compute queue in a multi-queue execution setup. `enabled` defaults true and can be changed at runtime with `set_pass_enabled` (C++ `setPassEnabled`). A disabled pass draws and dispatches nothing, but its barriers still run and its attachments still begin and end rendering: they are cleared to their `clear` values and end in the layouts later passes expect, so a disabled shadow pass leaves a map cleared to far depth. `requires` lists device capabilities the pass needs: `rayQuery`, `drawIndirectCount` for a `draw_indirect` pass with a count buffer, `geometryShader`, `tessellationShader`, `meshShader` and `taskShader`. On a device without them the pass is unavailable: it loads, stays disabled, and `set_pass_enabled` or a preset that would turn it on is refused with a warning. Declare such a pass `"enabled": false` and turn it on with a preset, so the pipeline still runs everywhere. `viewport` is a dot-path to a vec4 (x, y, width, height) in fractions of the pass's attachments, resolved every frame: the pass renders into that rectangle only, its clears included, and renders nothing in a frame where it is empty. Such a pass keeps the rest of its outputs, so it is ordered after their earlier writers even when it clears; tiles of a shadow atlas are the use (`scene.shadows.spot[N].rect`). `hasSideEffects` defaults false and prevents culling work whose outputs otherwise appear unused. A transfer pass records a copy or blit with execution type `copy` or `blit` (see [Execution](#execution)), or anything else through a native recording callback.
+Passes require `name` and `type` (`graphics`, `compute`, `transfer`, `ray_tracing`; see [ray tracing passes](#ray-tracing-passes)). `queue` defaults `graphics`; `compute` requests the compute queue in a multi-queue execution setup. `enabled` defaults true and can be changed at runtime with `set_pass_enabled` (C++ `setPassEnabled`). A disabled pass draws and dispatches nothing, but its barriers still run and its attachments still begin and end rendering: they are cleared to their `clear` values and end in the layouts later passes expect, so a disabled shadow pass leaves a map cleared to far depth. `requires` lists device capabilities the pass needs: `rayQuery`, `drawIndirectCount` for a `draw_indirect` pass with a count buffer, `geometryShader`, `tessellationShader`, `meshShader`, `taskShader` and `rayTracingPipeline`. On a device without them the pass is unavailable: it loads, stays disabled, and `set_pass_enabled` or a preset that would turn it on is refused with a warning. Declare such a pass `"enabled": false` and turn it on with a preset, so the pipeline still runs everywhere. `viewport` is a dot-path to a vec4 (x, y, width, height) in fractions of the pass's attachments, resolved every frame: the pass renders into that rectangle only, its clears included, and renders nothing in a frame where it is empty. Such a pass keeps the rest of its outputs, so it is ordered after their earlier writers even when it clears; tiles of a shadow atlas are the use (`scene.shadows.spot[N].rect`). `hasSideEffects` defaults false and prevents culling work whose outputs otherwise appear unused. A transfer pass records a copy or blit with execution type `copy` or `blit` (see [Execution](#execution)), or anything else through a native recording callback.
 
 | `pipeline` key | Default / options |
 |---|---|
@@ -213,6 +213,33 @@ A pass whose graphics or compute pipeline cannot be created (a missing or invali
 
 `pushConstants` accepts one object or an array. Each range requires `size`; `offset` defaults 0, `stages` selects visibility. Optional `bindings` map named graph parameters using `name`, `offset` (0), and `type` (`float`). A binding named `pass.repeatIndex`, `pass.repeatCount`, `pass.extent` or `pass.texelSize` pushes that value of the pass instead, which is how a fullscreen or compute pass learns its mip level. These graph parameters are distinct from per-entity layout sources.
 
+### Ray tracing passes
+
+A pass with `"type": "ray_tracing"` runs a ray tracing pipeline (`VK_KHR_ray_tracing_pipeline`) with execution type `trace_rays`. Its `pipeline` takes:
+
+| `pipeline` key | Default / options |
+|---|---|
+| `rayGenShader` | Required; the ray generation shader |
+| `missShaders` | `[]`; miss shaders, numbered in order for `traceRayEXT`'s `missIndex` |
+| `hitGroups` | `[]`; objects with `closestHit`, `anyHit` and `intersection` (at least one; with `intersection` the group is procedural), numbered in order |
+| `maxRecursionDepth` | 1; how deep `traceRayEXT` may be called from hit and miss shaders. Above the device's limit, compiling fails |
+
+No other shader keys apply. The pipeline's shader binding table holds one record per group: the ray generation shader, the miss shaders, then the hit groups, each record the group's handle and no data. Every instance of the scene's [acceleration structure](#descriptors-and-samplers) has an instance offset of 0, so a `traceRayEXT` call chooses its hit group with `sbtRecordOffset` (and `sbtRecordStride`, the number of hit groups per ray type) and its miss shader with `missIndex`. Hit shaders find the surface they hit as ray queries do: `gl_InstanceID` is its row of `rayInstances`, and its textures are in `sceneTextures`. The pass binds its descriptor sets and push constants at the ray tracing bind point, and its image and buffer accesses wait at the ray tracing shader stage. Compile its shaders for Vulkan 1.2 or later (`// glslc: --target-env=vulkan1.2` on the second line); `sk.shaders.compile_dir` compiles `.rgen`, `.rmiss`, `.rchit`, `.rahit` and `.rint` files.
+
+Ray tracing pipelines need a device with ray queries and `VK_KHR_ray_tracing_pipeline`; on a device without them a `ray_tracing` pass fails to load unless it `requires` `rayTracingPipeline`.
+
+```json
+{ "name": "Trace", "type": "ray_tracing", "requires": ["rayTracingPipeline"], "enabled": false,
+  "outputs": [{ "resource": "radiance", "usage": "storage_image_write" }],
+  "descriptorSets": ["traceSet"],
+  "pipeline": { "rayGenShader": "shaders/trace.rgen.spv",
+                "missShaders": ["shaders/sky.rmiss.spv", "shaders/shadow.rmiss.spv"],
+                "hitGroups": [{ "closestHit": "shaders/surface.rchit.spv" }] },
+  "execution": { "type": "trace_rays",
+                 "dispatch": { "x": { "resource": "radiance", "dimension": "width" },
+                               "y": { "resource": "radiance", "dimension": "height" } } } }
+```
+
 ## Repeated passes
 
 `"repeat": { "count": N, "index": "name", "first": 0, "step": 1 }` on a pass declares N passes at once. Each instance substitutes its index value (`first`, `first + step`, ...; a `step` of -1 counts down, as an upsampling chain that starts from the smallest mip needs, and every value must stay at least 0) for `{name}`, `{name+K}` and `{name-K}` in every string of the pass; a string that is only a placeholder becomes a number. An instance is named by substituting into `name` when it contains the placeholder, and `Name[value]` otherwise. `index` defaults to `i`. Four shadow cascades:
@@ -265,6 +292,7 @@ Descriptor set layouts take the same `repeat`, for passes that bind a different 
 | `sprite_geometry` | Sprite and glyph rendering |
 | `ui_canvas` | Screen canvases of the canvas UI, in ascending `sortOrder`. Needs exactly one colour output, usually the swapchain with `color_blend`, and no `pipeline` block: the engine supplies the pipeline from `shaders/ui/`, looking beside the JSON, then in the working directory, then beside the default pipeline |
 | `draw_mesh_tasks` | A pass with a `meshShader`: `vkCmdDrawMeshTasksEXT` with the group counts of `dispatch.x/y/z`, given as for `compute_dispatch` |
+| `trace_rays` | A `ray_tracing` pass: `vkCmdTraceRaysKHR` with the ray counts of `dispatch.x/y/z`, given as for `compute_dispatch` (one ray per pixel: the image's `width` and `height` with divisor 1) |
 | `copy` | A transfer pass: copy its `transfer_src` input into its `transfer_dst` output (`vkCmdCopyImage`) |
 | `blit` | A transfer pass: the same, scaled to the output's size with `filter` (`vkCmdBlitImage`) |
 | `none`, `manual` | Native callback/manual recording use |

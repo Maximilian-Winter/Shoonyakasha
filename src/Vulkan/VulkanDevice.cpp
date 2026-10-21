@@ -303,6 +303,40 @@ void VulkanDevice::createLogicalDevice() {
     }
     m_logger->log(LogLevel::Info, "Ray queries: %s", m_rayQuery ? "enabled" : "not available");
 
+    // Ray tracing pipelines, beside ray queries, when the device has them.
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingFeatures{};
+    rayTracingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    if (m_rayQuery) {
+        uint32_t count = 0;
+        vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &count, nullptr);
+        std::vector<VkExtensionProperties> available(count);
+        vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &count, available.data());
+        const bool has = std::any_of(available.begin(), available.end(), [](const VkExtensionProperties& e) {
+            return std::strcmp(e.extensionName, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) == 0;
+        });
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR supported{};
+        supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+        VkPhysicalDeviceFeatures2 features{};
+        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        features.pNext = &supported;
+        if (has) vkGetPhysicalDeviceFeatures2(m_physicalDevice, &features);
+        m_rayTracingPipeline = has && supported.rayTracingPipeline == VK_TRUE;
+    }
+    if (m_rayTracingPipeline) {
+        extensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+        rayTracingFeatures.rayTracingPipeline = VK_TRUE;
+        rayTracingFeatures.pNext = vulkan13Features.pNext;
+        vulkan13Features.pNext = &rayTracingFeatures;
+
+        m_rayTracingProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+        VkPhysicalDeviceProperties2 properties{};
+        properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties.pNext = &m_rayTracingProperties;
+        vkGetPhysicalDeviceProperties2(m_physicalDevice, &properties);
+        m_rayTracingProperties.pNext = nullptr;
+    }
+    m_logger->log(LogLevel::Info, "Ray tracing pipelines: %s", m_rayTracingPipeline ? "enabled" : "not available");
+
     // Mesh and task shaders, when the device has them.
     VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures{};
     meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
@@ -343,6 +377,16 @@ void VulkanDevice::createLogicalDevice() {
     if (m_meshShader) {
         m_drawMeshTasks = reinterpret_cast<PFN_vkCmdDrawMeshTasksEXT>(
             vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksEXT"));
+    }
+    if (m_rayTracingPipeline) {
+        m_rayTracingFunctions.createPipelines = reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
+            vkGetDeviceProcAddr(m_device, "vkCreateRayTracingPipelinesKHR"));
+        m_rayTracingFunctions.getShaderGroupHandles = reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
+            vkGetDeviceProcAddr(m_device, "vkGetRayTracingShaderGroupHandlesKHR"));
+        m_rayTracingFunctions.traceRays = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
+            vkGetDeviceProcAddr(m_device, "vkCmdTraceRaysKHR"));
+        m_rayTracingPipeline = m_rayTracingFunctions.createPipelines && m_rayTracingFunctions.getShaderGroupHandles &&
+                               m_rayTracingFunctions.traceRays;
     }
 
     vkGetDeviceQueue(m_device, indices.graphicsFamily.value(), 0, &m_graphicsQueue);
