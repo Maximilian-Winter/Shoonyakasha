@@ -14,6 +14,8 @@ The fog lives in a grid that follows the camera: three 3D images, `fogScatter`, 
 - **`FogIntegrate`** (`fog_integrate.comp`) runs along each column of the grid from the eye outwards, adding up the scattered light, faded by the fog in front of it, and the transmittance. Each slice of `fogIntegrated` holds both up to its far end.
 - **`FogApply`** (`fog_apply.frag`) reads `fogIntegrated` at each pixel's depth, interpolated between slices, and blends it onto `hdrColor` with the factors `one` and `src_alpha`: the colour becomes the fog's light plus the colour times the transmittance.
 
+`FogScatter`, `FogHistory` and `FogIntegrate`, like `LightClusters`, run on the compute queue ([`queue`](../../../../../docs/reference/pipeline-json.md#passes-and-pipeline-state)). They depend on no graphics pass of the frame, so on a GPU with async compute they run beside the shadow, G-buffer and lighting passes, and `FogApply` waits for them.
+
 ## The `Fog` block
 
 `scene.custom.fog.*`, all `vec4`, set with `set_custom_vec4`:

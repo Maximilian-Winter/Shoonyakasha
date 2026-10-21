@@ -1047,6 +1047,13 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         }
         m_logger->log(LogLevel::Info, "Queue batches: %zu (%zu compute), %zu waiting on the other queue",
                       result.queueBatches.size(), compute, withWait);
+        for (size_t b = 0; b < result.queueBatches.size(); ++b) {
+            const auto& batch = result.queueBatches[b];
+            std::string names;
+            for (uint32_t pi : batch.passes) names += (names.empty() ? "" : ", ") + passes[pi].name;
+            m_logger->log(LogLevel::Info, "  batch %zu (%s, waits for %d): %s", b,
+                          batch.queue == QueueType::Compute ? "compute" : "graphics", batch.wait, names.c_str());
+        }
     }
 
     size_t imageBarrierCount = 0, memoryBarrierCount = 0;

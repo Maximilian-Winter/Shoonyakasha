@@ -3896,6 +3896,7 @@
     {
       "name": "LightClusters",
       "type": "compute",
+      "queue": "compute",
       "execution": {
         "type": "compute_dispatch",
         "workgroupSize": [
@@ -4604,6 +4605,7 @@
     {
       "name": "FogScatter",
       "type": "compute",
+      "queue": "compute",
       "enabled": false,
       "requires": [
         "rayQuery"
@@ -4657,6 +4659,7 @@
     {
       "name": "FogHistory",
       "type": "transfer",
+      "queue": "compute",
       "enabled": false,
       "execution": {
         "type": "copy"
@@ -4677,6 +4680,7 @@
     {
       "name": "FogIntegrate",
       "type": "compute",
+      "queue": "compute",
       "enabled": false,
       "execution": {
         "type": "compute_dispatch",
