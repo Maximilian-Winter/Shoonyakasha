@@ -1330,6 +1330,12 @@ bool FrameGraphCompiler::createPipelines(
 
         // Shaders. Without a fragment shader the pipeline is depth only.
         builder.withShaders(pd.vertexShader, pd.fragmentShader);
+        if (!pd.tessControlShader.empty()) {
+            builder.withShader(VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, pd.tessControlShader);
+            builder.withShader(VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, pd.tessEvaluationShader);
+            builder.withTessellation(pd.patchControlPoints);
+        }
+        if (!pd.geometryShader.empty()) builder.withGeometryShader(pd.geometryShader);
 
         // Vertex input — check declarative registry first, then fall back to hardcoded
         if (pd.vertexInput != "none") {
@@ -1797,7 +1803,8 @@ bool FrameGraphCompiler::validateShaderInterfaces(
 
     for (const auto& pass : builder.getPassDeclarations()) {
         const auto& pd = pass.pipelineDesc;
-        const std::string* shaders[] = {&pd.vertexShader, &pd.fragmentShader, &pd.computeShader};
+        std::vector<const std::string*> shaders;
+        for (const auto& key : kShaderKeys) shaders.push_back(&pd.shader(key.stage));
 
         ShaderInterfaceExpectation expected;
         expected.setCount = static_cast<uint32_t>(pass.descriptorSetRefs.size());

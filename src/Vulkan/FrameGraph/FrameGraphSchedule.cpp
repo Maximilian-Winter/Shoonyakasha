@@ -130,6 +130,18 @@ VkAccessFlags usageToAccessMask(ResourceUsage usage) {
     return 0;
 }
 
+VkPipelineStageFlags extraShaderStages(const PassDeclaration& pass, ResourceUsage usage) {
+    const bool shaderUse = usage == ResourceUsage::ShaderReadOnly || usage == ResourceUsage::ShaderReadWrite ||
+                           usage == ResourceUsage::StorageImageWrite || usage == ResourceUsage::InputAttachment;
+    if (pass.type != PassType::Graphics || !shaderUse) return 0;
+    const auto& pd = pass.pipelineDesc;
+    VkPipelineStageFlags stages = 0;
+    if (!pd.tessControlShader.empty()) stages |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT;
+    if (!pd.tessEvaluationShader.empty()) stages |= VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
+    if (!pd.geometryShader.empty()) stages |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
+    return stages;
+}
+
 bool readsPreviousContents(const ResourceAccess& access, bool isOutput) {
     if (!isOutput) return true;
     switch (access.usage) {
@@ -662,7 +674,7 @@ BarrierPlan planBarriers(
 
                 transition(states[ri], r, access.handle, range,
                            usageToLayout(access.usage),
-                           usageToStageMask(access.usage, pass.type),
+                           usageToStageMask(access.usage, pass.type) | extraShaderStages(pass, access.usage),
                            usageToAccessMask(access.usage),
                            pre[pi]);
             };

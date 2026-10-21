@@ -327,9 +327,12 @@ ShaderBufferQuery reflectShaderBufferUse(
         if (hasManualPipeline && hasManualPipeline(pass.name)) return std::nullopt;
         const auto& pd = pass.pipelineDesc;
         const std::pair<const std::string*, VkPipelineStageFlags> shaders[] = {
-            {&pd.vertexShader,   VK_PIPELINE_STAGE_VERTEX_SHADER_BIT},
-            {&pd.fragmentShader, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT},
-            {&pd.computeShader,  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT},
+            {&pd.vertexShader,         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT},
+            {&pd.tessControlShader,    VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT},
+            {&pd.tessEvaluationShader, VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT},
+            {&pd.geometryShader,       VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT},
+            {&pd.fragmentShader,       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT},
+            {&pd.computeShader,        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT},
         };
         ShaderBufferUse use;
         bool any = false;

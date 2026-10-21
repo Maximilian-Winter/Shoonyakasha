@@ -66,7 +66,8 @@ namespace JsonUtils {
     // Pipeline state names; each throws on a name it does not know
     VkCullModeFlags       stringToCullMode(const std::string& str);     // none, front, back, front_and_back
     VkPrimitiveTopology   stringToTopology(const std::string& str);     // triangle_list, triangle_strip,
-                                                                        // line_list, line_strip, point_list
+                                                                        // line_list, line_strip, point_list,
+                                                                        // patch_list
     VkBlendFactor         stringToBlendFactor(const std::string& str);  // zero, one, src_color, ...
     VkBlendOp             stringToBlendOp(const std::string& str);      // add, subtract, reverse_subtract, min, max
 
@@ -89,6 +90,8 @@ struct PipelineCapabilities {
     bool rayQuery = true;            // "rayQuery": VulkanDevice::hasRayQuery
     bool drawIndirectCount = true;   // "drawIndirectCount": VulkanDevice::hasDrawIndirectCount
     bool multiDrawIndirect = true;   // several draws in one draw_indirect: the device feature
+    bool geometryShader = true;      // "geometryShader": the device feature
+    bool tessellationShader = true;  // "tessellationShader": the device feature
 };
 
 void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,

@@ -33,6 +33,16 @@ PipelineStateBuilder& PipelineStateBuilder::withComputeShader(const std::string&
     return *this;
 }
 
+PipelineStateBuilder& PipelineStateBuilder::withShader(VkShaderStageFlagBits stage, const std::string& path) {
+    m_state.shaderPaths.emplace_back(stage, path);
+    return *this;
+}
+
+PipelineStateBuilder& PipelineStateBuilder::withTessellation(uint32_t controlPoints) {
+    m_state.patchControlPoints = controlPoints;
+    return *this;
+}
+
 PipelineStateBuilder& PipelineStateBuilder::withGeometryShader(const std::string& geomPath) {
     m_state.shaderPaths.emplace_back(VK_SHADER_STAGE_GEOMETRY_BIT, geomPath);
     return *this;
@@ -499,6 +509,10 @@ void VulkanPipeline::createPipeline() {
     pipelineInfo.pInputAssemblyState = &inputAssembly;
     pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterizer;
+    VkPipelineTessellationStateCreateInfo tessellation{};
+    tessellation.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+    tessellation.patchControlPoints = m_state.patchControlPoints;
+    pipelineInfo.pTessellationState = m_state.patchControlPoints > 0 ? &tessellation : nullptr;
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;

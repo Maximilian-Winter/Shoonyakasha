@@ -44,6 +44,10 @@ public:
     PipelineStateBuilder& withShaders(const std::string& vertPath, const std::string& fragPath);
     PipelineStateBuilder& withComputeShader(const std::string& computePath);
     PipelineStateBuilder& withGeometryShader(const std::string& geomPath);
+    /// Add the shader of one more stage, such as tessellation control.
+    PipelineStateBuilder& withShader(VkShaderStageFlagBits stage, const std::string& path);
+    /// Patches of `controlPoints` vertices, for tessellation shaders.
+    PipelineStateBuilder& withTessellation(uint32_t controlPoints);
 
     // Input assembly configuration
     PipelineStateBuilder& withTopology(VkPrimitiveTopology topology);
@@ -111,6 +115,7 @@ public:
         // Input assembly
         VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         bool primitiveRestart = false;
+        uint32_t patchControlPoints = 0;  // above 0: tessellation
 
         // Vertex input
         std::vector<VkVertexInputBindingDescription> vertexBindings;

@@ -235,6 +235,9 @@ void VulkanDevice::createLogicalDevice() {
     // depth bounds test.
     deviceFeatures.independentBlend = supportedFeatures.independentBlend;
     deviceFeatures.depthBounds = supportedFeatures.depthBounds;
+    // Pipeline JSON geometry and tessellation shaders.
+    deviceFeatures.geometryShader = supportedFeatures.geometryShader;
+    deviceFeatures.tessellationShader = supportedFeatures.tessellationShader;
     m_enabledFeatures = deviceFeatures;
 
     // Enable timeline semaphore feature for multi-queue synchronization

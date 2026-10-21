@@ -91,6 +91,10 @@ bool readsPreviousContents(const ResourceAccess& access, bool isOutput);
 /// Whether an output is rendered to as a colour or depth attachment.
 bool isAttachmentUsage(ResourceUsage usage);
 
+/// Shader stages beyond usageToStageMask's that a graphics pass's image
+/// reads and writes reach: its tessellation and geometry shaders, if any.
+VkPipelineStageFlags extraShaderStages(const PassDeclaration& pass, ResourceUsage usage);
+
 // ═══════════════════════════════════════════════════════════════
 // Validation
 // ═══════════════════════════════════════════════════════════════

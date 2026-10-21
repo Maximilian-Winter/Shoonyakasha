@@ -281,10 +281,48 @@ using PassExecuteFn = std::function<void(const PassExecuteContext&)>;
 // Pipeline Description — JSON-serializable pipeline state
 // ═══════════════════════════════════════════════════════════════
 
+/// A pipeline JSON shader key and the stage it fills.
+struct ShaderKey {
+    const char*           key;
+    VkShaderStageFlagBits stage;
+};
+
+/// Every shader key of a "pipeline" block.
+inline constexpr ShaderKey kShaderKeys[] = {
+    {"vertexShader",         VK_SHADER_STAGE_VERTEX_BIT},
+    {"tessControlShader",    VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT},
+    {"tessEvaluationShader", VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT},
+    {"geometryShader",       VK_SHADER_STAGE_GEOMETRY_BIT},
+    {"fragmentShader",       VK_SHADER_STAGE_FRAGMENT_BIT},
+    {"computeShader",        VK_SHADER_STAGE_COMPUTE_BIT},
+};
+
 struct PipelineDesc {
     std::string vertexShader;
     std::string fragmentShader;
     std::string computeShader;
+    // Optional graphics stages, JSON "tessControlShader" and
+    // "tessEvaluationShader" (together, with "topology": "patch_list" and
+    // "patchControlPoints") and "geometryShader".
+    std::string tessControlShader;
+    std::string tessEvaluationShader;
+    std::string geometryShader;
+    uint32_t    patchControlPoints = 0;
+
+    /// The path a shader key names (kShaderKeys), empty for none.
+    const std::string& shader(VkShaderStageFlagBits stage) const {
+        switch (stage) {
+            case VK_SHADER_STAGE_VERTEX_BIT:                  return vertexShader;
+            case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:    return tessControlShader;
+            case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: return tessEvaluationShader;
+            case VK_SHADER_STAGE_GEOMETRY_BIT:                return geometryShader;
+            case VK_SHADER_STAGE_FRAGMENT_BIT:                return fragmentShader;
+            default:                                          return computeShader;
+        }
+    }
+    std::string& shader(VkShaderStageFlagBits stage) {
+        return const_cast<std::string&>(static_cast<const PipelineDesc&>(*this).shader(stage));
+    }
 
     bool depthTest  = true;
     bool depthWrite = true;

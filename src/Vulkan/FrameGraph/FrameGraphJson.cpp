@@ -363,8 +363,9 @@ VkPrimitiveTopology stringToTopology(const std::string& str) {
     if (str == "line_list")      return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     if (str == "line_strip")     return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
     if (str == "point_list")     return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    if (str == "patch_list")     return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
     throw std::runtime_error("Unknown topology: '" + str + "' (expected triangle_list, triangle_strip, "
-                             "line_list, line_strip or point_list)");
+                             "line_list, line_strip, point_list or patch_list)");
 }
 
 VkBlendFactor stringToBlendFactor(const std::string& str) {
@@ -1728,10 +1729,14 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                         met = met && capabilities.rayQuery;
                     } else if (what == "drawIndirectCount") {
                         met = met && capabilities.drawIndirectCount;
+                    } else if (what == "geometryShader") {
+                        met = met && capabilities.geometryShader;
+                    } else if (what == "tessellationShader") {
+                        met = met && capabilities.tessellationShader;
                     } else {
                         throw std::runtime_error("Pass '" + name + "' requires '" + what +
-                                                 "', which is not a capability (expected rayQuery or "
-                                                 "drawIndirectCount)");
+                                                 "', which is not a capability (expected rayQuery, "
+                                                 "drawIndirectCount, geometryShader or tessellationShader)");
                     }
                 }
                 if (!met) {
@@ -1780,6 +1785,45 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 pass.pipelineDesc.vertexShader   = pipeJson.value("vertexShader", std::string{});
                 pass.pipelineDesc.fragmentShader = pipeJson.value("fragmentShader", std::string{});
                 pass.pipelineDesc.computeShader  = pipeJson.value("computeShader", std::string{});
+                pass.pipelineDesc.tessControlShader    = pipeJson.value("tessControlShader", std::string{});
+                pass.pipelineDesc.tessEvaluationShader = pipeJson.value("tessEvaluationShader", std::string{});
+                pass.pipelineDesc.geometryShader       = pipeJson.value("geometryShader", std::string{});
+                pass.pipelineDesc.patchControlPoints   = pipeJson.value("patchControlPoints", 0u);
+                {
+                    const auto& pd = pass.pipelineDesc;
+                    const std::string where = "Pass '" + pass.name + "'";
+                    const bool tess = !pd.tessControlShader.empty() || !pd.tessEvaluationShader.empty();
+                    const bool extra = tess || !pd.geometryShader.empty();
+                    if (extra && (pass.type != PassType::Graphics || pd.vertexShader.empty())) {
+                        throw std::runtime_error(where + ": tessellation and geometry shaders need a graphics "
+                                                 "pass with a vertexShader");
+                    }
+                    if (tess && (pd.tessControlShader.empty() || pd.tessEvaluationShader.empty())) {
+                        throw std::runtime_error(where + ": tessellation takes both tessControlShader and "
+                                                 "tessEvaluationShader");
+                    }
+                    const bool patches = pipeJson.value("topology", std::string{}) == "patch_list";
+                    if (tess != patches) {
+                        throw std::runtime_error(where + ": tessellation shaders and \"topology\": "
+                                                 "\"patch_list\" go together");
+                    }
+                    if (tess && (pd.patchControlPoints < 1 || pd.patchControlPoints > 32)) {
+                        throw std::runtime_error(where + ": patchControlPoints must be 1 to 32");
+                    }
+                    if (!tess && pipeJson.contains("patchControlPoints")) {
+                        throw std::runtime_error(where + ": patchControlPoints applies to tessellation");
+                    }
+                    if (tess && !capabilities.tessellationShader) {
+                        throw std::runtime_error(where + " uses tessellation shaders, which this device lacks; "
+                                                 "declare \"requires\": [\"tessellationShader\"] to leave the "
+                                                 "pass out on such devices");
+                    }
+                    if (!pd.geometryShader.empty() && !capabilities.geometryShader) {
+                        throw std::runtime_error(where + " uses a geometry shader, which this device lacks; "
+                                                 "declare \"requires\": [\"geometryShader\"] to leave the "
+                                                 "pass out on such devices");
+                    }
+                }
                 pass.pipelineDesc.depthTest      = pipeJson.value("depthTest", true);
                 pass.pipelineDesc.depthWrite     = pipeJson.value("depthWrite", true);
                 pass.pipelineDesc.depthCompareOp = pipeJson.value("depthCompareOp", std::string{"less"});
@@ -2236,8 +2280,8 @@ void resolveShaderPathsAgainst(nlohmann::json& json, const std::filesystem::path
         for (auto& pass : json["passes"]) {
             if (!pass.is_object() || !pass.contains("pipeline") || !pass["pipeline"].is_object()) continue;
             auto& pipe = pass["pipeline"];
-            for (const char* key : {"vertexShader", "fragmentShader", "computeShader"}) {
-                if (pipe.contains(key)) resolvePathAgainst(pipe[key], dir);
+            for (const auto& shader : kShaderKeys) {
+                if (pipe.contains(shader.key)) resolvePathAgainst(pipe[shader.key], dir);
             }
         }
     }
@@ -2497,6 +2541,10 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             if (!pd.vertexShader.empty())   pipeJson["vertexShader"] = pd.vertexShader;
             if (!pd.fragmentShader.empty()) pipeJson["fragmentShader"] = pd.fragmentShader;
             if (!pd.computeShader.empty())  pipeJson["computeShader"] = pd.computeShader;
+            if (!pd.tessControlShader.empty())    pipeJson["tessControlShader"] = pd.tessControlShader;
+            if (!pd.tessEvaluationShader.empty()) pipeJson["tessEvaluationShader"] = pd.tessEvaluationShader;
+            if (!pd.geometryShader.empty())       pipeJson["geometryShader"] = pd.geometryShader;
+            if (pd.patchControlPoints != 0)       pipeJson["patchControlPoints"] = pd.patchControlPoints;
             pipeJson["depthTest"]  = pd.depthTest;
             pipeJson["depthWrite"] = pd.depthWrite;
             if (pd.depthCompareOp != "less") pipeJson["depthCompareOp"] = pd.depthCompareOp;
