@@ -86,6 +86,13 @@ public:
     /// in getEnabledFeatures().
     bool hasDrawIndirectCount() const { return m_drawIndirectCount; }
 
+    /// Mesh shaders (VK_EXT_mesh_shader), enabled when the device has them,
+    /// and task shaders where it has those too. drawMeshTasks() records
+    /// vkCmdDrawMeshTasksEXT; it is null without mesh shaders.
+    bool hasMeshShader() const { return m_meshShader; }
+    bool hasTaskShader() const { return m_taskShader; }
+    PFN_vkCmdDrawMeshTasksEXT drawMeshTasks() const { return m_drawMeshTasks; }
+
     /// The physical device's limits, such as maxPushConstantsSize.
     const VkPhysicalDeviceLimits& getLimits() const { return m_limits; }
 
@@ -114,10 +121,16 @@ private:
     VkPhysicalDeviceFeatures m_enabledFeatures{};
     bool m_rayQuery = false;
     bool m_drawIndirectCount = false;
+    bool m_meshShader = false;
+    bool m_taskShader = false;
+    PFN_vkCmdDrawMeshTasksEXT m_drawMeshTasks = nullptr;
     VkPhysicalDeviceLimits m_limits{};
     VkPipelineCache m_pipelineCache = VK_NULL_HANDLE;
     std::string m_pipelineCachePath;
     bool supportsRayQuery(VkPhysicalDevice device) const;
+    /// The mesh and task shader features of VK_EXT_mesh_shader, both false
+    /// when the device lacks the extension.
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshShaderSupport(VkPhysicalDevice device) const;
     std::unique_ptr<VulkanMemoryAllocator> m_vmaAllocator;
 
     // Declared after the allocator, so it is destroyed first and can still free

@@ -46,6 +46,7 @@ ExecutionKind executionKindOf(const std::string& type) {
     if (type == "draw_indirect")    return ExecutionKind::DrawIndirect;
     if (type == "copy")             return ExecutionKind::Copy;
     if (type == "blit")             return ExecutionKind::Blit;
+    if (type == "draw_mesh_tasks")  return ExecutionKind::DrawMeshTasks;
     if (type == "manual" || type.empty()) return ExecutionKind::Manual;
     if (type == "scene_geometry" || type == "ui_canvas" || isEntityGeometryExecutionType(type))
         return ExecutionKind::SceneRenderer;
@@ -1323,13 +1324,17 @@ bool FrameGraphCompiler::createPipelines(
 
         // Skip if no shaders specified — user manages pipelines manually
         const auto& pd = passDecl.pipelineDesc;
-        if (pd.vertexShader.empty()) continue;
+        if (pd.vertexShader.empty() && pd.meshShader.empty()) continue;
 
         // Build pipeline from PipelineDesc
         PipelineStateBuilder builder;
 
         // Shaders. Without a fragment shader the pipeline is depth only.
-        builder.withShaders(pd.vertexShader, pd.fragmentShader);
+        if (!pd.meshShader.empty()) {
+            builder.withMeshShaders(pd.taskShader, pd.meshShader, pd.fragmentShader);
+        } else {
+            builder.withShaders(pd.vertexShader, pd.fragmentShader);
+        }
         if (!pd.tessControlShader.empty()) {
             builder.withShader(VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, pd.tessControlShader);
             builder.withShader(VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, pd.tessEvaluationShader);
@@ -1338,7 +1343,7 @@ bool FrameGraphCompiler::createPipelines(
         if (!pd.geometryShader.empty()) builder.withGeometryShader(pd.geometryShader);
 
         // Vertex input — check declarative registry first, then fall back to hardcoded
-        if (pd.vertexInput != "none") {
+        if (pd.vertexInput != "none" && pd.meshShader.empty()) {
             VkVertexInputBindingDescription vtxBinding{};
             std::vector<VkVertexInputAttributeDescription> vtxAttributes;
 

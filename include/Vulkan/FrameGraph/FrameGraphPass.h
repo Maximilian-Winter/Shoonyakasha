@@ -293,6 +293,8 @@ inline constexpr ShaderKey kShaderKeys[] = {
     {"tessControlShader",    VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT},
     {"tessEvaluationShader", VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT},
     {"geometryShader",       VK_SHADER_STAGE_GEOMETRY_BIT},
+    {"taskShader",           VK_SHADER_STAGE_TASK_BIT_EXT},
+    {"meshShader",           VK_SHADER_STAGE_MESH_BIT_EXT},
     {"fragmentShader",       VK_SHADER_STAGE_FRAGMENT_BIT},
     {"computeShader",        VK_SHADER_STAGE_COMPUTE_BIT},
 };
@@ -308,6 +310,10 @@ struct PipelineDesc {
     std::string tessEvaluationShader;
     std::string geometryShader;
     uint32_t    patchControlPoints = 0;
+    // A mesh pipeline, JSON "meshShader" and optionally "taskShader", in
+    // place of the vertex stages; its pass's execution is "draw_mesh_tasks".
+    std::string taskShader;
+    std::string meshShader;
 
     /// The path a shader key names (kShaderKeys), empty for none.
     const std::string& shader(VkShaderStageFlagBits stage) const {
@@ -316,6 +322,8 @@ struct PipelineDesc {
             case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:    return tessControlShader;
             case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: return tessEvaluationShader;
             case VK_SHADER_STAGE_GEOMETRY_BIT:                return geometryShader;
+            case VK_SHADER_STAGE_TASK_BIT_EXT:                return taskShader;
+            case VK_SHADER_STAGE_MESH_BIT_EXT:                return meshShader;
             case VK_SHADER_STAGE_FRAGMENT_BIT:                return fragmentShader;
             default:                                          return computeShader;
         }
@@ -504,6 +512,8 @@ struct ExecutionDesc {
     //   "copy"               - Transfer: copy the transfer_src input into the
     //                          transfer_dst output, mip by mip
     //   "blit"               - Transfer: the same, scaled with `filter`
+    //   "draw_mesh_tasks"    - Mesh pipeline: vkCmdDrawMeshTasksEXT with the
+    //                          group counts of `dispatch`
     std::string type = "none";
 
     // For "blit": "linear" or "nearest"

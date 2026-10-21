@@ -52,7 +52,8 @@ RESOURCE_USAGES = frozenset({
 PASS_TYPES = frozenset({"graphics", "compute", "transfer"})
 
 #: What a pass may "require"; a device without it leaves the pass out.
-CAPABILITIES = frozenset({"rayQuery", "drawIndirectCount", "geometryShader", "tessellationShader"})
+CAPABILITIES = frozenset({"rayQuery", "drawIndirectCount", "geometryShader", "tessellationShader",
+                          "meshShader", "taskShader"})
 
 #: What a buffer layout with "source": {"type": "scene"} holds ("data").
 SCENE_DATA = frozenset({"lights", "rayInstances"})
@@ -361,7 +362,8 @@ def validate_json(document, base_dir=None, source="<json>"):
             pipeline_state = {}
 
         for key in ("vertexShader", "fragmentShader", "computeShader",
-                    "geometryShader", "tessControlShader", "tessEvaluationShader"):
+                    "geometryShader", "tessControlShader", "tessEvaluationShader",
+                    "taskShader", "meshShader"):
             reference = pipeline_state.get(key)
             if not reference or base_dir is None:
                 continue

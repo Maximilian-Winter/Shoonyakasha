@@ -535,6 +535,7 @@ enum class ExecutionKind : uint8_t {
     SceneRenderer,   // "scene_geometry" and the entity geometry types
     Copy,            // "copy": vkCmdCopyImage from the transfer_src input to the transfer_dst output
     Blit,            // "blit": vkCmdBlitImage, the same, scaled and filtered
+    DrawMeshTasks,   // "draw_mesh_tasks": vkCmdDrawMeshTasksEXT
     Manual,          // "manual"
     Unknown          // anything else; warned about while recording
 };

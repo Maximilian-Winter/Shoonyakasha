@@ -92,7 +92,8 @@ bool readsPreviousContents(const ResourceAccess& access, bool isOutput);
 bool isAttachmentUsage(ResourceUsage usage);
 
 /// Shader stages beyond usageToStageMask's that a graphics pass's image
-/// reads and writes reach: its tessellation and geometry shaders, if any.
+/// reads and writes reach: its tessellation, geometry, task and mesh
+/// shaders, if any.
 VkPipelineStageFlags extraShaderStages(const PassDeclaration& pass, ResourceUsage usage);
 
 // ═══════════════════════════════════════════════════════════════

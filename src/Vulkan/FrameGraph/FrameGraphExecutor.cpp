@@ -607,7 +607,8 @@ void FrameGraphExecutor::executeAutoCallback(
     }
 
     case ExecutionKind::ComputeDispatch:
-    case ExecutionKind::ComputeImage: {
+    case ExecutionKind::ComputeImage:
+    case ExecutionKind::DrawMeshTasks: {
         // Calculate dispatch dimensions
         uint32_t groupX = 1, groupY = 1, groupZ = 1;
 
@@ -640,6 +641,14 @@ void FrameGraphExecutor::executeAutoCallback(
             groupX = calcDim(exec.dispatch[0]);
             groupY = calcDim(exec.dispatch[1]);
             groupZ = calcDim(exec.dispatch[2]);
+        }
+
+        if (compiledPass.executionKind == ExecutionKind::DrawMeshTasks) {
+            // Mesh pipelines exist only on devices with mesh shaders.
+            if (const auto drawMeshTasks = m_device.drawMeshTasks()) {
+                drawMeshTasks(commandBuffer, groupX, groupY, groupZ);
+            }
+            break;
         }
 
         m_logger->logEvery(5.0f, LogLevel::Info,

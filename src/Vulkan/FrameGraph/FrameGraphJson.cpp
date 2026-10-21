@@ -214,6 +214,8 @@ VkShaderStageFlags stringToShaderStage(const std::string& str) {
         {"geometry",    VK_SHADER_STAGE_GEOMETRY_BIT},
         {"tess_control",    VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT},
         {"tess_eval",       VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT},
+        {"task",        VK_SHADER_STAGE_TASK_BIT_EXT},
+        {"mesh",        VK_SHADER_STAGE_MESH_BIT_EXT},
         {"all",         VK_SHADER_STAGE_ALL},
     };
     auto it = map.find(str);
@@ -1733,10 +1735,15 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                         met = met && capabilities.geometryShader;
                     } else if (what == "tessellationShader") {
                         met = met && capabilities.tessellationShader;
+                    } else if (what == "meshShader") {
+                        met = met && capabilities.meshShader;
+                    } else if (what == "taskShader") {
+                        met = met && capabilities.taskShader;
                     } else {
                         throw std::runtime_error("Pass '" + name + "' requires '" + what +
                                                  "', which is not a capability (expected rayQuery, "
-                                                 "drawIndirectCount, geometryShader or tessellationShader)");
+                                                 "drawIndirectCount, geometryShader, tessellationShader, "
+                                                 "meshShader or taskShader)");
                     }
                 }
                 if (!met) {
@@ -1789,6 +1796,32 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 pass.pipelineDesc.tessEvaluationShader = pipeJson.value("tessEvaluationShader", std::string{});
                 pass.pipelineDesc.geometryShader       = pipeJson.value("geometryShader", std::string{});
                 pass.pipelineDesc.patchControlPoints   = pipeJson.value("patchControlPoints", 0u);
+                pass.pipelineDesc.taskShader           = pipeJson.value("taskShader", std::string{});
+                pass.pipelineDesc.meshShader           = pipeJson.value("meshShader", std::string{});
+                {
+                    const auto& pd = pass.pipelineDesc;
+                    const std::string where = "Pass '" + pass.name + "'";
+                    const bool mesh = !pd.meshShader.empty();
+                    if (!pd.taskShader.empty() && !mesh) {
+                        throw std::runtime_error(where + ": a taskShader needs a meshShader");
+                    }
+                    if (mesh && (pass.type != PassType::Graphics || !pd.vertexShader.empty() ||
+                                 !pd.tessControlShader.empty() || !pd.tessEvaluationShader.empty() ||
+                                 !pd.geometryShader.empty())) {
+                        throw std::runtime_error(where + ": a meshShader takes the place of the vertex, "
+                                                 "tessellation and geometry shaders of a graphics pass");
+                    }
+                    if (mesh && !capabilities.meshShader) {
+                        throw std::runtime_error(where + " uses a mesh shader, which this device lacks; "
+                                                 "declare \"requires\": [\"meshShader\"] to leave the "
+                                                 "pass out on such devices");
+                    }
+                    if (!pd.taskShader.empty() && !capabilities.taskShader) {
+                        throw std::runtime_error(where + " uses a task shader, which this device lacks; "
+                                                 "declare \"requires\": [\"taskShader\"] to leave the "
+                                                 "pass out on such devices");
+                    }
+                }
                 {
                     const auto& pd = pass.pipelineDesc;
                     const std::string where = "Pass '" + pass.name + "'";
@@ -2137,6 +2170,12 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                                                  "' does not apply to execution type '" + type + "'");
                     }
                 }
+            }
+
+            // A mesh pipeline draws with draw_mesh_tasks, and only it does.
+            if (pass.pipelineDesc.meshShader.empty() != (pass.execution.type != "draw_mesh_tasks")) {
+                throw std::runtime_error("Pass '" + pass.name + "': a meshShader goes with execution type "
+                                         "\"draw_mesh_tasks\", and that type needs a meshShader");
             }
 
             // Parse hasSideEffects flag (prevents pass culling for compute-only passes)
@@ -2536,7 +2575,8 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
 
         // Pipeline
         const auto& pd = pass.pipelineDesc;
-        if (!pd.vertexShader.empty() || !pd.fragmentShader.empty() || !pd.computeShader.empty()) {
+        if (!pd.vertexShader.empty() || !pd.fragmentShader.empty() || !pd.computeShader.empty() ||
+            !pd.meshShader.empty()) {
             nlohmann::json pipeJson;
             if (!pd.vertexShader.empty())   pipeJson["vertexShader"] = pd.vertexShader;
             if (!pd.fragmentShader.empty()) pipeJson["fragmentShader"] = pd.fragmentShader;
@@ -2545,6 +2585,8 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             if (!pd.tessEvaluationShader.empty()) pipeJson["tessEvaluationShader"] = pd.tessEvaluationShader;
             if (!pd.geometryShader.empty())       pipeJson["geometryShader"] = pd.geometryShader;
             if (pd.patchControlPoints != 0)       pipeJson["patchControlPoints"] = pd.patchControlPoints;
+            if (!pd.taskShader.empty())           pipeJson["taskShader"] = pd.taskShader;
+            if (!pd.meshShader.empty())           pipeJson["meshShader"] = pd.meshShader;
             pipeJson["depthTest"]  = pd.depthTest;
             pipeJson["depthWrite"] = pd.depthWrite;
             if (pd.depthCompareOp != "less") pipeJson["depthCompareOp"] = pd.depthCompareOp;

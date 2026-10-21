@@ -46,6 +46,10 @@ public:
     PipelineStateBuilder& withGeometryShader(const std::string& geomPath);
     /// Add the shader of one more stage, such as tessellation control.
     PipelineStateBuilder& withShader(VkShaderStageFlagBits stage, const std::string& path);
+    /// A mesh pipeline: optional task shader, mesh shader and an optional
+    /// fragment shader, with no vertex input.
+    PipelineStateBuilder& withMeshShaders(const std::string& taskPath, const std::string& meshPath,
+                                          const std::string& fragPath);
     /// Patches of `controlPoints` vertices, for tessellation shaders.
     PipelineStateBuilder& withTessellation(uint32_t controlPoints);
 

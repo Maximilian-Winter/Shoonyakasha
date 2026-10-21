@@ -4,6 +4,7 @@
 
 #include "../../include/Vulkan/VulkanDevice.h"
 #include "../../include/Vulkan/VulkanMemoryAllocator.h"
+#include <algorithm>
 #include <set>
 #include <cstdlib>
 #include <filesystem>
@@ -257,14 +258,20 @@ void VulkanDevice::createLogicalDevice() {
     vulkan12Features.timelineSemaphore = VK_TRUE;
 
     // vkCmdDrawIndirectCount, where the device has it.
+    VkPhysicalDeviceVulkan13Features supported13{};
+    supported13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     VkPhysicalDeviceVulkan12Features supported12{};
     supported12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    supported12.pNext = &supported13;
     VkPhysicalDeviceFeatures2 supported2{};
     supported2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     supported2.pNext = &supported12;
     vkGetPhysicalDeviceFeatures2(m_physicalDevice, &supported2);
     m_drawIndirectCount = supported12.drawIndirectCount == VK_TRUE;
     vulkan12Features.drawIndirectCount = supported12.drawIndirectCount;
+    // Shaders compiled for Vulkan 1.3 declare their workgroup size with
+    // LocalSizeId, which needs maintenance4.
+    vulkan13Features.maintenance4 = supported13.maintenance4;
 
     VkPhysicalDeviceProperties deviceProperties;
     vkGetPhysicalDeviceProperties(m_physicalDevice, &deviceProperties);
@@ -296,6 +303,22 @@ void VulkanDevice::createLogicalDevice() {
     }
     m_logger->log(LogLevel::Info, "Ray queries: %s", m_rayQuery ? "enabled" : "not available");
 
+    // Mesh and task shaders, when the device has them.
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures{};
+    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    const VkPhysicalDeviceMeshShaderFeaturesEXT meshSupport = meshShaderSupport(m_physicalDevice);
+    m_meshShader = meshSupport.meshShader == VK_TRUE;
+    m_taskShader = m_meshShader && meshSupport.taskShader == VK_TRUE;
+    if (m_meshShader) {
+        extensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
+        meshFeatures.meshShader = VK_TRUE;
+        meshFeatures.taskShader = m_taskShader ? VK_TRUE : VK_FALSE;
+        meshFeatures.pNext = vulkan13Features.pNext;
+        vulkan13Features.pNext = &meshFeatures;
+    }
+    m_logger->log(LogLevel::Info, "Mesh shaders: %s, task shaders: %s", m_meshShader ? "enabled" : "not available",
+                  m_taskShader ? "enabled" : "not available");
+
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.pNext = &vulkan12Features;
@@ -315,6 +338,11 @@ void VulkanDevice::createLogicalDevice() {
     if (vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device) != VK_SUCCESS) {
         m_logger->log(LogLevel::Error, "Failed to create logical device");
         throw std::runtime_error("failed to create logical device!");
+    }
+
+    if (m_meshShader) {
+        m_drawMeshTasks = reinterpret_cast<PFN_vkCmdDrawMeshTasksEXT>(
+            vkGetDeviceProcAddr(m_device, "vkCmdDrawMeshTasksEXT"));
     }
 
     vkGetDeviceQueue(m_device, indices.graphicsFamily.value(), 0, &m_graphicsQueue);
@@ -480,6 +508,25 @@ bool VulkanDevice::supportsRayQuery(VkPhysicalDevice device) const {
     return vulkan12.bufferDeviceAddress && acceleration.accelerationStructure && rayQuery.rayQuery &&
            vulkan12.descriptorIndexing && vulkan12.runtimeDescriptorArray &&
            vulkan12.shaderSampledImageArrayNonUniformIndexing && vulkan12.descriptorBindingPartiallyBound;
+}
+
+VkPhysicalDeviceMeshShaderFeaturesEXT VulkanDevice::meshShaderSupport(VkPhysicalDevice device) const {
+    VkPhysicalDeviceMeshShaderFeaturesEXT mesh{};
+    mesh.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    uint32_t count = 0;
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr);
+    std::vector<VkExtensionProperties> available(count);
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &count, available.data());
+    const bool has = std::any_of(available.begin(), available.end(), [](const VkExtensionProperties& e) {
+        return std::strcmp(e.extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME) == 0;
+    });
+    if (!has) return mesh;
+    VkPhysicalDeviceFeatures2 features{};
+    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features.pNext = &mesh;
+    vkGetPhysicalDeviceFeatures2(device, &features);
+    mesh.pNext = nullptr;
+    return mesh;
 }
 
 QueueFamilyIndices VulkanDevice::findQueueFamilies(VkPhysicalDevice device) {

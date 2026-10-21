@@ -331,6 +331,8 @@ ShaderBufferQuery reflectShaderBufferUse(
             {&pd.tessControlShader,    VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT},
             {&pd.tessEvaluationShader, VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT},
             {&pd.geometryShader,       VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT},
+            {&pd.taskShader,           VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT},
+            {&pd.meshShader,           VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT},
             {&pd.fragmentShader,       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT},
             {&pd.computeShader,        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT},
         };

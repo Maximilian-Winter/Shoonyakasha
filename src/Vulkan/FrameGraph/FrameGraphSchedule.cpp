@@ -139,6 +139,8 @@ VkPipelineStageFlags extraShaderStages(const PassDeclaration& pass, ResourceUsag
     if (!pd.tessControlShader.empty()) stages |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT;
     if (!pd.tessEvaluationShader.empty()) stages |= VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
     if (!pd.geometryShader.empty()) stages |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
+    if (!pd.taskShader.empty()) stages |= VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT;
+    if (!pd.meshShader.empty()) stages |= VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT;
     return stages;
 }
 

@@ -38,6 +38,15 @@ PipelineStateBuilder& PipelineStateBuilder::withShader(VkShaderStageFlagBits sta
     return *this;
 }
 
+PipelineStateBuilder& PipelineStateBuilder::withMeshShaders(const std::string& taskPath, const std::string& meshPath,
+                                                            const std::string& fragPath) {
+    m_state.shaderPaths.clear();
+    if (!taskPath.empty()) m_state.shaderPaths.emplace_back(VK_SHADER_STAGE_TASK_BIT_EXT, taskPath);
+    m_state.shaderPaths.emplace_back(VK_SHADER_STAGE_MESH_BIT_EXT, meshPath);
+    if (!fragPath.empty()) m_state.shaderPaths.emplace_back(VK_SHADER_STAGE_FRAGMENT_BIT, fragPath);
+    return *this;
+}
+
 PipelineStateBuilder& PipelineStateBuilder::withTessellation(uint32_t controlPoints) {
     m_state.patchControlPoints = controlPoints;
     return *this;
@@ -505,8 +514,10 @@ void VulkanPipeline::createPipeline() {
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
     pipelineInfo.pStages = shaderStages.data();
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    // A mesh pipeline makes its own primitives: no vertex input or assembly.
+    const bool mesh = m_shaderModules.count(VK_SHADER_STAGE_MESH_BIT_EXT) > 0;
+    pipelineInfo.pVertexInputState = mesh ? nullptr : &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = mesh ? nullptr : &inputAssembly;
     pipelineInfo.pViewportState = &viewportState;
     pipelineInfo.pRasterizationState = &rasterizer;
     VkPipelineTessellationStateCreateInfo tessellation{};

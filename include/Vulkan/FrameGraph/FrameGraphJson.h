@@ -92,6 +92,8 @@ struct PipelineCapabilities {
     bool multiDrawIndirect = true;   // several draws in one draw_indirect: the device feature
     bool geometryShader = true;      // "geometryShader": the device feature
     bool tessellationShader = true;  // "tessellationShader": the device feature
+    bool meshShader = true;          // "meshShader": VulkanDevice::hasMeshShader
+    bool taskShader = true;          // "taskShader": VulkanDevice::hasTaskShader
 };
 
 void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,

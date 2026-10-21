@@ -120,3 +120,70 @@ TEST(ShaderStagesBarriers, ReadsWaitAtTheExtraStages) {
                                                 VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT));
     EXPECT_EQ(extraShaderStages(b.getPassDeclarations()[0], ResourceUsage::ColorAttachmentWrite), 0u);
 }
+
+// ── Mesh and task shaders ───────────────────────────────────────
+
+namespace {
+
+const json kMesh = {{"taskShader", "s/p.task.spv"}, {"meshShader", "s/p.mesh.spv"},
+                    {"fragmentShader", "s/p.frag.spv"}};
+const json kMeshExec = {{"execution", {{"type", "draw_mesh_tasks"}, {"dispatch", {{"x", 4}, {"y", 2}}}}}};
+
+} // namespace
+
+TEST(MeshShadersJson, ParseRoundTripAndExecution) {
+    auto b = load(graphWith(kMesh, kMeshExec));
+    const auto& pass = b.getPassDeclarations()[0];
+    EXPECT_EQ(pass.pipelineDesc.meshShader, "s/p.mesh.spv");
+    EXPECT_EQ(pass.pipelineDesc.shader(VK_SHADER_STAGE_TASK_BIT_EXT), "s/p.task.spv");
+    EXPECT_EQ(pass.execution.dispatch[0].value, 4u);
+    EXPECT_EQ(executionKindOf("draw_mesh_tasks"), ExecutionKind::DrawMeshTasks);
+    EXPECT_EQ(JsonUtils::stringToShaderStage("mesh"), static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_MESH_BIT_EXT));
+
+    // The execution block is not saved; the shaders are.
+    json saved = saveGraphToJson(b);
+    saved["passes"][0]["execution"] = kMeshExec["execution"];
+    EXPECT_EQ(load(saved).getPassDeclarations()[0].pipelineDesc.taskShader, "s/p.task.spv");
+}
+
+TEST(MeshShadersJson, BadCombinationsFailAtLoad) {
+    json taskAlone = kMesh;
+    taskAlone.erase("meshShader");
+    json withVertex = kMesh;
+    withVertex["vertexShader"] = "s/p.vert.spv";
+    json withGeometry = kMesh;
+    withGeometry["geometryShader"] = "s/p.geom.spv";
+    for (const auto& pipeline : {taskAlone, withVertex, withGeometry}) {
+        FrameGraphBuilder b;
+        EXPECT_THROW(loadGraphFromJson(b, graphWith(pipeline, kMeshExec)), std::runtime_error) << pipeline.dump();
+    }
+    // A mesh pipeline drawn another way, and draw_mesh_tasks without one.
+    FrameGraphBuilder b;
+    EXPECT_THROW(loadGraphFromJson(b, graphWith(kMesh, {{"execution", {{"type", "fullscreen"}}}})),
+                 std::runtime_error);
+    EXPECT_THROW(loadGraphFromJson(b, graphWith({{"vertexShader", "s/p.vert.spv"}}, kMeshExec)), std::runtime_error);
+}
+
+TEST(MeshShadersJson, MissingFeaturesFailUnlessRequired) {
+    PipelineCapabilities noTask;
+    noTask.taskShader = false;
+    FrameGraphBuilder b;
+    EXPECT_THROW(loadGraphFromJson(b, graphWith(kMesh, kMeshExec), noTask), std::runtime_error);
+    json meshOnly = kMesh;
+    meshOnly.erase("taskShader");
+    EXPECT_EQ(load(graphWith(meshOnly, kMeshExec), noTask).getPassDeclarations().size(), 1u);
+
+    PipelineCapabilities none;
+    none.meshShader = false;
+    none.taskShader = false;
+    json required = kMeshExec;
+    required["requires"] = {"meshShader"};
+    EXPECT_TRUE(load(graphWith(meshOnly, required), none).isUnavailablePass("P"));
+}
+
+TEST(MeshShadersBarriers, ReadsWaitAtTaskAndMeshStages) {
+    auto b = load(graphWith(kMesh, kMeshExec));
+    EXPECT_EQ(extraShaderStages(b.getPassDeclarations()[0], ResourceUsage::ShaderReadOnly),
+              static_cast<VkPipelineStageFlags>(VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT |
+                                                VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT));
+}
