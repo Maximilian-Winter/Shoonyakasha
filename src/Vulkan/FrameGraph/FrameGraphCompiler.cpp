@@ -352,6 +352,7 @@ bool FrameGraphCompiler::createPhysicalResources(
     std::vector<PhysicalResource>& outResources,
     VkExtent2D referenceExtent,
     const ImportedImageMap& importedImages,
+    const std::vector<bool>& sharedWithCompute,
     std::string& outError)
 {
     outResources.resize(declarations.size());
@@ -465,10 +466,12 @@ bool FrameGraphCompiler::createPhysicalResources(
                 }
             }
 
-            const VkImageCreateInfo info = VulkanImage::createInfo(
+            VkImageCreateInfo info = VulkanImage::createInfo(
                 width, height, format, VK_IMAGE_TILING_OPTIMAL, usage, shape.mipLevels, shape.arrayLayers,
                 cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0,
                 volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D, depth, desc.samples);
+            const bool shared = i < sharedWithCompute.size() && sharedWithCompute[i];
+            if (shared) device.shareWithCompute(info);
 
             // The whole-image view shaders sample. A sampled depth/stencil view
             // may name only one aspect, so depth formats are viewed as depth.
@@ -500,7 +503,7 @@ bool FrameGraphCompiler::createPhysicalResources(
                             std::make_unique<VulkanImage>(
                                 device, width, height, format, VK_IMAGE_TILING_OPTIMAL, usage, memProps,
                                 shape.mipLevels, shape.arrayLayers, info.flags, info.imageType, depth,
-                                desc.samples));
+                                desc.samples, shared));
             }
         } else {
             // Buffer resource
@@ -572,7 +575,7 @@ bool FrameGraphCompiler::createTransientImages(
             finishImage(physImg, deferred, std::make_unique<VulkanImage>(
                 device, info.extent.width, info.extent.height, info.format, info.tiling, info.usage,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, info.mipLevels, info.arrayLayers, info.flags,
-                info.imageType, info.extent.depth, info.samples));
+                info.imageType, info.extent.depth, info.samples, info.sharingMode == VK_SHARING_MODE_CONCURRENT));
             continue;
         }
         VkDeviceImageMemoryRequirements query{};
@@ -876,10 +879,16 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     m_logger->log(LogLevel::Info, "Compiling frame graph: %zu passes, %zu resources",
                   passes.size(), resources.size());
 
+    // With async compute, images passes on both queues use are shared by both.
+    std::vector<bool> sharedWithCompute;
+    if (device.hasAsyncCompute()) {
+        sharedWithCompute = sharedAcrossQueues(passes, resources, builder.getDescriptorSetLayouts());
+    }
+
     // Stage 1: Create physical resources. Their shapes (mips and layers) feed
     // everything below, so they exist before the graph is scheduled.
     if (!createPhysicalResources(device, resources, passes, result.physicalResources,
-                                 referenceExtent, importedImages, result.errorMessage)) {
+                                 referenceExtent, importedImages, sharedWithCompute, result.errorMessage)) {
         m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
         return result;
     }
@@ -1016,6 +1025,16 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         const auto memoryBarriers = planBufferBarriers(result.executionOrder, bufferAccesses);
         for (uint32_t pi = 0; pi < passes.size(); ++pi) {
             result.compiledPasses[pi].memoryBarrier = memoryBarriers[pi];
+        }
+    }
+    // Stage 5.2: Barriers recorded on the compute queue name only its stages
+    if (device.hasAsyncCompute()) {
+        for (uint32_t pi : result.executionOrder) {
+            auto& compiled = result.compiledPasses[pi];
+            if (compiled.queueType != QueueType::Compute) continue;
+            fitBarriersToComputeQueue(compiled.preBarriers, compiled.memoryBarrier);
+            MemoryBarrierInfo none;
+            fitBarriersToComputeQueue(compiled.postBarriers, none);
         }
     }
 
@@ -1525,8 +1544,8 @@ void FrameGraphCompiler::generateQueueBatches(
 
     if (executionOrder.empty()) return;
 
-    // If no dedicated compute queue, everything runs on graphics — one batch, no sync
-    if (!device.hasDedicatedComputeQueue()) {
+    // Without async compute, everything runs on graphics — one batch, no sync
+    if (!device.hasAsyncCompute()) {
         std::vector<uint32_t> allPasses(executionOrder.begin(), executionOrder.end());
         outBatches.batches.push_back({QueueType::Graphics, allPasses});
         m_logger->log(LogLevel::Info, "  Single-queue mode: all %zu passes in one batch", allPasses.size());

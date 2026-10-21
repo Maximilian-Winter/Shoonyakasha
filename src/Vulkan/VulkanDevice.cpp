@@ -411,6 +411,11 @@ void VulkanDevice::createLogicalDevice() {
         m_hasDedicatedCompute = false;
         m_logger->log(LogLevel::Info, "No compute queue found, using graphics queue for compute");
     }
+    const char* disableAsync = std::getenv("SHOONYAKASHA_DISABLE_ASYNC_COMPUTE");
+    m_asyncCompute = m_hasDedicatedCompute && !(disableAsync && *disableAsync && std::string(disableAsync) != "0");
+    m_sharedFamilies[0] = indices.graphicsFamily.value();
+    m_sharedFamilies[1] = indices.computeFamily.value_or(indices.graphicsFamily.value());
+    m_logger->log(LogLevel::Info, "Async compute: %s", m_asyncCompute ? "enabled" : "off");
 
     m_logger->log(LogLevel::Info, "Logical device created successfully (graphics=%u, present=%u, compute=%u)",
                   indices.graphicsFamily.value(), indices.presentFamily.value(),
@@ -711,6 +716,20 @@ VkMemoryPropertyFlags VulkanDevice::getMemoryProperties() const
 
 uint32_t VulkanDevice::getGraphicsQueueFamily() const {
     return m_queueFamilyIndices.graphicsFamily.value();
+}
+
+void VulkanDevice::shareWithCompute(VkBufferCreateInfo& info) const {
+    if (!m_asyncCompute) return;
+    info.sharingMode = VK_SHARING_MODE_CONCURRENT;
+    info.queueFamilyIndexCount = 2;
+    info.pQueueFamilyIndices = m_sharedFamilies;
+}
+
+void VulkanDevice::shareWithCompute(VkImageCreateInfo& info) const {
+    if (!m_asyncCompute) return;
+    info.sharingMode = VK_SHARING_MODE_CONCURRENT;
+    info.queueFamilyIndexCount = 2;
+    info.pQueueFamilyIndices = m_sharedFamilies;
 }
 
 uint32_t VulkanDevice::getComputeQueueFamily() const {

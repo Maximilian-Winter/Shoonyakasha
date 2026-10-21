@@ -1827,6 +1827,11 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
             // Parse queue type (default: "graphics" for backward compatibility)
             if (passJson.contains("queue")) {
                 pass.queueType = JsonUtils::stringToQueueType(passJson["queue"].get<std::string>());
+                if (pass.queueType == QueueType::Compute && pass.type == PassType::Graphics) {
+                    throw std::runtime_error("Pass '" + pass.name + "': a graphics pass cannot run on the compute "
+                                             "queue; \"queue\": \"compute\" is for compute, transfer and "
+                                             "ray_tracing passes");
+                }
             }
 
             // Parse inputs

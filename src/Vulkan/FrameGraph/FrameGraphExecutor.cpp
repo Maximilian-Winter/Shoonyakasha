@@ -281,18 +281,18 @@ void FrameGraphExecutor::execute(
         return;
     }
 
-    // Notify debugger of frame begin
-    if (m_debugger) {
-        m_debugger->onFrameBegin(frameIndex);
-    }
-
+    beginFrame(frameIndex);
     recordPasses(compiled, builder, compiled.executionOrder, frameIndex, swapchainImageIndex,
                  commandBuffer, parameters);
+    endFrame(frameIndex);
+}
 
-    // Notify debugger of frame end
-    if (m_debugger) {
-        m_debugger->onFrameEnd(frameIndex);
-    }
+void FrameGraphExecutor::beginFrame(uint32_t frameIndex) {
+    if (m_debugger) m_debugger->onFrameBegin(frameIndex);
+}
+
+void FrameGraphExecutor::endFrame(uint32_t frameIndex) {
+    if (m_debugger) m_debugger->onFrameEnd(frameIndex);
 }
 
 void FrameGraphExecutor::executePasses(

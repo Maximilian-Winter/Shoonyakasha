@@ -1778,6 +1778,7 @@ bool RenderGraph::recompile(VkExtent2D referenceExtent, uint32_t swapchainImageC
 
 void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
                            VkCommandBuffer commandBuffer) {
+    m_frameSegments.assign(1, FrameSegment{QueueType::Graphics, commandBuffer});
     if (!m_compiled.valid) {
         m_logger->log(LogLevel::Error, "Cannot execute: render graph not compiled");
         return;
@@ -1808,14 +1809,28 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
     updateSceneTextures(frameIndex);
     recordRayTracingScene(commandBuffer, frameIndex);
 
-    // Execute all passes
+    // Execute all passes, each batch into the current segment's command
+    // buffer, or a new one where the queue changes
     ++m_recordedFrames;
     if (m_stats) {
         m_stats->beginFrame(frameIndex, std::max(m_maxFramesInFlight, frameIndex + 1),
                             static_cast<uint32_t>(m_compiled.executionOrder.size()));
     }
-    m_executor.execute(m_compiled, m_builder, frameIndex, swapchainImageIndex, commandBuffer, &m_parameters);
+    m_executor.beginFrame(frameIndex);
+    uint32_t segmentsBegun[2] = {0, 0};
+    const auto newSegment = [&](QueueType queue) {
+        const auto q = static_cast<uint32_t>(queue);
+        m_frameSegments.push_back({queue, beginSegment(queue, frameIndex, segmentsBegun[q]++)});
+    };
+    for (const auto& [queue, passIndices] : m_compiled.queueBatches.batches) {
+        if (queue != m_frameSegments.back().queue) newSegment(queue);
+        m_executor.executePasses(m_compiled, m_builder, passIndices, frameIndex, swapchainImageIndex,
+                                 m_frameSegments.back().commandBuffer, &m_parameters);
+    }
+    m_executor.endFrame(frameIndex);
     if (m_stats) m_stats->endFrame();
+    if (m_frameSegments.back().queue != QueueType::Graphics) newSegment(QueueType::Graphics);
+    commandBuffer = m_frameSegments.back().commandBuffer;
 
     // Phase 3: Readback GPU→CPU after passes (buffers and images)
     if (m_stagingManager) {
@@ -1834,7 +1849,78 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
         m_stagingManager->recordImageReadbackCommands(commandBuffer, frameIndex, m_globalFrameNumber);
     }
 
+    for (size_t i = 1; i < m_frameSegments.size(); ++i) vkEndCommandBuffer(m_frameSegments[i].commandBuffer);
     m_globalFrameNumber++;
+}
+
+VkCommandBuffer RenderGraph::beginSegment(QueueType queue, uint32_t frameIndex, uint32_t n) {
+    auto& perFrame = m_segmentBuffers[static_cast<uint32_t>(queue)];
+    if (perFrame.size() <= frameIndex) perFrame.resize(frameIndex + 1);
+    auto& buffers = perFrame[frameIndex];
+    if (n == buffers.size()) {
+        VkCommandBufferAllocateInfo alloc{};
+        alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc.commandPool = queue == QueueType::Compute ? m_device.getComputeCommandPool()
+                                                        : m_device.getCommandPool();
+        alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc.commandBufferCount = 1;
+        VkCommandBuffer buffer = VK_NULL_HANDLE;
+        if (vkAllocateCommandBuffers(m_device.getLogicalDevice(), &alloc, &buffer) != VK_SUCCESS) {
+            throw std::runtime_error("RenderGraph: could not allocate a command buffer");
+        }
+        buffers.push_back(buffer);
+    }
+    VkCommandBuffer buffer = buffers[n];
+    vkResetCommandBuffer(buffer, 0);
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(buffer, &begin);
+    return buffer;
+}
+
+void RenderGraph::submit(VkSemaphore wait, VkPipelineStageFlags2 waitStage, VkSemaphore signal, VkFence fence) {
+    for (size_t i = 0; i < m_frameSegments.size(); ++i) {
+        const auto& segment = m_frameSegments[i];
+        const bool first = i == 0;
+        const bool last = i + 1 == m_frameSegments.size();
+
+        auto semaphore = [](VkSemaphore s, uint64_t value) {
+            VkSemaphoreSubmitInfo info{};
+            info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            info.semaphore = s;
+            info.value = value;
+            info.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            return info;
+        };
+        VkSemaphoreSubmitInfo waits[1]{}, signals[1]{};
+        uint32_t waitCount = 0, signalCount = 0;
+        if (first && wait != VK_NULL_HANDLE) {
+            waits[waitCount] = semaphore(wait, 0);
+            waits[waitCount++].stageMask = waitStage;
+        }
+        if (!first) waits[waitCount++] = semaphore(m_timelineSemaphore, m_timelineValue);
+        if (!last) signals[signalCount++] = semaphore(m_timelineSemaphore, ++m_timelineValue);
+        if (last && signal != VK_NULL_HANDLE) signals[signalCount++] = semaphore(signal, 0);
+
+        VkCommandBufferSubmitInfo commandBuffer{};
+        commandBuffer.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+        commandBuffer.commandBuffer = segment.commandBuffer;
+        VkSubmitInfo2 info{};
+        info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+        info.waitSemaphoreInfoCount = waitCount;
+        info.pWaitSemaphoreInfos = waits;
+        info.commandBufferInfoCount = 1;
+        info.pCommandBufferInfos = &commandBuffer;
+        info.signalSemaphoreInfoCount = signalCount;
+        info.pSignalSemaphoreInfos = signals;
+
+        const VkQueue queue = segment.queue == QueueType::Compute ? m_device.getComputeQueue()
+                                                                  : m_device.getGraphicsQueue();
+        if (vkQueueSubmit2(queue, 1, &info, last ? fence : VK_NULL_HANDLE) != VK_SUCCESS) {
+            throw std::runtime_error("RenderGraph: queue submission failed");
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2119,44 +2205,6 @@ void RenderGraph::applyImports(uint32_t swapchainImageIndex) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Multi-Queue Execution
-// 雙流並行 — Dual streams in parallel
-// ═══════════════════════════════════════════════════════════════
-
-bool RenderGraph::needsMultiQueueSubmit() const {
-    return m_compiled.valid && m_compiled.queueBatches.batches.size() > 1;
-}
-
-void RenderGraph::executeMultiQueue(uint32_t frameIndex, uint32_t swapchainImageIndex,
-                                     VkCommandBuffer graphicsCmdBuf, VkCommandBuffer computeCmdBuf) {
-    if (!m_compiled.valid) {
-        m_logger->log(LogLevel::Error, "Cannot execute: render graph not compiled");
-        return;
-    }
-
-    // Update imported resources for this frame
-    applyImports(swapchainImageIndex);
-    if (m_externalImagesPending) bindExternalImages(frameIndex, true);
-
-    const auto& batches = m_compiled.queueBatches;
-
-    ++m_recordedFrames;
-    if (m_stats) {
-        m_stats->beginFrame(frameIndex, std::max(m_maxFramesInFlight, frameIndex + 1),
-                            static_cast<uint32_t>(m_compiled.executionOrder.size()));
-    }
-
-    // For each batch, record commands into the appropriate command buffer
-    for (const auto& [queueType, passIndices] : batches.batches) {
-        VkCommandBuffer cmdBuf = (queueType == QueueType::Compute) ? computeCmdBuf : graphicsCmdBuf;
-        m_executor.executePasses(m_compiled, m_builder, passIndices,
-                                 frameIndex, swapchainImageIndex, cmdBuf, &m_parameters);
-    }
-
-    if (m_stats) m_stats->endFrame();
-}
-
-// ═══════════════════════════════════════════════════════════════
 // Synchronization Primitives
 // ═══════════════════════════════════════════════════════════════
 
@@ -2184,6 +2232,16 @@ void RenderGraph::destroySyncPrimitives() {
     if (m_timelineSemaphore != VK_NULL_HANDLE) {
         vkDestroySemaphore(m_device.getLogicalDevice(), m_timelineSemaphore, nullptr);
         m_timelineSemaphore = VK_NULL_HANDLE;
+    }
+    for (uint32_t q = 0; q < 2; ++q) {
+        const VkCommandPool pool = q == static_cast<uint32_t>(QueueType::Compute) ? m_device.getComputeCommandPool()
+                                                                                  : m_device.getCommandPool();
+        for (const auto& buffers : m_segmentBuffers[q]) {
+            if (buffers.empty()) continue;
+            vkFreeCommandBuffers(m_device.getLogicalDevice(), pool, static_cast<uint32_t>(buffers.size()),
+                                 buffers.data());
+        }
+        m_segmentBuffers[q].clear();
     }
 }
 

@@ -254,8 +254,13 @@ RenderStatsCollector::RenderStatsCollector(VulkanDevice& device)
     vkGetPhysicalDeviceQueueFamilyProperties(device.getPhysicalDevice(), &familyCount, nullptr);
     std::vector<VkQueueFamilyProperties> families(familyCount);
     vkGetPhysicalDeviceQueueFamilyProperties(device.getPhysicalDevice(), &familyCount, families.data());
-    const uint32_t family = device.getGraphicsQueueFamily();
-    const uint32_t validBits = family < families.size() ? families[family].timestampValidBits : 0;
+    // Passes record on the graphics queue, and with async compute on the
+    // compute queue too: both must write timestamps.
+    const auto bitsOf = [&](uint32_t family) {
+        return family < families.size() ? families[family].timestampValidBits : 0u;
+    };
+    uint32_t validBits = bitsOf(device.getGraphicsQueueFamily());
+    if (device.hasAsyncCompute()) validBits = std::min(validBits, bitsOf(device.getComputeQueueFamily()));
 
     m_gpuSupported = props.limits.timestampComputeAndGraphics == VK_TRUE && validBits > 0 &&
                      props.limits.timestampPeriod > 0.0f;

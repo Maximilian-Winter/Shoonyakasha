@@ -52,6 +52,18 @@ public:
     uint32_t getComputeQueueFamily() const;
     bool hasDedicatedComputeQueue() const { return m_hasDedicatedCompute; }
 
+    /// Passes on the compute queue are submitted to it, apart from the
+    /// graphics queue: the device has a compute family without graphics, and
+    /// $SHOONYAKASHA_DISABLE_ASYNC_COMPUTE is not set. Without it every pass
+    /// runs on the graphics queue.
+    bool hasAsyncCompute() const { return m_asyncCompute; }
+
+    /// With async compute, make the buffer or image `info` describes shared
+    /// by the graphics and compute families (VK_SHARING_MODE_CONCURRENT);
+    /// otherwise leave it as it is.
+    void shareWithCompute(VkBufferCreateInfo& info) const;
+    void shareWithCompute(VkImageCreateInfo& info) const;
+
     VulkanInstance& getInstance() const { return m_instance; }
     VulkanMemoryAllocator& getAllocator() const { return *m_vmaAllocator; }
 
@@ -138,6 +150,8 @@ private:
     VkCommandPool m_commandPool;
     VkCommandPool m_computeCommandPool = VK_NULL_HANDLE;
     bool m_hasDedicatedCompute = false;
+    bool m_asyncCompute = false;
+    uint32_t m_sharedFamilies[2] = {0, 0};   // graphics, compute
     QueueFamilyIndices m_queueFamilyIndices;
     VkPhysicalDeviceFeatures m_enabledFeatures{};
     bool m_rayQuery = false;

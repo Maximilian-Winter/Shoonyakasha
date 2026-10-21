@@ -1218,6 +1218,57 @@ std::vector<bool> aliasableImages(
     return out;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Queues
+// ═══════════════════════════════════════════════════════════════
+
+std::vector<bool> sharedAcrossQueues(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts)
+{
+    const auto bound = boundResources(declarations, descriptorLayouts);
+    std::vector<uint8_t> queues(declarations.size(), 0);
+    for (const auto& pass : passes) {
+        const uint8_t bit = pass.queueType == QueueType::Compute ? 2 : 1;
+        forEachUse(pass, bound, [&](uint32_t ri) {
+            if (ri < queues.size()) queues[ri] |= bit;
+        });
+    }
+    std::vector<bool> out(declarations.size());
+    for (size_t ri = 0; ri < queues.size(); ++ri) out[ri] = queues[ri] == 3;
+    return out;
+}
+
+namespace {
+
+constexpr VkPipelineStageFlags kGraphicsOnlyStages =
+    VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+    VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT |
+    VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT |
+    VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT | VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT;
+
+void fitToComputeQueue(VkPipelineStageFlags& stage, VkAccessFlags& access) {
+    if ((stage & kGraphicsOnlyStages) == 0) return;
+    stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    access = 0;
+}
+
+} // namespace
+
+void fitBarriersToComputeQueue(std::vector<BarrierInfo>& barriers, MemoryBarrierInfo& memory) {
+    for (auto& b : barriers) {
+        fitToComputeQueue(b.srcStage, b.srcAccess);
+        fitToComputeQueue(b.dstStage, b.dstAccess);
+    }
+    if (!memory.empty()) {
+        fitToComputeQueue(memory.srcStage, memory.srcAccess);
+        fitToComputeQueue(memory.dstStage, memory.dstAccess);
+    }
+}
+
 std::vector<AliasBlock> packAliases(std::vector<AliasRequest> requests,
                                     const std::vector<PassSpan>& lifetimes)
 {

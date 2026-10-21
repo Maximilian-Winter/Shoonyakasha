@@ -22,12 +22,13 @@ public:
     // Create a new image with several mip levels and/or array layers.
     // `flags` takes e.g. VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT. A
     // VK_IMAGE_TYPE_3D image has `depth` slices and one layer. `samples`
-    // above 1 makes a multisampled image.
+    // above 1 makes a multisampled image. `shareWithCompute` shares it
+    // between the graphics and compute families (VulkanDevice::shareWithCompute).
     VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
                 VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
                 uint32_t mipLevels, uint32_t arrayLayers, VkImageCreateFlags flags = 0,
                 VkImageType imageType = VK_IMAGE_TYPE_2D, uint32_t depth = 1,
-                VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
+                VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT, bool shareWithCompute = false);
 
     // Create an image in `memory` at `offset`, which other images may share;
     // the image does not own or free the memory.
@@ -74,6 +75,7 @@ private:
     VkImageType m_imageType = VK_IMAGE_TYPE_2D;
     VkSampleCountFlagBits m_samples = VK_SAMPLE_COUNT_1_BIT;
     bool m_sharedMemory = false;  // bound into memory it does not own
+    bool m_shareWithCompute = false;
     VkImageCreateFlags m_flags = 0;
     VkImageTiling m_tiling;
     VkImageUsageFlags m_usage;

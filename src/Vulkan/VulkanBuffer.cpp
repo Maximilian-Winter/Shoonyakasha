@@ -49,6 +49,7 @@ void VulkanBuffer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkM
     bufferInfo.size = size;
     bufferInfo.usage = usage;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    m_device.shareWithCompute(bufferInfo);
 
     // Determine VMA memory usage from Vulkan memory property flags
     VmaMemoryUsage vmaUsage = VMA_MEMORY_USAGE_AUTO;

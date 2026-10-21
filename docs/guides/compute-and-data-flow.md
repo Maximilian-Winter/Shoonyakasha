@@ -16,7 +16,7 @@ Storage buffers rarely appear in a pass's inputs and outputs, so the compiler fi
 
 Some passes record through code the graph cannot see: those with an execute callback, execution type `none`, `manual` or `scene_geometry`, the entity geometry types (their renderers bind vertex and index buffers), and those with a buffer binding without `autoBindBuffer`. They are taken to touch every buffer, graphics passes reading and compute passes reading and writing, so a buffer a compute pass writes is still visible to a renderer that binds it as vertex data. Give buffer bindings an `autoBindBuffer` where you can, so unrelated passes do not wait on each other.
 
-For a side-effect-only compute pass, set `hasSideEffects: true` if otherwise unused outputs would allow culling. JSON `queue: compute` only selects queue intent: the default ApplicationBase/facade render loop records through single-queue `execute`. Native `executeMultiQueue` requires appropriate command buffers and synchronized queue submission by its caller.
+For a side-effect-only compute pass, set `hasSideEffects: true` if otherwise unused outputs would allow culling. `queue: compute` runs a pass on the compute queue where the device has one without graphics; see [`queue`](../reference/pipeline-json.md#passes-and-pipeline-state).
 
 ## Indirect dispatches and draws
 

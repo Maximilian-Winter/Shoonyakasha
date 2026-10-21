@@ -902,6 +902,8 @@ private:
     /// Create every non-imported image and buffer, with its mips, layers and
     /// sampled view. Returns false and sets outError for a shape the image
     /// cannot have (a non-square cube, more mips than the size allows).
+    /// Images marked in `sharedWithCompute` are shared by the graphics and
+    /// compute families (VulkanDevice::shareWithCompute).
     bool createPhysicalResources(
         VulkanDevice& device,
         const std::vector<ResourceDeclaration>& declarations,
@@ -909,6 +911,7 @@ private:
         std::vector<PhysicalResource>& outResources,
         VkExtent2D referenceExtent,
         const ImportedImageMap& importedImages,
+        const std::vector<bool>& sharedWithCompute,
         std::string& outError);
 
     /// Fill each live pass's attachments (views, load/store ops, layouts) and
@@ -1075,6 +1078,11 @@ public:
         VkCommandBuffer commandBuffer,
         const std::unordered_map<std::string, ParameterValue>* parameters = nullptr
     );
+
+    /// Around the executePasses calls that record one frame: tells the
+    /// debugger, if any, that the frame begins and ends.
+    void beginFrame(uint32_t frameIndex);
+    void endFrame(uint32_t frameIndex);
 
     /// Execute a specific subset of passes into the given command buffer
     void executePasses(
@@ -1429,18 +1437,25 @@ public:
     bool isCompiled() const { return m_compiled.valid; }
 
     // ── Execution ──
-    /// Single command-buffer execution (existing API — all on graphics queue)
+    /// Record the frame. `commandBuffer`, begun, for the graphics queue, gets
+    /// the uploads, the scene's acceleration structures and the first batch
+    /// of passes. With async compute (VulkanDevice::hasAsyncCompute) each
+    /// later batch of getQueueBatches() that changes queue is recorded into
+    /// a command buffer of the graph's own, per frame in flight, and the
+    /// readbacks into the last graphics one. Once the caller has ended
+    /// `commandBuffer`, submit() submits them all.
     void execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
                  VkCommandBuffer commandBuffer);
 
-    /// Multi-queue execution with separate graphics and compute command buffers
-    /// graphicsCmdBuf and computeCmdBuf must be already begun
-    void executeMultiQueue(uint32_t frameIndex, uint32_t swapchainImageIndex,
-                           VkCommandBuffer graphicsCmdBuf, VkCommandBuffer computeCmdBuf);
+    /// Submit what execute() recorded, one submission per command buffer, in
+    /// order, each waiting for the one before through a timeline semaphore.
+    /// The first waits for `wait` (a binary semaphore, or VK_NULL_HANDLE) at
+    /// `waitStage`; the last, on the graphics queue, signals `signal` (or
+    /// VK_NULL_HANDLE) and `fence`, so the fence covers the whole frame.
+    void submit(VkSemaphore wait, VkPipelineStageFlags2 waitStage, VkSemaphore signal, VkFence fence);
 
-    /// Get timeline semaphore sync info for multi-queue submission
+    /// The passes in execution order, grouped into batches by queue.
     const QueueSubmitBatch& getQueueBatches() const { return m_compiled.queueBatches; }
-    bool needsMultiQueueSubmit() const;
 
     // ── Hot-reload ──
     bool recompile(VkExtent2D referenceExtent, uint32_t swapchainImageCount = 1,
@@ -1899,6 +1914,19 @@ private:
     // Multi-queue synchronization
     VkSemaphore m_timelineSemaphore = VK_NULL_HANDLE;
     uint64_t    m_timelineValue = 0;
+
+    /// The command buffers execute() recorded this frame, in submission
+    /// order; the first is the caller's.
+    struct FrameSegment {
+        QueueType       queue = QueueType::Graphics;
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    };
+    std::vector<FrameSegment> m_frameSegments;
+    /// Command buffers for segments after the first, per frame in flight,
+    /// indexed by QueueType.
+    std::vector<std::vector<VkCommandBuffer>> m_segmentBuffers[2];
+    /// Begin the `n`th segment command buffer of `queue` for `frameIndex`.
+    VkCommandBuffer beginSegment(QueueType queue, uint32_t frameIndex, uint32_t n);
 
     void createSyncPrimitives();
     void destroySyncPrimitives();

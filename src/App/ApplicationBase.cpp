@@ -713,13 +713,10 @@ void ApplicationBase::render() {
                            "no \"ui_canvas\" pass to draw them");
     }
 
-    m_commandManager->submitCommandBuffers(
-        {commandBuffer},
-        m_device->getGraphicsQueue(),
-        {m_imageAvailableSemaphores[m_currentFrame]},
-        {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
-        {m_renderFinishedSemaphores[m_currentFrame]},
-        m_inFlightFences[m_currentFrame]);
+    m_renderGraph->submit(m_imageAvailableSemaphores[m_currentFrame],
+                          VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          m_renderFinishedSemaphores[m_currentFrame],
+                          m_inFlightFences[m_currentFrame]);
 
     presentFrame(imageIndex);
     m_currentFrame = (m_currentFrame + 1) % m_config.maxFramesInFlight;

@@ -333,6 +333,25 @@ std::vector<bool> aliasableImages(
     const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
     const std::vector<uint32_t>& executionOrder);
 
+// ═══════════════════════════════════════════════════════════════
+// Queues
+// ═══════════════════════════════════════════════════════════════
+
+/// Which resources passes on both the graphics and the compute queue use, as
+/// inputs, outputs or through their descriptor sets.
+std::vector<bool> sharedAcrossQueues(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts);
+
+/// Make the barriers of a pass recorded on the compute queue name only
+/// stages that queue runs. A source or destination with graphics-only stages
+/// (vertex input to colour attachment output, task and mesh shaders) becomes
+/// ALL_COMMANDS with no access: that work ran on the graphics queue, earlier
+/// in the frame or in the frame before, and the semaphore the compute queue
+/// waits on before its work already made its writes available and visible.
+void fitBarriersToComputeQueue(std::vector<BarrierInfo>& barriers, MemoryBarrierInfo& memory);
+
 /// The memory an aliasable image needs.
 struct AliasRequest {
     uint32_t     resource = 0;

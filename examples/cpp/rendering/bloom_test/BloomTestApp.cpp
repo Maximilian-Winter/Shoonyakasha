@@ -191,21 +191,11 @@ void BloomTestApp::render() {
 
     vkEndCommandBuffer(cmdBuf);
 
-    // Submit
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphores[m_currentFrame] };
-    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = waitSemaphores;
-    submitInfo.pWaitDstStageMask = waitStages;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmdBuf;
+    // Submit: with async compute, the graph's compute and graphics command
+    // buffers follow this one
+    m_renderGraph->submit(m_imageAvailableSemaphores[m_currentFrame], VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          m_renderFinishedSemaphores[m_currentFrame], m_inFlightFences[m_currentFrame]);
     VkSemaphore signalSemaphores[] = { m_renderFinishedSemaphores[m_currentFrame] };
-    submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = signalSemaphores;
-
-    vkQueueSubmit(m_device->getGraphicsQueue(), 1, &submitInfo, m_inFlightFences[m_currentFrame]);
 
     // Present
     VkPresentInfoKHR presentInfo{};

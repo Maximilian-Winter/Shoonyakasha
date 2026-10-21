@@ -34,7 +34,8 @@ VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, 
 VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
                          VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
                          uint32_t mipLevels, uint32_t arrayLayers, VkImageCreateFlags flags,
-                         VkImageType imageType, uint32_t depth, VkSampleCountFlagBits samples)
+                         VkImageType imageType, uint32_t depth, VkSampleCountFlagBits samples,
+                         bool shareWithCompute)
         : m_device(device)
         , m_image(VK_NULL_HANDLE)
         , m_allocation(VK_NULL_HANDLE)
@@ -47,6 +48,7 @@ VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, 
         , m_depth(depth)
         , m_imageType(imageType)
         , m_samples(samples)
+        , m_shareWithCompute(shareWithCompute)
         , m_flags(flags)
         , m_tiling(tiling)
         , m_usage(usage)
@@ -154,8 +156,9 @@ VkImageCreateInfo VulkanImage::createInfo(uint32_t width, uint32_t height, VkFor
 
 void VulkanImage::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
                               VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
-    const VkImageCreateInfo imageInfo = createInfo(width, height, format, tiling, usage, m_mipLevels, m_arrayLayers,
-                                                   m_flags, m_imageType, m_depth, m_samples);
+    VkImageCreateInfo imageInfo = createInfo(width, height, format, tiling, usage, m_mipLevels, m_arrayLayers,
+                                             m_flags, m_imageType, m_depth, m_samples);
+    if (m_shareWithCompute) m_device.shareWithCompute(imageInfo);
 
     // Use VMA for allocation
     VmaAllocationCreateInfo allocInfo{};
