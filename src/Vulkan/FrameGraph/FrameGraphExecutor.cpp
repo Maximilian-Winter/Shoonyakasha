@@ -150,6 +150,10 @@ bool beginRendering(VkCommandBuffer commandBuffer,
     rendering.colorAttachmentCount = static_cast<uint32_t>(colors.size());
     rendering.pColorAttachments    = colors.data();
     rendering.pDepthAttachment     = pass.hasDepthAttachment ? &depth : nullptr;
+    // A depth format with stencil is the stencil attachment too, with the
+    // same view, layout, operations and clear value.
+    const bool stencil = pass.hasDepthAttachment && isStencilFormat(pass.depthAttachment.format);
+    rendering.pStencilAttachment   = stencil ? &depth : nullptr;
 
     vkCmdBeginRendering(commandBuffer, &rendering);
     return true;

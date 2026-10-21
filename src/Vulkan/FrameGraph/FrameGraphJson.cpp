@@ -348,6 +348,36 @@ VkCompareOp stringToCompareOp(const std::string& str) {
     throw std::runtime_error("Unknown VkCompareOp: '" + str + "'");
 }
 
+VkStencilOp stringToStencilOp(const std::string& str) {
+    static const std::unordered_map<std::string, VkStencilOp> map = {
+        {"keep",                VK_STENCIL_OP_KEEP},
+        {"zero",                VK_STENCIL_OP_ZERO},
+        {"replace",             VK_STENCIL_OP_REPLACE},
+        {"increment_and_clamp", VK_STENCIL_OP_INCREMENT_AND_CLAMP},
+        {"decrement_and_clamp", VK_STENCIL_OP_DECREMENT_AND_CLAMP},
+        {"invert",              VK_STENCIL_OP_INVERT},
+        {"increment_and_wrap",  VK_STENCIL_OP_INCREMENT_AND_WRAP},
+        {"decrement_and_wrap",  VK_STENCIL_OP_DECREMENT_AND_WRAP},
+    };
+    auto it = map.find(str);
+    if (it != map.end()) return it->second;
+    throw std::runtime_error("Unknown VkStencilOp: '" + str + "'");
+}
+
+std::string stencilOpToString(VkStencilOp op) {
+    switch (op) {
+        case VK_STENCIL_OP_KEEP:                return "keep";
+        case VK_STENCIL_OP_ZERO:                return "zero";
+        case VK_STENCIL_OP_REPLACE:             return "replace";
+        case VK_STENCIL_OP_INCREMENT_AND_CLAMP: return "increment_and_clamp";
+        case VK_STENCIL_OP_DECREMENT_AND_CLAMP: return "decrement_and_clamp";
+        case VK_STENCIL_OP_INVERT:              return "invert";
+        case VK_STENCIL_OP_INCREMENT_AND_WRAP:  return "increment_and_wrap";
+        case VK_STENCIL_OP_DECREMENT_AND_WRAP:  return "decrement_and_wrap";
+        default:                                return "keep";
+    }
+}
+
 } // namespace JsonUtils
 
 // ═══════════════════════════════════════════════════════════════
@@ -1602,6 +1632,40 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     pass.pipelineDesc.depthBiasClamp    = biasJson.value("clamp", 0.0f);
                 }
 
+                if (pipeJson.contains("stencil")) {
+                    const auto& stencilJson = pipeJson["stencil"];
+                    const std::string where = "Pass '" + pass.name + "': stencil";
+                    if (!stencilJson.is_object()) throw std::runtime_error(where + " must be an object");
+                    auto readFace = [&](const nlohmann::json& j, VkStencilOpState face) {
+                        auto op = [&](const char* key, VkStencilOp& out) {
+                            if (j.contains(key)) out = JsonUtils::stringToStencilOp(j[key].get<std::string>());
+                        };
+                        auto byte = [&](const char* key, uint32_t& out) {
+                            if (!j.contains(key)) return;
+                            const auto& v = j[key];
+                            if (!v.is_number_integer() || v.get<int64_t>() < 0 || v.get<int64_t>() > 255) {
+                                throw std::runtime_error(where + " \"" + key + "\" must be an integer from 0 to 255");
+                            }
+                            out = static_cast<uint32_t>(v.get<int64_t>());
+                        };
+                        op("failOp", face.failOp);
+                        op("passOp", face.passOp);
+                        op("depthFailOp", face.depthFailOp);
+                        if (j.contains("compareOp")) {
+                            face.compareOp = JsonUtils::stringToCompareOp(j["compareOp"].get<std::string>());
+                        }
+                        byte("compareMask", face.compareMask);
+                        byte("writeMask", face.writeMask);
+                        byte("reference", face.reference);
+                        return face;
+                    };
+                    pass.pipelineDesc.stencilTest  = true;
+                    pass.pipelineDesc.stencilFront = readFace(stencilJson, pass.pipelineDesc.stencilFront);
+                    pass.pipelineDesc.stencilBack  = stencilJson.contains("back")
+                        ? readFace(stencilJson["back"], pass.pipelineDesc.stencilFront)
+                        : pass.pipelineDesc.stencilFront;
+                }
+
                 // Only meaningful when blending == "custom" - see PipelineDesc
                 // for the accepted VkBlendFactor/VkBlendOp string names.
                 pass.pipelineDesc.srcColorBlendFactor = pipeJson.value("srcColorFactor", std::string{"src_alpha"});
@@ -2200,6 +2264,33 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
                     {"slope",    pd.depthBiasSlope},
                     {"clamp",    pd.depthBiasClamp}
                 };
+            }
+            if (pd.stencilTest) {
+                auto compareName = [](VkCompareOp op) {
+                    for (const char* name : {"never", "less", "equal", "less_or_equal", "greater",
+                                             "not_equal", "greater_or_equal", "always"}) {
+                        if (JsonUtils::stringToCompareOp(name) == op) return std::string{name};
+                    }
+                    return std::string{"always"};
+                };
+                auto face = [&](const VkStencilOpState& s) {
+                    return nlohmann::json{
+                        {"failOp", JsonUtils::stencilOpToString(s.failOp)},
+                        {"passOp", JsonUtils::stencilOpToString(s.passOp)},
+                        {"depthFailOp", JsonUtils::stencilOpToString(s.depthFailOp)},
+                        {"compareOp", compareName(s.compareOp)},
+                        {"compareMask", s.compareMask},
+                        {"writeMask", s.writeMask},
+                        {"reference", s.reference}};
+                };
+                auto stencilJson = face(pd.stencilFront);
+                const auto& f = pd.stencilFront;
+                const auto& b = pd.stencilBack;
+                const bool sameBack = f.failOp == b.failOp && f.passOp == b.passOp && f.depthFailOp == b.depthFailOp &&
+                                      f.compareOp == b.compareOp && f.compareMask == b.compareMask &&
+                                      f.writeMask == b.writeMask && f.reference == b.reference;
+                if (!sameBack) stencilJson["back"] = face(b);
+                pipeJson["stencil"] = stencilJson;
             }
             if (pd.blending == "custom") {
                 pipeJson["srcColorFactor"] = pd.srcColorBlendFactor;

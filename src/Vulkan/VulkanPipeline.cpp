@@ -3,6 +3,7 @@
 #include "Vulkan/VulkanPipeline.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VertexTypes.h"
+#include "GPU/VkFormatUtils.h"
 #include <fstream>
 #include <stdexcept>
 
@@ -104,6 +105,13 @@ PipelineStateBuilder& PipelineStateBuilder::withDepthBounds(float min, float max
 
 PipelineStateBuilder& PipelineStateBuilder::withStencilTest(bool enable) {
     m_state.stencilTest = enable;
+    return *this;
+}
+
+PipelineStateBuilder& PipelineStateBuilder::withStencil(const VkStencilOpState& front, const VkStencilOpState& back) {
+    m_state.stencilTest = true;
+    m_state.stencilFront = front;
+    m_state.stencilBack = back;
     return *this;
 }
 
@@ -432,6 +440,8 @@ void VulkanPipeline::createPipeline() {
     depthStencil.minDepthBounds = m_state.minDepthBounds;
     depthStencil.maxDepthBounds = m_state.maxDepthBounds;
     depthStencil.stencilTestEnable = m_state.stencilTest ? VK_TRUE : VK_FALSE;
+    depthStencil.front = m_state.stencilFront;
+    depthStencil.back = m_state.stencilBack;
 
     // Color blend state — replicate for all color attachments (MRT support)
     const uint32_t colorCount = static_cast<uint32_t>(m_formats.color.size());
@@ -483,7 +493,12 @@ void VulkanPipeline::createPipeline() {
     renderingInfo.colorAttachmentCount = colorCount;
     renderingInfo.pColorAttachmentFormats = m_formats.color.data();
     renderingInfo.depthAttachmentFormat = m_formats.depth;
-    renderingInfo.stencilAttachmentFormat = m_formats.stencil;
+    // A depth format with stencil is bound as the stencil attachment too, so
+    // every pipeline drawn into it declares it.
+    renderingInfo.stencilAttachmentFormat =
+        m_formats.stencil != VK_FORMAT_UNDEFINED ? m_formats.stencil
+        : isStencilFormat(m_formats.depth)      ? m_formats.depth
+                                                : VK_FORMAT_UNDEFINED;
     pipelineInfo.pNext = &renderingInfo;
     pipelineInfo.renderPass = VK_NULL_HANDLE;
     pipelineInfo.subpass = 0;

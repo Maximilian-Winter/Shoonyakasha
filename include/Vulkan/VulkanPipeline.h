@@ -27,7 +27,7 @@ class VulkanDevice;
 struct RenderingFormats {
     std::vector<VkFormat> color;                // one per colour attachment, in order
     VkFormat depth   = VK_FORMAT_UNDEFINED;     // UNDEFINED = no depth attachment
-    VkFormat stencil = VK_FORMAT_UNDEFINED;     // UNDEFINED = no stencil attachment
+    VkFormat stencil = VK_FORMAT_UNDEFINED;     // UNDEFINED = the depth format if it has stencil, else none
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -66,6 +66,8 @@ public:
     PipelineStateBuilder& withDepthWrite(bool enable = true);
     PipelineStateBuilder& withDepthBounds(float min, float max);
     PipelineStateBuilder& withStencilTest(bool enable = true);
+    /// Stencil test on, with these operations for front and back faces.
+    PipelineStateBuilder& withStencil(const VkStencilOpState& front, const VkStencilOpState& back);
 
     // Color blending configuration
     PipelineStateBuilder& withBlending(bool enable = true);
@@ -126,6 +128,9 @@ public:
         float minDepthBounds = 0.0f;
         float maxDepthBounds = 1.0f;
         bool stencilTest = false;
+        VkStencilOpState stencilFront{VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
+                                      VK_COMPARE_OP_ALWAYS, 0xFF, 0xFF, 0};
+        VkStencilOpState stencilBack = stencilFront;
 
         // Blending
         bool blending = false;

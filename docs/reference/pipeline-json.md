@@ -58,7 +58,7 @@ The compiler also picks each attachment's load and store operation. A write with
 | `color_write`, `color_attachment_write` | Color attachment write |
 | `color_blend`, `color_attachment_blend` | Color attachment read/modify/write |
 | `depth_write`, `depth_stencil_write` | Depth/stencil write |
-| `depth_read` | Read-only depth |
+| `depth_read` | Read-only depth and stencil |
 | `shader_read` | Shader read |
 | `shader_read_write` | Shader read/write |
 | `storage_image_write` | Storage-image write |
@@ -162,6 +162,20 @@ Passes require `name` and `type` (`graphics`, `compute`, `transfer`). `queue` de
 | `topology` | `triangle_list`; `triangle_strip`, `line_list`, `line_strip`, `point_list` |
 | `wireframe` | false; requires device support |
 | `depthBias` | absent = off; object `{constant, slope, clamp}`, each default 0. A non-zero `clamp` requires the `depthBiasClamp` device feature and is ignored with a warning without it |
+| `stencil` | absent = off; the stencil test, below |
+
+`stencil` turns the stencil test on. Its keys apply to both faces: `compareOp` (`always`; the names of `depthCompareOp`), `passOp`, `failOp` and `depthFailOp` (each `keep`; also `zero`, `replace`, `increment_and_clamp`, `decrement_and_clamp`, `invert`, `increment_and_wrap`, `decrement_and_wrap`), and `reference`, `compareMask` and `writeMask` (0, 255 and 255; integers from 0 to 255). `back`, an object with the same keys, overrides them for back faces; keys it leaves out keep the shared values. An unknown name or a value out of range fails at load. The pass needs a depth attachment whose format has stencil (`D16_UNORM_S8_UINT`, `D24_UNORM_S8_UINT` or `D32_SFLOAT_S8_UINT`), and one with usage `depth_write` or `depth_stencil_write` if its operations change stencil; otherwise compiling the graph fails. A depth attachment with a stencil format is the pass's stencil attachment as well: it is cleared to the `stencil` of its `clear`, loaded and stored with its depth, and every pipeline drawn into it declares its stencil format. In this example, with the passes' other keys left out, `Mark` writes 1 wherever it draws and `Tint` then draws only there:
+
+```json
+{ "name": "Mark",
+  "outputs": [{ "resource": "maskDepth", "usage": "depth_stencil_write", "clear": { "depth": 1.0, "stencil": 0 } }],
+  "pipeline": { "stencil": { "passOp": "replace", "reference": 1 } } },
+{ "name": "Tint",
+  "outputs": [{ "resource": "hdrColor", "usage": "color_blend" },
+              { "resource": "maskDepth", "usage": "depth_read" }],
+  "pipeline": { "depthTest": false, "depthWrite": false,
+                "stencil": { "compareOp": "equal", "reference": 1 } } }
+```
 
 For `custom` blending: `srcColorFactor=src_alpha`, `dstColorFactor=one_minus_src_alpha`, `colorBlendOp=add`, `srcAlphaFactor=one`, `dstAlphaFactor=zero`, `alphaBlendOp=add`. Operations are `add`, `subtract`, `reverse_subtract`, `min`, `max`. Factors include zero/one, source/destination color/alpha and their complements, constant color/alpha and complements, and `src_alpha_saturate`; native blend constants need appropriate setup. Unknown blend strings can fall back rather than fail, so use verified spellings.
 

@@ -1838,8 +1838,10 @@ void RenderGraph::recordPixelReadback(const CompiledPass& pass, const PassDeclar
         return;
     }
 
+    // The copy takes one aspect; the barriers take every aspect of the format,
+    // as a depth/stencil image's layout covers both.
     const VkImageAspectFlags aspect = pixelReadbackAspect(image->format);
-    const auto barriers = pixelReadbackBarriers(image->vkImage, *layout, aspect);
+    const auto barriers = pixelReadbackBarriers(image->vkImage, *layout, formatToAspectMask(image->format));
 
     VkDependencyInfo toCopy{};
     toCopy.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;

@@ -285,6 +285,15 @@ struct PipelineDesc {
     float depthBiasSlope    = 0.0f;
     float depthBiasClamp    = 0.0f;
 
+    // Stencil test, JSON "stencil": {compareOp, passOp, failOp, depthFailOp,
+    // reference, compareMask, writeMask} for both faces, and "back" with the
+    // same keys overriding them for back faces. Off unless the block is
+    // present. Needs a depth attachment whose format has stencil.
+    bool             stencilTest  = false;
+    VkStencilOpState stencilFront{VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
+                                  VK_COMPARE_OP_ALWAYS, 0xFF, 0xFF, 0};
+    VkStencilOpState stencilBack = stencilFront;
+
     // Only read when blending == "custom" - explicit VkBlendFactor/VkBlendOp
     // names (snake_case, e.g. "src_alpha", "one_minus_src_alpha", "add").
     // See docs/guides/json-render-pipeline.md for the full accepted list.

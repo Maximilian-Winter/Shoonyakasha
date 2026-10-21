@@ -531,6 +531,11 @@ ExecutionKind executionKindOf(const std::string& type);
 
 struct CompiledPass;
 
+/// Why a pass's stencil test cannot run on its attachments: it needs a depth
+/// attachment with a stencil format, and one it may write if its operations
+/// change stencil. Empty when it can, or has no stencil test.
+std::string stencilAttachmentError(const PassDeclaration& pass, const CompiledPass& compiled);
+
 /// The regions of a copy or blit pass, from its transfer_src input and
 /// transfer_dst output as created. Both are images the graph creates, and
 /// name the same number of mips and layers, copied level by level; a copy

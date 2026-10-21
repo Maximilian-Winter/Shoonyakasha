@@ -429,7 +429,9 @@ void StagingBufferManager::recordImageReadbackCommands(VkCommandBuffer cmd, uint
         region.bufferOffset = 0;
         region.bufferRowLength = 0;
         region.bufferImageHeight = 0;
-        region.imageSubresource.aspectMask = entry.aspectMask;
+        // A copy takes one aspect: depth, for a depth/stencil image.
+        region.imageSubresource.aspectMask = (entry.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT)
+            ? VkImageAspectFlags{VK_IMAGE_ASPECT_DEPTH_BIT} : entry.aspectMask;
         region.imageSubresource.mipLevel = 0;
         region.imageSubresource.baseArrayLayer = 0;
         region.imageSubresource.layerCount = 1;

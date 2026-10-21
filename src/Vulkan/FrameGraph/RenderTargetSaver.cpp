@@ -186,9 +186,12 @@ std::vector<uint8_t> RenderTargetSaver::readbackRaw(VkImage image, VkFormat form
 
     // Depth-only aspect: a copy to a buffer cannot span both the depth and the
     // stencil aspect in one region, and only the depth values are saved.
+    // The barriers take every aspect of the format, as a depth/stencil
+    // image's layout covers both.
     VkImageAspectFlags aspectMask = Shoonyakasha::isDepthFormat(format)
         ? VK_IMAGE_ASPECT_DEPTH_BIT
         : VK_IMAGE_ASPECT_COLOR_BIT;
+    const VkImageAspectFlags barrierAspect = Shoonyakasha::formatToAspectMask(format);
 
     // Transition: currentLayout -> TRANSFER_SRC_OPTIMAL
     {
@@ -199,7 +202,7 @@ std::vector<uint8_t> RenderTargetSaver::readbackRaw(VkImage image, VkFormat form
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = image;
-        barrier.subresourceRange.aspectMask = aspectMask;
+        barrier.subresourceRange.aspectMask = barrierAspect;
         barrier.subresourceRange.baseMipLevel = 0;
         barrier.subresourceRange.levelCount = 1;
         barrier.subresourceRange.baseArrayLayer = 0;
@@ -237,7 +240,7 @@ std::vector<uint8_t> RenderTargetSaver::readbackRaw(VkImage image, VkFormat form
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = image;
-        barrier.subresourceRange.aspectMask = aspectMask;
+        barrier.subresourceRange.aspectMask = barrierAspect;
         barrier.subresourceRange.baseMipLevel = 0;
         barrier.subresourceRange.levelCount = 1;
         barrier.subresourceRange.baseArrayLayer = 0;

@@ -131,6 +131,25 @@ bool compileTransferRegions(const PassDeclaration& pass, const std::vector<Physi
     return true;
 }
 
+std::string stencilAttachmentError(const PassDeclaration& pass, const CompiledPass& compiled) {
+    const auto& pd = pass.pipelineDesc;
+    if (!pd.stencilTest) return {};
+    const std::string where = "Pass '" + pass.name + "'";
+    if (!compiled.hasDepthAttachment || !isStencilFormat(compiled.depthAttachment.format)) {
+        return where + " has a stencil test but no depth attachment with a stencil format "
+                       "(D16_UNORM_S8_UINT, D24_UNORM_S8_UINT or D32_SFLOAT_S8_UINT)";
+    }
+    auto writes = [](const VkStencilOpState& s) {
+        return s.writeMask != 0 && (s.failOp != VK_STENCIL_OP_KEEP || s.passOp != VK_STENCIL_OP_KEEP ||
+                                    s.depthFailOp != VK_STENCIL_OP_KEEP);
+    };
+    if ((writes(pd.stencilFront) || writes(pd.stencilBack)) &&
+        compiled.depthAttachment.layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL) {
+        return where + " writes stencil into a depth_read attachment; use depth_write";
+    }
+    return {};
+}
+
 std::string sceneBuffersError(const std::vector<BufferLayoutDesc>& layouts,
                               const std::unordered_map<std::string, CompiledBufferLayout>& compiled) {
     for (const auto& desc : layouts) {
@@ -522,13 +541,16 @@ bool FrameGraphCompiler::createAttachments(
             }
 
             if (!declarations[ri].imported) {
+                // The whole-image view of a depth/stencil format shows depth
+                // only; as an attachment it needs both aspects.
                 const bool wholeSingle = physImg->shape.mipLevels == 1 && physImg->shape.arrayLayers == 1 &&
-                                         physImg->viewType == VK_IMAGE_VIEW_TYPE_2D;
+                                         physImg->viewType == VK_IMAGE_VIEW_TYPE_2D &&
+                                         !isStencilFormat(physImg->format);
                 if (wholeSingle) {
                     att.view = physImg->view;
                 } else {
                     VkImageSubresourceRange vr{};
-                    vr.aspectMask     = isDepth ? VkImageAspectFlags{VK_IMAGE_ASPECT_DEPTH_BIT} : physImg->aspect;
+                    vr.aspectMask     = physImg->aspect;
                     vr.baseMipLevel   = range.baseMip;
                     vr.levelCount     = 1;
                     vr.baseArrayLayer = range.baseLayer;
@@ -564,6 +586,12 @@ bool FrameGraphCompiler::createAttachments(
             } else {
                 compiled.colorAttachments.push_back(att);
             }
+        }
+
+        const std::string stencil = stencilAttachmentError(passDecl, compiled);
+        if (!stencil.empty()) {
+            outError = stencil;
+            return false;
         }
     }
     return true;
@@ -1148,6 +1176,7 @@ void FrameGraphCompiler::createPipelines(
         // Depth
         builder.withDepthTest(pd.depthTest, JsonUtils::stringToCompareOp(pd.depthCompareOp));
         builder.withDepthWrite(pd.depthWrite);
+        if (pd.stencilTest) builder.withStencil(pd.stencilFront, pd.stencilBack);
 
         // Blending
         if (pd.blending == "alpha") builder.withAlphaBlending();

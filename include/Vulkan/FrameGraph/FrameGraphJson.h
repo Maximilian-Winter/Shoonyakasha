@@ -63,6 +63,11 @@ namespace JsonUtils {
     VkBorderColor         stringToBorderColor(const std::string& str);
     VkCompareOp           stringToCompareOp(const std::string& str);
 
+    // Stencil operations: "keep", "zero", "replace", "increment_and_clamp",
+    // "decrement_and_clamp", "invert", "increment_and_wrap", "decrement_and_wrap"
+    VkStencilOp           stringToStencilOp(const std::string& str);
+    std::string           stencilOpToString(VkStencilOp op);
+
 } // namespace JsonUtils
 
 // ═══════════════════════════════════════════════════════════════
