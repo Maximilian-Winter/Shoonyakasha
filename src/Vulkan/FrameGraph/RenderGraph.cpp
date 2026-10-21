@@ -48,6 +48,22 @@
 namespace Shoonyakasha {
 namespace FrameGraph {
 
+namespace {
+
+/// Call fn(begin, end) for each run of non-zero bytes in `mask`.
+template <typename Fn>
+void forEachRun(const std::vector<uint8_t>& mask, Fn&& fn) {
+    size_t i = 0;
+    while (i < mask.size()) {
+        if (!mask[i]) { ++i; continue; }
+        const size_t begin = i;
+        while (i < mask.size() && mask[i]) ++i;
+        fn(begin, i);
+    }
+}
+
+} // namespace
+
 RenderGraph::RenderGraph(VulkanDevice& device, VulkanCommandManager& cmdManager)
     : m_device(device)
     , m_cmdManager(cmdManager)
@@ -355,9 +371,10 @@ void RenderGraph::createDotPathUBOs(uint32_t maxFramesInFlight) {
     const auto& compiledLayouts = m_compiled.bufferLayouts;
 
     for (const auto& [name, layout] : compiledLayouts) {
-        // Only process UBO layouts that have dot-path sources
+        // Uniform layouts; those without dot-path sources are filled by
+        // setBufferData, unless the application registered a buffer of its own
         if (layout.usage != BufferUsageType::UniformBuffer) continue;
-        if (!layout.usesDotPathSources()) continue;
+        if (!layout.usesDotPathSources() && m_registeredUBOs.count(name) && !m_dotPathUBOs.count(name)) continue;
         if (layout.totalSize == 0) continue;
 
         m_logger->log(LogLevel::Info, "Creating dot-path UBO '%s' (%u bytes, %s)",
@@ -430,15 +447,133 @@ void RenderGraph::updateDotPathUBOs(uint32_t frameIndex) {
     if (!m_sceneContext || !m_bufferResolver) return;
 
     for (auto& [name, ubo] : m_dotPathUBOs) {
-        if (ubo.updateFrequency != BufferUpdateFrequency::PerFrame) continue;
         if (frameIndex >= ubo.perFrameBuffers.size()) continue;
+        const bool perFrame = ubo.updateFrequency == BufferUpdateFrequency::PerFrame;
+        const auto set = m_bufferData.find(name);
 
-        // Allocate temp buffer and fill from SceneContext via dot-paths
-        std::vector<uint8_t> data(ubo.size, 0);
-        m_bufferResolver->fillSceneBuffer(data.data(), ubo.resolvedLayout, *m_sceneContext);
+        if (perFrame) {
+            // Fill from SceneContext via dot-paths, then the application's bytes
+            std::vector<uint8_t> data(ubo.size, 0);
+            m_bufferResolver->fillSceneBuffer(data.data(), ubo.resolvedLayout, *m_sceneContext);
+            if (set != m_bufferData.end()) {
+                forEachRun(set->second.isSet, [&](size_t begin, size_t end) {
+                    std::memcpy(data.data() + begin, set->second.bytes.data() + begin, end - begin);
+                });
+            }
+            ubo.perFrameBuffers[frameIndex]->update(data.data(), ubo.size);
+        } else if (set != m_bufferData.end()) {
+            forEachRun(set->second.isSet, [&](size_t begin, size_t end) {
+                ubo.perFrameBuffers[frameIndex]->update(set->second.bytes.data() + begin, end - begin, begin);
+            });
+        }
+    }
+}
 
-        // Upload to per-frame GPU buffer
-        ubo.perFrameBuffers[frameIndex]->update(data.data(), ubo.size);
+// ═══════════════════════════════════════════════════════════════
+// Buffer data from the application
+// ═══════════════════════════════════════════════════════════════
+
+VkDeviceSize RenderGraph::bufferDataCapacity(const std::string& name) const {
+    if (const auto it = m_dotPathUBOs.find(name); it != m_dotPathUBOs.end()) return it->second.size;
+    if (const auto it = m_dotPathSSBOs.find(name); it != m_dotPathSSBOs.end()) return it->second.size;
+    return 0;
+}
+
+std::string RenderGraph::setBufferData(const std::string& name, const void* data, size_t size, size_t offset) {
+    if (size == 0) return {};
+    if (m_compiled.valid) {
+        const VkDeviceSize capacity = bufferDataCapacity(name);
+        if (capacity == 0) {
+            return "'" + name + "' is not a uniform buffer, or a storage buffer with an elementCount, "
+                   "in the pipeline's bufferLayouts";
+        }
+        if (offset + size > capacity) {
+            return "bytes " + std::to_string(offset) + " to " + std::to_string(offset + size) +
+                   " do not fit buffer '" + name + "' of " + std::to_string(capacity) + " bytes";
+        }
+    }
+    auto& buffer = m_bufferData[name];
+    const size_t end = offset + size;
+    if (buffer.bytes.size() < end) {
+        buffer.bytes.resize(end, 0);
+        buffer.isSet.resize(end, 0);
+        buffer.toCopy.resize(end, 0);
+    }
+    std::memcpy(buffer.bytes.data() + offset, data, size);
+    std::fill(buffer.isSet.begin() + offset, buffer.isSet.begin() + end, uint8_t{1});
+    std::fill(buffer.toCopy.begin() + offset, buffer.toCopy.begin() + end, uint8_t{1});
+    buffer.pending = true;
+    return {};
+}
+
+void RenderGraph::checkBufferData() {
+    for (auto it = m_bufferData.begin(); it != m_bufferData.end();) {
+        auto& [name, buffer] = *it;
+        const VkDeviceSize capacity = bufferDataCapacity(name);
+        if (capacity == 0 || buffer.bytes.size() > capacity) {
+            m_logger->log(LogLevel::Warning, capacity == 0
+                ? "Buffer data for '%s' dropped: the pipeline has no uniform buffer, or storage buffer with an "
+                  "elementCount, of that name"
+                : "Buffer data for '%s' dropped: it does not fit the pipeline's buffer", name.c_str());
+            it = m_bufferData.erase(it);
+            continue;
+        }
+        // The buffers are new: everything set is copied in again.
+        buffer.toCopy = buffer.isSet;
+        buffer.pending = true;
+        buffer.staging.clear();
+        ++it;
+    }
+}
+
+void RenderGraph::recordBufferDataCopies(VkCommandBuffer cmd, uint32_t frameIndex) {
+    for (auto& [name, buffer] : m_bufferData) {
+        if (!buffer.pending) continue;
+        const auto ssbo = m_dotPathSSBOs.find(name);
+        if (ssbo == m_dotPathSSBOs.end()) {
+            buffer.pending = false;   // a uniform buffer, written by the host each frame
+            continue;
+        }
+        if (buffer.staging.size() <= frameIndex) buffer.staging.resize(frameIndex + 1);
+        auto& staging = buffer.staging[frameIndex];
+        if (!staging) {
+            staging = std::make_unique<VulkanBuffer>(m_device, ssbo->second.size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            staging->map();
+        }
+        auto* mapped = static_cast<uint8_t*>(staging->getMappedData());
+        std::vector<VkBufferCopy> regions;
+        forEachRun(buffer.toCopy, [&](size_t begin, size_t end) {
+            std::memcpy(mapped + begin, buffer.bytes.data() + begin, end - begin);
+            regions.push_back({begin, begin, end - begin});
+        });
+        std::fill(buffer.toCopy.begin(), buffer.toCopy.end(), uint8_t{0});
+        buffer.pending = false;
+        if (regions.empty()) continue;
+
+        // After everything earlier that used the buffer, and before
+        // everything later.
+        auto memoryBarrier = [&](VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
+                                 VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess) {
+            VkMemoryBarrier2 barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+            barrier.srcStageMask = srcStage;
+            barrier.srcAccessMask = srcAccess;
+            barrier.dstStageMask = dstStage;
+            barrier.dstAccessMask = dstAccess;
+            VkDependencyInfo dependency{};
+            dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dependency.memoryBarrierCount = 1;
+            dependency.pMemoryBarriers = &barrier;
+            vkCmdPipelineBarrier2(cmd, &dependency);
+        };
+        memoryBarrier(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        vkCmdCopyBuffer(cmd, staging->getBuffer(), ssbo->second.buffer->getBuffer(),
+                        static_cast<uint32_t>(regions.size()), regions.data());
+        memoryBarrier(VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
     }
 }
 
@@ -1719,6 +1854,9 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
         // Phase 3: Create staging buffers for CPU↔GPU transfer (after SSBOs exist)
         createStagingBuffers(maxFramesInFlight);
 
+        // The application's bytes for the new buffers
+        checkBufferData();
+
         // Bind UBOs to descriptor sets after successful compilation
         bindUBOsToDescriptorSets(maxFramesInFlight);
 
@@ -1803,6 +1941,7 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
     if (m_stagingManager) {
         m_stagingManager->recordUploadCommands(commandBuffer, frameIndex, m_globalFrameNumber);
     }
+    recordBufferDataCopies(commandBuffer, frameIndex);
 
     // The scene's textures and acceleration structures, for passes that
     // index the one and trace rays against the other.

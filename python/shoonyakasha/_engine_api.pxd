@@ -554,6 +554,13 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         void setCustomVec4(const string& key, const vec4& value)
         void setCustomMat4(const string& key, const mat4& value)
         void setCustomUint(const string& key, uint32_t value)
+        void setCustomFloatArray(const string& key, const vector[float]& values)
+        void setCustomVec2Array(const string& key, const vector[vec2]& values)
+        void setCustomVec3Array(const string& key, const vector[vec3]& values)
+        void setCustomVec4Array(const string& key, const vector[vec4]& values)
+        void setCustomMat4Array(const string& key, const vector[mat4]& values)
+        void setCustomUintArray(const string& key, const vector[uint32_t]& values)
+        string setBuffer(const string& name, const void* data, size_t size, size_t offset)
         void setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
                                   float splitLambda, uint32_t resolution, float casterExtension)
         mat4 getSunShadowCascade(uint32_t index)

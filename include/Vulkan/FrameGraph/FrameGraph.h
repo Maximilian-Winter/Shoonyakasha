@@ -1208,6 +1208,16 @@ public:
                                VkDeviceSize size);
 
     // ── Storage Buffer Management ──
+    /// Write `size` bytes at `offset` into the buffer of bufferLayouts entry
+    /// `name`: a uniform buffer, or a storage buffer with an elementCount.
+    /// The graph keeps the bytes until they are set again, over recompiles
+    /// too. Each frame's copy of a uniform buffer gets them after its
+    /// dot-path fields are filled; a storage buffer gets the bytes that
+    /// changed copied in with the frame's uploads, before its passes. Before
+    /// the graph is compiled the bytes are kept and checked at compile.
+    /// Returns an error message, empty when the bytes were taken.
+    std::string setBufferData(const std::string& name, const void* data, size_t size, size_t offset = 0);
+
     // Register externally-managed SSBO (for compute shaders, particle buffers, etc.)
     void registerStorageBuffer(const std::string& name, VkBuffer buffer, VkDeviceSize size);
     void registerStorageBuffer(const std::string& name,
@@ -1653,6 +1663,21 @@ private:
     };
     std::unordered_map<std::string, DotPathSSBO> m_dotPathSSBOs;
     void createDotPathSSBOs(uint32_t maxFramesInFlight);
+
+    // Bytes the application set into a uniform or storage buffer
+    // (setBufferData), each with a flag per byte that is set and, for storage
+    // buffers, per byte still to copy in.
+    struct BufferData {
+        std::vector<uint8_t> bytes, isSet, toCopy;
+        bool pending = false;     // toCopy has bytes
+        std::vector<std::unique_ptr<VulkanBuffer>> staging;   // per frame in flight
+    };
+    std::unordered_map<std::string, BufferData> m_bufferData;
+    /// The size of the buffer setBufferData writes for `name`, 0 if none.
+    VkDeviceSize bufferDataCapacity(const std::string& name) const;
+    /// After compiling: drop data that no longer fits, copy the rest in again.
+    void checkBufferData();
+    void recordBufferDataCopies(VkCommandBuffer cmd, uint32_t frameIndex);
 
     // Storage buffers filled from the scene every frame ("source": {"type":
     // "scene"}): one host-visible, host-coherent buffer per frame in flight,

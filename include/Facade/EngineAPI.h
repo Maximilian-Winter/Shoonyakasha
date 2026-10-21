@@ -281,6 +281,27 @@ public:
     void setCustomMat4(const std::string& key, const glm::mat4& value);
     void setCustomUint(const std::string& key, uint32_t value);
 
+    /// Arrays: key[0] .. key[n-1], read by a buffer field with arrayCount
+    /// whose source ends in "[i]" (scene.custom.key[i]). Elements left from
+    /// an earlier, longer array are removed; the field's elements past the
+    /// end read as its fallback.
+    void setCustomFloatArray(const std::string& key, const std::vector<float>& values);
+    void setCustomVec2Array(const std::string& key, const std::vector<glm::vec2>& values);
+    void setCustomVec3Array(const std::string& key, const std::vector<glm::vec3>& values);
+    void setCustomVec4Array(const std::string& key, const std::vector<glm::vec4>& values);
+    void setCustomMat4Array(const std::string& key, const std::vector<glm::mat4>& values);
+    void setCustomUintArray(const std::string& key, const std::vector<uint32_t>& values);
+
+    /// Write `size` bytes at `offset` into the buffer of the pipeline's
+    /// bufferLayouts entry `name`, a uniform buffer or a storage buffer with
+    /// an elementCount. The bytes stay until set again, over recompiles too.
+    /// A uniform buffer gets them in each frame's copy, after its dot-path
+    /// fields; a storage buffer gets the bytes that changed copied in before
+    /// the next frame's passes. May be called before the pipeline is loaded;
+    /// they are checked against it then. Returns an error message, empty
+    /// when the bytes were taken.
+    std::string setBuffer(const std::string& name, const void* data, size_t size, size_t offset = 0);
+
     // ═══════════════════════════════════════════════════════════
     // Sun Shadow Cascades
     // ═══════════════════════════════════════════════════════════

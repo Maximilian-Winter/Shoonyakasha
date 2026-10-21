@@ -507,6 +507,35 @@ void EngineAPI::setCustomUint(const std::string& key, uint32_t value) {
     m_impl->app->getRenderGraph().getSceneContext().setCustom(key, value);
 }
 
+void EngineAPI::setCustomFloatArray(const std::string& key, const std::vector<float>& values) {
+    m_impl->app->getRenderGraph().getSceneContext().setCustomArray(key, values);
+}
+
+void EngineAPI::setCustomVec2Array(const std::string& key, const std::vector<glm::vec2>& values) {
+    m_impl->app->getRenderGraph().getSceneContext().setCustomArray(key, values);
+}
+
+void EngineAPI::setCustomVec3Array(const std::string& key, const std::vector<glm::vec3>& values) {
+    m_impl->app->getRenderGraph().getSceneContext().setCustomArray(key, values);
+}
+
+void EngineAPI::setCustomVec4Array(const std::string& key, const std::vector<glm::vec4>& values) {
+    m_impl->app->getRenderGraph().getSceneContext().setCustomArray(key, values);
+}
+
+void EngineAPI::setCustomMat4Array(const std::string& key, const std::vector<glm::mat4>& values) {
+    m_impl->app->getRenderGraph().getSceneContext().setCustomArray(key, values);
+}
+
+void EngineAPI::setCustomUintArray(const std::string& key, const std::vector<uint32_t>& values) {
+    m_impl->app->getRenderGraph().getSceneContext().setCustomArray(key, values);
+}
+
+std::string EngineAPI::setBuffer(const std::string& name, const void* data, size_t size, size_t offset) {
+    if (!m_impl->app) return "the engine is not running";
+    return m_impl->app->getRenderGraph().setBufferData(name, data, size, offset);
+}
+
 void EngineAPI::setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount,
                                        uint32_t spotResolution, uint32_t pointResolution,
                                        uint32_t atlasResolution) {

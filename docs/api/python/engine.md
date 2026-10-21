@@ -86,6 +86,8 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_custom_vec4(key, value)` | None | Set custom vec4 for shader uniforms. |
 | `set_custom_mat4(key, value)` | None | Set custom mat4 for shader uniforms. |
 | `set_custom_uint(key, value)` | None | Set custom uint for shader uniforms. |
+| `set_custom_float_array(key, values)`, `set_custom_vec2_array`, `set_custom_vec3_array`, `set_custom_vec4_array`, `set_custom_mat4_array`, `set_custom_uint_array` | None | Set `key[0]` .. `key[n-1]` from a sequence, for a buffer field with `arrayCount` whose source ends in `[i]`; elements left from an earlier, longer array are removed. See [custom shader uniforms](../../guides/custom-shader-uniforms.md#arrays). |
+| `set_buffer(name, data, offset=0)` | None | Write the raw bytes of `data` (bytes, bytearray, `array.array`, a contiguous NumPy array) at byte `offset` into the buffer of a `bufferLayouts` uniform buffer, or storage buffer with an `elementCount`. Raises `ValueError` when there is no such buffer or the bytes do not fit. See [custom shader uniforms](../../guides/custom-shader-uniforms.md#whole-buffers). |
 | `set_sun_shadows(cascades=4, max_distance=60.0, split_lambda=0.75, resolution=2048, caster_extension=50.0)` | None | Configure the sun's shadow cascades. |
 | `set_local_shadows(spot=8, point=4, spot_resolution=2048, point_resolution=1024, atlas_resolution=4096)` | None | Shadow slots for spot and point lights with cast shadows on. |
 | `get_sun_shadow_cascade(index)` | 4×4 tuple (column-major) | World-to-light-clip matrix of a sun cascade this frame, as four columns. |

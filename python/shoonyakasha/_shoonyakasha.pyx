@@ -2156,6 +2156,73 @@ cdef class Engine:
         """Set custom uint for shader uniforms."""
         self._ptr.setCustomUint(key.encode('utf-8'), value)
 
+    # Arrays: key[0] .. key[n-1], for buffer fields with arrayCount whose
+    # source ends in "[i]" (scene.custom.<key>[i]). Elements left from an
+    # earlier, longer array are removed.
+
+    def set_custom_float_array(self, str key, values):
+        """Set custom floats key[0] .. key[n-1] from a sequence."""
+        cdef vector[float] v
+        for x in values:
+            v.push_back(<float>x)
+        self._ptr.setCustomFloatArray(key.encode('utf-8'), v)
+
+    def set_custom_vec2_array(self, str key, values):
+        """Set custom vec2s key[0] .. key[n-1] from a sequence of pairs."""
+        cdef vector[vec2] v
+        for x in values:
+            v.push_back(_tuple_to_vec2(x))
+        self._ptr.setCustomVec2Array(key.encode('utf-8'), v)
+
+    def set_custom_vec3_array(self, str key, values):
+        """Set custom vec3s key[0] .. key[n-1] from a sequence of triples."""
+        cdef vector[vec3] v
+        for x in values:
+            v.push_back(_tuple_to_vec3(x))
+        self._ptr.setCustomVec3Array(key.encode('utf-8'), v)
+
+    def set_custom_vec4_array(self, str key, values):
+        """Set custom vec4s key[0] .. key[n-1] from a sequence of 4-tuples."""
+        cdef vector[vec4] v
+        for x in values:
+            v.push_back(_tuple_to_vec4(x))
+        self._ptr.setCustomVec4Array(key.encode('utf-8'), v)
+
+    def set_custom_mat4_array(self, str key, values):
+        """Set custom mat4s key[0] .. key[n-1], each four columns of four floats."""
+        cdef vector[mat4] v
+        for x in values:
+            v.push_back(_tuple_to_mat4(x))
+        self._ptr.setCustomMat4Array(key.encode('utf-8'), v)
+
+    def set_custom_uint_array(self, str key, values):
+        """Set custom uints key[0] .. key[n-1] from a sequence."""
+        cdef vector[uint32_t] v
+        for x in values:
+            v.push_back(<uint32_t>x)
+        self._ptr.setCustomUintArray(key.encode('utf-8'), v)
+
+    def set_buffer(self, str name, data, size_t offset=0):
+        """Write bytes into the buffer of the pipeline's bufferLayouts entry
+        `name`: a uniform buffer, or a storage buffer with an elementCount.
+
+        `data` is anything with the buffer protocol and contiguous memory:
+        bytes, bytearray, array.array or a NumPy array, written as its raw
+        bytes at byte `offset`. The bytes stay until set again. A uniform
+        buffer gets them in every frame, after its dot-path fields; a
+        storage buffer gets the changed bytes copied in before the next
+        frame's passes. May be called from on_init, before the pipeline is
+        loaded. Raises ValueError when there is no such buffer or the bytes
+        do not fit it.
+        """
+        cdef const unsigned char[::1] view = memoryview(data).cast('B')
+        cdef string error
+        if view.shape[0] == 0:
+            return
+        error = self._ptr.setBuffer(name.encode('utf-8'), &view[0], view.shape[0], offset)
+        if not error.empty():
+            raise ValueError(error.decode('utf-8'))
+
     def set_sun_shadows(self, uint32_t cascades=4, float max_distance=60.0,
                         float split_lambda=0.75, uint32_t resolution=2048,
                         float caster_extension=50.0):

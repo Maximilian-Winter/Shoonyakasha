@@ -264,6 +264,16 @@ struct SceneContext {
     void setCustom(const std::string& key, const glm::vec4& value) { customValues[key] = ResolvedValue(value); }
     void setCustom(const std::string& key, const glm::mat4& value) { customValues[key] = ResolvedValue(value); }
 
+    /// Set key[0] .. key[n-1], which a field with arrayCount and a source
+    /// ending in "[i]" reads one per element, and remove key[n] onwards left
+    /// by an earlier, longer array.
+    template <typename T>
+    void setCustomArray(const std::string& key, const std::vector<T>& values) {
+        size_t i = 0;
+        for (; i < values.size(); ++i) customValues[key + "[" + std::to_string(i) + "]"] = ResolvedValue(values[i]);
+        while (customValues.erase(key + "[" + std::to_string(i) + "]") > 0) ++i;
+    }
+
     // ─── Update from ECS ────────────────────────────────────────
 
     void updateFromRegistry(entt::registry& registry);
