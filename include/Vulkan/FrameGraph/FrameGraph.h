@@ -1921,11 +1921,9 @@ private:
         uint32_t pendingFrames = 0;
         Shoonyakasha::GPUTexture owned;   // setExternalImageData's, else empty
     };
-    // Images setExternalImageData replaced, with the frame count when they
-    // were, freed once every frame recorded before then has completed.
-    std::vector<std::pair<uint64_t, Shoonyakasha::GPUTexture>> m_retiredImages;
+    // Hand an owned image to the device's delete queue, which frees it once
+    // no frame in flight samples it.
     void retireExternalImage(ExternalImage& image);
-    void freeRetiredImages(bool all);
     std::unordered_map<std::string, ExternalImage> m_externalImages;
     bool m_externalImagesPending = false;
 

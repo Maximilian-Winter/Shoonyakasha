@@ -1,6 +1,6 @@
 """
 Shared parts of the optics episodes (gold.py, brewster.py): the wave optics
-pipeline's paths and settings, glTF shapes, plots drawn into PNG images,
+pipeline's paths and settings, glTF shapes, plots drawn into RGBA images,
 panel helpers and the accumulation of paths.
 """
 
@@ -9,7 +9,6 @@ import math
 import os
 import struct
 import time
-import zlib
 
 import shoonyakasha as sk
 
@@ -68,10 +67,10 @@ def wavelength_colour(wavelength):
     return tuple(encode_srgb(c / peak * fade) for c in rgb)
 
 
-# ── Plots, drawn into PNG files ──────────────────────────────────────────
+# ── Plots, drawn into RGBA images ────────────────────────────────────────
 
 class Raster:
-    """An RGBA image with antialiased curves, saved as PNG."""
+    """An RGBA image with antialiased curves, for a UI image."""
 
     def __init__(self, width, height):
         self.width, self.height = width, height
@@ -113,20 +112,13 @@ class Raster:
         for (x, y), a in coverage.items():
             self.blend(x, y, colour, a * alpha)
 
-    def save(self, path):
-        rows = bytearray()
-        for y in range(self.height):
-            rows.append(0)
-            for p in self.pixels[y * self.width:(y + 1) * self.width]:
-                rows.extend(int(round(min(max(c, 0.0), 1.0) * 255.0)) for c in p)
+    def rgba(self):
+        """The texels as 8-bit sRGB RGBA bytes, top row first."""
+        return bytes(int(round(min(max(c, 0.0), 1.0) * 255.0)) for p in self.pixels for c in p)
 
-        def chunk(kind, data):
-            return (struct.pack(">I", len(data)) + kind + data
-                    + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
-        header = struct.pack(">IIBBBBB", self.width, self.height, 8, 6, 0, 0, 0)
-        with open(path, "wb") as f:
-            f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
-                    + chunk(b"IEND", b""))
+    def show(self, ui, image):
+        """Make this the texture of UI image `image`."""
+        ui.set_texture_data(image, self.rgba(), self.width, self.height, "R8G8B8A8_SRGB")
 
 
 class Axes:
@@ -329,12 +321,13 @@ class Plot:
     """A plot image in a panel column, with its tick labels, a title and a
     cursor line; `axes` places values on it."""
 
-    def __init__(self, ui, column, axes, texture, label, x_format="%g", y_format="%g"):
+    def __init__(self, ui, column, axes, raster, label, x_format="%g", y_format="%g"):
         self.ui, self.axes = ui, axes
         size = (axes.width, axes.height)
         self.holder = ui.create_element(column, size=size)
         ui.set_layout_element(self.holder, min=size, preferred=size)
-        self.image = ui.create_image(self.holder, size=size, texture=texture)
+        self.image = ui.create_image(self.holder, size=size)
+        raster.show(ui, self.image)
         ui.set_rect(self.image, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0), position=(0, 0), size=size)
         for value in axes.y_ticks:
             text_at(ui, self.holder, y_format % value, (axes.LEFT - 6.0, axes.y(value) - 10.0), width=40.0,

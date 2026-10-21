@@ -35,7 +35,6 @@ import argparse
 import colorsys
 import math
 import os
-import tempfile
 
 import shoonyakasha as sk
 from shoonyakasha import keys
@@ -110,9 +109,9 @@ def axes():
     return oc.Axes(PLOT_SIZE, (0.0, 90.0), 1.0, [0, 15, 30, 45, 60, 75, 90], [0.25 * i for i in range(5)])
 
 
-def draw_plots(directory):
-    """One reflectance plot per material; returns their paths by name."""
-    paths = {}
+def draw_plots():
+    """One reflectance plot per material, by name."""
+    plots = {}
     for name, _, n in MATERIALS:
         a = axes()
         raster = a.raster()
@@ -121,13 +120,11 @@ def draw_plots(directory):
                      dash=6.0 * a.scale)
         raster.curve(a.polyline(lambda t: fresnel(n, t)[1], step=0.25), P_COLOUR, 2.0 * a.scale)
         raster.curve(a.polyline(lambda t: fresnel(n, t)[0], step=0.25), S_COLOUR, 2.0 * a.scale)
-        paths[name] = os.path.join(directory, "reflectance_%s.png" % name)
-        raster.save(paths[name])
-    return paths
+        plots[name] = raster
+    return plots
 
 
-FILES = tempfile.mkdtemp(prefix="brewster_")
-PLOTS = draw_plots(FILES)
+PLOTS = draw_plots()
 
 sk.shaders.compile_dir(oc.SHADERS)
 engine = sk.Engine(title="Shoonyakasha - Brewster's angle", width=args.width, height=args.height,
@@ -254,7 +251,7 @@ class Panel:
         for index, button in enumerate(self.material_buttons):
             if ui.was_clicked(button):
                 self.material = index
-                ui.set_texture(self.plot.image, PLOTS[MATERIALS[index][0]])
+                PLOTS[MATERIALS[index][0]].show(ui, self.plot.image)
                 self.scene.set_index(self.n)
         if ui.value_changed(self.angle_slider):
             self.set_angle(ui.slider_value(self.angle_slider))

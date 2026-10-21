@@ -84,6 +84,7 @@ void setGeometry(EntityHandle element, const std::vector<glm::vec2>& positions, 
 void setWidgetPartColor(EntityHandle element, const std::string& part, const glm::vec4& color);
 void setInteractionColors(EntityHandle element, const glm::vec4& normal, const glm::vec4& hover, const glm::vec4& pressed, const glm::vec4& focused, const glm::vec4& disabled);
 bool setTexture(EntityHandle element, const std::string& path);
+std::string setTextureData(EntityHandle element, const void* data, size_t size, uint32_t width, uint32_t height, const std::string& format);   // error message, empty on success
 void setPanelBorder(EntityHandle element, const glm::vec4& border, float borderScale = 1.0f);
 void setRaycastTarget(EntityHandle element, bool target);
 void setInteractable(EntityHandle element, bool enabled);

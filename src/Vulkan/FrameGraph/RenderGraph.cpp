@@ -125,13 +125,7 @@ RenderGraph::~RenderGraph() {
     // createDefaultTextures(). DefaultTextures is an aggregate of GPUTexture
     // values with no destructor, so the four images, views and samplers have to
     // be released explicitly.
-    freeRetiredImages(true);
-    for (auto& [name, image] : m_externalImages) {
-        if (image.owned.view != VK_NULL_HANDLE) {
-            Shoonyakasha::GPUResourceFactory::destroyTexture(m_device.getAllocator().getHandle(),
-                                                             m_device.getLogicalDevice(), image.owned);
-        }
-    }
+    for (auto& [name, image] : m_externalImages) retireExternalImage(image);
 
     if (m_defaultTexturesCreated) {
         Shoonyakasha::GPUResourceFactory::destroyDefaultTextures(
@@ -1947,7 +1941,6 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
     // rewrite with an application image that changed.
     releaseDestroyedEntityDescriptors(frameIndex);
     if (m_externalImagesPending) bindExternalImages(frameIndex, true);
-    freeRetiredImages(false);
 
     // Phase 3: Upload CPU→GPU before passes
     if (m_stagingManager) {
@@ -2894,31 +2887,11 @@ void RenderGraph::setExternalImage(const std::string& name, VkImageView view, Vk
 
 std::string RenderGraph::setExternalImageData(const std::string& name, const void* data, size_t size,
                                               uint32_t width, uint32_t height, VkFormat format) {
-    const uint32_t texelSize = Shoonyakasha::copiedTexelSize(format);
-    if (texelSize == 0 || Shoonyakasha::isDepthFormat(format)) return "the format is not a colour format images can be made of";
-    if (width == 0 || height == 0) return "the image has no texels";
-    const size_t expected = static_cast<size_t>(width) * height * texelSize;
-    if (size != expected) {
-        return std::to_string(width) + " x " + std::to_string(height) + " texels of this format take " +
-               std::to_string(expected) + " bytes, not " + std::to_string(size);
-    }
-    VkFormatProperties properties{};
-    vkGetPhysicalDeviceFormatProperties(m_device.getPhysicalDevice(), format, &properties);
-    const VkFormatFeatureFlags features = properties.optimalTilingFeatures;
-    if (!(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) || !(features & VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
-        return "this device cannot sample images of this format";
-    }
-
-    Shoonyakasha::GPUTexture texture = Shoonyakasha::GPUResourceFactory::createTexture2DWithData(
-        m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getGraphicsQueue(),
-        m_device.getCommandPool(), width, height, format, data, size, false);
-    if (texture.view == VK_NULL_HANDLE) return "the image could not be created";
-    const VkFilter filter = (features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) ? VK_FILTER_LINEAR
-                                                                                          : VK_FILTER_NEAREST;
-    texture.sampler = Shoonyakasha::GPUResourceFactory::createSampler(
-        m_device.getLogicalDevice(), filter, filter, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 1.0f,
-        VK_SAMPLER_MIPMAP_MODE_NEAREST, 1.0f);
-    texture.exists = true;
+    Shoonyakasha::GPUTexture texture;
+    const std::string error = Shoonyakasha::GPUResourceFactory::createTextureFromTexels(
+        m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getPhysicalDevice(),
+        m_device.getGraphicsQueue(), m_device.getCommandPool(), data, size, width, height, format, texture);
+    if (!error.empty()) return error;
 
     setExternalImage(name, texture.view, texture.sampler);
     m_externalImages[name].owned = texture;
@@ -2927,19 +2900,8 @@ std::string RenderGraph::setExternalImageData(const std::string& name, const voi
 
 void RenderGraph::retireExternalImage(ExternalImage& image) {
     if (image.owned.view == VK_NULL_HANDLE) return;
-    m_retiredImages.emplace_back(m_recordedFrames, image.owned);
+    m_device.getDeleteQueue().retire(image.owned);
     image.owned = Shoonyakasha::GPUTexture{};
-}
-
-void RenderGraph::freeRetiredImages(bool all) {
-    // A frame recorded before the image was replaced may sample it until its
-    // fence was waited on: m_maxFramesInFlight frames later.
-    std::erase_if(m_retiredImages, [&](auto& retired) {
-        if (!all && m_recordedFrames <= retired.first + m_maxFramesInFlight) return false;
-        Shoonyakasha::GPUResourceFactory::destroyTexture(m_device.getAllocator().getHandle(),
-                                                         m_device.getLogicalDevice(), retired.second);
-        return true;
-    });
 }
 
 void RenderGraph::bindExternalImages(uint32_t frame, bool onlyPending) {

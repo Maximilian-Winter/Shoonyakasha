@@ -39,7 +39,7 @@ VulkanDevice::VulkanDevice(VulkanInstance& instance, VkSurfaceKHR surface)
 
     // Conservative default; ApplicationBase narrows it once maxFramesInFlight is
     // known. Too high only delays a free, too low frees a buffer still in flight.
-    m_deleteQueue = std::make_unique<GpuDeleteQueue>(m_vmaAllocator->getHandle(), 3);
+    m_deleteQueue = std::make_unique<GpuDeleteQueue>(m_vmaAllocator->getHandle(), 3, m_device);
 }
 
 VulkanDevice::~VulkanDevice() {

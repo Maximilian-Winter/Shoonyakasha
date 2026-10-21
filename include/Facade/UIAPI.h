@@ -333,6 +333,16 @@ public:
     /// The texture of the element's image or panel. False when it cannot be
     /// loaded.
     bool setTexture(EntityHandle element, const std::string& path);
+
+    /// The same from texels in memory: `size` bytes of `width` x `height`
+    /// texels in `format` (a pipeline JSON format name; colour formats the
+    /// device can sample), rows of tightly packed texels, top row first. The
+    /// texture belongs to the element: it is freed once the element gets
+    /// another texture or is destroyed, and no frame in flight draws it.
+    /// Uploading waits for the GPU. Returns an error message, empty on
+    /// success.
+    std::string setTextureData(EntityHandle element, const void* data, size_t size, uint32_t width,
+                               uint32_t height, const std::string& format);
     void setPanelBorder(EntityHandle element, const glm::vec4& border, float borderScale = 1.0f);
 
     /// Whether the element's image or panel stops the pointer.

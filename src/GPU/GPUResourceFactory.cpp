@@ -729,6 +729,38 @@ void GPUResourceFactory::destroyDefaultTextures(
 // Utility
 // ============================================================================
 
+std::string GPUResourceFactory::createTextureFromTexels(
+    VmaAllocator allocator, VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue,
+    VkCommandPool cmdPool, const void* data, size_t size, uint32_t width, uint32_t height, VkFormat format,
+    GPUTexture& out
+) {
+    const uint32_t texelSize = copiedTexelSize(format);
+    if (texelSize == 0 || isDepthFormat(format)) return "the format is not a colour format images can be made of";
+    if (width == 0 || height == 0) return "the image has no texels";
+    const size_t expected = static_cast<size_t>(width) * height * texelSize;
+    if (size != expected) {
+        return std::to_string(width) + " x " + std::to_string(height) + " texels of this format take " +
+               std::to_string(expected) + " bytes, not " + std::to_string(size);
+    }
+    VkFormatProperties properties{};
+    vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &properties);
+    const VkFormatFeatureFlags features = properties.optimalTilingFeatures;
+    if (!(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) || !(features & VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
+        return "this device cannot sample images of this format";
+    }
+
+    GPUTexture texture = createTexture2DWithData(allocator, device, queue, cmdPool, width, height, format, data,
+                                                 size, false);
+    if (texture.view == VK_NULL_HANDLE) return "the image could not be created";
+    const VkFilter filter = (features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) ? VK_FILTER_LINEAR
+                                                                                          : VK_FILTER_NEAREST;
+    texture.sampler = createSampler(device, filter, filter, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 1.0f,
+                                    VK_SAMPLER_MIPMAP_MODE_NEAREST, 1.0f);
+    texture.exists = true;
+    out = texture;
+    return {};
+}
+
 VkDeviceSize GPUResourceFactory::getFormatSize(VkFormat format) {
     switch (format) {
         case VK_FORMAT_R8_UNORM:

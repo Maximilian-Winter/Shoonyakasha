@@ -15,6 +15,7 @@
 #include "UI/UIContext.h"
 #include "UI/UIWidgets.h"
 #include "UI/Utf8.h"
+#include "Vulkan/FrameGraph/FrameGraphJson.h"
 
 #include <algorithm>
 #include <cmath>
@@ -67,6 +68,11 @@ UI::TextAlignV toAlign(TextVAlign align) {
     }
 }
 
+/// A texture setTextureData made for an element; released with it.
+struct OwnedUITexture {
+    GPUTexture texture;
+};
+
 } // namespace
 
 struct UIAPI::Impl {
@@ -75,7 +81,13 @@ struct UIAPI::Impl {
     Sprite2DManager* textures;
     uint32_t defaultFont = 0;
 
-    Impl(entt::registry& r, UI::UIContext& c, Sprite2DManager* t) : registry(r), context(c), textures(t) {}
+    Impl(entt::registry& r, UI::UIContext& c, Sprite2DManager* t) : registry(r), context(c), textures(t) {
+        registry.on_destroy<OwnedUITexture>().connect<&Impl::release>(*this);
+    }
+
+    void release(entt::registry& r, entt::entity e) {
+        if (textures) textures->releaseTexture(r.get<OwnedUITexture>(e).texture);
+    }
 
     bool valid(EntityHandle h) const { return h != NullEntity && registry.valid(toEntt(h)); }
 
@@ -608,7 +620,32 @@ bool UIAPI::setTexture(EntityHandle element, const std::string& path) {
     bool set = false;
     if (auto* image = m_impl->get<UI::UIImage>(element)) { image->texture = texture; set = true; }
     if (auto* panel = m_impl->get<UI::UIPanel>(element)) { panel->texture = texture; set = true; }
+    if (set) m_impl->registry.remove<OwnedUITexture>(toEntt(element));
     return set;
+}
+
+std::string UIAPI::setTextureData(EntityHandle element, const void* data, size_t size, uint32_t width,
+                                  uint32_t height, const std::string& format) {
+    if (!m_impl->textures) return "this UI has no textures";
+    if (!m_impl->get<UI::UIImage>(element) && !m_impl->get<UI::UIPanel>(element)) {
+        return "the element is not an image or a panel";
+    }
+    VkFormat vkFormat = VK_FORMAT_UNDEFINED;
+    try {
+        vkFormat = FrameGraph::JsonUtils::stringToFormat(format);
+    } catch (const std::exception&) {
+        return "unknown format '" + format + "'";
+    }
+    GPUTexture texture;
+    const std::string error = m_impl->textures->createTexture(data, size, width, height, vkFormat, texture);
+    if (!error.empty()) return error;
+
+    if (auto* image = m_impl->get<UI::UIImage>(element)) image->texture = texture;
+    if (auto* panel = m_impl->get<UI::UIPanel>(element)) panel->texture = texture;
+    const entt::entity e = toEntt(element);
+    m_impl->registry.remove<OwnedUITexture>(e);   // releases the one it replaces
+    m_impl->registry.emplace<OwnedUITexture>(e, texture);
+    return {};
 }
 
 void UIAPI::setPanelBorder(EntityHandle element, const glm::vec4& border, float borderScale) {

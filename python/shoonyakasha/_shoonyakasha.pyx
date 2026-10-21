@@ -1477,6 +1477,32 @@ cdef class UI:
         """The texture of the element's image or panel. False if it cannot be loaded."""
         return self._ptr.setTexture(element, path.encode("utf-8"))
 
+    def set_texture_data(self, uint32_t element, data, uint32_t width=0, uint32_t height=0,
+                         str format="R8G8B8A8_SRGB"):
+        """The texture of the element's image or panel, from texels in memory.
+
+        `data` holds rows of tightly packed texels, top row first: a NumPy
+        array shaped (height, width, channels) or (height, width), whose
+        shape gives the size, or bytes with `width` and `height`. `format` is
+        a pipeline JSON format name. The texture belongs to the element and
+        is freed once it gets another or is destroyed. Uploading waits for
+        the GPU. Raises ValueError when the bytes or the format do not fit,
+        or the element is not an image or a panel.
+        """
+        cdef const unsigned char[::1] view
+        cdef string error
+        mv = memoryview(data)
+        if width == 0 or height == 0:
+            if mv.ndim < 2:
+                raise ValueError("give width and height, or data shaped (height, width[, channels])")
+            height, width = mv.shape[0], mv.shape[1]
+        view = mv.cast('B')
+        if view.shape[0] == 0:
+            raise ValueError("the image has no texels")
+        error = self._ptr.setTextureData(element, &view[0], view.shape[0], width, height, format.encode("utf-8"))
+        if not error.empty():
+            raise ValueError(error.decode("utf-8"))
+
     def set_panel_border(self, uint32_t element, border, float border_scale=1.0):
         self._ptr.setPanelBorder(element, _tuple_to_vec4(border), border_scale)
 

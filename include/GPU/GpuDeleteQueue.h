@@ -50,7 +50,9 @@ public:
     /// framesInFlight is the number of frames that may be recorded before the
     /// first is known to have completed. Retired buffers survive that many
     /// beginFrame() calls.
-    GpuDeleteQueue(VmaAllocator allocator, uint32_t framesInFlight);
+    /// `device` destroys retired textures' views and samplers; without one,
+    /// textures cannot be retired.
+    GpuDeleteQueue(VmaAllocator allocator, uint32_t framesInFlight, VkDevice device = VK_NULL_HANDLE);
     ~GpuDeleteQueue();
 
     GpuDeleteQueue(const GpuDeleteQueue&) = delete;
@@ -60,6 +62,10 @@ public:
     /// a null ref for an invalid buffer, so an absent index buffer needs no
     /// special case at the call site.
     GpuBufferRef adopt(const GPUBuffer& buffer);
+
+    /// Free a texture (image, view and sampler) once no in-flight frame can
+    /// still be sampling it, as for buffers.
+    void retire(const GPUTexture& texture);
 
     /// Advance one frame and free anything old enough. Call once per frame,
     /// before recording.
@@ -88,11 +94,14 @@ private:
     void collectLocked(bool force);
 
     struct Pending {
-        GPUBuffer buffer;
-        uint64_t  retiredFrame;
+        GPUBuffer  buffer;
+        GPUTexture texture;       // a texture's when `isTexture`
+        bool       isTexture = false;
+        uint64_t   retiredFrame = 0;
     };
 
     VmaAllocator m_allocator;
+    VkDevice     m_device;
     uint32_t     m_framesInFlight;
     uint64_t     m_frame = 0;
 

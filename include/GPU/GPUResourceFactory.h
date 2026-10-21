@@ -15,6 +15,7 @@
 #include <vk_mem_alloc.h>
 #include <vector>
 #include <cstring>
+#include <string>
 
 // Forward declaration
 namespace Shoonyakasha {
@@ -117,6 +118,26 @@ public:
         const void* pixels,
         VkDeviceSize pixelDataSize,
         bool generateMipmaps = false
+    );
+
+    // A sampled image of `width` x `height` texels of `format`, from `size`
+    // bytes of rows of tightly packed texels, top row first, with a
+    // clamp-to-edge sampler, linear where the format filters, nearest
+    // otherwise. The format must be a colour format the device samples.
+    // Uploading waits for `queue`. Returns an error message, empty when
+    // `out` holds the texture.
+    static std::string createTextureFromTexels(
+        VmaAllocator allocator,
+        VkDevice device,
+        VkPhysicalDevice physicalDevice,
+        VkQueue queue,
+        VkCommandPool cmdPool,
+        const void* data,
+        size_t size,
+        uint32_t width,
+        uint32_t height,
+        VkFormat format,
+        GPUTexture& out
     );
 
     // Create a cubemap texture

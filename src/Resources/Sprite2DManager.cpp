@@ -11,6 +11,7 @@
 
 #include <glm/glm.hpp>
 #include <iostream>
+#include <algorithm>
 #include <vector>
 
 namespace Shoonyakasha {
@@ -35,6 +36,26 @@ Sprite2DManager::~Sprite2DManager() {
     for (auto& [path, texture] : m_textureCache) {
         GPUResourceFactory::destroyTexture(m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), texture);
     }
+    for (auto& texture : m_createdTextures) {
+        GPUResourceFactory::destroyTexture(m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), texture);
+    }
+}
+
+std::string Sprite2DManager::createTexture(const void* data, size_t size, uint32_t width, uint32_t height,
+                                           VkFormat format, GPUTexture& out) {
+    const std::string error = GPUResourceFactory::createTextureFromTexels(
+        m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getPhysicalDevice(),
+        m_device.getGraphicsQueue(), m_device.getCommandPool(), data, size, width, height, format, out);
+    if (error.empty()) m_createdTextures.push_back(out);
+    return error;
+}
+
+void Sprite2DManager::releaseTexture(const GPUTexture& texture) {
+    const auto it = std::find_if(m_createdTextures.begin(), m_createdTextures.end(),
+                                 [&](const GPUTexture& t) { return t.image == texture.image; });
+    if (it == m_createdTextures.end()) return;
+    m_device.getDeleteQueue().retire(*it);
+    m_createdTextures.erase(it);
 }
 
 void Sprite2DManager::createQuadMesh() {

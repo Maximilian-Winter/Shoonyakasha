@@ -7,8 +7,9 @@
 
 namespace Shoonyakasha {
 
-GpuDeleteQueue::GpuDeleteQueue(VmaAllocator allocator, uint32_t framesInFlight)
+GpuDeleteQueue::GpuDeleteQueue(VmaAllocator allocator, uint32_t framesInFlight, VkDevice device)
     : m_allocator(allocator)
+    , m_device(device)
     , m_framesInFlight(framesInFlight == 0 ? 1 : framesInFlight)
 {
 }
@@ -43,7 +44,22 @@ void GpuDeleteQueue::retire(const GPUBuffer& buffer) {
     if (m_live > 0) {
         --m_live;
     }
-    m_pending.push_back(Pending{buffer, m_frame});
+    Pending pending;
+    pending.buffer = buffer;
+    pending.retiredFrame = m_frame;
+    m_pending.push_back(pending);
+}
+
+void GpuDeleteQueue::retire(const GPUTexture& texture) {
+    if (texture.image == VK_NULL_HANDLE && texture.view == VK_NULL_HANDLE && texture.sampler == VK_NULL_HANDLE) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    Pending pending;
+    pending.texture = texture;
+    pending.isTexture = true;
+    pending.retiredFrame = m_frame;
+    m_pending.push_back(pending);
 }
 
 void GpuDeleteQueue::beginFrame() {
@@ -66,7 +82,9 @@ void GpuDeleteQueue::collectLocked(bool force) {
     size_t keep = 0;
     for (size_t i = 0; i < m_pending.size(); ++i) {
         const bool safe = force || (m_pending[i].retiredFrame + m_framesInFlight <= m_frame);
-        if (safe) {
+        if (safe && m_pending[i].isTexture) {
+            GPUResourceFactory::destroyTexture(m_allocator, m_device, m_pending[i].texture);
+        } else if (safe) {
             GPUBuffer buffer = m_pending[i].buffer;
             GPUResourceFactory::destroyBuffer(m_allocator, buffer);
         } else {

@@ -152,30 +152,28 @@ def nk_axes(metal):
                    [step * i for i in range(int(top / step) + 1)], spectrum=True)
 
 
-def draw_plots(directory):
-    """The reflectance plot and one n, k plot per metal; returns their paths."""
-    paths = {}
+def draw_plots():
+    """The reflectance plot and one n, k plot per metal."""
+    plots = {}
     axes = reflectance_axes()
     raster = axes.raster()
     for metal in ("ALUMINIUM", "SILVER", "COPPER", "GOLD"):
         raster.curve(axes.polyline(lambda w, m=metal: reflectance(*ior(m, w))), CURVE[metal], 2.0 * axes.scale)
-    paths["reflectance"] = os.path.join(directory, "reflectance.png")
-    raster.save(paths["reflectance"])
+    plots["reflectance"] = raster
     for metal in METALS:
         axes = nk_axes(metal)
         raster = axes.raster()
         raster.curve(axes.polyline(lambda w, m=metal: ior(m, w)[0]), CURVE[metal], 2.0 * axes.scale)
         raster.curve(axes.polyline(lambda w, m=metal: ior(m, w)[1]), CURVE[metal], 2.0 * axes.scale,
                      dash=7.0 * axes.scale)
-        paths[metal] = os.path.join(directory, "nk_%s.png" % metal.lower())
-        raster.save(paths[metal])
-    return paths
+        plots[metal] = raster
+    return plots
 
 
 FILES = tempfile.mkdtemp(prefix="gold_")
 SPHERE = os.path.join(FILES, "sphere.gltf")
 oc.write_gltf(SPHERE, *oc.sphere())
-PLOTS = draw_plots(FILES)
+PLOTS = draw_plots()
 
 sk.shaders.compile_dir(oc.SHADERS)
 engine = sk.Engine(title="Shoonyakasha - Why gold is gold", width=args.width, height=args.height,

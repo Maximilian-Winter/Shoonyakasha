@@ -187,6 +187,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_widget_part_color(element, part, color)` | None | Style surface, text, track, fill, or handle without child-order assumptions. |
 | `set_interaction_colors(element, normal, hover, pressed, focused, disabled)` | None | Set multiplicative normal, hover, pressed, focused and disabled colors. |
 | `set_texture(element, path)` | bool | The texture of the element's image or panel. False if it cannot be loaded. |
+| `set_texture_data(element, data, width=0, height=0, format="R8G8B8A8_SRGB")` | None | The same from texels in memory: `data` (bytes, or a contiguous NumPy array shaped (height, width[, channels]), whose shape gives the size) holds rows of tightly packed texels of `format`, a pipeline JSON format name, top row first. The texture belongs to the element and is freed once the element gets another or is destroyed. Uploading waits for the GPU. Raises `ValueError` when the bytes or the format do not fit, or the element is not an image or a panel. |
 | `set_panel_border(element, border, border_scale=1.0)` | None | Calls native `setPanelBorder`; see the class contract above. |
 | `set_raycast_target(element, target)` | None | Whether the element's image or panel stops the pointer. |
 | `set_interactable(element, enabled=True)` | None | Make the element take the pointer, or disable it. Widgets are interactable. |

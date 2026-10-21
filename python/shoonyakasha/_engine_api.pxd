@@ -446,6 +446,8 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
         void setWidgetPartColor(EntityHandle element, const string& part, const vec4& color) except +
         void setInteractionColors(EntityHandle element, const vec4& normal, const vec4& hover, const vec4& pressed, const vec4& focused, const vec4& disabled)
         cbool setTexture(EntityHandle element, const string& path)
+        string setTextureData(EntityHandle element, const void* data, size_t size, uint32_t width,
+                              uint32_t height, const string& format)
         void setPanelBorder(EntityHandle element, const vec4& border, float borderScale)
         void setRaycastTarget(EntityHandle element, cbool target)
 
