@@ -95,6 +95,8 @@ void StagingBufferManager::create(const std::vector<BufferConfig>& configs, uint
 }
 
 void StagingBufferManager::destroy() {
+    m_pendingResults.clear();
+    m_latest.clear();
     for (auto& [name, entry] : m_entries) {
         for (auto& buf : entry.uploadStaging) {
             buf.reset();
@@ -247,10 +249,10 @@ void StagingBufferManager::recordReadbackCommands(VkCommandBuffer cmd, uint32_t 
 
         uint32_t slot = frameIndex % entry.ringDepth;
 
-        // Barrier: ensure shader writes are complete before transfer read
+        // Barrier: after every earlier write to the buffer
         VkBufferMemoryBarrier preCopyBarrier{};
         preCopyBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        preCopyBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        preCopyBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
         preCopyBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
         preCopyBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         preCopyBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -259,7 +261,7 @@ void StagingBufferManager::recordReadbackCommands(VkCommandBuffer cmd, uint32_t 
         preCopyBarrier.size = entry.size;
 
         vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             0, 0, nullptr,
             1, &preCopyBarrier,
@@ -271,6 +273,12 @@ void StagingBufferManager::recordReadbackCommands(VkCommandBuffer cmd, uint32_t 
         copyRegion.dstOffset = 0;
         copyRegion.size = entry.size;
         vkCmdCopyBuffer(cmd, entry.gpuBuffer, entry.readbackStaging[slot]->getBuffer(), 1, &copyRegion);
+
+        // Barrier: later commands write the buffer only after the copy read it
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 0, nullptr, 0, nullptr, 0, nullptr);
 
         // Mark this slot as having a pending readback
         // +1 so 0 means "no pending"
@@ -285,6 +293,8 @@ void StagingBufferManager::processCompletedReadbacks(uint32_t frameIndex, uint64
     // When this function is called, the app has already waited on the fence for frameIndex.
     // Any copy command recorded into that frame's command buffer is now complete.
     // The readback staging buffer at slot (frameIndex % ringDepth) is safe to read.
+    // Results from earlier frames are dropped: their slots may be written again.
+    m_pendingResults.clear();
 
     for (auto& [name, entry] : m_entries) {
         if (!entry.hasReadback) continue;
@@ -319,6 +329,7 @@ void StagingBufferManager::processCompletedReadbacks(uint32_t frameIndex, uint64
 
         // Store for polling
         m_pendingResults.push_back(result);
+        m_latest[entry.name] = result;
 
         // Clear pending flag
         entry.readbackPendingFrame[slot] = 0;
@@ -500,8 +511,26 @@ void StagingBufferManager::processCompletedImageReadbacks(uint32_t frameIndex, u
         }
 
         m_pendingResults.push_back(result);
+        m_latest[entry.name] = result;
         entry.readbackPendingFrame[slot] = 0;
     }
+}
+
+bool StagingBufferManager::requestReadback(const std::string& name) {
+    if (const auto it = m_entries.find(name); it != m_entries.end() && it->second.hasReadback) {
+        it->second.readbackTriggered = true;
+        return true;
+    }
+    if (const auto it = m_imageEntries.find(name); it != m_imageEntries.end() && it->second.hasReadback) {
+        it->second.readbackTriggered = true;
+        return true;
+    }
+    return false;
+}
+
+const ReadbackResult* StagingBufferManager::latestReadback(const std::string& name) const {
+    const auto it = m_latest.find(name);
+    return it != m_latest.end() ? &it->second : nullptr;
 }
 
 void StagingBufferManager::registerImageReadbackCallback(const std::string& name, ReadbackCallbackFn cb) {

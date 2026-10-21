@@ -13,7 +13,7 @@ from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.memory cimport shared_ptr
 from libcpp cimport bool as cbool
-from libc.stdint cimport uint8_t, uint32_t
+from libc.stdint cimport uint8_t, uint32_t, uint64_t
 from cpython.ref cimport PyObject
 
 from ._facade_types cimport (
@@ -486,6 +486,18 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
 # ═══════════════════════════════════════════════════════════════
 
 cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
+    cdef cppclass Readback "Shoonyakasha::Facade::Readback":
+        Readback()
+        const void* data
+        size_t size
+        uint64_t frame
+        cbool image
+        uint32_t width
+        uint32_t height
+        string format
+        uint32_t elementCount
+        uint32_t elementStride
+
     cdef cppclass CppEngineAPI "Shoonyakasha::Facade::EngineAPI":
         CppEngineAPI(const EngineConfig& config) except +
 
@@ -561,6 +573,8 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         void setCustomMat4Array(const string& key, const vector[mat4]& values)
         void setCustomUintArray(const string& key, const vector[uint32_t]& values)
         string setBuffer(const string& name, const void* data, size_t size, size_t offset)
+        cbool requestReadback(const string& name)
+        cbool getReadback(const string& name, Readback& out)
         void setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
                                   float splitLambda, uint32_t resolution, float casterExtension)
         mat4 getSunShadowCascade(uint32_t index)

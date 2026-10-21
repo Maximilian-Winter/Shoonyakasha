@@ -31,6 +31,7 @@
 #include "ECS/SkeletalAnimationSystem.h"
 #include "ECS/SkeletonComponents.h"
 #include "FrameGraph/DotPathResolver.h"
+#include "Vulkan/FrameGraph/FrameGraphJson.h"
 #include "Vulkan/FrameGraph/FrameGraph.h"
 
 using namespace Shoonyakasha::Facade::Internal;
@@ -534,6 +535,30 @@ void EngineAPI::setCustomUintArray(const std::string& key, const std::vector<uin
 std::string EngineAPI::setBuffer(const std::string& name, const void* data, size_t size, size_t offset) {
     if (!m_impl->app) return "the engine is not running";
     return m_impl->app->getRenderGraph().setBufferData(name, data, size, offset);
+}
+
+bool EngineAPI::requestReadback(const std::string& name) {
+    return m_impl->app && m_impl->app->getRenderGraph().requestReadback(name);
+}
+
+bool EngineAPI::getReadback(const std::string& name, Readback& out) const {
+    if (!m_impl->app) return false;
+    const auto* result = m_impl->app->getRenderGraph().latestReadback(name);
+    if (!result || !result->data) return false;
+    out = Readback{};
+    out.data = result->data;
+    out.size = static_cast<size_t>(result->size);
+    out.frame = result->frameNumber;
+    out.image = result->isImage;
+    if (result->isImage) {
+        out.width = result->imageWidth;
+        out.height = result->imageHeight;
+        out.format = FrameGraph::JsonUtils::formatToString(result->imageFormat);
+    } else {
+        out.elementCount = result->elementCount;
+        out.elementStride = result->elementStride;
+    }
+    return true;
 }
 
 void EngineAPI::setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount,

@@ -55,6 +55,18 @@ bool videoRecordingAvailable();
 std::string findFfmpeg();
 
 
+/// A completed readback (EngineAPI::getReadback). `data` stays valid until
+/// the next frame begins.
+struct Readback {
+    const void* data = nullptr;
+    size_t size = 0;
+    uint64_t frame = 0;                 // the frame copied, counted from 0
+    bool image = false;
+    uint32_t width = 0, height = 0;     // an image's
+    std::string format;                 // an image's, as pipeline JSON names it
+    uint32_t elementCount = 0, elementStride = 0;   // a buffer's
+};
+
 /**
  * @brief Owns a callback-driven engine application and its facade APIs.
  *
@@ -301,6 +313,18 @@ public:
     /// they are checked against it then. Returns an error message, empty
     /// when the bytes were taken.
     std::string setBuffer(const std::string& name, const void* data, size_t size, size_t offset = 0);
+
+    /// Copy the buffer layout or image resource `name` back at the end of
+    /// the next frame, whatever the readback frequency its pipeline JSON
+    /// declares. False when it declares no readback.
+    bool requestReadback(const std::string& name);
+
+    /// The most recent completed readback of `name`: false when there is
+    /// none yet. A buffer's is the whole buffer; an image's is mip 0, layer
+    /// 0, as rows of tightly packed texels (the depth of a depth format).
+    /// Results arrive as many frames after the copy as there are frames in
+    /// flight, and are gone once the pipeline is compiled again.
+    bool getReadback(const std::string& name, Readback& out) const;
 
     // ═══════════════════════════════════════════════════════════
     // Sun Shadow Cascades

@@ -78,6 +78,14 @@ public:
     /// Trigger a one-shot readback for a buffer (Phase 4: for manual save triggers)
     void triggerReadback(const std::string& name);
 
+    /// Copy buffer or image `name` back at the end of the next frame
+    /// recorded, whatever its readback frequency. False if it has no readback.
+    bool requestReadback(const std::string& name);
+
+    /// The most recent completed readback of buffer or image `name`, or null.
+    /// Its data stays valid until the next frame's readbacks are processed.
+    const ReadbackResult* latestReadback(const std::string& name) const;
+
     // ── Upload API (CPU→GPU) ──
 
     /// Write data into the upload staging buffer for the current frame
@@ -101,7 +109,8 @@ public:
     /// Call AFTER vkWaitForFences for the current frame (fence guarantees copy completion)
     void processCompletedReadbacks(uint32_t frameIndex, uint64_t frameNumber);
 
-    /// Poll for completed readback results without callbacks
+    /// The readbacks completed when this frame began, without callbacks. Their
+    /// data stays valid until the next frame's readbacks are processed.
     std::vector<ReadbackResult> pollReadbacks();
 
     // ── Image Readback (render target data flow) ──
@@ -172,6 +181,7 @@ private:
 
     std::unordered_map<std::string, StagingEntry> m_entries;
     std::vector<ReadbackResult> m_pendingResults;  // For pollReadbacks()
+    std::unordered_map<std::string, ReadbackResult> m_latest;   // For latestReadback()
 
     /// Check if a readback should happen this frame based on frequency policy
     bool shouldReadback(const StagingEntry& entry, uint64_t frameNumber) const;

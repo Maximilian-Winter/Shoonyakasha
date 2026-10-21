@@ -34,7 +34,27 @@ Binary file sources load raw layout-compatible bytes; they are not a portable sc
 
 A target object can request periodic/manual readback and binary save. Image resources have corresponding target/readback/save policies for render-target capture. `StagingBufferManager` manages transfer staging and callbacks; the native example shows the callback and manual-trigger setup needed beyond JSON declarations.
 
-The public Python facade does not expose the native readback callback/trigger API. Its frame-capture methods save the presented image, a separate facility. Do not assume an intermediate HDR target can be selected through `capture_screenshot`.
+### Reading back from Python
+
+A buffer layout or image resource that declares a `readback` can be read from Python. `engine.request_readback(name)` copies it at the end of the next frame, whatever its declared frequency, and returns False when it declares no readback. `engine.get_readback(name)` returns the most recent copy, or None before the first:
+
+```python
+import numpy as np
+
+def on_update(dt):
+    r = engine.get_readback("Counter")          # a storage buffer, "frequency": "per_frame"
+    if r:
+        values = np.frombuffer(r["data"], dtype=np.uint32)
+
+engine.request_readback("pattern")              # an image, "frequency": "manual"
+r = engine.get_readback("pattern")              # a few frames later
+if r:
+    texels = np.frombuffer(r["data"], dtype=np.float32).reshape(r["height"], r["width"], 4)
+```
+
+The result is a dict: `data` (bytes), `frame` (the frame copied, counted from 0), and for an image `width`, `height` and `format` (its pipeline JSON name), for a buffer `element_count` and `element_stride`. A buffer's data is the whole buffer. An image's is mip 0, layer 0, as rows of tightly packed texels; a depth format gives its depth. A copy arrives once its frame's fence was waited on, as many frames later as there are frames in flight, and the result stays until a newer copy arrives or the pipeline is compiled again. Images whose format has no known texel size are not read back, with a warning. In C++, `EngineAPI::requestReadback` and `getReadback(name, Readback&)` do the same, and `RenderGraph::pollReadbacks` returns the copies completed when the frame began.
+
+The frame-capture methods save the presented image, a separate facility. Do not assume an intermediate HDR target can be selected through `capture_screenshot`.
 
 Readback frequency, memory placement, transfer direction, and buffer size affect correctness and cost. The parser accepting a policy does not prove a workflow has been exercised; use the matching example and GPU validation when changing it.
 

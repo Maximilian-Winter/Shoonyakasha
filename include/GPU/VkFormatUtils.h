@@ -33,6 +33,38 @@ constexpr bool isDepthFormat(VkFormat format) {
     }
 }
 
+/// Bytes per texel that vkCmdCopyImageToBuffer writes for an image of
+/// `format`: of its depth aspect for depth formats. 0 for formats not listed.
+constexpr uint32_t copiedTexelSize(VkFormat format) {
+    switch (format) {
+        case VK_FORMAT_R8_UNORM: case VK_FORMAT_R8_SNORM: case VK_FORMAT_R8_UINT: case VK_FORMAT_R8_SINT:
+            return 1;
+        case VK_FORMAT_R8G8_UNORM: case VK_FORMAT_R8G8_SNORM: case VK_FORMAT_R16_SFLOAT: case VK_FORMAT_R16_UNORM:
+        case VK_FORMAT_R16_UINT: case VK_FORMAT_R16_SINT: case VK_FORMAT_D16_UNORM: case VK_FORMAT_D16_UNORM_S8_UINT:
+            return 2;
+        case VK_FORMAT_R8G8B8_UNORM:
+            return 3;
+        case VK_FORMAT_R8G8B8A8_UNORM: case VK_FORMAT_R8G8B8A8_SNORM: case VK_FORMAT_R8G8B8A8_SRGB:
+        case VK_FORMAT_B8G8R8A8_UNORM: case VK_FORMAT_B8G8R8A8_SRGB: case VK_FORMAT_R16G16_SFLOAT:
+        case VK_FORMAT_R16G16_UNORM: case VK_FORMAT_R32_SFLOAT: case VK_FORMAT_R32_UINT: case VK_FORMAT_R32_SINT:
+        case VK_FORMAT_B10G11R11_UFLOAT_PACK32: case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+        case VK_FORMAT_D32_SFLOAT: case VK_FORMAT_X8_D24_UNORM_PACK32: case VK_FORMAT_D24_UNORM_S8_UINT:
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
+            return 4;
+        case VK_FORMAT_R16G16B16_SFLOAT:
+            return 6;
+        case VK_FORMAT_R16G16B16A16_SFLOAT: case VK_FORMAT_R16G16B16A16_UNORM: case VK_FORMAT_R32G32_SFLOAT:
+        case VK_FORMAT_R32G32_UINT:
+            return 8;
+        case VK_FORMAT_R32G32B32_SFLOAT:
+            return 12;
+        case VK_FORMAT_R32G32B32A32_SFLOAT: case VK_FORMAT_R32G32B32A32_UINT:
+            return 16;
+        default:
+            return 0;
+    }
+}
+
 /// True for the stencil-only and depth+stencil formats.
 constexpr bool isStencilFormat(VkFormat format) {
     switch (format) {

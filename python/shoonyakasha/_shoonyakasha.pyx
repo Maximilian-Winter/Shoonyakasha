@@ -54,7 +54,7 @@ from ._engine_api cimport (
     make_float2_callback, make_int_bool_callback,
     wrap_py_object, unwrap_py_object, make_system_update_callback,
     CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
-    videoRecordingAvailable, findFfmpeg,
+    videoRecordingAvailable, findFfmpeg, Readback,
 )
 from libcpp.memory cimport shared_ptr
 
@@ -2222,6 +2222,36 @@ cdef class Engine:
         error = self._ptr.setBuffer(name.encode('utf-8'), &view[0], view.shape[0], offset)
         if not error.empty():
             raise ValueError(error.decode('utf-8'))
+
+    def request_readback(self, str name):
+        """Copy the buffer layout or image resource `name` back at the end
+        of the next frame, whatever the readback frequency its pipeline JSON
+        declares. Returns False when it declares no readback.
+        """
+        return self._ptr.requestReadback(name.encode('utf-8'))
+
+    def get_readback(self, str name):
+        """The most recent completed readback of `name`, or None.
+
+        A dict with "data" (bytes), "frame" (the frame copied, from 0) and
+        for an image "width", "height" and "format" (its pipeline JSON format
+        name): mip 0, layer 0, rows of tightly packed texels, the depth of a
+        depth format; for a buffer "element_count" and "element_stride".
+        Results arrive as many frames after the copy as there are frames in
+        flight.
+        """
+        cdef Readback r
+        if not self._ptr.getReadback(name.encode('utf-8'), r):
+            return None
+        out = {"data": (<const char*>r.data)[:r.size], "frame": r.frame}
+        if r.image:
+            out["width"] = r.width
+            out["height"] = r.height
+            out["format"] = r.format.decode('utf-8')
+        else:
+            out["element_count"] = r.elementCount
+            out["element_stride"] = r.elementStride
+        return out
 
     def set_sun_shadows(self, uint32_t cascades=4, float max_distance=60.0,
                         float split_lambda=0.75, uint32_t resolution=2048,

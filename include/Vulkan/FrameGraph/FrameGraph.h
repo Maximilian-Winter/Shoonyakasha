@@ -1248,7 +1248,23 @@ public:
 
     // ── Readback API (Phase 3: GPU→CPU data transfer) ──
     void registerReadbackCallback(const std::string& bufferName, ReadbackCallbackFn cb);
+    /// The readbacks completed when this frame began; their data stays valid
+    /// until the next frame's readbacks are processed.
     std::vector<ReadbackResult> pollReadbacks();
+
+    /// Copy buffer layout or image resource `name`, which declares a
+    /// readback, back at the end of the next frame recorded, whatever its
+    /// readback frequency. The result arrives once that frame's fence was
+    /// waited on, as many frames later as there are frames in flight. False
+    /// if `name` has no readback.
+    bool requestReadback(const std::string& name);
+
+    /// The most recent completed readback of `name`, or null. A buffer's is
+    /// the whole buffer; an image's is mip 0, layer 0, rows of tightly packed
+    /// texels (the depth aspect of a depth format). Its data stays valid
+    /// until the next frame's readbacks are processed, and is gone once the
+    /// graph is compiled again.
+    const ReadbackResult* latestReadback(const std::string& name) const;
 
     // ── Pixel readback: one texel of an image ──
     // In the next frame recorded, copies the texel at `pixel` (mip 0, layer

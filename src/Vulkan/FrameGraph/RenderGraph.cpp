@@ -1064,17 +1064,12 @@ void RenderGraph::createStagingBuffers(uint32_t maxFramesInFlight) {
         const auto* img = std::get_if<PhysicalImage>(&m_compiled.physicalResources[handle.index]);
         if (!img || img->vkImage == VK_NULL_HANDLE) continue;
 
-        // Calculate bytes per pixel
-        uint32_t bpp = 4;  // default
-        switch (img->format) {
-            case VK_FORMAT_R8_UNORM: bpp = 1; break;
-            case VK_FORMAT_R8G8_UNORM: bpp = 2; break;
-            case VK_FORMAT_R8G8B8A8_UNORM: case VK_FORMAT_R8G8B8A8_SRGB:
-            case VK_FORMAT_B8G8R8A8_UNORM: case VK_FORMAT_B8G8R8A8_SRGB:
-            case VK_FORMAT_D32_SFLOAT: case VK_FORMAT_D24_UNORM_S8_UINT: bpp = 4; break;
-            case VK_FORMAT_R16G16B16A16_SFLOAT: bpp = 8; break;
-            case VK_FORMAT_R32G32B32A32_SFLOAT: bpp = 16; break;
-            default: bpp = 4; break;
+        // Bytes per texel the copy writes
+        const uint32_t bpp = Shoonyakasha::copiedTexelSize(img->format);
+        if (bpp == 0) {
+            m_logger->log(LogLevel::Warning, "Image '%s' has a readback, but its format cannot be read back",
+                          resDecl.name.c_str());
+            continue;
         }
 
         StagingBufferManager::ImageConfig imgCfg;
@@ -1358,6 +1353,14 @@ std::vector<ReadbackResult> RenderGraph::pollReadbacks() {
         return m_stagingManager->pollReadbacks();
     }
     return {};
+}
+
+bool RenderGraph::requestReadback(const std::string& name) {
+    return m_stagingManager && m_stagingManager->requestReadback(name);
+}
+
+const ReadbackResult* RenderGraph::latestReadback(const std::string& name) const {
+    return m_stagingManager ? m_stagingManager->latestReadback(name) : nullptr;
 }
 
 void RenderGraph::triggerSave(const std::string& bufferName) {
