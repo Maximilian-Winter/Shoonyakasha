@@ -244,6 +244,20 @@ class PipelineValidation(unittest.TestCase):
         document["passes"][0]["repeat"]["first"] = 1
         self.assertTrue(any("at least 0" in p.message for p in self.problems(document)))
 
+    def test_a_resolve_target_counts_as_written(self):
+        import copy
+        document = copy.deepcopy(self.MINIMAL)
+        document["resources"] += [{"name": "colorMS", "kind": "image"}, {"name": "color", "kind": "image"}]
+        document["passes"].insert(0, {
+            "name": "Draw", "type": "graphics",
+            "outputs": [{"resource": "colorMS", "usage": "color_write", "resolve": "color"}]})
+        document["passes"][1]["inputs"] = [{"resource": "color", "usage": "shader_read"}]
+        self.assertEqual([], self.problems(document))
+
+        document["passes"][0]["outputs"][0]["resolve"] = "colour"
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("resolve target 'colour'" in m for m in messages), messages)
+
     def test_pass_requirements_must_be_known_capabilities(self):
         import copy
         document = copy.deepcopy(self.MINIMAL)

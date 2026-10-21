@@ -68,6 +68,7 @@ VkImageLayout usageToLayout(ResourceUsage usage) {
         case ResourceUsage::InputAttachment:        return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         case ResourceUsage::TransferSrc:            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         case ResourceUsage::TransferDst:            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        case ResourceUsage::ColorResolve:           return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         // The layout a pass renders INTO. PRESENT_SRC_KHR is where the image
         // goes afterwards, through a post-barrier; see ResourceAccess::present.
         case ResourceUsage::Present:                return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -80,6 +81,7 @@ VkPipelineStageFlags usageToStageMask(ResourceUsage usage, PassType passType) {
         case ResourceUsage::ColorAttachmentWrite:
         case ResourceUsage::ColorAttachmentBlend:  // Blending uses same stage as color write
         case ResourceUsage::Present:
+        case ResourceUsage::ColorResolve:          // Resolves run in the colour output stage
             return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         case ResourceUsage::DepthStencilWrite:
         case ResourceUsage::DepthStencilReadOnly:
@@ -104,6 +106,7 @@ VkAccessFlags usageToAccessMask(ResourceUsage usage) {
             // before it must make the previous write visible to.
             return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         case ResourceUsage::Present:
+        case ResourceUsage::ColorResolve:
             return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         case ResourceUsage::ColorAttachmentBlend:
             // Blending requires READ (to fetch dst color) + WRITE (to output blended result)

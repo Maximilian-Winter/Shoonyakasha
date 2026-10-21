@@ -133,6 +133,21 @@ bool beginRendering(VkCommandBuffer commandBuffer,
         info.loadOp      = att.loadOp;
         info.storeOp     = att.storeOp;
         info.clearValue  = att.clearValue;
+        if (att.resolveResource.valid()) {
+            VkImageView resolveView = att.resolveView;
+            if (resolveView == VK_NULL_HANDLE) {
+                // Imported: the view for this frame's swapchain image.
+                const auto* target = std::get_if<PhysicalImage>(
+                    &compiled.physicalResources[att.resolveResource.index]);
+                resolveView = target ? target->view : VK_NULL_HANDLE;
+            }
+            if (resolveView == VK_NULL_HANDLE) return false;
+            // Integer formats take sample 0; the rest average their samples.
+            info.resolveMode        = isIntegerFormat(att.format) ? VK_RESOLVE_MODE_SAMPLE_ZERO_BIT
+                                                                  : VK_RESOLVE_MODE_AVERAGE_BIT;
+            info.resolveImageView   = resolveView;
+            info.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        }
         return view != VK_NULL_HANDLE;
     };
 
@@ -351,6 +366,7 @@ void FrameGraphExecutor::recordPasses(
         if (!compiledPass.colorAttachments.empty()) ctx.colorFormat = compiledPass.colorAttachments[0].format;
         ctx.colorAttachmentCount = static_cast<uint32_t>(compiledPass.colorAttachments.size());
         if (compiledPass.hasDepthAttachment) ctx.depthFormat = compiledPass.depthAttachment.format;
+        ctx.samples = compiledPass.samples;
         ctx.physicalResourcesPtr = &compiled.physicalResources;
         ctx.physicalResourceCount = static_cast<uint32_t>(compiled.physicalResources.size());
         ctx.repeatIndex = passDecl.repeatIndex;

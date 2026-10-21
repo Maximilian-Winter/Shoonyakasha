@@ -33,13 +33,24 @@ Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defau
 | `arrayLayers` | 1 (6 for `cube`) | Array layers, e.g. one per shadow cascade |
 | `viewType` | `auto` | How shaders sampling the whole image see it: `auto` (`2d` for one layer, `2d_array` for more), `2d`, `2d_array`, `cube` (6 square layers), `cube_array` (a multiple of 6), `3d` (a volume of `depth` slices) |
 | `depth` | 1 | Slices of a `3d` image; other view types take only 1. A `3d` image has one layer and a colour format, is written by compute passes as a storage image (`image3D`) and sampled as `sampler3D`, and cannot be an attachment or have a `readback` or `save`. A full mip chain also halves the depth |
-| `samples` | 1 | Read but not used: every image is created single-sampled, and passes have no resolve |
+| `samples` | 1 | Samples per pixel: 1, 2, 4, 8, 16, 32 or 64. A multisampled image has one mip level, is `2d` or `2d_array`, and has no `readback` or `save`; compiling fails when the device offers no such image of its format and usage. See [multisampling](#multisampling) |
 | `transient` | false | Transient image declaration |
 | `persistent` | false | Contents carry over from one frame to the next, for state a pass accumulates (an adapted exposure, a history). For last frame's image of a result, read a persistent image in the pass that makes the result, then copy the result into it in a pass after: the default pipeline's `TAA` and `TAAHistory` do this. Normally a frame's first access discards an image's contents; a persistent image's first barrier instead waits on and keeps the previous frame's. Cleared to zero (depth to 1) whenever the graph is compiled, including after a resize. A pass that writes a persistent image is never culled as unused: the next frame reads what it wrote |
 
 Image properties live inside `image`. Buffer properties live inside `buffer`: `size` in bytes (default 0), `persistentlyMapped` (false). Creating buffers through `bufferLayouts` is separate from declaring graph resource accesses; follow the SSBO examples for imported layout-backed buffers.
 
-Each pass input/output has a required `resource` name and `usage`. Optional `clear` is `[r,g,b,a]` or `{ "depth": 1.0, "stencil": 0 }`. Optional `present` marks the post-render presentation transition.
+Each pass input/output has a required `resource` name and `usage`. Optional `clear` is `[r,g,b,a]` or `{ "depth": 1.0, "stencil": 0 }`. Optional `present` marks the post-render presentation transition. Optional `resolve` on a `color_write` or `color_blend` output names the image a multisampled attachment resolves into; see [multisampling](#multisampling).
+
+### Multisampling
+
+Every attachment of a graphics pass has the same `samples`, and its pipeline rasterizes with that many; compiling fails otherwise. The canvas UI's pipeline follows the pass's sample count too. A multisampled colour attachment can name an image to resolve into at the end of the pass:
+
+```json
+"outputs": [{ "resource": "colorMS", "usage": "color_write", "clear": [0, 0, 0, 1], "resolve": "color" },
+            { "resource": "depthMS", "usage": "depth_write", "clear": { "depth": 1.0 } }]
+```
+
+The pass then also writes `color`, as if it were declared as an output, so later passes that read it run after this one. The target is a single-sampled colour image of the same format, with one mip level as large as the rendered one and as many layers; it may be imported. Float and normalized formats resolve to the average of their samples, integer formats to sample 0. A multisampled image that no later pass reads is not stored, as for any attachment, so only its resolve target reaches memory. Depth is not resolved. Shaders read a multisampled image as `sampler2DMS` or `texture2DMS`. A copy pass needs both images with the same sample count, and a blit takes only single-sampled images.
 
 An access covers the whole image unless it names a part: `"mip": n` or `"mips": [first, count]`, and `"layer": n` or `"layers": [first, count]`. An attachment names one mip level; one layer renders into that layer, several render layered. Ranges outside the image, and one pass using the same mip and layer in two different layouts, fail compilation. Descriptor bindings with `autoBindResource` accept the same keys and bind a view of just that part, so a downsample pass can sample mip n-1 while rendering mip n:
 

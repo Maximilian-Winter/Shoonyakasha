@@ -28,6 +28,7 @@ struct RenderingFormats {
     std::vector<VkFormat> color;                // one per colour attachment, in order
     VkFormat depth   = VK_FORMAT_UNDEFINED;     // UNDEFINED = no depth attachment
     VkFormat stencil = VK_FORMAT_UNDEFINED;     // UNDEFINED = the depth format if it has stencil, else none
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;  // of every attachment
 };
 
 // ═══════════════════════════════════════════════════════════════

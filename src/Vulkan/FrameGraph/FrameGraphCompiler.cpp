@@ -86,6 +86,14 @@ bool compileTransferRegions(const PassDeclaration& pass, const std::vector<Physi
     }
 
     const bool blit = compiled.executionKind == ExecutionKind::Blit;
+    if (blit && (srcImg->samples != VK_SAMPLE_COUNT_1_BIT || dstImg->samples != VK_SAMPLE_COUNT_1_BIT)) {
+        outError = where + ": a blit takes single-sampled images; resolve '" + srcName + "' first";
+        return false;
+    }
+    if (srcImg->samples != dstImg->samples) {
+        outError = where + ": a copy needs '" + srcName + "' and '" + dstName + "' with one sample count";
+        return false;
+    }
     if (!blit && srcImg->format != dstImg->format) {
         outError = where + ": a copy needs '" + srcName + "' and '" + dstName + "' in one format; use blit";
         return false;
@@ -129,6 +137,24 @@ bool compileTransferRegions(const PassDeclaration& pass, const std::vector<Physi
         }
     }
     return true;
+}
+
+std::string resolveTargetError(const PhysicalImage& source, const SubresourceRange& sourceRange,
+                               const std::string& sourceName, const PhysicalImage& target,
+                               const std::string& targetName) {
+    const std::string s = "'" + sourceName + "'", t = "'" + targetName + "'";
+    if (source.samples == VK_SAMPLE_COUNT_1_BIT) return s + " resolves into " + t + " but is not multisampled";
+    if (target.samples != VK_SAMPLE_COUNT_1_BIT) return "resolve target " + t + " is multisampled";
+    if (target.format != source.format) return s + " and its resolve target " + t + " differ in format";
+    if (target.aspect != VK_IMAGE_ASPECT_COLOR_BIT) return "resolve target " + t + " is not a colour image";
+    const VkExtent2D se = source.mipExtent(sourceRange.baseMip);
+    if (target.shape.mipLevels != 1 || target.shape.arrayLayers != sourceRange.layerCount ||
+        target.extent.width != se.width || target.extent.height != se.height) {
+        return "resolve target " + t + " must be one mip of " + std::to_string(se.width) + "x" +
+               std::to_string(se.height) + " with " + std::to_string(sourceRange.layerCount) +
+               " layer(s), as " + s + " is rendered";
+    }
+    return {};
 }
 
 std::string stencilAttachmentError(const PassDeclaration& pass, const CompiledPass& compiled) {
@@ -244,6 +270,7 @@ VkImageUsageFlags FrameGraphCompiler::usageToImageUsageFlags(ResourceUsage usage
         case ResourceUsage::TransferDst:
             return VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         case ResourceUsage::Present:
+        case ResourceUsage::ColorResolve:
             return VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     }
     return 0;
@@ -358,12 +385,26 @@ bool FrameGraphCompiler::createPhysicalResources(
                 format = device.findDepthFormat();
             }
 
+            // A sample count the device does not offer for this format and
+            // usage fails here rather than at image creation.
+            if (desc.samples != VK_SAMPLE_COUNT_1_BIT) {
+                VkImageFormatProperties props{};
+                const VkResult supported = vkGetPhysicalDeviceImageFormatProperties(
+                    device.getPhysicalDevice(), format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage, 0, &props);
+                if (supported != VK_SUCCESS || (props.sampleCounts & desc.samples) == 0) {
+                    outError = "Resource '" + decl.name + "': this device has no " +
+                               std::to_string(static_cast<int>(desc.samples)) +
+                               "-sample images of its format and usage";
+                    return false;
+                }
+            }
+
             auto image = std::make_unique<VulkanImage>(
                 device, width, height, format,
                 VK_IMAGE_TILING_OPTIMAL, usage, memProps,
                 shape.mipLevels, shape.arrayLayers,
                 cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0,
-                volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D, depth
+                volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D, depth, desc.samples
             );
 
             // The whole-image view shaders sample. A sampled depth/stencil view
@@ -385,6 +426,7 @@ bool FrameGraphCompiler::createPhysicalResources(
             physImg.format = format;
             physImg.extent = {width, height};
             physImg.depth = depth;
+            physImg.samples = desc.samples;
             physImg.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             physImg.shape = shape;
             physImg.viewType = viewType;
@@ -484,7 +526,9 @@ bool FrameGraphCompiler::createAttachments(
         compiled.extent = {};
         compiled.extentDepth = 1;
         compiled.layerCount = 1;
+        compiled.samples = VK_SAMPLE_COUNT_1_BIT;
         bool haveExtent = false;
+        bool haveSamples = false;
 
         // Compute passes render nothing; their extent, which compute_image
         // dispatches over, is that of the first image they write at the mip
@@ -574,6 +618,43 @@ bool FrameGraphCompiler::createAttachments(
                            std::to_string(compiled.extent.width) + "x" + std::to_string(compiled.extent.height) +
                            " with " + std::to_string(compiled.layerCount);
                 return false;
+            }
+
+            // Every attachment of a pass has one sample count.
+            if (!haveSamples) {
+                compiled.samples = physImg->samples;
+                haveSamples = true;
+            } else if (physImg->samples != compiled.samples) {
+                outError = "Pass '" + passDecl.name + "': attachment '" + declarations[ri].name + "' has " +
+                           std::to_string(static_cast<int>(physImg->samples)) + " sample(s), but the pass's " +
+                           "other attachments have " + std::to_string(static_cast<int>(compiled.samples));
+                return false;
+            }
+
+            if (output.resolveTarget.valid()) {
+                const uint32_t ti = output.resolveTarget.index;
+                const auto* target = std::get_if<PhysicalImage>(&physResources[ti]);
+                const std::string error = target
+                    ? resolveTargetError(*physImg, range, declarations[ri].name, *target, declarations[ti].name)
+                    : "'" + declarations[ti].name + "' is not an image";
+                if (!error.empty()) {
+                    outError = "Pass '" + passDecl.name + "': " + error;
+                    return false;
+                }
+                att.resolveResource = output.resolveTarget;
+                // Imported targets take this frame's view when recording.
+                if (!declarations[ti].imported) {
+                    const bool wholeSingle = target->shape.mipLevels == 1 && target->shape.arrayLayers == 1 &&
+                                             target->viewType == VK_IMAGE_VIEW_TYPE_2D;
+                    if (wholeSingle) {
+                        att.resolveView = target->view;
+                    } else {
+                        const VkImageSubresourceRange vr{target->aspect, 0, 1, 0, target->shape.arrayLayers};
+                        att.resolveView = target->subresourceViews->get(
+                            target->vkImage, target->format,
+                            target->shape.arrayLayers == 1 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_2D_ARRAY, vr);
+                    }
+                }
             }
 
             if (isDepth) {
@@ -1200,6 +1281,7 @@ void FrameGraphCompiler::createPipelines(
         if (compiled.hasDepthAttachment) {
             formats.depth = compiled.depthAttachment.format;
         }
+        formats.samples = compiled.samples;
 
         // Always use dynamic viewport/scissor
         builder.withDynamicViewport();

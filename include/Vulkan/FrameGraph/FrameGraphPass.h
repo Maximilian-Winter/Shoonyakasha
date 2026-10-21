@@ -62,6 +62,8 @@ enum class ResourceUsage {
     InputAttachment,            // Vulkan input attachment (subpass read)
     TransferSrc,                // Copy source
     TransferDst,                // Copy destination
+    ColorResolve,               // Resolve target of a multisampled colour attachment;
+                                // added by the loader for an output's "resolve"
 
     /// Deprecated: "colour write that also presents".
     ///
@@ -185,6 +187,11 @@ struct ResourceAccess {
     bool            hasClearValue = false;
     VkClearValue    clearValue{};
 
+    /// JSON "resolve": the single-sampled image this multisampled colour
+    /// attachment resolves into at the end of the pass. The loader also adds
+    /// an output of it with usage ColorResolve.
+    ResourceHandle  resolveTarget;
+
     // Resolved at compile time:
     VkImageLayout       requiredLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkPipelineStageFlags stageMask  = 0;
@@ -216,6 +223,7 @@ struct PassExecuteContext {
     VkFormat                colorFormat = VK_FORMAT_UNDEFINED;  // first colour attachment
     uint32_t                colorAttachmentCount = 0;
     VkFormat                depthFormat = VK_FORMAT_UNDEFINED;
+    VkSampleCountFlagBits   samples = VK_SAMPLE_COUNT_1_BIT;    // of every attachment
 
     // Opaque pointer to compiled physical resources (implementation accesses internals)
     const void* physicalResourcesPtr = nullptr;

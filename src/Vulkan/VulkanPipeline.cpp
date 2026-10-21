@@ -427,7 +427,9 @@ void VulkanPipeline::createPipeline() {
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = m_state.sampleShading ? VK_TRUE : VK_FALSE;
-    multisampling.rasterizationSamples = m_state.sampleCount;
+    // The attachments' sample count, when they are multisampled.
+    multisampling.rasterizationSamples = m_formats.samples != VK_SAMPLE_COUNT_1_BIT ? m_formats.samples
+                                                                                   : m_state.sampleCount;
     multisampling.minSampleShading = m_state.minSampleShading;
 
     // Depth stencil state

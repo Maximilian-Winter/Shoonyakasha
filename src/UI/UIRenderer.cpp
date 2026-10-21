@@ -436,7 +436,7 @@ void UIRenderer::renderWorldCanvases(VkCommandBuffer cmd, const UIDrawData& draw
     }
     recordBarriers(cmd, barriers);
 
-    VulkanPipeline* pipeline = m_atlasReady ? pipelineFor(kWorldFormat, VK_FORMAT_UNDEFINED) : nullptr;
+    VulkanPipeline* pipeline = m_atlasReady ? pipelineFor(kWorldFormat, VK_FORMAT_UNDEFINED, VK_SAMPLE_COUNT_1_BIT) : nullptr;
 
     for (const auto& draw : drawData.canvases) {
         auto it = m_targets.find(draw.canvas);
@@ -511,8 +511,8 @@ const MeshComponent& UIRenderer::worldQuad() {
 
 // ─── Drawing ────────────────────────────────────────────────────
 
-VulkanPipeline* UIRenderer::pipelineFor(VkFormat color, VkFormat depth) {
-    const PipelineKey key{color, depth};
+VulkanPipeline* UIRenderer::pipelineFor(VkFormat color, VkFormat depth, VkSampleCountFlagBits samples) {
+    const PipelineKey key{color, depth, samples};
     if (auto it = m_pipelines.find(key); it != m_pipelines.end()) return it->second.get();
 
     std::unique_ptr<VulkanPipeline> pipeline;
@@ -529,6 +529,7 @@ VulkanPipeline* UIRenderer::pipelineFor(VkFormat color, VkFormat depth) {
         RenderingFormats formats;
         formats.color = {color};
         formats.depth = depth;
+        formats.samples = samples;
 
         pipeline = PipelineStateBuilder()
             .withShaders(m_shaderDirectory + "ui.vert.spv", m_shaderDirectory + "ui.frag.spv")
@@ -637,7 +638,7 @@ void UIRenderer::drawOverlays(const FrameGraph::PassExecuteContext& ctx, const U
         return;
     }
 
-    VulkanPipeline* pipeline = pipelineFor(ctx.colorFormat, ctx.depthFormat);
+    VulkanPipeline* pipeline = pipelineFor(ctx.colorFormat, ctx.depthFormat, ctx.samples);
     if (!pipeline) return;
 
     const VkCommandBuffer cmd = ctx.cmd.getHandle();

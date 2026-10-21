@@ -93,7 +93,10 @@ private:
     struct PipelineKey {
         VkFormat color;
         VkFormat depth;
-        bool operator<(const PipelineKey& o) const { return std::tie(color, depth) < std::tie(o.color, o.depth); }
+        VkSampleCountFlagBits samples;
+        bool operator<(const PipelineKey& o) const {
+            return std::tie(color, depth, samples) < std::tie(o.color, o.depth, o.samples);
+        }
     };
     struct WorldTarget {
         GPUTexture texture;
@@ -105,7 +108,7 @@ private:
     };
 
     Atlas createAtlas(uint32_t layers) const;
-    VulkanPipeline* pipelineFor(VkFormat color, VkFormat depth);
+    VulkanPipeline* pipelineFor(VkFormat color, VkFormat depth, VkSampleCountFlagBits samples);
     VkDescriptorSet descriptorSetFor(VkImageView view, VkSampler sampler);
     void uploadGlyphs(VkCommandBuffer cmd, GlyphCache& glyphs);
     void syncWorldTargets(entt::registry& registry, const UIDrawData& drawData);

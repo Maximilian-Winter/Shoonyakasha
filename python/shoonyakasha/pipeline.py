@@ -336,6 +336,17 @@ def validate_json(document, base_dir=None, source="<json>"):
 
                 if resource:
                     (written if direction == "outputs" else read).add(resource)
+                # A multisampled attachment's "resolve" target is written too.
+                resolve = access.get("resolve")
+                if resolve is not None:
+                    if direction != "outputs":
+                        problems.append(Problem(access_where, "'resolve' applies to outputs"))
+                    elif resolve not in declared:
+                        problems.append(Problem(
+                            access_where, "resolve target '%s' is not declared in resources" % resolve,
+                            hint=_suggest(resolve, declared)))
+                    else:
+                        written.add(resolve)
                 if direction == "outputs" and (access.get("present")
                                                or usage == "present"):
                     presents.append((name, resource))

@@ -34,7 +34,7 @@ VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, 
 VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
                          VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
                          uint32_t mipLevels, uint32_t arrayLayers, VkImageCreateFlags flags,
-                         VkImageType imageType, uint32_t depth)
+                         VkImageType imageType, uint32_t depth, VkSampleCountFlagBits samples)
         : m_device(device)
         , m_image(VK_NULL_HANDLE)
         , m_allocation(VK_NULL_HANDLE)
@@ -46,6 +46,7 @@ VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, 
         , m_arrayLayers(arrayLayers)
         , m_depth(depth)
         , m_imageType(imageType)
+        , m_samples(samples)
         , m_flags(flags)
         , m_tiling(tiling)
         , m_usage(usage)
@@ -110,7 +111,7 @@ void VulkanImage::createImage(uint32_t width, uint32_t height, VkFormat format, 
     imageInfo.tiling = tiling;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imageInfo.usage = usage;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.samples = m_samples;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     // Use VMA for allocation

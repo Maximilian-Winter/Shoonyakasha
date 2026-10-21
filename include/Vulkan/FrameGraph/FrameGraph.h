@@ -465,6 +465,7 @@ struct PhysicalImage {
     VkFormat        format   = VK_FORMAT_UNDEFINED;
     VkExtent2D      extent   = {};              // of mip 0
     uint32_t        depth    = 1;               // slices of mip 0; 1 unless 3d
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
     /// Layout of mip 0, layer 0 at the end of the frame, for readback and saves.
     VkImageLayout   currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -508,6 +509,10 @@ struct CompiledAttachment {
     VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     VkClearValue        clearValue{};
     VkFormat            format  = VK_FORMAT_UNDEFINED;
+    /// The single-sampled image a multisampled colour attachment resolves
+    /// into, averaging its samples; null when it has none.
+    ResourceHandle      resolveResource;
+    VkImageView         resolveView = VK_NULL_HANDLE;
 };
 
 /// What the executor records for a pass, resolved from its execution type
@@ -530,6 +535,14 @@ enum class ExecutionKind : uint8_t {
 ExecutionKind executionKindOf(const std::string& type);
 
 struct CompiledPass;
+
+/// Why a multisampled colour attachment, `sourceRange` of `source`, cannot
+/// resolve into `target`: the target must be a single-sampled colour image
+/// of the same format, one mip as large as the rendered one, with as many
+/// layers. Empty when it can.
+std::string resolveTargetError(const PhysicalImage& source, const SubresourceRange& sourceRange,
+                               const std::string& sourceName, const PhysicalImage& target,
+                               const std::string& targetName);
 
 /// Why a pass's stencil test cannot run on its attachments: it needs a depth
 /// attachment with a stencil format, and one it may write if its operations
@@ -575,6 +588,8 @@ struct CompiledPass {
     VkExtent2D                          extent{};
     /// Slices at that mip level when the image is 3d; 1 otherwise.
     uint32_t                            extentDepth = 1;
+    /// Samples of every attachment of a graphics pass.
+    VkSampleCountFlagBits               samples = VK_SAMPLE_COUNT_1_BIT;
 
     /// Copy and blit passes: the images and one region per mip level.
     ResourceHandle                      transferSrc;

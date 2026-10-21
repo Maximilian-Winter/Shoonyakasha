@@ -155,6 +155,7 @@ std::string resourceUsageToString(ResourceUsage usage) {
         case ResourceUsage::TransferSrc:            return "transfer_src";
         case ResourceUsage::TransferDst:            return "transfer_dst";
         case ResourceUsage::Present:                return "present";
+        case ResourceUsage::ColorResolve:           return "color_resolve";
         default:                                    return "unknown";
     }
 }
@@ -500,6 +501,20 @@ static ResourceAccess parseResourceAccess(
             // Depth/stencil clear: {"depth": 1.0, "stencil": 0}
             access.clearValue.depthStencil.depth = clear.value("depth", 1.0f);
             access.clearValue.depthStencil.stencil = clear.value("stencil", 0u);
+        }
+    }
+
+    // "resolve": the image a multisampled colour attachment resolves into.
+    if (j.contains("resolve")) {
+        const std::string target = j["resolve"].get<std::string>();
+        if (access.usage != ResourceUsage::ColorAttachmentWrite &&
+            access.usage != ResourceUsage::ColorAttachmentBlend) {
+            throw std::runtime_error("Access to '" + resourceName + "': \"resolve\" applies to colour "
+                                     "attachments (color_write, color_blend)");
+        }
+        access.resolveTarget = builder.getResource(target);
+        if (!access.resolveTarget.valid()) {
+            throw std::runtime_error("Access to '" + resourceName + "': unknown resolve target '" + target + "'");
         }
     }
 
@@ -1459,7 +1474,23 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                             desc.format = JsonUtils::stringToFormat(imgJson["format"].get<std::string>());
                         }
                         if (imgJson.contains("samples")) {
-                            desc.samples = static_cast<VkSampleCountFlagBits>(imgJson["samples"].get<int>());
+                            const auto& s = imgJson["samples"];
+                            const int64_t n = s.is_number_integer() ? s.get<int64_t>() : 0;
+                            if (n < 1 || n > 64 || (n & (n - 1)) != 0) {
+                                throw std::runtime_error("Resource '" + name +
+                                    "': samples must be 1, 2, 4, 8, 16, 32 or 64");
+                            }
+                            desc.samples = static_cast<VkSampleCountFlagBits>(n);
+                        }
+                        if (desc.samples != VK_SAMPLE_COUNT_1_BIT) {
+                            if (desc.mipLevels != 1) {
+                                throw std::runtime_error("Resource '" + name + "': a multisampled image has one mip level");
+                            }
+                            if (desc.viewType != ImageViewKind::Auto && desc.viewType != ImageViewKind::Tex2D &&
+                                desc.viewType != ImageViewKind::Tex2DArray) {
+                                throw std::runtime_error("Resource '" + name +
+                                    "': a multisampled image is 2d or 2d_array");
+                            }
                         }
                         if (volume && (desc.format == VK_FORMAT_UNDEFINED || isDepthFormat(desc.format))) {
                             throw std::runtime_error("Resource '" + name + "': a 3d image needs a colour format");
@@ -1543,6 +1574,11 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     resDecl->imageDesc.viewType == ImageViewKind::Tex3D) {
                     throw std::runtime_error("Resource '" + name + "': a 3d image has no readback or save");
                 }
+                if (resDecl->kind == ResourceKind::Image && resDecl->readbackPolicy.enabled &&
+                    resDecl->imageDesc.samples != VK_SAMPLE_COUNT_1_BIT) {
+                    throw std::runtime_error("Resource '" + name + "': a multisampled image has no readback or "
+                                             "save; resolve it into one that does");
+                }
             }
         }
     }
@@ -1602,6 +1638,13 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
             if (passJson.contains("outputs")) {
                 for (const auto& outputJson : passJson["outputs"]) {
                     pass.outputs.push_back(parseResourceAccess(outputJson, builder));
+                    // A resolve target is written by the pass too.
+                    if (pass.outputs.back().resolveTarget.valid()) {
+                        ResourceAccess resolve;
+                        resolve.handle = pass.outputs.back().resolveTarget;
+                        resolve.usage = ResourceUsage::ColorResolve;
+                        pass.outputs.push_back(resolve);
+                    }
                 }
             }
 
@@ -1964,6 +2007,9 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
         if (!depth.valid() || builder.getResourceDeclarations()[depth.index].kind != ResourceKind::Image) {
             throw std::runtime_error("\"ui\": \"depth\" names '" + settings.depth + "', which is not an image");
         }
+        if (builder.getResourceDeclarations()[depth.index].imageDesc.samples != VK_SAMPLE_COUNT_1_BIT) {
+            throw std::runtime_error("\"ui\": \"depth\" names '" + settings.depth + "', which is multisampled");
+        }
         const PassDeclaration* pass = builder.getPass(settings.afterPass);
         if (!pass) {
             throw std::runtime_error("\"ui\": \"afterPass\" names '" + settings.afterPass + "', which is not a pass");
@@ -2126,6 +2172,10 @@ static nlohmann::json serializeResourceAccess(const ResourceAccess& access,
         }
     }
 
+    if (access.resolveTarget.valid() && access.resolveTarget.index < resources.size()) {
+        j["resolve"] = resources[access.resolveTarget.index].name;
+    }
+
     return j;
 }
 
@@ -2238,6 +2288,8 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
         if (!pass.outputs.empty()) {
             passJson["outputs"] = nlohmann::json::array();
             for (const auto& output : pass.outputs) {
+                // Written as "resolve" on the attachment it resolves.
+                if (output.usage == ResourceUsage::ColorResolve) continue;
                 passJson["outputs"].push_back(serializeResourceAccess(output, builder));
             }
         }
