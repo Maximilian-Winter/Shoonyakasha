@@ -20,10 +20,12 @@ public:
                 VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 
     // Create a new image with several mip levels and/or array layers.
-    // `flags` takes e.g. VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT.
+    // `flags` takes e.g. VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT. A
+    // VK_IMAGE_TYPE_3D image has `depth` slices and one layer.
     VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
                 VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
-                uint32_t mipLevels, uint32_t arrayLayers, VkImageCreateFlags flags = 0);
+                uint32_t mipLevels, uint32_t arrayLayers, VkImageCreateFlags flags = 0,
+                VkImageType imageType = VK_IMAGE_TYPE_2D, uint32_t depth = 1);
 
     // Wrap an existing image (not owned, no VMA allocation)
     VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, uint32_t width, uint32_t height,
@@ -37,6 +39,7 @@ public:
     uint32_t getHeight() const { return m_height; }
     uint32_t getMipLevels() const { return m_mipLevels; }
     uint32_t getArrayLayers() const { return m_arrayLayers; }
+    uint32_t getDepth() const { return m_depth; }
 
     /// A 2D view of mip 0, layer 0.
     void createImageView(VkImageAspectFlags aspectFlags);
@@ -55,6 +58,8 @@ private:
     uint32_t m_height;
     uint32_t m_mipLevels = 1;
     uint32_t m_arrayLayers = 1;
+    uint32_t m_depth = 1;
+    VkImageType m_imageType = VK_IMAGE_TYPE_2D;
     VkImageCreateFlags m_flags = 0;
     VkImageTiling m_tiling;
     VkImageUsageFlags m_usage;

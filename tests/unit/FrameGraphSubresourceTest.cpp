@@ -127,6 +127,7 @@ TEST(ImageShape, FullMipChainLength) {
     EXPECT_EQ(fullMipChainLength(1, 1), 1u);
     EXPECT_EQ(fullMipChainLength(2048, 2048), 12u);
     EXPECT_EQ(fullMipChainLength(1920, 1080), 11u);
+    EXPECT_EQ(fullMipChainLength(16, 16, 64), 7u);  // the depth is the longest side
 }
 
 // ── JSON: images ────────────────────────────────────────────────
@@ -156,6 +157,12 @@ TEST(SubresourceJson, InvalidShapesFailAtLoad) {
         {{"format", "D32_SFLOAT"}, {"viewType", "cube_array"}, {"arrayLayers", 8}},
         {{"format", "D32_SFLOAT"}, {"viewType", "2d"}, {"arrayLayers", 2}},
         {{"format", "D32_SFLOAT"}, {"viewType", "3d"}},
+        {{"viewType", "3d"}, {"depth", 8}},
+        {{"format", "R16G16B16A16_SFLOAT"}, {"depth", 8}},
+        {{"format", "R16G16B16A16_SFLOAT"}, {"viewType", "2d_array"}, {"arrayLayers", 2}, {"depth", 8}},
+        {{"format", "R16G16B16A16_SFLOAT"}, {"viewType", "3d"}, {"depth", 0}},
+        {{"format", "R16G16B16A16_SFLOAT"}, {"viewType", "3d"}, {"depth", 8}, {"arrayLayers", 2}},
+        {{"format", "D32_SFLOAT"}, {"viewType", "cubes"}},
         {{"format", "D32_SFLOAT"}, {"mipLevels", "all"}},
         {{"format", "D32_SFLOAT"}, {"mipLevels", 0}},
         {{"format", "D32_SFLOAT"}, {"arrayLayers", 0}},
@@ -177,6 +184,31 @@ TEST(SubresourceJson, ImageShapeRoundTrips) {
     EXPECT_EQ(res[0].imageDesc.mipLevels, 0u);
     EXPECT_EQ(res[1].imageDesc.viewType, ImageViewKind::CubeArray);
     EXPECT_EQ(res[1].imageDesc.arrayLayers, 12u);
+}
+
+TEST(SubresourceJson, VolumeParsesAndRoundTrips) {
+    auto original = load(graph({image("fog", {{"format", "R16G16B16A16_SFLOAT"}, {"widthScale", 0.25},
+                                              {"heightScale", 0.25}, {"viewType", "3d"}, {"depth", 96}})},
+                               {pass("P", json::array(), json::array())}));
+    const auto& parsed = original.getResourceDeclarations()[0].imageDesc;
+    EXPECT_EQ(parsed.viewType, ImageViewKind::Tex3D);
+    EXPECT_EQ(parsed.depth, 96u);
+    EXPECT_EQ(parsed.arrayLayers, 1u);
+
+    auto reloaded = load(saveGraphToJson(original));
+    const auto& desc = reloaded.getResourceDeclarations()[0].imageDesc;
+    EXPECT_EQ(desc.viewType, ImageViewKind::Tex3D);
+    EXPECT_EQ(desc.depth, 96u);
+}
+
+TEST(SubresourceJson, VolumeHasNoReadbackOrSave) {
+    for (const char* key : {"readback", "save"}) {
+        json res = image("fog", {{"format", "R16G16B16A16_SFLOAT"}, {"viewType", "3d"}, {"depth", 8}});
+        res[key] = json::object();
+        FrameGraphBuilder b;
+        EXPECT_THROW(loadGraphFromJson(b, graph({res}, {pass("P", json::array(), json::array())})),
+                     std::runtime_error) << key;
+    }
 }
 
 // ── JSON: accesses and bindings ─────────────────────────────────
@@ -272,6 +304,19 @@ TEST(SubresourceValidation, AttachmentMustNameOneMip) {
     auto err = validate(graph({image("img", {{"format", "R8G8B8A8_UNORM"}, {"mipLevels", 3}})},
         {pass("P", json::array(), {{{"resource", "img"}, {"usage", "color_write"}}})}));
     EXPECT_NE(err.find("one mip level"), std::string::npos) << err;
+}
+
+TEST(SubresourceValidation, VolumeIsNotAnAttachment) {
+    const json fog = image("fog", {{"format", "R16G16B16A16_SFLOAT"}, {"viewType", "3d"}, {"depth", 8}});
+    auto err = validate(graph({fog}, {pass("P", json::array(), {{{"resource", "fog"}, {"usage", "color_write"}}})}));
+    EXPECT_NE(err.find("3d image"), std::string::npos) << err;
+
+    // Written as a storage image and read in another pass is fine.
+    err = validate(graph({fog}, {pass("Write", json::array(), {{{"resource", "fog"}, {"usage", "storage_image_write"}}},
+                                      "compute"),
+                                 pass("Read", {{{"resource", "fog"}, {"usage", "shader_read"}}}, json::array(),
+                                      "compute")}));
+    EXPECT_EQ(err, "");
 }
 
 TEST(SubresourceValidation, OneSubresourceInTwoLayoutsInOnePass) {
@@ -374,6 +419,15 @@ TEST(SubresourceSchedule, FullMipChainCountsFromTheDeclaredSize) {
     EXPECT_EQ(describeResources(b.getResourceDeclarations())[0].shape.mipLevels, 7u);
     // With the size unknown until compile time, the resolved extent decides.
     EXPECT_EQ(describeResources(b.getResourceDeclarations(), {VkExtent2D{256, 256}})[0].shape.mipLevels, 9u);
+}
+
+TEST(SubresourceSchedule, FullMipChainOfAVolumeCountsItsDepth) {
+    auto b = load(graph({image("lut", {{"format", "R16G16B16A16_SFLOAT"}, {"width", 16}, {"height", 16},
+                                      {"viewType", "3d"}, {"depth", 64}, {"mipLevels", "full"}})},
+                        {pass("P", json::array(), json::array())}));
+    const auto resources = describeResources(b.getResourceDeclarations());
+    EXPECT_EQ(resources[0].shape.mipLevels, 7u);
+    EXPECT_EQ(resources[0].shape.arrayLayers, 1u);
 }
 
 // ── Barriers ────────────────────────────────────────────────────
@@ -612,6 +666,13 @@ TEST(SubresourceViews, SampledViewTypes) {
     EXPECT_EQ(sampledViewType(ImageViewKind::Tex2DArray, four, layers(2, 1)), VK_IMAGE_VIEW_TYPE_2D_ARRAY);
     EXPECT_EQ(sampledViewType(ImageViewKind::CubeArray, cubes, layers(6, 6)), VK_IMAGE_VIEW_TYPE_CUBE);
     EXPECT_EQ(sampledViewType(ImageViewKind::Cube, cube, layers(3, 1)), VK_IMAGE_VIEW_TYPE_2D);
+
+    // A volume is 3d whole and at any single mip.
+    const ImageShape volume{4, 1};
+    SubresourceRange mip2;
+    mip2.baseMip = 2; mip2.mipCount = 1;
+    EXPECT_EQ(sampledViewType(ImageViewKind::Tex3D, volume, whole(volume)), VK_IMAGE_VIEW_TYPE_3D);
+    EXPECT_EQ(sampledViewType(ImageViewKind::Tex3D, volume, volume.resolve(mip2)), VK_IMAGE_VIEW_TYPE_3D);
 }
 
 TEST(SubresourceViews, AttachmentViewTypes) {

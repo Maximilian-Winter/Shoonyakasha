@@ -40,12 +40,13 @@ std::vector<ScheduledResource> describeResources(
 
         r.persistent = decl.imageDesc.persistent;
         r.shape.arrayLayers = decl.imageDesc.arrayLayers;
+        const uint32_t depth = decl.imageDesc.viewType == ImageViewKind::Tex3D ? decl.imageDesc.depth : 1u;
         if (decl.imageDesc.mipLevels != 0) {
             r.shape.mipLevels = decl.imageDesc.mipLevels;
         } else if (i < extents.size() && extents[i].width > 0 && extents[i].height > 0) {
-            r.shape.mipLevels = fullMipChainLength(extents[i].width, extents[i].height);
+            r.shape.mipLevels = fullMipChainLength(extents[i].width, extents[i].height, depth);
         } else if (decl.imageDesc.width > 0 && decl.imageDesc.height > 0) {
-            r.shape.mipLevels = fullMipChainLength(decl.imageDesc.width, decl.imageDesc.height);
+            r.shape.mipLevels = fullMipChainLength(decl.imageDesc.width, decl.imageDesc.height, depth);
         }
     }
     return out;
@@ -221,6 +222,12 @@ bool validateSubresources(const std::vector<PassDeclaration>& passes,
             if (!checkRange(where, ri, access.subresource)) return;
 
             const auto resolved = resolvedRange(r, access.subresource);
+            if (isOutput && isAttachmentUsage(access.usage) &&
+                declarations[ri].imageDesc.viewType == ImageViewKind::Tex3D) {
+                fail(where + ": '" + declarations[ri].name +
+                     "' is a 3d image and cannot be an attachment; write it from a compute pass");
+                return;
+            }
             if (isOutput && isAttachmentUsage(access.usage) && resolved.mipCount != 1) {
                 fail(where + ": attachment '" + declarations[ri].name +
                      "' must name one mip level (\"mip\": n)");
@@ -437,6 +444,7 @@ VkImageViewType sampledViewType(ImageViewKind kind, const ImageShape& shape,
 
     if (allLayers) {
         switch (kind) {
+            case ImageViewKind::Tex3D:      return VK_IMAGE_VIEW_TYPE_3D;
             case ImageViewKind::Tex2D:      return VK_IMAGE_VIEW_TYPE_2D;
             case ImageViewKind::Tex2DArray: return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
             case ImageViewKind::Cube:       return VK_IMAGE_VIEW_TYPE_CUBE;

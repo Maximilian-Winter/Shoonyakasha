@@ -213,11 +213,14 @@ bool FrameGraphCompiler::createPhysicalResources(
             height = std::max(height, 1u);
 
             // Mips and layers
-            const uint32_t maxMips = fullMipChainLength(width, height);
+            const bool volume = desc.viewType == ImageViewKind::Tex3D;
+            const uint32_t depth = volume ? desc.depth : 1u;
+            const uint32_t maxMips = fullMipChainLength(width, height, depth);
             const uint32_t mipLevels = desc.mipLevels == 0 ? maxMips : desc.mipLevels;
             if (mipLevels > maxMips) {
                 outError = "Resource '" + decl.name + "' asks for " + std::to_string(mipLevels) +
                            " mip levels; " + std::to_string(width) + "x" + std::to_string(height) +
+                           (volume ? "x" + std::to_string(depth) : "") +
                            " has at most " + std::to_string(maxMips);
                 return false;
             }
@@ -258,7 +261,8 @@ bool FrameGraphCompiler::createPhysicalResources(
                 device, width, height, format,
                 VK_IMAGE_TILING_OPTIMAL, usage, memProps,
                 shape.mipLevels, shape.arrayLayers,
-                cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0
+                cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0,
+                volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D, depth
             );
 
             // The whole-image view shaders sample. A sampled depth/stencil view
@@ -275,6 +279,7 @@ bool FrameGraphCompiler::createPhysicalResources(
             physImg.view = image->getImageView();
             physImg.format = format;
             physImg.extent = {width, height};
+            physImg.depth = depth;
             physImg.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             physImg.shape = shape;
             physImg.viewType = viewType;
@@ -372,6 +377,7 @@ bool FrameGraphCompiler::createAttachments(
         compiled.colorAttachments.clear();
         compiled.hasDepthAttachment = false;
         compiled.extent = {};
+        compiled.extentDepth = 1;
         compiled.layerCount = 1;
         bool haveExtent = false;
 
@@ -384,7 +390,9 @@ bool FrameGraphCompiler::createAttachments(
                     if (haveExtent || !access.handle.valid()) continue;
                     const auto* physImg = std::get_if<PhysicalImage>(&physResources[access.handle.index]);
                     if (!physImg) continue;
-                    compiled.extent = physImg->mipExtent(physImg->shape.resolve(access.subresource).baseMip);
+                    const uint32_t mip = physImg->shape.resolve(access.subresource).baseMip;
+                    compiled.extent = physImg->mipExtent(mip);
+                    compiled.extentDepth = physImg->mipDepth(mip);
                     haveExtent = true;
                 }
             }

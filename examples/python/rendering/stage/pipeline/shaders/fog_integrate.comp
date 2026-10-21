@@ -12,8 +12,8 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) uniform sampler2DArray fogScatter;
-layout(set = 0, binding = 1, rgba16f) uniform writeonly image2DArray fogIntegrated;
+layout(set = 0, binding = 0) uniform sampler3D fogScatter;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image3D fogIntegrated;
 layout(set = 0, binding = 2) uniform Fog { FOG_BLOCK } fog;
 layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 

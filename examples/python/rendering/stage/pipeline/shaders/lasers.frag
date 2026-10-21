@@ -24,7 +24,7 @@ layout(set = 0, binding = 0) uniform sampler2D laserBeams;
 layout(set = 0, binding = 1) uniform sampler2D gDepth;
 layout(set = 0, binding = 2) uniform sampler2D gAlbedo;
 layout(set = 0, binding = 3) uniform sampler2D gNormal;
-layout(set = 0, binding = 4) uniform sampler2DArray fogIntegrated;
+layout(set = 0, binding = 4) uniform sampler3D fogIntegrated;
 layout(set = 0, binding = 5) uniform Fog { FOG_BLOCK } fog;
 layout(set = 0, binding = 6) uniform Lasers { LASERS_BLOCK } lasers;
 layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;

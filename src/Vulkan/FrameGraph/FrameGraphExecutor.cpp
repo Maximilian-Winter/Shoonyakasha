@@ -518,16 +518,16 @@ void FrameGraphExecutor::executeAutoCallback(
     }
 
     // ── Helper to look up resource dimensions ──
-    auto getResourceExtent = [&](const std::string& resourceName) -> VkExtent2D {
+    auto getResourceExtent = [&](const std::string& resourceName) -> VkExtent3D {
         ResourceHandle handle = builder.getResource(resourceName);
         if (handle.valid() && handle.index < compiled.physicalResources.size()) {
             const auto* physImg = std::get_if<PhysicalImage>(&compiled.physicalResources[handle.index]);
             if (physImg) {
-                return physImg->extent;
+                return {physImg->extent.width, physImg->extent.height, physImg->depth};
             }
         }
         // Fallback to render extent
-        return ctx.renderExtent;
+        return {ctx.renderExtent.width, ctx.renderExtent.height, 1};
     };
 
     // ── Helper to look up parameter value as uint32_t ──
@@ -583,7 +583,7 @@ void FrameGraphExecutor::executeAutoCallback(
             // Dispatch based on output image dimensions
             groupX = (ctx.renderExtent.width + exec.workgroupSize[0] - 1) / exec.workgroupSize[0];
             groupY = (ctx.renderExtent.height + exec.workgroupSize[1] - 1) / exec.workgroupSize[1];
-            groupZ = 1;
+            groupZ = (compiledPass.extentDepth + exec.workgroupSize[2] - 1) / exec.workgroupSize[2];
         } else {
             // Use specified dispatch dimensions with proper resource lookup
             auto calcDim = [&](const DispatchDimension& dim) -> uint32_t {
@@ -595,9 +595,10 @@ void FrameGraphExecutor::executeAutoCallback(
                     return (paramValue + dim.divisor - 1) / dim.divisor;
                 } else if (dim.isFromResource()) {
                     // Look up actual resource dimensions
-                    VkExtent2D resExtent = getResourceExtent(dim.resource);
+                    VkExtent3D resExtent = getResourceExtent(dim.resource);
                     uint32_t size = (dim.dimension == "width") ? resExtent.width :
-                                    (dim.dimension == "height") ? resExtent.height : 1;
+                                    (dim.dimension == "height") ? resExtent.height :
+                                    (dim.dimension == "depth") ? resExtent.depth : 1;
                     return (size + dim.divisor - 1) / dim.divisor;
                 } else {
                     return 1;

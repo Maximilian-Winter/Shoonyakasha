@@ -18,8 +18,8 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba16f) uniform writeonly image2DArray fogScatter;
-layout(set = 0, binding = 1) uniform sampler2DArray fogHistory;
+layout(set = 0, binding = 0, rgba16f) uniform writeonly image3D fogScatter;
+layout(set = 0, binding = 1) uniform sampler3D fogHistory;
 layout(set = 0, binding = 2) uniform Fog { FOG_BLOCK } fog;
 layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
@@ -103,13 +103,11 @@ void main() {
     vec4 previous = camera.prevViewProj * vec4(worldPos, 1.0);
     if (previous.w > 0.0 && fog.grid.z > 0.0) {
         vec2 prevUV = previous.xy / previous.w * 0.5 + 0.5;
-        float layer = depthSlice(previous.w, slices, fog.grid) - 0.5;
+        float slice = depthSlice(previous.w, slices, fog.grid);
         if (all(greaterThanEqual(prevUV, vec2(0.0))) && all(lessThanEqual(prevUV, vec2(1.0)))
-            && layer >= 0.0 && layer <= slices - 1.0) {
-            float k = floor(layer);
-            vec4 a = textureLod(fogHistory, vec3(prevUV, k), 0.0);
-            vec4 b = textureLod(fogHistory, vec3(prevUV, min(k + 1.0, slices - 1.0)), 0.0);
-            value = mix(value, mix(a, b, layer - k), fog.grid.z);
+            && slice >= 0.5 && slice <= slices - 0.5) {
+            vec4 last = textureLod(fogHistory, vec3(prevUV, slice / slices), 0.0);
+            value = mix(value, last, fog.grid.z);
         }
     }
     imageStore(fogScatter, id, value);

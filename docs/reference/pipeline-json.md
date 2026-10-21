@@ -31,7 +31,8 @@ Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defau
 | `widthScale`, `heightScale` | 1.0 | Scale reference-size dimensions, e.g. 0.5 for bloom |
 | `mipLevels` | 1 | Mip levels, or `"full"` for a complete chain at the resolved size |
 | `arrayLayers` | 1 (6 for `cube`) | Array layers, e.g. one per shadow cascade |
-| `viewType` | `auto` | How shaders sampling the whole image see it: `auto` (`2d` for one layer, `2d_array` for more), `2d`, `2d_array`, `cube` (6 square layers), `cube_array` (a multiple of 6) |
+| `viewType` | `auto` | How shaders sampling the whole image see it: `auto` (`2d` for one layer, `2d_array` for more), `2d`, `2d_array`, `cube` (6 square layers), `cube_array` (a multiple of 6), `3d` (a volume of `depth` slices) |
+| `depth` | 1 | Slices of a `3d` image; other view types take only 1. A `3d` image has one layer and a colour format, is written by compute passes as a storage image (`image3D`) and sampled as `sampler3D`, and cannot be an attachment or have a `readback` or `save`. A full mip chain also halves the depth |
 | `samples` | 1 | Read but not used: every image is created single-sampled, and passes have no resolve |
 | `transient` | false | Transient image declaration |
 | `persistent` | false | Contents carry over from one frame to the next, for state a pass accumulates (an adapted exposure, a history). For last frame's image of a result, read a persistent image in the pass that makes the result, then copy the result into it in a pass after: the default pipeline's `TAA` and `TAAHistory` do this. Normally a frame's first access discards an image's contents; a persistent image's first barrier instead waits on and keeps the previous frame's. Cleared to zero (depth to 1) whenever the graph is compiled, including after a resize. A pass that writes a persistent image is never culled as unused: the next frame reads what it wrote |
@@ -221,7 +222,7 @@ Descriptor set layouts take the same `repeat`, for passes that bind a different 
 
 Draw fields: `vertexCount` (integer, or `{ "parameter": "count", "divisor": 1 }`), `instanceCount` (1), `firstVertex` (0), `firstInstance` (0). The parser also accepts resource/dimension on vertexCount, but the current draw executor implements fixed/parameter counts, not resource-derived vertex counts.
 
-Compute dispatch uses `dispatch.x/y/z`, each a fixed group count, a parameter/divisor object, or `{ "resource": "imageName", "dimension": "width", "divisor": 16 }` (also `height`). Division rounds up. Use positive divisors and workgroup sizes; JSON does not alter GLSL `local_size`. `compute_image` uses `workgroupSize` to derive x/y groups and z=1.
+Compute dispatch uses `dispatch.x/y/z`, each a fixed group count, a parameter/divisor object, or `{ "resource": "imageName", "dimension": "width", "divisor": 16 }` (also `height`, and `depth`: a 3d image's slices, 1 for other images). Division rounds up. Use positive divisors and workgroup sizes; JSON does not alter GLSL `local_size`. `compute_image` uses `workgroupSize` to derive x/y groups from the extent of the first image the pass writes (or, with none, reads) at that access's mip level, and z groups from its depth, which is 1 unless it is a 3d image.
 
 Indirect execution reads its arguments from a storage buffer that an earlier pass writes on the GPU, so the work can follow a count the CPU never sees:
 

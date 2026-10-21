@@ -464,6 +464,7 @@ struct PhysicalImage {
     VkImageView     view     = VK_NULL_HANDLE;  // whole image, as shaders sample it
     VkFormat        format   = VK_FORMAT_UNDEFINED;
     VkExtent2D      extent   = {};              // of mip 0
+    uint32_t        depth    = 1;               // slices of mip 0; 1 unless 3d
     /// Layout of mip 0, layer 0 at the end of the frame, for readback and saves.
     VkImageLayout   currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -480,6 +481,8 @@ struct PhysicalImage {
     VkExtent2D mipExtent(uint32_t mip) const {
         return {std::max(1u, extent.width >> mip), std::max(1u, extent.height >> mip)};
     }
+    /// Slices of one mip level.
+    uint32_t mipDepth(uint32_t mip) const { return std::max(1u, depth >> mip); }
 };
 
 struct PhysicalBuffer {
@@ -552,6 +555,8 @@ struct CompiledPass {
     /// Render area: the attachments' mip extent for graphics passes, the first
     /// image output's for compute passes.
     VkExtent2D                          extent{};
+    /// Slices at that mip level when the image is 3d; 1 otherwise.
+    uint32_t                            extentDepth = 1;
 
     bool rendersAttachments() const { return !colorAttachments.empty() || hasDepthAttachment; }
 

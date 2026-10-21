@@ -33,7 +33,8 @@ VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, 
 
 VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
                          VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
-                         uint32_t mipLevels, uint32_t arrayLayers, VkImageCreateFlags flags)
+                         uint32_t mipLevels, uint32_t arrayLayers, VkImageCreateFlags flags,
+                         VkImageType imageType, uint32_t depth)
         : m_device(device)
         , m_image(VK_NULL_HANDLE)
         , m_allocation(VK_NULL_HANDLE)
@@ -43,6 +44,8 @@ VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height, 
         , m_height(height)
         , m_mipLevels(mipLevels)
         , m_arrayLayers(arrayLayers)
+        , m_depth(depth)
+        , m_imageType(imageType)
         , m_flags(flags)
         , m_tiling(tiling)
         , m_usage(usage)
@@ -96,10 +99,10 @@ void VulkanImage::createImage(uint32_t width, uint32_t height, VkFormat format, 
                               VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.imageType = m_imageType;
     imageInfo.extent.width = width;
     imageInfo.extent.height = height;
-    imageInfo.extent.depth = 1;
+    imageInfo.extent.depth = m_depth;
     imageInfo.mipLevels = m_mipLevels;
     imageInfo.arrayLayers = m_arrayLayers;
     imageInfo.flags = m_flags;

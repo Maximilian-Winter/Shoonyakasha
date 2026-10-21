@@ -9,6 +9,7 @@
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
 #include <system_error>
 #include "Vulkan/FrameGraph/FrameGraph.h"
+#include "GPU/VkFormatUtils.h"
 #include "FrameGraph/ShadowCascades.h"
 #include "FrameGraph/LocalShadows.h"
 
@@ -405,8 +406,9 @@ static ImageViewKind stringToImageViewKind(const std::string& str) {
     if (str == "2d_array")   return ImageViewKind::Tex2DArray;
     if (str == "cube")       return ImageViewKind::Cube;
     if (str == "cube_array") return ImageViewKind::CubeArray;
+    if (str == "3d")         return ImageViewKind::Tex3D;
     throw std::runtime_error("Unknown image viewType: '" + str +
-                             "' (expected auto, 2d, 2d_array, cube or cube_array)");
+                             "' (expected auto, 2d, 2d_array, cube, cube_array or 3d)");
 }
 
 static const char* imageViewKindToString(ImageViewKind kind) {
@@ -416,6 +418,7 @@ static const char* imageViewKindToString(ImageViewKind kind) {
         case ImageViewKind::Tex2DArray: return "2d_array";
         case ImageViewKind::Cube:       return "cube";
         case ImageViewKind::CubeArray:  return "cube_array";
+        case ImageViewKind::Tex3D:      return "3d";
     }
     return "auto";
 }
@@ -1368,6 +1371,18 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                             throw std::runtime_error("Resource '" + name +
                                 "': a 2d image has one layer; use 2d_array for more");
                         }
+                        desc.depth = imgJson.value("depth", 1u);
+                        if (desc.depth == 0) {
+                            throw std::runtime_error("Resource '" + name + "': depth must be at least 1");
+                        }
+                        const bool volume = desc.viewType == ImageViewKind::Tex3D;
+                        if (!volume && desc.depth != 1) {
+                            throw std::runtime_error("Resource '" + name +
+                                "': depth is the slice count of a 3d image; add \"viewType\": \"3d\"");
+                        }
+                        if (volume && desc.arrayLayers != 1) {
+                            throw std::runtime_error("Resource '" + name + "': a 3d image has one layer");
+                        }
                         desc.transient   = imgJson.value("transient", false);
                         desc.persistent  = imgJson.value("persistent", false);
                         if (desc.persistent) {
@@ -1380,6 +1395,9 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                         }
                         if (imgJson.contains("samples")) {
                             desc.samples = static_cast<VkSampleCountFlagBits>(imgJson["samples"].get<int>());
+                        }
+                        if (volume && (desc.format == VK_FORMAT_UNDEFINED || isDepthFormat(desc.format))) {
+                            throw std::runtime_error("Resource '" + name + "': a 3d image needs a colour format");
                         }
                     }
                     builder.declareImage(name, desc);
@@ -1455,6 +1473,10 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     } else {
                         resDecl->readbackPolicy.frequency = "manual";
                     }
+                }
+                if (resDecl->kind == ResourceKind::Image && resDecl->readbackPolicy.enabled &&
+                    resDecl->imageDesc.viewType == ImageViewKind::Tex3D) {
+                    throw std::runtime_error("Resource '" + name + "': a 3d image has no readback or save");
                 }
             }
         }
@@ -2074,6 +2096,7 @@ nlohmann::json saveGraphToJson(const FrameGraphBuilder& builder) {
             if (desc.mipLevels == 0)        imgJson["mipLevels"] = "full";
             else if (desc.mipLevels != 1)   imgJson["mipLevels"] = desc.mipLevels;
             if (desc.arrayLayers != 1) imgJson["arrayLayers"] = desc.arrayLayers;
+            if (desc.depth != 1)       imgJson["depth"] = desc.depth;
             if (desc.viewType != ImageViewKind::Auto) imgJson["viewType"] = imageViewKindToString(desc.viewType);
             if (desc.transient)        imgJson["transient"] = true;
             if (desc.persistent)       imgJson["persistent"] = true;

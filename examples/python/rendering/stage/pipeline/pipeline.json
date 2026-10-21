@@ -2597,7 +2597,8 @@
         "format": "R16G16B16A16_SFLOAT",
         "widthScale": 0.16666666666666666,
         "heightScale": 0.16666666666666666,
-        "arrayLayers": 96
+        "viewType": "3d",
+        "depth": 96
       }
     },
     {
@@ -2607,7 +2608,8 @@
         "format": "R16G16B16A16_SFLOAT",
         "widthScale": 0.16666666666666666,
         "heightScale": 0.16666666666666666,
-        "arrayLayers": 96,
+        "viewType": "3d",
+        "depth": 96,
         "persistent": true
       }
     },
@@ -2618,7 +2620,8 @@
         "format": "R16G16B16A16_SFLOAT",
         "widthScale": 0.16666666666666666,
         "heightScale": 0.16666666666666666,
-        "arrayLayers": 96
+        "viewType": "3d",
+        "depth": 96
       }
     },
     {
@@ -4656,7 +4659,10 @@
             "dimension": "height",
             "divisor": 8
           },
-          "z": 96
+          "z": {
+            "resource": "fogScatter",
+            "dimension": "depth"
+          }
         }
       },
       "inputs": [
@@ -4703,7 +4709,10 @@
             "dimension": "height",
             "divisor": 8
           },
-          "z": 96
+          "z": {
+            "resource": "fogScatter",
+            "dimension": "depth"
+          }
         }
       },
       "inputs": [

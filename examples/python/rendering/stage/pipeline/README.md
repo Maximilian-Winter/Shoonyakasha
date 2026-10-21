@@ -4,14 +4,14 @@ A copy of the [showroom pipeline](../../showroom/pipeline/README.md), with its v
 
 ## Fog
 
-The fog lives in a grid that follows the camera: three 2D-array images, `fogScatter`, `fogHistory` and `fogIntegrated`, at a sixth of the render size, whose 96 layers are slices of view depth, spaced exponentially from `fog.grid.x` to `fog.grid.y` metres. Four passes run after `TransparentRT`, before `TAA`, in the `hybrid` and `raytraced` presets:
+The fog lives in a grid that follows the camera: three 3D images, `fogScatter`, `fogHistory` and `fogIntegrated`, at a sixth of the render size, whose 96 slices cover view depth, spaced exponentially from `fog.grid.x` to `fog.grid.y` metres. Four passes run after `TransparentRT`, before `TAA`, in the `hybrid` and `raytraced` presets:
 
 - **`FogScatter`** (`fog_scatter.comp`, needs ray queries) fills `fogScatter`. Each cell holds the fog's density at one point in it, which moves within the cell every frame while TAA is on, and the light scattered towards the eye there:
   - **Density:** haze that drifts with `fog.wind`, ground fog that thins out above `fog.motion.z` metres, and the plumes of up to four smoke machines: jets that widen, slow and rise as they leave the nozzle, carrying puffs. A burst (`fog.burst`) adds to the smoke that leaves the nozzles from then on, fading, so it travels out along the plumes. The fog fills the hall, a box `fog.hall` across, and fades over its last metre.
   - **Light:** every point and spot light reaching the point through its falloff and cone, scattered by a Henyey-Greenstein phase function of `g = fog.media.w`. For lights whose shadow flag is set, a ray to the light decides whether it gets there, so objects cut shadows into the beams. Lights with image slot 2 (`set_light_source_image`) light surfaces only. Directional lights do not light the fog.
   - **Over frames:** the result is blended with last frame's value where the point was then (`fogHistory`), keeping `fog.grid.z` of it.
 - **`FogHistory`** (`fog_history.comp`) copies `fogScatter` into the persistent `fogHistory`.
-- **`FogIntegrate`** (`fog_integrate.comp`) runs along each column of the grid from the eye outwards, adding up the scattered light, faded by the fog in front of it, and the transmittance. Each layer of `fogIntegrated` holds both up to the far end of its slice.
+- **`FogIntegrate`** (`fog_integrate.comp`) runs along each column of the grid from the eye outwards, adding up the scattered light, faded by the fog in front of it, and the transmittance. Each slice of `fogIntegrated` holds both up to its far end.
 - **`FogApply`** (`fog_apply.frag`) reads `fogIntegrated` at each pixel's depth, interpolated between slices, and blends it onto `hdrColor` with the factors `one` and `src_alpha`: the colour becomes the fog's light plus the colour times the transmittance.
 
 ## The `Fog` block
@@ -65,7 +65,7 @@ With `fog.grid.w` at 0 the beams and sheets have no fog to light, and only the d
 
 ## Changing it
 
-Edit `pipeline.json` and the shaders as with any copy. Shaders recompile with `sk.shaders.compile_dir("shaders")`, and `sk.pipeline.check("pipeline.json")` validates the JSON without starting the engine. The grid's size is the three fog images' `widthScale`, `heightScale` and `arrayLayers`; `FogScatter` and `FogHistory` dispatch one workgroup layer per slice, so their `dispatch.z` is `arrayLayers`.
+Edit `pipeline.json` and the shaders as with any copy. Shaders recompile with `sk.shaders.compile_dir("shaders")`, and `sk.pipeline.check("pipeline.json")` validates the JSON without starting the engine. The grid's size is the three fog images' `widthScale`, `heightScale` and `depth`; `FogScatter` and `FogHistory` dispatch one workgroup layer per slice, taking `dispatch.z` from `fogScatter`'s depth.
 
 **Passes and shaders added over the showroom pipeline:**
 

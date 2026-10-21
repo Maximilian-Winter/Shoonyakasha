@@ -231,8 +231,9 @@ VkDeviceSize FrameGraphAnalyzer::estimateResourceSize(
     // Account for samples
     baseSize *= decl.imageDesc.samples;
 
-    // Account for array layers
+    // Account for array layers and 3d slices
     baseSize *= decl.imageDesc.arrayLayers;
+    if (decl.imageDesc.viewType == ImageViewKind::Tex3D) baseSize *= decl.imageDesc.depth;
 
     // Account for mip levels (roughly 1.33x for full mip chain)
     if (decl.imageDesc.mipLevels > 1) {

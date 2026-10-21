@@ -38,7 +38,8 @@ enum class ImageViewKind {
     Tex2D,      // "2d"
     Tex2DArray, // "2d_array"
     Cube,       // "cube": exactly 6 layers, square
-    CubeArray   // "cube_array": a multiple of 6 layers, square
+    CubeArray,  // "cube_array": a multiple of 6 layers, square
+    Tex3D       // "3d": a volume of `depth` slices, one layer
 };
 
 /// A block of mip levels and array layers of an image, as a pass access or a
@@ -84,9 +85,10 @@ struct ImageShape {
 };
 
 /// Length of a full mip chain for an image of this size.
-inline uint32_t fullMipChainLength(uint32_t width, uint32_t height) {
+inline uint32_t fullMipChainLength(uint32_t width, uint32_t height, uint32_t depth = 1) {
     uint32_t levels = 1;
     uint32_t size = width > height ? width : height;
+    if (depth > size) size = depth;
     while (size > 1) { size >>= 1; ++levels; }
     return levels;
 }
@@ -109,6 +111,7 @@ struct ImageDesc {
     // 0 means a full mip chain for the resolved size (JSON "mipLevels": "full").
     uint32_t mipLevels   = 1;
     uint32_t arrayLayers = 1;
+    uint32_t depth       = 1;       // slices of a 3d image; 1 otherwise
     ImageViewKind viewType = ImageViewKind::Auto;
 
     // For future transient aliasing (Phase 5)
