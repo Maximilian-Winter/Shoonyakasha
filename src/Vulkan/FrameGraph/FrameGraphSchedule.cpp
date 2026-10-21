@@ -619,6 +619,32 @@ BarrierPlan planBarriers(
         }
     }
 
+    // The image of each alias block that used its memory last, across frames.
+    std::unordered_map<uint32_t, uint32_t> blockOwner;
+    // An image taking over its block's memory starts from UNDEFINED, and its
+    // first barriers wait for the previous owner's last accesses.
+    auto takeOver = [&](uint32_t ri) {
+        const uint32_t block = resources[ri].aliasBlock;
+        if (block == ScheduledResource::kNoAlias) return;
+        const auto it = blockOwner.find(block);
+        if (it != blockOwner.end() && it->second != ri) {
+            VkPipelineStageFlags stage = 0;
+            VkAccessFlags access = 0;
+            for (const auto& st : states[it->second]) {
+                if (!st.used) continue;
+                stage |= st.stage;
+                access |= st.access;
+            }
+            for (auto& st : states[ri]) {
+                st.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                st.stage  = stage != 0 ? stage : VkPipelineStageFlags{VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT};
+                st.access = access;
+                st.used   = stage != 0;
+            }
+        }
+        blockOwner[block] = ri;
+    };
+
     // One frame of the graph: barriers into `pre`/`post`, states updated.
     auto runFrame = [&](std::vector<std::vector<BarrierInfo>>& pre,
                         std::vector<std::vector<BarrierInfo>>& post) {
@@ -632,6 +658,7 @@ BarrierPlan planBarriers(
                 if (!r.isImage) return;
                 const auto range = resolvedRange(r, access.subresource);
                 if (!r.shape.contains(range)) return;  // reported by validateSubresources
+                takeOver(ri);
 
                 transition(states[ri], r, access.handle, range,
                            usageToLayout(access.usage),
@@ -1066,6 +1093,121 @@ std::vector<std::vector<AttachmentOps>> planAttachmentOps(
         }
     }
     return out;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Aliasing
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+/// Resources bound through each descriptor set layout, by layout name.
+std::unordered_map<std::string, std::vector<uint32_t>> boundResources(
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts)
+{
+    std::unordered_map<std::string, uint32_t> byName;
+    for (uint32_t ri = 0; ri < declarations.size(); ++ri) byName[declarations[ri].name] = ri;
+    std::unordered_map<std::string, std::vector<uint32_t>> out;
+    for (const auto& layout : descriptorLayouts) {
+        auto& list = out[layout.name];
+        for (const auto& binding : layout.bindings) {
+            const auto it = byName.find(binding.autoBindResource);
+            if (!binding.autoBindResource.empty() && it != byName.end()) list.push_back(it->second);
+        }
+    }
+    return out;
+}
+
+/// Every resource `pass` uses: its accesses and what its descriptor sets bind.
+template <typename Fn>
+void forEachUse(const PassDeclaration& pass,
+                const std::unordered_map<std::string, std::vector<uint32_t>>& bound, Fn&& fn)
+{
+    for (const auto* list : {&pass.inputs, &pass.outputs}) {
+        for (const auto& access : *list) {
+            if (access.handle.valid()) fn(access.handle.index);
+        }
+    }
+    for (const auto& ref : pass.descriptorSetRefs) {
+        const auto it = bound.find(ref);
+        if (it == bound.end()) continue;
+        for (uint32_t ri : it->second) fn(ri);
+    }
+}
+
+} // namespace
+
+std::vector<PassSpan> resourceLifetimes(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
+    const std::vector<uint32_t>& executionOrder)
+{
+    const auto bound = boundResources(declarations, descriptorLayouts);
+    std::vector<PassSpan> out(declarations.size());
+    for (uint32_t pos = 0; pos < executionOrder.size(); ++pos) {
+        forEachUse(passes[executionOrder[pos]], bound, [&](uint32_t ri) {
+            if (ri >= out.size()) return;
+            auto& span = out[ri];
+            if (!span.used()) span.first = pos;
+            span.last = pos;
+        });
+    }
+    return out;
+}
+
+std::vector<bool> aliasableImages(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
+    const std::vector<uint32_t>& executionOrder)
+{
+    std::vector<bool> out(declarations.size(), false);
+    for (uint32_t ri = 0; ri < declarations.size(); ++ri) {
+        const auto& decl = declarations[ri];
+        const auto& desc = decl.imageDesc;
+        out[ri] = decl.kind == ResourceKind::Image && desc.transient && !decl.imported && !desc.persistent &&
+                  !decl.readbackPolicy.enabled && !decl.savePolicy.enabled && decl.target.empty() &&
+                  (desc.additionalUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0;
+    }
+    const auto bound = boundResources(declarations, descriptorLayouts);
+    for (uint32_t pi : executionOrder) {
+        const auto& pass = passes[pi];
+        if (!recordsOpaquely(pass) && pass.queueType == QueueType::Graphics) continue;
+        forEachUse(pass, bound, [&](uint32_t ri) {
+            if (ri < out.size()) out[ri] = false;
+        });
+    }
+    return out;
+}
+
+std::vector<AliasBlock> packAliases(std::vector<AliasRequest> requests,
+                                    const std::vector<PassSpan>& lifetimes)
+{
+    std::stable_sort(requests.begin(), requests.end(),
+                     [](const AliasRequest& a, const AliasRequest& b) { return a.size > b.size; });
+    std::vector<AliasBlock> blocks;
+    for (const auto& request : requests) {
+        const PassSpan span = request.resource < lifetimes.size() ? lifetimes[request.resource] : PassSpan{};
+        AliasBlock* home = nullptr;
+        for (auto& block : blocks) {
+            if ((block.memoryTypeBits & request.memoryTypeBits) == 0) continue;
+            const bool clash = std::any_of(block.resources.begin(), block.resources.end(), [&](uint32_t other) {
+                return other < lifetimes.size() && lifetimes[other].overlaps(span);
+            });
+            if (!clash) {
+                home = &block;
+                break;
+            }
+        }
+        if (!home) home = &blocks.emplace_back();
+        home->resources.push_back(request.resource);
+        home->size = std::max(home->size, request.size);
+        home->alignment = std::max(home->alignment, request.alignment);
+        home->memoryTypeBits &= request.memoryTypeBits;
+    }
+    return blocks;
 }
 
 } // namespace FrameGraph

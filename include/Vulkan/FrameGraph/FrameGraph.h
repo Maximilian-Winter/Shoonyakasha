@@ -458,7 +458,14 @@ private:
     std::vector<Entry> m_entries;
 };
 
+/// One allocation that transient images share; freed when the last image
+/// holding it is destroyed. Defined in FrameGraphCompiler.cpp.
+struct SharedImageMemory;
+
 struct PhysicalImage {
+    /// The memory a transient image shares with others, or null. Declared
+    /// before ownedImage so the image is destroyed first.
+    std::shared_ptr<SharedImageMemory> sharedMemory;
     std::unique_ptr<VulkanImage> ownedImage;    // null if imported
     VkImage         vkImage  = VK_NULL_HANDLE;
     VkImageView     view     = VK_NULL_HANDLE;  // whole image, as shaders sample it
@@ -903,6 +910,33 @@ private:
         const std::vector<std::vector<AttachmentOps>>& attachmentOps,
         std::string& outError);
 
+    /// A graph image whose creation waits until the passes are ordered.
+    struct DeferredImage {
+        uint32_t            resource = 0;
+        VkImageCreateInfo   info{};
+        VkImageAspectFlags  sampledAspect = VK_IMAGE_ASPECT_COLOR_BIT;
+        VkImageViewType     viewType = VK_IMAGE_VIEW_TYPE_2D;
+    };
+    /// Transient images, filled by createPhysicalResources.
+    std::vector<DeferredImage> m_deferredImages;
+
+    /// Put a created image into `physImg`, with its whole-image view when its
+    /// usage allows views.
+    static void finishImage(PhysicalImage& physImg, const DeferredImage& deferred,
+                            std::unique_ptr<VulkanImage> image);
+
+    /// Create the deferred transient images. Those that may alias share
+    /// memory blocks (packAliases over their lifetimes in `executionOrder`),
+    /// and their blocks go into `scheduled`; the rest get their own memory.
+    bool createTransientImages(
+        VulkanDevice& device,
+        const std::vector<ResourceDeclaration>& declarations,
+        const std::vector<PassDeclaration>& passes,
+        const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
+        const std::vector<uint32_t>& executionOrder,
+        std::vector<PhysicalResource>& physResources,
+        std::vector<ScheduledResource>& scheduled,
+        std::string& outError);
 
     // ── Stage 8: Descriptor set layout creation ──
     void createDescriptorSetLayouts(

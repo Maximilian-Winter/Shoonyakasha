@@ -290,6 +290,7 @@ bool FrameGraphCompiler::createPhysicalResources(
     std::string& outError)
 {
     outResources.resize(declarations.size());
+    m_deferredImages.clear();
 
     // First pass: compute required usage flags for each resource
     std::vector<VkImageUsageFlags> imageUsages(declarations.size(), 0);
@@ -399,30 +400,20 @@ bool FrameGraphCompiler::createPhysicalResources(
                 }
             }
 
-            auto image = std::make_unique<VulkanImage>(
-                device, width, height, format,
-                VK_IMAGE_TILING_OPTIMAL, usage, memProps,
-                shape.mipLevels, shape.arrayLayers,
+            const VkImageCreateInfo info = VulkanImage::createInfo(
+                width, height, format, VK_IMAGE_TILING_OPTIMAL, usage, shape.mipLevels, shape.arrayLayers,
                 cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0,
-                volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D, depth, desc.samples
-            );
+                volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D, depth, desc.samples);
 
             // The whole-image view shaders sample. A sampled depth/stencil view
             // may name only one aspect, so depth formats are viewed as depth.
-            // An image only copied to and from has no view.
             const VkImageAspectFlags fullAspect = Shoonyakasha::formatToAspectMask(format);
             const VkImageAspectFlags sampledAspect =
                 Shoonyakasha::isDepthFormat(format) ? VkImageAspectFlags{VK_IMAGE_ASPECT_DEPTH_BIT} : fullAspect;
             SubresourceRange whole;
             const VkImageViewType viewType = sampledViewType(desc.viewType, shape, shape.resolve(whole));
-            constexpr VkImageUsageFlags kViewUsages =
-                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-            if (usage & kViewUsages) image->createImageView(sampledAspect, viewType);
 
             PhysicalImage physImg;
-            physImg.vkImage = image->getImage();
-            physImg.view = image->getImageView();
             physImg.format = format;
             physImg.extent = {width, height};
             physImg.depth = depth;
@@ -431,10 +422,21 @@ bool FrameGraphCompiler::createPhysicalResources(
             physImg.shape = shape;
             physImg.viewType = viewType;
             physImg.aspect = fullAspect;
-            physImg.ownedImage = std::move(image);
             physImg.subresourceViews = std::make_unique<ImageViewSet>(device.getLogicalDevice());
-
             outResources[i] = std::move(physImg);
+
+            // A transient image is created once the passes are ordered, in
+            // memory it may share (createTransientImages).
+            const DeferredImage deferred{i, info, sampledAspect, viewType};
+            if (desc.transient) {
+                m_deferredImages.push_back(deferred);
+            } else {
+                finishImage(std::get<PhysicalImage>(outResources[i]), deferred,
+                            std::make_unique<VulkanImage>(
+                                device, width, height, format, VK_IMAGE_TILING_OPTIMAL, usage, memProps,
+                                shape.mipLevels, shape.arrayLayers, info.flags, info.imageType, depth,
+                                desc.samples));
+            }
         } else {
             // Buffer resource
             const auto& desc = decl.bufferDesc;
@@ -452,6 +454,107 @@ bool FrameGraphCompiler::createPhysicalResources(
             outResources[i] = std::move(physBuf);
         }
     }
+    return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Transient images and the memory they share
+// ═══════════════════════════════════════════════════════════════
+
+struct SharedImageMemory {
+    VmaAllocator  allocator  = VK_NULL_HANDLE;
+    VmaAllocation allocation = VK_NULL_HANDLE;
+    ~SharedImageMemory() {
+        if (allocation != VK_NULL_HANDLE) vmaFreeMemory(allocator, allocation);
+    }
+};
+
+void FrameGraphCompiler::finishImage(PhysicalImage& physImg, const DeferredImage& deferred,
+                                     std::unique_ptr<VulkanImage> image) {
+    // An image only copied to and from has no view.
+    constexpr VkImageUsageFlags kViewUsages =
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    if (deferred.info.usage & kViewUsages) image->createImageView(deferred.sampledAspect, deferred.viewType);
+    physImg.vkImage = image->getImage();
+    physImg.view = image->getImageView();
+    physImg.ownedImage = std::move(image);
+}
+
+bool FrameGraphCompiler::createTransientImages(
+    VulkanDevice& device,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
+    const std::vector<uint32_t>& executionOrder,
+    std::vector<PhysicalResource>& physResources,
+    std::vector<ScheduledResource>& scheduled,
+    std::string& outError)
+{
+    if (m_deferredImages.empty()) return true;
+
+    const auto aliasable = aliasableImages(passes, declarations, descriptorLayouts, executionOrder);
+    const auto lifetimes = resourceLifetimes(passes, declarations, descriptorLayouts, executionOrder);
+
+    std::vector<AliasRequest> requests;
+    std::unordered_map<uint32_t, const DeferredImage*> byResource;
+    for (const auto& deferred : m_deferredImages) {
+        auto& physImg = std::get<PhysicalImage>(physResources[deferred.resource]);
+        const auto& info = deferred.info;
+        if (!aliasable[deferred.resource]) {
+            m_logger->log(LogLevel::Info, "  Transient image '%s' cannot share memory; it gets its own",
+                          declarations[deferred.resource].name.c_str());
+            finishImage(physImg, deferred, std::make_unique<VulkanImage>(
+                device, info.extent.width, info.extent.height, info.format, info.tiling, info.usage,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, info.mipLevels, info.arrayLayers, info.flags,
+                info.imageType, info.extent.depth, info.samples));
+            continue;
+        }
+        VkDeviceImageMemoryRequirements query{};
+        query.sType = VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS;
+        query.pCreateInfo = &info;
+        VkMemoryRequirements2 requirements{};
+        requirements.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+        vkGetDeviceImageMemoryRequirements(device.getLogicalDevice(), &query, &requirements);
+        const auto& r = requirements.memoryRequirements;
+        requests.push_back({deferred.resource, r.size, r.alignment, r.memoryTypeBits});
+        byResource[deferred.resource] = &deferred;
+    }
+
+    const auto blocks = packAliases(requests, lifetimes);
+    VkDeviceSize separate = 0, shared = 0;
+    for (const auto& request : requests) separate += request.size;
+
+    for (uint32_t b = 0; b < blocks.size(); ++b) {
+        const auto& block = blocks[b];
+        auto memory = std::make_shared<SharedImageMemory>();
+        memory->allocator = device.getAllocator().getHandle();
+        const VkMemoryRequirements requirements{block.size, block.alignment, block.memoryTypeBits};
+        VmaAllocationCreateInfo create{};
+        create.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        if (vmaAllocateMemory(memory->allocator, &requirements, &create, &memory->allocation, nullptr) != VK_SUCCESS) {
+            outError = "Could not allocate " + std::to_string(block.size) + " bytes for transient images";
+            return false;
+        }
+        shared += block.size;
+
+        std::string names;
+        for (uint32_t ri : block.resources) {
+            auto& physImg = std::get<PhysicalImage>(physResources[ri]);
+            const auto& deferred = *byResource.at(ri);
+            finishImage(physImg, deferred,
+                        std::make_unique<VulkanImage>(device, deferred.info, memory->allocation, 0));
+            physImg.sharedMemory = memory;
+            if (block.resources.size() > 1) scheduled[ri].aliasBlock = b;
+            names += (names.empty() ? "" : ", ") + declarations[ri].name;
+        }
+        m_logger->log(LogLevel::Info, "  Memory block %u (%.1f MiB): %s", b,
+                      static_cast<double>(block.size) / (1024.0 * 1024.0), names.c_str());
+    }
+    m_logger->log(LogLevel::Info, "Transient images: %zu in %zu memory block(s), %.1f MiB instead of %.1f MiB",
+                  requests.size(), blocks.size(), static_cast<double>(shared) / (1024.0 * 1024.0),
+                  static_cast<double>(separate) / (1024.0 * 1024.0));
+    m_deferredImages.clear();
     return true;
 }
 
@@ -767,6 +870,14 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         std::erase_if(result.executionOrder, [&](uint32_t pi) { return !isLive[pi]; });
         m_logger->log(LogLevel::Info, "Pass order: %zu passes, %zu after culling",
                       beforeCull, result.executionOrder.size());
+    }
+
+    // Stage 3.2: Transient images, created now that their lifetimes are
+    // known, in memory they may share
+    if (!createTransientImages(device, resources, passes, builder.getDescriptorSetLayouts(), result.executionOrder,
+                               result.physicalResources, scheduled, result.errorMessage)) {
+        m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+        return result;
     }
 
     // Stage 3.5: Create samplers from JSON declarations

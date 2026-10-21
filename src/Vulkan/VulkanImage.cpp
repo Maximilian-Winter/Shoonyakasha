@@ -90,29 +90,72 @@ VulkanImage::~VulkanImage() {
         vmaDestroyImage(m_device.getAllocator().getHandle(), m_image, m_allocation);
         m_image = VK_NULL_HANDLE;
         m_allocation = VK_NULL_HANDLE;
+    } else if (m_sharedMemory && m_image != VK_NULL_HANDLE) {
+        vkDestroyImage(m_device.getLogicalDevice(), m_image, nullptr);
+        m_image = VK_NULL_HANDLE;
     }
 
     delete m_logger;
     delete m_eventDispatcher;
 }
 
-void VulkanImage::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
-                              VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
+VulkanImage::VulkanImage(VulkanDevice& device, const VkImageCreateInfo& info, VmaAllocation memory,
+                         VkDeviceSize offset)
+        : m_device(device)
+        , m_image(VK_NULL_HANDLE)
+        , m_allocation(VK_NULL_HANDLE)
+        , m_imageView(VK_NULL_HANDLE)
+        , m_format(info.format)
+        , m_width(info.extent.width)
+        , m_height(info.extent.height)
+        , m_mipLevels(info.mipLevels)
+        , m_arrayLayers(info.arrayLayers)
+        , m_depth(info.extent.depth)
+        , m_imageType(info.imageType)
+        , m_samples(info.samples)
+        , m_sharedMemory(true)
+        , m_flags(info.flags)
+        , m_tiling(info.tiling)
+        , m_usage(info.usage)
+        , m_properties(0)
+        , m_ownImage(true)
+{
+    m_logger = new Logger("vulkan_image.log");
+    m_eventDispatcher = new EventDispatcher();
+
+    if (vmaCreateAliasingImage2(m_device.getAllocator().getHandle(), memory, offset, &info, &m_image) != VK_SUCCESS) {
+        m_logger->log(LogLevel::Error, "Failed to create an image in shared memory");
+        throw std::runtime_error("Failed to create an image in shared memory!");
+    }
+    m_eventDispatcher->publish(ImageCreatedEvent{m_image, m_width, m_height, m_format});
+}
+
+VkImageCreateInfo VulkanImage::createInfo(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
+                                          VkImageUsageFlags usage, uint32_t mipLevels, uint32_t arrayLayers,
+                                          VkImageCreateFlags flags, VkImageType imageType, uint32_t depth,
+                                          VkSampleCountFlagBits samples) {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = m_imageType;
+    imageInfo.imageType = imageType;
     imageInfo.extent.width = width;
     imageInfo.extent.height = height;
-    imageInfo.extent.depth = m_depth;
-    imageInfo.mipLevels = m_mipLevels;
-    imageInfo.arrayLayers = m_arrayLayers;
-    imageInfo.flags = m_flags;
+    imageInfo.extent.depth = depth;
+    imageInfo.mipLevels = mipLevels;
+    imageInfo.arrayLayers = arrayLayers;
+    imageInfo.flags = flags;
     imageInfo.format = format;
     imageInfo.tiling = tiling;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imageInfo.usage = usage;
-    imageInfo.samples = m_samples;
+    imageInfo.samples = samples;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    return imageInfo;
+}
+
+void VulkanImage::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
+                              VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
+    const VkImageCreateInfo imageInfo = createInfo(width, height, format, tiling, usage, m_mipLevels, m_arrayLayers,
+                                                   m_flags, m_imageType, m_depth, m_samples);
 
     // Use VMA for allocation
     VmaAllocationCreateInfo allocInfo{};

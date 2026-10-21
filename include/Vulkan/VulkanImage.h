@@ -29,6 +29,16 @@ public:
                 VkImageType imageType = VK_IMAGE_TYPE_2D, uint32_t depth = 1,
                 VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
 
+    // Create an image in `memory` at `offset`, which other images may share;
+    // the image does not own or free the memory.
+    VulkanImage(VulkanDevice& device, const VkImageCreateInfo& info, VmaAllocation memory, VkDeviceSize offset);
+
+    /// The create info the mip/layer constructor uses.
+    static VkImageCreateInfo createInfo(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
+                                        VkImageUsageFlags usage, uint32_t mipLevels, uint32_t arrayLayers,
+                                        VkImageCreateFlags flags = 0, VkImageType imageType = VK_IMAGE_TYPE_2D,
+                                        uint32_t depth = 1, VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
+
     // Wrap an existing image (not owned, no VMA allocation)
     VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, uint32_t width, uint32_t height,
                 VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
@@ -63,6 +73,7 @@ private:
     uint32_t m_depth = 1;
     VkImageType m_imageType = VK_IMAGE_TYPE_2D;
     VkSampleCountFlagBits m_samples = VK_SAMPLE_COUNT_1_BIT;
+    bool m_sharedMemory = false;  // bound into memory it does not own
     VkImageCreateFlags m_flags = 0;
     VkImageTiling m_tiling;
     VkImageUsageFlags m_usage;

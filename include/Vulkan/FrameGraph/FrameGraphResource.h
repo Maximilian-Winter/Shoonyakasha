@@ -114,7 +114,8 @@ struct ImageDesc {
     uint32_t depth       = 1;       // slices of a 3d image; 1 otherwise
     ImageViewKind viewType = ImageViewKind::Auto;
 
-    // For future transient aliasing (Phase 5)
+    // May share memory with transient images whose lifetimes do not overlap
+    // its own (JSON "transient"); see FrameGraphCompiler::createTransientImages.
     bool transient = false;
 
     // Contents carry over from one frame to the next (JSON "persistent"):

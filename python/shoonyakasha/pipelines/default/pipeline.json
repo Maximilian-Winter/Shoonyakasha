@@ -1199,7 +1199,8 @@
         "width": 2048,
         "height": 2048,
         "arrayLayers": 4,
-        "viewType": "2d_array"
+        "viewType": "2d_array",
+        "transient": true
       }
     },
     {
@@ -1208,35 +1209,40 @@
       "image": {
         "format": "D32_SFLOAT",
         "width": 4096,
-        "height": 4096
+        "height": 4096,
+        "transient": true
       }
     },
     {
       "name": "gAlbedo",
       "kind": "image",
       "image": {
-        "format": "R8G8B8A8_SRGB"
+        "format": "R8G8B8A8_SRGB",
+        "transient": true
       }
     },
     {
       "name": "gNormal",
       "kind": "image",
       "image": {
-        "format": "R16G16_SFLOAT"
+        "format": "R16G16_SFLOAT",
+        "transient": true
       }
     },
     {
       "name": "gMaterial",
       "kind": "image",
       "image": {
-        "format": "R8G8_UNORM"
+        "format": "R8G8_UNORM",
+        "transient": true
       }
     },
     {
       "name": "gVelocity",
       "kind": "image",
       "image": {
-        "format": "R16G16_SFLOAT"
+        "format": "R16G16_SFLOAT",
+        "transient": true
       }
     },
     {
@@ -1250,14 +1256,16 @@
       "name": "hdrColor",
       "kind": "image",
       "image": {
-        "format": "R16G16B16A16_SFLOAT"
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
       }
     },
     {
       "name": "taaColor",
       "kind": "image",
       "image": {
-        "format": "R16G16B16A16_SFLOAT"
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
       }
     },
     {
@@ -1272,21 +1280,24 @@
       "name": "shadowMask",
       "kind": "image",
       "image": {
-        "format": "R8G8_UNORM"
+        "format": "R8G8_UNORM",
+        "transient": true
       }
     },
     {
       "name": "aoRaw",
       "kind": "image",
       "image": {
-        "format": "R8_UNORM"
+        "format": "R8_UNORM",
+        "transient": true
       }
     },
     {
       "name": "ao",
       "kind": "image",
       "image": {
-        "format": "R8_UNORM"
+        "format": "R8_UNORM",
+        "transient": true
       }
     },
     {
@@ -1296,7 +1307,8 @@
         "format": "R16G16B16A16_SFLOAT",
         "widthScale": 0.5,
         "heightScale": 0.5,
-        "mipLevels": 6
+        "mipLevels": 6,
+        "transient": true
       }
     },
     {
@@ -1315,7 +1327,8 @@
       "image": {
         "format": "R32_UINT",
         "width": 3457,
-        "height": 64
+        "height": 64,
+        "transient": true
       }
     }
   ],

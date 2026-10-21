@@ -13,6 +13,7 @@
 
 #include <vulkan/vulkan.h>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,6 +59,11 @@ struct ScheduledResource {
     /// Contents carry over between frames: a frame's first barrier keeps the
     /// layout the previous frame left rather than starting from UNDEFINED.
     bool persistent = false;
+    /// The memory block a transient image shares with others (kNoAlias for
+    /// none). Its first access after another image of the block starts from
+    /// UNDEFINED and waits for that image's last access.
+    static constexpr uint32_t kNoAlias = std::numeric_limits<uint32_t>::max();
+    uint32_t aliasBlock = kNoAlias;
 };
 
 /// Build the scheduler's view of every declared resource from the
@@ -285,6 +291,65 @@ std::vector<std::vector<AttachmentOps>> planAttachmentOps(
     const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
     const std::vector<uint32_t>& executionOrder,
     const std::vector<ScheduledResource>& resources);
+
+// ═══════════════════════════════════════════════════════════════
+// Aliasing: transient images sharing memory
+// ═══════════════════════════════════════════════════════════════
+
+/// Positions in an execution order of the first and last pass that uses a
+/// resource. `first` is kUnused for a resource no pass uses.
+struct PassSpan {
+    static constexpr uint32_t kUnused = std::numeric_limits<uint32_t>::max();
+    uint32_t first = kUnused;
+    uint32_t last  = 0;
+    bool used() const { return first != kUnused; }
+    bool overlaps(const PassSpan& o) const {
+        return used() && o.used() && first <= o.last && o.first <= last;
+    }
+};
+
+/// Each resource's lifetime over `executionOrder`: the passes that name it
+/// as an input or output (a resolve target included) or bind it through one
+/// of their descriptor sets.
+std::vector<PassSpan> resourceLifetimes(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
+    const std::vector<uint32_t>& executionOrder);
+
+/// Which resources may share memory: images declared "transient", created by
+/// the graph, not persistent, with no readback, save, target or added
+/// transfer-source use, that no pass on another queue uses and no pass that
+/// records through code the graph cannot see (an execute callback, or
+/// execution type "none", "manual" or "scene_geometry") uses or binds.
+std::vector<bool> aliasableImages(
+    const std::vector<PassDeclaration>& passes,
+    const std::vector<ResourceDeclaration>& declarations,
+    const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts,
+    const std::vector<uint32_t>& executionOrder);
+
+/// The memory an aliasable image needs.
+struct AliasRequest {
+    uint32_t     resource = 0;
+    VkDeviceSize size = 0;
+    VkDeviceSize alignment = 1;
+    uint32_t     memoryTypeBits = 0;
+};
+
+/// Images that share one allocation, as large and as aligned as the largest
+/// and most aligned of them, in a memory type all of them accept.
+struct AliasBlock {
+    std::vector<uint32_t> resources;
+    VkDeviceSize size = 0;
+    VkDeviceSize alignment = 1;
+    uint32_t     memoryTypeBits = ~0u;
+};
+
+/// Pack requests into blocks, largest first: each joins the first block
+/// whose images' lifetimes do not overlap its own and that shares a memory
+/// type with it, or starts a new one.
+std::vector<AliasBlock> packAliases(std::vector<AliasRequest> requests,
+                                    const std::vector<PassSpan>& lifetimes);
 
 } // namespace FrameGraph
 } // namespace Shoonyakasha

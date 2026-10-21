@@ -163,6 +163,11 @@ The top-level `ui` block names `gDepth`, read after `GBufferSkinnedMasked`,
 as the depth the canvas UI tests world-canvas hits against: geometry in front
 of a world canvas stops the pointer.
 
+Every image except `gDepth`, `taaHistory` and `exposure` is `transient`:
+images that no pass uses at the same time share memory, and compiling logs
+the blocks they share. A pass added to a copy that reads one of them must
+declare it, as an input or through its descriptor sets.
+
 ## Ray-traced shadows
 
 Where the device has `VK_KHR_ray_query` (the engine enables it and
