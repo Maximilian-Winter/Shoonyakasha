@@ -574,6 +574,8 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         void setCustomUintArray(const string& key, const vector[uint32_t]& values)
         string setBuffer(const string& name, const void* data, size_t size, size_t offset)
         cbool requestReadback(const string& name)
+        string setPipelineImageData(const string& name, const void* data, size_t size,
+                                    uint32_t width, uint32_t height, const string& format)
         cbool getReadback(const string& name, Readback& out)
         void setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
                                   float splitLambda, uint32_t resolution, float casterExtension)

@@ -612,6 +612,18 @@ bool EngineAPI::setPipelineImage(const std::string& name, const std::string& pat
     return true;
 }
 
+std::string EngineAPI::setPipelineImageData(const std::string& name, const void* data, size_t size,
+                                            uint32_t width, uint32_t height, const std::string& format) {
+    if (!m_impl->app || !m_impl->app->hasDevice()) return "the engine is not running";
+    VkFormat vkFormat = VK_FORMAT_UNDEFINED;
+    try {
+        vkFormat = FrameGraph::JsonUtils::stringToFormat(format);
+    } catch (const std::exception&) {
+        return "unknown format '" + format + "'";
+    }
+    return m_impl->app->getRenderGraph().setExternalImageData(name, data, size, width, height, vkFormat);
+}
+
 bool EngineAPI::rayQuerySupported() const {
     return m_impl->app && m_impl->app->hasDevice() && m_impl->app->getDevice().hasRayQuery();
 }

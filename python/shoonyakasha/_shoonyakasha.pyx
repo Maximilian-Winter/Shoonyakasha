@@ -2223,6 +2223,36 @@ cdef class Engine:
         if not error.empty():
             raise ValueError(error.decode('utf-8'))
 
+    def set_pipeline_image_data(self, str name, data, uint32_t width=0, uint32_t height=0,
+                                str format="R8G8B8A8_SRGB"):
+        """Make the image the pipeline's "externalImage": name bindings sample
+        from texels in memory instead of a file.
+
+        `data` is anything with the buffer protocol and contiguous memory,
+        rows of tightly packed texels with the top row first: a NumPy array
+        shaped (height, width, channels) or (height, width), whose shape gives
+        the size, or bytes with `width` and `height`. `format` is a pipeline
+        JSON format name; the bytes must be width x height texels of it.
+        The engine keeps the image until a later one replaces it. Uploading
+        waits for the GPU, so this suits images that change now and then.
+        May be called from on_init. Raises ValueError when the bytes or the
+        format do not fit.
+        """
+        cdef const unsigned char[::1] view
+        cdef string error
+        mv = memoryview(data)
+        if width == 0 or height == 0:
+            if mv.ndim < 2:
+                raise ValueError("give width and height, or data shaped (height, width[, channels])")
+            height, width = mv.shape[0], mv.shape[1]
+        view = mv.cast('B')
+        if view.shape[0] == 0:
+            raise ValueError("the image has no texels")
+        error = self._ptr.setPipelineImageData(name.encode('utf-8'), &view[0], view.shape[0],
+                                               width, height, format.encode('utf-8'))
+        if not error.empty():
+            raise ValueError(error.decode('utf-8'))
+
     def request_readback(self, str name):
         """Copy the buffer layout or image resource `name` back at the end
         of the next frame, whatever the readback frequency its pipeline JSON

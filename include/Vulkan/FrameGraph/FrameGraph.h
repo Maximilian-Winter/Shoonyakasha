@@ -1178,6 +1178,16 @@ public:
     // caller keeps the image alive as long as the graph may sample it.
     void setExternalImage(const std::string& name, VkImageView view, VkSampler sampler);
 
+    // An image made from `size` bytes of `width` x `height` texels of
+    // `format`, rows of tightly packed texels with the top row first, for
+    // the bindings with "externalImage": name, as setExternalImage. The
+    // graph owns it, and frees an image it owns once one replacing it is set
+    // and no frame in flight can sample it any more. The format must be a
+    // colour format the device can sample. Uploading waits for the graphics
+    // queue. Returns an error message, empty on success.
+    std::string setExternalImageData(const std::string& name, const void* data, size_t size,
+                                     uint32_t width, uint32_t height, VkFormat format);
+
     // ── Material textures ──
     // Material descriptor sets are shared by the textures they hold and kept
     // for the life of the graph. Before destroying a texture that materials
@@ -1909,7 +1919,13 @@ private:
         VkImageView view = VK_NULL_HANDLE;
         VkSampler sampler = VK_NULL_HANDLE;
         uint32_t pendingFrames = 0;
+        Shoonyakasha::GPUTexture owned;   // setExternalImageData's, else empty
     };
+    // Images setExternalImageData replaced, with the frame count when they
+    // were, freed once every frame recorded before then has completed.
+    std::vector<std::pair<uint64_t, Shoonyakasha::GPUTexture>> m_retiredImages;
+    void retireExternalImage(ExternalImage& image);
+    void freeRetiredImages(bool all);
     std::unordered_map<std::string, ExternalImage> m_externalImages;
     bool m_externalImagesPending = false;
 

@@ -103,6 +103,7 @@ bool setPassEnabled(const std::string& passName, bool enabled);
 bool isPassEnabled(const std::string& passName) const;
 bool applyPipelinePreset(const std::string& name);
 bool setPipelineImage(const std::string& name, const std::string& path);
+std::string setPipelineImageData(const std::string& name, const void* data, size_t size, uint32_t width, uint32_t height, const std::string& format);   // error message, empty on success
 bool rayQuerySupported() const;
 std::vector<std::string> getPipelinePresets() const;
 uint32_t getPassDrawnCount(const std::string& passName) const;

@@ -381,6 +381,16 @@ public:
     /// Returns false if the file could not be loaded.
     bool setPipelineImage(const std::string& name, const std::string& path);
 
+    /// The same from texels in memory: `size` bytes of `width` x `height`
+    /// texels in `format` (a pipeline JSON format name, colour formats the
+    /// device can sample), rows of tightly packed texels with the top row
+    /// first. The engine keeps the image and frees it once a later one
+    /// replaces it and no frame in flight samples it. Uploading waits for the
+    /// GPU. May be called before the pipeline is loaded. Returns an error
+    /// message, empty on success.
+    std::string setPipelineImageData(const std::string& name, const void* data, size_t size,
+                                     uint32_t width, uint32_t height, const std::string& format);
+
     /// Whether the device traces rays with ray queries, which passes that
     /// "require" them (the default pipeline's "raytraced" preset) need.
     /// Known once run() has created the device; false before.
