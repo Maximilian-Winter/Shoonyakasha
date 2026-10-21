@@ -224,6 +224,7 @@ VulkanDescriptorSet::VulkanDescriptorSet(VulkanDevice& device,
     m_pendingWrites.resize(maxSets);
     m_bufferInfos.resize(maxSets);
     m_imageInfos.resize(maxSets);
+    m_texelViews.resize(maxSets);
 
     createLayout();
     createPool();
@@ -336,12 +337,16 @@ void VulkanDescriptorSet::updateSet(uint32_t set) {
         // the pointers by iterating through writes and matching them to their info indices.
         size_t bufferIdx = 0;
         size_t imageIdx = 0;
+        size_t texelIdx = 0;
         for (auto& write : m_pendingWrites[set]) {
             if (write.pBufferInfo != nullptr) {
                 write.pBufferInfo = &m_bufferInfos[set][bufferIdx++];
             }
             if (write.pImageInfo != nullptr) {
                 write.pImageInfo = &m_imageInfos[set][imageIdx++];
+            }
+            if (write.pTexelBufferView != nullptr) {
+                write.pTexelBufferView = &m_texelViews[set][texelIdx++];
             }
         }
 
@@ -353,6 +358,7 @@ void VulkanDescriptorSet::updateSet(uint32_t set) {
         m_pendingWrites[set].clear();
         m_bufferInfos[set].clear();
         m_imageInfos[set].clear();
+        m_texelViews[set].clear();
     }
 }
 
@@ -521,6 +527,12 @@ void VulkanDescriptorSet::addPendingWrite(uint32_t set, const std::string& name,
         using T = std::decay_t<decltype(res)>;
 
         if constexpr (std::is_same_v<T, BufferResource>) {
+            if (res.texelView != VK_NULL_HANDLE) {
+                m_texelViews[set].push_back(res.texelView);
+                write.pTexelBufferView = &m_texelViews[set].back();
+                write.descriptorType = getBindingType(name);
+                return;
+            }
             VkDescriptorBufferInfo bufferInfo{};
             bufferInfo.buffer = res.buffer;
             bufferInfo.offset = res.offset;

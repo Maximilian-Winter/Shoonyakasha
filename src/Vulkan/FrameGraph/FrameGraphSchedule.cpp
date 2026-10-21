@@ -878,20 +878,22 @@ BufferAccessTable describeBufferAccesses(
             const auto it = layoutsByName.find(pass.descriptorSetRefs[set]);
             if (it == layoutsByName.end()) continue;
             for (const auto& binding : it->second->bindings) {
-                const bool storage = isStorageBufferType(binding.type);
-                if (!storage && !isUniformBufferType(binding.type)) continue;
+                const bool storageTexel = binding.type == "storage_texel_buffer";
+                const bool storage = isStorageBufferType(binding.type) || storageTexel;
+                if (!storage && !isUniformBufferType(binding.type) && binding.type != "uniform_texel_buffer") continue;
 
                 VkPipelineStageFlags stages = shaderPipelineStages(binding.stages, pass.type);
                 bool writes = storage;
-                if (storage && query) {
+                if (storage && !storageTexel && query) {
                     if (const auto use = query(pi, set, binding.binding)) {
                         stages = use->stages;
                         writes = use->writes;
                     }
                 }
                 if (stages == 0) continue;
-                const VkAccessFlags reads = storage ? VkAccessFlags{VK_ACCESS_SHADER_READ_BIT}
-                                                    : VkAccessFlags{VK_ACCESS_UNIFORM_READ_BIT};
+                const VkAccessFlags reads = storage || binding.type == "uniform_texel_buffer"
+                                                ? VkAccessFlags{VK_ACCESS_SHADER_READ_BIT}
+                                                : VkAccessFlags{VK_ACCESS_UNIFORM_READ_BIT};
                 const VkAccessFlags access = reads | (writes ? VkAccessFlags{VK_ACCESS_SHADER_WRITE_BIT} : 0);
 
                 if (!binding.autoBindBuffer.empty()) {

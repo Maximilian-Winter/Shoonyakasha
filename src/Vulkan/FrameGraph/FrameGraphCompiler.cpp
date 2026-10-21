@@ -1180,6 +1180,8 @@ void FrameGraphCompiler::createDescriptorSetLayouts(
                 case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
                 case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
                 case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+                case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+                case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
                 // Written per frame by RenderGraph with the scene's structure.
                 case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR: {
                     BufferBinding buf;

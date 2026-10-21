@@ -75,6 +75,7 @@ struct BufferResource {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceSize offset = 0;
     VkDeviceSize range = VK_WHOLE_SIZE;
+    VkBufferView texelView = VK_NULL_HANDLE;  // set for texel buffer bindings, in place of the rest
 
     BufferResource() = default;
     BufferResource(VkBuffer buf, VkDeviceSize off = 0, VkDeviceSize rng = VK_WHOLE_SIZE)
@@ -211,6 +212,7 @@ private:
     std::vector<std::vector<VkWriteDescriptorSet>> m_pendingWrites;
     std::vector<std::vector<VkDescriptorBufferInfo>> m_bufferInfos;
     std::vector<std::vector<VkDescriptorImageInfo>> m_imageInfos;
+    std::vector<std::vector<VkBufferView>> m_texelViews;
 
     void createLayout();
     void createPool();

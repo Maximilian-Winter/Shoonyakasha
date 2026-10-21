@@ -254,6 +254,8 @@ VkDescriptorType stringToDescriptorType(const std::string& str) {
         {"input_attachment",            VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT},
         {"sampler",                     VK_DESCRIPTOR_TYPE_SAMPLER},
         {"acceleration_structure",      VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR},
+        {"uniform_texel_buffer",        VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER},
+        {"storage_texel_buffer",        VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER},
     };
     auto it = map.find(str);
     if (it != map.end()) return it->second;
@@ -272,6 +274,8 @@ std::string descriptorTypeToString(VkDescriptorType type) {
         case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:        return "input_attachment";
         case VK_DESCRIPTOR_TYPE_SAMPLER:                 return "sampler";
         case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR: return "acceleration_structure";
+        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:    return "uniform_texel_buffer";
+        case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:    return "storage_texel_buffer";
         default:                                         return "unknown";
     }
 }
@@ -1549,6 +1553,22 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     binding.autoBindBuffer   = bindingJson.value("autoBindBuffer", std::string{});
                     binding.externalImage    = bindingJson.value("externalImage", std::string{});
                     binding.source           = bindingJson.value("source", std::string{});
+                    {
+                        // A texel buffer: a buffer of bufferLayouts seen as texels of "format".
+                        const bool texel = binding.type == "uniform_texel_buffer" ||
+                                           binding.type == "storage_texel_buffer";
+                        const std::string where = "Binding '" + binding.name + "' of layout '" + layoutDesc.name + "'";
+                        if (bindingJson.contains("format") != texel) {
+                            throw std::runtime_error(where + ": texel buffers take a \"format\", and only they do");
+                        }
+                        if (texel) {
+                            binding.texelFormat = JsonUtils::stringToFormat(bindingJson["format"].get<std::string>());
+                            if (binding.autoBindBuffer.empty() || binding.count != 1) {
+                                throw std::runtime_error(where + ": a texel buffer names one buffer with "
+                                                         "\"autoBindBuffer\"");
+                            }
+                        }
+                    }
                     if (!binding.source.empty() &&
                         (binding.source != "sceneTextures" || binding.type != "combined_image_sampler")) {
                         throw std::runtime_error("Binding '" + binding.name + "' of layout '" + layoutDesc.name +

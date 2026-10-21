@@ -79,6 +79,8 @@ RenderGraph::~RenderGraph() {
     // Phase 3: Destroy staging manager before SSBO cleanup
     m_stagingManager.reset();
 
+    for (VkBufferView view : m_texelBufferViews) vkDestroyBufferView(m_device.getLogicalDevice(), view, nullptr);
+
     // Phase 2: Unregister our targets from shared registry
     if (m_sharedBufferRegistry) {
         for (const auto& desc : m_builder.getBufferLayouts()) {
@@ -676,11 +678,12 @@ void RenderGraph::createDotPathSSBOs(uint32_t maxFramesInFlight) {
         ssbo.savePolicy = desc.savePolicy;
 
         // Phase 3: Add TRANSFER_SRC_BIT when readback or gpu_to_cpu/bidirectional is needed
-        // Any of them may hold the arguments of indirect passes, or the
-        // vertices and indices of draws.
+        // Any of them may hold the arguments of indirect passes, the
+        // vertices and indices of draws, or the texels of texel buffers.
         VkBufferUsageFlags usageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                         VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
         if (desc.readbackPolicy.enabled ||
             desc.memoryPolicy.transferDirection == TransferDirection::GpuToCpu ||
             desc.memoryPolicy.transferDirection == TransferDirection::Bidirectional) {
@@ -1523,6 +1526,9 @@ void RenderGraph::createManagedUBOs(uint32_t maxFramesInFlight) {
 
 void RenderGraph::bindUBOsToDescriptorSets(uint32_t maxFramesInFlight) {
     const auto& layoutDescs = m_builder.getDescriptorSetLayouts();
+    // Views of a previous compile; no frame that used them is in flight.
+    for (VkBufferView view : m_texelBufferViews) vkDestroyBufferView(m_device.getLogicalDevice(), view, nullptr);
+    m_texelBufferViews.clear();
 
     for (const auto& layoutDesc : layoutDescs) {
         auto setIt = m_compiled.namedDescriptorSets.find(layoutDesc.name);
@@ -1537,6 +1543,11 @@ void RenderGraph::bindUBOsToDescriptorSets(uint32_t maxFramesInFlight) {
             std::string bindingName = binding.name.empty()
                 ? "binding_" + std::to_string(binding.binding)
                 : binding.name;
+            if (binding.texelFormat != VK_FORMAT_UNDEFINED && !m_registeredSSBOs.count(uboName)) {
+                m_logger->log(LogLevel::Error, "  Texel buffer '%s' in layout '%s' names '%s', which is not a "
+                              "storage buffer", bindingName.c_str(), layoutDesc.name.c_str(), uboName.c_str());
+                continue;
+            }
 
             // Check managed UBOs first
             auto managedIt = m_managedUBOs.find(uboName);
@@ -1578,6 +1589,44 @@ void RenderGraph::bindUBOsToDescriptorSets(uint32_t maxFramesInFlight) {
 
             // Check registered SSBOs (storage buffers)
             auto ssboIt = m_registeredSSBOs.find(uboName);
+            if (ssboIt != m_registeredSSBOs.end() && binding.texelFormat != VK_FORMAT_UNDEFINED) {
+                // A texel buffer: a view of the buffer as texels of its format.
+                RegisteredSSBO& ssbo = ssboIt->second;
+                const bool storage = binding.type == "storage_texel_buffer";
+                VkFormatProperties props{};
+                vkGetPhysicalDeviceFormatProperties(m_device.getPhysicalDevice(), binding.texelFormat, &props);
+                const VkFormatFeatureFlags needed = storage ? VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT
+                                                            : VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT;
+                if ((props.bufferFeatures & needed) == 0) {
+                    m_logger->log(LogLevel::Error, "  Texel buffer '%s' in layout '%s': this device has no %s texel "
+                                  "buffers of format %d", bindingName.c_str(), layoutDesc.name.c_str(),
+                                  storage ? "storage" : "uniform", static_cast<int>(binding.texelFormat));
+                    continue;
+                }
+                for (uint32_t frame = 0; frame < maxFramesInFlight; ++frame) {
+                    const uint32_t bufIdx = (frame < ssbo.buffers.size()) ? frame : 0;
+                    VkBufferViewCreateInfo info{};
+                    info.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+                    info.buffer = ssbo.buffers[bufIdx];
+                    info.format = binding.texelFormat;
+                    info.offset = 0;
+                    info.range = VK_WHOLE_SIZE;
+                    VkBufferView view = VK_NULL_HANDLE;
+                    if (vkCreateBufferView(m_device.getLogicalDevice(), &info, nullptr, &view) != VK_SUCCESS) {
+                        m_logger->log(LogLevel::Error, "  Texel buffer '%s': could not create a buffer view",
+                                      bindingName.c_str());
+                        break;
+                    }
+                    m_texelBufferViews.push_back(view);
+                    BufferResource bufRes;
+                    bufRes.texelView = view;
+                    descriptorSet->bindBuffer(bindingName, frame, bufRes);
+                    descriptorSet->updateSet(frame);
+                }
+                m_logger->log(LogLevel::Info, "  Bound texel buffer '%s' -> '%s' in layout '%s'",
+                              uboName.c_str(), bindingName.c_str(), layoutDesc.name.c_str());
+                continue;
+            }
             if (ssboIt != m_registeredSSBOs.end()) {
                 RegisteredSSBO& ssbo = ssboIt->second;
                 // SSBOs may have one buffer used for all frames, or per-frame buffers

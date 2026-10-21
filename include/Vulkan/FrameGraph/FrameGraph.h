@@ -1604,6 +1604,8 @@ private:
         VkDeviceSize size = 0;
     };
     std::unordered_map<std::string, RegisteredSSBO> m_registeredSSBOs;
+    // Views of storage buffers bound as texel buffers, made when they are bound.
+    std::vector<VkBufferView> m_texelBufferViews;
 
     // Framework-managed UBOs (created from JSON uniformBuffers section)
     struct ManagedUBO {
