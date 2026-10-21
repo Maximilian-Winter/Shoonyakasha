@@ -170,17 +170,34 @@ struct BarrierPlan {
 
     /// Presentable images whose presenting pass had to be inferred.
     std::vector<std::string> warnings;
+
+    /// Indexed by pass declaration index: the pass on the other queue it must
+    /// wait for, the latest in execution order (kNoPass for none). Empty
+    /// without `queues`.
+    std::vector<uint32_t> crossQueueWait;
 };
+
+constexpr uint32_t kNoPass = std::numeric_limits<uint32_t>::max();
 
 /// Barriers for executing `executionOrder`. A barrier is placed before an
 /// access whenever the layout changes or either side writes; consecutive
 /// reads in one layout share the earlier barrier. Barriers for neighbouring
 /// layers and mips with the same prior state are merged into one range.
 /// An output that presents gets a post-barrier to PRESENT_SRC_KHR.
+///
+/// `queues`, by pass declaration index, gives the queue each pass runs on;
+/// empty puts them all on one. An access after accesses on the other queue
+/// always gets a barrier, reads after reads included, since another queue's
+/// barriers do not make writes visible to this one. Where those accesses are
+/// earlier in the frame, the pass waits for the latest of their passes
+/// (crossQueueWait). Such a barrier starts from ALL_COMMANDS with no access:
+/// the semaphore the pass's work waits on makes the other queue's writes
+/// available and visible.
 BarrierPlan planBarriers(
     const std::vector<PassDeclaration>& passes,
     const std::vector<uint32_t>& executionOrder,
-    const std::vector<ScheduledResource>& resources);
+    const std::vector<ScheduledResource>& resources,
+    const std::vector<QueueType>& queues = {});
 
 // ═══════════════════════════════════════════════════════════════
 // Buffers
@@ -262,10 +279,15 @@ struct MemoryBarrierInfo {
 /// before it so it sees earlier writes to the buffers it reads, and does not
 /// overwrite a buffer earlier passes are still using. Reads after reads need
 /// none. Planned like image barriers, across the frame boundary: a frame's
-/// first access waits for the previous frame's last.
+/// first access waits for the previous frame's last. With `queues`, as for
+/// planBarriers, `crossQueueWait` (if given) receives the pass on the other
+/// queue each pass must wait for; reads after reads on the other queue need
+/// none for a buffer no pass writes.
 std::vector<MemoryBarrierInfo> planBufferBarriers(
     const std::vector<uint32_t>& executionOrder,
-    const BufferAccessTable& table);
+    const BufferAccessTable& table,
+    const std::vector<QueueType>& queues = {},
+    std::vector<uint32_t>* crossQueueWait = nullptr);
 
 // ═══════════════════════════════════════════════════════════════
 // Attachment load and store operations
@@ -344,13 +366,24 @@ std::vector<bool> sharedAcrossQueues(
     const std::vector<ResourceDeclaration>& declarations,
     const std::vector<DescriptorSetLayoutDesc>& descriptorLayouts);
 
-/// Make the barriers of a pass recorded on the compute queue name only
-/// stages that queue runs. A source or destination with graphics-only stages
-/// (vertex input to colour attachment output, task and mesh shaders) becomes
-/// ALL_COMMANDS with no access: that work ran on the graphics queue, earlier
-/// in the frame or in the frame before, and the semaphore the compute queue
-/// waits on before its work already made its writes available and visible.
-void fitBarriersToComputeQueue(std::vector<BarrierInfo>& barriers, MemoryBarrierInfo& memory);
+/// Passes submitted together to one queue.
+struct QueueBatch {
+    QueueType             queue = QueueType::Graphics;
+    std::vector<uint32_t> passes;       // declaration indices, in execution order
+    /// The batch on the other queue this one waits for, by index in the
+    /// list; -1 for none. Earlier batches on the same queue precede it.
+    int32_t               wait = -1;
+};
+
+/// Group `executionOrder` into batches, in an order they can be submitted
+/// in. Each queue's passes keep their order. A batch ends where a pass on
+/// the other queue must wait for its last pass, and a new one starts where a
+/// pass must wait for a later batch of the other queue than its batch does;
+/// otherwise the queues' work overlaps. `crossQueueWait` is as planBarriers
+/// gives it, per pass declaration index.
+std::vector<QueueBatch> planQueueBatches(const std::vector<uint32_t>& executionOrder,
+                                         const std::vector<QueueType>& queues,
+                                         const std::vector<uint32_t>& crossQueueWait);
 
 /// The memory an aliasable image needs.
 struct AliasRequest {

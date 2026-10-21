@@ -493,14 +493,38 @@ struct SubState {
     VkPipelineStageFlags stage  = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
     VkAccessFlags        access = 0;
     bool                 used   = false;  // accessed earlier this frame
+    /// The queues whose accesses `stage` and `access` hold (bit per
+    /// QueueType), this frame or the one before.
+    uint8_t              queues = 0;
+    /// Per queue, the execution position of the latest of those accesses
+    /// this frame; kNoPass for none. Waits are noted from it before barriers
+    /// are merged, so it is not compared.
+    uint32_t             lastPos[2] = {kNoPass, kNoPass};
 
-    bool operator<(const SubState& o) const {
-        return std::tie(layout, stage, access, used) < std::tie(o.layout, o.stage, o.access, o.used);
-    }
-    bool operator==(const SubState& o) const {
-        return layout == o.layout && stage == o.stage && access == o.access && used == o.used;
-    }
+    /// What a barrier from this state looks like.
+    auto key() const { return std::tie(layout, stage, access, used, queues); }
+    bool operator<(const SubState& o) const { return key() < o.key(); }
+    bool operator==(const SubState& o) const { return key() == o.key(); }
 };
+
+/// The pass on `queue` at execution position `pos`.
+struct QueuedAccess {
+    uint32_t queue = 0;
+    uint32_t pos   = 0;
+    /// The latest execution position on the other queue to wait for.
+    uint32_t* wait = nullptr;
+};
+
+/// Before a barrier for an access by `by`: the latest earlier access on the
+/// other queue, which `by` must wait for.
+void noteHazard(const SubState& prior, const QueuedAccess& by) {
+    const uint32_t other = prior.lastPos[1 - by.queue];
+    if (other != kNoPass && (*by.wait == kNoPass || other > *by.wait)) *by.wait = other;
+}
+
+bool fromOtherQueue(uint8_t queues, uint32_t queue) {
+    return (queues & ~(1u << queue)) != 0;
+}
 
 /// Transition the subresources of `range` on resource `ri` to `target`,
 /// appending merged barriers to `out` and updating `states`.
@@ -509,6 +533,7 @@ void transition(std::vector<SubState>& states,
                 ResourceHandle handle,
                 const SubresourceRange& range,
                 VkImageLayout layout, VkPipelineStageFlags stage, VkAccessFlags access,
+                const QueuedAccess& by,
                 std::vector<BarrierInfo>& out)
 {
     const auto& shape = r.shape;
@@ -529,7 +554,8 @@ void transition(std::vector<SubState>& states,
             auto& st = states[subIndex(shape, m, l)];
             const bool hazard = st.layout != layout ||
                                 (st.access & kWriteAccess) != 0 ||
-                                (writes && st.used);
+                                (writes && st.used) ||
+                                (st.used && fromOtherQueue(st.queues, by.queue));
             if (!hazard) {
                 // Read after read in one layout: no barrier, but a later
                 // writer must wait for this reader too.
@@ -537,8 +563,11 @@ void transition(std::vector<SubState>& states,
                 st.stage |= stage;
                 st.access |= access;
                 st.used = true;
+                st.queues |= static_cast<uint8_t>(1u << by.queue);
+                st.lastPos[by.queue] = by.pos;
                 continue;
             }
+            noteHazard(st, by);
             if (runLen > 0 && runState == st && runStart + runLen == l) {
                 ++runLen;
             } else {
@@ -565,6 +594,10 @@ void transition(std::vector<SubState>& states,
             b.newLayout = layout;
             b.srcStage  = prior.used ? prior.stage : VkPipelineStageFlags{VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT};
             b.srcAccess = prior.used ? (prior.access & kWriteAccess) : 0;
+            if (prior.used && fromOtherQueue(prior.queues, by.queue)) {
+                b.srcStage  = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+                b.srcAccess = 0;
+            }
             b.dstStage  = stage;
             b.dstAccess = access;
             b.range.aspectMask     = r.aspect;
@@ -581,6 +614,9 @@ void transition(std::vector<SubState>& states,
                     st.stage  = stage;
                     st.access = access;
                     st.used   = true;
+                    st.queues = static_cast<uint8_t>(1u << by.queue);
+                    st.lastPos[0] = st.lastPos[1] = kNoPass;
+                    st.lastPos[by.queue] = by.pos;
                 }
             i = j;
         }
@@ -592,9 +628,15 @@ void transition(std::vector<SubState>& states,
 BarrierPlan planBarriers(
     const std::vector<PassDeclaration>& passes,
     const std::vector<uint32_t>& executionOrder,
-    const std::vector<ScheduledResource>& resources)
+    const std::vector<ScheduledResource>& resources,
+    const std::vector<QueueType>& queues)
 {
     BarrierPlan plan;
+    const auto queueOf = [&](uint32_t pi) {
+        return pi < queues.size() ? static_cast<uint32_t>(queues[pi]) : 0u;
+    };
+    // Per pass, the latest execution position on the other queue to wait for.
+    std::vector<uint32_t> waitPos(passes.size(), kNoPass);
     plan.preBarriers.resize(passes.size());
     plan.postBarriers.resize(passes.size());
     plan.finalLayouts.resize(resources.size());
@@ -643,19 +685,24 @@ BarrierPlan planBarriers(
         if (block == ScheduledResource::kNoAlias) return;
         const auto it = blockOwner.find(block);
         if (it != blockOwner.end() && it->second != ri) {
+            SubState merged;
             VkPipelineStageFlags stage = 0;
-            VkAccessFlags access = 0;
             for (const auto& st : states[it->second]) {
                 if (!st.used) continue;
                 stage |= st.stage;
-                access |= st.access;
+                merged.access |= st.access;
+                merged.queues |= st.queues;
+                for (uint32_t q = 0; q < 2; ++q) {
+                    if (st.lastPos[q] != kNoPass &&
+                        (merged.lastPos[q] == kNoPass || st.lastPos[q] > merged.lastPos[q])) {
+                        merged.lastPos[q] = st.lastPos[q];
+                    }
+                }
             }
-            for (auto& st : states[ri]) {
-                st.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-                st.stage  = stage != 0 ? stage : VkPipelineStageFlags{VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT};
-                st.access = access;
-                st.used   = stage != 0;
-            }
+            merged.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            merged.stage  = stage != 0 ? stage : VkPipelineStageFlags{VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT};
+            merged.used   = stage != 0;
+            for (auto& st : states[ri]) st = merged;
         }
         blockOwner[block] = ri;
     };
@@ -663,8 +710,10 @@ BarrierPlan planBarriers(
     // One frame of the graph: barriers into `pre`/`post`, states updated.
     auto runFrame = [&](std::vector<std::vector<BarrierInfo>>& pre,
                         std::vector<std::vector<BarrierInfo>>& post) {
-        for (uint32_t pi : executionOrder) {
+        for (uint32_t pos = 0; pos < executionOrder.size(); ++pos) {
+            const uint32_t pi = executionOrder[pos];
             const auto& pass = passes[pi];
+            const QueuedAccess by{queueOf(pi), pos, &waitPos[pi]};
 
             auto process = [&](const ResourceAccess& access) {
                 if (!access.handle.valid() || access.handle.index >= resources.size()) return;
@@ -679,7 +728,7 @@ BarrierPlan planBarriers(
                            usageToLayout(access.usage),
                            usageToStageMask(access.usage, pass.type) | extraShaderStages(pass, access.usage),
                            usageToAccessMask(access.usage),
-                           pre[pi]);
+                           by, pre[pi]);
             };
             for (const auto& in : pass.inputs)   process(in);
             for (const auto& out : pass.outputs) process(out);
@@ -695,7 +744,7 @@ BarrierPlan planBarriers(
                 transition(states[ri], r, out.handle, range,
                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
-                           post[pi]);
+                           by, post[pi]);
             }
         }
     };
@@ -722,9 +771,19 @@ BarrierPlan planBarriers(
                 st.access = 0;
             }
             if (!resources[ri].persistent) st.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            // The previous frame's accesses are waited for at the frame's
+            // start, not by passes.
+            st.lastPos[0] = st.lastPos[1] = kNoPass;
         }
     }
+    std::fill(waitPos.begin(), waitPos.end(), kNoPass);
     runFrame(plan.preBarriers, plan.postBarriers);
+    if (!queues.empty()) {
+        plan.crossQueueWait.assign(passes.size(), kNoPass);
+        for (uint32_t pi = 0; pi < passes.size(); ++pi) {
+            if (waitPos[pi] != kNoPass) plan.crossQueueWait[pi] = executionOrder[waitPos[pi]];
+        }
+    }
 
     for (size_t ri = 0; ri < resources.size(); ++ri) {
         plan.finalLayouts[ri].reserve(states[ri].size());
@@ -980,40 +1039,65 @@ void addIndirectArgumentDependencies(const std::vector<PassDeclaration>& passes,
 
 std::vector<MemoryBarrierInfo> planBufferBarriers(
     const std::vector<uint32_t>& executionOrder,
-    const BufferAccessTable& table)
+    const BufferAccessTable& table,
+    const std::vector<QueueType>& queues,
+    std::vector<uint32_t>* crossQueueWait)
 {
     std::vector<MemoryBarrierInfo> out(table.passes.size());
+    std::vector<uint32_t> waitPos(table.passes.size(), kNoPass);
 
+    // As SubState, without a layout.
     struct State {
         VkPipelineStageFlags stage  = 0;
         VkAccessFlags        access = 0;
         bool                 used   = false;
+        uint8_t              queues = 0;
+        uint32_t             lastPos[2] = {kNoPass, kNoPass};
     };
     std::vector<State> states(table.buffers.size());
+    std::vector<bool> written(table.buffers.size(), false);
+    for (const auto& accesses : table.passes) {
+        for (const auto& a : accesses) {
+            if (a.buffer < written.size() && (a.access & kWriteAccess)) written[a.buffer] = true;
+        }
+    }
 
     auto runFrame = [&](std::vector<MemoryBarrierInfo>& barriers) {
-        for (uint32_t pi : executionOrder) {
+        for (uint32_t pos = 0; pos < executionOrder.size(); ++pos) {
+            const uint32_t pi = executionOrder[pos];
             if (pi >= table.passes.size()) continue;
+            const uint32_t queue = pi < queues.size() ? static_cast<uint32_t>(queues[pi]) : 0u;
+            const uint8_t bit = static_cast<uint8_t>(1u << queue);
             auto& barrier = barriers[pi];
             barrier = {};
             for (const auto& a : table.passes[pi]) {
                 if (a.buffer >= states.size()) continue;
                 auto& st = states[a.buffer];
                 const bool writes = (a.access & kWriteAccess) != 0;
-                const bool hazard = (st.access & kWriteAccess) != 0 || (writes && st.used);
+                const bool hazard = (st.access & kWriteAccess) != 0 || (writes && st.used) ||
+                                    (st.used && written[a.buffer] && fromOtherQueue(st.queues, queue));
                 if (!hazard) {
                     // Read after read: no barrier, but a later writer must
                     // wait for this reader too.
                     st.stage |= a.stages;
                     st.access |= a.access;
                     st.used = true;
+                    st.queues |= bit;
+                    st.lastPos[queue] = pos;
                     continue;
                 }
-                barrier.srcStage  |= st.stage;
-                barrier.srcAccess |= st.access & kWriteAccess;
+                const uint32_t other = st.lastPos[1 - queue];
+                if (other != kNoPass && (waitPos[pi] == kNoPass || other > waitPos[pi])) waitPos[pi] = other;
+                if (fromOtherQueue(st.queues, queue)) {
+                    barrier.srcStage |= VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+                } else {
+                    barrier.srcStage  |= st.stage;
+                    barrier.srcAccess |= st.access & kWriteAccess;
+                }
                 barrier.dstStage  |= a.stages;
                 barrier.dstAccess |= a.access;
-                st = {a.stages, a.access, true};
+                st = {a.stages, a.access, true, bit, {kNoPass, kNoPass}};
+                st.lastPos[queue] = pos;
             }
         }
     };
@@ -1023,7 +1107,15 @@ std::vector<MemoryBarrierInfo> planBufferBarriers(
     // previous frame's last.
     std::vector<MemoryBarrierInfo> scratch(table.passes.size());
     runFrame(scratch);
+    for (auto& st : states) st.lastPos[0] = st.lastPos[1] = kNoPass;
+    std::fill(waitPos.begin(), waitPos.end(), kNoPass);
     runFrame(out);
+    if (crossQueueWait && !queues.empty()) {
+        crossQueueWait->assign(table.passes.size(), kNoPass);
+        for (uint32_t pi = 0; pi < table.passes.size(); ++pi) {
+            if (waitPos[pi] != kNoPass) (*crossQueueWait)[pi] = executionOrder[waitPos[pi]];
+        }
+    }
     return out;
 }
 
@@ -1240,33 +1332,41 @@ std::vector<bool> sharedAcrossQueues(
     return out;
 }
 
-namespace {
+std::vector<QueueBatch> planQueueBatches(const std::vector<uint32_t>& executionOrder,
+                                         const std::vector<QueueType>& queues,
+                                         const std::vector<uint32_t>& crossQueueWait)
+{
+    std::vector<QueueBatch> out;
+    QueueBatch open[2];
+    open[0].queue = QueueType::Graphics;
+    open[1].queue = QueueType::Compute;
+    std::unordered_map<uint32_t, int32_t> batchOf;   // passes of closed batches
 
-constexpr VkPipelineStageFlags kGraphicsOnlyStages =
-    VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-    VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT |
-    VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
-    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
-    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT |
-    VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT | VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT;
+    const auto close = [&](uint32_t q) {
+        if (open[q].passes.empty()) return;
+        const auto index = static_cast<int32_t>(out.size());
+        for (uint32_t pi : open[q].passes) batchOf[pi] = index;
+        out.push_back(std::move(open[q]));
+        open[q] = QueueBatch{};
+        open[q].queue = static_cast<QueueType>(q);
+    };
 
-void fitToComputeQueue(VkPipelineStageFlags& stage, VkAccessFlags& access) {
-    if ((stage & kGraphicsOnlyStages) == 0) return;
-    stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-    access = 0;
-}
-
-} // namespace
-
-void fitBarriersToComputeQueue(std::vector<BarrierInfo>& barriers, MemoryBarrierInfo& memory) {
-    for (auto& b : barriers) {
-        fitToComputeQueue(b.srcStage, b.srcAccess);
-        fitToComputeQueue(b.dstStage, b.dstAccess);
+    for (uint32_t pi : executionOrder) {
+        const uint32_t q = pi < queues.size() ? static_cast<uint32_t>(queues[pi]) : 0u;
+        const uint32_t w = pi < crossQueueWait.size() ? crossQueueWait[pi] : kNoPass;
+        if (w != kNoPass) {
+            if (!batchOf.count(w)) close(1 - q);   // the other queue signals after w
+            const int32_t need = batchOf.at(w);
+            if (need > open[q].wait) {
+                close(q);
+                open[q].wait = need;
+            }
+        }
+        open[q].passes.push_back(pi);
     }
-    if (!memory.empty()) {
-        fitToComputeQueue(memory.srcStage, memory.srcAccess);
-        fitToComputeQueue(memory.dstStage, memory.dstAccess);
-    }
+    close(1);
+    close(0);
+    return out;
 }
 
 std::vector<AliasBlock> packAliases(std::vector<AliasRequest> requests,

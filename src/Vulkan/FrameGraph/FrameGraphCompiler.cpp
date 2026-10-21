@@ -626,17 +626,6 @@ bool FrameGraphCompiler::createTransientImages(
     return true;
 }
 
-// Queue family index a pass of this queue type runs on
-static uint32_t resolveQueueFamily(QueueType type, VulkanDevice& device) {
-    switch (type) {
-        case QueueType::Compute:
-            return device.getComputeQueueFamily();
-        case QueueType::Graphics:
-        default:
-            return device.getGraphicsQueueFamily();
-    }
-}
-
 // ═══════════════════════════════════════════════════════════════
 // Subresource views
 // ═══════════════════════════════════════════════════════════════
@@ -998,9 +987,18 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         }
     }
 
+    // Each pass's queue; with async compute, passes on the two queues wait
+    // for each other where they must, and are grouped into batches.
+    std::vector<QueueType> queues;
+    if (device.hasAsyncCompute()) {
+        for (const auto& pass : passes) queues.push_back(pass.queueType);
+    }
+    std::vector<uint32_t> imageWaits, bufferWaits;
+
     // Stage 5: Barriers, per mip and layer
     {
-        auto plan = planBarriers(passes, result.executionOrder, scheduled);
+        auto plan = planBarriers(passes, result.executionOrder, scheduled, queues);
+        imageWaits = std::move(plan.crossQueueWait);
         for (uint32_t pi = 0; pi < passes.size(); ++pi) {
             result.compiledPasses[pi].preBarriers  = std::move(plan.preBarriers[pi]);
             result.compiledPasses[pi].postBarriers = std::move(plan.postBarriers[pi]);
@@ -1022,20 +1020,33 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
     // Stage 5.1: Buffer barriers, from the buffers each pass's descriptors
     // and declared accesses touch
     {
-        const auto memoryBarriers = planBufferBarriers(result.executionOrder, bufferAccesses);
+        const auto memoryBarriers = planBufferBarriers(result.executionOrder, bufferAccesses, queues, &bufferWaits);
         for (uint32_t pi = 0; pi < passes.size(); ++pi) {
             result.compiledPasses[pi].memoryBarrier = memoryBarriers[pi];
         }
     }
-    // Stage 5.2: Barriers recorded on the compute queue name only its stages
-    if (device.hasAsyncCompute()) {
-        for (uint32_t pi : result.executionOrder) {
-            auto& compiled = result.compiledPasses[pi];
-            if (compiled.queueType != QueueType::Compute) continue;
-            fitBarriersToComputeQueue(compiled.preBarriers, compiled.memoryBarrier);
-            MemoryBarrierInfo none;
-            fitBarriersToComputeQueue(compiled.postBarriers, none);
+    // Stage 5.2: Queue batches, each pass waiting for the later of what its
+    // images and its buffers need
+    if (queues.empty()) {
+        result.queueBatches = {QueueBatch{QueueType::Graphics, result.executionOrder, -1}};
+    } else {
+        std::vector<uint32_t> position(passes.size(), kNoPass);
+        for (uint32_t pos = 0; pos < result.executionOrder.size(); ++pos) position[result.executionOrder[pos]] = pos;
+        std::vector<uint32_t> waits(passes.size(), kNoPass);
+        for (uint32_t pi = 0; pi < passes.size(); ++pi) {
+            for (const auto* list : {&imageWaits, &bufferWaits}) {
+                const uint32_t w = pi < list->size() ? (*list)[pi] : kNoPass;
+                if (w != kNoPass && (waits[pi] == kNoPass || position[w] > position[waits[pi]])) waits[pi] = w;
+            }
         }
+        result.queueBatches = planQueueBatches(result.executionOrder, queues, waits);
+        size_t compute = 0, withWait = 0;
+        for (const auto& batch : result.queueBatches) {
+            compute += batch.queue == QueueType::Compute;
+            withWait += batch.wait >= 0;
+        }
+        m_logger->log(LogLevel::Info, "Queue batches: %zu (%zu compute), %zu waiting on the other queue",
+                      result.queueBatches.size(), compute, withWait);
     }
 
     size_t imageBarrierCount = 0, memoryBarrierCount = 0;
@@ -1102,11 +1113,6 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         return result;
     }
     m_logger->log(LogLevel::Info, "Pipelines created");
-
-    // Stage 10: Generate multi-queue execution batches
-    generateQueueBatches(device, result.compiledPasses, result.executionOrder, passes, result.queueBatches);
-    m_logger->log(LogLevel::Info, "Queue batches generated: %zu batches, %zu sync points",
-                  result.queueBatches.batches.size(), result.queueBatches.syncPoints.size());
 
     // Stage 11: Compile buffer layouts (declarative dot-path)
     const auto& bufferLayoutDescs = builder.getBufferLayouts();
@@ -1524,67 +1530,6 @@ bool FrameGraphCompiler::createPipelines(
         }
     }
     return true;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Stage 10: Multi-Queue Batch Generation
-// 雙流並行  計算與繪製各得其道
-// Dual streams in parallel — compute and graphics each find their Way
-// ═══════════════════════════════════════════════════════════════
-
-void FrameGraphCompiler::generateQueueBatches(
-    VulkanDevice& device,
-    const std::vector<CompiledPass>& compiledPasses,
-    const std::vector<uint32_t>& executionOrder,
-    const std::vector<PassDeclaration>& /*passes*/,
-    QueueSubmitBatch& outBatches)
-{
-    outBatches.batches.clear();
-    outBatches.syncPoints.clear();
-
-    if (executionOrder.empty()) return;
-
-    // Without async compute, everything runs on graphics — one batch, no sync
-    if (!device.hasAsyncCompute()) {
-        std::vector<uint32_t> allPasses(executionOrder.begin(), executionOrder.end());
-        outBatches.batches.push_back({QueueType::Graphics, allPasses});
-        m_logger->log(LogLevel::Info, "  Single-queue mode: all %zu passes in one batch", allPasses.size());
-        return;
-    }
-
-    // Group consecutive same-queue passes into batches
-    QueueType currentQueue = compiledPasses[executionOrder[0]].queueType;
-    std::vector<uint32_t> currentBatch;
-    uint64_t timelineValue = 1;
-
-    for (uint32_t passIdx : executionOrder) {
-        QueueType passQueue = compiledPasses[passIdx].queueType;
-
-        if (passQueue != currentQueue) {
-            // Queue transition detected — flush current batch and add sync point
-            outBatches.batches.push_back({currentQueue, currentBatch});
-
-            // Create sync point: previous queue signals, new queue waits
-            SyncPoint sync;
-            sync.signalQueue = resolveQueueFamily(currentQueue, device);
-            sync.waitQueue = resolveQueueFamily(passQueue, device);
-            sync.timelineValue = timelineValue++;
-            outBatches.syncPoints.push_back(sync);
-
-            currentBatch.clear();
-            currentQueue = passQueue;
-        }
-
-        currentBatch.push_back(passIdx);
-    }
-
-    // Flush last batch
-    if (!currentBatch.empty()) {
-        outBatches.batches.push_back({currentQueue, currentBatch});
-    }
-
-    m_logger->log(LogLevel::Info, "  Multi-queue: %zu batches, %zu sync points",
-                  outBatches.batches.size(), outBatches.syncPoints.size());
 }
 
 // ═══════════════════════════════════════════════════════════════

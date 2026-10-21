@@ -1778,7 +1778,7 @@ bool RenderGraph::recompile(VkExtent2D referenceExtent, uint32_t swapchainImageC
 
 void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
                            VkCommandBuffer commandBuffer) {
-    m_frameSegments.assign(1, FrameSegment{QueueType::Graphics, commandBuffer});
+    m_frameSegments.assign(1, FrameSegment{QueueType::Graphics, commandBuffer, -1, 0});
     if (!m_compiled.valid) {
         m_logger->log(LogLevel::Error, "Cannot execute: render graph not compiled");
         return;
@@ -1809,27 +1809,40 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
     updateSceneTextures(frameIndex);
     recordRayTracingScene(commandBuffer, frameIndex);
 
-    // Execute all passes, each batch into the current segment's command
-    // buffer, or a new one where the queue changes
+    // Execute all passes. With compute batches, each batch goes into a
+    // command buffer of its own, waiting for the batch it names, and a last
+    // graphics one joins the compute queue's work.
     ++m_recordedFrames;
     if (m_stats) {
         m_stats->beginFrame(frameIndex, std::max(m_maxFramesInFlight, frameIndex + 1),
                             static_cast<uint32_t>(m_compiled.executionOrder.size()));
     }
     m_executor.beginFrame(frameIndex);
+    const auto& batches = m_compiled.queueBatches;
+    const bool split = std::any_of(batches.begin(), batches.end(),
+                                   [](const QueueBatch& b) { return b.queue == QueueType::Compute; });
     uint32_t segmentsBegun[2] = {0, 0};
-    const auto newSegment = [&](QueueType queue) {
+    const auto newSegment = [&](QueueType queue, int32_t wait) {
         const auto q = static_cast<uint32_t>(queue);
-        m_frameSegments.push_back({queue, beginSegment(queue, frameIndex, segmentsBegun[q]++)});
+        m_frameSegments.push_back({queue, beginSegment(queue, frameIndex, segmentsBegun[q]++), wait, 0});
     };
-    for (const auto& [queue, passIndices] : m_compiled.queueBatches.batches) {
-        if (queue != m_frameSegments.back().queue) newSegment(queue);
-        m_executor.executePasses(m_compiled, m_builder, passIndices, frameIndex, swapchainImageIndex,
+    std::vector<int32_t> segmentOfBatch(batches.size(), 0);
+    int32_t lastCompute = -1;
+    for (size_t b = 0; b < batches.size(); ++b) {
+        const auto& batch = batches[b];
+        if (split) {
+            int32_t wait = batch.wait >= 0 ? segmentOfBatch[batch.wait] : -1;
+            if (wait < 0 && batch.queue == QueueType::Compute) wait = 0;   // the uploads
+            newSegment(batch.queue, wait);
+            segmentOfBatch[b] = static_cast<int32_t>(m_frameSegments.size()) - 1;
+            if (batch.queue == QueueType::Compute) lastCompute = segmentOfBatch[b];
+        }
+        m_executor.executePasses(m_compiled, m_builder, batch.passes, frameIndex, swapchainImageIndex,
                                  m_frameSegments.back().commandBuffer, &m_parameters);
     }
     m_executor.endFrame(frameIndex);
     if (m_stats) m_stats->endFrame();
-    if (m_frameSegments.back().queue != QueueType::Graphics) newSegment(QueueType::Graphics);
+    if (split) newSegment(QueueType::Graphics, lastCompute);
     commandBuffer = m_frameSegments.back().commandBuffer;
 
     // Phase 3: Readback GPU→CPU after passes (buffers and images)
@@ -1880,8 +1893,10 @@ VkCommandBuffer RenderGraph::beginSegment(QueueType queue, uint32_t frameIndex, 
 }
 
 void RenderGraph::submit(VkSemaphore wait, VkPipelineStageFlags2 waitStage, VkSemaphore signal, VkFence fence) {
+    const bool chained = m_frameSegments.size() > 1;
     for (size_t i = 0; i < m_frameSegments.size(); ++i) {
-        const auto& segment = m_frameSegments[i];
+        auto& segment = m_frameSegments[i];
+        const auto q = static_cast<uint32_t>(segment.queue);
         const bool first = i == 0;
         const bool last = i + 1 == m_frameSegments.size();
 
@@ -1893,14 +1908,20 @@ void RenderGraph::submit(VkSemaphore wait, VkPipelineStageFlags2 waitStage, VkSe
             info.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
             return info;
         };
-        VkSemaphoreSubmitInfo waits[1]{}, signals[1]{};
+        VkSemaphoreSubmitInfo waits[1]{}, signals[2]{};
         uint32_t waitCount = 0, signalCount = 0;
         if (first && wait != VK_NULL_HANDLE) {
             waits[waitCount] = semaphore(wait, 0);
             waits[waitCount++].stageMask = waitStage;
         }
-        if (!first) waits[waitCount++] = semaphore(m_timelineSemaphore, m_timelineValue);
-        if (!last) signals[signalCount++] = semaphore(m_timelineSemaphore, ++m_timelineValue);
+        if (segment.wait >= 0) {
+            const auto& other = m_frameSegments[segment.wait];
+            waits[waitCount++] = semaphore(m_timelines[static_cast<uint32_t>(other.queue)], other.value);
+        }
+        if (chained) {
+            segment.value = ++m_timelineValues[q];
+            signals[signalCount++] = semaphore(m_timelines[q], segment.value);
+        }
         if (last && signal != VK_NULL_HANDLE) signals[signalCount++] = semaphore(signal, 0);
 
         VkCommandBufferSubmitInfo commandBuffer{};
@@ -2209,7 +2230,7 @@ void RenderGraph::applyImports(uint32_t swapchainImageIndex) {
 // ═══════════════════════════════════════════════════════════════
 
 void RenderGraph::createSyncPrimitives() {
-    // Create timeline semaphore for multi-queue synchronization
+    // A timeline semaphore per queue, for multi-queue synchronization
     VkSemaphoreTypeCreateInfo timelineInfo{};
     timelineInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
     timelineInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
@@ -2219,19 +2240,18 @@ void RenderGraph::createSyncPrimitives() {
     semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     semInfo.pNext = &timelineInfo;
 
-    if (vkCreateSemaphore(m_device.getLogicalDevice(), &semInfo, nullptr, &m_timelineSemaphore) != VK_SUCCESS) {
-        m_logger->log(LogLevel::Warning, "Failed to create timeline semaphore — multi-queue disabled");
-        m_timelineSemaphore = VK_NULL_HANDLE;
-    } else {
-        m_logger->log(LogLevel::Info, "Timeline semaphore created for multi-queue sync");
+    for (uint32_t q = 0; q < 2; ++q) {
+        if (vkCreateSemaphore(m_device.getLogicalDevice(), &semInfo, nullptr, &m_timelines[q]) != VK_SUCCESS) {
+            throw std::runtime_error("RenderGraph: could not create a timeline semaphore");
+        }
+        m_timelineValues[q] = 0;
     }
-    m_timelineValue = 0;
 }
 
 void RenderGraph::destroySyncPrimitives() {
-    if (m_timelineSemaphore != VK_NULL_HANDLE) {
-        vkDestroySemaphore(m_device.getLogicalDevice(), m_timelineSemaphore, nullptr);
-        m_timelineSemaphore = VK_NULL_HANDLE;
+    for (VkSemaphore& timeline : m_timelines) {
+        if (timeline != VK_NULL_HANDLE) vkDestroySemaphore(m_device.getLogicalDevice(), timeline, nullptr);
+        timeline = VK_NULL_HANDLE;
     }
     for (uint32_t q = 0; q < 2; ++q) {
         const VkCommandPool pool = q == static_cast<uint32_t>(QueueType::Compute) ? m_device.getComputeCommandPool()

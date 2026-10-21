@@ -818,26 +818,6 @@ using ImportedImageMap = std::unordered_map<uint32_t, ImportedImageInfo>;
 // 玄武司察 — The Dark Warrior governs investigation
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-// Multi-Queue Synchronization Primitives
-// 雙流並行  計算與繪製各得其道
-// ═══════════════════════════════════════════════════════════════
-
-struct SyncPoint {
-    uint32_t signalQueue;     // queue family that signals
-    uint32_t waitQueue;       // queue family that waits
-    uint64_t timelineValue;   // timeline semaphore value
-};
-
-struct QueueSubmitBatch {
-    // Passes grouped by queue, in submission order
-    // Each entry: (queue type, list of pass indices in that batch)
-    std::vector<std::pair<QueueType, std::vector<uint32_t>>> batches;
-
-    // Sync points between batches
-    std::vector<SyncPoint> syncPoints;
-};
-
 class FrameGraphCompiler {
 public:
     struct CompileResult {
@@ -853,8 +833,9 @@ public:
         // Auto-created descriptor sets (shared across passes referencing the same layout name)
         std::unordered_map<std::string, std::shared_ptr<VulkanDescriptorSet>> namedDescriptorSets;
 
-        // Multi-queue execution batches and sync points
-        QueueSubmitBatch                queueBatches;
+        // The live passes grouped by queue, in submission order
+        // (planQueueBatches); one graphics batch without async compute.
+        std::vector<QueueBatch>         queueBatches;
 
         // Compiled buffer layouts (from JSON "bufferLayouts" section)
         // 緩衝之構 — The structure of buffers, ready for runtime
@@ -992,13 +973,6 @@ private:
         const VertexFormatRegistry& vertexFormats,
         std::string& outError);
 
-    // ── Stage 10: Multi-queue batch generation ──
-    void generateQueueBatches(
-        VulkanDevice& device,
-        const std::vector<CompiledPass>& compiledPasses,
-        const std::vector<uint32_t>& executionOrder,
-        const std::vector<PassDeclaration>& passes,
-        QueueSubmitBatch& outBatches);
 
     // ── Helpers ──
     /// Create m_logger on first use. compile() and compileBufferLayouts() are both
@@ -1438,24 +1412,27 @@ public:
 
     // ── Execution ──
     /// Record the frame. `commandBuffer`, begun, for the graphics queue, gets
-    /// the uploads, the scene's acceleration structures and the first batch
-    /// of passes. With async compute (VulkanDevice::hasAsyncCompute) each
-    /// later batch of getQueueBatches() that changes queue is recorded into
-    /// a command buffer of the graph's own, per frame in flight, and the
-    /// readbacks into the last graphics one. Once the caller has ended
-    /// `commandBuffer`, submit() submits them all.
+    /// the uploads and the scene's acceleration structures. Without compute
+    /// batches in getQueueBatches() it gets every pass and the readbacks as
+    /// well. With them, each batch is recorded into a command buffer of the
+    /// graph's own, per frame in flight, and the readbacks into a last
+    /// graphics one. Once the caller has ended `commandBuffer`, submit()
+    /// submits them all.
     void execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
                  VkCommandBuffer commandBuffer);
 
     /// Submit what execute() recorded, one submission per command buffer, in
-    /// order, each waiting for the one before through a timeline semaphore.
-    /// The first waits for `wait` (a binary semaphore, or VK_NULL_HANDLE) at
-    /// `waitStage`; the last, on the graphics queue, signals `signal` (or
-    /// VK_NULL_HANDLE) and `fence`, so the fence covers the whole frame.
+    /// order. Each queue signals a timeline semaphore of its own after each
+    /// submission. A batch waits for the batch of the other queue it names;
+    /// a compute batch that names none waits for the uploads. The first
+    /// submission waits for `wait` (a binary semaphore, or VK_NULL_HANDLE) at
+    /// `waitStage`. The last, on the graphics queue, waits for the last
+    /// compute batch and signals `signal` (or VK_NULL_HANDLE) and `fence`, so
+    /// the fence covers the whole frame.
     void submit(VkSemaphore wait, VkPipelineStageFlags2 waitStage, VkSemaphore signal, VkFence fence);
 
-    /// The passes in execution order, grouped into batches by queue.
-    const QueueSubmitBatch& getQueueBatches() const { return m_compiled.queueBatches; }
+    /// The passes grouped into batches by queue, in submission order.
+    const std::vector<QueueBatch>& getQueueBatches() const { return m_compiled.queueBatches; }
 
     // ── Hot-reload ──
     bool recompile(VkExtent2D referenceExtent, uint32_t swapchainImageCount = 1,
@@ -1911,15 +1888,19 @@ private:
     // Set up auto geometry renderers for passes with entityDataBinding
     void setupAutoGeometryRenderers();
 
-    // Multi-queue synchronization
-    VkSemaphore m_timelineSemaphore = VK_NULL_HANDLE;
-    uint64_t    m_timelineValue = 0;
+    // Multi-queue synchronization: a timeline semaphore per QueueType, and
+    // the value it was last signalled with
+    VkSemaphore m_timelines[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    uint64_t    m_timelineValues[2] = {0, 0};
 
     /// The command buffers execute() recorded this frame, in submission
-    /// order; the first is the caller's.
+    /// order; the first is the caller's. `wait` is the segment on the other
+    /// queue to wait for, -1 for none; `value` is set when submitted.
     struct FrameSegment {
         QueueType       queue = QueueType::Graphics;
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+        int32_t         wait = -1;
+        uint64_t        value = 0;
     };
     std::vector<FrameSegment> m_frameSegments;
     /// Command buffers for segments after the first, per frame in flight,
