@@ -200,8 +200,16 @@ ResolvedValue DotPathResolver::resolve(const std::string& path,
     switch (getPathRoot(path)) {
         case PathRoot::Scene:
             return resolveScenePath(path, scene);
-        case PathRoot::Entity:
+        case PathRoot::Entity: {
+            // A texture's slot needs the scene's texture table.
+            if (path.size() > 5 && path.compare(path.size() - 5, 5, ".slot") == 0) {
+                const CompiledPath compiled = compile(path);
+                if (compiled.op == CompiledPath::Op::MaterialTextureSlot) {
+                    return resolve(compiled, path, scene, entity, registry);
+                }
+            }
             return resolveEntityPath(path, entity, registry);
+        }
         case PathRoot::Const:
             return resolveConstPath(path);
         case PathRoot::Pass:
@@ -643,6 +651,9 @@ CompiledPath DotPathResolver::compile(const std::string& path) const {
             } else if (parts.size() == 4 && parts[0] == "material" && parts[1] == "textures" &&
                        parts[3] == "exists") {
                 return make(Op::MaterialTextureExists, parts[2]);
+            } else if (parts.size() == 4 && parts[0] == "material" && parts[1] == "textures" &&
+                       parts[3] == "slot") {
+                return make(Op::MaterialTextureSlot, parts[2]);
             }
             return out;
         }
@@ -691,6 +702,7 @@ ResolvedValue DotPathResolver::resolve(const CompiledPath& compiled,
         }
 
         case Op::MaterialParam: case Op::MaterialTexture: case Op::MaterialTextureExists:
+        case Op::MaterialTextureSlot:
         case Op::AlphaCutoff: case Op::AlphaMode: case Op::DoubleSided: {
             const auto* m = registry.try_get<MaterialComponentV5>(entity);
             if (!m) return ResolvedValue();
@@ -719,6 +731,9 @@ ResolvedValue DotPathResolver::resolve(const CompiledPath& compiled,
                     const auto it = m->textures.find(compiled.key);
                     return ResolvedValue(it != m->textures.end() && it->second.exists ? 1.0f : 0.0f);
                 }
+                case Op::MaterialTextureSlot:
+                    return ResolvedValue(scene.sceneTextures ? scene.sceneTextures->slotOf(m->getTexture(compiled.key))
+                                                             : SceneTextureTable::kNoTexture);
                 case Op::AlphaCutoff: return ResolvedValue(m->alphaCutoff);
                 case Op::AlphaMode:   return ResolvedValue(static_cast<uint32_t>(m->alphaMode));
                 default:              return ResolvedValue(m->doubleSided ? 1.0f : 0.0f);

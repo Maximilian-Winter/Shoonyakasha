@@ -1153,13 +1153,16 @@ void FrameGraphCompiler::createDescriptorSetLayouts(
     // Create VulkanDescriptorSet for each unique layout name referenced by any pass
     for (const auto& desc : layoutDescs) {
         // A layout with an acceleration structure cannot exist without ray
-        // queries; only passes left out for lacking them ("requires") use one.
-        // The scene's texture array is filled from that same structure.
-        if (!device.hasRayQuery() &&
-            std::any_of(desc.bindings.begin(), desc.bindings.end(), [](const auto& b) {
-                return b.type == "acceleration_structure" || b.source == "sceneTextures";
-            })) {
+        // queries, nor one with the scene's textures without bindless
+        // textures; only passes left out for lacking them ("requires") use one.
+        const auto has = [&](auto&& match) { return std::any_of(desc.bindings.begin(), desc.bindings.end(), match); };
+        if (!device.hasRayQuery() && has([](const auto& b) { return b.type == "acceleration_structure"; })) {
             m_logger->log(LogLevel::Info, "  Skipped descriptor set layout '%s': it needs ray queries",
+                          desc.name.c_str());
+            continue;
+        }
+        if (!device.hasBindlessTextures() && has([](const auto& b) { return b.source == "sceneTextures"; })) {
+            m_logger->log(LogLevel::Info, "  Skipped descriptor set layout '%s': it needs bindless textures",
                           desc.name.c_str());
             continue;
         }

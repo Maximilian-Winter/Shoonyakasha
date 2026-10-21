@@ -3,6 +3,7 @@
 //
 
 #include "Vulkan/RayTracingScene.h"
+#include "Vulkan/SceneTextureTable.h"
 
 #include "Core/Logger.h"
 #include "ECS/Core.h"
@@ -272,22 +273,13 @@ PackedRayInstance RayTracingScene::packInstance(const MaterialComponentV5& mater
 }
 
 void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt::registry& registry,
-                                  uint32_t textureCapacity) {
+                                  const SceneTextureTable* textures) {
+    static_assert(SceneTextureTable::kNoTexture == PackedRayInstance::kNoTexture);
     releaseExpired();
     TopLevel& top = m_topLevels[frameIndex % m_framesInFlight];
     top.rows.clear();
-    top.textures.clear();
-    // Slots in order of first use, so they stay put while the scene does.
-    std::unordered_map<VkImageView, uint32_t> slotOfView;
     auto slotOf = [&](const MaterialComponentV5& material, const char* name) -> uint32_t {
-        const GPUTexture* texture = material.getTexture(name);
-        if (!texture || !texture->exists || texture->view == VK_NULL_HANDLE) return PackedRayInstance::kNoTexture;
-        if (auto it = slotOfView.find(texture->view); it != slotOfView.end()) return it->second;
-        if (top.textures.size() >= textureCapacity) return PackedRayInstance::kNoTexture;
-        const auto slot = static_cast<uint32_t>(top.textures.size());
-        top.textures.push_back({texture->view, texture->sampler});
-        slotOfView.emplace(texture->view, slot);
-        return slot;
+        return textures ? textures->slotOf(material.getTexture(name)) : PackedRayInstance::kNoTexture;
     };
 
     // The static, opaque shadow casters.
@@ -378,10 +370,6 @@ uint32_t RayTracingScene::instanceCount(uint32_t frameIndex) const {
 
 const std::vector<PackedRayInstance>& RayTracingScene::instances(uint32_t frameIndex) const {
     return m_topLevels[frameIndex % m_framesInFlight].rows;
-}
-
-const std::vector<RayTracingScene::TextureSlot>& RayTracingScene::textures(uint32_t frameIndex) const {
-    return m_topLevels[frameIndex % m_framesInFlight].textures;
 }
 
 } // namespace Shoonyakasha

@@ -53,7 +53,8 @@ PASS_TYPES = frozenset({"graphics", "compute", "transfer", "ray_tracing"})
 
 #: What a pass may "require"; a device without it leaves the pass out.
 CAPABILITIES = frozenset({"rayQuery", "drawIndirectCount", "geometryShader", "tessellationShader",
-                          "meshShader", "taskShader", "rayTracingPipeline"})
+                          "meshShader", "taskShader", "rayTracingPipeline",
+                          "bindlessTextures"})
 
 #: What a buffer layout with "source": {"type": "scene"} holds ("data").
 SCENE_DATA = frozenset({"lights", "rayInstances"})

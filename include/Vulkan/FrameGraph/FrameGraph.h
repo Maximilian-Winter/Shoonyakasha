@@ -18,6 +18,7 @@
 #include "FrameGraph/SharedBufferRegistry.h"  // Phase 2: cross-graph SSBO sharing
 #include "GPU/GPUResourceFactory.h"  // Default textures for fallback
 #include "FrameGraph/BufferFieldTypes.h"  // Field types + std140/std430/scalar packing
+#include "Vulkan/SceneTextureTable.h"  // The scene's textures by slot
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
@@ -1692,6 +1693,10 @@ private:
         std::vector<std::vector<std::pair<VkImageView, VkSampler>>> written;
     };
     std::vector<SceneTextureBinding> m_sceneTextureBindings;
+    bool m_sceneTextureBindingsFound = false;
+    Shoonyakasha::SceneTextureTable m_sceneTextureTable;
+    // Build this frame's scene texture table and write the slots that changed.
+    void updateSceneTextures(uint32_t frameIndex);
     void writeRayTracingSceneData(uint32_t frameIndex);
     uint64_t m_globalFrameNumber = 0;
     uint64_t m_recordedFrames = 0;   // see getFrameNumber

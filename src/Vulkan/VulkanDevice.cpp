@@ -272,6 +272,18 @@ void VulkanDevice::createLogicalDevice() {
     // Shaders compiled for Vulkan 1.3 declare their workgroup size with
     // LocalSizeId, which needs maintenance4.
     vulkan13Features.maintenance4 = supported13.maintenance4;
+    // Arrays of the scene's textures, indexed in shaders, of which only some
+    // elements are written.
+    m_bindlessTextures = supported12.descriptorIndexing && supported12.runtimeDescriptorArray &&
+                         supported12.shaderSampledImageArrayNonUniformIndexing &&
+                         supported12.descriptorBindingPartiallyBound;
+    if (m_bindlessTextures) {
+        vulkan12Features.descriptorIndexing = VK_TRUE;
+        vulkan12Features.runtimeDescriptorArray = VK_TRUE;
+        vulkan12Features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+        vulkan12Features.descriptorBindingPartiallyBound = VK_TRUE;
+    }
+    m_logger->log(LogLevel::Info, "Bindless textures: %s", m_bindlessTextures ? "enabled" : "not available");
 
     VkPhysicalDeviceProperties deviceProperties;
     vkGetPhysicalDeviceProperties(m_physicalDevice, &deviceProperties);
@@ -290,12 +302,6 @@ void VulkanDevice::createLogicalDevice() {
         extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
         extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
         vulkan12Features.bufferDeviceAddress = VK_TRUE;
-        // Ray-query shaders look up the textures of the surface they hit in an
-        // array of the scene's textures, of which only some elements are written.
-        vulkan12Features.descriptorIndexing = VK_TRUE;
-        vulkan12Features.runtimeDescriptorArray = VK_TRUE;
-        vulkan12Features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-        vulkan12Features.descriptorBindingPartiallyBound = VK_TRUE;
         accelerationFeatures.accelerationStructure = VK_TRUE;
         rayQueryFeatures.rayQuery = VK_TRUE;
         accelerationFeatures.pNext = &rayQueryFeatures;

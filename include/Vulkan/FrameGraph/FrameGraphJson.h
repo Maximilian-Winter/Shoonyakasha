@@ -95,6 +95,7 @@ struct PipelineCapabilities {
     bool meshShader = true;          // "meshShader": VulkanDevice::hasMeshShader
     bool taskShader = true;          // "taskShader": VulkanDevice::hasTaskShader
     bool rayTracingPipeline = true;  // "rayTracingPipeline": VulkanDevice::hasRayTracingPipeline
+    bool bindlessTextures = true;    // "bindlessTextures": VulkanDevice::hasBindlessTextures
 };
 
 void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,

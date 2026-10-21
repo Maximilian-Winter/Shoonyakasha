@@ -13,7 +13,8 @@
 // The including shader compiles for Vulkan 1.2 or later: `// glslc:
 // --target-env=vulkan1.2` on its second line. Row i of the instances buffer
 // describes instance i of the acceleration structure (its instance id, not
-// its custom index).
+// its custom index). The texture array is sk/scene_textures.glsl's, in set
+// SK_SCENE_HITS_SET unless SK_SCENE_TEXTURES_SET says otherwise.
 //
 
 #ifndef SK_SCENE_HITS_GLSL
@@ -25,16 +26,16 @@
 #ifndef SK_RAY_INSTANCES_BINDING
 #define SK_RAY_INSTANCES_BINDING 0
 #endif
-#ifndef SK_SCENE_TEXTURES_BINDING
-#define SK_SCENE_TEXTURES_BINDING 1
+#ifndef SK_SCENE_TEXTURES_SET
+#define SK_SCENE_TEXTURES_SET SK_SCENE_HITS_SET
 #endif
 
 #extension GL_EXT_ray_query : require
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_buffer_reference_uvec2 : require
-#extension GL_EXT_nonuniform_qualifier : require
 
-#define SK_NO_TEXTURE 0xFFFFFFFFu
+#include "sk/scene_textures.glsl"
+
 #define SK_INDEX_NONE 2u
 #define SK_DOUBLE_SIDED 1u
 
@@ -52,7 +53,6 @@ struct SkRayInstance {
 layout(set = SK_SCENE_HITS_SET, binding = SK_RAY_INSTANCES_BINDING, std430) readonly buffer SkRayInstances {
     SkRayInstance skRayInstances[];
 };
-layout(set = SK_SCENE_HITS_SET, binding = SK_SCENE_TEXTURES_BINDING) uniform sampler2D skSceneTextures[];
 
 layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer SkWords { uint v[]; };
 layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer SkFloats { float v[]; };

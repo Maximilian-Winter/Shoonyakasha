@@ -17,8 +17,8 @@
 // Alongside each top-level structure, one PackedRayInstance per instance, in
 // the same order, describes the surface: a shader that hits instance i
 // (rayQueryGetIntersectionInstanceIdEXT) reads row i for its vertices,
-// indices and material. The textures the rows name are listed in slots, for
-// a pipeline's array of the scene's textures.
+// indices and material. The rows name textures by their slots in the scene's
+// SceneTextureTable.
 //
 
 #pragma once
@@ -42,6 +42,7 @@ class VulkanDevice;
 class Logger;
 struct MeshComponent;
 struct MaterialComponentV5;
+class SceneTextureTable;
 
 /// One instance of the top-level structure, as shaders read it. Eight vec4s;
 /// the GLSL side is python/shoonyakasha/glsl/sk/scene_hits.glsl.
@@ -65,13 +66,6 @@ static_assert(sizeof(PackedRayInstance) == 128, "PackedRayInstance is eight vec4
 
 class RayTracingScene {
 public:
-    /// A texture the instances use, at the slot that is its index in textures().
-    struct TextureSlot {
-        VkImageView view = VK_NULL_HANDLE;
-        VkSampler sampler = VK_NULL_HANDLE;
-        bool operator==(const TextureSlot& o) const { return view == o.view && sampler == o.sampler; }
-    };
-
     RayTracingScene(VulkanDevice& device, uint32_t framesInFlight);
     ~RayTracingScene();
 
@@ -81,10 +75,10 @@ public:
     /// Record this frame's top-level build into `cmd`, followed by a barrier
     /// that makes it visible to fragment and compute shaders. Builds any
     /// bottom-level structures it needs first, synchronously. Also fills this
-    /// frame's instances() and textures(), giving at most `textureCapacity`
-    /// textures a slot; the rest read as kNoTexture.
+    /// frame's instances(), with the slots `textures` gives their textures
+    /// (kNoTexture for all without one).
     void recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt::registry& registry,
-                     uint32_t textureCapacity = 0);
+                     const SceneTextureTable* textures = nullptr);
 
     /// The top-level structure `recordBuild` last built for `frameIndex`.
     VkAccelerationStructureKHR topLevel(uint32_t frameIndex) const;
@@ -93,8 +87,6 @@ public:
 
     /// The rows of `frameIndex`'s top-level instances, in their order.
     const std::vector<PackedRayInstance>& instances(uint32_t frameIndex) const;
-    /// The textures those rows name, by slot.
-    const std::vector<TextureSlot>& textures(uint32_t frameIndex) const;
 
     /// The row of one instance. `textureSlots` holds the slots of albedoMap,
     /// normalMap, metallicRoughnessMap and emissiveMap, `filmSlots` those of
@@ -130,7 +122,6 @@ private:
         uint32_t capacity = 0;
         uint32_t count = 0;
         std::vector<PackedRayInstance> rows;
-        std::vector<TextureSlot> textures;
     };
     struct MeshKey {
         VkBuffer vertices, indices;

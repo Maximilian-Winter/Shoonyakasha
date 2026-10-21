@@ -21,6 +21,7 @@
 #include "FrameGraph/LocalShadows.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/Core.h"
+#include "Vulkan/SceneTextureTable.h"
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <array>
@@ -158,6 +159,11 @@ struct ResolvedValue {
 // ============================================================================
 
 struct SceneContext {
+    // ─── The scene's textures by slot ──────────────────────────
+    // Read by entity.material.textures.<name>.slot; none: every slot reads
+    // SceneTextureTable::kNoTexture.
+    const SceneTextureTable* sceneTextures = nullptr;
+
     // ─── Current pass ──────────────────────────────────────────
     // Set before each geometry pass records its draws; read by "pass.*"
     // dot-paths, which only per-draw push constants may use.
@@ -281,6 +287,7 @@ struct CompiledPath {
         MaterialParam,          // entity.material.params.<key>
         MaterialTexture,        // entity.material.textures.<key>
         MaterialTextureExists,  // entity.material.textures.<key>.exists
+        MaterialTextureSlot,    // entity.material.textures.<key>.slot
         AlphaCutoff, AlphaMode, DoubleSided,
         VertexCount, IndexCount,
         HasSkeleton, JointCount,

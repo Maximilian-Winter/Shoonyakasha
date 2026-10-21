@@ -79,6 +79,13 @@ public:
     /// them off, to try the fallbacks.
     bool hasRayQuery() const { return m_rayQuery; }
 
+    /// Arrays of textures indexed in shaders, with only some elements written
+    /// (descriptorIndexing, runtimeDescriptorArray,
+    /// shaderSampledImageArrayNonUniformIndexing and
+    /// descriptorBindingPartiallyBound), enabled when the device has them all.
+    /// Every device with ray queries has them.
+    bool hasBindlessTextures() const { return m_bindlessTextures; }
+
     /// Ray tracing pipelines (VK_KHR_ray_tracing_pipeline), enabled with
     /// ray queries when the device has them; the functions they use and the
     /// device's shader group handle sizes and recursion limit.
@@ -134,6 +141,7 @@ private:
     QueueFamilyIndices m_queueFamilyIndices;
     VkPhysicalDeviceFeatures m_enabledFeatures{};
     bool m_rayQuery = false;
+    bool m_bindlessTextures = false;
     bool m_drawIndirectCount = false;
     bool m_meshShader = false;
     bool m_rayTracingPipeline = false;

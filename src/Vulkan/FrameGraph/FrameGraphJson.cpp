@@ -1800,11 +1800,14 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                         met = met && capabilities.taskShader;
                     } else if (what == "rayTracingPipeline") {
                         met = met && capabilities.rayTracingPipeline;
+                    } else if (what == "bindlessTextures") {
+                        met = met && capabilities.bindlessTextures;
                     } else {
                         throw std::runtime_error("Pass '" + name + "' requires '" + what +
                                                  "', which is not a capability (expected rayQuery, "
                                                  "drawIndirectCount, geometryShader, tessellationShader, "
-                                                 "meshShader, taskShader or rayTracingPipeline)");
+                                                 "meshShader, taskShader, rayTracingPipeline or "
+                                                 "bindlessTextures)");
                     }
                 }
                 if (!met) {

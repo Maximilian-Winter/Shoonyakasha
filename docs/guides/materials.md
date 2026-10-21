@@ -17,7 +17,7 @@ engine.getScene().setMaterialFloat(entity, "roughnessFactor", 0.7f);
 
 ## Binding contract
 
-Use `entity.material.params.<name>` for typed parameter fields and `entity.material.textures.<slot>` for textures. The `.exists` suffix is available for texture-presence fields. Typical glTF slots include `albedoMap`, `normalMap`, `metallicRoughnessMap`, `aoMap`, and `emissiveMap`; each example uses only the slots its shaders declare.
+Use `entity.material.params.<name>` for typed parameter fields and `entity.material.textures.<slot>` for textures. The `.exists` suffix is available for texture-presence fields, and `.slot` gives the texture's slot in a [`sceneTextures`](../reference/pipeline-json.md#descriptors-and-samplers) array. Typical glTF slots include `albedoMap`, `normalMap`, `metallicRoughnessMap`, `aoMap`, and `emissiveMap`; each example uses only the slots its shaders declare.
 
 The facade supports float, vec3, and vec4 material parameters, presence checks, and named texture assignment. Texture assignment returns a success boolean and requires the running engine's texture manager. It does not create a missing JSON descriptor binding.
 

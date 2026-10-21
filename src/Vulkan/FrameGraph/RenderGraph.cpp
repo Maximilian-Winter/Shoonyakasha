@@ -139,6 +139,7 @@ void RenderGraph::loadFromFile(const std::string& filePath) {
     capabilities.meshShader = m_device.hasMeshShader();
     capabilities.taskShader = m_device.hasTaskShader();
     capabilities.rayTracingPipeline = m_device.hasRayTracingPipeline();
+    capabilities.bindlessTextures = m_device.hasBindlessTextures();
     capabilities.multiDrawIndirect = m_device.getEnabledFeatures().multiDrawIndirect == VK_TRUE;
     loadGraphFromFile(m_builder, filePath, capabilities);
     m_logger->log(LogLevel::Info, "Loaded %zu resources, %zu passes from JSON",
@@ -1685,6 +1686,7 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
     // the next frame finds their bindings again and writes every slot.
     m_accelerationBindings.clear();
     m_sceneTextureBindings.clear();
+    m_sceneTextureBindingsFound = false;
 
     // Apply callbacks to pass declarations before compilation
     applyCallbacks();
@@ -1801,7 +1803,9 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
         m_stagingManager->recordUploadCommands(commandBuffer, frameIndex, m_globalFrameNumber);
     }
 
-    // The scene's acceleration structures, for passes that trace rays.
+    // The scene's textures and acceleration structures, for passes that
+    // index the one and trace rays against the other.
+    updateSceneTextures(frameIndex);
     recordRayTracingScene(commandBuffer, frameIndex);
 
     // Execute all passes
@@ -2395,6 +2399,7 @@ void RenderGraph::initSystems() {
     // Create the path resolver systems
     m_pathResolver = std::make_unique<Shoonyakasha::DotPathResolver>();
     m_sceneContext = std::make_unique<Shoonyakasha::SceneContext>();
+    m_sceneContext->sceneTextures = &m_sceneTextureTable;
     m_bufferResolver = std::make_unique<Shoonyakasha::BufferLayoutResolver>(*m_pathResolver);
 
     // Passes' "viewport" rectangles come from the scene.
@@ -2971,31 +2976,11 @@ void RenderGraph::recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex
             }
         }
         if (m_accelerationBindings.empty()) return;
-        for (const auto& layout : m_builder.getDescriptorSetLayouts()) {
-            auto set = getDescriptorSet(layout.name);
-            if (!set) continue;
-            for (const auto& binding : layout.bindings) {
-                if (binding.source != "sceneTextures") continue;
-                SceneTextureBinding textures;
-                textures.layout = layout.name;
-                textures.binding = binding.name.empty() ? "binding_" + std::to_string(binding.binding) : binding.name;
-                // The count the layout was made with, which the device's limits may have lowered.
-                for (const auto& made : set->getConfiguration().bindings) {
-                    if (const auto* image = std::get_if<ImageBinding>(&made); image && image->name == textures.binding) {
-                        textures.count = image->count;
-                    }
-                }
-                textures.written.resize(m_maxFramesInFlight);
-                m_sceneTextureBindings.push_back(std::move(textures));
-            }
-        }
     }
     if (!m_rayTracingScene) {
         m_rayTracingScene = std::make_unique<RayTracingScene>(m_device, m_maxFramesInFlight);
     }
-    uint32_t textureCapacity = m_sceneTextureBindings.empty() ? 0 : ~0u;
-    for (const auto& textures : m_sceneTextureBindings) textureCapacity = std::min(textureCapacity, textures.count);
-    m_rayTracingScene->recordBuild(cmd, frameIndex, m_boundScene->getRegistry(), textureCapacity);
+    m_rayTracingScene->recordBuild(cmd, frameIndex, m_boundScene->getRegistry(), &m_sceneTextureTable);
     const VkAccelerationStructureKHR scene = m_rayTracingScene->topLevel(frameIndex);
     for (const auto& [layout, binding] : m_accelerationBindings) {
         if (auto set = getDescriptorSet(layout)) {
@@ -3023,9 +3008,39 @@ void RenderGraph::writeRayTracingSceneData(uint32_t frameIndex) {
                         count * sizeof(PackedRayInstance));
         }
     }
+}
 
-    // The textures they name, written into the slots that changed.
-    const auto& slots = m_rayTracingScene->textures(frameIndex);
+void RenderGraph::updateSceneTextures(uint32_t frameIndex) {
+    // Only for pipelines with a "sceneTextures" binding; found on first use.
+    if (!m_sceneTextureBindingsFound) {
+        m_sceneTextureBindingsFound = true;
+        for (const auto& layout : m_builder.getDescriptorSetLayouts()) {
+            auto set = getDescriptorSet(layout.name);
+            if (!set) continue;
+            for (const auto& binding : layout.bindings) {
+                if (binding.source != "sceneTextures") continue;
+                SceneTextureBinding textures;
+                textures.layout = layout.name;
+                textures.binding = binding.name.empty() ? "binding_" + std::to_string(binding.binding) : binding.name;
+                // The count the layout was made with, which the device's limits may have lowered.
+                for (const auto& made : set->getConfiguration().bindings) {
+                    if (const auto* image = std::get_if<ImageBinding>(&made); image && image->name == textures.binding) {
+                        textures.count = image->count;
+                    }
+                }
+                textures.written.resize(m_maxFramesInFlight);
+                m_sceneTextureBindings.push_back(std::move(textures));
+            }
+        }
+    }
+    if (m_sceneTextureBindings.empty() || !m_boundScene) return;
+    uint32_t capacity = ~0u;
+    for (const auto& textures : m_sceneTextureBindings) capacity = std::min(capacity, textures.count);
+    m_sceneTextureTable.build(m_boundScene->getRegistry(), capacity);
+
+    // Written into the slots that changed.
+    const uint32_t frame = frameIndex % m_maxFramesInFlight;
+    const auto& slots = m_sceneTextureTable.slots();
     for (auto& textures : m_sceneTextureBindings) {
         auto set = getDescriptorSet(textures.layout);
         if (!set) continue;
