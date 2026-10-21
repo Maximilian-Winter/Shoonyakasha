@@ -913,6 +913,14 @@ BufferAccessTable describeBufferAccesses(
                 }
             }
         }
+        // A draw's vertex and index buffers, read by vertex input.
+        if (!pass.execution.vertexBuffer.empty()) {
+            add(pi, key(pass.execution.vertexBuffer), VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
+        }
+        if (!pass.execution.indexBuffer.empty()) {
+            add(pi, key(pass.execution.indexBuffer), VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_INDEX_READ_BIT);
+        }
     }
 
     // Opaque passes touch every buffer, including those no pass names.
@@ -929,7 +937,8 @@ BufferAccessTable describeBufferAccesses(
 }
 
 bool readsIndirectArguments(const PassDeclaration& pass) {
-    return pass.execution.type == "dispatch_indirect" || pass.execution.type == "draw_indirect";
+    return pass.execution.type == "dispatch_indirect" || pass.execution.type == "draw_indirect" ||
+           pass.execution.type == "draw_indexed_indirect";
 }
 
 void addIndirectArgumentDependencies(const std::vector<PassDeclaration>& passes,
@@ -948,9 +957,11 @@ void addIndirectArgumentDependencies(const std::vector<PassDeclaration>& passes,
     };
 
     for (uint32_t pi = 0; pi < passes.size() && pi < dependencies.size(); ++pi) {
-        if (!readsIndirectArguments(passes[pi])) continue;
+        const auto& exec = passes[pi].execution;
+        if (!readsIndirectArguments(passes[pi]) && exec.vertexBuffer.empty() && exec.indexBuffer.empty()) continue;
         auto& deps = dependencies[pi];
-        for (const std::string* name : {&passes[pi].execution.argumentBuffer, &passes[pi].execution.countBuffer}) {
+        for (const std::string* name : {&exec.argumentBuffer, &exec.countBuffer, &exec.vertexBuffer,
+                                        &exec.indexBuffer}) {
             const auto it = byName.find(*name);
             if (name->empty() || it == byName.end()) continue;
             for (uint32_t pj = pi; pj-- > 0;) {

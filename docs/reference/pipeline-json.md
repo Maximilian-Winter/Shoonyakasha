@@ -275,16 +275,18 @@ Descriptor set layouts take the same `repeat`, for passes that bind a different 
 
 ## Execution
 
-`execution.type` defaults `none`; `bindPipeline` and `bindDescriptorSets` default true.
+`execution.type` defaults `none`; `bindPipeline` and `bindDescriptorSets` default true. A type not in the table below fails at load.
 
 | Type | Work |
 |---|---|
 | `fullscreen` | Draw a three-vertex fullscreen triangle |
-| `draw` | Non-indexed draw with vertex/instance counts |
+| `draw` | Non-indexed draw with vertex/instance counts, optionally from a `vertexBuffer` |
+| `draw_indexed` | Indexed draw (`vkCmdDrawIndexed`) from an `indexBuffer`, optionally with a `vertexBuffer` |
 | `compute_dispatch` | Explicit or parameter/resource-based group counts |
 | `compute_image` | Group counts from render extent and `workgroupSize` |
 | `dispatch_indirect` | A compute dispatch whose group counts a storage buffer holds (`vkCmdDispatchIndirect`) |
 | `draw_indirect` | Non-indexed draws whose arguments, and optionally their number, a storage buffer holds (`vkCmdDrawIndirect`, `vkCmdDrawIndirectCount`) |
+| `draw_indexed_indirect` | The same for indexed draws from an `indexBuffer` (`vkCmdDrawIndexedIndirect`, `vkCmdDrawIndexedIndirectCount`) |
 | `scene_geometry`, `opaque_geometry`, `transparent_geometry` | Registered scene/entity rendering |
 | `shadow_casters` | Static entities with `castShadows`, opaque or masked; requires the rest of a shadow pipeline |
 | `skinned_geometry`, `skinned_transparent` | Skinned rendering with matching layouts/shaders |
@@ -306,9 +308,11 @@ A `copy` or `blit` pass has `"type": "transfer"`, exactly one input with usage `
   "execution": { "type": "copy" } }
 ```
 
-Draw fields: `vertexCount` (integer, or `{ "parameter": "count", "divisor": 1 }`), `instanceCount` (1), `firstVertex` (0), `firstInstance` (0). The parser also accepts resource/dimension on vertexCount, but the current draw executor implements fixed/parameter counts, not resource-derived vertex counts.
+Draw fields: `vertexCount` (a count, as below; 0 when absent), `instanceCount` (1), `firstVertex` (0), `firstInstance` (0). `draw_indexed` takes `indexCount` (a count; 0 when absent), `firstIndex` (0), `vertexOffset` (0, added to each index), `instanceCount` and `firstInstance`.
 
-Compute dispatch uses `dispatch.x/y/z`, each a fixed group count, a parameter/divisor object, or `{ "resource": "imageName", "dimension": "width", "divisor": 16 }` (also `height`, and `depth`: a 3d image's slices, 1 for other images). Division rounds up. Use positive divisors and workgroup sizes; JSON does not alter GLSL `local_size`. `compute_image` uses `workgroupSize` to derive x/y groups from the extent of the first image the pass writes (or, with none, reads) at that access's mip level, and z groups from its depth, which is 1 unless it is a 3d image.
+The draw types (`draw`, `draw_indexed`, `draw_indirect`, `draw_indexed_indirect`) of a graphics pass can draw from buffers: `"vertexBuffer": { "buffer": "Particles", "offset": 0 }` is bound at binding 0, and the indexed types need `"indexBuffer": { "buffer": "Indices", "offset": 0, "type": "uint32" }` (`type` is `uint32` or `uint16`); other types take neither. Each names a storage buffer of `bufferLayouts`, or one the application registered with vertex or index buffer usage, and offsets are multiples of 4. Every storage buffer of `bufferLayouts` can serve. The pipeline's `vertexInput` names the [vertex format](#vertex-formats) the buffer holds. The pass is ordered after the last earlier-declared pass that writes either buffer, as for indirect arguments below, and waits for those writes at vertex input. A `bufferLayouts` buffer named must be a storage buffer, or compilation fails.
+
+Compute dispatch uses `dispatch.x/y/z`. Each of them, and a draw's `vertexCount`, is a count: a number, `{ "parameter": "count", "divisor": 1 }` (a graph parameter), or `{ "resource": "imageName", "dimension": "width", "divisor": 16 }` with `dimension` one of `width`, `height`, `depth` (a 3d image's slices, 1 for other images) and `layers` (array layers). Division rounds up; `divisor` defaults 1 and must be at least 1. A resource that is not declared, or another dimension, fails at load. Use positive workgroup sizes; JSON does not alter GLSL `local_size`. `compute_image` uses `workgroupSize` to derive x/y groups from the extent of the first image the pass writes (or, with none, reads) at that access's mip level, and z groups from its depth, which is 1 unless it is a 3d image.
 
 Indirect execution reads its arguments from a storage buffer that an earlier pass writes on the GPU, so the work can follow a count the CPU never sees:
 
@@ -321,7 +325,7 @@ Indirect execution reads its arguments from a storage buffer that an earlier pas
 
 Three `execution` objects: a dispatch, four draws, and up to 1024 draws whose number the buffer holds.
 
-- **Arguments:** `arguments.buffer` names a storage buffer of `bufferLayouts`, or one the application registered. At `offset` (a multiple of 4) a `dispatch_indirect` finds a `VkDispatchIndirectCommand` (x, y, z: 3 uints), a `draw_indirect` `drawCount` `VkDrawIndirectCommand`s (vertexCount, instanceCount, firstVertex, firstInstance) `stride` bytes apart (default 16, at least 16). A `dispatch_indirect` must be a compute pass, a `draw_indirect` a graphics pass.
+- **Arguments:** `arguments.buffer` names a storage buffer of `bufferLayouts`, or one the application registered. At `offset` (a multiple of 4) a `dispatch_indirect` finds a `VkDispatchIndirectCommand` (x, y, z: 3 uints), a `draw_indirect` `drawCount` `VkDrawIndirectCommand`s (vertexCount, instanceCount, firstVertex, firstInstance) `stride` bytes apart (default 16, at least 16), and a `draw_indexed_indirect` `drawCount` `VkDrawIndexedIndirectCommand`s (indexCount, instanceCount, firstIndex, vertexOffset, firstInstance) `stride` bytes apart (default 20, at least 20). A `dispatch_indirect` must be a compute pass, the draw types graphics passes.
 - **Count:** with `count`, the number of draws is the uint at `count.offset` in `count.buffer`, at most `maxDrawCount`. That needs the device feature `drawIndirectCount`; declare `"requires": ["drawIndirectCount"]` to leave the pass out where it is missing, since a pass with a count on such a device fails at load. More than one draw per call needs the device feature `multiDrawIndirect`; without it such a pass fails at load too.
 - **Checks:** each `bufferLayouts` buffer named must be a storage buffer large enough for the arguments from its offset (the last of `drawCount` or `maxDrawCount` draws, and the count), or compilation fails. Every storage buffer of `bufferLayouts` can hold indirect arguments; one the application registers must be created with `VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT`. Group counts and draw arguments are not checked: the GPU writes them, within the device's `maxComputeWorkGroupCount`.
 - **Order:** the pass gets a barrier after the writes to its arguments (`DRAW_INDIRECT`, `INDIRECT_COMMAND_READ`), and depends on the last earlier-declared pass that writes the buffer, through a storage binding with `autoBindBuffer` whose shader block is not `readonly`. That pass is then ordered first and not culled. Declare it before the indirect pass.

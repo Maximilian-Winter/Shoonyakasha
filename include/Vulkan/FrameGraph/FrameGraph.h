@@ -533,6 +533,8 @@ enum class ExecutionKind : uint8_t {
     ComputeImage,    // "compute_image"
     DispatchIndirect,// "dispatch_indirect"
     DrawIndirect,    // "draw_indirect", with or without a count buffer
+    DrawIndexed,     // "draw_indexed"
+    DrawIndexedIndirect, // "draw_indexed_indirect", with or without a count buffer
     SceneRenderer,   // "scene_geometry" and the entity geometry types
     Copy,            // "copy": vkCmdCopyImage from the transfer_src input to the transfer_dst output
     Blit,            // "blit": vkCmdBlitImage, the same, scaled and filtered

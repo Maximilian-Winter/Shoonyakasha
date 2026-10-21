@@ -529,6 +529,8 @@ struct ExecutionDesc {
     //   "compute_image"      - Compute dispatch based on image dimensions
     //   "dispatch_indirect"  - Compute dispatch whose group counts a buffer holds
     //   "draw_indirect"      - Draws whose arguments (and count) a buffer holds
+    //   "draw_indexed"       - Indexed draw from indexBuffer
+    //   "draw_indexed_indirect" - Indexed draws whose arguments (and count) a buffer holds
     //   "scene_geometry"     - Hybrid: framework binds, callback draws
     //   "opaque_geometry"    - Built-in: render opaque entities
     //   "transparent_geometry" - Built-in: render transparent entities (back-to-front)
@@ -557,14 +559,29 @@ struct ExecutionDesc {
     uint32_t    firstVertex = 0;
     uint32_t    firstInstance = 0;
 
+    // For "draw_indexed": indices drawn, from firstIndex, each added to vertexOffset
+    DispatchDimension indexCount;
+    uint32_t    firstIndex = 0;
+    int32_t     vertexOffset = 0;
+
+    // Draw types: the vertex buffer bound at binding 0 (optional), and for
+    // the indexed types the index buffer, each a storage buffer of the
+    // pipeline's bufferLayouts or one the application registered.
+    std::string vertexBuffer;
+    uint32_t    vertexBufferOffset = 0;
+    std::string indexBuffer;
+    uint32_t    indexBufferOffset = 0;
+    VkIndexType indexType = VK_INDEX_TYPE_UINT32;
+
     // For "compute_dispatch" type
     std::array<uint32_t, 3>     workgroupSize = {16, 16, 1};
     std::array<DispatchDimension, 3> dispatch;      // x, y, z group counts
 
-    // For "dispatch_indirect" and "draw_indirect": the arguments, in a
-    // storage buffer of the pipeline's bufferLayouts that an earlier pass
-    // writes. A VkDispatchIndirectCommand, or drawCount VkDrawIndirectCommands
-    // drawStride bytes apart.
+    // For "dispatch_indirect", "draw_indirect" and "draw_indexed_indirect":
+    // the arguments, in a storage buffer of the pipeline's bufferLayouts that
+    // an earlier pass writes. A VkDispatchIndirectCommand, or drawCount
+    // VkDrawIndirectCommands (VkDrawIndexedIndirectCommands) drawStride bytes
+    // apart.
     std::string argumentBuffer;
     uint32_t    argumentOffset = 0;
     uint32_t    drawCount = 1;

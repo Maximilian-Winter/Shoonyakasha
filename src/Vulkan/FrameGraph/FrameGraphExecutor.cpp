@@ -579,6 +579,55 @@ void FrameGraphExecutor::executeAutoCallback(
         return defaultValue;
     };
 
+    // A count from a fixed value, a parameter or an image's dimension,
+    // divided by the divisor, rounding up; 1 when it names none.
+    auto calcDim = [&](const DispatchDimension& dim) -> uint32_t {
+        if (dim.isFixed()) return dim.value;
+        if (dim.isFromParameter()) {
+            const uint32_t paramValue = getParameterAsUint(dim.parameter, 1);
+            return (paramValue + dim.divisor - 1) / dim.divisor;
+        }
+        if (dim.isFromResource()) {
+            const VkExtent3D extent = getResourceExtent(dim.resource);
+            uint32_t size = dim.dimension == "width"  ? extent.width
+                          : dim.dimension == "height" ? extent.height
+                          : dim.dimension == "depth"  ? extent.depth : 1;
+            if (dim.dimension == "layers") {
+                const ResourceHandle handle = builder.getResource(dim.resource);
+                const auto* physImg = handle.valid() && handle.index < compiled.physicalResources.size()
+                    ? std::get_if<PhysicalImage>(&compiled.physicalResources[handle.index]) : nullptr;
+                size = physImg ? physImg->shape.arrayLayers : 1;
+            }
+            return (size + dim.divisor - 1) / dim.divisor;
+        }
+        return 1;
+    };
+
+    // A storage buffer of the graph by name, for draws and indirect passes.
+    auto lookupBuffer = [&](const std::string& name, const char* role) -> VkBuffer {
+        VkBuffer buffer = m_bufferLookup ? m_bufferLookup(name, ctx.frameIndex) : VK_NULL_HANDLE;
+        if (buffer == VK_NULL_HANDLE) {
+            m_logger->logEvery(5.0f, LogLevel::Error, "Pass '%s': no storage buffer '%s' for its %s; nothing recorded",
+                               passDecl.name.c_str(), name.c_str(), role);
+        }
+        return buffer;
+    };
+    // Bind a draw's vertex and index buffers; false when one is missing.
+    auto bindDrawBuffers = [&]() -> bool {
+        if (!exec.vertexBuffer.empty()) {
+            const VkBuffer vertices = lookupBuffer(exec.vertexBuffer, "vertices");
+            if (vertices == VK_NULL_HANDLE) return false;
+            const VkDeviceSize offset = exec.vertexBufferOffset;
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertices, &offset);
+        }
+        if (!exec.indexBuffer.empty()) {
+            const VkBuffer indices = lookupBuffer(exec.indexBuffer, "indices");
+            if (indices == VK_NULL_HANDLE) return false;
+            vkCmdBindIndexBuffer(commandBuffer, indices, exec.indexBufferOffset, exec.indexType);
+        }
+        return true;
+    };
+
     // ── Execute based on type ──
     switch (compiledPass.executionKind) {
     case ExecutionKind::Fullscreen:
@@ -589,16 +638,9 @@ void FrameGraphExecutor::executeAutoCallback(
 
     case ExecutionKind::Draw: {
         // Custom draw with specified counts
-        uint32_t vertexCount = exec.vertexCount.value;
-
-        // Support parameter-based vertex count
-        if (exec.vertexCount.isFromParameter()) {
-            vertexCount = getParameterAsUint(exec.vertexCount.parameter, vertexCount);
-            // Apply divisor if specified (e.g., for instanced rendering)
-            if (exec.vertexCount.divisor > 1) {
-                vertexCount = (vertexCount + exec.vertexCount.divisor - 1) / exec.vertexCount.divisor;
-            }
-        }
+        const uint32_t vertexCount = exec.vertexCount.isFromParameter() || exec.vertexCount.isFromResource()
+            ? calcDim(exec.vertexCount) : exec.vertexCount.value;
+        if (!bindDrawBuffers()) break;
 
         m_logger->logEvery(5.0f, LogLevel::Info,
             "  [draw] pass='%s' vertexCount=%u instanceCount=%u",
@@ -623,26 +665,6 @@ void FrameGraphExecutor::executeAutoCallback(
             groupY = (ctx.renderExtent.height + exec.workgroupSize[1] - 1) / exec.workgroupSize[1];
             groupZ = (compiledPass.extentDepth + exec.workgroupSize[2] - 1) / exec.workgroupSize[2];
         } else {
-            // Use specified dispatch dimensions with proper resource lookup
-            auto calcDim = [&](const DispatchDimension& dim) -> uint32_t {
-                if (dim.isFixed()) {
-                    return dim.value;
-                } else if (dim.isFromParameter()) {
-                    // Look up parameter value and apply divisor
-                    uint32_t paramValue = getParameterAsUint(dim.parameter, 1);
-                    return (paramValue + dim.divisor - 1) / dim.divisor;
-                } else if (dim.isFromResource()) {
-                    // Look up actual resource dimensions
-                    VkExtent3D resExtent = getResourceExtent(dim.resource);
-                    uint32_t size = (dim.dimension == "width") ? resExtent.width :
-                                    (dim.dimension == "height") ? resExtent.height :
-                                    (dim.dimension == "depth") ? resExtent.depth : 1;
-                    return (size + dim.divisor - 1) / dim.divisor;
-                } else {
-                    return 1;
-                }
-            };
-
             groupX = calcDim(exec.dispatch[0]);
             groupY = calcDim(exec.dispatch[1]);
             groupZ = calcDim(exec.dispatch[2]);
@@ -672,32 +694,48 @@ void FrameGraphExecutor::executeAutoCallback(
         break;
     }
 
+    case ExecutionKind::DrawIndexed: {
+        const uint32_t indexCount = exec.indexCount.isFromParameter() || exec.indexCount.isFromResource()
+            ? calcDim(exec.indexCount) : exec.indexCount.value;
+        if (!bindDrawBuffers()) break;
+        vkCmdDrawIndexed(commandBuffer, indexCount, exec.instanceCount, exec.firstIndex, exec.vertexOffset,
+                         exec.firstInstance);
+        countDraw(indexCount, exec.instanceCount);
+        break;
+    }
+
     case ExecutionKind::DispatchIndirect:
-    case ExecutionKind::DrawIndirect: {
+    case ExecutionKind::DrawIndirect:
+    case ExecutionKind::DrawIndexedIndirect: {
         // Arguments an earlier pass wrote into a storage buffer; the graph
         // has ordered this pass after it and planned the barrier.
-        auto lookup = [&](const std::string& name) -> VkBuffer {
-            VkBuffer buffer = m_bufferLookup ? m_bufferLookup(name, ctx.frameIndex) : VK_NULL_HANDLE;
-            if (buffer == VK_NULL_HANDLE) {
-                m_logger->logEvery(5.0f, LogLevel::Error,
-                    "Pass '%s': no storage buffer '%s' for its indirect arguments; nothing recorded",
-                    passDecl.name.c_str(), name.c_str());
-            }
-            return buffer;
-        };
-        VkBuffer arguments = lookup(exec.argumentBuffer);
+        VkBuffer arguments = lookupBuffer(exec.argumentBuffer, "indirect arguments");
         if (arguments == VK_NULL_HANDLE) break;
+        const bool indexed = compiledPass.executionKind == ExecutionKind::DrawIndexedIndirect;
         if (compiledPass.executionKind == ExecutionKind::DispatchIndirect) {
             vkCmdDispatchIndirect(commandBuffer, arguments, exec.argumentOffset);
             countDispatch();
-        } else if (!exec.countBuffer.empty()) {
-            VkBuffer count = lookup(exec.countBuffer);
+            break;
+        }
+        if (!bindDrawBuffers()) break;
+        if (!exec.countBuffer.empty()) {
+            VkBuffer count = lookupBuffer(exec.countBuffer, "draw count");
             if (count == VK_NULL_HANDLE) break;
-            vkCmdDrawIndirectCount(commandBuffer, arguments, exec.argumentOffset, count, exec.countOffset,
-                                   exec.maxDrawCount, exec.drawStride);
+            if (indexed) {
+                vkCmdDrawIndexedIndirectCount(commandBuffer, arguments, exec.argumentOffset, count, exec.countOffset,
+                                              exec.maxDrawCount, exec.drawStride);
+            } else {
+                vkCmdDrawIndirectCount(commandBuffer, arguments, exec.argumentOffset, count, exec.countOffset,
+                                       exec.maxDrawCount, exec.drawStride);
+            }
             countIndirectDraws(1);
         } else {
-            vkCmdDrawIndirect(commandBuffer, arguments, exec.argumentOffset, exec.drawCount, exec.drawStride);
+            if (indexed) {
+                vkCmdDrawIndexedIndirect(commandBuffer, arguments, exec.argumentOffset, exec.drawCount,
+                                         exec.drawStride);
+            } else {
+                vkCmdDrawIndirect(commandBuffer, arguments, exec.argumentOffset, exec.drawCount, exec.drawStride);
+            }
             countIndirectDraws(exec.drawCount);
         }
         break;

@@ -676,10 +676,11 @@ void RenderGraph::createDotPathSSBOs(uint32_t maxFramesInFlight) {
         ssbo.savePolicy = desc.savePolicy;
 
         // Phase 3: Add TRANSFER_SRC_BIT when readback or gpu_to_cpu/bidirectional is needed
-        // Any of them may hold the arguments of dispatch_indirect and
-        // draw_indirect passes.
+        // Any of them may hold the arguments of indirect passes, or the
+        // vertices and indices of draws.
         VkBufferUsageFlags usageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+                                        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
         if (desc.readbackPolicy.enabled ||
             desc.memoryPolicy.transferDirection == TransferDirection::GpuToCpu ||
             desc.memoryPolicy.transferDirection == TransferDirection::Bidirectional) {

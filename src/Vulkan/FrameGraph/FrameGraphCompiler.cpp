@@ -45,6 +45,8 @@ ExecutionKind executionKindOf(const std::string& type) {
     if (type == "compute_image")    return ExecutionKind::ComputeImage;
     if (type == "dispatch_indirect") return ExecutionKind::DispatchIndirect;
     if (type == "draw_indirect")    return ExecutionKind::DrawIndirect;
+    if (type == "draw_indexed")     return ExecutionKind::DrawIndexed;
+    if (type == "draw_indexed_indirect") return ExecutionKind::DrawIndexedIndirect;
     if (type == "copy")             return ExecutionKind::Copy;
     if (type == "blit")             return ExecutionKind::Blit;
     if (type == "draw_mesh_tasks")  return ExecutionKind::DrawMeshTasks;
@@ -274,13 +276,12 @@ std::string indirectArgumentsError(const std::vector<PassDeclaration>& passes,
         if (desc == layouts.end()) return "";
         const auto it = compiled.find(name);
         if (it == compiled.end() || it->second.usage != BufferUsageType::StorageBuffer) {
-            return "Pass '" + pass.name + "': indirect arguments come from '" + name +
-                   "', which is not a storage buffer";
+            return "Pass '" + pass.name + "' reads '" + name + "', which is not a storage buffer";
         }
         const uint64_t size = static_cast<uint64_t>(it->second.totalSize) * std::max(desc->elementCount, 1u);
         if (size < needed) {
             return "Pass '" + pass.name + "': '" + name + "' holds " + std::to_string(size) +
-                   " bytes; its indirect arguments need " + std::to_string(needed);
+                   " bytes; the pass reads " + std::to_string(needed);
         }
         return "";
     };
@@ -289,13 +290,22 @@ std::string indirectArgumentsError(const std::vector<PassDeclaration>& passes,
         std::string error;
         if (exec.type == "dispatch_indirect") {
             error = check(pass, exec.argumentBuffer, uint64_t{exec.argumentOffset} + 12);
-        } else if (exec.type == "draw_indirect") {
+        } else if (exec.type == "draw_indirect" || exec.type == "draw_indexed_indirect") {
             const uint32_t draws = exec.countBuffer.empty() ? exec.drawCount : exec.maxDrawCount;
+            const uint64_t commandSize = exec.type == "draw_indexed_indirect" ? 20 : 16;
             error = check(pass, exec.argumentBuffer,
-                          uint64_t{exec.argumentOffset} + uint64_t{std::max(draws, 1u) - 1} * exec.drawStride + 16);
+                          uint64_t{exec.argumentOffset} + uint64_t{std::max(draws, 1u) - 1} * exec.drawStride +
+                              commandSize);
             if (error.empty() && !exec.countBuffer.empty()) {
                 error = check(pass, exec.countBuffer, uint64_t{exec.countOffset} + 4);
             }
+        }
+        // Vertex and index buffers: storage buffers that reach past their offset.
+        if (error.empty() && !exec.vertexBuffer.empty()) {
+            error = check(pass, exec.vertexBuffer, uint64_t{exec.vertexBufferOffset} + 1);
+        }
+        if (error.empty() && !exec.indexBuffer.empty()) {
+            error = check(pass, exec.indexBuffer, uint64_t{exec.indexBufferOffset} + 1);
         }
         if (!error.empty()) return error;
     }

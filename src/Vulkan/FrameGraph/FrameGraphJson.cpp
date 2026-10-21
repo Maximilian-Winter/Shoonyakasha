@@ -764,22 +764,15 @@ void parseIndirectExecution(PassDeclaration& pass, const nlohmann::json& execJso
                             const PipelineCapabilities& capabilities) {
     const std::string& type = pass.execution.type;
     const bool dispatch = type == "dispatch_indirect";
-    const bool draw = type == "draw_indirect";
+    const bool indexed = type == "draw_indexed" || type == "draw_indexed_indirect";
+    const bool draw = type == "draw_indirect" || type == "draw_indexed_indirect";
+    const bool anyDraw = draw || indexed || type == "draw";
     const std::string where = "Pass '" + pass.name + "'";
-    if (!dispatch && !draw) {
-        for (const char* key : {"arguments", "count"}) {
-            if (execJson.contains(key)) {
-                throw std::runtime_error(where + ": \"" + key + "\" applies only to dispatch_indirect and "
-                                         "draw_indirect, not '" + type + "'");
-            }
-        }
-        return;
+    if (anyDraw && pass.type != PassType::Graphics) {
+        throw std::runtime_error(where + ": " + type + " needs a graphics pass");
     }
     if (dispatch && pass.type != PassType::Compute) {
         throw std::runtime_error(where + ": dispatch_indirect needs a compute pass");
-    }
-    if (draw && pass.type != PassType::Graphics) {
-        throw std::runtime_error(where + ": draw_indirect needs a graphics pass");
     }
 
     auto readUint = [&](const nlohmann::json& j, const char* key, uint32_t fallback, const std::string& in) {
@@ -805,6 +798,43 @@ void parseIndirectExecution(PassDeclaration& pass, const nlohmann::json& execJso
         return &j;
     };
 
+    // The vertex and index buffers of the draw types.
+    if (execJson.contains("vertexBuffer") && !anyDraw) {
+        throw std::runtime_error(where + ": \"vertexBuffer\" applies to draw types, not '" + type + "'");
+    }
+    if (execJson.contains("indexBuffer") != indexed) {
+        throw std::runtime_error(where + ": \"indexBuffer\" is required by draw_indexed and "
+                                 "draw_indexed_indirect, and applies to nothing else");
+    }
+    readBuffer("vertexBuffer", pass.execution.vertexBuffer, pass.execution.vertexBufferOffset);
+    if (const nlohmann::json* index = readBuffer("indexBuffer", pass.execution.indexBuffer,
+                                                 pass.execution.indexBufferOffset)) {
+        const std::string indexType = index->value("type", std::string{"uint32"});
+        if (indexType != "uint32" && indexType != "uint16") {
+            throw std::runtime_error(where + ": \"indexBuffer\" \"type\" must be uint32 or uint16");
+        }
+        pass.execution.indexType = indexType == "uint16" ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+    }
+    if (type == "draw_indexed") {
+        pass.execution.firstIndex = readUint(execJson, "firstIndex", 0, "execution");
+        if (execJson.contains("vertexOffset")) {
+            if (!execJson["vertexOffset"].is_number_integer()) {
+                throw std::runtime_error(where + ": \"vertexOffset\" must be an integer");
+            }
+            pass.execution.vertexOffset = execJson["vertexOffset"].get<int32_t>();
+        }
+    }
+
+    if (!dispatch && !draw) {
+        for (const char* key : {"arguments", "count"}) {
+            if (execJson.contains(key)) {
+                throw std::runtime_error(where + ": \"" + key + "\" applies only to dispatch_indirect, "
+                                         "draw_indirect and draw_indexed_indirect, not '" + type + "'");
+            }
+        }
+        return;
+    }
+
     const nlohmann::json* arguments = readBuffer("arguments", pass.execution.argumentBuffer,
                                                  pass.execution.argumentOffset);
     if (!arguments) {
@@ -818,11 +848,13 @@ void parseIndirectExecution(PassDeclaration& pass, const nlohmann::json& execJso
         return;
     }
 
+    const uint32_t commandSize = indexed ? 20u : 16u;  // VkDraw(Indexed)IndirectCommand
     pass.execution.drawCount = readUint(*arguments, "drawCount", 1, "\"arguments\"");
-    pass.execution.drawStride = readUint(*arguments, "stride", 16, "\"arguments\"");
-    if (pass.execution.drawStride % 4 != 0 || pass.execution.drawStride < 16) {
-        throw std::runtime_error(where + ": \"arguments\" \"stride\" must be a multiple of 4 and at least 16, "
-                                 "the size of VkDrawIndirectCommand");
+    pass.execution.drawStride = readUint(*arguments, "stride", commandSize, "\"arguments\"");
+    if (pass.execution.drawStride % 4 != 0 || pass.execution.drawStride < commandSize) {
+        throw std::runtime_error(where + ": \"arguments\" \"stride\" must be a multiple of 4 and at least " +
+                                 std::to_string(commandSize) + ", the size of " +
+                                 (indexed ? "VkDrawIndexedIndirectCommand" : "VkDrawIndirectCommand"));
     }
     uint32_t most = pass.execution.drawCount;
     if (const nlohmann::json* count = readBuffer("count", pass.execution.countBuffer, pass.execution.countOffset)) {
@@ -844,7 +876,7 @@ void parseIndirectExecution(PassDeclaration& pass, const nlohmann::json& execJso
         throw std::runtime_error(where + ": \"arguments\" \"drawCount\" must be at least 1");
     }
     if (most > 1 && !capabilities.multiDrawIndirect) {
-        throw std::runtime_error(where + ": more than one draw per draw_indirect needs the device feature "
+        throw std::runtime_error(where + ": more than one draw per " + type + " needs the device feature "
                                  "multiDrawIndirect, which this device lacks");
     }
 }
@@ -2108,17 +2140,39 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 pass.execution.firstVertex   = execJson.value("firstVertex", 0u);
                 pass.execution.firstInstance = execJson.value("firstInstance", 0u);
 
-                // Parse vertexCount (can be fixed or from parameter)
-                if (execJson.contains("vertexCount")) {
-                    const auto& vcJson = execJson["vertexCount"];
-                    if (vcJson.is_number()) {
-                        pass.execution.vertexCount.value = vcJson.get<uint32_t>();
-                    } else if (vcJson.is_object()) {
-                        pass.execution.vertexCount.parameter = vcJson.value("parameter", std::string{});
-                        pass.execution.vertexCount.resource  = vcJson.value("resource", std::string{});
-                        pass.execution.vertexCount.dimension = vcJson.value("dimension", std::string{});
-                        pass.execution.vertexCount.divisor   = vcJson.value("divisor", 1u);
+                // A count: a number, a parameter, or a dimension of an image,
+                // each divided (rounding up) by "divisor".
+                auto parseDimension = [&](const nlohmann::json& dj, const std::string& key) -> DispatchDimension {
+                    const std::string where = "Pass '" + pass.name + "': " + key;
+                    DispatchDimension dim;
+                    if (dj.is_number()) {
+                        dim.value = dj.get<uint32_t>();
+                        return dim;
                     }
+                    if (!dj.is_object()) throw std::runtime_error(where + " must be a number or an object");
+                    dim.value     = dj.value("value", 0u);
+                    dim.resource  = dj.value("resource", std::string{});
+                    dim.dimension = dj.value("dimension", std::string{});
+                    dim.divisor   = dj.value("divisor", 1u);
+                    dim.parameter = dj.value("parameter", std::string{});
+                    if (dim.divisor == 0) throw std::runtime_error(where + ": divisor must be at least 1");
+                    if (!dim.resource.empty()) {
+                        if (!builder.getResource(dim.resource).valid()) {
+                            throw std::runtime_error(where + " names '" + dim.resource + "', which is not a resource");
+                        }
+                        if (dim.dimension != "width" && dim.dimension != "height" && dim.dimension != "depth" &&
+                            dim.dimension != "layers") {
+                            throw std::runtime_error(where + ": dimension must be width, height, depth or layers");
+                        }
+                    }
+                    return dim;
+                };
+
+                if (execJson.contains("vertexCount")) {
+                    pass.execution.vertexCount = parseDimension(execJson["vertexCount"], "vertexCount");
+                }
+                if (execJson.contains("indexCount")) {
+                    pass.execution.indexCount = parseDimension(execJson["indexCount"], "indexCount");
                 }
 
                 // For "compute_dispatch" type
@@ -2134,23 +2188,9 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 // Parse dispatch dimensions
                 if (execJson.contains("dispatch")) {
                     const auto& dispJson = execJson["dispatch"];
-                    auto parseDispatchDim = [](const nlohmann::json& dj) -> DispatchDimension {
-                        DispatchDimension dim;
-                        if (dj.is_number()) {
-                            dim.value = dj.get<uint32_t>();
-                        } else if (dj.is_object()) {
-                            dim.value     = dj.value("value", 0u);
-                            dim.resource  = dj.value("resource", std::string{});
-                            dim.dimension = dj.value("dimension", std::string{});
-                            dim.divisor   = dj.value("divisor", 1u);
-                            dim.parameter = dj.value("parameter", std::string{});
-                        }
-                        return dim;
-                    };
-
-                    if (dispJson.contains("x")) pass.execution.dispatch[0] = parseDispatchDim(dispJson["x"]);
-                    if (dispJson.contains("y")) pass.execution.dispatch[1] = parseDispatchDim(dispJson["y"]);
-                    if (dispJson.contains("z")) pass.execution.dispatch[2] = parseDispatchDim(dispJson["z"]);
+                    if (dispJson.contains("x")) pass.execution.dispatch[0] = parseDimension(dispJson["x"], "dispatch.x");
+                    if (dispJson.contains("y")) pass.execution.dispatch[1] = parseDimension(dispJson["y"], "dispatch.y");
+                    if (dispJson.contains("z")) pass.execution.dispatch[2] = parseDimension(dispJson["z"], "dispatch.z");
                 }
 
                 parseIndirectExecution(pass, execJson, capabilities);
@@ -2230,6 +2270,12 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                                                  "' does not apply to execution type '" + type + "'");
                     }
                 }
+            }
+
+            // An execution type the executor would record nothing for.
+            if (executionKindOf(pass.execution.type) == ExecutionKind::Unknown) {
+                throw std::runtime_error("Pass '" + pass.name + "': unknown execution type '" +
+                                         pass.execution.type + "'");
             }
 
             // A ray tracing pass traces with trace_rays, and only it does.
