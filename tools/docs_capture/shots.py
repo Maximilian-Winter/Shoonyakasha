@@ -22,6 +22,7 @@ PYTHON = [
     dict(folder='rendering/bistro', script='bistro.py', seconds=8, timeout=600),
     dict(folder='rendering/scene_lights', script='scene_lights.py', seconds=5),
     dict(folder='rendering/volume_tiled', script='volume_tiled.py', seconds=5),
+    dict(folder='rendering/split_screen', script='split_screen.py'),
     dict(folder='rendering/showroom', script='showroom.py', args=['--models', 'corvette_c8', '--width', '1280', '--height', '720'],
          seconds=20, timeout=600),
     dict(folder='rendering/museum', script='museum.py', args=['--width', '1280', '--height', '720'],
