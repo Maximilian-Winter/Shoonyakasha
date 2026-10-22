@@ -1,13 +1,11 @@
 """
 Shared parts of the optics episodes (gold.py, brewster.py): the wave optics
-pipeline's paths and settings, glTF shapes, plots drawn into RGBA images,
+pipeline's paths and settings, generated shapes, plots drawn into RGBA images,
 panel helpers and the accumulation of paths.
 """
 
-import json
 import math
 import os
-import struct
 import time
 
 import shoonyakasha as sk
@@ -177,47 +175,7 @@ class Axes:
                 (self.x(value) * self.scale, self.y(0.0) * self.scale)]
 
 
-# ── Shapes, written as glTF ──────────────────────────────────────────────
-
-def write_gltf(path, positions, normals, uvs, indices):
-    """One mesh of one primitive, its buffer next to it, under a single node."""
-    blob = bytearray()
-    views, accessors = [], []
-
-    def add(data, target, accessor):
-        while len(blob) % 4:
-            blob.append(0)
-        views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": len(data), "target": target})
-        blob.extend(data)
-        accessor["bufferView"] = len(views) - 1
-        accessors.append(accessor)
-        return len(accessors) - 1
-
-    def floats(values, kind):
-        flat = [c for v in values for c in v]
-        accessor = {"componentType": 5126, "count": len(values), "type": kind}
-        if kind == "VEC3":
-            accessor["min"] = [min(v[i] for v in values) for i in range(3)]
-            accessor["max"] = [max(v[i] for v in values) for i in range(3)]
-        return add(struct.pack("<%df" % len(flat), *flat), 34962, accessor)
-
-    index = add(struct.pack("<%dI" % len(indices), *indices), 34963,
-                {"componentType": 5125, "count": len(indices), "type": "SCALAR"})
-    attributes = {"POSITION": floats(positions, "VEC3"), "NORMAL": floats(normals, "VEC3"),
-                  "TEXCOORD_0": floats(uvs, "VEC2")}
-    base = os.path.splitext(os.path.basename(path))[0]
-    gltf = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
-            "nodes": [{"name": base, "mesh": 0}],
-            "meshes": [{"primitives": [{"attributes": attributes, "indices": index, "material": 0}]}],
-            "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0,
-                                                    "roughnessFactor": 0.5}}],
-            "accessors": accessors, "bufferViews": views,
-            "buffers": [{"uri": base + ".bin", "byteLength": len(blob)}]}
-    with open(os.path.join(os.path.dirname(path), base + ".bin"), "wb") as f:
-        f.write(blob)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(gltf, f)
-
+# ── Shapes ─────────────────────────────────────────────────────────────────
 
 def sphere(rings=48, segments=96):
     """A sphere of radius 1 about the origin: positions, normals, uvs, indices."""
@@ -245,18 +203,33 @@ def root_of(engine, entity):
     return entity
 
 
-def place(engine, path, position, scale, color=(0.8, 0.8, 0.8), roughness=0.8):
-    """A glTF model placed in the scene, unrotated; returns its entities."""
-    result = engine.load_gltf_scene(path)
-    for root in {root_of(engine, entity) for entity in result.entities}:
+def arrange(engine, roots, entities, position, scale, color, roughness):
+    """Put `roots` at `position`, unrotated, scaled; give `entities` a plain
+    material. Returns `entities`."""
+    for root in roots:
         engine.scene.set_rotation(root, (0.0, 0.0, 0.0))
         engine.scene.set_scale(root, scale)
         engine.scene.set_position(root, position)
-    for entity in result.entities:
+    for entity in entities:
         engine.scene.set_material_vec4(entity, "baseColorFactor", tuple(color) + (1.0,))
         engine.scene.set_material_float(entity, "metallicFactor", 0.0)
         engine.scene.set_material_float(entity, "roughnessFactor", roughness)
-    return list(result.entities)
+    return list(entities)
+
+
+def place(engine, path, position, scale, color=(0.8, 0.8, 0.8), roughness=0.8):
+    """A glTF model placed in the scene, unrotated; returns its entities."""
+    result = engine.load_gltf_scene(path)
+    roots = {root_of(engine, entity) for entity in result.entities}
+    return arrange(engine, roots, result.entities, position, scale, color, roughness)
+
+
+def place_mesh(engine, mesh, position, scale, color=(0.8, 0.8, 0.8), roughness=0.8):
+    """A shape from sphere() and the like placed in the scene, unrotated;
+    returns its entity, in a list."""
+    positions, normals, uvs, indices = mesh
+    entity = engine.create_mesh(positions, indices, normals, uvs)
+    return arrange(engine, [entity], [entity], position, scale, color, roughness)
 
 
 def set_material_slots(engine, slots):

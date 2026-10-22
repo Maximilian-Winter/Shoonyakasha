@@ -631,6 +631,108 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
     return buffer;
 }
 
+std::string GltfSceneLoader::buildMeshPrimitive(const MeshArrays& arrays, GltfPrimitive& out) {
+    const size_t n = arrays.positions.size();
+    if (n == 0) return "the mesh has no positions";
+    if (n > std::numeric_limits<uint32_t>::max()) return "the mesh has too many positions";
+    for (const auto& [count, what] : {std::pair{arrays.normals.size(), "normals"}, {arrays.uvs.size(), "uvs"},
+                                      {arrays.colors.size(), "colors"}}) {
+        if (count != 0 && count != n) {
+            return std::string("there are ") + std::to_string(count) + " " + what + " for " + std::to_string(n) +
+                   " positions";
+        }
+    }
+    const bool indexed = !arrays.indices.empty();
+    const size_t corners = indexed ? arrays.indices.size() : n;
+    if (corners % 3 != 0) {
+        return std::string(indexed ? "the index count" : "without indices, the position count") +
+               " is not a multiple of 3";
+    }
+    for (uint32_t i : arrays.indices) {
+        if (i >= n) return "index " + std::to_string(i) + " is past the " + std::to_string(n) + " positions";
+    }
+
+    // Area-weighted vertex normals when none are given.
+    std::vector<glm::vec3> normals = arrays.normals;
+    if (normals.empty()) {
+        normals.assign(n, glm::vec3(0.0f));
+        for (size_t t = 0; t < corners; t += 3) {
+            const uint32_t a = indexed ? arrays.indices[t] : static_cast<uint32_t>(t);
+            const uint32_t b = indexed ? arrays.indices[t + 1] : static_cast<uint32_t>(t + 1);
+            const uint32_t c = indexed ? arrays.indices[t + 2] : static_cast<uint32_t>(t + 2);
+            const glm::vec3 face = glm::cross(arrays.positions[b] - arrays.positions[a],
+                                              arrays.positions[c] - arrays.positions[a]);
+            normals[a] += face;
+            normals[b] += face;
+            normals[c] += face;
+        }
+    }
+
+    std::vector<StandardVertex> vertices(n);
+    glm::vec3 lo(std::numeric_limits<float>::max()), hi(std::numeric_limits<float>::lowest());
+    for (size_t i = 0; i < n; ++i) {
+        StandardVertex& v = vertices[i];
+        v.pos = arrays.positions[i];
+        v.color = arrays.colors.empty() ? glm::vec3(1.0f) : arrays.colors[i];
+        v.texCoord = arrays.uvs.empty() ? glm::vec2(0.0f) : arrays.uvs[i];
+        const float length = glm::length(normals[i]);
+        v.normal = length > 0.0f ? normals[i] / length : glm::vec3(0.0f, 1.0f, 0.0f);
+        lo = glm::min(lo, v.pos);
+        hi = glm::max(hi, v.pos);
+    }
+
+    auto upload = [&](const void* data, VkDeviceSize size, VkBufferUsageFlags usage) {
+        GPUBuffer buffer = GPUResourceFactory::createBuffer(
+            m_device.getAllocator().getHandle(), size,
+            usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | rayTracingInputUsage(), VMA_MEMORY_USAGE_GPU_ONLY);
+        GPUResourceFactory::uploadBuffer(m_device.getAllocator().getHandle(), m_device.getLogicalDevice(),
+                                         m_device.getGraphicsQueue(), m_device.getCommandPool(), buffer, data, size);
+        return m_device.getDeleteQueue().adopt(buffer);
+    };
+    out.vertexBuffer = upload(vertices.data(), vertices.size() * sizeof(StandardVertex),
+                              VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    out.vertexCount = static_cast<uint32_t>(n);
+    out.vertexStride = sizeof(StandardVertex);
+    out.indexBuffer = indexed ? upload(arrays.indices.data(), arrays.indices.size() * sizeof(uint32_t),
+                                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
+                              : GpuBufferRef{};
+    out.indexCount = indexed ? static_cast<uint32_t>(arrays.indices.size()) : 0;
+    out.indexType = IndexType::UInt32;
+    out.boundsMin = lo;
+    out.boundsMax = hi;
+    out.hasBounds = true;
+    return {};
+}
+
+entt::entity GltfSceneLoader::createMeshEntity(std::shared_ptr<ECS::Scene> scene, const std::string& name,
+                                               const MeshArrays& arrays, std::string& error) {
+    GltfPrimitive primitive;
+    primitive.name = name;
+    error = buildMeshPrimitive(arrays, primitive);
+    if (!error.empty()) return entt::null;
+    return createEntity(std::move(scene), primitive, entt::null);
+}
+
+std::string GltfSceneLoader::setMeshGeometry(entt::registry& registry, entt::entity entity,
+                                             const MeshArrays& arrays) {
+    auto* mesh = registry.valid(entity) ? registry.try_get<MeshComponent>(entity) : nullptr;
+    if (!mesh) return "the entity has no mesh";
+    GltfPrimitive primitive;
+    const std::string error = buildMeshPrimitive(arrays, primitive);
+    if (!error.empty()) return error;
+    mesh->vertexBuffer = primitive.vertexBuffer;
+    mesh->indexBuffer = primitive.indexBuffer;
+    mesh->vertexCount = primitive.vertexCount;
+    mesh->indexCount = primitive.indexCount;
+    mesh->vertexStride = primitive.vertexStride;
+    mesh->indexType = primitive.indexType;
+    mesh->boundsMin = primitive.boundsMin;
+    mesh->boundsMax = primitive.boundsMax;
+    mesh->hasBounds = true;
+    mesh->rayTracingInput = m_device.hasRayQuery();
+    return {};
+}
+
 VkBufferUsageFlags GltfSceneLoader::rayTracingInputUsage() const {
     // Static meshes are built into acceleration structures for ray queries,
     // which read their vertices and indices by device address.

@@ -1008,6 +1008,10 @@ entt::entity ApplicationBase::createCamera(const glm::vec3& pos, float fov,
     return m_cameraEntity;
 }
 
+entt::entity ApplicationBase::createMesh(const std::string& name, const MeshArrays& arrays, std::string& error) {
+    return m_gltfLoader->createMeshEntity(m_activeScene, name, arrays, error);
+}
+
 GltfLoadResult ApplicationBase::loadGltfScene(const std::string& path,
                                                 const GltfLoadOptions& opts) {
     const auto resolved = AssetPaths::locate(path);

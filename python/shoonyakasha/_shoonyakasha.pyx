@@ -2044,6 +2044,66 @@ cdef class Engine:
         return <uint32_t>self._ptr.createPointLight(
             _tuple_to_vec3(pos), _tuple_to_vec3(color), intensity, range)
 
+    @staticmethod
+    def _flat(values):
+        """A sequence of vectors (a list of tuples, an N x k array) or a flat
+        sequence, as one flat list."""
+        if values is None:
+            return []
+        if hasattr(values, "tolist"):          # NumPy arrays, array.array
+            values = values.tolist()
+        values = list(values)
+        if values and hasattr(values[0], "__len__"):
+            return [x for v in values for x in v]
+        return values
+
+    def create_mesh(self, positions, indices=None, normals=None, uvs=None, colors=None, str name=""):
+        """Create an entity drawing triangles from arrays.
+
+        Args:
+            positions: (x, y, z) per vertex: a list of tuples, an N x 3
+                array, or flat
+            indices: three per triangle, counter-clockwise from the front;
+                None draws every three vertices as a triangle
+            normals: (x, y, z) per vertex; None gives each vertex the
+                area-weighted normal of its triangles
+            uvs: (u, v) per vertex, or None
+            colors: (r, g, b) per vertex, or None for white
+            name: the entity's name
+
+        The entity has an identity transform, the default material (white,
+        metallic 0, roughness 0.5) and casts and receives shadows; set_position
+        and the set_material_* calls change them. It renders, is culled and is
+        ray traced like a loaded glTF mesh.
+
+        Returns:
+            The entity handle. Raises ValueError when the arrays do not fit.
+        """
+        cdef vector[float] pos = Engine._flat(positions)
+        cdef vector[uint32_t] idx = [int(i) for i in Engine._flat(indices)]
+        cdef vector[float] nrm = Engine._flat(normals)
+        cdef vector[float] tex = Engine._flat(uvs)
+        cdef vector[float] col = Engine._flat(colors)
+        cdef string error
+        cdef EntityHandle e = self._ptr.createMesh(pos, idx, nrm, tex, col, name.encode("utf-8"), error)
+        if not error.empty():
+            raise ValueError(error.decode("utf-8"))
+        return <uint32_t>e
+
+    def set_mesh(self, uint32_t entity, positions, indices=None, normals=None, uvs=None, colors=None):
+        """Replace the triangles of a mesh entity, taking them as create_mesh
+        does; its material and transform stay. The old geometry is freed once
+        no frame in flight draws it. Uploading waits for the GPU. Raises
+        ValueError when the arrays do not fit or the entity has no mesh."""
+        cdef vector[float] pos = Engine._flat(positions)
+        cdef vector[uint32_t] idx = [int(i) for i in Engine._flat(indices)]
+        cdef vector[float] nrm = Engine._flat(normals)
+        cdef vector[float] tex = Engine._flat(uvs)
+        cdef vector[float] col = Engine._flat(colors)
+        cdef string error = self._ptr.setMesh(entity, pos, idx, nrm, tex, col)
+        if not error.empty():
+            raise ValueError(error.decode("utf-8"))
+
     def create_point_lights(self, positions, colors=(1.0, 1.0, 1.0), intensity=5.0, range=15.0):
         """Create many point lights in one call.
 

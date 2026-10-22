@@ -7,7 +7,7 @@ Short demonstrations of optics on the [wave optics](../wave_optics/README.md) ex
 | `gold.py` | [Why gold is gold](#why-gold-is-gold): four metals beside their reflectance and refractive indices |
 | `brewster.py` | [Brewster's angle](#brewsters-angle): a polariser takes a glass slab's reflection away |
 
-`optics_common.py` holds what they share: the pipeline's paths and settings, glTF shapes, plots drawn into RGBA images that panels show with `ui.set_texture_data`, panel helpers and the average over paths. `gold.py` writes its sphere, a glTF file, into a temporary directory at start. The average starts over whenever the camera or a setting the image depends on changes.
+`optics_common.py` holds what they share: the pipeline's paths and settings, generated shapes that `engine.create_mesh` turns into entities, plots drawn into RGBA images that panels show with `ui.set_texture_data`, panel helpers and the average over paths. The average starts over whenever the camera or a setting the image depends on changes.
 
 All episodes share these keys and options:
 

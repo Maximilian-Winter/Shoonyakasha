@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <tuple>
 #include <utility>
 #include <stdexcept>
 #include <entt/entt.hpp>
@@ -171,6 +172,8 @@ public:
     using ApplicationBase::setRenderScale;
     using ApplicationBase::getRenderScale;
     using ApplicationBase::loadGltfScene;
+    using ApplicationBase::createMesh;
+    using ApplicationBase::getGltfLoader;
     using ApplicationBase::createDirectionalLight;
     using ApplicationBase::createPointLight;
     using ApplicationBase::createSprite;
@@ -394,6 +397,53 @@ GltfResult EngineAPI::loadGltfScene(const std::string& path, const GltfOptions& 
     // Auto-create bone SSBOs for any newly loaded skinned entities
     m_impl->app->createBoneSSBOs();
     return toGltfResult(lr);
+}
+
+namespace {
+
+/// Flat float lists as MeshArrays; an error when one is not whole vectors.
+std::string meshArrays(const std::vector<float>& positions, const std::vector<uint32_t>& indices,
+                       const std::vector<float>& normals, const std::vector<float>& uvs,
+                       const std::vector<float>& colors, MeshArrays& out) {
+    for (const auto& [values, width, what] : {std::tuple{&positions, 3u, "positions"}, {&normals, 3u, "normals"},
+                                              {&uvs, 2u, "uvs"}, {&colors, 3u, "colors"}}) {
+        if (values->size() % width != 0) {
+            return std::string(what) + " must hold " + std::to_string(width) + " numbers for each vertex";
+        }
+    }
+    auto vec3s = [](const std::vector<float>& v) {
+        std::vector<glm::vec3> out(v.size() / 3);
+        for (size_t i = 0; i < out.size(); ++i) out[i] = {v[3 * i], v[3 * i + 1], v[3 * i + 2]};
+        return out;
+    };
+    out.positions = vec3s(positions);
+    out.normals = vec3s(normals);
+    out.colors = vec3s(colors);
+    out.uvs.resize(uvs.size() / 2);
+    for (size_t i = 0; i < out.uvs.size(); ++i) out.uvs[i] = {uvs[2 * i], uvs[2 * i + 1]};
+    out.indices = indices;
+    return {};
+}
+
+} // namespace
+
+EntityHandle EngineAPI::createMesh(const std::vector<float>& positions, const std::vector<uint32_t>& indices,
+                                   const std::vector<float>& normals, const std::vector<float>& uvs,
+                                   const std::vector<float>& colors, const std::string& name, std::string& error) {
+    MeshArrays arrays;
+    error = meshArrays(positions, indices, normals, uvs, colors, arrays);
+    if (!error.empty()) return NullEntity;
+    const entt::entity e = m_impl->app->createMesh(name, arrays, error);
+    return e == entt::null ? NullEntity : toHandle(e);
+}
+
+std::string EngineAPI::setMesh(EntityHandle entity, const std::vector<float>& positions,
+                               const std::vector<uint32_t>& indices, const std::vector<float>& normals,
+                               const std::vector<float>& uvs, const std::vector<float>& colors) {
+    MeshArrays arrays;
+    const std::string error = meshArrays(positions, indices, normals, uvs, colors, arrays);
+    if (!error.empty()) return error;
+    return m_impl->app->getGltfLoader().setMeshGeometry(m_impl->app->getRegistry(), toEntt(entity), arrays);
 }
 
 EntityHandle EngineAPI::createDirectionalLight(const glm::vec3& direction,

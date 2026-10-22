@@ -179,6 +179,22 @@ struct GltfLoadOptions {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// Meshes from arrays
+// ═══════════════════════════════════════════════════════════════
+
+/// Triangles for GltfSceneLoader::createMeshEntity and setMeshGeometry:
+/// every three indices a triangle, counter-clockwise from the front, or
+/// without indices every three vertices. Normals, uvs and colours are
+/// empty or one per position.
+struct MeshArrays {
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec2> uvs;
+    std::vector<glm::vec3> colors;
+    std::vector<uint32_t>  indices;
+};
+
+// ═══════════════════════════════════════════════════════════════
 // GltfSceneLoader — The loader itself
 // 載之器 — The vessel of loading
 // ═══════════════════════════════════════════════════════════════
@@ -211,7 +227,23 @@ public:
     /// materials hold its views and samplers directly.
     void releaseCachedGeometry();
 
+    /// An entity drawing `arrays` as a glTF primitive would be: in its own
+    /// space, under an identity transform, with the default material (white,
+    /// metallic 0, roughness 0.5) and shadows cast and received. Without
+    /// normals, each vertex gets the area-weighted normal of its triangles.
+    /// Returns entt::null with `error` set when the arrays do not fit.
+    entt::entity createMeshEntity(std::shared_ptr<ECS::Scene> scene, const std::string& name,
+                                  const MeshArrays& arrays, std::string& error);
+
+    /// Replace the geometry of an entity's MeshComponent with `arrays`; its
+    /// material and transform stay. The old buffers are freed once no frame
+    /// in flight draws them. Returns an error message, empty on success.
+    std::string setMeshGeometry(entt::registry& registry, entt::entity entity, const MeshArrays& arrays);
+
 private:
+    /// Check `arrays` and upload them into `out`'s geometry and bounds.
+    std::string buildMeshPrimitive(const MeshArrays& arrays, GltfPrimitive& out);
+
     VulkanDevice& m_device;
 
     // Per-load state (reset on each load call)

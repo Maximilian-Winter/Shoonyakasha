@@ -196,6 +196,11 @@ protected:
     GltfLoadResult loadGltfScene(const std::string& path,
                                   const GltfLoadOptions& opts = {});
 
+    // A mesh entity in the active scene from arrays
+    // (GltfSceneLoader::createMeshEntity); entt::null with `error` set when
+    // they do not fit.
+    entt::entity createMesh(const std::string& name, const MeshArrays& arrays, std::string& error);
+
     // Create a directional light entity
     entt::entity createDirectionalLight(const glm::vec3& direction,
                                          const glm::vec3& color = glm::vec3(1.f),

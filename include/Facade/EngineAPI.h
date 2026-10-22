@@ -233,6 +233,26 @@ public:
     GltfResult loadGltfScene(const std::string& path,
                              const GltfOptions& opts = {});
 
+    /// A mesh entity drawing triangles from arrays, flat: `positions` x, y, z
+    /// per vertex; `indices` three per triangle, counter-clockwise from the
+    /// front, or empty for every three vertices; `normals` (x, y, z), `uvs`
+    /// (u, v) and `colors` (r, g, b) empty or one per vertex. Without normals
+    /// each vertex gets the area-weighted normal of its triangles. The
+    /// entity has an identity transform, the default material (white,
+    /// metallic 0, roughness 0.5) and casts and receives shadows; it renders,
+    /// is culled and is ray traced like a loaded glTF mesh. Returns
+    /// NullEntity with `error` set when the arrays do not fit.
+    EntityHandle createMesh(const std::vector<float>& positions, const std::vector<uint32_t>& indices,
+                            const std::vector<float>& normals, const std::vector<float>& uvs,
+                            const std::vector<float>& colors, const std::string& name, std::string& error);
+
+    /// Replace the triangles of a mesh entity, as createMesh takes them; its
+    /// material and transform stay. The old geometry is freed once no frame
+    /// in flight draws it. Returns an error message, empty on success.
+    std::string setMesh(EntityHandle entity, const std::vector<float>& positions,
+                        const std::vector<uint32_t>& indices, const std::vector<float>& normals,
+                        const std::vector<float>& uvs, const std::vector<float>& colors);
+
     /// Create a directional light entity.
     EntityHandle createDirectionalLight(const glm::vec3& direction,
                                         const glm::vec3& color = glm::vec3(1.f),

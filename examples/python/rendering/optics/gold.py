@@ -34,7 +34,6 @@ import argparse
 import math
 import os
 import re
-import tempfile
 
 import shoonyakasha as sk
 from shoonyakasha import keys
@@ -170,9 +169,7 @@ def draw_plots():
     return plots
 
 
-FILES = tempfile.mkdtemp(prefix="gold_")
-SPHERE = os.path.join(FILES, "sphere.gltf")
-oc.write_gltf(SPHERE, *oc.sphere())
+SPHERE = oc.sphere()
 PLOTS = draw_plots()
 
 sk.shaders.compile_dir(oc.SHADERS)
@@ -194,7 +191,7 @@ def build_scene():
     oc.place(engine, oc.BOX, (0.0, -0.05, 0.0), (10.0, 0.1, 10.0), color=(0.06, 0.06, 0.065))
     slots = []
     for index, metal in enumerate(ORDER):
-        for entity in oc.place(engine, SPHERE, sphere_centre(index), (RADIUS,) * 3):
+        for entity in oc.place_mesh(engine, SPHERE, sphere_centre(index), (RADIUS,) * 3):
             slots.append(((entity, oc.CONDUCTOR, METALS.index(metal) + 1, args.roughness), (1.0, 0.0, 1.0, 0.0),
                           (0.0, 0.0, 0.0, 1.0)))
     oc.set_material_slots(engine, slots)

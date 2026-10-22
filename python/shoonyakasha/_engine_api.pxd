@@ -547,6 +547,12 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
                                             const vec3& color, float intensity)
         EntityHandle createPointLight(const vec3& position,
                                       const vec3& color, float intensity, float range)
+        EntityHandle createMesh(const vector[float]& positions, const vector[uint32_t]& indices,
+                                const vector[float]& normals, const vector[float]& uvs,
+                                const vector[float]& colors, const string& name, string& error) except +
+        string setMesh(EntityHandle entity, const vector[float]& positions, const vector[uint32_t]& indices,
+                       const vector[float]& normals, const vector[float]& uvs,
+                       const vector[float]& colors) except +
         vector[EntityHandle] createPointLights(const vector[float]& positions, const vector[float]& colors,
                                                const vector[float]& intensities,
                                                const vector[float]& ranges) except +
