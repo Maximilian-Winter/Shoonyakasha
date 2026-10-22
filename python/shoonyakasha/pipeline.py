@@ -13,8 +13,9 @@ This finds everything wrong in one pass and says where:
 
 Vocabulary here mirrors the C++ string tables in
 `src/Vulkan/FrameGraph/FrameGraphJson.cpp` and `include/FrameGraph/BufferFieldTypes.h`.
-Two copies of one list is a drift risk, so `tests/python/test_pipeline.py` parses
-those sources and asserts they still agree.
+When the engine extension is installed, validation also loads the pipeline with
+the engine's own loader and reports what it rejects; `tests/python/test_utilities.py`
+checks that the two agree.
 """
 
 import difflib
@@ -72,7 +73,7 @@ FIELD_TYPES = frozenset({
 PACKING_RULES = frozenset({"std140", "std430", "scalar", "push_constant"})
 
 #: How a buffer layout is bound. Descriptor types the JSON accepts for a layout.
-BUFFER_USAGES = frozenset({"uniform_buffer", "storage_buffer", "push_constant"})
+BUFFER_USAGES = frozenset({"uniform_buffer", "storage_buffer", "push_constant", "descriptor_set"})
 
 #: Usages that write a colour attachment, for the present check.
 _COLOUR_WRITES = {"color_write", "color_attachment_write",
@@ -216,12 +217,8 @@ def validate_json(document, base_dir=None, source="<json>"):
     # ── buffer layouts ─────────────────────────────────────────
     # A JSON object keyed by layout name, so iterate items rather than indices.
     layouts = document.get("bufferLayouts", {})
-    if isinstance(layouts, list):
-        # Tolerated: a list of objects each carrying its own "name".
-        layouts = {entry.get("name", "<unnamed>"): entry
-                   for entry in layouts if isinstance(entry, dict)}
     if not isinstance(layouts, dict):
-        problems.append(Problem(source, "'bufferLayouts' must be an object"))
+        problems.append(Problem(source, "'bufferLayouts' must be an object keyed by layout name"))
         layouts = {}
 
     for name, layout in layouts.items():
@@ -253,13 +250,15 @@ def validate_json(document, base_dir=None, source="<json>"):
                                         "must be an object"))
                 continue
             field_where = "%s field '%s'" % (where, field.get("name", field_index))
-            field_type = field.get("type")
-            if field_type is None:
-                problems.append(Problem(field_where, "missing 'type'"))
+            if "name" not in field:
+                problems.append(Problem(field_where, "missing 'name'"))
+            field_type = str(field.get("type", "float"))
+            if "[" in field_type:
+                problems.append(Problem(field_where, "type '%s' has array syntax" % field_type,
+                                        hint="use \"type\": \"%s\" with \"arrayCount\""
+                                             % field_type.split("[", 1)[0]))
             else:
-                # "vec4[16]" -> "vec4"; the array suffix is checked separately.
-                base_type = str(field_type).split("[", 1)[0]
-                _check_enum(base_type, FIELD_TYPES, field_where, "type", problems)
+                _check_enum(field_type, FIELD_TYPES, field_where, "type", problems)
 
     # ── descriptor set layouts ─────────────────────────────────
     set_layouts = document.get("descriptorSetLayouts", {})
@@ -464,7 +463,20 @@ def validate_json(document, base_dir=None, source="<json>"):
                 hint="the compiler will assume the last pass writing a "
                      "presentable image meant to, and warn at runtime"))
 
+    error = _engine_loader_error(document)
+    if error:
+        problems.append(Problem(source, "the engine's loader rejects it: %s" % error))
     return problems
+
+
+def _engine_loader_error(document):
+    """The engine's loader error for `document`, or None when it loads or the
+    extension is not installed."""
+    try:
+        from ._shoonyakasha import _check_pipeline_json
+    except ImportError:
+        return None
+    return _check_pipeline_json(json.dumps(document)) or None
 
 
 def validate(path):

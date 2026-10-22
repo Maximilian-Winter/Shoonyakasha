@@ -54,6 +54,11 @@ bool videoRecordingAvailable();
 /// The ffmpeg that would be used, or empty if none was found.
 std::string findFfmpeg();
 
+/// Load pipeline JSON text as the engine does, for a device with every
+/// capability, without compiling it. Returns the loader's error message,
+/// empty when it loads.
+std::string checkPipelineJson(const std::string& text);
+
 
 /// A completed readback (EngineAPI::getReadback). `data` stays valid until
 /// the next frame begins.

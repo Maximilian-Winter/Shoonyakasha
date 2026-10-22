@@ -757,6 +757,16 @@ std::string findFfmpeg() {
     return VideoRecorder::findFfmpeg();
 }
 
+std::string checkPipelineJson(const std::string& text) {
+    try {
+        FrameGraph::FrameGraphBuilder builder;
+        FrameGraph::loadGraphFromJson(builder, nlohmann::json::parse(text));
+        return {};
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+}
+
 bool EngineAPI::captureScreenshot(const std::string& path) {
     return m_impl->app->captureScreenshot(path);
 }

@@ -76,7 +76,7 @@ for problem in sk.pipeline.validate("pipeline.json"):
 sk.pipeline.check("pipeline.json")  # raises ValueError on errors
 ```
 
-The Python validator is a useful preflight, not a complete schema or proof of Vulkan correctness. The C++ parser/compiler and runtime validation are authoritative; see [validator differences](../reference/pipeline-json.md#validation-and-export).
+The validator finds every problem it knows in one pass and, with the engine extension installed, also runs the engine's own loader. Shader interfaces and device features are checked when the engine compiles the graph; see [validation](../reference/pipeline-json.md#validation-and-export).
 
 The default application uses single-command-buffer execution. Queue declarations and native multi-queue APIs do not by themselves guarantee asynchronous execution through the facade.
 

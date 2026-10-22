@@ -54,7 +54,7 @@ from ._engine_api cimport (
     make_float2_callback, make_int_bool_callback,
     wrap_py_object, unwrap_py_object, make_system_update_callback,
     CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
-    videoRecordingAvailable, findFfmpeg, Readback,
+    videoRecordingAvailable, findFfmpeg, checkPipelineJson, Readback,
 )
 from libcpp.memory cimport shared_ptr
 
@@ -2547,3 +2547,9 @@ def find_ffmpeg():
     Searched in order: $FFMPEG, PATH, then the usual install locations.
     """
     return findFfmpeg().decode('utf-8')
+
+
+def _check_pipeline_json(str text):
+    """The engine's loader error for pipeline JSON text, '' when it loads.
+    shoonyakasha.pipeline.validate reports it."""
+    return checkPipelineJson(text.encode('utf-8')).decode('utf-8')

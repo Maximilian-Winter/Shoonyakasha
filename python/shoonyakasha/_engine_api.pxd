@@ -608,3 +608,4 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
     # check for ffmpeg before it decides to record.
     cbool videoRecordingAvailable()
     string findFfmpeg()
+    string checkPipelineJson(const string& text) except +

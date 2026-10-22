@@ -10,6 +10,7 @@ and `assets.py` restate vocabulary and rules that are defined in C++; those
 tests parse the C++ sources and fail when the copies disagree.
 """
 
+import json
 import math
 import os
 import re
@@ -430,6 +431,13 @@ class VocabularyMatchesTheEngine(unittest.TestCase):
         in_cpp = set(re.findall(r'== "([a-z0-9_]+)"', rules))
         self.assertEqual(in_cpp, set(pipeline.PACKING_RULES))
 
+    def test_buffer_usages_match_the_cpp_parser(self):
+        source = (REPO / "src/Vulkan/FrameGraph/FrameGraphJson.cpp").read_text(
+            encoding="utf-8")
+        block = source.split("// Parse usage type", 1)[1].split("parsePackingRule", 1)[0]
+        in_cpp = set(re.findall(r'usageStr == "([a-z_]+)"', block))
+        self.assertEqual(in_cpp, set(pipeline.BUFFER_USAGES))
+
     def test_asset_marker_and_env_var_match_the_cpp_resolver(self):
         source = (REPO / "src/Core/AssetPaths.cpp").read_text(encoding="utf-8")
 
@@ -439,6 +447,50 @@ class VocabularyMatchesTheEngine(unittest.TestCase):
         self.assertEqual(marker, assets.MARKER_FILE,
                          "assets.MARKER_FILE has drifted from AssetPaths.cpp")
         self.assertEqual(env_var, assets.ENV_VAR)
+
+
+class ValidatorAgreesWithTheEngineLoader(unittest.TestCase):
+    """Each case is rejected by both the Python checks and the engine's loader,
+    or by neither. Needs the engine extension."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from shoonyakasha._shoonyakasha import _check_pipeline_json  # noqa: F401
+        except ImportError as exc:
+            raise unittest.SkipTest("engine extension: %s" % exc)
+
+    @staticmethod
+    def with_layout(layout):
+        document = json.loads(json.dumps(PipelineValidation.MINIMAL))
+        document["bufferLayouts"] = layout
+        return document
+
+    def test_cases(self):
+        field = {"name": "tint", "type": "vec4"}
+        cases = {
+            "minimal": (PipelineValidation.MINIMAL, True),
+            "a uniform buffer": (self.with_layout({"U": {"fields": [field]}}), True),
+            "descriptor_set usage": (self.with_layout(
+                {"T": {"usage": "descriptor_set", "textures": [{"name": "albedo"}]}}), True),
+            "a field without a type": (self.with_layout({"U": {"fields": [{"name": "x"}]}}), True),
+            "arrayCount": (self.with_layout(
+                {"U": {"fields": [dict(field, arrayCount=16)]}}), True),
+            "an unknown usage": (self.with_layout({"U": {"usage": "uniform_bufer", "fields": [field]}}), False),
+            "layouts as a list": (self.with_layout([dict(name="U", fields=[field])]), False),
+            "array syntax in a type": (self.with_layout(
+                {"U": {"fields": [{"name": "x", "type": "vec4[16]"}]}}), False),
+            "a field without a name": (self.with_layout({"U": {"fields": [{"type": "vec4"}]}}), False),
+            "an unknown field type": (self.with_layout({"U": {"fields": [{"name": "x", "type": "vec5"}]}}), False),
+            "an unknown packing": (self.with_layout({"U": {"packing": "std999", "fields": [field]}}), False),
+        }
+        for name, (document, loads) in cases.items():
+            with self.subTest(name):
+                problems = pipeline.validate_json(document, source="test.json")
+                engine = [p for p in problems if p.message.startswith("the engine's loader")]
+                python = [p for p in problems if p.is_error and p not in engine]
+                self.assertEqual(loads, not engine, engine)
+                self.assertEqual(loads, not python, python)
 
 
 class KeyCodes(unittest.TestCase):

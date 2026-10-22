@@ -1228,6 +1228,9 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 layout.usage = BufferUsageType::StorageBuffer;
             } else if (usageStr == "descriptor_set") {
                 layout.usage = BufferUsageType::DescriptorSet;
+            } else {
+                throw std::runtime_error("Buffer layout '" + layout.name + "': unknown usage '" + usageStr +
+                                         "'; one of uniform_buffer, storage_buffer, push_constant, descriptor_set");
             }
 
             // A missing key defaults to std140. An unrecognised value throws.

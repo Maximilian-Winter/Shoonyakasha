@@ -20,7 +20,6 @@ This audit records findings checked against the source during the September 2026
 | No public raycast/constraint API | [PhysicsAPI.h](../include/Facade/PhysicsAPI.h), [PhysicsSystem.h](../include/ECS/PhysicsSystem.h) |
 | Text label destruction can leave glyphs | [SceneAPI.h](../include/Facade/SceneAPI.h): use text visibility before destruction |
 | Texture option gaps | [GltfSceneLoader.cpp](../src/Resources/GltfSceneLoader.cpp): maxTextureSize warns, srgbAlbedo is not consulted |
-| Python validator/native parser mismatch | [Pipeline reference](reference/pipeline-json.md#validation-and-export): layout shapes/types and descriptor-set usage differ |
 | Builder JSON export omits authoring data | [FrameGraphJson.cpp](../src/Vulkan/FrameGraph/FrameGraphJson.cpp): retain authored pipelines |
 | Facade has no async submission loop | [ApplicationBase.cpp](../src/App/ApplicationBase.cpp): multi-queue execution requires native integration |
 

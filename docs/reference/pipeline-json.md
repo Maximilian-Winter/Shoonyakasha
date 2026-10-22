@@ -407,7 +407,7 @@ Image resources also accept `target`, `readback`, and `save`; resource-level pol
 
 ## Validation and export
 
-`sk.pipeline.validate(path)` returns diagnostic objects. `check(path, warnings_are_errors=False)` raises ValueError on errors and otherwise returns the diagnostic list; it does **not** return a success boolean. Neither verifies shader interfaces, device features, or every parser key.
+`sk.pipeline.validate(path)` returns diagnostic objects. `check(path, warnings_are_errors=False)` raises ValueError on errors and otherwise returns the diagnostic list; it does **not** return a success boolean. Neither verifies shader interfaces or device features.
 
 The native compiler does verify shader interfaces, at startup. After compiling buffer layouts it reflects every pass's SPIR-V (with SPIRV-Reflect) and compares it with the JSON:
 
@@ -417,6 +417,6 @@ The native compiler does verify shader interfaces, at startup. After compiling b
 
 Blocks ending in a runtime array, and arrays of structs, are not compared member by member. A mismatch fails compilation with one line per problem, naming the pass, the shader file and the member, so `Engine(...)` raises instead of rendering from misread bytes.
 
-Known differences: the Python validator tolerates layout arrays and type strings such as `vec4[16]`, while native declarations use named layout objects and `arrayCount`. Conversely, native `descriptor_set` layout usage is not in the Python validator's buffer-usage vocabulary. Treat disagreements as tooling limitations and check native behavior.
+When the engine extension is installed, `validate` also loads the pipeline with the engine's own loader, for a device with every capability, and reports its error as one more problem. Shader interfaces are checked only when the engine compiles the graph.
 
 The loader does not enforce `version` 2/3. Builder serialization currently writes version 1 and omits declarations such as buffer layouts/entity bindings and some execution/data-flow information. Diagnostic graph export is a separate representation. Neither is a safe substitute for keeping authored pipeline JSON under version control.
