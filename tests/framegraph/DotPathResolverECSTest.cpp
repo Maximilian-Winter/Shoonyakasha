@@ -236,6 +236,51 @@ TEST_F(DotPathResolverECS, ResolveScene_CameraFov) {
     EXPECT_FLOAT_EQ(v.as<float>(), 60.0f);
 }
 
+TEST_F(DotPathResolverECS, NamedCameras_ResolvedByName) {
+    const entt::entity overhead = registry.create();
+    registry.emplace<NameComponent>(overhead, "Overhead");
+    registry.emplace<TransformComponent>(overhead).position = glm::vec3(0.0f, 20.0f, 0.0f);
+    auto& cam = registry.emplace<CameraComponent>(overhead);
+    cam.fov = 40.0f;
+    cam.aspectRatio = 1.0f;
+    transformSystem.update(registry, 0.016f);
+    cameraSystem.update(registry, 0.016f);
+    scene.updateFromRegistry(registry);
+
+    // The main camera has no name here, so only the named one is listed.
+    ASSERT_EQ(scene.cameras.size(), 1u);
+    const auto position = resolver.resolveScene("scene.cameras.Overhead.position", scene);
+    ASSERT_TRUE(position.isVec3());
+    TestHelpers::ExpectVec3Near(position.as<glm::vec3>(), glm::vec3(0.0f, 20.0f, 0.0f));
+    EXPECT_FLOAT_EQ(resolver.resolveScene("scene.cameras.Overhead.fov", scene).as<float>(), 40.0f);
+    EXPECT_FLOAT_EQ(resolver.resolveScene("scene.cameras.Overhead.aspect", scene).as<float>(), 1.0f);
+    const auto& values = scene.cameras.at("Overhead");
+    TestHelpers::ExpectMat4Near(values.viewProjection, values.projection * values.view);
+    // First frame: last frame's is this frame's.
+    TestHelpers::ExpectMat4Near(values.prevViewProjection, values.viewProjection);
+    EXPECT_FALSE(resolver.resolveScene("scene.cameras.Missing.view", scene).isValid());
+    EXPECT_FALSE(resolver.resolveScene("scene.cameras.Overhead", scene).isValid());
+    EXPECT_EQ(resolver.validatePath("scene.cameras.Overhead.view"), "");
+
+    // The next frame keeps the last frame's view-projection.
+    const glm::mat4 before = values.viewProjection;
+    registry.get<TransformComponent>(overhead).position = glm::vec3(5.0f, 20.0f, 0.0f);
+    registry.get<TransformComponent>(overhead).isDirty = true;
+    transformSystem.update(registry, 0.016f);
+    cameraSystem.update(registry, 0.016f);
+    scene.updateFromRegistry(registry);
+    const auto& moved = scene.cameras.at("Overhead");
+    TestHelpers::ExpectMat4Near(moved.prevViewProjection, before);
+    TestHelpers::ExpectVec3Near(moved.position, glm::vec3(5.0f, 20.0f, 0.0f));
+}
+
+TEST_F(DotPathResolverECS, MainCamera_PathsUnchangedByNamedCameras) {
+    const auto view = resolver.resolveScene("scene.camera.nearFarFovAspect", scene);
+    ASSERT_TRUE(view.isVec4());
+    TestHelpers::ExpectVec4Near(view.as<glm::vec4>(),
+                                glm::vec4(0.1f, 500.0f, 60.0f, scene.cameraAspect));
+}
+
 // ═══════════════════════════════════════════════════════════════
 // resolveScene — Time Paths
 // ═══════════════════════════════════════════════════════════════

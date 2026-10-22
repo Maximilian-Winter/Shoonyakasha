@@ -42,11 +42,35 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
             this->cameraFov = cam.fov;
             this->cameraNearPlane = cam.nearPlane;
             this->cameraFarPlane = cam.farPlane;
+            this->cameraAspect = cam.aspectRatio;
             this->cameraPrevViewProjection = hadCamera ? previousViewProjection : cameraViewProjection;
             foundCamera = true;
 
             break;
         }
+    }
+
+    std::unordered_map<std::string, CameraValues> previousCameras = std::move(cameras);
+    cameras.clear();
+    for (auto entity : cameraEntities) {
+        const auto* name = registry.try_get<ECS::NameComponent>(entity);
+        if (!name || name->name.empty()) continue;
+        const auto& cam = cameraEntities.get<ECS::CameraComponent>(entity);
+        CameraValues& values = cameras[name->name];
+        values.view = cam.viewMatrix;
+        values.projection = cam.projectionMatrix;
+        values.projection[1][1] *= -1;  // Vulkan Y-flip
+        values.viewProjection = values.projection * values.view;
+        values.invView = glm::inverse(values.view);
+        values.invProj = glm::inverse(values.projection);
+        values.position = glm::vec3(values.invView[3]);
+        values.fov = cam.fov;
+        values.nearPlane = cam.nearPlane;
+        values.farPlane = cam.farPlane;
+        values.aspect = cam.aspectRatio;
+        const auto previous = previousCameras.find(name->name);
+        values.prevViewProjection = previous != previousCameras.end() ? previous->second.viewProjection
+                                                                      : values.viewProjection;
     }
 
     hasCamera = foundCamera;
@@ -248,6 +272,32 @@ ResolvedValue DotPathResolver::resolveEntity(const std::string& path,
 // Scene Path Resolution
 // ============================================================================
 
+namespace {
+
+/// A scene.camera or scene.cameras.<name> property of `camera`.
+ResolvedValue cameraProperty(const SceneContext::CameraValues& camera, std::string_view property) {
+    if (property == "view") return ResolvedValue(camera.view);
+    if (property == "projection") return ResolvedValue(camera.projection);
+    if (property == "viewProjection") return ResolvedValue(camera.viewProjection);
+    if (property == "prevViewProjection") return ResolvedValue(camera.prevViewProjection);
+    if (property == "invView") return ResolvedValue(camera.invView);
+    if (property == "invProj") return ResolvedValue(camera.invProj);
+    if (property == "position") return ResolvedValue(camera.position);
+    if (property == "fov") return ResolvedValue(camera.fov);
+    if (property == "nearPlane") return ResolvedValue(camera.nearPlane);
+    if (property == "farPlane") return ResolvedValue(camera.farPlane);
+    if (property == "aspect") return ResolvedValue(camera.aspect);
+
+    // Composite paths for shader-compatible packed formats
+    if (property == "positionVec4") return ResolvedValue(glm::vec4(camera.position, 1.0f));
+    if (property == "nearFarFovAspect") {
+        return ResolvedValue(glm::vec4(camera.nearPlane, camera.farPlane, camera.fov, camera.aspect));
+    }
+    return ResolvedValue();
+}
+
+} // namespace
+
 ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const SceneContext& scene) const {
     // Strip "scene." prefix
     auto subpath = stripPrefix(path, "scene.");
@@ -258,25 +308,15 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
     // ─── Camera paths ───────────────────────────────────────────
     if (parts[0] == "camera") {
         if (parts.size() < 2) return ResolvedValue();
+        return cameraProperty(scene.mainCamera(), parts[1]);
+    }
 
-        if (parts[1] == "view") return ResolvedValue(scene.cameraView);
-        if (parts[1] == "projection") return ResolvedValue(scene.cameraProjection);
-        if (parts[1] == "viewProjection") return ResolvedValue(scene.cameraViewProjection);
-        if (parts[1] == "prevViewProjection") return ResolvedValue(scene.cameraPrevViewProjection);
-        if (parts[1] == "invView") return ResolvedValue(scene.cameraInvView);
-        if (parts[1] == "invProj") return ResolvedValue(scene.cameraInvProj);
-        if (parts[1] == "position") return ResolvedValue(scene.cameraPosition);
-        if (parts[1] == "fov") return ResolvedValue(scene.cameraFov);
-        if (parts[1] == "nearPlane") return ResolvedValue(scene.cameraNearPlane);
-        if (parts[1] == "farPlane") return ResolvedValue(scene.cameraFarPlane);
-        if (parts[1] == "aspect") return ResolvedValue(scene.cameraAspect);
-
-        // Composite paths for shader-compatible packed formats
-        if (parts[1] == "positionVec4")
-            return ResolvedValue(glm::vec4(scene.cameraPosition, 1.0f));
-        if (parts[1] == "nearFarFovAspect")
-            return ResolvedValue(glm::vec4(scene.cameraNearPlane, scene.cameraFarPlane,
-                                           scene.cameraFov, scene.cameraAspect));
+    // ─── Named camera paths: scene.cameras.<name>.<property> ───
+    if (parts[0] == "cameras") {
+        if (parts.size() < 3) return ResolvedValue();
+        const auto camera = scene.cameras.find(std::string(parts[1]));
+        if (camera == scene.cameras.end()) return ResolvedValue();
+        return cameraProperty(camera->second, parts[2]);
     }
 
     // ─── Environment paths ──────────────────────────────────────
@@ -808,7 +848,7 @@ std::string DotPathResolver::validatePath(const std::string& path) const {
         // "custom" were missing, so validatePath rejected two categories that
         // resolve perfectly well — one reason it was never wired into anything.
         static const std::vector<std::string> validCategories = {
-            "camera", "environment", "time", "screen", "lights", "shadows", "custom"
+            "camera", "cameras", "environment", "time", "screen", "lights", "shadows", "custom"
         };
         std::string category(parts[1]);
         // scene.lights[0].positionType arrives as "lights[0]"

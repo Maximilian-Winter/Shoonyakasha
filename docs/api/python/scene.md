@@ -75,6 +75,8 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_camera_far(entity, far_plane)` | None | Calls native `setCameraFar`; see the class contract above. |
 | `get_camera_ortho_size(entity)` | float | Calls native `getCameraOrthoSize`; see the class contract above. |
 | `set_camera_ortho_size(entity, size)` | None | Calls native `setCameraOrthoSize`; see the class contract above. |
+| `get_camera_aspect(entity)` | float | The width / height the camera projects at; 0 follows the window. |
+| `set_camera_aspect(entity, aspect)` | None | Project at `aspect` instead of the window's shape, for a camera rendering into an image or a viewport; 0 follows the window. See [more cameras](../../guides/cameras-and-controllers.md#more-cameras). |
 | `is_camera_main(entity)` | bool | Calls native `isCameraMain`; see the class contract above. |
 | `set_camera_main(entity, is_main)` | None | Calls native `setCameraMain`; see the class contract above. |
 | `get_light_type(entity)` | int | Calls native `getLightType`; see the class contract above. |

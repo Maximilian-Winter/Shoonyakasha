@@ -2245,6 +2245,9 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                         pass.execution.view = CullView::None;
                     } else if (view == "camera") {
                         pass.execution.view = CullView::Camera;
+                    } else if (view.starts_with("cameras.") && view.size() > 8) {
+                        pass.execution.view = CullView::NamedCamera;
+                        pass.execution.viewName = view.substr(8);
                     } else if (view.starts_with(cascadePrefix) && view.ends_with("]")) {
                         const std::string digits = view.substr(cascadePrefix.size(),
                                                                view.size() - cascadePrefix.size() - 1);
@@ -2275,8 +2278,9 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                         pass.execution.viewIndex = *face;
                     } else {
                         throw std::runtime_error("Pass '" + pass.name + "': unknown view '" + view +
-                                                 "' (expected camera, none, shadows.sun.cascades[N], "
-                                                 "shadows.spot[N] or shadows.point.faces[N])");
+                                                 "' (expected camera, cameras.<name>, none, "
+                                                 "shadows.sun.cascades[N], shadows.spot[N] or "
+                                                 "shadows.point.faces[N])");
                     }
                 }
 

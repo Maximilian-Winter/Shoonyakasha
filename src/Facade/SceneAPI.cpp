@@ -378,6 +378,18 @@ void SceneAPI::setCameraOrthoSize(EntityHandle entity, float size) {
     if (c) c->orthoSize = size;
 }
 
+float SceneAPI::getCameraAspect(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return 0.0f;
+    auto* c = m_impl->registry.try_get<ECS::CameraComponent>(toEntt(entity));
+    return c ? c->fixedAspectRatio : 0.0f;
+}
+
+void SceneAPI::setCameraAspect(EntityHandle entity, float aspect) {
+    if (!m_impl->valid(entity)) return;
+    auto* c = m_impl->registry.try_get<ECS::CameraComponent>(toEntt(entity));
+    if (c) c->fixedAspectRatio = std::max(aspect, 0.0f);
+}
+
 bool SceneAPI::isCameraMain(EntityHandle entity) const {
     if (!m_impl->valid(entity)) return false;
     auto* c = m_impl->registry.try_get<ECS::CameraComponent>(toEntt(entity));

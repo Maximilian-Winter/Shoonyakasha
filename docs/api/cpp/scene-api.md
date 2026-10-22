@@ -76,6 +76,8 @@ float getCameraFar(EntityHandle entity) const;
 void setCameraFar(EntityHandle entity, float farPlane);
 float getCameraOrthoSize(EntityHandle entity) const;
 void setCameraOrthoSize(EntityHandle entity, float size);
+float getCameraAspect(EntityHandle entity) const;     // width / height; 0 follows the window
+void setCameraAspect(EntityHandle entity, float aspect);
 bool isCameraMain(EntityHandle entity) const;
 void setCameraMain(EntityHandle entity, bool isMain);
 LightType getLightType(EntityHandle entity) const;

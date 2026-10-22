@@ -512,7 +512,8 @@ enum class CullView {
     Camera,      // "camera": the main camera's frustum
     SunCascade,     // "shadows.sun.cascades[N]": sun cascade N's light volume
     SpotShadow,     // "shadows.spot[N]": spot shadow slot N's cone
-    PointShadowFace // "shadows.point.faces[N]": face N % 6 of point shadow slot N / 6
+    PointShadowFace, // "shadows.point.faces[N]": face N % 6 of point shadow slot N / 6
+    NamedCamera      // "cameras.<name>": the frustum of the camera entity with that name
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -600,6 +601,7 @@ struct ExecutionDesc {
     AlphaFilter alphaFilter = AlphaFilter::Any;  // Narrow by material alpha mode
     CullView    view = CullView::Default;        // What to cull and sort against
     uint32_t    viewIndex = 0;                   // Cascade, spot slot or point face for the shadow views
+    std::string viewName;                        // The camera's name for CullView::NamedCamera
     int32_t     lightIndex = -1;            // For shadow_casters: which light's VP to use
 
     // Common options

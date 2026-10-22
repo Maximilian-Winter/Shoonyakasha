@@ -187,8 +187,34 @@ struct SceneContext {
     float cameraFov = 60.0f;
     float cameraNearPlane = 0.1f;
     float cameraFarPlane = 1000.0f;
-    float cameraAspect = 1.77f;                          // screenWidth / screenHeight
+    float cameraAspect = 1.77f;                          // the main camera's width / height
     bool hasCamera = false;                              // a main camera was found last update
+
+    // ─── Named cameras ──────────────────────────────────────────
+    // Every camera entity with a name, by that name, filled by
+    // updateFromRegistry like the main camera above. Read by
+    // "scene.cameras.<name>.*" dot-paths and "cameras.<name>" pass views.
+    struct CameraValues {
+        glm::mat4 view{1.0f};
+        glm::mat4 projection{1.0f};            // Vulkan Y-flipped
+        glm::mat4 viewProjection{1.0f};
+        glm::mat4 prevViewProjection{1.0f};    // last frame's; the current one in its first frame
+        glm::mat4 invView{1.0f};
+        glm::mat4 invProj{1.0f};
+        glm::vec3 position{0.0f};              // in the world
+        float fov = 60.0f;
+        float nearPlane = 0.1f;
+        float farPlane = 1000.0f;
+        float aspect = 1.77f;                  // width / height
+    };
+    std::unordered_map<std::string, CameraValues> cameras;
+
+    /// The main camera's values above, as CameraValues.
+    CameraValues mainCamera() const {
+        return {cameraView, cameraProjection, cameraViewProjection, cameraPrevViewProjection,
+                cameraInvView, cameraInvProj, cameraPosition, cameraFov, cameraNearPlane,
+                cameraFarPlane, cameraAspect};
+    }
 
     // Environment (IBL textures)
     const SceneEnvironment* environment = nullptr;

@@ -134,6 +134,12 @@ TEST(ExecutionView, DefaultsAndNamedViewsParse) {
     EXPECT_EQ(b.getPassDeclarations()[0].execution.viewIndex, 3u);
 }
 
+TEST(ExecutionView, NamedCameraViewsParse) {
+    const auto b = load(graphWithExecution({{"type", "opaque_geometry"}, {"view", "cameras.Overhead"}}));
+    EXPECT_EQ(b.getPassDeclarations()[0].execution.view, FrameGraph::CullView::NamedCamera);
+    EXPECT_EQ(b.getPassDeclarations()[0].execution.viewName, "Overhead");
+}
+
 TEST(ExecutionView, RepeatedCascadePassesEachGetTheirCascade) {
     const auto b = load(graphWithExecution(
         {{"type", "shadow_casters"}, {"view", "shadows.sun.cascades[{cascade}]"}},
@@ -151,6 +157,7 @@ TEST(ExecutionView, BadViewsFailAtLoad) {
              json{{"type", "shadow_casters"}, {"view", "shadows.sun.cascades[4]"}},
              json{{"type", "shadow_casters"}, {"view", "shadows.sun.cascades[x]"}},
              json{{"type", "shadow_casters"}, {"view", "sky"}},
+             json{{"type", "opaque_geometry"}, {"view", "cameras."}},
              json{{"type", "fullscreen"}, {"view", "camera"}}}) {
         FrameGraph::FrameGraphBuilder b;
         EXPECT_THROW(FrameGraph::loadGraphFromJson(b, graphWithExecution(execution)), std::runtime_error)

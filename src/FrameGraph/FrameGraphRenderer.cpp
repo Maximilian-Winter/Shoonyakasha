@@ -170,6 +170,15 @@ FrameGraphRenderer::ViewCull FrameGraphRenderer::resolveView(
             view.cull = true;
             view.frustum = frustumFromViewProj(scene.cameraViewProjection, ClipDepth::MinusOneToOne);
         }
+    } else if (kind == CullView::NamedCamera) {
+        const auto camera = scene.cameras.find(passDecl.execution.viewName);
+        if (camera == scene.cameras.end()) {
+            view.skip = true;
+        } else {
+            view.cull = true;
+            view.frustum = frustumFromViewProj(camera->second.viewProjection, ClipDepth::MinusOneToOne);
+            view.origin = camera->second.position;
+        }
     } else if (kind == CullView::SunCascade) {
         const auto& sun = scene.sunShadow;
         if (sun.cascades.valid) {

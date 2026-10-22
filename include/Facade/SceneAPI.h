@@ -141,6 +141,12 @@ public:
     float getCameraOrthoSize(EntityHandle entity) const;
     void setCameraOrthoSize(EntityHandle entity, float size);
 
+    /// The width / height the camera projects at; 0, the default, follows
+    /// the window. A camera rendering into an image or a viewport of another
+    /// shape sets that shape.
+    float getCameraAspect(EntityHandle entity) const;
+    void setCameraAspect(EntityHandle entity, float aspect);
+
     bool isCameraMain(EntityHandle entity) const;
     void setCameraMain(EntityHandle entity, bool isMain);
 

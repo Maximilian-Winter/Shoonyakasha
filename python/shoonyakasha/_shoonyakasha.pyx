@@ -435,6 +435,16 @@ cdef class Scene:
     def set_camera_ortho_size(self, uint32_t entity, float size):
         self._ptr.setCameraOrthoSize(entity, size)
 
+    def get_camera_aspect(self, uint32_t entity):
+        """The width / height the camera projects at; 0 follows the window."""
+        return self._ptr.getCameraAspect(entity)
+
+    def set_camera_aspect(self, uint32_t entity, float aspect):
+        """Project at `aspect` (width / height) instead of the window's shape,
+        for a camera rendering into an image or a viewport; 0 follows the
+        window again."""
+        self._ptr.setCameraAspect(entity, aspect)
+
     def is_camera_main(self, uint32_t entity):
         return self._ptr.isCameraMain(entity)
 

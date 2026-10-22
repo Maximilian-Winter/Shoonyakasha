@@ -128,6 +128,9 @@ struct CameraComponent {
     float nearPlane = 0.1f;
     float farPlane = 1000.0f;
     float aspectRatio = 16.0f / 9.0f;
+    // The width / height the camera projects at; 0: the window's, which
+    // aspectRatio follows every frame.
+    float fixedAspectRatio = 0.0f;
 
     // Orthographic specific
     float orthoSize = 10.0f;

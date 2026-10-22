@@ -617,10 +617,11 @@ void ApplicationBase::update() {
     if (m_swapChain) {
         VkExtent2D extent = m_swapChain->getSwapChainExtent();
         m_screenSize = glm::vec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
-        // Cameras project at the shape of the swapchain.
+        // Cameras project at the shape of the swapchain, or at their fixed one.
         if (extent.width > 0 && extent.height > 0) {
             for (auto [entity, camera] : m_activeScene->getRegistry().view<ECS::CameraComponent>().each()) {
-                camera.aspectRatio = m_screenSize.x / m_screenSize.y;
+                camera.aspectRatio = camera.fixedAspectRatio > 0.0f ? camera.fixedAspectRatio
+                                                                    : m_screenSize.x / m_screenSize.y;
             }
         }
     }
