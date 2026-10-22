@@ -82,7 +82,15 @@ target_include_directories(Shoonyakasha SYSTEM
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace
 )
+
+# MikkTSpace tangent generation (Resources/MeshTangents.cpp). Its own object
+# library, so the engine's warning level below does not apply to it; the
+# objects go into the engine library.
+add_library(ShoonyakashaMikkTSpace OBJECT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace/mikktspace.c")
+set_target_properties(ShoonyakashaMikkTSpace PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_sources(Shoonyakasha PRIVATE $<TARGET_OBJECTS:ShoonyakashaMikkTSpace>)
 
 # BULLET_LIBRARIES expands to vcpkg's imported target names (BulletDynamics,
 # BulletCollision, LinearMath, ...), not to file paths — so it is safe to

@@ -39,11 +39,13 @@ Default loading preserves the node tree and shares mesh-space GPU buffers among 
 
 Use a pipeline matching the loaded geometry: PBR shaders and IBL resources for PBR/IBL scenes; skinned vertex formats, skeleton bindings, and execution for animated meshes. Loading an animation does not make an ordinary static-mesh pass perform skinning.
 
+Every vertex carries a tangent for normal maps (the [vertex layouts](../reference/pipeline-json.md#vertex-formats)). The loader reads a primitive's `TANGENT` attribute, or generates MikkTSpace tangents from its `TEXCOORD_0` when it has none; a vertex whose triangles get different tangents, on a UV seam or where UVs are mirrored, becomes one vertex per tangent. Primitives without uvs get no tangent.
+
 See [materials](materials.md), [lighting/IBL](lighting-and-ibl.md), and [animation](animation.md). glTF loading does not provide a documented physics-metadata import contract; configure physics separately.
 
 ## Meshes from arrays
 
-`engine.create_mesh(positions, indices=None, normals=None, uvs=None, colors=None, name="")` makes an entity from triangles generated in code, without a file:
+`engine.create_mesh(positions, indices=None, normals=None, uvs=None, colors=None, name="", tangents=None)` makes an entity from triangles generated in code, without a file:
 
 ```python
 import numpy as np
@@ -53,6 +55,6 @@ quad = engine.create_mesh(positions, indices=[0, 3, 1, 1, 3, 2], uvs=[(0, 0), (0
 engine.scene.set_material_vec4(quad, "baseColorFactor", (0.8, 0.2, 0.2, 1.0))
 ```
 
-Positions, normals and colours are (x, y, z) or (r, g, b) per vertex, uvs (u, v): lists of tuples, N x k arrays or flat lists. Every three indices make a triangle, counter-clockwise seen from its front; without indices every three vertices do. Without normals each vertex gets the area-weighted normal of the triangles it is in: smooth where triangles share vertices, flat where they do not. Without colours the vertices are white; the default pipeline multiplies its albedo by them, as it does a glTF file's `COLOR_0`.
+Positions, normals and colours are (x, y, z) or (r, g, b) per vertex, uvs (u, v): lists of tuples, N x k arrays or flat lists. Every three indices make a triangle, counter-clockwise seen from its front; without indices every three vertices do. Without normals each vertex gets the area-weighted normal of the triangles it is in: smooth where triangles share vertices, flat where they do not. Without colours the vertices are white; the default pipeline multiplies its albedo by them, as it does a glTF file's `COLOR_0`. Tangents are (x, y, z, w) per vertex, as in a glTF file's `TANGENT`; without them a mesh with uvs gets MikkTSpace tangents, as a loaded one does.
 
 The entity is like one primitive of a loaded glTF file: it has an identity transform, the default material (white, metallic 0, roughness 0.5) and casts and receives shadows; it is drawn by the same passes, culled by its bounds, and on a device with ray queries traced. `engine.set_mesh(entity, positions, ...)` replaces its triangles, keeping material and transform; the old geometry is freed once no frame in flight draws it. Both upload by waiting for the GPU, so a mesh that changes every frame costs a wait every frame. Arrays that do not fit, such as an index past the last vertex, raise `ValueError`. In C++, `EngineAPI::createMesh` and `setMesh` take the same arrays flat.

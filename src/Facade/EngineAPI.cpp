@@ -405,9 +405,10 @@ namespace {
 /// Flat float lists as MeshArrays; an error when one is not whole vectors.
 std::string meshArrays(const std::vector<float>& positions, const std::vector<uint32_t>& indices,
                        const std::vector<float>& normals, const std::vector<float>& uvs,
-                       const std::vector<float>& colors, MeshArrays& out) {
+                       const std::vector<float>& colors, const std::vector<float>& tangents, MeshArrays& out) {
     for (const auto& [values, width, what] : {std::tuple{&positions, 3u, "positions"}, {&normals, 3u, "normals"},
-                                              {&uvs, 2u, "uvs"}, {&colors, 3u, "colors"}}) {
+                                              {&uvs, 2u, "uvs"}, {&colors, 3u, "colors"},
+                                              {&tangents, 4u, "tangents"}}) {
         if (values->size() % width != 0) {
             return std::string(what) + " must hold " + std::to_string(width) + " numbers for each vertex";
         }
@@ -422,6 +423,10 @@ std::string meshArrays(const std::vector<float>& positions, const std::vector<ui
     out.colors = vec3s(colors);
     out.uvs.resize(uvs.size() / 2);
     for (size_t i = 0; i < out.uvs.size(); ++i) out.uvs[i] = {uvs[2 * i], uvs[2 * i + 1]};
+    out.tangents.resize(tangents.size() / 4);
+    for (size_t i = 0; i < out.tangents.size(); ++i) {
+        out.tangents[i] = {tangents[4 * i], tangents[4 * i + 1], tangents[4 * i + 2], tangents[4 * i + 3]};
+    }
     out.indices = indices;
     return {};
 }
@@ -430,9 +435,10 @@ std::string meshArrays(const std::vector<float>& positions, const std::vector<ui
 
 EntityHandle EngineAPI::createMesh(const std::vector<float>& positions, const std::vector<uint32_t>& indices,
                                    const std::vector<float>& normals, const std::vector<float>& uvs,
-                                   const std::vector<float>& colors, const std::string& name, std::string& error) {
+                                   const std::vector<float>& colors, const std::vector<float>& tangents,
+                                   const std::string& name, std::string& error) {
     MeshArrays arrays;
-    error = meshArrays(positions, indices, normals, uvs, colors, arrays);
+    error = meshArrays(positions, indices, normals, uvs, colors, tangents, arrays);
     if (!error.empty()) return NullEntity;
     const entt::entity e = m_impl->app->createMesh(name, arrays, error);
     return e == entt::null ? NullEntity : toHandle(e);
@@ -440,9 +446,10 @@ EntityHandle EngineAPI::createMesh(const std::vector<float>& positions, const st
 
 std::string EngineAPI::setMesh(EntityHandle entity, const std::vector<float>& positions,
                                const std::vector<uint32_t>& indices, const std::vector<float>& normals,
-                               const std::vector<float>& uvs, const std::vector<float>& colors) {
+                               const std::vector<float>& uvs, const std::vector<float>& colors,
+                               const std::vector<float>& tangents) {
     MeshArrays arrays;
-    const std::string error = meshArrays(positions, indices, normals, uvs, colors, arrays);
+    const std::string error = meshArrays(positions, indices, normals, uvs, colors, tangents, arrays);
     if (!error.empty()) return error;
     return m_impl->app->getGltfLoader().setMeshGeometry(m_impl->app->getRegistry(), toEntt(entity), arrays);
 }

@@ -23,7 +23,7 @@ This describes one working application, not the only supported layout.
 
 ## How the starter fits together
 
-1. `vertexFormats.standard` describes the attributes actually in the loaded vertex buffer. Locations and types must match the vertex shader.
+1. `vertexFormats.standard` describes the attributes at the start of the loaded vertex buffer; it leaves out the tangent that follows them (see [vertex formats](../reference/pipeline-json.md#vertex-formats)). Locations and types must match the vertex shader.
 2. `bufferLayouts.CameraUBO` uses `std140` and `per_frame` sources such as `scene.camera.view`. `MaterialPushConstants` uses per-entity sources and scalar packing.
 3. `descriptorSetLayouts.cameraSet` binds the UBO through `autoBindBuffer`. `materialSet` declares texture slots. Pass `descriptorSets` order determines shader set indices.
 4. `entityDataBindings.pbrOpaque` connects per-draw/material layouts to geometry rendering. `execution.entityDataBinding` selects it for the pass.

@@ -29,6 +29,11 @@
           "name": "jointWeights",
           "type": "vec4",
           "location": 4
+        },
+        {
+          "name": "tangent",
+          "type": "vec4",
+          "location": 5
         }
       ]
     }

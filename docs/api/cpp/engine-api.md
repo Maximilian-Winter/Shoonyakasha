@@ -79,8 +79,8 @@ void setRenderScale(float scale);
 float getRenderScale() const;
 std::string reloadPipeline();   // the pipeline JSON and its SPIR-V again; error message, empty on success
 GltfResult loadGltfScene(const std::string& path, const GltfOptions& opts = {});
-EntityHandle createMesh(const std::vector<float>& positions, const std::vector<uint32_t>& indices, const std::vector<float>& normals, const std::vector<float>& uvs, const std::vector<float>& colors, const std::string& name, std::string& error);   // NullEntity with error set when the arrays do not fit
-std::string setMesh(EntityHandle entity, const std::vector<float>& positions, const std::vector<uint32_t>& indices, const std::vector<float>& normals, const std::vector<float>& uvs, const std::vector<float>& colors);   // error message, empty on success
+EntityHandle createMesh(const std::vector<float>& positions, const std::vector<uint32_t>& indices, const std::vector<float>& normals, const std::vector<float>& uvs, const std::vector<float>& colors, const std::vector<float>& tangents, const std::string& name, std::string& error);   // NullEntity with error set when the arrays do not fit
+std::string setMesh(EntityHandle entity, const std::vector<float>& positions, const std::vector<uint32_t>& indices, const std::vector<float>& normals, const std::vector<float>& uvs, const std::vector<float>& colors, const std::vector<float>& tangents);   // error message, empty on success
 EntityHandle createDirectionalLight(const glm::vec3& direction, const glm::vec3& color = glm::vec3(1.f), float intensity = 2.f);
 EntityHandle createPointLight(const glm::vec3& position, const glm::vec3& color = glm::vec3(1.f), float intensity = 5.f, float range = 15.f);
 std::vector<EntityHandle> createPointLights(const std::vector<float>& positions, const std::vector<float>& colors, const std::vector<float>& intensities, const std::vector<float>& ranges);

@@ -618,7 +618,8 @@ void FrameGraphExecutor::executeAutoCallback(
             const VkBuffer vertices = lookupBuffer(exec.vertexBuffer, "vertices");
             if (vertices == VK_NULL_HANDLE) return false;
             const VkDeviceSize offset = exec.vertexBufferOffset;
-            vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertices, &offset);
+            const VkDeviceSize stride = compiledPass.vertexStride;
+            vkCmdBindVertexBuffers2(commandBuffer, 0, 1, &vertices, &offset, nullptr, &stride);
         }
         if (!exec.indexBuffer.empty()) {
             const VkBuffer indices = lookupBuffer(exec.indexBuffer, "indices");

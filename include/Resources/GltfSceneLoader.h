@@ -184,13 +184,15 @@ struct GltfLoadOptions {
 
 /// Triangles for GltfSceneLoader::createMeshEntity and setMeshGeometry:
 /// every three indices a triangle, counter-clockwise from the front, or
-/// without indices every three vertices. Normals, uvs and colours are
-/// empty or one per position.
+/// without indices every three vertices. Normals, uvs, colours and tangents
+/// are empty or one per position. Without tangents, meshes with uvs get
+/// MikkTSpace tangents (MeshTangents.h).
 struct MeshArrays {
     std::vector<glm::vec3> positions;
     std::vector<glm::vec3> normals;
     std::vector<glm::vec2> uvs;
     std::vector<glm::vec3> colors;
+    std::vector<glm::vec4> tangents;   // xyz along +u, w = ±1 (bitangent = w * cross(normal, xyz))
     std::vector<uint32_t>  indices;
 };
 
@@ -198,6 +200,8 @@ struct MeshArrays {
 // GltfSceneLoader — The loader itself
 // 載之器 — The vessel of loading
 // ═══════════════════════════════════════════════════════════════
+
+struct PrimitiveGeometry;
 
 class GltfSceneLoader {
 public:
@@ -324,30 +328,27 @@ private:
 
     // ─── Internal Processing Methods ─────────────────────────
 
-    /// Process a primitive (GPUBuffer + GPUTexture)
+    /// Process a primitive (GPUBuffer + GPUTexture): standard vertices with
+    /// `worldTransform` applied, or skinned vertices in mesh space.
     GltfPrimitive processPrimitive(
         cgltf_data* data,
         const cgltf_primitive& primitive,
         const glm::mat4& worldTransform,
-        const std::string& primitiveName
+        const std::string& primitiveName,
+        bool skinned
     );
 
-    /// Build vertex GPUBuffer
+    /// Build a standard-vertex GPUBuffer from a primitive's arrays
     Shoonyakasha::GPUBuffer buildVertexBuffer(
-        cgltf_data* data,
-        const cgltf_primitive& primitive,
-        const glm::mat4& worldTransform,
+        const PrimitiveGeometry& geometry,
         uint32_t& outVertexCount,
-        uint32_t& outVertexStride,
-        glm::vec3& outBoundsMin,
-        glm::vec3& outBoundsMax
+        uint32_t& outVertexStride
     );
 
-    /// Build index GPUBuffer
+    /// Build an index GPUBuffer, 16-bit when the largest index allows it
     VkBufferUsageFlags rayTracingInputUsage() const;
     Shoonyakasha::GPUBuffer buildIndexBuffer(
-        cgltf_data* data,
-        const cgltf_primitive& primitive,
+        const std::vector<uint32_t>& indices,
         uint32_t& outIndexCount,
         Shoonyakasha::IndexType& outIndexType
     );
@@ -380,10 +381,11 @@ private:
         const Shoonyakasha::Skeleton& skeleton
     );
 
-    /// Build a skinned vertex buffer (with joints + weights)
+    /// Build a skinned vertex buffer: the primitive's arrays plus its joints
+    /// and weights
     Shoonyakasha::GPUBuffer buildSkinnedVertexBuffer(
-        cgltf_data* data,
         const cgltf_primitive& primitive,
+        const PrimitiveGeometry& geometry,
         uint32_t& outVertexCount,
         uint32_t& outVertexStride
     );

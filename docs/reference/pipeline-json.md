@@ -83,6 +83,15 @@ Prefer `"usage": "color_write", "present": true` on the final swapchain output. 
 
 A named format contains `attributes`, each with `name`, `type`, and `location`. The registry calculates offsets/stride. Match the actual uploaded geometry and GLSL locations; a declaration does not repack a mesh. See [VertexFormatRegistry](../../include/Vulkan/FrameGraph/VertexFormatRegistry.h) and the starter/skinned/sprite pipelines for compatible formats.
 
+Meshes from glTF files and `create_mesh` hold one of two vertex layouts:
+
+| Layout | Attributes, in order | Stride |
+|---|---|---|
+| standard | `position` vec3, `color` vec3, `texCoord` vec2, `normal` vec3, `tangent` vec4 | 60 bytes |
+| skinned | `position` vec3, `normal` vec3, `texCoord` vec2, `jointIndices` uvec4, `jointWeights` vec4, `tangent` vec4 | 80 bytes |
+
+`vertexInput: "default"` is the standard layout at locations 0-4. The tangent's xyz points along +u, and its w (1 or -1) gives the bitangent, `w * cross(normal, tangent.xyz)`, which points up the texture image; it is 0 on meshes without uvs. Entity draws bind each mesh with its own stride, so a format can declare only the first attributes of a layout, as the starter's `standard` format does. Draws from buffers use the declared format's stride.
+
 ## Buffer layouts
 
 | Key | Default / accepted forms |
@@ -170,7 +179,7 @@ Passes require `name` and `type` (`graphics`, `compute`, `transfer`, `ray_tracin
 | `geometryShader` | SPIR-V path, default empty; a geometry stage after the vertex (or tessellation) stage of a graphics pass. On a device without the `geometryShader` feature the pass fails to load unless it `requires` `geometryShader` |
 | `tessControlShader`, `tessEvaluationShader`, `patchControlPoints` | SPIR-V paths, default empty, given together, with `"topology": "patch_list"` and `patchControlPoints` from 1 to 32 vertices per patch. On a device without the `tessellationShader` feature the pass fails to load unless it `requires` `tessellationShader` |
 | `meshShader`, `taskShader` | SPIR-V paths, default empty. A `meshShader`, with an optional `taskShader` before it, takes the place of the vertex, tessellation and geometry shaders of a graphics pass: the pipeline has no vertex input, and the pass's execution type is `draw_mesh_tasks`. They need `VK_EXT_mesh_shader`; on a device without mesh (or task) shaders the pass fails to load unless it `requires` `meshShader` (or `taskShader`). Compile them for SPIR-V 1.4 or later, with `// glslc: --target-env=vulkan1.3` on the shader's second line |
-| `vertexInput` | `default`; select a registered matching format |
+| `vertexInput` | `default` (the standard [mesh layout](#vertex-formats)); select a registered matching format |
 | `depthTest`, `depthWrite` | true |
 | `depthCompareOp` | `less`; `never`, `equal`, `less_or_equal`, `greater`, `not_equal`, `greater_or_equal`, `always`. An unknown name fails at load |
 | `depthClamp` | false; clamps depth instead of clipping at the near and far planes (directional shadow passes). Requires the `depthClamp` device feature and is ignored with a warning without it |

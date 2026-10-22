@@ -1424,11 +1424,17 @@ bool FrameGraphCompiler::createPipelines(
                 vertexFormats.getVertexInputDescriptions(pd.vertexInput, vtxBinding, vtxAttributes)) {
                 // Use declarative vertex format from JSON
                 builder.withCustomVertexInput({vtxBinding}, vtxAttributes);
+                compiled.vertexStride = vtxBinding.stride;
             } else if (pd.vertexInput == "default") {
                 // Backward compatibility: use hardcoded Vertex struct
                 builder.withVertexType<Vertex>();
+                compiled.vertexStride = sizeof(Vertex);
             }
             // else: unknown format name — no vertex input (will likely cause validation error)
+
+            // A declared format may name the first attributes of a mesh's
+            // vertex: the stride is bound per draw.
+            if (compiled.vertexStride != 0) builder.withDynamicState(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE);
         }
         // "none" = no vertex input (fullscreen triangle), don't call withVertexType
 

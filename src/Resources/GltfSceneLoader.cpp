@@ -12,6 +12,8 @@
 #include "ECS/TransformMath.h"
 #include "ECS/SkeletonComponents.h"
 #include "ECS/SkeletalAnimationSystem.h"
+#include "Resources/MeshTangents.h"
+#include "Vulkan/VertexTypes.h"
 
 #include <cgltf.h>
 #include <algorithm>
@@ -35,24 +37,156 @@ namespace Shoonyakasha {
 // Standard Vertex Structure
 // ═══════════════════════════════════════════════════════════════
 
+// The same layout as Vertex (VertexTypes.h).
 struct StandardVertex {
     glm::vec3 pos;       // location 0
     glm::vec3 color;     // location 1
     glm::vec2 texCoord;  // location 2
     glm::vec3 normal;    // location 3
+    glm::vec4 tangent;   // location 4: xyz along +u, w = ±1; 0 without uvs
 };
+static_assert(sizeof(StandardVertex) == sizeof(Vertex), "StandardVertex must match Vertex");
 
 // Skinned vertex — includes bone joint indices and weights
 // Matches the "skinned" vertex format in JSON:
-//   position(vec3), normal(vec3), texCoord(vec2), jointIndices(uvec4), jointWeights(vec4)
+//   position(vec3), normal(vec3), texCoord(vec2), jointIndices(uvec4), jointWeights(vec4), tangent(vec4)
 struct SkinnedVertex {
     glm::vec3 pos;           // location 0
     glm::vec3 normal;        // location 1
     glm::vec2 texCoord;      // location 2
     glm::uvec4 joints;       // location 3 (bone indices)
     glm::vec4 weights;       // location 4 (bone weights)
+    glm::vec4 tangent;       // location 5: xyz along +u, w = ±1; 0 without uvs
 };
-// Stride: 12 + 12 + 8 + 16 + 16 = 64 bytes
+// Stride: 12 + 12 + 8 + 16 + 16 + 16 = 80 bytes
+
+// ═══════════════════════════════════════════════════════════════
+// Primitive Geometry
+// ═══════════════════════════════════════════════════════════════
+
+// A primitive's vertex attributes as arrays, one entry per vertex. `source`
+// is the glTF vertex each one was read from: generated tangents split the
+// vertices whose triangles disagree on the tangent.
+struct PrimitiveGeometry {
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec2> uvs;
+    std::vector<glm::vec3> colors;
+    std::vector<glm::vec4> tangents;
+    std::vector<uint32_t> indices;   // empty: every three vertices are a triangle
+    std::vector<uint32_t> source;
+};
+
+namespace {
+
+// MikkTSpace tangents for the geometry's triangles; the arrays are rebuilt
+// over the split vertices.
+void generatePrimitiveTangents(PrimitiveGeometry& g) {
+    TangentMesh t = generateTangents(g.positions, g.normals, g.uvs, g.indices);
+    auto expand = [&t](auto& values) {
+        std::remove_reference_t<decltype(values)> out;
+        out.reserve(t.source.size());
+        for (uint32_t s : t.source) out.push_back(values[s]);
+        values = std::move(out);
+    };
+    expand(g.positions);
+    expand(g.normals);
+    expand(g.uvs);
+    expand(g.colors);
+    expand(g.source);
+    g.tangents = std::move(t.tangents);
+    if (!g.indices.empty()) g.indices = std::move(t.indices);
+}
+
+// A glTF primitive's attributes, with positions, normals and tangents under
+// `transform`. Tangents come from the file's TANGENT attribute, or from
+// MikkTSpace for triangles with uvs; otherwise they are 0.
+PrimitiveGeometry readPrimitiveGeometry(const cgltf_primitive& primitive, const glm::mat4& transform) {
+    const cgltf_accessor* posAccessor = nullptr;
+    const cgltf_accessor* normalAccessor = nullptr;
+    const cgltf_accessor* texCoordAccessor = nullptr;
+    const cgltf_accessor* colorAccessor = nullptr;
+    const cgltf_accessor* tangentAccessor = nullptr;
+    for (cgltf_size i = 0; i < primitive.attributes_count; ++i) {
+        const cgltf_attribute& attr = primitive.attributes[i];
+        switch (attr.type) {
+            case cgltf_attribute_type_position:  posAccessor = attr.data; break;
+            case cgltf_attribute_type_normal:    normalAccessor = attr.data; break;
+            case cgltf_attribute_type_tangent:   tangentAccessor = attr.data; break;
+            case cgltf_attribute_type_texcoord:  if (attr.index == 0) texCoordAccessor = attr.data; break;
+            case cgltf_attribute_type_color:     if (attr.index == 0) colorAccessor = attr.data; break;
+            default: break;
+        }
+    }
+
+    PrimitiveGeometry g;
+    if (!posAccessor) return g;
+
+    const size_t n = posAccessor->count;
+    const glm::mat3 linear(transform);
+    const glm::mat3 normalMatrix = glm::transpose(glm::inverse(linear));
+    // A mirroring transform flips the bitangent relative to cross(normal, tangent).
+    const float handedness = glm::determinant(linear) < 0.0f ? -1.0f : 1.0f;
+    g.positions.resize(n);
+    g.normals.resize(n);
+    g.uvs.resize(n);
+    g.colors.resize(n);
+    g.tangents.assign(n, glm::vec4(0.0f));
+    g.source.resize(n);
+    for (size_t i = 0; i < n; ++i) {
+        cgltf_float pos[3] = {0, 0, 0};
+        cgltf_accessor_read_float(posAccessor, i, pos, 3);
+        g.positions[i] = glm::vec3(transform * glm::vec4(pos[0], pos[1], pos[2], 1.0f));
+
+        if (colorAccessor) {
+            cgltf_float col[4] = {1, 1, 1, 1};
+            cgltf_accessor_read_float(colorAccessor, i, col, cgltf_num_components(colorAccessor->type));
+            g.colors[i] = glm::vec3(col[0], col[1], col[2]);
+        } else {
+            g.colors[i] = glm::vec3(1.0f);
+        }
+
+        if (texCoordAccessor) {
+            cgltf_float uv[2] = {0, 0};
+            cgltf_accessor_read_float(texCoordAccessor, i, uv, 2);
+            g.uvs[i] = glm::vec2(uv[0], uv[1]);
+        } else {
+            g.uvs[i] = glm::vec2(0.0f);
+        }
+
+        if (normalAccessor) {
+            cgltf_float norm[3] = {0, 1, 0};
+            cgltf_accessor_read_float(normalAccessor, i, norm, 3);
+            g.normals[i] = glm::normalize(normalMatrix * glm::vec3(norm[0], norm[1], norm[2]));
+        } else {
+            g.normals[i] = glm::vec3(0.0f, 1.0f, 0.0f);
+        }
+
+        if (tangentAccessor) {
+            cgltf_float tan[4] = {1, 0, 0, 1};
+            cgltf_accessor_read_float(tangentAccessor, i, tan, 4);
+            const glm::vec3 t = linear * glm::vec3(tan[0], tan[1], tan[2]);
+            const float length = glm::length(t);
+            g.tangents[i] = glm::vec4(length > 0.0f ? t / length : glm::vec3(0.0f),
+                                      (tan[3] < 0.0f ? -1.0f : 1.0f) * handedness);
+        }
+        g.source[i] = static_cast<uint32_t>(i);
+    }
+
+    if (primitive.indices) {
+        g.indices.resize(primitive.indices->count);
+        for (size_t i = 0; i < g.indices.size(); ++i) {
+            g.indices[i] = static_cast<uint32_t>(cgltf_accessor_read_index(primitive.indices, i));
+        }
+    }
+
+    if (!tangentAccessor && texCoordAccessor && primitive.type == cgltf_primitive_type_triangles) {
+        generatePrimitiveTangents(g);
+    }
+    return g;
+}
+
+} // namespace
 
 // ═══════════════════════════════════════════════════════════════
 // Material Push Constants Layout
@@ -250,26 +384,8 @@ GltfPrimitive GltfSceneLoader::buildPrimitive(
     const glm::mat4& transform)
 {
     const cgltf_primitive& primitive = node->mesh->primitives[primitiveIndex];
-
-    if (!skinned) {
-        return processPrimitive(data, primitive, transform, name);
-    }
-
     // Skinned meshes are not baked: the skin places them in skeleton space.
-    GltfPrimitive built = processPrimitive(data, primitive, glm::mat4(1.0f), name);
-
-    // processPrimitive built a StandardVertex buffer; skinning needs joints and
-    // weights. Assigning over the reference retires the old buffer, which the
-    // delete queue frees once the frames referencing it have completed.
-    uint32_t vertexCount = 0;
-    uint32_t vertexStride = 0;
-    GPUBuffer skinnedVB = buildSkinnedVertexBuffer(data, primitive, vertexCount, vertexStride);
-    if (skinnedVB.isValid()) {
-        built.vertexBuffer = m_device.getDeleteQueue().adopt(skinnedVB);
-        built.vertexCount = vertexCount;
-        built.vertexStride = vertexStride;
-    }
-    return built;
+    return processPrimitive(data, primitive, skinned ? glm::mat4(1.0f) : transform, name, skinned);
 }
 
 const GltfPrimitive* GltfSceneLoader::getOrBuildPrimitive(
@@ -420,23 +536,29 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
     cgltf_data* data,
     const cgltf_primitive& primitive,
     const glm::mat4& worldTransform,
-    const std::string& primitiveName)
+    const std::string& primitiveName,
+    bool skinned)
 {
     GltfPrimitive result;
     result.name = primitiveName;
     result.worldTransform = worldTransform;
 
-    // Build vertex buffer
+    const PrimitiveGeometry geometry = readPrimitiveGeometry(primitive, worldTransform);
     result.vertexBuffer = m_device.getDeleteQueue().adopt(
-        buildVertexBuffer(data, primitive, worldTransform,
-                          result.vertexCount, result.vertexStride,
-                          result.boundsMin, result.boundsMax));
+        skinned ? buildSkinnedVertexBuffer(primitive, geometry, result.vertexCount, result.vertexStride)
+                : buildVertexBuffer(geometry, result.vertexCount, result.vertexStride));
     result.hasBounds = result.vertexCount > 0;
+    if (result.hasBounds) {
+        result.boundsMin = glm::vec3(std::numeric_limits<float>::max());
+        result.boundsMax = glm::vec3(std::numeric_limits<float>::lowest());
+        for (const glm::vec3& p : geometry.positions) {
+            result.boundsMin = glm::min(result.boundsMin, p);
+            result.boundsMax = glm::max(result.boundsMax, p);
+        }
+    }
 
-    // Build index buffer
     result.indexBuffer = m_device.getDeleteQueue().adopt(
-        buildIndexBuffer(data, primitive,
-                         result.indexCount, result.indexType));
+        buildIndexBuffer(geometry.indices, result.indexCount, result.indexType));
 
     // Process material
     if (primitive.material && m_options.loadMaterials) {
@@ -527,88 +649,21 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
 }
 
 GPUBuffer GltfSceneLoader::buildVertexBuffer(
-    cgltf_data* /*data*/,
-    const cgltf_primitive& primitive,
-    const glm::mat4& worldTransform,
+    const PrimitiveGeometry& geometry,
     uint32_t& outVertexCount,
-    uint32_t& outVertexStride,
-    glm::vec3& outBoundsMin,
-    glm::vec3& outBoundsMax)
+    uint32_t& outVertexStride)
 {
-    // Find attribute accessors
-    const cgltf_accessor* posAccessor = nullptr;
-    const cgltf_accessor* normalAccessor = nullptr;
-    const cgltf_accessor* texCoordAccessor = nullptr;
-    const cgltf_accessor* colorAccessor = nullptr;
-
-    for (cgltf_size i = 0; i < primitive.attributes_count; ++i) {
-        const cgltf_attribute& attr = primitive.attributes[i];
-        switch (attr.type) {
-            case cgltf_attribute_type_position:  posAccessor = attr.data; break;
-            case cgltf_attribute_type_normal:    normalAccessor = attr.data; break;
-            case cgltf_attribute_type_texcoord:  if (attr.index == 0) texCoordAccessor = attr.data; break;
-            case cgltf_attribute_type_color:     if (attr.index == 0) colorAccessor = attr.data; break;
-            default: break;
-        }
-    }
-
-    if (!posAccessor) {
-        outVertexCount = 0;
-        outVertexStride = 0;
-        return GPUBuffer{};
-    }
-
-    size_t vertexCount = posAccessor->count;
-    glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(worldTransform)));
-
-    // Build interleaved vertex data
-    std::vector<StandardVertex> vertices(vertexCount);
-    outBoundsMin = glm::vec3(std::numeric_limits<float>::max());
-    outBoundsMax = glm::vec3(std::numeric_limits<float>::lowest());
-
-    for (size_t i = 0; i < vertexCount; ++i) {
-        StandardVertex& v = vertices[i];
-
-        // Position
-        cgltf_float pos[3] = {0, 0, 0};
-        cgltf_accessor_read_float(posAccessor, i, pos, 3);
-        glm::vec4 worldPos = worldTransform * glm::vec4(pos[0], pos[1], pos[2], 1.0f);
-        v.pos = glm::vec3(worldPos);
-        outBoundsMin = glm::min(outBoundsMin, v.pos);
-        outBoundsMax = glm::max(outBoundsMax, v.pos);
-
-        // Color
-        if (colorAccessor) {
-            cgltf_float col[4] = {1, 1, 1, 1};
-            cgltf_accessor_read_float(colorAccessor, i, col, cgltf_num_components(colorAccessor->type));
-            v.color = glm::vec3(col[0], col[1], col[2]);
-        } else {
-            v.color = glm::vec3(1.0f);
-        }
-
-        // TexCoord
-        if (texCoordAccessor) {
-            cgltf_float uv[2] = {0, 0};
-            cgltf_accessor_read_float(texCoordAccessor, i, uv, 2);
-            v.texCoord = glm::vec2(uv[0], uv[1]);
-        } else {
-            v.texCoord = glm::vec2(0.0f);
-        }
-
-        // Normal
-        if (normalAccessor) {
-            cgltf_float norm[3] = {0, 1, 0};
-            cgltf_accessor_read_float(normalAccessor, i, norm, 3);
-            v.normal = glm::normalize(normalMatrix * glm::vec3(norm[0], norm[1], norm[2]));
-        } else {
-            v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
-        }
-    }
-
+    const size_t vertexCount = geometry.positions.size();
     outVertexCount = static_cast<uint32_t>(vertexCount);
-    outVertexStride = sizeof(StandardVertex);
+    outVertexStride = vertexCount > 0 ? sizeof(StandardVertex) : 0;
+    if (vertexCount == 0) return GPUBuffer{};
 
-    // Create GPU buffer
+    std::vector<StandardVertex> vertices(vertexCount);
+    for (size_t i = 0; i < vertexCount; ++i) {
+        vertices[i] = {geometry.positions[i], geometry.colors[i], geometry.uvs[i], geometry.normals[i],
+                       geometry.tangents[i]};
+    }
+
     VkDeviceSize bufferSize = vertices.size() * sizeof(StandardVertex);
     GPUBuffer buffer = GPUResourceFactory::createBuffer(
         m_device.getAllocator().getHandle(),
@@ -616,8 +671,6 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | rayTracingInputUsage(),
         VMA_MEMORY_USAGE_GPU_ONLY
     );
-
-    // Upload data
     GPUResourceFactory::uploadBuffer(
         m_device.getAllocator().getHandle(),
         m_device.getLogicalDevice(),
@@ -627,7 +680,6 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
         vertices.data(),
         bufferSize
     );
-
     return buffer;
 }
 
@@ -636,7 +688,7 @@ std::string GltfSceneLoader::buildMeshPrimitive(const MeshArrays& arrays, GltfPr
     if (n == 0) return "the mesh has no positions";
     if (n > std::numeric_limits<uint32_t>::max()) return "the mesh has too many positions";
     for (const auto& [count, what] : {std::pair{arrays.normals.size(), "normals"}, {arrays.uvs.size(), "uvs"},
-                                      {arrays.colors.size(), "colors"}}) {
+                                      {arrays.colors.size(), "colors"}, {arrays.tangents.size(), "tangents"}}) {
         if (count != 0 && count != n) {
             return std::string("there are ") + std::to_string(count) + " " + what + " for " + std::to_string(n) +
                    " positions";
@@ -652,33 +704,49 @@ std::string GltfSceneLoader::buildMeshPrimitive(const MeshArrays& arrays, GltfPr
         if (i >= n) return "index " + std::to_string(i) + " is past the " + std::to_string(n) + " positions";
     }
 
+    PrimitiveGeometry g;
+    g.positions = arrays.positions;
+    g.indices = arrays.indices;
+    g.uvs = arrays.uvs.empty() ? std::vector<glm::vec2>(n, glm::vec2(0.0f)) : arrays.uvs;
+    g.colors = arrays.colors.empty() ? std::vector<glm::vec3>(n, glm::vec3(1.0f)) : arrays.colors;
+    g.source.resize(n);
+    for (size_t i = 0; i < n; ++i) g.source[i] = static_cast<uint32_t>(i);
+
     // Area-weighted vertex normals when none are given.
-    std::vector<glm::vec3> normals = arrays.normals;
-    if (normals.empty()) {
-        normals.assign(n, glm::vec3(0.0f));
+    g.normals = arrays.normals;
+    if (g.normals.empty()) {
+        g.normals.assign(n, glm::vec3(0.0f));
         for (size_t t = 0; t < corners; t += 3) {
             const uint32_t a = indexed ? arrays.indices[t] : static_cast<uint32_t>(t);
             const uint32_t b = indexed ? arrays.indices[t + 1] : static_cast<uint32_t>(t + 1);
             const uint32_t c = indexed ? arrays.indices[t + 2] : static_cast<uint32_t>(t + 2);
             const glm::vec3 face = glm::cross(arrays.positions[b] - arrays.positions[a],
                                               arrays.positions[c] - arrays.positions[a]);
-            normals[a] += face;
-            normals[b] += face;
-            normals[c] += face;
+            g.normals[a] += face;
+            g.normals[b] += face;
+            g.normals[c] += face;
         }
     }
+    for (glm::vec3& normal : g.normals) {
+        const float length = glm::length(normal);
+        normal = length > 0.0f ? normal / length : glm::vec3(0.0f, 1.0f, 0.0f);
+    }
 
-    std::vector<StandardVertex> vertices(n);
+    if (!arrays.tangents.empty()) {
+        g.tangents = arrays.tangents;
+    } else if (!arrays.uvs.empty()) {
+        generatePrimitiveTangents(g);
+    } else {
+        g.tangents.assign(n, glm::vec4(0.0f));
+    }
+
+    const size_t count = g.positions.size();
+    std::vector<StandardVertex> vertices(count);
     glm::vec3 lo(std::numeric_limits<float>::max()), hi(std::numeric_limits<float>::lowest());
-    for (size_t i = 0; i < n; ++i) {
-        StandardVertex& v = vertices[i];
-        v.pos = arrays.positions[i];
-        v.color = arrays.colors.empty() ? glm::vec3(1.0f) : arrays.colors[i];
-        v.texCoord = arrays.uvs.empty() ? glm::vec2(0.0f) : arrays.uvs[i];
-        const float length = glm::length(normals[i]);
-        v.normal = length > 0.0f ? normals[i] / length : glm::vec3(0.0f, 1.0f, 0.0f);
-        lo = glm::min(lo, v.pos);
-        hi = glm::max(hi, v.pos);
+    for (size_t i = 0; i < count; ++i) {
+        vertices[i] = {g.positions[i], g.colors[i], g.uvs[i], g.normals[i], g.tangents[i]};
+        lo = glm::min(lo, g.positions[i]);
+        hi = glm::max(hi, g.positions[i]);
     }
 
     auto upload = [&](const void* data, VkDeviceSize size, VkBufferUsageFlags usage) {
@@ -691,12 +759,12 @@ std::string GltfSceneLoader::buildMeshPrimitive(const MeshArrays& arrays, GltfPr
     };
     out.vertexBuffer = upload(vertices.data(), vertices.size() * sizeof(StandardVertex),
                               VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    out.vertexCount = static_cast<uint32_t>(n);
+    out.vertexCount = static_cast<uint32_t>(count);
     out.vertexStride = sizeof(StandardVertex);
-    out.indexBuffer = indexed ? upload(arrays.indices.data(), arrays.indices.size() * sizeof(uint32_t),
+    out.indexBuffer = indexed ? upload(g.indices.data(), g.indices.size() * sizeof(uint32_t),
                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
                               : GpuBufferRef{};
-    out.indexCount = indexed ? static_cast<uint32_t>(arrays.indices.size()) : 0;
+    out.indexCount = indexed ? static_cast<uint32_t>(g.indices.size()) : 0;
     out.indexType = IndexType::UInt32;
     out.boundsMin = lo;
     out.boundsMax = hi;
@@ -743,31 +811,23 @@ VkBufferUsageFlags GltfSceneLoader::rayTracingInputUsage() const {
 }
 
 GPUBuffer GltfSceneLoader::buildIndexBuffer(
-    cgltf_data* /*data*/,
-    const cgltf_primitive& primitive,
+    const std::vector<uint32_t>& wide,
     uint32_t& outIndexCount,
     Shoonyakasha::IndexType& outIndexType)
 {
-    if (!primitive.indices) {
+    if (wide.empty()) {
         // Non-indexed geometry - return empty buffer
         outIndexCount = 0;
         outIndexType = Shoonyakasha::IndexType::UInt32;
         return GPUBuffer{};
     }
 
-    const cgltf_accessor* indexAccessor = primitive.indices;
-    size_t indexCount = indexAccessor->count;
-
-    // Read every index at full width, then narrow only if the largest value
-    // fits. The width follows the maximum index value, not the index count:
-    // indices address the primitive's vertex attributes, so a mesh with 100k
-    // vertices and 60k indices holds values above 65535.
-    std::vector<uint32_t> wide(indexCount);
-    uint32_t maxIndex = 0;
-    for (size_t i = 0; i < indexCount; ++i) {
-        wide[i] = static_cast<uint32_t>(cgltf_accessor_read_index(indexAccessor, i));
-        maxIndex = std::max(maxIndex, wide[i]);
-    }
+    // Narrow only if the largest value fits. The width follows the maximum
+    // index value, not the index count: indices address the primitive's
+    // vertex attributes, so a mesh with 100k vertices and 60k indices holds
+    // values above 65535.
+    const size_t indexCount = wide.size();
+    const uint32_t maxIndex = *std::max_element(wide.begin(), wide.end());
 
     // 0xFFFF is reserved as the primitive-restart marker for 16-bit indices, so it
     // is not usable as a vertex index.
@@ -1232,96 +1292,56 @@ std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> GltfSceneLoader::loadA
 // ═══════════════════════════════════════════════════════════════
 
 GPUBuffer GltfSceneLoader::buildSkinnedVertexBuffer(
-    cgltf_data* /*data*/,
     const cgltf_primitive& primitive,
+    const PrimitiveGeometry& geometry,
     uint32_t& outVertexCount,
     uint32_t& outVertexStride)
 {
-    // Find attribute accessors
-    const cgltf_accessor* posAccessor = nullptr;
-    const cgltf_accessor* normalAccessor = nullptr;
-    const cgltf_accessor* texCoordAccessor = nullptr;
     const cgltf_accessor* jointsAccessor = nullptr;
     const cgltf_accessor* weightsAccessor = nullptr;
-
     for (cgltf_size i = 0; i < primitive.attributes_count; ++i) {
         const cgltf_attribute& attr = primitive.attributes[i];
         switch (attr.type) {
-            case cgltf_attribute_type_position:  posAccessor = attr.data; break;
-            case cgltf_attribute_type_normal:    normalAccessor = attr.data; break;
-            case cgltf_attribute_type_texcoord:  if (attr.index == 0) texCoordAccessor = attr.data; break;
             case cgltf_attribute_type_joints:    if (attr.index == 0) jointsAccessor = attr.data; break;
             case cgltf_attribute_type_weights:   if (attr.index == 0) weightsAccessor = attr.data; break;
             default: break;
         }
     }
 
-    if (!posAccessor) {
-        outVertexCount = 0;
-        outVertexStride = 0;
-        return GPUBuffer{};
-    }
+    const size_t vertexCount = geometry.positions.size();
+    outVertexCount = static_cast<uint32_t>(vertexCount);
+    outVertexStride = vertexCount > 0 ? sizeof(SkinnedVertex) : 0;
+    if (vertexCount == 0) return GPUBuffer{};
 
-    size_t vertexCount = posAccessor->count;
-
-    // Build interleaved skinned vertex data (NO transform baking for skinned meshes)
+    // Mesh-space vertices: the skin places them.
     std::vector<SkinnedVertex> vertices(vertexCount);
-
     for (size_t i = 0; i < vertexCount; ++i) {
         SkinnedVertex& v = vertices[i];
-
-        // Position (not transformed — skinning will handle this)
-        cgltf_float pos[3] = {0, 0, 0};
-        cgltf_accessor_read_float(posAccessor, i, pos, 3);
-        v.pos = glm::vec3(pos[0], pos[1], pos[2]);
-
-        // Normal
-        if (normalAccessor) {
-            cgltf_float norm[3] = {0, 1, 0};
-            cgltf_accessor_read_float(normalAccessor, i, norm, 3);
-            v.normal = glm::normalize(glm::vec3(norm[0], norm[1], norm[2]));
-        } else {
-            v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
-        }
-
-        // TexCoord
-        if (texCoordAccessor) {
-            cgltf_float uv[2] = {0, 0};
-            cgltf_accessor_read_float(texCoordAccessor, i, uv, 2);
-            v.texCoord = glm::vec2(uv[0], uv[1]);
-        } else {
-            v.texCoord = glm::vec2(0.0f);
-        }
+        const cgltf_size gltfVertex = geometry.source[i];
+        v.pos = geometry.positions[i];
+        v.normal = geometry.normals[i];
+        v.texCoord = geometry.uvs[i];
+        v.tangent = geometry.tangents[i];
 
         // Joint indices
         if (jointsAccessor) {
             cgltf_uint joints[4] = {0, 0, 0, 0};
-            cgltf_accessor_read_uint(jointsAccessor, i, joints, 4);
+            cgltf_accessor_read_uint(jointsAccessor, gltfVertex, joints, 4);
             v.joints = glm::uvec4(joints[0], joints[1], joints[2], joints[3]);
         } else {
             v.joints = glm::uvec4(0);
         }
 
-        // Joint weights
+        // Joint weights, normalised
+        v.weights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
         if (weightsAccessor) {
             cgltf_float weights[4] = {1, 0, 0, 0};
-            cgltf_accessor_read_float(weightsAccessor, i, weights, 4);
-            // Normalize weights
-            float sum = weights[0] + weights[1] + weights[2] + weights[3];
-            if (sum > 0.0f) {
-                v.weights = glm::vec4(weights[0], weights[1], weights[2], weights[3]) / sum;
-            } else {
-                v.weights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
-            }
-        } else {
-            v.weights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+            cgltf_accessor_read_float(weightsAccessor, gltfVertex, weights, 4);
+            const float sum = weights[0] + weights[1] + weights[2] + weights[3];
+            if (sum > 0.0f) v.weights = glm::vec4(weights[0], weights[1], weights[2], weights[3]) / sum;
         }
     }
 
-    outVertexCount = static_cast<uint32_t>(vertexCount);
-    outVertexStride = sizeof(SkinnedVertex);
-
-    // Create GPU buffer
     VkDeviceSize bufferSize = vertices.size() * sizeof(SkinnedVertex);
     GPUBuffer buffer = GPUResourceFactory::createBuffer(
         m_device.getAllocator().getHandle(),
@@ -1329,8 +1349,6 @@ GPUBuffer GltfSceneLoader::buildSkinnedVertexBuffer(
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_MEMORY_USAGE_GPU_ONLY
     );
-
-    // Upload data
     GPUResourceFactory::uploadBuffer(
         m_device.getAllocator().getHandle(),
         m_device.getLogicalDevice(),
@@ -1340,7 +1358,6 @@ GPUBuffer GltfSceneLoader::buildSkinnedVertexBuffer(
         vertices.data(),
         bufferSize
     );
-
     return buffer;
 }
 

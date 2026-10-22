@@ -2084,7 +2084,7 @@ cdef class Engine:
             return [x for v in values for x in v]
         return values
 
-    def create_mesh(self, positions, indices=None, normals=None, uvs=None, colors=None, str name=""):
+    def create_mesh(self, positions, indices=None, normals=None, uvs=None, colors=None, str name="", tangents=None):
         """Create an entity drawing triangles from arrays.
 
         Args:
@@ -2097,6 +2097,10 @@ cdef class Engine:
             uvs: (u, v) per vertex, or None
             colors: (r, g, b) per vertex, or None for white
             name: the entity's name
+            tangents: (x, y, z, w) per vertex: the direction of +u, and w
+                = 1 or -1, the bitangent's side (bitangent = w * cross(normal,
+                tangent)). None generates MikkTSpace tangents when there are
+                uvs; normal maps use them.
 
         The entity has an identity transform, the default material (white,
         metallic 0, roughness 0.5) and casts and receives shadows; set_position
@@ -2111,13 +2115,14 @@ cdef class Engine:
         cdef vector[float] nrm = Engine._flat(normals)
         cdef vector[float] tex = Engine._flat(uvs)
         cdef vector[float] col = Engine._flat(colors)
+        cdef vector[float] tan = Engine._flat(tangents)
         cdef string error
-        cdef EntityHandle e = self._ptr.createMesh(pos, idx, nrm, tex, col, name.encode("utf-8"), error)
+        cdef EntityHandle e = self._ptr.createMesh(pos, idx, nrm, tex, col, tan, name.encode("utf-8"), error)
         if not error.empty():
             raise ValueError(error.decode("utf-8"))
         return <uint32_t>e
 
-    def set_mesh(self, uint32_t entity, positions, indices=None, normals=None, uvs=None, colors=None):
+    def set_mesh(self, uint32_t entity, positions, indices=None, normals=None, uvs=None, colors=None, tangents=None):
         """Replace the triangles of a mesh entity, taking them as create_mesh
         does; its material and transform stay. The old geometry is freed once
         no frame in flight draws it. Uploading waits for the GPU. Raises
@@ -2127,7 +2132,8 @@ cdef class Engine:
         cdef vector[float] nrm = Engine._flat(normals)
         cdef vector[float] tex = Engine._flat(uvs)
         cdef vector[float] col = Engine._flat(colors)
-        cdef string error = self._ptr.setMesh(entity, pos, idx, nrm, tex, col)
+        cdef vector[float] tan = Engine._flat(tangents)
+        cdef string error = self._ptr.setMesh(entity, pos, idx, nrm, tex, col, tan)
         if not error.empty():
             raise ValueError(error.decode("utf-8"))
 

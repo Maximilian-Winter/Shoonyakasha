@@ -23,6 +23,7 @@ layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragWorldNormal;
 layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in vec3 fragColor;
+layout(location = 6) in vec4 fragWorldTangent;   // 0 for meshes without uvs
 
 struct Surface {
     vec4 baseColor;   // rgb albedo, a coverage
@@ -35,7 +36,7 @@ struct Surface {
     float clearcoatRoughness;
 };
 
-// Tangent frame from screen-space derivatives: meshes carry no tangents.
+// Tangent frame from screen-space derivatives, for meshes without tangents.
 mat3 derivativeTBN(vec3 N, vec3 p, vec2 uv) {
     vec3 dp1 = dFdx(p), dp2 = dFdy(p);
     vec2 duv1 = dFdx(uv), duv2 = dFdy(uv);
@@ -45,6 +46,16 @@ mat3 derivativeTBN(vec3 N, vec3 p, vec2 uv) {
     vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
     float invMax = inversesqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
     return mat3(T * invMax, B * invMax, N);
+}
+
+// Tangent frame at the fragment: the mesh's tangent made orthogonal to N,
+// or the derivative frame when the mesh has none.
+mat3 tangentFrame(vec3 N) {
+    vec3 T = fragWorldTangent.xyz - N * dot(N, fragWorldTangent.xyz);
+    if (dot(T, T) < 1e-12) return derivativeTBN(N, fragWorldPos, fragTexCoord);
+    T = normalize(T);
+    float side = fragWorldTangent.w < 0.0 ? -1.0 : 1.0;
+    return mat3(T, side * cross(N, T), N);
 }
 
 // The exposure Tonemap applies, as of last frame: settings.exposure times
@@ -67,14 +78,14 @@ Surface evaluateSurface(vec4 baseColor) {
     s.baseColor = baseColor;
 
     vec3 N = normalize(fragWorldNormal);
+    if (draw.hasNormalMap > 0.5) {
+        vec3 t = texture(normalMap, fragTexCoord).xyz * 2.0 - 1.0;
+        vec3 mapped = tangentFrame(N) * t;
+        if (dot(mapped, mapped) > 1e-6) N = normalize(mapped);
+    }
     // Double-sided materials, and single-sided ones seen from behind, shade
     // the side facing the camera.
     if (!gl_FrontFacing) N = -N;
-    if (draw.hasNormalMap > 0.5) {
-        vec3 t = texture(normalMap, fragTexCoord).xyz * 2.0 - 1.0;
-        vec3 mapped = derivativeTBN(N, fragWorldPos, fragTexCoord) * t;
-        if (dot(mapped, mapped) > 1e-6) N = normalize(mapped);
-    }
     s.N = N;
 
     s.metallic = draw.metallicFactor;

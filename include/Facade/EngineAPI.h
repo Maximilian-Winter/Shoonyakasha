@@ -258,14 +258,16 @@ public:
     /// NullEntity with `error` set when the arrays do not fit.
     EntityHandle createMesh(const std::vector<float>& positions, const std::vector<uint32_t>& indices,
                             const std::vector<float>& normals, const std::vector<float>& uvs,
-                            const std::vector<float>& colors, const std::string& name, std::string& error);
+                            const std::vector<float>& colors, const std::vector<float>& tangents,
+                            const std::string& name, std::string& error);
 
     /// Replace the triangles of a mesh entity, as createMesh takes them; its
     /// material and transform stay. The old geometry is freed once no frame
     /// in flight draws it. Returns an error message, empty on success.
     std::string setMesh(EntityHandle entity, const std::vector<float>& positions,
                         const std::vector<uint32_t>& indices, const std::vector<float>& normals,
-                        const std::vector<float>& uvs, const std::vector<float>& colors);
+                        const std::vector<float>& uvs, const std::vector<float>& colors,
+                        const std::vector<float>& tangents);
 
     /// Create a directional light entity.
     EntityHandle createDirectionalLight(const glm::vec3& direction,

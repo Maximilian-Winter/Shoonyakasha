@@ -333,7 +333,8 @@ void EntityRenderExecutor::bindEntityMesh(
     // Bind vertex buffer
     VkBuffer vertexBuffers[] = { mesh.vertexHandle() };
     VkDeviceSize offsets[] = { 0 };
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+    VkDeviceSize strides[] = { mesh.vertexStride };
+    vkCmdBindVertexBuffers2(commandBuffer, 0, 1, vertexBuffers, offsets, nullptr, strides);
 
     // Bind index buffer if present
     if (mesh.hasIndices()) {

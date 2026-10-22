@@ -636,6 +636,10 @@ struct CompiledPass {
     // Auto-created pipeline (null if manually managed or no shaders specified)
     std::shared_ptr<VulkanPipeline>     pipeline;
     VkPipelineLayout                    pipelineLayout = VK_NULL_HANDLE;
+    /// The stride of the pipeline's vertex format, 0 without vertex input.
+    /// The stride is dynamic state: entity draws bind each mesh with its
+    /// own stride, draws from buffers with this one.
+    uint32_t                            vertexStride = 0;
 
     // Compute pipeline (for compute passes — separate from graphics pipeline)
     std::shared_ptr<VulkanComputePipeline> computePipeline;

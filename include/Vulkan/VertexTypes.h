@@ -39,13 +39,14 @@ struct Vertex {
     glm::vec3 color;
     glm::vec2 texCoord;
     glm::vec3 normal;
+    glm::vec4 tangent;   // xyz along +u; w = ±1, bitangent = w * cross(normal, xyz); 0 without uvs
 
     static VkVertexInputBindingDescription getBindingDescription();
-    static std::array<VkVertexInputAttributeDescription, 4> getAttributeDescriptions();
+    static std::array<VkVertexInputAttributeDescription, 5> getAttributeDescriptions();
 
     bool operator==(const Vertex& other) const {
         return pos == other.pos && color == other.color &&
-               texCoord == other.texCoord && normal == other.normal;
+               texCoord == other.texCoord && normal == other.normal && tangent == other.tangent;
     }
 };
 

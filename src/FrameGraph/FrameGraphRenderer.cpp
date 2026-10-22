@@ -305,10 +305,12 @@ void FrameGraphRenderer::bindAndDrawEntity(
     // Vertex and index buffers, unless the previous draw left them bound:
     // meshes are often suballocated from shared buffers.
     VkBuffer vertexBuffer = mesh.vertexHandle();
-    if (vertexBuffer != bound.vertex) {
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+    if (vertexBuffer != bound.vertex || mesh.vertexStride != bound.vertexStride) {
+        const VkDeviceSize offset = 0;
+        const VkDeviceSize stride = mesh.vertexStride;
+        vkCmdBindVertexBuffers2(cmd, 0, 1, &vertexBuffer, &offset, nullptr, &stride);
         bound.vertex = vertexBuffer;
+        bound.vertexStride = mesh.vertexStride;
     }
 
     if (mesh.hasIndices()) {

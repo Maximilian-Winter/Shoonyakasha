@@ -481,11 +481,12 @@ const MeshComponent& UIRenderer::worldQuad() {
     if (m_worldQuad.isValid()) return m_worldQuad;
 
     const glm::vec3 white(1.0f), normal(0.0f, 0.0f, 1.0f);
+    const glm::vec4 tangent(1.0f, 0.0f, 0.0f, 1.0f);
     const Vertex vertices[] = {
-        {{-0.5f, -0.5f, 0.0f}, white, {0.0f, 1.0f}, normal},
-        {{ 0.5f, -0.5f, 0.0f}, white, {1.0f, 1.0f}, normal},
-        {{ 0.5f,  0.5f, 0.0f}, white, {1.0f, 0.0f}, normal},
-        {{-0.5f,  0.5f, 0.0f}, white, {0.0f, 0.0f}, normal},
+        {{-0.5f, -0.5f, 0.0f}, white, {0.0f, 1.0f}, normal, tangent},
+        {{ 0.5f, -0.5f, 0.0f}, white, {1.0f, 1.0f}, normal, tangent},
+        {{ 0.5f,  0.5f, 0.0f}, white, {1.0f, 0.0f}, normal, tangent},
+        {{-0.5f,  0.5f, 0.0f}, white, {0.0f, 0.0f}, normal, tangent},
     };
     const uint32_t indices[] = {0, 1, 2, 0, 2, 3};  // counter-clockwise seen from +Z
 

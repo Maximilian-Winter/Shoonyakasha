@@ -252,6 +252,7 @@ private:
     /// Buffers already bound in the pass being recorded, to skip rebinding.
     struct BoundBuffers {
         VkBuffer vertex = VK_NULL_HANDLE;
+        uint32_t vertexStride = 0;
         VkBuffer index = VK_NULL_HANDLE;
         VkIndexType indexType = VK_INDEX_TYPE_MAX_ENUM;
     };
