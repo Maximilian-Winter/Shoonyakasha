@@ -106,7 +106,7 @@ The pipeline declares four presets; apply one with
 | `low` | No ambient occlusion, no shadows from alpha-tested casters (sun, spot or point), no contact shadows, no bloom, a narrower shadow filter and hard cascade seams |
 | `medium` | Everything but contact shadows |
 | `high` | Everything, every setting back to its default. What the pipeline starts with |
-| `raytraced` | `high`, with sun shadows from ray queries instead of the cascades' opaque casters, on blended materials too. Refused, with a warning, on a device without ray queries; check with `engine.ray_query_supported()` (C++ `rayQuerySupported`) |
+| `raytraced` | `high`, with sun shadows from ray queries instead of the cascades' opaque and alpha-tested casters, on blended materials too. Refused, with a warning, on a device without ray queries; check with `engine.ray_query_supported()` (C++ `rayQuerySupported`) |
 
 A preset only touches the passes and settings it names, so settings of your
 own that it does not mention stay as you set them.
@@ -120,12 +120,12 @@ own that it does not mention stay as you set them.
 | `PointShadowOpaque0..23`, `PointShadowMasked0..23`, `PointShadowSkinned0..23` | Shadow casters into cube face 0..23's tile (four lights, six faces each), culled per face |
 | `GBufferOpaque`, `GBufferMasked`, `GBufferSkinned`, `GBufferSkinnedMasked` | The G-buffer and motion vectors; emission goes straight into the HDR target |
 | `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` |
-| `ShadowMaskRT` | In the `raytraced` preset, instead of `ShadowMask`: a shadow ray per pixel, multiplied with the cascades of the casters the rays do not see. `"requires": ["rayQuery"]`; off by default |
+| `ShadowMaskRT` | In the `raytraced` preset, instead of `ShadowMask`: a shadow ray per pixel, multiplied with the cascades of the casters the rays do not see. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `GTAO`, `AODenoise` | Ambient occlusion from the depth buffer in a 4x4 pattern of slice directions, then a depth-aware 4x4 average |
 | `LightClusters` | A compute pass listing the point and spot lights that reach each cluster of the view, into `lightClusters` |
 | `Lighting` | Lights, image-based light and the sky, added onto the emission |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
-| `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with sun shadow rays. `"requires": ["rayQuery"]`; off by default |
+| `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with sun shadow rays. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |
 | `BloomDown0`, `BloomDown1..5` | The HDR image down a half-resolution mip chain, with a 13-tap filter |
 | `AutoExposure` | A compute pass: a histogram of mip 2 of the chain, and the adapted exposure in a persistent 1x1 image |
@@ -178,12 +178,15 @@ built when the mesh is first seen, and a top-level one rebuilt every frame
 from the transforms. `ShadowMaskRT` binds it as an `acceleration_structure`
 descriptor and traces one ray per pixel.
 
-Only static, opaque, shadow-casting meshes go into it. Skinned meshes would
-need their structures rebuilt from the skinned vertices every frame, and
-alpha-tested ones an any-hit test against their textures; both still cast
-into the cascades, which is why the preset keeps `ShadowMasked{cascade}` and
-`ShadowSkinned{cascade}` on and turns only `ShadowOpaque{cascade}` off. The
-mask is the product of the two. Blended materials have no mask; the preset
+Shadow-casting meshes go into it, opaque and alpha-tested: the binding has
+`"alphaTested": true`, and the rays test an alpha-tested triangle's albedo
+alpha against the cutoff (`skAlphaTestCandidate`), reading it through
+`RayInstances` and `sceneTextures`, the other two bindings of
+`rayTracingSceneSet`. Skinned meshes are in it posed, by
+`shaders/skinning/skin_vertices.comp`, which the engine runs every frame.
+The preset turns `ShadowOpaque{cascade}` and `ShadowMasked{cascade}` off and
+keeps `ShadowSkinned{cascade}` on, so skinned meshes also cast into the
+cascades; the mask is the product of the rays and the cascades. Blended materials have no mask; the preset
 swaps `Transparent` for `TransparentRT`, which traces four rays per pixel
 itself (TAA cannot average a surface it sees through) and multiplies them
 with the cascades the same way. Spot and point lights keep their shadow maps.

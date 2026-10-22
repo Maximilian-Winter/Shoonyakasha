@@ -219,4 +219,32 @@ SkHit skFetchHit(rayQueryEXT query, float coneWidth) {
     return hit;
 }
 
+// Whether the candidate triangle of `query` is solid where the ray crosses
+// it: its material's alpha (the base colour factor's times the albedo
+// texture's, at full size) reaches the alpha cutoff. The non-opaque
+// instances of an acceleration structure with "alphaTested" are the
+// alpha-tested materials, and a ray query sees them as candidates:
+//
+//     while (rayQueryProceedEXT(query)) {
+//         if (skAlphaTestCandidate(query)) rayQueryConfirmIntersectionEXT(query);
+//     }
+bool skAlphaTestCandidate(rayQueryEXT query) {
+    if (rayQueryGetIntersectionTypeEXT(query, false) != gl_RayQueryCandidateIntersectionTriangleEXT) return false;
+    SkRayInstance row = skRayInstances[uint(rayQueryGetIntersectionInstanceIdEXT(query, false))];
+    float alpha = row.baseColor.a;
+    if (row.textures.x != SK_NO_TEXTURE) {
+        uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, false));
+        vec2 bary2 = rayQueryGetIntersectionBarycentricsEXT(query, false);
+        SkFloats floats = SkFloats(row.geometry.xy);
+        uint strideWords = row.vertexLayout.x / 4u;
+        uint uvOffset = (row.vertexLayout.z >> 8) & 0xFFu;
+        vec2 uv = skVertexVec2(floats, skIndex(row, primitive * 3u), strideWords, uvOffset) *
+                      (1.0 - bary2.x - bary2.y) +
+                  skVertexVec2(floats, skIndex(row, primitive * 3u + 1u), strideWords, uvOffset) * bary2.x +
+                  skVertexVec2(floats, skIndex(row, primitive * 3u + 2u), strideWords, uvOffset) * bary2.y;
+        alpha *= textureLod(skSceneTextures[nonuniformEXT(row.textures.x)], uv, 0.0).a;
+    }
+    return alpha >= row.surface.z;
+}
+
 #endif

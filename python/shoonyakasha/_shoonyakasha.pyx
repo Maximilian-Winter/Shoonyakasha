@@ -1719,9 +1719,13 @@ cdef class Engine:
             ibl_cache: save an HDR map's lighting beside it (sky.hdr.ibl)
                 and load it from there while the map is unchanged.
         """
+        from . import pipeline as _pipeline
         if not pipeline_json_path:
-            from . import pipeline as _pipeline
             pipeline_json_path = str(_pipeline.DEFAULT)
+        # Where the engine finds the shaders the default pipeline ships for
+        # its own use (UI, skinning), whatever pipeline this engine runs.
+        import os as _os
+        _os.environ.setdefault("SHOONYAKASHA_DEFAULT_PIPELINE", str(_pipeline.DEFAULT))
         cdef EngineConfig cfg
         cfg.width = width
         cfg.height = height

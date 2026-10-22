@@ -93,7 +93,7 @@ def on_init():
     engine.set_custom_float("default.sunAngle", 0.27)   # the real sun; larger is softer
 ```
 
-On a GPU without ray queries the preset is refused with a warning and nothing changes. `ray_query_supported()` answers from `on_init` on. The rays see static opaque geometry. Skinned and alpha-tested meshes keep casting through the cascades, and the two shadows are combined, so nothing loses its shadow. The noise needs TAA: with `taa` off, ray-traced shadow edges look grainy. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to try a program as it runs on a GPU without them.
+On a GPU without ray queries the preset is refused with a warning and nothing changes. `ray_query_supported()` answers from `on_init` on. The rays see opaque and alpha-tested geometry, skinned meshes in their current pose included; for alpha-tested materials they test the texture's alpha. Skinned meshes also cast through the cascades, and the two shadows are combined. The noise needs TAA: with `taa` off, ray-traced shadow edges look grainy. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to try a program as it runs on a GPU without them.
 
 ## Settings
 

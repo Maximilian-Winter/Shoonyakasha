@@ -39,6 +39,22 @@
     }
   },
   "bufferLayouts": {
+    "RayInstances": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 16384,
+      "fields": [
+        { "name": "geometry", "type": "uvec4" },
+        { "name": "vertexLayout", "type": "uvec4" },
+        { "name": "baseColor", "type": "vec4" },
+        { "name": "emissive", "type": "vec4" },
+        { "name": "surface", "type": "vec4" },
+        { "name": "textures", "type": "uvec4" },
+        { "name": "optics", "type": "vec4" },
+        { "name": "film", "type": "vec4" }
+      ],
+      "source": { "type": "scene", "data": "rayInstances" }
+    },
     "Camera": {
       "usage": "uniform_buffer",
       "packing": "std140",
@@ -1185,7 +1201,27 @@
           "stages": [
             "fragment"
           ],
-          "name": "scene"
+          "name": "scene",
+          "alphaTested": true
+        },
+        {
+          "binding": 1,
+          "type": "storage_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "RayInstances",
+          "autoBindBuffer": "RayInstances"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "sceneTextures",
+          "count": 4096,
+          "source": "sceneTextures"
         }
       ]
     }
@@ -2131,7 +2167,8 @@
       "type": "graphics",
       "enabled": false,
       "requires": [
-        "rayQuery"
+        "rayQuery",
+        "bindlessTextures"
       ],
       "execution": {
         "type": "fullscreen"
@@ -2391,7 +2428,8 @@
       "type": "graphics",
       "enabled": false,
       "requires": [
-        "rayQuery"
+        "rayQuery",
+        "bindlessTextures"
       ],
       "execution": {
         "type": "transparent_geometry",
@@ -2807,7 +2845,7 @@
     "raytraced": {
       "passes": {
         "ShadowOpaque{cascade}": false,
-        "ShadowMasked{cascade}": true,
+        "ShadowMasked{cascade}": false,
         "ShadowSkinned{cascade}": true,
         "ShadowMask": false,
         "ShadowMaskRT": true,

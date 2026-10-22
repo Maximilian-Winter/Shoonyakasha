@@ -127,7 +127,7 @@ TEST(RayInstancesBuffer, RowHoldsTransmissionAndThinFilm) {
     material.setParam("iridescenceThicknessMinimum", 200.0f);
     material.setParam("iridescenceThicknessMaximum", 600.0f);
     MeshComponent mesh;
-    mesh.vertexStride = 44;
+    mesh.vertexStride = 60;
     const PackedRayInstance row = RayTracingScene::packInstance(
         material, 0u, mesh, 0, 0, glm::uvec4(PackedRayInstance::kNoTexture), glm::uvec2(3, 9));
 
@@ -155,14 +155,14 @@ TEST(RayInstancesBuffer, RowHoldsTheMeshAndMaterial) {
     mesh.vertexCount = 3;
     mesh.indexCount = 3;
     mesh.indexType = IndexType::UInt16;
-    mesh.vertexStride = 44;
+    mesh.vertexStride = 60;
 
     const VkDeviceAddress vertices = 0x0000000123456780ull, indices = 0x00000009ABCDEF00ull;
     const glm::uvec4 slots(7, PackedRayInstance::kNoTexture, 2, PackedRayInstance::kNoTexture);
     const PackedRayInstance row = RayTracingScene::packInstance(material, 42u, mesh, vertices, indices, slots);
 
     EXPECT_EQ(row.geometry, glm::uvec4(0x23456780u, 0x1u, 0xABCDEF00u, 0x9u));
-    EXPECT_EQ(row.layout, glm::uvec4(44u, 0u, 32u | (24u << 8) | (12u << 16), PackedRayInstance::kDoubleSided));
+    EXPECT_EQ(row.layout, glm::uvec4(60u, 0u, 32u | (24u << 8) | (12u << 16), PackedRayInstance::kDoubleSided));
     EXPECT_EQ(row.baseColor, glm::vec4(0.5f, 0.25f, 1.0f, 1.0f));
     EXPECT_EQ(row.emissive, glm::vec4(2.0f, 3.0f, 4.0f, 0.0f));
     EXPECT_EQ(row.surface.x, 0.75f);
@@ -184,7 +184,7 @@ TEST(RayInstancesBuffer, RowHoldsTheMeshAndMaterial) {
 
 TEST(RayInstancesBuffer, MissingFactorsReadAsGltfDefaults) {
     MeshComponent mesh;
-    mesh.vertexStride = 44;
+    mesh.vertexStride = 60;
     const PackedRayInstance row = RayTracingScene::packInstance(MaterialComponentV5{}, 0u, mesh, 0, 0,
                                                                 glm::uvec4(PackedRayInstance::kNoTexture));
     EXPECT_EQ(row.baseColor, glm::vec4(1.0f));
@@ -217,4 +217,24 @@ TEST(SceneTexturesBinding, ErrorsAreCaughtAtLoad) {
         EXPECT_THROW(loadGraphFromJson(builder, graph(instancesLayout(), json::array({bad}))), std::runtime_error)
             << bad.dump();
     }
+}
+
+TEST(AccelerationStructureBinding, AlphaTestedIsParsed) {
+    const json scene = {{"binding", 0}, {"type", "acceleration_structure"}, {"name", "scene"},
+                        {"stages", {"fragment"}}};
+    json tested = scene;
+    tested["alphaTested"] = true;
+
+    FrameGraphBuilder plain, opted;
+    loadGraphFromJson(plain, graph(instancesLayout(), json::array({scene})));
+    loadGraphFromJson(opted, graph(instancesLayout(), json::array({tested})));
+    EXPECT_FALSE(plain.getDescriptorSetLayouts()[0].bindings[0].alphaTested);
+    EXPECT_TRUE(opted.getDescriptorSetLayouts()[0].bindings[0].alphaTested);
+}
+
+TEST(AccelerationStructureBinding, AlphaTestedOnlyOnAccelerationStructures) {
+    json bad = texturesBinding();
+    bad["alphaTested"] = true;
+    FrameGraphBuilder builder;
+    EXPECT_THROW(loadGraphFromJson(builder, graph(instancesLayout(), json::array({bad}))), std::runtime_error);
 }

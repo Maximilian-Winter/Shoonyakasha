@@ -388,6 +388,7 @@ private:
     void replaceIBL(IBLResources resources);
     std::string iblShaderDirectory() const;  // empty if the IBL shaders are nowhere to be found
     std::string uiShaderDirectory() const;   // empty if the UI shaders are nowhere to be found
+    std::string skinningShaderPath() const;  // empty if skin_vertices.comp.spv is nowhere to be found
     void createUIContext();
     /// Construct the RenderGraph object. Runs before onInit() so subclasses and
     /// facade callbacks can reach getRenderGraph() there.

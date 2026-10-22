@@ -1261,6 +1261,10 @@ public:
     void setSharedBufferRegistry(SharedBufferRegistry* registry);
     SharedBufferRegistry* getSharedBufferRegistry() const { return m_sharedBufferRegistry; }
 
+    /// The skinning shader the scene's acceleration structure poses skinned
+    /// meshes with (RayTracingScene::setSkinningShader); set before the first frame.
+    void setSkinningShader(const std::string& spirvPath) { m_skinningShaderPath = spirvPath; }
+
     // ── Readback API (Phase 3: GPU→CPU data transfer) ──
     void registerReadbackCallback(const std::string& bufferName, ReadbackCallbackFn cb);
     /// The readbacks completed when this frame began; their data stays valid
@@ -1746,6 +1750,8 @@ private:
     std::unique_ptr<StagingBufferManager> m_stagingManager;
     std::unique_ptr<Shoonyakasha::RayTracingScene> m_rayTracingScene;
     std::vector<std::pair<std::string, std::string>> m_accelerationBindings;   // (layout, binding)
+    bool m_accelerationAlphaTested = false;   // one of them asks for alpha-tested meshes
+    std::string m_skinningShaderPath;         // RayTracingScene::setSkinningShader
     // Bindings with "source": "sceneTextures", and per frame in flight the
     // (view, sampler) last written to each of their slots.
     struct SceneTextureBinding {

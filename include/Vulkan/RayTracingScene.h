@@ -8,9 +8,18 @@
 //
 // What goes in: entities with a mesh made for it (MeshComponent::
 // rayTracingInput: static glTF meshes on a device with ray queries), that
-// cast shadows, are visible and have an opaque material. Skinned meshes,
-// alpha-tested and transparent materials and sprites stay out; a pipeline
-// shadows those some other way (the default pipeline: its shadow maps).
+// cast shadows, are visible and have an opaque material, as opaque
+// instances. With alphaTested, alpha-tested materials go in too, as
+// non-opaque instances: a ray query sees their triangles as candidates, and
+// the shader decides from the texture's alpha (sk/scene_hits.glsl,
+// skAlphaTestCandidate). Transparent materials and sprites stay out.
+//
+// Skinned meshes go in posed: every frame a compute shader
+// (skin_vertices.comp, setSkinningShader) writes each one's vertices, in
+// the standard layout, from its bone matrices, and its bottom-level
+// structure is refitted to them. Each skinned entity has its own posed
+// vertices and structure per frame in flight. Without the shader they stay
+// out.
 //
 // Only exists on a device with ray queries (VulkanDevice::hasRayQuery).
 //
@@ -33,6 +42,7 @@
 #include <bit>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -76,9 +86,15 @@ public:
     /// that makes it visible to fragment and compute shaders. Builds any
     /// bottom-level structures it needs first, synchronously. Also fills this
     /// frame's instances(), with the slots `textures` gives their textures
-    /// (kNoTexture for all without one).
+    /// (kNoTexture for all without one). `alphaTested` puts alpha-tested
+    /// materials in as non-opaque instances.
     void recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt::registry& registry,
-                     const SceneTextureTable* textures = nullptr);
+                     const SceneTextureTable* textures = nullptr, bool alphaTested = false);
+
+    /// The SPIR-V file of skin_vertices.comp, which poses skinned meshes; read
+    /// when the first skinned mesh is seen. Empty or unreadable: skinned
+    /// meshes stay out, with a warning.
+    void setSkinningShader(const std::string& spirvPath) { m_skinningShaderPath = spirvPath; }
 
     /// The top-level structure `recordBuild` last built for `frameIndex`.
     VkAccelerationStructureKHR topLevel(uint32_t frameIndex) const;
@@ -91,8 +107,8 @@ public:
     /// The row of one instance. `textureSlots` holds the slots of albedoMap,
     /// normalMap, metallicRoughnessMap and emissiveMap, `filmSlots` those of
     /// iridescenceThicknessMap and iridescenceMap (kNoTexture for none).
-    /// The vertex layout is the 44-byte glTF vertex every mesh in the
-    /// structure has: position at 0, color at 12, uv at 24, normal at 32.
+    /// The vertex layout is the standard mesh vertex (Vertex, VertexTypes.h):
+    /// position at 0, color at 12, uv at 24, normal at 32; the stride is the mesh's.
     static PackedRayInstance packInstance(const MaterialComponentV5& material, uint32_t entity,
                                           const MeshComponent& mesh, VkDeviceAddress vertices,
                                           VkDeviceAddress indices, const glm::uvec4& textureSlots,
@@ -138,7 +154,29 @@ private:
         }
     };
 
+    /// A skinned entity's posed copy for one frame in flight.
+    struct PosedMesh {
+        GPUBuffer bones;                 // host-visible bone matrices
+        void* bonesMapped = nullptr;
+        uint32_t jointCount = 0;
+        GPUBuffer vertices;              // standard vertices, written by the skinning shader
+        uint32_t vertexCount = 0;
+        VkBuffer source = VK_NULL_HANDLE;   // the skinned vertex buffer it poses
+        AccelerationStructure structure; // built once, refitted every frame after
+        GPUBuffer scratch;
+        bool built = false;
+    };
+    struct PosedEntity {
+        std::vector<PosedMesh> frames;   // one per frame in flight
+        uint64_t lastBuild = 0;
+    };
+
     const BottomLevel* bottomLevelFor(const MeshComponent& mesh);
+    bool skinningReady();
+    void destroyPosed(PosedMesh& posed);
+    PosedMesh& posedFor(entt::entity entity, uint32_t frame, const MeshComponent& mesh, uint32_t jointCount);
+    void recordPosedBuilds(VkCommandBuffer cmd, const std::vector<PosedMesh*>& posed,
+                           const std::vector<const MeshComponent*>& meshes);
     void releaseExpired();
     void ensureTopLevelCapacity(TopLevel& top, uint32_t count);
     AccelerationStructure createStructure(VkAccelerationStructureTypeKHR type, VkDeviceSize size);
@@ -156,6 +194,16 @@ private:
     // can still reference them: (structure, builds remaining).
     std::vector<std::pair<AccelerationStructure, uint32_t>> m_retiring;
     uint32_t m_framesInFlight;
+
+    std::unordered_map<entt::entity, PosedEntity> m_posed;
+    // Posed entities no longer drawn, destroyed once no frame in flight can
+    // still reference them: (entity's copies, builds remaining).
+    std::vector<std::pair<PosedEntity, uint32_t>> m_retiringPosed;
+    uint64_t m_buildCount = 0;
+    std::string m_skinningShaderPath;
+    bool m_skinningTried = false;
+    VkPipelineLayout m_skinLayout = VK_NULL_HANDLE;
+    VkPipeline m_skinPipeline = VK_NULL_HANDLE;
 
     PFN_vkCreateAccelerationStructureKHR m_create = nullptr;
     PFN_vkDestroyAccelerationStructureKHR m_destroy = nullptr;

@@ -156,6 +156,8 @@ struct DescriptorBindingDesc {
     std::string                 source;             // "sceneTextures": the array of the textures the
                                                     // ray-traced scene's instances use, by slot
     VkFormat                    texelFormat = VK_FORMAT_UNDEFINED;  // texel buffers: JSON "format"
+    bool                        alphaTested = false; // acceleration_structure: JSON "alphaTested", alpha-tested
+                                                     // meshes go in as non-opaque instances
 };
 
 struct DescriptorSetLayoutDesc {

@@ -1,0 +1,66 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// Poses a skinned mesh for ray tracing: reads its skinned vertices (80
+// bytes: position, normal, uv, joints, weights, tangent) and bone matrices,
+// and writes standard vertices (60 bytes: position, colour, uv, normal,
+// tangent) in mesh space, which the engine's acceleration structure and
+// rayInstances rows read. RayTracingScene dispatches it, one thread per
+// vertex; everything comes through buffer device addresses.
+
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+layout(local_size_x = 64) in;
+
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer SkinnedWords { uint v[]; };
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Bones { mat4 m[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) writeonly buffer Posed { float v[]; };
+
+layout(push_constant) uniform Push {
+    uvec2 skinned;      // the mesh's skinned vertex buffer
+    uvec2 bones;        // jointCount bone matrices
+    uvec2 posed;        // the standard vertices to write
+    uint vertexCount;
+} push;
+
+const uint SKINNED_WORDS = 20u;   // SkinnedVertex
+const uint POSED_WORDS = 15u;     // Vertex
+
+vec3 readVec3(SkinnedWords w, uint at) {
+    return vec3(uintBitsToFloat(w.v[at]), uintBitsToFloat(w.v[at + 1u]), uintBitsToFloat(w.v[at + 2u]));
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= push.vertexCount) return;
+
+    SkinnedWords source = SkinnedWords(push.skinned);
+    Bones bones = Bones(push.bones);
+    Posed posed = Posed(push.posed);
+    uint s = i * SKINNED_WORDS;
+
+    vec3 position = readVec3(source, s);
+    vec3 normal = readVec3(source, s + 3u);
+    vec2 uv = vec2(uintBitsToFloat(source.v[s + 6u]), uintBitsToFloat(source.v[s + 7u]));
+    uvec4 joints = uvec4(source.v[s + 8u], source.v[s + 9u], source.v[s + 10u], source.v[s + 11u]);
+    vec4 weights = vec4(uintBitsToFloat(source.v[s + 12u]), uintBitsToFloat(source.v[s + 13u]),
+                        uintBitsToFloat(source.v[s + 14u]), uintBitsToFloat(source.v[s + 15u]));
+    vec4 tangent = vec4(readVec3(source, s + 16u), uintBitsToFloat(source.v[s + 19u]));
+
+    mat4 skin = weights.x * bones.m[joints.x] + weights.y * bones.m[joints.y] +
+                weights.z * bones.m[joints.z] + weights.w * bones.m[joints.w];
+    vec3 p = (skin * vec4(position, 1.0)).xyz;
+    vec3 n = transpose(inverse(mat3(skin))) * normal;
+    float nLength = length(n);
+    n = nLength > 0.0 ? n / nLength : vec3(0.0, 1.0, 0.0);
+    vec3 t = mat3(skin) * tangent.xyz;
+    // A mirroring skin flips the bitangent's side, as gbuffer_skinned.vert does.
+    float side = determinant(mat3(skin)) < 0.0 ? -tangent.w : tangent.w;
+
+    uint o = i * POSED_WORDS;
+    posed.v[o] = p.x;        posed.v[o + 1u] = p.y;   posed.v[o + 2u] = p.z;
+    posed.v[o + 3u] = 1.0;   posed.v[o + 4u] = 1.0;   posed.v[o + 5u] = 1.0;   // colour: white
+    posed.v[o + 6u] = uv.x;  posed.v[o + 7u] = uv.y;
+    posed.v[o + 8u] = n.x;   posed.v[o + 9u] = n.y;   posed.v[o + 10u] = n.z;
+    posed.v[o + 11u] = t.x;  posed.v[o + 12u] = t.y;  posed.v[o + 13u] = t.z;  posed.v[o + 14u] = side;
+}

@@ -1827,6 +1827,7 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
     // The descriptor sets about to be made hold none of the scene's textures;
     // the next frame finds their bindings again and writes every slot.
     m_accelerationBindings.clear();
+    m_accelerationAlphaTested = false;
     m_sceneTextureBindings.clear();
     m_sceneTextureBindingsFound = false;
 
@@ -3252,6 +3253,7 @@ void RenderGraph::recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex
                 if (binding.type == "acceleration_structure") {
                     m_accelerationBindings.emplace_back(layout.name,
                         binding.name.empty() ? "binding_" + std::to_string(binding.binding) : binding.name);
+                    m_accelerationAlphaTested = m_accelerationAlphaTested || binding.alphaTested;
                 }
             }
         }
@@ -3259,8 +3261,10 @@ void RenderGraph::recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex
     }
     if (!m_rayTracingScene) {
         m_rayTracingScene = std::make_unique<RayTracingScene>(m_device, m_maxFramesInFlight);
+        m_rayTracingScene->setSkinningShader(m_skinningShaderPath);
     }
-    m_rayTracingScene->recordBuild(cmd, frameIndex, m_boundScene->getRegistry(), &m_sceneTextureTable);
+    m_rayTracingScene->recordBuild(cmd, frameIndex, m_boundScene->getRegistry(), &m_sceneTextureTable,
+                                   m_accelerationAlphaTested);
     const VkAccelerationStructureKHR scene = m_rayTracingScene->topLevel(frameIndex);
     for (const auto& [layout, binding] : m_accelerationBindings) {
         if (auto set = getDescriptorSet(layout)) {

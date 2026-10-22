@@ -7,10 +7,10 @@
 // shadow_mask.frag, which it replaces in the "raytraced" preset; needs a
 // device with ray queries (the pass "requires" them).
 //
-// The acceleration structure holds the static, opaque shadow casters. The
-// rest, skinned and alpha-tested, still go into the cascaded shadow map
-// (the preset keeps those passes and drops the opaque one), and the mask is
-// the product of both.
+// The acceleration structure holds the shadow casters, opaque and
+// alpha-tested, skinned ones posed. The skinned ones also go into the
+// cascaded shadow map (the preset keeps that pass and drops the others),
+// and the mask is the product of both.
 
 #extension GL_EXT_ray_query : require
 
@@ -20,6 +20,10 @@ layout(set = 0, binding = 0) uniform sampler2D gDepth;
 layout(set = 0, binding = 1) uniform sampler2D gNormal;
 layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 layout(set = 2, binding = 0) uniform accelerationStructureEXT scene;
+#define SK_SCENE_HITS_SET 2
+#define SK_RAY_INSTANCES_BINDING 1
+#define SK_SCENE_TEXTURES_BINDING 2
+#include "sk/scene_hits.glsl"
 layout(set = 3, binding = 0) uniform Settings { DEFAULT_SETTINGS_BLOCK } settings;
 layout(set = 3, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascades;
 layout(set = 4, binding = 0) uniform sampler2DArrayShadow shadowMap;

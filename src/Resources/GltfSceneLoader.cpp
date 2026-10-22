@@ -1342,11 +1342,14 @@ GPUBuffer GltfSceneLoader::buildSkinnedVertexBuffer(
         }
     }
 
+    // On a device with ray queries, RayTracingScene's skinning shader reads
+    // the vertices by device address.
     VkDeviceSize bufferSize = vertices.size() * sizeof(SkinnedVertex);
     GPUBuffer buffer = GPUResourceFactory::createBuffer(
         m_device.getAllocator().getHandle(),
         bufferSize,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            (m_device.hasRayQuery() ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0),
         VMA_MEMORY_USAGE_GPU_ONLY
     );
     GPUResourceFactory::uploadBuffer(

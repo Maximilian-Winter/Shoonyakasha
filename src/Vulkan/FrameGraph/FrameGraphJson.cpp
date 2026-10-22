@@ -1556,6 +1556,11 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     binding.autoBindBuffer   = bindingJson.value("autoBindBuffer", std::string{});
                     binding.externalImage    = bindingJson.value("externalImage", std::string{});
                     binding.source           = bindingJson.value("source", std::string{});
+                    binding.alphaTested      = bindingJson.value("alphaTested", false);
+                    if (binding.alphaTested && binding.type != "acceleration_structure") {
+                        throw std::runtime_error("Binding '" + binding.name + "' of layout '" + layoutDesc.name +
+                                                 "': \"alphaTested\" is for acceleration_structure bindings");
+                    }
                     {
                         // A texel buffer: a buffer of bufferLayouts seen as texels of "format".
                         const bool texel = binding.type == "uniform_texel_buffer" ||

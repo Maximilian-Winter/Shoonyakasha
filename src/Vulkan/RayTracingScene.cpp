@@ -10,11 +10,13 @@
 #include "ECS/RenderComponents.h"
 #include "ECS/SkeletonComponents.h"
 #include "ECS/Sprite2DComponents.h"
+#include "Vulkan/VertexTypes.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanMemoryAllocator.h"
 
 #include <algorithm>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
 
 namespace Shoonyakasha {
@@ -30,6 +32,50 @@ T deviceFunction(VkDevice device, const char* name) {
 
 VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) {
     return alignment ? (value + alignment - 1) / alignment * alignment : value;
+}
+
+// The skinned vertex the glTF loader builds (GltfSceneLoader.cpp,
+// SkinnedVertex), which skin_vertices.comp reads.
+constexpr uint32_t kSkinnedVertexStride = 80;
+
+// skin_vertices.comp's push constants.
+struct SkinPush {
+    glm::uvec2 skinned;
+    glm::uvec2 bones;
+    glm::uvec2 posed;
+    uint32_t vertexCount;
+};
+
+glm::uvec2 splitAddress(VkDeviceAddress address) {
+    return {static_cast<uint32_t>(address), static_cast<uint32_t>(address >> 32)};
+}
+
+constexpr VkBuildAccelerationStructureFlagsKHR kPosedBuildFlags =
+    VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+
+// The triangles of a posed mesh: its standard vertices, the skinned mesh's indices.
+VkAccelerationStructureGeometryKHR posedGeometry(VkDeviceAddress vertices, VkDeviceAddress indices,
+                                                 const MeshComponent& mesh, uint32_t& primitives) {
+    VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
+    triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+    triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    triangles.vertexData.deviceAddress = vertices;
+    triangles.vertexStride = sizeof(Vertex);
+    triangles.maxVertex = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0;
+    primitives = mesh.vertexCount / 3;
+    if (mesh.hasIndices()) {
+        triangles.indexType = mesh.indexType == IndexType::UInt16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+        triangles.indexData.deviceAddress = indices;
+        primitives = mesh.indexCount / 3;
+    } else {
+        triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+    }
+    VkAccelerationStructureGeometryKHR geometry{};
+    geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    geometry.geometry.triangles = triangles;
+    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    return geometry;
 }
 
 } // namespace
@@ -70,6 +116,15 @@ RayTracingScene::~RayTracingScene() {
     }
     for (auto& [key, bottom] : m_bottomLevels) destroyStructure(bottom.structure);
     for (auto& [structure, remaining] : m_retiring) destroyStructure(structure);
+    for (auto& [entity, posed] : m_posed) {
+        for (auto& frame : posed.frames) destroyPosed(frame);
+    }
+    for (auto& [posed, remaining] : m_retiringPosed) {
+        for (auto& frame : posed.frames) destroyPosed(frame);
+    }
+    const VkDevice d = m_device.getLogicalDevice();
+    if (m_skinPipeline != VK_NULL_HANDLE) vkDestroyPipeline(d, m_skinPipeline, nullptr);
+    if (m_skinLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, m_skinLayout, nullptr);
     delete m_logger;
 }
 
@@ -187,6 +242,165 @@ const RayTracingScene::BottomLevel* RayTracingScene::bottomLevelFor(const MeshCo
     return &m_bottomLevels.emplace(key, std::move(bottom)).first->second;
 }
 
+bool RayTracingScene::skinningReady() {
+    if (m_skinPipeline != VK_NULL_HANDLE) return true;
+    if (m_skinningTried) return false;
+    m_skinningTried = true;
+
+    std::ifstream file(m_skinningShaderPath, std::ios::binary | std::ios::ate);
+    if (m_skinningShaderPath.empty() || !file) {
+        m_logger->log(LogLevel::Warning, "No skinning shader ('%s'): skinned meshes stay out of the acceleration "
+                      "structure", m_skinningShaderPath.c_str());
+        return false;
+    }
+    const std::streamsize size = file.tellg();
+    std::vector<uint32_t> code(static_cast<size_t>(size) / 4);
+    file.seekg(0);
+    file.read(reinterpret_cast<char*>(code.data()), static_cast<std::streamsize>(code.size() * 4));
+
+    const VkDevice d = m_device.getLogicalDevice();
+    VkShaderModuleCreateInfo moduleInfo{};
+    moduleInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    moduleInfo.codeSize = code.size() * 4;
+    moduleInfo.pCode = code.data();
+    VkShaderModule module = VK_NULL_HANDLE;
+    if (code.empty() || vkCreateShaderModule(d, &moduleInfo, nullptr, &module) != VK_SUCCESS) {
+        m_logger->log(LogLevel::Warning, "Skinning shader '%s' could not be loaded: skinned meshes stay out of the "
+                      "acceleration structure", m_skinningShaderPath.c_str());
+        return false;
+    }
+
+    VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(SkinPush)};
+    VkPipelineLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &range;
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pipelineInfo.stage.module = module;
+    pipelineInfo.stage.pName = "main";
+    bool ok = vkCreatePipelineLayout(d, &layoutInfo, nullptr, &m_skinLayout) == VK_SUCCESS;
+    if (ok) {
+        pipelineInfo.layout = m_skinLayout;
+        ok = vkCreateComputePipelines(d, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_skinPipeline) == VK_SUCCESS;
+    }
+    vkDestroyShaderModule(d, module, nullptr);
+    if (!ok) {
+        m_logger->log(LogLevel::Warning, "Skinning pipeline creation failed: skinned meshes stay out of the "
+                      "acceleration structure");
+        if (m_skinLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(d, m_skinLayout, nullptr);
+        m_skinLayout = VK_NULL_HANDLE;
+        m_skinPipeline = VK_NULL_HANDLE;
+        return false;
+    }
+    m_logger->log(LogLevel::Info, "Skinning shader loaded: %s", m_skinningShaderPath.c_str());
+    return true;
+}
+
+void RayTracingScene::destroyPosed(PosedMesh& posed) {
+    const VmaAllocator allocator = m_device.getAllocator().getHandle();
+    destroyStructure(posed.structure);
+    if (posed.bonesMapped) vmaUnmapMemory(allocator, posed.bones.allocation);
+    if (posed.bones.isValid()) vmaDestroyBuffer(allocator, posed.bones.buffer, posed.bones.allocation);
+    if (posed.vertices.isValid()) vmaDestroyBuffer(allocator, posed.vertices.buffer, posed.vertices.allocation);
+    if (posed.scratch.isValid()) vmaDestroyBuffer(allocator, posed.scratch.buffer, posed.scratch.allocation);
+    posed = PosedMesh{};
+}
+
+RayTracingScene::PosedMesh& RayTracingScene::posedFor(entt::entity entity, uint32_t frame, const MeshComponent& mesh,
+                                                      uint32_t jointCount) {
+    PosedEntity& entry = m_posed[entity];
+    if (entry.frames.size() != m_framesInFlight) entry.frames.resize(m_framesInFlight);
+    entry.lastBuild = m_buildCount;
+    PosedMesh& posed = entry.frames[frame];
+    if (posed.source == mesh.vertexHandle() && posed.vertexCount == mesh.vertexCount &&
+        posed.jointCount == jointCount) {
+        return posed;
+    }
+
+    // This frame's fence has passed, so its copy is idle.
+    destroyPosed(posed);
+    posed.source = mesh.vertexHandle();
+    posed.vertexCount = mesh.vertexCount;
+    posed.jointCount = jointCount;
+    posed.bones = createBuffer(sizeof(glm::mat4) * std::max(jointCount, 1u), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    vmaMapMemory(m_device.getAllocator().getHandle(), posed.bones.allocation, &posed.bonesMapped);
+    posed.vertices = createBuffer(sizeof(Vertex) * std::max(mesh.vertexCount, 1u),
+                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                      VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                                  false);
+
+    uint32_t primitives = 0;
+    const VkAccelerationStructureGeometryKHR geometry =
+        posedGeometry(addressOf(posed.vertices.buffer), mesh.hasIndices() ? addressOf(mesh.indexHandle()) : 0, mesh,
+                      primitives);
+    VkAccelerationStructureBuildGeometryInfoKHR build{};
+    build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    build.flags = kPosedBuildFlags;
+    build.geometryCount = 1;
+    build.pGeometries = &geometry;
+    VkAccelerationStructureBuildSizesInfoKHR sizes{};
+    sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    m_buildSizes(m_device.getLogicalDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build, &primitives,
+                 &sizes);
+    posed.structure = createStructure(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizes.accelerationStructureSize);
+    posed.scratch = createBuffer(std::max(sizes.buildScratchSize, sizes.updateScratchSize),
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false, m_scratchAlignment);
+    posed.built = false;
+    return posed;
+}
+
+void RayTracingScene::recordPosedBuilds(VkCommandBuffer cmd, const std::vector<PosedMesh*>& posed,
+                                        const std::vector<const MeshComponent*>& meshes) {
+    if (posed.empty()) return;
+
+    // Pose: one thread per vertex.
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_skinPipeline);
+    for (const PosedMesh* p : posed) {
+        const SkinPush push{splitAddress(addressOf(p->source)), splitAddress(addressOf(p->bones.buffer)),
+                            splitAddress(addressOf(p->vertices.buffer)), p->vertexCount};
+        vkCmdPushConstants(cmd, m_skinLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+        vkCmdDispatch(cmd, (p->vertexCount + 63) / 64, 1, 1);
+    }
+    VkMemoryBarrier posedWritten{};
+    posedWritten.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    posedWritten.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    posedWritten.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                         0, 1, &posedWritten, 0, nullptr, 0, nullptr);
+
+    // Build each structure the first time, refit it after.
+    std::vector<VkAccelerationStructureGeometryKHR> geometries(posed.size());
+    std::vector<VkAccelerationStructureBuildGeometryInfoKHR> builds(posed.size());
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges(posed.size());
+    std::vector<const VkAccelerationStructureBuildRangeInfoKHR*> rangePointers(posed.size());
+    for (size_t i = 0; i < posed.size(); ++i) {
+        const MeshComponent& mesh = *meshes[i];
+        uint32_t primitives = 0;
+        geometries[i] = posedGeometry(addressOf(posed[i]->vertices.buffer),
+                                      mesh.hasIndices() ? addressOf(mesh.indexHandle()) : 0, mesh, primitives);
+        VkAccelerationStructureBuildGeometryInfoKHR& build = builds[i];
+        build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+        build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        build.flags = kPosedBuildFlags;
+        build.mode = posed[i]->built ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR
+                                     : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        build.srcAccelerationStructure = posed[i]->built ? posed[i]->structure.handle : VK_NULL_HANDLE;
+        build.dstAccelerationStructure = posed[i]->structure.handle;
+        build.geometryCount = 1;
+        build.pGeometries = &geometries[i];
+        build.scratchData.deviceAddress = alignUp(addressOf(posed[i]->scratch.buffer), m_scratchAlignment);
+        ranges[i] = VkAccelerationStructureBuildRangeInfoKHR{};
+        ranges[i].primitiveCount = primitives;
+        rangePointers[i] = &ranges[i];
+        posed[i]->built = true;
+    }
+    m_cmdBuild(cmd, static_cast<uint32_t>(builds.size()), builds.data(), rangePointers.data());
+}
+
 void RayTracingScene::releaseExpired() {
     // Retire structures whose meshes are gone; a frame in flight may still
     // trace against them, so they live until every frame has been rebuilt.
@@ -203,6 +417,14 @@ void RayTracingScene::releaseExpired() {
         if (--it->second == 0) {
             destroyStructure(it->first);
             it = m_retiring.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = m_retiringPosed.begin(); it != m_retiringPosed.end();) {
+        if (--it->second == 0) {
+            for (auto& frame : it->first.frames) destroyPosed(frame);
+            it = m_retiringPosed.erase(it);
         } else {
             ++it;
         }
@@ -273,46 +495,107 @@ PackedRayInstance RayTracingScene::packInstance(const MaterialComponentV5& mater
 }
 
 void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt::registry& registry,
-                                  const SceneTextureTable* textures) {
+                                  const SceneTextureTable* textures, bool alphaTested) {
     static_assert(SceneTextureTable::kNoTexture == PackedRayInstance::kNoTexture);
     releaseExpired();
-    TopLevel& top = m_topLevels[frameIndex % m_framesInFlight];
+    ++m_buildCount;
+    const uint32_t frame = frameIndex % m_framesInFlight;
+    TopLevel& top = m_topLevels[frame];
     top.rows.clear();
     auto slotOf = [&](const MaterialComponentV5& material, const char* name) -> uint32_t {
         return textures ? textures->slotOf(material.getTexture(name)) : PackedRayInstance::kNoTexture;
     };
 
-    // The static, opaque shadow casters.
+    // One instance and its row. `mesh` describes the vertices at `vertices`.
     std::vector<VkAccelerationStructureInstanceKHR> instances;
-    auto view = registry.view<MeshComponent, MaterialComponentV5, RenderableTagComponent, ECS::TransformComponent>();
-    for (auto entity : view) {
-        const auto& mesh = view.get<MeshComponent>(entity);
-        const auto& tag = view.get<RenderableTagComponent>(entity);
-        if (!mesh.rayTracingInput || !mesh.isValid() || !tag.shouldRender() || !tag.castShadows) continue;
-        // Opaque materials only: alpha-tested ones need their texture to cut
-        // the right holes, which a pipeline can leave to its shadow maps.
-        const auto& material = view.get<MaterialComponentV5>(entity);
-        if (!material.isOpaque()) continue;
-        if (registry.all_of<SkeletonComponent>(entity) || registry.all_of<Sprite2DComponent>(entity)) continue;
-
-        const BottomLevel* bottom = bottomLevelFor(mesh);
+    auto addInstance = [&](entt::entity entity, const MaterialComponentV5& material, const MeshComponent& mesh,
+                           VkDeviceAddress vertices, VkDeviceAddress structure, const glm::mat4& world,
+                           bool masked) {
         glm::uvec4 slots;
         for (int t = 0; t < 4; ++t) slots[t] = slotOf(material, kTextureNames[t]);
         glm::uvec2 filmSlots;
         for (int t = 0; t < 2; ++t) filmSlots[t] = slotOf(material, kFilmTextureNames[t]);
-        top.rows.push_back(packInstance(material, static_cast<uint32_t>(entity), mesh,
-                                        addressOf(mesh.vertexHandle()),
+        top.rows.push_back(packInstance(material, static_cast<uint32_t>(entity), mesh, vertices,
                                         mesh.hasIndices() ? addressOf(mesh.indexHandle()) : 0, slots, filmSlots));
-        const glm::mat4& world = view.get<ECS::TransformComponent>(entity).worldMatrix;
         VkAccelerationStructureInstanceKHR instance{};
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c) instance.transform.matrix[r][c] = world[c][r];
         instance.instanceCustomIndex = static_cast<uint32_t>(entity) & 0xFFFFFF;
         instance.mask = 0xFF;
         instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
-                         VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
-        instance.accelerationStructureReference = bottom->structure.address;
+                         (masked ? VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR
+                                 : VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR);
+        instance.accelerationStructureReference = structure;
         instances.push_back(instance);
+    };
+    // Shadow casters with an opaque material, or an alpha-tested one when
+    // asked: those need their texture to cut the right holes, which only
+    // shaders that test the candidates do.
+    auto caster = [&](const MeshComponent& mesh, const RenderableTagComponent& tag, const MaterialComponentV5& material,
+                      bool& masked) {
+        masked = alphaTested && material.isMasked();
+        return mesh.isValid() && tag.shouldRender() && tag.castShadows && (material.isOpaque() || masked);
+    };
+
+    // The static casters.
+    auto view = registry.view<MeshComponent, MaterialComponentV5, RenderableTagComponent, ECS::TransformComponent>();
+    for (auto entity : view) {
+        const auto& mesh = view.get<MeshComponent>(entity);
+        const auto& material = view.get<MaterialComponentV5>(entity);
+        bool masked = false;
+        if (!mesh.rayTracingInput || !caster(mesh, view.get<RenderableTagComponent>(entity), material, masked)) continue;
+        if (registry.all_of<SkeletonComponent>(entity) || registry.all_of<Sprite2DComponent>(entity)) continue;
+        addInstance(entity, material, mesh, addressOf(mesh.vertexHandle()), bottomLevelFor(mesh)->structure.address,
+                    view.get<ECS::TransformComponent>(entity).worldMatrix, masked);
+    }
+
+    // The skinned casters, posed for this frame.
+    std::vector<entt::entity> skinned;
+    std::vector<PosedMesh*> posed;
+    std::vector<const MeshComponent*> posedMeshes;
+    std::vector<bool> posedMasked;
+    auto skinnedView = registry.view<MeshComponent, MaterialComponentV5, RenderableTagComponent,
+                                     ECS::TransformComponent, SkeletonComponent>();
+    for (auto entity : skinnedView) {
+        const auto& mesh = skinnedView.get<MeshComponent>(entity);
+        const auto& skeleton = skinnedView.get<SkeletonComponent>(entity);
+        bool masked = false;
+        if (!caster(mesh, skinnedView.get<RenderableTagComponent>(entity), skinnedView.get<MaterialComponentV5>(entity),
+                    masked)) {
+            continue;
+        }
+        if (mesh.vertexStride != kSkinnedVertexStride || mesh.vertexCount == 0 || skeleton.boneMatrices.empty() ||
+            registry.all_of<Sprite2DComponent>(entity)) {
+            continue;
+        }
+        if (!skinningReady()) break;
+        const uint32_t joints = static_cast<uint32_t>(skeleton.boneMatrices.size());
+        PosedMesh& p = posedFor(entity, frame, mesh, joints);
+        std::memcpy(p.bonesMapped, skeleton.boneMatrices.data(), joints * sizeof(glm::mat4));
+        vmaFlushAllocation(m_device.getAllocator().getHandle(), p.bones.allocation, 0, VK_WHOLE_SIZE);
+        skinned.push_back(entity);
+        posed.push_back(&p);
+        posedMeshes.push_back(&mesh);
+        posedMasked.push_back(masked);
+    }
+    recordPosedBuilds(cmd, posed, posedMeshes);
+    for (size_t i = 0; i < posed.size(); ++i) {
+        MeshComponent rowMesh = *posedMeshes[i];   // the posed vertices are standard ones
+        rowMesh.vertexStride = sizeof(Vertex);
+        addInstance(skinned[i], skinnedView.get<MaterialComponentV5>(skinned[i]), rowMesh,
+                    addressOf(posed[i]->vertices.buffer), posed[i]->structure.address,
+                    skinnedView.get<ECS::TransformComponent>(skinned[i]).worldMatrix, posedMasked[i]);
+    }
+
+    // Skinned entities no longer drawn: their copies may still be traced by
+    // frames in flight.
+    for (auto it = m_posed.begin(); it != m_posed.end();) {
+        if (it->second.lastBuild != m_buildCount) {
+            m_retiringPosed.emplace_back(std::move(it->second), m_framesInFlight + 1);
+            it = m_posed.erase(it);
+        } else {
+            ++it;
+        }
     }
 
     ensureTopLevelCapacity(top, static_cast<uint32_t>(instances.size()));

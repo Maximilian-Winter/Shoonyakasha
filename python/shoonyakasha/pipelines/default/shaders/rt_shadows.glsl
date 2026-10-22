@@ -1,6 +1,7 @@
 // rt_shadows.glsl - sun shadow rays against the scene's acceleration
-// structure. The including shader enables GL_EXT_ray_query and declares
-// `accelerationStructureEXT scene` and the Settings block as `settings`.
+// structure. The including shader enables GL_EXT_ray_query, declares
+// `accelerationStructureEXT scene` and the Settings block as `settings`, and
+// includes sk/scene_hits.glsl for the alpha-tested casters.
 
 #ifndef DEFAULT_RT_SHADOWS_GLSL
 #define DEFAULT_RT_SHADOWS_GLSL
@@ -16,9 +17,12 @@ bool sunRayBlocked(vec3 origin, vec3 L, float u, float v) {
     vec3 direction = normalize(L + (t * cos(angle) + b * sin(angle)) * radius);
 
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-                          0xFF, origin, 0.0, direction, 10000.0);
-    while (rayQueryProceedEXT(query)) {}
+    rayQueryInitializeEXT(query, scene, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, origin, 0.0, direction, 10000.0);
+    // Opaque casters commit by themselves; the alpha-tested ones' triangles
+    // come back as candidates.
+    while (rayQueryProceedEXT(query)) {
+        if (skAlphaTestCandidate(query)) rayQueryConfirmIntersectionEXT(query);
+    }
     return rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT;
 }
 

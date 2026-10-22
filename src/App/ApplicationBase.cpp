@@ -266,6 +266,22 @@ std::string ApplicationBase::uiShaderDirectory() const {
     return {};
 }
 
+std::string ApplicationBase::skinningShaderPath() const {
+    // shaders/skinning/ beside the pipeline, then in the working directory,
+    // then beside the default pipeline, which ships it.
+    const char* name = "skin_vertices.comp.spv";
+    std::error_code ec;
+    const std::filesystem::path candidates[] = {
+        std::filesystem::absolute(m_config.pipelineJsonPath, ec).parent_path() / "shaders" / "skinning",
+        std::filesystem::path("shaders") / "skinning",
+        std::filesystem::path(defaultPipelinePath()).parent_path() / "shaders" / "skinning",
+    };
+    for (const auto& dir : candidates) {
+        if (std::filesystem::exists(dir / name, ec)) return (dir / name).generic_string();
+    }
+    return {};
+}
+
 void ApplicationBase::loadIBLTextures() {
     if (m_config.hdrEnvironmentPath.empty()) {
         m_logger->log(LogLevel::Info, "No HDR environment path — IBL, if the pipeline samples it, "
@@ -397,6 +413,7 @@ void ApplicationBase::createRenderGraph() {
 
     m_renderGraph = std::make_unique<FrameGraph::RenderGraph>(*m_device, *m_commandManager);
     m_renderGraph->setSharedBufferRegistry(m_sharedBufferRegistry.get());
+    m_renderGraph->setSkinningShader(skinningShaderPath());
 
     m_uiContext->setTextureReleaser([this](VkImageView view) { m_renderGraph->releaseMaterialTexture(view); });
 }

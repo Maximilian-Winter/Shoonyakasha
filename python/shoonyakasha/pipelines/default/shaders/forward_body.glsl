@@ -26,6 +26,10 @@ layout(set = 5, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascade
 #include "csm.glsl"
 #ifdef RAY_TRACED_SHADOWS
 layout(set = 7, binding = 0) uniform accelerationStructureEXT scene;
+#define SK_SCENE_HITS_SET 7
+#define SK_RAY_INSTANCES_BINDING 1
+#define SK_SCENE_TEXTURES_BINDING 2
+#include "sk/scene_hits.glsl"
 #include "rt_shadows.glsl"
 const int SUN_RAYS = 4;   // more than the opaque pass: TAA cannot follow a blended surface
 #endif
