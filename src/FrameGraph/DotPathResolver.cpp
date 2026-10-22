@@ -166,7 +166,7 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
     // ─── Spot and point light shadows ───────────────────────────
     localShadow.shadows = assignLocalShadows(
         shadowCandidates, cameraPosition, foundCamera ? cameraViewProjection : glm::mat4(1.0f),
-        /*cameraMinusOneToOne=*/true, localShadow.settings);
+        /*cameraMinusOneToOne=*/false, localShadow.settings);
 }
 
 // ============================================================================

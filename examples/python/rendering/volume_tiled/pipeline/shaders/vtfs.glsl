@@ -94,8 +94,8 @@ uvec3 vtfsClusterCoord(Grid g, uint index) {
 }
 
 // View depth (positive, in front of the camera) of a depth-buffer value. The
-// projection is OpenGL style and the buffer stores the NDC depth as is
-// (common.glsl), so it goes back through the inverse projection.
+// buffer stores the NDC depth (common.glsl), so it goes back through the
+// inverse projection.
 float vtfsViewDepth(mat4 invProj, float depth) {
     vec4 p = invProj * vec4(0.0, 0.0, depth, 1.0);
     return -p.z / p.w;

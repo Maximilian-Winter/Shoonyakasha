@@ -101,10 +101,8 @@ def on_init():
     engine.scene.add_component(map_camera, "Camera")
     engine.scene.set_camera_type(map_camera, sk.CAMERA_ORTHOGRAPHIC)
     engine.scene.set_camera_ortho_size(map_camera, MAP_SPAN)
-    # The town, 72 to 80 m below, must lie beyond the middle of the depth
-    # range: the projection maps depth to -1..1, and Vulkan keeps 0..1.
     engine.scene.set_camera_near(map_camera, 1.0)
-    engine.scene.set_camera_far(map_camera, 1.5 * MAP_HEIGHT)
+    engine.scene.set_camera_far(map_camera, MAP_HEIGHT + 10.0)
     engine.scene.set_rotation(map_camera, (-math.pi / 2, 0.0, 0.0))
     state["map"] = map_camera
 

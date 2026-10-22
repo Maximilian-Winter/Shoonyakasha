@@ -151,9 +151,9 @@ vec3 octDecode(vec2 f) {
 }
 
 // ── Positions from depth ────────────────────────────────────────
-// The camera's projection is OpenGL style (-1..1 depth) and the depth buffer
-// stores that NDC depth as is, so a texel's depth goes straight back through
-// the inverse projection. The far plane (cleared depth) is 1.
+// The depth buffer stores the camera projection's NDC depth (0 at the near
+// plane), so a texel's depth goes straight back through the inverse
+// projection. The far plane (cleared depth) is 1.
 
 vec3 viewPositionFromDepth(mat4 invProj, vec2 uv, float depth) {
     vec4 p = invProj * vec4(uv * 2.0 - 1.0, depth, 1.0);

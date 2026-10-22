@@ -102,7 +102,7 @@ std::array<glm::mat4, 6> pointShadowFaceViewProj(const glm::vec3& position, floa
 
 /// Pick which candidates get a slot and compute their shadows. `cameraViewProj`
 /// culls lights whose sphere of influence is outside the view (identity: no
-/// culling); `cameraClip` says whether it maps depth to -1..1 (true) or 0..1.
+/// culling); `cameraMinusOneToOne` says whether it maps depth to -1..1 (true) or 0..1.
 /// Pack square tiles, each a power of two no larger than `atlas` (also a
 /// power of two), largest first along a Z-order curve. Returns each tile's
 /// top-left corner in texels, in the order given, or an empty vector when

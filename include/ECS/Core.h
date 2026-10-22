@@ -140,13 +140,15 @@ struct CameraComponent {
     glm::mat4 projectionMatrix{1.0f};
     bool isMainCamera = false;
 
+    // Vulkan's clip depth: 0 at the near plane, 1 at the far plane. No Y flip;
+    // SceneContext applies it.
     glm::mat4 getProjectionMatrix() const {
         if (type == Perspective) {
-            return glm::perspective(glm::radians(fov), aspectRatio, nearPlane, farPlane);
+            return glm::perspectiveRH_ZO(glm::radians(fov), aspectRatio, nearPlane, farPlane);
         } else {
             float halfSize = orthoSize * 0.5f;
-            return glm::ortho(-halfSize * aspectRatio, halfSize * aspectRatio,
-                            -halfSize, halfSize, nearPlane, farPlane);
+            return glm::orthoRH_ZO(-halfSize * aspectRatio, halfSize * aspectRatio,
+                                   -halfSize, halfSize, nearPlane, farPlane);
         }
     }
 };

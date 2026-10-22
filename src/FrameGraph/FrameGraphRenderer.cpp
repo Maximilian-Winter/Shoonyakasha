@@ -168,7 +168,7 @@ FrameGraphRenderer::ViewCull FrameGraphRenderer::resolveView(
         // cameraViewProjection is identity until a main camera is found.
         if (scene.cameraViewProjection != glm::mat4(1.0f)) {
             view.cull = true;
-            view.frustum = frustumFromViewProj(scene.cameraViewProjection, ClipDepth::MinusOneToOne);
+            view.frustum = frustumFromViewProj(scene.cameraViewProjection, ClipDepth::ZeroToOne);
         }
     } else if (kind == CullView::NamedCamera) {
         const auto camera = scene.cameras.find(passDecl.execution.viewName);
@@ -176,7 +176,7 @@ FrameGraphRenderer::ViewCull FrameGraphRenderer::resolveView(
             view.skip = true;
         } else {
             view.cull = true;
-            view.frustum = frustumFromViewProj(camera->second.viewProjection, ClipDepth::MinusOneToOne);
+            view.frustum = frustumFromViewProj(camera->second.viewProjection, ClipDepth::ZeroToOne);
             view.origin = camera->second.position;
         }
     } else if (kind == CullView::SunCascade) {

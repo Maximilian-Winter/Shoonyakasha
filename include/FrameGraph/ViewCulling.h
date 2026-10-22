@@ -15,8 +15,8 @@ namespace Shoonyakasha {
 
 /// Clip-space depth range a projection matrix produces.
 enum class ClipDepth {
-    MinusOneToOne,  // glm::perspective without GLM_FORCE_DEPTH_ZERO_TO_ONE (the camera)
-    ZeroToOne       // *_ZO projections (the sun cascades)
+    MinusOneToOne,  // glm::perspective and glm::ortho without GLM_FORCE_DEPTH_ZERO_TO_ONE
+    ZeroToOne       // *_ZO projections (the cameras, the sun cascades)
 };
 
 /// Planes with dot(xyz, p) + w >= 0 on the inside. Not normalised; only

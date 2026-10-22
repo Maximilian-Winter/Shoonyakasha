@@ -1,10 +1,10 @@
 //
 // CameraRay.h - Rays from a camera through window pixels, and hits on quads
 //
-// The projection is CameraComponent::projectionMatrix: GL-style, with clip
-// depth -1..1 and no Vulkan Y-flip (the flip is applied only when SceneContext
-// is filled). Window pixels have their origin at the top-left with y down, so
-// pixel row 0 maps to NDC y = +1.
+// The projection is CameraComponent::projectionMatrix: clip depth 0..1 and no
+// Vulkan Y-flip (the flip is applied only when SceneContext is filled).
+// Window pixels have their origin at the top-left with y down, so pixel row 0
+// maps to NDC y = +1.
 //
 
 #pragma once
@@ -31,7 +31,7 @@ inline Ray screenPointToRay(const glm::vec2& pixel, const glm::vec2& screenSize,
                         1.0f - 2.0f * pixel.y / screenSize.y);
     const glm::mat4 inverseViewProjection = glm::inverse(projection * view);
 
-    glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, -1.0f, 1.0f);
+    glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, 0.0f, 1.0f);
     glm::vec4 farPoint  = inverseViewProjection * glm::vec4(ndc,  1.0f, 1.0f);
     nearPoint /= nearPoint.w;
     farPoint /= farPoint.w;
@@ -44,8 +44,7 @@ inline Ray screenPointToRay(const glm::vec2& pixel, const glm::vec2& screenSize,
 
 /// The world point seen at window pixel `pixel` whose depth-buffer value is
 /// `depth`, for a camera rendered with the given view and projection. The
-/// depth buffer holds the projection's clip z over w, which with this
-/// GL-style projection is the NDC z, kept where it lies in 0..1.
+/// depth buffer holds the projection's clip z over w, the NDC z.
 inline glm::vec3 screenPointToWorld(const glm::vec2& pixel, const glm::vec2& screenSize, float depth,
                                     const glm::mat4& view, const glm::mat4& projection) {
     const glm::vec2 ndc(2.0f * pixel.x / screenSize.x - 1.0f,

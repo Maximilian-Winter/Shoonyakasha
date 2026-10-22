@@ -121,3 +121,28 @@ TEST(CameraComponent, Default_ReasonableDefaults) {
     EXPECT_FLOAT_EQ(cam.nearPlane, 0.1f);
     EXPECT_FLOAT_EQ(cam.farPlane, 1000.0f);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Clip Depth
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+float ndcDepthAt(const CameraComponent& cam, float distance) {
+    const glm::vec4 clip = cam.getProjectionMatrix() * glm::vec4(0.0f, 0.0f, -distance, 1.0f);
+    return clip.z / clip.w;
+}
+} // namespace
+
+TEST(CameraComponent, ClipDepth_ZeroAtNearOneAtFar) {
+    for (auto type : {CameraComponent::Perspective, CameraComponent::Orthographic}) {
+        CameraComponent cam;
+        cam.type = type;
+        cam.nearPlane = 1.0f;
+        cam.farPlane = 120.0f;
+        EXPECT_NEAR(ndcDepthAt(cam, 1.0f), 0.0f, 1e-5f);
+        EXPECT_NEAR(ndcDepthAt(cam, 120.0f), 1.0f, 1e-5f);
+        const float middle = ndcDepthAt(cam, 1.5f);
+        EXPECT_GT(middle, 0.0f);
+        EXPECT_LT(middle, 1.0f);
+    }
+}

@@ -196,7 +196,7 @@ void ParticleTestApp::update(float dt) {
     );
     cam.view = glm::lookAt(eye, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     VkExtent2D extent = m_swapChain->getSwapChainExtent();
-    cam.proj = glm::perspective(glm::radians(60.0f),
+    cam.proj = glm::perspectiveRH_ZO(glm::radians(60.0f),
         static_cast<float>(extent.width) / static_cast<float>(extent.height),
         0.1f, 100.0f);
     cam.proj[1][1] *= -1; // Vulkan Y-flip
