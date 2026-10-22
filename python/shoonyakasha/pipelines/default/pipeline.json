@@ -39,6 +39,16 @@
     }
   },
   "bufferLayouts": {
+    "LTC": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 4096,
+      "fields": [
+        { "name": "inverseMatrix", "type": "vec4" }
+      ],
+      "source": { "type": "file", "path": "ltc.bin" },
+      "memory": { "location": "device_local" }
+    },
     "ClusterLightIndices": {
       "usage": "storage_buffer",
       "packing": "std430",
@@ -721,6 +731,15 @@
           ],
           "name": "ClusterLightIndices",
           "autoBindBuffer": "ClusterLightIndices"
+        },
+        {
+          "binding": 6,
+          "type": "storage_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "LtcTable",
+          "autoBindBuffer": "LTC"
         }
       ]
     },

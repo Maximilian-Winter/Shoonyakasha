@@ -23,6 +23,7 @@ layout(set = 3, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS
 layout(set = 3, binding = 2) uniform sampler2DShadow localShadowAtlas;
 layout(set = 3, binding = 3) uniform usampler2D lightClusters;
 layout(set = 3, binding = 5, std430) readonly buffer ClusterLightIndices { uint clusterLightIndices[]; };
+layout(set = 3, binding = 6, std430) readonly buffer LtcTable { vec4 ltcTable[]; };
 layout(set = 4, binding = 0) uniform Settings { DEFAULT_SETTINGS_BLOCK } settings;
 layout(set = 4, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascades;
 

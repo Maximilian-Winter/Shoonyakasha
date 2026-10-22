@@ -26,6 +26,11 @@ Deferred PBR (glTF metallic-roughness) with:
   slices by range, testing each light against each cluster, and each pixel
   shades only its cluster's and the directional lights. The clusters' lists
   share one buffer of 524288 light indices
+- rectangle lights: a point or spot light with a source size
+  (`scene.set_light_source_size`) is shaded as that rectangle by linearly
+  transformed cosines (`shaders/area_lights.glsl`, with the fitted table
+  `ltc.bin`), so its highlights take the rectangle's shape; it lights only
+  what is in front of it
 - image-based light from the HDR environment, or from a uniform environment
   when there is none
 - ground-truth ambient occlusion (GTAO), with the light that bounces between

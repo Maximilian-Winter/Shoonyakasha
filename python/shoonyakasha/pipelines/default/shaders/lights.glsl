@@ -5,9 +5,17 @@
 // With CLUSTERED defined, directLight takes the fragment's cluster and loops
 // over its lights only; with LOCAL_SHADOWS, spot and point lights are
 // shadowed.
+//
+// Point and spot lights with a rectangle (sceneLights[i].shape: its right
+// axis times half its width, and half its height) are shaded as that
+// rectangle (area_lights.glsl): their highlights take its shape. It faces
+// the light's direction and lights nothing behind it. The including shader
+// also declares brdfLUT and the LtcTable buffer (area_lights.glsl).
 
 #ifndef DEFAULT_LIGHTS_GLSL
 #define DEFAULT_LIGHTS_GLSL
+
+#include "area_lights.glsl"
 
 #ifdef LOCAL_SHADOWS
 #include "local_shadows.glsl"
@@ -15,6 +23,47 @@
 #ifdef CLUSTERED
 #include "clusters.glsl"
 #endif
+
+// Light from scene light i, shaded as its rectangle. Its radiance keeps the
+// light's own falloff: far away the rectangle gives what the point light
+// would have, times the cosine a flat panel's brightness falls off with
+// across its face. Near it the rectangle's shape and size take over; within
+// half its diagonal the falloff stops growing.
+vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
+                    vec3 F0) {
+    vec3 centre = sceneLights[i].positionType.xyz;
+    vec3 forward = normalize(sceneLights[i].directionRange.xyz);
+    float range = sceneLights[i].directionRange.w;
+    vec4 attenuation = sceneLights[i].attenuation;
+    vec4 shape = sceneLights[i].shape;
+    vec3 toLight = centre - worldPos;
+    float dist = length(toLight);
+    vec3 L = toLight / max(dist, 1e-4);
+    float theta = dot(-L, forward);
+    if (theta <= 0.0) return vec3(0.0);     // behind the panel
+
+    vec3 halfX = shape.xyz;
+    vec3 halfY = normalize(cross(halfX, forward)) * shape.w;
+    float d = max(dist, sqrt(dot(halfX, halfX) + shape.w * shape.w));
+    float falloff = 1.0 / max(attenuation.x + attenuation.y * d + attenuation.z * d * d, 1e-4);
+    if (range > 0.0) {
+        float r = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
+        falloff *= r * r;
+    }
+    if (sceneLights[i].positionType.w > 1.5) {    // a spot's cone
+        float cosOuter = attenuation.w;
+        falloff *= smoothstep(cosOuter, mix(cosOuter, 1.0, 0.1), theta);
+    }
+    if (falloff <= 1e-4) return vec3(0.0);
+
+    vec3 reflected = rectangleBRDF(N, V, toLight, halfX, halfY, albedo, metallic, roughness, F0);
+    if (max(reflected.r, max(reflected.g, reflected.b)) <= 0.0) return vec3(0.0);
+#ifdef LOCAL_SHADOWS
+    falloff *= localShadowVisibility(int(i), sceneLights[i].positionType.w, worldPos, N, L);
+#endif
+    vec3 color = sceneLights[i].colorIntensity.rgb * sceneLights[i].colorIntensity.w;
+    return reflected * color * falloff * d * d / (4.0 * length(halfX) * shape.w);
+}
 
 // Light from scene light i. `sunIndex` is the light shadowed by
 // `sunVisibility`; -1 when none is.
@@ -25,6 +74,10 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
     vec3 direction = sceneLights[i].directionRange.xyz;
     float range = sceneLights[i].directionRange.w;
     vec4 attenuation = sceneLights[i].attenuation;
+
+    if (type > 0.5 && sceneLights[i].shape.w > 0.0) {
+        return rectangleLight(i, worldPos, N, V, albedo, metallic, roughness, F0);
+    }
 
     vec3 L;
     float falloff = 1.0;

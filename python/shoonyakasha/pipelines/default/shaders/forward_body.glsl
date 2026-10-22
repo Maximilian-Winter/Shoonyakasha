@@ -17,6 +17,7 @@ layout(set = 2, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS
 layout(set = 2, binding = 2) uniform sampler2DShadow localShadowAtlas;
 layout(set = 2, binding = 3) uniform usampler2D lightClusters;
 layout(set = 2, binding = 5, std430) readonly buffer ClusterLightIndices { uint clusterLightIndices[]; };
+layout(set = 2, binding = 6, std430) readonly buffer LtcTable { vec4 ltcTable[]; };
 layout(set = 3, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 3, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 3, binding = 2) uniform sampler2D brdfLUT;
