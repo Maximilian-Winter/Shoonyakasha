@@ -9,7 +9,6 @@
 #define CLUSTER_Y 9u
 #define CLUSTER_Z 24u
 #define CLUSTER_COUNT 3456   // CLUSTER_X * CLUSTER_Y * CLUSTER_Z
-#define MAX_PER_CLUSTER 63   // the image has 64 rows: a count and 63 lights
 
 // View depth where slice `slice` begins; slices are spaced logarithmically.
 float clusterSliceDepth(uint slice, float nearPlane, float farPlane) {

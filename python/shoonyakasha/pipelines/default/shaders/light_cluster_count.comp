@@ -1,0 +1,21 @@
+#version 450
+// Light clusters, first step: how many lights each cluster wants; see
+// light_cluster_lists.glsl.
+
+#include "light_cluster_lists.glsl"
+
+void main() {
+    uint cluster = gl_GlobalInvocationID.x;
+    if (cluster > uint(CLUSTER_COUNT)) return;
+    bool directionalColumn = cluster == uint(CLUSTER_COUNT);
+    vec3 lo = vec3(0.0), hi = vec3(0.0);
+    if (!directionalColumn) clusterBox(cluster, lo, hi);
+
+    uint wanted = 0u;
+    for (uint i = 0u; i < SCENE_LIGHT_COUNT; ++i) {
+        float distance;
+        if (belongs(i, directionalColumn, lo, hi, distance)) ++wanted;
+    }
+    imageStore(clusters, ivec2(cluster, 0), uvec4(wanted));
+    atomicAdd(counts.wanted, wanted);
+}

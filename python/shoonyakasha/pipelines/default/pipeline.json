@@ -39,6 +39,23 @@
     }
   },
   "bufferLayouts": {
+    "ClusterLightIndices": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 524288,
+      "fields": [
+        { "name": "light", "type": "uint" }
+      ]
+    },
+    "ClusterLightCount": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 1,
+      "fields": [
+        { "name": "wanted", "type": "uint" },
+        { "name": "used", "type": "uint" }
+      ]
+    },
     "RayInstances": {
       "usage": "storage_buffer",
       "packing": "std430",
@@ -695,6 +712,15 @@
           ],
           "name": "SceneLights",
           "autoBindBuffer": "SceneLights"
+        },
+        {
+          "binding": 5,
+          "type": "storage_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "ClusterLightIndices",
+          "autoBindBuffer": "ClusterLightIndices"
         }
       ]
     },
@@ -1168,6 +1194,37 @@
           ],
           "name": "clusters",
           "autoBindResource": "lightClusters"
+        },
+        {
+          "binding": 1,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "ClusterLightIndices",
+          "autoBindBuffer": "ClusterLightIndices"
+        },
+        {
+          "binding": 2,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "ClusterLightCount",
+          "autoBindBuffer": "ClusterLightCount"
+        }
+      ]
+    },
+    "lightClusterResetSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "ClusterLightCount",
+          "autoBindBuffer": "ClusterLightCount"
         }
       ]
     },
@@ -1368,7 +1425,7 @@
       "image": {
         "format": "R32_UINT",
         "width": 3457,
-        "height": 64,
+        "height": 2,
         "transient": true
       }
     }
@@ -2085,7 +2142,31 @@
       ]
     },
     {
-      "name": "LightClusters",
+      "name": "LightClusterReset",
+      "type": "compute",
+      "hasSideEffects": true,
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          1,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/light_cluster_reset.comp.spv"
+      },
+      "descriptorSets": [
+        "lightClusterResetSet"
+      ]
+    },
+    {
+      "name": "LightClusterCount",
       "type": "compute",
       "execution": {
         "type": "compute_dispatch",
@@ -2104,6 +2185,37 @@
         {
           "resource": "lightClusters",
           "usage": "storage_image_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/light_cluster_count.comp.spv"
+      },
+      "descriptorSets": [
+        "lightClusterWriteSet",
+        "cameraSet",
+        "lightsComputeSet"
+      ]
+    },
+    {
+      "name": "LightClusters",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          64,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 55,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "outputs": [
+        {
+          "resource": "lightClusters",
+          "usage": "shader_read_write"
         }
       ],
       "pipeline": {

@@ -24,7 +24,8 @@ Deferred PBR (glTF metallic-roughness) with:
   storage buffer the engine refills every frame, and clustered: a compute
   pass sorts the point and spot lights into 16 x 9 screen tiles x 24 depth
   slices by range, testing each light against each cluster, and each pixel
-  shades only its cluster's (at most 63) and the directional lights
+  shades only its cluster's and the directional lights. The clusters' lists
+  share one buffer of 524288 light indices
 - image-based light from the HDR environment, or from a uniform environment
   when there is none
 - ground-truth ambient occlusion (GTAO), with the light that bounces between
@@ -122,7 +123,9 @@ own that it does not mention stay as you set them.
 | `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` |
 | `ShadowMaskRT` | In the `raytraced` preset, instead of `ShadowMask`: a shadow ray per pixel, multiplied with the cascades of the casters the rays do not see. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `GTAO`, `AODenoise` | Ambient occlusion from the depth buffer in a 4x4 pattern of slice directions, then a depth-aware 4x4 average |
-| `LightClusters` | A compute pass listing the point and spot lights that reach each cluster of the view, into `lightClusters` |
+| `LightClusterReset` | Zeroes `ClusterLightCount`: the lights the clusters want, and the room in `ClusterLightIndices` taken |
+| `LightClusterCount` | A compute pass counting the point and spot lights that reach each cluster of the view, into `lightClusters`, and their total |
+| `LightClusters` | A compute pass listing them: each cluster takes room in `ClusterLightIndices` for its list, and `lightClusters` holds the list's count and offset. When the total does not fit, each cluster gets the same share of the room as of the total, and keeps its nearest lights |
 | `Lighting` | Lights, image-based light and the sky, added onto the emission |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
 | `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with sun shadow rays. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |

@@ -4,70 +4,63 @@
 // plane, and each cluster lists the point and spot lights whose range
 // reaches it. Lighting then loops over its pixel's cluster only.
 //
-// The lists live in an R32_UINT image, one column per cluster: row 0 holds
-// the count, rows 1.. the light indices, at most MAX_PER_CLUSTER. Column
-// CLUSTER_COUNT lists the directional lights, which reach everything.
+// The second step, after light_cluster_count.comp: each cluster's list, in
+// the room it is given; see light_cluster_lists.glsl.
 
-#include "common.glsl"
-#include "clusters.glsl"
-
-layout(local_size_x = 64) in;
-
-layout(set = 0, binding = 0, r32ui) uniform writeonly uimage2D clusters;
-layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
-layout(set = 2, binding = 0) uniform Lights { DEFAULT_LIGHTS_BLOCK };
-DEFAULT_SCENE_LIGHTS(2, 1)
-
-// View-space point on the ray through NDC xy, at view depth -z.
-vec3 onRay(vec2 ndc, float depth) {
-    vec4 p = camera.invProj * vec4(ndc, 1.0, 1.0);
-    vec3 direction = p.xyz / p.w;
-    return direction * (depth / -direction.z);
-}
+#include "light_cluster_lists.glsl"
 
 void main() {
     uint cluster = gl_GlobalInvocationID.x;
     if (cluster > uint(CLUSTER_COUNT)) return;
+    bool directionalColumn = cluster == uint(CLUSTER_COUNT);
+    vec3 lo = vec3(0.0), hi = vec3(0.0);
+    if (!directionalColumn) clusterBox(cluster, lo, hi);
 
+    // All the lights it wants, or its share of the buffer.
+    uint wanted = imageLoad(clusters, ivec2(cluster, 0)).r;
+    uint capacity = uint(clusterLightIndices.length());
+    uint room = wanted;
+    if (counts.wanted > capacity) {
+        room = uint(floor(float(wanted) * (float(capacity) / float(counts.wanted))));
+    }
+    uint offset = atomicAdd(counts.used, room);
+    room = offset >= capacity ? 0u : min(room, capacity - offset);
+
+    // Too little room: the largest distance that keeps the count within it.
     uint count = SCENE_LIGHT_COUNT;
-    uint found = 0u;
-
-    if (cluster == uint(CLUSTER_COUNT)) {
-        // The directional lights' column.
-        for (uint i = 0u; i < count && found < uint(MAX_PER_CLUSTER); ++i) {
-            if (sceneLights[i].positionType.w < 0.5) imageStore(clusters, ivec2(cluster, 1u + found++), uvec4(i));
+    float cutoff = 1e30;
+    if (room < wanted) {
+        float farthest = 0.0;
+        for (uint i = 0u; i < count; ++i) {
+            float distance;
+            if (belongs(i, directionalColumn, lo, hi, distance)) farthest = max(farthest, distance);
         }
-        imageStore(clusters, ivec2(cluster, 0), uvec4(found));
-        return;
-    }
-
-    // The cluster's box in view space: its tile's corners at its slice's two
-    // depths.
-    uvec3 c = uvec3(cluster % CLUSTER_X, (cluster / CLUSTER_X) % CLUSTER_Y, cluster / (CLUSTER_X * CLUSTER_Y));
-    float nearPlane = camera.params.x, farPlane = camera.params.y;
-    float d0 = clusterSliceDepth(c.z, nearPlane, farPlane);
-    float d1 = clusterSliceDepth(c.z + 1u, nearPlane, farPlane);
-    vec2 ndc0 = vec2(c.xy) / vec2(CLUSTER_X, CLUSTER_Y) * 2.0 - 1.0;
-    vec2 ndc1 = vec2(c.xy + 1u) / vec2(CLUSTER_X, CLUSTER_Y) * 2.0 - 1.0;
-    vec3 lo = vec3(1e30), hi = vec3(-1e30);
-    for (int k = 0; k < 8; ++k) {
-        vec2 ndc = vec2((k & 1) != 0 ? ndc1.x : ndc0.x, (k & 2) != 0 ? ndc1.y : ndc0.y);
-        vec3 p = onRay(ndc, (k & 4) != 0 ? d1 : d0);
-        lo = min(lo, p);
-        hi = max(hi, p);
-    }
-
-    for (uint i = 0u; i < count && found < uint(MAX_PER_CLUSTER); ++i) {
-        float type = sceneLights[i].positionType.w;
-        if (type < 0.5) continue;   // directional: in their own column
-        float range = sceneLights[i].directionRange.w;
-        bool reaches = range <= 0.0;   // no range: everywhere
-        if (!reaches) {
-            vec3 center = (camera.view * vec4(sceneLights[i].positionType.xyz, 1.0)).xyz;
-            vec3 nearest = clamp(center, lo, hi);
-            reaches = dot(nearest - center, nearest - center) <= range * range;
+        float below = 0.0, above = farthest;
+        cutoff = 0.0;   // ties at 0 beyond the room: the first ones in light order
+        for (int step = 0; step < 24; ++step) {
+            float middle = 0.5 * (below + above);
+            uint within = 0u;
+            for (uint i = 0u; i < count; ++i) {
+                float distance;
+                if (belongs(i, directionalColumn, lo, hi, distance) && distance <= middle) ++within;
+            }
+            if (within <= room) {
+                cutoff = middle;
+                below = middle;
+            } else {
+                above = middle;
+            }
         }
-        if (reaches) imageStore(clusters, ivec2(cluster, 1u + found++), uvec4(i));
     }
-    imageStore(clusters, ivec2(cluster, 0), uvec4(found));
+
+    uint written = 0u;
+    for (uint i = 0u; i < count && written < room; ++i) {
+        float distance;
+        if (belongs(i, directionalColumn, lo, hi, distance) && distance <= cutoff) {
+            clusterLightIndices[offset + written] = i;
+            ++written;
+        }
+    }
+    imageStore(clusters, ivec2(cluster, 0), uvec4(written));
+    imageStore(clusters, ivec2(cluster, 1), uvec4(offset));
 }

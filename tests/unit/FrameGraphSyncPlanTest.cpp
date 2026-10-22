@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <set>
 
 using namespace Shoonyakasha;
 using namespace Shoonyakasha::FrameGraph;
@@ -395,13 +396,19 @@ Planned planShipped(const std::string& relativePath) {
 
 } // namespace
 
-TEST(ShippedPipelines, DefaultPipelineNeedsNoBufferBarriers) {
-    // Its compute passes write images, which image barriers cover, and every
-    // storage buffer its shaders bind is readonly. The executor used to put a
-    // compute -> graphics barrier after each of its two compute passes.
+TEST(ShippedPipelines, DefaultPipelineBufferBarriersGuardOnlyTheClusterLists) {
+    // The only storage buffers its shaders write are the cluster light lists
+    // (ClusterLightCount, ClusterLightIndices): each step of building them
+    // waits for the one before, and Lighting for the last at the fragment
+    // shader. Transparent, an entity pass taken to read any buffer, waits
+    // again for its vertex stages; TransparentRT after it needs nothing more.
+    // Every other compute pass writes images, which image barriers cover.
     auto p = planShipped("python/shoonyakasha/pipelines/default/pipeline.json");
+    const std::set<std::string> guarded{"LightClusterReset", "LightClusterCount", "LightClusters", "Lighting",
+                                        "Transparent"};
     for (uint32_t pi : p.order) {
-        EXPECT_TRUE(p.memory[pi].empty()) << p.builder.getPassDeclarations()[pi].name;
+        const std::string& name = p.builder.getPassDeclarations()[pi].name;
+        EXPECT_EQ(p.memory[pi].empty(), guarded.count(name) == 0) << name;
     }
 }
 

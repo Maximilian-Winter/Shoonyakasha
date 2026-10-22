@@ -1,0 +1,15 @@
+#version 450
+// Zeroes the cluster lists' two counts before LightClusterCount and
+// LightClusters fill them; see light_cluster_lists.glsl.
+
+layout(local_size_x = 1) in;
+
+layout(set = 0, binding = 0, std430) writeonly buffer ClusterLightCount {
+    uint wanted;
+    uint used;
+} counts;
+
+void main() {
+    counts.wanted = 0u;
+    counts.used = 0u;
+}

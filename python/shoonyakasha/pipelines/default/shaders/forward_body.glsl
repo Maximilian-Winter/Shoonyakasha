@@ -16,6 +16,7 @@ DEFAULT_SCENE_LIGHTS(2, 4)
 layout(set = 2, binding = 1) uniform LocalShadowMatrices { DEFAULT_LOCAL_SHADOWS_BLOCK } localShadows;
 layout(set = 2, binding = 2) uniform sampler2DShadow localShadowAtlas;
 layout(set = 2, binding = 3) uniform usampler2D lightClusters;
+layout(set = 2, binding = 5, std430) readonly buffer ClusterLightIndices { uint clusterLightIndices[]; };
 layout(set = 3, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 3, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 3, binding = 2) uniform sampler2D brdfLUT;

@@ -60,16 +60,18 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
 
 #ifdef CLUSTERED
 // Light from the directional lights and the lights of cluster `cluster`
-// (clusters.glsl), listed in `lightClusters` by light_clusters.comp. The
-// including shader declares `usampler2D lightClusters`.
+// (clusters.glsl), listed by light_clusters.comp: `lightClusters` holds each
+// list's count and offset, `clusterLightIndices` the lists. The including
+// shader declares both.
 vec3 directLight(uint cluster, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
                  vec3 F0, int sunIndex, float sunVisibility) {
     vec3 total = vec3(0.0);
     for (int column = 0; column < 2; ++column) {
         int x = column == 0 ? CLUSTER_COUNT : int(cluster);
         uint count = texelFetch(lightClusters, ivec2(x, 0), 0).r;
+        uint offset = texelFetch(lightClusters, ivec2(x, 1), 0).r;
         for (uint k = 0u; k < count; ++k) {
-            uint i = texelFetch(lightClusters, ivec2(x, int(k) + 1), 0).r;
+            uint i = clusterLightIndices[offset + k];
             total += lightFrom(i, worldPos, N, V, albedo, metallic, roughness, F0, sunIndex, sunVisibility);
         }
     }
