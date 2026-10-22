@@ -252,6 +252,7 @@ struct GltfOptions {
     int  maxTextureSize   = 0;
     bool generateMipmaps  = true;
     bool srgbAlbedo       = true;
+    bool compressTextures = false;  // see GltfLoadOptions::compressTextures
     std::string namePrefix;
 };
 

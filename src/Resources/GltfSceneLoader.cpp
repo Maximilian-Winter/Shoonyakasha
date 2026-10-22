@@ -13,6 +13,7 @@
 #include "ECS/SkeletonComponents.h"
 #include "ECS/SkeletalAnimationSystem.h"
 #include "Resources/MeshTangents.h"
+#include "Resources/TextureProcessing.h"
 #include "Vulkan/VertexTypes.h"
 
 #include <cgltf.h>
@@ -588,7 +589,7 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
         }
 
         if (material->normal_texture.texture && m_options.loadTextures) {
-            result.normalMap = loadTexture(data, material->normal_texture, false);
+            result.normalMap = loadTexture(data, material->normal_texture, false, true);
         }
 
         if (material->occlusion_texture.texture && m_options.loadTextures) {
@@ -890,7 +891,8 @@ GPUBuffer GltfSceneLoader::buildIndexBuffer(
 GPUTexture GltfSceneLoader::loadTexture(
     cgltf_data* /*data*/,
     const cgltf_texture_view& textureView,
-    bool srgb)
+    bool srgb,
+    bool normalMap)
 {
     if (!textureView.texture || !textureView.texture->image) {
         return GPUTexture{};
@@ -918,8 +920,12 @@ GPUTexture GltfSceneLoader::loadTexture(
         return GPUTexture{};
     }
 
-    // Check cache first to avoid loading same texture multiple times
-    std::string fullCacheKey = cacheKey + (srgb ? "_srgb" : "_linear");
+    // Check cache first to avoid loading same texture multiple times. The
+    // key names everything that changes the texture made from the file.
+    const bool compress = m_options.compressTextures && m_device.getEnabledFeatures().textureCompressionBC;
+    const uint32_t maxSize = m_options.maxTextureSize > 0 ? static_cast<uint32_t>(m_options.maxTextureSize) : 0;
+    std::string fullCacheKey = cacheKey + (srgb ? "_srgb" : normalMap ? "_normal" : "_linear") +
+                               (maxSize ? "_max" + std::to_string(maxSize) : "") + (compress ? "_bc" : "");
     m_loadTextureKeys.insert(fullCacheKey);
     auto cacheIt = m_textureCache.find(fullCacheKey);
     if (cacheIt != m_textureCache.end()) {
@@ -954,32 +960,51 @@ GPUTexture GltfSceneLoader::loadTexture(
         }
     }
 
-    // Warn about large textures (resize not implemented yet)
-    uint32_t maxSize = m_options.maxTextureSize;
-    if (maxSize > 0 && (static_cast<uint32_t>(width) > maxSize || static_cast<uint32_t>(height) > maxSize)) {
-        std::cout << "[GltfSceneLoader] Warning - texture " << cacheKey
-                  << " (" << width << "x" << height << ") exceeds maxTextureSize " << maxSize
-                  << " (resize not yet implemented)" << std::endl;
-    }
-
-    VkFormat format = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-    VkDeviceSize imageSize = width * height * 4;
-
-    // Create texture using GPUResourceFactory
-    GPUTexture texture = GPUResourceFactory::createTexture2DWithData(
-        m_device.getAllocator().getHandle(),
-        m_device.getLogicalDevice(),
-        m_device.getGraphicsQueue(),
-        m_device.getCommandPool(),
-        static_cast<uint32_t>(width),
-        static_cast<uint32_t>(height),
-        format,
-        pixels,
-        imageSize,
-        m_options.generateMipmaps
-    );
-
+    RgbaImage decoded;
+    decoded.width = static_cast<uint32_t>(width);
+    decoded.height = static_cast<uint32_t>(height);
+    decoded.texels.assign(pixels, pixels + static_cast<size_t>(width) * height * 4);
     stbi_image_free(pixels);
+    decoded = fitImage(std::move(decoded), maxSize, srgb);
+
+    GPUTexture texture;
+    if (compress) {
+        // Mips from the CPU: a block-compressed decoded cannot be blitted.
+        BlockFormat block = BlockFormat::BC1;
+        VkFormat format = srgb ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_BC1_RGB_UNORM_BLOCK;
+        if (normalMap) {
+            block = BlockFormat::BC5;
+            format = VK_FORMAT_BC5_UNORM_BLOCK;
+        } else if (hasTransparency(decoded)) {
+            block = BlockFormat::BC3;
+            format = srgb ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK;
+        }
+        const uint32_t baseWidth = decoded.width, baseHeight = decoded.height;
+        std::vector<RgbaImage> mips;
+        if (m_options.generateMipmaps) {
+            mips = mipChain(std::move(decoded), srgb);
+        } else {
+            mips.push_back(std::move(decoded));
+        }
+        std::vector<std::vector<uint8_t>> levels;
+        for (const auto& mip : mips) levels.push_back(compressBlocks(mip, block));
+        texture = GPUResourceFactory::createTexture2DWithLevels(
+            m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getGraphicsQueue(),
+            m_device.getCommandPool(), baseWidth, baseHeight, format, levels);
+    } else {
+        texture = GPUResourceFactory::createTexture2DWithData(
+            m_device.getAllocator().getHandle(),
+            m_device.getLogicalDevice(),
+            m_device.getGraphicsQueue(),
+            m_device.getCommandPool(),
+            decoded.width,
+            decoded.height,
+            srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
+            decoded.texels.data(),
+            decoded.texels.size(),
+            m_options.generateMipmaps
+        );
+    }
 
     // Create sampler for this texture
     texture.sampler = GPUResourceFactory::createSampler(

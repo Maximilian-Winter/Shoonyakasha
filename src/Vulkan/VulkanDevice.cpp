@@ -239,6 +239,8 @@ void VulkanDevice::createLogicalDevice() {
     // Pipeline JSON geometry and tessellation shaders.
     deviceFeatures.geometryShader = supportedFeatures.geometryShader;
     deviceFeatures.tessellationShader = supportedFeatures.tessellationShader;
+    // Block-compressed textures (glTF loading with compressTextures).
+    deviceFeatures.textureCompressionBC = supportedFeatures.textureCompressionBC;
     m_enabledFeatures = deviceFeatures;
 
     // Enable timeline semaphore feature for multi-queue synchronization

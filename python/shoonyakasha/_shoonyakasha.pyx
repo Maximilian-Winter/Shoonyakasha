@@ -2037,6 +2037,8 @@ cdef class Engine:
             opts.generateMipmaps = kwargs['generate_mipmaps']
         if 'srgb_albedo' in kwargs:
             opts.srgbAlbedo = kwargs['srgb_albedo']
+        if 'compress_textures' in kwargs:
+            opts.compressTextures = kwargs['compress_textures']
         if 'name_prefix' in kwargs:
             opts.namePrefix = kwargs['name_prefix'].encode('utf-8')
 

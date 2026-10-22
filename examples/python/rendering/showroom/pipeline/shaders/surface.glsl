@@ -79,7 +79,9 @@ Surface evaluateSurface(vec4 baseColor) {
 
     vec3 N = normalize(fragWorldNormal);
     if (draw.hasNormalMap > 0.5) {
-        vec3 t = texture(normalMap, fragTexCoord).xyz * 2.0 - 1.0;
+        // z from x and y: a block-compressed (BC5) map holds only those two.
+        vec2 xy = texture(normalMap, fragTexCoord).xy * 2.0 - 1.0;
+        vec3 t = vec3(xy, sqrt(max(1.0 - dot(xy, xy), 0.0)));
         vec3 mapped = tangentFrame(N) * t;
         if (dot(mapped, mapped) > 1e-6) N = normalize(mapped);
     }

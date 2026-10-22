@@ -170,8 +170,11 @@ struct GltfLoadOptions {
     bool flattenHierarchy       = false;
 
     // Texture settings
-    int maxTextureSize          = 0;      // 0 = no limit
+    int maxTextureSize          = 0;      // larger images are halved until they fit; 0 = no limit
     bool generateMipmaps        = true;
+    // Block-compress textures where the device samples BC formats: colour
+    // BC1 (BC3 with transparency), normal maps BC5 (x and y), other data BC1.
+    bool compressTextures       = false;
     bool srgbAlbedo             = true;   // Load albedo as sRGB
 
     // Naming
@@ -357,7 +360,8 @@ private:
     Shoonyakasha::GPUTexture loadTexture(
         cgltf_data* data,
         const cgltf_texture_view& textureView,
-        bool srgb
+        bool srgb,
+        bool normalMap = false
     );
 
     /// Create ECS entity with components

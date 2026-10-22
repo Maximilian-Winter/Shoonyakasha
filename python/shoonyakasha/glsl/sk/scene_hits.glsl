@@ -209,7 +209,9 @@ SkHit skFetchHit(rayQueryEXT query, float coneWidth) {
             vec3 B = (e2 * d1.x - e1 * d2.x) / det;
             T = normalize(T - N * dot(N, T));
             B = normalize(B - N * dot(N, B) - T * dot(T, B));
-            vec3 m = skSceneTexture(row.textures.y, hit.uv, lodBase, coneWidth, cosine).xyz * 2.0 - 1.0;
+            // z from x and y: a block-compressed (BC5) map holds only those two.
+            vec2 xy = skSceneTexture(row.textures.y, hit.uv, lodBase, coneWidth, cosine).xy * 2.0 - 1.0;
+            vec3 m = vec3(xy, sqrt(max(1.0 - dot(xy, xy), 0.0)));
             vec3 mapped = mat3(T, B, N) * m;
             if (dot(mapped, mapped) > 1e-6 && !any(isnan(mapped))) N = normalize(mapped);
         }

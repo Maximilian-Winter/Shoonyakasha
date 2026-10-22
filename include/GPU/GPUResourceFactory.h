@@ -120,6 +120,21 @@ public:
         bool generateMipmaps = false
     );
 
+    // A sampled texture of `width` x `height` texels of `format` with one mip
+    // level per entry of `levels`, each the bytes of that level as
+    // vkCmdCopyBufferToImage reads them (tightly packed rows, or rows of
+    // blocks for a block-compressed format). Uploading waits for `queue`.
+    static GPUTexture createTexture2DWithLevels(
+        VmaAllocator allocator,
+        VkDevice device,
+        VkQueue queue,
+        VkCommandPool cmdPool,
+        uint32_t width,
+        uint32_t height,
+        VkFormat format,
+        const std::vector<std::vector<uint8_t>>& levels
+    );
+
     // A sampled image of `width` x `height` texels of `format`, from `size`
     // bytes of rows of tightly packed texels, top row first, with a
     // clamp-to-edge sampler, linear where the format filters, nearest

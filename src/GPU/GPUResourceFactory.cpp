@@ -329,6 +329,74 @@ GPUTexture GPUResourceFactory::createTexture2DWithData(
     return texture;
 }
 
+GPUTexture GPUResourceFactory::createTexture2DWithLevels(
+    VmaAllocator allocator,
+    VkDevice device,
+    VkQueue queue,
+    VkCommandPool cmdPool,
+    uint32_t width,
+    uint32_t height,
+    VkFormat format,
+    const std::vector<std::vector<uint8_t>>& levels
+) {
+    const uint32_t mipLevels = static_cast<uint32_t>(std::max<size_t>(levels.size(), 1));
+    GPUTexture texture = createTexture2D(allocator, device, width, height, format,
+                                         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, mipLevels);
+
+    VkDeviceSize total = 0;
+    for (const auto& level : levels) total += level.size();
+    GPUBuffer staging = createBuffer(allocator, std::max<VkDeviceSize>(total, 4), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                     VMA_MEMORY_USAGE_CPU_ONLY);
+    auto* mapped = static_cast<uint8_t*>(mapBuffer(allocator, staging));
+    std::vector<VkBufferImageCopy> regions;
+    VkDeviceSize offset = 0;
+    for (uint32_t mip = 0; mip < levels.size(); ++mip) {
+        std::memcpy(mapped + offset, levels[mip].data(), levels[mip].size());
+        VkBufferImageCopy region{};
+        region.bufferOffset = offset;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = mip;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = {std::max(width >> mip, 1u), std::max(height >> mip, 1u), 1};
+        regions.push_back(region);
+        offset += levels[mip].size();
+    }
+    unmapBuffer(allocator, staging);
+
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandPool = cmdPool;
+    cmdAllocInfo.commandBufferCount = 1;
+    VkCommandBuffer cmdBuffer;
+    vkAllocateCommandBuffers(device, &cmdAllocInfo, &cmdBuffer);
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+
+    transitionImageLayout(cmdBuffer, texture.image, format, VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels);
+    if (!regions.empty()) {
+        vkCmdCopyBufferToImage(cmdBuffer, staging.buffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               static_cast<uint32_t>(regions.size()), regions.data());
+    }
+    transitionImageLayout(cmdBuffer, texture.image, format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
+    vkEndCommandBuffer(cmdBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmdBuffer;
+    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+
+    vkFreeCommandBuffers(device, cmdPool, 1, &cmdBuffer);
+    destroyBuffer(allocator, staging);
+    return texture;
+}
+
 GPUTexture GPUResourceFactory::createTextureCube(
     VmaAllocator allocator,
     VkDevice device,

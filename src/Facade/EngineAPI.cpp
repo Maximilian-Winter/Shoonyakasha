@@ -262,6 +262,7 @@ static GltfLoadOptions toLoadOptions(const GltfOptions& fo) {
     lo.maxTextureSize   = fo.maxTextureSize;
     lo.generateMipmaps  = fo.generateMipmaps;
     lo.srgbAlbedo       = fo.srgbAlbedo;
+    lo.compressTextures = fo.compressTextures;
     lo.namePrefix       = fo.namePrefix;
     return lo;
 }

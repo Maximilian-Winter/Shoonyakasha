@@ -27,13 +27,25 @@ Paths first resolve as given, then against the shared asset root. The bundled bo
 
 ## Options and hierarchy
 
-All boolean loading options default to true: textures, materials, entities, skins, animations, mipmaps, and sRGB albedo preference. `flatten_hierarchy` defaults to false, `max_texture_size` to 0, and `name_prefix` to empty (the loader then uses the file stem). The [result/options reference](../api/python/gltf-result.md) lists names in both languages.
+All boolean loading options default to true: textures, materials, entities, skins, animations, mipmaps, and sRGB albedo preference. `flatten_hierarchy` and `compress_textures` default to false, `max_texture_size` to 0, and `name_prefix` to empty (the loader then uses the file stem). The [result/options reference](../api/python/gltf-result.md) lists names in both languages.
 
 Default loading preserves the node tree and shares mesh-space GPU buffers among repeated mesh references in that load. Renderable primitive entities are children of node entities. Move an appropriate node ancestor to move the whole object. The facade result lists renderable entities; native `GltfLoadResult` additionally exposes node and root lists.
 
 `flatten_hierarchy=True` bakes node transforms into vertices and emits flattened geometry, losing that sharing. See [instancing](instancing.md) before choosing it.
 
-`max_texture_size` currently reports oversized textures without resizing them. `srgb_albedo` is exposed as an option, but the loader selects formats by texture slot rather than consulting that flag. Treat these as implementation limitations, not working texture-conversion controls.
+## Texture size and compression
+
+Textures load through stb_image (PNG, JPEG and the other formats it reads) as 8-bit RGBA. `max_texture_size=N` halves a texture wider or taller than N until it fits, averaging 2 x 2 texels; colour textures average in linear light. `srgb_albedo` is exposed as an option, but the loader selects formats by texture slot rather than consulting that flag.
+
+`compress_textures=True` stores the textures block-compressed, where the GPU samples BC formats (otherwise it has no effect):
+
+| Texture | Format | Bytes per texel |
+|---|---|---|
+| Base colour, emissive | BC1 sRGB; BC3 sRGB when any texel is transparent | 0.5; 1 |
+| Normal map | BC5: x and y | 1 |
+| Metallic-roughness, occlusion, clear coat, iridescence | BC1 | 0.5 |
+
+Uncompressed textures take 4 bytes per texel, so this is a quarter to an eighth of the memory, at some loss of quality: BC1 stores each 4 x 4 block as two 16-bit colours and blends between them, which bands smooth gradients. Compression runs on the CPU while loading (stb_dxt), and so do the mipmaps, so loading takes longer. A BC5 normal map holds only x and y; the default pipeline and `sk/scene_hits.glsl` compute z from them, and a pipeline's own shaders need to do the same: `z = sqrt(max(1 - dot(xy, xy), 0))`.
 
 ## Materials and animation
 
