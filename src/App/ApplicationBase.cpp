@@ -38,6 +38,7 @@
 #include "Vulkan/FrameGraph/RenderTargetSaver.h"
 
 #include <GLFW/glfw3.h>
+#include <thread>
 #include <stdexcept>
 #include <iostream>
 #include <algorithm>
@@ -659,6 +660,10 @@ void ApplicationBase::update() {
 // ═══════════════════════════════════════════════════════════════
 
 void ApplicationBase::render() {
+    if (!m_renderGraph->isCompiled()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        return;
+    }
     if (m_renderScaleChanged) {
         m_renderScaleChanged = false;
         recompileForRenderScale();
@@ -688,7 +693,9 @@ void ApplicationBase::render() {
     m_renderGraph->updateSceneContext(m_deltaTime);
     m_renderGraph->updateStandardBuffers(m_deltaTime, m_currentFrame);
 
+    m_inPreRender = true;
     onPreRender(m_deltaTime);
+    m_inPreRender = false;
 
     vkResetFences(m_device->getLogicalDevice(), 1, &m_inFlightFences[m_currentFrame]);
 
@@ -881,6 +888,21 @@ VkExtent2D ApplicationBase::getRenderExtent() const {
         return std::clamp(static_cast<uint32_t>(std::lround(size * m_renderScale)), 1u, limit);
     };
     return {scaled(screen.width), scaled(screen.height)};
+}
+
+std::string ApplicationBase::reloadPipeline() {
+    if (!m_renderGraph || m_inFlightFences.empty()) return "the pipeline is not loaded yet";
+    if (m_inPreRender) return "the pipeline cannot be reloaded while a frame is being prepared (onPreRender)";
+    vkDeviceWaitIdle(m_device->getLogicalDevice());
+    const std::string error = m_renderGraph->reload(m_config.pipelineJsonPath, getRenderExtent(),
+                                                    static_cast<uint32_t>(m_swapChain->getImageCount()),
+                                                    m_config.maxFramesInFlight);
+    m_renderScaleChanged = false;
+    if (m_renderGraph->isCompiled()) bindIBLTextures();
+    if (error.empty()) {
+        m_logger->log(LogLevel::Info, "Reloaded %s", m_config.pipelineJsonPath.c_str());
+    }
+    return error;
 }
 
 void ApplicationBase::recompileForRenderScale() {

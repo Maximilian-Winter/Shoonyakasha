@@ -268,6 +268,7 @@ bool RenderGraph::setPassEnabled(const std::string& passName, bool enabled) {
     }
     if (PassDeclaration* pass = m_builder.getPass(passName)) {
         pass->enabled = enabled;
+        m_switchedPasses[passName] = enabled;
         return true;
     }
     // The declared name of a repeated pass switches every instance.
@@ -278,6 +279,7 @@ bool RenderGraph::setPassEnabled(const std::string& passName, bool enabled) {
             found = true;
         }
     }
+    if (found) m_switchedPasses[passName] = enabled;
     if (!found) {
         m_logger->log(LogLevel::Warning, "setPassEnabled: no pass named '%s'", passName.c_str());
     }
@@ -1883,24 +1885,17 @@ bool RenderGraph::compile(VkExtent2D referenceExtent, uint32_t swapchainImageCou
     return m_compiled.valid;
 }
 
-bool RenderGraph::recompile(VkExtent2D referenceExtent, uint32_t swapchainImageCount,
-                            uint32_t maxFramesInFlight) {
-    m_logger->log(LogLevel::Info, "Recompiling render graph");
-
-    // Phase 3: Destroy staging manager before recompile (will be recreated after)
+void RenderGraph::releaseCompiled(const FrameGraphBuilder& builder) {
     if (m_stagingManager) {
         m_stagingManager->destroy();
         m_stagingManager.reset();
     }
-
-    // Phase 2: Unregister our targets before recompile (they'll be re-registered after)
     if (m_sharedBufferRegistry) {
-        for (const auto& desc : m_builder.getBufferLayouts()) {
+        for (const auto& desc : builder.getBufferLayouts()) {
             if (!desc.target.empty()) {
                 m_sharedBufferRegistry->unregisterBuffer(desc.target);
             }
         }
-        // Unregister image targets
         for (const auto& [name, rt] : m_trackedRenderTargets) {
             if (!rt.target.empty()) {
                 m_sharedBufferRegistry->unregisterImage(rt.target);
@@ -1908,11 +1903,54 @@ bool RenderGraph::recompile(VkExtent2D referenceExtent, uint32_t swapchainImageC
         }
     }
     m_trackedRenderTargets.clear();
+}
 
+bool RenderGraph::recompile(VkExtent2D referenceExtent, uint32_t swapchainImageCount,
+                            uint32_t maxFramesInFlight) {
+    m_logger->log(LogLevel::Info, "Recompiling render graph");
+
+    // Staging buffers and registry entries are made again by compile().
     // Physical resources (owned VulkanImages/Buffers) are cleaned up
-    // by their unique_ptrs when the CompileResult is replaced
+    // by their unique_ptrs when the CompileResult is replaced.
+    releaseCompiled(m_builder);
 
     return compile(referenceExtent, swapchainImageCount, maxFramesInFlight);
+}
+
+std::string RenderGraph::reload(const std::string& filePath, VkExtent2D referenceExtent,
+                                uint32_t swapchainImageCount, uint32_t maxFramesInFlight) {
+    FrameGraphBuilder previous = m_builder;
+    try {
+        loadFromFile(filePath);
+    } catch (const std::exception& e) {
+        m_builder = std::move(previous);
+        m_logger->log(LogLevel::Error, "Reloading '%s' failed: %s", filePath.c_str(), e.what());
+        return e.what();
+    }
+    for (const auto& [name, enabled] : m_switchedPasses) {
+        if (m_builder.getPass(name)) {
+            m_builder.getPass(name)->enabled = enabled;
+        } else {
+            for (auto& pass : m_builder.getPassDeclarations()) {
+                if (pass.repeatGroup == name) pass.enabled = enabled;
+            }
+        }
+    }
+
+    // The per-entity sets were made with the previous graph's layouts.
+    releaseCompiled(previous);
+    destroyMaterialDescriptorPools();
+    if (compile(referenceExtent, swapchainImageCount, maxFramesInFlight)) return {};
+
+    const std::string error = m_compiled.errorMessage;
+    m_logger->log(LogLevel::Error, "Reloading '%s' failed: %s; compiling the previous graph again",
+                  filePath.c_str(), error.c_str());
+    releaseCompiled(m_builder);
+    m_builder = std::move(previous);
+    if (!compile(referenceExtent, swapchainImageCount, maxFramesInFlight)) {
+        return error + "; the previous graph does not compile either: " + m_compiled.errorMessage;
+    }
+    return error;
 }
 
 // ═══════════════════════════════════════════════════════════════

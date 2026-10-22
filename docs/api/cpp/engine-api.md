@@ -77,6 +77,7 @@ void setRecordingPaused(bool paused);
 bool isRecordingPaused() const;
 void setRenderScale(float scale);
 float getRenderScale() const;
+std::string reloadPipeline();   // the pipeline JSON and its SPIR-V again; error message, empty on success
 GltfResult loadGltfScene(const std::string& path, const GltfOptions& opts = {});
 EntityHandle createMesh(const std::vector<float>& positions, const std::vector<uint32_t>& indices, const std::vector<float>& normals, const std::vector<float>& uvs, const std::vector<float>& colors, const std::string& name, std::string& error);   // NullEntity with error set when the arrays do not fit
 std::string setMesh(EntityHandle entity, const std::vector<float>& positions, const std::vector<uint32_t>& indices, const std::vector<float>& normals, const std::vector<float>& uvs, const std::vector<float>& colors);   // error message, empty on success

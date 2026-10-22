@@ -171,6 +171,7 @@ public:
     using ApplicationBase::isRecordingPaused;
     using ApplicationBase::setRenderScale;
     using ApplicationBase::getRenderScale;
+    using ApplicationBase::reloadPipeline;
     using ApplicationBase::loadGltfScene;
     using ApplicationBase::createMesh;
     using ApplicationBase::getGltfLoader;
@@ -808,6 +809,10 @@ void EngineAPI::setRenderScale(float scale) {
 
 float EngineAPI::getRenderScale() const {
     return m_impl->app->getRenderScale();
+}
+
+std::string EngineAPI::reloadPipeline() {
+    return m_impl->app->reloadPipeline();
 }
 
 bool assetExists(const std::string& relativePath) {

@@ -225,6 +225,15 @@ public:
     void setRenderScale(float scale);
     float getRenderScale() const;
 
+    /// Load the pipeline JSON and the SPIR-V its passes name again, and
+    /// rebuild the render graph, waiting for the GPU. Parameters,
+    /// scene.custom values, buffer data, pipeline images and passes switched
+    /// with setPassEnabled or applyPipelinePreset stay. Call it from
+    /// onUpdate, an ECS system, a UI callback or onPostRender, not from
+    /// onInit or onPreRender. Returns an error message, empty on success; on
+    /// failure the previous graph is compiled again.
+    std::string reloadPipeline();
+
     /// Load a glTF scene into the active ECS scene and prepare loaded skin buffers.
     /// @param path Model path, resolved through the shared asset resolver.
     /// @param opts Loading flags; see GltfOptions and the scene-loading guide.

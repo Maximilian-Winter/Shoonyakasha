@@ -69,6 +69,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `stop_recording()` | bool | Finish the recording and finalise the file. |
 | `recording_paused (read/write property)` | bool | While True, presented frames are not written to the recording. |
 | `render_scale (read/write property)` | float | The scene renders at the window's size times this, scaled to the window when it is shown. |
+| `reload_pipeline()` | None | Load the pipeline JSON and its SPIR-V again and rebuild the graph. See [reload while running](../../guides/json-render-pipeline.md#reload-while-running). Raises `RuntimeError` when the JSON does not load or the graph does not compile. |
 | `is_recording (read-only property)` | bool | Whether a recording is in progress. |
 | `recorded_frame_count (read-only property)` | int | Frames written to the current or most recent recording. |
 | `load_gltf_scene(path, **kwargs)` | GltfResult | Load a glTF scene. |

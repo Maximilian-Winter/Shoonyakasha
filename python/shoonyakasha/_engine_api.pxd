@@ -543,6 +543,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         cbool isRecordingPaused() const
         void setRenderScale(float scale)
         float getRenderScale() const
+        string reloadPipeline() except +
         EntityHandle createDirectionalLight(const vec3& direction,
                                             const vec3& color, float intensity)
         EntityHandle createPointLight(const vec3& position,

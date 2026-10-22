@@ -1962,6 +1962,23 @@ cdef class Engine:
     def render_scale(self, float value):
         self._ptr.setRenderScale(value)
 
+    def reload_pipeline(self):
+        """Load the pipeline JSON and the SPIR-V its passes name again, and
+        rebuild the render graph, waiting for the GPU.
+
+        Compile changed GLSL first, with shoonyakasha.shaders.compile_dir.
+        Parameters, set_custom_* values, set_buffer data, pipeline images and
+        passes switched with set_pass_enabled or apply_pipeline_preset stay.
+        Call it from on_update, an ECS system, a UI callback or
+        on_post_render, not from on_init or on_pre_render.
+
+        Raises RuntimeError with the reason when the JSON does not load or the
+        graph does not compile; the previous graph is then compiled again.
+        """
+        cdef string error = self._ptr.reloadPipeline()
+        if not error.empty():
+            raise RuntimeError(error.decode("utf-8"))
+
     @property
     def is_recording(self):
         """Whether a recording is in progress.

@@ -289,6 +289,13 @@ protected:
     /// The size the scene renders at.
     VkExtent2D getRenderExtent() const;
 
+    /// Load the pipeline JSON and its shaders' SPIR-V again and rebuild the
+    /// graph (RenderGraph::reload), waiting for the GPU first. From onInit's
+    /// return on, outside onPreRender. Returns an error message, empty on
+    /// success. While a failed reload leaves no graph compiled, no frames are
+    /// rendered.
+    std::string reloadPipeline();
+
 private:
     ApplicationConfig m_config;
 
@@ -349,6 +356,7 @@ private:
     float m_recordingStep = 0.0f;     ///< seconds per frame while recording; 0: wall clock
     float m_renderScale = 1.0f;
     bool m_renderScaleChanged = false;
+    bool m_inPreRender = false;
     // Index of the swapchain image most recently handed to vkQueuePresentKHR.
     // Capture reads that one: reading the image currently being rendered into
     // would show a half-drawn frame.

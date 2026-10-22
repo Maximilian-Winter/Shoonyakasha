@@ -34,7 +34,29 @@ The starter's 104-byte push-constant range matches its shader/layout. If you cha
 
 ## Make a first change
 
-Change the ForwardPass swapchain output's `clear` color, then restart. This changes the background without rebuilding C++. Next, edit the fragment shader and rerun the shader compiler. Python examples compile on startup; C++ examples compile through CMake.
+Change the ForwardPass swapchain output's `clear` color, then restart or [reload](#reload-while-running). This changes the background without rebuilding C++. Next, edit the fragment shader and rerun the shader compiler. Python examples compile on startup; C++ examples compile through CMake.
+
+## Reload while running
+
+`engine.reload_pipeline()` loads the pipeline JSON and the SPIR-V its passes name again and rebuilds the graph, waiting for the GPU. GLSL is compiled by `sk.shaders.compile_dir`, which rebuilds the shaders whose source or included files are newer than their SPIR-V. A key that does both:
+
+```python
+import shoonyakasha as sk
+
+def on_key(key):
+    if key == sk.keys.F5:
+        try:
+            sk.shaders.compile_dir("shaders")
+            engine.reload_pipeline()
+        except (sk.shaders.ShaderCompileError, RuntimeError) as error:
+            print(error)
+
+engine.set_on_key_pressed(on_key)
+```
+
+To reload on save, an ECS system can do the same when `compile_dir` returns compiled outputs or the JSON file's modification time changes.
+
+Parameters, `set_custom_*` values, `set_buffer` data and pipeline images stay. Passes switched with `set_pass_enabled` or `apply_pipeline_preset` keep their state; the others take the JSON's `enabled`. A JSON file that does not load or a graph that does not compile raises `RuntimeError` with the reason, and the previous graph is compiled again; if that fails too, for example because its SPIR-V is gone, no frames are drawn until a reload succeeds. Call it from a key callback, `on_update`, an ECS system, a UI callback or `on_post_render`; from `on_init` and `on_pre_render` it raises. In C++, `EngineAPI::reloadPipeline()` returns the error message, empty on success.
 
 For application-driven values, follow [custom uniforms](custom-shader-uniforms.md): set a named value during init/update, add a matching field source, bind the buffer, and consume it in GLSL.
 

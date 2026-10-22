@@ -1158,7 +1158,8 @@ public:
     // setting is kept and applied when it loads. Returns false if the loaded
     // pipeline has no pass with that name. The declared name of a JSON
     // "repeat" pass switches every instance; isPassEnabled on it is true when
-    // all of them are enabled.
+    // all of them are enabled. reload() applies the setting again to the
+    // pipeline it loads.
     bool setPassEnabled(const std::string& passName, bool enabled);
     bool isPassEnabled(const std::string& passName) const;
 
@@ -1474,6 +1475,17 @@ public:
     bool recompile(VkExtent2D referenceExtent, uint32_t swapchainImageCount = 1,
                    uint32_t maxFramesInFlight = 2);
 
+    /// Load the pipeline JSON at `filePath` again, with its shaders' SPIR-V,
+    /// and compile it in place of the current graph. The GPU must be idle.
+    /// Parameters, scene.custom values, buffer data and external images stay;
+    /// passes switched with setPassEnabled or applyPreset keep their state.
+    /// Returns an error message, empty on success. When the JSON cannot be
+    /// loaded nothing changes; when the new graph does not compile, the
+    /// previous one is compiled again, and if that fails too isCompiled() is
+    /// false until a reload succeeds.
+    std::string reload(const std::string& filePath, VkExtent2D referenceExtent,
+                       uint32_t swapchainImageCount, uint32_t maxFramesInFlight);
+
     // ── Query compiled state ──
     VkImageView getResourceView(const std::string& name) const;
     const FrameGraphCompiler::CompileResult& getCompileResult() const { return m_compiled; }
@@ -1611,6 +1623,8 @@ private:
 
     // setPassEnabled calls made before the pipeline was loaded
     std::unordered_map<std::string, bool> m_pendingPassEnabled;
+    // Every pass setPassEnabled switched, and how; reload() applies them again.
+    std::unordered_map<std::string, bool> m_switchedPasses;
     // applyPreset called before the pipeline was loaded
     std::string m_pendingPreset;
 
@@ -1876,6 +1890,9 @@ private:
     void createMaterialDescriptorPool(uint32_t maxSets = 4096);
     // Destroys every material pool, and with them every set allocated from them.
     void destroyMaterialDescriptorPools();
+    // Destroys the staging manager and takes the targets of `builder`'s buffer
+    // layouts and of the tracked render targets out of the shared registry.
+    void releaseCompiled(const FrameGraphBuilder& builder);
     // A set with `layout` from the material pools, chaining a new pool when the
     // current one is full. VK_NULL_HANDLE on failure.
     VkDescriptorSet allocateMaterialDescriptorSet(VkDescriptorSetLayout layout);
