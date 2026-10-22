@@ -37,7 +37,6 @@ void main() {
     vec3 albedo = push.baseColorFactor.rgb * fragColor;
     vec3 lit = albedo * (ambient + diffuse * 0.9);
 
-    // The swapchain is UNORM, so encode for display here. A pipeline with a
-    // separate tonemap pass would do this there instead.
-    outColor = vec4(pow(lit, vec3(1.0 / 2.2)), push.baseColorFactor.a);
+    // The swapchain is sRGB: writing to it encodes the linear colour.
+    outColor = vec4(lit, push.baseColorFactor.a);
 }
