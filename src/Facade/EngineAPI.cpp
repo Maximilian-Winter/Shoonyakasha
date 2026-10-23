@@ -263,6 +263,7 @@ static GltfLoadOptions toLoadOptions(const GltfOptions& fo) {
     lo.generateMipmaps  = fo.generateMipmaps;
     lo.srgbAlbedo       = fo.srgbAlbedo;
     lo.compressTextures = fo.compressTextures;
+    lo.generateLods     = fo.generateLods;
     lo.namePrefix       = fo.namePrefix;
     return lo;
 }
@@ -715,6 +716,18 @@ void EngineAPI::setOcclusionCulling(bool enabled) {
 
 bool EngineAPI::isOcclusionCullingEnabled() const {
     return m_impl->app->getRenderGraph().isOcclusionCullingEnabled();
+}
+
+void EngineAPI::setLodThreshold(float pixels) {
+    m_impl->app->getRenderGraph().setLodThreshold(pixels);
+}
+
+float EngineAPI::getLodThreshold() const {
+    return m_impl->app->getRenderGraph().getLodThreshold();
+}
+
+std::vector<uint32_t> EngineAPI::getLodCounts() const {
+    return m_impl->app->getRenderGraph().getLodCounts();
 }
 
 void EngineAPI::setRenderStatsEnabled(bool enabled, bool gpuTiming) {

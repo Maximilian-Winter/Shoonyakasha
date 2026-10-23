@@ -15,6 +15,7 @@
 #include "GPU/GPUTypes.h"
 #include "GPU/GpuDeleteQueue.h"
 #include <unordered_map>
+#include <vector>
 #include <string>
 #include <optional>
 
@@ -35,6 +36,15 @@ namespace Shoonyakasha {
 // gone and the frames that may still reference it have completed.
 // Copying a MeshComponent shares the geometry: the copy holds a reference to
 // the same allocation rather than a duplicate handle to it.
+
+/// A coarser level of detail of a mesh: a range of its index buffer drawing
+/// the same vertices with fewer triangles, and how far, in mesh units, its
+/// surface may lie from the full mesh's.
+struct MeshLod {
+    uint32_t firstIndex = 0;
+    uint32_t indexCount = 0;
+    float    error = 0.0f;
+};
 
 struct MeshComponent {
     GpuBufferRef vertexBuffer;
@@ -57,6 +67,12 @@ struct MeshComponent {
     // need (static glTF meshes on a device with ray queries), so the mesh
     // can appear in ray-traced shadows.
     bool      rayTracingInput = false;
+
+    // Coarser levels of detail after the full mesh (indexCount indices from
+    // the start), coarsest last; empty for none. Entity geometry passes draw
+    // the coarsest whose error, seen from the main camera, is within the
+    // renderer's LOD threshold. Ray tracing uses the full mesh.
+    std::vector<MeshLod> lods;
 
     // ─── Helpers ────────────────────────────────────────────────
 

@@ -1224,6 +1224,16 @@ public:
     void setOcclusionCullingEnabled(bool enabled) { m_occlusionCulling = enabled; }
     bool isOcclusionCullingEnabled() const { return m_occlusionCulling; }
 
+    // ── Levels of detail ──
+    // Meshes with levels of detail (MeshComponent::lods) draw the coarsest
+    // whose error, seen from the main camera, covers at most this many
+    // pixels of the render height; 0 draws every mesh in full. Default 1.
+    void setLodThreshold(float pixels) { m_lodThreshold = pixels; }
+    float getLodThreshold() const { return m_lodThreshold; }
+    /// Entities drawn at each level last frame, among those with levels:
+    /// [0] the full mesh, [k] MeshComponent::lods[k - 1].
+    std::vector<uint32_t> getLodCounts() const;
+
     // ── Named Parameters (for push constants) ──
     void setParameter(const std::string& name, float value);
     void setParameter(const std::string& name, int32_t value);
@@ -1840,6 +1850,7 @@ private:
     std::unique_ptr<Shoonyakasha::FrameGraphRenderer> m_frameGraphRenderer;  // Auto geometry rendering
     bool m_ecsBindingEnabled = true;
     bool m_occlusionCulling = true;
+    float m_lodThreshold = 1.0f;
 
     /// Resolver-side layouts, converted once and keyed by layout name.
     ///

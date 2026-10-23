@@ -320,6 +320,10 @@ bool RenderGraph::isPassEnabled(const std::string& passName) const {
     return found;
 }
 
+std::vector<uint32_t> RenderGraph::getLodCounts() const {
+    return m_frameGraphRenderer ? m_frameGraphRenderer->getLodCounts() : std::vector<uint32_t>{};
+}
+
 bool RenderGraph::getPassDrawStats(const std::string& passName, uint32_t& drawn, uint32_t& culled,
                                    uint32_t* occluded) const {
     const auto* stats = m_frameGraphRenderer ? m_frameGraphRenderer->getPassDrawStats(passName) : nullptr;

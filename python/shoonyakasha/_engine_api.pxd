@@ -610,6 +610,9 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         uint32_t getPassOccludedCount(const string& passName)
         void setOcclusionCulling(bint enabled)
         bint isOcclusionCullingEnabled() const
+        void setLodThreshold(float pixels)
+        float getLodThreshold() const
+        vector[uint32_t] getLodCounts() const
         void setRenderStatsEnabled(bint enabled, bint gpuTiming)
         bint isRenderStatsEnabled() const
         RenderStatsSnapshot getRenderStats() const

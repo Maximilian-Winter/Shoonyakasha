@@ -253,6 +253,7 @@ struct GltfOptions {
     bool generateMipmaps  = true;
     bool srgbAlbedo       = true;
     bool compressTextures = false;  // see GltfLoadOptions::compressTextures
+    bool generateLods     = false;  // see GltfLoadOptions::generateLods
     std::string namePrefix;
 };
 

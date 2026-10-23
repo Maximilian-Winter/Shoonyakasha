@@ -48,6 +48,12 @@ Textures load through stb_image (PNG, JPEG and the other formats it reads) as 8-
 
 Uncompressed textures take 4 bytes per texel, so this is a quarter to an eighth of the memory, at some loss of quality: BC1 stores each 4 x 4 block as two 16-bit colours and blends between them, which bands smooth gradients. Compression runs on the CPU while loading (stb_dxt), and so do the mipmaps, so loading takes longer. A BC5 normal map holds only x and y; the default pipeline and `sk/scene_hits.glsl` compute z from them, and a pipeline's own shaders need to do the same: `z = sqrt(max(1 - dot(xy, xy), 0))`.
 
+## Levels of detail
+
+`lods=True` (C++ `GltfOptions::generateLods`) gives each static triangle mesh of at least 64 triangles up to four coarser levels of detail, simplified with meshoptimizer to about half the triangles of the level before. They share the mesh's vertices and follow its full index list in the same index buffer (`MeshComponent::lods`), and the mesh's open borders stay in place. Each level records how far its surface may lie from the full mesh's, counting how far its normals stray. Skinned and morphed meshes get none.
+
+Each frame, entity geometry passes draw every such entity at the coarsest level whose error, seen from the main camera at the nearest point of the entity's bounds, covers at most `set_lod_threshold(pixels)` pixels of the render height (default 1; 0 draws every mesh in full). Every pass that frame, shadow passes included, draws the level the main camera picked. Ray-traced shadows and reflections use the full mesh. `get_lod_counts()` reports how many entities each level drew. Generating the levels adds to loading time.
+
 ## Materials and animation
 
 Use a pipeline matching the loaded geometry: PBR shaders and IBL resources for PBR/IBL scenes; skinned vertex formats, skeleton bindings, and execution for animated meshes. Loading an animation does not make an ordinary static-mesh pass perform skinning.

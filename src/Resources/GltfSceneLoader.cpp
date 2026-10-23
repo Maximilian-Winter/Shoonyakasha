@@ -13,6 +13,7 @@
 #include "ECS/SkeletonComponents.h"
 #include "ECS/SkeletalAnimationSystem.h"
 #include "Resources/MeshTangents.h"
+#include "Resources/MeshLods.h"
 #include "Resources/TextureProcessing.h"
 #include "Vulkan/VertexTypes.h"
 
@@ -747,8 +748,15 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
         }
     }
 
+    // Generated levels of detail follow the full mesh in its index buffer.
+    std::vector<uint32_t> indices = geometry.indices;
+    if (m_options.generateLods && !skinned && !result.morphTargets &&
+        primitive.type == cgltf_primitive_type_triangles) {
+        result.lods = appendMeshLods(geometry.positions, indices, 4, geometry.normals);
+    }
     result.indexBuffer = m_device.getDeleteQueue().adopt(
-        buildIndexBuffer(geometry.indices, result.indexCount, result.indexType));
+        buildIndexBuffer(indices, result.indexCount, result.indexType));
+    if (!result.lods.empty()) result.indexCount = result.lods.front().firstIndex;
 
     // Process material
     if (primitive.material && m_options.loadMaterials) {
@@ -1325,6 +1333,7 @@ entt::entity GltfSceneLoader::createEntity(
     mesh.boundsMin = primitive.boundsMin;
     mesh.boundsMax = primitive.boundsMax;
     mesh.hasBounds = primitive.hasBounds;
+    mesh.lods = primitive.lods;
     // Standard-vertex meshes are made with acceleration structure input usage
     // on a device with ray queries (rayTracingInputUsage); skinned ones are not.
     mesh.rayTracingInput = m_device.hasRayQuery() && mesh.vertexStride == sizeof(StandardVertex);

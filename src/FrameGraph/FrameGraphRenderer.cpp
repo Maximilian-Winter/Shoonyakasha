@@ -90,6 +90,7 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
         re.transform = r.transform;
         re.batchKey = r.batchKey;
         re.materialHash = r.materialHash;
+        re.lod = r.lod;
         re.distanceToCamera = calculateDistance(*r.transform, cullView);
 
         result.push_back(re);
@@ -135,6 +136,7 @@ void FrameGraphRenderer::gatherRenderables() const {
     if (frame == m_renderablesFrame) return;
     m_renderablesFrame = frame;
     m_renderables.clear();
+    m_lodCounts.clear();
 
     // The main camera this frame, for the occlusion images it renders.
     const auto& scene = m_renderGraph.getSceneContext();
@@ -172,8 +174,41 @@ void FrameGraphRenderer::gatherRenderables() const {
         r.materialHash = materialHash(*r.material);
         r.batchKey = ownBuffers ? 0 : batchKey(mesh, r.materialHash) ^ (mirrored ? 0x5bd1e9955bd1e995ull : 0);
         if (!ownBuffers && r.batchKey == 0) r.batchKey = 1;
+        // The level of detail every pass draws this frame; levels batch apart.
+        if (!mesh.lods.empty() && r.hasBounds) {
+            r.lod = selectLod(mesh, r.transform->worldMatrix, r.worldMin, r.worldMax);
+            const uint32_t level = r.lod ? static_cast<uint32_t>(r.lod - mesh.lods.data()) + 1 : 0;
+            if (m_lodCounts.size() <= level) m_lodCounts.resize(level + 1, 0);
+            ++m_lodCounts[level];
+            if (r.batchKey != 0 && level > 0) {
+                r.batchKey ^= 0x9e3779b97f4a7c15ull * level;
+                if (r.batchKey == 0) r.batchKey = 1;
+            }
+        }
         m_renderables.push_back(r);
     }
+}
+
+const MeshLod* FrameGraphRenderer::selectLod(const MeshComponent& mesh, const glm::mat4& world,
+                                             const glm::vec3& worldMin, const glm::vec3& worldMax) const {
+    const auto& scene = m_renderGraph.getSceneContext();
+    const float threshold = m_renderGraph.getLodThreshold();
+    if (threshold <= 0.0f || !scene.hasCamera || scene.renderHeight <= 0.0f) return nullptr;
+
+    const glm::vec3 eye(scene.cameraInvView[3]);
+    const float distance = glm::length(eye - glm::clamp(eye, worldMin, worldMax));
+    if (distance <= 0.0f) return nullptr;
+    const float scale = std::max({glm::length(glm::vec3(world[0])), glm::length(glm::vec3(world[1])),
+                                  glm::length(glm::vec3(world[2]))});
+    const float pixelsPerUnit =
+        scene.renderHeight / (2.0f * std::tan(glm::radians(scene.cameraFov) * 0.5f) * distance);
+
+    const MeshLod* chosen = nullptr;
+    for (const MeshLod& lod : mesh.lods) {
+        if (lod.error * scale * pixelsPerUnit > threshold) break;
+        chosen = &lod;
+    }
+    return chosen;
 }
 
 // ============================================================================
@@ -337,7 +372,7 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
                                   frameIndex);
     } else {
         for (const auto& re : entities) {
-            bindAndDrawEntity(re.entity, *re.mesh, re.materialHash, pass, plan, bound, cmd, frameIndex);
+            bindAndDrawEntity(re.entity, *re.mesh, re.lod, re.materialHash, pass, plan, bound, cmd, frameIndex);
             drawCount++;
         }
     }
@@ -368,6 +403,7 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
 void FrameGraphRenderer::bindAndDrawEntity(
     entt::entity entity,
     const MeshComponent& mesh,
+    const MeshLod* lod,
     uint64_t materialHash,
     const FrameGraph::CompiledPass& pass,
     FrameGraph::RenderGraph::EntityBindingPlan& plan,
@@ -422,8 +458,9 @@ void FrameGraphRenderer::bindAndDrawEntity(
             bound.index = mesh.indexHandle();
             bound.indexType = indexType;
         }
-        vkCmdDrawIndexed(cmd, mesh.indexCount, instanceCount, 0, 0, 0);
-        FrameGraph::countDraw(mesh.indexCount * instanceCount);
+        const uint32_t indexCount = lod ? lod->indexCount : mesh.indexCount;
+        vkCmdDrawIndexed(cmd, indexCount, instanceCount, lod ? lod->firstIndex : 0, 0, 0);
+        FrameGraph::countDraw(indexCount * instanceCount);
     } else {
         vkCmdDraw(cmd, mesh.vertexCount, instanceCount, 0, 0);
         FrameGraph::countDraw(mesh.vertexCount * instanceCount);
@@ -465,7 +502,7 @@ uint32_t FrameGraphRenderer::drawInstanced(
         const VkDeviceSize offset = (firstRow + batch.first) * stride;
         vkCmdBindVertexBuffers2(cmd, kInstanceBinding, 1, &buffer, &offset, nullptr, &stride);
         const RenderableEntity& first = entities[order[batch.first]];
-        bindAndDrawEntity(first.entity, *first.mesh, first.materialHash, pass, plan, bound, cmd, frameIndex,
+        bindAndDrawEntity(first.entity, *first.mesh, first.lod, first.materialHash, pass, plan, bound, cmd, frameIndex,
                           batch.count);
     }
     return static_cast<uint32_t>(batches.size());

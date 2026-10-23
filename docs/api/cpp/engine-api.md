@@ -114,6 +114,9 @@ uint32_t getPassCulledCount(const std::string& passName) const;
 uint32_t getPassOccludedCount(const std::string& passName) const;   // left out as hidden (execution "occlusion")
 void setOcclusionCulling(bool enabled);                              // on by default
 bool isOcclusionCullingEnabled() const;
+void setLodThreshold(float pixels);                                  // default 1; 0 draws every mesh in full
+float getLodThreshold() const;
+std::vector<uint32_t> getLodCounts() const;                          // [0] full mesh, [k] k-th coarser level
 void setRenderStatsEnabled(bool enabled, bool gpuTiming = true);
 bool isRenderStatsEnabled() const;
 RenderStatsSnapshot getRenderStats() const;

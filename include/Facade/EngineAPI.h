@@ -447,6 +447,15 @@ public:
     void setOcclusionCulling(bool enabled);
     bool isOcclusionCullingEnabled() const;
 
+    /// Meshes with levels of detail (loaded with GltfOptions::generateLods)
+    /// draw the coarsest whose error, seen from the main camera, covers at
+    /// most this many pixels; 0 draws every mesh in full. Default 1.
+    void setLodThreshold(float pixels);
+    float getLodThreshold() const;
+    /// Entities drawn at each level last frame, among those with levels:
+    /// [0] the full mesh, [k] the k-th coarser level.
+    std::vector<uint32_t> getLodCounts() const;
+
     // ═══════════════════════════════════════════════════════════
     // Render statistics
     // ═══════════════════════════════════════════════════════════

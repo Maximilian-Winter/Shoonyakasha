@@ -55,6 +55,9 @@ struct GltfPrimitive {
     uint32_t indexCount     = 0;
     uint32_t vertexStride   = 0;
     Shoonyakasha::IndexType indexType = Shoonyakasha::IndexType::UInt32;
+    // Generated levels of detail (GltfLoadOptions::generateLods), after the
+    // full mesh's indexCount indices in the index buffer.
+    std::vector<Shoonyakasha::MeshLod> lods;
     // The primitive's morph targets and its vertices with none applied; null
     // when it has none.
     std::shared_ptr<const Shoonyakasha::MorphTargetSet> morphTargets;
@@ -210,6 +213,11 @@ struct GltfLoadOptions {
     // BC1 (BC3 with transparency), normal maps BC5 (x and y), other data BC1.
     bool compressTextures       = false;
     bool srgbAlbedo             = true;   // Load albedo as sRGB
+
+    // Generate up to four coarser levels of detail for each static triangle
+    // mesh (MeshComponent::lods; appendMeshLods), in its index buffer.
+    // Skinned and morphed meshes get none.
+    bool generateLods           = false;
 
     // Naming
     std::string namePrefix      = "";

@@ -80,6 +80,9 @@ struct RenderableEntity {
     // morphed, sprites).
     uint64_t batchKey = 0;
     uint64_t materialHash = 0;   // of `material` (InstanceBatching.h), made once a frame
+    // The level of detail drawn this frame (one of mesh->lods); null for
+    // the full mesh.
+    const MeshLod* lod = nullptr;
 };
 
 // ============================================================================
@@ -246,7 +249,21 @@ private:
         glm::vec3 worldMin{0.0f}, worldMax{0.0f};
         uint64_t batchKey = 0;   // RenderableEntity::batchKey
         uint64_t materialHash = 0;
+        const MeshLod* lod = nullptr;   // RenderableEntity::lod
     };
+    /// Entities drawn at each level of detail last frame, among those with
+    /// levels: [0] the full mesh, [k] mesh.lods[k - 1].
+    mutable std::vector<uint32_t> m_lodCounts;
+    /// The level of `mesh` to draw for an entity with these world bounds and
+    /// matrix: the coarsest whose error, seen from the main camera at the
+    /// bounds' nearest point, is within the LOD threshold in pixels.
+    const MeshLod* selectLod(const MeshComponent& mesh, const glm::mat4& world, const glm::vec3& worldMin,
+                             const glm::vec3& worldMax) const;
+
+public:
+    const std::vector<uint32_t>& getLodCounts() const { return m_lodCounts; }
+
+private:
     mutable std::vector<Renderable> m_renderables;
     mutable uint64_t m_renderablesFrame = ~uint64_t{0};
     void gatherRenderables() const;
@@ -310,6 +327,7 @@ private:
     void bindAndDrawEntity(
         entt::entity entity,
         const MeshComponent& mesh,
+        const MeshLod* lod,
         uint64_t materialHash,
         const FrameGraph::CompiledPass& pass,
         FrameGraph::RenderGraph::EntityBindingPlan& plan,

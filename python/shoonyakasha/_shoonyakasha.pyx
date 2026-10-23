@@ -2058,6 +2058,8 @@ cdef class Engine:
             opts.srgbAlbedo = kwargs['srgb_albedo']
         if 'compress_textures' in kwargs:
             opts.compressTextures = kwargs['compress_textures']
+        if 'lods' in kwargs:
+            opts.generateLods = kwargs['lods']
         if 'name_prefix' in kwargs:
             opts.namePrefix = kwargs['name_prefix'].encode('utf-8')
 
@@ -2492,6 +2494,21 @@ cdef class Engine:
     def is_occlusion_culling_enabled(self):
         """Whether occlusion culling is on (set_occlusion_culling)."""
         return self._ptr.isOcclusionCullingEnabled()
+
+    def set_lod_threshold(self, float pixels):
+        """Meshes loaded with lods=True draw the coarsest level of detail whose
+        error, seen from the main camera, covers at most this many pixels; 0
+        draws every mesh in full. Default 1."""
+        self._ptr.setLodThreshold(pixels)
+
+    def get_lod_threshold(self):
+        """The level-of-detail threshold in pixels (set_lod_threshold)."""
+        return self._ptr.getLodThreshold()
+
+    def get_lod_counts(self):
+        """Entities drawn at each level of detail last frame, among those with
+        levels: [0] the full mesh, [k] the k-th coarser level."""
+        return list(self._ptr.getLodCounts())
 
     # ── Render statistics ──────────────────────────────────────
 

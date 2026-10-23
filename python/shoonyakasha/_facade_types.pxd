@@ -132,6 +132,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         cbool generateMipmaps
         cbool srgbAlbedo
         cbool compressTextures
+        cbool generateLods
         string namePrefix
 
     cdef cppclass ClipInfo "Shoonyakasha::Facade::GltfResult::ClipInfo":

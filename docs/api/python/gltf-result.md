@@ -30,6 +30,7 @@ Native `GltfLoadResult` also exposes primitive, root/node, skeleton, and clip ob
 | `generate_mipmaps` | `generateMipmaps` | true |
 | `srgb_albedo` | `srgbAlbedo` | true |
 | `compress_textures` | `compressTextures` | false |
+| `lods` | `generateLods` | false |
 | `name_prefix` | `namePrefix` | empty string |
 
 The current wrapper reads known keywords from `**kwargs`; unknown keywords are ignored rather than rejected. Check spelling. An empty name prefix becomes the input file stem in the native loader. `max_texture_size` halves larger textures until they fit, and `compress_textures` block-compresses them (see [loading scenes](../../guides/loading-scenes.md#texture-size-and-compression)); `srgb_albedo` is not consulted by the current slot-based texture-format selection. See [loading scenes](../../guides/loading-scenes.md) for hierarchy and texture behavior.

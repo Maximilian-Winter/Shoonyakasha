@@ -101,6 +101,9 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `get_pass_occluded_count(pass_name)` | int | Entities a geometry pass with an execution `occlusion` image left out as hidden, last run. |
 | `set_occlusion_culling(enabled)` | None | Whether passes with an execution `occlusion` image leave out what it hides (on by default). |
 | `is_occlusion_culling_enabled()` | bool | Whether occlusion culling is on. |
+| `set_lod_threshold(pixels)` | None | Meshes loaded with `lods=True` draw the coarsest level of detail whose error, seen from the main camera, covers at most this many pixels; 0 draws every mesh in full (default 1). |
+| `get_lod_threshold()` | float | The level-of-detail threshold in pixels. |
+| `get_lod_counts()` | list of int | Entities drawn at each level of detail last frame, among those with levels: [0] the full mesh, [k] the k-th coarser level. |
 | `enable_render_stats(gpu_timing=True)` | None | Collect frame rate, frame times, draw counts and per-pass times. |
 | `disable_render_stats()` | None | Stop collecting render statistics. |
 | `render_stats_enabled (read-only property)` | bool | Whether render statistics are being collected. |
