@@ -120,6 +120,7 @@ The ones most worth knowing, by symptom:
 | Corners and crevices too dark, or not dark enough | `aoIntensity`, `aoRadius` |
 | Bright highlights glow too much | `bloomIntensity` (0 turns bloom off) |
 | The sky is too detailed behind the scene | `skyBlur` |
+| Everything is in focus, like a phone photo | `dof` 1, with `dofFocus` the distance in focus (metres) and `dofFStop` the f-number (smaller blurs more) |
 | Colours look too contrasty, or too flat | `toneMapper`: 2 AgX (the default), 1 Khronos PBR Neutral, 0 ACES |
 | Sky light too strong or too weak | `iblIntensity`; `shadowAmbient` below 1 also darkens sky light in the sun's shadow |
 

@@ -104,6 +104,9 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `aoRadius` | 0.6 | World-space reach of ambient occlusion; 0 turns it off |
 | `aoIntensity` | 1.0 | Power applied to the occlusion; above 1 darkens it |
 | `toneMapper` | 2 | Tone curve: 2 AgX, which keeps mid-tones as exposed and rolls bright light off to white without shifting its hue; 1 Khronos PBR Neutral, which keeps base colours as authored, for exposures that put white at 1; 0 the ACES fit, more contrast (`set_custom_uint`) |
+| `dof` | 0 | Depth of field: 1 blurs what is nearer or farther than `dofFocus` |
+| `dofFocus` | 5.0 | Distance in focus, in metres |
+| `dofFStop` | 2.8 | f-number of a full-frame camera with the view's focal length; smaller blurs more |
 | `bloomIntensity` | 0.04 | How much of the bloom is mixed into the image |
 | `bloomRadius` | 1.0 | Spread of each upsampling step, in texels |
 | `taa` | 1 | 1 for temporal anti-aliasing, 0 for none (`set_custom_uint`). Turn it off here rather than turning its passes off: the passes after it read its output |
@@ -148,6 +151,7 @@ own that it does not mention stay as you set them.
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
 | `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with shadow rays towards the sun, spot and point lights. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |
+| `DepthOfField` | `taaColor` blurred by distance from the focus, as a full-frame camera with the view's focal length would (a single-pass gather on a golden-angle spiral, out to 2% of the image height), into `sceneColor`, which bloom and the tone mapping read; with `dof` 0 or a debug view, a copy |
 | `BloomDown0`, `BloomDown1..5` | The HDR image down a half-resolution mip chain, with a 13-tap filter |
 | `AutoExposure` | A compute pass: a histogram of mip 2 of the chain, and the adapted exposure in a persistent 1x1 image |
 | `BloomUp4..0` | Back up the chain, each mip adding a tent-filtered copy of the one below |
