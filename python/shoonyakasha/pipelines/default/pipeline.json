@@ -405,6 +405,12 @@
             1.0,
             1.0
           ]
+        },
+        {
+          "name": "motionBlur",
+          "type": "float",
+          "source": "scene.custom.default.motionBlur",
+          "default": 0.0
         }
       ]
     },
@@ -735,6 +741,40 @@
     }
   },
   "descriptorSetLayouts": {
+    "motionBlurSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "taaColor",
+          "autoBindResource": "taaColor",
+          "autoBindSampler": "linearClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gVelocity",
+          "autoBindResource": "gVelocity",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
     "heightFogSet": {
       "bindings": [
         {
@@ -757,8 +797,8 @@
           "stages": [
             "fragment"
           ],
-          "name": "taaColor",
-          "autoBindResource": "taaColor",
+          "name": "motionColor",
+          "autoBindResource": "motionColor",
           "autoBindSampler": "linearClamp"
         },
         {
@@ -1601,6 +1641,14 @@
     },
     {
       "name": "taaColor",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "motionColor",
       "kind": "image",
       "image": {
         "format": "R16G16B16A16_SFLOAT",
@@ -3114,7 +3162,7 @@
       ]
     },
     {
-      "name": "DepthOfField",
+      "name": "MotionBlur",
       "type": "graphics",
       "execution": {
         "type": "fullscreen"
@@ -3122,6 +3170,46 @@
       "inputs": [
         {
           "resource": "taaColor",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gVelocity",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "motionColor",
+          "usage": "color_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/motion_blur.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "motionBlurSet",
+        "cameraSet",
+        "settingsSet"
+      ]
+    },
+    {
+      "name": "DepthOfField",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "motionColor",
           "usage": "shader_read"
         },
         {

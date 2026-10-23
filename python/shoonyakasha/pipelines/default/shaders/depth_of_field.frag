@@ -6,13 +6,13 @@
 // blur; a sample counts where its own circle of confusion reaches back to
 // this pixel, so a blurred foreground spreads over what is behind it while a
 // blurred background does not spread over a sharp foreground (Dennis
-// Gustafsson's single-pass gather). Reads TAA's result and writes
+// Gustafsson's single-pass gather). Reads motion blur's result and writes
 // sceneColor, which bloom and the tone mapping read; with settings.dof 0, or
 // a debug view, it copies.
 
 #include "common.glsl"
 
-layout(set = 0, binding = 0) uniform sampler2D taaColor;
+layout(set = 0, binding = 0) uniform sampler2D motionColor;
 layout(set = 0, binding = 1) uniform sampler2D gDepth;
 layout(set = 1, binding = 0) uniform Camera { DEFAULT_CAMERA_BLOCK } camera;
 layout(set = 2, binding = 0) uniform Settings { DEFAULT_SETTINGS_BLOCK } settings;
@@ -40,7 +40,7 @@ float blurRadius(float depth, float focal, float focus, float maxRadius) {
 }
 
 void main() {
-    vec3 center = texelFetch(taaColor, ivec2(gl_FragCoord.xy), 0).rgb;
+    vec3 center = texelFetch(motionColor, ivec2(gl_FragCoord.xy), 0).rgb;
     if (settings.dof == 0u || settings.debugView != 0u) {
         outColor = vec4(center, 1.0);
         return;
@@ -69,7 +69,7 @@ void main() {
         // Behind this pixel, a sample spreads no further than this pixel's own blur.
         if (depth > centerDepth) sampleRadius = min(sampleRadius, centerRadius * 2.0);
         float weight = smoothstep(radius - 0.5, radius + 0.5, sampleRadius);
-        color += mix(color / total, textureLod(taaColor, uv, 0.0).rgb, weight);
+        color += mix(color / total, textureLod(motionColor, uv, 0.0).rgb, weight);
         total += 1.0;
     }
     outColor = vec4(color / total, 1.0);

@@ -108,6 +108,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `fogHeight` | 0.0 | Height in metres where the fog has `fogDensity` |
 | `fogHeightFalloff` | 0.0 | How fast the fog thins with height: by a factor e every 1/falloff metres above `fogHeight`, thickening below it; 0 is the same density everywhere |
 | `fogColor` | (1, 1, 1) | Tint of the fog's light, which is the environment's, blurred, times `iblIntensity` |
+| `motionBlur` | 0.0 | Motion blur: the share of each frame the shutter is open, 0 to 1 (0.5 is a film camera's 180 degree shutter); 0 is none |
 | `dof` | 0 | Depth of field: 1 blurs what is nearer or farther than `dofFocus` |
 | `dofFocus` | 5.0 | Distance in focus, in metres |
 | `dofFStop` | 2.8 | f-number of a full-frame camera with the view's focal length; smaller blurs more |
@@ -156,7 +157,8 @@ own that it does not mention stay as you set them.
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
 | `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with shadow rays towards the sun, spot and point lights. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |
-| `DepthOfField` | `taaColor` blurred by distance from the focus, as a full-frame camera with the view's focal length would (a single-pass gather on a golden-angle spiral, out to 2% of the image height), into `sceneColor`, which bloom and the tone mapping read; with `dof` 0 or a debug view, a copy |
+| `MotionBlur` | `taaColor` smeared along each pixel's motion (`gVelocity`; for the sky, the camera's turn) over the open shutter (`motionBlur`), 16 samples across it, at most 5% of the image width, into `motionColor`; samples nearer the camera count only where their own blur reaches the pixel. With `motionBlur` 0 or a debug view, a copy |
+| `DepthOfField` | `motionColor` blurred by distance from the focus, as a full-frame camera with the view's focal length would (a single-pass gather on a golden-angle spiral, out to 2% of the image height), into `sceneColor`, which bloom and the tone mapping read; with `dof` 0 or a debug view, a copy |
 | `BloomDown0`, `BloomDown1..5` | The HDR image down a half-resolution mip chain, with a 13-tap filter |
 | `AutoExposure` | A compute pass: a histogram of mip 2 of the chain, and the adapted exposure in a persistent 1x1 image |
 | `BloomUp4..0` | Back up the chain, each mip adding a tent-filtered copy of the one below |
