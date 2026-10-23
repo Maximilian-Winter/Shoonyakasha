@@ -2480,6 +2480,19 @@ cdef class Engine:
         name = pass_name.encode('utf-8')
         return (self._ptr.getPassDrawnCount(name), self._ptr.getPassCulledCount(name))
 
+    def get_pass_occluded_count(self, str pass_name):
+        """Entities a geometry pass with an execution "occlusion" image left out as hidden, last run."""
+        return self._ptr.getPassOccludedCount(pass_name.encode('utf-8'))
+
+    def set_occlusion_culling(self, bint enabled):
+        """Whether passes with an execution "occlusion" image leave out the entities it hides
+        (on by default)."""
+        self._ptr.setOcclusionCulling(enabled)
+
+    def is_occlusion_culling_enabled(self):
+        """Whether occlusion culling is on (set_occlusion_culling)."""
+        return self._ptr.isOcclusionCullingEnabled()
+
     # ── Render statistics ──────────────────────────────────────
 
     def enable_render_stats(self, bint gpu_timing=True):

@@ -111,6 +111,9 @@ bool rayQuerySupported() const;
 std::vector<std::string> getPipelinePresets() const;
 uint32_t getPassDrawnCount(const std::string& passName) const;
 uint32_t getPassCulledCount(const std::string& passName) const;
+uint32_t getPassOccludedCount(const std::string& passName) const;   // left out as hidden (execution "occlusion")
+void setOcclusionCulling(bool enabled);                              // on by default
+bool isOcclusionCullingEnabled() const;
 void setRenderStatsEnabled(bool enabled, bool gpuTiming = true);
 bool isRenderStatsEnabled() const;
 RenderStatsSnapshot getRenderStats() const;

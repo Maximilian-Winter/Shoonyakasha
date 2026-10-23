@@ -703,6 +703,20 @@ uint32_t EngineAPI::getPassCulledCount(const std::string& passName) const {
     return culled;
 }
 
+uint32_t EngineAPI::getPassOccludedCount(const std::string& passName) const {
+    uint32_t drawn = 0, culled = 0, occluded = 0;
+    m_impl->app->getRenderGraph().getPassDrawStats(passName, drawn, culled, &occluded);
+    return occluded;
+}
+
+void EngineAPI::setOcclusionCulling(bool enabled) {
+    m_impl->app->getRenderGraph().setOcclusionCullingEnabled(enabled);
+}
+
+bool EngineAPI::isOcclusionCullingEnabled() const {
+    return m_impl->app->getRenderGraph().isOcclusionCullingEnabled();
+}
+
 void EngineAPI::setRenderStatsEnabled(bool enabled, bool gpuTiming) {
     if (m_impl->app && m_impl->app->hasRenderGraph()) {
         m_impl->app->getRenderGraph().setStatsEnabled(enabled, gpuTiming);

@@ -986,6 +986,22 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
                     passDecl.name.c_str(), passDecl.execution.entityDataBinding.c_str());
             }
         }
+
+        // The occlusion image is a read-back R32_SFLOAT image.
+        if (!passDecl.execution.occlusion.empty()) {
+            const auto& resources = builder.getResourceDeclarations();
+            const auto it = std::find_if(resources.begin(), resources.end(), [&](const ResourceDeclaration& r) {
+                return r.name == passDecl.execution.occlusion;
+            });
+            if (it == resources.end() || it->kind != ResourceKind::Image ||
+                it->imageDesc.format != VK_FORMAT_R32_SFLOAT || !it->readbackPolicy.enabled) {
+                result.errorMessage = "Pass '" + passDecl.name + "': \"occlusion\" names '" +
+                                      passDecl.execution.occlusion +
+                                      "', which is not an R32_SFLOAT image resource with a readback";
+                m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+                return result;
+            }
+        }
     }
 
     // Each pass's queue; with async compute, passes on the two queues wait

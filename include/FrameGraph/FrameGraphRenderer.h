@@ -16,6 +16,7 @@
 #include "ECS/Core.h"
 #include "FrameGraph/ViewCulling.h"
 #include "FrameGraph/InstanceBatching.h"
+#include "FrameGraph/OcclusionCulling.h"
 #include "GPU/GpuDeleteQueue.h"
 
 #include <vulkan/vulkan.h>
@@ -148,10 +149,14 @@ public:
     struct ViewCull {
         bool      skip = false;           // draw nothing: a shadow slot no light has this frame
         bool      cull = false;           // test bounds against `frustum`
+        bool      mainCamera = false;     // `frustum` is the main camera's
         Frustum   frustum;
         bool      alongDirection = false; // sort by depth along `direction`, not distance
         glm::vec3 origin{0.0f};           // for distance sorting
         glm::vec3 direction{0.0f};        // for depth sorting (a sun's travel direction)
+        // Leaves out static, unskinned entities hidden behind this pyramid's
+        // depth (execution "occlusion"); null for none.
+        const DepthPyramid* occlusion = nullptr;
     };
 
     /// Resolve execution.view for this frame. A view that cannot be resolved
@@ -204,10 +209,12 @@ public:
     uint32_t getLastQueryCount() const { return m_lastQueryCount; }
     uint32_t getLastCulledCount() const { return m_lastCulledCount; }
 
-    /// Entities drawn and culled by a pass the last time it ran.
+    /// Entities drawn, culled as outside its view, and left out as hidden
+    /// (execution "occlusion") by a pass the last time it ran.
     struct PassDrawStats {
         uint32_t drawn = 0;
         uint32_t culled = 0;
+        uint32_t occluded = 0;
     };
     const PassDrawStats* getPassDrawStats(const std::string& passName) const {
         auto it = m_passStats.find(passName);
@@ -235,6 +242,7 @@ private:
         bool isSprite2D = false;
         bool transmissive = false;   // transmissionFactor above 0
         bool hasBounds = false;
+        bool moving = false;         // its world matrix changed since last frame
         glm::vec3 worldMin{0.0f}, worldMax{0.0f};
         uint64_t batchKey = 0;   // RenderableEntity::batchKey
         uint64_t materialHash = 0;
@@ -246,7 +254,32 @@ private:
     mutable uint32_t m_lastDrawCount = 0;
     mutable uint32_t m_lastQueryCount = 0;
     mutable uint32_t m_lastCulledCount = 0;
+    mutable uint32_t m_lastOccludedCount = 0;
     std::unordered_map<std::string, PassDrawStats> m_passStats;
+
+    // ── Occlusion ───────────────────────────────────────────────────
+
+    /// The main camera as a frame recorded it, by readback frame number.
+    struct CameraRecord {
+        uint64_t frame = 0;
+        glm::mat4 viewProj{1.0f};
+        glm::vec3 position{0.0f};
+        glm::vec3 forward{0.0f, 0.0f, -1.0f};
+    };
+    mutable std::vector<CameraRecord> m_cameraRecords;   // the last few frames'
+    /// One occlusion image's latest readback as a pyramid, with the camera
+    /// that rendered it.
+    struct OcclusionSource {
+        DepthPyramid pyramid;
+        uint64_t frame = ~uint64_t{0};
+        CameraRecord camera;
+    };
+    std::unordered_map<std::string, OcclusionSource> m_occlusion;
+    /// The pyramid of occlusion image `name` to test this frame's main
+    /// camera view against, or null: none read back yet, or the camera cut
+    /// away since (turned by more than 25 degrees, or moved by more than a
+    /// tenth of its far plane).
+    const DepthPyramid* occlusionFor(const std::string& name);
 
     // ── Internal Helpers ────────────────────────────────────────────
 

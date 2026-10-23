@@ -613,6 +613,11 @@ struct ExecutionDesc {
     // instance's model and previous model matrix (two mat4s, locations 8 to
     // 15), which its vertex shader reads instead of per-draw values.
     bool        instancing = false;
+    // Leaves out entities hidden behind the depth in this image resource
+    // (JSON "occlusion"): an R32_SFLOAT image with a readback, each texel
+    // the farthest depth of the camera's view over its screen block. Empty
+    // for none. Only passes that cull against the main camera use it.
+    std::string occlusion;
 
     // Common options
     bool        bindDescriptorSets = true;

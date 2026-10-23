@@ -150,6 +150,7 @@ The [README](../../python/shoonyakasha/pipelines/default/README.md#settings) lis
 
 - **Cost, from most to least:** local shadows (every shadowed light that's in use re-renders its casters, up to six times for a point light), sun cascades (four renders of the casters), then ambient occlusion and the screen-space passes, then TAA, bloom and exposure.
 - **Trimming shadows:** turn off `set_light_cast_shadows` on lights the viewer won't miss them for, and shorten ranges. The `low` preset drops alpha-tested casters, which are often foliage and cost the most.
+- **Occlusion culling:** after the G-buffer, pass `HiZ` writes the farthest depth of every 8 x 8 block of the screen into `hiz`, which is read back. The G-buffer and transparent passes leave out the static entities hidden behind it. The depth is two frames old: something revealed by a fast turn can appear a frame late. Shadow passes are not occlusion culled. `set_occlusion_culling(False)` turns it off.
 - **Memory:** the atlas takes 64 MB, the cascades another 64 MB, and the screen-sized targets about 78 bytes per pixel.
 - **Push constants:** the pipeline pushes 236 bytes of per-draw constants. Every desktop GPU allows 256. A device limited to Vulkan's minimum of 128 logs the G-buffer passes as not fitting, and they draw nothing.
 

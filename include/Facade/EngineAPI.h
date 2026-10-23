@@ -438,6 +438,14 @@ public:
     /// last time it ran; 0 if it has not run.
     uint32_t getPassDrawnCount(const std::string& passName) const;
     uint32_t getPassCulledCount(const std::string& passName) const;
+    /// Entities a pass with an execution "occlusion" image left out as
+    /// hidden the last time it ran; 0 if it has not run.
+    uint32_t getPassOccludedCount(const std::string& passName) const;
+
+    /// Whether passes with an execution "occlusion" image leave out the
+    /// entities it hides; on by default.
+    void setOcclusionCulling(bool enabled);
+    bool isOcclusionCullingEnabled() const;
 
     // ═══════════════════════════════════════════════════════════
     // Render statistics

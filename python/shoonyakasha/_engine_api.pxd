@@ -607,6 +607,9 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         vector[string] getPipelinePresets() const
         uint32_t getPassDrawnCount(const string& passName)
         uint32_t getPassCulledCount(const string& passName)
+        uint32_t getPassOccludedCount(const string& passName)
+        void setOcclusionCulling(bint enabled)
+        bint isOcclusionCullingEnabled() const
         void setRenderStatsEnabled(bint enabled, bint gpuTiming)
         bint isRenderStatsEnabled() const
         RenderStatsSnapshot getRenderStats() const

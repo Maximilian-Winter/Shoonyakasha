@@ -98,6 +98,9 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `get_sun_shadow_cascade(index)` | 4×4 tuple (column-major) | World-to-light-clip matrix of a sun cascade this frame, as four columns. |
 | `set_pass_enabled(pass_name, enabled)` | bool | Turn a pipeline pass on or off from the next frame. |
 | `get_pass_draw_stats(pass_name)` | int | (drawn, culled): entities a geometry pass drew and culled as outside its view, last run. |
+| `get_pass_occluded_count(pass_name)` | int | Entities a geometry pass with an execution `occlusion` image left out as hidden, last run. |
+| `set_occlusion_culling(enabled)` | None | Whether passes with an execution `occlusion` image leave out what it hides (on by default). |
+| `is_occlusion_culling_enabled()` | bool | Whether occlusion culling is on. |
 | `enable_render_stats(gpu_timing=True)` | None | Collect frame rate, frame times, draw counts and per-pass times. |
 | `disable_render_stats()` | None | Stop collecting render statistics. |
 | `render_stats_enabled (read-only property)` | bool | Whether render statistics are being collected. |

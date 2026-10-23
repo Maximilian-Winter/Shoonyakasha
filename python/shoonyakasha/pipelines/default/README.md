@@ -151,6 +151,7 @@ own that it does not mention stay as you set them.
 | `SpotShadowOpaque0..7`, `SpotShadowMasked0..7`, `SpotShadowSkinned0..7` | Shadow casters into spot slot 0..7's tile of `localShadowAtlas`, culled against the light's cone; nothing when the slot is empty |
 | `PointShadowOpaque0..23`, `PointShadowMasked0..23`, `PointShadowSkinned0..23` | Shadow casters into cube face 0..23's tile (four lights, six faces each), culled per face |
 | `GBufferOpaque`, `GBufferMasked`, `GBufferSkinned`, `GBufferSkinnedMasked` | The G-buffer and motion vectors; emission goes straight into the HDR target |
+| `HiZ` | The farthest depth of each 8 x 8 block of `gDepth`, into `hiz` (R32F, an eighth of the size, read back every frame). `GBufferOpaque`, `GBufferMasked`, `Transparent` and `TransparentRT` leave out the static entities it hides (execution `"occlusion": "hiz"`) |
 | `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` |
 | `ShadowMaskRT` | In the `raytraced` preset, instead of `ShadowMask`: a shadow ray per pixel, multiplied with the cascades of the casters the rays do not see. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `GTAO`, `AODenoise` | Ambient occlusion from the depth buffer in a 4x4 pattern of slice directions, then a depth-aware 4x4 average |

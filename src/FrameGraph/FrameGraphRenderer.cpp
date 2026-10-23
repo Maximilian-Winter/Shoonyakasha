@@ -14,6 +14,8 @@
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/FrameGraph/RenderStats.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include <algorithm>
@@ -45,6 +47,7 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
 {
     std::vector<RenderableEntity> result;
     m_lastCulledCount = 0;
+    m_lastOccludedCount = 0;
 
     if (!m_registry || (cullView && cullView->skip)) {
         m_lastQueryCount = 0;
@@ -71,6 +74,13 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
             ++m_lastCulledCount;
             continue;
         }
+        // Hidden behind the occlusion depth. It is a few frames old, so
+        // entities that move, and skinned ones, are always drawn.
+        if (cullView && cullView->occlusion && !r.hasSkeleton && r.hasBounds && !r.moving &&
+            cullView->occlusion->occluded(r.worldMin, r.worldMax)) {
+            ++m_lastOccludedCount;
+            continue;
+        }
 
         RenderableEntity re;
         re.entity = r.entity;
@@ -88,19 +98,19 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
     // Sort if requested
     switch (sortMode) {
         case EntitySortMode::FrontToBack:
-            std::sort(result.begin(), result.end(),
+            std::stable_sort(result.begin(), result.end(),
                 [](const RenderableEntity& a, const RenderableEntity& b) {
                     return a.distanceToCamera < b.distanceToCamera;
                 });
             break;
         case EntitySortMode::BackToFront:
-            std::sort(result.begin(), result.end(),
+            std::stable_sort(result.begin(), result.end(),
                 [](const RenderableEntity& a, const RenderableEntity& b) {
                     return a.distanceToCamera > b.distanceToCamera;
                 });
             break;
         case EntitySortMode::SortKey:
-            std::sort(result.begin(), result.end(),
+            std::stable_sort(result.begin(), result.end(),
                 [](const RenderableEntity& a, const RenderableEntity& b) {
                     uint32_t keyA = a.tag ? a.tag->sortKey : 0;
                     uint32_t keyB = b.tag ? b.tag->sortKey : 0;
@@ -126,6 +136,16 @@ void FrameGraphRenderer::gatherRenderables() const {
     m_renderablesFrame = frame;
     m_renderables.clear();
 
+    // The main camera this frame, for the occlusion images it renders.
+    const auto& scene = m_renderGraph.getSceneContext();
+    CameraRecord record;
+    record.frame = m_renderGraph.getReadbackFrameNumber();
+    record.viewProj = scene.cameraViewProjection;
+    record.position = scene.cameraPosition;
+    record.forward = -glm::normalize(glm::vec3(scene.cameraInvView[2]));
+    if (m_cameraRecords.size() >= 8) m_cameraRecords.erase(m_cameraRecords.begin());
+    m_cameraRecords.push_back(record);
+
     // Transforms are final by the time the frame records, so world bounds
     // are computed here once instead of in each pass that culls.
     auto view = m_registry->view<MeshComponent, MaterialComponentV5, RenderableTagComponent, ECS::TransformComponent>();
@@ -144,6 +164,7 @@ void FrameGraphRenderer::gatherRenderables() const {
         r.isSprite2D = m_registry->all_of<Shoonyakasha::Sprite2DComponent>(entity);
         r.transmissive = r.material->getParam<float>("transmissionFactor", 0.0f) > 0.0f;
         r.hasBounds = mesh.hasBounds;
+        r.moving = r.transform->hasPreviousWorld && r.transform->previousWorldMatrix != r.transform->worldMatrix;
         if (r.hasBounds) transformBounds(r.transform->worldMatrix, mesh.boundsMin, mesh.boundsMax, r.worldMin, r.worldMax);
         const bool ownBuffers = r.hasSkeleton || r.isSprite2D || m_registry->all_of<MorphComponent>(entity);
         // Mirroring world matrices draw with the other front face, apart.
@@ -153,6 +174,39 @@ void FrameGraphRenderer::gatherRenderables() const {
         if (!ownBuffers && r.batchKey == 0) r.batchKey = 1;
         m_renderables.push_back(r);
     }
+}
+
+// ============================================================================
+// occlusionFor - the latest read-back depth of an occlusion image
+// ============================================================================
+
+const DepthPyramid* FrameGraphRenderer::occlusionFor(const std::string& name) {
+    OcclusionSource& source = m_occlusion[name];
+    const auto* readback = m_renderGraph.latestReadback(name);
+    if (readback && readback->isImage && readback->data && readback->frameNumber != source.frame &&
+        readback->imageFormat == VK_FORMAT_R32_SFLOAT &&
+        readback->size >= static_cast<VkDeviceSize>(readback->imageWidth) * readback->imageHeight * sizeof(float)) {
+        // The camera of the frame that rendered it.
+        const auto camera = std::find_if(m_cameraRecords.begin(), m_cameraRecords.end(),
+                                         [&](const CameraRecord& c) { return c.frame == readback->frameNumber; });
+        if (camera != m_cameraRecords.end() && camera->viewProj != glm::mat4(1.0f)) {
+            source.pyramid.build(static_cast<const float*>(readback->data), readback->imageWidth,
+                                 readback->imageHeight, camera->viewProj);
+            source.camera = *camera;
+            source.frame = readback->frameNumber;
+        }
+    }
+    if (source.pyramid.empty() || m_cameraRecords.empty()) return nullptr;
+
+    // Too old, or the camera cut away since: test nothing.
+    const CameraRecord& now = m_cameraRecords.back();
+    if (now.frame > source.frame + 8) return nullptr;
+    const float farPlane = m_renderGraph.getSceneContext().cameraFarPlane;
+    if (glm::dot(now.forward, source.camera.forward) < std::cos(glm::radians(25.0f)) ||
+        glm::length(now.position - source.camera.position) > 0.1f * farPlane) {
+        return nullptr;
+    }
+    return &source.pyramid;
 }
 
 // ============================================================================
@@ -182,6 +236,7 @@ FrameGraphRenderer::ViewCull FrameGraphRenderer::resolveView(
         // cameraViewProjection is identity until a main camera is found.
         if (scene.cameraViewProjection != glm::mat4(1.0f)) {
             view.cull = true;
+            view.mainCamera = true;
             view.frustum = frustumFromViewProj(scene.cameraViewProjection, ClipDepth::ZeroToOne);
         }
     } else if (kind == CullView::NamedCamera) {
@@ -264,7 +319,11 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
     EntitySortMode sortMode = sortModeStringToEnum(passDecl.execution.sortMode);
 
     // Query entities inside the pass's view
-    const ViewCull view = resolveView(passDecl);
+    ViewCull view = resolveView(passDecl);
+    if (!passDecl.execution.occlusion.empty() && view.mainCamera && m_renderGraph.isOcclusionCullingEnabled()) {
+        gatherRenderables();
+        view.occlusion = occlusionFor(passDecl.execution.occlusion);
+    }
     auto entities = queryEntities(filter, sortMode, passDecl.execution.renderLayerMask,
                                   passDecl.execution.alphaFilter, &view);
 
@@ -284,7 +343,7 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
     }
 
     m_lastDrawCount = drawCount;
-    m_passStats[passDecl.name] = PassDrawStats{drawCount, m_lastCulledCount};
+    m_passStats[passDecl.name] = PassDrawStats{drawCount, m_lastCulledCount, m_lastOccludedCount};
 
     // Debug logging (once per session)
     static bool loggedOnce = false;

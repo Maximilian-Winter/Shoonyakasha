@@ -1065,6 +1065,20 @@
     }
   },
   "descriptorSetLayouts": {
+    "hizSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
     "transmissionSet": {
       "bindings": [
         {
@@ -2087,6 +2101,19 @@
       }
     },
     {
+      "name": "hiz",
+      "kind": "image",
+      "image": {
+        "format": "R32_SFLOAT",
+        "widthScale": 0.125,
+        "heightScale": 0.125,
+        "persistent": true
+      },
+      "readback": {
+        "frequency": "per_frame"
+      }
+    },
+    {
       "name": "hdrColor",
       "kind": "image",
       "image": {
@@ -2640,6 +2667,7 @@
         "type": "opaque_geometry",
         "alphaFilter": "opaque",
         "sortMode": "front_to_back",
+        "occlusion": "hiz",
         "entityDataBinding": "material",
         "instancing": true
       },
@@ -2760,6 +2788,7 @@
         "type": "opaque_geometry",
         "alphaFilter": "mask",
         "sortMode": "front_to_back",
+        "occlusion": "hiz",
         "entityDataBinding": "material",
         "instancing": true
       },
@@ -2972,6 +3001,52 @@
           ],
           "offset": 0,
           "size": 236
+        }
+      ]
+    },
+    {
+      "name": "HiZ",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "hiz",
+          "usage": "color_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/hiz.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "blending": "none"
+      },
+      "descriptorSets": [
+        "hizSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 8,
+          "bindings": [
+            {
+              "name": "pass.extent",
+              "offset": 0
+            }
+          ]
         }
       ]
     },
@@ -3555,6 +3630,7 @@
       "execution": {
         "type": "transparent_geometry",
         "sortMode": "back_to_front",
+        "occlusion": "hiz",
         "entityDataBinding": "material",
         "instancing": true
       },
@@ -3661,6 +3737,7 @@
       "execution": {
         "type": "transparent_geometry",
         "sortMode": "back_to_front",
+        "occlusion": "hiz",
         "entityDataBinding": "material",
         "instancing": true
       },

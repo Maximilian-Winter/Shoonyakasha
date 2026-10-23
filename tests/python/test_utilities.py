@@ -316,6 +316,18 @@ class PipelineValidation(unittest.TestCase):
         self.assertTrue(any("'scene.time.elapsed'" in m for m in messages), messages)
         self.assertFalse(any("albedoMapUvRow0" in m for m in messages), messages)
 
+    def test_occlusion_names_a_read_back_depth_image(self):
+        import copy
+        document = copy.deepcopy(self.MINIMAL)
+        document["resources"].append({"name": "hiz", "kind": "image", "image": {"format": "R32_SFLOAT"},
+                                      "readback": {"frequency": "per_frame"}})
+        document["passes"][0]["execution"] = {"type": "opaque_geometry", "occlusion": "hiz"}
+        self.assertFalse(any("'occlusion'" in p.message for p in self.problems(document)))
+
+        del document["resources"][-1]["readback"]
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("'occlusion' names 'hiz'" in m for m in messages), messages)
+
     def test_presets_are_checked_against_the_passes(self):
         import copy
         document = copy.deepcopy(self.MINIMAL)

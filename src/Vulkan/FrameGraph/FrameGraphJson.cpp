@@ -2251,6 +2251,11 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                     throw std::runtime_error("Pass '" + pass.name + "': \"instancing\" needs an entity geometry "
                                              "execution type, not '" + pass.execution.type + "'");
                 }
+                pass.execution.occlusion = execJson.value("occlusion", std::string{});
+                if (!pass.execution.occlusion.empty() && !isEntityGeometryExecutionType(pass.execution.type)) {
+                    throw std::runtime_error("Pass '" + pass.name + "': \"occlusion\" needs an entity geometry "
+                                             "execution type, not '" + pass.execution.type + "'");
+                }
 
                 if (execJson.contains("view")) {
                     const auto& viewJson = execJson["view"];

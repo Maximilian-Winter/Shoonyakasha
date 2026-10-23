@@ -373,6 +373,19 @@ def validate_json(document, base_dir=None, source="<json>"):
                 if "present" in access and not isinstance(access["present"], bool):
                     problems.append(Problem(access_where, "'present' must be true or false"))
 
+        # ── occlusion image ────────────────────────────────────
+        execution = pass_decl.get("execution", {})
+        occlusion = execution.get("occlusion") if isinstance(execution, dict) else None
+        if occlusion is not None:
+            image = declared.get(occlusion)
+            image_desc = image.get("image", {}) if isinstance(image, dict) else {}
+            if not (isinstance(image, dict) and image.get("kind") == "image" and
+                    isinstance(image_desc, dict) and image_desc.get("format") == "R32_SFLOAT" and
+                    isinstance(image.get("readback"), dict)):
+                problems.append(Problem("%s execution" % where,
+                                        "'occlusion' names '%s', which is not an R32_SFLOAT image "
+                                        "resource with a readback" % occlusion))
+
         # ── shader files ───────────────────────────────────────
         pipeline_state = pass_decl.get("pipeline", {})
         if not isinstance(pipeline_state, dict):

@@ -1212,9 +1212,17 @@ public:
     void releaseMaterialTexture(VkImageView view);
 
     // ── Geometry pass statistics ──
-    // Entities an entity geometry pass drew, and left out as outside its
-    // view, the last time it ran. Returns false if it has not run.
-    bool getPassDrawStats(const std::string& passName, uint32_t& drawn, uint32_t& culled) const;
+    // Entities an entity geometry pass drew, left out as outside its view,
+    // and left out as hidden (execution "occlusion"), the last time it ran.
+    // Returns false if it has not run.
+    bool getPassDrawStats(const std::string& passName, uint32_t& drawn, uint32_t& culled,
+                          uint32_t* occluded = nullptr) const;
+
+    // ── Occlusion culling ──
+    // Whether passes with an execution "occlusion" image leave out what it
+    // hides; on by default.
+    void setOcclusionCullingEnabled(bool enabled) { m_occlusionCulling = enabled; }
+    bool isOcclusionCullingEnabled() const { return m_occlusionCulling; }
 
     // ── Named Parameters (for push constants) ──
     void setParameter(const std::string& name, float value);
@@ -1458,6 +1466,9 @@ public:
     /// Counts recorded frames, single- and multi-queue alike; constant while
     /// a frame's passes record.
     uint64_t getFrameNumber() const { return m_recordedFrames; }
+    /// The frame number this frame's readbacks carry (ReadbackResult::
+    /// frameNumber), while its passes record.
+    uint64_t getReadbackFrameNumber() const { return m_globalFrameNumber; }
 
     /// The device, and how many frames may be in flight at once.
     VulkanDevice& getDevice() const { return m_device; }
@@ -1828,6 +1839,7 @@ private:
     std::unique_ptr<Shoonyakasha::SceneContext> m_sceneContext;
     std::unique_ptr<Shoonyakasha::FrameGraphRenderer> m_frameGraphRenderer;  // Auto geometry rendering
     bool m_ecsBindingEnabled = true;
+    bool m_occlusionCulling = true;
 
     /// Resolver-side layouts, converted once and keyed by layout name.
     ///
