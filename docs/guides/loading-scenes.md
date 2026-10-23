@@ -33,6 +33,8 @@ Default loading preserves the node tree and shares mesh-space GPU buffers among 
 
 `flatten_hierarchy=True` bakes node transforms into vertices and emits flattened geometry, losing that sharing. See [instancing](instancing.md) before choosing it.
 
+Vertex attributes, morph targets and animation samplers stored as integers or normalized integers (`KHR_mesh_quantization`) are read as floats while loading.
+
 ## Lights
 
 `load_lights=True` (C++ `GltfOptions::loadLights`) creates a light entity for each node with a `KHR_lights_punctual` light, listed in the result's `lights`. It is a child of the node's entity and shines along the node's -Z (with `flatten_hierarchy`, an unparented entity at the node's world position and direction). Directional, point and spot lights keep the file's colour and intensity as they are: candela for point and spot lights, lux for directional ones, with inverse-square falloff. A light with a `range` fades to nothing there; one without reaches as far as its intensity times its brightest colour channel, over the distance squared, stays above 0.01. Spot cone angles become the light's inner and outer half angles. The lights cast no shadows until `scene.set_light_cast_shadows(light, True)`; the first directional light with shadows is the sun in the default pipeline.
