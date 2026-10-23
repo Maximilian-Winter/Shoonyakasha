@@ -35,6 +35,10 @@ Deferred PBR (glTF metallic-roughness) with:
   (`scene.set_light_source_image`) is N shines through tile N of
   `lightCookies`, an application image (`"externalImage"`) holding a 4 x 4
   grid of tiles; `shoonyakasha.cookies.atlas` builds one
+- IES profiles: a point or spot light without a rectangle whose image slot
+  is 16 + N follows tile N of `lightProfiles`, an application image laid
+  out the same way, which scales its intensity by direction;
+  `shoonyakasha.ies` reads IES files and builds one
 - image-based light from the HDR environment, or from a uniform environment
   when there is none
 - ground-truth ambient occlusion (GTAO), with the light that bounces between

@@ -749,6 +749,15 @@
           ],
           "name": "lightCookies",
           "externalImage": "lightCookies"
+        },
+        {
+          "binding": 8,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "lightProfiles",
+          "externalImage": "lightProfiles"
         }
       ]
     },

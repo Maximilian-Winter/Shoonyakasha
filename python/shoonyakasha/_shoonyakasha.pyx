@@ -513,9 +513,13 @@ cdef class Scene:
         return self._ptr.getLightSourceImage(entity)
 
     def set_light_source_image(self, uint32_t entity, uint32_t slot):
-        """Which image the light's rectangle shines with: 0, the default,
-        none; pipelines say what other slots mean (the showroom's 1 is its
-        "lightImage"). Published as scene.lights[N].source.w."""
+        """Which image the light shines with: 0, the default, none;
+        pipelines say what other slots mean (the showroom's 1 is its
+        "lightImage" for rectangles; in the default pipeline, for a light
+        without a rectangle, 1 to 16 make a spot light shine through that
+        tile of "lightCookies", and 17 to 32 make a point or spot light
+        follow IES profile N - 16 of "lightProfiles"). Published as
+        scene.lights[N].source.w."""
         self._ptr.setLightSourceImage(entity, slot)
 
     # ── Material ──────────────────────────────────────────────

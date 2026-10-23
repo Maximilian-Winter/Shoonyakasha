@@ -13,10 +13,17 @@
 // also declares brdfLUT and the LtcTable buffer (area_lights.glsl).
 //
 // A spot light without a rectangle whose image slot (sceneLights[i].source.w)
-// is N >= 1 shines through a cookie: tile N - 1 of `sampler2D lightCookies`,
-// which the including shader declares, a 4 x 4 grid of tiles numbered left
-// to right, top to bottom. The tile fills the square around the cone, its
-// top towards the light's up axis.
+// is N, 1 to 16, shines through a cookie: tile N - 1 of `sampler2D
+// lightCookies`, which the including shader declares, a 4 x 4 grid of tiles
+// numbered left to right, top to bottom. The tile fills the square around
+// the cone, its top towards the light's up axis.
+//
+// A point or spot light without a rectangle whose image slot is 16 + N, N 1
+// to 16, follows an IES profile: tile N - 1 of `sampler2D lightProfiles`,
+// laid out the same way, which the including shader declares. In a tile,
+// rows run from the light's direction (top) to the opposite one (bottom),
+// columns once round from the light's right axis towards its up axis; the
+// red channel scales the light's intensity.
 
 #ifndef DEFAULT_LIGHTS_GLSL
 #define DEFAULT_LIGHTS_GLSL
@@ -75,7 +82,7 @@ vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float me
 // direction -L from the light; white without one.
 vec3 spotCookie(uint i, vec3 L) {
     float slot = sceneLights[i].source.w;
-    if (slot < 0.5) return vec3(1.0);
+    if (slot < 0.5 || slot > 16.5) return vec3(1.0);
     vec3 F = normalize(sceneLights[i].directionRange.xyz);
     vec3 R = sceneLights[i].shape.xyz;              // the unit right axis
     vec3 U = cross(R, F);
@@ -91,6 +98,26 @@ vec3 spotCookie(uint i, vec3 L) {
     uv = clamp(uv, halfTexel, 1.0 - halfTexel);
     int tile = clamp(int(slot + 0.5) - 1, 0, 15);
     return textureLod(lightCookies, (vec2(tile % 4, tile / 4) + uv) * 0.25, 0.0).rgb;
+}
+
+// The share of light i's intensity its IES profile sends towards a point in
+// direction -L from the light; 1 without one.
+float lightProfile(uint i, vec3 L) {
+    float slot = sceneLights[i].source.w;
+    if (slot < 16.5 || slot > 32.5) return 1.0;
+    vec3 F = normalize(sceneLights[i].directionRange.xyz);
+    vec3 R = sceneLights[i].shape.xyz;              // the unit right axis
+    vec3 U = cross(R, F);
+    vec3 D = -L;
+    vec2 across = vec2(dot(D, R), dot(D, U));
+    float horizontal = dot(across, across) > 1e-12 ? atan(across.y, across.x) / (2.0 * SK_PI) : 0.0;
+    float vertical = acos(clamp(dot(D, F), -1.0, 1.0)) / SK_PI;
+    vec2 uv = vec2(fract(horizontal), vertical);
+    // Inside the tile by half a texel, so filtering never reads its neighbour.
+    vec2 halfTexel = 0.5 / (vec2(textureSize(lightProfiles, 0)) * 0.25);
+    uv = clamp(uv, halfTexel, 1.0 - halfTexel);
+    int tile = clamp(int(slot + 0.5) - 17, 0, 15);
+    return textureLod(lightProfiles, (vec2(tile % 4, tile / 4) + uv) * 0.25, 0.0).r;
 }
 
 // Light from scene light i. `sunIndex` is the light shadowed by
@@ -128,6 +155,7 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
             falloff *= smoothstep(cosOuter, mix(cosOuter, 1.0, 0.1), theta);
             if (falloff > 1e-4) color *= spotCookie(i, L);
         }
+        if (falloff > 1e-4) falloff *= lightProfile(i, L);
 #ifdef LOCAL_SHADOWS
         if (falloff > 1e-4 && dot(N, L) > 0.0) {
             falloff *= localShadowVisibility(int(i), type, worldPos, N, L);

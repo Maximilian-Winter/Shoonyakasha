@@ -1,6 +1,6 @@
 # Python utilities
 
-The package's `assets`, `cookies`, `keys`, `mathutil`, `pipeline`, and `shaders` modules work without the native extension. `shoonyakasha.extension_available()` returns whether the extension loaded. Importing the package alone is not an engine installation test.
+The package's `assets`, `cookies`, `ies`, `keys`, `mathutil`, `pipeline`, and `shaders` modules work without the native extension. `shoonyakasha.extension_available()` returns whether the extension loaded. Importing the package alone is not an engine installation test.
 
 ## Shader compilation
 
@@ -100,3 +100,27 @@ Source: [mathutil.py](../../../python/shoonyakasha/mathutil.py).
 `shoonyakasha.cookies.atlas(tiles, tile_size=256)` builds the default pipeline's `lightCookies` image from up to 16 NumPy arrays (grey, RGB or RGBA; uint8, or float from 0 to 1): a 4 x 4 grid of `tile_size` tiles, numbered 1 to 16 left to right and top to bottom, each tile resampled to fit (nearest texel), white where none is given. It returns a uint8 array for `engine.set_pipeline_image_data("lightCookies", ...)`; it needs NumPy. A spot light shines through tile N after `scene.set_light_source_image(light, N)` (see the [default pipeline](../../guides/default-pipeline.md)).
 
 Source: [cookies.py](../../../python/shoonyakasha/cookies.py).
+
+## IES light profiles
+
+`shoonyakasha.ies` reads IES LM-63 photometric files with type C photometry:
+
+| Function | Returns | Description |
+|---|---|---|
+| `load(path)`, `parse(text)` | `Profile` | The profile in a file or its text. Raises `ValueError` when it is not one, or its photometry is not type C. |
+| `atlas(profiles, tile_size=128)` | NumPy array | The default pipeline's `lightProfiles` image from up to 16 profiles: a float16 (4 x `tile_size`) square, a 4 x 4 grid of tiles numbered 1 to 16 left to right and top to bottom, each its profile divided by the profile's peak; tiles not given are 1. For `engine.set_pipeline_image_data("lightProfiles", ..., format="R16_SFLOAT")`; needs NumPy. |
+| `slot(n)` | int | The image slot, 16 + n, for `scene.set_light_source_image` that makes a light follow profile n. |
+
+A `Profile` has `vertical_angles` and `horizontal_angles` (degrees, as the file lists them), `candela[h][v]` (the file's values times its candela multiplier, ballast factor and ballast-lamp factor), `keywords` (the header's `[KEYWORD]` lines), `peak` (the highest intensity) and `sample(vertical, horizontal)`, the intensity at any angles, interpolated linearly, with the file's symmetry filling in horizontal angles it does not list and 0 outside its vertical range (needs NumPy).
+
+In the default pipeline, vertical angle 0 points along the light's direction, and horizontal angle 0 lies along its right axis and 90 along its up axis. The light's intensity is its intensity in the profile's brightest direction:
+
+```python
+from shoonyakasha import ies
+
+downlight = ies.load("downlight.ies")
+engine.set_pipeline_image_data("lightProfiles", ies.atlas([downlight]), format="R16_SFLOAT")
+engine.scene.set_light_source_image(light, ies.slot(1))
+```
+
+Source: [ies.py](../../../python/shoonyakasha/ies.py).

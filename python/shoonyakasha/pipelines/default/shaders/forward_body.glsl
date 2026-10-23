@@ -19,6 +19,7 @@ layout(set = 2, binding = 3) uniform usampler2D lightClusters;
 layout(set = 2, binding = 5, std430) readonly buffer ClusterLightIndices { uint clusterLightIndices[]; };
 layout(set = 2, binding = 6, std430) readonly buffer LtcTable { vec4 ltcTable[]; };
 layout(set = 2, binding = 7) uniform sampler2D lightCookies;
+layout(set = 2, binding = 8) uniform sampler2D lightProfiles;
 layout(set = 3, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 3, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 3, binding = 2) uniform sampler2D brdfLUT;
