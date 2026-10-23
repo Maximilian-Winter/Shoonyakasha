@@ -87,12 +87,9 @@ void DeclarativeSponzaApp::initializeECS() {
     m_sceneManager = std::make_unique<ECS::SceneManager>(*m_resourceManager, *m_device);
     m_activeScene = m_sceneManager->createScene("DeclarativeSponzaScene");
 
-    // Systems must be added in correct order:
-    // 1. TransformSystem - updates worldMatrix from position/rotation/scale
-    // 2. CameraSystem - updates viewMatrix/projectionMatrix from camera's worldMatrix
-    // 3. CameraControllerSystem - handles input to move the camera
-    m_activeScene->addSystem<ECS::TransformSystem>();
-    m_activeScene->addSystem<ECS::CameraSystem>();
+    // The scene comes with its TransformSystem (worldMatrix from position,
+    // rotation and scale) and CameraSystem (view and projection from the
+    // camera's worldMatrix); the controller moves the camera from input.
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
 
     m_inputHandler = std::make_unique<ECS::StandaloneInputHandler>(*m_eventDispatcher, *m_window);

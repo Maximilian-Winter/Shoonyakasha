@@ -211,8 +211,10 @@ void ApplicationBase::registerSystems() {
     // positions feed into this frame's world matrix computation.
     m_activeScene->addSystem<ECS::TextRenderSystem>(*m_fontLoader, *m_sprite2DManager)->priority = -2;
     m_activeScene->addSystem<ECS::UILayoutSystem>(&m_screenSize)->priority = -1;
-    m_activeScene->addSystem<ECS::TransformSystem>();
-    m_activeScene->addSystem<ECS::CameraSystem>();
+    // A scene starts with its own transform and camera systems; these are
+    // added only where it has none, so each runs once a frame.
+    if (!m_activeScene->getSystem<ECS::TransformSystem>()) m_activeScene->addSystem<ECS::TransformSystem>();
+    if (!m_activeScene->getSystem<ECS::CameraSystem>()) m_activeScene->addSystem<ECS::CameraSystem>();
     m_activeScene->addSystem<ECS::CameraControllerSystem>();
     m_activeScene->addSystem<UI::CanvasInputSystem>(&m_screenSize, &m_windowSize, &m_uiContext->pointer(),
                                                     &m_uiContext->focus(), &m_uiContext->clipboard(),
