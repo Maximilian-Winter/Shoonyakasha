@@ -39,7 +39,7 @@ struct SceneLight {
     vec4 directionRange;    // xyz direction the light points, w range
     vec4 attenuation;       // constant, linear, quadratic, cos(outer cone)
     vec4 source;            // x radius, y casts shadows, z cos(inner cone), w image slot
-    vec4 shape;             // xyz right axis * half width, w half height; 0 for none
+    vec4 shape;             // xyz right axis * half width, w half height; none: unit right axis, w 0
 };
 #define DEFAULT_SCENE_LIGHTS(SET, BINDING) \
     layout(std430, set = SET, binding = BINDING) readonly buffer SceneLights { SceneLight sceneLights[]; };

@@ -128,8 +128,8 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
         packed.source = glm::vec4(light.sourceRadius, light.castShadows ? 1.0f : 0.0f,
                                   glm::cos(glm::radians(light.innerCone)),
                                   static_cast<float>(light.sourceImage));
-        // The emitting rectangle.
-        packed.shape = glm::vec4(0.0f);
+        // The emitting rectangle; without one, the light's right axis alone.
+        packed.shape = glm::vec4(right, 0.0f);
         if (light.sourceSize.x > 0.0f && light.sourceSize.y > 0.0f) {
             packed.shape = glm::vec4(right * (0.5f * light.sourceSize.x), 0.5f * light.sourceSize.y);
         }

@@ -31,6 +31,10 @@ Deferred PBR (glTF metallic-roughness) with:
   transformed cosines (`shaders/area_lights.glsl`, with the fitted table
   `ltc.bin`), so its highlights take the rectangle's shape; it lights only
   what is in front of it
+- spot light cookies: a spot light without a rectangle whose image slot
+  (`scene.set_light_source_image`) is N shines through tile N of
+  `lightCookies`, an application image (`"externalImage"`) holding a 4 x 4
+  grid of tiles; `shoonyakasha.cookies.atlas` builds one
 - image-based light from the HDR environment, or from a uniform environment
   when there is none
 - ground-truth ambient occlusion (GTAO), with the light that bounces between

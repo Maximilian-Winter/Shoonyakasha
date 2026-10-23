@@ -96,7 +96,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `get_light_source_size(entity)` | 2-tuple | Calls native `getLightSourceSize`; see the class contract above. |
 | `set_light_source_size(entity, width, height)` | None | Width and height of the light's emitting rectangle, facing its forward axis with its width along its right axis. Pipelines with area lights shade it as that rectangle; (0, 0), the default, is none. |
 | `get_light_source_image(entity)` | int | Calls native `getLightSourceImage`; see the class contract above. |
-| `set_light_source_image(entity, slot)` | None | Which image the light's rectangle shines with: 0, the default, none; pipelines say what other slots mean (the showroom's 1 is its "lightImage"). Published as scene.lights[N].source.w. |
+| `set_light_source_image(entity, slot)` | None | Which image the light shines with: 0, the default, none; pipelines say what other slots mean (the showroom's 1 is its "lightImage" for rectangles; in the default pipeline a spot light without a rectangle shines through tile N of its `lightCookies` image). Published as scene.lights[N].source.w. |
 | `set_material_float(entity, param, value)` | None | Calls native `setMaterialFloat`; see the class contract above. |
 | `get_material_float(entity, param, default_val=0.0)` | float | Calls native `getMaterialFloat`; see the class contract above. |
 | `set_material_vec3(entity, param, value)` | None | Calls native `setMaterialVec3`; see the class contract above. |

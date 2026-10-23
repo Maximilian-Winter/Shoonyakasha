@@ -1,6 +1,6 @@
 # Python utilities
 
-The package's `assets`, `keys`, `mathutil`, `pipeline`, and `shaders` modules work without the native extension. `shoonyakasha.extension_available()` returns whether the extension loaded. Importing the package alone is not an engine installation test.
+The package's `assets`, `cookies`, `keys`, `mathutil`, `pipeline`, and `shaders` modules work without the native extension. `shoonyakasha.extension_available()` returns whether the extension loaded. Importing the package alone is not an engine installation test.
 
 ## Shader compilation
 
@@ -94,3 +94,9 @@ engine.scene.set_rotation(camera, look_rotation(eye, (0.0, 1.0, 0.0)))
 ```
 
 Source: [mathutil.py](../../../python/shoonyakasha/mathutil.py).
+
+## Light cookies
+
+`shoonyakasha.cookies.atlas(tiles, tile_size=256)` builds the default pipeline's `lightCookies` image from up to 16 NumPy arrays (grey, RGB or RGBA; uint8, or float from 0 to 1): a 4 x 4 grid of `tile_size` tiles, numbered 1 to 16 left to right and top to bottom, each tile resampled to fit (nearest texel), white where none is given. It returns a uint8 array for `engine.set_pipeline_image_data("lightCookies", ...)`; it needs NumPy. A spot light shines through tile N after `scene.set_light_source_image(light, N)` (see the [default pipeline](../../guides/default-pipeline.md)).
+
+Source: [cookies.py](../../../python/shoonyakasha/cookies.py).

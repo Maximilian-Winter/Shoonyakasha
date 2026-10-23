@@ -152,8 +152,9 @@ TEST_F(DotPathResolverECS, SceneContext_LightShapePacked) {
     ASSERT_TRUE(v.isVec4());
     EXPECT_NEAR(v.as<glm::vec4>().w, 0.5f, 1e-5f);
 
-    // The fixture's directional light has no rectangle.
-    EXPECT_EQ(scene.lights[1u - i].shape, glm::vec4(0.0f));
+    // The fixture's directional light has no rectangle: its unit right axis, w 0.
+    EXPECT_NEAR(glm::length(glm::vec3(scene.lights[1u - i].shape)), 1.0f, 1e-5f);
+    EXPECT_EQ(scene.lights[1u - i].shape.w, 0.0f);
 }
 
 TEST_F(DotPathResolverECS, SceneContext_EveryLightCollected) {

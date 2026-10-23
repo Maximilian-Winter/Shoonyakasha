@@ -740,6 +740,15 @@
           ],
           "name": "LtcTable",
           "autoBindBuffer": "LTC"
+        },
+        {
+          "binding": 7,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "lightCookies",
+          "externalImage": "lightCookies"
         }
       ]
     },
