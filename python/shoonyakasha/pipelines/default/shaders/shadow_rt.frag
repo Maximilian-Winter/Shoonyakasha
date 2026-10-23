@@ -3,7 +3,7 @@
 // Ray-traced sun shadows: one ray per pixel towards a random point of the
 // sun's disc, through the scene's acceleration structure. Over frames, TAA
 // averages the rays into a soft shadow whose penumbra widens with distance
-// from the caster, as a real one does. Writes the same mask as
+// from the caster, as a real one does, for each sun. Writes the same mask as
 // shadow_mask.frag, which it replaces in the "raytraced" preset; needs a
 // device with ray queries (the pass "requires" them).
 //
@@ -32,31 +32,33 @@ layout(set = 4, binding = 0) uniform sampler2DArrayShadow shadowMap;
 #include "rt_shadows.glsl"
 
 layout(location = 0) in vec2 fragTexCoord;
-layout(location = 0) out vec2 outMask;
+layout(location = 0) out vec4 outMask;
+
+// Sun s's visibility at the pixel: one ray, times its cascades for the
+// casters that are not in the acceleration structure. 1 without the sun.
+float sunMask(int s, vec3 viewPos, vec3 worldPos, vec3 N) {
+    if (sunCascadeCount(s) == 0) return 1.0;
+    vec3 L = -normalize(sunTravel(s));
+    if (dot(N, L) <= 0.0) return 0.0;   // facing away from the sun
+
+    // A point on the sun's disc, different every pixel, frame and sun.
+    float u = temporalNoise(gl_FragCoord.xy + 31.0 * float(s), camera.frame, camera.taa);
+    float v = temporalNoise(gl_FragCoord.yx + 17.0 + 31.0 * float(s), camera.frame + 3u, camera.taa);
+    bool shadowed = sunRayBlocked(worldPos + N * sunRayOffset(-viewPos.z), L, u, v);
+    int cascade;
+    float mapped = sunVisibility(s, worldPos, N, L, -viewPos.z, u, cascade);
+    return shadowed ? 0.0 : mapped;
+}
 
 void main() {
     float depth = textureLod(gDepth, fragTexCoord, 0.0).r;
-    if (depth >= 1.0 || cascades.sunEnabled == 0u) {
-        outMask = vec2(1.0, 1.0);
+    if (depth >= 1.0) {
+        outMask = vec4(1.0);
         return;
     }
 
     vec3 viewPos = viewPositionFromDepth(camera.invProj, fragTexCoord, depth);
     vec3 worldPos = (camera.invView * vec4(viewPos, 1.0)).xyz;
     vec3 N = octDecode(textureLod(gNormal, fragTexCoord, 0.0).xy);
-    vec3 L = -normalize(cascades.sunDirection.xyz);
-    if (dot(N, L) <= 0.0) {
-        outMask = vec2(0.0, 1.0);   // facing away from the sun
-        return;
-    }
-
-    // A point on the sun's disc, different every pixel and frame.
-    float u = temporalNoise(gl_FragCoord.xy, camera.frame, camera.taa);
-    float v = temporalNoise(gl_FragCoord.yx + 17.0, camera.frame + 3u, camera.taa);
-    bool shadowed = sunRayBlocked(worldPos + N * sunRayOffset(-viewPos.z), L, u, v);
-
-    // The casters that are not in the acceleration structure.
-    int cascade;
-    float mapped = sunVisibility(worldPos, N, L, -viewPos.z, u, cascade);
-    outMask = vec2(shadowed ? 0.0 : mapped, 1.0);
+    outMask = vec4(sunMask(0, viewPos, worldPos, N), 1.0, sunMask(1, viewPos, worldPos, N), 1.0);
 }

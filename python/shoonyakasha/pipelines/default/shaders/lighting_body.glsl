@@ -258,8 +258,10 @@ void main() {
     float roughness = max(material.g, 0.045);
     coatFactor = material.b;
     coatRoughness = max(material.a, 0.045);
-    vec2 mask = textureLod(shadowMask, fragTexCoord, 0.0).rg;
+    vec3 mask = textureLod(shadowMask, fragTexCoord, 0.0).rgb;
     float sunVisibility = mask.r;
+    secondSunVisibility = mask.b;
+    secondSunIndex = cascades.secondSunEnabled != 0u ? cascades.secondSunLightIndex : -1;
 
     vec3 worldPos = (camera.invView * vec4(viewPos, 1.0)).xyz;
     vec3 V = normalize(camera.position.xyz - worldPos);

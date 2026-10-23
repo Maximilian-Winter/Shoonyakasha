@@ -199,17 +199,17 @@ protected:
 
 TEST_F(SunShadowScene, NoCascadesUntilALightCastsShadows) {
     scene.updateFromRegistry(registry);
-    EXPECT_FALSE(scene.sunShadow.cascades.valid);
-    EXPECT_EQ(scene.sunShadow.lightIndex, -1);
+    EXPECT_FALSE(scene.suns[0].cascades.valid);
+    EXPECT_EQ(scene.suns[0].lightIndex, -1);
     EXPECT_EQ(resolver.resolveScene("scene.shadows.sun.enabled", scene).as<uint32_t>(), 0u);
 }
 
 TEST_F(SunShadowScene, CastingSunIsFittedAndPublished) {
     registry.get<ECS::LightComponent>(sun).castShadows = true;
-    scene.sunShadow.settings.cascadeCount = 3;
+    scene.suns[0].settings.cascadeCount = 3;
     scene.updateFromRegistry(registry);
 
-    const auto& sunShadow = scene.sunShadow;
+    const auto& sunShadow = scene.suns[0];
     ASSERT_TRUE(sunShadow.cascades.valid);
     ASSERT_GE(sunShadow.lightIndex, 0);
     EXPECT_EQ(scene.lights[sunShadow.lightIndex].positionType.w, 0.0f);  // directional
@@ -224,7 +224,45 @@ TEST_F(SunShadowScene, CastingSunIsFittedAndPublished) {
               sunShadow.cascades.texelWorldSize);
     EXPECT_EQ(resolver.resolveScene("scene.shadows.sun.cascades[2].viewProj", scene).as<glm::mat4>(),
               sunShadow.cascades.viewProj[2]);
-    EXPECT_FALSE(resolver.resolveScene("scene.shadows.sun.cascades[4].viewProj", scene).isValid());
+    // Slots 4 to 7 are the second sun's, which no light is here.
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.sun.cascades[4].viewProj", scene).as<glm::mat4>(),
+              glm::mat4(1.0f));
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.suns[1].enabled", scene).as<uint32_t>(), 0u);
+    EXPECT_FALSE(resolver.resolveScene("scene.shadows.sun.cascades[8].viewProj", scene).isValid());
+    EXPECT_FALSE(resolver.resolveScene("scene.shadows.suns[2].enabled", scene).isValid());
     EXPECT_FALSE(resolver.resolveScene("scene.shadows.sun.nothing", scene).isValid());
     EXPECT_EQ(resolver.validatePath("scene.shadows.sun.cascades[0].viewProj"), "");
+}
+
+TEST_F(SunShadowScene, TheSecondCastingDirectionalLightIsTheSecondSun) {
+    registry.get<ECS::LightComponent>(sun).castShadows = true;
+    auto moon = registry.create();
+    registry.emplace<ECS::TransformComponent>(moon).rotation = glm::vec3(-0.5f, -1.2f, 0.0f);
+    auto& light = registry.emplace<ECS::LightComponent>(moon);
+    light.type = ECS::LightComponent::Directional;
+    light.castShadows = true;
+    // A third one gets no cascades.
+    auto third = registry.create();
+    registry.emplace<ECS::TransformComponent>(third);
+    auto& thirdLight = registry.emplace<ECS::LightComponent>(third);
+    thirdLight.type = ECS::LightComponent::Directional;
+    thirdLight.castShadows = true;
+    transformSystem.update(registry, 0.016f);
+    scene.updateFromRegistry(registry);
+
+    const auto& first = scene.suns[0];
+    const auto& second = scene.suns[1];
+    ASSERT_TRUE(first.cascades.valid);
+    ASSERT_TRUE(second.cascades.valid);
+    EXPECT_NE(first.lightIndex, second.lightIndex);
+    EXPECT_EQ(scene.lights[second.lightIndex].positionType.w, 0.0f);   // directional
+    EXPECT_EQ(glm::vec3(second.direction), glm::vec3(scene.lights[second.lightIndex].directionRange));
+
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.suns[1].enabled", scene).as<uint32_t>(), 1u);
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.suns[1].lightIndex", scene).as<int32_t>(), second.lightIndex);
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.suns[0].lightIndex", scene).as<int32_t>(), first.lightIndex);
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.sun.cascades[5].viewProj", scene).as<glm::mat4>(),
+              second.cascades.viewProj[1]);
+    EXPECT_EQ(resolver.resolveScene("scene.shadows.sun.cascades[1].viewProj", scene).as<glm::mat4>(),
+              first.cascades.viewProj[1]);
 }

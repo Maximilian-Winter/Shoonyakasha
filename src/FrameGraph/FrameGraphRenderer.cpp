@@ -284,9 +284,14 @@ FrameGraphRenderer::ViewCull FrameGraphRenderer::resolveView(
             view.origin = camera->second.position;
         }
     } else if (kind == CullView::SunCascade) {
-        const auto& sun = scene.sunShadow;
+        // Cascade slot c is cascade c % MAX_SUN_CASCADES of sun
+        // c / MAX_SUN_CASCADES. A sun after the first that no light is draws
+        // nothing.
+        const uint32_t sunIndex = passDecl.execution.viewIndex / MAX_SUN_CASCADES;
+        const auto& sun = scene.suns[sunIndex];
+        if (sunIndex > 0 && !sun.cascades.valid) view.skip = true;
         if (sun.cascades.valid) {
-            const uint32_t index = std::min(passDecl.execution.viewIndex, sun.cascades.count - 1);
+            const uint32_t index = std::min(passDecl.execution.viewIndex % MAX_SUN_CASCADES, sun.cascades.count - 1);
             // No near plane: with depth clamping, casters between the sun and
             // the cascade still write depth.
             view.cull = true;

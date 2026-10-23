@@ -215,7 +215,7 @@
           "name": "cascadeViewProj",
           "type": "mat4",
           "source": "scene.shadows.sun.cascades[i].viewProj",
-          "arrayCount": 4
+          "arrayCount": 8
         },
         {
           "name": "splits",
@@ -253,6 +253,43 @@
           "name": "cascadeCount",
           "type": "uint",
           "source": "scene.shadows.sun.cascadeCount"
+        },
+        {
+          "name": "secondSplits",
+          "type": "vec4",
+          "source": "scene.shadows.suns[1].splits"
+        },
+        {
+          "name": "secondTexelWorldSize",
+          "type": "vec4",
+          "source": "scene.shadows.suns[1].texelWorldSize"
+        },
+        {
+          "name": "secondSunDirection",
+          "type": "vec4",
+          "source": "scene.shadows.suns[1].direction",
+          "default": [
+            0,
+            -1,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "secondSunEnabled",
+          "type": "uint",
+          "source": "scene.shadows.suns[1].enabled"
+        },
+        {
+          "name": "secondSunLightIndex",
+          "type": "int",
+          "source": "scene.shadows.suns[1].lightIndex",
+          "default": -1
+        },
+        {
+          "name": "secondCascadeCount",
+          "type": "uint",
+          "source": "scene.shadows.suns[1].cascadeCount"
         }
       ]
     },
@@ -2014,7 +2051,7 @@
         "format": "D32_SFLOAT",
         "width": 2048,
         "height": 2048,
-        "arrayLayers": 4,
+        "arrayLayers": 8,
         "viewType": "2d_array",
         "transient": true
       }
@@ -2182,7 +2219,7 @@
       "name": "shadowMask",
       "kind": "image",
       "image": {
-        "format": "R8G8_UNORM",
+        "format": "R8G8B8A8_UNORM",
         "transient": true
       }
     },
@@ -2239,7 +2276,7 @@
       "name": "ShadowOpaque{cascade}",
       "type": "graphics",
       "repeat": {
-        "count": 4,
+        "count": 8,
         "index": "cascade"
       },
       "execution": {
@@ -2289,7 +2326,7 @@
       "name": "ShadowMasked{cascade}",
       "type": "graphics",
       "repeat": {
-        "count": 4,
+        "count": 8,
         "index": "cascade"
       },
       "execution": {
@@ -2339,7 +2376,7 @@
       "name": "ShadowSkinned{cascade}",
       "type": "graphics",
       "repeat": {
-        "count": 4,
+        "count": 8,
         "index": "cascade"
       },
       "execution": {

@@ -99,8 +99,8 @@ void setCustomFloatArray(const std::string& key, const std::vector<float>& value
 std::string setBuffer(const std::string& name, const void* data, size_t size, size_t offset = 0);   // error message, empty on success
 bool requestReadback(const std::string& name);
 bool getReadback(const std::string& name, Readback& out) const;   // false when none has completed
-void setSunShadowSettings(uint32_t cascadeCount, float maxDistance, float splitLambda, uint32_t resolution, float casterExtension = 50.f);
-glm::mat4 getSunShadowCascade(uint32_t index) const;
+void setSunShadowSettings(uint32_t cascadeCount, float maxDistance, float splitLambda, uint32_t resolution, float casterExtension = 50.f, uint32_t sun = 0);   // sun 0 or 1
+glm::mat4 getSunShadowCascade(uint32_t index, uint32_t sun = 0) const;
 void setLocalShadowSettings(uint32_t spotCount = 16, uint32_t pointCount = 8, uint32_t spotResolution = 2048, uint32_t pointResolution = 1024, uint32_t atlasResolution = 4096);
 bool setPassEnabled(const std::string& passName, bool enabled);
 bool isPassEnabled(const std::string& passName) const;

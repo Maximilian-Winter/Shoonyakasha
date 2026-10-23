@@ -2431,17 +2431,18 @@ cdef class Engine:
 
     def set_sun_shadows(self, uint32_t cascades=4, float max_distance=60.0,
                         float split_lambda=0.75, uint32_t resolution=2048,
-                        float caster_extension=50.0):
-        """Configure the sun's shadow cascades.
+                        float caster_extension=50.0, uint32_t sun=0):
+        """Configure a sun's shadow cascades.
 
-        Applies to the first directional light with cast shadows on. The engine
-        refits the cascades to the camera every frame and publishes them as
-        scene.shadows.sun.* dot-paths. `resolution` is the shadow map's size in
-        texels and should match it; `split_lambda` blends evenly spaced (0)
-        and logarithmic (1) splits.
+        `sun` 0 is the first directional light, in light order, with cast
+        shadows on; 1 the second. The engine refits the cascades to the camera
+        every frame and publishes them as scene.shadows.sun.* (the first) and
+        scene.shadows.suns[N].* dot-paths. `resolution` is the shadow map's
+        size in texels and should match it; `split_lambda` blends evenly spaced
+        (0) and logarithmic (1) splits.
         """
         self._ptr.setSunShadowSettings(cascades, max_distance, split_lambda,
-                                       resolution, caster_extension)
+                                       resolution, caster_extension, sun)
 
     def set_local_shadows(self, uint32_t spot=16, uint32_t point=8,
                           uint32_t spot_resolution=2048, uint32_t point_resolution=1024,
@@ -2462,9 +2463,9 @@ cdef class Engine:
         self._ptr.setLocalShadowSettings(spot, point, spot_resolution, point_resolution,
                                          atlas_resolution)
 
-    def get_sun_shadow_cascade(self, uint32_t index):
-        """World-to-light-clip matrix of a sun cascade this frame, as four columns."""
-        return _mat4_to_tuple(self._ptr.getSunShadowCascade(index))
+    def get_sun_shadow_cascade(self, uint32_t index, uint32_t sun=0):
+        """World-to-light-clip matrix of cascade `index` of sun `sun` (0 or 1) this frame, as four columns."""
+        return _mat4_to_tuple(self._ptr.getSunShadowCascade(index, sun))
 
     def set_pass_enabled(self, str pass_name, bint enabled):
         """Turn a pipeline pass on or off from the next frame.

@@ -91,6 +91,30 @@ layout(location = 0) out vec4 outColor;      // alpha-blended over the HDR targe
 layout(location = 1) out vec4 outAccum;
 layout(location = 2) out vec4 outReveal;
 
+// How much of sun s (0 or 1) reaches the fragment: its cascades, and with
+// RAY_TRACED_SHADOWS rays towards its disc.
+float sunReaching(int s, vec3 N, float viewDepth, float noise) {
+    vec3 L = -normalize(sunTravel(s));
+    int cascade;
+    float lit = sunVisibility(s, fragWorldPos, N, L, viewDepth, noise, cascade);
+#ifdef RAY_TRACED_SHADOWS
+    if (sunCascadeCount(s) > 0 && lit > 0.0) {
+        // Off whichever side faces the sun: blended surfaces are often thin
+        // and seen from both sides.
+        vec3 origin = fragWorldPos + (dot(N, L) < 0.0 ? -N : N) * sunRayOffset(viewDepth);
+        int open = 0;
+        for (int r = 0; r < SUN_RAYS; ++r) {
+            float u = fract(noise + float(r) / float(SUN_RAYS));
+            float v = temporalNoise(gl_FragCoord.yx + 17.0 * float(r + 1) + 31.0 * float(s), camera.frame + 3u,
+                                    camera.taa);
+            if (!sunRayBlocked(origin, L, u, v)) ++open;
+        }
+        lit *= float(open) / float(SUN_RAYS);
+    }
+#endif
+    return lit;
+}
+
 void main() {
     Surface s = evaluateSurface(surfaceBaseColor());
     if (draw.alphaMode == 1u && s.baseColor.a < draw.alphaCutoff) discard;
@@ -108,27 +132,15 @@ void main() {
     vec3 diffuseAlbedo = s.baseColor.rgb * (1.0 - transmission);
 
     float viewDepth = -(camera.view * vec4(fragWorldPos, 1.0)).z;
-    vec3 L = -normalize(cascades.sunDirection.xyz);
-    int cascade;
     float noise = temporalNoise(gl_FragCoord.xy, camera.frame, camera.taa);
-    float sunLit = sunVisibility(fragWorldPos, s.N, L, viewDepth, noise, cascade);
+    float sunLit = sunReaching(0, s.N, viewDepth, noise);
+    secondSunIndex = sunLight(1);
+    secondSunVisibility = secondSunIndex >= 0 ? sunReaching(1, s.N, viewDepth, noise) : 1.0;
 #ifdef RAY_TRACED_SHADOWS
-    if (cascades.sunEnabled != 0u && sunLit > 0.0) {
-        // Off whichever side faces the sun: blended surfaces are often thin
-        // and seen from both sides.
-        vec3 origin = fragWorldPos + (dot(s.N, L) < 0.0 ? -s.N : s.N) * sunRayOffset(viewDepth);
-        int open = 0;
-        for (int r = 0; r < SUN_RAYS; ++r) {
-            float u = fract(noise + float(r) / float(SUN_RAYS));
-            float v = temporalNoise(gl_FragCoord.yx + 17.0 * float(r + 1), camera.frame + 3u, camera.taa);
-            if (!sunRayBlocked(origin, L, u, v)) ++open;
-        }
-        sunLit *= float(open) / float(SUN_RAYS);
-    }
     rtLightPixel = gl_FragCoord.xy;
     rtLightOffset = sunRayOffset(viewDepth);
 #endif
-    int sunIndex = cascades.sunEnabled != 0u ? cascades.sunLightIndex : -1;
+    int sunIndex = sunLight(0);
 
     uint cluster = clusterIndex(gl_FragCoord.xy / camera.resolution, viewDepth, camera.params.x, camera.params.y);
     vec3 color = directLight(cluster, fragWorldPos, s.N, V, diffuseAlbedo, s.metallic, s.roughness, F0,

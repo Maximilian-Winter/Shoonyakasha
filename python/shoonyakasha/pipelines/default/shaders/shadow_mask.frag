@@ -1,10 +1,12 @@
 #version 450
-// Sun shadow mask: how much of the sun reaches each visible pixel, from the
+// Sun shadow mask: how much of each sun reaches each visible pixel, from the
 // cascaded shadow map and a short screen-space march towards the sun that
 // catches contact shadows smaller than a shadow texel.
 //
-//   r  visibility, 0 = fully shadowed
-//   g  cascade used / 4, 1 past the last cascade (for the cascade debug view)
+//   r  the first sun's visibility, 0 = fully shadowed
+//   g  the first sun's cascade used / 4, 1 past the last (for the cascade debug view)
+//   b  the second sun's visibility
+//   a  1
 
 #include "common.glsl"
 
@@ -18,7 +20,7 @@ layout(set = 3, binding = 1) uniform Cascades { DEFAULT_CASCADES_BLOCK } cascade
 #include "csm.glsl"
 
 layout(location = 0) in vec2 fragTexCoord;
-layout(location = 0) out vec2 outMask;
+layout(location = 0) out vec4 outMask;
 
 // 0 where something on screen sits between viewPos and the sun, within
 // `contactShadowThickness` behind the depth buffer's surface there.
@@ -55,25 +57,31 @@ float contactShadow(vec3 viewPos, vec3 viewN, vec3 viewL, float noise) {
     return 1.0;
 }
 
+// Sun s's visibility at the pixel: its cascades, then its contact shadow.
+float sunMask(int s, vec3 viewPos, vec3 worldPos, vec3 N, float noise, out int cascade) {
+    vec3 L = -normalize(sunTravel(s));
+    float visibility = sunVisibility(s, worldPos, N, L, -viewPos.z, noise, cascade);
+    if (visibility > 0.0 && sunCascadeCount(s) > 0 && dot(N, L) > 0.0) {
+        mat3 toView = mat3(camera.view);
+        visibility *= contactShadow(viewPos, toView * N, toView * L, noise);
+    }
+    return visibility;
+}
+
 void main() {
     float depth = textureLod(gDepth, fragTexCoord, 0.0).r;
     if (depth >= 1.0) {
-        outMask = vec2(1.0, 1.0);
+        outMask = vec4(1.0);
         return;
     }
 
     vec3 viewPos = viewPositionFromDepth(camera.invProj, fragTexCoord, depth);
     vec3 worldPos = (camera.invView * vec4(viewPos, 1.0)).xyz;
     vec3 N = octDecode(textureLod(gNormal, fragTexCoord, 0.0).xy);
-    vec3 L = -normalize(cascades.sunDirection.xyz);
     float noise = temporalNoise(gl_FragCoord.xy, camera.frame, camera.taa);
 
-    int cascade;
-    float visibility = sunVisibility(worldPos, N, L, -viewPos.z, noise, cascade);
-
-    if (visibility > 0.0 && cascades.sunEnabled != 0u && dot(N, L) > 0.0) {
-        mat3 toView = mat3(camera.view);
-        visibility *= contactShadow(viewPos, toView * N, toView * L, noise);
-    }
-    outMask = vec2(visibility, cascade < 0 ? 1.0 : float(cascade) / 4.0);
+    int cascade, secondCascade;
+    float visibility = sunMask(0, viewPos, worldPos, N, noise, cascade);
+    float second = sunCascadeCount(1) > 0 ? sunMask(1, viewPos, worldPos, N, noise, secondCascade) : 1.0;
+    outMask = vec4(visibility, cascade < 0 ? 1.0 : float(cascade) / 4.0, second, 1.0);
 }

@@ -366,17 +366,18 @@ public:
     // Sun Shadow Cascades
     // ═══════════════════════════════════════════════════════════
 
-    /// Cascade settings for the first directional light with castShadows.
-    /// The engine refits the cascades to the camera every frame and publishes
-    /// them as scene.shadows.sun.* dot-paths. `resolution` is the shadow map's
-    /// size in texels and should match it.
+    /// Cascade settings for sun `sun`: the first (0) or second (1)
+    /// directional light, in light order, with castShadows. The engine refits
+    /// the cascades to the camera every frame and publishes them as
+    /// scene.shadows.sun.* (the first) and scene.shadows.suns[N].* dot-paths.
+    /// `resolution` is the shadow map's size in texels and should match it.
     void setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
                               float splitLambda, uint32_t resolution,
-                              float casterExtension = 50.f);
+                              float casterExtension = 50.f, uint32_t sun = 0);
 
-    /// World-to-light-clip matrix of cascade `index` for the current frame,
-    /// identity when no light casts sun shadows.
-    glm::mat4 getSunShadowCascade(uint32_t index) const;
+    /// World-to-light-clip matrix of cascade `index` of sun `sun` for the
+    /// current frame, identity when that sun has no light.
+    glm::mat4 getSunShadowCascade(uint32_t index, uint32_t sun = 0) const;
 
     /// Shadow slots for spot and point lights with castShadows. Each frame
     /// the engine gives the slots to the lights that matter most (bright,

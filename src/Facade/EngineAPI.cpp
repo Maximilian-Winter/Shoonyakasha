@@ -634,8 +634,10 @@ void EngineAPI::setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount,
 
 void EngineAPI::setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
                                      float splitLambda, uint32_t resolution,
-                                     float casterExtension) {
-    auto& settings = m_impl->app->getRenderGraph().getSceneContext().sunShadow.settings;
+                                     float casterExtension, uint32_t sun) {
+    auto& suns = m_impl->app->getRenderGraph().getSceneContext().suns;
+    if (sun >= suns.size()) return;
+    auto& settings = suns[sun].settings;
     settings.cascadeCount = cascadeCount;
     settings.maxDistance = maxDistance;
     settings.splitLambda = splitLambda;
@@ -643,8 +645,10 @@ void EngineAPI::setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
     settings.casterExtension = casterExtension;
 }
 
-glm::mat4 EngineAPI::getSunShadowCascade(uint32_t index) const {
-    const auto& cascades = m_impl->app->getRenderGraph().getSceneContext().sunShadow.cascades;
+glm::mat4 EngineAPI::getSunShadowCascade(uint32_t index, uint32_t sun) const {
+    const auto& suns = m_impl->app->getRenderGraph().getSceneContext().suns;
+    if (sun >= suns.size()) return glm::mat4(1.0f);
+    const auto& cascades = suns[sun].cascades;
     if (!cascades.valid || index >= cascades.count) return glm::mat4(1.0f);
     return cascades.viewProj[index];
 }

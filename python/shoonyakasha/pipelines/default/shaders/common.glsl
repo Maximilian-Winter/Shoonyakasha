@@ -43,15 +43,22 @@ struct SceneLight {
     layout(std430, set = SET, binding = BINDING) readonly buffer SceneLights { SceneLight sceneLights[]; };
 #define SCENE_LIGHT_COUNT min(lightCount, uint(sceneLights.length()))
 
-// scene.shadows.sun.* (pipeline.json "Cascades")
-#define DEFAULT_CASCADES_BLOCK \
-    mat4 cascadeViewProj[4];   \
-    vec4 splits;               \
-    vec4 texelWorldSize;       \
-    vec4 sunDirection;         \
-    uint sunEnabled;           \
-    int sunLightIndex;         \
-    uint cascadeCount;
+// scene.shadows.sun.* and scene.shadows.suns[1].* (pipeline.json
+// "Cascades"): cascadeViewProj[4 * s + c] is sun s's cascade c.
+#define DEFAULT_CASCADES_BLOCK    \
+    mat4 cascadeViewProj[8];      \
+    vec4 splits;                  \
+    vec4 texelWorldSize;          \
+    vec4 sunDirection;            \
+    uint sunEnabled;              \
+    int sunLightIndex;            \
+    uint cascadeCount;            \
+    vec4 secondSplits;            \
+    vec4 secondTexelWorldSize;    \
+    vec4 secondSunDirection;      \
+    uint secondSunEnabled;        \
+    int secondSunLightIndex;      \
+    uint secondCascadeCount;
 
 // scene.shadows.spot* and scene.shadows.point* (pipeline.json
 // "LocalShadowMatrices"): 16 spot slots, 8 point slots of 6 faces each, all

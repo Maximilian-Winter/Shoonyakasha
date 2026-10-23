@@ -224,6 +224,11 @@ float lightProfile(uint i, vec3 L) {
     return textureLod(lightProfiles, (vec2(tile % 4, tile / 4) + uv) * 0.25, 0.0).r;
 }
 
+// The second shadowed sun, set like the coat by the including shader: the
+// light shadowed by secondSunVisibility, -1 when none is.
+int secondSunIndex = -1;
+float secondSunVisibility = 1.0;
+
 // Light from scene light i. `sunIndex` is the light shadowed by
 // `sunVisibility`; -1 when none is.
 vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
@@ -243,6 +248,7 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
     if (type < 0.5) {                       // directional
         L = -normalize(direction);
         if (int(i) == sunIndex) falloff = sunVisibility;
+        else if (int(i) == secondSunIndex) falloff = secondSunVisibility;
     } else {                                // point or spot
         vec3 toLight = sceneLights[i].positionType.xyz - worldPos;
         float dist = length(toLight);

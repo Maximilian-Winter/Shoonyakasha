@@ -154,7 +154,7 @@ TEST(ExecutionView, RepeatedCascadePassesEachGetTheirCascade) {
 
 TEST(ExecutionView, BadViewsFailAtLoad) {
     for (const json& execution : {
-             json{{"type", "shadow_casters"}, {"view", "shadows.sun.cascades[4]"}},
+             json{{"type", "shadow_casters"}, {"view", "shadows.sun.cascades[8]"}},
              json{{"type", "shadow_casters"}, {"view", "shadows.sun.cascades[x]"}},
              json{{"type", "shadow_casters"}, {"view", "sky"}},
              json{{"type", "opaque_geometry"}, {"view", "cameras."}},

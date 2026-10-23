@@ -594,8 +594,8 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
                                     uint32_t width, uint32_t height, const string& format)
         cbool getReadback(const string& name, Readback& out)
         void setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
-                                  float splitLambda, uint32_t resolution, float casterExtension)
-        mat4 getSunShadowCascade(uint32_t index)
+                                  float splitLambda, uint32_t resolution, float casterExtension, uint32_t sun)
+        mat4 getSunShadowCascade(uint32_t index, uint32_t sun)
         void setLocalShadowSettings(uint32_t spotCount, uint32_t pointCount,
                                     uint32_t spotResolution, uint32_t pointResolution,
                                     uint32_t atlasResolution)

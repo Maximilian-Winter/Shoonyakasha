@@ -11,7 +11,7 @@
 // map in whole texels. Together they keep shadow edges from shimmering as the
 // camera moves.
 //
-// Pure math, no device: RenderGraph fills SceneContext::sunShadow with it each
+// Pure math, no device: RenderGraph fills SceneContext::suns with it each
 // frame, and the unit tests call it directly.
 //
 
@@ -25,6 +25,11 @@ namespace Shoonyakasha {
 
 /// Most cascades a sun shadow can have (splits are published as a vec4).
 constexpr uint32_t MAX_SUN_CASCADES = 4;
+/// Most directional lights with cascaded shadows: the first ones, in light
+/// order, whose shadow flag is on. Cascade slot c of all of them together
+/// (shadows.sun.cascades[c]) is cascade c % MAX_SUN_CASCADES of sun
+/// c / MAX_SUN_CASCADES.
+constexpr uint32_t MAX_SHADOWED_SUNS = 2;
 
 struct SunShadowSettings {
     uint32_t cascadeCount    = 4;      // 1..MAX_SUN_CASCADES

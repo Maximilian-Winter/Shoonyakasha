@@ -16,7 +16,7 @@ The engine publishes every light of the scene. A pipeline reads them either from
 
 ## Sun shadow cascades
 
-When a directional light has its shadow flag set, the engine fits cascaded shadow maps for it to the camera every frame. The first such light is the sun:
+When a directional light has its shadow flag set, the engine fits cascaded shadow maps for it to the camera every frame, for the first two such lights in light order. The first is the sun; `set_sun_shadows(..., sun=1)` and `scene.shadows.suns[1].*` address the second:
 
 ```python
 sun = engine.create_directional_light((-0.45, -0.55, 0.7), intensity=3.0)
@@ -30,15 +30,16 @@ A pipeline reads the result through dot-paths:
 
 | Path | Type | Value |
 |---|---|---|
-| `scene.shadows.sun.cascades[N].viewProj` | mat4 | World to light clip space for cascade N, depth 0..1; use `[i]` in an array field |
+| `scene.shadows.sun.cascades[N].viewProj` | mat4 | World to light clip space for cascade N % 4 of sun N / 4 (0 to 7), depth 0..1; use `[i]` in an array field |
 | `scene.shadows.sun.splits` | vec4 | View depth at which each cascade ends |
 | `scene.shadows.sun.texelWorldSize` | vec4 | World size of a shadow texel per cascade, for normal-offset bias |
 | `scene.shadows.sun.cascadeCount` | uint | Cascades in use, 0 when no light casts |
 | `scene.shadows.sun.enabled` | uint | 1 when a sun casts shadows |
 | `scene.shadows.sun.lightIndex` | int | The sun's index in `scene.lights`, -1 when none |
 | `scene.shadows.sun.direction` | vec4 | Direction the sun's light travels |
+| `scene.shadows.suns[N].*` | | The same `enabled`, `cascadeCount`, `splits`, `texelWorldSize`, `lightIndex` and `direction`, of sun N (0 or 1) |
 
-A shadow pass declared with `"repeat": { "count": 4, "index": "cascade" }` writes one cascade per layer of a `2d_array` depth image and selects its matrix with a `pass.repeatIndex` push constant; the lighting shader compares view depth against `splits` to choose a cascade. See [repeated passes](../reference/pipeline-json.md#repeated-passes). `get_sun_shadow_cascade(i)` returns a cascade's matrix for debugging.
+A shadow pass declared with `"repeat": { "count": 4, "index": "cascade" }` writes one cascade per layer of a `2d_array` depth image and selects its matrix with a `pass.repeatIndex` push constant; the lighting shader compares view depth against `splits` to choose a cascade. See [repeated passes](../reference/pipeline-json.md#repeated-passes). The default pipeline repeats its sun shadow passes 8 times over an 8-layer map: layers 0 to 3 are the first sun's cascades, 4 to 7 the second's, which draw nothing while there is no second sun. `get_sun_shadow_cascade(i, sun=0)` returns a cascade's matrix for debugging.
 
 ## Spot and point light shadows
 

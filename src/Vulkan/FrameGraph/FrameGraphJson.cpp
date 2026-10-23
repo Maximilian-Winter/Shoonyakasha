@@ -2277,10 +2277,10 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                                                                view.size() - cascadePrefix.size() - 1);
                         const bool numeric = !digits.empty() && digits.size() < 4 &&
                             std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; });
-                        if (!numeric || std::stoul(digits) >= MAX_SUN_CASCADES) {
+                        if (!numeric || std::stoul(digits) >= MAX_SUN_CASCADES * MAX_SHADOWED_SUNS) {
                             throw std::runtime_error("Pass '" + pass.name + "': view '" + view +
                                                      "' names no sun cascade (0 to " +
-                                                     std::to_string(MAX_SUN_CASCADES - 1) + ")");
+                                                     std::to_string(MAX_SUN_CASCADES * MAX_SHADOWED_SUNS - 1) + ")");
                         }
                         pass.execution.view = CullView::SunCascade;
                         pass.execution.viewIndex = static_cast<uint32_t>(std::stoul(digits));

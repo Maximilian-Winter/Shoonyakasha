@@ -147,12 +147,12 @@ own that it does not mention stay as you set them.
 
 | Pass | Draws |
 |---|---|
-| `ShadowOpaque0..3`, `ShadowMasked0..3`, `ShadowSkinned0..3` | Shadow casters into cascade 0..3, each culled against its cascade |
+| `ShadowOpaque0..7`, `ShadowMasked0..7`, `ShadowSkinned0..7` | Shadow casters into `shadowMap` layer 0..7, each culled against its cascade: layers 0..3 the first sun's cascades, 4..7 the second sun's, which draw nothing without one |
 | `SpotShadowOpaque0..7`, `SpotShadowMasked0..7`, `SpotShadowSkinned0..7` | Shadow casters into spot slot 0..7's tile of `localShadowAtlas`, culled against the light's cone; nothing when the slot is empty |
 | `PointShadowOpaque0..23`, `PointShadowMasked0..23`, `PointShadowSkinned0..23` | Shadow casters into cube face 0..23's tile (four lights, six faces each), culled per face |
 | `GBufferOpaque`, `GBufferMasked`, `GBufferSkinned`, `GBufferSkinnedMasked` | The G-buffer and motion vectors; emission goes straight into the HDR target |
 | `HiZ` | The farthest depth of each 8 x 8 block of `gDepth`, into `hiz` (R32F, an eighth of the size, read back every frame). `GBufferOpaque`, `GBufferMasked`, `Transparent` and `TransparentRT` leave out the static entities it hides (execution `"occlusion": "hiz"`) |
-| `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` |
+| `ShadowMask` | Cascades and contact shadows resolved per pixel, into `shadowMask` (RGBA8: the first sun's visibility, its cascade for debug view 1, the second sun's visibility) |
 | `ShadowMaskRT` | In the `raytraced` preset, instead of `ShadowMask`: a shadow ray per pixel, multiplied with the cascades of the casters the rays do not see. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `GTAO`, `AODenoise` | Ambient occlusion from the depth buffer in a 4x4 pattern of slice directions, then a depth-aware 4x4 average |
 | `LightClusterReset` | Zeroes `ClusterLightCount`: the lights the clusters want, and the room in `ClusterLightIndices` taken |
@@ -176,7 +176,7 @@ own that it does not mention stay as you set them.
 | `UIOverlay` | Screen canvases of the canvas UI, blended over the swapchain, which it then presents. Its shaders are in `shaders/ui/` and the engine binds them itself |
 
 Any pass can be turned off at runtime, for instance for a low-quality tier:
-`engine.set_pass_enabled("ShadowMasked{cascade}", False)` turns off all four
+`engine.set_pass_enabled("ShadowMasked{cascade}", False)` turns off all eight
 masked cascade passes (a repeated pass answers to its declared name); masked
 geometry then casts no shadow. Turning off `ShadowMask` leaves it cleared to
 fully lit, and turning off `GTAO` leaves no occlusion. For bloom, set

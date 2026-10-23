@@ -53,7 +53,7 @@ Its last pass, `UIOverlay`, draws the [canvas UI](canvas-ui.md). Not drawn by th
 
 ## Lights and shadows
 
-**The sun.** The first directional light whose shadow flag is on is the sun, and gets four cascades of 2048² fitted to the camera every frame. `max_distance` is how far from the camera they reach. Use the smallest distance that covers what matters, because the same texels are spread over all of it: 30 to 60 units for a scene you walk through, more for a landscape seen from above. Leave `resolution` at 2048, the size the pipeline declares. Contact shadows add the fine detail near where objects touch, which the cascades are too coarse for.
+**The sun.** The first directional light whose shadow flag is on is the sun, and gets four cascades of 2048² fitted to the camera every frame. A second flagged directional light (a moon, a second sun) gets four of its own, configured with `set_sun_shadows(..., sun=1)`; further ones cast no shadow. The second sun's cascades render the casters again, so it costs about as much as the first. `max_distance` is how far from the camera they reach. Use the smallest distance that covers what matters, because the same texels are spread over all of it: 30 to 60 units for a scene you walk through, more for a landscape seen from above. Leave `resolution` at 2048, the size the pipeline declares. Contact shadows add the fine detail near where objects touch, which the cascades are too coarse for.
 
 **Spot and point lights** cast shadows when their flag is on:
 
@@ -152,7 +152,7 @@ The [README](../../python/shoonyakasha/pipelines/default/README.md#settings) lis
 - **Trimming shadows:** turn off `set_light_cast_shadows` on lights the viewer won't miss them for, and shorten ranges. The `low` preset drops alpha-tested casters, which are often foliage and cost the most.
 - **Levels of detail:** load large scenes with `load_gltf_scene(path, lods=True)` to draw distant meshes with fewer triangles, in the G-buffer and in the shadows alike; `set_lod_threshold` trades detail against speed ([loading scenes](loading-scenes.md#levels-of-detail)).
 - **Occlusion culling:** after the G-buffer, pass `HiZ` writes the farthest depth of every 8 x 8 block of the screen into `hiz`, which is read back. The G-buffer and transparent passes leave out the static entities hidden behind it. The depth is two frames old: something revealed by a fast turn can appear a frame late. Shadow passes are not occlusion culled. `set_occlusion_culling(False)` turns it off.
-- **Memory:** the atlas takes 64 MB, the cascades another 64 MB, and the screen-sized targets about 78 bytes per pixel.
+- **Memory:** the atlas takes 64 MB, the cascades another 128 MB (64 MB for each sun), and the screen-sized targets about 78 bytes per pixel.
 - **Push constants:** the pipeline pushes 236 bytes of per-draw constants. Every desktop GPU allows 256. A device limited to Vulkan's minimum of 128 logs the G-buffer passes as not fitting, and they draw nothing.
 
 ## Making it your own
@@ -260,7 +260,7 @@ Some things this example shows about the pipeline:
 | Problem | Likely cause |
 |---|---|
 | Everything is black except the sky | No lights, or only lights whose range doesn't reach the scene. Check the sky light too: `iblIntensity`, and the environment map |
-| A directional light casts no shadow | Its shadow flag is off, another directional light was flagged first, or what should be shadowed is beyond `max_distance` (debug view 1) |
+| A directional light casts no shadow | Its shadow flag is off, two other directional lights were flagged before it, or what should be shadowed is beyond `max_distance` (debug view 1) |
 | A spot or point light casts no shadow | Its flag is off; more than 16 spot or 8 point lights are flagged and it ranked lower (not with `raytraced`); or its range doesn't reach the view |
 | Blended glass casts no shadow | Blended and transmissive materials receive shadows but don't cast them. Use `MASK` for things like leaves and fences |
 | Shadows shimmer on distant objects | They're in the last cascade with few texels per unit. Shorten `max_distance`, or raise `split_lambda` so more of the resolution goes near the camera |

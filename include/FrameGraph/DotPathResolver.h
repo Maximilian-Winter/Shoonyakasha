@@ -254,17 +254,18 @@ struct SceneContext {
     std::vector<PackedLight> lights;
     uint32_t lightCount = 0;   // lights.size()
 
-    // ─── Sun shadow ─────────────────────────────────────────────
-    // Cascades for the first directional light with castShadows, refitted to
-    // the camera every frame by updateFromRegistry. Read by
-    // "scene.shadows.sun.*" dot-paths.
+    // ─── Sun shadows ────────────────────────────────────────────
+    // Cascades for the first MAX_SHADOWED_SUNS directional lights with
+    // castShadows, in light order, refitted to the camera every frame by
+    // updateFromRegistry. Read by "scene.shadows.sun.*" (the first) and
+    // "scene.shadows.suns[N].*" dot-paths.
     struct SunShadow {
         SunShadowSettings settings;         // set by the application
         SunShadowCascades cascades;         // cascades.valid = false when no light casts
         int32_t           lightIndex = -1;  // index of the sun in lights[], -1 when none
         glm::vec4         direction{0.0f};  // xyz = direction the light travels
     };
-    SunShadow sunShadow;
+    std::array<SunShadow, MAX_SHADOWED_SUNS> suns;
 
     // ─── Spot and point light shadows ──────────────────────────
     // Slots assigned every frame by updateFromRegistry to the lights with

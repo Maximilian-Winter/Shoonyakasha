@@ -89,8 +89,11 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
     // parent is placed and turned by its world matrix; one without, by its
     // own transform, which is the same thing.
     lights.clear();
-    sunShadow.lightIndex = -1;
-    sunShadow.cascades = SunShadowCascades{};
+    for (auto& sun : suns) {
+        sun.lightIndex = -1;
+        sun.cascades = SunShadowCascades{};
+    }
+    uint32_t sunCount = 0;
     std::vector<LocalShadowCandidate> shadowCandidates;
     auto lightEntities = registry.view<ECS::LightComponent, ECS::TransformComponent>();
     for (auto entity : lightEntities) {
@@ -134,9 +137,9 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
             packed.shape = glm::vec4(right * (0.5f * light.sourceSize.x), 0.5f * light.sourceSize.y);
         }
 
-        // The sun: the first directional light that casts shadows.
-        if (sunShadow.lightIndex < 0 && light.type == ECS::LightComponent::Directional && light.castShadows) {
-            sunShadow.lightIndex = static_cast<int32_t>(index);
+        // The suns: the first directional lights that cast shadows.
+        if (sunCount < MAX_SHADOWED_SUNS && light.type == ECS::LightComponent::Directional && light.castShadows) {
+            suns[sunCount++].lightIndex = static_cast<int32_t>(index);
         }
 
         const bool spot = light.type == ECS::LightComponent::Spot;
@@ -155,12 +158,12 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
     lightCount = static_cast<uint32_t>(lights.size());
 
     // ─── Sun shadow ─────────────────────────────────────────────
-    if (sunShadow.lightIndex >= 0 && foundCamera) {
-        const glm::vec3 direction = glm::vec3(lights[sunShadow.lightIndex].directionRange);
-        sunShadow.direction = glm::vec4(direction, 0.0f);
-        sunShadow.cascades = computeSunCascades(cameraView, cameraFov, cameraAspect,
-                                                cameraNearPlane, cameraFarPlane,
-                                                direction, sunShadow.settings);
+    for (auto& sun : suns) {
+        if (sun.lightIndex < 0 || !foundCamera) continue;
+        const glm::vec3 direction = glm::vec3(lights[sun.lightIndex].directionRange);
+        sun.direction = glm::vec4(direction, 0.0f);
+        sun.cascades = computeSunCascades(cameraView, cameraFov, cameraAspect, cameraNearPlane, cameraFarPlane,
+                                          direction, sun.settings);
     }
 
     // ─── Spot and point light shadows ───────────────────────────
@@ -434,11 +437,22 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
         }
     }
 
-    // ─── Sun shadow ────────────────────────────────────────────
+    // ─── Sun shadows ───────────────────────────────────────────
     // scene.shadows.sun.{enabled, cascadeCount, splits, texelWorldSize,
-    // lightIndex, direction} and scene.shadows.sun.cascades[N].viewProj
-    if (parts[0] == "shadows" && parts.size() >= 3 && parts[1] == "sun") {
-        const auto& sun = scene.sunShadow;
+    // lightIndex, direction}, of the first sun; scene.shadows.suns[N].{the
+    // same}, of sun N; and scene.shadows.sun.cascades[N].viewProj, cascade
+    // N % MAX_SUN_CASCADES of sun N / MAX_SUN_CASCADES
+    auto sunIndexIn = [](std::string_view part, std::string_view name, uint32_t& index) {
+        if (!part.starts_with(name) || part.size() < name.size() + 3 || part[name.size()] != '[' ||
+            part.back() != ']') return false;
+        const auto digits = part.substr(name.size() + 1, part.size() - name.size() - 2);
+        auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), index);
+        return ec == std::errc() && ptr == digits.data() + digits.size();
+    };
+    uint32_t sunIndex = 0;
+    if (parts[0] == "shadows" && parts.size() >= 3 &&
+        (parts[1] == "sun" || (sunIndexIn(parts[1], "suns", sunIndex) && sunIndex < MAX_SHADOWED_SUNS))) {
+        const auto& sun = scene.suns[parts[1] == "sun" ? 0 : sunIndex];
         const auto& c = sun.cascades;
         if (parts.size() == 3) {
             if (parts[2] == "enabled")        return ResolvedValue(c.valid ? 1u : 0u);
@@ -448,15 +462,10 @@ ResolvedValue DotPathResolver::resolveScenePath(std::string_view path, const Sce
             if (parts[2] == "lightIndex")     return ResolvedValue(sun.lightIndex);
             if (parts[2] == "direction")      return ResolvedValue(sun.direction);
         }
-        std::string_view cascadePart = parts[2];
-        if (parts.size() == 4 && cascadePart.starts_with("cascades[") && cascadePart.ends_with("]") &&
-            parts[3] == "viewProj") {
-            auto numStr = cascadePart.substr(9, cascadePart.size() - 10);
-            uint32_t index = 0;
-            auto [ptr, ec] = std::from_chars(numStr.data(), numStr.data() + numStr.size(), index);
-            if (ec == std::errc() && ptr == numStr.data() + numStr.size() && index < MAX_SUN_CASCADES) {
-                return ResolvedValue(c.viewProj[index]);
-            }
+        uint32_t cascade = 0;
+        if (parts[1] == "sun" && parts.size() == 4 && parts[3] == "viewProj" &&
+            sunIndexIn(parts[2], "cascades", cascade) && cascade < MAX_SUN_CASCADES * MAX_SHADOWED_SUNS) {
+            return ResolvedValue(scene.suns[cascade / MAX_SUN_CASCADES].cascades.viewProj[cascade % MAX_SUN_CASCADES]);
         }
         return ResolvedValue();
     }
