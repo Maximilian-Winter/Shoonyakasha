@@ -100,7 +100,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `contactShadowThickness` | 0.1 | How thick things on screen are assumed to be, in world units |
 | `shadowAmbient` | 1.0 | Ambient light kept in the sun's shadow. Below 1 darkens shadowed areas' sky light too |
 | `sunAngle` | 0.4 | Angular radius of the sun in degrees, for ray-traced shadows: how quickly their penumbra widens with distance from the caster. The real sun's is 0.27 |
-| `reflections` | 1.0 | With `raytraced`: how much traced reflections replace the environment's on glossy surfaces, 0 to 1 |
+| `reflections` | 1.0 | How much reflections of the scene (screen-space, or ray traced with `raytraced`) replace the environment's on glossy surfaces, 0 to 1; 0 traces none. The `low` preset sets 0 |
 | `aoRadius` | 0.6 | World-space reach of ambient occlusion; 0 turns it off |
 | `aoIntensity` | 1.0 | Power applied to the occlusion; above 1 darkens it |
 | `toneMapper` | 2 | Tone curve: 2 AgX, which keeps mid-tones as exposed and rolls bright light off to white without shifting its hue; 1 Khronos PBR Neutral, which keeps base colours as authored, for exposures that put white at 1; 0 the ACES fit, more contrast (`set_custom_uint`) |
@@ -142,9 +142,9 @@ own that it does not mention stay as you set them.
 | `LightClusterReset` | Zeroes `ClusterLightCount`: the lights the clusters want, and the room in `ClusterLightIndices` taken |
 | `LightClusterCount` | A compute pass counting the point and spot lights that reach each cluster of the view, into `lightClusters`, and their total |
 | `LightClusters` | A compute pass listing them: each cluster takes room in `ClusterLightIndices` for its list, and `lightClusters` holds the list's count and offset. When the total does not fit, each cluster gets the same share of the room as of the total, and keeps its nearest lights |
-| `Lighting` | Lights, image-based light and the sky, added onto the emission |
+| `Lighting` | Lights, image-based light and the sky, added onto the emission; screen-space reflections of glossy surfaces, written to `reflection` and `reflectionScale` |
 | `LightingRT` | In the `raytraced` preset, instead of `Lighting`: the same, with shadow rays towards spot and point lights instead of the shadow atlas, and a reflection ray per glossy pixel, written to `reflection` and `reflectionScale`. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
-| `ReflectionDenoise` | In the `raytraced` preset: the traced reflections averaged over each surface and added to the HDR target. Off by default |
+| `ReflectionDenoise` | The reflections `Lighting` or `LightingRT` wrote, averaged over each surface and added to the HDR target. Off in the `low` preset |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
 | `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with shadow rays towards the sun, spot and point lights. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |
@@ -242,6 +242,17 @@ the environment's reflection goes to `reflection` and `reflectionScale`;
 `ReflectionDenoise` averages it over the surface around each pixel, over a
 radius that grows with roughness, and adds it to the HDR target. The
 `reflections` setting scales it.
+
+Without `raytraced`, `Lighting` finds the reflections in screen space: the
+same ray marches through the depth buffer, 40 steps across the screen
+towards 40 metres, and at a step behind a surface, five halvings find the
+crossing, a hit where the ray is behind the surface by less than 0.1 m
+plus 2% of its distance. A hit takes last frame's image there, faded out
+towards the screen's edges and the march's end; a ray that leaves the
+screen or finds nothing keeps the environment's reflection. It writes the
+same targets, which `ReflectionDenoise` filters the same way. Both lighting
+passes write every pixel of those targets, without clearing them, so the
+one the preset turns off leaves the other's in place.
 
 One ray per pixel is noisy on its own; TAA averages it. With `taa` 0 the
 shadows' and reflections' edges are left grainy.

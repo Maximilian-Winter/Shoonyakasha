@@ -4,7 +4,8 @@
 // with spot and point light shadows from the atlas (pass Lighting);
 // lighting_rt.frag with RT_LOCAL_SHADOWS, shadow rays instead, and
 // RT_REFLECTIONS, traced reflections (pass LightingRT, the "raytraced"
-// preset). Those it writes to two more targets, which
+// preset). lighting.frag defines SS_REFLECTIONS, reflections marched through
+// the depth buffer. Either writes them to two more targets, which
 // reflection_denoise.frag filters and adds to the HDR target.
 
 #include "common.glsl"
@@ -46,16 +47,21 @@ layout(set = 5, binding = 0) uniform accelerationStructureEXT scene;
 #define CLUSTERED
 #include "lights.glsl"
 
+#if defined(RT_REFLECTIONS) || defined(SS_REFLECTIONS)
+#define REFLECTIONS
 #ifdef RT_REFLECTIONS
-layout(set = 6, binding = 0) uniform sampler2D taaHistory;   // last frame's image
+#define REFLECTION_SET 6
+#else
+#define REFLECTION_SET 5
+#endif
+layout(set = REFLECTION_SET, binding = 0) uniform sampler2D taaHistory;   // last frame's image
 
-// Ray-traced reflections of what is on screen. A ray along the reflection
-// (spread by roughness, so TAA averages a glossy lobe) finds the nearest
-// surface in the acceleration structure, alpha-tested ones by their texture.
-// Where that point is on screen and not hidden there, last frame's image at
-// it is the reflected light; elsewhere the reflection is blocked by
-// something the screen cannot show, and the environment behind it is
-// darkened instead. Rays that hit nothing keep the environment.
+// Reflections of what is on screen. A ray along the reflection (spread by
+// roughness, so TAA averages a glossy lobe) looks for the nearest surface:
+// in the acceleration structure with RT_REFLECTIONS, alpha-tested surfaces
+// by their texture; in the depth buffer with SS_REFLECTIONS. Where it finds
+// one on screen, last frame's image at it is the reflected light. Rays that
+// find nothing keep the environment.
 //
 // How much traced light replaces the environment's on a surface this rough:
 // 0 for rough surfaces and where settings.reflections is 0.
@@ -63,22 +69,47 @@ float reflectionWeight(float roughness) {
     return (1.0 - smoothstep(0.3, 0.55, roughness)) * clamp(settings.reflections, 0.0, 1.0);
 }
 
-// Returns the weight to give the traced light over the environment's, and
-// the light in `radiance`.
-float tracedReflection(vec3 worldPos, vec3 N, vec3 V, float roughness, float viewDepth, vec3 environment,
-                       out vec3 radiance) {
-    radiance = vec3(0.0);
-    float weight = reflectionWeight(roughness);
-    if (weight <= 0.0) return 0.0;
-
+// The ray's direction: the mirror direction of V about N, spread by
+// roughness, new each frame.
+vec3 reflectionDirection(vec3 N, vec3 V, float roughness) {
     vec3 R = reflect(-V, N);
     float u = temporalNoise(gl_FragCoord.xy + vec2(91.0, 13.0), camera.frame, camera.taa);
     float v = temporalNoise(gl_FragCoord.yx + vec2(5.0, 71.0), camera.frame + 7u, camera.taa);
     float spread = roughness * roughness;
     float z = 1.0 - 2.0 * u, r = sqrt(max(1.0 - z * z, 0.0)), a = 6.28318531 * v;
     vec3 dir = normalize(R + spread * vec3(r * cos(a), r * sin(a), z));
-    if (dot(dir, N) <= 0.0) dir = R;
+    return dot(dir, N) > 0.0 ? dir : R;
+}
 
+// Last frame's image at world point `hit`, faded out towards the screen's
+// edges by `fade`; false where that frame did not show it.
+bool previousImageAt(vec3 hit, out vec3 seen, out float fade) {
+    seen = vec3(0.0);
+    fade = 0.0;
+    vec4 previous = camera.prevViewProj * vec4(hit, 1.0);
+    if (previous.w <= 0.0) return false;
+    vec2 prevUV = previous.xy / previous.w * 0.5 + 0.5;
+    vec2 edge = min(prevUV, 1.0 - prevUV);
+    if (any(lessThanEqual(edge, vec2(0.0)))) return false;
+    vec4 image = textureLod(taaHistory, prevUV, 0.0);
+    if (image.a <= 0.0) return false;
+    seen = image.rgb;
+    fade = smoothstep(0.0, 0.08, min(edge.x, edge.y));
+    return true;
+}
+#endif
+
+#ifdef RT_REFLECTIONS
+// Returns the weight to give the traced light over the environment's, and
+// the light in `radiance`. A hit the screen cannot show (the underside of
+// an object over a glossy floor) darkens the environment behind it instead.
+float tracedReflection(vec3 worldPos, vec3 N, vec3 V, float roughness, float viewDepth, vec3 environment,
+                       out vec3 radiance) {
+    radiance = vec3(0.0);
+    float weight = reflectionWeight(roughness);
+    if (weight <= 0.0) return 0.0;
+
+    vec3 dir = reflectionDirection(N, V, roughness);
     vec3 origin = worldPos + N * sunRayOffset(viewDepth);
     rayQueryEXT query;
     rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0xFF, origin, 0.0, dir, 200.0);
@@ -97,12 +128,10 @@ float tracedReflection(vec3 worldPos, vec3 N, vec3 V, float roughness, float vie
         if (all(greaterThan(edge, vec2(0.0)))) {
             float sceneDepth = -viewPositionFromDepth(camera.invProj, uv, textureLod(gDepth, uv, 0.0).r).z;
             float hitDepth = -(camera.view * vec4(hit, 1.0)).z;
-            if (abs(sceneDepth - hitDepth) < 0.03 + 0.02 * hitDepth) {
-                vec4 previous = camera.prevViewProj * vec4(hit, 1.0);
-                vec2 prevUV = previous.xy / previous.w * 0.5 + 0.5;
-                vec4 seen = textureLod(taaHistory, prevUV, 0.0);
-                float fade = smoothstep(0.0, 0.08, min(edge.x, edge.y));
-                if (seen.a > 0.0) radiance = mix(radiance, seen.rgb, fade);
+            vec3 seen;
+            float fade;
+            if (abs(sceneDepth - hitDepth) < 0.03 + 0.02 * hitDepth && previousImageAt(hit, seen, fade)) {
+                radiance = mix(radiance, seen, fade);
             }
         }
     }
@@ -110,9 +139,89 @@ float tracedReflection(vec3 worldPos, vec3 N, vec3 V, float roughness, float vie
 }
 #endif
 
+#ifdef SS_REFLECTIONS
+// The reflection ray marched through the depth buffer: SSR_STEPS steps
+// across the screen towards SSR_DISTANCE metres, stopping where the ray
+// leaves the screen; at each step that lands behind a surface, SSR_REFINE
+// halvings find the crossing, which is a hit where the ray is behind the
+// surface by less than its thickness (0.1 m plus 2% of the distance).
+const int SSR_STEPS = 40;
+const int SSR_REFINE = 5;
+const float SSR_DISTANCE = 40.0;
+
+// The depth buffer's view-space z at uv, negative in front of the camera.
+float sceneViewZ(vec2 uv) {
+    return viewPositionFromDepth(camera.invProj, uv, textureLod(gDepth, uv, 0.0).r).z;
+}
+
+// Returns the weight to give the reflected light over the environment's,
+// and the light in `radiance`; 0 where the ray finds nothing on screen.
+float screenReflection(vec3 worldPos, vec3 viewPos, vec3 N, vec3 V, float roughness, vec3 environment,
+                       out vec3 radiance) {
+    radiance = vec3(0.0);
+    float weight = reflectionWeight(roughness);
+    if (weight <= 0.0) return 0.0;
+
+    vec3 dir = mat3(camera.view) * reflectionDirection(N, V, roughness);
+    vec3 origin = viewPos + mat3(camera.view) * N * (0.01 + 0.002 * -viewPos.z);
+    // Stop before the near plane.
+    float length_ = SSR_DISTANCE;
+    float nearZ = -camera.params.x;
+    if (dir.z > 0.0) length_ = min(length_, (nearZ - origin.z) / dir.z * 0.99);
+    vec3 end = origin + dir * length_;
+
+    // Screen positions and 1/w interpolate linearly across the screen; z/w
+    // too, for the ray's depth at each step.
+    vec4 h0 = camera.proj * vec4(origin, 1.0), h1 = camera.proj * vec4(end, 1.0);
+    vec2 uv0 = h0.xy / h0.w * 0.5 + 0.5, uv1 = h1.xy / h1.w * 0.5 + 0.5;
+    float k0 = 1.0 / h0.w, k1 = 1.0 / h1.w;
+    float z0 = origin.z * k0, z1 = end.z * k1;
+    float jitter = temporalNoise(gl_FragCoord.xy + vec2(23.0, 41.0), camera.frame + 3u, camera.taa);
+
+    float previousT = 0.0;
+    for (int i = 1; i <= SSR_STEPS; ++i) {
+        float t = (float(i) - jitter) / float(SSR_STEPS);
+        vec2 uv = mix(uv0, uv1, t);
+        if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+        float rayZ = mix(z0, z1, t) / mix(k0, k1, t);
+        if (sceneViewZ(uv) - rayZ <= 0.0) {
+            previousT = t;
+            continue;
+        }
+
+        // Halve the step around the crossing; a ray that is still behind the
+        // surface by more than its thickness there passed behind it.
+        float lo = previousT, hi = t;
+        for (int j = 0; j < SSR_REFINE; ++j) {
+            float mid = 0.5 * (lo + hi);
+            vec2 midUV = mix(uv0, uv1, mid);
+            float midZ = mix(z0, z1, mid) / mix(k0, k1, mid);
+            if (sceneViewZ(midUV) - midZ > 0.0) hi = mid; else lo = mid;
+        }
+        vec2 hitUV = mix(uv0, uv1, hi);
+        float hitZ = mix(z0, z1, hi) / mix(k0, k1, hi);
+        if (sceneViewZ(hitUV) - hitZ > 0.1 + 0.02 * -hitZ) {
+            previousT = t;
+            continue;
+        }
+        vec3 hit = (camera.invView * vec4(viewPositionFromDepth(camera.invProj, hitUV,
+                                                                textureLod(gDepth, hitUV, 0.0).r), 1.0)).xyz;
+        vec3 seen;
+        float fade;
+        if (!previousImageAt(hit, seen, fade)) return 0.0;
+        // Fade out towards the screen's edges and the march's end.
+        vec2 edge = min(hitUV, 1.0 - hitUV);
+        fade *= smoothstep(0.0, 0.08, min(edge.x, edge.y)) * (1.0 - smoothstep(0.8, 1.0, hi));
+        radiance = mix(environment, seen, fade);
+        return weight;
+    }
+    return 0.0;
+}
+#endif
+
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
-#ifdef RT_REFLECTIONS
+#ifdef REFLECTIONS
 // The traced reflection, for reflection_denoise.frag. rgb: the traced light
 // minus the environment's reflection it replaces, divided by the
 // reflectance, times the trace's weight; a: 1 where traced.
@@ -125,7 +234,7 @@ const vec3 CASCADE_COLORS[5] = vec3[](vec3(1.0, 0.3, 0.3), vec3(0.3, 1.0, 0.3), 
                                       vec3(1.0, 1.0, 0.3), vec3(1.0));
 
 void main() {
-#ifdef RT_REFLECTIONS
+#ifdef REFLECTIONS
     outReflection = vec4(0.0);
     outReflectionScale = vec4(0.0);
 #endif
@@ -175,7 +284,7 @@ void main() {
                       ambientDiffuse, ambientSpecular);
     vec3 ambient = (ambientDiffuse * diffuseAO + ambientSpecular * specularAO)
                  * settings.iblIntensity * mix(settings.shadowAmbient, 1.0, sunVisibility);
-#ifdef RT_REFLECTIONS
+#ifdef REFLECTIONS
     {
         // A clear coat is the glossiest layer, and the one whose reflection
         // shows: it is traced in place of the base where there is one.
@@ -188,7 +297,11 @@ void main() {
             vec3 environment = textureLod(prefilterMap, reflect(-V, N), traceRoughness * maxLod).rgb
                              * settings.iblIntensity;
             vec3 traced;
+#ifdef RT_REFLECTIONS
             float weight = tracedReflection(worldPos, N, V, traceRoughness, -viewPos.z, environment, traced);
+#else
+            float weight = screenReflection(worldPos, viewPos, N, V, traceRoughness, environment, traced);
+#endif
             vec3 replaced = coated ? ambientCoatSpecular : ambientSpecular - ambientCoatSpecular;
             vec3 envSpecular = replaced * specularAO * settings.iblIntensity
                              * mix(settings.shadowAmbient, 1.0, sunVisibility);

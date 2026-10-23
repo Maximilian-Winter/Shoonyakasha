@@ -2611,12 +2611,26 @@
         {
           "resource": "lightClusters",
           "usage": "shader_read"
+        },
+        {
+          "resource": "taaHistory",
+          "usage": "shader_read"
         }
       ],
       "outputs": [
         {
           "resource": "hdrColor",
           "usage": "color_blend"
+        },
+        {
+          "resource": "reflection",
+          "usage": "color_write",
+          "blending": "none"
+        },
+        {
+          "resource": "reflectionScale",
+          "usage": "color_write",
+          "blending": "none"
         }
       ],
       "pipeline": {
@@ -2633,7 +2647,8 @@
         "iblSet",
         "cameraSet",
         "lightsSet",
-        "settingsSet"
+        "settingsSet",
+        "reflectionSet"
       ]
     },
     {
@@ -2692,23 +2707,11 @@
         {
           "resource": "reflection",
           "usage": "color_write",
-          "clear": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ],
           "blending": "none"
         },
         {
           "resource": "reflectionScale",
           "usage": "color_write",
-          "clear": [
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ],
           "blending": "none"
         }
       ],
@@ -2778,11 +2781,6 @@
       "descriptorSets": [
         "reflectionDenoiseSet",
         "cameraSet"
-      ],
-      "enabled": false,
-      "requires": [
-        "rayQuery",
-        "bindlessTextures"
       ]
     },
     {
@@ -3232,7 +3230,8 @@
         "default.contactShadowLength": 0,
         "default.bloomIntensity": 0,
         "default.shadowSoftness": 1.0,
-        "default.cascadeBlend": 0
+        "default.cascadeBlend": 0,
+        "default.reflections": 0
       }
     },
     "medium": {
@@ -3248,7 +3247,7 @@
         "AODenoise": true,
         "Lighting": true,
         "LightingRT": false,
-        "ReflectionDenoise": false,
+        "ReflectionDenoise": true,
         "SpotShadowOpaque{s}": true,
         "SpotShadowMasked{s}": true,
         "SpotShadowSkinned{s}": true,
@@ -3260,7 +3259,8 @@
         "default.contactShadowLength": 0,
         "default.bloomIntensity": null,
         "default.shadowSoftness": null,
-        "default.cascadeBlend": null
+        "default.cascadeBlend": null,
+        "default.reflections": null
       }
     },
     "high": {
@@ -3276,7 +3276,7 @@
         "AODenoise": true,
         "Lighting": true,
         "LightingRT": false,
-        "ReflectionDenoise": false,
+        "ReflectionDenoise": true,
         "SpotShadowOpaque{s}": true,
         "SpotShadowMasked{s}": true,
         "SpotShadowSkinned{s}": true,
@@ -3288,7 +3288,8 @@
         "default.contactShadowLength": null,
         "default.bloomIntensity": null,
         "default.shadowSoftness": null,
-        "default.cascadeBlend": null
+        "default.cascadeBlend": null,
+        "default.reflections": null
       }
     },
     "raytraced": {
@@ -3316,7 +3317,8 @@
         "default.contactShadowLength": null,
         "default.bloomIntensity": null,
         "default.shadowSoftness": null,
-        "default.cascadeBlend": null
+        "default.cascadeBlend": null,
+        "default.reflections": null
       }
     }
   },

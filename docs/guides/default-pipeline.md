@@ -79,7 +79,7 @@ engine.apply_pipeline_preset("medium")
 |---|---|
 | `high` | Everything on. What the pipeline starts with |
 | `medium` | High without contact shadows |
-| `low` | Integrated or older GPUs: no ambient occlusion, bloom, contact shadows, or shadows from alpha-tested geometry |
+| `low` | Integrated or older GPUs: no ambient occlusion, bloom, contact shadows, reflections, or shadows from alpha-tested geometry |
 | `raytraced` | High, with the shadows of the sun and of spot and point lights, and reflections on glossy surfaces, ray traced where the GPU supports ray queries |
 
 Call it from `on_init` or at any time after, for instance from a key or a settings menu. A preset only touches what it names, so your own settings that it doesn't name survive it.
@@ -97,7 +97,7 @@ On a GPU without ray queries the preset is refused with a warning and nothing ch
 
 Spot and point lights with their shadow flag on are ray traced too, in place of their shadow maps: each pixel traces one ray per light towards a random point of it, so `set_light_source_radius` (or a light's rectangle, `set_light_source_size`) widens its penumbra, and radius 0 gives hard shadows with no noise. Every shadowed light gets a shadow, with no limit of 16 and 8, but each one costs a ray in every pixel it reaches.
 
-Glossy surfaces (roughness below about 0.5, or a clear coat) reflect the scene: one ray per pixel finds what the reflection sees, and where that is on screen, last frame's image there is the reflected light. What the screen does not show, such as the underside of an object over a polished floor, darkens the environment's reflection instead. `set_custom_float("default.reflections", x)` scales how much the traced reflections replace the environment's, 0 to 1. The noise needs TAA: with `taa` off, ray-traced shadow and reflection edges look grainy. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to try a program as it runs on a GPU without them.
+Glossy surfaces (roughness below about 0.5, or a clear coat) reflect the scene: one ray per pixel finds what the reflection sees, and where that is on screen, last frame's image there is the reflected light. With `raytraced` the ray goes through the acceleration structure, and what the screen does not show, such as the underside of an object over a polished floor, darkens the environment's reflection instead; the other presets except `low` march it through the depth buffer, and a ray that leaves the screen keeps the environment's reflection. `set_custom_float("default.reflections", x)` scales how much these reflections replace the environment's, 0 to 1; 0 traces none. The noise needs TAA: with `taa` off, ray-traced shadow and reflection edges look grainy. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to try a program as it runs on a GPU without them.
 
 ## Settings
 
