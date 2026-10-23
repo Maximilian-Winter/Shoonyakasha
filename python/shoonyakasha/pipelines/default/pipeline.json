@@ -1520,7 +1520,8 @@
         "alphaFilter": "opaque",
         "view": "shadows.sun.cascades[{cascade}]",
         "sortMode": "front_to_back",
-        "entityDataBinding": "shadowOpaque"
+        "entityDataBinding": "shadowOpaque",
+        "instancing": true
       },
       "outputs": [
         {
@@ -1569,7 +1570,8 @@
         "alphaFilter": "mask",
         "view": "shadows.sun.cascades[{cascade}]",
         "sortMode": "front_to_back",
-        "entityDataBinding": "shadowMasked"
+        "entityDataBinding": "shadowMasked",
+        "instancing": true
       },
       "outputs": [
         {
@@ -1662,7 +1664,8 @@
         "type": "shadow_casters",
         "alphaFilter": "opaque",
         "view": "shadows.spot[{s}]",
-        "entityDataBinding": "shadowOpaque"
+        "entityDataBinding": "shadowOpaque",
+        "instancing": true
       },
       "outputs": [
         {
@@ -1709,7 +1712,8 @@
         "type": "shadow_casters",
         "alphaFilter": "mask",
         "view": "shadows.spot[{s}]",
-        "entityDataBinding": "shadowMasked"
+        "entityDataBinding": "shadowMasked",
+        "instancing": true
       },
       "outputs": [
         {
@@ -1799,7 +1803,8 @@
         "type": "shadow_casters",
         "alphaFilter": "opaque",
         "view": "shadows.point.faces[{f}]",
-        "entityDataBinding": "shadowOpaque"
+        "entityDataBinding": "shadowOpaque",
+        "instancing": true
       },
       "outputs": [
         {
@@ -1846,7 +1851,8 @@
         "type": "shadow_casters",
         "alphaFilter": "mask",
         "view": "shadows.point.faces[{f}]",
-        "entityDataBinding": "shadowMasked"
+        "entityDataBinding": "shadowMasked",
+        "instancing": true
       },
       "outputs": [
         {
@@ -1931,7 +1937,8 @@
         "type": "opaque_geometry",
         "alphaFilter": "opaque",
         "sortMode": "front_to_back",
-        "entityDataBinding": "material"
+        "entityDataBinding": "material",
+        "instancing": true
       },
       "inputs": [
         {
@@ -2029,7 +2036,8 @@
         "type": "opaque_geometry",
         "alphaFilter": "mask",
         "sortMode": "front_to_back",
-        "entityDataBinding": "material"
+        "entityDataBinding": "material",
+        "instancing": true
       },
       "inputs": [
         {
@@ -2627,7 +2635,8 @@
       "execution": {
         "type": "transparent_geometry",
         "sortMode": "back_to_front",
-        "entityDataBinding": "material"
+        "entityDataBinding": "material",
+        "instancing": true
       },
       "inputs": [
         {
@@ -2696,7 +2705,8 @@
       "execution": {
         "type": "transparent_geometry",
         "sortMode": "back_to_front",
-        "entityDataBinding": "material"
+        "entityDataBinding": "material",
+        "instancing": true
       },
       "inputs": [
         {

@@ -15,6 +15,8 @@
 #include "ECS/Sprite2DComponents.h"
 #include "ECS/Core.h"
 #include "FrameGraph/ViewCulling.h"
+#include "FrameGraph/InstanceBatching.h"
+#include "GPU/GpuDeleteQueue.h"
 
 #include <vulkan/vulkan.h>
 #include <entt/entt.hpp>
@@ -71,6 +73,11 @@ struct RenderableEntity {
     const MaterialComponentV5* material = nullptr;
     const ECS::TransformComponent* transform = nullptr;
     const RenderableTagComponent* tag = nullptr;
+
+    // Draws with the same nonzero key may share an instanced draw
+    // (batchKey); 0 for entities that bind buffers of their own (skinned,
+    // morphed, sprites).
+    uint64_t batchKey = 0;
 };
 
 // ============================================================================
@@ -224,6 +231,7 @@ private:
         bool isSprite2D = false;
         bool hasBounds = false;
         glm::vec3 worldMin{0.0f}, worldMax{0.0f};
+        uint64_t batchKey = 0;   // RenderableEntity::batchKey
     };
     mutable std::vector<Renderable> m_renderables;
     mutable uint64_t m_renderablesFrame = ~uint64_t{0};
@@ -264,8 +272,40 @@ private:
         FrameGraph::RenderGraph::EntityBindingPlan& plan,
         BoundBuffers& bound,
         VkCommandBuffer cmd,
+        uint32_t frameIndex,
+        uint32_t instanceCount = 1
+    );
+
+    /// Draws `entities` for a pass with "instancing": those sharing a mesh
+    /// and material as one instanced draw, each instance's matrices in this
+    /// frame's instance buffers at kInstanceBinding. Returns the draws made.
+    uint32_t drawInstanced(
+        const std::vector<RenderableEntity>& entities,
+        bool keepOrder,
+        const FrameGraph::CompiledPass& pass,
+        FrameGraph::RenderGraph::EntityBindingPlan& plan,
+        BoundBuffers& bound,
+        VkCommandBuffer cmd,
         uint32_t frameIndex
     );
+
+    /// Host-visible buffers of InstanceRows, per frame in flight: the
+    /// frame's passes take rows in turn and the buffers are reused once the
+    /// frame comes round again. More are made when a frame needs them.
+    struct InstanceChunk {
+        GpuBufferRef buffer;
+        uint32_t capacity = 0;   // rows
+        uint32_t used = 0;
+    };
+    struct InstanceFrame {
+        std::vector<InstanceChunk> chunks;
+        uint64_t frameNumber = ~uint64_t{0};
+    };
+    std::vector<InstanceFrame> m_instanceFrames;
+
+    /// Writes `rows` to this frame's instance buffers; returns the buffer
+    /// and the row they start at.
+    std::pair<VkBuffer, uint32_t> writeInstanceRows(const std::vector<InstanceRow>& rows, uint32_t frameIndex);
 };
 
 // ============================================================================

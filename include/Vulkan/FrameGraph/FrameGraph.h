@@ -1447,6 +1447,10 @@ public:
     /// a frame's passes record.
     uint64_t getFrameNumber() const { return m_recordedFrames; }
 
+    /// The device, and how many frames may be in flight at once.
+    VulkanDevice& getDevice() const { return m_device; }
+    uint32_t getMaxFramesInFlight() const { return m_maxFramesInFlight; }
+
     /// Get the scene context (for external use)
     Shoonyakasha::SceneContext& getSceneContext();
     const Shoonyakasha::SceneContext& getSceneContext() const;

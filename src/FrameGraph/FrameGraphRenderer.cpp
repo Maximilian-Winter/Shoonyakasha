@@ -10,7 +10,11 @@
 #include "Vulkan/FrameGraph/FrameGraphPass.h"  // For PassDeclaration
 #include "GPU/GPUTypes.h"
 #include "ECS/MorphComponents.h"
+#include "GPU/GPUResourceFactory.h"
+#include "Vulkan/VulkanDevice.h"
 #include "Vulkan/FrameGraph/RenderStats.h"
+
+#include <cstring>
 
 #include <algorithm>
 
@@ -74,6 +78,7 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
         re.material = r.material;
         re.tag = r.tag;
         re.transform = r.transform;
+        re.batchKey = r.batchKey;
         re.distanceToCamera = calculateDistance(*r.transform, cullView);
 
         result.push_back(re);
@@ -138,6 +143,8 @@ void FrameGraphRenderer::gatherRenderables() const {
         r.isSprite2D = m_registry->all_of<Shoonyakasha::Sprite2DComponent>(entity);
         r.hasBounds = mesh.hasBounds;
         if (r.hasBounds) transformBounds(r.transform->worldMatrix, mesh.boundsMin, mesh.boundsMax, r.worldMin, r.worldMax);
+        const bool ownBuffers = r.hasSkeleton || r.isSprite2D || m_registry->all_of<MorphComponent>(entity);
+        r.batchKey = ownBuffers ? 0 : batchKey(mesh, *r.material);
         m_renderables.push_back(r);
     }
 }
@@ -260,9 +267,14 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
     BoundBuffers bound;
 
     uint32_t drawCount = 0;
-    for (const auto& re : entities) {
-        bindAndDrawEntity(re.entity, *re.mesh, pass, plan, bound, cmd, frameIndex);
-        drawCount++;
+    if (passDecl.execution.instancing) {
+        drawCount = drawInstanced(entities, sortMode == EntitySortMode::BackToFront, pass, plan, bound, cmd,
+                                  frameIndex);
+    } else {
+        for (const auto& re : entities) {
+            bindAndDrawEntity(re.entity, *re.mesh, pass, plan, bound, cmd, frameIndex);
+            drawCount++;
+        }
     }
 
     m_lastDrawCount = drawCount;
@@ -295,7 +307,8 @@ void FrameGraphRenderer::bindAndDrawEntity(
     FrameGraph::RenderGraph::EntityBindingPlan& plan,
     BoundBuffers& bound,
     VkCommandBuffer cmd,
-    uint32_t frameIndex)
+    uint32_t frameIndex,
+    uint32_t instanceCount)
 {
     // Push constants, material textures and bone buffer, as the pass's
     // entityDataBinding names them (looked up once, in `plan`).
@@ -325,12 +338,95 @@ void FrameGraphRenderer::bindAndDrawEntity(
             bound.index = mesh.indexHandle();
             bound.indexType = indexType;
         }
-        vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
-        FrameGraph::countDraw(mesh.indexCount);
+        vkCmdDrawIndexed(cmd, mesh.indexCount, instanceCount, 0, 0, 0);
+        FrameGraph::countDraw(mesh.indexCount * instanceCount);
     } else {
-        vkCmdDraw(cmd, mesh.vertexCount, 1, 0, 0);
-        FrameGraph::countDraw(mesh.vertexCount);
+        vkCmdDraw(cmd, mesh.vertexCount, instanceCount, 0, 0);
+        FrameGraph::countDraw(mesh.vertexCount * instanceCount);
     }
+}
+
+// ============================================================================
+// Instanced drawing
+// ============================================================================
+
+uint32_t FrameGraphRenderer::drawInstanced(
+    const std::vector<RenderableEntity>& entities,
+    bool keepOrder,
+    const FrameGraph::CompiledPass& pass,
+    FrameGraph::RenderGraph::EntityBindingPlan& plan,
+    BoundBuffers& bound,
+    VkCommandBuffer cmd,
+    uint32_t frameIndex)
+{
+    if (entities.empty()) return 0;
+
+    // Draws share a batch when they bind the same geometry and material
+    // (RenderableEntity::batchKey, made once a frame).
+    std::vector<uint64_t> keys(entities.size());
+    for (size_t i = 0; i < entities.size(); ++i) keys[i] = entities[i].batchKey;
+
+    std::vector<uint32_t> order;
+    const std::vector<InstanceBatch> batches = batchDraws(keys, keepOrder, order);
+    std::vector<InstanceRow> rows(order.size());
+    for (size_t i = 0; i < order.size(); ++i) {
+        const ECS::TransformComponent& transform = *entities[order[i]].transform;
+        rows[i] = InstanceRow{transform.worldMatrix, transform.previousWorldMatrix};
+    }
+    const auto [buffer, firstRow] = writeInstanceRows(rows, frameIndex);
+    if (buffer == VK_NULL_HANDLE) return 0;
+
+    const VkDeviceSize stride = sizeof(InstanceRow);
+    for (const InstanceBatch& batch : batches) {
+        const VkDeviceSize offset = (firstRow + batch.first) * stride;
+        vkCmdBindVertexBuffers2(cmd, kInstanceBinding, 1, &buffer, &offset, nullptr, &stride);
+        const RenderableEntity& first = entities[order[batch.first]];
+        bindAndDrawEntity(first.entity, *first.mesh, pass, plan, bound, cmd, frameIndex, batch.count);
+    }
+    return static_cast<uint32_t>(batches.size());
+}
+
+std::pair<VkBuffer, uint32_t> FrameGraphRenderer::writeInstanceRows(const std::vector<InstanceRow>& rows,
+                                                                     uint32_t frameIndex) {
+    const uint32_t frames = std::max(m_renderGraph.getMaxFramesInFlight(), 1u);
+    if (m_instanceFrames.size() != frames) m_instanceFrames.resize(frames);
+    InstanceFrame& frame = m_instanceFrames[frameIndex % frames];
+    // This frame's fence has passed: its rows from the last time round are done with.
+    if (frame.frameNumber != m_renderGraph.getFrameNumber()) {
+        frame.frameNumber = m_renderGraph.getFrameNumber();
+        for (InstanceChunk& chunk : frame.chunks) chunk.used = 0;
+    }
+
+    const uint32_t count = static_cast<uint32_t>(rows.size());
+    InstanceChunk* target = nullptr;
+    for (InstanceChunk& chunk : frame.chunks) {
+        if (chunk.capacity - chunk.used >= count) {
+            target = &chunk;
+            break;
+        }
+    }
+    VulkanDevice& device = m_renderGraph.getDevice();
+    VmaAllocator allocator = device.getAllocator().getHandle();
+    if (!target) {
+        InstanceChunk chunk;
+        chunk.capacity = std::max(count, 8192u);
+        chunk.buffer = device.getDeleteQueue().adopt(GPUResourceFactory::createBuffer(
+            allocator, VkDeviceSize{chunk.capacity} * sizeof(InstanceRow), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VMA_MEMORY_USAGE_CPU_TO_GPU));
+        frame.chunks.push_back(std::move(chunk));
+        target = &frame.chunks.back();
+    }
+    if (!target->buffer || !target->buffer->isValid()) return {VK_NULL_HANDLE, 0};
+
+    void* mapped = GPUResourceFactory::mapBuffer(allocator, *target->buffer);
+    if (!mapped) return {VK_NULL_HANDLE, 0};
+    const uint32_t first = target->used;
+    std::memcpy(static_cast<InstanceRow*>(mapped) + first, rows.data(), rows.size() * sizeof(InstanceRow));
+    vmaFlushAllocation(allocator, target->buffer->allocation, VkDeviceSize{first} * sizeof(InstanceRow),
+                       VkDeviceSize{count} * sizeof(InstanceRow));
+    GPUResourceFactory::unmapBuffer(allocator, *target->buffer);
+    target->used += count;
+    return {target->buffer->buffer, first};
 }
 
 } // namespace Shoonyakasha

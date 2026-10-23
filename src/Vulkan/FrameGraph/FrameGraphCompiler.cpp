@@ -17,6 +17,7 @@
 #include "Vulkan/VulkanMemoryAllocator.h"
 #include "Vulkan/RayTracingScene.h"
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
+#include "FrameGraph/InstanceBatching.h"
 #include "FrameGraph/ShaderInterfaceValidator.h"
 #include "Core/Logger.h"
 
@@ -1418,19 +1419,34 @@ bool FrameGraphCompiler::createPipelines(
         // Vertex input — check declarative registry first, then fall back to hardcoded
         if (pd.vertexInput != "none" && pd.meshShader.empty()) {
             VkVertexInputBindingDescription vtxBinding{};
+            std::vector<VkVertexInputBindingDescription> vtxBindings;
             std::vector<VkVertexInputAttributeDescription> vtxAttributes;
 
             if (vertexFormats.hasFormat(pd.vertexInput) &&
                 vertexFormats.getVertexInputDescriptions(pd.vertexInput, vtxBinding, vtxAttributes)) {
                 // Use declarative vertex format from JSON
-                builder.withCustomVertexInput({vtxBinding}, vtxAttributes);
-                compiled.vertexStride = vtxBinding.stride;
+                vtxBindings.push_back(vtxBinding);
             } else if (pd.vertexInput == "default") {
                 // Backward compatibility: use hardcoded Vertex struct
-                builder.withVertexType<Vertex>();
-                compiled.vertexStride = sizeof(Vertex);
+                vtxBindings.push_back(Vertex::getBindingDescription());
+                const auto attributes = Vertex::getAttributeDescriptions();
+                vtxAttributes.assign(attributes.begin(), attributes.end());
             }
             // else: unknown format name — no vertex input (will likely cause validation error)
+
+            if (!vtxBindings.empty()) {
+                // Instanced entity passes: each instance's model and previous
+                // model matrix at binding 1 (InstanceRow), locations 8 to 15.
+                if (passDecl.execution.instancing) {
+                    vtxBindings.push_back({kInstanceBinding, sizeof(InstanceRow), VK_VERTEX_INPUT_RATE_INSTANCE});
+                    for (uint32_t column = 0; column < 8; ++column) {
+                        vtxAttributes.push_back({kInstanceFirstLocation + column, kInstanceBinding,
+                                                 VK_FORMAT_R32G32B32A32_SFLOAT, column * 16u});
+                    }
+                }
+                builder.withCustomVertexInput(vtxBindings, vtxAttributes);
+                compiled.vertexStride = vtxBindings[0].stride;
+            }
 
             // A declared format may name the first attributes of a mesh's
             // vertex: the stride is bound per draw.

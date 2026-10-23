@@ -171,6 +171,13 @@ frame's model matrix, then the material factors). Every desktop GPU allows
 256; a device that allows only Vulkan's minimum of 128 reports those passes
 at load and draws nothing in them.
 
+The G-buffer, sun, spot and point shadow, and transparent passes for static
+meshes are instanced (`"instancing": true`): entities sharing a mesh and a
+material are one draw, and `gbuffer.vert`, `shadow_vert.glsl` and
+`shadow_masked_vert.glsl` take each instance's model matrices from the
+per-instance vertex buffer (locations 8 to 15) instead of the push
+constants. The skinned passes draw each entity on its own.
+
 Materials can set `exposureCompensation`, from 0 (the default) to 1. At 1
 the material's emission is divided by the exposure before Tonemap multiplies
 by it, so it keeps its brightness whatever the exposure; canvas UI world

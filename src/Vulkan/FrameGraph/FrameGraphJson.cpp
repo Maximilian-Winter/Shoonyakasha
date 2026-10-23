@@ -2237,6 +2237,11 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                 pass.execution.entityDataBinding = execJson.value("entityDataBinding", std::string{});
                 pass.execution.renderLayerMask = execJson.value("renderLayerMask", 0xFFFFFFFFu);
                 pass.execution.lightIndex = execJson.value("lightIndex", -1);
+                pass.execution.instancing = execJson.value("instancing", false);
+                if (pass.execution.instancing && !isEntityGeometryExecutionType(pass.execution.type)) {
+                    throw std::runtime_error("Pass '" + pass.name + "': \"instancing\" needs an entity geometry "
+                                             "execution type, not '" + pass.execution.type + "'");
+                }
 
                 if (execJson.contains("view")) {
                     const auto& viewJson = execJson["view"];

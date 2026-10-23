@@ -6,9 +6,9 @@ The loader returns renderable primitive entities beneath node entities. Native `
 
 Setting `flattenHierarchy=true` bakes world transforms into vertex data, so differently transformed instances need different geometry. Keep the default unless baked geometry is explicitly needed.
 
-## What sharing does and does not mean
+## Instanced draws
 
-Shared buffers do not imply that the entity renderer combines objects into one Vulkan instanced draw. The generic JSON `draw` execution supports an explicit `instanceCount`, but the application/shaders must supply the corresponding per-instance data. The loader also caches primitives across loads using file path, mesh/primitive index, and skinning mode. That cache belongs to the loader; do not assume automatic invalidation when source files or load options change.
+An entity pass with `"instancing": true` draws the entities that share a mesh and a material as one instanced draw, each instance's model matrices in a per-instance vertex buffer its vertex shader reads (see the [pipeline JSON reference](../reference/pipeline-json.md) for the attributes). The default pipeline's G-buffer, shadow and transparent passes for static meshes do this. Passes without the key draw each entity on its own. The generic JSON `draw` execution supports an explicit `instanceCount`, but the application/shaders must supply the corresponding per-instance data. The loader also caches primitives across loads using file path, mesh/primitive index, and skinning mode. That cache belongs to the loader; do not assume automatic invalidation when source files or load options change.
 
 Run [InstancingTest](../../examples/cpp/api/instancing_test) from its source directory after building with examples enabled. Its `--selftest` mode checks shared buffers, hierarchy behavior, and capture; use it when changing loader ownership or transforms.
 

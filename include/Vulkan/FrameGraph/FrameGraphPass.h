@@ -605,6 +605,11 @@ struct ExecutionDesc {
     uint32_t    viewIndex = 0;                   // Cascade, spot slot or point face for the shadow views
     std::string viewName;                        // The camera's name for CullView::NamedCamera
     int32_t     lightIndex = -1;            // For shadow_casters: which light's VP to use
+    // Draws entities that share a mesh and material as one instanced draw.
+    // The pipeline gets a per-instance vertex buffer at binding 1, each
+    // instance's model and previous model matrix (two mat4s, locations 8 to
+    // 15), which its vertex shader reads instead of per-draw values.
+    bool        instancing = false;
 
     // Common options
     bool        bindDescriptorSets = true;

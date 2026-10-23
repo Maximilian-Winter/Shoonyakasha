@@ -1,5 +1,6 @@
 #version 450
-// G-buffer geometry, static meshes.
+// G-buffer geometry, static meshes, drawn instanced: each instance's model
+// matrices come from the per-instance vertex buffer (locations 8 to 15).
 
 #include "common.glsl"
 
@@ -12,6 +13,8 @@ layout(location = 1) in vec3 inColor;
 layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in vec3 inNormal;
 layout(location = 4) in vec4 inTangent;   // xyz along +u, w the bitangent's side; 0 without uvs
+layout(location = 8) in mat4 instanceModel;
+layout(location = 12) in mat4 instancePrevModel;   // last frame's, for motion vectors
 
 layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec3 fragWorldNormal;
@@ -22,16 +25,16 @@ layout(location = 5) out vec4 fragPrevClip;      // where it was last frame
 layout(location = 6) out vec4 fragWorldTangent;
 
 void main() {
-    vec4 worldPos = draw.model * vec4(inPosition, 1.0);
+    vec4 worldPos = instanceModel * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
-    fragWorldNormal = transpose(inverse(mat3(draw.model))) * inNormal;
+    fragWorldNormal = transpose(inverse(mat3(instanceModel))) * inNormal;
     // A mirroring model matrix flips the bitangent's side.
-    fragWorldTangent = vec4(mat3(draw.model) * inTangent.xyz,
-                            determinant(mat3(draw.model)) < 0.0 ? -inTangent.w : inTangent.w);
+    fragWorldTangent = vec4(mat3(instanceModel) * inTangent.xyz,
+                            determinant(mat3(instanceModel)) < 0.0 ? -inTangent.w : inTangent.w);
     fragTexCoord = inTexCoord;
     fragColor = inColor;
     gl_Position = camera.proj * camera.view * worldPos;
     fragClip = gl_Position;
-    fragPrevClip = camera.prevViewProj * (draw.prevModel * vec4(inPosition, 1.0));
+    fragPrevClip = camera.prevViewProj * (instancePrevModel * vec4(inPosition, 1.0));
     gl_Position.xy += taaJitter(camera.frame, camera.taa, camera.resolution) * gl_Position.w;
 }
