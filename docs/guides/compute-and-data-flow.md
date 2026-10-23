@@ -24,6 +24,14 @@ A compute pass can decide how much work a later pass does: it writes the argumen
 
 A one-thread pass after the one that counts the work is the usual way to fill in the arguments, for instance a group count rounded up from an item count. The [Volume Tiled Forward Shading example](../../examples/python/rendering/volume_tiled/pipeline/README.md) dispatches one workgroup per active cluster that way.
 
+## Per-pass control from Python
+
+Python code runs between frames: in the `set_on_update`, `set_on_pre_render` and `set_on_post_render` callbacks and in ECS systems, not while a pass records. What it sets there reaches the passes of the next frame:
+
+- **Which passes run:** `engine.set_pass_enabled(name, enabled)` turns a pass, or every instance of a repeated pass, on or off from the next frame.
+- **Values:** `set_custom_*` values reach every pass whose layouts read them, uploaded once per frame. Values that differ from one pass to the next come from push constants bound to `pass.repeatIndex`, `pass.repeatCount`, `pass.extent` or `pass.texelSize`; a repeated pass can index a custom array with its repeat index.
+- **Results:** `engine.request_readback(name)` and `engine.get_readback(name)` read a buffer or image a pass wrote (see [Reading back from Python](#reading-back-from-python)); `engine.get_pass_draw_stats(name)` gives a geometry pass's drawn and culled entities, and `engine.render_stats`, after `engine.enable_render_stats()`, each pass's CPU and GPU time.
+
 ## Initialization and sharing
 
 [ssbo_pipeline.json](../../examples/cpp/compute/ssbo_data_flow_example/ssbo_pipeline.json) demonstrates seeded sphere/gaussian initialization and publishing a target named `particles.currentState`. A consumer can use a `buffer_ref` source referring to a target in `SharedBufferRegistry`. Native application code must arrange graph lifetimes, registration, and execution order.
