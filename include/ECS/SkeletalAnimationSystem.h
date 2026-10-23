@@ -7,6 +7,10 @@
 //   3. Compute final bone matrices
 //   4. Upload bone matrices to per-entity SSBOs
 //
+// Skeletons without an AnimationPlaybackComponent get their default pose's
+// bone matrices once. Morph target weights follow the current clip's weight
+// channels (MorphComponent).
+//
 // Priority: 35 (after physics at 30, before rendering)
 //
 // 動之系統 — The system of motion

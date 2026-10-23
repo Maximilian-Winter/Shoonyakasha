@@ -49,6 +49,24 @@ void SkeletalAnimationSystem::update(float deltaTime, entt::registry& registry) 
         }
     }
 
+    // Skeletons without clips hold their default pose, computed and uploaded
+    // once.
+    auto stills = registry.view<SkeletonComponent>(entt::exclude<AnimationPlaybackComponent>);
+    std::vector<glm::vec3> translations, scales;
+    std::vector<glm::quat> rotations;
+    for (auto entity : stills) {
+        auto& skeleton = stills.get<SkeletonComponent>(entity);
+        if (!skeleton.skeleton || !skeleton.dirty) continue;
+        const uint32_t joints = skeleton.skeleton->jointCount();
+        translations.assign(joints, glm::vec3(0.0f));
+        rotations.assign(joints, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+        scales.assign(joints, glm::vec3(1.0f));
+        AnimationEvaluator::setDefaultPose(*skeleton.skeleton, translations, rotations, scales);
+        AnimationEvaluator::computeBoneMatrices(*skeleton.skeleton, translations, rotations, scales,
+                                                skeleton.boneMatrices);
+        if (skeleton.boneSSBO && skeleton.boneSSBO->isValid()) uploadBoneMatrices(skeleton);
+    }
+
     // Morph target weights from the current clip's channels for the node
     // each entity was made from. Playback advances here for entities
     // without a skeleton.
