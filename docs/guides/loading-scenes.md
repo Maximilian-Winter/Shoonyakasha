@@ -54,6 +54,8 @@ Textures load through stb_image (PNG, JPEG and the other formats it reads) as 8-
 
 Uncompressed textures take 4 bytes per texel, so this is a quarter to an eighth of the memory, at some loss of quality: BC1 stores each 4 x 4 block as two 16-bit colours and blends between them, which bands smooth gradients. Compression runs on the CPU while loading (stb_dxt), and so do the mipmaps, so loading takes longer. A BC5 normal map holds only x and y; the default pipeline and `sk/scene_hits.glsl` compute z from them, and a pipeline's own shaders need to do the same: `z = sqrt(max(1 - dot(xy, xy), 0))`.
 
+A texture with a `KHR_texture_basisu` source is read from its KTX2 file with libktx (ETC1S and UASTC, with or without supercompression). A KTX2 file with mip levels is transcoded level by level to BC7, sRGB for colour textures, where the GPU samples BC formats, and to 8-bit RGBA otherwise; `max_texture_size` skips the levels larger than it. A KTX2 file with one level is transcoded to 8-bit RGBA and then treated like a PNG: resized, mipmapped and, with `compress_textures`, compressed as above. When the KTX2 file cannot be read, the texture's own `source` image is used if it has one.
+
 ## Levels of detail
 
 `lods=True` (C++ `GltfOptions::generateLods`) gives each static triangle mesh of at least 64 triangles up to four coarser levels of detail, simplified with meshoptimizer to about half the triangles of the level before. They share the mesh's vertices and follow its full index list in the same index buffer (`MeshComponent::lods`), and the mesh's open borders stay in place. Each level records how far its surface may lie from the full mesh's, counting how far its normals stray. Skinned and morphed meshes get none.

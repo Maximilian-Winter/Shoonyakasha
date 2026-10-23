@@ -20,6 +20,7 @@
 #include <cgltf.h>
 #include <meshoptimizer.h>
 #include <draco/compression/decode.h>
+#include <ktx.h>
 #include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -31,6 +32,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <iterator>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -210,6 +212,74 @@ std::string decodeMeshoptBuffers(cgltf_data* data) {
         view.data = decoded;
     }
     return {};
+}
+
+// A KTX2 image (KHR_texture_basisu), read with libktx. With more than one
+// mip level: the levels from the first that fits maxSize (0: no limit), as
+// BC7 when transcoded from Basis Universal where `bc` (the device samples BC
+// formats), and RGBA8 otherwise, in
+// `levels` with their `format`. With one level: that level as RGBA8 in
+// `single`, for the path PNG and JPEG images take. `error` is set when the
+// file cannot be read or transcoded.
+struct KtxImage {
+    uint32_t width = 0, height = 0;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    std::vector<std::vector<uint8_t>> levels;
+    RgbaImage single;
+    std::string error;
+};
+
+KtxImage decodeKtx2(const uint8_t* bytes, size_t size, bool srgb, bool bc, uint32_t maxSize) {
+    KtxImage out;
+    ktxTexture2* texture = nullptr;
+    if (ktxTexture2_CreateFromMemory(bytes, size, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) != KTX_SUCCESS) {
+        out.error = "not a KTX2 file libktx can read";
+        return out;
+    }
+    const bool mipmapped = texture->numLevels > 1;
+    const bool transcoded = ktxTexture2_NeedsTranscoding(texture);
+    const bool toBc = mipmapped && bc && transcoded;
+    if (transcoded) {
+        const ktx_error_code_e status =
+            ktxTexture2_TranscodeBasis(texture, toBc ? KTX_TTF_BC7_RGBA : KTX_TTF_RGBA32, 0);
+        if (status != KTX_SUCCESS) {
+            out.error = std::string("transcoding failed: ") + ktxErrorString(status);
+            ktxTexture_Destroy(ktxTexture(texture));
+            return out;
+        }
+    } else if (texture->vkFormat != VK_FORMAT_R8G8B8A8_UNORM && texture->vkFormat != VK_FORMAT_R8G8B8A8_SRGB) {
+        out.error = "neither Basis Universal nor RGBA8 (VkFormat " + std::to_string(texture->vkFormat) + ")";
+        ktxTexture_Destroy(ktxTexture(texture));
+        return out;
+    }
+    out.format = toBc ? (srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK)
+                      : (srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM);
+
+    auto levelData = [&](uint32_t level) {
+        ktx_size_t offset = 0;
+        ktxTexture_GetImageOffset(ktxTexture(texture), level, 0, 0, &offset);
+        const ktx_size_t bytesInLevel = ktxTexture_GetImageSize(ktxTexture(texture), level);
+        const uint8_t* start = ktxTexture_GetData(ktxTexture(texture)) + offset;
+        return std::vector<uint8_t>(start, start + bytesInLevel);
+    };
+    if (!mipmapped) {
+        out.single.width = texture->baseWidth;
+        out.single.height = texture->baseHeight;
+        out.single.texels = levelData(0);
+        out.width = texture->baseWidth;
+        out.height = texture->baseHeight;
+    } else {
+        uint32_t first = 0;
+        while (maxSize > 0 && first + 1 < texture->numLevels &&
+               std::max(texture->baseWidth >> first, texture->baseHeight >> first) > maxSize) {
+            ++first;
+        }
+        out.width = std::max(texture->baseWidth >> first, 1u);
+        out.height = std::max(texture->baseHeight >> first, 1u);
+        for (uint32_t level = first; level < texture->numLevels; ++level) out.levels.push_back(levelData(level));
+    }
+    ktxTexture_Destroy(ktxTexture(texture));
+    return out;
 }
 
 // Memory holding decoded KHR_draco_mesh_compression data: buffer views the
@@ -1430,11 +1500,13 @@ GPUTexture GltfSceneLoader::loadTexture(
     bool srgb,
     bool normalMap)
 {
-    if (!textureView.texture || !textureView.texture->image) {
+    // KHR_texture_basisu: the KTX2 image in place of the texture's own.
+    const cgltf_texture* source = textureView.texture;
+    const bool basisu = source && source->has_basisu && source->basisu_image;
+    const cgltf_image* image = !source ? nullptr : basisu ? source->basisu_image : source->image;
+    if (!image) {
         return GPUTexture{};
     }
-
-    const cgltf_image* image = textureView.texture->image;
     std::string cacheKey;
     bool isEmbedded = false;
 
@@ -1475,12 +1547,65 @@ GPUTexture GltfSceneLoader::loadTexture(
     if (cacheIt != m_textureCache.end()) {
         return sampled(cacheIt->second);
     }
+    // A made texture gets a sampler and goes into the cache.
+    auto finish = [&](GPUTexture texture) {
+        texture.sampler = GPUResourceFactory::createSampler(
+            m_device.getLogicalDevice(),
+            VK_FILTER_LINEAR, VK_FILTER_LINEAR,
+            VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            16.0f,  // max anisotropy
+            VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            static_cast<float>(texture.mipLevels)
+        );
+        texture.exists = true;
+        m_textureCache[fullCacheKey] = texture;
+        return sampled(texture);
+    };
+
+    RgbaImage decoded;
+    if (basisu) {
+        std::vector<uint8_t> fileBytes;
+        const uint8_t* bytes = nullptr;
+        size_t size = 0;
+        if (isEmbedded) {
+            bytes = cgltf_buffer_view_data(image->buffer_view);
+            size = image->buffer_view->size;
+        } else {
+            std::ifstream file(cacheKey, std::ios::binary);
+            fileBytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+            bytes = fileBytes.data();
+            size = fileBytes.size();
+        }
+        KtxImage ktx = bytes && size ? decodeKtx2(bytes, size, srgb, m_device.getEnabledFeatures().textureCompressionBC,
+                                                  maxSize)
+                                     : KtxImage{};
+        if (!bytes || !size) ktx.error = "no data";
+        if (!ktx.error.empty()) {
+            std::cerr << "[GltfSceneLoader] KTX2 texture " << cacheKey << ": " << ktx.error << std::endl;
+            if (!source->image) return GPUTexture{};
+            // The texture's own image, as a texture without the extension.
+            cgltf_texture plain = *source;
+            plain.has_basisu = 0;
+            plain.basisu_image = nullptr;
+            cgltf_texture_view view = textureView;
+            view.texture = &plain;
+            return loadTexture(nullptr, view, srgb, normalMap);
+        }
+        if (!ktx.levels.empty()) {
+            return finish(GPUResourceFactory::createTexture2DWithLevels(
+                m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getGraphicsQueue(),
+                m_device.getCommandPool(), ktx.width, ktx.height, ktx.format, ktx.levels));
+        }
+        decoded = std::move(ktx.single);
+    }
 
     // Load image with stb_image
-    int width, height, channels;
+    int width = 0, height = 0, channels = 0;
     stbi_uc* pixels = nullptr;
 
-    if (isEmbedded) {
+    if (basisu) {
+        // Decoded from the KTX2 image above.
+    } else if (isEmbedded) {
         // 蘊中取像 — Extract the image from within the vessel
         const cgltf_buffer_view* bv = image->buffer_view;
         const uint8_t* bufData = static_cast<const uint8_t*>(bv->buffer->data) + bv->offset;
@@ -1504,11 +1629,12 @@ GPUTexture GltfSceneLoader::loadTexture(
         }
     }
 
-    RgbaImage decoded;
-    decoded.width = static_cast<uint32_t>(width);
-    decoded.height = static_cast<uint32_t>(height);
-    decoded.texels.assign(pixels, pixels + static_cast<size_t>(width) * height * 4);
-    stbi_image_free(pixels);
+    if (pixels) {
+        decoded.width = static_cast<uint32_t>(width);
+        decoded.height = static_cast<uint32_t>(height);
+        decoded.texels.assign(pixels, pixels + static_cast<size_t>(width) * height * 4);
+        stbi_image_free(pixels);
+    }
     decoded = fitImage(std::move(decoded), maxSize, srgb);
 
     GPUTexture texture;
@@ -1550,22 +1676,7 @@ GPUTexture GltfSceneLoader::loadTexture(
         );
     }
 
-    // Create sampler for this texture
-    texture.sampler = GPUResourceFactory::createSampler(
-        m_device.getLogicalDevice(),
-        VK_FILTER_LINEAR, VK_FILTER_LINEAR,
-        VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        16.0f,  // max anisotropy
-        VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        static_cast<float>(texture.mipLevels)
-    );
-
-    texture.exists = true;
-
-    // Cache the texture for reuse
-    m_textureCache[fullCacheKey] = texture;
-
-    return sampled(texture);
+    return finish(texture);
 }
 
 entt::entity GltfSceneLoader::createEntity(
