@@ -1158,6 +1158,12 @@
           "type": "float",
           "source": "entity.material.params.iridescenceThicknessMaximum",
           "default": 400.0
+        },
+        {
+          "name": "unlit",
+          "type": "float",
+          "source": "entity.material.params.unlit",
+          "default": 0.0
         }
       ]
     },

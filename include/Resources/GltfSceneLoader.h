@@ -116,6 +116,8 @@ struct GltfPrimitive {
     glm::vec3 specularColorFactor = glm::vec3(1.0f);
     // KHR_materials_iridescence, when the material has the extension: a thin
     // film of index iridescenceIor, thicknesses in nanometres.
+    // KHR_materials_unlit: the material gets the param unlit = 1.
+    bool unlit                  = false;
     bool hasIridescence         = false;
     float iridescenceFactor     = 0.0f;
     float iridescenceIor        = 1.3f;

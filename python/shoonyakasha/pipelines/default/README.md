@@ -53,6 +53,8 @@ Deferred PBR (glTF metallic-roughness) with:
   specular strength, colour and reflectance
 - iridescence (`KHR_materials_iridescence`): a thin film over the base whose
   interference colours the specular by its thickness and index of refraction
+- unlit materials (`KHR_materials_unlit`): the base colour written as
+  emission, with nothing reflected
 - clear coat (`KHR_materials_clearcoat`): a glossy dielectric layer with its
   own roughness over the base, from every light and the environment
 - transmission (`KHR_materials_transmission`, `KHR_materials_ior`,
@@ -211,8 +213,8 @@ Each material texture is sampled at the uv its `MaterialData` rows give
 (`material_data.glsl`): `TEXCOORD_0` or `TEXCOORD_1`, through the texture's
 `KHR_texture_transform`. `MaterialData` is the material set's uniform buffer
 at binding 9 (`"source": "material"`), filled from the material's
-`<slot>UvRow0` and `<slot>UvRow1` parameters and its sheen, specular and
-iridescence factors. The passes that read uvs take
+`<slot>UvRow0` and `<slot>UvRow1` parameters, its sheen, specular and
+iridescence factors, and its `unlit` param. The passes that read uvs take
 the `standard` vertex format, with `TEXCOORD_1` at location 7.
 
 The G-buffer, sun, spot and point shadow, and transparent passes for static

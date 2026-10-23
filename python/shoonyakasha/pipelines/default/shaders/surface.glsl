@@ -165,6 +165,19 @@ Surface evaluateSurface(vec4 baseColor) {
         s.filmThickness = mix(materialData.iridescenceThicknessMinimum, materialData.iridescenceThicknessMaximum,
                               texture(iridescenceThicknessMap, MATERIAL_UV(iridescenceThickness)).g);
     }
+
+    // Unlit (KHR_materials_unlit): the base colour is given off as it is, as
+    // emission, and nothing is reflected; the alpha stays for coverage.
+    if (materialData.unlit > 0.5) {
+        s.emissive = s.baseColor.rgb;
+        s.baseColor.rgb = vec3(0.0);
+        s.metallic = 0.0;
+        s.dielectricF0 = vec3(0.0);
+        s.specularWeight = 0.0;
+        s.clearcoat = 0.0;
+        s.sheenColor = vec3(0.0);
+        s.iridescence = 0.0;
+    }
     return s;
 }
 

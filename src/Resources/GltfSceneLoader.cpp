@@ -979,6 +979,7 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             if (uv != kIdentityUvTransform) result.uvTransforms.emplace_back(slot, uv);
         }
 
+        result.unlit = material->unlit != 0;
         result.alphaMode = extractAlphaMode(material);
         result.alphaCutoff = material->alpha_cutoff;
         result.doubleSided = material->double_sided;
@@ -1462,6 +1463,7 @@ entt::entity GltfSceneLoader::createEntity(
     }
     setSheenAndSpecular(material, primitive);
     setIridescence(material, primitive);
+    if (primitive.unlit) material.setParam("unlit", 1.0f);
 
     // Add RenderableTagComponent
     auto& tag = scene->addComponent<RenderableTagComponent>(entity);
@@ -1857,6 +1859,7 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     if (primitive.thicknessMap.isValid()) material.textures["thicknessMap"] = primitive.thicknessMap;
     setSheenAndSpecular(material, primitive);
     setIridescence(material, primitive);
+    if (primitive.unlit) material.setParam("unlit", 1.0f);
 
     // Add SkeletonComponent
     auto& skelComp = scene->addComponent<SkeletonComponent>(entity);

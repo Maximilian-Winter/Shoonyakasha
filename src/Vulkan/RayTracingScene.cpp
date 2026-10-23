@@ -495,7 +495,16 @@ PackedRayInstance RayTracingScene::packInstance(const MaterialComponentV5& mater
     row.surface = glm::vec4(material.getParam<float>("metallicFactor", 0.0f),
                             material.getParam<float>("roughnessFactor", 0.5f), material.alphaCutoff, entityBits);
     row.textures = textureSlots;
-    row.optics = glm::vec4(material.getParam<float>("transmissionFactor", 0.0f), material.getParam<float>("ior", 1.5f),
+    if (material.getParam<float>("unlit", 0.0f) > 0.5f) {
+        // KHR_materials_unlit: the base colour is the light the surface
+        // gives off, and it reflects none. The albedo keeps its alpha and
+        // texture for alpha testing.
+        row.emissive = glm::vec4(glm::vec3(row.baseColor), 0.0f);
+        row.textures.w = row.textures.x;
+        row.baseColor = glm::vec4(0.0f, 0.0f, 0.0f, row.baseColor.a);
+        row.surface.x = 0.0f;
+    }
+    row.optics =glm::vec4(material.getParam<float>("transmissionFactor", 0.0f), material.getParam<float>("ior", 1.5f),
                            material.getParam<float>("iridescenceFactor", 0.0f),
                            material.getParam<float>("iridescenceIor", 1.3f));
     float slotBits[2];
