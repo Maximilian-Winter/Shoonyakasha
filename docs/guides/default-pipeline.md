@@ -120,6 +120,7 @@ The ones most worth knowing, by symptom:
 | Corners and crevices too dark, or not dark enough | `aoIntensity`, `aoRadius` |
 | Bright highlights glow too much | `bloomIntensity` (0 turns bloom off) |
 | The sky is too detailed behind the scene | `skyBlur` |
+| The air is perfectly clear | `fogDensity` (per metre, e.g. 0.02), and for fog that lies low, `fogHeight` and `fogHeightFalloff`; `fogColor` tints it |
 | Everything is in focus, like a phone photo | `dof` 1, with `dofFocus` the distance in focus (metres) and `dofFStop` the f-number (smaller blurs more) |
 | Colours look too contrasty, or too flat | `toneMapper`: 2 AgX (the default), 1 Khronos PBR Neutral, 0 ACES |
 | Sky light too strong or too weak | `iblIntensity`; `shadowAmbient` below 1 also darkens sky light in the sun's shadow |
@@ -165,7 +166,7 @@ engine = sk.Engine(title="Mine", pipeline_json_path="my_pipeline/pipeline.json")
 - **Validation:** `sk.pipeline.check("my_pipeline/pipeline.json")` reads the JSON without starting the engine and raises on problems.
 - **Engine updates:** your copy doesn't follow changes to the default pipeline. When the engine changes it, compare the two directories to pick the changes up.
 
-**A worked example: distance fog.** A fullscreen pass after `Lighting` blends a fog colour over the lit opaque scene, more of it the farther each pixel is. It needs a shader, a buffer layout that reads the fog's parameters from `scene.custom`, a descriptor set, and the pass.
+**A worked example: distance fog.** The pipeline has height fog of its own (`fogDensity`); this simpler one shows how a pass is added. A fullscreen pass after `Lighting` blends a fog colour over the lit opaque scene, more of it the farther each pixel is. It needs a shader, a buffer layout that reads the fog's parameters from `scene.custom`, a descriptor set, and the pass.
 
 `my_pipeline/shaders/fog.frag`:
 

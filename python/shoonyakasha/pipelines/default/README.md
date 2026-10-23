@@ -104,6 +104,10 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `aoRadius` | 0.6 | World-space reach of ambient occlusion; 0 turns it off |
 | `aoIntensity` | 1.0 | Power applied to the occlusion; above 1 darkens it |
 | `toneMapper` | 2 | Tone curve: 2 AgX, which keeps mid-tones as exposed and rolls bright light off to white without shifting its hue; 1 Khronos PBR Neutral, which keeps base colours as authored, for exposures that put white at 1; 0 the ACES fit, more contrast (`set_custom_uint`) |
+| `fogDensity` | 0.0 | Height fog's density per metre at `fogHeight`; 0 is no fog |
+| `fogHeight` | 0.0 | Height in metres where the fog has `fogDensity` |
+| `fogHeightFalloff` | 0.0 | How fast the fog thins with height: by a factor e every 1/falloff metres above `fogHeight`, thickening below it; 0 is the same density everywhere |
+| `fogColor` | (1, 1, 1) | Tint of the fog's light, which is the environment's, blurred, times `iblIntensity` |
 | `dof` | 0 | Depth of field: 1 blurs what is nearer or farther than `dofFocus` |
 | `dofFocus` | 5.0 | Distance in focus, in metres |
 | `dofFStop` | 2.8 | f-number of a full-frame camera with the view's focal length; smaller blurs more |
@@ -148,6 +152,7 @@ own that it does not mention stay as you set them.
 | `Lighting` | Lights, image-based light and the sky, added onto the emission; screen-space reflections of glossy surfaces, written to `reflection` and `reflectionScale` |
 | `LightingRT` | In the `raytraced` preset, instead of `Lighting`: the same, with shadow rays towards spot and point lights instead of the shadow atlas, and a reflection ray per glossy pixel, written to `reflection` and `reflectionScale`. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `ReflectionDenoise` | The reflections `Lighting` or `LightingRT` wrote, averaged over each surface and added to the HDR target. Off in the `low` preset |
+| `HeightFog` | Exponential height fog (`fog.glsl`) blended over the opaque scene and the sky: the fog's share along each view ray, to the far plane for the sky, of the environment's blurred light. `Transparent` and `TransparentRT` fog blended surfaces the same way. Draws nothing with `fogDensity` 0 |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
 | `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with shadow rays towards the sun, spot and point lights. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |

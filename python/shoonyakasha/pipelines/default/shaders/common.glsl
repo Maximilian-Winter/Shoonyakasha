@@ -96,7 +96,11 @@ struct SceneLight {
     float reflections;          /* how much traced reflections replace the environment's, 0..1 */ \
     uint dof;                   /* depth of field: 0 off, 1 on */ \
     float dofFocus;             /* metres from the camera in focus */ \
-    float dofFStop;             /* f-number: smaller blurs more */
+    float dofFStop;             /* f-number: smaller blurs more */ \
+    float fogDensity;           /* per metre at fogHeight; 0 no fog (fog.glsl) */ \
+    float fogHeight;            /* metres */ \
+    float fogHeightFalloff;     /* per metre of height; 0 the same density everywhere */ \
+    vec3 fogColor;              /* tint of the fog's light */
 
 // ── Normals ─────────────────────────────────────────────────────
 // Octahedral encoding of a unit vector into two values in -1..1.

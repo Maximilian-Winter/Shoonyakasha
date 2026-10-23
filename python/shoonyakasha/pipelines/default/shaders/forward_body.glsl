@@ -1,6 +1,7 @@
 // forward_body.glsl - forward shading of blended materials (glTF alphaMode
-// BLEND), over the lit opaque scene. Shadows come from the cascades
-// directly: the shadow mask only covers the opaque surfaces behind.
+// BLEND), over the lit opaque scene, fogged as pass HeightFog fogs that
+// (fog.glsl). Shadows come from the cascades directly: the shadow mask only
+// covers the opaque surfaces behind.
 // forward_rt.frag builds it with RAY_TRACED_SHADOWS, for the "raytraced"
 // preset, where the cascades hold only the casters the rays do not see and
 // spot and point lights are shadowed by rays (RT_LOCAL_SHADOWS) instead of
@@ -44,6 +45,7 @@ const int SUN_RAYS = 4;   // more than the opaque pass: TAA cannot follow a blen
 #endif
 #define CLUSTERED
 #include "lights.glsl"
+#include "fog.glsl"
 
 layout(location = 0) out vec4 outColor;
 
@@ -84,5 +86,11 @@ void main() {
                               s.metallic, s.roughness, F0)
                  * settings.iblIntensity * s.occlusion * mix(settings.shadowAmbient, 1.0, sunLit)
                + s.emissive;
+    if (settings.debugView == 0u) {
+        vec3 toSurface = fragWorldPos - camera.position.xyz;
+        float distance = length(toSurface);
+        vec3 dir = toSurface / max(distance, 1e-4);
+        color = mix(color, fogLight(dir), fogAmount(camera.position.xyz, dir, distance));
+    }
     outColor = vec4(color, s.baseColor.a);
 }

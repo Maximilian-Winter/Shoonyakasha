@@ -377,6 +377,34 @@
           "type": "float",
           "source": "scene.custom.default.dofFStop",
           "default": 2.8
+        },
+        {
+          "name": "fogDensity",
+          "type": "float",
+          "source": "scene.custom.default.fogDensity",
+          "default": 0.0
+        },
+        {
+          "name": "fogHeight",
+          "type": "float",
+          "source": "scene.custom.default.fogHeight",
+          "default": 0.0
+        },
+        {
+          "name": "fogHeightFalloff",
+          "type": "float",
+          "source": "scene.custom.default.fogHeightFalloff",
+          "default": 0.0
+        },
+        {
+          "name": "fogColor",
+          "type": "vec3",
+          "source": "scene.custom.default.fogColor",
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ]
         }
       ]
     },
@@ -707,6 +735,20 @@
     }
   },
   "descriptorSetLayouts": {
+    "heightFogSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
     "dofSet": {
       "bindings": [
         {
@@ -2831,6 +2873,40 @@
       "descriptorSets": [
         "reflectionDenoiseSet",
         "cameraSet"
+      ]
+    },
+    {
+      "name": "HeightFog",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "color_blend"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/fog.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "blending": "alpha"
+      },
+      "descriptorSets": [
+        "heightFogSet",
+        "iblSet",
+        "cameraSet",
+        "settingsSet"
       ]
     },
     {
