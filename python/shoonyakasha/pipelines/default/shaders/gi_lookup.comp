@@ -4,7 +4,7 @@
 // entries and choose where they trace from), half a cell of jitter blending
 // neighbouring cells over frames under TAA. Writes giIrradiance, irradiance
 // over pi: times the diffuse albedo it is the light the surface reflects.
-// Black where the sky is or with settings.gi 0.
+// Black where the sky is, and unless settings.gi is 1.
 
 #include "gi_common.glsl"
 
@@ -21,7 +21,7 @@ void main() {
 
     vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
     float depth = textureLod(gDepth, uv, 0.0).r;
-    if (depth >= 1.0 || settings.gi == 0u) {
+    if (depth >= 1.0 || settings.gi != 1u) {
         imageStore(giIrradiance, pixel, vec4(0.0));
         return;
     }

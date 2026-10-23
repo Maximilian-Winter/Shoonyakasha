@@ -1,0 +1,60 @@
+#version 460
+// How far each half resolution pixel's history can be trusted: the
+// validation's invalidity blurred over 5 x 5 pixels, raised near surfaces
+// the camera just revealed (where the reprojection fails), and kept for a
+// while (three quarters of last frame's, reprojected). invalidityOut: x
+// that invalidity, y this frame's own.
+
+#include "rtdgi_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 3, binding = 0, r16f) uniform readonly image2D validityIn;
+layout(set = 3, binding = 1, rg16f) uniform readonly image2D invalidityHistory;
+layout(set = 3, binding = 2, rgba32f) uniform readonly image2D reproj;
+layout(set = 3, binding = 3, rgba32f) uniform readonly image2D giPosition;
+layout(set = 3, binding = 4, rg16f) uniform writeonly image2D invalidityOut;
+
+void main() {
+    if (settings.gi != 2u) return;
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 halfSize = imageSize(invalidityOut);
+    if (any(greaterThanEqual(px, halfSize))) return;
+    ivec2 fullSize = ivec2(camera.resolution);
+
+    vec2 blurred = vec2(0.0);
+    for (int y = -2; y <= 2; ++y) {
+        for (int x = -2; x <= 2; ++x) {
+            float w = exp2(-0.1 * float(x * x + y * y));
+            blurred += vec2(imageLoad(validityIn, clamp(px + ivec2(x, y), ivec2(0), halfSize - 1)).r, 1.0) * w;
+        }
+    }
+    float invalid = smoothstep(0.0, 1.0, blurred.x / blurred.y);
+
+    // Just revealed: neighbours whose surface last frame did not see.
+    float centerDepth = imageLoad(giPosition, min(px * 2, fullSize - 1)).w;
+    float edge = 1.0;
+    for (int y = 0; y <= 2 && edge > 0.0; ++y) {
+        for (int x = 1; x <= 2; ++x) {
+            ivec2 sample2 = min(px * 2 + ivec2(x, y), fullSize - 1);
+            vec4 r = imageLoad(reproj, sample2);
+            float depth = imageLoad(giPosition, sample2).w;
+            if (depthRelativeDiff(centerDepth, depth) > 0.1) { edge = 0.0; break; }
+            edge *= (r.z == 0.0 && depth != 0.0) ? 1.0 : 0.0;
+        }
+    }
+    invalid = clamp(invalid + edge, 0.0, 1.0);
+
+    vec4 r = imageLoad(reproj, min(px * 2, fullSize - 1));
+    vec2 reprojPx = vec2(px) + camera.resolution * r.xy * 0.5 + 0.5;
+    float history = 0.0;
+    float angle = float(hashPixel(px, camera.frame) >> 8) / 16777216.0 * TAU;
+    for (int i = 0; i < 8; ++i) {
+        float a = (float(i) + angle) * GOLDEN_ANGLE;
+        ivec2 tap = clamp(ivec2(reprojPx + vec2(cos(a), sin(a)) * float(i)), ivec2(0), halfSize - 1);
+        history += imageLoad(invalidityHistory, tap).x;
+    }
+    history /= 8.0;
+
+    imageStore(invalidityOut, px, vec4(max(history * 0.75, invalid), imageLoad(validityIn, px).r, 0.0, 0.0));
+}

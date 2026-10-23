@@ -19,7 +19,7 @@ IrcacheTraced ircacheTrace(IrcacheVertex entry, uint params, uint life) {
     result.direction = sampleDirection(params);
 
     rayQueryEXT query;
-    if (!traceSurface(query, entry.position, result.direction)) {
+    if (!traceSurface(query, entry.position, result.direction, RAY_FAR)) {
         result.radiance = environment(result.direction);
         return result;
     }

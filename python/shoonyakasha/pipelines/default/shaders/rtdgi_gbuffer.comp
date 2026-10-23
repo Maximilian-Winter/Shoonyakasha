@@ -1,0 +1,72 @@
+#version 460
+// What the ReSTIR GI passes read of each pixel's surface, from the G-buffer
+// (pass RtdgiGBuffer): giPosition (xyz world, w view depth; 0 and a point
+// far along the view ray where the sky is), giNormal (shading normal,
+// metallic) and giGeoNormal (the surface's geometric normal, from the
+// depths of the neighbouring pixels on the smoother side, and roughness).
+
+#include "rtdgi_common.glsl"
+
+layout(set = 3, binding = 0) uniform sampler2D gDepth;
+layout(set = 3, binding = 1) uniform sampler2D gNormal;
+layout(set = 3, binding = 2) uniform sampler2D gMaterial;
+layout(set = 3, binding = 3, rgba32f) uniform writeonly image2D giPosition;
+layout(set = 3, binding = 4, rgba16f) uniform writeonly image2D giNormal;
+layout(set = 3, binding = 5, rgba16f) uniform writeonly image2D giGeoNormal;
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// The view position at pixel `p`, or false for the sky or off screen.
+bool viewPositionAt(ivec2 p, ivec2 size, out vec3 position) {
+    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, size))) return false;
+    float depth = texelFetch(gDepth, p, 0).r;
+    if (depth >= 1.0) return false;
+    position = viewPositionFromDepth(camera.invProj, (vec2(p) + 0.5) / vec2(size), depth);
+    return true;
+}
+
+// Of the two neighbours along one axis, the step to the one nearer in depth.
+bool smootherStep(ivec2 p, ivec2 axis, ivec2 size, vec3 center, out vec3 step) {
+    vec3 a, b;
+    bool hasA = viewPositionAt(p + axis, size, a), hasB = viewPositionAt(p - axis, size, b);
+    if (!hasA && !hasB) return false;
+    if (hasA && (!hasB || abs(a.z - center.z) <= abs(b.z - center.z))) step = a - center;
+    else step = center - b;
+    return true;
+}
+
+void main() {
+    if (settings.gi != 2u) return;
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(giPosition);
+    if (any(greaterThanEqual(px, size))) return;
+
+    vec2 uv = (vec2(px) + 0.5) / vec2(size);
+    vec3 center;
+    if (!viewPositionAt(px, size, center)) {
+        vec4 target = camera.invProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+        vec3 direction = normalize((camera.invView * vec4(normalize(target.xyz / target.w), 0.0)).xyz);
+        imageStore(giPosition, px, vec4(camera.position.xyz + direction * SKY_DIST, 0.0));
+        imageStore(giNormal, px, vec4(-direction, 0.0));
+        imageStore(giGeoNormal, px, vec4(-direction, 1.0));
+        return;
+    }
+
+    vec3 N = octDecode(texelFetch(gNormal, px, 0).xy);
+    vec4 material = texelFetch(gMaterial, px, 0);   // metallic, roughness
+    vec3 worldPos = (camera.invView * vec4(center, 1.0)).xyz;
+
+    vec3 Ng = N;
+    vec3 dx, dy;
+    if (smootherStep(px, ivec2(1, 0), size, center, dx) && smootherStep(px, ivec2(0, 1), size, center, dy)) {
+        vec3 n = cross(dy, dx);
+        if (dot(n, n) > 1e-20) {
+            n = normalize(mat3(camera.invView) * n);
+            Ng = dot(n, camera.position.xyz - worldPos) < 0.0 ? -n : n;
+        }
+    }
+
+    imageStore(giPosition, px, vec4(worldPos, -center.z));
+    imageStore(giNormal, px, vec4(N, material.r));
+    imageStore(giGeoNormal, px, vec4(Ng, max(material.g, 0.045)));
+}

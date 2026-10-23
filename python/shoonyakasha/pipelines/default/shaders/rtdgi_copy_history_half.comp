@@ -1,0 +1,31 @@
+#version 460
+// This frame's half resolution results become next frame's history.
+
+#include "rtdgi_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 3, binding = 0, rgba16f) uniform readonly image2D radianceOut;
+layout(set = 3, binding = 1, rgba32f) uniform readonly image2D rayOrigOut;
+layout(set = 3, binding = 2, rgba32f) uniform readonly image2D rayOut;
+layout(set = 3, binding = 3, rg32ui) uniform readonly uimage2D reservoirOut;
+layout(set = 3, binding = 4, rgba16f) uniform readonly image2D hitNormalOut;
+layout(set = 3, binding = 5, rg16f) uniform readonly image2D invalidityOut;
+layout(set = 3, binding = 6, rgba16f) uniform writeonly image2D radianceHistory;
+layout(set = 3, binding = 7, rgba32f) uniform writeonly image2D rayOrigHistory;
+layout(set = 3, binding = 8, rgba32f) uniform writeonly image2D rayHistory;
+layout(set = 3, binding = 9, rg32ui) uniform writeonly uimage2D reservoirHistory;
+layout(set = 3, binding = 10, rgba16f) uniform writeonly image2D hitNormalHistory;
+layout(set = 3, binding = 11, rg16f) uniform writeonly image2D invalidityHistory;
+
+void main() {
+    if (settings.gi != 2u) return;
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(px, imageSize(radianceOut)))) return;
+    imageStore(radianceHistory, px, imageLoad(radianceOut, px));
+    imageStore(rayOrigHistory, px, imageLoad(rayOrigOut, px));
+    imageStore(rayHistory, px, imageLoad(rayOut, px));
+    imageStore(reservoirHistory, px, imageLoad(reservoirOut, px));
+    imageStore(hitNormalHistory, px, imageLoad(hitNormalOut, px));
+    imageStore(invalidityHistory, px, imageLoad(invalidityOut, px));
+}

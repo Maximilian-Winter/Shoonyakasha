@@ -1,0 +1,120 @@
+#version 460
+// Indirect irradiance (over pi) at full resolution, from four half
+// resolution pixels on a tiny spiral around each pixel, weighed by how
+// alike their surfaces are (normal and depth). Two sources are blended by
+// how far the light came from:
+//   - near hits (within about 40 pixels' worth of distance at the
+//     surface's depth): this frame's raw candidates, which keep contact
+//     lighting in corners;
+//   - far hits: the reservoirs' samples, times their W.
+// Each sample counts its radiance times twice the cosine to the normal (the
+// uniform hemisphere's pdf, over pi).
+
+#include "rtdgi_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 3, binding = 0, rgba16f) uniform readonly image2D radianceOut;
+layout(set = 3, binding = 1, rg32ui) uniform readonly uimage2D reservoirSpatial;
+layout(set = 3, binding = 2, rgba32f) uniform readonly image2D giPosition;
+layout(set = 3, binding = 3, rgba16f) uniform readonly image2D giNormal;
+layout(set = 3, binding = 4, rgba16f) uniform readonly image2D candRadiance;
+layout(set = 3, binding = 5, rgba32f) uniform readonly image2D candHit;
+layout(set = 3, binding = 6, rgba32f) uniform readonly image2D trHit;
+layout(set = 3, binding = 7, rgba16f) uniform writeonly image2D resolved;
+
+float ggxNdfUnnormalized(float a2, float cosTheta) {
+    float d = cosTheta * cosTheta * (a2 - 1.0) + 1.0;
+    return a2 / (d * d);
+}
+
+void main() {
+    if (settings.gi != 2u) return;
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 fullSize = ivec2(camera.resolution);
+    if (any(greaterThanEqual(px, fullSize))) return;
+    ivec2 halfSize = imageSize(radianceOut);
+
+    vec4 center = imageLoad(giPosition, px);
+    if (center.w == 0.0) {
+        imageStore(resolved, px, vec4(0.0));
+        return;
+    }
+    vec3 centerNormal = imageLoad(giNormal, px).xyz;
+    vec3 centerNormalVs = directionWorldToView(centerNormal);
+
+    uint frameHash = hash1(camera.frame);
+    float quadIndex = float((((px.x & 1) | (px.y & 1) * 2) + int(frameHash)) & 3);
+    float blue = fract(interleavedGradientNoise(vec2(px)) + r2Sequence(camera.frame % 1024u).x) * TAU;
+
+    float nearFieldEnd = center.w * 80.0 * 0.5 / camera.resolution.y;
+    float nearFieldStart = nearFieldEnd * 0.5;
+
+    vec3 total = vec3(0.0);
+    bool sharpen = false;
+    bool nearField = (RTDGI_STAGES & STAGE_NEAR_FIELD) != 0u;
+
+    // Near field: the raw candidates.
+    if (nearField) {
+        vec3 sum = vec3(0.0);
+        float wSum = 0.0;
+        for (uint i = 0u; i < 4u; ++i) {
+            float angle = (float(i) + blue) * GOLDEN_ANGLE + quadIndex / 4.0 * TAU;
+            float radius = pow(float(i), 0.666) + 0.4;
+            ivec2 rpx = clamp(ivec2(floor(vec2(px) * 0.5 + vec2(cos(angle), sin(angle)) * radius)),
+                              ivec2(0), halfSize - 1);
+            ivec2 rpxHi = min(hiPixel(rpx), fullSize - 1);
+            vec4 neighbor = imageLoad(giPosition, rpxHi);
+            vec3 hit = imageLoad(candHit, rpx).xyz + neighbor.xyz;
+            vec3 offset = hit - center.xyz;
+            float dist = length(offset);
+            vec3 dir = offset / max(dist, 1e-8);
+            float geometric = 2.0 * max(0.0, dot(centerNormal, dir));
+            float atten = smoothstep(nearFieldEnd, nearFieldStart, dist);
+            sharpen = sharpen || atten > 0.9;
+            vec3 contribution = imageLoad(candRadiance, rpx).rgb * geometric * atten;
+
+            vec3 sampleNormalVs = directionWorldToView(imageLoad(giNormal, rpxHi).xyz);
+            float w = ggxNdfUnnormalized(0.01, clamp(dot(centerNormalVs, sampleNormalVs), 0.0, 1.0));
+            w *= exp2(-200.0 * abs(centerNormalVs.z * (neighbor.w / center.w - 1.0)));
+            sum += contribution * w;
+            wSum += w;
+        }
+        total += sum / max(1e-20, wSum);
+    }
+
+    // Far field: the reservoirs.
+    {
+        vec3 sum = vec3(0.0);
+        float wSum = 0.0;
+        float kernelScale = sharpen ? 0.5 : 1.0;
+        for (uint i = 0u; i < 4u; ++i) {
+            float angle = (float(i) + blue) * GOLDEN_ANGLE + quadIndex / 4.0 * TAU;
+            float radius = (pow(float(i), 0.666) + 0.4) * kernelScale;
+            ivec2 rpx = clamp(ivec2(floor(vec2(px) * 0.5 + vec2(cos(angle), sin(angle)) * radius)),
+                              ivec2(0), halfSize - 1);
+            Reservoir r = reservoirFromRaw(imageLoad(reservoirSpatial, rpx).xy);
+            ivec2 spx = clamp(payloadPixel(r.payload), ivec2(0), halfSize - 1);
+
+            vec3 hit = imageLoad(trHit, spx).xyz;
+            vec3 offset = hit - center.xyz;
+            float dist = length(offset);
+            vec3 dir = offset / max(dist, 1e-8);
+            float geometric = 2.0 * max(0.0, dot(centerNormal, dir));
+            vec3 radiance = imageLoad(radianceOut, spx).rgb;
+            if (nearField) radiance *= smoothstep(nearFieldStart, nearFieldEnd, dist);
+            vec3 contribution = radiance * geometric * r.W;
+
+            ivec2 rpxHi = min(hiPixel(rpx), fullSize - 1);
+            float rpxDepth = imageLoad(giPosition, rpxHi).w;
+            vec3 sampleNormalVs = directionWorldToView(imageLoad(giNormal, min(hiPixel(spx), fullSize - 1)).xyz);
+            float w = ggxNdfUnnormalized(0.01, clamp(dot(centerNormalVs, sampleNormalVs), 0.0, 1.0));
+            w *= exp2(-200.0 * abs(centerNormalVs.z * (rpxDepth / center.w - 1.0)));
+            sum += contribution * w;
+            wSum += w;
+        }
+        total += sum / max(1e-20, wSum);
+    }
+
+    imageStore(resolved, px, vec4(total, 1.0));
+}

@@ -47,11 +47,11 @@ bool visible(vec3 origin, vec3 direction, float distance) {
     return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
 }
 
-// The nearest surface along a ray, committed in `query`, alpha-tested
-// surfaces counting where their alpha passes. False when the ray leaves the
-// scene.
-bool traceSurface(rayQueryEXT query, vec3 origin, vec3 direction) {
-    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0xFF, origin, 0.0, direction, RAY_FAR);
+// The nearest surface along a ray up to `tMax`, committed in `query`,
+// alpha-tested surfaces counting where their alpha passes. False when the
+// ray reaches nothing.
+bool traceSurface(rayQueryEXT query, vec3 origin, vec3 direction, float tMax) {
+    rayQueryInitializeEXT(query, scene, gl_RayFlagsNoneEXT, 0xFF, origin, 0.0, direction, tMax);
     while (rayQueryProceedEXT(query)) {
         if (skAlphaTestCandidate(query)) rayQueryConfirmIntersectionEXT(query);
     }

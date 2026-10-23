@@ -401,7 +401,8 @@ TEST(ShippedPipelines, DefaultPipelineBufferBarriersGuardOnlyTheClusterListsAndT
     // (ClusterLightCount, ClusterLightIndices) and the irradiance cache's:
     // each step of building the lists waits for the one before, and Lighting
     // for the last at the fragment shader; each cache pass, and GiLookup,
-    // which allocates entries, for the cache passes before. Transparent, an
+    // which allocates entries, for the cache passes before; each ReSTIR GI
+    // pass, whose shader declares the cache's buffers, too. Transparent, an
     // entity pass taken to read any buffer, waits again for its vertex
     // stages; TransparentRT after it needs nothing more. Every other compute
     // pass writes images, which image barriers cover.
@@ -410,7 +411,11 @@ TEST(ShippedPipelines, DefaultPipelineBufferBarriersGuardOnlyTheClusterListsAndT
                                         "Transparent", "IrcacheInit", "IrcacheCascades", "IrcacheScroll",
                                         "IrcacheCopyGrid", "IrcacheAgeArgs", "IrcacheAge", "IrcacheTraceArgs",
                                         "IrcacheReset", "IrcacheAccessibility", "IrcacheValidate", "IrcacheTrace",
-                                        "IrcacheSum", "GiLookup"};
+                                        "IrcacheSum", "GiLookup", "RtdgiGBuffer", "RtdgiReproject",
+                                        "RtdgiHistoryReproject", "RtdgiValidate", "RtdgiTrace", "RtdgiValidity",
+                                        "RestirTemporal", "RestirSpatial0", "RestirSpatial1", "RestirResolve",
+                                        "RtdgiTemporalFilter", "RtdgiSpatialFilter", "RtdgiCopyHistoryHalf",
+                                        "RtdgiCopyHistoryFull"};
     for (uint32_t pi : p.order) {
         const std::string& name = p.builder.getPassDeclarations()[pi].name;
         EXPECT_EQ(p.memory[pi].empty(), guarded.count(name) == 0) << name;

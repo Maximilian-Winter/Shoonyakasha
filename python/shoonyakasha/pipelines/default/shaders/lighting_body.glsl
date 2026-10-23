@@ -7,15 +7,17 @@
 // preset). lighting.frag defines SS_REFLECTIONS, reflections marched through
 // the depth buffer. Either writes them to two more targets, which
 // reflection_denoise.frag filters and adds to the HDR target. lighting_rt.frag
-// also defines GI: with settings.gi, the diffuse ambient light is the
-// irradiance cache's (giIrradiance, pass GiLookup) instead of the
+// also defines GI: with settings.gi 1, the diffuse ambient light is the
+// irradiance cache's (giIrradiance, pass GiLookup), with 2 ReSTIR GI's
+// (giIndirect, pass RtdgiSpatialFilter), instead of the
 // environment's.
 
 #include "common.glsl"
 #include "sk/pbr.glsl"
 
 #ifdef GI
-layout(set = 7, binding = 0) uniform sampler2D giIrradiance;   // irradiance over pi
+layout(set = 7, binding = 0) uniform sampler2D giIrradiance;   // irradiance over pi, gi 1
+layout(set = 7, binding = 1) uniform sampler2D giIndirect;     // irradiance over pi, gi 2
 #endif
 
 layout(set = 0, binding = 0) uniform sampler2D gAlbedo;
@@ -301,7 +303,8 @@ void main() {
     float diffuseScale = iblScale;
 #ifdef GI
     if (settings.gi != 0u) {
-        ambientIrradianceOverride = textureLod(giIrradiance, fragTexCoord, 0.0).rgb;
+        ambientIrradianceOverride = settings.gi == 2u ? textureLod(giIndirect, fragTexCoord, 0.0).rgb
+                                                      : textureLod(giIrradiance, fragTexCoord, 0.0).rgb;
         diffuseScale = 1.0;
     }
 #endif

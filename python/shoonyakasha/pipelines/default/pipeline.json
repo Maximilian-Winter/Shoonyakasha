@@ -1262,6 +1262,1020 @@
     }
   },
   "descriptorSetLayouts": {
+    "rtdgiHistoryReprojectImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "prevDepth",
+          "autoBindResource": "prevDepth"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giHistory",
+          "autoBindResource": "giHistory"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reprojectedGi",
+          "autoBindResource": "reprojectedGi"
+        }
+      ]
+    },
+    "rtdgiValidateImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reprojectedGi",
+          "autoBindResource": "reprojectedGi"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirHistory",
+          "autoBindResource": "reservoirHistory"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceHistory",
+          "autoBindResource": "radianceHistory"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigHistory",
+          "autoBindResource": "rayOrigHistory"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayHistory",
+          "autoBindResource": "rayHistory"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "validityPre",
+          "autoBindResource": "validityPre"
+        }
+      ]
+    },
+    "rtdgiTraceImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reprojectedGi",
+          "autoBindResource": "reprojectedGi"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giNormal",
+          "autoBindResource": "giNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giGeoNormal",
+          "autoBindResource": "giGeoNormal"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "validityPre",
+          "autoBindResource": "validityPre"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candRadiance",
+          "autoBindResource": "candRadiance"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candHit",
+          "autoBindResource": "candHit"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candNormal",
+          "autoBindResource": "candNormal"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "validityIn",
+          "autoBindResource": "validityIn"
+        }
+      ]
+    },
+    "rtdgiValidityImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "validityIn",
+          "autoBindResource": "validityIn"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityHistory",
+          "autoBindResource": "invalidityHistory"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityOut",
+          "autoBindResource": "invalidityOut"
+        }
+      ]
+    },
+    "restirTemporalImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giNormal",
+          "autoBindResource": "giNormal"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candRadiance",
+          "autoBindResource": "candRadiance"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candHit",
+          "autoBindResource": "candHit"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candNormal",
+          "autoBindResource": "candNormal"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceHistory",
+          "autoBindResource": "radianceHistory"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigHistory",
+          "autoBindResource": "rayOrigHistory"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayHistory",
+          "autoBindResource": "rayHistory"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirHistory",
+          "autoBindResource": "reservoirHistory"
+        },
+        {
+          "binding": 10,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "hitNormalHistory",
+          "autoBindResource": "hitNormalHistory"
+        },
+        {
+          "binding": 11,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityOut",
+          "autoBindResource": "invalidityOut"
+        },
+        {
+          "binding": 12,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceOut",
+          "autoBindResource": "radianceOut"
+        },
+        {
+          "binding": 13,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigOut",
+          "autoBindResource": "rayOrigOut"
+        },
+        {
+          "binding": 14,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOut",
+          "autoBindResource": "rayOut"
+        },
+        {
+          "binding": 15,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "hitNormalOut",
+          "autoBindResource": "hitNormalOut"
+        },
+        {
+          "binding": 16,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirOut",
+          "autoBindResource": "reservoirOut"
+        },
+        {
+          "binding": 17,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trHit",
+          "autoBindResource": "trHit"
+        },
+        {
+          "binding": 18,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trNormal",
+          "autoBindResource": "trNormal"
+        },
+        {
+          "binding": 19,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giGeoNormal",
+          "autoBindResource": "giGeoNormal"
+        }
+      ]
+    },
+    "restirSpatial0Images": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirOut",
+          "autoBindResource": "reservoirOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giNormal",
+          "autoBindResource": "giNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trHit",
+          "autoBindResource": "trHit"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trNormal",
+          "autoBindResource": "trNormal"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "spatialA",
+          "autoBindResource": "spatialA"
+        }
+      ]
+    },
+    "restirSpatial1Images": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "spatialA",
+          "autoBindResource": "spatialA"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giNormal",
+          "autoBindResource": "giNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trHit",
+          "autoBindResource": "trHit"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trNormal",
+          "autoBindResource": "trNormal"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "spatialB",
+          "autoBindResource": "spatialB"
+        }
+      ]
+    },
+    "restirResolveImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceOut",
+          "autoBindResource": "radianceOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "spatialB",
+          "autoBindResource": "spatialB"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giNormal",
+          "autoBindResource": "giNormal"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candRadiance",
+          "autoBindResource": "candRadiance"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "candHit",
+          "autoBindResource": "candHit"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "trHit",
+          "autoBindResource": "trHit"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "resolved",
+          "autoBindResource": "resolved"
+        }
+      ]
+    },
+    "rtdgiTemporalFilterImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "resolved",
+          "autoBindResource": "resolved"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reprojectedGi",
+          "autoBindResource": "reprojectedGi"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "varianceHistory",
+          "autoBindResource": "varianceHistory"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityOut",
+          "autoBindResource": "invalidityOut"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "temporalOut",
+          "autoBindResource": "temporalOut"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giHistoryOut",
+          "autoBindResource": "giHistoryOut"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "varianceOut",
+          "autoBindResource": "varianceOut"
+        }
+      ]
+    },
+    "rtdgiSpatialFilterImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "temporalOut",
+          "autoBindResource": "temporalOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giGeoNormal",
+          "autoBindResource": "giGeoNormal"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giIndirect",
+          "autoBindResource": "giIndirect"
+        }
+      ]
+    },
+    "rtdgiCopyHistoryHalfImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceOut",
+          "autoBindResource": "radianceOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigOut",
+          "autoBindResource": "rayOrigOut"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOut",
+          "autoBindResource": "rayOut"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirOut",
+          "autoBindResource": "reservoirOut"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "hitNormalOut",
+          "autoBindResource": "hitNormalOut"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityOut",
+          "autoBindResource": "invalidityOut"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "radianceHistory",
+          "autoBindResource": "radianceHistory"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayOrigHistory",
+          "autoBindResource": "rayOrigHistory"
+        },
+        {
+          "binding": 8,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "rayHistory",
+          "autoBindResource": "rayHistory"
+        },
+        {
+          "binding": 9,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reservoirHistory",
+          "autoBindResource": "reservoirHistory"
+        },
+        {
+          "binding": 10,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "hitNormalHistory",
+          "autoBindResource": "hitNormalHistory"
+        },
+        {
+          "binding": 11,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "invalidityHistory",
+          "autoBindResource": "invalidityHistory"
+        }
+      ]
+    },
+    "rtdgiCopyHistoryFullImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giHistoryOut",
+          "autoBindResource": "giHistoryOut"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "varianceOut",
+          "autoBindResource": "varianceOut"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giHistory",
+          "autoBindResource": "giHistory"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "varianceHistory",
+          "autoBindResource": "varianceHistory"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "prevDepth",
+          "autoBindResource": "prevDepth"
+        }
+      ]
+    },
+    "rtdgiGBufferImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "gMaterial",
+          "autoBindResource": "gMaterial",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giNormal",
+          "autoBindResource": "giNormal"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giGeoNormal",
+          "autoBindResource": "giGeoNormal"
+        }
+      ]
+    },
+    "rtdgiReprojectImages": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giPosition",
+          "autoBindResource": "giPosition"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "prevDepth",
+          "autoBindResource": "prevDepth"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "gVelocity",
+          "autoBindResource": "gVelocity",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "reproj",
+          "autoBindResource": "reproj"
+        }
+      ]
+    },
     "ircacheSet": {
       "bindings": [
         {
@@ -1435,6 +2449,16 @@
           ],
           "name": "giIrradiance",
           "autoBindResource": "giIrradiance",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "giIndirect",
+          "autoBindResource": "giIndirect",
           "autoBindSampler": "nearestClamp"
         }
       ]
@@ -2499,6 +3523,320 @@
       "kind": "image",
       "image": {
         "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "giPosition",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "giNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "giGeoNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "reproj",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "prevDepth",
+      "kind": "image",
+      "image": {
+        "format": "R32_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "giHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "varianceHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "reprojectedGi",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "resolved",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "temporalOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "giHistoryOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "varianceOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "giIndirect",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "radianceHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rayOrigHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "rayHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "reservoirHistory",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "hitNormalHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "invalidityHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "persistent": true
+      }
+    },
+    {
+      "name": "candRadiance",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "candHit",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "candNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "validityPre",
+      "kind": "image",
+      "image": {
+        "format": "R16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "validityIn",
+      "kind": "image",
+      "image": {
+        "format": "R16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "invalidityOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "radianceOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "rayOrigOut",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "rayOut",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "hitNormalOut",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "reservoirOut",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "trHit",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "trNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "spatialA",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "transient": true
+      }
+    },
+    {
+      "name": "spatialB",
+      "kind": "image",
+      "image": {
+        "format": "R32G32_UINT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
         "transient": true
       }
     },
@@ -3817,6 +5155,1028 @@
       ]
     },
     {
+      "name": "RtdgiGBuffer",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "giPosition",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "giPosition",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giGeoNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_gbuffer.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "rtdgiGBufferImages"
+      ]
+    },
+    {
+      "name": "RtdgiReproject",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "giPosition",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "giPosition",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "prevDepth",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "gVelocity",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_reproject.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "rtdgiReprojectImages"
+      ]
+    },
+    {
+      "name": "RtdgiHistoryReproject",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "reproj",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "reproj",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "prevDepth",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "reprojectedGi",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_history_reproject.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "rtdgiHistoryReprojectImages"
+      ]
+    },
+    {
+      "name": "RtdgiValidate",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery",
+        "bindlessTextures"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "reservoirHistory",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "reservoirHistory",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reprojectedGi",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "reservoirHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "radianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "validityPre",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_validate.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "lightsComputeSet",
+        "rayTracingSceneSet",
+        "iblSet",
+        "rtdgiValidateImages"
+      ]
+    },
+    {
+      "name": "RtdgiTrace",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery",
+        "bindlessTextures"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "validityPre",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "validityPre",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reprojectedGi",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giGeoNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "validityPre",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "candRadiance",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "validityIn",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_trace.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "lightsComputeSet",
+        "rayTracingSceneSet",
+        "iblSet",
+        "rtdgiTraceImages"
+      ]
+    },
+    {
+      "name": "RtdgiValidity",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "validityIn",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "validityIn",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "validityIn",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "invalidityOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_validity.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "rtdgiValidityImages"
+      ]
+    },
+    {
+      "name": "RestirTemporal",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "candRadiance",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "candRadiance",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candRadiance",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "radianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reservoirHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "hitNormalHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giGeoNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "radianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "hitNormalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reservoirOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/restir_temporal.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "restirTemporalImages"
+      ]
+    },
+    {
+      "name": "RestirSpatial0",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "reservoirOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "reservoirOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "reservoirOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "spatialA",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/restir_spatial0.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "restirSpatial0Images"
+      ]
+    },
+    {
+      "name": "RestirSpatial1",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "spatialA",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "spatialA",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "spatialA",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "spatialB",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/restir_spatial1.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "restirSpatial1Images"
+      ]
+    },
+    {
+      "name": "RestirResolve",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "giPosition",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "giPosition",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "radianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "spatialB",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giNormal",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candRadiance",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "candHit",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "trHit",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "resolved",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/restir_resolve.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "restirResolveImages"
+      ]
+    },
+    {
+      "name": "RtdgiTemporalFilter",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "resolved",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "resolved",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "resolved",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reprojectedGi",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "varianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reproj",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "temporalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giHistoryOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "varianceOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_temporal_filter.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "rtdgiTemporalFilterImages"
+      ]
+    },
+    {
+      "name": "RtdgiSpatialFilter",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "temporalOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "temporalOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "temporalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giGeoNormal",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "giIndirect",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_spatial_filter.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "rtdgiSpatialFilterImages"
+      ]
+    },
+    {
+      "name": "RtdgiCopyHistoryHalf",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "radianceOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "radianceOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "radianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reservoirOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "hitNormalOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityOut",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "radianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayOrigHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "rayHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "reservoirHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "hitNormalHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "invalidityHistory",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_copy_history_half.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "rtdgiCopyHistoryHalfImages"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "RtdgiCopyHistoryFull",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "giHistoryOut",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "giHistoryOut",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "giHistoryOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "varianceOut",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "giPosition",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "giHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "varianceHistory",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "prevDepth",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/rtdgi_copy_history_full.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "rtdgiCopyHistoryFullImages"
+      ],
+      "hasSideEffects": true
+    },
+    {
       "name": "LightClusterReset",
       "type": "compute",
       "hasSideEffects": true,
@@ -4226,6 +6586,10 @@
         },
         {
           "resource": "giIrradiance",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "giIndirect",
           "usage": "shader_read"
         }
       ],
@@ -4992,6 +7356,20 @@
   "presets": {
     "low": {
       "passes": {
+        "RtdgiGBuffer": false,
+        "RtdgiReproject": false,
+        "RtdgiHistoryReproject": false,
+        "RtdgiValidate": false,
+        "RtdgiTrace": false,
+        "RtdgiValidity": false,
+        "RestirTemporal": false,
+        "RestirSpatial0": false,
+        "RestirSpatial1": false,
+        "RestirResolve": false,
+        "RtdgiTemporalFilter": false,
+        "RtdgiSpatialFilter": false,
+        "RtdgiCopyHistoryHalf": false,
+        "RtdgiCopyHistoryFull": false,
         "IrcacheInit": false,
         "IrcacheCascades": false,
         "IrcacheScroll": false,
@@ -5035,6 +7413,20 @@
     },
     "medium": {
       "passes": {
+        "RtdgiGBuffer": false,
+        "RtdgiReproject": false,
+        "RtdgiHistoryReproject": false,
+        "RtdgiValidate": false,
+        "RtdgiTrace": false,
+        "RtdgiValidity": false,
+        "RestirTemporal": false,
+        "RestirSpatial0": false,
+        "RestirSpatial1": false,
+        "RestirResolve": false,
+        "RtdgiTemporalFilter": false,
+        "RtdgiSpatialFilter": false,
+        "RtdgiCopyHistoryHalf": false,
+        "RtdgiCopyHistoryFull": false,
         "IrcacheInit": false,
         "IrcacheCascades": false,
         "IrcacheScroll": false,
@@ -5078,6 +7470,20 @@
     },
     "high": {
       "passes": {
+        "RtdgiGBuffer": false,
+        "RtdgiReproject": false,
+        "RtdgiHistoryReproject": false,
+        "RtdgiValidate": false,
+        "RtdgiTrace": false,
+        "RtdgiValidity": false,
+        "RestirTemporal": false,
+        "RestirSpatial0": false,
+        "RestirSpatial1": false,
+        "RestirResolve": false,
+        "RtdgiTemporalFilter": false,
+        "RtdgiSpatialFilter": false,
+        "RtdgiCopyHistoryHalf": false,
+        "RtdgiCopyHistoryFull": false,
         "IrcacheInit": false,
         "IrcacheCascades": false,
         "IrcacheScroll": false,
@@ -5121,6 +7527,20 @@
     },
     "raytraced": {
       "passes": {
+        "RtdgiGBuffer": true,
+        "RtdgiReproject": true,
+        "RtdgiHistoryReproject": true,
+        "RtdgiValidate": true,
+        "RtdgiTrace": true,
+        "RtdgiValidity": true,
+        "RestirTemporal": true,
+        "RestirSpatial0": true,
+        "RestirSpatial1": true,
+        "RestirResolve": true,
+        "RtdgiTemporalFilter": true,
+        "RtdgiSpatialFilter": true,
+        "RtdgiCopyHistoryHalf": true,
+        "RtdgiCopyHistoryFull": true,
         "IrcacheInit": true,
         "IrcacheCascades": true,
         "IrcacheScroll": true,
