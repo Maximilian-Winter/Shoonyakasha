@@ -47,7 +47,15 @@ const int SUN_RAYS = 4;   // more than the opaque pass: TAA cannot follow a blen
 #include "lights.glsl"
 #include "fog.glsl"
 
-layout(location = 0) out vec4 outColor;
+layout(location = 0) out vec4 outColor;      // alpha-blended over the HDR target
+// With settings.oit, weighted blended order-independent transparency
+// (McGuire and Bavoil 2013) instead: outColor leaves the HDR target as it is,
+// transparentAccum adds the surface's premultiplied colour and coverage times
+// a weight that falls with distance, transparentReveal multiplies by what the
+// surface lets through, and pass TransparentComposite (transparent_composite
+// .frag) blends the weighted average over the scene.
+layout(location = 1) out vec4 outAccum;
+layout(location = 2) out vec4 outReveal;
 
 void main() {
     Surface s = evaluateSurface(surfaceBaseColor());
@@ -92,5 +100,17 @@ void main() {
         vec3 dir = toSurface / max(distance, 1e-4);
         color = mix(color, fogLight(dir), fogAmount(camera.position.xyz, dir, distance));
     }
-    outColor = vec4(color, s.baseColor.a);
+    float alpha = s.baseColor.a;
+    if (settings.oit != 0u) {
+        // McGuire and Bavoil's equation 10: nearer surfaces weigh more.
+        float weight = alpha * clamp(10.0 / (1e-5 + pow(viewDepth / 10.0, 3.0) + pow(viewDepth / 200.0, 6.0)),
+                                     1e-2, 3e3);
+        outColor = vec4(0.0);
+        outAccum = vec4(color * alpha, alpha) * weight;
+        outReveal = vec4(alpha);
+    } else {
+        outColor = vec4(color, alpha);
+        outAccum = vec4(0.0);
+        outReveal = vec4(0.0);
+    }
 }

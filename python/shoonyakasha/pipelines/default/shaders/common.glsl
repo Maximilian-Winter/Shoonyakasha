@@ -101,7 +101,8 @@ struct SceneLight {
     float fogHeight;            /* metres */ \
     float fogHeightFalloff;     /* per metre of height; 0 the same density everywhere */ \
     vec3 fogColor;              /* tint of the fog's light */ \
-    float motionBlur;           /* shutter: share of the frame it is open; 0 no motion blur */
+    float motionBlur;           /* shutter: share of the frame it is open; 0 no motion blur */ \
+    uint oit;                   /* 1: order-independent transparency (forward_body.glsl) */
 
 // ── Normals ─────────────────────────────────────────────────────
 // Octahedral encoding of a unit vector into two values in -1..1.

@@ -121,6 +121,7 @@ The ones most worth knowing, by symptom:
 | Bright highlights glow too much | `bloomIntensity` (0 turns bloom off) |
 | The sky is too detailed behind the scene | `skyBlur` |
 | The air is perfectly clear | `fogDensity` (per metre, e.g. 0.02), and for fog that lies low, `fogHeight` and `fogHeightFalloff`; `fogColor` tints it |
+| Overlapping or intersecting glass pops as the camera moves | `oit` 1: order-independent transparency, which does not depend on sorting |
 | Fast motion looks choppy | `motionBlur`: the share of each frame the shutter is open, e.g. 0.5 |
 | Everything is in focus, like a phone photo | `dof` 1, with `dofFocus` the distance in focus (metres) and `dofFStop` the f-number (smaller blurs more) |
 | Colours look too contrasty, or too flat | `toneMapper`: 2 AgX (the default), 1 Khronos PBR Neutral, 0 ACES |

@@ -108,6 +108,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `fogHeight` | 0.0 | Height in metres where the fog has `fogDensity` |
 | `fogHeightFalloff` | 0.0 | How fast the fog thins with height: by a factor e every 1/falloff metres above `fogHeight`, thickening below it; 0 is the same density everywhere |
 | `fogColor` | (1, 1, 1) | Tint of the fog's light, which is the environment's, blurred, times `iblIntensity` |
+| `oit` | 0 | 1: blended materials use weighted blended order-independent transparency, whose result does not depend on draw order but is an approximation; 0: they are sorted back to front and blended in turn |
 | `motionBlur` | 0.0 | Motion blur: the share of each frame the shutter is open, 0 to 1 (0.5 is a film camera's 180 degree shutter); 0 is none |
 | `dof` | 0 | Depth of field: 1 blurs what is nearer or farther than `dofFocus` |
 | `dofFocus` | 5.0 | Distance in focus, in metres |
@@ -154,8 +155,9 @@ own that it does not mention stay as you set them.
 | `LightingRT` | In the `raytraced` preset, instead of `Lighting`: the same, with shadow rays towards spot and point lights instead of the shadow atlas, and a reflection ray per glossy pixel, written to `reflection` and `reflectionScale`. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `ReflectionDenoise` | The reflections `Lighting` or `LightingRT` wrote, averaged over each surface and added to the HDR target. Off in the `low` preset |
 | `HeightFog` | Exponential height fog (`fog.glsl`) blended over the opaque scene and the sky: the fog's share along each view ray, to the far plane for the sky, of the environment's blurred light. `Transparent` and `TransparentRT` fog blended surfaces the same way. Draws nothing with `fogDensity` 0 |
-| `Transparent` | Blended materials, back to front, sampling the cascades directly |
+| `Transparent` | Blended materials, back to front, sampling the cascades directly. With `oit` 1 they go to `transparentAccum` and `transparentReveal` instead (weighted blended order-independent transparency): it clears both, and `TransparentRT` adds to them |
 | `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with shadow rays towards the sun, spot and point lights. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
+| `TransparentComposite` | With `oit` 1: the transparent surfaces' weighted average colour (`transparentAccum`) alpha-blended over the HDR target by their combined coverage (1 - `transparentReveal`). Draws nothing where none was accumulated |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |
 | `MotionBlur` | `taaColor` smeared along each pixel's motion (`gVelocity`; for the sky, the camera's turn) over the open shutter (`motionBlur`), 16 samples across it, at most 5% of the image width, into `motionColor`; samples nearer the camera count only where their own blur reaches the pixel. With `motionBlur` 0 or a debug view, a copy |
 | `DepthOfField` | `motionColor` blurred by distance from the focus, as a full-frame camera with the view's focal length would (a single-pass gather on a golden-angle spiral, out to 2% of the image height), into `sceneColor`, which bloom and the tone mapping read; with `dof` 0 or a debug view, a copy |

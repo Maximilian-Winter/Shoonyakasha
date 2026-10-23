@@ -411,6 +411,12 @@
           "type": "float",
           "source": "scene.custom.default.motionBlur",
           "default": 0.0
+        },
+        {
+          "name": "oit",
+          "type": "uint",
+          "source": "scene.custom.default.oit",
+          "default": 0
         }
       ]
     },
@@ -741,6 +747,30 @@
     }
   },
   "descriptorSetLayouts": {
+    "transparentCompositeSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "transparentAccum",
+          "autoBindResource": "transparentAccum",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "transparentReveal",
+          "autoBindResource": "transparentReveal",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
     "motionBlurSet": {
       "bindings": [
         {
@@ -1644,6 +1674,22 @@
       "kind": "image",
       "image": {
         "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "transparentAccum",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "transparentReveal",
+      "kind": "image",
+      "image": {
+        "format": "R16_SFLOAT",
         "transient": true
       }
     },
@@ -2990,6 +3036,36 @@
           "usage": "color_blend"
         },
         {
+          "resource": "transparentAccum",
+          "usage": "color_blend",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "blending": "custom",
+          "srcColorFactor": "one",
+          "dstColorFactor": "one",
+          "srcAlphaFactor": "one",
+          "dstAlphaFactor": "one"
+        },
+        {
+          "resource": "transparentReveal",
+          "usage": "color_blend",
+          "clear": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "blending": "custom",
+          "srcColorFactor": "zero",
+          "dstColorFactor": "one_minus_src_color",
+          "srcAlphaFactor": "zero",
+          "dstAlphaFactor": "one_minus_src_alpha"
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_read"
         }
@@ -3060,6 +3136,24 @@
           "usage": "color_blend"
         },
         {
+          "resource": "transparentAccum",
+          "usage": "color_blend",
+          "blending": "custom",
+          "srcColorFactor": "one",
+          "dstColorFactor": "one",
+          "srcAlphaFactor": "one",
+          "dstAlphaFactor": "one"
+        },
+        {
+          "resource": "transparentReveal",
+          "usage": "color_blend",
+          "blending": "custom",
+          "srcColorFactor": "zero",
+          "dstColorFactor": "one_minus_src_color",
+          "srcAlphaFactor": "zero",
+          "dstAlphaFactor": "one_minus_src_alpha"
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_read"
         }
@@ -3091,6 +3185,41 @@
           "offset": 0,
           "size": 200
         }
+      ]
+    },
+    {
+      "name": "TransparentComposite",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "transparentAccum",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "transparentReveal",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "color_blend"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/transparent_composite.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "blending": "alpha"
+      },
+      "descriptorSets": [
+        "transparentCompositeSet"
       ]
     },
     {
