@@ -1,9 +1,9 @@
 #version 460
 // glslc: --target-env=vulkan1.2
-// Poses a skinned mesh for ray tracing: reads its skinned vertices (80
-// bytes: position, normal, uv, joints, weights, tangent) and bone matrices,
-// and writes standard vertices (60 bytes: position, colour, uv, normal,
-// tangent) in mesh space, which the engine's acceleration structure and
+// Poses a skinned mesh for ray tracing: reads its skinned vertices (88
+// bytes: position, normal, uv, joints, weights, tangent, uv1) and bone matrices,
+// and writes standard vertices (68 bytes: position, colour, uv, normal,
+// tangent, uv1) in mesh space, which the engine's acceleration structure and
 // rayInstances rows read. RayTracingScene dispatches it, one thread per
 // vertex; everything comes through buffer device addresses.
 
@@ -23,8 +23,8 @@ layout(push_constant) uniform Push {
     uint vertexCount;
 } push;
 
-const uint SKINNED_WORDS = 20u;   // SkinnedVertex
-const uint POSED_WORDS = 15u;     // Vertex
+const uint SKINNED_WORDS = 22u;   // SkinnedVertex
+const uint POSED_WORDS = 17u;     // Vertex
 
 vec3 readVec3(SkinnedWords w, uint at) {
     return vec3(uintBitsToFloat(w.v[at]), uintBitsToFloat(w.v[at + 1u]), uintBitsToFloat(w.v[at + 2u]));
@@ -63,4 +63,6 @@ void main() {
     posed.v[o + 6u] = uv.x;  posed.v[o + 7u] = uv.y;
     posed.v[o + 8u] = n.x;   posed.v[o + 9u] = n.y;   posed.v[o + 10u] = n.z;
     posed.v[o + 11u] = t.x;  posed.v[o + 12u] = t.y;  posed.v[o + 13u] = t.z;  posed.v[o + 14u] = side;
+    posed.v[o + 15u] = uintBitsToFloat(source.v[s + 20u]);
+    posed.v[o + 16u] = uintBitsToFloat(source.v[s + 21u]);
 }

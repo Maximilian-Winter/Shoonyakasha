@@ -395,6 +395,14 @@ void RenderGraph::createDotPathUBOs(uint32_t maxFramesInFlight) {
         // setBufferData, unless the application registered a buffer of its own
         if (layout.usage != BufferUsageType::UniformBuffer) continue;
         if (!layout.usesDotPathSources() && m_registeredUBOs.count(name) && !m_dotPathUBOs.count(name)) continue;
+        // Material buffers are filled per material, when their sets are made.
+        const auto& setLayouts = m_builder.getDescriptorSetLayouts();
+        const bool materialBuffer = std::any_of(setLayouts.begin(), setLayouts.end(), [&name](const auto& set) {
+            return std::any_of(set.bindings.begin(), set.bindings.end(), [&name](const auto& binding) {
+                return binding.source == "material" && binding.name == name;
+            });
+        });
+        if (materialBuffer) continue;
         if (layout.totalSize == 0) continue;
 
         m_logger->log(LogLevel::Info, "Creating dot-path UBO '%s' (%u bytes, %s)",
@@ -2830,6 +2838,27 @@ void RenderGraph::destroyMaterialDescriptorPools() {
     m_descriptorSetPools.clear();
     m_materialDescriptorCache.clear();
     m_materialTextureSets.clear();
+    m_materialBufferChunks.clear();
+}
+
+std::pair<VkBuffer, VkDeviceSize> RenderGraph::storeMaterialBuffer(const void* data, VkDeviceSize size) {
+    constexpr VkDeviceSize kChunkSize = 64 * 1024;
+    const VkDeviceSize alignment = std::max<VkDeviceSize>(m_device.getLimits().minUniformBufferOffsetAlignment, 16);
+    if (m_materialBufferChunks.empty() ||
+        (m_materialBufferChunks.back().used + alignment - 1) / alignment * alignment + size >
+            m_materialBufferChunks.back().buffer->getSize()) {
+        MaterialBufferChunk chunk;
+        chunk.buffer = std::make_unique<VulkanBuffer>(
+            m_device, std::max(kChunkSize, size), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (chunk.buffer->getBuffer() == VK_NULL_HANDLE) return {VK_NULL_HANDLE, 0};
+        m_materialBufferChunks.push_back(std::move(chunk));
+    }
+    MaterialBufferChunk& chunk = m_materialBufferChunks.back();
+    const VkDeviceSize offset = (chunk.used + alignment - 1) / alignment * alignment;
+    chunk.buffer->update(data, size, offset);
+    chunk.used = offset + size;
+    return {chunk.buffer->getBuffer(), offset};
 }
 
 VkDescriptorSet RenderGraph::allocateMaterialDescriptorSet(VkDescriptorSetLayout layout) {
@@ -2867,9 +2896,10 @@ void RenderGraph::createMaterialDescriptorPool(uint32_t maxSets) {
     }
 
     // Pool sizes for per-entity descriptors (textures + skeleton SSBOs)
-    std::array<VkDescriptorPoolSize, 2> poolSizes = {{
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxSets * 8 },  // Up to 8 textures per material
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, maxSets * 2 }           // Skeleton bone SSBOs
+    std::array<VkDescriptorPoolSize, 3> poolSizes = {{
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxSets * 12 },  // Up to 12 textures per material
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, maxSets * 2 },           // Skeleton bone SSBOs
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxSets }                // Material buffers
     }};
 
     VkDescriptorPoolCreateInfo poolInfo{};
@@ -2913,7 +2943,8 @@ void RenderGraph::releaseDestroyedEntityDescriptors(uint32_t frameIndex) {
 void RenderGraph::releaseMaterialTexture(VkImageView view) {
     if (view == VK_NULL_HANDLE) return;
     for (auto& [name, sets] : m_materialTextureSets) {
-        for (auto it = sets.begin(); it != sets.end();) {
+        bool freed = false;
+        for (auto it = sets.byContents.begin(); it != sets.byContents.end();) {
             const auto& key = it->first;
             const bool holds = std::any_of(key.textures.begin(), key.textures.begin() + key.count,
                                            [view](const auto& texture) { return texture.view == view; });
@@ -2927,8 +2958,10 @@ void RenderGraph::releaseMaterialTexture(VkImageView view) {
                 vkFreeDescriptorSets(m_device.getLogicalDevice(), pool->second, 1, &set);
                 m_descriptorSetPools.erase(pool);
             }
-            it = sets.erase(it);
+            it = sets.byContents.erase(it);
+            freed = true;
         }
+        if (freed) sets.byMaterial.clear();
     }
 }
 
@@ -3057,6 +3090,17 @@ bool RenderGraph::planMaterial(const std::string& name, const CompiledPass& pass
         }
         plan.materialImages.push_back({binding.binding, &binding.name, fallback});
     }
+    plan.materialBuffer = nullptr;
+    for (const auto& binding : layoutDesc->bindings) {
+        if (binding.source != "material") continue;
+        plan.materialBuffer = m_bufferResolver ? getResolvedLayout(binding.name) : nullptr;
+        if (!plan.materialBuffer || plan.materialBuffer->totalSize == 0) {
+            m_logger->log(LogLevel::Error, "bindMaterialTextures: Layout '%s': no buffer layout '%s' for its "
+                          "material buffer", name.c_str(), binding.name.c_str());
+            return false;
+        }
+        plan.materialBufferBinding = binding.binding;
+    }
     if (plan.materialImages.size() > EntityBindingPlan::kMaxMaterialImages) {
         m_logger->log(LogLevel::Error, "bindMaterialTextures: Layout '%s' has %zu image bindings; at most %zu are supported",
                       name.c_str(), plan.materialImages.size(), EntityBindingPlan::kMaxMaterialImages);
@@ -3090,8 +3134,23 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
                                         entt::registry& registry,
                                         EntityBindingPlan& plan,
                                         VkCommandBuffer cmd,
-                                        VkPipelineLayout pipelineLayout) {
+                                        VkPipelineLayout pipelineLayout,
+                                        uint64_t materialHash) {
     if (!plan.material) return;
+    auto& sets = *static_cast<MaterialSets*>(plan.materialSets);
+
+    // A material with the same hash as one before binds the same set.
+    if (materialHash != 0) {
+        auto known = sets.byMaterial.find(materialHash);
+        if (known != sets.byMaterial.end()) {
+            if (known->second != plan.lastMaterialSet) {
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
+                                        plan.materialSetIndex, 1, &known->second, 0, nullptr);
+                plan.lastMaterialSet = known->second;
+            }
+            return;
+        }
+    }
 
     auto* material = registry.try_get<Shoonyakasha::MaterialComponentV5>(entity);
     if (!material) {
@@ -3121,13 +3180,31 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
         key.textures[key.count++] = {image.binding, gpuTex->view, gpuTex->sampler};
     }
 
+    // The material buffer's contents, and their hash for the key.
+    alignas(16) uint8_t bufferLocal[1024];
+    std::vector<uint8_t> bufferHeap;
+    uint8_t* bufferData = nullptr;
+    uint32_t bufferSize = 0;
+    if (plan.materialBuffer) {
+        bufferSize = plan.materialBuffer->totalSize;
+        bufferData = bufferLocal;
+        if (bufferSize > sizeof(bufferLocal)) {
+            bufferHeap.resize(bufferSize);
+            bufferData = bufferHeap.data();
+        }
+        std::memset(bufferData, 0, bufferSize);
+        m_bufferResolver->fillBuffer(bufferData, *plan.materialBuffer, *m_sceneContext, entity, registry);
+        uint64_t h = 0xcbf29ce484222325ull;   // FNV-1a
+        for (uint32_t i = 0; i < bufferSize; ++i) h = (h ^ bufferData[i]) * 0x100000001b3ull;
+        key.bufferHash = h != 0 ? h : 1;
+    }
+
     // Sets are shared by what they hold: entities whose materials bind the
     // same textures under the same layout use one set. They are written once
     // and never changed, so frames in flight can share them too.
-    auto& sets = *static_cast<MaterialSetMap*>(plan.materialSets);
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-    auto cached = sets.find(key);
-    if (cached != sets.end()) {
+    auto cached = sets.byContents.find(key);
+    if (cached != sets.byContents.end()) {
         descriptorSet = cached->second;
     } else {
         descriptorSet = allocateMaterialDescriptorSet(plan.materialLayout);
@@ -3153,8 +3230,25 @@ void RenderGraph::bindMaterialTextures(entt::entity entity,
         if (key.count > 0) {
             vkUpdateDescriptorSets(m_device.getLogicalDevice(), key.count, writes.data(), 0, nullptr);
         }
-        sets.emplace(key, descriptorSet);
+        if (plan.materialBuffer) {
+            const auto [buffer, offset] = storeMaterialBuffer(bufferData, bufferSize);
+            if (buffer == VK_NULL_HANDLE) {
+                m_logger->logEvery(5.0f, LogLevel::Error, "bindMaterialTextures: Failed to create a material buffer");
+                return;
+            }
+            VkDescriptorBufferInfo bufferInfo{buffer, offset, bufferSize};
+            VkWriteDescriptorSet write{};
+            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.dstSet = descriptorSet;
+            write.dstBinding = plan.materialBufferBinding;
+            write.descriptorCount = 1;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            write.pBufferInfo = &bufferInfo;
+            vkUpdateDescriptorSets(m_device.getLogicalDevice(), 1, &write, 0, nullptr);
+        }
+        sets.byContents.emplace(key, descriptorSet);
     }
+    if (materialHash != 0) sets.byMaterial.emplace(materialHash, descriptorSet);
 
     // Draws in a row that share a material keep the set already bound.
     if (descriptorSet != plan.lastMaterialSet) {

@@ -37,7 +37,7 @@ VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) {
 
 // The skinned vertex the glTF loader builds (GltfSceneLoader.cpp,
 // SkinnedVertex), which skin_vertices.comp reads.
-constexpr uint32_t kSkinnedVertexStride = 80;
+constexpr uint32_t kSkinnedVertexStride = 88;
 
 // skin_vertices.comp's push constants.
 struct SkinPush {

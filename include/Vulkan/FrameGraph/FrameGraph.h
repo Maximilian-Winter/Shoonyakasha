@@ -1427,6 +1427,10 @@ public:
         VkDescriptorSetLayout     materialLayout = VK_NULL_HANDLE;
         void*                     materialSets = nullptr;   // this layout's set cache
         VkDescriptorSet           lastMaterialSet = VK_NULL_HANDLE;
+        // The layout's uniform buffer with "source": "material", filled from
+        // the entity's material; null for none.
+        const Shoonyakasha::CompiledBufferLayout* materialBuffer = nullptr;
+        uint32_t                  materialBufferBinding = 0;
 
         // Skeleton bone buffer
         bool                  skeleton = false;
@@ -1441,8 +1445,12 @@ public:
 
     void bindEntityData(entt::entity entity, entt::registry& registry,
                         const EntityBindingPlan& plan, VkCommandBuffer cmd, VkPipelineLayout pipelineLayout);
+    /// `materialHash` (InstanceBatching.h's, of the entity's material) finds
+    /// the set a material with that hash used before without looking at the
+    /// material again; 0 always looks.
     void bindMaterialTextures(entt::entity entity, entt::registry& registry,
-                              EntityBindingPlan& plan, VkCommandBuffer cmd, VkPipelineLayout pipelineLayout);
+                              EntityBindingPlan& plan, VkCommandBuffer cmd, VkPipelineLayout pipelineLayout,
+                              uint64_t materialHash = 0);
     void bindSkeletonSSBO(entt::entity entity, entt::registry& registry,
                           EntityBindingPlan& plan, VkCommandBuffer cmd, VkPipelineLayout pipelineLayout,
                           uint32_t frameIndex);
@@ -1882,13 +1890,15 @@ private:
     struct MaterialTextureKey {
         uint32_t count = 0;
         std::array<MaterialTexture, EntityBindingPlan::kMaxMaterialImages> textures{};
+        uint64_t bufferHash = 0;   // of the material buffer's contents, 0 without one
         bool operator==(const MaterialTextureKey& o) const {
-            return count == o.count && std::equal(textures.begin(), textures.begin() + count, o.textures.begin());
+            return count == o.count && bufferHash == o.bufferHash &&
+                   std::equal(textures.begin(), textures.begin() + count, o.textures.begin());
         }
     };
     struct MaterialTextureKeyHash {
         size_t operator()(const MaterialTextureKey& k) const {
-            size_t h = k.count;
+            size_t h = k.count ^ static_cast<size_t>(k.bufferHash);
             for (uint32_t i = 0; i < k.count; ++i) {
                 for (size_t v : {size_t{k.textures[i].binding}, reinterpret_cast<size_t>(k.textures[i].view),
                                  reinterpret_cast<size_t>(k.textures[i].sampler)}) {
@@ -1899,7 +1909,25 @@ private:
         }
     };
     using MaterialSetMap = std::unordered_map<MaterialTextureKey, VkDescriptorSet, MaterialTextureKeyHash>;
-    std::unordered_map<std::string, MaterialSetMap> m_materialTextureSets;
+    /// One material layout's sets, by what they hold and by the hash of the
+    /// materials that used them.
+    struct MaterialSets {
+        MaterialSetMap byContents;
+        std::unordered_map<uint64_t, VkDescriptorSet> byMaterial;
+    };
+    std::unordered_map<std::string, MaterialSets> m_materialTextureSets;
+
+    /// Material buffers' contents, one range per material set that has one,
+    /// in host-visible uniform buffers of 64 KiB or more. Freed with the
+    /// material descriptor pools.
+    struct MaterialBufferChunk {
+        std::unique_ptr<VulkanBuffer> buffer;
+        VkDeviceSize used = 0;
+    };
+    std::vector<MaterialBufferChunk> m_materialBufferChunks;
+    /// Copy `size` bytes into a new range of the material buffers; the
+    /// buffer and offset of the range, or a null buffer when none was made.
+    std::pair<VkBuffer, VkDeviceSize> storeMaterialBuffer(const void* data, VkDeviceSize size);
 
     /// The compiled layout of the descriptor set `name`, from any pass that
     /// lists it.

@@ -116,8 +116,9 @@ TEST(MeshTangents, VerticesNoTriangleUsesAreLeftOut) {
 }
 
 TEST(VertexLayout, TangentFollowsTheNormal) {
-    EXPECT_EQ(sizeof(Vertex), 60u);
+    EXPECT_EQ(sizeof(Vertex), 68u);
     EXPECT_EQ(offsetof(Vertex, tangent), 44u);
+    EXPECT_EQ(offsetof(Vertex, texCoord1), 60u);
     const auto attributes = Vertex::getAttributeDescriptions();
     ASSERT_EQ(attributes.size(), 5u);
     EXPECT_EQ(attributes[4].location, 4u);

@@ -2,6 +2,7 @@
 // Discards the parts of an alpha-tested caster that let light through.
 
 layout(set = 1, binding = 0) uniform sampler2D albedoMap;
+#include "material_uv.glsl"
 
 layout(push_constant) uniform MaskedShadowDraw {
     mat4 model;
@@ -11,9 +12,11 @@ layout(push_constant) uniform MaskedShadowDraw {
 } draw;
 
 layout(location = 0) in vec2 fragTexCoord;
+layout(location = 1) in vec2 fragTexCoord1;
 
 void main() {
-    if (texture(albedoMap, fragTexCoord).a * draw.baseColorFactor.a < draw.alphaCutoff) {
+    vec2 uv = textureUv(materialUv.albedoUv0, materialUv.albedoUv1, fragTexCoord, fragTexCoord1);
+    if (texture(albedoMap, uv).a * draw.baseColorFactor.a < draw.alphaCutoff) {
         discard;
     }
 }

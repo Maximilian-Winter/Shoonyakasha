@@ -190,6 +190,13 @@ frame's model matrix, then the material factors). Every desktop GPU allows
 256; a device that allows only Vulkan's minimum of 128 reports those passes
 at load and draws nothing in them.
 
+Each material texture is sampled at the uv its `MaterialUV` rows give
+(`material_uv.glsl`): `TEXCOORD_0` or `TEXCOORD_1`, through the texture's
+`KHR_texture_transform`. `MaterialUV` is the material set's uniform buffer at
+binding 9 (`"source": "material"`), filled from the material's
+`<slot>UvRow0` and `<slot>UvRow1` parameters. The passes that read uvs take
+the `standard` vertex format, with `TEXCOORD_1` at location 7.
+
 The G-buffer, sun, spot and point shadow, and transparent passes for static
 meshes are instanced (`"instancing": true`): entities sharing a mesh and a
 material are one draw, and `gbuffer.vert`, `shadow_vert.glsl` and

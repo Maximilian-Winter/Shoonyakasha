@@ -79,6 +79,7 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
         re.tag = r.tag;
         re.transform = r.transform;
         re.batchKey = r.batchKey;
+        re.materialHash = r.materialHash;
         re.distanceToCamera = calculateDistance(*r.transform, cullView);
 
         result.push_back(re);
@@ -147,7 +148,8 @@ void FrameGraphRenderer::gatherRenderables() const {
         const bool ownBuffers = r.hasSkeleton || r.isSprite2D || m_registry->all_of<MorphComponent>(entity);
         // Mirroring world matrices draw with the other front face, apart.
         const bool mirrored = glm::determinant(glm::mat3(r.transform->worldMatrix)) < 0.0f;
-        r.batchKey = ownBuffers ? 0 : batchKey(mesh, *r.material) ^ (mirrored ? 0x5bd1e9955bd1e995ull : 0);
+        r.materialHash = materialHash(*r.material);
+        r.batchKey = ownBuffers ? 0 : batchKey(mesh, r.materialHash) ^ (mirrored ? 0x5bd1e9955bd1e995ull : 0);
         if (!ownBuffers && r.batchKey == 0) r.batchKey = 1;
         m_renderables.push_back(r);
     }
@@ -276,7 +278,7 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
                                   frameIndex);
     } else {
         for (const auto& re : entities) {
-            bindAndDrawEntity(re.entity, *re.mesh, pass, plan, bound, cmd, frameIndex);
+            bindAndDrawEntity(re.entity, *re.mesh, re.materialHash, pass, plan, bound, cmd, frameIndex);
             drawCount++;
         }
     }
@@ -307,6 +309,7 @@ uint32_t FrameGraphRenderer::executeGeometryPass(
 void FrameGraphRenderer::bindAndDrawEntity(
     entt::entity entity,
     const MeshComponent& mesh,
+    uint64_t materialHash,
     const FrameGraph::CompiledPass& pass,
     FrameGraph::RenderGraph::EntityBindingPlan& plan,
     BoundBuffers& bound,
@@ -317,7 +320,7 @@ void FrameGraphRenderer::bindAndDrawEntity(
     // Push constants, material textures and bone buffer, as the pass's
     // entityDataBinding names them (looked up once, in `plan`).
     m_renderGraph.bindEntityData(entity, *m_registry, plan, cmd, pass.pipelineLayout);
-    m_renderGraph.bindMaterialTextures(entity, *m_registry, plan, cmd, pass.pipelineLayout);
+    m_renderGraph.bindMaterialTextures(entity, *m_registry, plan, cmd, pass.pipelineLayout, materialHash);
     m_renderGraph.bindSkeletonSSBO(entity, *m_registry, plan, cmd, pass.pipelineLayout, frameIndex);
 
     // Single-sided materials lose their back faces; a mirroring world
@@ -403,7 +406,8 @@ uint32_t FrameGraphRenderer::drawInstanced(
         const VkDeviceSize offset = (firstRow + batch.first) * stride;
         vkCmdBindVertexBuffers2(cmd, kInstanceBinding, 1, &buffer, &offset, nullptr, &stride);
         const RenderableEntity& first = entities[order[batch.first]];
-        bindAndDrawEntity(first.entity, *first.mesh, pass, plan, bound, cmd, frameIndex, batch.count);
+        bindAndDrawEntity(first.entity, *first.mesh, first.materialHash, pass, plan, bound, cmd, frameIndex,
+                          batch.count);
     }
     return static_cast<uint32_t>(batches.size());
 }

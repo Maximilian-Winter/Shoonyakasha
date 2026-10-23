@@ -15,6 +15,7 @@ layout(set = 1, binding = 3) uniform sampler2D aoMap;
 layout(set = 1, binding = 4) uniform sampler2D emissiveMap;
 layout(set = 1, binding = 5) uniform sampler2D clearcoatMap;            // KHR_materials_clearcoat: r amount
 layout(set = 1, binding = 6) uniform sampler2D clearcoatRoughnessMap;   // g roughness
+#include "material_uv.glsl"
 
 layout(set = EXPOSURE_SET, binding = 0) uniform ExposureSettings { DEFAULT_SETTINGS_BLOCK } exposureSettings;
 layout(set = EXPOSURE_SET, binding = 1) uniform sampler2D exposureImage;   // 1x1, last frame's adapted value
@@ -24,6 +25,10 @@ layout(location = 1) in vec3 fragWorldNormal;
 layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in vec3 fragColor;
 layout(location = 6) in vec4 fragWorldTangent;   // 0 for meshes without uvs
+layout(location = 7) in vec2 fragTexCoord1;      // TEXCOORD_1
+
+// The uv the material texture `name` (albedo, normal, ...) is sampled at.
+#define MATERIAL_UV(name) textureUv(materialUv.name##Uv0, materialUv.name##Uv1, fragTexCoord, fragTexCoord1)
 
 struct Surface {
     vec4 baseColor;   // rgb albedo, a coverage
@@ -48,11 +53,13 @@ mat3 derivativeTBN(vec3 N, vec3 p, vec2 uv) {
     return mat3(T * invMax, B * invMax, N);
 }
 
-// Tangent frame at the fragment: the mesh's tangent made orthogonal to N,
-// or the derivative frame when the mesh has none.
-mat3 tangentFrame(vec3 N) {
+// Tangent frame at the fragment for a normal map sampled at `uv`: the
+// mesh's tangent made orthogonal to N, or the derivative frame when the mesh
+// has none or the map is not sampled at TEXCOORD_0 as it is.
+mat3 tangentFrame(vec3 N, vec2 uv) {
+    if (!isPlainUv(materialUv.normalUv0, materialUv.normalUv1)) return derivativeTBN(N, fragWorldPos, uv);
     vec3 T = fragWorldTangent.xyz - N * dot(N, fragWorldTangent.xyz);
-    if (dot(T, T) < 1e-12) return derivativeTBN(N, fragWorldPos, fragTexCoord);
+    if (dot(T, T) < 1e-12) return derivativeTBN(N, fragWorldPos, uv);
     T = normalize(T);
     float side = fragWorldTangent.w < 0.0 ? -1.0 : 1.0;
     return mat3(T, side * cross(N, T), N);
@@ -70,7 +77,7 @@ float sceneExposure() {
 }
 
 vec4 surfaceBaseColor() {
-    return texture(albedoMap, fragTexCoord) * draw.baseColorFactor * vec4(fragColor, 1.0);
+    return texture(albedoMap, MATERIAL_UV(albedo)) * draw.baseColorFactor * vec4(fragColor, 1.0);
 }
 
 Surface evaluateSurface(vec4 baseColor) {
@@ -80,9 +87,10 @@ Surface evaluateSurface(vec4 baseColor) {
     vec3 N = normalize(fragWorldNormal);
     if (draw.hasNormalMap > 0.5) {
         // z from x and y: a block-compressed (BC5) map holds only those two.
-        vec2 xy = texture(normalMap, fragTexCoord).xy * 2.0 - 1.0;
+        vec2 uv = MATERIAL_UV(normal);
+        vec2 xy = texture(normalMap, uv).xy * 2.0 - 1.0;
         vec3 t = vec3(xy * draw.normalScale, sqrt(max(1.0 - dot(xy, xy), 0.0)));
-        vec3 mapped = tangentFrame(N) * t;
+        vec3 mapped = tangentFrame(N, uv) * t;
         if (dot(mapped, mapped) > 1e-6) N = normalize(mapped);
     }
     // Double-sided materials, and single-sided ones seen from behind, shade
@@ -93,7 +101,7 @@ Surface evaluateSurface(vec4 baseColor) {
     s.metallic = draw.metallicFactor;
     s.roughness = draw.roughnessFactor;
     if (draw.hasMetalRoughMap > 0.5) {
-        vec4 mr = texture(metallicRoughnessMap, fragTexCoord);   // glTF: g roughness, b metallic
+        vec4 mr = texture(metallicRoughnessMap, MATERIAL_UV(metallicRoughness));   // glTF: g roughness, b metallic
         s.metallic *= mr.b;
         s.roughness *= mr.g;
     }
@@ -101,8 +109,8 @@ Surface evaluateSurface(vec4 baseColor) {
     s.roughness = clamp(s.roughness, 0.045, 1.0);
 
     // No texture: the fallback is 1.
-    s.occlusion = 1.0 + draw.occlusionStrength * (texture(aoMap, fragTexCoord).r - 1.0);
-    s.emissive = texture(emissiveMap, fragTexCoord).rgb * draw.emissiveFactor.rgb;
+    s.occlusion = 1.0 + draw.occlusionStrength * (texture(aoMap, MATERIAL_UV(occlusion)).r - 1.0);
+    s.emissive = texture(emissiveMap, MATERIAL_UV(emissive)).rgb * draw.emissiveFactor.rgb;
     // With compensation 1 the emission reaches the tone curve at its own
     // value, whatever the exposure.
     if (draw.exposureCompensation > 0.0) {
@@ -112,8 +120,8 @@ Surface evaluateSurface(vec4 baseColor) {
     s.clearcoat = clamp(draw.clearcoatFactor, 0.0, 1.0);
     s.clearcoatRoughness = draw.clearcoatRoughness;
     if (s.clearcoat > 0.0) {
-        s.clearcoat *= texture(clearcoatMap, fragTexCoord).r;
-        s.clearcoatRoughness *= texture(clearcoatRoughnessMap, fragTexCoord).g;
+        s.clearcoat *= texture(clearcoatMap, MATERIAL_UV(clearcoat)).r;
+        s.clearcoatRoughness *= texture(clearcoatRoughnessMap, MATERIAL_UV(clearcoatRoughness)).g;
     }
     s.clearcoatRoughness = clamp(s.clearcoatRoughness, 0.045, 1.0);
     return s;

@@ -101,7 +101,7 @@ void main() {
     float dielectricF0 = (ior - 1.0) / (ior + 1.0);
     vec3 F0 = mix(vec3(dielectricF0 * dielectricF0), s.baseColor.rgb, s.metallic);
     float transmission = clamp(draw.transmissionFactor, 0.0, 1.0);
-    if (transmission > 0.0) transmission *= texture(transmissionMap, fragTexCoord).r;
+    if (transmission > 0.0) transmission *= texture(transmissionMap, MATERIAL_UV(transmission)).r;
     // The transmitted part of the dielectric takes the place of its diffuse.
     vec3 diffuseAlbedo = s.baseColor.rgb * (1.0 - transmission);
 
@@ -137,7 +137,7 @@ void main() {
                + s.emissive;
     if (transmission > 0.0) {
         // Thickness is in mesh units: scaled by the model matrix.
-        float thickness = draw.thicknessFactor * texture(thicknessMap, fragTexCoord).g;
+        float thickness = draw.thicknessFactor * texture(thicknessMap, MATERIAL_UV(thickness)).g;
         thickness *= (length(draw.model[0].xyz) + length(draw.model[1].xyz) + length(draw.model[2].xyz)) / 3.0;
         float NdotV = max(dot(s.N, V), 1e-4);
         vec2 brdf = texture(brdfLUT, vec2(NdotV, s.roughness)).rg;

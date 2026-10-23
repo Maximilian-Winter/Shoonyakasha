@@ -1141,6 +1141,38 @@ FrameGraphCompiler::CompileResult FrameGraphCompiler::compile(
         }
     }
 
+    // A material buffer ("source": "material") is a uniform buffer layout
+    // filled from the material alone: sets are reused for equal materials.
+    for (const auto& setLayout : builder.getDescriptorSetLayouts()) {
+        for (const auto& binding : setLayout.bindings) {
+            if (binding.source != "material") continue;
+            const auto layoutIt = result.bufferLayouts.find(binding.name);
+            const auto descIt = std::find_if(bufferLayoutDescs.begin(), bufferLayoutDescs.end(),
+                                             [&binding](const auto& desc) { return desc.name == binding.name; });
+            std::string problem;
+            if (layoutIt == result.bufferLayouts.end() || descIt == bufferLayoutDescs.end()) {
+                problem = "names no buffer layout";
+            } else if (layoutIt->second.usage != BufferUsageType::UniformBuffer) {
+                problem = "names a buffer layout that is not a uniform_buffer";
+            } else {
+                for (const auto& field : descIt->fields) {
+                    if (!field.source.empty() && !field.source.starts_with("entity.material.") &&
+                        !field.source.starts_with("const.")) {
+                        problem = "has field '" + field.name + "' from '" + field.source +
+                                  "'; a material buffer reads only entity.material.* and const.*";
+                        break;
+                    }
+                }
+            }
+            if (!problem.empty()) {
+                result.errorMessage = "Material buffer '" + binding.name + "' of descriptor set layout '" +
+                                      setLayout.name + "' " + problem;
+                m_logger->log(LogLevel::Error, "%s", result.errorMessage.c_str());
+                return result;
+            }
+        }
+    }
+
     // Stage 11.1: Scene-filled buffers hold what the scene gives them, and
     // indirect passes' argument buffers their arguments
     result.errorMessage = sceneBuffersError(bufferLayoutDescs, result.bufferLayouts);
@@ -1864,8 +1896,9 @@ bool FrameGraphCompiler::validateShaderInterfaces(
                 }
                 descriptor.setName = setDesc->name;
                 descriptor.bindingName = binding.name;
-                if (!binding.autoBindBuffer.empty()) {
-                    const auto it = layouts.find(binding.autoBindBuffer);
+                const std::string& bufferLayout = binding.source == "material" ? binding.name : binding.autoBindBuffer;
+                if (!bufferLayout.empty()) {
+                    const auto it = layouts.find(bufferLayout);
                     if (it != layouts.end()) descriptor.layout = &it->second;
                 }
                 expected.descriptors[{set, binding.binding}] = descriptor;

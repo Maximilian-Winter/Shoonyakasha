@@ -288,6 +288,34 @@ class PipelineValidation(unittest.TestCase):
         messages = [p.message for p in self.problems(document)]
         self.assertTrue(any("'sceneTexture' is not known" in m for m in messages), messages)
 
+    def test_material_buffers_name_a_buffer_layout(self):
+        import copy
+        document = copy.deepcopy(self.MINIMAL)
+        document["bufferLayouts"] = {"MaterialUV": {"usage": "uniform_buffer", "fields": []}}
+        document["descriptorSetLayouts"] = {"materialSet": {"bindings": [
+            {"binding": 9, "type": "uniform_buffer", "name": "MaterialUV", "source": "material"}]}}
+        self.assertEqual([], self.problems(document))
+
+        binding = document["descriptorSetLayouts"]["materialSet"]["bindings"][0]
+        binding["name"] = "MaterialUv"
+        binding["autoBindBuffer"] = "MaterialUV"
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("'MaterialUv' is not one" in m for m in messages), messages)
+        self.assertTrue(any("without \"autoBindBuffer\"" in m for m in messages), messages)
+
+        binding["type"] = "storage_buffer"
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("'material' binding is a uniform_buffer" in m for m in messages), messages)
+
+        binding.update({"type": "uniform_buffer", "name": "MaterialUV"})
+        del binding["autoBindBuffer"]
+        document["bufferLayouts"]["MaterialUV"]["fields"] = [
+            {"name": "row", "type": "vec4", "source": "entity.material.params.albedoMapUvRow0"},
+            {"name": "time", "type": "float", "source": "scene.time.elapsed"}]
+        messages = [p.message for p in self.problems(document)]
+        self.assertTrue(any("'scene.time.elapsed'" in m for m in messages), messages)
+        self.assertFalse(any("albedoMapUvRow0" in m for m in messages), messages)
+
     def test_presets_are_checked_against_the_passes(self):
         import copy
         document = copy.deepcopy(self.MINIMAL)

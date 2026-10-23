@@ -1579,11 +1579,18 @@ void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                             }
                         }
                     }
-                    if (!binding.source.empty() &&
-                        (binding.source != "sceneTextures" || binding.type != "combined_image_sampler")) {
+                    const bool sceneTextures =
+                        binding.source == "sceneTextures" && binding.type == "combined_image_sampler";
+                    const bool materialBuffer = binding.source == "material" && binding.type == "uniform_buffer";
+                    if (!binding.source.empty() && !sceneTextures && !materialBuffer) {
                         throw std::runtime_error("Binding '" + binding.name + "' of layout '" + layoutDesc.name +
-                                                 "': \"source\": \"sceneTextures\" is the only binding source, "
-                                                 "on a combined_image_sampler");
+                                                 "': \"source\" is \"sceneTextures\" on a combined_image_sampler "
+                                                 "or \"material\" on a uniform_buffer");
+                    }
+                    if (materialBuffer && (binding.count != 1 || !binding.autoBindBuffer.empty())) {
+                        throw std::runtime_error("Binding '" + binding.name + "' of layout '" + layoutDesc.name +
+                                                 "': a \"material\" buffer is one buffer, named by the binding's "
+                                                 "\"name\", without \"autoBindBuffer\"");
                     }
                     binding.autoBindSubresource = parseSubresource(
                         bindingJson, "Binding '" + binding.name + "' of layout '" + layoutDesc.name + "'");

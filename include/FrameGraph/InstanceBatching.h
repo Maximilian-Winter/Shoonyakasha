@@ -56,5 +56,7 @@ uint64_t materialHash(const MaterialComponentV5& material);
 /// and index buffers, counts, stride and index type, and materialHash.
 /// Never 0.
 uint64_t batchKey(const MeshComponent& mesh, const MaterialComponentV5& material);
+/// The same, from the material's materialHash.
+uint64_t batchKey(const MeshComponent& mesh, uint64_t materialHash);
 
 } // namespace Shoonyakasha

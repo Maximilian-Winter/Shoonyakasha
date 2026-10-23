@@ -126,10 +126,14 @@ uint64_t materialHash(const MaterialComponentV5& material) {
 }
 
 uint64_t batchKey(const MeshComponent& mesh, const MaterialComponentV5& material) {
+    return batchKey(mesh, materialHash(material));
+}
+
+uint64_t batchKey(const MeshComponent& mesh, uint64_t materialHash) {
     uint64_t h = mix(reinterpret_cast<uint64_t>(mesh.vertexHandle()), reinterpret_cast<uint64_t>(mesh.indexHandle()));
     h = mix(h, (uint64_t{mesh.vertexCount} << 32) | mesh.indexCount);
     h = mix(h, (uint64_t{mesh.vertexStride} << 8) | static_cast<uint64_t>(mesh.indexType));
-    h = mix(h, materialHash(material));
+    h = mix(h, materialHash);
     return h != 0 ? h : 1;
 }
 

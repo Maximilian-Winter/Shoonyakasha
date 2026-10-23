@@ -87,10 +87,10 @@ Meshes from glTF files and `create_mesh` hold one of two vertex layouts:
 
 | Layout | Attributes, in order | Stride |
 |---|---|---|
-| standard | `position` vec3, `color` vec3, `texCoord` vec2, `normal` vec3, `tangent` vec4 | 60 bytes |
-| skinned | `position` vec3, `normal` vec3, `texCoord` vec2, `jointIndices` uvec4, `jointWeights` vec4, `tangent` vec4 | 80 bytes |
+| standard | `position` vec3, `color` vec3, `texCoord` vec2, `normal` vec3, `tangent` vec4, `texCoord1` vec2 | 68 bytes |
+| skinned | `position` vec3, `normal` vec3, `texCoord` vec2, `jointIndices` uvec4, `jointWeights` vec4, `tangent` vec4, `texCoord1` vec2 | 88 bytes |
 
-`vertexInput: "default"` is the standard layout at locations 0-4. The tangent's xyz points along +u, and its w (1 or -1) gives the bitangent, `w * cross(normal, tangent.xyz)`, which points up the texture image; it is 0 on meshes without uvs. Entity draws bind each mesh with its own stride, so a format can declare only the first attributes of a layout, as the starter's `standard` format does. Draws from buffers use the declared format's stride.
+`texCoord1` is a glTF primitive's `TEXCOORD_1`, 0 without one and on meshes from `create_mesh`. `vertexInput: "default"` is the standard layout's first five attributes at locations 0-4. The tangent's xyz points along +u, and its w (1 or -1) gives the bitangent, `w * cross(normal, tangent.xyz)`, which points up the texture image; it is 0 on meshes without uvs. Entity draws bind each mesh with its own stride, so a format can declare only the first attributes of a layout, as the starter's `standard` format does. Draws from buffers use the declared format's stride.
 
 ## Buffer layouts
 
@@ -164,7 +164,7 @@ Sampler keys: `magFilter`, `minFilter`, `mipmapMode` default `linear` (also `nea
 Each named binding can contain:
 
 - `perDraw`: `layoutRef` (preferred; legacy `layout`), `method` (`push_constant`), `offset` (0), `size` (64), `stages`, `set` (0), and `binding` (0).
-- `material`: `layoutRef`, `method` (`descriptor_set`), `set` (1), and optional texture-name→binding-number `bindings`.
+- `material`: `layoutRef`, `method` (`descriptor_set`), `set` (1), and optional texture-name→binding-number `bindings`. The layout's image bindings take the material's textures of the same names (white, or a flat normal and default metallic-roughness for `normalMap`, `metallicRoughnessMap` and `aoMap`, when it has none). A `uniform_buffer` binding with `"source": "material"` takes the bytes of the buffer layout named by its `name`, filled from the entity: one per material set, without `autoBindBuffer`. Its fields may read only `entity.material.*` and `const.*`. Equal materials share one set; one whose parameters or textures change gets another.
 - `skeleton`: `layoutRef` for the skeleton descriptor set.
 
 Use a matching `execution.entityDataBinding`. The parser accepting a method string is not a promise of an arbitrary binding backend; the supplied geometry examples use push constants for per-draw data and descriptor sets for materials/skeletons.
@@ -424,7 +424,7 @@ Image resources also accept `target`, `readback`, and `save`; resource-level pol
 The native compiler does verify shader interfaces, at startup. After compiling buffer layouts it reflects every pass's SPIR-V (with SPIRV-Reflect) and compares it with the JSON:
 
 - every descriptor the shader uses must be declared in the pass's `descriptorSets` at the same set index and binding, with the same descriptor type;
-- for a uniform or storage buffer bound through `autoBindBuffer`, and for the push constants of the pass's `entityDataBinding` `perDraw` layout, each block member's offset, base type, vector size, matrix stride, array length and array stride must match a field of the layout. Names are not compared. A shader may declare fewer members than the layout;
+- for a uniform or storage buffer bound through `autoBindBuffer`, for a material buffer (`"source": "material"`), and for the push constants of the pass's `entityDataBinding` `perDraw` layout, each block member's offset, base type, vector size, matrix stride, array length and array stride must match a field of the layout. Names are not compared. A shader may declare fewer members than the layout;
 - push constants must fit inside the pass's `pushConstants` ranges.
 
 Blocks ending in a runtime array, and arrays of structs, are not compared member by member. A mismatch fails compilation with one line per problem, naming the pass, the shader file and the member, so `Engine(...)` raises instead of rendering from misread bytes.

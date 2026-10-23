@@ -34,6 +34,45 @@
           "name": "tangent",
           "type": "vec4",
           "location": 5
+        },
+        {
+          "name": "texCoord1",
+          "type": "vec2",
+          "location": 7
+        }
+      ]
+    },
+    "standard": {
+      "attributes": [
+        {
+          "name": "position",
+          "type": "vec3",
+          "location": 0
+        },
+        {
+          "name": "color",
+          "type": "vec3",
+          "location": 1
+        },
+        {
+          "name": "texCoord",
+          "type": "vec2",
+          "location": 2
+        },
+        {
+          "name": "normal",
+          "type": "vec3",
+          "location": 3
+        },
+        {
+          "name": "tangent",
+          "type": "vec4",
+          "location": 4
+        },
+        {
+          "name": "texCoord1",
+          "type": "vec2",
+          "location": 7
         }
       ]
     }
@@ -621,6 +660,120 @@
         }
       ]
     },
+    "MaterialUV": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "fields": [
+        {
+          "name": "albedoUv0",
+          "type": "vec4",
+          "source": "entity.material.params.albedoMapUvRow0",
+          "default": [1.0, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "albedoUv1",
+          "type": "vec4",
+          "source": "entity.material.params.albedoMapUvRow1",
+          "default": [0.0, 1.0, 0.0, 0.0]
+        },
+        {
+          "name": "metallicRoughnessUv0",
+          "type": "vec4",
+          "source": "entity.material.params.metallicRoughnessMapUvRow0",
+          "default": [1.0, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "metallicRoughnessUv1",
+          "type": "vec4",
+          "source": "entity.material.params.metallicRoughnessMapUvRow1",
+          "default": [0.0, 1.0, 0.0, 0.0]
+        },
+        {
+          "name": "normalUv0",
+          "type": "vec4",
+          "source": "entity.material.params.normalMapUvRow0",
+          "default": [1.0, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "normalUv1",
+          "type": "vec4",
+          "source": "entity.material.params.normalMapUvRow1",
+          "default": [0.0, 1.0, 0.0, 0.0]
+        },
+        {
+          "name": "occlusionUv0",
+          "type": "vec4",
+          "source": "entity.material.params.aoMapUvRow0",
+          "default": [1.0, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "occlusionUv1",
+          "type": "vec4",
+          "source": "entity.material.params.aoMapUvRow1",
+          "default": [0.0, 1.0, 0.0, 0.0]
+        },
+        {
+          "name": "emissiveUv0",
+          "type": "vec4",
+          "source": "entity.material.params.emissiveMapUvRow0",
+          "default": [1.0, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "emissiveUv1",
+          "type": "vec4",
+          "source": "entity.material.params.emissiveMapUvRow1",
+          "default": [0.0, 1.0, 0.0, 0.0]
+        },
+        {
+          "name": "clearcoatUv0",
+          "type": "vec4",
+          "source": "entity.material.params.clearcoatMapUvRow0",
+          "default": [1.0, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "clearcoatUv1",
+          "type": "vec4",
+          "source": "entity.material.params.clearcoatMapUvRow1",
+          "default": [0.0, 1.0, 0.0, 0.0]
+        },
+        {
+          "name": "clearcoatRoughnessUv0",
+          "type": "vec4",
+          "source": "entity.material.params.clearcoatRoughnessMapUvRow0",
+          "default": [1.0, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "clearcoatRoughnessUv1",
+          "type": "vec4",
+          "source": "entity.material.params.clearcoatRoughnessMapUvRow1",
+          "default": [0.0, 1.0, 0.0, 0.0]
+        },
+        {
+          "name": "transmissionUv0",
+          "type": "vec4",
+          "source": "entity.material.params.transmissionMapUvRow0",
+          "default": [1.0, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "transmissionUv1",
+          "type": "vec4",
+          "source": "entity.material.params.transmissionMapUvRow1",
+          "default": [0.0, 1.0, 0.0, 0.0]
+        },
+        {
+          "name": "thicknessUv0",
+          "type": "vec4",
+          "source": "entity.material.params.thicknessMapUvRow0",
+          "default": [1.0, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "thicknessUv1",
+          "type": "vec4",
+          "source": "entity.material.params.thicknessMapUvRow1",
+          "default": [0.0, 1.0, 0.0, 0.0]
+        }
+      ]
+    },
     "LocalShadowMatrices": {
       "usage": "uniform_buffer",
       "packing": "std140",
@@ -1192,6 +1345,15 @@
             "fragment"
           ],
           "name": "thicknessMap"
+        },
+        {
+          "binding": 9,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "MaterialUV",
+          "source": "material"
         }
       ]
     },
@@ -1929,6 +2091,7 @@
         }
       ],
       "pipeline": {
+        "vertexInput": "standard",
         "vertexShader": "shaders/shadow_masked.vert.spv",
         "fragmentShader": "shaders/shadow_masked.frag.spv",
         "depthTest": true,
@@ -2077,6 +2240,7 @@
           "constant": 0.0,
           "slope": 1.5
         },
+        "vertexInput": "standard",
         "vertexShader": "shaders/spot_shadow_masked.vert.spv",
         "fragmentShader": "shaders/shadow_masked.frag.spv"
       },
@@ -2216,6 +2380,7 @@
           "constant": 0.0,
           "slope": 1.5
         },
+        "vertexInput": "standard",
         "vertexShader": "shaders/point_shadow_masked.vert.spv",
         "fragmentShader": "shaders/shadow_masked.frag.spv"
       },
@@ -2355,6 +2520,7 @@
         }
       ],
       "pipeline": {
+        "vertexInput": "standard",
         "vertexShader": "shaders/gbuffer.vert.spv",
         "fragmentShader": "shaders/gbuffer.frag.spv",
         "depthTest": true,
@@ -2420,6 +2586,7 @@
         }
       ],
       "pipeline": {
+        "vertexInput": "standard",
         "vertexShader": "shaders/gbuffer.vert.spv",
         "fragmentShader": "shaders/gbuffer_masked.frag.spv",
         "depthTest": true,
@@ -3204,6 +3371,7 @@
         }
       ],
       "pipeline": {
+        "vertexInput": "standard",
         "vertexShader": "shaders/gbuffer.vert.spv",
         "fragmentShader": "shaders/forward.frag.spv",
         "depthTest": true,
@@ -3297,6 +3465,7 @@
         }
       ],
       "pipeline": {
+        "vertexInput": "standard",
         "vertexShader": "shaders/gbuffer.vert.spv",
         "fragmentShader": "shaders/forward_rt.frag.spv",
         "depthTest": true,

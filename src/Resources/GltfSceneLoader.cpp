@@ -45,6 +45,7 @@ struct StandardVertex {
     glm::vec2 texCoord;  // location 2
     glm::vec3 normal;    // location 3
     glm::vec4 tangent;   // location 4: xyz along +u, w = ±1; 0 without uvs
+    glm::vec2 texCoord1; // TEXCOORD_1; 0 without it
 };
 static_assert(sizeof(StandardVertex) == sizeof(Vertex), "StandardVertex must match Vertex");
 
@@ -58,8 +59,9 @@ struct SkinnedVertex {
     glm::uvec4 joints;       // location 3 (bone indices)
     glm::vec4 weights;       // location 4 (bone weights)
     glm::vec4 tangent;       // location 5: xyz along +u, w = ±1; 0 without uvs
+    glm::vec2 texCoord1;     // TEXCOORD_1; 0 without it
 };
-// Stride: 12 + 12 + 8 + 16 + 16 + 16 = 80 bytes
+// Stride: 12 + 12 + 8 + 16 + 16 + 16 + 8 = 88 bytes
 
 // ═══════════════════════════════════════════════════════════════
 // Primitive Geometry
@@ -72,6 +74,7 @@ struct PrimitiveGeometry {
     std::vector<glm::vec3> positions;
     std::vector<glm::vec3> normals;
     std::vector<glm::vec2> uvs;
+    std::vector<glm::vec2> uvs1;   // TEXCOORD_1
     std::vector<glm::vec3> colors;
     std::vector<glm::vec4> tangents;
     std::vector<uint32_t> indices;   // empty: every three vertices are a triangle
@@ -93,11 +96,28 @@ void generatePrimitiveTangents(PrimitiveGeometry& g) {
     expand(g.positions);
     expand(g.normals);
     expand(g.uvs);
+    expand(g.uvs1);
     expand(g.colors);
     expand(g.source);
     g.tangents = std::move(t.tangents);
     if (!g.indices.empty()) g.indices = std::move(t.indices);
 }
+
+// A texture's uv set and transform as two rows: the transformed uv is
+// (dot(rows[0].xyz, (u, v, 1)), dot(rows[1].xyz, (u, v, 1))) of the set
+// rows[0].w (0 or 1). KHR_texture_transform: offset, then rotation, then scale.
+std::array<glm::vec4, 2> textureUvTransform(const cgltf_texture_view& view) {
+    float set = view.texcoord == 1 ? 1.0f : 0.0f;
+    if (!view.has_transform) return {glm::vec4(1.0f, 0.0f, 0.0f, set), glm::vec4(0.0f, 1.0f, 0.0f, 0.0f)};
+    const cgltf_texture_transform& t = view.transform;
+    if (t.has_texcoord) set = t.texcoord == 1 ? 1.0f : 0.0f;
+    const float c = std::cos(t.rotation), s = std::sin(t.rotation);
+    return {glm::vec4(c * t.scale[0], s * t.scale[1], t.offset[0], set),
+            glm::vec4(-s * t.scale[0], c * t.scale[1], t.offset[1], 0.0f)};
+}
+
+const std::array<glm::vec4, 2> kIdentityUvTransform = {glm::vec4(1.0f, 0.0f, 0.0f, 0.0f),
+                                                       glm::vec4(0.0f, 1.0f, 0.0f, 0.0f)};
 
 // A glTF primitive's attributes, with positions, normals and tangents under
 // `transform`. Tangents come from the file's TANGENT attribute, or from
@@ -106,6 +126,7 @@ PrimitiveGeometry readPrimitiveGeometry(const cgltf_primitive& primitive, const 
     const cgltf_accessor* posAccessor = nullptr;
     const cgltf_accessor* normalAccessor = nullptr;
     const cgltf_accessor* texCoordAccessor = nullptr;
+    const cgltf_accessor* texCoord1Accessor = nullptr;
     const cgltf_accessor* colorAccessor = nullptr;
     const cgltf_accessor* tangentAccessor = nullptr;
     for (cgltf_size i = 0; i < primitive.attributes_count; ++i) {
@@ -114,7 +135,10 @@ PrimitiveGeometry readPrimitiveGeometry(const cgltf_primitive& primitive, const 
             case cgltf_attribute_type_position:  posAccessor = attr.data; break;
             case cgltf_attribute_type_normal:    normalAccessor = attr.data; break;
             case cgltf_attribute_type_tangent:   tangentAccessor = attr.data; break;
-            case cgltf_attribute_type_texcoord:  if (attr.index == 0) texCoordAccessor = attr.data; break;
+            case cgltf_attribute_type_texcoord:
+                if (attr.index == 0) texCoordAccessor = attr.data;
+                if (attr.index == 1) texCoord1Accessor = attr.data;
+                break;
             case cgltf_attribute_type_color:     if (attr.index == 0) colorAccessor = attr.data; break;
             default: break;
         }
@@ -131,6 +155,7 @@ PrimitiveGeometry readPrimitiveGeometry(const cgltf_primitive& primitive, const 
     g.positions.resize(n);
     g.normals.resize(n);
     g.uvs.resize(n);
+    g.uvs1.assign(n, glm::vec2(0.0f));
     g.colors.resize(n);
     g.tangents.assign(n, glm::vec4(0.0f));
     g.source.resize(n);
@@ -153,6 +178,11 @@ PrimitiveGeometry readPrimitiveGeometry(const cgltf_primitive& primitive, const 
             g.uvs[i] = glm::vec2(uv[0], uv[1]);
         } else {
             g.uvs[i] = glm::vec2(0.0f);
+        }
+        if (texCoord1Accessor) {
+            cgltf_float uv[2] = {0, 0};
+            cgltf_accessor_read_float(texCoord1Accessor, i, uv, 2);
+            g.uvs1[i] = glm::vec2(uv[0], uv[1]);
         }
 
         if (normalAccessor) {
@@ -803,6 +833,26 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             }
         }
 
+        // Each texture's uv set and KHR_texture_transform, for those that
+        // differ from TEXCOORD_0 untransformed.
+        const auto& pbr = material->pbr_metallic_roughness;
+        const std::pair<const char*, const cgltf_texture_view*> views[] = {
+            {"albedoMap", &pbr.base_color_texture},
+            {"metallicRoughnessMap", &pbr.metallic_roughness_texture},
+            {"normalMap", &material->normal_texture},
+            {"aoMap", &material->occlusion_texture},
+            {"emissiveMap", &material->emissive_texture},
+            {"clearcoatMap", &material->clearcoat.clearcoat_texture},
+            {"clearcoatRoughnessMap", &material->clearcoat.clearcoat_roughness_texture},
+            {"transmissionMap", &material->transmission.transmission_texture},
+            {"thicknessMap", &material->volume.thickness_texture},
+        };
+        for (const auto& [slot, view] : views) {
+            if (!view->texture) continue;
+            const auto uv = textureUvTransform(*view);
+            if (uv != kIdentityUvTransform) result.uvTransforms.emplace_back(slot, uv);
+        }
+
         result.alphaMode = extractAlphaMode(material);
         result.alphaCutoff = material->alpha_cutoff;
         result.doubleSided = material->double_sided;
@@ -825,7 +875,7 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
     std::vector<StandardVertex> vertices(vertexCount);
     for (size_t i = 0; i < vertexCount; ++i) {
         vertices[i] = {geometry.positions[i], geometry.colors[i], geometry.uvs[i], geometry.normals[i],
-                       geometry.tangents[i]};
+                       geometry.tangents[i], geometry.uvs1[i]};
     }
 
     VkDeviceSize bufferSize = vertices.size() * sizeof(StandardVertex);
@@ -876,6 +926,7 @@ std::string GltfSceneLoader::buildMeshPrimitive(const MeshArrays& arrays, GltfPr
     g.positions = arrays.positions;
     g.indices = arrays.indices;
     g.uvs = arrays.uvs.empty() ? std::vector<glm::vec2>(n, glm::vec2(0.0f)) : arrays.uvs;
+    g.uvs1.assign(n, glm::vec2(0.0f));
     g.colors = arrays.colors.empty() ? std::vector<glm::vec3>(n, glm::vec3(1.0f)) : arrays.colors;
     g.source.resize(n);
     for (size_t i = 0; i < n; ++i) g.source[i] = static_cast<uint32_t>(i);
@@ -912,7 +963,7 @@ std::string GltfSceneLoader::buildMeshPrimitive(const MeshArrays& arrays, GltfPr
     std::vector<StandardVertex> vertices(count);
     glm::vec3 lo(std::numeric_limits<float>::max()), hi(std::numeric_limits<float>::lowest());
     for (size_t i = 0; i < count; ++i) {
-        vertices[i] = {g.positions[i], g.colors[i], g.uvs[i], g.normals[i], g.tangents[i]};
+        vertices[i] = {g.positions[i], g.colors[i], g.uvs[i], g.normals[i], g.tangents[i], glm::vec2(0.0f)};
         lo = glm::min(lo, g.positions[i]);
         hi = glm::max(hi, g.positions[i]);
     }
@@ -1252,6 +1303,10 @@ entt::entity GltfSceneLoader::createEntity(
         material.setParam("iridescenceThicknessMinimum", primitive.iridescenceThicknessMinimum);
         material.setParam("iridescenceThicknessMaximum", primitive.iridescenceThicknessMaximum);
     }
+    for (const auto& [slot, rows] : primitive.uvTransforms) {
+        material.setParam(slot + "UvRow0", rows[0]);
+        material.setParam(slot + "UvRow1", rows[1]);
+    }
     material.alphaMode = primitive.alphaMode;
     material.alphaCutoff = primitive.alphaCutoff;
     material.doubleSided = primitive.doubleSided;
@@ -1555,6 +1610,7 @@ GPUBuffer GltfSceneLoader::buildSkinnedVertexBuffer(
         v.normal = geometry.normals[i];
         v.texCoord = geometry.uvs[i];
         v.tangent = geometry.tangents[i];
+        v.texCoord1 = geometry.uvs1[i];
 
         // Joint indices
         if (jointsAccessor) {
@@ -1663,6 +1719,10 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     material.setParam("thicknessFactor", primitive.thicknessFactor);
     material.setParam("attenuationDistance", primitive.attenuationDistance);
     material.setParam("attenuationColor", glm::vec4(primitive.attenuationColor, 1.0f));
+    for (const auto& [slot, rows] : primitive.uvTransforms) {
+        material.setParam(slot + "UvRow0", rows[0]);
+        material.setParam(slot + "UvRow1", rows[1]);
+    }
     material.alphaMode = primitive.alphaMode;
     material.alphaCutoff = primitive.alphaCutoff;
     material.doubleSided = primitive.doubleSided;

@@ -51,7 +51,7 @@ Uncompressed textures take 4 bytes per texel, so this is a quarter to an eighth 
 
 Use a pipeline matching the loaded geometry: PBR shaders and IBL resources for PBR/IBL scenes; skinned vertex formats, skeleton bindings, and execution for animated meshes. Loading an animation does not make an ordinary static-mesh pass perform skinning.
 
-Every vertex carries a tangent for normal maps (the [vertex layouts](../reference/pipeline-json.md#vertex-formats)). The loader reads a primitive's `TANGENT` attribute, or generates MikkTSpace tangents from its `TEXCOORD_0` when it has none; a vertex whose triangles get different tangents, on a UV seam or where UVs are mirrored, becomes one vertex per tangent. Primitives without uvs get no tangent.
+Vertices carry `TEXCOORD_0` and `TEXCOORD_1`. Every vertex carries a tangent for normal maps (the [vertex layouts](../reference/pipeline-json.md#vertex-formats)). The loader reads a primitive's `TANGENT` attribute, or generates MikkTSpace tangents from its `TEXCOORD_0` when it has none; a vertex whose triangles get different tangents, on a UV seam or where UVs are mirrored, becomes one vertex per tangent. Primitives without uvs get no tangent.
 
 See [materials](materials.md), [lighting/IBL](lighting-and-ibl.md), and [animation](animation.md). glTF loading does not provide a documented physics-metadata import contract; configure physics separately.
 

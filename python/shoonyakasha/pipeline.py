@@ -60,8 +60,8 @@ CAPABILITIES = frozenset({"rayQuery", "drawIndirectCount", "geometryShader", "te
 #: What a buffer layout with "source": {"type": "scene"} holds ("data").
 SCENE_DATA = frozenset({"lights", "rayInstances"})
 
-#: What a descriptor binding's "source" may name.
-BINDING_SOURCES = frozenset({"sceneTextures"})
+#: What a descriptor binding's "source" may name, and the binding type each takes.
+BINDING_SOURCES = {"sceneTextures": "combined_image_sampler", "material": "uniform_buffer"}
 RESOURCE_KINDS = frozenset({"image", "buffer"})
 
 FIELD_TYPES = frozenset({
@@ -268,9 +268,27 @@ def validate_json(document, base_dir=None, source="<json>"):
             if not isinstance(binding, dict) or "source" not in binding:
                 continue
             where = "%s descriptorSetLayouts '%s' binding %s" % (source, layout_name, binding.get("binding"))
-            if _check_enum(str(binding["source"]), BINDING_SOURCES, where, "source", problems) and \
-                    binding.get("type") != "combined_image_sampler":
-                problems.append(Problem(where, "a 'sceneTextures' binding is a combined_image_sampler"))
+            binding_source = str(binding["source"])
+            if not _check_enum(binding_source, frozenset(BINDING_SOURCES), where, "source", problems):
+                continue
+            if binding.get("type") != BINDING_SOURCES[binding_source]:
+                problems.append(Problem(where, "a '%s' binding is a %s"
+                                        % (binding_source, BINDING_SOURCES[binding_source])))
+            elif binding_source == "material":
+                buffer_layouts = document.get("bufferLayouts", {})
+                if not isinstance(buffer_layouts, dict) or binding.get("name") not in buffer_layouts:
+                    problems.append(Problem(where, "a 'material' binding is filled from the buffer layout "
+                                                   "named by its \"name\"; '%s' is not one" % binding.get("name")))
+                else:
+                    for field in buffer_layouts[binding["name"]].get("fields", []):
+                        field_source = str(field.get("source", "")) if isinstance(field, dict) else ""
+                        if field_source and not field_source.startswith(("entity.material.", "const.")):
+                            problems.append(Problem(where, "material buffer field '%s' reads '%s'; a material "
+                                                           "buffer reads only entity.material.* and const.*"
+                                                    % (field.get("name"), field_source)))
+                if "autoBindBuffer" in binding or binding.get("count", 1) != 1:
+                    problems.append(Problem(where, "a 'material' binding is one buffer, without "
+                                                   "\"autoBindBuffer\""))
 
     # ── passes ─────────────────────────────────────────────────
     written, read, presents = set(), set(), []

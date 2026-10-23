@@ -16,6 +16,7 @@
 #include "GPU/GPUResourceFactory.h"
 
 #include <filesystem>
+#include <array>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -70,6 +71,11 @@ struct GltfPrimitive {
     Shoonyakasha::GPUTexture thicknessMap;            // KHR_materials_volume: g thickness
     Shoonyakasha::GPUTexture iridescenceMap;           // KHR_materials_iridescence: r amount
     Shoonyakasha::GPUTexture iridescenceThicknessMap;  // g thickness, from minimum to maximum
+    // Textures read from TEXCOORD_1 or through KHR_texture_transform: the
+    // slot and two rows, (m00, m01, m02, uv set) and (m10, m11, m12, 0), that
+    // map (u, v, 1) to the uv sampled. The material gets them as the params
+    // <slot>UvRow0 and <slot>UvRow1.
+    std::vector<std::pair<std::string, std::array<glm::vec4, 2>>> uvTransforms;
 
     // ─── Material Parameters ────────────────────────────────
     glm::vec4 baseColorFactor   = glm::vec4(1.0f);

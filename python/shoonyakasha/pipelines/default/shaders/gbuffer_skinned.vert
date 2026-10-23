@@ -14,6 +14,7 @@ layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in uvec4 inJoints;
 layout(location = 4) in vec4 inWeights;
 layout(location = 5) in vec4 inTangent;   // xyz along +u, w the bitangent's side; 0 without uvs
+layout(location = 7) in vec2 inTexCoord1;     // TEXCOORD_1
 
 layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec3 fragWorldNormal;
@@ -22,6 +23,7 @@ layout(location = 3) out vec3 fragColor;
 layout(location = 4) out vec4 fragClip;          // unjittered, for motion vectors
 layout(location = 5) out vec4 fragPrevClip;      // where it was last frame
 layout(location = 6) out vec4 fragWorldTangent;
+layout(location = 7) out vec2 fragTexCoord1;
 
 void main() {
     mat4 skin = inWeights.x * bones[inJoints.x] + inWeights.y * bones[inJoints.y] +
@@ -38,6 +40,7 @@ void main() {
     fragWorldTangent = vec4(mat3(model) * inTangent.xyz,
                             determinant(mat3(model)) < 0.0 ? -inTangent.w : inTangent.w);
     fragTexCoord = inTexCoord;
+    fragTexCoord1 = inTexCoord1;
     fragColor = vec3(1.0);
     gl_Position = camera.proj * camera.view * worldPos;
     fragClip = gl_Position;

@@ -78,6 +78,7 @@ struct RenderableEntity {
     // (batchKey); 0 for entities that bind buffers of their own (skinned,
     // morphed, sprites).
     uint64_t batchKey = 0;
+    uint64_t materialHash = 0;   // of `material` (InstanceBatching.h), made once a frame
 };
 
 // ============================================================================
@@ -236,6 +237,7 @@ private:
         bool hasBounds = false;
         glm::vec3 worldMin{0.0f}, worldMax{0.0f};
         uint64_t batchKey = 0;   // RenderableEntity::batchKey
+        uint64_t materialHash = 0;
     };
     mutable std::vector<Renderable> m_renderables;
     mutable uint64_t m_renderablesFrame = ~uint64_t{0};
@@ -275,6 +277,7 @@ private:
     void bindAndDrawEntity(
         entt::entity entity,
         const MeshComponent& mesh,
+        uint64_t materialHash,
         const FrameGraph::CompiledPass& pass,
         FrameGraph::RenderGraph::EntityBindingPlan& plan,
         BoundBuffers& bound,

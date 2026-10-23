@@ -14,11 +14,14 @@ layout(push_constant) uniform MaskedShadowDraw {
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 2) in vec2 inTexCoord;
+layout(location = 7) in vec2 inTexCoord1;   // TEXCOORD_1
 layout(location = 8) in mat4 instanceModel;
 
 layout(location = 0) out vec2 fragTexCoord;
+layout(location = 1) out vec2 fragTexCoord1;
 
 void main() {
     fragTexCoord = inTexCoord;
+    fragTexCoord1 = inTexCoord1;
     gl_Position = shadowViewProj(draw.cascade) * instanceModel * vec4(inPosition, 1.0);
 }
