@@ -189,6 +189,11 @@ material are one draw, and `gbuffer.vert`, `shadow_vert.glsl` and
 per-instance vertex buffer (locations 8 to 15) instead of the push
 constants. The skinned passes draw each entity on its own.
 
+The G-buffer and transparent passes cull by material (`"cullMode":
+"material"`): single-sided materials show their front faces only,
+double-sided ones both, and mirrored entities keep their front faces. The
+shadow passes draw both sides of everything.
+
 Materials can set `exposureCompensation`, from 0 (the default) to 1. At 1
 the material's emission is divided by the exposure before Tonemap multiplies
 by it, so it keeps its brightness whatever the exposure; canvas UI world

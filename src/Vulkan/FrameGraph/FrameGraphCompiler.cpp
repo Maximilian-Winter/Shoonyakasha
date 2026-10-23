@@ -1461,6 +1461,11 @@ bool FrameGraphCompiler::createPipelines(
         builder.withPrimitiveRestart(pd.primitiveRestart);
         builder.withCulling(JsonUtils::stringToCullMode(pd.cullMode),
                             pd.frontFace == "clockwise" ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
+        if (pd.cullMode == "material") {
+            builder.withDynamicState(VK_DYNAMIC_STATE_CULL_MODE);
+            builder.withDynamicState(VK_DYNAMIC_STATE_FRONT_FACE);
+            compiled.materialCulling = true;
+        }
         builder.withLineWidth(pd.lineWidth);
         if (pd.wireframe) builder.withWireframe();
         const VkPhysicalDeviceFeatures& features = device.getEnabledFeatures();

@@ -144,7 +144,10 @@ void FrameGraphRenderer::gatherRenderables() const {
         r.hasBounds = mesh.hasBounds;
         if (r.hasBounds) transformBounds(r.transform->worldMatrix, mesh.boundsMin, mesh.boundsMax, r.worldMin, r.worldMax);
         const bool ownBuffers = r.hasSkeleton || r.isSprite2D || m_registry->all_of<MorphComponent>(entity);
-        r.batchKey = ownBuffers ? 0 : batchKey(mesh, *r.material);
+        // Mirroring world matrices draw with the other front face, apart.
+        const bool mirrored = glm::determinant(glm::mat3(r.transform->worldMatrix)) < 0.0f;
+        r.batchKey = ownBuffers ? 0 : batchKey(mesh, *r.material) ^ (mirrored ? 0x5bd1e9955bd1e995ull : 0);
+        if (!ownBuffers && r.batchKey == 0) r.batchKey = 1;
         m_renderables.push_back(r);
     }
 }
@@ -315,6 +318,24 @@ void FrameGraphRenderer::bindAndDrawEntity(
     m_renderGraph.bindEntityData(entity, *m_registry, plan, cmd, pass.pipelineLayout);
     m_renderGraph.bindMaterialTextures(entity, *m_registry, plan, cmd, pass.pipelineLayout);
     m_renderGraph.bindSkeletonSSBO(entity, *m_registry, plan, cmd, pass.pipelineLayout, frameIndex);
+
+    // Single-sided materials lose their back faces; a mirroring world
+    // matrix reverses which faces are front ones.
+    if (pass.materialCulling) {
+        const auto* material = m_registry->try_get<MaterialComponentV5>(entity);
+        const auto* transform = m_registry->try_get<ECS::TransformComponent>(entity);
+        const VkCullModeFlags cull = material && material->doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+        const bool mirrored = transform && glm::determinant(glm::mat3(transform->worldMatrix)) < 0.0f;
+        const VkFrontFace front = mirrored ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        if (cull != bound.cullMode) {
+            vkCmdSetCullMode(cmd, cull);
+            bound.cullMode = cull;
+        }
+        if (front != bound.frontFace) {
+            vkCmdSetFrontFace(cmd, front);
+            bound.frontFace = front;
+        }
+    }
 
     // Vertex and index buffers, unless the previous draw left them bound:
     // meshes are often suballocated from shared buffers. A mesh with morph

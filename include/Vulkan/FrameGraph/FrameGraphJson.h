@@ -64,7 +64,7 @@ namespace JsonUtils {
     VkCompareOp           stringToCompareOp(const std::string& str);
 
     // Pipeline state names; each throws on a name it does not know
-    VkCullModeFlags       stringToCullMode(const std::string& str);     // none, front, back, front_and_back
+    VkCullModeFlags       stringToCullMode(const std::string& str);     // none, front, back, front_and_back; material: back
     VkPrimitiveTopology   stringToTopology(const std::string& str);     // triangle_list, triangle_strip,
                                                                         // line_list, line_strip, point_list,
                                                                         // patch_list

@@ -81,6 +81,12 @@ TEST(PipelineStateJson, ConversionsThrowOnUnknownNames) {
     EXPECT_EQ(JsonUtils::stringToBlendFactor("one_minus_constant_alpha"), VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA);
 }
 
+TEST(PipelineStateJson, MaterialCullModeStartsAsBack) {
+    // Entity draws set the cull mode per material; the pipeline's static
+    // value is back-face culling.
+    EXPECT_EQ(JsonUtils::stringToCullMode("material"), static_cast<VkCullModeFlags>(VK_CULL_MODE_BACK_BIT));
+}
+
 // ── Blending per attachment ─────────────────────────────────────
 
 TEST(PipelineStateBlend, OutputsOverrideThePipeline) {

@@ -640,6 +640,10 @@ struct CompiledPass {
     /// The stride is dynamic state: entity draws bind each mesh with its
     /// own stride, draws from buffers with this one.
     uint32_t                            vertexStride = 0;
+    /// "cullMode": "material": cull mode and front face are dynamic state,
+    /// set per entity draw from its material's sidedness and its world
+    /// matrix's handedness.
+    bool                                materialCulling = false;
 
     // Compute pipeline (for compute passes — separate from graphics pipeline)
     std::shared_ptr<VulkanComputePipeline> computePipeline;

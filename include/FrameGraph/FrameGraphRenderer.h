@@ -263,6 +263,9 @@ private:
         uint32_t vertexStride = 0;
         VkBuffer index = VK_NULL_HANDLE;
         VkIndexType indexType = VK_INDEX_TYPE_MAX_ENUM;
+        // Dynamic cull mode and front face last set ("cullMode": "material").
+        VkCullModeFlags cullMode = VK_CULL_MODE_FLAG_BITS_MAX_ENUM;
+        VkFrontFace frontFace = VK_FRONT_FACE_MAX_ENUM;
     };
 
     void bindAndDrawEntity(

@@ -2183,7 +2183,7 @@
         "fragmentShader": "shaders/gbuffer.frag.spv",
         "depthTest": true,
         "depthWrite": true,
-        "cullMode": "none"
+        "cullMode": "material"
       },
       "descriptorSets": [
         "cameraSet",
@@ -2248,7 +2248,7 @@
         "fragmentShader": "shaders/gbuffer_masked.frag.spv",
         "depthTest": true,
         "depthWrite": true,
-        "cullMode": "none"
+        "cullMode": "material"
       },
       "descriptorSets": [
         "cameraSet",
@@ -2313,7 +2313,7 @@
         "vertexInput": "skinned",
         "depthTest": true,
         "depthWrite": true,
-        "cullMode": "none"
+        "cullMode": "material"
       },
       "descriptorSets": [
         "cameraSet",
@@ -2379,7 +2379,7 @@
         "vertexInput": "skinned",
         "depthTest": true,
         "depthWrite": true,
-        "cullMode": "none"
+        "cullMode": "material"
       },
       "descriptorSets": [
         "cameraSet",
@@ -2951,7 +2951,7 @@
         "fragmentShader": "shaders/forward.frag.spv",
         "depthTest": true,
         "depthWrite": false,
-        "cullMode": "none",
+        "cullMode": "material",
         "blending": "alpha"
       },
       "descriptorSets": [
@@ -3021,7 +3021,7 @@
         "fragmentShader": "shaders/forward_rt.frag.spv",
         "depthTest": true,
         "depthWrite": false,
-        "cullMode": "none",
+        "cullMode": "material",
         "blending": "alpha"
       },
       "descriptorSets": [

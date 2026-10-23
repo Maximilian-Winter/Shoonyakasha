@@ -377,7 +377,10 @@ struct PipelineDesc {
     // between the light and the near plane still write depth. Needs the
     // depthClamp device feature; ignored with a warning where it is missing.
     bool depthClamp = false;
-    std::string cullMode      = "back";           // "none", "front", "back", "front_and_back"
+    // "none", "front", "back", "front_and_back", or "material": entity draws
+    // cull back faces of single-sided materials and none of double-sided
+    // ones, with front faces reversed for mirroring world matrices.
+    std::string cullMode      = "back";
     std::string blending      = "none";           // "none", "alpha", "additive", "custom"
     std::string topology      = "triangle_list";  // "triangle_list", "triangle_strip", "line_list", "point_list"
     std::string vertexInput   = "default";        // "default" (Vertex type), "none" (fullscreen)

@@ -183,7 +183,7 @@ Passes require `name` and `type` (`graphics`, `compute`, `transfer`, `ray_tracin
 | `depthTest`, `depthWrite` | true |
 | `depthCompareOp` | `less`; `never`, `equal`, `less_or_equal`, `greater`, `not_equal`, `greater_or_equal`, `always`. An unknown name fails at load |
 | `depthClamp` | false; clamps depth instead of clipping at the near and far planes (directional shadow passes). Requires the `depthClamp` device feature and is ignored with a warning without it |
-| `cullMode` | `back`; `front`, `none`, `front_and_back` |
+| `cullMode` | `back`; `front`, `none`, `front_and_back`, or `material` for entity passes: each draw culls the back faces of single-sided materials and none of double-sided ones (glTF `doubleSided`), and treats clockwise triangles as front faces where the entity's world matrix mirrors (negative determinant); cull mode and front face are then dynamic state |
 | `frontFace` | `counter_clockwise`; `clockwise` |
 | `blending` | `none`; `alpha`, `additive`, `custom`; see [blending](#blending) |
 | `writeMask` | `rgba`; the channels written to colour attachments, any of `r`, `g`, `b` and `a` once each (`""` writes none) |

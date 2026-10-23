@@ -367,7 +367,9 @@ VkCullModeFlags stringToCullMode(const std::string& str) {
     if (str == "front")          return VK_CULL_MODE_FRONT_BIT;
     if (str == "back")           return VK_CULL_MODE_BACK_BIT;
     if (str == "front_and_back") return VK_CULL_MODE_FRONT_AND_BACK;
-    throw std::runtime_error("Unknown cullMode: '" + str + "' (expected none, front, back or front_and_back)");
+    if (str == "material")       return VK_CULL_MODE_BACK_BIT;   // set per draw
+    throw std::runtime_error("Unknown cullMode: '" + str +
+                             "' (expected none, front, back, front_and_back or material)");
 }
 
 VkPrimitiveTopology stringToTopology(const std::string& str) {
