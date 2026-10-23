@@ -56,7 +56,7 @@ std::vector<RenderableEntity> FrameGraphRenderer::queryEntities(
 
     for (const auto& r : m_renderables) {
         // Apply filter
-        if (!passesFilter(*r.material, *r.tag, filter, r.hasSkeleton, r.isSprite2D)) continue;
+        if (!passesFilter(*r.material, *r.tag, filter, r.hasSkeleton, r.isSprite2D, r.transmissive)) continue;
 
         if (!passesAlphaFilter(*r.material, alphaFilter)) continue;
 
@@ -141,6 +141,7 @@ void FrameGraphRenderer::gatherRenderables() const {
         r.transform = &view.get<ECS::TransformComponent>(entity);
         r.hasSkeleton = m_registry->all_of<Shoonyakasha::SkeletonComponent>(entity);
         r.isSprite2D = m_registry->all_of<Shoonyakasha::Sprite2DComponent>(entity);
+        r.transmissive = r.material->getParam<float>("transmissionFactor", 0.0f) > 0.0f;
         r.hasBounds = mesh.hasBounds;
         if (r.hasBounds) transformBounds(r.transform->worldMatrix, mesh.boundsMin, mesh.boundsMax, r.worldMin, r.worldMax);
         const bool ownBuffers = r.hasSkeleton || r.isSprite2D || m_registry->all_of<MorphComponent>(entity);

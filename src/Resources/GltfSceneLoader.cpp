@@ -768,8 +768,23 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             }
         }
 
-        if (material->has_transmission) result.transmissionFactor = material->transmission.transmission_factor;
+        if (material->has_transmission) {
+            result.transmissionFactor = material->transmission.transmission_factor;
+            if (m_options.loadTextures && material->transmission.transmission_texture.texture) {
+                result.transmissionMap = loadTexture(data, material->transmission.transmission_texture, false);
+            }
+        }
         if (material->has_ior) result.ior = material->ior.ior;
+        if (material->has_volume) {
+            const auto& volume = material->volume;
+            result.thicknessFactor = volume.thickness_factor;
+            result.attenuationDistance = std::isfinite(volume.attenuation_distance) ? volume.attenuation_distance : 0.0f;
+            result.attenuationColor = glm::vec3(volume.attenuation_color[0], volume.attenuation_color[1],
+                                                volume.attenuation_color[2]);
+            if (m_options.loadTextures && volume.thickness_texture.texture) {
+                result.thicknessMap = loadTexture(data, volume.thickness_texture, false);
+            }
+        }
 
         if (material->has_iridescence) {
             const auto& film = material->iridescence;
@@ -1228,6 +1243,9 @@ entt::entity GltfSceneLoader::createEntity(
     }
     material.setParam("transmissionFactor", primitive.transmissionFactor);
     material.setParam("ior", primitive.ior);
+    material.setParam("thicknessFactor", primitive.thicknessFactor);
+    material.setParam("attenuationDistance", primitive.attenuationDistance);
+    material.setParam("attenuationColor", glm::vec4(primitive.attenuationColor, 1.0f));
     if (primitive.hasIridescence) {
         material.setParam("iridescenceFactor", primitive.iridescenceFactor);
         material.setParam("iridescenceIor", primitive.iridescenceIor);
@@ -1259,6 +1277,12 @@ entt::entity GltfSceneLoader::createEntity(
     }
     if (primitive.clearcoatRoughnessMap.isValid()) {
         material.textures["clearcoatRoughnessMap"] = primitive.clearcoatRoughnessMap;
+    }
+    if (primitive.transmissionMap.isValid()) {
+        material.textures["transmissionMap"] = primitive.transmissionMap;
+    }
+    if (primitive.thicknessMap.isValid()) {
+        material.textures["thicknessMap"] = primitive.thicknessMap;
     }
     if (primitive.iridescenceMap.isValid()) {
         material.textures["iridescenceMap"] = primitive.iridescenceMap;
@@ -1634,6 +1658,11 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
         material.setParam("clearcoatFactor", primitive.clearcoatFactor);
         material.setParam("clearcoatRoughnessFactor", primitive.clearcoatRoughnessFactor);
     }
+    material.setParam("transmissionFactor", primitive.transmissionFactor);
+    material.setParam("ior", primitive.ior);
+    material.setParam("thicknessFactor", primitive.thicknessFactor);
+    material.setParam("attenuationDistance", primitive.attenuationDistance);
+    material.setParam("attenuationColor", glm::vec4(primitive.attenuationColor, 1.0f));
     material.alphaMode = primitive.alphaMode;
     material.alphaCutoff = primitive.alphaCutoff;
     material.doubleSided = primitive.doubleSided;
@@ -1647,6 +1676,8 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     if (primitive.clearcoatMap.isValid()) material.textures["clearcoatMap"] = primitive.clearcoatMap;
     if (primitive.clearcoatRoughnessMap.isValid())
         material.textures["clearcoatRoughnessMap"] = primitive.clearcoatRoughnessMap;
+    if (primitive.transmissionMap.isValid()) material.textures["transmissionMap"] = primitive.transmissionMap;
+    if (primitive.thicknessMap.isValid()) material.textures["thicknessMap"] = primitive.thicknessMap;
 
     // Add SkeletonComponent
     auto& skelComp = scene->addComponent<SkeletonComponent>(entity);

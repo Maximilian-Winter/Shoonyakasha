@@ -43,6 +43,7 @@ That gives a lit, anti-aliased and tone-mapped box against the environment. With
 **glTF materials.** Metallic-roughness materials are used as glTF defines them:
 - **Textures:** base colour, normal, metallic-roughness, occlusion and emissive.
 - **Alpha mode:** `OPAQUE` goes into the G-buffer. `MASK` is alpha-tested, in the G-buffer and in every shadow. `BLEND` is shaded forward over the lit scene, back to front, and receives shadows but casts none.
+- **Transmission:** a material with `KHR_materials_transmission` (and `KHR_materials_ior`, `KHR_materials_volume`) is shaded forward like `BLEND`, in any alpha mode, and lets through the lit opaque scene behind it, refracted through its thickness, blurred by its roughness and tinted by its colour and attenuation. It casts no shadow. The [materials guide](materials.md#binding-contract) has the details.
 - **Changes at runtime:** `set_material_vec4(entity, "baseColorFactor", ...)`, `set_material_float(entity, "roughnessFactor", ...)` and the other factors take effect on the next frame.
 
 **Animated models** render once loaded with `load_gltf_scene(path, load_skins=True, load_animations=True)` and played with `engine.scene.play_animation(entity, clip)`. They are skinned in the G-buffer and in the shadows, and carry motion vectors, so TAA follows them.
@@ -148,8 +149,8 @@ The [README](../../python/shoonyakasha/pipelines/default/README.md#settings) lis
 
 - **Cost, from most to least:** local shadows (every shadowed light that's in use re-renders its casters, up to six times for a point light), sun cascades (four renders of the casters), then ambient occlusion and the screen-space passes, then TAA, bloom and exposure.
 - **Trimming shadows:** turn off `set_light_cast_shadows` on lights the viewer won't miss them for, and shorten ranges. The `low` preset drops alpha-tested casters, which are often foliage and cost the most.
-- **Memory:** the atlas takes 64 MB, the cascades another 64 MB, and the screen-sized targets about 60 bytes per pixel.
-- **Push constants:** the pipeline pushes 200 bytes of per-draw constants. Every desktop GPU allows 256. A device limited to Vulkan's minimum of 128 logs the G-buffer passes as not fitting, and they draw nothing.
+- **Memory:** the atlas takes 64 MB, the cascades another 64 MB, and the screen-sized targets about 70 bytes per pixel.
+- **Push constants:** the pipeline pushes 236 bytes of per-draw constants. Every desktop GPU allows 256. A device limited to Vulkan's minimum of 128 logs the G-buffer passes as not fitting, and they draw nothing.
 
 ## Making it your own
 
@@ -258,7 +259,7 @@ Some things this example shows about the pipeline:
 | Everything is black except the sky | No lights, or only lights whose range doesn't reach the scene. Check the sky light too: `iblIntensity`, and the environment map |
 | A directional light casts no shadow | Its shadow flag is off, another directional light was flagged first, or what should be shadowed is beyond `max_distance` (debug view 1) |
 | A spot or point light casts no shadow | Its flag is off; more than 16 spot or 8 point lights are flagged and it ranked lower (not with `raytraced`); or its range doesn't reach the view |
-| Blended glass casts no shadow | Blended materials receive shadows but don't cast them. Use `MASK` for things like leaves and fences |
+| Blended glass casts no shadow | Blended and transmissive materials receive shadows but don't cast them. Use `MASK` for things like leaves and fences |
 | Shadows shimmer on distant objects | They're in the last cascade with few texels per unit. Shorten `max_distance`, or raise `split_lambda` so more of the resolution goes near the camera |
 | `raytraced` does nothing | The GPU has no ray queries (see the warning in the log), or `SHOONYAKASHA_DISABLE_RAY_QUERY` is set |
 | A copied pipeline fails to load after an edit | The log names the pass, shader and member whose declaration doesn't match the JSON. Recompile the shaders and run `sk.pipeline.check` |

@@ -47,6 +47,9 @@ Deferred PBR (glTF metallic-roughness) with:
   materials that receive shadows
 - clear coat (`KHR_materials_clearcoat`): a glossy dielectric layer with its
   own roughness over the base, from every light and the environment
+- transmission (`KHR_materials_transmission`, `KHR_materials_ior`,
+  `KHR_materials_volume`): forward-shaded surfaces that let through the
+  opaque scene behind them, refracted, blurred by roughness and attenuated
 - temporal anti-aliasing: a sub-pixel camera jitter, history reprojected
   with per-pixel motion vectors (moving, skinned and animated objects as well
   as the camera) and clipped to the new frame's colours; it also averages the
@@ -155,7 +158,8 @@ own that it does not mention stay as you set them.
 | `LightingRT` | In the `raytraced` preset, instead of `Lighting`: the same, with shadow rays towards spot and point lights instead of the shadow atlas, and a reflection ray per glossy pixel, written to `reflection` and `reflectionScale`. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `ReflectionDenoise` | The reflections `Lighting` or `LightingRT` wrote, averaged over each surface and added to the HDR target. Off in the `low` preset |
 | `HeightFog` | Exponential height fog (`fog.glsl`) blended over the opaque scene and the sky: the fog's share along each view ray, to the far plane for the sky, of the environment's blurred light. `Transparent` and `TransparentRT` fog blended surfaces the same way. Draws nothing with `fogDensity` 0 |
-| `Transparent` | Blended materials, back to front, sampling the cascades directly. With `oit` 1 they go to `transparentAccum` and `transparentReveal` instead (weighted blended order-independent transparency): it clears both, and `TransparentRT` adds to them |
+| `SceneBehind`, `SceneBehindMips1`–`5` | Copy the lit, fogged opaque scene to `sceneBehind` and blit its mip chain, for transmissive surfaces to see through |
+| `Transparent` | Blended and transmissive materials, back to front, sampling the cascades directly. With `oit` 1 blended ones go to `transparentAccum` and `transparentReveal` instead (weighted blended order-independent transparency): it clears both, and `TransparentRT` adds to them. Transmissive ones always draw straight into the HDR target |
 | `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with shadow rays towards the sun, spot and point lights. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `TransparentComposite` | With `oit` 1: the transparent surfaces' weighted average colour (`transparentAccum`) alpha-blended over the HDR target by their combined coverage (1 - `transparentReveal`). Draws nothing where none was accumulated |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |
@@ -181,7 +185,7 @@ roughness, clear coat, clear coat roughness), `gVelocity` (RG16F: this frame's s
 frame's, in UV units, without the jitter), `gDepth` (D32; positions are
 reconstructed from it) and `hdrColor` (RGBA16F).
 
-The G-buffer passes push 200 bytes of constants per draw (this and last
+The G-buffer passes push 236 bytes of constants per draw (this and last
 frame's model matrix, then the material factors). Every desktop GPU allows
 256; a device that allows only Vulkan's minimum of 128 reports those passes
 at load and draws nothing in them.

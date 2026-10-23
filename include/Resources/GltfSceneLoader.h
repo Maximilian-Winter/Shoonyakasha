@@ -66,6 +66,8 @@ struct GltfPrimitive {
     Shoonyakasha::GPUTexture emissiveMap;
     Shoonyakasha::GPUTexture clearcoatMap;            // KHR_materials_clearcoat: r amount
     Shoonyakasha::GPUTexture clearcoatRoughnessMap;   // g roughness
+    Shoonyakasha::GPUTexture transmissionMap;         // KHR_materials_transmission: r amount
+    Shoonyakasha::GPUTexture thicknessMap;            // KHR_materials_volume: g thickness
     Shoonyakasha::GPUTexture iridescenceMap;           // KHR_materials_iridescence: r amount
     Shoonyakasha::GPUTexture iridescenceThicknessMap;  // g thickness, from minimum to maximum
 
@@ -85,6 +87,12 @@ struct GltfPrimitive {
     // defaults when a material has neither.
     float transmissionFactor    = 0.0f;
     float ior                   = 1.5f;
+    // KHR_materials_volume: thickness in the mesh's units (0 thin-walled),
+    // and the distance over which light keeps attenuationColor of itself
+    // (0 for none).
+    float thicknessFactor       = 0.0f;
+    float attenuationDistance   = 0.0f;
+    glm::vec3 attenuationColor  = glm::vec3(1.0f);
     // KHR_materials_iridescence, when the material has the extension: a thin
     // film of index iridescenceIor, thicknesses in nanometres.
     bool hasIridescence         = false;

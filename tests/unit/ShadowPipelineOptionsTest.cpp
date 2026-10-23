@@ -238,6 +238,19 @@ TEST(ShadowCasterFilter, SpritesNeverCastShadows) {
     EXPECT_FALSE(drawn(EntityFilter::ShadowCasters, AlphaMode::Opaque, false, true, /*isSprite2D=*/true));
 }
 
+TEST(ShadowCasterFilter, TransmissiveStaticEntitiesDrawWithTheTransparentOnes) {
+    RenderableTagComponent tag;
+    for (auto mode : {AlphaMode::Opaque, AlphaMode::Mask, AlphaMode::Blend}) {
+        const auto material = materialWith(mode);
+        EXPECT_FALSE(FrameGraphRenderer::passesFilter(material, tag, EntityFilter::Opaque, false, false, true));
+        EXPECT_TRUE(FrameGraphRenderer::passesFilter(material, tag, EntityFilter::Transparent, false, false, true));
+        EXPECT_FALSE(FrameGraphRenderer::passesFilter(material, tag, EntityFilter::ShadowCasters, false, false, true));
+    }
+    const auto opaque = materialWith(AlphaMode::Opaque);
+    EXPECT_TRUE(FrameGraphRenderer::passesFilter(opaque, tag, EntityFilter::Opaque, false, false, false));
+    EXPECT_FALSE(FrameGraphRenderer::passesFilter(opaque, tag, EntityFilter::Transparent, false, false, false));
+}
+
 TEST(ShadowCasterFilter, AlphaFilterNarrowsByAlphaMode) {
     const auto opaque = materialWith(AlphaMode::Opaque);
     const auto mask = materialWith(AlphaMode::Mask);

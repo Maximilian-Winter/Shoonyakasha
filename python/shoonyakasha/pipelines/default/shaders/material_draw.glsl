@@ -16,4 +16,10 @@ layout(push_constant) uniform MaterialDraw {
     float occlusionStrength; // 0: the occlusion map has no effect, 1: its full effect
     float clearcoatFactor;   // KHR_materials_clearcoat: coat amount, 0 for none
     float clearcoatRoughness;
+    float transmissionFactor;   // KHR_materials_transmission: light let through, 0 for none
+    float ior;                  // KHR_materials_ior
+    vec4 attenuationColor;      // KHR_materials_volume: rgb, a unused
+    float thicknessFactor;      // thickness in mesh units, 0 for a thin surface
+    float attenuationDistance;  // distance light travels before it is attenuationColor, 0 for none
+    uint alphaMode;             // 0 opaque, 1 mask, 2 blend
 } draw;

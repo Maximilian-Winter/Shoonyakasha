@@ -12,7 +12,8 @@
 // instances. With alphaTested, alpha-tested materials go in too, as
 // non-opaque instances: a ray query sees their triangles as candidates, and
 // the shader decides from the texture's alpha (sk/scene_hits.glsl,
-// skAlphaTestCandidate). Transparent materials and sprites stay out.
+// skAlphaTestCandidate). Transparent and transmissive (transmissionFactor
+// above 0) materials and sprites stay out.
 //
 // Skinned meshes go in posed: every frame a compute shader
 // (skin_vertices.comp, setSkinningShader) writes each one's vertices, in

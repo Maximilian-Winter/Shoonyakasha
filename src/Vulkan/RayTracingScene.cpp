@@ -539,13 +539,15 @@ void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt
         instance.accelerationStructureReference = structure;
         instances.push_back(instance);
     };
-    // Shadow casters with an opaque material, or an alpha-tested one when
-    // asked: those need their texture to cut the right holes, which only
-    // shaders that test the candidates do.
+    // Shadow casters with an opaque material that transmits nothing, or an
+    // alpha-tested one when asked: those need their texture to cut the right
+    // holes, which only shaders that test the candidates do.
     auto caster = [&](const MeshComponent& mesh, const RenderableTagComponent& tag, const MaterialComponentV5& material,
                       bool& masked) {
         masked = alphaTested && material.isMasked();
-        return mesh.isValid() && tag.shouldRender() && tag.castShadows && (material.isOpaque() || masked);
+        const bool transmissive = material.getParam<float>("transmissionFactor", 0.0f) > 0.0f;
+        return mesh.isValid() && tag.shouldRender() && tag.castShadows && !transmissive &&
+               (material.isOpaque() || masked);
     };
 
     // The static casters.

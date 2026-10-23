@@ -183,12 +183,15 @@ public:
 
     // ── Filtering ───────────────────────────────────────────────────
 
-    /// Whether an entity is drawn by a pass using `filter`.
+    /// Whether an entity is drawn by a pass using `filter`. A transmissive
+    /// static entity (its material's transmissionFactor above 0) is drawn
+    /// with the transparent ones, not the opaque ones, and casts no shadow.
     static bool passesFilter(const MaterialComponentV5& material,
                              const RenderableTagComponent& tag,
                              EntityFilter filter,
                              bool hasSkeleton,
-                             bool isSprite2D);
+                             bool isSprite2D,
+                             bool transmissive = false);
 
     /// Whether a material's alpha mode is accepted by `alphaFilter`.
     static bool passesAlphaFilter(const MaterialComponentV5& material,
@@ -229,6 +232,7 @@ private:
         const ECS::TransformComponent* transform = nullptr;
         bool hasSkeleton = false;
         bool isSprite2D = false;
+        bool transmissive = false;   // transmissionFactor above 0
         bool hasBounds = false;
         glm::vec3 worldMin{0.0f}, worldMax{0.0f};
         uint64_t batchKey = 0;   // RenderableEntity::batchKey
@@ -343,7 +347,8 @@ inline bool FrameGraphRenderer::passesFilter(
     const RenderableTagComponent& tag,
     EntityFilter filter,
     bool hasSkeleton,
-    bool isSprite2D)
+    bool isSprite2D,
+    bool transmissive)
 {
     if (!tag.shouldRender()) return false;
 
@@ -351,13 +356,13 @@ inline bool FrameGraphRenderer::passesFilter(
         case EntityFilter::All:
             return true;
         case EntityFilter::Opaque:
-            return !hasSkeleton && !isSprite2D && material.isOpaqueOrMasked();
+            return !hasSkeleton && !isSprite2D && !transmissive && material.isOpaqueOrMasked();
         case EntityFilter::Transparent:
-            return !hasSkeleton && !isSprite2D && material.isTransparent();
+            return !hasSkeleton && !isSprite2D && (transmissive || material.isTransparent());
         case EntityFilter::ShadowCasters:
             // Skinned casters need the skinned vertex shader, so they have
             // their own type rather than casting bind-pose shadows here.
-            return !hasSkeleton && !isSprite2D && tag.castShadows && material.isOpaqueOrMasked();
+            return !hasSkeleton && !isSprite2D && !transmissive && tag.castShadows && material.isOpaqueOrMasked();
         case EntityFilter::Skinned:
             return hasSkeleton && material.isOpaqueOrMasked();
         case EntityFilter::SkinnedTransparent:
