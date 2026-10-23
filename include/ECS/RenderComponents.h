@@ -182,6 +182,18 @@ struct MaterialComponentV5 {
 };
 
 // ============================================================================
+// MaterialVariantsComponent - KHR_materials_variants
+// ============================================================================
+// The materials an entity takes for the variants of its glTF file, by
+// variant index, and the file's default material. setMaterialVariant puts
+// one of them in the entity's MaterialComponentV5.
+struct MaterialVariantsComponent {
+    MaterialComponentV5 defaultMaterial;
+    std::unordered_map<uint32_t, MaterialComponentV5> variants;
+    int active = -1;   // the variant in use; -1 the default
+};
+
+// ============================================================================
 // SceneEnvironment - Global environment data (not per-entity)
 // ============================================================================
 //

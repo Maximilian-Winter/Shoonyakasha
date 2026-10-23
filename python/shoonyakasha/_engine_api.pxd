@@ -231,6 +231,7 @@ cdef extern from "Facade/SceneAPI.h" namespace "Shoonyakasha::Facade":
         # Renderable
         cbool isVisible(EntityHandle entity) const
         void setVisible(EntityHandle entity, cbool visible)
+        cbool setMaterialVariant(EntityHandle entity, int index)
         cbool getCastShadows(EntityHandle entity) const
         void setCastShadows(EntityHandle entity, cbool castShadows)
         uint8_t getRenderLayerMask(EntityHandle entity) const

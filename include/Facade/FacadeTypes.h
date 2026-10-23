@@ -264,6 +264,7 @@ struct GltfResult {
     std::string error;
     std::vector<EntityHandle> entities;
     std::vector<EntityHandle> lights;  // with loadLights: the KHR_lights_punctual lights
+    std::vector<std::string> variants; // KHR_materials_variants names, by index
     size_t totalVertices  = 0;
     size_t totalIndices   = 0;
     size_t totalTextures  = 0;

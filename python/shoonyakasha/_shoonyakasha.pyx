@@ -191,7 +191,7 @@ cdef inline vec2 _tuple_to_vec2(object t):
 
 class GltfResult:
     """Result of loading a glTF scene."""
-    __slots__ = ('success', 'error', 'entities', 'lights',
+    __slots__ = ('success', 'error', 'entities', 'lights', 'variants',
                  'total_vertices', 'total_indices',
                  'total_textures', 'total_materials',
                  'animation_clips', 'skeleton_count')
@@ -201,6 +201,7 @@ class GltfResult:
         self.error = ""
         self.entities = []
         self.lights = []            # with load_lights=True: the file's light entities
+        self.variants = []          # KHR_materials_variants names, by index
         self.total_vertices = 0
         self.total_indices = 0
         self.total_textures = 0
@@ -226,6 +227,8 @@ cdef object _wrap_gltf_result(CppGltfResult& cpp_result):
     r.entities = [<uint32_t>cpp_result.entities[i]
                   for i in range(cpp_result.entities.size())]
     r.lights = [<uint32_t>cpp_result.lights[i] for i in range(cpp_result.lights.size())]
+    r.variants = [cpp_result.variants[i].decode('utf-8', errors='replace')
+                  for i in range(cpp_result.variants.size())]
     r.total_vertices = cpp_result.totalVertices
     r.total_indices = cpp_result.totalIndices
     r.total_textures = cpp_result.totalTextures
@@ -633,6 +636,15 @@ cdef class Scene:
 
     def set_visible(self, uint32_t entity, bint visible):
         self._ptr.setVisible(entity, visible)
+
+    def set_material_variant(self, uint32_t entity, int index):
+        """KHR_materials_variants: give an entity from a glTF file with variants
+        the material it maps for variant `index` (into GltfResult.variants),
+        or its default material for -1 or a variant it does not map.
+
+        Returns False for an entity without variants.
+        """
+        return self._ptr.setMaterialVariant(entity, index)
 
     def get_cast_shadows(self, uint32_t entity):
         return self._ptr.getCastShadows(entity)

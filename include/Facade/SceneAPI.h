@@ -272,6 +272,12 @@ public:
     bool isVisible(EntityHandle entity) const;
     void setVisible(EntityHandle entity, bool visible);
 
+    /// KHR_materials_variants: give an entity loaded from a glTF file with
+    /// variants the material its primitive maps for variant `index` (an index
+    /// into GltfResult::variants), or its default material for -1 or a variant
+    /// it does not map. False for an entity without variants.
+    bool setMaterialVariant(EntityHandle entity, int index);
+
     bool getCastShadows(EntityHandle entity) const;
     void setCastShadows(EntityHandle entity, bool castShadows);
 

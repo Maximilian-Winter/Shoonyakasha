@@ -21,6 +21,7 @@
 #include <meshoptimizer.h>
 #include <draco/compression/decode.h>
 #include <ktx.h>
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -282,6 +283,22 @@ KtxImage decodeKtx2(const uint8_t* bytes, size_t size, bool srgb, bool bc, uint3
     return out;
 }
 
+// KHR_node_visibility: whether the node, or one of its ancestors, has
+// "visible": false.
+bool nodeHidden(const cgltf_node* node) {
+    for (; node; node = node->parent) {
+        for (cgltf_size i = 0; i < node->extensions_count; ++i) {
+            const cgltf_extension& extension = node->extensions[i];
+            if (!extension.name || !extension.data || std::strcmp(extension.name, "KHR_node_visibility") != 0) {
+                continue;
+            }
+            const auto json = nlohmann::json::parse(extension.data, nullptr, false);
+            if (json.is_object() && json.value("visible", true) == false) return true;
+        }
+    }
+    return false;
+}
+
 // Memory holding decoded KHR_draco_mesh_compression data: buffer views the
 // decoded accessors point at, kept until the cgltf data is freed.
 struct DracoStorage {
@@ -414,6 +431,68 @@ void setIridescence(MaterialComponentV5& material, const GltfPrimitive& primitiv
     if (primitive.iridescenceThicknessMap.isValid()) {
         material.textures["iridescenceThicknessMap"] = primitive.iridescenceThicknessMap;
     }
+}
+
+// The MaterialComponentV5 of a glTF material: its factors, uv rows,
+// alpha mode and textures, as the loader read them into `primitive`.
+MaterialComponentV5 makeMaterial(const GltfPrimitive& primitive) {
+    MaterialComponentV5 material;
+    material.setParam("baseColorFactor", primitive.baseColorFactor);
+    material.setParam("metallicFactor", primitive.metallicFactor);
+    material.setParam("roughnessFactor", primitive.roughnessFactor);
+    material.setParam("emissiveFactor", glm::vec4(primitive.emissiveFactor, 1.0f));
+    material.setParam("normalScale", primitive.normalScale);
+    material.setParam("occlusionStrength", primitive.occlusionStrength);
+    if (primitive.hasClearcoat) {
+        material.setParam("clearcoatFactor", primitive.clearcoatFactor);
+        material.setParam("clearcoatRoughnessFactor", primitive.clearcoatRoughnessFactor);
+    }
+    material.setParam("transmissionFactor", primitive.transmissionFactor);
+    material.setParam("ior", primitive.ior);
+    material.setParam("thicknessFactor", primitive.thicknessFactor);
+    material.setParam("attenuationDistance", primitive.attenuationDistance);
+    material.setParam("attenuationColor", glm::vec4(primitive.attenuationColor, 1.0f));
+    for (const auto& [slot, rows] : primitive.uvTransforms) {
+        material.setParam(slot + "UvRow0", rows[0]);
+        material.setParam(slot + "UvRow1", rows[1]);
+    }
+    material.alphaMode = primitive.alphaMode;
+    material.alphaCutoff = primitive.alphaCutoff;
+    material.doubleSided = primitive.doubleSided;
+
+    // Add textures
+    if (primitive.albedoMap.isValid()) {
+        material.textures["albedoMap"] = primitive.albedoMap;
+    }
+    if (primitive.normalMap.isValid()) {
+        material.textures["normalMap"] = primitive.normalMap;
+    }
+    if (primitive.metallicRoughnessMap.isValid()) {
+        material.textures["metallicRoughnessMap"] = primitive.metallicRoughnessMap;
+    }
+    if (primitive.aoMap.isValid()) {
+        material.textures["aoMap"] = primitive.aoMap;
+    }
+    if (primitive.emissiveMap.isValid()) {
+        material.textures["emissiveMap"] = primitive.emissiveMap;
+    }
+    if (primitive.clearcoatMap.isValid()) {
+        material.textures["clearcoatMap"] = primitive.clearcoatMap;
+    }
+    if (primitive.clearcoatRoughnessMap.isValid()) {
+        material.textures["clearcoatRoughnessMap"] = primitive.clearcoatRoughnessMap;
+    }
+    if (primitive.transmissionMap.isValid()) {
+        material.textures["transmissionMap"] = primitive.transmissionMap;
+    }
+    if (primitive.thicknessMap.isValid()) {
+        material.textures["thicknessMap"] = primitive.thicknessMap;
+    }
+    setSheenAndSpecular(material, primitive);
+    setIridescence(material, primitive);
+    if (primitive.unlit) material.setParam("unlit", 1.0f);
+    setAnisotropy(material, primitive);
+    return material;
 }
 
 const std::array<glm::vec4, 2> kIdentityUvTransform = {glm::vec4(1.0f, 0.0f, 0.0f, 0.0f),
@@ -722,6 +801,9 @@ GltfLoadResult GltfSceneLoader::load(
         result.error = path.string() + ": " + error;
         return result;
     }
+    for (cgltf_size i = 0; i < data->variants_count; ++i) {
+        result.variants.emplace_back(data->variants[i].name ? data->variants[i].name : "");
+    }
 
     std::cout << "[GltfSceneLoader] Loading: " << path.string() << std::endl;
     std::cout << "  Meshes: " << data->meshes_count << std::endl;
@@ -940,6 +1022,18 @@ void GltfSceneLoader::processNode(
                 if (instance.morphTargets) {
                     addMorphTargets(scene, entity, instance, data, node, result.animationClips);
                 }
+                if (!instance.materialVariants.empty()) {
+                    auto& registry = scene->getRegistry();
+                    MaterialVariantsComponent variants;
+                    variants.defaultMaterial = registry.get<MaterialComponentV5>(entity);
+                    for (const auto& [index, material] : instance.materialVariants) {
+                        variants.variants[index] = makeMaterial(*material);
+                    }
+                    registry.emplace_or_replace<MaterialVariantsComponent>(entity, std::move(variants));
+                }
+                if (nodeHidden(node)) {
+                    scene->getRegistry().get<RenderableTagComponent>(entity).visible = false;
+                }
                 result.entities.push_back(entity);
             }
 
@@ -1076,177 +1170,191 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
         buildIndexBuffer(indices, result.indexCount, result.indexType));
     if (!result.lods.empty()) result.indexCount = result.lods.front().firstIndex;
 
-    // Process material
     if (primitive.material && m_options.loadMaterials) {
-        const cgltf_material* material = primitive.material;
-
-        // Extract material properties
-        if (material->has_pbr_metallic_roughness) {
-            const auto& pbr = material->pbr_metallic_roughness;
-            result.baseColorFactor = glm::vec4(
-                pbr.base_color_factor[0],
-                pbr.base_color_factor[1],
-                pbr.base_color_factor[2],
-                pbr.base_color_factor[3]
-            );
-            result.metallicFactor = pbr.metallic_factor;
-            result.roughnessFactor = pbr.roughness_factor;
-
-            // Load textures
-            if (m_options.loadTextures) {
-                if (pbr.base_color_texture.texture) {
-                    result.albedoMap = loadTexture(data, pbr.base_color_texture, true);
-                }
-                if (pbr.metallic_roughness_texture.texture) {
-                    result.metallicRoughnessMap = loadTexture(data, pbr.metallic_roughness_texture, false);
-                }
-            }
+        readMaterial(data, primitive.material, result);
+    }
+    // KHR_materials_variants: each mapped material, read like the default.
+    if (m_options.loadMaterials) {
+        for (cgltf_size i = 0; i < primitive.mappings_count; ++i) {
+            const cgltf_material_mapping& mapping = primitive.mappings[i];
+            if (!mapping.material) continue;
+            auto variant = std::make_shared<GltfPrimitive>();
+            readMaterial(data, mapping.material, *variant);
+            result.materialVariants.emplace_back(static_cast<uint32_t>(mapping.variant), std::move(variant));
         }
-
-        if (material->normal_texture.texture && m_options.loadTextures) {
-            result.normalMap = loadTexture(data, material->normal_texture, false, true);
-        }
-        result.normalScale = material->normal_texture.scale;
-
-        if (material->occlusion_texture.texture && m_options.loadTextures) {
-            result.aoMap = loadTexture(data, material->occlusion_texture, false);
-        }
-        result.occlusionStrength = material->occlusion_texture.scale;
-
-        if (material->emissive_texture.texture && m_options.loadTextures) {
-            result.emissiveMap = loadTexture(data, material->emissive_texture, true);
-        }
-
-        result.emissiveFactor = glm::vec3(
-            material->emissive_factor[0],
-            material->emissive_factor[1],
-            material->emissive_factor[2]
-        );
-        if (material->has_emissive_strength) {
-            result.emissiveFactor *= material->emissive_strength.emissive_strength;
-        }
-
-        if (material->has_clearcoat) {
-            result.hasClearcoat = true;
-            result.clearcoatFactor = material->clearcoat.clearcoat_factor;
-            result.clearcoatRoughnessFactor = material->clearcoat.clearcoat_roughness_factor;
-            if (m_options.loadTextures) {
-                if (material->clearcoat.clearcoat_texture.texture) {
-                    result.clearcoatMap = loadTexture(data, material->clearcoat.clearcoat_texture, false);
-                }
-                if (material->clearcoat.clearcoat_roughness_texture.texture) {
-                    result.clearcoatRoughnessMap =
-                        loadTexture(data, material->clearcoat.clearcoat_roughness_texture, false);
-                }
-            }
-        }
-
-        if (material->has_transmission) {
-            result.transmissionFactor = material->transmission.transmission_factor;
-            if (m_options.loadTextures && material->transmission.transmission_texture.texture) {
-                result.transmissionMap = loadTexture(data, material->transmission.transmission_texture, false);
-            }
-        }
-        if (material->has_ior) result.ior = material->ior.ior;
-        if (material->has_volume) {
-            const auto& volume = material->volume;
-            result.thicknessFactor = volume.thickness_factor;
-            result.attenuationDistance = std::isfinite(volume.attenuation_distance) ? volume.attenuation_distance : 0.0f;
-            result.attenuationColor = glm::vec3(volume.attenuation_color[0], volume.attenuation_color[1],
-                                                volume.attenuation_color[2]);
-            if (m_options.loadTextures && volume.thickness_texture.texture) {
-                result.thicknessMap = loadTexture(data, volume.thickness_texture, false);
-            }
-        }
-
-        if (material->has_sheen) {
-            const auto& sheen = material->sheen;
-            result.hasSheen = true;
-            result.sheenColorFactor = glm::vec3(sheen.sheen_color_factor[0], sheen.sheen_color_factor[1],
-                                                sheen.sheen_color_factor[2]);
-            result.sheenRoughnessFactor = sheen.sheen_roughness_factor;
-            if (m_options.loadTextures && sheen.sheen_color_texture.texture) {
-                result.sheenColorMap = loadTexture(data, sheen.sheen_color_texture, true);
-            }
-            if (m_options.loadTextures && sheen.sheen_roughness_texture.texture) {
-                result.sheenRoughnessMap = loadTexture(data, sheen.sheen_roughness_texture, false);
-            }
-        }
-        if (material->has_specular) {
-            const auto& specular = material->specular;
-            result.hasSpecular = true;
-            result.specularFactor = specular.specular_factor;
-            result.specularColorFactor = glm::vec3(specular.specular_color_factor[0],
-                                                   specular.specular_color_factor[1],
-                                                   specular.specular_color_factor[2]);
-            if (m_options.loadTextures && specular.specular_texture.texture) {
-                result.specularMap = loadTexture(data, specular.specular_texture, false);
-            }
-            if (m_options.loadTextures && specular.specular_color_texture.texture) {
-                result.specularColorMap = loadTexture(data, specular.specular_color_texture, true);
-            }
-        }
-
-        if (material->has_iridescence) {
-            const auto& film = material->iridescence;
-            result.hasIridescence = true;
-            result.iridescenceFactor = film.iridescence_factor;
-            result.iridescenceIor = film.iridescence_ior;
-            result.iridescenceThicknessMinimum = film.iridescence_thickness_min;
-            result.iridescenceThicknessMaximum = film.iridescence_thickness_max;
-            if (m_options.loadTextures) {
-                if (film.iridescence_texture.texture) {
-                    result.iridescenceMap = loadTexture(data, film.iridescence_texture, false);
-                }
-                if (film.iridescence_thickness_texture.texture) {
-                    result.iridescenceThicknessMap = loadTexture(data, film.iridescence_thickness_texture, false);
-                }
-            }
-        }
-
-        // Each texture's uv set and KHR_texture_transform, for those that
-        // differ from TEXCOORD_0 untransformed.
-        const auto& pbr = material->pbr_metallic_roughness;
-        const std::pair<const char*, const cgltf_texture_view*> views[] = {
-            {"albedoMap", &pbr.base_color_texture},
-            {"metallicRoughnessMap", &pbr.metallic_roughness_texture},
-            {"normalMap", &material->normal_texture},
-            {"aoMap", &material->occlusion_texture},
-            {"emissiveMap", &material->emissive_texture},
-            {"clearcoatMap", &material->clearcoat.clearcoat_texture},
-            {"clearcoatRoughnessMap", &material->clearcoat.clearcoat_roughness_texture},
-            {"transmissionMap", &material->transmission.transmission_texture},
-            {"thicknessMap", &material->volume.thickness_texture},
-            {"sheenColorMap", &material->sheen.sheen_color_texture},
-            {"sheenRoughnessMap", &material->sheen.sheen_roughness_texture},
-            {"specularMap", &material->specular.specular_texture},
-            {"specularColorMap", &material->specular.specular_color_texture},
-            {"iridescenceMap", &material->iridescence.iridescence_texture},
-            {"iridescenceThicknessMap", &material->iridescence.iridescence_thickness_texture},
-            {"anisotropyMap", &material->anisotropy.anisotropy_texture},
-        };
-        for (const auto& [slot, view] : views) {
-            if (!view->texture) continue;
-            const auto uv = textureUvTransform(*view);
-            if (uv != kIdentityUvTransform) result.uvTransforms.emplace_back(slot, uv);
-        }
-
-        result.unlit = material->unlit != 0;
-        if (material->has_anisotropy) {
-            const auto& anisotropy = material->anisotropy;
-            result.hasAnisotropy = true;
-            result.anisotropyStrength = anisotropy.anisotropy_strength;
-            result.anisotropyRotation = anisotropy.anisotropy_rotation;
-            if (m_options.loadTextures && anisotropy.anisotropy_texture.texture) {
-                result.anisotropyMap = loadTexture(data, anisotropy.anisotropy_texture, false);
-            }
-        }
-        result.alphaMode = extractAlphaMode(material);
-        result.alphaCutoff = material->alpha_cutoff;
-        result.doubleSided = material->double_sided;
     }
 
     return result;
+}
+
+// A glTF material's factors, extensions, textures, uv rows and alpha mode,
+// into the material fields of `result`.
+void GltfSceneLoader::readMaterial(cgltf_data* data, const cgltf_material* material, GltfPrimitive& result) {
+
+    // Extract material properties
+    if (material->has_pbr_metallic_roughness) {
+        const auto& pbr = material->pbr_metallic_roughness;
+        result.baseColorFactor = glm::vec4(
+            pbr.base_color_factor[0],
+            pbr.base_color_factor[1],
+            pbr.base_color_factor[2],
+            pbr.base_color_factor[3]
+        );
+        result.metallicFactor = pbr.metallic_factor;
+        result.roughnessFactor = pbr.roughness_factor;
+
+        // Load textures
+        if (m_options.loadTextures) {
+            if (pbr.base_color_texture.texture) {
+                result.albedoMap = loadTexture(data, pbr.base_color_texture, true);
+            }
+            if (pbr.metallic_roughness_texture.texture) {
+                result.metallicRoughnessMap = loadTexture(data, pbr.metallic_roughness_texture, false);
+            }
+        }
+    }
+
+    if (material->normal_texture.texture && m_options.loadTextures) {
+        result.normalMap = loadTexture(data, material->normal_texture, false, true);
+    }
+    result.normalScale = material->normal_texture.scale;
+
+    if (material->occlusion_texture.texture && m_options.loadTextures) {
+        result.aoMap = loadTexture(data, material->occlusion_texture, false);
+    }
+    result.occlusionStrength = material->occlusion_texture.scale;
+
+    if (material->emissive_texture.texture && m_options.loadTextures) {
+        result.emissiveMap = loadTexture(data, material->emissive_texture, true);
+    }
+
+    result.emissiveFactor = glm::vec3(
+        material->emissive_factor[0],
+        material->emissive_factor[1],
+        material->emissive_factor[2]
+    );
+    if (material->has_emissive_strength) {
+        result.emissiveFactor *= material->emissive_strength.emissive_strength;
+    }
+
+    if (material->has_clearcoat) {
+        result.hasClearcoat = true;
+        result.clearcoatFactor = material->clearcoat.clearcoat_factor;
+        result.clearcoatRoughnessFactor = material->clearcoat.clearcoat_roughness_factor;
+        if (m_options.loadTextures) {
+            if (material->clearcoat.clearcoat_texture.texture) {
+                result.clearcoatMap = loadTexture(data, material->clearcoat.clearcoat_texture, false);
+            }
+            if (material->clearcoat.clearcoat_roughness_texture.texture) {
+                result.clearcoatRoughnessMap =
+                    loadTexture(data, material->clearcoat.clearcoat_roughness_texture, false);
+            }
+        }
+    }
+
+    if (material->has_transmission) {
+        result.transmissionFactor = material->transmission.transmission_factor;
+        if (m_options.loadTextures && material->transmission.transmission_texture.texture) {
+            result.transmissionMap = loadTexture(data, material->transmission.transmission_texture, false);
+        }
+    }
+    if (material->has_ior) result.ior = material->ior.ior;
+    if (material->has_volume) {
+        const auto& volume = material->volume;
+        result.thicknessFactor = volume.thickness_factor;
+        result.attenuationDistance = std::isfinite(volume.attenuation_distance) ? volume.attenuation_distance : 0.0f;
+        result.attenuationColor = glm::vec3(volume.attenuation_color[0], volume.attenuation_color[1],
+                                            volume.attenuation_color[2]);
+        if (m_options.loadTextures && volume.thickness_texture.texture) {
+            result.thicknessMap = loadTexture(data, volume.thickness_texture, false);
+        }
+    }
+
+    if (material->has_sheen) {
+        const auto& sheen = material->sheen;
+        result.hasSheen = true;
+        result.sheenColorFactor = glm::vec3(sheen.sheen_color_factor[0], sheen.sheen_color_factor[1],
+                                            sheen.sheen_color_factor[2]);
+        result.sheenRoughnessFactor = sheen.sheen_roughness_factor;
+        if (m_options.loadTextures && sheen.sheen_color_texture.texture) {
+            result.sheenColorMap = loadTexture(data, sheen.sheen_color_texture, true);
+        }
+        if (m_options.loadTextures && sheen.sheen_roughness_texture.texture) {
+            result.sheenRoughnessMap = loadTexture(data, sheen.sheen_roughness_texture, false);
+        }
+    }
+    if (material->has_specular) {
+        const auto& specular = material->specular;
+        result.hasSpecular = true;
+        result.specularFactor = specular.specular_factor;
+        result.specularColorFactor = glm::vec3(specular.specular_color_factor[0],
+                                               specular.specular_color_factor[1],
+                                               specular.specular_color_factor[2]);
+        if (m_options.loadTextures && specular.specular_texture.texture) {
+            result.specularMap = loadTexture(data, specular.specular_texture, false);
+        }
+        if (m_options.loadTextures && specular.specular_color_texture.texture) {
+            result.specularColorMap = loadTexture(data, specular.specular_color_texture, true);
+        }
+    }
+
+    if (material->has_iridescence) {
+        const auto& film = material->iridescence;
+        result.hasIridescence = true;
+        result.iridescenceFactor = film.iridescence_factor;
+        result.iridescenceIor = film.iridescence_ior;
+        result.iridescenceThicknessMinimum = film.iridescence_thickness_min;
+        result.iridescenceThicknessMaximum = film.iridescence_thickness_max;
+        if (m_options.loadTextures) {
+            if (film.iridescence_texture.texture) {
+                result.iridescenceMap = loadTexture(data, film.iridescence_texture, false);
+            }
+            if (film.iridescence_thickness_texture.texture) {
+                result.iridescenceThicknessMap = loadTexture(data, film.iridescence_thickness_texture, false);
+            }
+        }
+    }
+
+    // Each texture's uv set and KHR_texture_transform, for those that
+    // differ from TEXCOORD_0 untransformed.
+    const auto& pbr = material->pbr_metallic_roughness;
+    const std::pair<const char*, const cgltf_texture_view*> views[] = {
+        {"albedoMap", &pbr.base_color_texture},
+        {"metallicRoughnessMap", &pbr.metallic_roughness_texture},
+        {"normalMap", &material->normal_texture},
+        {"aoMap", &material->occlusion_texture},
+        {"emissiveMap", &material->emissive_texture},
+        {"clearcoatMap", &material->clearcoat.clearcoat_texture},
+        {"clearcoatRoughnessMap", &material->clearcoat.clearcoat_roughness_texture},
+        {"transmissionMap", &material->transmission.transmission_texture},
+        {"thicknessMap", &material->volume.thickness_texture},
+        {"sheenColorMap", &material->sheen.sheen_color_texture},
+        {"sheenRoughnessMap", &material->sheen.sheen_roughness_texture},
+        {"specularMap", &material->specular.specular_texture},
+        {"specularColorMap", &material->specular.specular_color_texture},
+        {"iridescenceMap", &material->iridescence.iridescence_texture},
+        {"iridescenceThicknessMap", &material->iridescence.iridescence_thickness_texture},
+        {"anisotropyMap", &material->anisotropy.anisotropy_texture},
+    };
+    for (const auto& [slot, view] : views) {
+        if (!view->texture) continue;
+        const auto uv = textureUvTransform(*view);
+        if (uv != kIdentityUvTransform) result.uvTransforms.emplace_back(slot, uv);
+    }
+
+    result.unlit = material->unlit != 0;
+    if (material->has_anisotropy) {
+        const auto& anisotropy = material->anisotropy;
+        result.hasAnisotropy = true;
+        result.anisotropyStrength = anisotropy.anisotropy_strength;
+        result.anisotropyRotation = anisotropy.anisotropy_rotation;
+        if (m_options.loadTextures && anisotropy.anisotropy_texture.texture) {
+            result.anisotropyMap = loadTexture(data, anisotropy.anisotropy_texture, false);
+        }
+    }
+    result.alphaMode = extractAlphaMode(material);
+    result.alphaCutoff = material->alpha_cutoff;
+    result.doubleSided = material->double_sided;
 }
 
 GPUBuffer GltfSceneLoader::buildVertexBuffer(
@@ -1711,62 +1819,7 @@ entt::entity GltfSceneLoader::createEntity(
     mesh.rayTracingInput = m_device.hasRayQuery() && mesh.vertexStride == sizeof(StandardVertex);
 
     // Add MaterialComponentV5
-    auto& material = scene->addComponent<MaterialComponentV5>(entity);
-    material.setParam("baseColorFactor", primitive.baseColorFactor);
-    material.setParam("metallicFactor", primitive.metallicFactor);
-    material.setParam("roughnessFactor", primitive.roughnessFactor);
-    material.setParam("emissiveFactor", glm::vec4(primitive.emissiveFactor, 1.0f));
-    material.setParam("normalScale", primitive.normalScale);
-    material.setParam("occlusionStrength", primitive.occlusionStrength);
-    if (primitive.hasClearcoat) {
-        material.setParam("clearcoatFactor", primitive.clearcoatFactor);
-        material.setParam("clearcoatRoughnessFactor", primitive.clearcoatRoughnessFactor);
-    }
-    material.setParam("transmissionFactor", primitive.transmissionFactor);
-    material.setParam("ior", primitive.ior);
-    material.setParam("thicknessFactor", primitive.thicknessFactor);
-    material.setParam("attenuationDistance", primitive.attenuationDistance);
-    material.setParam("attenuationColor", glm::vec4(primitive.attenuationColor, 1.0f));
-    for (const auto& [slot, rows] : primitive.uvTransforms) {
-        material.setParam(slot + "UvRow0", rows[0]);
-        material.setParam(slot + "UvRow1", rows[1]);
-    }
-    material.alphaMode = primitive.alphaMode;
-    material.alphaCutoff = primitive.alphaCutoff;
-    material.doubleSided = primitive.doubleSided;
-
-    // Add textures
-    if (primitive.albedoMap.isValid()) {
-        material.textures["albedoMap"] = primitive.albedoMap;
-    }
-    if (primitive.normalMap.isValid()) {
-        material.textures["normalMap"] = primitive.normalMap;
-    }
-    if (primitive.metallicRoughnessMap.isValid()) {
-        material.textures["metallicRoughnessMap"] = primitive.metallicRoughnessMap;
-    }
-    if (primitive.aoMap.isValid()) {
-        material.textures["aoMap"] = primitive.aoMap;
-    }
-    if (primitive.emissiveMap.isValid()) {
-        material.textures["emissiveMap"] = primitive.emissiveMap;
-    }
-    if (primitive.clearcoatMap.isValid()) {
-        material.textures["clearcoatMap"] = primitive.clearcoatMap;
-    }
-    if (primitive.clearcoatRoughnessMap.isValid()) {
-        material.textures["clearcoatRoughnessMap"] = primitive.clearcoatRoughnessMap;
-    }
-    if (primitive.transmissionMap.isValid()) {
-        material.textures["transmissionMap"] = primitive.transmissionMap;
-    }
-    if (primitive.thicknessMap.isValid()) {
-        material.textures["thicknessMap"] = primitive.thicknessMap;
-    }
-    setSheenAndSpecular(material, primitive);
-    setIridescence(material, primitive);
-    if (primitive.unlit) material.setParam("unlit", 1.0f);
-    setAnisotropy(material, primitive);
+    scene->addComponent<MaterialComponentV5>(entity) = makeMaterial(primitive);
 
     // Add RenderableTagComponent
     auto& tag = scene->addComponent<RenderableTagComponent>(entity);
@@ -2125,45 +2178,7 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     mesh.rayTracingInput = m_device.hasRayQuery() && mesh.vertexStride == sizeof(StandardVertex);
 
     // Add MaterialComponentV5
-    auto& material = scene->addComponent<MaterialComponentV5>(entity);
-    material.setParam("baseColorFactor", primitive.baseColorFactor);
-    material.setParam("metallicFactor", primitive.metallicFactor);
-    material.setParam("roughnessFactor", primitive.roughnessFactor);
-    material.setParam("emissiveFactor", glm::vec4(primitive.emissiveFactor, 1.0f));
-    material.setParam("normalScale", primitive.normalScale);
-    material.setParam("occlusionStrength", primitive.occlusionStrength);
-    if (primitive.hasClearcoat) {
-        material.setParam("clearcoatFactor", primitive.clearcoatFactor);
-        material.setParam("clearcoatRoughnessFactor", primitive.clearcoatRoughnessFactor);
-    }
-    material.setParam("transmissionFactor", primitive.transmissionFactor);
-    material.setParam("ior", primitive.ior);
-    material.setParam("thicknessFactor", primitive.thicknessFactor);
-    material.setParam("attenuationDistance", primitive.attenuationDistance);
-    material.setParam("attenuationColor", glm::vec4(primitive.attenuationColor, 1.0f));
-    for (const auto& [slot, rows] : primitive.uvTransforms) {
-        material.setParam(slot + "UvRow0", rows[0]);
-        material.setParam(slot + "UvRow1", rows[1]);
-    }
-    material.alphaMode = primitive.alphaMode;
-    material.alphaCutoff = primitive.alphaCutoff;
-    material.doubleSided = primitive.doubleSided;
-
-    // Add textures
-    if (primitive.albedoMap.isValid()) material.textures["albedoMap"] = primitive.albedoMap;
-    if (primitive.normalMap.isValid()) material.textures["normalMap"] = primitive.normalMap;
-    if (primitive.metallicRoughnessMap.isValid()) material.textures["metallicRoughnessMap"] = primitive.metallicRoughnessMap;
-    if (primitive.aoMap.isValid()) material.textures["aoMap"] = primitive.aoMap;
-    if (primitive.emissiveMap.isValid()) material.textures["emissiveMap"] = primitive.emissiveMap;
-    if (primitive.clearcoatMap.isValid()) material.textures["clearcoatMap"] = primitive.clearcoatMap;
-    if (primitive.clearcoatRoughnessMap.isValid())
-        material.textures["clearcoatRoughnessMap"] = primitive.clearcoatRoughnessMap;
-    if (primitive.transmissionMap.isValid()) material.textures["transmissionMap"] = primitive.transmissionMap;
-    if (primitive.thicknessMap.isValid()) material.textures["thicknessMap"] = primitive.thicknessMap;
-    setSheenAndSpecular(material, primitive);
-    setIridescence(material, primitive);
-    if (primitive.unlit) material.setParam("unlit", 1.0f);
-    setAnisotropy(material, primitive);
+    scene->addComponent<MaterialComponentV5>(entity) = makeMaterial(primitive);
 
     // Add SkeletonComponent
     auto& skelComp = scene->addComponent<SkeletonComponent>(entity);

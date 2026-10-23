@@ -22,7 +22,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <utility>
 
 // Forward declarations (cgltf internals)
 struct cgltf_data;
@@ -119,6 +121,9 @@ struct GltfPrimitive {
     // film of index iridescenceIor, thicknesses in nanometres.
     // KHR_materials_unlit: the material gets the param unlit = 1.
     bool unlit                  = false;
+    // KHR_materials_variants: for each variant index this primitive maps,
+    // a primitive holding that material's fields (its geometry left empty).
+    std::vector<std::pair<uint32_t, std::shared_ptr<GltfPrimitive>>> materialVariants;
     // KHR_materials_anisotropy, when the material has the extension: the
     // strength and the rotation (radians) of the direction from the uv tangent.
     bool hasAnisotropy          = false;
@@ -179,6 +184,10 @@ struct GltfLoadResult {
     /// light a node holds, a child of the node's entity (unparented, at the
     /// node's world position and direction, with flattenHierarchy).
     std::vector<entt::entity> lights;
+
+    /// KHR_materials_variants: the file's variant names, by index. Entities
+    /// whose primitives map variants carry a MaterialVariantsComponent.
+    std::vector<std::string> variants;
 
     // ─── Skeleton & Animation Data ─────────────────────────
     std::vector<std::shared_ptr<Shoonyakasha::Skeleton>> skeletons;
@@ -386,6 +395,10 @@ private:
         const std::string& name,
         const glm::mat4& transform
     );
+
+    /// A glTF material's factors, extensions, textures, uv rows and alpha
+    /// mode, into the material fields of `result`.
+    void readMaterial(cgltf_data* data, const cgltf_material* material, GltfPrimitive& result);
 
     /// Extract alpha mode from glTF material
     Shoonyakasha::AlphaMode extractAlphaMode(const cgltf_material* material);

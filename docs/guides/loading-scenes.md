@@ -35,6 +35,19 @@ Default loading preserves the node tree and shares mesh-space GPU buffers among 
 
 Vertex attributes, morph targets and animation samplers stored as integers or normalized integers (`KHR_mesh_quantization`) are read as floats while loading. Buffer views compressed with `EXT_meshopt_compression` or `KHR_meshopt_compression` are decoded with meshoptimizer while loading, filters included; a file whose compressed data cannot be decoded fails to load with the buffer view named in `error`. Primitives compressed with `KHR_draco_mesh_compression` are decoded with Google's Draco library: each attribute keeps its accessor's component type, and the indices become 32-bit; one that fails to decode fails the load, named in `error`.
 
+## Material variants and visibility
+
+A file with `KHR_materials_variants` lists its variant names in the result's `variants`. Each entity whose primitive maps materials to variants loads them all, textures included, and keeps them with its default material (`MaterialVariantsComponent`). `scene.set_material_variant(entity, index)` puts the material for variant `index` on the entity, or its default for -1 or a variant its primitive does not map; call it for each of `result.entities` to switch the whole model:
+
+```python
+result = engine.load_gltf_scene("MaterialsVariantsShoe.gltf")
+street = result.variants.index("street")
+for entity in result.entities:
+    engine.scene.set_material_variant(entity, street)
+```
+
+A node with `KHR_node_visibility` `"visible": false` loads its meshes, and those of every node below it, hidden; `scene.set_visible(entity, True)` shows them. Lights load as they would without the extension.
+
 ## Lights
 
 `load_lights=True` (C++ `GltfOptions::loadLights`) creates a light entity for each node with a `KHR_lights_punctual` light, listed in the result's `lights`. It is a child of the node's entity and shines along the node's -Z (with `flatten_hierarchy`, an unparented entity at the node's world position and direction). Directional, point and spot lights keep the file's colour and intensity as they are: candela for point and spot lights, lux for directional ones, with inverse-square falloff. A light with a `range` fades to nothing there; one without reaches as far as its intensity times its brightest colour channel, over the distance squared, stays above 0.01. Spot cone angles become the light's inner and outer half angles. The lights cast no shadows until `scene.set_light_cast_shadows(light, True)`; the first directional light with shadows is the sun in the default pipeline.

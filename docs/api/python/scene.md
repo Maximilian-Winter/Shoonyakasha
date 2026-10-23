@@ -125,6 +125,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `is_text_visible(entity)` | bool | Calls native `isTextVisible`; see the class contract above. |
 | `is_visible(entity)` | bool | Calls native `isVisible`; see the class contract above. |
 | `set_visible(entity, visible)` | None | Calls native `setVisible`; see the class contract above. |
+| `set_material_variant(entity, index)` | bool | `KHR_materials_variants`: gives an entity from a glTF file with variants the material its primitive maps for variant `index` (into the load result's `variants`), or its default material for -1 or a variant it does not map. False for an entity without variants. |
 | `get_cast_shadows(entity)` | bool | Calls native `getCastShadows`; see the class contract above. |
 | `set_cast_shadows(entity, cast_shadows)` | None | Calls native `setCastShadows`; see the class contract above. |
 | `get_render_layer_mask(entity)` | int | 8-bit layer mask (bits 0-7, default 0xFF = every layer). |

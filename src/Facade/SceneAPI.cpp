@@ -732,6 +732,18 @@ void SceneAPI::setVisible(EntityHandle entity, bool visible) {
     if (tag) tag->visible = visible;
 }
 
+bool SceneAPI::setMaterialVariant(EntityHandle entity, int index) {
+    if (!m_impl->valid(entity)) return false;
+    const entt::entity e = toEntt(entity);
+    auto* variants = m_impl->registry.try_get<MaterialVariantsComponent>(e);
+    auto* material = m_impl->registry.try_get<MaterialComponentV5>(e);
+    if (!variants || !material) return false;
+    const auto it = index >= 0 ? variants->variants.find(static_cast<uint32_t>(index)) : variants->variants.end();
+    *material = it != variants->variants.end() ? it->second : variants->defaultMaterial;
+    variants->active = it != variants->variants.end() ? index : -1;
+    return true;
+}
+
 bool SceneAPI::getCastShadows(EntityHandle entity) const {
     if (!m_impl->valid(entity)) return false;
     auto* tag = m_impl->registry.try_get<RenderableTagComponent>(toEntt(entity));

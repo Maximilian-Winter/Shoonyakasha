@@ -169,6 +169,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         string error
         vector[EntityHandle] entities
         vector[EntityHandle] lights
+        vector[string] variants
         size_t totalVertices
         size_t totalIndices
         size_t totalTextures

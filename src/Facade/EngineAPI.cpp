@@ -289,6 +289,7 @@ static GltfResult toGltfResult(const GltfLoadResult& lr) {
     for (auto e : lr.lights) {
         fr.lights.push_back(toHandle(e));
     }
+    fr.variants = lr.variants;
 
     // Animation metadata
     fr.skeletonCount = lr.skeletons.size();

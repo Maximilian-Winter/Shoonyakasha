@@ -8,6 +8,7 @@
 | `error` | `error` | Error string |
 | `entities` | `entities` | Renderable entity handles |
 | `lights` | `lights` | With `load_lights=True`, the light entity handles (`KHR_lights_punctual`) |
+| `variants` | `variants` | The file's `KHR_materials_variants` names, by index, for `scene.set_material_variant` |
 | `total_vertices` | `totalVertices` | Vertex count |
 | `total_indices` | `totalIndices` | Index count |
 | `total_textures` | `totalTextures` | Texture count |
