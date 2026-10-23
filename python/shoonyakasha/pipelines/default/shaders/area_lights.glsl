@@ -100,7 +100,7 @@ vec3 rectangleBRDF(vec3 N, vec3 V, vec3 centre, vec3 halfX, vec3 halfY, vec3 alb
     float NdotV = clamp(dot(N, V), 1e-4, 1.0);
     mat3 frame = ltcFrame(N, V);
     vec2 env = texture(brdfLUT, vec2(NdotV, roughness)).rg;
-    vec3 specularAlbedo = F0 * env.x + specularF90 * env.y;
+    vec3 specularAlbedo = splitSumAlbedo(F0, env);
     float diffuse = ltcRectangle(frame, corners);
     float specular = ltcRectangle(ltcInverse(roughness, NdotV) * frame, corners);
     vec3 result = (1.0 - specularAlbedo) * (1.0 - metallic) * albedo * diffuse + specularAlbedo * specular;

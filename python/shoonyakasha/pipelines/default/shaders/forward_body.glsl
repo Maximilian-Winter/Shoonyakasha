@@ -126,6 +126,7 @@ void main() {
     float ior = max(draw.ior, 1.0);
     vec3 F0 = mix(s.dielectricF0, s.baseColor.rgb, s.metallic);
     specularF90 = mix(s.specularWeight, 1.0, s.metallic);
+    setFilm(s.iridescence, s.filmIor, s.filmThickness, max(dot(s.N, V), 1e-4), F0);
     float transmission = clamp(draw.transmissionFactor, 0.0, 1.0);
     if (transmission > 0.0) transmission *= texture(transmissionMap, MATERIAL_UV(transmission)).r;
     // The transmitted part of the dielectric takes the place of its diffuse.
@@ -155,7 +156,7 @@ void main() {
         thickness *= (length(draw.model[0].xyz) + length(draw.model[1].xyz) + length(draw.model[2].xyz)) / 3.0;
         float NdotV = max(dot(s.N, V), 1e-4);
         vec2 brdf = texture(brdfLUT, vec2(NdotV, s.roughness)).rg;
-        vec3 reflected = F0 * brdf.x + specularF90 * brdf.y;
+        vec3 reflected = splitSumAlbedo(F0, brdf);
         color += (1.0 - reflected) * transmission * (1.0 - s.metallic)
                * transmittedLight(s.N, V, s.baseColor.rgb, s.roughness, ior, thickness);
     }

@@ -134,6 +134,21 @@ void setSheenAndSpecular(MaterialComponentV5& material, const GltfPrimitive& pri
     if (primitive.specularColorMap.isValid()) material.textures["specularColorMap"] = primitive.specularColorMap;
 }
 
+// The KHR_materials_iridescence params and textures of a material with the
+// extension.
+void setIridescence(MaterialComponentV5& material, const GltfPrimitive& primitive) {
+    if (primitive.hasIridescence) {
+        material.setParam("iridescenceFactor", primitive.iridescenceFactor);
+        material.setParam("iridescenceIor", primitive.iridescenceIor);
+        material.setParam("iridescenceThicknessMinimum", primitive.iridescenceThicknessMinimum);
+        material.setParam("iridescenceThicknessMaximum", primitive.iridescenceThicknessMaximum);
+    }
+    if (primitive.iridescenceMap.isValid()) material.textures["iridescenceMap"] = primitive.iridescenceMap;
+    if (primitive.iridescenceThicknessMap.isValid()) {
+        material.textures["iridescenceThicknessMap"] = primitive.iridescenceThicknessMap;
+    }
+}
+
 const std::array<glm::vec4, 2> kIdentityUvTransform = {glm::vec4(1.0f, 0.0f, 0.0f, 0.0f),
                                                        glm::vec4(0.0f, 1.0f, 0.0f, 0.0f)};
 
@@ -903,6 +918,8 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             {"sheenRoughnessMap", &material->sheen.sheen_roughness_texture},
             {"specularMap", &material->specular.specular_texture},
             {"specularColorMap", &material->specular.specular_color_texture},
+            {"iridescenceMap", &material->iridescence.iridescence_texture},
+            {"iridescenceThicknessMap", &material->iridescence.iridescence_thickness_texture},
         };
         for (const auto& [slot, view] : views) {
             if (!view->texture) continue;
@@ -1355,12 +1372,6 @@ entt::entity GltfSceneLoader::createEntity(
     material.setParam("thicknessFactor", primitive.thicknessFactor);
     material.setParam("attenuationDistance", primitive.attenuationDistance);
     material.setParam("attenuationColor", glm::vec4(primitive.attenuationColor, 1.0f));
-    if (primitive.hasIridescence) {
-        material.setParam("iridescenceFactor", primitive.iridescenceFactor);
-        material.setParam("iridescenceIor", primitive.iridescenceIor);
-        material.setParam("iridescenceThicknessMinimum", primitive.iridescenceThicknessMinimum);
-        material.setParam("iridescenceThicknessMaximum", primitive.iridescenceThicknessMaximum);
-    }
     for (const auto& [slot, rows] : primitive.uvTransforms) {
         material.setParam(slot + "UvRow0", rows[0]);
         material.setParam(slot + "UvRow1", rows[1]);
@@ -1397,13 +1408,8 @@ entt::entity GltfSceneLoader::createEntity(
     if (primitive.thicknessMap.isValid()) {
         material.textures["thicknessMap"] = primitive.thicknessMap;
     }
-    if (primitive.iridescenceMap.isValid()) {
-        material.textures["iridescenceMap"] = primitive.iridescenceMap;
-    }
-    if (primitive.iridescenceThicknessMap.isValid()) {
-        material.textures["iridescenceThicknessMap"] = primitive.iridescenceThicknessMap;
-    }
     setSheenAndSpecular(material, primitive);
+    setIridescence(material, primitive);
 
     // Add RenderableTagComponent
     auto& tag = scene->addComponent<RenderableTagComponent>(entity);
@@ -1798,6 +1804,7 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     if (primitive.transmissionMap.isValid()) material.textures["transmissionMap"] = primitive.transmissionMap;
     if (primitive.thicknessMap.isValid()) material.textures["thicknessMap"] = primitive.thicknessMap;
     setSheenAndSpecular(material, primitive);
+    setIridescence(material, primitive);
 
     // Add SkeletonComponent
     auto& skelComp = scene->addComponent<SkeletonComponent>(entity);

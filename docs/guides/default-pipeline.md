@@ -44,6 +44,7 @@ That gives a lit, anti-aliased and tone-mapped box against the environment. With
 - **Textures:** base colour, normal, metallic-roughness, occlusion and emissive, each from `TEXCOORD_0` or `TEXCOORD_1` and through its `KHR_texture_transform`.
 - **Alpha mode:** `OPAQUE` goes into the G-buffer. `MASK` is alpha-tested, in the G-buffer and in every shadow. `BLEND` is shaded forward over the lit scene, back to front, and receives shadows but casts none.
 - **Sheen and specular:** `KHR_materials_sheen` adds a soft sheen of its colour and roughness over the base, and the base beneath gives up what the sheen reflects. `KHR_materials_specular` sets the strength and colour of a dielectric's specular, and `KHR_materials_ior` its reflectance, in the G-buffer and in forward shading.
+- **Iridescence:** `KHR_materials_iridescence` puts a thin film over the base, as on soap bubbles or oil: its reflections take colours that shift with the viewing angle, the film's thickness (from the thickness texture, between its minimum and maximum) and its index of refraction.
 - **Transmission:** a material with `KHR_materials_transmission` (and `KHR_materials_ior`, `KHR_materials_volume`) is shaded forward like `BLEND`, in any alpha mode, and lets through the lit opaque scene behind it, refracted through its thickness, blurred by its roughness and tinted by its colour and attenuation. It casts no shadow. The [materials guide](materials.md#binding-contract) has the details.
 - **Changes at runtime:** `set_material_vec4(entity, "baseColorFactor", ...)`, `set_material_float(entity, "roughnessFactor", ...)` and the other factors take effect on the next frame.
 
@@ -154,7 +155,7 @@ The [README](../../python/shoonyakasha/pipelines/default/README.md#settings) lis
 - **Trimming shadows:** turn off `set_light_cast_shadows` on lights the viewer won't miss them for, and shorten ranges. The `low` preset drops alpha-tested casters, which are often foliage and cost the most.
 - **Levels of detail:** load large scenes with `load_gltf_scene(path, lods=True)` to draw distant meshes with fewer triangles, in the G-buffer and in the shadows alike; `set_lod_threshold` trades detail against speed ([loading scenes](loading-scenes.md#levels-of-detail)).
 - **Occlusion culling:** after the G-buffer, pass `HiZ` writes the farthest depth of every 8 x 8 block of the screen into `hiz`, which is read back. The G-buffer and transparent passes leave out the static entities hidden behind it. The depth is two frames old: something revealed by a fast turn can appear a frame late. Shadow passes are not occlusion culled. `set_occlusion_culling(False)` turns it off.
-- **Memory:** the atlas takes 64 MB, the cascades another 128 MB (64 MB for each sun), the screen-sized targets about 78 bytes per pixel, and the irradiance cache about 76 MB. The ReSTIR GI images add about 157 bytes per pixel.
+- **Memory:** the atlas takes 64 MB, the cascades another 128 MB (64 MB for each sun), the screen-sized targets about 82 bytes per pixel, and the irradiance cache about 76 MB. The ReSTIR GI images add about 157 bytes per pixel.
 - **Push constants:** the pipeline pushes 236 bytes of per-draw constants. Every desktop GPU allows 256. A device limited to Vulkan's minimum of 128 logs the G-buffer passes as not fitting, and they draw nothing.
 
 ## Making it your own

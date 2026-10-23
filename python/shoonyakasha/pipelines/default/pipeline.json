@@ -1058,6 +1058,50 @@
           ]
         },
         {
+          "name": "iridescenceUv0",
+          "type": "vec4",
+          "source": "entity.material.params.iridescenceMapUvRow0",
+          "default": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "iridescenceUv1",
+          "type": "vec4",
+          "source": "entity.material.params.iridescenceMapUvRow1",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "iridescenceThicknessUv0",
+          "type": "vec4",
+          "source": "entity.material.params.iridescenceThicknessMapUvRow0",
+          "default": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "iridescenceThicknessUv1",
+          "type": "vec4",
+          "source": "entity.material.params.iridescenceThicknessMapUvRow1",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
           "name": "sheenColorFactor",
           "type": "vec4",
           "source": "entity.material.params.sheenColorFactor",
@@ -1090,6 +1134,30 @@
           "type": "float",
           "source": "entity.material.params.specularFactor",
           "default": 1.0
+        },
+        {
+          "name": "iridescenceFactor",
+          "type": "float",
+          "source": "entity.material.params.iridescenceFactor",
+          "default": 0.0
+        },
+        {
+          "name": "iridescenceIor",
+          "type": "float",
+          "source": "entity.material.params.iridescenceIor",
+          "default": 1.3
+        },
+        {
+          "name": "iridescenceThicknessMinimum",
+          "type": "float",
+          "source": "entity.material.params.iridescenceThicknessMinimum",
+          "default": 100.0
+        },
+        {
+          "name": "iridescenceThicknessMaximum",
+          "type": "float",
+          "source": "entity.material.params.iridescenceThicknessMaximum",
+          "default": 400.0
         }
       ]
     },
@@ -2921,6 +2989,22 @@
             "fragment"
           ],
           "name": "specularColorMap"
+        },
+        {
+          "binding": 14,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "iridescenceMap"
+        },
+        {
+          "binding": 15,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "iridescenceThicknessMap"
         }
       ]
     },
@@ -3096,6 +3180,16 @@
           ],
           "name": "gSpecular",
           "autoBindResource": "gSpecular",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 9,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gIridescence",
+          "autoBindResource": "gIridescence",
           "autoBindSampler": "nearestClamp"
         }
       ]
@@ -3468,6 +3562,14 @@
     },
     {
       "name": "gSpecular",
+      "kind": "image",
+      "image": {
+        "format": "R8G8B8A8_UNORM",
+        "transient": true
+      }
+    },
+    {
+      "name": "gIridescence",
       "kind": "image",
       "image": {
         "format": "R8G8B8A8_UNORM",
@@ -4476,6 +4578,16 @@
           ]
         },
         {
+          "resource": "gIridescence",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_write",
           "clear": {
@@ -4555,6 +4667,10 @@
           "usage": "color_write"
         },
         {
+          "resource": "gIridescence",
+          "usage": "color_write"
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_write"
         }
@@ -4625,6 +4741,10 @@
         },
         {
           "resource": "gSpecular",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gIridescence",
           "usage": "color_write"
         },
         {
@@ -4699,6 +4819,10 @@
         },
         {
           "resource": "gSpecular",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gIridescence",
           "usage": "color_write"
         },
         {
@@ -6475,6 +6599,10 @@
           "usage": "shader_read"
         },
         {
+          "resource": "gIridescence",
+          "usage": "shader_read"
+        },
+        {
           "resource": "shadowMask",
           "usage": "shader_read"
         },
@@ -6562,6 +6690,10 @@
         },
         {
           "resource": "gSpecular",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gIridescence",
           "usage": "shader_read"
         },
         {

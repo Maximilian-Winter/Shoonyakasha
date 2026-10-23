@@ -9,11 +9,14 @@
 //                                    frame's position minus last frame's
 //   5 gSheen     R8G8B8A8_SRGB       sheen colour, sheen roughness
 //   6 gSpecular  R8G8B8A8_UNORM      sqrt of the dielectric F0, specular strength
+//   7 gIridescence R8G8B8A8_UNORM    thin film: amount, thickness (16 bits), index
+//                                    of refraction (iridescence.glsl's packFilm)
 
 #include "common.glsl"
 #include "material_draw.glsl"
 #define EXPOSURE_SET 2
 #include "surface.glsl"
+#include "iridescence.glsl"
 
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec2 outNormal;
@@ -22,6 +25,7 @@ layout(location = 3) out vec4 outEmission;
 layout(location = 4) out vec2 outVelocity;
 layout(location = 5) out vec4 outSheen;
 layout(location = 6) out vec4 outSpecular;
+layout(location = 7) out vec4 outIridescence;
 
 layout(location = 4) in vec4 fragClip;
 layout(location = 5) in vec4 fragPrevClip;
@@ -41,4 +45,5 @@ void main() {
         : vec2(0.0);
     outSheen = vec4(s.sheenColor, s.sheenRoughness);
     outSpecular = vec4(sqrt(s.dielectricF0), s.specularWeight);
+    outIridescence = packFilm(s.iridescence, s.filmIor, s.filmThickness);
 }

@@ -19,6 +19,8 @@ layout(set = 1, binding = 10) uniform sampler2D sheenColorMap;          // KHR_m
 layout(set = 1, binding = 11) uniform sampler2D sheenRoughnessMap;      // a roughness
 layout(set = 1, binding = 12) uniform sampler2D specularMap;            // KHR_materials_specular: a strength
 layout(set = 1, binding = 13) uniform sampler2D specularColorMap;       // rgb colour
+layout(set = 1, binding = 14) uniform sampler2D iridescenceMap;         // KHR_materials_iridescence: r amount
+layout(set = 1, binding = 15) uniform sampler2D iridescenceThicknessMap;   // g thickness, minimum to maximum
 #include "material_data.glsl"
 
 layout(set = EXPOSURE_SET, binding = 0) uniform ExposureSettings { DEFAULT_SETTINGS_BLOCK } exposureSettings;
@@ -47,6 +49,9 @@ struct Surface {
     float sheenRoughness;
     vec3 dielectricF0;          // the base's F0 where it is not metal: from ior, specular colour and strength
     float specularWeight;       // the dielectric's F90: specular strength
+    float iridescence;          // amount of the thin film over the base, 0 for none
+    float filmIor;
+    float filmThickness;        // nanometres
 };
 
 // Tangent frame from screen-space derivatives, for meshes without tangents.
@@ -148,6 +153,18 @@ Surface evaluateSurface(vec4 baseColor) {
     s.specularWeight = clamp(materialData.specularFactor * texture(specularMap, MATERIAL_UV(specular)).a, 0.0, 1.0);
     vec3 specularColor = materialData.specularColorFactor.rgb * texture(specularColorMap, MATERIAL_UV(specularColor)).rgb;
     s.dielectricF0 = min(f0 * f0 * specularColor, vec3(1.0)) * s.specularWeight;
+
+    // The film: the amount scaled by the texture's r, the thickness from
+    // minimum to maximum by the thickness texture's g (white without one:
+    // the maximum).
+    s.iridescence = clamp(materialData.iridescenceFactor, 0.0, 1.0);
+    s.filmIor = max(materialData.iridescenceIor, 1.0);
+    s.filmThickness = materialData.iridescenceThicknessMaximum;
+    if (s.iridescence > 0.0) {
+        s.iridescence *= texture(iridescenceMap, MATERIAL_UV(iridescence)).r;
+        s.filmThickness = mix(materialData.iridescenceThicknessMinimum, materialData.iridescenceThicknessMaximum,
+                              texture(iridescenceThicknessMap, MATERIAL_UV(iridescenceThickness)).g);
+    }
     return s;
 }
 

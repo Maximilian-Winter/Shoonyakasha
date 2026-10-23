@@ -1,6 +1,6 @@
 // material_data.glsl - the material's buffer (pipeline.json "MaterialData",
 // in the material set at binding 9): which uv each texture is sampled at,
-// and the sheen and specular factors.
+// and the sheen, specular and iridescence factors.
 //
 // Per texture, two rows map (u, v, 1) to the uv sampled; row0.w picks the
 // uv set: 0 TEXCOORD_0, 1 TEXCOORD_1. Without TEXCOORD_1 or
@@ -23,10 +23,16 @@ layout(set = 1, binding = 9) uniform MaterialData {
     vec4 sheenRoughnessUv0, sheenRoughnessUv1;
     vec4 specularUv0, specularUv1;
     vec4 specularColorUv0, specularColorUv1;
+    vec4 iridescenceUv0, iridescenceUv1;
+    vec4 iridescenceThicknessUv0, iridescenceThicknessUv1;
     vec4 sheenColorFactor;       // KHR_materials_sheen: rgb, black for none
     vec4 specularColorFactor;    // KHR_materials_specular: rgb
     float sheenRoughnessFactor;
     float specularFactor;        // strength of the dielectric's specular
+    float iridescenceFactor;     // KHR_materials_iridescence: amount of the film, 0 for none
+    float iridescenceIor;        // the film's index of refraction
+    float iridescenceThicknessMinimum;   // nanometres
+    float iridescenceThicknessMaximum;
 } materialData;
 
 // The uv a texture with these rows is sampled at, from the two uv sets.

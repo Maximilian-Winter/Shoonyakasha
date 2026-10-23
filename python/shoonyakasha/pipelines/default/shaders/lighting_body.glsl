@@ -29,6 +29,7 @@ layout(set = 0, binding = 5) uniform sampler2D aoMap;
 layout(set = 0, binding = 6) uniform sampler2D gVelocity;
 layout(set = 0, binding = 7) uniform sampler2D gSheen;      // sheen colour, sheen roughness
 layout(set = 0, binding = 8) uniform sampler2D gSpecular;   // sqrt of the dielectric F0, specular strength
+layout(set = 0, binding = 9) uniform sampler2D gIridescence;   // thin film (iridescence.glsl's packFilm)
 layout(set = 1, binding = 0) uniform samplerCube irradianceMap;
 layout(set = 1, binding = 1) uniform samplerCube prefilterMap;
 layout(set = 1, binding = 2) uniform sampler2D brdfLUT;
@@ -280,6 +281,9 @@ void main() {
     vec4 specular = textureLod(gSpecular, fragTexCoord, 0.0);
     vec3 F0 = mix(specular.rgb * specular.rgb, albedo, metallic);
     specularF90 = mix(specular.a, 1.0, metallic);
+    float filmShare, filmIor, filmThickness;
+    unpackFilm(textureLod(gIridescence, fragTexCoord, 0.0), filmShare, filmIor, filmThickness);
+    setFilm(filmShare, filmIor, filmThickness, max(dot(N, V), 1e-4), F0);
 
     int sunIndex = cascades.sunEnabled != 0u ? cascades.sunLightIndex : -1;
 #ifdef RT_LOCAL_SHADOWS
@@ -323,7 +327,7 @@ void main() {
             // The base beneath a sheen reflects what the sheen lets through.
             float sheenScale = 1.0 - maxComponent(sheenColor) * sheenAlbedo(NdotV);
             vec3 split = coated ? vec3((COAT_F0 * envBRDF.x + envBRDF.y) * coatFactor)
-                                : (F0 * envBRDF.x + specularF90 * envBRDF.y) * sheenScale;
+                                : splitSumAlbedo(F0, envBRDF) * sheenScale;
             float maxLod = float(textureQueryLevels(prefilterMap) - 1);
             vec3 environment = textureLod(prefilterMap, reflect(-V, N), traceRoughness * maxLod).rgb
                              * settings.iblIntensity;

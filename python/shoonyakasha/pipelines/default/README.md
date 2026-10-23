@@ -51,6 +51,8 @@ Deferred PBR (glTF metallic-roughness) with:
 - sheen (`KHR_materials_sheen`): a Charlie lobe over the base, for cloth
 - specular (`KHR_materials_specular`, `KHR_materials_ior`): a dielectric's
   specular strength, colour and reflectance
+- iridescence (`KHR_materials_iridescence`): a thin film over the base whose
+  interference colours the specular by its thickness and index of refraction
 - clear coat (`KHR_materials_clearcoat`): a glossy dielectric layer with its
   own roughness over the base, from every light and the environment
 - transmission (`KHR_materials_transmission`, `KHR_materials_ior`,
@@ -194,7 +196,9 @@ G-buffer layout: `gAlbedo` (RGBA8 sRGB: albedo, material occlusion),
 `gNormal` (RG16F: octahedral world normal), `gMaterial` (RGBA8: metallic,
 roughness, clear coat, clear coat roughness), `gSheen` (RGBA8 sRGB: sheen
 colour, sheen roughness), `gSpecular` (RGBA8: the square root of the
-dielectric's reflectance at normal incidence, specular strength), `gVelocity` (RG16F: this frame's screen position minus last
+dielectric's reflectance at normal incidence, specular strength),
+`gIridescence` (RGBA8: the film's amount, its thickness over 0 to 2000 nm in
+16 bits across g and b, and its index of refraction over 1 to 2.5), `gVelocity` (RG16F: this frame's screen position minus last
 frame's, in UV units, without the jitter), `gDepth` (D32; positions are
 reconstructed from it) and `hdrColor` (RGBA16F).
 
@@ -207,8 +211,8 @@ Each material texture is sampled at the uv its `MaterialData` rows give
 (`material_data.glsl`): `TEXCOORD_0` or `TEXCOORD_1`, through the texture's
 `KHR_texture_transform`. `MaterialData` is the material set's uniform buffer
 at binding 9 (`"source": "material"`), filled from the material's
-`<slot>UvRow0` and `<slot>UvRow1` parameters and its sheen and specular
-factors. The passes that read uvs take
+`<slot>UvRow0` and `<slot>UvRow1` parameters and its sheen, specular and
+iridescence factors. The passes that read uvs take
 the `standard` vertex format, with `TEXCOORD_1` at location 7.
 
 The G-buffer, sun, spot and point shadow, and transparent passes for static

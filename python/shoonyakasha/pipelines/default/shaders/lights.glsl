@@ -60,6 +60,27 @@ float maxComponent(vec3 v) {
     return max(v.r, max(v.g, v.b));
 }
 
+#include "iridescence.glsl"
+
+// Thin-film iridescence over the base (KHR_materials_iridescence), set like
+// the coat through setFilm: the base's Fresnel moves towards filmFresnel, the
+// film's reflectance at N.V, by filmAmount (0 for none).
+float filmAmount = 0.0;
+vec3 filmFresnel = vec3(0.0);
+
+void setFilm(float amount, float filmIor, float thickness, float NdotV, vec3 F0) {
+    filmAmount = clamp(amount, 0.0, 1.0);
+    filmFresnel = filmAmount > 0.0 ? thinFilmFresnel(1.0, filmIor, NdotV, thickness, F0) : vec3(0.0);
+}
+
+// The base's specular albedo from the split-sum terms `brdf` (scale, bias):
+// F0 * scale + specularF90 * bias, moved towards the film's Fresnel times
+// their sum.
+vec3 splitSumAlbedo(vec3 F0, vec2 brdf) {
+    vec3 plain = F0 * brdf.x + specularF90 * brdf.y;
+    return filmAmount > 0.0 ? mix(plain, filmFresnel * (brdf.x + brdf.y), filmAmount) : plain;
+}
+
 // The albedo of a white sheen seen at cosine `cosTheta`: exp of a cubic in
 // cosTheta and 1 / (sheenRoughness + 0.05), fitted to the integral of
 // sheenLobe over the hemisphere. Within 0.01 on average; up to 0.1 off at
@@ -96,7 +117,7 @@ float sheenLobe(float NdotH, float NdotV, float NdotL) {
 }
 
 // Cook-Torrance as sk/pbr.glsl's cookTorrance, with Fresnel rising from F0
-// to specularF90.
+// to specularF90, and moved towards the film's.
 vec3 baseBRDF(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic, float roughness, vec3 F0) {
     vec3 H = normalize(V + L);
     float NdotV = max(dot(N, V), 0.0);
@@ -105,6 +126,7 @@ vec3 baseBRDF(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic, float roughne
     float VdotH = max(dot(V, H), 0.0);
 
     vec3 F = F0 + (specularF90 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+    F = mix(F, filmFresnel, filmAmount);
     float D = distributionGGX(NdotH, roughness);
     float G = geometrySmith(NdotV, NdotL, roughness);
 
@@ -327,6 +349,7 @@ void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, samp
     // sk/pbr.glsl's fresnelSchlickRoughness, rising to specularF90.
     vec3 kS = F0 + (max(vec3(specularF90 * (1.0 - roughness)), F0) - F0) *
                    pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+    kS = mix(kS, filmFresnel, filmAmount);
     vec3 kD = (1.0 - kS) * (1.0 - metallic);
     vec3 irradiance = ambientIrradianceOverride.x >= 0.0 ? ambientIrradianceOverride : texture(irradianceMap, N).rgb;
     diffuse = kD * irradiance * albedo;
@@ -335,7 +358,7 @@ void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, samp
     vec3 R = reflect(-V, N);
     vec3 prefiltered = textureLod(prefilterMap, R, roughness * maxLod).rgb;
     vec2 brdf = texture(brdfLUT, vec2(NdotV, roughness)).rg;
-    specular = prefiltered * (F0 * brdf.x + specularF90 * brdf.y);
+    specular = prefiltered * splitSumAlbedo(F0, brdf);
 
     // The sheen, a broad lobe, joins the diffuse part: the irradiance times
     // its albedo.
