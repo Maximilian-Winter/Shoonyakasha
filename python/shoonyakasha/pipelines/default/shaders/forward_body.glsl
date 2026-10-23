@@ -49,6 +49,8 @@ layout(location = 0) out vec4 outColor;
 
 void main() {
     Surface s = evaluateSurface(surfaceBaseColor());
+    coatFactor = s.clearcoat;
+    coatRoughness = s.clearcoatRoughness;
     vec3 V = normalize(camera.position.xyz - fragWorldPos);
     vec3 F0 = baseReflectivity(s.baseColor.rgb, s.metallic);
 

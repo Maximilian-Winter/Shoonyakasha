@@ -13,6 +13,8 @@ layout(set = 1, binding = 1) uniform sampler2D normalMap;
 layout(set = 1, binding = 2) uniform sampler2D metallicRoughnessMap;
 layout(set = 1, binding = 3) uniform sampler2D aoMap;
 layout(set = 1, binding = 4) uniform sampler2D emissiveMap;
+layout(set = 1, binding = 5) uniform sampler2D clearcoatMap;            // KHR_materials_clearcoat: r amount
+layout(set = 1, binding = 6) uniform sampler2D clearcoatRoughnessMap;   // g roughness
 
 layout(set = EXPOSURE_SET, binding = 0) uniform ExposureSettings { DEFAULT_SETTINGS_BLOCK } exposureSettings;
 layout(set = EXPOSURE_SET, binding = 1) uniform sampler2D exposureImage;   // 1x1, last frame's adapted value
@@ -30,6 +32,8 @@ struct Surface {
     float roughness;
     float occlusion;
     vec3 emissive;
+    float clearcoat;            // amount of the clear lacquer layer over the base
+    float clearcoatRoughness;
 };
 
 // Tangent frame from screen-space derivatives, for meshes without tangents.
@@ -104,6 +108,14 @@ Surface evaluateSurface(vec4 baseColor) {
     if (draw.exposureCompensation > 0.0) {
         s.emissive *= mix(1.0, 1.0 / sceneExposure(), clamp(draw.exposureCompensation, 0.0, 1.0));
     }
+    // The coat maps scale the factors; without them the fallback is white.
+    s.clearcoat = clamp(draw.clearcoatFactor, 0.0, 1.0);
+    s.clearcoatRoughness = draw.clearcoatRoughness;
+    if (s.clearcoat > 0.0) {
+        s.clearcoat *= texture(clearcoatMap, fragTexCoord).r;
+        s.clearcoatRoughness *= texture(clearcoatRoughnessMap, fragTexCoord).g;
+    }
+    s.clearcoatRoughness = clamp(s.clearcoatRoughness, 0.045, 1.0);
     return s;
 }
 

@@ -45,6 +45,8 @@ Deferred PBR (glTF metallic-roughness) with:
   occluders added back and occlusion of reflections
 - emission, material occlusion, forward-shaded blended (glTF `BLEND`)
   materials that receive shadows
+- clear coat (`KHR_materials_clearcoat`): a glossy dielectric layer with its
+  own roughness over the base, from every light and the environment
 - temporal anti-aliasing: a sub-pixel camera jitter, history reprojected
   with per-pixel motion vectors (moving, skinned and animated objects as well
   as the camera) and clipped to the new frame's colours; it also averages the
@@ -159,12 +161,12 @@ fully lit, and turning off `GTAO` leaves no occlusion. For bloom, set
 the chain.
 
 G-buffer layout: `gAlbedo` (RGBA8 sRGB: albedo, material occlusion),
-`gNormal` (RG16F: octahedral world normal), `gMaterial` (RG8: metallic,
-roughness), `gVelocity` (RG16F: this frame's screen position minus last
+`gNormal` (RG16F: octahedral world normal), `gMaterial` (RGBA8: metallic,
+roughness, clear coat, clear coat roughness), `gVelocity` (RG16F: this frame's screen position minus last
 frame's, in UV units, without the jitter), `gDepth` (D32; positions are
 reconstructed from it) and `hdrColor` (RGBA16F).
 
-The G-buffer passes push 192 bytes of constants per draw (this and last
+The G-buffer passes push 200 bytes of constants per draw (this and last
 frame's model matrix, then the material factors). Every desktop GPU allows
 256; a device that allows only Vulkan's minimum of 128 reports those passes
 at load and draws nothing in them.

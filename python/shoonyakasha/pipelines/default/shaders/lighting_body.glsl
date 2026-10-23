@@ -64,9 +64,11 @@ void main() {
     vec3 albedo = albedoAO.rgb;
     float occlusion = albedoAO.a;
     vec3 N = octDecode(textureLod(gNormal, fragTexCoord, 0.0).xy);
-    vec2 material = textureLod(gMaterial, fragTexCoord, 0.0).rg;
+    vec4 material = textureLod(gMaterial, fragTexCoord, 0.0);
     float metallic = material.r;
     float roughness = max(material.g, 0.045);
+    coatFactor = material.b;
+    coatRoughness = max(material.a, 0.045);
     vec2 mask = textureLod(shadowMask, fragTexCoord, 0.0).rg;
     float sunVisibility = mask.r;
 

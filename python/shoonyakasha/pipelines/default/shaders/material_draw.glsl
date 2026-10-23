@@ -14,4 +14,6 @@ layout(push_constant) uniform MaterialDraw {
     float exposureCompensation;  // 0..1: how much emission is divided by the exposure
     float normalScale;       // scales the normal map's x and y (glTF normalTexture.scale)
     float occlusionStrength; // 0: the occlusion map has no effect, 1: its full effect
+    float clearcoatFactor;   // KHR_materials_clearcoat: coat amount, 0 for none
+    float clearcoatRoughness;
 } draw;

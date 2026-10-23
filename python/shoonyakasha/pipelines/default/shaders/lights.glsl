@@ -30,6 +30,19 @@
 #ifndef DEFAULT_LIGHTS_GLSL
 #define DEFAULT_LIGHTS_GLSL
 
+// Clear coat over the base (KHR_materials_clearcoat), set by the including
+// shader for the surface being lit before it calls directLight and
+// ambientLight. A dielectric layer (F0 0.04) with its own roughness, sharing
+// the base's normal: its specular is added, and the base beneath it receives
+// what the coat's Fresnel lets through.
+float coatFactor = 0.0;
+float coatRoughness = 0.045;
+
+const float COAT_F0 = 0.04;
+float coatFresnel(float cosTheta) {
+    return COAT_F0 + (1.0 - COAT_F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
 #include "area_lights.glsl"
 
 #ifdef LOCAL_SHADOWS
@@ -176,7 +189,16 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
 
     float NdotL = dot(N, L);
     if (NdotL <= 0.0 || falloff <= 1e-4) return vec3(0.0);
-    return cookTorrance(N, V, L, albedo, metallic, roughness, F0) * color * NdotL * falloff;
+    vec3 brdf = cookTorrance(N, V, L, albedo, metallic, roughness, F0);
+    if (coatFactor > 0.0) {
+        float NdotV = max(dot(N, V), 1e-4);
+        vec3 H = normalize(V + L);
+        float Fc = coatFresnel(max(dot(V, H), 0.0)) * coatFactor;
+        float D = distributionGGX(max(dot(N, H), 0.0), coatRoughness);
+        float G = geometrySmith(NdotV, NdotL, coatRoughness);
+        brdf = brdf * (1.0 - Fc) + vec3(D * G * Fc / max(4.0 * NdotV * NdotL, 0.001));
+    }
+    return brdf * color * NdotL * falloff;
 }
 
 #ifdef CLUSTERED
@@ -225,6 +247,15 @@ void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, samp
     vec3 prefiltered = textureLod(prefilterMap, R, roughness * maxLod).rgb;
     vec2 brdf = texture(brdfLUT, vec2(NdotV, roughness)).rg;
     specular = prefiltered * (F0 * brdf.x + brdf.y);
+
+    if (coatFactor > 0.0) {
+        float Fc = coatFresnel(NdotV) * coatFactor;
+        diffuse *= 1.0 - Fc;
+        specular *= 1.0 - Fc;
+        vec3 coatPrefiltered = textureLod(prefilterMap, R, coatRoughness * maxLod).rgb;
+        vec2 coatBrdf = texture(brdfLUT, vec2(NdotV, coatRoughness)).rg;
+        specular += coatPrefiltered * (COAT_F0 * coatBrdf.x + coatBrdf.y) * coatFactor;
+    }
 }
 
 vec3 ambientLight(samplerCube irradianceMap, samplerCube prefilterMap, sampler2D brdfLUT,
