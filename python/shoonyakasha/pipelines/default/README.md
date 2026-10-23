@@ -100,6 +100,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `contactShadowThickness` | 0.1 | How thick things on screen are assumed to be, in world units |
 | `shadowAmbient` | 1.0 | Ambient light kept in the sun's shadow. Below 1 darkens shadowed areas' sky light too |
 | `sunAngle` | 0.4 | Angular radius of the sun in degrees, for ray-traced shadows: how quickly their penumbra widens with distance from the caster. The real sun's is 0.27 |
+| `reflections` | 1.0 | With `raytraced`: how much traced reflections replace the environment's on glossy surfaces, 0 to 1 |
 | `aoRadius` | 0.6 | World-space reach of ambient occlusion; 0 turns it off |
 | `aoIntensity` | 1.0 | Power applied to the occlusion; above 1 darkens it |
 | `toneMapper` | 2 | Tone curve: 2 AgX, which keeps mid-tones as exposed and rolls bright light off to white without shifting its hue; 1 Khronos PBR Neutral, which keeps base colours as authored, for exposures that put white at 1; 0 the ACES fit, more contrast (`set_custom_uint`) |
@@ -142,7 +143,8 @@ own that it does not mention stay as you set them.
 | `LightClusterCount` | A compute pass counting the point and spot lights that reach each cluster of the view, into `lightClusters`, and their total |
 | `LightClusters` | A compute pass listing them: each cluster takes room in `ClusterLightIndices` for its list, and `lightClusters` holds the list's count and offset. When the total does not fit, each cluster gets the same share of the room as of the total, and keeps its nearest lights |
 | `Lighting` | Lights, image-based light and the sky, added onto the emission |
-| `LightingRT` | In the `raytraced` preset, instead of `Lighting`: the same, with shadow rays towards spot and point lights instead of the shadow atlas. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
+| `LightingRT` | In the `raytraced` preset, instead of `Lighting`: the same, with shadow rays towards spot and point lights instead of the shadow atlas, and a reflection ray per glossy pixel, written to `reflection` and `reflectionScale`. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
+| `ReflectionDenoise` | In the `raytraced` preset: the traced reflections averaged over each surface and added to the HDR target. Off by default |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
 | `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with shadow rays towards the sun, spot and point lights. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |
@@ -229,8 +231,20 @@ same pixels, those pixels trace many rays. `TransparentRT` traces the same
 rays. A light with source radius 0 casts hard, noise-free shadows; geometry
 at the light itself should not cast shadows, or it hides the light.
 
+`LightingRT` also traces reflections. On surfaces with roughness below 0.55
+(fading out from 0.3), or their clear coat where they have one, each pixel
+traces one ray along the reflection, spread by the roughness, to the nearest
+surface, alpha-tested ones by their texture. Where that point is on screen
+and not hidden there, last frame's image (`taaHistory`) at it is the
+reflected light; where it is not, the environment's reflection is darkened
+to 15%, and rays that hit nothing keep the environment. The difference from
+the environment's reflection goes to `reflection` and `reflectionScale`;
+`ReflectionDenoise` averages it over the surface around each pixel, over a
+radius that grows with roughness, and adds it to the HDR target. The
+`reflections` setting scales it.
+
 One ray per pixel is noisy on its own; TAA averages it. With `taa` 0 the
-shadows' edges are left grainy.
+shadows' and reflections' edges are left grainy.
 
 ## The shadow atlas
 

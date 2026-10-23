@@ -353,6 +353,12 @@
           "type": "uint",
           "source": "scene.custom.default.toneMapper",
           "default": 2
+        },
+        {
+          "name": "reflections",
+          "type": "float",
+          "source": "scene.custom.default.reflections",
+          "default": 1.0
         }
       ]
     },
@@ -683,6 +689,64 @@
     }
   },
   "descriptorSetLayouts": {
+    "reflectionSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "taaHistory",
+          "autoBindResource": "taaHistory",
+          "autoBindSampler": "linearClamp"
+        }
+      ]
+    },
+    "reflectionDenoiseSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "reflection",
+          "autoBindResource": "reflection",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "reflectionScale",
+          "autoBindResource": "reflectionScale",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 3,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
     "cameraSet": {
       "bindings": [
         {
@@ -1417,6 +1481,22 @@
       "kind": "image",
       "image": {
         "format": "R16G16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "reflection",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
+      }
+    },
+    {
+      "name": "reflectionScale",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
         "transient": true
       }
     },
@@ -2598,12 +2678,38 @@
         {
           "resource": "lightClusters",
           "usage": "shader_read"
+        },
+        {
+          "resource": "taaHistory",
+          "usage": "shader_read"
         }
       ],
       "outputs": [
         {
           "resource": "hdrColor",
           "usage": "color_blend"
+        },
+        {
+          "resource": "reflection",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "blending": "none"
+        },
+        {
+          "resource": "reflectionScale",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "blending": "none"
         }
       ],
       "pipeline": {
@@ -2621,7 +2727,57 @@
         "cameraSet",
         "lightsSet",
         "settingsSet",
-        "rayTracingSceneSet"
+        "rayTracingSceneSet",
+        "reflectionSet"
+      ],
+      "enabled": false,
+      "requires": [
+        "rayQuery",
+        "bindlessTextures"
+      ]
+    },
+    {
+      "name": "ReflectionDenoise",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "reflection",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "reflectionScale",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "hdrColor",
+          "usage": "color_blend"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/reflection_denoise.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": [
+        "reflectionDenoiseSet",
+        "cameraSet"
       ],
       "enabled": false,
       "requires": [
@@ -3064,6 +3220,7 @@
         "AODenoise": false,
         "Lighting": true,
         "LightingRT": false,
+        "ReflectionDenoise": false,
         "SpotShadowOpaque{s}": true,
         "SpotShadowMasked{s}": false,
         "SpotShadowSkinned{s}": true,
@@ -3091,6 +3248,7 @@
         "AODenoise": true,
         "Lighting": true,
         "LightingRT": false,
+        "ReflectionDenoise": false,
         "SpotShadowOpaque{s}": true,
         "SpotShadowMasked{s}": true,
         "SpotShadowSkinned{s}": true,
@@ -3118,6 +3276,7 @@
         "AODenoise": true,
         "Lighting": true,
         "LightingRT": false,
+        "ReflectionDenoise": false,
         "SpotShadowOpaque{s}": true,
         "SpotShadowMasked{s}": true,
         "SpotShadowSkinned{s}": true,
@@ -3145,6 +3304,7 @@
         "AODenoise": true,
         "Lighting": false,
         "LightingRT": true,
+        "ReflectionDenoise": true,
         "SpotShadowOpaque{s}": false,
         "SpotShadowMasked{s}": false,
         "SpotShadowSkinned{s}": false,

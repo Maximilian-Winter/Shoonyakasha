@@ -80,7 +80,7 @@ engine.apply_pipeline_preset("medium")
 | `high` | Everything on. What the pipeline starts with |
 | `medium` | High without contact shadows |
 | `low` | Integrated or older GPUs: no ambient occlusion, bloom, contact shadows, or shadows from alpha-tested geometry |
-| `raytraced` | High, with the shadows of the sun and of spot and point lights ray traced where the GPU supports ray queries |
+| `raytraced` | High, with the shadows of the sun and of spot and point lights, and reflections on glossy surfaces, ray traced where the GPU supports ray queries |
 
 Call it from `on_init` or at any time after, for instance from a key or a settings menu. A preset only touches what it names, so your own settings that it doesn't name survive it.
 
@@ -95,7 +95,9 @@ def on_init():
 
 On a GPU without ray queries the preset is refused with a warning and nothing changes. `ray_query_supported()` answers from `on_init` on. The rays see opaque and alpha-tested geometry, skinned meshes in their current pose included; for alpha-tested materials they test the texture's alpha. Skinned meshes also cast through the cascades, and the two shadows are combined.
 
-Spot and point lights with their shadow flag on are ray traced too, in place of their shadow maps: each pixel traces one ray per light towards a random point of it, so `set_light_source_radius` (or a light's rectangle, `set_light_source_size`) widens its penumbra, and radius 0 gives hard shadows with no noise. Every shadowed light gets a shadow, with no limit of 16 and 8, but each one costs a ray in every pixel it reaches. The noise needs TAA: with `taa` off, ray-traced shadow edges look grainy. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to try a program as it runs on a GPU without them.
+Spot and point lights with their shadow flag on are ray traced too, in place of their shadow maps: each pixel traces one ray per light towards a random point of it, so `set_light_source_radius` (or a light's rectangle, `set_light_source_size`) widens its penumbra, and radius 0 gives hard shadows with no noise. Every shadowed light gets a shadow, with no limit of 16 and 8, but each one costs a ray in every pixel it reaches.
+
+Glossy surfaces (roughness below about 0.5, or a clear coat) reflect the scene: one ray per pixel finds what the reflection sees, and where that is on screen, last frame's image there is the reflected light. What the screen does not show, such as the underside of an object over a polished floor, darkens the environment's reflection instead. `set_custom_float("default.reflections", x)` scales how much the traced reflections replace the environment's, 0 to 1. The noise needs TAA: with `taa` off, ray-traced shadow and reflection edges look grainy. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to try a program as it runs on a GPU without them.
 
 ## Settings
 

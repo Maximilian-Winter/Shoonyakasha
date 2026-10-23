@@ -92,7 +92,8 @@ struct SceneLight {
     float exposureMaxEV;        \
     float deltaTime;            \
     float sunAngle;             \
-    uint toneMapper;            /* 0 ACES, 1 PBR Neutral, 2 AgX */
+    uint toneMapper;            /* 0 ACES, 1 PBR Neutral, 2 AgX */ \
+    float reflections;          /* how much traced reflections replace the environment's, 0..1 */
 
 // ── Normals ─────────────────────────────────────────────────────
 // Octahedral encoding of a unit vector into two values in -1..1.

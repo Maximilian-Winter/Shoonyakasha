@@ -37,6 +37,8 @@
 // what the coat's Fresnel lets through.
 float coatFactor = 0.0;
 float coatRoughness = 0.045;
+// The coat's share of ambientLightParts's specular.
+vec3 ambientCoatSpecular = vec3(0.0);
 
 const float COAT_F0 = 0.04;
 float coatFresnel(float cosTheta) {
@@ -248,13 +250,15 @@ void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, samp
     vec2 brdf = texture(brdfLUT, vec2(NdotV, roughness)).rg;
     specular = prefiltered * (F0 * brdf.x + brdf.y);
 
+    ambientCoatSpecular = vec3(0.0);
     if (coatFactor > 0.0) {
         float Fc = coatFresnel(NdotV) * coatFactor;
         diffuse *= 1.0 - Fc;
         specular *= 1.0 - Fc;
         vec3 coatPrefiltered = textureLod(prefilterMap, R, coatRoughness * maxLod).rgb;
         vec2 coatBrdf = texture(brdfLUT, vec2(NdotV, coatRoughness)).rg;
-        specular += coatPrefiltered * (COAT_F0 * coatBrdf.x + coatBrdf.y) * coatFactor;
+        ambientCoatSpecular = coatPrefiltered * (COAT_F0 * coatBrdf.x + coatBrdf.y) * coatFactor;
+        specular += ambientCoatSpecular;
     }
 }
 
