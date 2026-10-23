@@ -12,4 +12,6 @@ layout(push_constant) uniform MaterialDraw {
     float hasNormalMap;      // 1 when the material has its own texture
     float hasMetalRoughMap;
     float exposureCompensation;  // 0..1: how much emission is divided by the exposure
+    float normalScale;       // scales the normal map's x and y (glTF normalTexture.scale)
+    float occlusionStrength; // 0: the occlusion map has no effect, 1: its full effect
 } draw;

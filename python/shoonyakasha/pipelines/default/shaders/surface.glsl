@@ -77,7 +77,7 @@ Surface evaluateSurface(vec4 baseColor) {
     if (draw.hasNormalMap > 0.5) {
         // z from x and y: a block-compressed (BC5) map holds only those two.
         vec2 xy = texture(normalMap, fragTexCoord).xy * 2.0 - 1.0;
-        vec3 t = vec3(xy, sqrt(max(1.0 - dot(xy, xy), 0.0)));
+        vec3 t = vec3(xy * draw.normalScale, sqrt(max(1.0 - dot(xy, xy), 0.0)));
         vec3 mapped = tangentFrame(N) * t;
         if (dot(mapped, mapped) > 1e-6) N = normalize(mapped);
     }
@@ -96,7 +96,8 @@ Surface evaluateSurface(vec4 baseColor) {
     s.metallic = clamp(s.metallic, 0.0, 1.0);
     s.roughness = clamp(s.roughness, 0.045, 1.0);
 
-    s.occlusion = texture(aoMap, fragTexCoord).r;   // no texture: the fallback is 1
+    // No texture: the fallback is 1.
+    s.occlusion = 1.0 + draw.occlusionStrength * (texture(aoMap, fragTexCoord).r - 1.0);
     s.emissive = texture(emissiveMap, fragTexCoord).rgb * draw.emissiveFactor.rgb;
     // With compensation 1 the emission reaches the tone curve at its own
     // value, whatever the exposure.

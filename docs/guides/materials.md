@@ -21,6 +21,8 @@ Use `entity.material.params.<name>` for typed parameter fields and `entity.mater
 
 The facade supports float, vec3, and vec4 material parameters, presence checks, and named texture assignment. Texture assignment returns a success boolean and requires the running engine's texture manager. It does not create a missing JSON descriptor binding.
 
+The glTF loader sets these parameters: `baseColorFactor`, `metallicFactor`, `roughnessFactor`, `emissiveFactor` (times `KHR_materials_emissive_strength`), `normalScale` (`normalTexture.scale`), `occlusionStrength` (`occlusionTexture.strength`), `transmissionFactor`, `ior`, and with their extensions the clear coat and iridescence factors. Each texture is sampled with its glTF sampler's filters (nearest or linear, with or without mipmaps) and wrap modes (repeat, clamp or mirrored repeat). The default pipeline reads `normalScale` and `occlusionStrength` from its per-draw constants (1 when a material has neither).
+
 GLTF alpha mode/cutoff and double-sided data are imported. Correct transparent rendering also needs a transparent pass, blend/depth state, and ordering appropriate to the shader. The existence of material properties is not a guarantee that every supplied shader implements them.
 
 References: [pipeline walkthrough](json-render-pipeline.md), [Scene API](../api/python/scene.md), [lighting and IBL](lighting-and-ibl.md), [native render components](../../include/ECS/RenderComponents.h).

@@ -494,6 +494,18 @@
           "type": "float",
           "source": "entity.material.params.exposureCompensation",
           "default": 0.0
+        },
+        {
+          "name": "normalScale",
+          "type": "float",
+          "source": "entity.material.params.normalScale",
+          "default": 1.0
+        },
+        {
+          "name": "occlusionStrength",
+          "type": "float",
+          "source": "entity.material.params.occlusionStrength",
+          "default": 1.0
         }
       ]
     },
@@ -1978,7 +1990,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 184
+          "size": 192
         }
       ]
     },
@@ -2042,7 +2054,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 184
+          "size": 192
         }
       ]
     },
@@ -2108,7 +2120,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 184
+          "size": 192
         }
       ]
     },
@@ -2174,7 +2186,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 184
+          "size": 192
         }
       ]
     },
@@ -2641,7 +2653,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 184
+          "size": 192
         }
       ]
     },
@@ -2711,7 +2723,7 @@
             "fragment"
           ],
           "offset": 0,
-          "size": 184
+          "size": 192
         }
       ]
     },

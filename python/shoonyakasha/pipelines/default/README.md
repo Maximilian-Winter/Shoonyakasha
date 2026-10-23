@@ -164,7 +164,7 @@ roughness), `gVelocity` (RG16F: this frame's screen position minus last
 frame's, in UV units, without the jitter), `gDepth` (D32; positions are
 reconstructed from it) and `hdrColor` (RGBA16F).
 
-The G-buffer passes push 184 bytes of constants per draw (this and last
+The G-buffer passes push 192 bytes of constants per draw (this and last
 frame's model matrix, then the material factors). Every desktop GPU allows
 256; a device that allows only Vulkan's minimum of 128 reports those passes
 at load and draws nothing in them.

@@ -28,6 +28,7 @@ struct cgltf_node;
 struct cgltf_primitive;
 struct cgltf_material;
 struct cgltf_texture_view;
+struct cgltf_sampler;
 struct cgltf_skin;
 struct cgltf_animation;
 
@@ -67,7 +68,9 @@ struct GltfPrimitive {
     glm::vec4 baseColorFactor   = glm::vec4(1.0f);
     float metallicFactor        = 0.0f;
     float roughnessFactor       = 0.5f;
-    glm::vec3 emissiveFactor    = glm::vec3(0.0f);
+    glm::vec3 emissiveFactor    = glm::vec3(0.0f);   // times KHR_materials_emissive_strength
+    float normalScale           = 1.0f;   // normalTexture.scale
+    float occlusionStrength     = 1.0f;   // occlusionTexture.strength
     // KHR_materials_clearcoat factors, when the material has the extension.
     // Its coat normal map is not read: the coat takes the base normal.
     bool hasClearcoat           = false;
@@ -264,6 +267,12 @@ private:
     /// ~GltfSceneLoader.
     std::unordered_map<std::string, Shoonyakasha::GPUTexture> m_textureCache;
 
+    /// Samplers for glTF samplers other than the default, keyed by their
+    /// filters, wrap modes and level count. Textures that use one get a copy
+    /// of the cached GPUTexture with this sampler; the cache owns both. Freed
+    /// with the texture cache.
+    std::unordered_map<std::string, VkSampler> m_samplerCache;
+
     /// Cache keys touched by the load in progress, so GltfLoadResult::totalTextures
     /// stays per-load now that the cache spans loads.
     std::unordered_set<std::string> m_loadTextureKeys;
@@ -356,13 +365,19 @@ private:
         Shoonyakasha::IndexType& outIndexType
     );
 
-    /// Load a texture as GPUTexture
+    /// Load a texture as GPUTexture, sampled as its glTF sampler says
     Shoonyakasha::GPUTexture loadTexture(
         cgltf_data* data,
         const cgltf_texture_view& textureView,
         bool srgb,
         bool normalMap = false
     );
+
+    /// The sampler for a glTF sampler's filters and wrap modes over a
+    /// texture of `mipLevels` levels; VK_NULL_HANDLE for the defaults
+    /// (linear, mipmapped, repeat), which the texture's own sampler has.
+    /// Made once per combination and kept in m_samplerCache.
+    VkSampler gltfSampler(const cgltf_sampler* sampler, uint32_t mipLevels);
 
     /// Create ECS entity with components
     entt::entity createEntity(

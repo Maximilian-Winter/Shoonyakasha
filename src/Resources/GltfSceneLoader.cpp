@@ -230,6 +230,66 @@ void GltfSceneLoader::destroyTextureCache() {
             texture);
     }
     m_textureCache.clear();
+    for (auto& [key, sampler] : m_samplerCache) {
+        vkDestroySampler(m_device.getLogicalDevice(), sampler, nullptr);
+    }
+    m_samplerCache.clear();
+}
+
+VkSampler GltfSceneLoader::gltfSampler(const cgltf_sampler* sampler, uint32_t mipLevels) {
+    if (!sampler) return VK_NULL_HANDLE;
+    auto wrap = [](cgltf_wrap_mode mode) {
+        switch (mode) {
+            case cgltf_wrap_mode_clamp_to_edge:   return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            case cgltf_wrap_mode_mirrored_repeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+            default:                              return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        }
+    };
+    const VkSamplerAddressMode wrapU = wrap(sampler->wrap_s), wrapV = wrap(sampler->wrap_t);
+    const VkFilter mag = sampler->mag_filter == cgltf_filter_type_nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+    VkFilter min = VK_FILTER_LINEAR;
+    VkSamplerMipmapMode mipmap = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    bool mipmapped = true;
+    switch (sampler->min_filter) {
+        case cgltf_filter_type_nearest:                min = VK_FILTER_NEAREST; mipmapped = false; break;
+        case cgltf_filter_type_linear:                 mipmapped = false; break;
+        case cgltf_filter_type_nearest_mipmap_nearest: min = VK_FILTER_NEAREST; mipmap = VK_SAMPLER_MIPMAP_MODE_NEAREST; break;
+        case cgltf_filter_type_linear_mipmap_nearest:  mipmap = VK_SAMPLER_MIPMAP_MODE_NEAREST; break;
+        case cgltf_filter_type_nearest_mipmap_linear:  min = VK_FILTER_NEAREST; break;
+        default: break;
+    }
+    if (mag == VK_FILTER_LINEAR && min == VK_FILTER_LINEAR && mipmapped && mipmap == VK_SAMPLER_MIPMAP_MODE_LINEAR &&
+        wrapU == VK_SAMPLER_ADDRESS_MODE_REPEAT && wrapV == VK_SAMPLER_ADDRESS_MODE_REPEAT) {
+        return VK_NULL_HANDLE;
+    }
+
+    const float maxLod = mipmapped ? static_cast<float>(mipLevels) : 0.0f;
+    const std::string key = std::to_string(mag) + "_" + std::to_string(min) + "_" + std::to_string(mipmap) + "_" +
+                            std::to_string(wrapU) + "_" + std::to_string(wrapV) + "_" + std::to_string(maxLod);
+    if (auto it = m_samplerCache.find(key); it != m_samplerCache.end()) return it->second;
+
+    VkSamplerCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    info.magFilter = mag;
+    info.minFilter = min;
+    info.mipmapMode = mipmap;
+    info.addressModeU = wrapU;
+    info.addressModeV = wrapV;
+    info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    // Anisotropic filtering where both filters are linear.
+    info.anisotropyEnable = (mag == VK_FILTER_LINEAR && min == VK_FILTER_LINEAR) ? VK_TRUE : VK_FALSE;
+    info.maxAnisotropy = info.anisotropyEnable ? 16.0f : 1.0f;
+    info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    info.compareOp = VK_COMPARE_OP_ALWAYS;
+    info.minLod = 0.0f;
+    info.maxLod = maxLod;
+    VkSampler made = VK_NULL_HANDLE;
+    if (vkCreateSampler(m_device.getLogicalDevice(), &info, nullptr, &made) != VK_SUCCESS) {
+        std::cerr << "[GltfSceneLoader] Failed to create a texture sampler; using the default" << std::endl;
+        return VK_NULL_HANDLE;
+    }
+    m_samplerCache[key] = made;
+    return made;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -591,10 +651,12 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
         if (material->normal_texture.texture && m_options.loadTextures) {
             result.normalMap = loadTexture(data, material->normal_texture, false, true);
         }
+        result.normalScale = material->normal_texture.scale;
 
         if (material->occlusion_texture.texture && m_options.loadTextures) {
             result.aoMap = loadTexture(data, material->occlusion_texture, false);
         }
+        result.occlusionStrength = material->occlusion_texture.scale;
 
         if (material->emissive_texture.texture && m_options.loadTextures) {
             result.emissiveMap = loadTexture(data, material->emissive_texture, true);
@@ -605,6 +667,9 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             material->emissive_factor[1],
             material->emissive_factor[2]
         );
+        if (material->has_emissive_strength) {
+            result.emissiveFactor *= material->emissive_strength.emissive_strength;
+        }
 
         if (material->has_clearcoat) {
             result.hasClearcoat = true;
@@ -927,9 +992,17 @@ GPUTexture GltfSceneLoader::loadTexture(
     std::string fullCacheKey = cacheKey + (srgb ? "_srgb" : normalMap ? "_normal" : "_linear") +
                                (maxSize ? "_max" + std::to_string(maxSize) : "") + (compress ? "_bc" : "");
     m_loadTextureKeys.insert(fullCacheKey);
+    // The cached texture, with the glTF sampler's own VkSampler when it is
+    // not the default.
+    auto sampled = [&](Shoonyakasha::GPUTexture texture) {
+        if (VkSampler sampler = gltfSampler(textureView.texture->sampler, texture.mipLevels)) {
+            texture.sampler = sampler;
+        }
+        return texture;
+    };
     auto cacheIt = m_textureCache.find(fullCacheKey);
     if (cacheIt != m_textureCache.end()) {
-        return cacheIt->second;  // Return cached texture
+        return sampled(cacheIt->second);
     }
 
     // Load image with stb_image
@@ -1021,7 +1094,7 @@ GPUTexture GltfSceneLoader::loadTexture(
     // Cache the texture for reuse
     m_textureCache[fullCacheKey] = texture;
 
-    return texture;
+    return sampled(texture);
 }
 
 entt::entity GltfSceneLoader::createEntity(
@@ -1060,6 +1133,8 @@ entt::entity GltfSceneLoader::createEntity(
     material.setParam("metallicFactor", primitive.metallicFactor);
     material.setParam("roughnessFactor", primitive.roughnessFactor);
     material.setParam("emissiveFactor", glm::vec4(primitive.emissiveFactor, 1.0f));
+    material.setParam("normalScale", primitive.normalScale);
+    material.setParam("occlusionStrength", primitive.occlusionStrength);
     if (primitive.hasClearcoat) {
         material.setParam("clearcoatFactor", primitive.clearcoatFactor);
         material.setParam("clearcoatRoughnessFactor", primitive.clearcoatRoughnessFactor);
@@ -1440,6 +1515,8 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     material.setParam("metallicFactor", primitive.metallicFactor);
     material.setParam("roughnessFactor", primitive.roughnessFactor);
     material.setParam("emissiveFactor", glm::vec4(primitive.emissiveFactor, 1.0f));
+    material.setParam("normalScale", primitive.normalScale);
+    material.setParam("occlusionStrength", primitive.occlusionStrength);
     if (primitive.hasClearcoat) {
         material.setParam("clearcoatFactor", primitive.clearcoatFactor);
         material.setParam("clearcoatRoughnessFactor", primitive.clearcoatRoughnessFactor);
