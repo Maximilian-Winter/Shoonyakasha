@@ -18,6 +18,7 @@
 #include "Vulkan/VertexTypes.h"
 
 #include <cgltf.h>
+#include <meshoptimizer.h>
 #include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -31,6 +32,7 @@
 #include <fstream>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 
 namespace Shoonyakasha {
@@ -159,6 +161,52 @@ ECS::LightComponent lightFromGltf(const cgltf_light& source) {
         light.outerCone = glm::degrees(source.spot_outer_cone_angle);
     }
     return light;
+}
+
+// Decodes the buffer views compressed with EXT_meshopt_compression or
+// KHR_meshopt_compression into memory of their own (cgltf_buffer_view::data,
+// which cgltf reads in place of the buffer and frees in cgltf_free).
+// Returns an error message, empty when every view decoded.
+std::string decodeMeshoptBuffers(cgltf_data* data) {
+    for (cgltf_size i = 0; i < data->buffer_views_count; ++i) {
+        cgltf_buffer_view& view = data->buffer_views[i];
+        if (!view.has_meshopt_compression || view.data) continue;
+        const cgltf_meshopt_compression& mc = view.meshopt_compression;
+        const std::string where = "meshopt-compressed buffer view " + std::to_string(i);
+        if (!mc.buffer || !mc.buffer->data || mc.offset + mc.size > mc.buffer->size) {
+            return where + ": its compressed data is missing";
+        }
+        const auto* source = static_cast<const unsigned char*>(mc.buffer->data) + mc.offset;
+        void* decoded = std::malloc(mc.count * mc.stride);
+        if (!decoded) return where + ": out of memory";
+        int status = -1;
+        switch (mc.mode) {
+            case cgltf_meshopt_compression_mode_attributes:
+                status = meshopt_decodeVertexBuffer(decoded, mc.count, mc.stride, source, mc.size);
+                break;
+            case cgltf_meshopt_compression_mode_triangles:
+                status = meshopt_decodeIndexBuffer(decoded, mc.count, mc.stride, source, mc.size);
+                break;
+            case cgltf_meshopt_compression_mode_indices:
+                status = meshopt_decodeIndexSequence(decoded, mc.count, mc.stride, source, mc.size);
+                break;
+            default:
+                break;
+        }
+        if (status != 0) {
+            std::free(decoded);
+            return where + ": decoding failed (" + std::to_string(status) + ")";
+        }
+        switch (mc.filter) {
+            case cgltf_meshopt_compression_filter_octahedral:  meshopt_decodeFilterOct(decoded, mc.count, mc.stride); break;
+            case cgltf_meshopt_compression_filter_quaternion:  meshopt_decodeFilterQuat(decoded, mc.count, mc.stride); break;
+            case cgltf_meshopt_compression_filter_exponential: meshopt_decodeFilterExp(decoded, mc.count, mc.stride); break;
+            case cgltf_meshopt_compression_filter_color:       meshopt_decodeFilterColor(decoded, mc.count, mc.stride); break;
+            default: break;
+        }
+        view.data = decoded;
+    }
+    return {};
 }
 
 // The KHR_materials_anisotropy params and texture of a material with the
@@ -481,6 +529,11 @@ GltfLoadResult GltfSceneLoader::load(
     if (parseResult != cgltf_result_success) {
         cgltf_free(data);
         result.error = "glTF validation failed: " + path.string();
+        return result;
+    }
+    if (const std::string error = decodeMeshoptBuffers(data); !error.empty()) {
+        cgltf_free(data);
+        result.error = path.string() + ": " + error;
         return result;
     }
 

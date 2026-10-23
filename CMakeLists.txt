@@ -93,11 +93,15 @@ add_library(ShoonyakashaMikkTSpace OBJECT "${CMAKE_CURRENT_SOURCE_DIR}/third_par
 set_target_properties(ShoonyakashaMikkTSpace PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_sources(Shoonyakasha PRIVATE $<TARGET_OBJECTS:ShoonyakashaMikkTSpace>)
 
-# meshoptimizer's simplifier (v0.22), for generated mesh levels of detail
-# (Resources/MeshLods.cpp), built the same way.
+# meshoptimizer (v1.2): its simplifier, for generated mesh levels of detail
+# (Resources/MeshLods.cpp), and its decoders, for meshopt-compressed glTF
+# buffers (Resources/GltfSceneLoader.cpp); built the same way.
 add_library(ShoonyakashaMeshOptimizer OBJECT
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/simplifier.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/allocator.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/allocator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/vertexcodec.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/indexcodec.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer/vertexfilter.cpp")
 set_target_properties(ShoonyakashaMeshOptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_sources(Shoonyakasha PRIVATE $<TARGET_OBJECTS:ShoonyakashaMeshOptimizer>)
 

@@ -33,7 +33,7 @@ Default loading preserves the node tree and shares mesh-space GPU buffers among 
 
 `flatten_hierarchy=True` bakes node transforms into vertices and emits flattened geometry, losing that sharing. See [instancing](instancing.md) before choosing it.
 
-Vertex attributes, morph targets and animation samplers stored as integers or normalized integers (`KHR_mesh_quantization`) are read as floats while loading.
+Vertex attributes, morph targets and animation samplers stored as integers or normalized integers (`KHR_mesh_quantization`) are read as floats while loading. Buffer views compressed with `EXT_meshopt_compression` or `KHR_meshopt_compression` are decoded with meshoptimizer while loading, filters included; a file whose compressed data cannot be decoded fails to load with the buffer view named in `error`.
 
 ## Lights
 
