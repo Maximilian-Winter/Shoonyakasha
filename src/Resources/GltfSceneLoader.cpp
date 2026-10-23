@@ -19,6 +19,7 @@
 
 #include <cgltf.h>
 #include <meshoptimizer.h>
+#include <draco/compression/decode.h>
 #include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -33,7 +34,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
+#include <memory>
 
 namespace Shoonyakasha {
 
@@ -205,6 +208,113 @@ std::string decodeMeshoptBuffers(cgltf_data* data) {
             default: break;
         }
         view.data = decoded;
+    }
+    return {};
+}
+
+// Memory holding decoded KHR_draco_mesh_compression data: buffer views the
+// decoded accessors point at, kept until the cgltf data is freed.
+struct DracoStorage {
+    std::vector<std::unique_ptr<cgltf_buffer_view>> views;
+    std::vector<std::vector<uint8_t>> bytes;
+
+    // A buffer view over `size` new bytes; `out` is where they are written.
+    cgltf_buffer_view* add(size_t size, uint8_t*& out) {
+        bytes.emplace_back(size);
+        auto view = std::make_unique<cgltf_buffer_view>();
+        *view = cgltf_buffer_view{};
+        view->size = size;
+        view->data = bytes.back().data();
+        out = bytes.back().data();
+        views.push_back(std::move(view));
+        return views.back().get();
+    }
+};
+
+// The values of draco attribute `source` for every point of `mesh`, in the
+// component type T, written tightly packed to `out`.
+template <typename T>
+void writeDracoValues(const draco::PointAttribute& source, const draco::Mesh& mesh, int components, uint8_t* out) {
+    std::vector<T> value(static_cast<size_t>(components));
+    for (draco::PointIndex p(0); p < mesh.num_points(); ++p) {
+        source.ConvertValue<T>(source.mapped_index(p), static_cast<int8_t>(components), value.data());
+        std::memcpy(out, value.data(), sizeof(T) * components);
+        out += sizeof(T) * components;
+    }
+}
+
+// Decodes the primitives compressed with KHR_draco_mesh_compression: each
+// attribute's accessor, and the indices, get a buffer view in `storage`
+// holding the decoded values in the accessor's own component type (32-bit
+// indices). Returns an error message, empty when every primitive decoded.
+std::string decodeDracoPrimitives(cgltf_data* data, DracoStorage& storage) {
+    for (cgltf_size m = 0; m < data->meshes_count; ++m) {
+        for (cgltf_size p = 0; p < data->meshes[m].primitives_count; ++p) {
+            cgltf_primitive& primitive = data->meshes[m].primitives[p];
+            if (!primitive.has_draco_mesh_compression) continue;
+            const std::string where = "Draco primitive " + std::to_string(p) + " of mesh " + std::to_string(m);
+            const cgltf_draco_mesh_compression& draco = primitive.draco_mesh_compression;
+            const uint8_t* compressed = draco.buffer_view ? cgltf_buffer_view_data(draco.buffer_view) : nullptr;
+            if (!compressed) return where + ": its compressed data is missing";
+
+            draco::DecoderBuffer buffer;
+            buffer.Init(reinterpret_cast<const char*>(compressed), draco.buffer_view->size);
+            draco::Decoder decoder;
+            auto decoded = decoder.DecodeMeshFromBuffer(&buffer);
+            if (!decoded.ok()) return where + ": " + decoded.status().error_msg_string();
+            const std::unique_ptr<draco::Mesh> mesh = std::move(decoded).value();
+            const size_t points = mesh->num_points();
+
+            for (cgltf_size a = 0; a < primitive.attributes_count; ++a) {
+                cgltf_accessor* accessor = primitive.attributes[a].data;
+                if (!accessor || accessor->buffer_view) continue;   // not compressed, or already decoded
+                const cgltf_attribute* entry = nullptr;
+                for (cgltf_size d = 0; d < draco.attributes_count; ++d) {
+                    if (std::strcmp(draco.attributes[d].name, primitive.attributes[a].name) == 0) entry = &draco.attributes[d];
+                }
+                if (!entry) continue;
+                // cgltf resolves the draco attribute id as an accessor index.
+                const auto id = static_cast<uint32_t>(cgltf_accessor_index(data, entry->data));
+                const draco::PointAttribute* source = mesh->GetAttributeByUniqueId(id);
+                if (!source) return where + ": no attribute " + std::to_string(id) + " for " + primitive.attributes[a].name;
+                if (accessor->count != points) return where + ": " + primitive.attributes[a].name + " has " +
+                                                      std::to_string(accessor->count) + " values, the mesh " +
+                                                      std::to_string(points) + " points";
+                const int components = static_cast<int>(cgltf_num_components(accessor->type));
+                const size_t componentSize = cgltf_component_size(accessor->component_type);
+                uint8_t* out = nullptr;
+                cgltf_buffer_view* view = storage.add(points * components * componentSize, out);
+                switch (accessor->component_type) {
+                    case cgltf_component_type_r_8:   writeDracoValues<int8_t>(*source, *mesh, components, out); break;
+                    case cgltf_component_type_r_8u:  writeDracoValues<uint8_t>(*source, *mesh, components, out); break;
+                    case cgltf_component_type_r_16:  writeDracoValues<int16_t>(*source, *mesh, components, out); break;
+                    case cgltf_component_type_r_16u: writeDracoValues<uint16_t>(*source, *mesh, components, out); break;
+                    case cgltf_component_type_r_32u: writeDracoValues<uint32_t>(*source, *mesh, components, out); break;
+                    case cgltf_component_type_r_32f: writeDracoValues<float>(*source, *mesh, components, out); break;
+                    default: return where + ": unsupported component type for " + primitive.attributes[a].name;
+                }
+                accessor->buffer_view = view;
+                accessor->offset = 0;
+                accessor->stride = components * componentSize;
+            }
+
+            if (primitive.indices && !primitive.indices->buffer_view) {
+                const size_t count = static_cast<size_t>(mesh->num_faces()) * 3;
+                uint8_t* out = nullptr;
+                cgltf_buffer_view* view = storage.add(count * sizeof(uint32_t), out);
+                for (draco::FaceIndex f(0); f < mesh->num_faces(); ++f) {
+                    const auto& face = mesh->face(f);
+                    const uint32_t corners[3] = {face[0].value(), face[1].value(), face[2].value()};
+                    std::memcpy(out, corners, sizeof(corners));
+                    out += sizeof(corners);
+                }
+                primitive.indices->buffer_view = view;
+                primitive.indices->offset = 0;
+                primitive.indices->count = count;
+                primitive.indices->component_type = cgltf_component_type_r_32u;
+                primitive.indices->stride = sizeof(uint32_t);
+            }
+        }
     }
     return {};
 }
@@ -532,6 +642,12 @@ GltfLoadResult GltfSceneLoader::load(
         return result;
     }
     if (const std::string error = decodeMeshoptBuffers(data); !error.empty()) {
+        cgltf_free(data);
+        result.error = path.string() + ": " + error;
+        return result;
+    }
+    DracoStorage dracoStorage;
+    if (const std::string error = decodeDracoPrimitives(data, dracoStorage); !error.empty()) {
         cgltf_free(data);
         result.error = path.string() + ": " + error;
         return result;
