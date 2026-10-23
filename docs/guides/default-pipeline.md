@@ -80,7 +80,7 @@ engine.apply_pipeline_preset("medium")
 | `high` | Everything on. What the pipeline starts with |
 | `medium` | High without contact shadows |
 | `low` | Integrated or older GPUs: no ambient occlusion, bloom, contact shadows, or shadows from alpha-tested geometry |
-| `raytraced` | High, with the sun's shadows ray traced where the GPU supports ray queries |
+| `raytraced` | High, with the shadows of the sun and of spot and point lights ray traced where the GPU supports ray queries |
 
 Call it from `on_init` or at any time after, for instance from a key or a settings menu. A preset only touches what it names, so your own settings that it doesn't name survive it.
 
@@ -93,7 +93,9 @@ def on_init():
     engine.set_custom_float("default.sunAngle", 0.27)   # the real sun; larger is softer
 ```
 
-On a GPU without ray queries the preset is refused with a warning and nothing changes. `ray_query_supported()` answers from `on_init` on. The rays see opaque and alpha-tested geometry, skinned meshes in their current pose included; for alpha-tested materials they test the texture's alpha. Skinned meshes also cast through the cascades, and the two shadows are combined. The noise needs TAA: with `taa` off, ray-traced shadow edges look grainy. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to try a program as it runs on a GPU without them.
+On a GPU without ray queries the preset is refused with a warning and nothing changes. `ray_query_supported()` answers from `on_init` on. The rays see opaque and alpha-tested geometry, skinned meshes in their current pose included; for alpha-tested materials they test the texture's alpha. Skinned meshes also cast through the cascades, and the two shadows are combined.
+
+Spot and point lights with their shadow flag on are ray traced too, in place of their shadow maps: each pixel traces one ray per light towards a random point of it, so `set_light_source_radius` (or a light's rectangle, `set_light_source_size`) widens its penumbra, and radius 0 gives hard shadows with no noise. Every shadowed light gets a shadow, with no limit of 16 and 8, but each one costs a ray in every pixel it reaches. The noise needs TAA: with `taa` off, ray-traced shadow edges look grainy. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to try a program as it runs on a GPU without them.
 
 ## Settings
 
@@ -249,7 +251,7 @@ Some things this example shows about the pipeline:
 |---|---|
 | Everything is black except the sky | No lights, or only lights whose range doesn't reach the scene. Check the sky light too: `iblIntensity`, and the environment map |
 | A directional light casts no shadow | Its shadow flag is off, another directional light was flagged first, or what should be shadowed is beyond `max_distance` (debug view 1) |
-| A spot or point light casts no shadow | Its flag is off; more than 16 spot or 8 point lights are flagged and it ranked lower; or its range doesn't reach the view |
+| A spot or point light casts no shadow | Its flag is off; more than 16 spot or 8 point lights are flagged and it ranked lower (not with `raytraced`); or its range doesn't reach the view |
 | Blended glass casts no shadow | Blended materials receive shadows but don't cast them. Use `MASK` for things like leaves and fences |
 | Shadows shimmer on distant objects | They're in the last cascade with few texels per unit. Shorten `max_distance`, or raise `split_lambda` so more of the resolution goes near the camera |
 | `raytraced` does nothing | The GPU has no ray queries (see the warning in the log), or `SHOONYAKASHA_DISABLE_RAY_QUERY` is set |

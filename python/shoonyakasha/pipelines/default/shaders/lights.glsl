@@ -4,7 +4,9 @@
 // (DEFAULT_SCENE_LIGHTS), and includes sk/pbr.glsl.
 // With CLUSTERED defined, directLight takes the fragment's cluster and loops
 // over its lights only; with LOCAL_SHADOWS, spot and point lights are
-// shadowed.
+// shadowed from the shadow atlas, and with RT_LOCAL_SHADOWS, those whose
+// shadow flag is set (sceneLights[i].source.y) by a ray each
+// (rt_lights.glsl).
 //
 // Point and spot lights with a rectangle (sceneLights[i].shape: its right
 // axis times half its width, and half its height) are shaded as that
@@ -33,9 +35,24 @@
 #ifdef LOCAL_SHADOWS
 #include "local_shadows.glsl"
 #endif
+#ifdef RT_LOCAL_SHADOWS
+#include "rt_lights.glsl"
+#endif
 #ifdef CLUSTERED
 #include "clusters.glsl"
 #endif
+
+// How much of spot or point light i reaches worldPos past what casts
+// shadows; 1 with neither LOCAL_SHADOWS nor RT_LOCAL_SHADOWS.
+float localVisibility(uint i, vec3 worldPos, vec3 N, vec3 L) {
+#if defined(RT_LOCAL_SHADOWS)
+    return sceneLights[i].source.y > 0.5 ? localRayVisibility(i, worldPos, N) : 1.0;
+#elif defined(LOCAL_SHADOWS)
+    return localShadowVisibility(int(i), sceneLights[i].positionType.w, worldPos, N, L);
+#else
+    return 1.0;
+#endif
+}
 
 // Light from scene light i, shaded as its rectangle. Its radiance keeps the
 // light's own falloff: far away the rectangle gives what the point light
@@ -71,9 +88,7 @@ vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float me
 
     vec3 reflected = rectangleBRDF(N, V, toLight, halfX, halfY, albedo, metallic, roughness, F0);
     if (max(reflected.r, max(reflected.g, reflected.b)) <= 0.0) return vec3(0.0);
-#ifdef LOCAL_SHADOWS
-    falloff *= localShadowVisibility(int(i), sceneLights[i].positionType.w, worldPos, N, L);
-#endif
+    falloff *= localVisibility(i, worldPos, N, L);
     vec3 color = sceneLights[i].colorIntensity.rgb * sceneLights[i].colorIntensity.w;
     return reflected * color * falloff * d * d / (4.0 * length(halfX) * shape.w);
 }
@@ -156,11 +171,7 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
             if (falloff > 1e-4) color *= spotCookie(i, L);
         }
         if (falloff > 1e-4) falloff *= lightProfile(i, L);
-#ifdef LOCAL_SHADOWS
-        if (falloff > 1e-4 && dot(N, L) > 0.0) {
-            falloff *= localShadowVisibility(int(i), type, worldPos, N, L);
-        }
-#endif
+        if (falloff > 1e-4 && dot(N, L) > 0.0) falloff *= localVisibility(i, worldPos, N, L);
     }
 
     float NdotL = dot(N, L);

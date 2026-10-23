@@ -2,7 +2,9 @@
 // BLEND), over the lit opaque scene. Shadows come from the cascades
 // directly: the shadow mask only covers the opaque surfaces behind.
 // forward_rt.frag builds it with RAY_TRACED_SHADOWS, for the "raytraced"
-// preset, where the cascades hold only the casters the rays do not see.
+// preset, where the cascades hold only the casters the rays do not see and
+// spot and point lights are shadowed by rays (RT_LOCAL_SHADOWS) instead of
+// the shadow atlas.
 
 #include "common.glsl"
 #include "sk/pbr.glsl"
@@ -36,8 +38,10 @@ layout(set = 7, binding = 0) uniform accelerationStructureEXT scene;
 #include "sk/scene_hits.glsl"
 #include "rt_shadows.glsl"
 const int SUN_RAYS = 4;   // more than the opaque pass: TAA cannot follow a blended surface
-#endif
+#define RT_LOCAL_SHADOWS
+#else
 #define LOCAL_SHADOWS
+#endif
 #define CLUSTERED
 #include "lights.glsl"
 
@@ -66,6 +70,8 @@ void main() {
         }
         sunLit *= float(open) / float(SUN_RAYS);
     }
+    rtLightPixel = gl_FragCoord.xy;
+    rtLightOffset = sunRayOffset(viewDepth);
 #endif
     int sunIndex = cascades.sunEnabled != 0u ? cascades.sunLightIndex : -1;
 

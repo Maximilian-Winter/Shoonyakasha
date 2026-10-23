@@ -140,8 +140,9 @@ own that it does not mention stay as you set them.
 | `LightClusterCount` | A compute pass counting the point and spot lights that reach each cluster of the view, into `lightClusters`, and their total |
 | `LightClusters` | A compute pass listing them: each cluster takes room in `ClusterLightIndices` for its list, and `lightClusters` holds the list's count and offset. When the total does not fit, each cluster gets the same share of the room as of the total, and keeps its nearest lights |
 | `Lighting` | Lights, image-based light and the sky, added onto the emission |
+| `LightingRT` | In the `raytraced` preset, instead of `Lighting`: the same, with shadow rays towards spot and point lights instead of the shadow atlas. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `Transparent` | Blended materials, back to front, sampling the cascades directly |
-| `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with sun shadow rays. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
+| `TransparentRT` | In the `raytraced` preset, instead of `Transparent`: the same, with shadow rays towards the sun, spot and point lights. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `TAA`, `TAAHistory` | The new frame blended with last frame's result into `taaColor`, which `TAAHistory`, a `copy` transfer pass, then copies into the persistent `taaHistory` for the next frame |
 | `BloomDown0`, `BloomDown1..5` | The HDR image down a half-resolution mip chain, with a 13-tap filter |
 | `AutoExposure` | A compute pass: a histogram of mip 2 of the chain, and the adapted exposure in a persistent 1x1 image |
@@ -205,7 +206,19 @@ keeps `ShadowSkinned{cascade}` on, so skinned meshes also cast into the
 cascades; the mask is the product of the rays and the cascades. Blended materials have no mask; the preset
 swaps `Transparent` for `TransparentRT`, which traces four rays per pixel
 itself (TAA cannot average a surface it sees through) and multiplies them
-with the cascades the same way. Spot and point lights keep their shadow maps.
+with the cascades the same way.
+
+Spot and point lights are shadowed by rays as well: the preset swaps
+`Lighting` for `LightingRT` (`lighting_rt.frag`, `lighting_body.glsl` built
+with `RT_LOCAL_SHADOWS`) and turns every spot and point shadow-map pass off.
+For each light with its shadow flag set, each pixel traces one ray
+(`rt_lights.glsl`) towards a random point of the light: its rectangle, or the
+disc of its source radius facing the pixel, or its centre for radius 0. Every
+such light is traced, without the shadow atlas's slot budgets, and a ray costs
+the same whatever the light's size; with many shadowed lights reaching the
+same pixels, those pixels trace many rays. `TransparentRT` traces the same
+rays. A light with source radius 0 casts hard, noise-free shadows; geometry
+at the light itself should not cast shadows, or it hides the light.
 
 One ray per pixel is noisy on its own; TAA averages it. With `taa` 0 the
 shadows' edges are left grainy.
