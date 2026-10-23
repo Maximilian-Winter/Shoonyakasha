@@ -97,9 +97,11 @@ void main() {
     coatFactor = s.clearcoat;
     coatRoughness = s.clearcoatRoughness;
     vec3 V = normalize(camera.position.xyz - fragWorldPos);
+    sheenColor = s.sheenColor;
+    sheenRoughness = s.sheenRoughness;
     float ior = max(draw.ior, 1.0);
-    float dielectricF0 = (ior - 1.0) / (ior + 1.0);
-    vec3 F0 = mix(vec3(dielectricF0 * dielectricF0), s.baseColor.rgb, s.metallic);
+    vec3 F0 = mix(s.dielectricF0, s.baseColor.rgb, s.metallic);
+    specularF90 = mix(s.specularWeight, 1.0, s.metallic);
     float transmission = clamp(draw.transmissionFactor, 0.0, 1.0);
     if (transmission > 0.0) transmission *= texture(transmissionMap, MATERIAL_UV(transmission)).r;
     // The transmitted part of the dielectric takes the place of its diffuse.
@@ -141,7 +143,7 @@ void main() {
         thickness *= (length(draw.model[0].xyz) + length(draw.model[1].xyz) + length(draw.model[2].xyz)) / 3.0;
         float NdotV = max(dot(s.N, V), 1e-4);
         vec2 brdf = texture(brdfLUT, vec2(NdotV, s.roughness)).rg;
-        vec3 reflected = F0 * brdf.x + brdf.y;
+        vec3 reflected = F0 * brdf.x + specularF90 * brdf.y;
         color += (1.0 - reflected) * transmission * (1.0 - s.metallic)
                * transmittedLight(s.N, V, s.baseColor.rgb, s.roughness, ior, thickness);
     }

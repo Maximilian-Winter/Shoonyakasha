@@ -45,6 +45,80 @@ float coatFresnel(float cosTheta) {
     return COAT_F0 + (1.0 - COAT_F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+// The base's Fresnel at grazing angles (F90), set by the including shader
+// like the coat: KHR_materials_specular's strength for a dielectric, 1 for a
+// metal, mix(specularWeight, 1, metallic) between.
+float specularF90 = 1.0;
+
+// Sheen over the base (KHR_materials_sheen), set like the coat: a Charlie
+// lobe of colour sheenColor (black for none) and roughness sheenRoughness,
+// whose albedo (sheenAlbedo) the base beneath loses.
+vec3 sheenColor = vec3(0.0);
+float sheenRoughness = 0.0;
+
+float maxComponent(vec3 v) {
+    return max(v.r, max(v.g, v.b));
+}
+
+// The albedo of a white sheen seen at cosine `cosTheta`: exp of a cubic in
+// cosTheta and 1 / (sheenRoughness + 0.05), fitted to the integral of
+// sheenLobe over the hemisphere. Within 0.01 on average; up to 0.1 off at
+// grazing angles on the smoothest sheens.
+float sheenAlbedo(float cosTheta) {
+    float u = 1.0 / (sheenRoughness + 0.05);
+    float logE = -0.17504 + u * (-0.11953 + u * (0.0454 - 0.0024 * u))
+               + cosTheta * (-1.2222 + u * (-0.60062 - 0.12786 * u))
+               + cosTheta * cosTheta * (2.14176 - 1.00193 * u)
+               - 0.77484 * cosTheta * cosTheta * cosTheta;
+    return clamp(exp(logE), 0.0, 1.0);
+}
+
+// The Charlie sheen's Lambda (Estevez and Kulla 2017, their fit).
+float sheenLambda(float cosTheta, float alpha) {
+    float t = (1.0 - alpha) * (1.0 - alpha);
+    float a = mix(21.5473, 25.3245, t), b = mix(3.82987, 3.32435, t), c = mix(0.19823, 0.16801, t);
+    float d = mix(-1.97760, -1.27393, t), e = mix(-4.32054, -4.85967, t);
+    float x = cosTheta < 0.5 ? cosTheta : 1.0 - cosTheta;
+    float fit = a / (1.0 + b * pow(x, c)) + d * x + e;
+    if (cosTheta < 0.5) return exp(fit);
+    float half_ = a / (1.0 + b * pow(0.5, c)) + d * 0.5 + e;
+    return exp(2.0 * half_ - fit);
+}
+
+// Charlie distribution and visibility (Estevez and Kulla 2017).
+float sheenLobe(float NdotH, float NdotV, float NdotL) {
+    float alpha = max(sheenRoughness * sheenRoughness, 1e-4);
+    float sin2 = max(1.0 - NdotH * NdotH, 0.0);
+    float D = (2.0 + 1.0 / alpha) * pow(sin2, 0.5 / alpha) / (2.0 * SK_PI);
+    float V = clamp(1.0 / ((1.0 + sheenLambda(NdotV, alpha) + sheenLambda(NdotL, alpha)) * (4.0 * NdotV * NdotL)),
+                    0.0, 1.0);
+    return D * V;
+}
+
+// Cook-Torrance as sk/pbr.glsl's cookTorrance, with Fresnel rising from F0
+// to specularF90.
+vec3 baseBRDF(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic, float roughness, vec3 F0) {
+    vec3 H = normalize(V + L);
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float NdotH = max(dot(N, H), 0.0);
+    float VdotH = max(dot(V, H), 0.0);
+
+    vec3 F = F0 + (specularF90 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+    float D = distributionGGX(NdotH, roughness);
+    float G = geometrySmith(NdotV, NdotL, roughness);
+
+    vec3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
+    vec3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / SK_PI;
+    vec3 result = diffuse + specular;
+    float sheenMax = maxComponent(sheenColor);
+    if (sheenMax > 0.0) {
+        float scale = min(1.0 - sheenMax * sheenAlbedo(max(NdotV, 1e-4)), 1.0 - sheenMax * sheenAlbedo(NdotL));
+        result = result * scale + sheenColor * sheenLobe(NdotH, max(NdotV, 1e-4), NdotL);
+    }
+    return result;
+}
+
 #include "area_lights.glsl"
 
 #ifdef LOCAL_SHADOWS
@@ -191,7 +265,7 @@ vec3 lightFrom(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metalli
 
     float NdotL = dot(N, L);
     if (NdotL <= 0.0 || falloff <= 1e-4) return vec3(0.0);
-    vec3 brdf = cookTorrance(N, V, L, albedo, metallic, roughness, F0);
+    vec3 brdf = baseBRDF(N, V, L, albedo, metallic, roughness, F0);
     if (coatFactor > 0.0) {
         float NdotV = max(dot(N, V), 1e-4);
         vec3 H = normalize(V + L);
@@ -240,15 +314,28 @@ void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, samp
                        vec3 N, vec3 V, vec3 albedo, float metallic, float roughness, vec3 F0,
                        out vec3 diffuse, out vec3 specular) {
     float NdotV = max(dot(N, V), 1e-4);
-    vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
+    // sk/pbr.glsl's fresnelSchlickRoughness, rising to specularF90.
+    vec3 kS = F0 + (max(vec3(specularF90 * (1.0 - roughness)), F0) - F0) *
+                   pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
     vec3 kD = (1.0 - kS) * (1.0 - metallic);
-    diffuse = kD * texture(irradianceMap, N).rgb * albedo;
+    vec3 irradiance = texture(irradianceMap, N).rgb;
+    diffuse = kD * irradiance * albedo;
 
     float maxLod = float(textureQueryLevels(prefilterMap) - 1);
     vec3 R = reflect(-V, N);
     vec3 prefiltered = textureLod(prefilterMap, R, roughness * maxLod).rgb;
     vec2 brdf = texture(brdfLUT, vec2(NdotV, roughness)).rg;
-    specular = prefiltered * (F0 * brdf.x + brdf.y);
+    specular = prefiltered * (F0 * brdf.x + specularF90 * brdf.y);
+
+    // The sheen, a broad lobe, joins the diffuse part: the irradiance times
+    // its albedo.
+    float sheenMax = maxComponent(sheenColor);
+    if (sheenMax > 0.0) {
+        float E = sheenAlbedo(NdotV);
+        diffuse *= 1.0 - sheenMax * E;
+        specular *= 1.0 - sheenMax * E;
+        diffuse += irradiance * sheenColor * E;
+    }
 
     ambientCoatSpecular = vec3(0.0);
     if (coatFactor > 0.0) {

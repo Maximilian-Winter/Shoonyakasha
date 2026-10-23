@@ -2897,7 +2897,7 @@ void RenderGraph::createMaterialDescriptorPool(uint32_t maxSets) {
 
     // Pool sizes for per-entity descriptors (textures + skeleton SSBOs)
     std::array<VkDescriptorPoolSize, 3> poolSizes = {{
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxSets * 12 },  // Up to 12 textures per material
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxSets * 16 },  // Up to 16 textures per material
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, maxSets * 2 },           // Skeleton bone SSBOs
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxSets }                // Material buffers
     }};

@@ -90,8 +90,9 @@ mat3 ltcFrame(vec3 N, vec3 V) {
 }
 
 // Light reflected from a rectangle of radiance 1 (centre and half-axes
-// relative to the shading point): diffuse plus specular, and the clear coat
-// over them (coatFactor, coatRoughness, from lights.glsl).
+// relative to the shading point): diffuse plus specular, the sheen, and the
+// clear coat over them (specularF90, sheenColor, coatFactor and the rest,
+// from lights.glsl).
 vec3 rectangleBRDF(vec3 N, vec3 V, vec3 centre, vec3 halfX, vec3 halfY, vec3 albedo, float metallic,
                    float roughness, vec3 F0) {
     vec3 corners[4] = vec3[](centre - halfX - halfY, centre + halfX - halfY,
@@ -99,10 +100,17 @@ vec3 rectangleBRDF(vec3 N, vec3 V, vec3 centre, vec3 halfX, vec3 halfY, vec3 alb
     float NdotV = clamp(dot(N, V), 1e-4, 1.0);
     mat3 frame = ltcFrame(N, V);
     vec2 env = texture(brdfLUT, vec2(NdotV, roughness)).rg;
-    vec3 specularAlbedo = F0 * env.x + env.y;
+    vec3 specularAlbedo = F0 * env.x + specularF90 * env.y;
     float diffuse = ltcRectangle(frame, corners);
     float specular = ltcRectangle(ltcInverse(roughness, NdotV) * frame, corners);
     vec3 result = (1.0 - specularAlbedo) * (1.0 - metallic) * albedo * diffuse + specularAlbedo * specular;
+    // A sheen (sheenColor, from lights.glsl) as a broad lobe: its albedo
+    // times the rectangle's cosine-weighted extent.
+    float sheenMax = maxComponent(sheenColor);
+    if (sheenMax > 0.0) {
+        float E = sheenAlbedo(NdotV);
+        result = result * (1.0 - sheenMax * E) + sheenColor * E * diffuse;
+    }
     if (coatFactor > 0.0) {
         vec2 coatEnv = texture(brdfLUT, vec2(NdotV, coatRoughness)).rg;
         float coat = ltcRectangle(ltcInverse(coatRoughness, NdotV) * frame, corners);

@@ -7,6 +7,8 @@
 //   3 hdrColor   R16G16B16A16_SFLOAT emission; lighting adds onto it
 //   4 gVelocity  R16G16_SFLOAT       motion since last frame, in UV: this
 //                                    frame's position minus last frame's
+//   5 gSheen     R8G8B8A8_SRGB       sheen colour, sheen roughness
+//   6 gSpecular  R8G8B8A8_UNORM      sqrt of the dielectric F0, specular strength
 
 #include "common.glsl"
 #include "material_draw.glsl"
@@ -18,6 +20,8 @@ layout(location = 1) out vec2 outNormal;
 layout(location = 2) out vec4 outMaterial;
 layout(location = 3) out vec4 outEmission;
 layout(location = 4) out vec2 outVelocity;
+layout(location = 5) out vec4 outSheen;
+layout(location = 6) out vec4 outSpecular;
 
 layout(location = 4) in vec4 fragClip;
 layout(location = 5) in vec4 fragPrevClip;
@@ -35,4 +39,6 @@ void main() {
     outVelocity = fragPrevClip.w > 0.0
         ? (fragClip.xy / fragClip.w - fragPrevClip.xy / fragPrevClip.w) * 0.5
         : vec2(0.0);
+    outSheen = vec4(s.sheenColor, s.sheenRoughness);
+    outSpecular = vec4(sqrt(s.dielectricF0), s.specularWeight);
 }

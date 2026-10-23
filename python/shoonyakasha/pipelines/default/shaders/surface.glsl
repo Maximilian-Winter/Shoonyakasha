@@ -15,7 +15,11 @@ layout(set = 1, binding = 3) uniform sampler2D aoMap;
 layout(set = 1, binding = 4) uniform sampler2D emissiveMap;
 layout(set = 1, binding = 5) uniform sampler2D clearcoatMap;            // KHR_materials_clearcoat: r amount
 layout(set = 1, binding = 6) uniform sampler2D clearcoatRoughnessMap;   // g roughness
-#include "material_uv.glsl"
+layout(set = 1, binding = 10) uniform sampler2D sheenColorMap;          // KHR_materials_sheen: rgb colour
+layout(set = 1, binding = 11) uniform sampler2D sheenRoughnessMap;      // a roughness
+layout(set = 1, binding = 12) uniform sampler2D specularMap;            // KHR_materials_specular: a strength
+layout(set = 1, binding = 13) uniform sampler2D specularColorMap;       // rgb colour
+#include "material_data.glsl"
 
 layout(set = EXPOSURE_SET, binding = 0) uniform ExposureSettings { DEFAULT_SETTINGS_BLOCK } exposureSettings;
 layout(set = EXPOSURE_SET, binding = 1) uniform sampler2D exposureImage;   // 1x1, last frame's adapted value
@@ -28,7 +32,7 @@ layout(location = 6) in vec4 fragWorldTangent;   // 0 for meshes without uvs
 layout(location = 7) in vec2 fragTexCoord1;      // TEXCOORD_1
 
 // The uv the material texture `name` (albedo, normal, ...) is sampled at.
-#define MATERIAL_UV(name) textureUv(materialUv.name##Uv0, materialUv.name##Uv1, fragTexCoord, fragTexCoord1)
+#define MATERIAL_UV(name) textureUv(materialData.name##Uv0, materialData.name##Uv1, fragTexCoord, fragTexCoord1)
 
 struct Surface {
     vec4 baseColor;   // rgb albedo, a coverage
@@ -39,6 +43,10 @@ struct Surface {
     vec3 emissive;
     float clearcoat;            // amount of the clear lacquer layer over the base
     float clearcoatRoughness;
+    vec3 sheenColor;            // black for no sheen
+    float sheenRoughness;
+    vec3 dielectricF0;          // the base's F0 where it is not metal: from ior, specular colour and strength
+    float specularWeight;       // the dielectric's F90: specular strength
 };
 
 // Tangent frame from screen-space derivatives, for meshes without tangents.
@@ -57,7 +65,7 @@ mat3 derivativeTBN(vec3 N, vec3 p, vec2 uv) {
 // mesh's tangent made orthogonal to N, or the derivative frame when the mesh
 // has none or the map is not sampled at TEXCOORD_0 as it is.
 mat3 tangentFrame(vec3 N, vec2 uv) {
-    if (!isPlainUv(materialUv.normalUv0, materialUv.normalUv1)) return derivativeTBN(N, fragWorldPos, uv);
+    if (!isPlainUv(materialData.normalUv0, materialData.normalUv1)) return derivativeTBN(N, fragWorldPos, uv);
     vec3 T = fragWorldTangent.xyz - N * dot(N, fragWorldTangent.xyz);
     if (dot(T, T) < 1e-12) return derivativeTBN(N, fragWorldPos, uv);
     T = normalize(T);
@@ -124,6 +132,22 @@ Surface evaluateSurface(vec4 baseColor) {
         s.clearcoatRoughness *= texture(clearcoatRoughnessMap, MATERIAL_UV(clearcoatRoughness)).g;
     }
     s.clearcoatRoughness = clamp(s.clearcoatRoughness, 0.045, 1.0);
+
+    // The textures scale the factors; without them the fallback is white.
+    s.sheenColor = materialData.sheenColorFactor.rgb;
+    s.sheenRoughness = materialData.sheenRoughnessFactor;
+    if (max(s.sheenColor.r, max(s.sheenColor.g, s.sheenColor.b)) > 0.0) {
+        s.sheenColor *= texture(sheenColorMap, MATERIAL_UV(sheenColor)).rgb;
+        s.sheenRoughness *= texture(sheenRoughnessMap, MATERIAL_UV(sheenRoughness)).a;
+    }
+    s.sheenColor = clamp(s.sheenColor, 0.0, 1.0);
+    s.sheenRoughness = clamp(s.sheenRoughness, 0.0, 1.0);
+
+    float ior = max(draw.ior, 1.0);
+    float f0 = (ior - 1.0) / (ior + 1.0);
+    s.specularWeight = clamp(materialData.specularFactor * texture(specularMap, MATERIAL_UV(specular)).a, 0.0, 1.0);
+    vec3 specularColor = materialData.specularColorFactor.rgb * texture(specularColorMap, MATERIAL_UV(specularColor)).rgb;
+    s.dielectricF0 = min(f0 * f0 * specularColor, vec3(1.0)) * s.specularWeight;
     return s;
 }
 

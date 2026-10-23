@@ -660,7 +660,7 @@
         }
       ]
     },
-    "MaterialUV": {
+    "MaterialData": {
       "usage": "uniform_buffer",
       "packing": "std140",
       "fields": [
@@ -771,6 +771,128 @@
           "type": "vec4",
           "source": "entity.material.params.thicknessMapUvRow1",
           "default": [0.0, 1.0, 0.0, 0.0]
+        },
+        {
+          "name": "sheenColorUv0",
+          "type": "vec4",
+          "source": "entity.material.params.sheenColorMapUvRow0",
+          "default": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "sheenColorUv1",
+          "type": "vec4",
+          "source": "entity.material.params.sheenColorMapUvRow1",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "sheenRoughnessUv0",
+          "type": "vec4",
+          "source": "entity.material.params.sheenRoughnessMapUvRow0",
+          "default": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "sheenRoughnessUv1",
+          "type": "vec4",
+          "source": "entity.material.params.sheenRoughnessMapUvRow1",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "specularUv0",
+          "type": "vec4",
+          "source": "entity.material.params.specularMapUvRow0",
+          "default": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "specularUv1",
+          "type": "vec4",
+          "source": "entity.material.params.specularMapUvRow1",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "specularColorUv0",
+          "type": "vec4",
+          "source": "entity.material.params.specularColorMapUvRow0",
+          "default": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "specularColorUv1",
+          "type": "vec4",
+          "source": "entity.material.params.specularColorMapUvRow1",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "sheenColorFactor",
+          "type": "vec4",
+          "source": "entity.material.params.sheenColorFactor",
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "specularColorFactor",
+          "type": "vec4",
+          "source": "entity.material.params.specularColorFactor",
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "name": "sheenRoughnessFactor",
+          "type": "float",
+          "source": "entity.material.params.sheenRoughnessFactor",
+          "default": 0.0
+        },
+        {
+          "name": "specularFactor",
+          "type": "float",
+          "source": "entity.material.params.specularFactor",
+          "default": 1.0
         }
       ]
     },
@@ -1352,8 +1474,40 @@
           "stages": [
             "fragment"
           ],
-          "name": "MaterialUV",
+          "name": "MaterialData",
           "source": "material"
+        },
+        {
+          "binding": 10,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "sheenColorMap"
+        },
+        {
+          "binding": 11,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "sheenRoughnessMap"
+        },
+        {
+          "binding": 12,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "specularMap"
+        },
+        {
+          "binding": 13,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "specularColorMap"
         }
       ]
     },
@@ -1506,6 +1660,26 @@
           ],
           "name": "gVelocity",
           "autoBindResource": "gVelocity",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 7,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gSheen",
+          "autoBindResource": "gSheen",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 8,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gSpecular",
+          "autoBindResource": "gSpecular",
           "autoBindSampler": "nearestClamp"
         }
       ]
@@ -1859,6 +2033,22 @@
     },
     {
       "name": "gMaterial",
+      "kind": "image",
+      "image": {
+        "format": "R8G8B8A8_UNORM",
+        "transient": true
+      }
+    },
+    {
+      "name": "gSheen",
+      "kind": "image",
+      "image": {
+        "format": "R8G8B8A8_SRGB",
+        "transient": true
+      }
+    },
+    {
+      "name": "gSpecular",
       "kind": "image",
       "image": {
         "format": "R8G8B8A8_UNORM",
@@ -2511,6 +2701,26 @@
           ]
         },
         {
+          "resource": "gSheen",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "gSpecular",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_write",
           "clear": {
@@ -2581,6 +2791,14 @@
           "usage": "color_write"
         },
         {
+          "resource": "gSheen",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gSpecular",
+          "usage": "color_write"
+        },
+        {
           "resource": "gDepth",
           "usage": "depth_write"
         }
@@ -2643,6 +2861,14 @@
         },
         {
           "resource": "gVelocity",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gSheen",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gSpecular",
           "usage": "color_write"
         },
         {
@@ -2709,6 +2935,14 @@
         },
         {
           "resource": "gVelocity",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gSheen",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gSpecular",
           "usage": "color_write"
         },
         {
@@ -3032,6 +3266,14 @@
           "usage": "shader_read"
         },
         {
+          "resource": "gSheen",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gSpecular",
+          "usage": "shader_read"
+        },
+        {
           "resource": "shadowMask",
           "usage": "shader_read"
         },
@@ -3111,6 +3353,14 @@
         },
         {
           "resource": "gVelocity",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gSheen",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gSpecular",
           "usage": "shader_read"
         },
         {

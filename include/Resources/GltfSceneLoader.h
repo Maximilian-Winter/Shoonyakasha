@@ -71,6 +71,10 @@ struct GltfPrimitive {
     Shoonyakasha::GPUTexture thicknessMap;            // KHR_materials_volume: g thickness
     Shoonyakasha::GPUTexture iridescenceMap;           // KHR_materials_iridescence: r amount
     Shoonyakasha::GPUTexture iridescenceThicknessMap;  // g thickness, from minimum to maximum
+    Shoonyakasha::GPUTexture sheenColorMap;            // KHR_materials_sheen: rgb colour (sRGB)
+    Shoonyakasha::GPUTexture sheenRoughnessMap;        // a roughness
+    Shoonyakasha::GPUTexture specularMap;              // KHR_materials_specular: a strength
+    Shoonyakasha::GPUTexture specularColorMap;         // rgb colour (sRGB)
     // Textures read from TEXCOORD_1 or through KHR_texture_transform: the
     // slot and two rows, (m00, m01, m02, uv set) and (m10, m11, m12, 0), that
     // map (u, v, 1) to the uv sampled. The material gets them as the params
@@ -99,6 +103,14 @@ struct GltfPrimitive {
     float thicknessFactor       = 0.0f;
     float attenuationDistance   = 0.0f;
     glm::vec3 attenuationColor  = glm::vec3(1.0f);
+    // KHR_materials_sheen, when the material has the extension.
+    bool hasSheen               = false;
+    glm::vec3 sheenColorFactor  = glm::vec3(0.0f);
+    float sheenRoughnessFactor  = 0.0f;
+    // KHR_materials_specular, when the material has the extension.
+    bool hasSpecular            = false;
+    float specularFactor        = 1.0f;
+    glm::vec3 specularColorFactor = glm::vec3(1.0f);
     // KHR_materials_iridescence, when the material has the extension: a thin
     // film of index iridescenceIor, thicknesses in nanometres.
     bool hasIridescence         = false;

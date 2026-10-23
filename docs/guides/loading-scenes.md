@@ -41,9 +41,10 @@ Textures load through stb_image (PNG, JPEG and the other formats it reads) as 8-
 
 | Texture | Format | Bytes per texel |
 |---|---|---|
-| Base colour, emissive | BC1 sRGB; BC3 sRGB when any texel is transparent | 0.5; 1 |
+| Base colour, emissive, sheen colour, specular colour | BC1 sRGB; BC3 sRGB when any texel is transparent | 0.5; 1 |
 | Normal map | BC5: x and y | 1 |
 | Metallic-roughness, occlusion, clear coat, iridescence, transmission, thickness | BC1 | 0.5 |
+| Sheen roughness, specular strength (in alpha) | BC1; BC3 when any texel's alpha is below 1 | 0.5; 1 |
 
 Uncompressed textures take 4 bytes per texel, so this is a quarter to an eighth of the memory, at some loss of quality: BC1 stores each 4 x 4 block as two 16-bit colours and blends between them, which bands smooth gradients. Compression runs on the CPU while loading (stb_dxt), and so do the mipmaps, so loading takes longer. A BC5 normal map holds only x and y; the default pipeline and `sk/scene_hits.glsl` compute z from them, and a pipeline's own shaders need to do the same: `z = sqrt(max(1 - dot(xy, xy), 0))`.
 
