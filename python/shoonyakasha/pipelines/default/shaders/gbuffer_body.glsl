@@ -2,7 +2,8 @@
 // keeping the discard out of gbuffer.frag leaves early depth testing on.
 //
 //   0 gAlbedo    R8G8B8A8_SRGB       albedo, material occlusion
-//   1 gNormal    R16G16_SFLOAT       octahedral world normal
+//   1 gNormal    R16G16B16A16_SFLOAT octahedral world normal; anisotropy (anisotropy.glsl's
+//                                    packAnisotropy): direction angle, strength
 //   2 gMaterial  R8G8B8A8_UNORM      metallic, roughness, clear coat, clear coat roughness
 //   3 hdrColor   R16G16B16A16_SFLOAT emission; lighting adds onto it
 //   4 gVelocity  R16G16_SFLOAT       motion since last frame, in UV: this
@@ -17,9 +18,10 @@
 #define EXPOSURE_SET 2
 #include "surface.glsl"
 #include "iridescence.glsl"
+#include "anisotropy.glsl"
 
 layout(location = 0) out vec4 outAlbedo;
-layout(location = 1) out vec2 outNormal;
+layout(location = 1) out vec4 outNormal;
 layout(location = 2) out vec4 outMaterial;
 layout(location = 3) out vec4 outEmission;
 layout(location = 4) out vec2 outVelocity;
@@ -37,7 +39,15 @@ void main() {
 #endif
     Surface s = evaluateSurface(baseColor);
     outAlbedo = vec4(s.baseColor.rgb, s.occlusion);
-    outNormal = octEncode(s.N);
+    // The anisotropy's angle is taken around the normal as Lighting reads it
+    // back, after the round trip through 16-bit floats.
+    vec2 encoded = octEncode(s.N);
+    vec2 anisotropic = vec2(0.0);
+    if (s.anisotropy > 0.0) {
+        vec3 stored = octDecode(unpackHalf2x16(packHalf2x16(encoded)));
+        anisotropic = packAnisotropy(stored, s.anisotropyT, s.anisotropy);
+    }
+    outNormal = vec4(encoded, anisotropic);
     outMaterial = vec4(s.metallic, s.roughness, s.clearcoat, s.clearcoatRoughness);
     outEmission = vec4(s.emissive, 0.0);
     outVelocity = fragPrevClip.w > 0.0

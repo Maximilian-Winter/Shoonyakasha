@@ -78,6 +78,7 @@ struct GltfPrimitive {
     Shoonyakasha::GPUTexture sheenRoughnessMap;        // a roughness
     Shoonyakasha::GPUTexture specularMap;              // KHR_materials_specular: a strength
     Shoonyakasha::GPUTexture specularColorMap;         // rgb colour (sRGB)
+    Shoonyakasha::GPUTexture anisotropyMap;            // KHR_materials_anisotropy: rg direction, b strength
     // Textures read from TEXCOORD_1 or through KHR_texture_transform: the
     // slot and two rows, (m00, m01, m02, uv set) and (m10, m11, m12, 0), that
     // map (u, v, 1) to the uv sampled. The material gets them as the params
@@ -118,6 +119,11 @@ struct GltfPrimitive {
     // film of index iridescenceIor, thicknesses in nanometres.
     // KHR_materials_unlit: the material gets the param unlit = 1.
     bool unlit                  = false;
+    // KHR_materials_anisotropy, when the material has the extension: the
+    // strength and the rotation (radians) of the direction from the uv tangent.
+    bool hasAnisotropy          = false;
+    float anisotropyStrength    = 0.0f;
+    float anisotropyRotation    = 0.0f;
     bool hasIridescence         = false;
     float iridescenceFactor     = 0.0f;
     float iridescenceIor        = 1.3f;

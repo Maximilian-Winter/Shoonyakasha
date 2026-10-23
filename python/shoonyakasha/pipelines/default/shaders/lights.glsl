@@ -73,6 +73,32 @@ void setFilm(float amount, float filmIor, float thickness, float NdotV, vec3 F0)
     filmFresnel = filmAmount > 0.0 ? thinFilmFresnel(1.0, filmIor, NdotV, thickness, F0) : vec3(0.0);
 }
 
+#include "anisotropy.glsl"
+
+// Anisotropic specular on the base (KHR_materials_anisotropy), set like the
+// coat through setAnisotropy: strength anisotropy (0 for none) along the
+// tangent anisotropyT, across it anisotropyB.
+float anisotropy = 0.0;
+vec3 anisotropyT = vec3(1.0, 0.0, 0.0);
+vec3 anisotropyB = vec3(0.0, 1.0, 0.0);
+
+void setAnisotropy(vec3 N, vec3 T, float strength) {
+    anisotropy = clamp(strength, 0.0, 1.0);
+    T = T - N * dot(N, T);
+    if (anisotropy <= 0.0 || dot(T, T) < 1e-8) {
+        anisotropy = 0.0;
+        return;
+    }
+    anisotropyT = normalize(T);
+    anisotropyB = cross(N, anisotropyT);
+}
+
+// The normal the environment's specular is looked up with: N, bent by the
+// anisotropy.
+vec3 specularNormal(vec3 N, vec3 V, float roughness) {
+    return anisotropy > 0.0 ? anisotropicBentNormal(N, V, anisotropyB, roughness, anisotropy) : N;
+}
+
 // The base's specular albedo from the split-sum terms `brdf` (scale, bias):
 // F0 * scale + specularF90 * bias, moved towards the film's Fresnel times
 // their sum.
@@ -131,6 +157,13 @@ vec3 baseBRDF(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic, float roughne
     float G = geometrySmith(NdotV, NdotL, roughness);
 
     vec3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
+    if (anisotropy > 0.0) {
+        vec2 alphas = anisotropicAlphas(roughness, anisotropy);
+        float Da = distributionGGXAnisotropic(NdotH, dot(anisotropyT, H), dot(anisotropyB, H), alphas);
+        float Va = visibilityGGXAnisotropic(NdotL, NdotV, dot(anisotropyT, V), dot(anisotropyB, V),
+                                            dot(anisotropyT, L), dot(anisotropyB, L), alphas);
+        specular = F * Da * Va;
+    }
     vec3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / SK_PI;
     vec3 result = diffuse + specular;
     float sheenMax = maxComponent(sheenColor);
@@ -355,7 +388,7 @@ void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, samp
     diffuse = kD * irradiance * albedo;
 
     float maxLod = float(textureQueryLevels(prefilterMap) - 1);
-    vec3 R = reflect(-V, N);
+    vec3 R = reflect(-V, specularNormal(N, V, roughness));
     vec3 prefiltered = textureLod(prefilterMap, R, roughness * maxLod).rgb;
     vec2 brdf = texture(brdfLUT, vec2(NdotV, roughness)).rg;
     specular = prefiltered * splitSumAlbedo(F0, brdf);
@@ -375,7 +408,7 @@ void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, samp
         float Fc = coatFresnel(NdotV) * coatFactor;
         diffuse *= 1.0 - Fc;
         specular *= 1.0 - Fc;
-        vec3 coatPrefiltered = textureLod(prefilterMap, R, coatRoughness * maxLod).rgb;
+        vec3 coatPrefiltered = textureLod(prefilterMap, reflect(-V, N), coatRoughness * maxLod).rgb;
         vec2 coatBrdf = texture(brdfLUT, vec2(NdotV, coatRoughness)).rg;
         ambientCoatSpecular = coatPrefiltered * (COAT_F0 * coatBrdf.x + coatBrdf.y) * coatFactor;
         specular += ambientCoatSpecular;

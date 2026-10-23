@@ -161,6 +161,18 @@ ECS::LightComponent lightFromGltf(const cgltf_light& source) {
     return light;
 }
 
+// The KHR_materials_anisotropy params and texture of a material with the
+// extension; anisotropyTexture is 1 when it has the texture.
+void setAnisotropy(MaterialComponentV5& material, const GltfPrimitive& primitive) {
+    if (!primitive.hasAnisotropy) return;
+    material.setParam("anisotropyStrength", primitive.anisotropyStrength);
+    material.setParam("anisotropyRotation", primitive.anisotropyRotation);
+    if (primitive.anisotropyMap.isValid()) {
+        material.textures["anisotropyMap"] = primitive.anisotropyMap;
+        material.setParam("anisotropyTexture", 1.0f);
+    }
+}
+
 // The KHR_materials_iridescence params and textures of a material with the
 // extension.
 void setIridescence(MaterialComponentV5& material, const GltfPrimitive& primitive) {
@@ -972,6 +984,7 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             {"specularColorMap", &material->specular.specular_color_texture},
             {"iridescenceMap", &material->iridescence.iridescence_texture},
             {"iridescenceThicknessMap", &material->iridescence.iridescence_thickness_texture},
+            {"anisotropyMap", &material->anisotropy.anisotropy_texture},
         };
         for (const auto& [slot, view] : views) {
             if (!view->texture) continue;
@@ -980,6 +993,15 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
         }
 
         result.unlit = material->unlit != 0;
+        if (material->has_anisotropy) {
+            const auto& anisotropy = material->anisotropy;
+            result.hasAnisotropy = true;
+            result.anisotropyStrength = anisotropy.anisotropy_strength;
+            result.anisotropyRotation = anisotropy.anisotropy_rotation;
+            if (m_options.loadTextures && anisotropy.anisotropy_texture.texture) {
+                result.anisotropyMap = loadTexture(data, anisotropy.anisotropy_texture, false);
+            }
+        }
         result.alphaMode = extractAlphaMode(material);
         result.alphaCutoff = material->alpha_cutoff;
         result.doubleSided = material->double_sided;
@@ -1464,6 +1486,7 @@ entt::entity GltfSceneLoader::createEntity(
     setSheenAndSpecular(material, primitive);
     setIridescence(material, primitive);
     if (primitive.unlit) material.setParam("unlit", 1.0f);
+    setAnisotropy(material, primitive);
 
     // Add RenderableTagComponent
     auto& tag = scene->addComponent<RenderableTagComponent>(entity);
@@ -1860,6 +1883,7 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     setSheenAndSpecular(material, primitive);
     setIridescence(material, primitive);
     if (primitive.unlit) material.setParam("unlit", 1.0f);
+    setAnisotropy(material, primitive);
 
     // Add SkeletonComponent
     auto& skelComp = scene->addComponent<SkeletonComponent>(entity);

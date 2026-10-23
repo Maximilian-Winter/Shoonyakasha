@@ -1,6 +1,7 @@
 // material_data.glsl - the material's buffer (pipeline.json "MaterialData",
 // in the material set at binding 9): which uv each texture is sampled at,
-// the sheen, specular and iridescence factors, and whether it is unlit.
+// the sheen, specular, iridescence and anisotropy factors, and whether it is
+// unlit.
 //
 // Per texture, two rows map (u, v, 1) to the uv sampled; row0.w picks the
 // uv set: 0 TEXCOORD_0, 1 TEXCOORD_1. Without TEXCOORD_1 or
@@ -25,6 +26,7 @@ layout(set = 1, binding = 9) uniform MaterialData {
     vec4 specularColorUv0, specularColorUv1;
     vec4 iridescenceUv0, iridescenceUv1;
     vec4 iridescenceThicknessUv0, iridescenceThicknessUv1;
+    vec4 anisotropyUv0, anisotropyUv1;
     vec4 sheenColorFactor;       // KHR_materials_sheen: rgb, black for none
     vec4 specularColorFactor;    // KHR_materials_specular: rgb
     float sheenRoughnessFactor;
@@ -34,6 +36,9 @@ layout(set = 1, binding = 9) uniform MaterialData {
     float iridescenceThicknessMinimum;   // nanometres
     float iridescenceThicknessMaximum;
     float unlit;                 // KHR_materials_unlit: 1 for unlit
+    float anisotropyStrength;    // KHR_materials_anisotropy: 0 for none
+    float anisotropyRotation;    // radians, counterclockwise from the uv tangent
+    float anisotropyTexture;     // 1 when the material has an anisotropy texture
 } materialData;
 
 // The uv a texture with these rows is sampled at, from the two uv sets.

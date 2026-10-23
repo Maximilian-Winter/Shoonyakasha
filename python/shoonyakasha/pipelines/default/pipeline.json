@@ -1102,6 +1102,28 @@
           ]
         },
         {
+          "name": "anisotropyUv0",
+          "type": "vec4",
+          "source": "entity.material.params.anisotropyMapUvRow0",
+          "default": [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "anisotropyUv1",
+          "type": "vec4",
+          "source": "entity.material.params.anisotropyMapUvRow1",
+          "default": [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
           "name": "sheenColorFactor",
           "type": "vec4",
           "source": "entity.material.params.sheenColorFactor",
@@ -1163,6 +1185,24 @@
           "name": "unlit",
           "type": "float",
           "source": "entity.material.params.unlit",
+          "default": 0.0
+        },
+        {
+          "name": "anisotropyStrength",
+          "type": "float",
+          "source": "entity.material.params.anisotropyStrength",
+          "default": 0.0
+        },
+        {
+          "name": "anisotropyRotation",
+          "type": "float",
+          "source": "entity.material.params.anisotropyRotation",
+          "default": 0.0
+        },
+        {
+          "name": "anisotropyTexture",
+          "type": "float",
+          "source": "entity.material.params.anisotropyTexture",
           "default": 0.0
         }
       ]
@@ -3011,6 +3051,14 @@
             "fragment"
           ],
           "name": "iridescenceThicknessMap"
+        },
+        {
+          "binding": 16,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "anisotropyMap"
         }
       ]
     },
@@ -3546,7 +3594,7 @@
       "name": "gNormal",
       "kind": "image",
       "image": {
-        "format": "R16G16_SFLOAT",
+        "format": "R16G16B16A16_SFLOAT",
         "transient": true
       }
     },

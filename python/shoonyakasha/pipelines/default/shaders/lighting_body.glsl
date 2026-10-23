@@ -21,7 +21,7 @@ layout(set = 7, binding = 1) uniform sampler2D giIndirect;     // irradiance ove
 #endif
 
 layout(set = 0, binding = 0) uniform sampler2D gAlbedo;
-layout(set = 0, binding = 1) uniform sampler2D gNormal;
+layout(set = 0, binding = 1) uniform sampler2D gNormal;     // octahedral normal; anisotropy (anisotropy.glsl)
 layout(set = 0, binding = 2) uniform sampler2D gMaterial;
 layout(set = 0, binding = 3) uniform sampler2D gDepth;
 layout(set = 0, binding = 4) uniform sampler2D shadowMask;
@@ -262,7 +262,8 @@ void main() {
     vec4 albedoAO = textureLod(gAlbedo, fragTexCoord, 0.0);
     vec3 albedo = albedoAO.rgb;
     float occlusion = albedoAO.a;
-    vec3 N = octDecode(textureLod(gNormal, fragTexCoord, 0.0).xy);
+    vec4 normalTexel = textureLod(gNormal, fragTexCoord, 0.0);
+    vec3 N = octDecode(normalTexel.xy);
     vec4 material = textureLod(gMaterial, fragTexCoord, 0.0);
     float metallic = material.r;
     float roughness = max(material.g, 0.045);
@@ -284,6 +285,7 @@ void main() {
     float filmShare, filmIor, filmThickness;
     unpackFilm(textureLod(gIridescence, fragTexCoord, 0.0), filmShare, filmIor, filmThickness);
     setFilm(filmShare, filmIor, filmThickness, max(dot(N, V), 1e-4), F0);
+    if (normalTexel.w > 0.0) setAnisotropy(N, unpackAnisotropy(N, normalTexel.zw), normalTexel.w);
 
     int sunIndex = cascades.sunEnabled != 0u ? cascades.sunLightIndex : -1;
 #ifdef RT_LOCAL_SHADOWS
@@ -329,13 +331,15 @@ void main() {
             vec3 split = coated ? vec3((COAT_F0 * envBRDF.x + envBRDF.y) * coatFactor)
                                 : splitSumAlbedo(F0, envBRDF) * sheenScale;
             float maxLod = float(textureQueryLevels(prefilterMap) - 1);
-            vec3 environment = textureLod(prefilterMap, reflect(-V, N), traceRoughness * maxLod).rgb
+            // The base's reflection leaves along the anisotropy's bent normal.
+            vec3 reflectN = coated ? N : specularNormal(N, V, roughness);
+            vec3 environment = textureLod(prefilterMap, reflect(-V, reflectN), traceRoughness * maxLod).rgb
                              * settings.iblIntensity;
             vec3 traced;
 #ifdef RT_REFLECTIONS
-            float weight = tracedReflection(worldPos, N, V, traceRoughness, -viewPos.z, environment, traced);
+            float weight = tracedReflection(worldPos, reflectN, V, traceRoughness, -viewPos.z, environment, traced);
 #else
-            float weight = screenReflection(worldPos, viewPos, N, V, traceRoughness, environment, traced);
+            float weight = screenReflection(worldPos, viewPos, reflectN, V, traceRoughness, environment, traced);
 #endif
             vec3 replaced = coated ? ambientCoatSpecular : ambientSpecular - ambientCoatSpecular;
             vec3 envSpecular = replaced * specularAO * settings.iblIntensity

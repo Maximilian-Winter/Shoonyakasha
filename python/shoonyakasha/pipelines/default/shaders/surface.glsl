@@ -21,6 +21,7 @@ layout(set = 1, binding = 12) uniform sampler2D specularMap;            // KHR_m
 layout(set = 1, binding = 13) uniform sampler2D specularColorMap;       // rgb colour
 layout(set = 1, binding = 14) uniform sampler2D iridescenceMap;         // KHR_materials_iridescence: r amount
 layout(set = 1, binding = 15) uniform sampler2D iridescenceThicknessMap;   // g thickness, minimum to maximum
+layout(set = 1, binding = 16) uniform sampler2D anisotropyMap;   // KHR_materials_anisotropy: rg direction, b strength
 #include "material_data.glsl"
 
 layout(set = EXPOSURE_SET, binding = 0) uniform ExposureSettings { DEFAULT_SETTINGS_BLOCK } exposureSettings;
@@ -52,6 +53,8 @@ struct Surface {
     float iridescence;          // amount of the thin film over the base, 0 for none
     float filmIor;
     float filmThickness;        // nanometres
+    float anisotropy;           // strength of the anisotropic specular, 0 for none
+    vec3 anisotropyT;           // world direction the highlight stretches along
 };
 
 // Tangent frame from screen-space derivatives, for meshes without tangents.
@@ -66,11 +69,12 @@ mat3 derivativeTBN(vec3 N, vec3 p, vec2 uv) {
     return mat3(T * invMax, B * invMax, N);
 }
 
-// Tangent frame at the fragment for a normal map sampled at `uv`: the
-// mesh's tangent made orthogonal to N, or the derivative frame when the mesh
-// has none or the map is not sampled at TEXCOORD_0 as it is.
-mat3 tangentFrame(vec3 N, vec2 uv) {
-    if (!isPlainUv(materialData.normalUv0, materialData.normalUv1)) return derivativeTBN(N, fragWorldPos, uv);
+// Tangent frame at the fragment for a texture sampled at `uv` through the
+// rows row0 and row1: the mesh's tangent made orthogonal to N, or the
+// derivative frame when the mesh has none or the rows are not TEXCOORD_0 as
+// it is.
+mat3 tangentFrame(vec3 N, vec2 uv, vec4 row0, vec4 row1) {
+    if (!isPlainUv(row0, row1)) return derivativeTBN(N, fragWorldPos, uv);
     vec3 T = fragWorldTangent.xyz - N * dot(N, fragWorldTangent.xyz);
     if (dot(T, T) < 1e-12) return derivativeTBN(N, fragWorldPos, uv);
     T = normalize(T);
@@ -103,7 +107,7 @@ Surface evaluateSurface(vec4 baseColor) {
         vec2 uv = MATERIAL_UV(normal);
         vec2 xy = texture(normalMap, uv).xy * 2.0 - 1.0;
         vec3 t = vec3(xy * draw.normalScale, sqrt(max(1.0 - dot(xy, xy), 0.0)));
-        vec3 mapped = tangentFrame(N, uv) * t;
+        vec3 mapped = tangentFrame(N, uv, materialData.normalUv0, materialData.normalUv1) * t;
         if (dot(mapped, mapped) > 1e-6) N = normalize(mapped);
     }
     // Double-sided materials, and single-sided ones seen from behind, shade
@@ -166,6 +170,30 @@ Surface evaluateSurface(vec4 baseColor) {
                               texture(iridescenceThicknessMap, MATERIAL_UV(iridescenceThickness)).g);
     }
 
+    // Anisotropy: the direction (1, 0) in the texture's tangent space, or the
+    // texture's rg from [0, 1] to [-1, 1], turned by the rotation; the
+    // strength scaled by the texture's b.
+    s.anisotropy = clamp(materialData.anisotropyStrength, 0.0, 1.0);
+    s.anisotropyT = vec3(0.0);
+    if (s.anisotropy > 0.0) {
+        vec2 uv = MATERIAL_UV(anisotropy);
+        vec2 direction = vec2(1.0, 0.0);
+        if (materialData.anisotropyTexture > 0.5) {
+            vec3 texel = texture(anisotropyMap, uv).rgb;
+            direction = texel.rg * 2.0 - 1.0;
+            s.anisotropy *= texel.b;
+            if (dot(direction, direction) < 1e-8) direction = vec2(1.0, 0.0);
+        }
+        float c = cos(materialData.anisotropyRotation), r = sin(materialData.anisotropyRotation);
+        direction = vec2(c * direction.x - r * direction.y, r * direction.x + c * direction.y);
+        mat3 frame = tangentFrame(N, uv, materialData.anisotropyUv0, materialData.anisotropyUv1);
+        // Perpendicular to N; none where the frame gives no direction.
+        vec3 T = frame * vec3(normalize(direction), 0.0);
+        T -= N * dot(N, T);
+        if (dot(T, T) > 1e-8) s.anisotropyT = normalize(T);
+        else s.anisotropy = 0.0;
+    }
+
     // Unlit (KHR_materials_unlit): the base colour is given off as it is, as
     // emission, and nothing is reflected; the alpha stays for coverage.
     if (materialData.unlit > 0.5) {
@@ -177,6 +205,7 @@ Surface evaluateSurface(vec4 baseColor) {
         s.clearcoat = 0.0;
         s.sheenColor = vec3(0.0);
         s.iridescence = 0.0;
+        s.anisotropy = 0.0;
     }
     return s;
 }

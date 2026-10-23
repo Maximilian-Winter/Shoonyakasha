@@ -127,6 +127,7 @@ void main() {
     vec3 F0 = mix(s.dielectricF0, s.baseColor.rgb, s.metallic);
     specularF90 = mix(s.specularWeight, 1.0, s.metallic);
     setFilm(s.iridescence, s.filmIor, s.filmThickness, max(dot(s.N, V), 1e-4), F0);
+    setAnisotropy(s.N, s.anisotropyT, s.anisotropy);
     float transmission = clamp(draw.transmissionFactor, 0.0, 1.0);
     if (transmission > 0.0) transmission *= texture(transmissionMap, MATERIAL_UV(transmission)).r;
     // The transmitted part of the dielectric takes the place of its diffuse.

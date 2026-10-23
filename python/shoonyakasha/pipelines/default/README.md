@@ -55,6 +55,8 @@ Deferred PBR (glTF metallic-roughness) with:
   interference colours the specular by its thickness and index of refraction
 - unlit materials (`KHR_materials_unlit`): the base colour written as
   emission, with nothing reflected
+- anisotropy (`KHR_materials_anisotropy`): specular highlights and
+  reflections stretched along a direction, as on brushed metal
 - clear coat (`KHR_materials_clearcoat`): a glossy dielectric layer with its
   own roughness over the base, from every light and the environment
 - transmission (`KHR_materials_transmission`, `KHR_materials_ior`,
@@ -195,7 +197,8 @@ fully lit, and turning off `GTAO` leaves no occlusion. For bloom, set
 the chain.
 
 G-buffer layout: `gAlbedo` (RGBA8 sRGB: albedo, material occlusion),
-`gNormal` (RG16F: octahedral world normal), `gMaterial` (RGBA8: metallic,
+`gNormal` (RGBA16F: octahedral world normal; the anisotropy's direction, as
+its angle around the normal, and strength), `gMaterial` (RGBA8: metallic,
 roughness, clear coat, clear coat roughness), `gSheen` (RGBA8 sRGB: sheen
 colour, sheen roughness), `gSpecular` (RGBA8: the square root of the
 dielectric's reflectance at normal incidence, specular strength),
@@ -213,8 +216,8 @@ Each material texture is sampled at the uv its `MaterialData` rows give
 (`material_data.glsl`): `TEXCOORD_0` or `TEXCOORD_1`, through the texture's
 `KHR_texture_transform`. `MaterialData` is the material set's uniform buffer
 at binding 9 (`"source": "material"`), filled from the material's
-`<slot>UvRow0` and `<slot>UvRow1` parameters, its sheen, specular and
-iridescence factors, and its `unlit` param. The passes that read uvs take
+`<slot>UvRow0` and `<slot>UvRow1` parameters, its sheen, specular,
+iridescence and anisotropy factors, and its `unlit` param. The passes that read uvs take
 the `standard` vertex format, with `TEXCOORD_1` at location 7.
 
 The G-buffer, sun, spot and point shadow, and transparent passes for static
