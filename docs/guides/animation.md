@@ -36,4 +36,15 @@ Use skinned vertex attributes, a skeleton descriptor binding, matching shaders, 
 
 The bone buffer holds this frame's matrices and then last frame's, so a shader can compute motion vectors: last frame's bone `j` is `bones[j + bones.length() / 2]`. The [default pipeline's](../../python/shoonyakasha/pipelines/default/README.md) `gbuffer_skinned.vert` does this.
 
+## Morph targets
+
+The loader reads a glTF primitive's morph targets (position, normal and tangent deltas) and its mesh's default weights, or the node's. Each entity drawing such a mesh gets its own weights, and every frame whose weights changed the CPU blends the vertices into a buffer of the entity's own, one per frame in flight, which every pass draws and ray tracing builds from. Skinning applies on top, so a mesh can have both. Morphed meshes are never culled, and their motion vectors leave out what the weights move.
+
+```python
+weights = engine.scene.get_morph_weights(face)     # one per target
+engine.scene.set_morph_weights(face, [0.0, 1.0])
+```
+
+Clips also carry glTF `weights` channels. Entities with morph targets get the load's clips; playing one (`play_animation`) drives the weights of the entities made from each animated node, and overwrites weights set by hand while it plays. A file without skins loads its clips with their weight channels.
+
 The public controls select one current clip; they do not expose an animation state machine, blending tree, or retargeting API. See [Scene reference](../api/python/scene.md) and [native components](../api/cpp/ecs-components.md).

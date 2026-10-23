@@ -147,6 +147,8 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `is_animation_looping(entity)` | bool | Check if animation is set to loop. |
 | `set_animation_looping(entity, loop)` | None | Set animation looping. |
 | `get_current_animation_clip(entity)` | int | Get current animation clip index (-1 if none). |
+| `get_morph_weights(entity)` | list[float] | The weights of the entity's morph targets, one per target; empty when its mesh has none. |
+| `set_morph_weights(entity, weights)` | bool | Set the weights of the entity's morph targets, one per target (extra ones dropped, missing ones 0). A playing clip with weight channels for the entity's node overwrites them each frame. False when its mesh has no morph targets. |
 | `save_to_file(path)` | bool | Calls native `saveToFile`; see the class contract above. |
 | `load_from_file(path)` | bool | Calls native `loadFromFile`; see the class contract above. |
 

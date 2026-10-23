@@ -1593,6 +1593,11 @@ private:
     /// queries.
     void recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex);
 
+    /// Blend the morph targets of the bound scene's entities into their
+    /// vertex buffers for this frame, where the weights changed since that
+    /// buffer was last written (MorphComponent).
+    void updateMorphedMeshes(uint32_t frameIndex);
+
     /// Records the waiting pixel readback when `decl` is its pass.
     void recordPixelReadback(const CompiledPass& pass, const PassDeclaration& decl, uint32_t frameIndex,
                              VkCommandBuffer cmd);

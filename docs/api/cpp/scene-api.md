@@ -148,6 +148,8 @@ void setAnimationTime(EntityHandle entity, float time);
 bool isAnimationLooping(EntityHandle entity) const;
 void setAnimationLooping(EntityHandle entity, bool loop);
 int getCurrentAnimationClip(EntityHandle entity) const;
+std::vector<float> getMorphWeights(EntityHandle entity) const;
+bool setMorphWeights(EntityHandle entity, const std::vector<float>& weights);
 bool saveToFile(const std::string& path) const;
 bool loadFromFile(const std::string& path);
 ```

@@ -30,6 +30,8 @@
 #include "Vulkan/FrameGraph/RenderTargetSaver.h"  // Render target screenshot support
 #include "ECS/RenderComponents.h"
 #include "ECS/SkeletonComponents.h"
+#include "ECS/MorphComponents.h"
+#include "GPU/GPUResourceFactory.h"
 
 #include <stdexcept>
 #include <cstddef>
@@ -2004,6 +2006,7 @@ void RenderGraph::execute(uint32_t frameIndex, uint32_t swapchainImageIndex,
     // The scene's textures and acceleration structures, for passes that
     // index the one and trace rays against the other.
     updateSceneTextures(frameIndex);
+    updateMorphedMeshes(frameIndex);
     recordRayTracingScene(commandBuffer, frameIndex);
 
     // Execute all passes. With compute batches, each batch goes into a
@@ -3255,6 +3258,44 @@ RenderGraph::EntityBindingPlan RenderGraph::planEntityBindings(const CompiledPas
     if (!binding.material.layoutRef.empty()) planMaterial(binding.material.layoutRef, pass, plan);
     if (!binding.skeleton.layoutRef.empty()) planSkeleton(binding.skeleton.layoutRef, pass, plan);
     return plan;
+}
+
+void RenderGraph::updateMorphedMeshes(uint32_t frameIndex) {
+    if (!m_boundScene) return;
+    auto& registry = m_boundScene->getRegistry();
+    auto view = registry.view<MorphComponent>();
+    if (view.empty()) return;
+
+    const uint32_t frames = std::max(m_maxFramesInFlight, 1u);
+    const uint32_t frame = frameIndex % frames;
+    // Ray tracing reads the vertices by device address, and copies them
+    // into its own posed buffers.
+    const VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+        (m_device.hasRayQuery() ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0);
+    VmaAllocator allocator = m_device.getAllocator().getHandle();
+    for (auto entity : view) {
+        auto& morph = view.get<MorphComponent>(entity);
+        if (!morph.targets || morph.targets->vertexCount == 0 || morph.targets->vertexStride == 0) continue;
+        if (morph.frames.size() != frames) {
+            morph.frames.assign(frames, nullptr);
+            morph.frameVersions.assign(frames, 0);
+        }
+        // This frame's fence has passed, so its buffer is idle.
+        GpuBufferRef& buffer = morph.frames[frame];
+        if (!buffer || !buffer->isValid()) {
+            const VkDeviceSize size = static_cast<VkDeviceSize>(morph.targets->vertexCount) * morph.targets->vertexStride;
+            buffer = m_device.getDeleteQueue().adopt(
+                GPUResourceFactory::createBuffer(allocator, size, usage, VMA_MEMORY_USAGE_CPU_TO_GPU));
+            morph.frameVersions[frame] = 0;
+        }
+        if (morph.frameVersions[frame] == morph.version) continue;
+        void* mapped = GPUResourceFactory::mapBuffer(allocator, *buffer);
+        if (!mapped) continue;
+        blendMorphTargets(*morph.targets, morph.weights, static_cast<uint8_t*>(mapped));
+        vmaFlushAllocation(allocator, buffer->allocation, 0, VK_WHOLE_SIZE);
+        GPUResourceFactory::unmapBuffer(allocator, *buffer);
+        morph.frameVersions[frame] = morph.version;
+    }
 }
 
 void RenderGraph::recordRayTracingScene(VkCommandBuffer cmd, uint32_t frameIndex) {

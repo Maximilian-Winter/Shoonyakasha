@@ -9,6 +9,7 @@
 #include "ECS/Core.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/SkeletonComponents.h"
+#include "ECS/MorphComponents.h"
 #include "ECS/Sprite2DComponents.h"
 #include "Vulkan/VertexTypes.h"
 #include "Vulkan/VulkanDevice.h"
@@ -310,25 +311,24 @@ void RayTracingScene::destroyPosed(PosedMesh& posed) {
 }
 
 RayTracingScene::PosedMesh& RayTracingScene::posedFor(entt::entity entity, uint32_t frame, const MeshComponent& mesh,
-                                                      uint32_t jointCount) {
+                                                      uint32_t jointCount, VkBuffer source) {
     PosedEntity& entry = m_posed[entity];
     if (entry.frames.size() != m_framesInFlight) entry.frames.resize(m_framesInFlight);
     entry.lastBuild = m_buildCount;
     PosedMesh& posed = entry.frames[frame];
-    if (posed.source == mesh.vertexHandle() && posed.vertexCount == mesh.vertexCount &&
-        posed.jointCount == jointCount) {
+    if (posed.source == source && posed.vertexCount == mesh.vertexCount && posed.jointCount == jointCount) {
         return posed;
     }
 
     // This frame's fence has passed, so its copy is idle.
     destroyPosed(posed);
-    posed.source = mesh.vertexHandle();
+    posed.source = source;
     posed.vertexCount = mesh.vertexCount;
     posed.jointCount = jointCount;
     posed.bones = createBuffer(sizeof(glm::mat4) * std::max(jointCount, 1u), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
     vmaMapMemory(m_device.getAllocator().getHandle(), posed.bones.allocation, &posed.bonesMapped);
     posed.vertices = createBuffer(sizeof(Vertex) * std::max(mesh.vertexCount, 1u),
-                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
                                   false);
 
@@ -357,9 +357,19 @@ void RayTracingScene::recordPosedBuilds(VkCommandBuffer cmd, const std::vector<P
                                         const std::vector<const MeshComponent*>& meshes) {
     if (posed.empty()) return;
 
-    // Pose: one thread per vertex.
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_skinPipeline);
+    // Pose: one thread per vertex for skinned meshes; the others' vertices
+    // are copied as they are.
+    bool skinBound = false;
     for (const PosedMesh* p : posed) {
+        if (p->jointCount == 0) {
+            const VkBufferCopy region{0, 0, sizeof(Vertex) * static_cast<VkDeviceSize>(p->vertexCount)};
+            vkCmdCopyBuffer(cmd, p->source, p->vertices.buffer, 1, &region);
+            continue;
+        }
+        if (!skinBound) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_skinPipeline);
+            skinBound = true;
+        }
         const SkinPush push{splitAddress(addressOf(p->source)), splitAddress(addressOf(p->bones.buffer)),
                             splitAddress(addressOf(p->vertices.buffer)), p->vertexCount};
         vkCmdPushConstants(cmd, m_skinLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
@@ -367,10 +377,11 @@ void RayTracingScene::recordPosedBuilds(VkCommandBuffer cmd, const std::vector<P
     }
     VkMemoryBarrier posedWritten{};
     posedWritten.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    posedWritten.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    posedWritten.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
     posedWritten.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-                         0, 1, &posedWritten, 0, nullptr, 0, nullptr);
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &posedWritten, 0, nullptr, 0,
+                         nullptr);
 
     // Build each structure the first time, refit it after.
     std::vector<VkAccelerationStructureGeometryKHR> geometries(posed.size());
@@ -544,12 +555,18 @@ void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt
         const auto& material = view.get<MaterialComponentV5>(entity);
         bool masked = false;
         if (!mesh.rayTracingInput || !caster(mesh, view.get<RenderableTagComponent>(entity), material, masked)) continue;
-        if (registry.all_of<SkeletonComponent>(entity) || registry.all_of<Sprite2DComponent>(entity)) continue;
+        if (registry.any_of<SkeletonComponent, MorphComponent, Sprite2DComponent>(entity)) continue;
         addInstance(entity, material, mesh, addressOf(mesh.vertexHandle()), bottomLevelFor(mesh)->structure.address,
                     view.get<ECS::TransformComponent>(entity).worldMatrix, masked);
     }
 
-    // The skinned casters, posed for this frame.
+    // The skinned casters, posed for this frame from their vertices (their
+    // morph targets blended in, when they have them), and the casters with
+    // morph targets alone, their blended vertices copied.
+    auto blendedOf = [&](entt::entity entity) {
+        const auto* morph = registry.try_get<MorphComponent>(entity);
+        return morph ? morph->bufferFor(frameIndex) : VK_NULL_HANDLE;
+    };
     std::vector<entt::entity> skinned;
     std::vector<PosedMesh*> posed;
     std::vector<const MeshComponent*> posedMeshes;
@@ -570,7 +587,8 @@ void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt
         }
         if (!skinningReady()) break;
         const uint32_t joints = static_cast<uint32_t>(skeleton.boneMatrices.size());
-        PosedMesh& p = posedFor(entity, frame, mesh, joints);
+        const VkBuffer blended = blendedOf(entity);
+        PosedMesh& p = posedFor(entity, frame, mesh, joints, blended ? blended : mesh.vertexHandle());
         std::memcpy(p.bonesMapped, skeleton.boneMatrices.data(), joints * sizeof(glm::mat4));
         vmaFlushAllocation(m_device.getAllocator().getHandle(), p.bones.allocation, 0, VK_WHOLE_SIZE);
         skinned.push_back(entity);
@@ -578,13 +596,31 @@ void RayTracingScene::recordBuild(VkCommandBuffer cmd, uint32_t frameIndex, entt
         posedMeshes.push_back(&mesh);
         posedMasked.push_back(masked);
     }
+    auto morphView = registry.view<MeshComponent, MaterialComponentV5, RenderableTagComponent,
+                                   ECS::TransformComponent, MorphComponent>();
+    for (auto entity : morphView) {
+        const auto& mesh = morphView.get<MeshComponent>(entity);
+        bool masked = false;
+        if (registry.any_of<SkeletonComponent, Sprite2DComponent>(entity) || !mesh.rayTracingInput ||
+            mesh.vertexStride != sizeof(Vertex) ||
+            !caster(mesh, morphView.get<RenderableTagComponent>(entity), morphView.get<MaterialComponentV5>(entity),
+                    masked)) {
+            continue;
+        }
+        const VkBuffer blended = blendedOf(entity);
+        if (!blended) continue;
+        skinned.push_back(entity);
+        posed.push_back(&posedFor(entity, frame, mesh, 0, blended));
+        posedMeshes.push_back(&mesh);
+        posedMasked.push_back(masked);
+    }
     recordPosedBuilds(cmd, posed, posedMeshes);
     for (size_t i = 0; i < posed.size(); ++i) {
         MeshComponent rowMesh = *posedMeshes[i];   // the posed vertices are standard ones
         rowMesh.vertexStride = sizeof(Vertex);
-        addInstance(skinned[i], skinnedView.get<MaterialComponentV5>(skinned[i]), rowMesh,
+        addInstance(skinned[i], registry.get<MaterialComponentV5>(skinned[i]), rowMesh,
                     addressOf(posed[i]->vertices.buffer), posed[i]->structure.address,
-                    skinnedView.get<ECS::TransformComponent>(skinned[i]).worldMatrix, posedMasked[i]);
+                    registry.get<ECS::TransformComponent>(skinned[i]).worldMatrix, posedMasked[i]);
     }
 
     // Skinned entities no longer drawn: their copies may still be traced by

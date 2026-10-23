@@ -339,6 +339,20 @@ public:
     int getCurrentAnimationClip(EntityHandle entity) const;
 
     // ═══════════════════════════════════════════════════════════
+    // Morph Targets
+    // ═══════════════════════════════════════════════════════════
+
+    /// The weights of the entity's morph targets, one per target; empty
+    /// when its mesh has none.
+    std::vector<float> getMorphWeights(EntityHandle entity) const;
+
+    /// Set the weights of the entity's morph targets, one per target (extra
+    /// ones dropped, missing ones 0). A playing clip with weight channels
+    /// for the entity's node overwrites them each frame. Returns false when
+    /// its mesh has no morph targets.
+    bool setMorphWeights(EntityHandle entity, const std::vector<float>& weights);
+
+    // ═══════════════════════════════════════════════════════════
     // Serialization
     // ═══════════════════════════════════════════════════════════
 

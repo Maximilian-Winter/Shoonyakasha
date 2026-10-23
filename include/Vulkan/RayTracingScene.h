@@ -19,7 +19,9 @@
 // the standard layout, from its bone matrices, and its bottom-level
 // structure is refitted to them. Each skinned entity has its own posed
 // vertices and structure per frame in flight. Without the shader they stay
-// out.
+// out. Meshes with morph targets (MorphComponent) are posed from their
+// blended vertices: skinned ones by the shader, the others copied as they
+// are.
 //
 // Only exists on a device with ray queries (VulkanDevice::hasRayQuery).
 //
@@ -159,9 +161,9 @@ private:
         GPUBuffer bones;                 // host-visible bone matrices
         void* bonesMapped = nullptr;
         uint32_t jointCount = 0;
-        GPUBuffer vertices;              // standard vertices, written by the skinning shader
+        GPUBuffer vertices;              // standard vertices, written by the skinning shader or copied
         uint32_t vertexCount = 0;
-        VkBuffer source = VK_NULL_HANDLE;   // the skinned vertex buffer it poses
+        VkBuffer source = VK_NULL_HANDLE;   // the vertex buffer it poses
         AccelerationStructure structure; // built once, refitted every frame after
         GPUBuffer scratch;
         bool built = false;
@@ -174,7 +176,11 @@ private:
     const BottomLevel* bottomLevelFor(const MeshComponent& mesh);
     bool skinningReady();
     void destroyPosed(PosedMesh& posed);
-    PosedMesh& posedFor(entt::entity entity, uint32_t frame, const MeshComponent& mesh, uint32_t jointCount);
+    /// The entity's posed copy for `frame`, posed from `source`: skinned
+    /// vertices with `jointCount` joints, or standard vertices copied as
+    /// they are for 0.
+    PosedMesh& posedFor(entt::entity entity, uint32_t frame, const MeshComponent& mesh, uint32_t jointCount,
+                        VkBuffer source);
     void recordPosedBuilds(VkCommandBuffer cmd, const std::vector<PosedMesh*>& posed,
                            const std::vector<const MeshComponent*>& meshes);
     void releaseExpired();

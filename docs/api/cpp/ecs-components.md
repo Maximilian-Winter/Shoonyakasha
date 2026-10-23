@@ -1,6 +1,6 @@
 # Native ECS component map
 
-Most native components live in [Core.h](../../../include/ECS/Core.h), [RenderComponents.h](../../../include/ECS/RenderComponents.h), [Sprite2DComponents.h](../../../include/ECS/Sprite2DComponents.h), and [SkeletonComponents.h](../../../include/ECS/SkeletonComponents.h). Use these declarations for field types and defaults.
+Most native components live in [Core.h](../../../include/ECS/Core.h), [RenderComponents.h](../../../include/ECS/RenderComponents.h), [Sprite2DComponents.h](../../../include/ECS/Sprite2DComponents.h), [SkeletonComponents.h](../../../include/ECS/SkeletonComponents.h), and [MorphComponents.h](../../../include/ECS/MorphComponents.h). Use these declarations for field types and defaults.
 
 | Group | Components and role |
 |---|---|

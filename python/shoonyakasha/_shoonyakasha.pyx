@@ -719,6 +719,21 @@ cdef class Scene:
         """Get current animation clip index (-1 if none)."""
         return self._ptr.getCurrentAnimationClip(entity)
 
+    # ── Morph targets ─────────────────────────────────────────
+
+    def get_morph_weights(self, uint32_t entity):
+        """The weights of the entity's morph targets, one per target, as a
+        list; empty when its mesh has none."""
+        return list(self._ptr.getMorphWeights(entity))
+
+    def set_morph_weights(self, uint32_t entity, weights):
+        """Set the weights of the entity's morph targets, one per target
+        (extra ones dropped, missing ones 0). A playing clip with weight
+        channels for the entity's node overwrites them each frame. Returns
+        False when its mesh has no morph targets."""
+        cdef vector[float] values = [float(w) for w in weights]
+        return self._ptr.setMorphWeights(entity, values)
+
     # ── Serialization ─────────────────────────────────────────
 
     def save_to_file(self, str path):

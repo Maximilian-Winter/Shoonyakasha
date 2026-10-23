@@ -258,6 +258,10 @@ cdef extern from "Facade/SceneAPI.h" namespace "Shoonyakasha::Facade":
         void setAnimationLooping(EntityHandle entity, cbool loop)
         int getCurrentAnimationClip(EntityHandle entity) const
 
+        # Morph targets
+        vector[float] getMorphWeights(EntityHandle entity) const
+        cbool setMorphWeights(EntityHandle entity, const vector[float]& weights)
+
         # Serialization
         cbool saveToFile(const string& path) const
         cbool loadFromFile(const string& path)

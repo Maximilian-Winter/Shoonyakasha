@@ -187,6 +187,49 @@ PrimitiveGeometry readPrimitiveGeometry(const cgltf_primitive& primitive, const 
     return g;
 }
 
+// A primitive's morph targets for the vertices of `g` (each read at its
+// source vertex), under `transform`, with the mesh's default weights; null
+// without targets. The caller fills in the vertex layout and base vertices.
+std::shared_ptr<MorphTargetSet> readMorphTargets(const cgltf_primitive& primitive, const cgltf_mesh& mesh,
+                                                 const PrimitiveGeometry& g, const glm::mat4& transform) {
+    if (primitive.targets_count == 0 || g.positions.empty()) return nullptr;
+    auto set = std::make_shared<MorphTargetSet>();
+    const size_t n = g.positions.size();
+    set->vertexCount = static_cast<uint32_t>(n);
+    set->targetCount = static_cast<uint32_t>(primitive.targets_count);
+    const glm::mat3 linear(transform);
+    const glm::mat3 normalMatrix = glm::transpose(glm::inverse(linear));
+    set->positionDeltas.assign(n * set->targetCount, glm::vec3(0.0f));
+
+    for (cgltf_size t = 0; t < primitive.targets_count; ++t) {
+        const cgltf_morph_target& target = primitive.targets[t];
+        for (cgltf_size a = 0; a < target.attributes_count; ++a) {
+            const cgltf_attribute& attribute = target.attributes[a];
+            std::vector<glm::vec3>* deltas = nullptr;
+            glm::mat3 matrix = linear;
+            switch (attribute.type) {
+                case cgltf_attribute_type_position: deltas = &set->positionDeltas; break;
+                case cgltf_attribute_type_normal:   deltas = &set->normalDeltas; matrix = normalMatrix; break;
+                case cgltf_attribute_type_tangent:  deltas = &set->tangentDeltas; break;
+                default: break;
+            }
+            if (!deltas || !attribute.data) continue;
+            deltas->resize(n * set->targetCount, glm::vec3(0.0f));
+            for (size_t v = 0; v < n; ++v) {
+                cgltf_float d[3] = {0, 0, 0};
+                cgltf_accessor_read_float(attribute.data, g.source[v], d, 3);
+                (*deltas)[t * n + v] = matrix * glm::vec3(d[0], d[1], d[2]);
+            }
+        }
+    }
+
+    set->defaultWeights.assign(set->targetCount, 0.0f);
+    for (cgltf_size t = 0; t < std::min<cgltf_size>(mesh.weights_count, set->targetCount); ++t) {
+        set->defaultWeights[t] = mesh.weights[t];
+    }
+    return set;
+}
+
 } // namespace
 
 // ═══════════════════════════════════════════════════════════════
@@ -357,11 +400,12 @@ GltfLoadResult GltfSceneLoader::load(
         }
     }
 
-    // Load animations if requested and we have skeletons
-    if (m_options.loadAnimations && !result.skeletons.empty()) {
-        for (const auto& skeleton : result.skeletons) {
-            auto clips = loadAnimations(data, *skeleton);
-            for (auto& clip : clips) {
+    // Load animations if requested: each skeleton's joint channels, and the
+    // morph weight channels once, with the first skeleton's or on their own.
+    if (m_options.loadAnimations) {
+        for (size_t s = 0; s < std::max<size_t>(result.skeletons.size(), 1); ++s) {
+            const Skeleton* skeleton = s < result.skeletons.size() ? result.skeletons[s].get() : nullptr;
+            for (auto& clip : loadAnimations(data, skeleton, s == 0)) {
                 result.animationClips.push_back(std::move(clip));
             }
         }
@@ -446,7 +490,7 @@ GltfPrimitive GltfSceneLoader::buildPrimitive(
 {
     const cgltf_primitive& primitive = node->mesh->primitives[primitiveIndex];
     // Skinned meshes are not baked: the skin places them in skeleton space.
-    return processPrimitive(data, primitive, skinned ? glm::mat4(1.0f) : transform, name, skinned);
+    return processPrimitive(data, *node->mesh, primitive, skinned ? glm::mat4(1.0f) : transform, name, skinned);
 }
 
 const GltfPrimitive* GltfSceneLoader::getOrBuildPrimitive(
@@ -552,6 +596,9 @@ void GltfSceneLoader::processNode(
                         ? createSkinnedEntity(scene, instance, result.skeletons[0],
                                               result.animationClips, parent)
                         : createEntity(scene, instance, parent);
+                if (instance.morphTargets) {
+                    addMorphTargets(scene, entity, instance, data, node, result.animationClips);
+                }
                 result.entities.push_back(entity);
             }
 
@@ -561,6 +608,30 @@ void GltfSceneLoader::processNode(
 
     for (cgltf_size i = 0; i < node->children_count; ++i) {
         processNode(data, node->children[i], nodeEntity, scene, result);
+    }
+}
+
+void GltfSceneLoader::addMorphTargets(
+    const std::shared_ptr<ECS::Scene>& scene,
+    entt::entity entity,
+    const GltfPrimitive& primitive,
+    cgltf_data* data,
+    const cgltf_node* node,
+    const std::vector<std::shared_ptr<AnimationClip>>& clips)
+{
+    auto& registry = scene->getRegistry();
+    auto& morph = registry.emplace_or_replace<MorphComponent>(entity);
+    morph.targets = primitive.morphTargets;
+    morph.sourceNode = static_cast<int>(cgltf_node_index(data, node));
+    std::vector<float> weights = primitive.morphTargets->defaultWeights;
+    for (cgltf_size t = 0; t < std::min<cgltf_size>(node->weights_count, weights.size()); ++t) {
+        weights[t] = node->weights[t];
+    }
+    morph.setWeights(std::move(weights));
+
+    // Skinned entities already carry the clips.
+    if (!clips.empty() && !registry.all_of<AnimationPlaybackComponent>(entity)) {
+        registry.emplace<AnimationPlaybackComponent>(entity).clips = clips;
     }
 }
 
@@ -595,6 +666,7 @@ std::string GltfSceneLoader::resolveTexturePath(const std::string& uri) {
 
 GltfPrimitive GltfSceneLoader::processPrimitive(
     cgltf_data* data,
+    const cgltf_mesh& mesh,
     const cgltf_primitive& primitive,
     const glm::mat4& worldTransform,
     const std::string& primitiveName,
@@ -605,10 +677,20 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
     result.worldTransform = worldTransform;
 
     const PrimitiveGeometry geometry = readPrimitiveGeometry(primitive, worldTransform);
+    std::shared_ptr<MorphTargetSet> morph = readMorphTargets(primitive, mesh, geometry, worldTransform);
+    std::vector<uint8_t>* keep = morph ? &morph->baseVertices : nullptr;
     result.vertexBuffer = m_device.getDeleteQueue().adopt(
-        skinned ? buildSkinnedVertexBuffer(primitive, geometry, result.vertexCount, result.vertexStride)
-                : buildVertexBuffer(geometry, result.vertexCount, result.vertexStride));
-    result.hasBounds = result.vertexCount > 0;
+        skinned ? buildSkinnedVertexBuffer(primitive, geometry, result.vertexCount, result.vertexStride, keep)
+                : buildVertexBuffer(geometry, result.vertexCount, result.vertexStride, keep));
+    if (morph) {
+        morph->vertexStride = result.vertexStride;
+        morph->positionOffset = 0;
+        morph->normalOffset = skinned ? offsetof(SkinnedVertex, normal) : offsetof(StandardVertex, normal);
+        morph->tangentOffset = skinned ? offsetof(SkinnedVertex, tangent) : offsetof(StandardVertex, tangent);
+        result.morphTargets = std::move(morph);
+    }
+    // Morphed meshes move outside their base bounds, so they are never culled.
+    result.hasBounds = result.vertexCount > 0 && !result.morphTargets;
     if (result.hasBounds) {
         result.boundsMin = glm::vec3(std::numeric_limits<float>::max());
         result.boundsMax = glm::vec3(std::numeric_limits<float>::lowest());
@@ -717,7 +799,8 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
 GPUBuffer GltfSceneLoader::buildVertexBuffer(
     const PrimitiveGeometry& geometry,
     uint32_t& outVertexCount,
-    uint32_t& outVertexStride)
+    uint32_t& outVertexStride,
+    std::vector<uint8_t>* keepVertices)
 {
     const size_t vertexCount = geometry.positions.size();
     outVertexCount = static_cast<uint32_t>(vertexCount);
@@ -731,6 +814,10 @@ GPUBuffer GltfSceneLoader::buildVertexBuffer(
     }
 
     VkDeviceSize bufferSize = vertices.size() * sizeof(StandardVertex);
+    if (keepVertices) {
+        const auto* bytes = reinterpret_cast<const uint8_t*>(vertices.data());
+        keepVertices->assign(bytes, bytes + bufferSize);
+    }
     GPUBuffer buffer = GPUResourceFactory::createBuffer(
         m_device.getAllocator().getHandle(),
         bufferSize,
@@ -1298,9 +1385,18 @@ std::shared_ptr<Shoonyakasha::Skeleton> GltfSceneLoader::loadSkin(
 
 std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> GltfSceneLoader::loadAnimations(
     cgltf_data* data,
-    const Shoonyakasha::Skeleton& skeleton)
+    const Shoonyakasha::Skeleton* skeleton,
+    bool withWeights)
 {
     std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> clips;
+
+    auto interpolationOf = [](const cgltf_animation_sampler& sampler) {
+        switch (sampler.interpolation) {
+            case cgltf_interpolation_type_step:         return Shoonyakasha::AnimationInterpolation::Step;
+            case cgltf_interpolation_type_cubic_spline: return Shoonyakasha::AnimationInterpolation::CubicSpline;
+            default:                                    return Shoonyakasha::AnimationInterpolation::Linear;
+        }
+    };
 
     for (cgltf_size animIdx = 0; animIdx < data->animations_count; ++animIdx) {
         const cgltf_animation& anim = data->animations[animIdx];
@@ -1315,8 +1411,30 @@ std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> GltfSceneLoader::loadA
 
             if (!channel.target_node) continue;
 
+            // Morph target weights of a mesh node.
+            if (channel.target_path == cgltf_animation_path_type_weights) {
+                const cgltf_mesh* mesh = channel.target_node->mesh;
+                if (!withWeights || !mesh || mesh->primitives_count == 0) continue;
+                Shoonyakasha::MorphWeightChannel weights;
+                weights.targetNode = static_cast<int>(cgltf_node_index(data, channel.target_node));
+                weights.interpolation = interpolationOf(sampler);
+                weights.weightCount = static_cast<uint32_t>(mesh->primitives[0].targets_count);
+                weights.timestamps.resize(sampler.input->count);
+                for (cgltf_size t = 0; t < sampler.input->count; ++t) {
+                    cgltf_accessor_read_float(sampler.input, t, &weights.timestamps[t], 1);
+                    clip->duration = std::max(clip->duration, weights.timestamps[t]);
+                }
+                weights.values.resize(sampler.output->count);
+                for (cgltf_size v = 0; v < sampler.output->count; ++v) {
+                    cgltf_accessor_read_float(sampler.output, v, &weights.values[v], 1);
+                }
+                if (weights.weightCount > 0) clip->weightChannels.push_back(std::move(weights));
+                continue;
+            }
+            if (!skeleton) continue;
+
             // Find joint index for target node
-            int jointIdx = skeleton.findJoint(
+            int jointIdx = skeleton->findJoint(
                 channel.target_node->name ? channel.target_node->name : ""
             );
             if (jointIdx < 0) continue;  // Target not in skeleton
@@ -1339,18 +1457,7 @@ std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> GltfSceneLoader::loadA
                     continue;  // Skip weights/unknown
             }
 
-            // Map interpolation
-            switch (sampler.interpolation) {
-                case cgltf_interpolation_type_step:
-                    animChannel.interpolation = Shoonyakasha::AnimationInterpolation::Step;
-                    break;
-                case cgltf_interpolation_type_linear:
-                    animChannel.interpolation = Shoonyakasha::AnimationInterpolation::Linear;
-                    break;
-                case cgltf_interpolation_type_cubic_spline:
-                    animChannel.interpolation = Shoonyakasha::AnimationInterpolation::CubicSpline;
-                    break;
-            }
+            animChannel.interpolation = interpolationOf(sampler);
 
             // Read timestamps
             const cgltf_accessor* inputAccessor = sampler.input;
@@ -1376,10 +1483,11 @@ std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> GltfSceneLoader::loadA
             clip->channels.push_back(std::move(animChannel));
         }
 
-        if (!clip->channels.empty()) {
+        if (!clip->channels.empty() || !clip->weightChannels.empty()) {
             std::cout << "[GltfSceneLoader] Loaded animation '" << clip->name
                       << "' (" << clip->duration << "s, "
-                      << clip->channels.size() << " channels)" << std::endl;
+                      << clip->channels.size() << " channels, "
+                      << clip->weightChannels.size() << " weight channels)" << std::endl;
             clips.push_back(std::move(clip));
         }
     }
@@ -1395,7 +1503,8 @@ GPUBuffer GltfSceneLoader::buildSkinnedVertexBuffer(
     const cgltf_primitive& primitive,
     const PrimitiveGeometry& geometry,
     uint32_t& outVertexCount,
-    uint32_t& outVertexStride)
+    uint32_t& outVertexStride,
+    std::vector<uint8_t>* keepVertices)
 {
     const cgltf_accessor* jointsAccessor = nullptr;
     const cgltf_accessor* weightsAccessor = nullptr;
@@ -1445,6 +1554,10 @@ GPUBuffer GltfSceneLoader::buildSkinnedVertexBuffer(
     // On a device with ray queries, RayTracingScene's skinning shader reads
     // the vertices by device address.
     VkDeviceSize bufferSize = vertices.size() * sizeof(SkinnedVertex);
+    if (keepVertices) {
+        const auto* bytes = reinterpret_cast<const uint8_t*>(vertices.data());
+        keepVertices->assign(bytes, bytes + bufferSize);
+    }
     GPUBuffer buffer = GPUResourceFactory::createBuffer(
         m_device.getAllocator().getHandle(),
         bufferSize,

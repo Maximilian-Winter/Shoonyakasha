@@ -114,10 +114,28 @@ struct AnimationChannel {
 // AnimationClip - A complete animation (e.g., "Walk", "Idle", "Attack")
 // ============================================================================
 
+// ============================================================================
+// MorphWeightChannel - Keyframed morph target weights of one mesh node
+// ============================================================================
+//
+// A glTF "weights" channel. Each keyframe holds weightCount values; for
+// CubicSpline, three groups of weightCount per keyframe (in-tangents,
+// values, out-tangents).
+//
+
+struct MorphWeightChannel {
+    int targetNode = -1;   // the glTF node, by its index in the file
+    AnimationInterpolation interpolation = AnimationInterpolation::Linear;
+    uint32_t weightCount = 0;
+    std::vector<float> timestamps;
+    std::vector<float> values;
+};
+
 struct AnimationClip {
     std::string name;
     float duration = 0.0f;  // Max timestamp across all channels (seconds)
     std::vector<AnimationChannel> channels;
+    std::vector<MorphWeightChannel> weightChannels;
 };
 
 } // namespace Shoonyakasha

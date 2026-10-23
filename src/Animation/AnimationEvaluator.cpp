@@ -159,6 +159,55 @@ glm::vec4 AnimationEvaluator::sampleChannel(
 }
 
 // ============================================================================
+// Morph Weight Sampling
+// ============================================================================
+
+void AnimationEvaluator::sampleWeights(
+    const MorphWeightChannel& channel,
+    float time,
+    std::vector<float>& outWeights)
+{
+    const uint32_t count = channel.weightCount;
+    const size_t keys = channel.timestamps.size();
+    const bool cubic = channel.interpolation == AnimationInterpolation::CubicSpline;
+    outWeights.assign(count, 0.0f);
+    if (keys == 0 || channel.values.size() < keys * count * (cubic ? 3 : 1)) return;
+
+    // Keyframe k's weight j, and for CubicSpline its in- (part 0) and
+    // out-tangent (part 2).
+    auto value = [&](size_t k, uint32_t j, int part = 1) {
+        return cubic ? channel.values[(k * 3 + part) * count + j] : channel.values[k * count + j];
+    };
+    if (keys == 1 || time <= channel.timestamps.front() || time >= channel.timestamps.back()) {
+        const size_t k = (keys == 1 || time <= channel.timestamps.front()) ? 0 : keys - 1;
+        for (uint32_t j = 0; j < count; ++j) outWeights[j] = value(k, j);
+        return;
+    }
+
+    const uint32_t k = findKeyframe(channel.timestamps, time);
+    const float deltaTime = channel.timestamps[k + 1] - channel.timestamps[k];
+    const float t = deltaTime > 0.0f ? (time - channel.timestamps[k]) / deltaTime : 0.0f;
+    for (uint32_t j = 0; j < count; ++j) {
+        switch (channel.interpolation) {
+            case AnimationInterpolation::Step:
+                outWeights[j] = value(k, j);
+                break;
+            case AnimationInterpolation::Linear:
+                outWeights[j] = value(k, j) + (value(k + 1, j) - value(k, j)) * t;
+                break;
+            case AnimationInterpolation::CubicSpline: {
+                const float t2 = t * t, t3 = t2 * t;
+                outWeights[j] = (2.0f * t3 - 3.0f * t2 + 1.0f) * value(k, j) +
+                                (t3 - 2.0f * t2 + t) * deltaTime * value(k, j, 2) +
+                                (-2.0f * t3 + 3.0f * t2) * value(k + 1, j) +
+                                (t3 - t2) * deltaTime * value(k + 1, j, 0);
+                break;
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Keyframe Search
 // ============================================================================
 

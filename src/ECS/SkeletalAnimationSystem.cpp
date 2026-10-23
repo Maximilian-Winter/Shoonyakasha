@@ -3,6 +3,7 @@
 //
 
 #include "ECS/SkeletalAnimationSystem.h"
+#include "ECS/MorphComponents.h"
 #include "Vulkan/VulkanDevice.h"
 #include "GPU/GPUResourceFactory.h"
 
@@ -45,6 +46,26 @@ void SkeletalAnimationSystem::update(float deltaTime, entt::registry& registry) 
         // Upload to GPU if dirty
         if (skeleton.dirty && skeleton.boneSSBO && skeleton.boneSSBO->isValid()) {
             uploadBoneMatrices(skeleton);
+        }
+    }
+
+    // Morph target weights from the current clip's channels for the node
+    // each entity was made from. Playback advances here for entities
+    // without a skeleton.
+    auto morphs = registry.view<AnimationPlaybackComponent, MorphComponent>();
+    std::vector<float> weights;
+    for (auto entity : morphs) {
+        auto& playback = morphs.get<AnimationPlaybackComponent>(entity);
+        auto& morph = morphs.get<MorphComponent>(entity);
+        if (playback.playing && !registry.all_of<SkeletonComponent>(entity)) {
+            updatePlayback(playback, deltaTime);
+        }
+        const AnimationClip* clip = playback.getCurrentClip();
+        if (!clip) continue;
+        for (const MorphWeightChannel& channel : clip->weightChannels) {
+            if (channel.targetNode != morph.sourceNode) continue;
+            AnimationEvaluator::sampleWeights(channel, playback.currentTime, weights);
+            morph.setWeights(weights);
         }
     }
 }

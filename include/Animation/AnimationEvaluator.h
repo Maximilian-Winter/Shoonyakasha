@@ -35,6 +35,15 @@ public:
         std::vector<glm::vec3>& outScales
     );
 
+    /// Sample a morph weight channel at the given time into `outWeights`,
+    /// resized to the channel's weightCount. Before the first keyframe it
+    /// holds the first one's weights, after the last the last one's.
+    static void sampleWeights(
+        const MorphWeightChannel& channel,
+        float time,
+        std::vector<float>& outWeights
+    );
+
     // ─── Bone Matrix Computation ────────────────────────────────
 
     /// Compute final bone matrices from local TRS values.

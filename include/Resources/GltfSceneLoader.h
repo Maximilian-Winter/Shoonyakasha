@@ -10,6 +10,7 @@
 #include "ECS/Scene.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/SkeletonComponents.h"
+#include "ECS/MorphComponents.h"
 #include "Resources/AnimationData.h"
 #include "GPU/GPUTypes.h"
 #include "GPU/GPUResourceFactory.h"
@@ -26,6 +27,7 @@
 struct cgltf_data;
 struct cgltf_node;
 struct cgltf_primitive;
+struct cgltf_mesh;
 struct cgltf_material;
 struct cgltf_texture_view;
 struct cgltf_sampler;
@@ -52,6 +54,9 @@ struct GltfPrimitive {
     uint32_t indexCount     = 0;
     uint32_t vertexStride   = 0;
     Shoonyakasha::IndexType indexType = Shoonyakasha::IndexType::UInt32;
+    // The primitive's morph targets and its vertices with none applied; null
+    // when it has none.
+    std::shared_ptr<const Shoonyakasha::MorphTargetSet> morphTargets;
 
     // ─── Textures (thin GPU wrappers) ───────────────────────
     Shoonyakasha::GPUTexture albedoMap;
@@ -340,21 +345,25 @@ private:
 
     // ─── Internal Processing Methods ─────────────────────────
 
-    /// Process a primitive (GPUBuffer + GPUTexture): standard vertices with
-    /// `worldTransform` applied, or skinned vertices in mesh space.
+    /// Process a primitive of `mesh` (GPUBuffer + GPUTexture): standard
+    /// vertices with `worldTransform` applied, or skinned vertices in mesh
+    /// space, and its morph targets.
     GltfPrimitive processPrimitive(
         cgltf_data* data,
+        const cgltf_mesh& mesh,
         const cgltf_primitive& primitive,
         const glm::mat4& worldTransform,
         const std::string& primitiveName,
         bool skinned
     );
 
-    /// Build a standard-vertex GPUBuffer from a primitive's arrays
+    /// Build a standard-vertex GPUBuffer from a primitive's arrays; with
+    /// `keepVertices`, also copies the vertex bytes there
     Shoonyakasha::GPUBuffer buildVertexBuffer(
         const PrimitiveGeometry& geometry,
         uint32_t& outVertexCount,
-        uint32_t& outVertexStride
+        uint32_t& outVertexStride,
+        std::vector<uint8_t>* keepVertices = nullptr
     );
 
     /// Build an index GPUBuffer, 16-bit when the largest index allows it
@@ -379,6 +388,18 @@ private:
     /// Made once per combination and kept in m_samplerCache.
     VkSampler gltfSampler(const cgltf_sampler* sampler, uint32_t mipLevels);
 
+    /// Give `entity`, made from `primitive` at `node`, a MorphComponent with
+    /// the mesh's default weights (or the node's), and the load's clips when
+    /// it has none
+    void addMorphTargets(
+        const std::shared_ptr<ECS::Scene>& scene,
+        entt::entity entity,
+        const GltfPrimitive& primitive,
+        cgltf_data* data,
+        const cgltf_node* node,
+        const std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>>& clips
+    );
+
     /// Create ECS entity with components
     entt::entity createEntity(
         std::shared_ptr<ECS::Scene> scene,
@@ -394,19 +415,23 @@ private:
         const cgltf_skin* skin
     );
 
-    /// Load all animations from glTF data
+    /// Load all animations from glTF data, one clip per glTF animation: the
+    /// channels of `skeleton`'s joints (none without one), and with
+    /// `withWeights` the morph weight channels
     std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> loadAnimations(
         cgltf_data* data,
-        const Shoonyakasha::Skeleton& skeleton
+        const Shoonyakasha::Skeleton* skeleton,
+        bool withWeights
     );
 
     /// Build a skinned vertex buffer: the primitive's arrays plus its joints
-    /// and weights
+    /// and weights; with `keepVertices`, also copies the vertex bytes there
     Shoonyakasha::GPUBuffer buildSkinnedVertexBuffer(
         const cgltf_primitive& primitive,
         const PrimitiveGeometry& geometry,
         uint32_t& outVertexCount,
-        uint32_t& outVertexStride
+        uint32_t& outVertexStride,
+        std::vector<uint8_t>* keepVertices = nullptr
     );
 
     /// Create a skinned entity with SkeletonComponent + AnimationPlaybackComponent

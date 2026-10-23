@@ -13,6 +13,7 @@
 #include "ECS/Scene.h"
 #include "ECS/RenderComponents.h"
 #include "ECS/SkeletonComponents.h"
+#include "ECS/MorphComponents.h"
 #include "ECS/Sprite2DComponents.h"
 #include "Resources/Sprite2DManager.h"
 
@@ -852,6 +853,20 @@ float SceneAPI::getAnimationClipDuration(EntityHandle entity, int clipIndex) con
     auto* pb = m_impl->registry.try_get<AnimationPlaybackComponent>(toEntt(entity));
     if (!pb || clipIndex < 0 || clipIndex >= static_cast<int>(pb->clips.size())) return 0.0f;
     return pb->clips[clipIndex] ? pb->clips[clipIndex]->duration : 0.0f;
+}
+
+std::vector<float> SceneAPI::getMorphWeights(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return {};
+    const auto* morph = m_impl->registry.try_get<MorphComponent>(toEntt(entity));
+    return morph ? morph->weights : std::vector<float>{};
+}
+
+bool SceneAPI::setMorphWeights(EntityHandle entity, const std::vector<float>& weights) {
+    if (!m_impl->valid(entity)) return false;
+    auto* morph = m_impl->registry.try_get<MorphComponent>(toEntt(entity));
+    if (!morph || !morph->targets) return false;
+    morph->setWeights(weights);
+    return true;
 }
 
 void SceneAPI::playAnimation(EntityHandle entity, int clipIndex) {

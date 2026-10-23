@@ -9,6 +9,7 @@
 #include "Vulkan/FrameGraph/FrameGraph.h"  // For RenderGraph, CompiledPass (full definitions)
 #include "Vulkan/FrameGraph/FrameGraphPass.h"  // For PassDeclaration
 #include "GPU/GPUTypes.h"
+#include "ECS/MorphComponents.h"
 #include "Vulkan/FrameGraph/RenderStats.h"
 
 #include <algorithm>
@@ -303,8 +304,12 @@ void FrameGraphRenderer::bindAndDrawEntity(
     m_renderGraph.bindSkeletonSSBO(entity, *m_registry, plan, cmd, pass.pipelineLayout, frameIndex);
 
     // Vertex and index buffers, unless the previous draw left them bound:
-    // meshes are often suballocated from shared buffers.
+    // meshes are often suballocated from shared buffers. A mesh with morph
+    // targets draws this frame's blended vertices.
     VkBuffer vertexBuffer = mesh.vertexHandle();
+    if (const auto* morph = m_registry->try_get<MorphComponent>(entity)) {
+        if (VkBuffer blended = morph->bufferFor(frameIndex)) vertexBuffer = blended;
+    }
     if (vertexBuffer != bound.vertex || mesh.vertexStride != bound.vertexStride) {
         const VkDeviceSize offset = 0;
         const VkDeviceSize stride = mesh.vertexStride;
