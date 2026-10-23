@@ -127,6 +127,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         cbool createEntities
         cbool loadSkins
         cbool loadAnimations
+        cbool loadLights
         cbool flattenHierarchy
         int maxTextureSize
         cbool generateMipmaps
@@ -167,6 +168,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         cbool success
         string error
         vector[EntityHandle] entities
+        vector[EntityHandle] lights
         size_t totalVertices
         size_t totalIndices
         size_t totalTextures

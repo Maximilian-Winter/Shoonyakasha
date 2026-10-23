@@ -167,6 +167,11 @@ struct GltfLoadResult {
     /// and the whole loaded scene follows.
     std::vector<entt::entity> rootEntities;
 
+    /// With GltfLoadOptions::loadLights, one entity per KHR_lights_punctual
+    /// light a node holds, a child of the node's entity (unparented, at the
+    /// node's world position and direction, with flattenHierarchy).
+    std::vector<entt::entity> lights;
+
     // ─── Skeleton & Animation Data ─────────────────────────
     std::vector<std::shared_ptr<Shoonyakasha::Skeleton>> skeletons;
     std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> animationClips;
@@ -190,6 +195,9 @@ struct GltfLoadOptions {
     bool createEntities         = true;
     bool loadSkins              = true;   // Load skeletal skin data
     bool loadAnimations         = true;   // Load animation clips
+    // KHR_lights_punctual: an entity with a LightComponent for each node's
+    // light (GltfLoadResult::lights).
+    bool loadLights             = false;
 
     // Transform handling.
     //

@@ -191,7 +191,7 @@ cdef inline vec2 _tuple_to_vec2(object t):
 
 class GltfResult:
     """Result of loading a glTF scene."""
-    __slots__ = ('success', 'error', 'entities',
+    __slots__ = ('success', 'error', 'entities', 'lights',
                  'total_vertices', 'total_indices',
                  'total_textures', 'total_materials',
                  'animation_clips', 'skeleton_count')
@@ -200,6 +200,7 @@ class GltfResult:
         self.success = False
         self.error = ""
         self.entities = []
+        self.lights = []            # with load_lights=True: the file's light entities
         self.total_vertices = 0
         self.total_indices = 0
         self.total_textures = 0
@@ -224,6 +225,7 @@ cdef object _wrap_gltf_result(CppGltfResult& cpp_result):
     r.error = cpp_result.error.decode('utf-8', errors='replace')
     r.entities = [<uint32_t>cpp_result.entities[i]
                   for i in range(cpp_result.entities.size())]
+    r.lights = [<uint32_t>cpp_result.lights[i] for i in range(cpp_result.lights.size())]
     r.total_vertices = cpp_result.totalVertices
     r.total_indices = cpp_result.totalIndices
     r.total_textures = cpp_result.totalTextures
@@ -2048,6 +2050,8 @@ cdef class Engine:
             opts.loadSkins = kwargs['load_skins']
         if 'load_animations' in kwargs:
             opts.loadAnimations = kwargs['load_animations']
+        if 'load_lights' in kwargs:
+            opts.loadLights = kwargs['load_lights']
         if 'flatten_hierarchy' in kwargs:
             opts.flattenHierarchy = kwargs['flatten_hierarchy']
         if 'max_texture_size' in kwargs:

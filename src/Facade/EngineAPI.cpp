@@ -258,6 +258,7 @@ static GltfLoadOptions toLoadOptions(const GltfOptions& fo) {
     lo.createEntities   = fo.createEntities;
     lo.loadSkins        = fo.loadSkins;
     lo.loadAnimations   = fo.loadAnimations;
+    lo.loadLights       = fo.loadLights;
     lo.flattenHierarchy = fo.flattenHierarchy;
     lo.maxTextureSize   = fo.maxTextureSize;
     lo.generateMipmaps  = fo.generateMipmaps;
@@ -284,6 +285,9 @@ static GltfResult toGltfResult(const GltfLoadResult& lr) {
     fr.entities.reserve(lr.entities.size());
     for (auto e : lr.entities) {
         fr.entities.push_back(toHandle(e));
+    }
+    for (auto e : lr.lights) {
+        fr.lights.push_back(toHandle(e));
     }
 
     // Animation metadata

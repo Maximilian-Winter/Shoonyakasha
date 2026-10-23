@@ -7,6 +7,7 @@
 | `success` | `success` | bool |
 | `error` | `error` | Error string |
 | `entities` | `entities` | Renderable entity handles |
+| `lights` | `lights` | With `load_lights=True`, the light entity handles (`KHR_lights_punctual`) |
 | `total_vertices` | `totalVertices` | Vertex count |
 | `total_indices` | `totalIndices` | Index count |
 | `total_textures` | `totalTextures` | Texture count |
@@ -25,6 +26,7 @@ Native `GltfLoadResult` also exposes primitive, root/node, skeleton, and clip ob
 | `create_entities` | `createEntities` | true |
 | `load_skins` | `loadSkins` | true |
 | `load_animations` | `loadAnimations` | true |
+| `load_lights` | `loadLights` | false |
 | `flatten_hierarchy` | `flattenHierarchy` | false |
 | `max_texture_size` | `maxTextureSize` | 0 |
 | `generate_mipmaps` | `generateMipmaps` | true |

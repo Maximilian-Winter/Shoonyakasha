@@ -248,6 +248,7 @@ struct GltfOptions {
     bool createEntities   = true;
     bool loadSkins        = true;
     bool loadAnimations   = true;
+    bool loadLights       = false;  // see GltfLoadOptions::loadLights
     bool flattenHierarchy = false;  // see GltfLoadOptions::flattenHierarchy
     int  maxTextureSize   = 0;
     bool generateMipmaps  = true;
@@ -262,6 +263,7 @@ struct GltfResult {
     bool success = false;
     std::string error;
     std::vector<EntityHandle> entities;
+    std::vector<EntityHandle> lights;  // with loadLights: the KHR_lights_punctual lights
     size_t totalVertices  = 0;
     size_t totalIndices   = 0;
     size_t totalTextures  = 0;

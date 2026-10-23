@@ -27,11 +27,15 @@ Paths first resolve as given, then against the shared asset root. The bundled bo
 
 ## Options and hierarchy
 
-All boolean loading options default to true: textures, materials, entities, skins, animations, mipmaps, and sRGB albedo preference. `flatten_hierarchy` and `compress_textures` default to false, `max_texture_size` to 0, and `name_prefix` to empty (the loader then uses the file stem). The [result/options reference](../api/python/gltf-result.md) lists names in both languages.
+All boolean loading options default to true: textures, materials, entities, skins, animations, mipmaps, and sRGB albedo preference. `load_lights`, `flatten_hierarchy` and `compress_textures` default to false, `max_texture_size` to 0, and `name_prefix` to empty (the loader then uses the file stem). The [result/options reference](../api/python/gltf-result.md) lists names in both languages.
 
 Default loading preserves the node tree and shares mesh-space GPU buffers among repeated mesh references in that load. Renderable primitive entities are children of node entities. Move an appropriate node ancestor to move the whole object. The facade result lists renderable entities; native `GltfLoadResult` additionally exposes node and root lists.
 
 `flatten_hierarchy=True` bakes node transforms into vertices and emits flattened geometry, losing that sharing. See [instancing](instancing.md) before choosing it.
+
+## Lights
+
+`load_lights=True` (C++ `GltfOptions::loadLights`) creates a light entity for each node with a `KHR_lights_punctual` light, listed in the result's `lights`. It is a child of the node's entity and shines along the node's -Z (with `flatten_hierarchy`, an unparented entity at the node's world position and direction). Directional, point and spot lights keep the file's colour and intensity as they are: candela for point and spot lights, lux for directional ones, with inverse-square falloff. A light with a `range` fades to nothing there; one without reaches as far as its intensity times its brightest colour channel, over the distance squared, stays above 0.01. Spot cone angles become the light's inner and outer half angles. The lights cast no shadows until `scene.set_light_cast_shadows(light, True)`; the first directional light with shadows is the sun in the default pipeline.
 
 ## Texture size and compression
 

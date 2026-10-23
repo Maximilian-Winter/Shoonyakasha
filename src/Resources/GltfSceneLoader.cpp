@@ -134,6 +134,33 @@ void setSheenAndSpecular(MaterialComponentV5& material, const GltfPrimitive& pri
     if (primitive.specularColorMap.isValid()) material.textures["specularColorMap"] = primitive.specularColorMap;
 }
 
+// A KHR_lights_punctual light as a LightComponent. The intensity is kept as
+// glTF gives it (candela for point and spot lights, lux for directional
+// ones), with inverse-square falloff. A light without a range reaches as far
+// as its intensity times its brightest colour channel, over the distance
+// squared, stays above 0.01. Cone angles are half angles, in degrees.
+ECS::LightComponent lightFromGltf(const cgltf_light& source) {
+    ECS::LightComponent light;
+    light.color = glm::vec3(source.color[0], source.color[1], source.color[2]);
+    light.intensity = source.intensity;
+    switch (source.type) {
+        case cgltf_light_type_directional: light.type = ECS::LightComponent::Directional; break;
+        case cgltf_light_type_spot:        light.type = ECS::LightComponent::Spot; break;
+        default:                           light.type = ECS::LightComponent::Point; break;
+    }
+    light.constant = 0.0f;
+    light.linear = 0.0f;
+    light.quadratic = 1.0f;
+    const float brightest = std::max(light.color.r, std::max(light.color.g, light.color.b));
+    light.range = source.range > 0.0f ? source.range
+                                      : std::max(std::sqrt(std::max(light.intensity * brightest, 0.0f) / 0.01f), 0.01f);
+    if (source.type == cgltf_light_type_spot) {
+        light.innerCone = glm::degrees(source.spot_inner_cone_angle);
+        light.outerCone = glm::degrees(source.spot_outer_cone_angle);
+    }
+    return light;
+}
+
 // The KHR_materials_iridescence params and textures of a material with the
 // extension.
 void setIridescence(MaterialComponentV5& material, const GltfPrimitive& primitive) {
@@ -667,6 +694,31 @@ void GltfSceneLoader::processNode(
 
             result.primitives.push_back(std::move(instance));
         }
+    }
+
+    // The node's light, shining along its -Z: a child of the node's entity,
+    // or, flattened, placed at the node's world position and direction.
+    if (makeEntities && m_options.loadLights && node->light) {
+        const std::string lightName = m_options.namePrefix + "_"
+                                    + (node->light->name ? node->light->name : "light");
+        entt::entity lightEntity = entt::null;
+        if (flatten) {
+            const glm::vec3 forward = -glm::vec3(worldTransform[2]);
+            lightEntity = scene->createEntity(lightName)
+                .withTransform(glm::vec3(worldTransform[3]))
+                .build();
+            if (glm::dot(forward, forward) > 1e-12f) {
+                scene->getRegistry().get<ECS::TransformComponent>(lightEntity).rotation =
+                    ECS::TransformComponent::rotationFacing(forward);
+            }
+        } else {
+            lightEntity = scene->createEntity(lightName)
+                .withTransform(glm::vec3(0.0f))
+                .withParent(nodeEntity)
+                .build();
+        }
+        scene->getRegistry().emplace<ECS::LightComponent>(lightEntity, lightFromGltf(*node->light));
+        result.lights.push_back(lightEntity);
     }
 
     for (cgltf_size i = 0; i < node->children_count; ++i) {
