@@ -1,0 +1,21 @@
+#version 460
+// Centres every cascade on the eye, in whole cells of its own size, and
+// records how many cells each moved since last frame.
+
+#include "gi_common.glsl"
+
+layout(local_size_x = 1) in;
+
+void main() {
+    bool first = ircacheMeta[META_INITIALIZED] == 0u;
+    vec3 eye = camera.position.xyz;
+    for (uint cascade = 0u; cascade < IRCACHE_CASCADE_COUNT; ++cascade) {
+        ivec3 center = ivec3(floor(eye / ircacheCellDiameter(cascade)));
+        ivec3 origin = center - ivec3(int(IRCACHE_CASCADE_SIZE / 2u));
+        ivec3 previous = first ? origin : ircacheCascades[2u * cascade].xyz;
+        ircacheCascades[2u * cascade] = ivec4(origin, 0);
+        ircacheCascades[2u * cascade + 1u] = ivec4(origin - previous, 0);
+    }
+    ircacheCascades[2u * IRCACHE_CASCADE_COUNT] = ivec4(floatBitsToInt(eye), 0);
+    ircacheMeta[META_INITIALIZED] = 1u;
+}

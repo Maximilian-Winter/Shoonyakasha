@@ -1,0 +1,40 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// Traces again the sample a stratum's reservoir holds, from where it was
+// traced, before this frame's new samples. Where the radiance changed by
+// more than a tenth, the reservoir trusts its history less (its candidate
+// count shrinks towards 1), and it keeps the new radiance.
+
+#extension GL_EXT_ray_query : require
+
+#define IRCACHE_LOOKUP_PRECISE
+#include "gi_common.glsl"
+#include "gi_lighting.glsl"
+#include "ircache_trace.glsl"
+
+layout(local_size_x = 64) in;
+
+void main() {
+    uint dispatch = gl_GlobalInvocationID.x;
+    if (dispatch >= ircacheMeta[META_TRACING_COUNT] * IRCACHE_VALIDATION_SAMPLES_PER_FRAME) return;
+    uint entry = ircacheIndirection[dispatch / IRCACHE_VALIDATION_SAMPLES_PER_FRAME];
+    uint sampleIndex = dispatch % IRCACHE_VALIDATION_SAMPLES_PER_FRAME;
+    uint life = ircacheLife[entry];
+
+    uint params = sampleParams(IRCACHE_VALIDATION_SAMPLES_PER_FRAME, entry, sampleIndex, camera.frame);
+    uint index = entry * IRCACHE_AUX_STRIDE + sampleOcta(params);
+
+    Reservoir r = reservoirFromRaw(ircacheAux[index].xy);
+    if (r.M <= 0.0) return;
+
+    IrcacheVertex previousOrigin = unpackVertex(ircacheAux[index + 2u * IRCACHE_OCTA_DIMS2]);
+    IrcacheTraced traced = ircacheTrace(previousOrigin, r.payload, life);
+    vec3 a = traced.radiance * selfLightingLimiter(traced.direction, previousOrigin.normal);
+    vec3 b = auxValue(index + IRCACHE_OCTA_DIMS2);
+    vec3 change = abs(a - b) / max(a + b, vec3(1e-8));
+    float invalidity = smoothstep(0.1, 0.5, max(change.r, max(change.g, change.b)));
+    r.M = max(0.0, min(r.M, exp2(log2(IRCACHE_RESTIR_M_CLAMP) * (1.0 - invalidity))));
+
+    ircacheAux[index].xy = reservoirRaw(r);
+    setAuxValue(index + IRCACHE_OCTA_DIMS2, a, auxWeight(index + IRCACHE_OCTA_DIMS2));
+}

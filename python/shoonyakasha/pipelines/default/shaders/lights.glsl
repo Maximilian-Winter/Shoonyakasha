@@ -314,6 +314,10 @@ vec3 directLight(vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic, flo
 }
 #endif
 
+// The diffuse irradiance (over pi) ambientLightParts uses in place of the
+// irradiance map's, set by the including shader; negative for the map's.
+vec3 ambientIrradianceOverride = vec3(-1.0);
+
 // Image-based light, diffuse irradiance and split-sum specular apart, for
 // occluding them differently.
 void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, sampler2D brdfLUT,
@@ -324,7 +328,7 @@ void ambientLightParts(samplerCube irradianceMap, samplerCube prefilterMap, samp
     vec3 kS = F0 + (max(vec3(specularF90 * (1.0 - roughness)), F0) - F0) *
                    pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
     vec3 kD = (1.0 - kS) * (1.0 - metallic);
-    vec3 irradiance = texture(irradianceMap, N).rgb;
+    vec3 irradiance = ambientIrradianceOverride.x >= 0.0 ? ambientIrradianceOverride : texture(irradianceMap, N).rgb;
     diffuse = kD * irradiance * albedo;
 
     float maxLod = float(textureQueryLevels(prefilterMap) - 1);

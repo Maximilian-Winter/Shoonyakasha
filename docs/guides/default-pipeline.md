@@ -82,7 +82,7 @@ engine.apply_pipeline_preset("medium")
 | `high` | Everything on. What the pipeline starts with |
 | `medium` | High without contact shadows |
 | `low` | Integrated or older GPUs: no ambient occlusion, bloom, contact shadows, reflections, or shadows from alpha-tested geometry |
-| `raytraced` | High, with the shadows of the sun and of spot and point lights, and reflections on glossy surfaces, ray traced where the GPU supports ray queries |
+| `raytraced` | High, with the shadows of the sun and of spot and point lights, reflections on glossy surfaces and global illumination, ray traced where the GPU supports ray queries |
 
 Call it from `on_init` or at any time after, for instance from a key or a settings menu. A preset only touches what it names, so your own settings that it doesn't name survive it.
 
@@ -98,6 +98,8 @@ def on_init():
 On a GPU without ray queries the preset is refused with a warning and nothing changes. `ray_query_supported()` answers from `on_init` on. The rays see opaque and alpha-tested geometry, skinned meshes in their current pose included; for alpha-tested materials they test the texture's alpha. Skinned meshes also cast through the cascades, and the two shadows are combined.
 
 Spot and point lights with their shadow flag on are ray traced too, in place of their shadow maps: each pixel traces one ray per light towards a random point of it, so `set_light_source_radius` (or a light's rectangle, `set_light_source_size`) widens its penumbra, and radius 0 gives hard shadows with no noise. Every shadowed light gets a shadow, with no limit of 16 and 8, but each one costs a ray in every pixel it reaches.
+
+Light that bounced reaches surfaces too (global illumination): an irradiance cache around the camera traces rays from points in the scene, lights what they hit by the suns, a sample of the other lights and the sky, and adds what those surfaces received in turn. Its light replaces the environment's even light in the shade, so enclosed places come out darker and lit surfaces tint what faces them. It needs some frames to fill where the camera arrives. `set_custom_uint("default.gi", 0)` keeps the environment's light instead; the cache's passes, `IrcacheInit` to `IrcacheSum` and `GiLookup`, can then be turned off too.
 
 Glossy surfaces (roughness below about 0.5, or a clear coat) reflect the scene: one ray per pixel finds what the reflection sees, and where that is on screen, last frame's image there is the reflected light. With `raytraced` the ray goes through the acceleration structure, and what the screen does not show, such as the underside of an object over a polished floor, darkens the environment's reflection instead; the other presets except `low` march it through the depth buffer, and a ray that leaves the screen keeps the environment's reflection. `set_custom_float("default.reflections", x)` scales how much these reflections replace the environment's, 0 to 1; 0 traces none. The noise needs TAA: with `taa` off, ray-traced shadow and reflection edges look grainy. Set `SHOONYAKASHA_DISABLE_RAY_QUERY=1` to try a program as it runs on a GPU without them.
 
@@ -152,7 +154,7 @@ The [README](../../python/shoonyakasha/pipelines/default/README.md#settings) lis
 - **Trimming shadows:** turn off `set_light_cast_shadows` on lights the viewer won't miss them for, and shorten ranges. The `low` preset drops alpha-tested casters, which are often foliage and cost the most.
 - **Levels of detail:** load large scenes with `load_gltf_scene(path, lods=True)` to draw distant meshes with fewer triangles, in the G-buffer and in the shadows alike; `set_lod_threshold` trades detail against speed ([loading scenes](loading-scenes.md#levels-of-detail)).
 - **Occlusion culling:** after the G-buffer, pass `HiZ` writes the farthest depth of every 8 x 8 block of the screen into `hiz`, which is read back. The G-buffer and transparent passes leave out the static entities hidden behind it. The depth is two frames old: something revealed by a fast turn can appear a frame late. Shadow passes are not occlusion culled. `set_occlusion_culling(False)` turns it off.
-- **Memory:** the atlas takes 64 MB, the cascades another 128 MB (64 MB for each sun), and the screen-sized targets about 78 bytes per pixel.
+- **Memory:** the atlas takes 64 MB, the cascades another 128 MB (64 MB for each sun), the screen-sized targets about 78 bytes per pixel, and the irradiance cache about 76 MB.
 - **Push constants:** the pipeline pushes 236 bytes of per-draw constants. Every desktop GPU allows 256. A device limited to Vulkan's minimum of 128 logs the G-buffer passes as not fitting, and they draw nothing.
 
 ## Making it your own

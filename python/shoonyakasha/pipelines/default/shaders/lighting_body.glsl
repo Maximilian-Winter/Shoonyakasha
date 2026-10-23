@@ -6,10 +6,17 @@
 // RT_REFLECTIONS, traced reflections (pass LightingRT, the "raytraced"
 // preset). lighting.frag defines SS_REFLECTIONS, reflections marched through
 // the depth buffer. Either writes them to two more targets, which
-// reflection_denoise.frag filters and adds to the HDR target.
+// reflection_denoise.frag filters and adds to the HDR target. lighting_rt.frag
+// also defines GI: with settings.gi, the diffuse ambient light is the
+// irradiance cache's (giIrradiance, pass GiLookup) instead of the
+// environment's.
 
 #include "common.glsl"
 #include "sk/pbr.glsl"
+
+#ifdef GI
+layout(set = 7, binding = 0) uniform sampler2D giIrradiance;   // irradiance over pi
+#endif
 
 layout(set = 0, binding = 0) uniform sampler2D gAlbedo;
 layout(set = 0, binding = 1) uniform sampler2D gNormal;
@@ -288,11 +295,20 @@ void main() {
     float NdotV = max(dot(N, V), 1e-4);
     float specularAO = clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
 
+    // The environment's light, dimmed in the suns' shadow. The irradiance
+    // cache's light (GI) already holds the sky, the suns and their shadows.
+    float iblScale = settings.iblIntensity * mix(settings.shadowAmbient, 1.0, sunVisibility);
+    float diffuseScale = iblScale;
+#ifdef GI
+    if (settings.gi != 0u) {
+        ambientIrradianceOverride = textureLod(giIrradiance, fragTexCoord, 0.0).rgb;
+        diffuseScale = 1.0;
+    }
+#endif
     vec3 ambientDiffuse, ambientSpecular;
     ambientLightParts(irradianceMap, prefilterMap, brdfLUT, N, V, albedo, metallic, roughness, F0,
                       ambientDiffuse, ambientSpecular);
-    vec3 ambient = (ambientDiffuse * diffuseAO + ambientSpecular * specularAO)
-                 * settings.iblIntensity * mix(settings.shadowAmbient, 1.0, sunVisibility);
+    vec3 ambient = ambientDiffuse * diffuseAO * diffuseScale + ambientSpecular * specularAO * iblScale;
 #ifdef REFLECTIONS
     {
         // A clear coat is the glossiest layer, and the one whose reflection

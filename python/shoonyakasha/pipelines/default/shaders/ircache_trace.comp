@@ -1,0 +1,54 @@
+#version 460
+// glslc: --target-env=vulkan1.2
+// Four new samples per live entry, each in its own stratum of the sphere.
+// A sample's radiance becomes a candidate for the stratum's reservoir,
+// weighed by its luminance against the reservoir's sample (whose count of
+// candidates is clamped to 30, so it keeps adapting). The chosen sample's
+// radiance and trace origin are kept with the reservoir.
+
+#extension GL_EXT_ray_query : require
+
+#define IRCACHE_LOOKUP_PRECISE
+#include "gi_common.glsl"
+#include "gi_lighting.glsl"
+#include "ircache_trace.glsl"
+
+layout(local_size_x = 64) in;
+
+void main() {
+    uint dispatch = gl_GlobalInvocationID.x;
+    if (dispatch >= ircacheMeta[META_TRACING_COUNT] * IRCACHE_SAMPLES_PER_FRAME) return;
+    uint entry = ircacheIndirection[dispatch / IRCACHE_SAMPLES_PER_FRAME];
+    uint sampleIndex = dispatch % IRCACHE_SAMPLES_PER_FRAME;
+    uint life = ircacheLife[entry];
+
+    uvec4 packedEntry = ircacheSpatial[entry];
+    IrcacheVertex origin = unpackVertex(packedEntry);
+    uint rng = hash1(hash1(entry) + camera.frame);
+    uint params = sampleParams(IRCACHE_SAMPLES_PER_FRAME, entry, sampleIndex, camera.frame);
+
+    IrcacheTraced traced = ircacheTrace(origin, params, life);
+    vec3 value = traced.radiance * selfLightingLimiter(traced.direction, origin.normal);
+
+    Reservoir reservoir = Reservoir(0.0, 0u, 0.0, 0.0);
+    ReservoirStream stream = ReservoirStream(0.0, 0.0);
+    reservoirInit(reservoir, luminance(value), 1.0, stream, params);
+
+    uint index = entry * IRCACHE_AUX_STRIDE + sampleOcta(params);
+    vec3 chosen = value;
+    bool chosenNew = true;
+    Reservoir previous = reservoirFromRaw(ircacheAux[index].xy);
+    if (previous.M > 0.0) {
+        previous.M = min(previous.M, IRCACHE_RESTIR_M_CLAMP);
+        vec3 previousValue = auxValue(index + IRCACHE_OCTA_DIMS2);
+        if (reservoirMerge(reservoir, previous, luminance(previousValue), 1.0, stream, previous.payload, rng)) {
+            chosen = previousValue;
+            chosenNew = false;
+        }
+    }
+    reservoirFinish(reservoir, stream);
+
+    ircacheAux[index].xy = reservoirRaw(reservoir);
+    setAuxValue(index + IRCACHE_OCTA_DIMS2, chosen, reservoir.W);
+    if (chosenNew) ircacheAux[index + 2u * IRCACHE_OCTA_DIMS2] = packedEntry;
+}

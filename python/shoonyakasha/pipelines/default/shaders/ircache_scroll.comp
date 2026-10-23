@@ -1,0 +1,43 @@
+#version 460
+// Moves each cascade's cells by the cells it scrolled: one thread per cell
+// of the scrolled grid, which takes the cell that now lands there. A cell
+// that falls off the cascade frees its entry.
+
+#include "gi_common.glsl"
+
+layout(local_size_x = 32) in;   // x, y over a cascade's 32 x 32; z over 32 slices of 12 cascades
+
+void freeCell(uint cell) {
+    if ((ircacheGrid[2u * cell + 1u] & IRCACHE_OCCUPIED) == 0u) return;
+    uint entry = ircacheGrid[2u * cell];
+    ircacheLife[entry] = IRCACHE_LIFE_RECYCLED;
+    for (uint i = 0u; i < IRCACHE_IRRADIANCE_STRIDE; ++i) {
+        ircacheIrradiance[entry * IRCACHE_IRRADIANCE_STRIDE + i] = vec4(0.0);
+    }
+    uint allocated = atomicAdd(ircacheMeta[META_ALLOC_COUNT], uint(-1));
+    ircachePool[allocated - 1u] = entry;
+}
+
+void main() {
+    uvec3 dst = uvec3(gl_GlobalInvocationID.xy, gl_GlobalInvocationID.z % IRCACHE_CASCADE_SIZE);
+    uint cascade = gl_GlobalInvocationID.z / IRCACHE_CASCADE_SIZE;
+    if (cascade >= IRCACHE_CASCADE_COUNT) return;
+    uint dstCell = ircacheCellIndex(dst, cascade);
+    ivec3 scroll = ircacheCascades[2u * cascade + 1u].xyz;
+
+    // The cell at this place of the old grid leaves the cascade.
+    if (any(greaterThanEqual(uvec3(ivec3(dst) - scroll), uvec3(IRCACHE_CASCADE_SIZE)))) freeCell(dstCell);
+
+    ivec3 src = ivec3(dst) + scroll;
+    if (all(lessThan(uvec3(src), uvec3(IRCACHE_CASCADE_SIZE)))) {
+        uint srcCell = ircacheCellIndex(uvec3(src), cascade);
+        uint entry = ircacheGrid[2u * srcCell];
+        uint flags = ircacheGrid[2u * srcCell + 1u];
+        ircacheGridScrolled[2u * dstCell] = entry;
+        ircacheGridScrolled[2u * dstCell + 1u] = flags;
+        if ((flags & IRCACHE_OCCUPIED) != 0u) ircacheEntryCell[entry] = dstCell;
+    } else {
+        ircacheGridScrolled[2u * dstCell] = 0u;
+        ircacheGridScrolled[2u * dstCell + 1u] = 0u;
+    }
+}

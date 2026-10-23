@@ -9,6 +9,9 @@ Deferred PBR (glTF metallic-roughness) with:
 
 - cascaded sun shadows: four cascades in one 2048² depth array, 16-tap Vogel
   PCF rotated per pixel, per-cascade normal offset, blended cascade seams
+- diffuse global illumination in the `raytraced` preset: an irradiance cache
+  (after kajiya's) of light that bounced, from the suns, a sample of the
+  other lights and the sky, in place of the environment's diffuse light
 - ray-traced sun shadows, where the device has ray queries (the `raytraced`
   preset): one ray per pixel towards a random point of the sun's disc,
   averaged over frames by TAA into a penumbra that widens away from the caster
@@ -114,6 +117,7 @@ set only what you want to change: `engine.set_custom_float("default.exposure", 0
 | `fogHeight` | 0.0 | Height in metres where the fog has `fogDensity` |
 | `fogHeightFalloff` | 0.0 | How fast the fog thins with height: by a factor e every 1/falloff metres above `fogHeight`, thickening below it; 0 is the same density everywhere |
 | `fogColor` | (1, 1, 1) | Tint of the fog's light, which is the environment's, blurred, times `iblIntensity` |
+| `gi` | 0 | 1: `LightingRT` takes the diffuse ambient light from the irradiance cache (`giIrradiance`) instead of the environment's irradiance map, and `GiLookup` fills it; the `raytraced` preset sets 1, the others 0 |
 | `oit` | 0 | 1: blended materials use weighted blended order-independent transparency, whose result does not depend on draw order but is an approximation; 0: they are sorted back to front and blended in turn |
 | `motionBlur` | 0.0 | Motion blur: the share of each frame the shutter is open, 0 to 1 (0.5 is a film camera's 180 degree shutter); 0 is none |
 | `dof` | 0 | Depth of field: 1 blurs what is nearer or farther than `dofFocus` |
@@ -138,7 +142,7 @@ The pipeline declares four presets; apply one with
 | `low` | No ambient occlusion, no shadows from alpha-tested casters (sun, spot or point), no contact shadows, no bloom, a narrower shadow filter and hard cascade seams |
 | `medium` | Everything but contact shadows |
 | `high` | Everything, every setting back to its default. What the pipeline starts with |
-| `raytraced` | `high`, with sun shadows from ray queries instead of the cascades' opaque and alpha-tested casters, on blended materials too. Refused, with a warning, on a device without ray queries; check with `engine.ray_query_supported()` (C++ `rayQuerySupported`) |
+| `raytraced` | `high`, with sun shadows from ray queries instead of the cascades' opaque and alpha-tested casters, on blended materials too, and global illumination from the irradiance cache (`Ircache*`, `GiLookup`, `gi` 1). Refused, with a warning, on a device without ray queries; check with `engine.ray_query_supported()` (C++ `rayQuerySupported`) |
 
 A preset only touches the passes and settings it names, so settings of your
 own that it does not mention stay as you set them.
@@ -159,7 +163,9 @@ own that it does not mention stay as you set them.
 | `LightClusterCount` | A compute pass counting the point and spot lights that reach each cluster of the view, into `lightClusters`, and their total |
 | `LightClusters` | A compute pass listing them: each cluster takes room in `ClusterLightIndices` for its list, and `lightClusters` holds the list's count and offset. When the total does not fit, each cluster gets the same share of the room as of the total, and keeps its nearest lights |
 | `Lighting` | Lights, image-based light and the sky, added onto the emission; screen-space reflections of glossy surfaces, written to `reflection` and `reflectionScale` |
-| `LightingRT` | In the `raytraced` preset, instead of `Lighting`: the same, with shadow rays towards spot and point lights instead of the shadow atlas, and a reflection ray per glossy pixel, written to `reflection` and `reflectionScale`. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
+| `IrcacheInit` ... `IrcacheSum` | In the `raytraced` preset: the irradiance cache's compute passes (`ircache_*.comp`). Around the camera, 12 cascades of 32³ cells, the smallest 2 cm across and each the next twice as wide, hold up to 65,536 entries, allocated where a lookup lands. Each frame every live entry traces 4 rays, validates 4 earlier ones and checks it still sees where its samples came from; a ray's hit is lit by the suns, two of the other lights picked at random (each with a shadow ray) and its emission, plus the cache one rank further out, and a miss by the environment (`iblIntensity`). The samples, kept in reservoirs per stratum, become L1 spherical harmonics. The cache's buffers (`Ircache*` in `bufferLayouts`, about 76 MB) exist in every preset. `"requires": ["rayQuery"]`, the tracing ones also `bindlessTextures`; off by default |
+| `GiLookup` | In the `raytraced` preset: the cache looked up at every G-buffer pixel, with half a cell of jitter that TAA averages, into `giIrradiance` (RGBA16F); the lookups allocate the entries near the camera. Black with `gi` 0 |
+| `LightingRT` | In the `raytraced` preset, instead of `Lighting`: the same, with shadow rays towards spot and point lights instead of the shadow atlas, a reflection ray per glossy pixel, written to `reflection` and `reflectionScale`, and with `gi` the diffuse ambient light from `giIrradiance`, still occluded by `ao`. `"requires": ["rayQuery", "bindlessTextures"]`; off by default |
 | `ReflectionDenoise` | The reflections `Lighting` or `LightingRT` wrote, averaged over each surface and added to the HDR target. Off in the `low` preset |
 | `HeightFog` | Exponential height fog (`fog.glsl`) blended over the opaque scene and the sky: the fog's share along each view ray, to the far plane for the sky, of the environment's blurred light. `Transparent` and `TransparentRT` fog blended surfaces the same way. Draws nothing with `fogDensity` 0 |
 | `SceneBehind`, `SceneBehindMips1`–`5` | Copy the lit, fogged opaque scene to `sceneBehind` and blit its mip chain, for transmissive surfaces to see through |

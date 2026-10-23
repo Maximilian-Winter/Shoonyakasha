@@ -396,16 +396,21 @@ Planned planShipped(const std::string& relativePath) {
 
 } // namespace
 
-TEST(ShippedPipelines, DefaultPipelineBufferBarriersGuardOnlyTheClusterLists) {
-    // The only storage buffers its shaders write are the cluster light lists
-    // (ClusterLightCount, ClusterLightIndices): each step of building them
-    // waits for the one before, and Lighting for the last at the fragment
-    // shader. Transparent, an entity pass taken to read any buffer, waits
-    // again for its vertex stages; TransparentRT after it needs nothing more.
-    // Every other compute pass writes images, which image barriers cover.
+TEST(ShippedPipelines, DefaultPipelineBufferBarriersGuardOnlyTheClusterListsAndTheIrradianceCache) {
+    // The storage buffers its shaders write are the cluster light lists
+    // (ClusterLightCount, ClusterLightIndices) and the irradiance cache's:
+    // each step of building the lists waits for the one before, and Lighting
+    // for the last at the fragment shader; each cache pass, and GiLookup,
+    // which allocates entries, for the cache passes before. Transparent, an
+    // entity pass taken to read any buffer, waits again for its vertex
+    // stages; TransparentRT after it needs nothing more. Every other compute
+    // pass writes images, which image barriers cover.
     auto p = planShipped("python/shoonyakasha/pipelines/default/pipeline.json");
     const std::set<std::string> guarded{"LightClusterReset", "LightClusterCount", "LightClusters", "Lighting",
-                                        "Transparent"};
+                                        "Transparent", "IrcacheInit", "IrcacheCascades", "IrcacheScroll",
+                                        "IrcacheCopyGrid", "IrcacheAgeArgs", "IrcacheAge", "IrcacheTraceArgs",
+                                        "IrcacheReset", "IrcacheAccessibility", "IrcacheValidate", "IrcacheTrace",
+                                        "IrcacheSum", "GiLookup"};
     for (uint32_t pi : p.order) {
         const std::string& name = p.builder.getPassDeclarations()[pi].name;
         EXPECT_EQ(p.memory[pi].empty(), guarded.count(name) == 0) << name;

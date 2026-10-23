@@ -206,6 +206,160 @@
         }
       ]
     },
+    "IrcacheMeta": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 16,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheCascades": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 26,
+      "fields": [
+        {
+          "name": "value",
+          "type": "ivec4"
+        }
+      ]
+    },
+    "IrcacheGrid": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 786432,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheGridScrolled": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 786432,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheEntryCell": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheSpatial": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uvec4"
+        }
+      ]
+    },
+    "IrcacheIrradiance": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 196608,
+      "fields": [
+        {
+          "name": "value",
+          "type": "vec4"
+        }
+      ]
+    },
+    "IrcacheAux": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 4194304,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uvec4"
+        }
+      ]
+    },
+    "IrcacheLife": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcachePool": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheProposal": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uvec4"
+        }
+      ]
+    },
+    "IrcacheProposalCount": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheIndirection": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 65536,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uint"
+        }
+      ]
+    },
+    "IrcacheArgs": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 8,
+      "fields": [
+        {
+          "name": "value",
+          "type": "uvec4"
+        }
+      ]
+    },
     "Cascades": {
       "usage": "uniform_buffer",
       "packing": "std140",
@@ -492,6 +646,12 @@
           "name": "oit",
           "type": "uint",
           "source": "scene.custom.default.oit",
+          "default": 0
+        },
+        {
+          "name": "gi",
+          "type": "uint",
+          "source": "scene.custom.default.gi",
           "default": 0
         }
       ]
@@ -1102,6 +1262,183 @@
     }
   },
   "descriptorSetLayouts": {
+    "ircacheSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheMeta",
+          "autoBindBuffer": "IrcacheMeta"
+        },
+        {
+          "binding": 1,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheCascades",
+          "autoBindBuffer": "IrcacheCascades"
+        },
+        {
+          "binding": 2,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheGrid",
+          "autoBindBuffer": "IrcacheGrid"
+        },
+        {
+          "binding": 3,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheGridScrolled",
+          "autoBindBuffer": "IrcacheGridScrolled"
+        },
+        {
+          "binding": 4,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheEntryCell",
+          "autoBindBuffer": "IrcacheEntryCell"
+        },
+        {
+          "binding": 5,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheSpatial",
+          "autoBindBuffer": "IrcacheSpatial"
+        },
+        {
+          "binding": 6,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheIrradiance",
+          "autoBindBuffer": "IrcacheIrradiance"
+        },
+        {
+          "binding": 7,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheAux",
+          "autoBindBuffer": "IrcacheAux"
+        },
+        {
+          "binding": 8,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheLife",
+          "autoBindBuffer": "IrcacheLife"
+        },
+        {
+          "binding": 9,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcachePool",
+          "autoBindBuffer": "IrcachePool"
+        },
+        {
+          "binding": 10,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheProposal",
+          "autoBindBuffer": "IrcacheProposal"
+        },
+        {
+          "binding": 11,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheProposalCount",
+          "autoBindBuffer": "IrcacheProposalCount"
+        },
+        {
+          "binding": 12,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheIndirection",
+          "autoBindBuffer": "IrcacheIndirection"
+        },
+        {
+          "binding": 13,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "IrcacheArgs",
+          "autoBindBuffer": "IrcacheArgs"
+        }
+      ]
+    },
+    "giLookupSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "giIrradiance",
+          "autoBindResource": "giIrradiance"
+        }
+      ]
+    },
+    "giSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "giIrradiance",
+          "autoBindResource": "giIrradiance",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
     "hizSet": {
       "bindings": [
         {
@@ -1415,7 +1752,8 @@
           "binding": 1,
           "type": "uniform_buffer",
           "stages": [
-            "fragment"
+            "fragment",
+            "compute"
           ],
           "name": "Cascades",
           "autoBindBuffer": "Cascades"
@@ -1581,7 +1919,8 @@
           "binding": 0,
           "type": "combined_image_sampler",
           "stages": [
-            "fragment"
+            "fragment",
+            "compute"
           ],
           "name": "irradianceMap"
         },
@@ -1589,7 +1928,8 @@
           "binding": 1,
           "type": "combined_image_sampler",
           "stages": [
-            "fragment"
+            "fragment",
+            "compute"
           ],
           "name": "prefilterMap"
         },
@@ -1597,7 +1937,8 @@
           "binding": 2,
           "type": "combined_image_sampler",
           "stages": [
-            "fragment"
+            "fragment",
+            "compute"
           ],
           "name": "brdfLUT"
         }
@@ -2011,7 +2352,8 @@
           "binding": 0,
           "type": "acceleration_structure",
           "stages": [
-            "fragment"
+            "fragment",
+            "compute"
           ],
           "name": "scene",
           "alphaTested": true
@@ -2020,7 +2362,8 @@
           "binding": 1,
           "type": "storage_buffer",
           "stages": [
-            "fragment"
+            "fragment",
+            "compute"
           ],
           "name": "RayInstances",
           "autoBindBuffer": "RayInstances"
@@ -2029,7 +2372,8 @@
           "binding": 2,
           "type": "combined_image_sampler",
           "stages": [
-            "fragment"
+            "fragment",
+            "compute"
           ],
           "name": "sceneTextures",
           "count": 4096,
@@ -2148,6 +2492,14 @@
       },
       "readback": {
         "frequency": "per_frame"
+      }
+    },
+    {
+      "name": "giIrradiance",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "transient": true
       }
     },
     {
@@ -3088,6 +3440,383 @@
       ]
     },
     {
+      "name": "IrcacheInit",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          64,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1024,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_init.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheCascades",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          1,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_cascades.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheScroll",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          32,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 32,
+          "z": 384
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_scroll.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheCopyGrid",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          64,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 12288,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_copy_grid.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheAgeArgs",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          1,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_age_args.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheAge",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 0
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_age.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheTraceArgs",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          1,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_trace_args.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheReset",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 16
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_reset.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheAccessibility",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery",
+        "bindlessTextures"
+      ],
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 48
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_accessibility.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "lightsComputeSet",
+        "rayTracingSceneSet",
+        "iblSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheValidate",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery",
+        "bindlessTextures"
+      ],
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 32
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_validate.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "lightsComputeSet",
+        "rayTracingSceneSet",
+        "iblSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheTrace",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery",
+        "bindlessTextures"
+      ],
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 32
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_trace.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "lightsComputeSet",
+        "rayTracingSceneSet",
+        "iblSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "IrcacheSum",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "dispatch_indirect",
+        "arguments": {
+          "buffer": "IrcacheArgs",
+          "offset": 16
+        }
+      },
+      "pipeline": {
+        "computeShader": "shaders/ircache_sum.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet"
+      ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "GiLookup",
+      "type": "compute",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "compute_image",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ]
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "giIrradiance",
+          "usage": "storage_image_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "shaders/gi_lookup.comp.spv"
+      },
+      "descriptorSets": [
+        "ircacheSet",
+        "cameraSet",
+        "settingsSet",
+        "giLookupSet"
+      ]
+    },
+    {
       "name": "LightClusterReset",
       "type": "compute",
       "hasSideEffects": true,
@@ -3494,6 +4223,10 @@
         {
           "resource": "taaHistory",
           "usage": "shader_read"
+        },
+        {
+          "resource": "giIrradiance",
+          "usage": "shader_read"
         }
       ],
       "outputs": [
@@ -3528,7 +4261,8 @@
         "lightsSet",
         "settingsSet",
         "rayTracingSceneSet",
-        "reflectionSet"
+        "reflectionSet",
+        "giSet"
       ],
       "enabled": false,
       "requires": [
@@ -4258,6 +4992,19 @@
   "presets": {
     "low": {
       "passes": {
+        "IrcacheInit": false,
+        "IrcacheCascades": false,
+        "IrcacheScroll": false,
+        "IrcacheCopyGrid": false,
+        "IrcacheAgeArgs": false,
+        "IrcacheAge": false,
+        "IrcacheTraceArgs": false,
+        "IrcacheReset": false,
+        "IrcacheAccessibility": false,
+        "IrcacheValidate": false,
+        "IrcacheTrace": false,
+        "IrcacheSum": false,
+        "GiLookup": false,
         "ShadowOpaque{cascade}": true,
         "ShadowMasked{cascade}": false,
         "ShadowSkinned{cascade}": true,
@@ -4278,6 +5025,7 @@
         "PointShadowSkinned{f}": true
       },
       "values": {
+        "default.gi": null,
         "default.contactShadowLength": 0,
         "default.bloomIntensity": 0,
         "default.shadowSoftness": 1.0,
@@ -4287,6 +5035,19 @@
     },
     "medium": {
       "passes": {
+        "IrcacheInit": false,
+        "IrcacheCascades": false,
+        "IrcacheScroll": false,
+        "IrcacheCopyGrid": false,
+        "IrcacheAgeArgs": false,
+        "IrcacheAge": false,
+        "IrcacheTraceArgs": false,
+        "IrcacheReset": false,
+        "IrcacheAccessibility": false,
+        "IrcacheValidate": false,
+        "IrcacheTrace": false,
+        "IrcacheSum": false,
+        "GiLookup": false,
         "ShadowOpaque{cascade}": true,
         "ShadowMasked{cascade}": true,
         "ShadowSkinned{cascade}": true,
@@ -4307,6 +5068,7 @@
         "PointShadowSkinned{f}": true
       },
       "values": {
+        "default.gi": null,
         "default.contactShadowLength": 0,
         "default.bloomIntensity": null,
         "default.shadowSoftness": null,
@@ -4316,6 +5078,19 @@
     },
     "high": {
       "passes": {
+        "IrcacheInit": false,
+        "IrcacheCascades": false,
+        "IrcacheScroll": false,
+        "IrcacheCopyGrid": false,
+        "IrcacheAgeArgs": false,
+        "IrcacheAge": false,
+        "IrcacheTraceArgs": false,
+        "IrcacheReset": false,
+        "IrcacheAccessibility": false,
+        "IrcacheValidate": false,
+        "IrcacheTrace": false,
+        "IrcacheSum": false,
+        "GiLookup": false,
         "ShadowOpaque{cascade}": true,
         "ShadowMasked{cascade}": true,
         "ShadowSkinned{cascade}": true,
@@ -4336,6 +5111,7 @@
         "PointShadowSkinned{f}": true
       },
       "values": {
+        "default.gi": null,
         "default.contactShadowLength": null,
         "default.bloomIntensity": null,
         "default.shadowSoftness": null,
@@ -4345,6 +5121,19 @@
     },
     "raytraced": {
       "passes": {
+        "IrcacheInit": true,
+        "IrcacheCascades": true,
+        "IrcacheScroll": true,
+        "IrcacheCopyGrid": true,
+        "IrcacheAgeArgs": true,
+        "IrcacheAge": true,
+        "IrcacheTraceArgs": true,
+        "IrcacheReset": true,
+        "IrcacheAccessibility": true,
+        "IrcacheValidate": true,
+        "IrcacheTrace": true,
+        "IrcacheSum": true,
+        "GiLookup": true,
         "ShadowOpaque{cascade}": false,
         "ShadowMasked{cascade}": false,
         "ShadowSkinned{cascade}": true,
@@ -4365,6 +5154,7 @@
         "PointShadowSkinned{f}": false
       },
       "values": {
+        "default.gi": 1,
         "default.contactShadowLength": null,
         "default.bloomIntensity": null,
         "default.shadowSoftness": null,

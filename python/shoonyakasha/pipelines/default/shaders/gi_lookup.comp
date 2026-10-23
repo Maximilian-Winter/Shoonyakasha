@@ -1,0 +1,40 @@
+#version 460
+// The irradiance cache's light at each visible pixel (pass GiLookup): the
+// lookup at its surface, from the camera (rank 0: the queries that allocate
+// entries and choose where they trace from), half a cell of jitter blending
+// neighbouring cells over frames under TAA. Writes giIrradiance, irradiance
+// over pi: times the diffuse albedo it is the light the surface reflects.
+// Black where the sky is or with settings.gi 0.
+
+#include "gi_common.glsl"
+
+layout(set = 3, binding = 0) uniform sampler2D gDepth;
+layout(set = 3, binding = 1) uniform sampler2D gNormal;
+layout(set = 3, binding = 2, rgba16f) uniform writeonly image2D giIrradiance;
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(giIrradiance);
+    if (pixel.x >= size.x || pixel.y >= size.y) return;
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+    float depth = textureLod(gDepth, uv, 0.0).r;
+    if (depth >= 1.0 || settings.gi == 0u) {
+        imageStore(giIrradiance, pixel, vec4(0.0));
+        return;
+    }
+
+    vec3 viewPos = viewPositionFromDepth(camera.invProj, uv, depth);
+    IrcacheQuery q;
+    q.from = camera.position.xyz;
+    q.position = (camera.invView * vec4(viewPos, 1.0)).xyz;
+    q.normal = octDecode(textureLod(gNormal, uv, 0.0).xy);
+    q.rank = 0u;
+    q.jitter = true;
+    uint rng = hash1(uint(pixel.x) + uint(pixel.y) * 65536u) ^ hash1(camera.frame * 9781u + 17u);
+    vec3 irradiance = ircacheLookup(q, rng);
+    if (any(isnan(irradiance)) || any(isinf(irradiance))) irradiance = vec3(0.0);
+    imageStore(giIrradiance, pixel, vec4(irradiance, 1.0));
+}
