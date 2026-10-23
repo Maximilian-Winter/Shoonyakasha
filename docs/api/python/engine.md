@@ -94,7 +94,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `get_readback(name)` | dict or None | The most recent copy of `name`: `data` (bytes), `frame`, and `width`, `height`, `format` for an image or `element_count`, `element_stride` for a buffer. |
 | `set_buffer(name, data, offset=0)` | None | Write the raw bytes of `data` (bytes, bytearray, `array.array`, a contiguous NumPy array) at byte `offset` into the buffer of a `bufferLayouts` uniform buffer, or storage buffer with an `elementCount`. Raises `ValueError` when there is no such buffer or the bytes do not fit. See [custom shader uniforms](../../guides/custom-shader-uniforms.md#whole-buffers). |
 | `set_sun_shadows(cascades=4, max_distance=60.0, split_lambda=0.75, resolution=2048, caster_extension=50.0)` | None | Configure the sun's shadow cascades. |
-| `set_local_shadows(spot=8, point=4, spot_resolution=2048, point_resolution=1024, atlas_resolution=4096)` | None | Shadow slots for spot and point lights with cast shadows on. |
+| `set_local_shadows(spot=16, point=8, spot_resolution=2048, point_resolution=1024, atlas_resolution=4096)` | None | Shadow slots for spot and point lights with cast shadows on: at most 16 and 8, and at most the slots the pipeline's shadow passes render. |
 | `get_sun_shadow_cascade(index)` | 4×4 tuple (column-major) | World-to-light-clip matrix of a sun cascade this frame, as four columns. |
 | `set_pass_enabled(pass_name, enabled)` | bool | Turn a pipeline pass on or off from the next frame. |
 | `get_pass_draw_stats(pass_name)` | int | (drawn, culled): entities a geometry pass drew and culled as outside its view, last run. |

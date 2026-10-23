@@ -506,56 +506,56 @@
           "name": "spotViewProj",
           "type": "mat4",
           "source": "scene.shadows.spot[i].viewProj",
-          "arrayCount": 8
+          "arrayCount": 16
         },
         {
           "name": "pointFaceViewProj",
           "type": "mat4",
           "source": "scene.shadows.point.faces[i].viewProj",
-          "arrayCount": 24
+          "arrayCount": 48
         },
         {
           "name": "spotParams",
           "type": "vec4",
           "source": "scene.shadows.spot[i].params",
-          "arrayCount": 8
+          "arrayCount": 16
         },
         {
           "name": "pointPositionFar",
           "type": "vec4",
           "source": "scene.shadows.point[i].positionFar",
-          "arrayCount": 4
+          "arrayCount": 8
         },
         {
           "name": "pointDepthParams",
           "type": "vec4",
           "source": "scene.shadows.point[i].depthParams",
-          "arrayCount": 4
+          "arrayCount": 8
         },
         {
           "name": "spotRect",
           "type": "vec4",
           "source": "scene.shadows.spot[i].rect",
-          "arrayCount": 8
+          "arrayCount": 16
         },
         {
           "name": "pointFaceRect",
           "type": "vec4",
           "source": "scene.shadows.point.faces[i].rect",
-          "arrayCount": 24
+          "arrayCount": 48
         },
         {
           "name": "spotLightIndex",
           "type": "int",
           "source": "scene.shadows.spot[i].lightIndex",
-          "arrayCount": 8,
+          "arrayCount": 16,
           "default": -1
         },
         {
           "name": "pointLightIndex",
           "type": "int",
           "source": "scene.shadows.point[i].lightIndex",
-          "arrayCount": 4,
+          "arrayCount": 8,
           "default": -1
         }
       ]
@@ -1614,7 +1614,7 @@
       "name": "SpotShadowOpaque{s}",
       "type": "graphics",
       "repeat": {
-        "count": 8,
+        "count": 16,
         "index": "s"
       },
       "viewport": "scene.shadows.spot[{s}].rect",
@@ -1661,7 +1661,7 @@
       "name": "SpotShadowMasked{s}",
       "type": "graphics",
       "repeat": {
-        "count": 8,
+        "count": 16,
         "index": "s"
       },
       "viewport": "scene.shadows.spot[{s}].rect",
@@ -1707,7 +1707,7 @@
       "name": "SpotShadowSkinned{s}",
       "type": "graphics",
       "repeat": {
-        "count": 8,
+        "count": 16,
         "index": "s"
       },
       "viewport": "scene.shadows.spot[{s}].rect",
@@ -1751,7 +1751,7 @@
       "name": "PointShadowOpaque{f}",
       "type": "graphics",
       "repeat": {
-        "count": 24,
+        "count": 48,
         "index": "f"
       },
       "viewport": "scene.shadows.point.faces[{f}].rect",
@@ -1798,7 +1798,7 @@
       "name": "PointShadowMasked{f}",
       "type": "graphics",
       "repeat": {
-        "count": 24,
+        "count": 48,
         "index": "f"
       },
       "viewport": "scene.shadows.point.faces[{f}].rect",
@@ -1844,7 +1844,7 @@
       "name": "PointShadowSkinned{f}",
       "type": "graphics",
       "repeat": {
-        "count": 24,
+        "count": 48,
         "index": "f"
       },
       "viewport": "scene.shadows.point.faces[{f}].rect",

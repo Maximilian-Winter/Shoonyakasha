@@ -13,8 +13,8 @@
 // a shader recomputes from the light-to-point vector as `depthA + depthB / m`,
 // m being that vector's largest absolute component.
 //
-// Lights compete for a fixed number of slots, a budget per type that must
-// match the pipeline's shadow maps. Those whose range cannot reach the
+// Lights compete for a fixed number of slots, a budget per type. Those whose
+// range cannot reach the
 // camera's view are skipped; the rest are ranked by intensity and by how
 // close they are to the camera.
 //
@@ -40,12 +40,12 @@
 
 namespace Shoonyakasha {
 
-constexpr uint32_t MAX_SPOT_SHADOWS  = 8;
-constexpr uint32_t MAX_POINT_SHADOWS = 4;
+constexpr uint32_t MAX_SPOT_SHADOWS  = 16;
+constexpr uint32_t MAX_POINT_SHADOWS = 8;
 
 struct LocalShadowSettings {
-    uint32_t spotCount       = 8;     // slots for spot lights, 0..MAX_SPOT_SHADOWS; match the pipeline
-    uint32_t pointCount      = 4;     // slots for point lights, 0..MAX_POINT_SHADOWS; match the pipeline
+    uint32_t spotCount       = MAX_SPOT_SHADOWS;   // slots for spot lights, 0..MAX_SPOT_SHADOWS
+    uint32_t pointCount      = MAX_POINT_SHADOWS;  // slots for point lights, 0..MAX_POINT_SHADOWS
     uint32_t spotResolution  = 2048;  // texels per side of a spot map (in an atlas, the largest tile)
     uint32_t pointResolution = 1024;  // texels per side of a cube face (in an atlas, the largest tile)
     uint32_t atlasResolution = 4096;  // texels per side of the atlas holding every map; 0 for arrays

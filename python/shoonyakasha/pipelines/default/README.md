@@ -14,7 +14,7 @@ Deferred PBR (glTF metallic-roughness) with:
   averaged over frames by TAA into a penumbra that widens away from the caster
 - contact shadows: a short screen-space march towards the sun, for the detail
   the cascades are too coarse for
-- shadows from up to eight spot lights and four point lights, given each
+- shadows from up to sixteen spot lights and eight point lights, given each
   frame to the shadow-casting lights that matter most, as tiles of one 4096²
   atlas sized by how large each light looks (spot maps up to 2048², cube
   faces up to 1024²), filtered with 3x3 hardware comparisons
@@ -222,7 +222,7 @@ render into their rectangle only (`"viewport"` in `pipeline.json`), clearing
 just that; the shaders read each light through its tile's rectangle and keep
 the filter inside it, and pick the cube face of a point light themselves.
 
-`set_local_shadows(spot=8, point=4, spot_resolution=2048,
+`set_local_shadows(spot=16, point=8, spot_resolution=2048,
 point_resolution=1024, atlas_resolution=4096)` are the defaults; lower the
 largest tiles for a smaller budget of memory bandwidth, or the atlas to fit a
 smaller image declared in a copy of the pipeline. `atlas_resolution=0` is for

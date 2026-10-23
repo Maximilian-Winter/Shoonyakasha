@@ -271,7 +271,11 @@ struct SceneContext {
     // castShadows that matter most. Read by "scene.shadows.spot*" and
     // "scene.shadows.point*" dot-paths.
     struct LocalShadow {
-        LocalShadowSettings settings;       // set by the application; budgets must match the pipeline
+        LocalShadowSettings settings;       // set by the application
+        // The slots the loaded pipeline's shadow passes render
+        // (setLocalShadowSlots); the budgets used are at most these.
+        uint32_t            pipelineSpotSlots  = MAX_SPOT_SHADOWS;
+        uint32_t            pipelinePointSlots = MAX_POINT_SHADOWS;
         LocalShadows        shadows;
     };
     LocalShadow localShadow;

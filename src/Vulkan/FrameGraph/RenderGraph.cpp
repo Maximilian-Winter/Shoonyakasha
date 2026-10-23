@@ -172,6 +172,7 @@ void RenderGraph::loadFromFile(const std::string& filePath) {
         }
     }
     m_pendingPassEnabled.clear();
+    setLocalShadowSlots(m_builder, getSceneContext());
 
     if (!m_pendingPreset.empty()) {
         const std::string preset = std::exchange(m_pendingPreset, std::string{});
@@ -207,6 +208,19 @@ bool RenderGraph::applyPreset(const std::string& name) {
     }
     m_logger->log(LogLevel::Info, "Applied pipeline preset '%s'", name.c_str());
     return true;
+}
+
+void setLocalShadowSlots(const FrameGraphBuilder& builder, Shoonyakasha::SceneContext& scene) {
+    uint32_t spot = 0, point = 0;
+    for (const auto& pass : builder.getPassDeclarations()) {
+        if (pass.execution.view == CullView::SpotShadow) {
+            spot = std::max(spot, pass.execution.viewIndex + 1);
+        } else if (pass.execution.view == CullView::PointShadowFace) {
+            point = std::max(point, pass.execution.viewIndex / 6 + 1);
+        }
+    }
+    scene.localShadow.pipelineSpotSlots = spot;
+    scene.localShadow.pipelinePointSlots = point;
 }
 
 std::vector<std::string> applyPresetValues(const FrameGraphBuilder& builder, const PipelinePreset& preset,

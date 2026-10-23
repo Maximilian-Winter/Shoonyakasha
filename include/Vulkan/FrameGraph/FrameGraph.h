@@ -691,6 +691,13 @@ class FrameGraphBuilder;
 std::vector<std::string> applyPresetValues(const FrameGraphBuilder& builder, const PipelinePreset& preset,
                                            Shoonyakasha::SceneContext& scene);
 
+/// Set scene.localShadow's pipeline slot counts to the spot slots and point
+/// lights the passes in `builder` render: one more than the highest
+/// shadows.spot[N] view, and than the highest point light whose faces a
+/// shadows.point.faces[N] view renders; 0 without such passes.
+/// RenderGraph::loadFromFile calls it.
+void setLocalShadowSlots(const FrameGraphBuilder& builder, Shoonyakasha::SceneContext& scene);
+
 class FrameGraphBuilder {
 public:
     FrameGraphBuilder();

@@ -65,7 +65,7 @@ engine.scene.set_rotation(spot, (-1.1, 0.0, 0.0))   # it shines along its forwar
 engine.scene.set_light_cast_shadows(spot, True)
 ```
 
-At most 8 spot and 4 point lights get a shadow in any frame. Every frame the engine drops lights whose range can't reach the view, ranks the rest by brightness and nearness, and hands out the slots in that order, so more shadowed lights than that is fine: the ones that matter most get shadows. All the maps share one 4096² atlas. A light's tile grows as the camera nears it: up to 2048² for a spot light and 1024² per cube face for a point light, down to 128² far away. Spot lights have a 45° cone (`LightComponent::outerCone`); there is no Python setter for it yet.
+At most 16 spot and 8 point lights get a shadow in any frame. Every frame the engine drops lights whose range can't reach the view, ranks the rest by brightness and nearness, and hands out the slots in that order, so more shadowed lights than that is fine: the ones that matter most get shadows. All the maps share one 4096² atlas. A light's tile grows as the camera nears it: up to 2048² for a spot light and 1024² per cube face for a point light, down to 128² far away. Spot lights have a 45° cone (`LightComponent::outerCone`) unless `scene.set_light_cone` sets another.
 
 ## Quality presets and ray-traced shadows
 
@@ -249,7 +249,7 @@ Some things this example shows about the pipeline:
 |---|---|
 | Everything is black except the sky | No lights, or only lights whose range doesn't reach the scene. Check the sky light too: `iblIntensity`, and the environment map |
 | A directional light casts no shadow | Its shadow flag is off, another directional light was flagged first, or what should be shadowed is beyond `max_distance` (debug view 1) |
-| A spot or point light casts no shadow | Its flag is off; more than 8 spot or 4 point lights are flagged and it ranked lower; or its range doesn't reach the view |
+| A spot or point light casts no shadow | Its flag is off; more than 16 spot or 8 point lights are flagged and it ranked lower; or its range doesn't reach the view |
 | Blended glass casts no shadow | Blended materials receive shadows but don't cast them. Use `MASK` for things like leaves and fences |
 | Shadows shimmer on distant objects | They're in the last cascade with few texels per unit. Shorten `max_distance`, or raise `split_lambda` so more of the resolution goes near the camera |
 | `raytraced` does nothing | The GPU has no ray queries (see the warning in the log), or `SHOONYAKASHA_DISABLE_RAY_QUERY` is set |

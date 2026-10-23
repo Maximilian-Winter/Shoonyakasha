@@ -54,10 +54,10 @@ struct SceneLight {
     uint cascadeCount;
 
 // scene.shadows.spot* and scene.shadows.point* (pipeline.json
-// "LocalShadowMatrices"): 8 spot slots, 4 point slots of 6 faces each, all
+// "LocalShadowMatrices"): 16 spot slots, 8 point slots of 6 faces each, all
 // tiles of one atlas
-#define SPOT_SHADOW_SLOTS 8
-#define POINT_SHADOW_SLOTS 4
+#define SPOT_SHADOW_SLOTS 16
+#define POINT_SHADOW_SLOTS 8
 #define DEFAULT_LOCAL_SHADOWS_BLOCK                          \
     mat4 spotViewProj[SPOT_SHADOW_SLOTS];                    \
     mat4 pointFaceViewProj[POINT_SHADOW_SLOTS * 6];          \

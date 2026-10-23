@@ -164,9 +164,12 @@ void SceneContext::updateFromRegistry(entt::registry& registry) {
     }
 
     // ─── Spot and point light shadows ───────────────────────────
+    LocalShadowSettings budgets = localShadow.settings;
+    budgets.spotCount = std::min(budgets.spotCount, localShadow.pipelineSpotSlots);
+    budgets.pointCount = std::min(budgets.pointCount, localShadow.pipelinePointSlots);
     localShadow.shadows = assignLocalShadows(
         shadowCandidates, cameraPosition, foundCamera ? cameraViewProjection : glm::mat4(1.0f),
-        /*cameraMinusOneToOne=*/false, localShadow.settings);
+        /*cameraMinusOneToOne=*/false, budgets);
 }
 
 // ============================================================================

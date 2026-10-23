@@ -340,8 +340,19 @@ TEST_F(LocalShadowScene, CastingLightsArePublished) {
     EXPECT_EQ(resolver.resolveScene("scene.shadows.point.faces[3].rect", scene).as<glm::vec4>(),
               local.point[0].faceRect[3]);
     EXPECT_EQ(resolver.resolveScene("scene.shadows.spot[1].rect", scene).as<glm::vec4>(), glm::vec4(0.0f));
-    EXPECT_FALSE(resolver.resolveScene("scene.shadows.spot[8].viewProj", scene).isValid());
-    EXPECT_FALSE(resolver.resolveScene("scene.shadows.point.faces[24].viewProj", scene).isValid());
+    EXPECT_FALSE(resolver.resolveScene("scene.shadows.spot[16].viewProj", scene).isValid());
+    EXPECT_FALSE(resolver.resolveScene("scene.shadows.point.faces[48].viewProj", scene).isValid());
+}
+
+TEST_F(LocalShadowScene, TheSlotsThePipelineRendersCapTheBudgets) {
+    registry.get<ECS::LightComponent>(spot).castShadows = true;
+    registry.get<ECS::LightComponent>(point).castShadows = true;
+    scene.localShadow.pipelineSpotSlots = 0;
+    scene.updateFromRegistry(registry);
+
+    EXPECT_EQ(scene.localShadow.shadows.spotCount, 0u);
+    EXPECT_EQ(scene.localShadow.shadows.pointCount, 1u);
+    EXPECT_EQ(scene.localShadow.settings.spotCount, MAX_SPOT_SHADOWS);   // the setting itself stays
 }
 
 // ── Pass views ──────────────────────────────────────────────────
@@ -361,10 +372,10 @@ TEST(LocalShadowViews, ParseAndCheckTheirSlot) {
     FrameGraph::loadGraphFromJson(b, graph("shadows.spot[3]"));
     EXPECT_EQ(b.getPassDeclarations()[0].execution.view, FrameGraph::CullView::SpotShadow);
     EXPECT_EQ(b.getPassDeclarations()[0].execution.viewIndex, 3u);
-    FrameGraph::loadGraphFromJson(b, graph("shadows.point.faces[23]"));
+    FrameGraph::loadGraphFromJson(b, graph("shadows.point.faces[47]"));
     EXPECT_EQ(b.getPassDeclarations()[0].execution.view, FrameGraph::CullView::PointShadowFace);
-    EXPECT_EQ(b.getPassDeclarations()[0].execution.viewIndex, 23u);
-    for (const char* bad : {"shadows.spot[8]", "shadows.point.faces[24]", "shadows.spot[a]", "shadows.point[0]"}) {
+    EXPECT_EQ(b.getPassDeclarations()[0].execution.viewIndex, 47u);
+    for (const char* bad : {"shadows.spot[16]", "shadows.point.faces[48]", "shadows.spot[a]", "shadows.point[0]"}) {
         FrameGraph::FrameGraphBuilder c;
         EXPECT_THROW(FrameGraph::loadGraphFromJson(c, graph(bad)), std::runtime_error) << bad;
     }

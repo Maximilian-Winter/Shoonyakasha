@@ -2426,7 +2426,7 @@ cdef class Engine:
         self._ptr.setSunShadowSettings(cascades, max_distance, split_lambda,
                                        resolution, caster_extension)
 
-    def set_local_shadows(self, uint32_t spot=8, uint32_t point=4,
+    def set_local_shadows(self, uint32_t spot=16, uint32_t point=8,
                           uint32_t spot_resolution=2048, uint32_t point_resolution=1024,
                           uint32_t atlas_resolution=4096):
         """Shadow slots for spot and point lights with cast shadows on.
@@ -2434,7 +2434,8 @@ cdef class Engine:
         Each frame the engine gives the slots to the lights that matter most
         (bright, near the camera, able to reach the view) and publishes them as
         scene.shadows.spot* and scene.shadows.point* dot-paths. The counts
-        should match the pipeline's passes; at most 8 spot and 4 point slots.
+        used are at most 16 spot and 8 point slots, and at most the slots the
+        pipeline's shadow passes render.
         With atlas_resolution > 0 every map is a tile of one atlas of that
         size, sized each frame by how large the light looks, up to
         spot_resolution (point_resolution per cube face); with 0 the maps are

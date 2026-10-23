@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include "App/ApplicationBase.h"
+#include "FrameGraph/DotPathResolver.h"
 #include "Vulkan/FrameGraph/FrameGraph.h"
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
 
@@ -124,6 +125,26 @@ TEST(DefaultPipeline, ShipsTheUIShaders) {
     for (const char* name : {"ui.vert.spv", "ui.frag.spv"}) {
         EXPECT_TRUE(fs::exists(ui / name)) << name;
     }
+}
+
+TEST(DefaultPipeline, RendersEveryLocalShadowSlot) {
+    FrameGraphBuilder builder;
+    loadGraphFromFile(builder, defaultPipeline().string());
+    Shoonyakasha::SceneContext scene;
+    setLocalShadowSlots(builder, scene);
+    EXPECT_EQ(scene.localShadow.pipelineSpotSlots, Shoonyakasha::MAX_SPOT_SHADOWS);
+    EXPECT_EQ(scene.localShadow.pipelinePointSlots, Shoonyakasha::MAX_POINT_SHADOWS);
+}
+
+TEST(ShippedPipelineInterfaces, ShowroomRendersEightSpotAndFourPointShadowSlots) {
+    const fs::path showroom = fs::path(SHOONYAKASHA_SOURCE_DIR) / "examples/python/rendering/showroom/pipeline";
+    WorkingDirectory cwd(showroom);
+    FrameGraphBuilder builder;
+    loadGraphFromFile(builder, (showroom / "pipeline.json").string());
+    Shoonyakasha::SceneContext scene;
+    setLocalShadowSlots(builder, scene);
+    EXPECT_EQ(scene.localShadow.pipelineSpotSlots, 8u);
+    EXPECT_EQ(scene.localShadow.pipelinePointSlots, 4u);
 }
 
 TEST(DefaultPipeline, DrawsTheUIOverlayLastAndPresentsFromIt) {
