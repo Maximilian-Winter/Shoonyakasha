@@ -77,6 +77,101 @@ class Orbits(unittest.TestCase):
         self.assertEqual(flight.orbit(planet, ship.position, ship.velocity)[1], math.inf)
 
 
+def planet_with_moon(phase=0.0):
+    """The planet with a moon circling in the plane of X (angle 0) and Y."""
+    planet = flight.Planet(density_factor=0.0)
+    planet.moon = flight.Moon(phase=phase, u=(1.0, 0.0, 0.0), v=(0.0, 1.0, 0.0), primary_gm=planet.gm)
+    return planet
+
+
+def coast(ship, planet, seconds, dt):
+    """Coast with no thrust, the planet's clock running with the flight."""
+    hold = flight.Controls(assist=False)
+    for _ in range(int(round(seconds / dt))):
+        ship.step(planet, hold, dt)
+        planet.time += dt
+
+
+def ship_at(position, velocity):
+    return flight.Ship(position=position, velocity=velocity)
+
+
+class Moon(unittest.TestCase):
+    def test_the_moon_goes_round_its_circle_at_its_speed(self):
+        planet = planet_with_moon(phase=0.3)
+        moon = planet.moon
+        period = 2.0 * math.pi / moon.rate
+        for t in (0.0, 1234.5, period / 3.0):
+            self.assertAlmostEqual(flight.length(moon.position(t)), moon.distance, delta=1e-6)
+            # The velocity is the position's rate of change, square to it.
+            h = 0.01
+            difference = flight.scale(flight.sub(moon.position(t + h), moon.position(t - h)), 0.5 / h)
+            self.assertLess(flight.length(flight.sub(difference, moon.velocity(t))), 1e-3)
+            self.assertAlmostEqual(flight.dot(moon.velocity(t), moon.position(t)), 0.0, delta=1e-3)
+        start, end = moon.position(0.0), moon.position(period)
+        self.assertLess(flight.length(flight.sub(start, end)), 1e-3)
+        self.assertAlmostEqual(period / 3600.0, 3.64, delta=0.01)
+
+    def test_its_sphere_of_influence_decides_what_orbits_are_reckoned_around(self):
+        planet = planet_with_moon()
+        moon = planet.moon
+        self.assertAlmostEqual(moon.influence, 104_000.0, delta=1_000.0)
+        centre = moon.position(0.0)
+        inside = flight.add(centre, (0.0, 0.99 * moon.influence, 0.0))
+        outside = flight.add(centre, (0.0, 1.01 * moon.influence, 0.0))
+        body, position, velocity = flight.reference(planet, inside, (1.0, 2.0, 3.0))
+        self.assertIs(body, moon)
+        self.assertLess(flight.length(flight.sub(position, (0.0, 0.99 * moon.influence, 0.0))), 1e-6)
+        self.assertLess(flight.length(flight.sub(velocity, flight.sub((1.0, 2.0, 3.0), moon.velocity(0.0)))), 1e-9)
+        self.assertIs(flight.reference(planet, outside, (0.0, 0.0, 0.0))[0], planet)
+
+    def test_a_low_orbit_of_the_planet_barely_feels_the_moon(self):
+        planet = planet_with_moon(phase=math.pi)        # the moon on the far side
+        r = planet.radius + 40_000.0
+        ship = ship_at((r, 0.0, 0.0), (0.0, flight.circular_speed(planet, 40_000.0), 0.0))
+        heights = []
+        for _ in range(30):
+            coast(ship, planet, 10.0, 1.0 / 30.0)
+            heights.append(flight.length(ship.position) - planet.radius)
+        # Five minutes: the moon's tide (its pull less the planet's fall towards it) is small.
+        self.assertLess(max(abs(h - 40_000.0) for h in heights), 20.0)
+
+    def test_an_orbit_of_the_moon_holds_while_the_moon_goes_round(self):
+        planet = planet_with_moon()
+        moon = planet.moon
+        r = moon.radius + 15_000.0
+        offset, relative = (0.0, 0.0, r), (0.0, math.sqrt(moon.gm / r), 0.0)   # over the moon's pole
+        ship = ship_at(flight.add(moon.position(0.0), offset), flight.add(moon.velocity(0.0), relative))
+        period = 2.0 * math.pi * math.sqrt(r ** 3 / moon.gm)
+        distances = []
+        for _ in range(20):
+            coast(ship, planet, period / 20.0, 0.25)
+            distances.append(flight.length(flight.sub(ship.position, moon.position(planet.time))))
+        self.assertLess(max(abs(d - r) for d in distances), 2_000.0)
+        body, position, velocity = flight.reference(planet, ship.position, ship.velocity)
+        self.assertIs(body, moon)
+
+    def test_a_hohmann_transfer_from_a_low_orbit_reaches_the_moon(self):
+        planet = flight.Planet(density_factor=0.0)
+        r1 = planet.radius + 40_000.0
+        moon = flight.Moon(u=(1.0, 0.0, 0.0), v=(0.0, 1.0, 0.0), primary_gm=planet.gm)
+        r2 = moon.distance
+        a = 0.5 * (r1 + r2)
+        transfer = math.pi * math.sqrt(a ** 3 / planet.gm)
+        # The moon leads by what it travels during the transfer, short of half a turn.
+        moon.phase = math.pi - moon.rate * transfer
+        planet.moon = moon
+        perigee_speed = math.sqrt(planet.gm * (2.0 / r1 - 1.0 / a))
+        self.assertAlmostEqual(perigee_speed - flight.circular_speed(planet, 40_000.0), 162.0, delta=2.0)
+        ship = ship_at((r1, 0.0, 0.0), (0.0, perigee_speed, 0.0))
+        closest = math.inf
+        for _ in range(int(1.1 * transfer / 10.0)):
+            coast(ship, planet, 10.0, 0.5)
+            closest = min(closest, flight.length(flight.sub(ship.position, moon.position(planet.time))))
+        self.assertLess(closest, moon.influence)
+        self.assertAlmostEqual(transfer / 60.0, 53.0, delta=1.0)
+
+
 class OrbitPath(unittest.TestCase):
     def assert_close(self, a, b, delta):
         self.assertLess(flight.length(flight.sub(a, b)), delta)

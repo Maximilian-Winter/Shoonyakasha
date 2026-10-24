@@ -92,7 +92,7 @@ class Instruments:
                                "throttle    %7.0f %%\nassist      %7s"
                     % (r["speed"], r["climb"], r["agl_text"], r["asl_text"], r["throttle"] * 100.0,
                        "on" if r["assist"] else "off"))
-        ui.set_text(orbit[1], "ORBIT")
+        ui.set_text(orbit[1], "ORBIT  " + r["body"].upper())
         ui.set_text(orbit[2], "periapsis   %s\napoapsis    %s\nspeed       %7.0f m/s\ncircular    %7.0f m/s\n"
                               "air         %7.4f kg/m3\npressure    %7.2f kPa\nglow        %7.0f %%"
                     % (r["periapsis_text"], r["apoapsis_text"], r["speed"], r["circular"], r["density"],

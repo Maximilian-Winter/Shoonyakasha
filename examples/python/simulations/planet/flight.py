@@ -14,6 +14,11 @@ falls off exponentially with height; and the thrusters. `Ship.step`
 advances it by one time step with semi-implicit Euler: the velocity
 first, then the position with the new velocity.
 
+A moon (`Moon`, optional) circles the planet on rails and pulls on the
+ship too; `Planet.time` places it. Orbits are reckoned around the moon
+inside its sphere of influence and around the planet outside it
+(`reference`).
+
 Flight assist: the stick asks for rotation rates, which the ship's
 torque holds (always). With translation assist on, the throttle asks for
 a forward speed and the vertical thrusters for a climb rate; the
@@ -136,6 +141,9 @@ class Planet:
     air_density: float = 1.225          # kg/m^3 at the radius
     scale_height: float = 2_500.0       # m; the atmosphere's Rayleigh scale height
     density_factor: float = 1.0         # times the air's density
+    moon: object = None                 # a Moon, which pulls too, where it is at `time`
+    time: float = 0.0                   # seconds of flight, for the moon's place
+    moon_pulls: bool = True             # whether the moon's gravity counts
 
     @property
     def gm(self):
@@ -143,11 +151,76 @@ class Planet:
 
     def gravity(self, position):
         r = length(position)
-        return scale(position, -self.gm / (r * r * r))
+        g = scale(position, -self.gm / (r * r * r))
+        if self.moon is not None and self.moon_pulls:
+            g = add(g, self.moon.gravity(position, self.time))
+        return g
 
     def density(self, position):
         height = max(length(position) - self.radius, -2_000.0)
         return self.air_density * self.density_factor * math.exp(-height / self.scale_height)
+
+
+@dataclass
+class Moon:
+    """A moon on a circular orbit around the planet's centre: at `time` t
+    it is `distance` from it at the angle phase + rate * t in the plane of
+    the unit vectors `u` (where it is at angle 0) and `v` (a quarter turn
+    on, the way it moves). Everything is reckoned from the planet's centre,
+    which the moon pulls as well: the moon circles it at the rate for both
+    their masses, and its pull on the ship is less its pull on the planet
+    (the frame's own acceleration). No air."""
+    radius: float = 25_000.0
+    surface_gravity: float = 0.981
+    distance: float = 600_000.0
+    phase: float = 0.0
+    u: tuple = (1.0, 0.0, 0.0)
+    v: tuple = (0.0, 1.0, 0.0)
+    primary_gm: float = 4.905 * 100_000.0 ** 2
+
+    @property
+    def gm(self):
+        return self.surface_gravity * self.radius * self.radius
+
+    @property
+    def rate(self):
+        """Radians a second along its orbit around the planet."""
+        return math.sqrt((self.primary_gm + self.gm) / self.distance ** 3)
+
+    def position(self, time):
+        angle = self.phase + self.rate * time
+        return add(scale(self.u, self.distance * math.cos(angle)), scale(self.v, self.distance * math.sin(angle)))
+
+    def velocity(self, time):
+        angle = self.phase + self.rate * time
+        speed = self.distance * self.rate
+        return add(scale(self.u, -speed * math.sin(angle)), scale(self.v, speed * math.cos(angle)))
+
+    def gravity(self, position, time):
+        """Its pull at `position` relative to the planet's centre: towards
+        the moon, less the planet's own fall towards it."""
+        centre = self.position(time)
+        offset = sub(position, centre)
+        r = length(offset)
+        d = length(centre)
+        return sub(scale(offset, -self.gm / (r * r * r)), scale(centre, self.gm / (d * d * d)))
+
+    @property
+    def influence(self):
+        """Radius of its sphere of influence: distance * (its GM / the planet's) ** 0.4."""
+        return self.distance * (self.gm / self.primary_gm) ** 0.4
+
+
+def reference(planet, position, velocity):
+    """(body, position, velocity) relative to the body whose gravity the
+    ship's orbit is reckoned around: the moon inside its sphere of
+    influence, else the planet."""
+    moon = planet.moon
+    if moon is not None:
+        centre = moon.position(planet.time)
+        if length(sub(position, centre)) < moon.influence:
+            return moon, sub(position, centre), sub(velocity, moon.velocity(planet.time))
+    return planet, position, velocity
 
 
 @dataclass
@@ -383,8 +456,9 @@ class Ship:
 
 def orbit(planet, position, velocity):
     """(periapsis, apoapsis) heights above the radius of the path the ship
-    would coast along around the planet; apoapsis is inf when it would
-    escape."""
+    would coast along around the planet (or any body with `gm` and
+    `radius`, given the position and velocity relative to it); apoapsis is
+    inf when it would escape."""
     r = length(position)
     v2 = dot(velocity, velocity)
     energy = 0.5 * v2 - planet.gm / r

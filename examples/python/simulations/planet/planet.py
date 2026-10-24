@@ -181,6 +181,12 @@ GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAM
                 keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1}
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
 ORBIT_POINTS = 256               # points of the drawn orbit path; matches OrbitPoints in pipeline.json
+# The moon (flight.Moon): radius, surface gravity (a fifth of the planet's), distance from the
+# planet's centre, and where it starts, in radians east of the site's zenith along its orbit.
+MOON_RADIUS = 25_000.0
+MOON_GRAVITY = 0.981
+MOON_DISTANCE = 600_000.0
+MOON_PHASE = 0.6
 
 parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
@@ -267,6 +273,26 @@ def distance_text(metres):
 
 # ── Meshes ─────────────────────────────────────────────────────────────────
 
+def sphere(subdivisions):
+    """A unit sphere centred on the origin, as triangles with smooth
+    normals: an octahedron whose triangles are split in four
+    `subdivisions` times, each new corner pushed out to the sphere."""
+    triangles = []
+    corners = ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0))
+    for i in range(4):
+        a, b = corners[i], corners[(i + 1) % 4]
+        triangles.append(((0, 0, 1), a, b))
+        triangles.append(((0, 0, -1), b, a))
+    for _ in range(subdivisions):
+        finer = []
+        for a, b, c in triangles:
+            ab, bc, ca = (normalize(scale(add(p, q), 0.5)) for p, q in ((a, b), (b, c), (c, a)))
+            finer += [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)]
+        triangles = finer
+    positions = [p for triangle in triangles for p in triangle]
+    return positions, list(positions)
+
+
 def box():
     """A unit cube centred on the origin, as triangles with flat normals."""
     positions, normals = [], []
@@ -321,6 +347,7 @@ state = {
     "rebuild": [],               # built chunks still to build again for horizon_sun, nearest last
     "gamepad_held": set(),       # gamepad buttons held last frame
     "reentry_pass": False,       # whether the ReentryGlow pass is enabled
+    "moon_entity": None,
     "multiple_scattering": True,  # light scattered more than once, from the multiple scattering table
     "exposure": EXPOSURE,
     "mode": "camera",            # "camera": the free camera; "ship": the view from the ship
@@ -581,14 +608,17 @@ def blow_clouds(dt):
 
 
 def upload_orbit_path():
-    """The path the ship would coast along (flight.orbit_path), relative to
-    the camera (subtracted in double), as one indexed indirect draw for
-    OrbitPath; none without a ship, with the path switched off, or when
-    there is no path."""
+    """The path the ship would coast along (flight.orbit_path) around the
+    body it is reckoned around (flight.reference), drawn where that body
+    is now, relative to the camera (subtracted in double), as one indexed
+    indirect draw for OrbitPath; none without a ship, with the path
+    switched off, or when there is no path."""
     ship = state["ship"]
     points = []
     if ship is not None and state["orbit_path"]:
-        points = flight.orbit_path(flight_planet, ship.position, ship.velocity, count=ORBIT_POINTS)
+        body, position, velocity = flight.reference(flight_planet, ship.position, ship.velocity)
+        centre = body.position(flight_planet.time) if body is flight_planet.moon else (0.0, 0.0, 0.0)
+        points = [add(centre, p) for p in flight.orbit_path(body, position, velocity, count=ORBIT_POINTS)]
     if points:
         camera = state["position"]
         relative = np.zeros((len(points), 4), dtype=np.float32)
@@ -680,6 +710,23 @@ def build_site():
         engine.scene.set_material_float(entity, "gridStrength", 0.0)
         engine.scene.set_render_layer_mask(entity, 1)
         blocks.append((entity, add(scale(east, e), add(scale(up, u), scale(north, n)))))
+
+
+def build_moon():
+    """The moon (flight.Moon) circling in the plane of the site's up and
+    east, so that it passes over the site moving east like preset 9's
+    orbit, starting MOON_PHASE radians east of the site's zenith; drawn as
+    a grey sphere of its radius."""
+    _, up, east, _ = site_frame()
+    flight_planet.moon = flight.Moon(radius=MOON_RADIUS, surface_gravity=MOON_GRAVITY, distance=MOON_DISTANCE,
+                                     phase=MOON_PHASE, u=up, v=east, primary_gm=flight_planet.gm)
+    positions, normals = sphere(4)
+    entity = engine.create_mesh(positions, normals=normals, name="Moon")
+    engine.scene.set_scale(entity, (MOON_RADIUS,) * 3)
+    engine.scene.set_material_vec4(entity, "baseColorFactor", (0.55, 0.55, 0.53, 1.0))
+    engine.scene.set_material_float(entity, "gridStrength", 0.0)
+    engine.scene.set_render_layer_mask(entity, 1)
+    state["moon_entity"] = entity
 
 
 def build_cockpit():
@@ -938,6 +985,7 @@ def fly_ship(dt):
     state["impact_speed"] = 0.0
     steps = 0
     while state["accumulator"] >= FLIGHT_STEP and steps < MAX_STEPS_PER_FRAME:
+        flight_planet.time = state["flight_time"]
         ship.step(flight_planet, state["controls"], FLIGHT_STEP, ground)
         state["impact_speed"] = max(state["impact_speed"], ship.impact_speed)
         state["accumulator"] -= FLIGHT_STEP
@@ -945,6 +993,7 @@ def fly_ship(dt):
         steps += 1
     if steps == MAX_STEPS_PER_FRAME:
         state["accumulator"] = 0.0      # too far behind: drop the rest rather than fall further behind
+    flight_planet.time = state["flight_time"]
     state["position"] = ship.position
     state["forward"] = ship.axes()[2]
 
@@ -1031,6 +1080,9 @@ def frame(dt):
         state["speed"] = 0.0
         fly(dt)
         keep_above_ground()
+        # The world's clock runs on (the moon moves) while the ship waits.
+        state["flight_time"] += dt * WARPS[state["warp"]]
+        flight_planet.time = state["flight_time"]
     update_level_of_detail()
 
     # Camera-relative placement: subtract in double, then hand floats over.
@@ -1041,6 +1093,7 @@ def frame(dt):
     ground = site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
+    engine.scene.set_position(state["moon_entity"], sub(flight_planet.moon.position(flight_planet.time), camera))
     right, up, forward = state["ship"].axes() if state["mode"] == "ship" else camera_basis()
     view_rotation = euler_from_basis(right, up, forward)
     engine.scene.set_rotation(state["camera"], view_rotation)
@@ -1083,9 +1136,10 @@ def update_cockpit(right, up, forward, view_rotation):
     east, north = local_frame(radial)
     level = sub(forward, scale(radial, dot(forward, radial)))
     heading = math.degrees(math.atan2(dot(level, east), dot(level, north))) % 360.0
-    periapsis, apoapsis = flight.orbit(flight_planet, ship.position, ship.velocity)
+    body, periapsis, apoapsis, circular = ship_orbit()
     density = flight_planet.density(ship.position)
     state["instruments"].update({
+        "body": body,
         "speed": speed,
         "climb": dot(ship.velocity, radial),
         "height_text": distance_text(height_above_ground()),
@@ -1098,11 +1152,22 @@ def update_cockpit(right, up, forward, view_rotation):
         "contact": contact_text(ship),
         "periapsis_text": "%11s" % ("below ground" if periapsis < 0.0 else distance_text(periapsis)),
         "apoapsis_text": "%11s" % ("escape" if apoapsis == math.inf else distance_text(apoapsis)),
-        "circular": flight.circular_speed(flight_planet, max(altitude(), 0.0)),
+        "circular": circular,
         "density": density,
         "dynamic_pressure": 0.5 * density * speed * speed,
         "glow": glow,
     })
+
+
+def ship_orbit():
+    """The ship's orbit around the body it is reckoned around
+    (flight.reference): (that body's name, periapsis and apoapsis heights,
+    the circular speed at the ship's distance from it)."""
+    ship = state["ship"]
+    body, position, velocity = flight.reference(flight_planet, ship.position, ship.velocity)
+    periapsis, apoapsis = flight.orbit(body, position, velocity)
+    name = "moon" if body is flight_planet.moon else "planet"
+    return name, periapsis, apoapsis, math.sqrt(body.gm / length(position))
 
 
 def contact_text(ship):
@@ -1122,13 +1187,13 @@ def update_hud():
     deepest = max(node.level for node in tree.selected)
     if state["mode"] == "ship":
         ship, controls = state["ship"], state["controls"]
-        periapsis, apoapsis = flight.orbit(flight_planet, ship.position, ship.velocity)
+        body, periapsis, apoapsis, _ = ship_orbit()
         climb = dot(ship.velocity, normalize(ship.position))
         engine.ui.set_text(state["hud"][0], "SHIP    throttle %3.0f%%    assist %s    speed %.0f m/s    climb %+.0f m/s    "
-                           "above ground %s    above sea level %s    periapsis %s    apoapsis %s    warp x%d%s    "
-                           "frame %.1f ms"
+                           "above ground %s    above sea level %s    around the %s: periapsis %s    apoapsis %s    "
+                           "warp x%d%s    frame %.1f ms"
                            % (controls.throttle * 100.0, "on" if controls.assist else "off", length(ship.velocity),
-                              climb, distance_text(height_above_ground()), distance_text(altitude()),
+                              climb, distance_text(height_above_ground()), distance_text(altitude()), body,
                               "below ground" if periapsis < 0.0 else distance_text(periapsis),
                               "escape" if apoapsis == math.inf else distance_text(apoapsis),
                               WARPS[state["warp"]], "    " + contact_text(ship), state["frame_ms"]))
@@ -1169,6 +1234,7 @@ def on_init():
     build_site()
     build_hud()
     build_cockpit()
+    build_moon()
     state["instruments"] = Instruments(engine, cockpit.SCREENS)
     state["planet_edit"] = {name: list(value) for name, value in state["terrain"].items()}
     state["menu"] = SettingsMenu(engine, "Settings   (F1 to hide)", menu_items())
@@ -2035,9 +2101,10 @@ class LandingCheck:
 
 class OrbitCheck:
     """--orbit-check: the ship in preset 9's circular orbit, coasting at 16x
-    for one orbital period. Prints the periapsis and apoapsis at the start
-    and the end and the range of heights flown, and exits with status 0 when
-    the heights stayed within 100 m of the orbit's, 1 otherwise."""
+    for one orbital period without the moon's pull (whose tide alone moves
+    the orbit by about 100 m). Prints the periapsis and apoapsis at the
+    start and the end and the range of heights flown, and exits with status
+    0 when the heights stayed within 100 m of the orbit's, 1 otherwise."""
 
     TOLERANCE = 100.0
 
@@ -2051,6 +2118,7 @@ class OrbitCheck:
             return True
         if self.start is None:
             teleport(9)
+            flight_planet.moon_pulls = False
             state["warp"] = len(WARPS) - 1
             ship = state["ship"]
             self.start = state["flight_time"]
