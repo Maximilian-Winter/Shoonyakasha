@@ -236,6 +236,8 @@ void VulkanDevice::createLogicalDevice() {
     // depth bounds test.
     deviceFeatures.independentBlend = supportedFeatures.independentBlend;
     deviceFeatures.depthBounds = supportedFeatures.depthBounds;
+    // Pipeline JSON "wireframe": line polygon mode.
+    deviceFeatures.fillModeNonSolid = supportedFeatures.fillModeNonSolid;
     // Pipeline JSON geometry and tessellation shaders.
     deviceFeatures.geometryShader = supportedFeatures.geometryShader;
     deviceFeatures.tessellationShader = supportedFeatures.tessellationShader;
