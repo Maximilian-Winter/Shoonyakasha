@@ -326,12 +326,10 @@ state = {
     "frozen": False,
     "frame": 0,
     "frame_ms": 16.0,            # frame time, smoothed
-    "tree": None,                # made once the site's height is known
     "terrain_version": 0,        # counts terrain changes; probe results carry the version they were made with
-    "ground": None,              # terrain height under the camera, from the probes
+    "ground": None,              # terrain height under the camera on the body under it, from the probes
     "site_height": None,         # natural terrain height at the site, the pad's height, from the probes
     "teleport_when_known": None,  # a preset to jump to again once the site's height is known
-    "terrain": {name: list(value) for name, value in TERRAIN.items()},
     "sun_elevation": SUN_ELEVATION,
     "sun_azimuth": SUN_AZIMUTH,
     "density": 1.0,              # times the atmosphere's coefficients
@@ -356,8 +354,9 @@ state = {
     "warp": 0,                   # index into WARPS
     "accumulator": 0.0,          # seconds of flight not yet stepped
     "flight_time": 0.0,          # seconds of flight stepped
-    "patch": None,               # the ground patch around the ship (ground.py), from the probes
-    "probe_requests": {},        # stamp: (terrain version, ground patch or None, extra directions) not read back yet
+    "patch": None,               # (body, ground patch around the ship relative to it (ground.py)), from the probes
+    "probe_requests": {},        # stamp: (terrain version, body under the camera, "patch" or None, extra directions)
+                                 # not read back yet
     "extra_probes": [],          # directions a check asks the terrain's height at
     "extra_heights": [],         # (direction, height) for the extra probes last read back
     "probe_latency": 3.0,        # frames from asking for probes to using their heights
@@ -381,14 +380,16 @@ class ChunkPool:
         self.free = list(range(SLOTS - 1, -1, -1))
         self.jobs = []           # (jobA, jobB) per chunk to build this frame
         self.pending = {}        # slot: (node, stamp) until the slot's heights come back
+        self.body = {}           # slot: the index of the body its chunk belongs to
         self.stamp = 0
 
-    def make(self, node):
-        """A slot for `node` with a job to build it, or None when the pool is
-        full or this frame's jobs are taken."""
+    def make(self, node, body):
+        """A slot for `node` of `body` with a job to build it, or None when
+        the pool is full or this frame's jobs are taken."""
         if not self.free or len(self.jobs) == MAX_JOBS:
             return None
         slot = self.free.pop()
+        self.body[slot] = body.index
         self.add_job(node, slot)
         return slot
 
@@ -403,11 +404,12 @@ class ChunkPool:
     def add_job(self, node, slot):
         self.stamp += 1
         self.jobs.append(((float(node.face), float(node.level), float(node.x), float(node.y)),
-                          (float(slot), SKIRT_FRACTION * node.edge, float(self.stamp), 0.0)))
+                          (float(slot), SKIRT_FRACTION * node.edge, float(self.stamp), float(self.body[slot]))))
         self.pending[slot] = (node, float(self.stamp))
 
     def release(self, node):
         self.pending.pop(node.chunk, None)
+        self.body.pop(node.chunk, None)
         self.free.append(node.chunk)
 
     def submit_jobs(self, probe_directions):
@@ -437,9 +439,45 @@ class ChunkPool:
 pool = ChunkPool()
 
 
-def new_tree():
-    return QuadTree(RADIUS, pool.make, pool.release, max_level=MAX_LEVEL, split_factor=SPLIT_FACTOR,
-                    heights=ROOT_HEIGHTS, height_pad=HEIGHT_PAD)
+class Body:
+    """A body drawn with terrain from the chunk pool: its index (its chunk
+    jobs carry it, and BuildChunks reads its radius by it), its radius, its
+    terrain's parameters, its orbit (an object with position(time) and
+    velocity(time) around the planet's centre, or None for the planet),
+    whether the ocean is drawn on it, and its quadtree once made. Its
+    tree's chunks and its ground patches are relative to its centre."""
+
+    def __init__(self, index, name, radius, terrain, orbit=None, ocean=False):
+        self.index, self.name, self.radius = index, name, radius
+        self.terrain = terrain
+        self.orbit = orbit
+        self.ocean = ocean
+        self.tree = None
+
+    def centre(self):
+        """Its centre at the flight's time, from the planet's centre."""
+        return self.orbit.position(flight_planet.time) if self.orbit is not None else (0.0, 0.0, 0.0)
+
+    def velocity(self):
+        """Its velocity at the flight's time."""
+        return self.orbit.velocity(flight_planet.time) if self.orbit is not None else (0.0, 0.0, 0.0)
+
+    def relative(self, point):
+        """`point` (from the planet's centre) from its centre."""
+        return sub(point, self.centre())
+
+    def new_tree(self):
+        return QuadTree(self.radius, lambda node: pool.make(node, self), pool.release, max_level=MAX_LEVEL,
+                        split_factor=SPLIT_FACTOR, heights=ROOT_HEIGHTS, height_pad=HEIGHT_PAD)
+
+
+planet = Body(0, "planet", RADIUS, {name: list(value) for name, value in TERRAIN.items()}, ocean=True)
+bodies = [planet]
+
+
+def body_under(point):
+    """The body whose surface (sphere) is nearest `point`."""
+    return min(bodies, key=lambda body: length(body.relative(point)) - body.radius)
 
 
 def site_frame():
@@ -475,7 +513,7 @@ def upload_chunk_indices():
 
 def upload_terrain():
     """The terrain's parameters, and the pad around the site once its height is known."""
-    for name, value in state["terrain"].items():
+    for name, value in planet.terrain.items():
         engine.set_custom_vec4("planet.terrain." + name, tuple(value))
     _, up, _, _ = site_frame()
     known = state["site_height"] is not None
@@ -514,50 +552,66 @@ def skirt_depth(node):
     return max(SKIRT_FRACTION * node.edge, node.high - node.low)
 
 
-def parent_split_distance(node):
-    """The distance from its bounding sphere at which a node's parent splits
-    (the parent's edge is twice the node's); 0 for the roots."""
-    return state["tree"].split_factor * 2.0 * node.edge if node.level > 0 else 0.0
+def parent_split_distance(node, tree):
+    """The distance from its bounding sphere at which a node's parent in
+    `tree` splits (the parent's edge is twice the node's); 0 for the
+    roots."""
+    return tree.split_factor * 2.0 * node.edge if node.level > 0 else 0.0
 
 
-def terrain_floor():
-    """Metres above the radius that no terrain goes below: the seabed's
-    depth, or on land the continent's edge plus the hills' and the detail's
-    heights, both with 10 % to spare (terrain.glsl's noise stays within
-    [-1, 1])."""
-    terrain = state["terrain"]
+def terrain_floor(body):
+    """Metres above `body`'s radius that no terrain goes below: the
+    seabed's depth, or on land the continent's edge plus the hills' and the
+    detail's heights, both with 10 % to spare (terrain.glsl's noise stays
+    within [-1, 1])."""
+    terrain = body.terrain
     return -1.1 * max(terrain["hills"][2], 0.05 * terrain["continent"][3] + terrain["hills"][1] + terrain["detail"][1])
 
 
-def visible(node, occluder):
-    return (in_view(node.bound_centre, node.bound_radius)
-            and not hidden_by_horizon(node.bound_centre, node.bound_radius, state["position"], occluder))
+def visible(node, centre, eye, occluder):
+    """Whether `node` of the body at `centre` is in view and not behind
+    the body's horizon; `eye`: the camera from the body's centre."""
+    return (in_view(add(centre, node.bound_centre), node.bound_radius)
+            and not hidden_by_horizon(node.bound_centre, node.bound_radius, eye, occluder))
 
 
 def upload_drawn_chunks():
-    """One indexed indirect draw per chunk the tree selected that is in
-    view and not behind the horizon, and each drawn slot's centre relative
-    to the camera (subtracted in double), colour, and its parent's split
-    distance and the levels above it, for morph.glsl. The shadow cascades
-    draw every selected chunk within their reach, in view or not."""
-    all_selected = state["tree"].selected if state["tree"] is not None else []
-    occluder = RADIUS + terrain_floor()
-    selected = [node for node in all_selected if visible(node, occluder)]
-    state["chunks_culled"] = len(all_selected) - len(selected)
+    """One indexed indirect draw per chunk the bodies' trees selected that
+    is in view and not behind its body's horizon, and each drawn slot's
+    centre relative to the camera (its body's centre plus its own, less the
+    camera, in double), colour, and its parent's split distance and the
+    levels above it, for morph.glsl. The shadow cascades draw every
+    selected chunk within their reach, in view or not."""
     camera = state["position"]
+    reach = SHADOW_SPLITS[-1] + SHADOW_REACH
     instances = np.zeros((SLOTS, 3, 4), dtype=np.float32)
-    for node in all_selected:
-        slot = node.chunk
-        instances[slot, 0, :3] = sub(node.centre, camera)
-        instances[slot, 1] = chunk_colour(node)
-        instances[slot, 2, :2] = (parent_split_distance(node), node.level)
+    selected, casters, wet_nodes = [], [], []
+    culled = 0
+    for body in bodies:
+        if body.tree is None:
+            continue
+        centre = body.centre()
+        eye = sub(camera, centre)
+        occluder = body.radius + terrain_floor(body)
+        for node in body.tree.selected:
+            slot = node.chunk
+            instances[slot, 0, :3] = sub(node.centre, eye)
+            instances[slot, 1] = chunk_colour(node)
+            instances[slot, 2, :2] = (parent_split_distance(node, body.tree), node.level)
+            if length(sub(node.bound_centre, eye)) - node.bound_radius < reach:
+                casters.append(node)
+            if not visible(node, centre, eye, occluder):
+                culled += 1
+                continue
+            selected.append(node)
+            # The ocean redraws the chunks whose height range reaches below sea level.
+            if body.ocean and node.low < 0.0:
+                wet_nodes.append(node)
+    state["chunks_culled"] = culled
     engine.set_buffer("ChunkInstances", instances)
     # indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
     draw = lambda node: (state["index_count"], 1, 0, node.chunk * VERTICES_PER_CHUNK, node.chunk)
     commands = np.array([draw(node) for node in selected], dtype=np.uint32).reshape(-1, 5)
-    reach = SHADOW_SPLITS[-1] + SHADOW_REACH
-    casters = [node for node in all_selected
-               if length(sub(node.bound_centre, camera)) - node.bound_radius < reach]
     engine.set_buffer("ShadowDraws", np.uint32([len(casters)]))
     if casters:
         engine.set_buffer("ShadowDraws", np.array([draw(node) for node in casters], dtype=np.uint32),
@@ -565,8 +619,7 @@ def upload_drawn_chunks():
     engine.set_buffer("ChunkDraws", np.uint32([len(selected)]))
     if len(selected):
         engine.set_buffer("ChunkDraws", commands, offset=DRAWS_OFFSET)
-    # The ocean redraws the chunks whose height range reaches below sea level.
-    wet = commands[[row for row, node in enumerate(selected) if node.low < 0.0]]
+    wet = np.array([draw(node) for node in wet_nodes], dtype=np.uint32).reshape(-1, 5)
     state["ocean_chunks"] = len(wet)
     engine.set_buffer("OceanDraws", np.uint32([len(wet)]))
     if len(wet):
@@ -631,11 +684,12 @@ def upload_orbit_path():
 
 
 def read_back_heights():
-    """Chunk heights into the tree's nodes, and the probes' heights when
+    """Chunk heights into the trees' nodes, and the probes' heights when
     they were made with the current terrain version: the ground under the
-    camera, the site's natural height, and the ground patch around the
-    ship. Each probe result carries the stamp of the frame that asked for
-    it, which also gives the probes' latency."""
+    camera (when it is still over the body it was measured on), the site's
+    natural height, and the ground patch around the ship. Each probe result
+    carries the stamp of the frame that asked for it, which also gives the
+    probes' latency."""
     readback = engine.get_readback("ChunkHeights")
     if readback is not None:
         pool.take_heights(np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, 4))
@@ -651,12 +705,12 @@ def read_back_heights():
     if request is None or request[0] != state["terrain_version"]:
         return
     state["probe_latency"] = state["frame"] + 1 - stamp
-    state["ground"] = float(probes[0, 0])
+    _, ground_body, patch, extra = request
+    state["ground"] = float(probes[0, 0]) if ground_body is body_under(state["position"]) else None
     if state["site_height"] is None:
         state["site_height"] = float(probes[1, 0])
-    _, patch, extra = request
     if patch is not None:
-        patch.set_heights(probes[2:2 + PATCH_SIZE * PATCH_SIZE, 0])
+        patch[1].set_heights(probes[2:2 + PATCH_SIZE * PATCH_SIZE, 0])
         state["patch"] = patch
     first = PROBES - EXTRA_PROBES
     state["extra_heights"] = [(d, float(h)) for d, h in zip(extra, probes[first:first + len(extra), 0])]
@@ -669,23 +723,23 @@ def start_terrain():
     state["terrain_version"] += 1
     state["ground"] = None
     state["patch"] = None
-    state["tree"] = new_tree()
+    planet.tree = planet.new_tree()
 
 
 def regenerate():
     """Apply changed terrain parameters: every chunk is released, the
     site's height is measured again, and the planet is built again."""
-    if state["tree"] is not None:
-        for node in state["tree"].nodes():
+    if planet.tree is not None:
+        for node in planet.tree.nodes():
             if node.chunk is not None:
                 pool.release(node)
                 node.chunk = None
-    state["tree"] = None
+    planet.tree = None
     state["site_height"] = None
     state["ground"] = None
     state["patch"] = None
     state["terrain_version"] += 1
-    state["planet_edit"] = {name: list(value) for name, value in state["terrain"].items()}
+    state["planet_edit"] = {name: list(value) for name, value in planet.terrain.items()}
     upload_terrain()
 
 
@@ -773,14 +827,17 @@ def build_hud():
 # ── Camera ─────────────────────────────────────────────────────────────────
 
 def altitude():
-    """Height above the sphere of radius RADIUS (sea level)."""
-    return length(state["position"]) - RADIUS
+    """Height above the sphere of the body under the camera (on the
+    planet, sea level)."""
+    body = body_under(state["position"])
+    return length(body.relative(state["position"])) - body.radius
 
 
 def surface_height():
     """The height of what is under the camera: the ground, or the sea where
-    the ground is below sea level."""
-    return max(state["ground"] or 0.0, 0.0)
+    the ground is below sea level on a body with an ocean."""
+    ground = state["ground"] or 0.0
+    return max(ground, 0.0) if body_under(state["position"]).ocean else ground
 
 
 def height_above_ground():
@@ -788,22 +845,29 @@ def height_above_ground():
 
 
 def keep_above_ground():
-    floor = RADIUS + surface_height() + MIN_ALTITUDE
-    if length(state["position"]) < floor:
-        state["position"] = scale(normalize(state["position"]), floor)
+    body = body_under(state["position"])
+    floor = body.radius + surface_height() + MIN_ALTITUDE
+    offset = body.relative(state["position"])
+    if length(offset) < floor:
+        state["position"] = add(body.centre(), scale(normalize(offset), floor))
+
+
+def radial_up(point):
+    """Up at `point`: away from the centre of the body under it."""
+    return normalize(body_under(point).relative(point))
 
 
 def camera_basis():
     """(right, up, forward), with the horizon level: up lies in the plane of
-    the forward direction and the planet's radial up."""
-    radial = normalize(state["position"])
+    the forward direction and the radial up of the body under the camera."""
+    radial = radial_up(state["position"])
     forward = state["forward"]
     right = normalize(cross(forward, radial))
     return right, cross(right, forward), forward
 
 
 def look(dx, dy):
-    radial = normalize(state["position"])
+    radial = radial_up(state["position"])
     forward = rotate(state["forward"], radial, -dx * LOOK_RADIANS_PER_PIXEL)
     right = normalize(cross(forward, radial))
     pitched = rotate(forward, right, -dy * LOOK_RADIANS_PER_PIXEL)
@@ -881,7 +945,7 @@ def leave_ship():
     """Camera mode, from where the ship is, facing its way with the horizon level."""
     state["mode"] = "camera"
     _, _, forward = state["ship"].axes()
-    radial = normalize(state["position"])
+    radial = radial_up(state["position"])
     if abs(dot(forward, radial)) > 0.99:
         forward = local_frame(radial)[1]
     state["forward"] = normalize(forward)
@@ -959,21 +1023,28 @@ def read_gamepad_buttons():
 
 
 def ground_patch_request(ship):
-    """A ground patch to measure around where the ship will be when its
-    heights come back: ahead along its velocity over the ground by the
-    probes' latency (times the warp), reaching that far again either way
-    beyond the ship's contact points."""
-    radial = normalize(ship.position)
-    along = sub(ship.velocity, scale(radial, dot(ship.velocity, radial)))
+    """(body, patch): a ground patch on the body under the ship, relative
+    to its centre, to measure around where the ship will be when its
+    heights come back: ahead along its velocity over that body's ground by
+    the probes' latency (times the warp), reaching that far again either
+    way beyond the ship's contact points."""
+    body = body_under(ship.position)
+    position = body.relative(ship.position)
+    velocity = sub(ship.velocity, body.velocity())
+    radial = normalize(position)
+    along = sub(velocity, scale(radial, dot(velocity, radial)))
     ahead = state["probe_latency"] * state["frame_ms"] / 1000.0 * WARPS[state["warp"]]
     half = SHIP_REACH + PATCH_MARGIN + length(along) * ahead
-    return GroundPatch(RADIUS, add(ship.position, scale(along, ahead)), 2.0 * half / (PATCH_SIZE - 1))
+    return body, GroundPatch(body.radius, add(position, scale(along, ahead)), 2.0 * half / (PATCH_SIZE - 1))
 
 
 def ground_under_ship():
-    """The ground patch's query for the ship, or None while there is no patch."""
-    patch = state["patch"]
-    return patch.query if patch is not None else None
+    """The ground patch's query for the ship, taking points from the
+    planet's centre, or None while there is no patch."""
+    if state["patch"] is None:
+        return None
+    body, patch = state["patch"]
+    return lambda point: patch.query(body.relative(point))
 
 
 def fly_ship(dt):
@@ -1014,19 +1085,25 @@ def in_view(centre, radius):
 
 # ── Per frame ──────────────────────────────────────────────────────────────
 
-def rebuild_for_sun(tree):
+def rebuild_for_sun():
     """When the sun has moved more than HORIZON_SUN_STEP from the direction
     the chunks' horizons were measured towards (chunk_build.comp), measure
-    towards the new one: every built chunk is built again in its own slot,
-    nearest first, in the jobs this frame's new chunks leave over."""
+    towards the new one: every built chunk of every body is built again in
+    its own slot, nearest first, in the jobs this frame's new chunks leave
+    over."""
     sun = sun_direction()
     if state["horizon_sun"] is None or dot(sun, state["horizon_sun"]) < math.cos(HORIZON_SUN_STEP):
         state["horizon_sun"] = sun
         engine.set_custom_vec4("planet.horizonSun", sun + (0.0,))
-        camera = state["position"]
-        built = [node for node in tree.nodes() if node.chunk is not None]
-        built.sort(key=lambda node: length(sub(node.bound_centre, camera)), reverse=True)
-        state["rebuild"] = built                       # popped from the end: nearest first
+        distances = []
+        for body in bodies:
+            if body.tree is None:
+                continue
+            eye = body.relative(state["position"])
+            distances += [(length(sub(node.bound_centre, eye)), node)
+                          for node in body.tree.nodes() if node.chunk is not None]
+        distances.sort(key=lambda pair: pair[0], reverse=True)
+        state["rebuild"] = [node for _, node in distances]   # popped from the end: nearest first
     queue = state["rebuild"]
     while queue:
         node = queue[-1]
@@ -1039,30 +1116,38 @@ def rebuild_for_sun(tree):
 
 
 def update_level_of_detail():
-    tree = state["tree"]
+    """Each body's tree updated for the camera (from the body's centre),
+    its missing chunks built, those in view first, and its unused ones
+    evicted; then the sun's rebuilds and this frame's probes."""
     state["frame"] += 1
-    if tree is not None and not state["frozen"]:
-        tree.update(state["position"], state["frame"])
-        tree.build(MAX_JOBS,
-                   priority=lambda distance, node: (not in_view(node.bound_centre, node.bound_radius), distance))
-        tree.evict(state["frame"])
-        rebuild_for_sun(tree)
-    # The probes: the ground under the camera, the site, and the ground patch around the ship.
+    trees = [body for body in bodies if body.tree is not None]
+    if trees and not state["frozen"]:
+        for body in trees:
+            centre = body.centre()
+            body.tree.update(body.relative(state["position"]), state["frame"])
+            body.tree.build(MAX_JOBS, priority=lambda distance, node, centre=centre: (
+                not in_view(add(centre, node.bound_centre), node.bound_radius), distance))
+            body.tree.evict(state["frame"])
+        rebuild_for_sun()
+    # The probes: the ground under the camera on the body under it, the site, and the ground patch
+    # around the ship.
     _, site_up, _, _ = site_frame()
     ship = state["ship"]
     patch = ground_patch_request(ship) if state["mode"] == "ship" and not ship.crashed else None
-    probes = [normalize(state["position"]), site_up] + (patch.directions if patch is not None else [])
+    ground_body = body_under(state["position"])
+    probes = [normalize(ground_body.relative(state["position"])), site_up]
+    probes += patch[1].directions if patch is not None else []
     extra = list(state["extra_probes"][:EXTRA_PROBES])
     probes += [(0.0, 1.0, 0.0)] * (PROBES - EXTRA_PROBES - len(probes))
     probes += extra + [(0.0, 1.0, 0.0)] * (EXTRA_PROBES - len(extra))
     stamp = float(state["frame"])
-    state["probe_requests"][stamp] = (state["terrain_version"], patch, extra)
+    state["probe_requests"][stamp] = (state["terrain_version"], ground_body, patch, extra)
     pool.submit_jobs([tuple(d) + (stamp,) for d in probes])
 
 
 def frame(dt):
     read_back_heights()
-    if state["tree"] is None and state["site_height"] is not None:
+    if planet.tree is None and state["site_height"] is not None:
         start_terrain()
         if state["teleport_when_known"]:
             teleport(state["teleport_when_known"])
@@ -1177,14 +1262,17 @@ def contact_text(ship):
 
 
 def update_hud():
-    tree = state["tree"]
+    tree = planet.tree
     if tree is None:
         return
     for line in state["hud"]:
         engine.ui.set_visible(line, state["debug_text"])
-    terrain = state["terrain"]
-    cached = sum(1 for node in tree.nodes() if node.chunk is not None)
-    deepest = max(node.level for node in tree.selected)
+    terrain = planet.terrain
+    trees = [body.tree for body in bodies if body.tree is not None]
+    selected = sum(len(t.selected) for t in trees)
+    cached = sum(1 for t in trees for node in t.nodes() if node.chunk is not None)
+    missing = sum(len(t.missing) for t in trees)
+    deepest = max(node.level for t in trees for node in t.selected)
     if state["mode"] == "ship":
         ship, controls = state["ship"], state["controls"]
         body, periapsis, apoapsis, _ = ship_orbit()
@@ -1204,8 +1292,8 @@ def update_hud():
                               state["speed_factor"], state["frame_ms"]))
     engine.ui.set_text(state["hud"][1], "chunks drawn %d of %d (ocean %d)    built %d    missing %d    "
                        "pool %d / %d    deepest level %d    split factor %.2f%s    colour: %s"
-                       % (len(tree.selected) - state["chunks_culled"], len(tree.selected), state["ocean_chunks"],
-                          cached, len(tree.missing), pool.used, SLOTS,
+                       % (selected - state["chunks_culled"], selected, state["ocean_chunks"],
+                          cached, missing, pool.used, SLOTS,
                           deepest,
                           tree.split_factor, "    LOD FROZEN" if state["frozen"] else "",
                           COLOUR_MODES[state["colour_mode"]]))
@@ -1227,7 +1315,8 @@ def on_init():
 
     upload_sky()
     upload_clouds()
-    engine.set_custom_float("planet.radius", RADIUS)
+    radii = [body.radius for body in bodies]
+    engine.set_custom_vec4("planet.radii", tuple(radii + [0.0] * (4 - len(radii))))
     upload_terrain()
     upload_chunk_indices()
     engine.set_buffer("OrbitIndices", np.arange(ORBIT_POINTS, dtype=np.uint32))
@@ -1236,7 +1325,7 @@ def on_init():
     build_cockpit()
     build_moon()
     state["instruments"] = Instruments(engine, cockpit.SCREENS)
-    state["planet_edit"] = {name: list(value) for name, value in state["terrain"].items()}
+    state["planet_edit"] = {name: list(value) for name, value in planet.terrain.items()}
     state["menu"] = SettingsMenu(engine, "Settings   (F1 to hide)", menu_items())
     teleport(1)
 
@@ -1286,11 +1375,11 @@ def menu_items():
         state["controls"].assist = on
 
     def set_split(value):
-        if state["tree"] is not None:
-            state["tree"].split_factor = value
+        if planet.tree is not None:
+            planet.tree.split_factor = value
 
     def apply_planet():
-        state["terrain"] = {name: list(value) for name, value in state["planet_edit"].items()}
+        planet.terrain = {name: list(value) for name, value in state["planet_edit"].items()}
         regenerate()
 
     return [
@@ -1310,7 +1399,7 @@ def menu_items():
         {"slider": "Sun azimuth", "min": 0.0, "max": 360.0, "get": lambda: state["sun_azimuth"],
          "set": set_and("sun_azimuth", upload_sky), "format": "%.0f deg"},
         {"slider": "Split factor", "min": 0.5, "max": 4.0,
-         "get": lambda: state["tree"].split_factor if state["tree"] is not None else SPLIT_FACTOR,
+         "get": lambda: planet.tree.split_factor if planet.tree is not None else SPLIT_FACTOR,
          "set": set_split, "format": "%.2f"},
         {"toggle": "Ocean", "get": lambda: state["ocean"], "set": set_ocean},
         {"toggle": "Orbit path", "get": lambda: state["orbit_path"], "set": lambda on: state.update(orbit_path=on)},
@@ -1347,7 +1436,7 @@ def menu_items():
 
 
 def new_seed():
-    state["terrain"]["seed"] = [random.uniform(-100.0, 100.0) for _ in range(3)] + [0.0]
+    planet.terrain["seed"] = [random.uniform(-100.0, 100.0) for _ in range(3)] + [0.0]
     regenerate()
 
 
@@ -1361,12 +1450,12 @@ def set_colour_mode(mode):
 
 
 def change_terrain(name, index, factor):
-    state["terrain"][name][index] *= factor
+    planet.terrain[name][index] *= factor
     regenerate()
 
 
 def on_key(key):
-    tree = state["tree"]
+    tree = planet.tree
     if keys.NUM_1 <= key <= keys.NUM_9:
         teleport(key - keys.NUM_0)
     elif key == keys.TAB:
@@ -1429,9 +1518,10 @@ def on_scroll(x_offset, y_offset):
 
 
 def settled():
-    """The tree made, no chunks missing, none still to build again for the
-    sun, and every built chunk's heights back."""
-    return state["tree"] is not None and not state["tree"].missing and not state["rebuild"] and not pool.pending
+    """The planet's tree made, no body's chunks missing, none still to
+    build again for the sun, and every built chunk's heights back."""
+    return (planet.tree is not None and not any(body.tree.missing for body in bodies if body.tree is not None)
+            and not state["rebuild"] and not pool.pending)
 
 
 def look_up(degrees):
@@ -1575,7 +1665,7 @@ class CaptureTour:
             if done or self.frames >= self.MAX_FRAMES:
                 path = os.path.join(self.directory, name + ".png")
                 ok = engine.capture_screenshot(path)
-                selected = len(state["tree"].selected)
+                selected = len(planet.tree.selected)
                 print("[planet] %s after %d frames%s, %d of %d chunks drawn, frame %.1f ms"
                       % (path if ok else "screenshot failed", self.frames, "" if done else " (not settled)",
                          selected - state["chunks_culled"], selected, state["frame_ms"]), flush=True)
@@ -1635,7 +1725,7 @@ class Verify:
                  "normal length - 1": 0.0, "lowest/highest height (m)": 0.0}
         lowest_normal_dot = 1.0
         chunks = 0
-        for node in state["tree"].nodes():
+        for node in planet.tree.nodes():
             if node.chunk is None:
                 continue
             built = gpu[node.chunk]
@@ -1713,13 +1803,13 @@ class MorphCheck:
     def factor(self, node, camera):
         if node.level == 0:
             return 1.0
-        split = state["tree"].split_factor * 2.0 * node.edge
+        split = planet.tree.split_factor * 2.0 * node.edge
         distance = max(0.0, length(sub(camera, node.bound_centre)) - node.bound_radius)
         t = max(0.0, min(1.0, (distance - MORPH_START * split) / ((1.0 - MORPH_START) * split)))
         return t * t * (3.0 - 2.0 * t)
 
     def __call__(self, dt):
-        tree = state["tree"]
+        tree = planet.tree
         if tree is None or not tree.selected:
             return True
         if self.frame < 0 and not self.settled_at_start():
@@ -1774,7 +1864,7 @@ def morph_factor(node, point, level=1):
     present position; 0 where the node has no such ancestor."""
     if level > min(MORPH_LEVELS, node.level):
         return 0.0
-    split = parent_split_distance(node) * 2.0 ** (level - 1)
+    split = parent_split_distance(node, planet.tree) * 2.0 ** (level - 1)
     distance = length(sub(point, state["position"]))
     t = max(0.0, min(1.0, (distance - MORPH_START * split) / ((1.0 - MORPH_START) * split)))
     return t * t * (3.0 - 2.0 * t)
@@ -1830,7 +1920,7 @@ class CrackCheck:
         self.worst = 0.0
 
     def __call__(self, dt):
-        if state["tree"] is None:
+        if planet.tree is None:
             return True
         self.frames += 1
         if self.frames == 1:
@@ -1856,7 +1946,7 @@ class CrackCheck:
         return True
 
     def measure(self, gpu):
-        selected = state["tree"].selected
+        selected = planet.tree.selected
         by_key = {(n.face, n.level, n.x, n.y): n for n in selected}
         row = QUADS + 1
 
@@ -1981,7 +2071,7 @@ class LandingCheck:
         self.touchdown_speed = 0.0
 
     def __call__(self, dt):
-        if state["tree"] is None:
+        if planet.tree is None:
             return True
         if self.best is None or self.spot < len(self.spots):
             return self.search()
@@ -2037,7 +2127,7 @@ class LandingCheck:
         return True
 
     def report(self, ship):
-        patch = state["patch"]
+        patch = state["patch"][1] if state["patch"] is not None else None
         ok = patch is not None and not ship.crashed and ship.on_ground
         if patch is not None:
             depth, normal = patch.query(ship.position)
@@ -2114,7 +2204,7 @@ class OrbitCheck:
         self.high = -math.inf
 
     def __call__(self, dt):
-        if state["tree"] is None:
+        if planet.tree is None:
             return True
         if self.start is None:
             teleport(9)
