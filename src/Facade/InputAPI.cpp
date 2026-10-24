@@ -41,6 +41,25 @@ glm::vec2 InputAPI::getMouseDelta() const {
     return m_impl->inputHandler->getInputState().mouseDelta;
 }
 
+bool InputAPI::isGamepadConnected() const {
+    if (!m_impl->inputHandler) return false;
+    return m_impl->inputHandler->getInputState().gamepad.connected;
+}
+
+bool InputAPI::isGamepadButtonDown(int button) const {
+    if (!m_impl->inputHandler) return false;
+    const auto& pad = m_impl->inputHandler->getInputState().gamepad;
+    if (!pad.connected || button < 0 || button >= static_cast<int>(pad.buttons.size())) return false;
+    return pad.buttons[static_cast<size_t>(button)];
+}
+
+float InputAPI::getGamepadAxis(int axis) const {
+    if (!m_impl->inputHandler) return 0.f;
+    const auto& pad = m_impl->inputHandler->getInputState().gamepad;
+    if (!pad.connected || axis < 0 || axis >= static_cast<int>(pad.axes.size())) return 0.f;
+    return pad.axes[static_cast<size_t>(axis)];
+}
+
 glm::vec2 InputAPI::getScrollDelta() const {
     if (!m_impl->inputHandler) return glm::vec2(0.f);
     return m_impl->inputHandler->getInputState().scrollDelta;

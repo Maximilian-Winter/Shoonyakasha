@@ -45,6 +45,19 @@ public:
     /// Check if mouse is currently captured (FPS mode).
     bool isMouseCaptured() const;
 
+    /// Whether a gamepad is connected: the first joystick GLFW knows a
+    /// standard mapping for, polled once per frame.
+    bool isGamepadConnected() const;
+
+    /// Whether a button of that gamepad is held (GLFW_GAMEPAD_BUTTON_*, 0 to
+    /// 14); false without a gamepad or for a button outside that range.
+    bool isGamepadButtonDown(int button) const;
+
+    /// An axis of that gamepad (GLFW_GAMEPAD_AXIS_*, 0 to 5): sticks from -1
+    /// to 1 (y down positive), triggers from -1 (released) to 1; 0 without a
+    /// gamepad or for an axis outside that range.
+    float getGamepadAxis(int axis) const;
+
     // ═══════════════════════════════════════════════════════════
     // Event Callbacks
     // ═══════════════════════════════════════════════════════════

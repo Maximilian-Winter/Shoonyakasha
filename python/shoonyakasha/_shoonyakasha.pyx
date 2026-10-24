@@ -828,6 +828,22 @@ cdef class Input:
         """Check if mouse is captured (FPS mode)."""
         return self._ptr.isMouseCaptured()
 
+    def is_gamepad_connected(self):
+        """Whether a gamepad is connected: the first joystick GLFW has a
+        standard mapping for, polled once per frame."""
+        return self._ptr.isGamepadConnected()
+
+    def is_gamepad_button_down(self, int button):
+        """Whether a gamepad button is held (keys.GAMEPAD_A ...); False
+        without a gamepad or for an unknown button."""
+        return self._ptr.isGamepadButtonDown(button)
+
+    def get_gamepad_axis(self, int axis):
+        """A gamepad axis (keys.GAMEPAD_LEFT_X ...): sticks from -1 to 1
+        (y down positive), triggers from -1 (released) to 1; 0.0 without a
+        gamepad or for an unknown axis."""
+        return self._ptr.getGamepadAxis(axis)
+
     # ── Event Callbacks ───────────────────────────────────────
 
     def set_on_key_event(self, callback):

@@ -89,6 +89,31 @@ MOUSE_LEFT = 0
 MOUSE_RIGHT = 1
 MOUSE_MIDDLE = 2
 
+# ── Gamepad buttons, for is_gamepad_button_down() (GLFW's standard mapping) ──
+GAMEPAD_A = 0
+GAMEPAD_B = 1
+GAMEPAD_X = 2
+GAMEPAD_Y = 3
+GAMEPAD_LEFT_BUMPER = 4
+GAMEPAD_RIGHT_BUMPER = 5
+GAMEPAD_BACK = 6
+GAMEPAD_START = 7
+GAMEPAD_GUIDE = 8
+GAMEPAD_LEFT_THUMB = 9
+GAMEPAD_RIGHT_THUMB = 10
+GAMEPAD_DPAD_UP = 11
+GAMEPAD_DPAD_RIGHT = 12
+GAMEPAD_DPAD_DOWN = 13
+GAMEPAD_DPAD_LEFT = 14
+
+# ── Gamepad axes, for get_gamepad_axis() ──────────────────────
+GAMEPAD_LEFT_X = 0
+GAMEPAD_LEFT_Y = 1
+GAMEPAD_RIGHT_X = 2
+GAMEPAD_RIGHT_Y = 3
+GAMEPAD_LEFT_TRIGGER = 4
+GAMEPAD_RIGHT_TRIGGER = 5
+
 
 def name(code):
     """Return the name of a key code, or its number as a string if unnamed.

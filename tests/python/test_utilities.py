@@ -554,6 +554,14 @@ class KeyCodes(unittest.TestCase):
         self.assertEqual(301, keys.F12)
         self.assertEqual(340, keys.LEFT_SHIFT)
 
+    def test_gamepad_constants_match_glfws_standard_mapping(self):
+        self.assertEqual((0, 1, 2, 3), (keys.GAMEPAD_A, keys.GAMEPAD_B, keys.GAMEPAD_X, keys.GAMEPAD_Y))
+        self.assertEqual((11, 12, 13, 14), (keys.GAMEPAD_DPAD_UP, keys.GAMEPAD_DPAD_RIGHT,
+                                            keys.GAMEPAD_DPAD_DOWN, keys.GAMEPAD_DPAD_LEFT))
+        self.assertEqual((0, 1, 2, 3, 4, 5), (keys.GAMEPAD_LEFT_X, keys.GAMEPAD_LEFT_Y, keys.GAMEPAD_RIGHT_X,
+                                              keys.GAMEPAD_RIGHT_Y, keys.GAMEPAD_LEFT_TRIGGER,
+                                              keys.GAMEPAD_RIGHT_TRIGGER))
+
     def test_name_round_trips(self):
         self.assertEqual("ESCAPE", keys.name(keys.ESCAPE))
         self.assertEqual("999", keys.name(999))

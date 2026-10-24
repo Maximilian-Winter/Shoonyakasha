@@ -285,6 +285,9 @@ cdef extern from "Facade/InputAPI.h" namespace "Shoonyakasha::Facade":
         vec2 getMouseDelta() const
         vec2 getScrollDelta() const
         cbool isMouseCaptured() const
+        cbool isGamepadConnected() const
+        cbool isGamepadButtonDown(int button) const
+        float getGamepadAxis(int axis) const
 
         # Event Callbacks
         void setOnKeyEvent(function_int_bool cb)
