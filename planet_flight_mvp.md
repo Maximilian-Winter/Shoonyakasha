@@ -791,8 +791,9 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
   - Culling the terrain's chunks against the view and the horizon before the indirect draw (WP4 draws every chunk the tree selects; the engine's per-entity culling no longer applies).
     - As built: in Python before the draw commands are written: the view cone that holds the screen's diagonal (with the framebuffer's aspect), and a horizon test against a sphere at the terrain's floor, bounded from the terrain function's parameters. Draws 194 of 564 chunks at preset 1, 131 of 387 at preset 2, 79 of 300 at preset 7, 68 of 111 in orbit; from 1,000 km and beyond the six roots stay drawn. Every capture below its text lines is pixel-identical to before.
   - Detail below the terrain's finest noise octave (about 80 m): detail noise in the shaders, or more octaves where the chunks are fine enough.
+    - As built: derivative ("eroded") fBm for the hills and a detail layer from 80 m to 10 m wavelengths, 15 m high in the mountains' bands and 35 % of that outside them, in `terrain.glsl`, so the chunks, the probes and the colours share it. The `detail` vec4 (wavelength, height, octaves, erosion) is in `TerrainParams` and the menu. The ground patch grew to 11 × 11 (128 probes) to follow the detail: the gear rests within 1.6 cm of the terrain on a 17° slope.
+  - Derivative fBm (from the first line above): as built with the detail; the ridged mountains are unchanged.
   - Water depth per pixel from the depth buffer instead of per vertex (shallow water shows the coarse chunks' facets from far away); rougher water further away, so the sun's glint spreads naturally.
   - Redder sunsets without a teal sky (multiple scattering, or the Hillaire LUTs above).
   - Gamepad axes and buttons in the Python bindings, then a gamepad mapping for the ship.
-  - A systematic search for cracks between levels in steep terrain (only stills were inspected).
-  - The terrain's lighting: the sun shadowed by mountains, and the cockpit's interior shadowed by its frame.
+  - A systematic search for cracks between levels in steep terrain (only stills were inspected).  - The terrain's lighting: the sun shadowed by mountains, and the cockpit's interior shadowed by its frame.

@@ -21,7 +21,7 @@
 layout(local_size_x = 64) in;
 
 const int MAX_JOBS = 16;
-const int PROBES = 32;
+const int PROBES = 128;
 const int QUADS = 16;
 const int ROW = QUADS + 1;
 const int GRID = ROW * ROW;
@@ -52,6 +52,7 @@ layout(set = 0, binding = 2) uniform TerrainParams {
     vec4 seed;
     vec4 site;
     vec4 siteShape;
+    vec4 detail;
 } terrain;
 
 layout(std430, set = 0, binding = 3) writeonly buffer ChunkHeights {
@@ -114,8 +115,7 @@ vec3 surfaceNormal(dvec3 d, double radius, double step) {
 }
 
 void evaluateProbes() {
-    uint i = gl_LocalInvocationID.x;
-    if (i < uint(PROBES)) {
+    for (uint i = gl_LocalInvocationID.x; i < uint(PROBES); i += 64u) {
         vec3 dir = normalize(jobs.probe[i].xyz);
         float h = i == 1u ? terrainHeightNatural(dir) : terrainHeight(dir);
         probes.probeHeights[i] = vec4(h, jobs.probe[i].w, 0.0, 0.0);

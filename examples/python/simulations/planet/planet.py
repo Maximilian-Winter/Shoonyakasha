@@ -101,7 +101,7 @@ ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks a
 # The GPU chunk pool; these match pipeline.json and chunk_build.comp.
 SLOTS = 2048                     # chunks the pool holds
 MAX_JOBS = 16                    # chunks BuildChunks builds per frame at most
-PROBES = 32                      # directions BuildChunks evaluates the terrain at
+PROBES = 128                     # directions BuildChunks evaluates the terrain at
 EXTRA_PROBES = 4                 # the last probes, for directions a check asks for
 VERTICES_PER_CHUNK = (QUADS + 1) ** 2 + 4 * (QUADS + 1)
 FLOATS_PER_VERTEX = 12           # position and u, normal and v, direction and height
@@ -112,6 +112,7 @@ TERRAIN = {
     "mountains": [6.0, 3000.0, 2.0, 8.0],   # frequency, height (m), mask frequency, octaves
     "hills": [40.0, 150.0, 1500.0, 6.0],    # frequency, height (m), ocean depth (m), octaves
     "seed": [0.0, 0.0, 0.0, 0.0],           # offset added to the noise input
+    "detail": [80.0, 15.0, 4.0, 0.5],       # wavelength (m), height (m), octaves, erosion
 }
 SITE_FACE = 4                    # +Z
 SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a vertex of every chunk from level 3 down
@@ -415,10 +416,11 @@ def upload_sky():
 
 def terrain_floor():
     """Metres above the radius that no terrain goes below: the seabed's
-    depth, or on land the continent's edge plus the hills' height, both
-    with 10 % to spare (terrain.glsl's noise stays within [-1, 1])."""
-    continent, hills = state["terrain"]["continent"], state["terrain"]["hills"]
-    return -1.1 * max(hills[2], 0.05 * continent[3] + hills[1])
+    depth, or on land the continent's edge plus the hills' and the detail's
+    heights, both with 10 % to spare (terrain.glsl's noise stays within
+    [-1, 1])."""
+    terrain = state["terrain"]
+    return -1.1 * max(terrain["hills"][2], 0.05 * terrain["continent"][3] + terrain["hills"][1] + terrain["detail"][1])
 
 
 def visible(node, occluder):
@@ -1038,6 +1040,10 @@ def menu_items():
          "set": edit_set("continent", 2), "format": "%+.2f"},
         {"slider": "Ocean depth", "min": 0.0, "max": 4000.0, "get": edit("hills", 2),
          "set": edit_set("hills", 2), "format": "%.0f m"},
+        {"slider": "Detail height", "min": 0.0, "max": 30.0, "get": edit("detail", 1),
+         "set": edit_set("detail", 1), "format": "%.1f m"},
+        {"slider": "Erosion", "min": 0.0, "max": 4.0, "get": edit("detail", 3),
+         "set": edit_set("detail", 3), "format": "%.2f"},
         {"button": "Apply: build the planet again", "do": apply_planet},
     ]
 
@@ -1129,6 +1135,34 @@ def settled():
     return state["tree"] is not None and not state["tree"].missing and not pool.pending
 
 
+def near_mountain(sun_elevation, sun_azimuth, top=False):
+    """The free camera 2.7 km above the sphere, 600 m south-west of a peak
+    60 km from the site at 67.5 degrees from east (2,460 m high with the
+    default terrain), looking north-east at it and down 12 degrees; with
+    `top`, 2,520 m above the sphere over the peak, looking south-west and
+    down 20 degrees. The sun at `sun_elevation` and `sun_azimuth` (degrees,
+    from east towards north) seen from the peak."""
+    _, up, east, north = site_frame()
+    azimuth = math.radians(67.5)
+    level = add(scale(east, math.cos(azimuth)), scale(north, math.sin(azimuth)))
+    peak = normalize(add(up, scale(level, 60_000.0 / RADIUS)))
+    peak_east, peak_north = local_frame(peak)
+    north_east = normalize(add(peak_east, peak_north))
+    spot = normalize(add(peak, scale(north_east, -600.0 / RADIUS)))
+    if top:
+        state["position"] = scale(peak, RADIUS + 2_520.0)
+        state["forward"] = normalize(add(scale(north_east, -1.0), scale(peak, -math.tan(math.radians(20.0)))))
+    else:
+        state["position"] = scale(spot, RADIUS + 2_700.0)
+        state["forward"] = normalize(add(north_east, scale(spot, -math.tan(math.radians(12.0)))))
+    elevation, azimuth = math.radians(sun_elevation), math.radians(sun_azimuth)
+    sun = add(scale(peak, math.sin(elevation)),
+              scale(add(scale(peak_east, math.cos(azimuth)), scale(peak_north, math.sin(azimuth))), math.cos(elevation)))
+    state["sun_elevation"] = math.degrees(math.asin(max(-1.0, min(1.0, dot(sun, up)))))
+    state["sun_azimuth"] = math.degrees(math.atan2(dot(sun, north), dot(sun, east))) % 360.0
+    upload_sky()
+
+
 class CaptureTour:
     """--capture: each shot in turn, a screenshot once settled (or after
     MAX_FRAMES), then exit. Waits for the site's height first."""
@@ -1151,6 +1185,11 @@ class CaptureTour:
          lambda: state["menu"].show(True), lambda: setattr(state["controls"], "throttle", 0.6)),
         ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN),
         ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
+        ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
+        ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
+        ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),
+        ("mountain_top_no_detail", 7, False, 0, ("detail", 1, 0.0), DAY_SUN,
+         lambda: near_mountain(15.0, 135.0, top=True)),
         ("preset_3_mountains_higher", 3, False, 0, ("mountains", 1, 1.5), DAY_SUN),
     ]
 
@@ -1335,6 +1374,8 @@ class LandingCheck:
             height = state["ground"]
             if self.best is None or height > self.best[0]:
                 self.best = (height, self.spots[self.spot])
+                self.best_place = (self.RINGS[self.spot // self.AZIMUTHS],
+                                   360.0 * (self.spot % self.AZIMUTHS) / self.AZIMUTHS)
         self.spot += 1
         self.frames = 0
         if self.spot < len(self.spots):
@@ -1352,7 +1393,8 @@ class LandingCheck:
             state["warp"] = 0
             state["patch"] = None
             self.start = state["flight_time"]
-            print("[planet] the highest spot found: %.0f m" % height, flush=True)
+            print("[planet] the highest spot found: %.0f m, %.0f km from the site at %.1f degrees from east"
+                  % (height, self.best_place[0] / 1000.0, self.best_place[1]), flush=True)
         return True
 
     def land(self):

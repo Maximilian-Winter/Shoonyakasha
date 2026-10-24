@@ -17,7 +17,7 @@ patch's width have no answer.
 
 import math
 
-SIZE = 5                        # grid points along each side
+SIZE = 11                       # grid points along each side
 
 
 def _add(a, b):

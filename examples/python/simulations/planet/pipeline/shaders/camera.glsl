@@ -18,6 +18,7 @@ layout(set = CAMERA_SET, binding = 1) uniform TerrainParams {
     vec4 seed;
     vec4 site;
     vec4 siteShape;
+    vec4 detail;
 } terrain;
 
 layout(set = CAMERA_SET, binding = 2) uniform AtmosphereParams {
