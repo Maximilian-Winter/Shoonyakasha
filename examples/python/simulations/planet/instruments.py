@@ -94,6 +94,6 @@ class Instruments:
                        "on" if r["assist"] else "off"))
         ui.set_text(orbit[1], "ORBIT")
         ui.set_text(orbit[2], "periapsis   %s\napoapsis    %s\nspeed       %7.0f m/s\ncircular    %7.0f m/s\n"
-                              "air         %7.4f kg/m3\npressure    %7.2f kPa"
+                              "air         %7.4f kg/m3\npressure    %7.2f kPa\nglow        %7.0f %%"
                     % (r["periapsis_text"], r["apoapsis_text"], r["speed"], r["circular"], r["density"],
-                       r["dynamic_pressure"] / 1000.0))
+                       r["dynamic_pressure"] / 1000.0, r["glow"] * 100.0))

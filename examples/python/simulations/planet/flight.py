@@ -442,5 +442,23 @@ def orbit_path(planet, position, velocity, count=256, reach=10.0):
     return points
 
 
+def smoothstep(edge0, edge1, x):
+    t = max(0.0, min(1.0, (x - edge0) / (edge1 - edge0)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def reentry_glow(planet, position, velocity):
+    """How strongly the air ahead of the ship glows, 0 to 1. Not a physical
+    temperature: the product of the speed's rise from 0.6 to 0.85 of the
+    circular speed at the surface, and the air density's rise, in powers of
+    ten, from 1e-5 to 1e-3 of its density at sea level. A ship coming down
+    from orbit glows from about 25 km down to where the air has slowed it."""
+    speed = length(velocity) / circular_speed(planet, 0.0)
+    density = planet.density(position) / planet.air_density
+    if density <= 0.0:
+        return 0.0
+    return smoothstep(0.6, 0.85, speed) * smoothstep(-5.0, -3.0, math.log10(density))
+
+
 def circular_speed(planet, height):
     return math.sqrt(planet.gm / (planet.radius + height))

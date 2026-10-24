@@ -183,7 +183,9 @@
         { "name": "prograde", "type": "vec4", "source": "scene.custom.planet.hud.prograde",
           "default": [ 0.0, 0.0, -1.0, 0.0 ] },
         { "name": "colour", "type": "vec4", "source": "scene.custom.planet.hud.colour",
-          "default": [ 0.35, 1.0, 0.45, 1.0 ] }
+          "default": [ 0.35, 1.0, 0.45, 1.0 ] },
+        { "name": "reentry", "type": "vec4", "source": "scene.custom.planet.hud.reentry",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] }
       ]
     }
   },
@@ -489,6 +491,29 @@
       },
       "descriptorSets": [ "cameraSet", "atmosphereInputSet" ],
       "outputs": [ { "resource": "swapchain", "usage": "color_write" } ]
+    },
+    {
+      "name": "ReentryGlow",
+      "type": "graphics",
+      "enabled": false,
+      "execution": { "type": "fullscreen" },
+      "inputs": [
+        { "resource": "hdrColor", "usage": "shader_read" },
+        { "resource": "depth", "usage": "shader_read" },
+        { "resource": "transmittanceLut", "usage": "shader_read" },
+        { "resource": "multiScatteringLut", "usage": "shader_read" }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/reentry.frag.spv",
+        "vertexInput": "none",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": [ "cameraSet", "hudSet", "atmosphereInputSet" ],
+      "outputs": [ { "resource": "swapchain", "usage": "color_blend" } ]
     },
     {
       "name": "OrbitPath",

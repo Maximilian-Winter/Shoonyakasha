@@ -20,6 +20,7 @@ layout(set = 1, binding = 0) uniform HudParams {
     vec4 up;          // xyz: the planet's up at the ship
     vec4 prograde;    // xyz: unit direction of the velocity; w: 1 to show the marker
     vec4 colour;      // rgb: the symbols' colour
+    vec4 reentry;     // x: the reentry glow, 0 to 1 (reentry.frag)
 } hud;
 
 layout(location = 0) in vec2 fragTexCoord;

@@ -136,6 +136,31 @@ class OrbitPath(unittest.TestCase):
         self.assertEqual(flight.orbit_path(planet, ship.position, ship.velocity), [])
 
 
+class ReentryGlow(unittest.TestCase):
+    def test_no_glow_in_orbit_or_in_ordinary_low_flight(self):
+        planet = flight.Planet()
+        orbiting = level_ship(40_000.0, planet, speed=flight.circular_speed(planet, 40_000.0))
+        self.assertEqual(flight.reentry_glow(planet, orbiting.position, orbiting.velocity), 0.0)
+        cruising = level_ship(1_000.0, planet, speed=300.0)
+        self.assertEqual(flight.reentry_glow(planet, cruising.position, cruising.velocity), 0.0)
+
+    def test_coming_down_from_orbit_glows_between_25_and_8_km(self):
+        planet = flight.Planet()
+        ship = level_ship(40_000.0, planet, speed=flight.circular_speed(planet, 40_000.0) - 80.0)
+        coast = flight.Controls(assist=False)
+        glows = []
+        dt = 1.0 / 30.0
+        while flight.length(ship.position) - planet.radius > 2_000.0:
+            ship.step(planet, coast, dt)
+            height = flight.length(ship.position) - planet.radius
+            glows.append((height, flight.reentry_glow(planet, ship.position, ship.velocity)))
+        self.assertTrue(all(g == 0.0 for h, g in glows if h > 30_000.0))
+        brightest = max(glows, key=lambda hg: hg[1])
+        self.assertGreater(brightest[1], 0.9)
+        self.assertTrue(8_000.0 < brightest[0] < 25_000.0)
+        self.assertTrue(all(g < 0.1 for h, g in glows if h < 3_000.0))
+
+
 class ClimbToOrbit(unittest.TestCase):
     """A scripted ascent with assist off: burn at 60 degrees until the
     apoapsis is 40 km up, coast to it, burn along the velocity until the

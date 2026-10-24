@@ -294,6 +294,7 @@ state = {
     "ozone": True,               # the ozone layer's absorption
     "orbit_path": True,          # draw the path the ship would coast along
     "gamepad_held": set(),       # gamepad buttons held last frame
+    "reentry_pass": False,       # whether the ReentryGlow pass is enabled
     "multiple_scattering": True,  # light scattered more than once, from the multiple scattering table
     "exposure": EXPOSURE,
     "mode": "camera",            # "camera": the free camera; "ship": the view from the ship
@@ -611,7 +612,16 @@ def show_mode():
     engine.scene.set_visible(state["cockpit"], ship)
     state["instruments"].show(ship)
     engine.set_pass_enabled("HudSymbols", ship)
+    if not ship:
+        set_reentry_pass(False)
     state["shown_mode"] = state["mode"]
+
+
+def set_reentry_pass(on):
+    """The ReentryGlow pass on or off, when that changes."""
+    if state["reentry_pass"] != on:
+        engine.set_pass_enabled("ReentryGlow", on)
+        state["reentry_pass"] = on
 
 
 def build_hud():
@@ -952,6 +962,9 @@ def update_cockpit(right, up, forward, view_rotation):
     engine.set_custom_vec4("planet.hud.up", radial + (0.0,))
     prograde = scale(ship.velocity, 1.0 / speed) if speed > 1.0 else forward
     engine.set_custom_vec4("planet.hud.prograde", prograde + (1.0 if speed > 1.0 else 0.0,))
+    glow = flight.reentry_glow(flight_planet, ship.position, ship.velocity)
+    engine.set_custom_vec4("planet.hud.reentry", (glow, 0.0, 0.0, 0.0))
+    set_reentry_pass(glow > 0.0)
 
     east, north = local_frame(radial)
     level = sub(forward, scale(radial, dot(forward, radial)))
@@ -974,6 +987,7 @@ def update_cockpit(right, up, forward, view_rotation):
         "circular": flight.circular_speed(flight_planet, max(altitude(), 0.0)),
         "density": density,
         "dynamic_pressure": 0.5 * density * speed * speed,
+        "glow": glow,
     })
 
 
@@ -1228,6 +1242,23 @@ def settled():
     return state["tree"] is not None and not state["tree"].missing and not pool.pending
 
 
+def mid_reentry():
+    """The ship 17 km above the blocks at 640 m/s eastwards, 8 degrees
+    below level, its nose along its path: in the reentry glow."""
+    _, up, east, _ = site_frame()
+    down = math.radians(8.0)
+    forward = normalize(add(scale(east, math.cos(down)), scale(up, -math.sin(down))))
+    ship_up = normalize(sub(up, scale(forward, dot(up, forward))))
+    position = scale(up, RADIUS + 17_000.0)
+    state["ship"] = flight.Ship(position=position, velocity=scale(forward, 640.0),
+                                orientation=flight.quat_from_basis(cross(forward, ship_up), ship_up,
+                                                                   scale(forward, -1.0)))
+    state["controls"] = flight.Controls(assist=False)
+    state["mode"] = "ship"
+    state["position"] = position
+    state["forward"] = forward
+
+
 def near_mountain(sun_elevation, sun_azimuth, top=False):
     """The free camera 2.7 km above the sphere, 600 m south-west of a peak
     60 km from the site at 67.5 degrees from east (2,460 m high with the
@@ -1280,6 +1311,7 @@ class CaptureTour:
         ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
         ("preset_2_twilight", 2, False, 0, None, (-3.0, 90.0)),
         ("orbit_from_afar", 9, False, 0, None, DAY_SUN, lambda: teleport(4)),
+        ("reentry", 9, False, 0, None, DAY_SUN, mid_reentry),
         ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
         ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
         ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),

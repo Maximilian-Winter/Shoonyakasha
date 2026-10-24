@@ -787,6 +787,7 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 
 **WP11 and onward: Polish (any order)**
 - Horizon culling, CDLOD morphing, Hillaire LUTs, derivative fBm, reentry effects, clouds, a moon, orbit display.
+  - Reentry, as built: at this planet's speeds nothing would glow (the air ahead heats by under 200 K), so the glow is a stated heuristic on its scale, `flight.reentry_glow`: speed against the surface's circular speed times the air density in the band where Earth's plasma shows. A fullscreen pass draws a core and streaks around the direction of travel; the ORBIT display shows it.
   - Orbit display, as built: the conic from the ship's position and velocity (`flight.orbit_path`), drawn as a depth-tested line strip after the atmosphere, from the cockpit and from outside.
 - Gathered while building WP1–WP9:
   - Culling the terrain's chunks against the view and the horizon before the indirect draw (WP4 draws every chunk the tree selects; the engine's per-entity culling no longer applies).
