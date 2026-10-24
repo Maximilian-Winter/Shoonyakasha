@@ -31,6 +31,19 @@ python planet.py --crack-check     # measure the gaps between levels in steep te
 | **L** | Translation assist on / off |
 | **, / .** | Time warp down / up: 1×, 2×, 4×, 8×, 16× |
 
+| Ship, gamepad (adding to the keys) | |
+|---|---|
+| Left stick | Pitch (back raises the nose) and roll |
+| Right stick | Yaw (sideways), thrust up / down (up / down) |
+| Right / left trigger | Throttle up / down, at up to 50 % a second as far as pulled |
+| **A** | Translation assist on / off |
+| **B** | Throttle to 0 |
+| Bumpers | Time warp down / up |
+| **Y** | Free camera / ship |
+| **Start** | Settings menu |
+
+The sticks ignore the 12 % of their travel nearest the centre and stretch the rest back to full. The gamepad is the first one GLFW has a standard mapping for (`engine.input.is_gamepad_connected`, `is_gamepad_button_down`, `get_gamepad_axis`).
+
 | Anywhere | |
 |---|---|
 | **1 – 5** | 5 m above the blocks, 1 km above them, then 50 km, 1,000 km, 5,000 km above the sphere |

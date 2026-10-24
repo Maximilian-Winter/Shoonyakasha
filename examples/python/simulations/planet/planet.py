@@ -42,6 +42,14 @@ Keys:
     E / Q                  thrust up / down
     L                      translation assist on / off
     , / .                  time warp down / up (1x to 16x)
+  ship, gamepad (adding to the keys):
+    left stick             pitch and roll
+    right stick            yaw (x), thrust up / down (y)
+    right / left trigger   throttle up / down
+    A                      translation assist on / off
+    B                      throttle to 0
+    bumpers                time warp down / up
+    Y / Start              free camera or ship / settings menu
   anywhere:
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
@@ -150,6 +158,11 @@ SHIP_REACH = 8.0                 # metres from the ship's centre to its farthest
 PATCH_MARGIN = 4.0               # metres the ground patch reaches beyond the ship
 THROTTLE_RATE = 0.5              # throttle per second while W or S is held
 MOUSE_STICK = 0.04               # stick per pixel of mouse movement
+GAMEPAD_DEAD_ZONE = 0.12         # of a stick's travel, read as 0
+# Gamepad buttons and the keys they press: A assist, B throttle to 0, the bumpers time warp,
+# Y ship or free camera, Start the menu.
+GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAMEPAD_LEFT_BUMPER: keys.COMMA,
+                keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1}
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
 ORBIT_POINTS = 256               # points of the drawn orbit path; matches OrbitPoints in pipeline.json
 
@@ -280,6 +293,7 @@ state = {
     "density": 1.0,              # times the atmosphere's coefficients
     "ozone": True,               # the ozone layer's absorption
     "orbit_path": True,          # draw the path the ship would coast along
+    "gamepad_held": set(),       # gamepad buttons held last frame
     "multiple_scattering": True,  # light scattered more than once, from the multiple scattering table
     "exposure": EXPOSURE,
     "mode": "camera",            # "camera": the free camera; "ship": the view from the ship
@@ -753,23 +767,51 @@ def place_ship(preset):
     state["forward"] = forward
 
 
+def stick(value):
+    """A gamepad axis with GAMEPAD_DEAD_ZONE around 0 cut out and the rest
+    stretched back to -1 .. 1."""
+    size = abs(value)
+    if size <= GAMEPAD_DEAD_ZONE:
+        return 0.0
+    return math.copysign((min(size, 1.0) - GAMEPAD_DEAD_ZONE) / (1.0 - GAMEPAD_DEAD_ZONE), value)
+
+
+def trigger(axis):
+    """A gamepad trigger from 0 (released) to 1."""
+    return 0.5 * (engine.input.get_gamepad_axis(axis) + 1.0)
+
+
 def read_ship_controls(dt):
+    """The ship's controls from the keys, the mouse and the gamepad; their
+    sticks add up, each clamped to -1 .. 1."""
     controls = state["controls"]
     down = engine.input.is_key_down
-    if down(keys.W):
-        controls.throttle = min(1.0, controls.throttle + THROTTLE_RATE * dt)
-    if down(keys.S):
-        controls.throttle = max(0.0, controls.throttle - THROTTLE_RATE * dt)
-    pitch = float(down(keys.UP)) - float(down(keys.DOWN))
-    yaw = float(down(keys.RIGHT)) - float(down(keys.LEFT))
+    pad = engine.input.is_gamepad_connected()
+    axis = (lambda a: stick(engine.input.get_gamepad_axis(a))) if pad else (lambda a: 0.0)
+    throttle_up = float(down(keys.W)) + (trigger(keys.GAMEPAD_RIGHT_TRIGGER) if pad else 0.0)
+    throttle_down = float(down(keys.S)) + (trigger(keys.GAMEPAD_LEFT_TRIGGER) if pad else 0.0)
+    controls.throttle = max(0.0, min(1.0, controls.throttle + THROTTLE_RATE * dt * (throttle_up - throttle_down)))
+    pitch = float(down(keys.UP)) - float(down(keys.DOWN)) + axis(keys.GAMEPAD_LEFT_Y)
+    yaw = float(down(keys.RIGHT)) - float(down(keys.LEFT)) + axis(keys.GAMEPAD_RIGHT_X)
     if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
         dx, dy = engine.input.get_mouse_delta()
         pitch -= dy * MOUSE_STICK
         yaw += dx * MOUSE_STICK
     clamp = lambda value: max(-1.0, min(1.0, value))
     controls.pitch, controls.yaw = clamp(pitch), clamp(yaw)
-    controls.roll = float(down(keys.D)) - float(down(keys.A))
-    controls.vertical = float(down(keys.E)) - float(down(keys.Q))
+    controls.roll = clamp(float(down(keys.D)) - float(down(keys.A)) + axis(keys.GAMEPAD_LEFT_X))
+    controls.vertical = clamp(float(down(keys.E)) - float(down(keys.Q)) - axis(keys.GAMEPAD_RIGHT_Y))
+
+
+def read_gamepad_buttons():
+    """Gamepad buttons on the frame they are pressed, as the keys of
+    GAMEPAD_KEYS."""
+    held = set()
+    if engine.input.is_gamepad_connected():
+        held = {b for b in GAMEPAD_KEYS if engine.input.is_gamepad_button_down(b)}
+    for button in held - state["gamepad_held"]:
+        on_key(GAMEPAD_KEYS[button])
+    state["gamepad_held"] = held
 
 
 def ground_patch_request(ship):
@@ -854,6 +896,8 @@ def frame(dt):
         if state["teleport_when_known"]:
             teleport(state["teleport_when_known"])
 
+    if not state["scripted_controls"]:
+        read_gamepad_buttons()
     if state["mode"] == "ship":
         if not state["scripted_controls"]:
             read_ship_controls(dt)
