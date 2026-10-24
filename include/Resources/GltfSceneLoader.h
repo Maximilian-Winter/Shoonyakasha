@@ -149,6 +149,8 @@ struct GltfPrimitive {
     glm::vec3 boundsMin         = glm::vec3(0.0f);
     glm::vec3 boundsMax         = glm::vec3(0.0f);
     bool      hasBounds         = false;
+    // Uv units (TEXCOORD_0) per unit of surface, as MeshComponent::uvPerUnit.
+    float     uvPerUnit         = 0.0f;
 
     // ─── Convenience ────────────────────────────────────────
     bool isTransparent() const { return alphaMode == Shoonyakasha::AlphaMode::Blend; }
@@ -323,17 +325,42 @@ public:
 
     /// Textures loaded with GltfLoadOptions::streamTextures: upload those the
     /// worker threads have decoded, until `byteBudget` bytes (at least one
-    /// texture), and put each in place of its placeholder in the registry's
-    /// materials and material variants. Call from the main thread.
-    void updateTextureStreaming(entt::registry& registry, size_t byteBudget);
+    /// texture), and put each in place of the texture it replaces (its
+    /// placeholder, or its earlier mips) in the registry's materials and
+    /// material variants. Then, with a memory budget, keep each at the mip
+    /// `demand` (FrameGraphRenderer::getTextureDemand) needs, as the budget
+    /// allows: decoding finer mips on the worker threads, copying coarser
+    /// ones on the GPU (when over the budget, or after a second of needing
+    /// no more). Call from the main thread.
+    void updateTextureStreaming(entt::registry& registry, size_t byteBudget,
+                                const std::unordered_map<VkImageView, float>& demand);
 
     /// Streamed textures finished (uploaded, or failed to decode) and
     /// requested so far.
     std::pair<size_t, size_t> textureStreamingProgress() const;
 
+    /// Bytes streamed textures may take on the GPU; 0, the default, keeps
+    /// every one at full size. Textures streamed while it is set start at
+    /// their mip of at most 128 texels.
+    void setTextureMemoryBudget(uint64_t bytes) { m_textureMemoryBudget = bytes; }
+
+    /// Streamed textures, the bytes their resident mips take and would take
+    /// at the mips they need, the budget, textures waiting for finer mips and
+    /// textures the budget holds coarser than they need.
+    struct ResidencyReport {
+        size_t textures = 0;
+        uint64_t residentBytes = 0;
+        uint64_t neededBytes = 0;
+        uint64_t budget = 0;
+        size_t waiting = 0;
+        size_t heldBack = 0;
+    };
+    ResidencyReport textureResidency() const;
+
 private:
     struct TextureStreaming;
     std::unique_ptr<TextureStreaming> m_streaming;
+    uint64_t m_textureMemoryBudget = 0;
     /// Check `arrays` and upload them into `out`'s geometry and bounds.
     std::string buildMeshPrimitive(const MeshArrays& arrays, GltfPrimitive& out);
 

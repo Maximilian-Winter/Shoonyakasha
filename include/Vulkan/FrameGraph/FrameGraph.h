@@ -1233,6 +1233,9 @@ public:
     /// Entities drawn at each level last frame, among those with levels:
     /// [0] the full mesh, [k] MeshComponent::lods[k - 1].
     std::vector<uint32_t> getLodCounts() const;
+    /// FrameGraphRenderer::getTextureDemand: the most pixels per uv unit each
+    /// sampled image view covered last frame; empty without entity passes.
+    const std::unordered_map<VkImageView, float>& getTextureDemand() const;
 
     // ── Named Parameters (for push constants) ──
     void setParameter(const std::string& name, float value);

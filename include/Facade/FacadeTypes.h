@@ -259,6 +259,16 @@ struct GltfOptions {
     std::string namePrefix;
 };
 
+/// Texture residency of streamed textures (EngineAPI::getTextureResidency).
+struct TextureResidencyStats {
+    size_t textures = 0;          // streamed textures
+    uint64_t residentBytes = 0;   // their mips on the GPU
+    uint64_t neededBytes = 0;     // at the mips last frame's view needs
+    uint64_t budget = 0;          // setTextureMemoryBudget; 0 none
+    size_t waiting = 0;           // waiting for finer mips
+    size_t heldBack = 0;          // held coarser than needed by the budget
+};
+
 /// Result of EngineAPI::loadGltfScene(). Check success before using entities.
 struct GltfResult {
     bool success = false;

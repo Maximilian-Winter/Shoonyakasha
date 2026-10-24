@@ -157,6 +157,25 @@ public:
         const std::vector<TextureLevels>& textures
     );
 
+    // A texture for createShrunkTextures2D: a sampled texture made with the
+    // transfer source usage (as createTextures2D's are), and how many of its
+    // top mips the new one leaves out.
+    struct TextureShrink {
+        const GPUTexture* source = nullptr;
+        uint32_t skip = 0;
+    };
+
+    // For each entry, a new texture holding mips `skip` on of its source,
+    // copied on the GPU, with one command buffer and one wait for `queue`.
+    // The sources are left as they were, without samplers on the new ones.
+    static std::vector<GPUTexture> createShrunkTextures2D(
+        VmaAllocator allocator,
+        VkDevice device,
+        VkQueue queue,
+        VkCommandPool cmdPool,
+        const std::vector<TextureShrink>& shrinks
+    );
+
     // A sampled image of `width` x `height` texels of `format`, from `size`
     // bytes of rows of tightly packed texels, top row first, with a
     // clamp-to-edge sampler, linear where the format filters, nearest

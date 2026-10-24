@@ -436,8 +436,9 @@ std::vector<GPUTexture> GPUResourceFactory::createTextures2D(
         const uint32_t mipLevels = source.generateMipmaps
             ? calculateMipLevels(source.width, source.height)
             : static_cast<uint32_t>(std::max<size_t>(levels.size(), 1));
-        VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        if (source.generateMipmaps) usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        // A transfer source too, for mip generation and for createShrunkTextures2D.
+        const VkImageUsageFlags usage =
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         GPUTexture texture = createTexture2D(allocator, device, source.width, source.height, source.format, usage,
                                              mipLevels);
 
@@ -482,6 +483,72 @@ std::vector<GPUTexture> GPUResourceFactory::createTextures2D(
 
     vkFreeCommandBuffers(device, cmdPool, 1, &cmdBuffer);
     destroyBuffer(allocator, staging);
+    return out;
+}
+
+std::vector<GPUTexture> GPUResourceFactory::createShrunkTextures2D(
+    VmaAllocator allocator,
+    VkDevice device,
+    VkQueue queue,
+    VkCommandPool cmdPool,
+    const std::vector<TextureShrink>& shrinks
+) {
+    std::vector<GPUTexture> out;
+    if (shrinks.empty()) return out;
+
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandPool = cmdPool;
+    cmdAllocInfo.commandBufferCount = 1;
+    VkCommandBuffer cmdBuffer;
+    vkAllocateCommandBuffers(device, &cmdAllocInfo, &cmdBuffer);
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+
+    for (const auto& shrink : shrinks) {
+        const GPUTexture& source = *shrink.source;
+        const uint32_t skip = std::min(shrink.skip, source.mipLevels - 1);
+        const uint32_t width = std::max(source.width >> skip, 1u), height = std::max(source.height >> skip, 1u);
+        const uint32_t mipLevels = source.mipLevels - skip;
+        GPUTexture texture = createTexture2D(
+            allocator, device, width, height, source.format,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, mipLevels);
+
+        transitionImageLayout(cmdBuffer, source.image, source.format, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, source.mipLevels);
+        transitionImageLayout(cmdBuffer, texture.image, source.format, VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels);
+        std::vector<VkImageCopy> regions;
+        for (uint32_t mip = 0; mip < mipLevels; ++mip) {
+            VkImageCopy region{};
+            region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.srcSubresource.mipLevel = mip + skip;
+            region.srcSubresource.layerCount = 1;
+            region.dstSubresource = region.srcSubresource;
+            region.dstSubresource.mipLevel = mip;
+            region.extent = {std::max(width >> mip, 1u), std::max(height >> mip, 1u), 1};
+            regions.push_back(region);
+        }
+        vkCmdCopyImage(cmdBuffer, source.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture.image,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(regions.size()), regions.data());
+        transitionImageLayout(cmdBuffer, source.image, source.format, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, source.mipLevels);
+        transitionImageLayout(cmdBuffer, texture.image, source.format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
+        out.push_back(texture);
+    }
+    vkEndCommandBuffer(cmdBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmdBuffer;
+    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+    vkFreeCommandBuffers(device, cmdPool, 1, &cmdBuffer);
     return out;
 }
 

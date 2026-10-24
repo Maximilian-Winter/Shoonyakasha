@@ -78,6 +78,14 @@ result = engine.load_gltf_scene("bistro.gltf", max_texture_size=1024, stream_tex
 finished, requested = engine.get_texture_streaming_progress()   # from a later frame
 ```
 
+### Texture memory budget
+
+`engine.set_texture_memory_budget(megabytes)` keeps streamed textures at the resolution the view needs instead of at full size, within that many megabytes. Textures streamed while a budget is set start at their mip of at most 128 texels. Each frame, for each entity in the main camera's view, the renderer works out how many pixels a unit of its uvs covers at its nearest point: from the camera's field of view and render height, the distance, the entity's scale and its mesh's uvs per unit of surface (`TEXCOORD_0`). The finest mip a texture needs is the coarsest that still has a texel per pixel there, along its larger side, for the entity that shows it largest. When those mips together exceed the budget, the textures that have given up the fewest mips beyond what they need give up one more, the larger first, until they fit or reach their 128-texel mip.
+
+A texture that needs finer mips is decoded again on the worker threads from that mip on and uploaded as above. One that needs coarser mips gets them by a copy on the GPU, at once when the textures are over the budget, otherwise after a second of needing no more. Either way the new texture takes the old one's place in the materials, and the old one is freed once no frame in flight uses it. A budget of 0, the default, keeps every texture at full size. Textures that are not mipmapped (`generate_mipmaps=False`) keep their size and count against the budget.
+
+`engine.get_texture_residency()` returns a dict: `textures` streamed, `resident_mb` their mips on the GPU take, `needed_mb` they would take at the mips the view needs, `budget_mb`, `waiting` (textures waiting for finer mips) and `held_back` (textures the budget holds coarser than needed). The estimate takes neither texture transforms nor how steeply a surface is seen into account, and ray-traced reflections and GI sample the same mips.
+
 ## Levels of detail
 
 `lods=True` (C++ `GltfOptions::generateLods`) gives each static triangle mesh of at least 64 triangles up to four coarser levels of detail, simplified with meshoptimizer to about half the triangles of the level before. They share the mesh's vertices and follow its full index list in the same index buffer (`MeshComponent::lods`), and the mesh's open borders stay in place. Each level records how far its surface may lie from the full mesh's, counting how far its normals stray. Skinned and morphed meshes get none.

@@ -417,6 +417,22 @@ void EngineAPI::setTextureUploadBudget(size_t bytes) {
     m_impl->app->setTextureUploadBudget(bytes);
 }
 
+void EngineAPI::setTextureMemoryBudget(uint64_t bytes) {
+    m_impl->app->getGltfLoader().setTextureMemoryBudget(bytes);
+}
+
+TextureResidencyStats EngineAPI::getTextureResidency() const {
+    const auto report = m_impl->app->getGltfLoader().textureResidency();
+    TextureResidencyStats stats;
+    stats.textures = report.textures;
+    stats.residentBytes = report.residentBytes;
+    stats.neededBytes = report.neededBytes;
+    stats.budget = report.budget;
+    stats.waiting = report.waiting;
+    stats.heldBack = report.heldBack;
+    return stats;
+}
+
 namespace {
 
 /// Flat float lists as MeshArrays; an error when one is not whole vectors.

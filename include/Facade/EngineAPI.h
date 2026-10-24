@@ -256,6 +256,13 @@ public:
     /// texture a frame while any are waiting); 16 MiB by default.
     void setTextureUploadBudget(size_t bytes);
 
+    /// Bytes streamed textures may take on the GPU; each is kept at the mip
+    /// the main camera's view needs as far as the budget allows. 0, the
+    /// default, keeps every one at full size. Textures streamed while a
+    /// budget is set start at their mip of at most 128 texels.
+    void setTextureMemoryBudget(uint64_t bytes);
+    TextureResidencyStats getTextureResidency() const;
+
     /// A mesh entity drawing triangles from arrays, flat: `positions` x, y, z
     /// per vertex; `indices` three per triangle, counter-clockwise from the
     /// front, or empty for every three vertices; `normals` (x, y, z), `uvs`

@@ -254,6 +254,7 @@ private:
     /// Entities drawn at each level of detail last frame, among those with
     /// levels: [0] the full mesh, [k] mesh.lods[k - 1].
     mutable std::vector<uint32_t> m_lodCounts;
+    mutable std::unordered_map<VkImageView, float> m_textureDemand;
     /// The level of `mesh` to draw for an entity with these world bounds and
     /// matrix: the coarsest whose error, seen from the main camera at the
     /// bounds' nearest point, is within the LOD threshold in pixels.
@@ -262,6 +263,12 @@ private:
 
 public:
     const std::vector<uint32_t>& getLodCounts() const { return m_lodCounts; }
+
+    /// Texture demand last frame: for each image view a material of an
+    /// entity in the main camera's view samples, the most pixels per uv unit
+    /// it covers on screen (at the entity's nearest point, through its mesh's
+    /// uvPerUnit). Entities without bounds or uvPerUnit add nothing.
+    const std::unordered_map<VkImageView, float>& getTextureDemand() const { return m_textureDemand; }
 
 private:
     mutable std::vector<Renderable> m_renderables;

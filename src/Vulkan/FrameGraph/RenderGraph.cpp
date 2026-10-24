@@ -324,6 +324,11 @@ std::vector<uint32_t> RenderGraph::getLodCounts() const {
     return m_frameGraphRenderer ? m_frameGraphRenderer->getLodCounts() : std::vector<uint32_t>{};
 }
 
+const std::unordered_map<VkImageView, float>& RenderGraph::getTextureDemand() const {
+    static const std::unordered_map<VkImageView, float> none;
+    return m_frameGraphRenderer ? m_frameGraphRenderer->getTextureDemand() : none;
+}
+
 bool RenderGraph::getPassDrawStats(const std::string& passName, uint32_t& drawn, uint32_t& culled,
                                    uint32_t* occluded) const {
     const auto* stats = m_frameGraphRenderer ? m_frameGraphRenderer->getPassDrawStats(passName) : nullptr;

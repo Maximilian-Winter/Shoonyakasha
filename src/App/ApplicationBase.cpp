@@ -653,8 +653,9 @@ void ApplicationBase::update() {
     m_activeScene->update();
 
     // Textures loaded with streamTextures: decoded ones uploaded, up to the
-    // budget, and put in place of their placeholders.
-    m_gltfLoader->updateTextureStreaming(m_activeScene->getRegistry(), m_textureUploadBudget);
+    // upload budget, and kept at the mips last frame's view needs.
+    m_gltfLoader->updateTextureStreaming(m_activeScene->getRegistry(), m_textureUploadBudget,
+                                         m_renderGraph->getTextureDemand());
 
     // Screen readers hear of what changed in this frame's snapshot.
     if (m_accessibility && m_uiContext->accessibility().enabled) m_accessibility->snapshotPublished();

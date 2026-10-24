@@ -19,7 +19,7 @@ from cpython.ref cimport PyObject
 
 from ._facade_types cimport (
     EntityHandle, EngineConfig, GltfOptions, RecordingOptions,
-    GltfResult as CppGltfResult, RenderStatsSnapshot,
+    GltfResult as CppGltfResult, RenderStatsSnapshot, TextureResidencyStats,
     CameraType, LightType, UIAnchor, TextHAlign, TextVAlign, TextDirection, TextOrientation, LayoutDirection,
     CanvasScaleMode, SizeFit, AccessibleRole,
 )
@@ -539,6 +539,8 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         CppGltfResult loadGltfScene(const string& path, const GltfOptions& opts) except +
         pair[size_t, size_t] getTextureStreamingProgress()
         void setTextureUploadBudget(size_t bytes)
+        void setTextureMemoryBudget(uint64_t bytes)
+        TextureResidencyStats getTextureResidency()
 
         # Frame capture
         cbool captureScreenshot(const string& path) except +

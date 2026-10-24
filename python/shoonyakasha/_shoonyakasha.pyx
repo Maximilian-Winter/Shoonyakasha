@@ -11,7 +11,7 @@
 #
 
 from cpython.ref cimport PyObject
-from libc.stdint cimport uint8_t, uint32_t
+from libc.stdint cimport uint8_t, uint32_t, uint64_t
 from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.pair cimport pair
@@ -39,7 +39,7 @@ from ._facade_types cimport (
     CanvasScaleMode, CanvasScaleMode_ConstantPixel, CanvasScaleMode_ScaleWithScreen,
     SizeFit, SizeFit_Unconstrained, SizeFit_Min, SizeFit_Preferred,
     EngineConfig, GltfOptions, RecordingOptions, ClipInfo, GltfResult as CppGltfResult,
-    RenderStatsSnapshot, RenderPassStats,
+    RenderStatsSnapshot, RenderPassStats, TextureResidencyStats,
 )
 
 from ._engine_api cimport (
@@ -2095,6 +2095,23 @@ cdef class Engine:
         """Megabytes of streamed textures uploaded per frame at most (at least
         one texture a frame while any are waiting); 16 by default."""
         self._ptr.setTextureUploadBudget(<size_t>(max(megabytes, 0.0) * 1024 * 1024))
+
+    def set_texture_memory_budget(self, double megabytes):
+        """Megabytes streamed textures may take on the GPU: each is kept at the
+        resolution the main camera's view needs, as far as the budget allows.
+        0, the default, keeps every one at full size. Textures streamed while a
+        budget is set start at their mip of at most 128 texels."""
+        self._ptr.setTextureMemoryBudget(<uint64_t>(max(megabytes, 0.0) * 1024 * 1024))
+
+    def get_texture_residency(self):
+        """Residency of streamed textures: a dict with textures, resident_mb
+        (their mips on the GPU), needed_mb (at the mips last frame's view
+        needs), budget_mb, waiting (textures waiting for finer mips) and
+        held_back (textures the budget holds coarser than needed)."""
+        cdef TextureResidencyStats s = self._ptr.getTextureResidency()
+        return {"textures": s.textures, "resident_mb": s.residentBytes / 1048576.0,
+                "needed_mb": s.neededBytes / 1048576.0, "budget_mb": s.budget / 1048576.0,
+                "waiting": s.waiting, "held_back": s.heldBack}
 
     def create_directional_light(self, direction, color=(1.0, 1.0, 1.0),
                                   float intensity=2.0):

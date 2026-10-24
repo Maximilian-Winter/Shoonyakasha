@@ -137,6 +137,7 @@ void FrameGraphRenderer::gatherRenderables() const {
     m_renderablesFrame = frame;
     m_renderables.clear();
     m_lodCounts.clear();
+    m_textureDemand.clear();
 
     // The main camera this frame, for the occlusion images it renders.
     const auto& scene = m_renderGraph.getSceneContext();
@@ -152,6 +153,13 @@ void FrameGraphRenderer::gatherRenderables() const {
     // are computed here once instead of in each pass that culls.
     auto view = m_registry->view<MeshComponent, MaterialComponentV5, RenderableTagComponent, ECS::TransformComponent>();
     m_renderables.reserve(view.size_hint());
+    // Texture demand: pixels per world unit at distance 1 from the main camera.
+    const bool demand = scene.hasCamera && scene.renderHeight > 0.0f;
+    const Frustum cameraFrustum = demand ? frustumFromViewProj(scene.cameraViewProjection, ClipDepth::ZeroToOne)
+                                         : Frustum{};
+    const float pixelsAtUnitDistance =
+        demand ? scene.renderHeight / (2.0f * std::tan(glm::radians(scene.cameraFov) * 0.5f)) : 0.0f;
+    const glm::vec3 eye(scene.cameraInvView[3]);
     for (auto entity : view) {
         const auto& mesh = view.get<MeshComponent>(entity);
         if (!mesh.isValid()) continue;
@@ -183,6 +191,21 @@ void FrameGraphRenderer::gatherRenderables() const {
             if (r.batchKey != 0 && level > 0) {
                 r.batchKey ^= 0x9e3779b97f4a7c15ull * level;
                 if (r.batchKey == 0) r.batchKey = 1;
+            }
+        }
+        // Pixels per uv unit at the nearest point of the entity's bounds,
+        // the most of any entity sampling the texture.
+        if (demand && r.hasBounds && mesh.uvPerUnit > 0.0f && r.tag->shouldRender() &&
+            boundsInFrustum(cameraFrustum, r.worldMin, r.worldMax)) {
+            const float distance = std::max(glm::length(eye - glm::clamp(eye, r.worldMin, r.worldMax)), 1e-3f);
+            const float scale = std::max({glm::length(glm::vec3(r.transform->worldMatrix[0])),
+                                          glm::length(glm::vec3(r.transform->worldMatrix[1])),
+                                          glm::length(glm::vec3(r.transform->worldMatrix[2]))});
+            const float pixelsPerUv = pixelsAtUnitDistance / distance * scale / mesh.uvPerUnit;
+            for (const auto& [name, texture] : r.material->textures) {
+                if (texture.view == VK_NULL_HANDLE) continue;
+                float& most = m_textureDemand[texture.view];
+                most = std::max(most, pixelsPerUv);
             }
         }
         m_renderables.push_back(r);

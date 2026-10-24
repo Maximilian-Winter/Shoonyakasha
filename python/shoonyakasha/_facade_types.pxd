@@ -165,6 +165,14 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         vector[RenderPassStats] passes
         string summary
 
+    cdef cppclass TextureResidencyStats:
+        size_t textures
+        uint64_t residentBytes
+        uint64_t neededBytes
+        uint64_t budget
+        size_t waiting
+        size_t heldBack
+
     cdef cppclass GltfResult:
         cbool success
         string error

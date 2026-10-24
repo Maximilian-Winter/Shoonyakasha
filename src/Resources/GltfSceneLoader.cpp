@@ -15,6 +15,7 @@
 #include "Resources/MeshTangents.h"
 #include "Resources/MeshLods.h"
 #include "Resources/TextureProcessing.h"
+#include "Resources/TextureResidency.h"
 #include "Vulkan/VertexTypes.h"
 
 #include <cgltf.h>
@@ -32,6 +33,7 @@
 #include <stb_image.h>
 
 #include <iostream>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <fstream>
@@ -220,21 +222,26 @@ std::string decodeMeshoptBuffers(cgltf_data* data) {
 }
 
 // A KTX2 image (KHR_texture_basisu), read with libktx. With more than one
-// mip level: the levels from the first that fits maxSize (0: no limit), as
-// BC7 when transcoded from Basis Universal where `bc` (the device samples BC
-// formats), and RGBA8 otherwise, in
-// `levels` with their `format`. With one level: that level as RGBA8 in
-// `single`, for the path PNG and JPEG images take. `error` is set when the
-// file cannot be read or transcoded.
+// mip level: the levels from the first that fits maxSize (0: no limit),
+// `skip` levels further on, or, with `tail`, on to the first no larger than
+// `tail` (at most the last), as BC7 when transcoded from Basis Universal
+// where `bc` (the device samples BC formats), and RGBA8 otherwise, in
+// `levels` with their `format`; fullWidth x fullHeight is the level that
+// fits maxSize and firstMip how many were skipped after it. With one level:
+// that level as RGBA8 in `single`, for the path PNG and JPEG images take.
+// `error` is set when the file cannot be read or transcoded.
 struct KtxImage {
     uint32_t width = 0, height = 0;
+    uint32_t fullWidth = 0, fullHeight = 0;
+    uint32_t firstMip = 0;
     VkFormat format = VK_FORMAT_UNDEFINED;
     std::vector<std::vector<uint8_t>> levels;
     RgbaImage single;
     std::string error;
 };
 
-KtxImage decodeKtx2(const uint8_t* bytes, size_t size, bool srgb, bool bc, uint32_t maxSize) {
+KtxImage decodeKtx2(const uint8_t* bytes, size_t size, bool srgb, bool bc, uint32_t maxSize, uint32_t skip,
+                    uint32_t tail) {
     KtxImage out;
     ktxTexture2* texture = nullptr;
     if (ktxTexture2_CreateFromMemory(bytes, size, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) != KTX_SUCCESS) {
@@ -273,12 +280,22 @@ KtxImage decodeKtx2(const uint8_t* bytes, size_t size, bool srgb, bool bc, uint3
         out.single.texels = levelData(0);
         out.width = texture->baseWidth;
         out.height = texture->baseHeight;
+        out.fullWidth = out.width;
+        out.fullHeight = out.height;
     } else {
-        uint32_t first = 0;
-        while (maxSize > 0 && first + 1 < texture->numLevels &&
-               std::max(texture->baseWidth >> first, texture->baseHeight >> first) > maxSize) {
-            ++first;
+        auto largerSide = [&](uint32_t level) {
+            return std::max(texture->baseWidth >> level, texture->baseHeight >> level);
+        };
+        uint32_t fits = 0;
+        while (maxSize > 0 && fits + 1 < texture->numLevels && largerSide(fits) > maxSize) ++fits;
+        uint32_t first = std::min(fits + skip, texture->numLevels - 1);
+        if (tail > 0) {
+            first = fits;
+            while (first + 1 < texture->numLevels && largerSide(first) > tail) ++first;
         }
+        out.fullWidth = std::max(texture->baseWidth >> fits, 1u);
+        out.fullHeight = std::max(texture->baseHeight >> fits, 1u);
+        out.firstMip = first - fits;
         out.width = std::max(texture->baseWidth >> first, 1u);
         out.height = std::max(texture->baseHeight >> first, 1u);
         for (uint32_t level = first; level < texture->numLevels; ++level) out.levels.push_back(levelData(level));
@@ -643,6 +660,17 @@ std::shared_ptr<MorphTargetSet> readMorphTargets(const cgltf_primitive& primitiv
     return set;
 }
 
+// The largest side, in texels, of the mip streamed textures start at and are
+// never held coarser than under a memory budget.
+constexpr uint32_t kResidentTail = 128;
+
+// Decodes of finer mips out at once, at most.
+constexpr size_t kMaxRaises = 32;
+
+// How long a texture must need no more than coarser mips before it is
+// given them while within the budget.
+constexpr std::chrono::milliseconds kShrinkDelay{1000};
+
 // What decoding a texture needs, apart from the glTF data: the file to
 // read, or the embedded image's bytes, and how the texture is made.
 struct TextureRequest {
@@ -655,6 +683,8 @@ struct TextureRequest {
     bool bc = false;                   // the device samples BC formats
     bool generateMipmaps = true;
     uint32_t maxSize = 0;
+    uint32_t firstMip = 0;             // mips to leave out after fitting maxSize
+    uint32_t tail = 0;                 // nonzero: leave out mips down to the first no larger than this
 };
 
 // The minimal sampler state gltfSampler reads, kept past cgltf_free.
@@ -687,10 +717,13 @@ void forEachTexture(GltfPrimitive& primitive, Fn&& fn) {
 
 // A texture decoded on the CPU, ready to upload: mip levels in `format`
 // (levels), or one RGBA8 image whose mips the GPU makes when
-// generateMipmaps (image). `ktxFailed`: a KTX2 file libktx could not read;
-// `error`: nothing to upload.
+// generateMipmaps (image). width x height is mip firstMip of the full
+// texture, fullWidth x fullHeight (after max_texture_size). `ktxFailed`: a
+// KTX2 file libktx could not read; `error`: nothing to upload.
 struct DecodedTexture {
     uint32_t width = 0, height = 0;
+    uint32_t fullWidth = 0, fullHeight = 0;
+    uint32_t firstMip = 0;
     VkFormat format = VK_FORMAT_UNDEFINED;
     std::vector<std::vector<uint8_t>> levels;
     RgbaImage image;
@@ -708,8 +741,9 @@ struct DecodedTexture {
 namespace {
 
 // Reads and decodes the texture `request` describes: PNG, JPEG and the other
-// formats stb_image reads, or KTX2; resized to request.maxSize and, with
-// request.compress, block-compressed with its mips. Safe on any thread.
+// formats stb_image reads, or KTX2; resized to request.maxSize, from mip
+// request.firstMip (or the tail mip) on and, with request.compress,
+// block-compressed with its mips. Safe on any thread.
 DecodedTexture decodeTexture(const TextureRequest& request) {
     DecodedTexture out;
     out.generateMipmaps = request.generateMipmaps;
@@ -728,7 +762,8 @@ DecodedTexture decodeTexture(const TextureRequest& request) {
 
     RgbaImage decoded;
     if (request.ktx2) {
-        KtxImage ktx = decodeKtx2(bytes->data(), bytes->size(), request.srgb, request.bc, request.maxSize);
+        KtxImage ktx = decodeKtx2(bytes->data(), bytes->size(), request.srgb, request.bc, request.maxSize,
+                                  request.firstMip, request.tail);
         if (!ktx.error.empty()) {
             out.error = "KTX2 texture " + request.cacheKey + ": " + ktx.error;
             out.ktxFailed = true;
@@ -737,6 +772,9 @@ DecodedTexture decodeTexture(const TextureRequest& request) {
         if (!ktx.levels.empty()) {
             out.width = ktx.width;
             out.height = ktx.height;
+            out.fullWidth = ktx.fullWidth;
+            out.fullHeight = ktx.fullHeight;
+            out.firstMip = ktx.firstMip;
             out.format = ktx.format;
             out.levels = std::move(ktx.levels);
             return out;
@@ -756,6 +794,18 @@ DecodedTexture decodeTexture(const TextureRequest& request) {
         stbi_image_free(pixels);
     }
     decoded = fitImage(std::move(decoded), request.maxSize, request.srgb);
+    out.fullWidth = decoded.width;
+    out.fullHeight = decoded.height;
+    // Mips left out: halved that many times (at most to 1 x 1).
+    const uint32_t larger = std::max(decoded.width, decoded.height);
+    const uint32_t last = TextureResidency::mipCount(decoded.width, decoded.height) - 1;
+    uint32_t skip = std::min(request.firstMip, last);
+    if (request.tail > 0) {
+        skip = 0;
+        while (skip < last && (larger >> skip) > request.tail) ++skip;
+    }
+    if (skip > 0) decoded = fitImage(std::move(decoded), std::max(larger >> skip, 1u), request.srgb);
+    out.firstMip = skip;
 
     if (request.compress) {
         // Mips from the CPU: a block-compressed image cannot be blitted.
@@ -798,9 +848,30 @@ struct GltfSceneLoader::TextureStreaming {
         TextureRequest request;
         std::optional<TextureRequest> fallback;   // the texture's own image, for a KTX2 file that fails
         std::string key;                          // the texture cache key
-        GPUTexture placeholder;
+        GPUTexture placeholder;                   // a first load's
+        int resident = -1;                        // finer mips for residents[resident]; -1 a first load
+        bool usedFallback = false;
         DecodedTexture result;
     };
+
+    // A streamed texture's residency: its full size, the mips on the GPU
+    // (firstMip on, in `texture`), and how to decode it again.
+    struct Resident {
+        std::string key;
+        TextureRequest request;
+        uint32_t fullWidth = 0, fullHeight = 0;
+        VkFormat format = VK_FORMAT_UNDEFINED;
+        uint32_t firstMip = 0;
+        GPUTexture texture;
+        bool resizable = true;     // a full mip chain
+        uint32_t needed = 0;       // last frame's
+        uint32_t target = 0;       // last frame's, under the budget
+        bool raising = false;      // a decode of finer mips is out
+        bool wantsCoarser = false;
+        std::chrono::steady_clock::time_point coarserSince{};
+    };
+    std::vector<Resident> residents;
+    std::unordered_map<VkImageView, size_t> residentOfView;
 
     std::mutex mutex;
     std::condition_variable wake;
@@ -842,6 +913,7 @@ struct GltfSceneLoader::TextureStreaming {
             if (job->result.ktxFailed && job->fallback) {
                 std::cerr << "[GltfSceneLoader] " << job->result.error << std::endl;
                 job->result = decodeTexture(*job->fallback);
+                job->usedFallback = true;
             }
             std::lock_guard<std::mutex> lock(mutex);
             done.push_back(std::move(job));
@@ -1384,6 +1456,7 @@ GltfPrimitive GltfSceneLoader::processPrimitive(
             result.boundsMax = glm::max(result.boundsMax, p);
         }
     }
+    result.uvPerUnit = TextureResidency::uvPerUnit(geometry.positions, geometry.uvs, geometry.indices);
 
     // Generated levels of detail follow the full mesh in its index buffer.
     std::vector<uint32_t> indices = geometry.indices;
@@ -1928,6 +2001,12 @@ GPUTexture GltfSceneLoader::loadTexture(
         placeholder.exists = true;
         m_streaming->placeholders.push_back(placeholder);
         m_streaming->pending[fullCacheKey] = placeholder;
+        // Under a memory budget, the texture starts at its mip of at most
+        // kResidentTail texels and gains finer ones as it is needed.
+        if (m_textureMemoryBudget > 0 && request.generateMipmaps) {
+            request.tail = kResidentTail;
+            if (fallback) fallback->tail = kResidentTail;
+        }
         auto job = std::make_unique<TextureStreaming::Job>();
         job->request = std::move(request);
         job->fallback = std::move(fallback);
@@ -1984,56 +2063,189 @@ std::vector<GPUTexture> GltfSceneLoader::uploadTextures(const std::vector<Decode
     return textures;
 }
 
-void GltfSceneLoader::updateTextureStreaming(entt::registry& registry, size_t byteBudget) {
+void GltfSceneLoader::updateTextureStreaming(entt::registry& registry, size_t byteBudget,
+                                             const std::unordered_map<VkImageView, float>& demand) {
     if (!m_streaming) return;
-    std::vector<std::unique_ptr<TextureStreaming::Job>> ready;
-    {
-        std::lock_guard<std::mutex> lock(m_streaming->mutex);
-        size_t bytes = 0;
-        while (!m_streaming->done.empty() && (ready.empty() || bytes < byteBudget)) {
-            bytes += m_streaming->done.front()->result.bytes();
-            ready.push_back(std::move(m_streaming->done.front()));
-            m_streaming->done.pop_front();
-        }
-    }
-    if (ready.empty()) return;
+    TextureStreaming& s = *m_streaming;
+    const auto now = std::chrono::steady_clock::now();
 
-    // Each placeholder's view, and what takes its place.
+    // Each replaced view, and what takes its place.
     struct Replacement {
         GPUTexture texture;
-        VkSampler placeholderSampler;
+        VkSampler oldDefaultSampler;   // the replaced texture's own sampler
     };
     std::unordered_map<VkImageView, Replacement> replacements;
+    std::unordered_set<size_t> moved;
+    // A resident's texture becomes `texture`; the old one retires. Earlier
+    // replacements this frame that led to the old one lead to the new one.
+    auto moveResident = [&](size_t index, const GPUTexture& texture, uint32_t firstMip) {
+        TextureStreaming::Resident& r = s.residents[index];
+        for (auto& [view, replacement] : replacements) {
+            if (replacement.texture.view == r.texture.view) replacement.texture = texture;
+        }
+        replacements[r.texture.view] = {texture, r.texture.sampler};
+        moved.insert(index);
+        s.residentOfView.erase(r.texture.view);
+        m_device.getDeleteQueue().retire(r.texture);
+        r.texture = texture;
+        r.firstMip = firstMip;
+        r.format = texture.format;
+        m_textureCache[r.key] = texture;
+        s.residentOfView[texture.view] = index;
+    };
+
+    // 1. Decoded textures, uploaded up to the byte budget.
+    std::vector<std::unique_ptr<TextureStreaming::Job>> ready;
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        size_t bytes = 0;
+        while (!s.done.empty() && (ready.empty() || bytes < byteBudget)) {
+            bytes += s.done.front()->result.bytes();
+            ready.push_back(std::move(s.done.front()));
+            s.done.pop_front();
+        }
+    }
     std::vector<TextureStreaming::Job*> uploaded;
     std::vector<DecodedTexture*> decoded;
     for (auto& job : ready) {
-        ++m_streaming->finished;
-        m_streaming->pending.erase(job->key);
+        if (job->resident < 0) {
+            ++s.finished;
+            s.pending.erase(job->key);
+        } else {
+            s.residents[job->resident].raising = false;
+        }
         if (!job->result.error.empty()) {
             std::cerr << "[GltfSceneLoader] " << job->result.error << std::endl;
             continue;
         }
+        // Finer mips that arrive after the texture was given others no finer.
+        if (job->resident >= 0 && job->result.firstMip >= s.residents[job->resident].firstMip) continue;
         uploaded.push_back(job.get());
         decoded.push_back(&job->result);
     }
     const std::vector<GPUTexture> textures = uploadTextures(decoded);
     for (size_t i = 0; i < uploaded.size(); ++i) {
-        m_textureCache[uploaded[i]->key] = textures[i];
-        replacements[uploaded[i]->placeholder.view] = {textures[i], uploaded[i]->placeholder.sampler};
+        TextureStreaming::Job& job = *uploaded[i];
+        if (job.resident >= 0) {
+            moveResident(static_cast<size_t>(job.resident), textures[i], job.result.firstMip);
+            continue;
+        }
+        m_textureCache[job.key] = textures[i];
+        replacements[job.placeholder.view] = {textures[i], job.placeholder.sampler};
+        TextureStreaming::Resident r;
+        r.key = job.key;
+        r.request = job.usedFallback && job.fallback ? std::move(*job.fallback) : std::move(job.request);
+        r.request.tail = 0;
+        r.fullWidth = job.result.fullWidth;
+        r.fullHeight = job.result.fullHeight;
+        r.format = textures[i].format;
+        r.firstMip = job.result.firstMip;
+        r.texture = textures[i];
+        r.resizable = r.request.generateMipmaps &&
+                      textures[i].mipLevels == TextureResidency::mipCount(r.fullWidth, r.fullHeight) - r.firstMip;
+        r.needed = r.target = r.firstMip;
+        s.residentOfView[r.texture.view] = s.residents.size();
+        s.residents.push_back(std::move(r));
+    }
+
+    // 2. The mips each texture needs, and those the budget allows.
+    std::vector<TextureResidency::Candidate> candidates;
+    for (auto& r : s.residents) {
+        TextureResidency::Candidate c;
+        c.width = r.fullWidth;
+        c.height = r.fullHeight;
+        c.format = r.format;
+        if (r.resizable) {
+            const auto it = demand.find(r.texture.view);
+            c.needed = TextureResidency::neededMip(r.fullWidth, r.fullHeight, it != demand.end() ? it->second : 0.0f);
+            const uint32_t last = TextureResidency::mipCount(r.fullWidth, r.fullHeight) - 1;
+            c.coarsest = 0;
+            while (c.coarsest < last && std::max(r.fullWidth >> c.coarsest, r.fullHeight >> c.coarsest) > kResidentTail) {
+                ++c.coarsest;
+            }
+        } else {
+            c.needed = c.coarsest = r.firstMip;
+        }
+        r.needed = c.needed;
+        candidates.push_back(c);
+    }
+    const std::vector<uint32_t> targets = TextureResidency::fitBudget(candidates, m_textureMemoryBudget);
+    uint64_t resident = 0;
+    for (size_t i = 0; i < s.residents.size(); ++i) {
+        s.residents[i].target = targets[i];
+        resident += TextureResidency::chainBytes(s.residents[i].format, s.residents[i].fullWidth,
+                                                 s.residents[i].fullHeight, s.residents[i].firstMip);
+    }
+
+    // 3. Without a budget nothing moves. With one: finer mips decoded,
+    // coarser ones copied on the GPU when over the budget or after a while.
+    if (m_textureMemoryBudget > 0) {
+        size_t raising = 0;
+        for (const auto& r : s.residents) raising += r.raising ? 1 : 0;
+        std::vector<GPUResourceFactory::TextureShrink> shrinks;
+        std::vector<size_t> shrunk;
+        for (size_t i = 0; i < s.residents.size(); ++i) {
+            TextureStreaming::Resident& r = s.residents[i];
+            if (!r.resizable) continue;
+            if (r.target < r.firstMip) {
+                r.wantsCoarser = false;
+                if (!r.raising && raising < kMaxRaises) {
+                    auto job = std::make_unique<TextureStreaming::Job>();
+                    job->request = r.request;
+                    job->request.firstMip = r.target;
+                    job->key = r.key;
+                    job->resident = static_cast<int>(i);
+                    r.raising = true;
+                    ++raising;
+                    s.enqueue(std::move(job));
+                }
+            } else if (r.target > r.firstMip) {
+                if (!r.wantsCoarser) {
+                    r.wantsCoarser = true;
+                    r.coarserSince = now;
+                }
+                if (!moved.count(i) && (resident > m_textureMemoryBudget || now - r.coarserSince >= kShrinkDelay)) {
+                    shrinks.push_back({&r.texture, r.target - r.firstMip});
+                    shrunk.push_back(i);
+                }
+            } else {
+                r.wantsCoarser = false;
+            }
+        }
+        if (!shrinks.empty()) {
+            std::vector<GPUTexture> smaller = GPUResourceFactory::createShrunkTextures2D(
+                m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getGraphicsQueue(),
+                m_device.getCommandPool(), shrinks);
+            for (size_t k = 0; k < smaller.size(); ++k) {
+                GPUTexture& texture = smaller[k];
+                texture.sampler = GPUResourceFactory::createSampler(
+                    m_device.getLogicalDevice(), VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                    16.0f, VK_SAMPLER_MIPMAP_MODE_LINEAR, static_cast<float>(texture.mipLevels));
+                texture.exists = true;
+                const size_t index = shrunk[k];
+                s.residents[index].wantsCoarser = false;
+                moveResident(index, texture, s.residents[index].target);
+            }
+        }
     }
     if (replacements.empty()) return;
 
-    // A texture that is a placeholder becomes the real one, with the real
-    // one's default sampler or the glTF sampler the placeholder was given.
+    // 4. A replaced texture in materials becomes the new one, with the new
+    // one's own sampler, or the glTF sampler the old one was given, made for
+    // the new mip count.
     auto replace = [&](GPUTexture& texture) {
         if (texture.view == VK_NULL_HANDLE) return;
         auto it = replacements.find(texture.view);
         if (it == replacements.end()) return;
         GPUTexture real = it->second.texture;
-        if (texture.sampler != it->second.placeholderSampler) {
-            auto state = m_streaming->samplerStates.find(texture.sampler);
-            if (state != m_streaming->samplerStates.end()) {
-                if (VkSampler sampler = gltfSampler(&state->second, real.mipLevels)) real.sampler = sampler;
+        if (texture.sampler != it->second.oldDefaultSampler) {
+            auto state = s.samplerStates.find(texture.sampler);
+            if (state != s.samplerStates.end()) {
+                const cgltf_sampler kept = state->second;
+                if (VkSampler sampler = gltfSampler(&kept, real.mipLevels)) {
+                    real.sampler = sampler;
+                    s.samplerStates[sampler] = kept;
+                }
             }
         }
         texture = real;
@@ -2047,6 +2259,20 @@ void GltfSceneLoader::updateTextureStreaming(entt::registry& registry, size_t by
         for (auto& [index, material] : variants.variants) replaceIn(material);
     }
     for (auto& [key, primitive] : m_primitiveCache) forEachTexture(primitive, replace);
+}
+
+GltfSceneLoader::ResidencyReport GltfSceneLoader::textureResidency() const {
+    ResidencyReport report;
+    report.budget = m_textureMemoryBudget;
+    if (!m_streaming) return report;
+    for (const auto& r : m_streaming->residents) {
+        ++report.textures;
+        report.residentBytes += TextureResidency::chainBytes(r.format, r.fullWidth, r.fullHeight, r.firstMip);
+        report.neededBytes += TextureResidency::chainBytes(r.format, r.fullWidth, r.fullHeight, r.needed);
+        if (r.target < r.firstMip) ++report.waiting;
+        if (r.target > r.needed) ++report.heldBack;
+    }
+    return report;
 }
 
 std::pair<size_t, size_t> GltfSceneLoader::textureStreamingProgress() const {
@@ -2080,6 +2306,7 @@ entt::entity GltfSceneLoader::createEntity(
     mesh.boundsMin = primitive.boundsMin;
     mesh.boundsMax = primitive.boundsMax;
     mesh.hasBounds = primitive.hasBounds;
+    mesh.uvPerUnit = primitive.uvPerUnit;
     mesh.lods = primitive.lods;
     // Standard-vertex meshes are made with acceleration structure input usage
     // on a device with ray queries (rayTracingInputUsage); skinned ones are not.
@@ -2440,6 +2667,7 @@ entt::entity GltfSceneLoader::createSkinnedEntity(
     mesh.boundsMin = primitive.boundsMin;
     mesh.boundsMax = primitive.boundsMax;
     mesh.hasBounds = primitive.hasBounds;
+    mesh.uvPerUnit = primitive.uvPerUnit;
     // Standard-vertex meshes are made with acceleration structure input usage
     // on a device with ray queries (rayTracingInputUsage); skinned ones are not.
     mesh.rayTracingInput = m_device.hasRayQuery() && mesh.vertexStride == sizeof(StandardVertex);

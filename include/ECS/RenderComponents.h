@@ -63,6 +63,10 @@ struct MeshComponent {
     glm::vec3 boundsMax{0.0f};
     bool      hasBounds = false;
 
+    // Uv units (TEXCOORD_0) per unit of surface in mesh space, for texture
+    // residency (TextureResidency::uvPerUnit); 0 when unknown.
+    float     uvPerUnit = 0.0f;
+
     // The buffers were made with the usage acceleration structure builds
     // need (static glTF meshes on a device with ray queries), so the mesh
     // can appear in ray-traced shadows.
