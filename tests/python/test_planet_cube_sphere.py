@@ -279,6 +279,21 @@ def segment_meets_sphere(a, b, radius):
     return sum(c * c for c in nearest) < radius * radius
 
 
+class FaceCoordinates(unittest.TestCase):
+    def test_face_uv_inverts_direction_across_every_face_and_up_to_the_corners(self):
+        for face in range(6):
+            for u in (-1.0, -0.999, -0.6, 0.0, 0.3141, 0.97, 1.0):
+                for v in (-1.0, -0.5, 0.0, 0.73, 0.999):
+                    d = cube_sphere.direction(face, u, v)
+                    got_face, got_u, got_v = cube_sphere.face_uv(d)
+                    back = cube_sphere.direction(got_face, got_u, got_v)
+                    self.assertLess(max(abs(back[k] - d[k]) for k in range(3)), 1e-12)
+                    if max(abs(u), abs(v)) < 0.999:
+                        self.assertEqual(got_face, face)
+                        self.assertAlmostEqual(got_u, u, places=10)
+                        self.assertAlmostEqual(got_v, v, places=10)
+
+
 class HorizonCulling(unittest.TestCase):
     OCCLUDER = RADIUS - 1_650.0
 

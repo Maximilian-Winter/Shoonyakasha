@@ -67,6 +67,7 @@ Keys:
     python planet.py --verify          check the GPU's chunks against cube_sphere.chunk_mesh, then exit
     python planet.py --orbit-check     fly one orbit from preset 9 at 16x, report the drift, then exit
     python planet.py --landing-check   land the ship on a mountain near the site, report how it stands, then exit
+    python planet.py --crack-check     measure the gaps between levels in steep terrain against the skirts, then exit
 """
 
 import argparse
@@ -154,6 +155,8 @@ parser.add_argument("--verify", action="store_true",
                     help="check the chunks the GPU built against cube_sphere.chunk_mesh, print the result and exit")
 parser.add_argument("--orbit-check", action="store_true",
                     help="fly one orbit from preset 9 at 16x, print how far it drifted and exit")
+parser.add_argument("--crack-check", action="store_true",
+                    help="measure the gaps between chunks of different levels in steep terrain against the skirts")
 parser.add_argument("--landing-check", action="store_true",
                     help="land the ship on the highest spot found around the site, print how it stands and exit")
 args = parser.parse_args()
@@ -412,6 +415,13 @@ def upload_sky():
     engine.set_custom_vec4("planet.atmosphere.rayleigh", scale(RAYLEIGH, density) + (MIE_G,))
     engine.set_custom_vec4("planet.atmosphere.mie", (MIE_SCATTERING * density, MIE_ABSORPTION * density,
                                                      SUN_ILLUMINANCE, state["exposure"]))
+
+
+def skirt_depth(node):
+    """How far a built chunk's skirts reach below its edges, as
+    chunk_build.comp makes them: SKIRT_FRACTION of its edge, or its grid's
+    height range."""
+    return max(SKIRT_FRACTION * node.edge, node.high - node.low)
 
 
 def terrain_floor():
@@ -966,6 +976,8 @@ def on_init():
         engine.ecs.add_system("PlanetVerify", Verify(), priority=-2)
     elif args.orbit_check:
         engine.ecs.add_system("PlanetOrbitCheck", OrbitCheck(), priority=-2)
+    elif args.crack_check:
+        engine.ecs.add_system("PlanetCrackCheck", CrackCheck(), priority=-2)
     elif args.landing_check:
         engine.ecs.add_system("PlanetLandingCheck", LandingCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
@@ -1240,7 +1252,8 @@ class Verify:
     every built chunk against cube_sphere.chunk_mesh:
       - directions and face coordinates equal to its, rounded to 32-bit;
       - positions equal to direction * (radius + height - skirt) - centre
-        worked out from its directions and the GPU's heights, to within one
+        worked out from its directions and the GPU's heights, the skirt the
+        larger of the job's depth and the grid's height range, to within one
         unit in the last place (ULP) of the chunk's largest coordinate;
       - normals of unit length, on the outer side;
       - each slot's lowest and highest grid heights in ChunkHeights equal to
@@ -1283,9 +1296,11 @@ class Verify:
         for node in state["tree"].nodes():
             if node.chunk is None:
                 continue
-            centre, positions, directions, uvs, _ = cube_sphere.chunk_mesh(
-                node.face, node.level, node.x, node.y, QUADS, RADIUS, skirt_depth=SKIRT_FRACTION * node.edge)
             built = gpu[node.chunk]
+            # The skirt's depth as the GPU works it out, in 32-bit: the job's, or the grid's height range.
+            depth = max(np.float32(SKIRT_FRACTION * node.edge), built[:grid, 11].max() - built[:grid, 11].min())
+            centre, positions, directions, uvs, _ = cube_sphere.chunk_mesh(
+                node.face, node.level, node.x, node.y, QUADS, RADIUS, skirt_depth=float(depth))
             height = built[:, 11].astype(np.float64)
             expected = (positions + directions * height[:, None]).astype(np.float32)
             ulp = float(np.spacing(np.abs(expected).max()))
@@ -1313,6 +1328,121 @@ class Verify:
               and worst["face uv"] == 0 and worst["normal length - 1"] < 1e-5 and lowest_normal_dot > 0.0
               and worst["lowest/highest height (m)"] == 0)
         os._exit(0 if ok else 1)
+
+
+class CrackCheck:
+    """--crack-check: at each view in VIEWS, once settled, freezes the level
+    of detail, reads ChunkPool back and, for every drawn chunk's edge whose
+    neighbour is coarser by k levels, measures the gap at each of the
+    chunk's edge vertices between it and the neighbour's edge, the straight
+    line between the vertices the two share (every 2^k-th). A gap where the
+    finer edge is higher must be covered by the finer chunk's skirt, one
+    where it is lower by the coarser chunk's. Prints per view the edges with
+    a coarser neighbour, the largest gap, and the largest gap as a share of
+    the skirt that covers it; exits with status 0 when no share is above 1,
+    1 otherwise."""
+
+    MIN_FRAMES, MAX_FRAMES = 10, 1200
+    VIEWS = [
+        ("preset 1", lambda: teleport(1)),
+        ("preset 2", lambda: teleport(2)),
+        ("preset 6, the cube's corner", lambda: teleport(6)),
+        ("beside the peak", lambda: (teleport(7), near_mountain(40.0, 160.0))),
+        ("over the peak", lambda: (teleport(7), near_mountain(40.0, 160.0, top=True))),
+        ("over the peak, mountains twice as high",
+         lambda: (change_terrain("mountains", 1, 2.0), teleport(7), near_mountain(40.0, 160.0, top=True))),
+    ]
+
+    def __init__(self):
+        self.view = 0
+        self.frames = 0
+        self.requested = False
+        self.worst = 0.0
+
+    def __call__(self, dt):
+        if state["tree"] is None:
+            return True
+        self.frames += 1
+        if self.frames == 1:
+            state["frozen"] = False
+            self.VIEWS[self.view][1]()
+        elif not self.requested:
+            if (self.frames >= self.MIN_FRAMES and settled()) or self.frames >= self.MAX_FRAMES:
+                state["frozen"] = True
+                previous = engine.get_readback("ChunkPool")
+                self.after = previous["frame"] if previous is not None else -1
+                engine.request_readback("ChunkPool")
+                self.requested = True
+        else:
+            readback = engine.get_readback("ChunkPool")
+            if readback is not None and readback["frame"] > self.after:
+                self.measure(np.frombuffer(readback["data"], dtype=np.float32).reshape(
+                    SLOTS, VERTICES_PER_CHUNK, FLOATS_PER_VERTEX))
+                self.view += 1
+                self.frames = 0
+                self.requested = False
+                if self.view == len(self.VIEWS):
+                    os._exit(0 if self.worst <= 1.0 else 1)
+        return True
+
+    def measure(self, gpu):
+        selected = state["tree"].selected
+        by_key = {(n.face, n.level, n.x, n.y): n for n in selected}
+        row = QUADS + 1
+
+        def selected_at(d):
+            face, u, v = cube_sphere.face_uv(d)
+            for level in range(MAX_LEVEL + 1):
+                cells = 1 << level
+                x = min(max(int((u + 1.0) * 0.5 * cells), 0), cells - 1)
+                y = min(max(int((v + 1.0) * 0.5 * cells), 0), cells - 1)
+                if (face, level, x, y) in by_key:
+                    return by_key[face, level, x, y]
+            return None
+
+        edges, largest_gap, largest_share = 0, 0.0, 0.0
+        for node in selected:
+            u0, v0, size = cube_sphere.chunk_bounds(node.level, node.x, node.y)
+            # Per edge: its grid indices in order, and a point just outside its middle.
+            sides = [
+                (list(range(row)), (u0 + 0.5 * size, v0 - 1e-4 * size)),
+                ([j * row + QUADS for j in range(row)], (u0 + size + 1e-4 * size, v0 + 0.5 * size)),
+                ([QUADS * row + i for i in range(row)], (u0 + 0.5 * size, v0 + size + 1e-4 * size)),
+                ([j * row for j in range(row)], (u0 - 1e-4 * size, v0 + 0.5 * size)),
+            ]
+            built = gpu[node.chunk]
+            fine_skirt = skirt_depth(node)
+            for indices, (u, v) in sides:
+                # Past a face's edge the cube point leaves the cube; normalising puts it on the sphere.
+                other = selected_at(normalize(cube_sphere.spherify(cube_sphere.cube_point(node.face, u, v))))
+                if other is None or other.level >= node.level:
+                    continue
+                neighbour = other.level
+                edges += 1
+                step = 1 << (node.level - neighbour)
+                coarse_skirt = skirt_depth(other)
+                points = [add(node.centre, tuple(float(c) for c in built[k, :3])) for k in indices]
+                for i in range(row):
+                    i0 = (i // step) * step
+                    if i0 == i:
+                        continue
+                    t = (i - i0) / step
+                    a, b = points[i0], points[i0 + step]
+                    line = add(a, scale(sub(b, a), t))
+                    gap = length(points[i]) - length(line)
+                    share = gap / fine_skirt if gap > 0.0 else -gap / coarse_skirt
+                    largest_gap = max(largest_gap, abs(gap))
+                    if share > largest_share:
+                        largest_share = share
+                        where = (node.level, neighbour, gap, fine_skirt if gap > 0.0 else coarse_skirt,
+                                 length(sub(points[i], state["position"])))
+        self.worst = max(self.worst, largest_share)
+        print("[planet] %s: %d chunks selected, %d edges with a coarser neighbour, largest gap %.3f m, "
+              "largest gap / skirt %.3f" % (self.VIEWS[self.view][0], len(selected), edges, largest_gap,
+                                            largest_share), flush=True)
+        if largest_share > 0.0:
+            print("[planet]   there: level %d beside level %d, gap %+.2f m, skirt %.2f m, %.0f m from the camera"
+                  % where, flush=True)
 
 
 class LandingCheck:

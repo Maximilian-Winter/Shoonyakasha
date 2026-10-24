@@ -43,6 +43,36 @@ def direction(face, u, v):
     return spherify(cube_point(face, u, v))
 
 
+def face_uv(d):
+    """(face, u, v) of the unit direction `d`: the face whose normal is
+    nearest to it, and the face coordinates `direction` maps onto it,
+    found by Newton's method from where `d` meets the cube."""
+    face = max(range(6), key=lambda f: sum(FACES[f][0][k] * d[k] for k in range(3)))
+    n, a, b = FACES[face]
+    along = sum(n[k] * d[k] for k in range(3))
+    u = sum(a[k] * d[k] for k in range(3)) / along
+    v = sum(b[k] * d[k] for k in range(3)) / along
+    h = 1e-7
+    for _ in range(8):
+        p = direction(face, u, v)
+        pu, pv = direction(face, u + h, v), direction(face, u, v + h)
+        du = [(pu[k] - p[k]) / h for k in range(3)]
+        dv = [(pv[k] - p[k]) / h for k in range(3)]
+        e = [d[k] - p[k] for k in range(3)]
+        # Least squares: [du dv] (su, sv) = e.
+        a11 = sum(c * c for c in du)
+        a12 = sum(du[k] * dv[k] for k in range(3))
+        a22 = sum(c * c for c in dv)
+        b1 = sum(du[k] * e[k] for k in range(3))
+        b2 = sum(dv[k] * e[k] for k in range(3))
+        det = a11 * a22 - a12 * a12
+        su, sv = (a22 * b1 - a12 * b2) / det, (a11 * b2 - a12 * b1) / det
+        u, v = u + su, v + sv
+        if abs(su) + abs(sv) < 1e-15:
+            break
+    return face, u, v
+
+
 def chunk_bounds(level, x, y):
     """(u0, v0, size) of a chunk in face coordinates."""
     size = 2.0 / (1 << level)

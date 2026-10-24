@@ -796,4 +796,6 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
   - Water depth per pixel from the depth buffer instead of per vertex (shallow water shows the coarse chunks' facets from far away); rougher water further away, so the sun's glint spreads naturally.
   - Redder sunsets without a teal sky (multiple scattering, or the Hillaire LUTs above).
   - Gamepad axes and buttons in the Python bindings, then a gamepad mapping for the ship.
-  - A systematic search for cracks between levels in steep terrain (only stills were inspected).  - The terrain's lighting: the sun shadowed by mountains, and the cockpit's interior shadowed by its frame.
+  - A systematic search for cracks between levels in steep terrain (only stills were inspected).
+    - As built: `--crack-check` measures every gap to a coarser neighbour against its skirt at six views. With skirts of 5 % of the edge, the default terrain was covered at up to 0.79 of a skirt, and mountains twice as high were not (an 11 m gap against a 7.7 m skirt, 864 m from the camera). Skirts now reach down by the larger of that and the chunk's height range, which bounds the gap; the largest share is 0.24.
+  - The terrain's lighting: the sun shadowed by mountains, and the cockpit's interior shadowed by its frame.

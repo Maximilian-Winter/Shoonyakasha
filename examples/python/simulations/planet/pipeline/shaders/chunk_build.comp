@@ -3,8 +3,9 @@
 // Builds cube-sphere chunks with terrain into their slots of ChunkPool: one
 // workgroup per job, in cube_sphere.chunk_mesh's vertex order. The first
 // ROW * ROW vertices are the grid, row by row along u, then rows along v;
-// then the four edges' skirts, ROW vertices each (skirtCorner), `skirt`
-// metres below their edge vertex.
+// then the four edges' skirts, ROW vertices each (skirtCorner), below their
+// edge vertex by the job's skirt depth or the grid's height range (highest
+// minus lowest), whichever is greater.
 //
 // Face coordinates, the cube point, spherify and the position relative to
 // the chunk's centre are worked out in 64-bit floats and stored as 32-bit:
@@ -114,6 +115,22 @@ vec3 surfaceNormal(dvec3 d, double radius, double step) {
     return vec3(normalize(cross(p1 - p3, p2 - p4)));
 }
 
+// Writes vertex `k` of `slot`, at grid coordinates `ij`, `below` metres
+// under the terrain; returns the terrain's height there.
+float writeVertex(uint slot, int k, ivec2 ij, int face, int x, int y, double cells, double radius, dvec3 centre,
+                  double step, float below) {
+    double u = -1.0LF + 2.0LF * double(x * QUADS + ij.x) / cells;
+    double v = -1.0LF + 2.0LF * double(y * QUADS + ij.y) / cells;
+    dvec3 d = direction(face, u, v);
+    float h = terrainHeight(vec3(d));
+    double r = radius + double(h) - double(below);
+    uint index = slot * uint(VERTICES) + uint(k);
+    pool.vertices[index].positionU = vec4(vec3(d * r - centre), float(u));
+    pool.vertices[index].normalV = vec4(surfaceNormal(d, radius, step), float(v));
+    pool.vertices[index].radialHeight = vec4(vec3(d), h);
+    return h;
+}
+
 void evaluateProbes() {
     for (uint i = gl_LocalInvocationID.x; i < uint(PROBES); i += 64u) {
         vec3 dir = normalize(jobs.probe[i].xyz);
@@ -145,33 +162,30 @@ void main() {
                                    -1.0LF + 2.0LF * (double(y * QUADS) + halfQuads) / cells) * radius;
     double step = 1.0LF / cells;     // about two thirds of the angle between neighbouring vertices
 
+    // The grid first, then its lowest and highest heights, then the skirts.
     float low = 1e30, high = -1e30;
-    for (int k = int(gl_LocalInvocationID.x); k < VERTICES; k += 64) {
-        bool isSkirt = k >= GRID;
-        ivec2 ij = isSkirt ? skirtCorner((k - GRID) / ROW, (k - GRID) % ROW) : ivec2(k % ROW, k / ROW);
-        double u = -1.0LF + 2.0LF * double(x * QUADS + ij.x) / cells;
-        double v = -1.0LF + 2.0LF * double(y * QUADS + ij.y) / cells;
-        dvec3 d = direction(face, u, v);
-        float h = terrainHeight(vec3(d));
-        if (!isSkirt) {
-            low = min(low, h);
-            high = max(high, h);
-        }
-        double r = radius + double(h) - (isSkirt ? double(skirt) : 0.0LF);
-        uint index = slot * uint(VERTICES) + uint(k);
-        pool.vertices[index].positionU = vec4(vec3(d * r - centre), float(u));
-        pool.vertices[index].normalV = vec4(surfaceNormal(d, radius, step), float(v));
-        pool.vertices[index].radialHeight = vec4(vec3(d), h);
+    for (int k = int(gl_LocalInvocationID.x); k < GRID; k += 64) {
+        float h = writeVertex(slot, k, ivec2(k % ROW, k / ROW), face, x, y, cells, radius, centre, step, 0.0);
+        low = min(low, h);
+        high = max(high, h);
     }
 
     sharedLow[gl_LocalInvocationID.x] = low;
     sharedHigh[gl_LocalInvocationID.x] = high;
     barrier();
+    for (int i = 0; i < 64; ++i) {
+        low = min(low, sharedLow[i]);
+        high = max(high, sharedHigh[i]);
+    }
     if (gl_LocalInvocationID.x == 0u) {
-        for (int i = 1; i < 64; ++i) {
-            low = min(low, sharedLow[i]);
-            high = max(high, sharedHigh[i]);
-        }
         chunkHeights.heights[slot] = vec4(low, high, b.z, 0.0);
+    }
+
+    // A skirt reaches below its edge by at least the grid's height range, the most
+    // a coarser neighbour's edge can stand above it there.
+    float depth = max(skirt, high - low);
+    for (int k = GRID + int(gl_LocalInvocationID.x); k < VERTICES; k += 64) {
+        writeVertex(slot, k, skirtCorner((k - GRID) / ROW, (k - GRID) % ROW), face, x, y, cells, radius, centre,
+                    step, depth);
     }
 }
