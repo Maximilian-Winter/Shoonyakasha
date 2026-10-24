@@ -1,5 +1,5 @@
 """
-Shoonyakasha planet: a cube-sphere
+Shoonyakasha planet: a cube-sphere with quadtree level of detail
 
 A sphere of radius 100 km, flown around from a few metres above its surface
 to thousands of kilometres away. Positions are Python floats (64-bit) with
@@ -8,12 +8,15 @@ origin and only turns; every frame each entity is placed at its position
 minus the camera's, so the GPU sees only small numbers. The projection is
 reverse-Z with an infinite far plane.
 
-The sphere is a cube-sphere: each of the six cube faces split into 8 x 8
-chunks of 16 x 16 quads, mapped onto the sphere with `spherify`. Each chunk
-holds its vertices relative to its own centre. Lines on the ground follow
-the face coordinates, at every power-of-two subdivision of a face. A cluster
-of blocks stands on a vertex near the centre of the +Z face, on a pad 5 cm
-above the ground.
+The sphere is a cube-sphere: six cube faces mapped onto the sphere with
+`spherify`, each the root of a quadtree (quadtree.py). Each frame the tree
+picks the chunks to draw, finer near the camera, and a few missing chunks
+are built with numpy, nearest first and those in view before the rest.
+Every chunk is 16 x 16 quads with its vertices relative to its own centre,
+and skirts along its edges hide the cracks between levels. Lines on the
+ground follow the face coordinates, at every power-of-two subdivision of a
+face. A cluster of blocks stands on the +Z face, on a pad 5 cm above the
+ground.
 
 Keys:
     right mouse + move     look around
@@ -24,10 +27,12 @@ Keys:
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
     F                      wireframe
-    C                      a colour per face
+    C                      colour: ground, per face, per level
+    K                      freeze the level of detail
+    [ / ]                  split factor down / up
     P                      screenshot into planet_captures/
 
-    python planet.py --capture DIR     save a screenshot at each of 1 - 6 and exit
+    python planet.py --capture DIR     screenshots at the presets, then exit
 """
 
 import argparse
@@ -39,27 +44,32 @@ import shoonyakasha as sk
 from shoonyakasha import keys
 
 import cube_sphere
+from quadtree import QuadTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PIPELINE = os.path.join(HERE, "pipeline", "pipeline.json")
 CAPTURES = os.path.join(HERE, "planet_captures")
 
 RADIUS = 100_000.0               # metres
-LEVEL = 3                        # every face is 2**LEVEL x 2**LEVEL chunks
 QUADS = 16                       # quads along each side of a chunk
+MAX_LEVEL = 12                   # a level-12 chunk is 38 m across, its quads 2.4 m
+SPLIT_FACTOR = 1.25              # split when nearer than this many chunk edges
+BUILD_PER_FRAME = 8              # chunks built per frame at most
+SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 SITE_FACE = 4                    # +Z
-SITE_UV = 2.0 / (QUADS << LEVEL)  # one quad from the face's centre along u and v: a vertex
+SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a vertex of every chunk from level 3 down
 GROUND_COLOUR = (0.30, 0.40, 0.27)
 FACE_COLOURS = ((0.62, 0.30, 0.25), (0.25, 0.50, 0.55), (0.55, 0.55, 0.30),
                 (0.40, 0.30, 0.60), (0.30, 0.55, 0.30), (0.60, 0.42, 0.25))
+COLOUR_MODES = ("ground", "face", "level")
 SUN = (0.48, 0.42, 0.77)
 NEAR_PLANE = 0.05
 FOV = 70.0
 LOOK_RADIANS_PER_PIXEL = 0.0025
 MIN_ALTITUDE = 0.3               # the camera stays this far above the sphere
 
-parser = argparse.ArgumentParser(description="Planet precision sandbox")
-parser.add_argument("--capture", metavar="DIR", help="save a screenshot at each preset and exit")
+parser = argparse.ArgumentParser(description="Planet with quadtree level of detail")
+parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
 args = parser.parse_args()
 
 sk.shaders.compile_dir(os.path.join(HERE, "pipeline", "shaders"))
@@ -121,6 +131,12 @@ def euler_from_basis(right, up, forward):
     return (pitch, yaw, roll)
 
 
+def level_colour(level):
+    """A colour per quadtree level, round the hue circle."""
+    hue = level * 0.61803398875
+    return tuple(0.45 + 0.30 * math.cos(2.0 * math.pi * (hue - offset)) for offset in (0.0, 1 / 3, 2 / 3))
+
+
 # ── Meshes ─────────────────────────────────────────────────────────────────
 
 def box():
@@ -139,18 +155,22 @@ def box():
 
 # ── World ──────────────────────────────────────────────────────────────────
 
-# Each placed entity: (entity, position in planet space). Rebased every frame.
+# Each block: (entity, position in planet space). Rebased every frame.
 placed = []
-# (entity, face) of every chunk.
-chunks = []
 state = {
     "camera": None,
     "position": (0.0, 0.0, RADIUS + 5.0),
     "forward": (0.0, 0.0, 1.0),
+    "speed": 0.0,
     "speed_factor": 1.0,
     "hud": None,
     "wireframe": False,
-    "face_colours": False,
+    "colour_mode": 0,
+    "frozen": False,
+    "frame": 0,
+    "frame_ms": 16.0,            # frame time, smoothed
+    "shown": set(),              # chunk entities drawn this frame
+    "tree": None,
 }
 
 
@@ -160,22 +180,37 @@ def site_frame():
     return scale(up, RADIUS), up, east, north
 
 
-def build_planet():
-    for face in range(6):
-        for y in range(1 << LEVEL):
-            for x in range(1 << LEVEL):
-                centre, positions, normals, uvs, indices = cube_sphere.chunk_mesh(face, LEVEL, x, y, QUADS, RADIUS)
-                entity = engine.create_mesh(positions, indices, normals=normals, uvs=uvs, name="Chunk")
-                engine.scene.set_material_float(entity, "gridStrength", 1.0)
-                placed.append((entity, centre))
-                chunks.append((entity, face))
-    colour_chunks()
+def chunk_colour(node):
+    mode = COLOUR_MODES[state["colour_mode"]]
+    if mode == "face":
+        return FACE_COLOURS[node.face]
+    if mode == "level":
+        return level_colour(node.level)
+    return GROUND_COLOUR
+
+
+def make_chunk(node):
+    """Build a node's chunk: a hidden mesh entity."""
+    _, positions, normals, uvs, indices = cube_sphere.chunk_mesh(
+        node.face, node.level, node.x, node.y, QUADS, RADIUS, skirt_depth=SKIRT_FRACTION * node.edge)
+    entity = engine.create_mesh(positions.astype("float32").ravel(), indices,
+                                normals=normals.astype("float32").ravel(),
+                                uvs=uvs.astype("float32").ravel(), name="Chunk")
+    engine.scene.set_visible(entity, False)
+    engine.scene.set_material_float(entity, "gridStrength", 1.0)
+    engine.scene.set_material_vec4(entity, "baseColorFactor", chunk_colour(node) + (1.0,))
+    return entity
+
+
+def release_chunk(node):
+    state["shown"].discard(node.chunk)
+    engine.scene.destroy_entity(node.chunk)
 
 
 def colour_chunks():
-    for entity, face in chunks:
-        colour = FACE_COLOURS[face] if state["face_colours"] else GROUND_COLOUR
-        engine.scene.set_material_vec4(entity, "baseColorFactor", colour + (1.0,))
+    for node in state["tree"].nodes():
+        if node.chunk is not None:
+            engine.scene.set_material_vec4(node.chunk, "baseColorFactor", chunk_colour(node) + (1.0,))
 
 
 def build_site():
@@ -203,9 +238,13 @@ def build_site():
 def build_hud():
     ui = engine.ui
     canvas = ui.create_canvas(reference_size=(1600, 900))
-    text = ui.create_text(canvas, "", size=22, color=(0.92, 0.92, 0.88, 1.0))
-    ui.set_rect(text, anchor_min=(0, 0), anchor_max=(1, 0), pivot=(0, 0), position=(20, 16), size=(-40, 30))
-    state["hud"] = text
+    lines = []
+    for row in range(2):
+        text = ui.create_text(canvas, "", size=22, color=(0.92, 0.92, 0.88, 1.0))
+        ui.set_rect(text, anchor_min=(0, 0), anchor_max=(1, 0), pivot=(0, 0),
+                    position=(20, 16 + 30 * row), size=(-40, 30))
+        lines.append(text)
+    state["hud"] = lines
 
 
 # ── Camera ─────────────────────────────────────────────────────────────────
@@ -275,7 +314,37 @@ def teleport(preset):
         state["forward"] = normalize(add(scale(up, -0.98), scale(north, 0.2)))
 
 
+def in_view(centre, radius):
+    """Whether a sphere around `centre` (planet space) is roughly in view: a
+    cone around the camera's forward direction that holds the screen."""
+    to_centre = sub(centre, state["position"])
+    distance = length(to_centre)
+    if distance <= radius:
+        return True
+    aspect = 16.0 / 9.0
+    half_diagonal = math.atan(math.tan(math.radians(FOV) * 0.5) * math.sqrt(1.0 + aspect * aspect))
+    angle = math.acos(max(-1.0, min(1.0, dot(to_centre, state["forward"]) / distance)))
+    return angle - math.asin(min(1.0, radius / distance)) < half_diagonal
+
+
 # ── Per frame ──────────────────────────────────────────────────────────────
+
+def update_level_of_detail():
+    tree = state["tree"]
+    state["frame"] += 1
+    if not state["frozen"]:
+        tree.update(state["position"], state["frame"])
+        tree.build(BUILD_PER_FRAME,
+                   priority=lambda distance, node: (not in_view(node.centre, node.bound_radius), distance))
+        tree.evict(state["frame"])
+
+    shown = {node.chunk for node in tree.selected}
+    for entity in state["shown"] - shown:
+        engine.scene.set_visible(entity, False)
+    for entity in shown - state["shown"]:
+        engine.scene.set_visible(entity, True)
+    state["shown"] = shown
+
 
 def frame(dt):
     if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
@@ -283,19 +352,30 @@ def frame(dt):
         look(dx, dy)
     state["speed"] = 0.0
     fly(dt)
+    update_level_of_detail()
 
     # Camera-relative placement: subtract in double, then hand floats over.
     camera = state["position"]
+    for node in state["tree"].selected:
+        engine.scene.set_position(node.chunk, sub(node.centre, camera))
     for entity, position in placed:
         engine.scene.set_position(entity, sub(position, camera))
     right, up, forward = camera_basis()
     engine.scene.set_rotation(state["camera"], euler_from_basis(right, up, forward))
 
+    state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * dt * 1000.0
     if state["hud"] is not None:
+        tree = state["tree"]
         h = altitude()
         shown = "%.1f m" % h if h < 10_000.0 else "%.1f km" % (h / 1000.0)
-        engine.ui.set_text(state["hud"], "altitude %s    speed %.0f m/s    speed factor %.2f"
-                           % (shown, state["speed"], state["speed_factor"]))
+        cached = sum(1 for node in tree.nodes() if node.chunk is not None)
+        deepest = max(node.level for node in tree.selected)
+        engine.ui.set_text(state["hud"][0], "altitude %s    speed %.0f m/s    speed factor %.2f    frame %.1f ms"
+                           % (shown, state["speed"], state["speed_factor"], state["frame_ms"]))
+        engine.ui.set_text(state["hud"][1], "chunks drawn %d    built %d    missing %d    deepest level %d    "
+                           "split factor %.2f%s    colour: %s"
+                           % (len(tree.selected), cached, len(tree.missing), deepest, tree.split_factor,
+                              "    LOD FROZEN" if state["frozen"] else "", COLOUR_MODES[state["colour_mode"]]))
     return True
 
 
@@ -309,7 +389,7 @@ def on_init():
     state["camera"] = camera
 
     engine.set_custom_vec4("planet.sunDirection", normalize(SUN) + (0.0,))
-    build_planet()
+    state["tree"] = QuadTree(RADIUS, make_chunk, release_chunk, max_level=MAX_LEVEL, split_factor=SPLIT_FACTOR)
     build_site()
     build_hud()
     teleport(1)
@@ -326,14 +406,25 @@ def set_wireframe(on):
     engine.set_pass_enabled("Wireframe", on)
 
 
+def set_colour_mode(mode):
+    state["colour_mode"] = mode
+    colour_chunks()
+
+
 def on_key(key):
+    tree = state["tree"]
     if keys.NUM_1 <= key <= keys.NUM_6:
         teleport(key - keys.NUM_0)
     elif key == keys.F:
         set_wireframe(not state["wireframe"])
     elif key == keys.C:
-        state["face_colours"] = not state["face_colours"]
-        colour_chunks()
+        set_colour_mode((state["colour_mode"] + 1) % len(COLOUR_MODES))
+    elif key == keys.K:
+        state["frozen"] = not state["frozen"]
+    elif key == keys.LEFT_BRACKET:
+        tree.split_factor = max(0.5, tree.split_factor / 1.25)
+    elif key == keys.RIGHT_BRACKET:
+        tree.split_factor = min(8.0, tree.split_factor * 1.25)
     elif key == keys.P:
         os.makedirs(CAPTURES, exist_ok=True)
         path = os.path.join(CAPTURES, time.strftime("planet_%Y%m%d_%H%M%S.png"))
@@ -346,15 +437,16 @@ def on_scroll(x_offset, y_offset):
 
 
 class CaptureTour:
-    """--capture: each shot in turn, a screenshot once it has settled for a
-    few frames, then exit."""
+    """--capture: each shot in turn, a screenshot once no chunks are missing
+    (or after MAX_FRAMES), then exit."""
 
-    SETTLE_FRAMES = 30
-    # (file name, preset, wireframe, a colour per face)
-    SHOTS = [("preset_%d" % p, p, False, False) for p in range(1, 7)] + [
-        ("preset_1_wireframe", 1, True, False),
-        ("preset_6_wireframe_faces", 6, True, True),
-        ("preset_4_faces", 4, False, True),
+    MIN_FRAMES, MAX_FRAMES = 10, 600
+    # (file name, preset, wireframe, colour mode)
+    SHOTS = [("preset_%d" % p, p, False, 0) for p in range(1, 7)] + [
+        ("preset_1_wireframe_levels", 1, True, 2),
+        ("preset_2_levels", 2, False, 2),
+        ("preset_2_wireframe", 2, True, 0),
+        ("preset_6_wireframe_faces", 6, True, 1),
     ]
 
     def __init__(self, directory):
@@ -362,22 +454,28 @@ class CaptureTour:
         self.directory = directory
         self.shot = 0
         self.frames = 0
+        self.captured = None
 
     def __call__(self, dt):
-        name, preset, wireframe, face_colours = self.SHOTS[self.shot]
+        name, preset, wireframe, colour_mode = self.SHOTS[self.shot]
         self.frames += 1
         if self.frames == 1:
             teleport(preset)
             set_wireframe(wireframe)
-            if state["face_colours"] != face_colours:
-                state["face_colours"] = face_colours
-                colour_chunks()
-        elif self.frames == self.SETTLE_FRAMES:
-            path = os.path.join(self.directory, name + ".png")
-            print("[planet]", path if engine.capture_screenshot(path) else "screenshot failed", flush=True)
-        elif self.frames > self.SETTLE_FRAMES + 2:
+            if state["colour_mode"] != colour_mode:
+                set_colour_mode(colour_mode)
+        elif self.captured is None:
+            settled = self.frames >= self.MIN_FRAMES and not state["tree"].missing
+            if settled or self.frames >= self.MAX_FRAMES:
+                path = os.path.join(self.directory, name + ".png")
+                ok = engine.capture_screenshot(path)
+                print("[planet] %s after %d frames%s" % (path if ok else "screenshot failed", self.frames,
+                                                         "" if settled else " (not settled)"), flush=True)
+                self.captured = self.frames
+        elif self.frames > self.captured + 2:
             self.shot += 1
             self.frames = 0
+            self.captured = None
             if self.shot == len(self.SHOTS):
                 os._exit(0)        # the engine has no quit call
         return True

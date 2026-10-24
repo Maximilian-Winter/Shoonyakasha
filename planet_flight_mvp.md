@@ -717,8 +717,9 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 **WP3: Quadtree LOD (CPU meshes)**
 - Chunk meshes built with numpy.
 - Split and merge with hysteresis; a parent stays visible until all four children are ready; a per-frame generation budget sorted by distance.
-- Skirts and frustum culling. Skirts also cover the seams between neighbouring chunks: each places a shared edge vertex through its own float32 offset, up to about 1.4 mm (0.3 px) apart 3 m above a seam.
+- Skirts and frustum culling. Skirts also cover the seams between neighbouring chunks: each places a shared edge vertex through its own float32 offset, up to about 1.4 mm (0.3 px) apart 3 m above a seam. Draws are culled by the engine per entity; split decisions ignore the frustum, and the build order puts chunks in view first.
 - Debug: colour by LOD level, freeze LOD.
+- Measured with split factor 1.25 and max level 12: 474 chunks drawn at 5 m altitude, 354 at 1 km; a chunk build (numpy plus `create_mesh`) takes about 1.1 ms, so frames that build 8 take about 10 ms of Python.
 - Done: low flight over the sphere with no holes and no flicker.
 
 **WP4: GPU chunk generation**

@@ -6,7 +6,8 @@ cross(u, v) == normal. A point of a face is normal + u * u_axis + v * v_axis
 with u, v in [-1, 1]; `spherify` maps it onto the unit sphere.
 
 A chunk is the square of a face at quadtree `level` with integer
-coordinates (x, y), 0 .. 2**level - 1 along u and v.
+coordinates (x, y), 0 .. 2**level - 1 along u and v. `chunk_mesh` needs
+numpy; the rest is plain Python.
 """
 
 import math
@@ -55,27 +56,63 @@ def chunk_uv(level, x, y, i, j, quads):
     return -1.0 + 2.0 * (x * quads + i) / cells, -1.0 + 2.0 * (y * quads + j) / cells
 
 
-def chunk_mesh(face, level, x, y, quads, radius):
-    """One chunk of the sphere of `radius`. Returns its centre (planet
-    space) and, relative to that centre, its positions, plus normals (the
-    directions from the planet's centre), face (u, v) per vertex, and
-    indices, counter-clockwise seen from outside."""
+def chunk_centre(face, level, x, y, radius):
+    """The point of the sphere of `radius` at the middle of a chunk's face
+    coordinates."""
     u0, v0, size = chunk_bounds(level, x, y)
     c = direction(face, u0 + 0.5 * size, v0 + 0.5 * size)
-    centre = (c[0] * radius, c[1] * radius, c[2] * radius)
+    return (c[0] * radius, c[1] * radius, c[2] * radius)
 
-    positions, normals, uvs, indices = [], [], [], []
-    for j in range(quads + 1):
-        for i in range(quads + 1):
-            u, v = chunk_uv(level, x, y, i, j, quads)
-            d = direction(face, u, v)
-            positions.append((d[0] * radius - centre[0], d[1] * radius - centre[1], d[2] * radius - centre[2]))
-            normals.append(d)
-            uvs.append((u, v))
+
+def chunk_mesh(face, level, x, y, quads, radius, skirt_depth=0.0):
+    """One chunk of the sphere of `radius`, built with numpy. Returns its
+    centre (planet space, a tuple) and numpy arrays: positions relative to
+    that centre (N x 3), normals (the directions from the planet's centre),
+    face (u, v) per vertex, and indices (uint32), counter-clockwise seen
+    from outside.
+
+    The first (quads + 1)**2 vertices are the grid, row by row along u, then
+    rows along v. With `skirt_depth` > 0 each edge vertex has a copy that
+    much nearer the centre, after the grid, and walls join each edge to its
+    copies, drawn from both sides. The directions are the same, to the bit,
+    as `direction` gives for `chunk_uv`."""
+    import numpy as np
+
+    n, a, b = (np.array(axis) for axis in FACES[face])
+    cells = quads << level
+    k = np.arange(quads + 1, dtype=np.float64)
+    u = -1.0 + 2.0 * (x * quads + k) / cells
+    v = -1.0 + 2.0 * (y * quads + k) / cells
+    uu, vv = np.meshgrid(u, v)                   # [j, i]: u from i, v from j
+    p = n + uu[..., None] * a + vv[..., None] * b
+    px, py, pz = p[..., 0], p[..., 1], p[..., 2]
+    x2, y2, z2 = px * px, py * py, pz * pz
+    dirs = np.stack([px * np.sqrt(1.0 - 0.5 * y2 - 0.5 * z2 + y2 * z2 / 3.0),
+                     py * np.sqrt(1.0 - 0.5 * z2 - 0.5 * x2 + z2 * x2 / 3.0),
+                     pz * np.sqrt(1.0 - 0.5 * x2 - 0.5 * y2 + x2 * y2 / 3.0)], axis=-1).reshape(-1, 3)
+    uvs = np.stack([uu, vv], axis=-1).reshape(-1, 2)
+
+    centre = chunk_centre(face, level, x, y, radius)
+    c = np.array(centre)
     row = quads + 1
-    for j in range(quads):
-        for i in range(quads):
-            a = j * row + i             # +i is along u, +j along v, and cross(u, v) points outward
-            b, c2, d2 = a + 1, a + row + 1, a + row
-            indices += [a, b, c2, a, c2, d2]
-    return centre, positions, normals, uvs, indices
+    grid = np.arange(row * row).reshape(row, row)
+    quad_a = grid[:-1, :-1].ravel()              # +i is along u, +j along v, and cross(u, v) points outward
+    quad_b, quad_c, quad_d = quad_a + 1, quad_a + row + 1, quad_a + row
+    indices = [np.stack([quad_a, quad_b, quad_c, quad_a, quad_c, quad_d], axis=-1).ravel()]
+    positions = [dirs * radius - c]
+    normals, uv_list = [dirs], [uvs]
+
+    if skirt_depth > 0.0:
+        base = row * row
+        for edge in (grid[0, :], grid[:, -1], grid[-1, ::-1], grid[::-1, 0]):
+            skirt = base + np.arange(row)
+            positions.append(dirs[edge] * (radius - skirt_depth) - c)
+            normals.append(dirs[edge])
+            uv_list.append(uvs[edge])
+            e0, e1, s0, s1 = edge[:-1], edge[1:], skirt[:-1], skirt[1:]
+            indices.append(np.stack([e0, s0, s1, e0, s1, e1,          # one side
+                                     e0, s1, s0, e0, e1, s1], axis=-1).ravel())   # the other
+            base += row
+
+    return (centre, np.concatenate(positions), np.concatenate(normals), np.concatenate(uv_list),
+            np.concatenate(indices).astype(np.uint32))
