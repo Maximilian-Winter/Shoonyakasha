@@ -74,7 +74,10 @@ UITextField* multiLineFieldAt(entt::registry& registry, entt::entity element);  
 std::optional<ECS::Ray> mainCameraRay(const entt::registry& registry, glm::vec2 pixel, glm::vec2 screen) {
     if (screen.x <= 0.0f || screen.y <= 0.0f) return std::nullopt;
     for (auto [entity, camera] : registry.view<const ECS::CameraComponent>().each()) {
-        if (camera.isMainCamera) return ECS::screenPointToRay(pixel, screen, camera.viewMatrix, camera.projectionMatrix);
+        if (camera.isMainCamera) {
+            return ECS::screenPointToRay(pixel, screen, camera.viewMatrix, camera.projectionMatrix,
+                                         camera.type == ECS::CameraComponent::Perspective && camera.reverseZ);
+        }
     }
     return std::nullopt;
 }
@@ -85,9 +88,11 @@ std::optional<ECS::Ray> mainCameraRay(const entt::registry& registry, glm::vec2 
 float worldHitLimit(const entt::registry& registry, const UIPointerDepth* depth, glm::vec2 pixel, glm::vec2 screen,
                     const std::optional<ECS::Ray>& ray) {
     constexpr float kNone = std::numeric_limits<float>::infinity();
-    if (!depth || !depth->valid || !ray || depth->depth >= 1.0f) return kNone;
+    if (!depth || !depth->valid || !ray) return kNone;
     for (auto [entity, camera] : registry.view<const ECS::CameraComponent>().each()) {
         if (!camera.isMainCamera) continue;
+        const bool reverseZ = camera.type == ECS::CameraComponent::Perspective && camera.reverseZ;
+        if (reverseZ ? depth->depth <= 0.0f : depth->depth >= 1.0f) return kNone;
         const glm::vec3 seen = ECS::screenPointToWorld(pixel, screen, depth->depth, camera.viewMatrix,
                                                        camera.projectionMatrix);
         const float distance = glm::dot(seen - ray->origin, ray->direction);

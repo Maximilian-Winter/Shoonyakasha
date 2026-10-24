@@ -367,6 +367,18 @@ void SceneAPI::setCameraFar(EntityHandle entity, float farPlane) {
     if (c) c->farPlane = farPlane;
 }
 
+bool SceneAPI::getCameraReverseZ(EntityHandle entity) const {
+    if (!m_impl->valid(entity)) return false;
+    auto* c = m_impl->registry.try_get<ECS::CameraComponent>(toEntt(entity));
+    return c ? c->reverseZ : false;
+}
+
+void SceneAPI::setCameraReverseZ(EntityHandle entity, bool reverseZ) {
+    if (!m_impl->valid(entity)) return;
+    auto* c = m_impl->registry.try_get<ECS::CameraComponent>(toEntt(entity));
+    if (c) c->reverseZ = reverseZ;
+}
+
 float SceneAPI::getCameraOrthoSize(EntityHandle entity) const {
     if (!m_impl->valid(entity)) return 10.0f;
     auto* c = m_impl->registry.try_get<ECS::CameraComponent>(toEntt(entity));

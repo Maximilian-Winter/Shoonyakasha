@@ -170,6 +170,8 @@ cdef extern from "Facade/SceneAPI.h" namespace "Shoonyakasha::Facade":
         void setCameraNear(EntityHandle entity, float nearPlane)
         float getCameraFar(EntityHandle entity) const
         void setCameraFar(EntityHandle entity, float farPlane)
+        cbool getCameraReverseZ(EntityHandle entity) const
+        void setCameraReverseZ(EntityHandle entity, cbool reverseZ)
         float getCameraOrthoSize(EntityHandle entity) const
         void setCameraOrthoSize(EntityHandle entity, float size)
         float getCameraAspect(EntityHandle entity) const

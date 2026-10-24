@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 #include "FrameGraph/ViewCulling.h"
+#include "ECS/Core.h"
 #include "FrameGraph/FrameGraphRenderer.h"
 #include "Vulkan/FrameGraph/FrameGraphJson.h"
 #include "Vulkan/FrameGraph/FrameGraph.h"
@@ -58,6 +59,23 @@ TEST(ViewCulling, WithoutTheNearPlaneCastersTowardsTheLightPass) {
     EXPECT_TRUE(inside(clamped, {0, 0, -2}));    // still casts with depth clamping
     EXPECT_FALSE(inside(clamped, {0, 0, -40}));  // beyond the far plane
     EXPECT_FALSE(inside(clamped, {8, 0, -20}));  // outside the sides
+}
+
+TEST(ViewCulling, ReverseZInfiniteFrustumKeepsDistantBoundsAndCullsBehindNear) {
+    ECS::CameraComponent camera;
+    camera.fov = 90.0f;
+    camera.aspectRatio = 1.0f;
+    camera.nearPlane = 1.0f;
+    camera.reverseZ = true;
+    const glm::mat4 vp = camera.getProjectionMatrix() *
+                         glm::lookAtRH(glm::vec3(0.0f), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
+    const Frustum f = frustumFromViewProj(vp, ClipDepth::ZeroToOne);
+
+    EXPECT_TRUE(inside(f, {0, 0, -10}));
+    EXPECT_TRUE(inside(f, {0, 0, -5.0e6f}, 1000.0f));  // thousands of kilometres away
+    EXPECT_FALSE(inside(f, {12, 0, -10}));             // right of the view
+    EXPECT_FALSE(inside(f, {0, 0, 10}));               // behind the camera
+    EXPECT_FALSE(inside(f, {0, 0, -0.2f}, 0.1f));      // between the eye and the near plane
 }
 
 TEST(ViewCulling, TransformedBoundsCoverTheRotatedBox) {

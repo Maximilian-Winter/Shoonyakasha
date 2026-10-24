@@ -138,6 +138,10 @@ public:
     float getCameraFar(EntityHandle entity) const;
     void setCameraFar(EntityHandle entity, float farPlane);
 
+    // Perspective cameras: depth 1 at the near plane, 0 at infinity, no far plane.
+    bool getCameraReverseZ(EntityHandle entity) const;
+    void setCameraReverseZ(EntityHandle entity, bool reverseZ);
+
     float getCameraOrthoSize(EntityHandle entity) const;
     void setCameraOrthoSize(EntityHandle entity, float size);
 

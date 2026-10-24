@@ -73,6 +73,8 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `set_camera_near(entity, near_plane)` | None | Calls native `setCameraNear`; see the class contract above. |
 | `get_camera_far(entity)` | float | Calls native `getCameraFar`; see the class contract above. |
 | `set_camera_far(entity, far_plane)` | None | Calls native `setCameraFar`; see the class contract above. |
+| `get_camera_reverse_z(entity)` | bool | Whether the perspective projection is reverse-Z with an infinite far plane. |
+| `set_camera_reverse_z(entity, reverse_z)` | None | Perspective cameras: depth 1 at the near plane and 0 at infinity; the far plane is not used. Pipelines drawing with it compare depth with `greater_or_equal` and clear depth to 0. Orthographic cameras are unaffected. |
 | `get_camera_ortho_size(entity)` | float | Calls native `getCameraOrthoSize`; see the class contract above. |
 | `set_camera_ortho_size(entity, size)` | None | Calls native `setCameraOrthoSize`; see the class contract above. |
 | `get_camera_aspect(entity)` | float | The width / height the camera projects at; 0 follows the window. |

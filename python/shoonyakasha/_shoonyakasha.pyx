@@ -434,6 +434,13 @@ cdef class Scene:
     def set_camera_far(self, uint32_t entity, float far_plane):
         self._ptr.setCameraFar(entity, far_plane)
 
+    def get_camera_reverse_z(self, uint32_t entity):
+        return self._ptr.getCameraReverseZ(entity)
+
+    def set_camera_reverse_z(self, uint32_t entity, bint reverse_z):
+        """Perspective only: depth 1 at the near plane, 0 at infinity, no far plane."""
+        self._ptr.setCameraReverseZ(entity, reverse_z)
+
     def get_camera_ortho_size(self, uint32_t entity):
         return self._ptr.getCameraOrthoSize(entity)
 

@@ -28,9 +28,10 @@ struct TestCamera {
 };
 
 TestCamera makeCamera(CameraComponent::Type type, const glm::vec3& position,
-                      const glm::vec3& lookDirection) {
+                      const glm::vec3& lookDirection, bool reverseZ = false) {
     CameraComponent camera;
     camera.type = type;
+    camera.reverseZ = reverseZ;
     camera.aspectRatio = kScreen.x / kScreen.y;
 
     TransformComponent transform;
@@ -100,6 +101,32 @@ TEST(CameraRay, RayPassesThroughProjectedWorldPoints) {
             << "point (" << point.x << ", " << point.y << ", " << point.z << ")";
         EXPECT_GT(glm::dot(point - ray.origin, ray.direction), 0.0f);
     }
+}
+
+TEST(CameraRay, ReverseZRayStartsOnNearPlaneAndPassesThroughProjectedPoints) {
+    const auto camera = makeCamera(CameraComponent::Perspective, {-2, 1.5f, 4}, {0.3f, -0.2f, -1}, true);
+
+    const Ray centre = screenPointToRay(kScreen * 0.5f, kScreen, camera.view, camera.projection, true);
+    expectVec3Near(centre.direction, camera.forward);
+    expectVec3Near(centre.origin, camera.position + camera.forward * 0.1f, 1e-3f);
+
+    const glm::vec3 points[] = {{0, 0, 0}, {-1.5f, 1, -2}, {0.4f, 3, -6}, {300, -40, -5000}};
+    for (const auto& point : points) {
+        const glm::vec2 pixel = projectToPixel(camera, point);
+        const Ray ray = screenPointToRay(pixel, kScreen, camera.view, camera.projection, true);
+        EXPECT_LT(distanceToRay(ray, point), 1e-3f * glm::length(point - camera.position))
+            << "point (" << point.x << ", " << point.y << ", " << point.z << ")";
+        EXPECT_GT(glm::dot(point - ray.origin, ray.direction), 0.0f);
+    }
+}
+
+TEST(CameraRay, ReverseZWorldPointFromDepth) {
+    const auto camera = makeCamera(CameraComponent::Perspective, {1, 2, 3}, {0, 0, -1}, true);
+    const glm::vec3 point(1.5f, 2.5f, -400.0f);
+    const glm::vec4 clip = camera.projection * camera.view * glm::vec4(point, 1.0f);
+    const glm::vec3 seen = screenPointToWorld(projectToPixel(camera, point), kScreen, clip.z / clip.w,
+                                              camera.view, camera.projection);
+    expectVec3Near(seen, point, 1e-2f);
 }
 
 TEST(CameraRay, OrthographicRaysAreParallelWithDistinctOrigins) {

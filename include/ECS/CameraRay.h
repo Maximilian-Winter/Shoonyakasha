@@ -24,15 +24,19 @@ struct Ray {
 
 /// Ray through the window pixel `pixel` for a camera with the given view and
 /// projection. The origin lies on the near plane, so the same code serves
-/// perspective and orthographic cameras.
+/// perspective and orthographic cameras. `reverseZ` is the camera's
+/// CameraComponent::reverseZ: the ray then runs from depth 1 (near plane)
+/// through depth 0.5 (twice the near distance).
 inline Ray screenPointToRay(const glm::vec2& pixel, const glm::vec2& screenSize,
-                            const glm::mat4& view, const glm::mat4& projection) {
+                            const glm::mat4& view, const glm::mat4& projection, bool reverseZ = false) {
     const glm::vec2 ndc(2.0f * pixel.x / screenSize.x - 1.0f,
                         1.0f - 2.0f * pixel.y / screenSize.y);
     const glm::mat4 inverseViewProjection = glm::inverse(projection * view);
 
-    glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, 0.0f, 1.0f);
-    glm::vec4 farPoint  = inverseViewProjection * glm::vec4(ndc,  1.0f, 1.0f);
+    const float nearDepth = reverseZ ? 1.0f : 0.0f;
+    const float farDepth  = reverseZ ? 0.5f : 1.0f;
+    glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndc, nearDepth, 1.0f);
+    glm::vec4 farPoint  = inverseViewProjection * glm::vec4(ndc, farDepth, 1.0f);
     nearPoint /= nearPoint.w;
     farPoint /= farPoint.w;
 

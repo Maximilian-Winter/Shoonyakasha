@@ -12,6 +12,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <memory>
@@ -128,6 +129,10 @@ struct CameraComponent {
     float nearPlane = 0.1f;
     float farPlane = 1000.0f;
     float aspectRatio = 16.0f / 9.0f;
+    // Perspective only: clip depth 1 at the near plane and 0 at infinity, with
+    // no far plane (farPlane is not used by the projection). Pipelines drawing
+    // with it compare depth with "greater_or_equal" and clear depth to 0.
+    bool reverseZ = false;
     // The width / height the camera projects at; 0: the window's, which
     // aspectRatio follows every frame.
     float fixedAspectRatio = 0.0f;
@@ -140,9 +145,19 @@ struct CameraComponent {
     glm::mat4 projectionMatrix{1.0f};
     bool isMainCamera = false;
 
-    // Vulkan's clip depth: 0 at the near plane, 1 at the far plane. No Y flip;
-    // SceneContext applies it.
+    // Vulkan's clip depth: 0 at the near plane, 1 at the far plane, or with
+    // reverseZ 1 at the near plane and 0 at infinity. No Y flip; SceneContext
+    // applies it.
     glm::mat4 getProjectionMatrix() const {
+        if (type == Perspective && reverseZ) {
+            const float f = 1.0f / std::tan(glm::radians(fov) * 0.5f);
+            glm::mat4 projection(0.0f);
+            projection[0][0] = f / aspectRatio;
+            projection[1][1] = f;
+            projection[2][3] = -1.0f;      // w_clip = -z_view
+            projection[3][2] = nearPlane;  // z_clip = near, so depth = near / -z_view
+            return projection;
+        }
         if (type == Perspective) {
             return glm::perspectiveRH_ZO(glm::radians(fov), aspectRatio, nearPlane, farPlane);
         } else {
