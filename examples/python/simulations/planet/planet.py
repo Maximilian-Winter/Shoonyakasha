@@ -110,7 +110,7 @@ MORPH_START = 0.8                # morphing starts at this share of the parent's
 MORPH_LEVELS = 4                 # ancestors a vertex morphs towards at most; matches morph.glsl
 # The sun's shadow cascades (shadows.py): where they split the view (m), the map's size per side,
 # and how far towards the sun beyond a cascade casters count (m).
-SHADOW_SPLITS = (0.05, 40.0, 400.0, 3_000.0, 20_000.0)
+SHADOW_SPLITS = (0.05, 12.0, 150.0, 2_000.0, 20_000.0)
 SHADOW_RESOLUTION = 2048         # matches sunShadowMap in pipeline.json
 SHADOW_REACH = 5_000.0
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge

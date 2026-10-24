@@ -156,6 +156,15 @@
           "default": [ 0.0, 2048.0, 0.0, 0.0 ] }
       ]
     },
+    "ShadowEntityDraw": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": { "offset": 0, "stages": [ "vertex" ] },
+      "fields": [
+        { "name": "model", "type": "mat4", "source": "entity.transform.worldMatrix" },
+        { "name": "cascade", "type": "uint", "source": "pass.repeatIndex" }
+      ]
+    },
     "ShadowDraws": {
       "usage": "storage_buffer",
       "packing": "std430",
@@ -214,6 +223,9 @@
     "opaque": {
       "perDraw": { "layoutRef": "MaterialPushConstants" },
       "material": { "layoutRef": "materialSet" }
+    },
+    "shadowEntity": {
+      "perDraw": { "layoutRef": "ShadowEntityDraw" }
     }
   },
   "descriptorSetLayouts": {
@@ -385,6 +397,32 @@
       "outputs": [
         { "resource": "sunShadowMap", "usage": "depth_write", "layer": "{cascade}",
           "clear": { "depth": 1.0, "stencil": 0 } }
+      ]
+    },
+    {
+      "name": "ShadowEntities{cascade}",
+      "type": "graphics",
+      "repeat": { "count": 4, "index": "cascade" },
+      "execution": {
+        "type": "shadow_casters",
+        "view": "none",
+        "renderLayerMask": 3,
+        "entityDataBinding": "shadowEntity"
+      },
+      "pipeline": {
+        "vertexShader": "shaders/shadow_entity.vert.spv",
+        "vertexInput": "standard",
+        "depthTest": true,
+        "depthWrite": true,
+        "depthCompareOp": "less_or_equal",
+        "cullMode": "none",
+        "depthClamp": true,
+        "depthBias": { "constant": 0.0, "slope": 1.5 }
+      },
+      "descriptorSets": [ "shadowSet" ],
+      "pushConstants": [ { "stages": [ "vertex" ], "offset": 0, "size": 68 } ],
+      "outputs": [
+        { "resource": "sunShadowMap", "usage": "depth_write", "layer": "{cascade}" }
       ]
     },
     {

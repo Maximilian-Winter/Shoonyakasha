@@ -831,6 +831,7 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 - WP13b: Cascades.
   - Three or four cascades from the cockpit out to about 20 km, split logarithmically, each fitted to its slice of the view and snapped to its texels so shadows do not shimmer as the camera moves.
   - The cockpit and the blocks cast and receive in the nearest cascade: the cockpit's interior shadowed by its frame.
+  - As built: `ShadowEntities{cascade}` (execution `shadow_casters`, unculled, render layers 1 and 2) adds the entities after the terrain. The splits moved to 12 m, 150 m, 2 km and 20 km, so the nearest cascade's texels (1.7 cm, from 5.6 cm) can draw the cockpit's pillars; the blocks shadow the pad and the cockpit's frame shadows the dashboard.
 - WP13c: Long mountain shadows at low sun, beyond the cascades.
   - Per chunk vertex, the angle of the terrain's horizon towards the sun, found in `chunk_build.comp` by marching the terrain function towards the sun. It is rebuilt when the sun moves more than a little (the chunks are rebuilt, as on a terrain change).
   - The terrain beyond the last cascade is in shadow where the sun is below that horizon.
