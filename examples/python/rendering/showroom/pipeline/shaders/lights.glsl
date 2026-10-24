@@ -54,15 +54,20 @@ float coatFresnel(float cosTheta) {
 
 #ifdef RT_SHADOW_SPLIT
 // With RT_SHADOW_SPLIT defined, the lights shadowed by rays add nothing to
-// what lightFrom returns: their light goes to rtShadowTotal, and where the
-// ray is clear also to rtShadowLit, for shadow_denoise.frag to filter.
+// what lightFrom returns: their light goes to rtShadowTotal, and the share
+// the rays found clear also to rtShadowLit, for shadow_denoise.frag to
+// filter.
 vec3 rtShadowLit = vec3(0.0);
 vec3 rtShadowTotal = vec3(0.0);
 
-vec3 splitTraced(vec3 light, bool blocked) {
+vec3 splitTraced(vec3 light, float visible) {
     rtShadowTotal += light;
-    if (!blocked) rtShadowLit += light;
+    rtShadowLit += light * visible;
     return vec3(0.0);
+}
+
+vec3 splitTraced(vec3 light, bool blocked) {
+    return splitTraced(light, blocked ? 0.0 : 1.0);
 }
 #endif
 #include "area_lights.glsl"
@@ -131,12 +136,13 @@ vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float me
     vec3 reflected = rectangleBRDF(N, V, toLight, halfX, halfY, albedo, metallic, roughness, F0,
                                    patterned, cells, imaged);
     if (max(reflected.r, max(reflected.g, reflected.b)) <= 0.0) return vec3(0.0);
-    bool traced = false, blocked = false;
+    bool traced = false;
+    float visible = 1.0;
 #ifdef RT_LOCAL_SHADOWS
     traced = sceneLights[i].source.y > 0.5;
-    blocked = traced && localRayBlockedRect(i, worldPos, N, centre, halfX, halfY);
+    if (traced) visible = localRectVisibility(i, worldPos, N, centre, halfX, halfY);
 #ifndef RT_SHADOW_SPLIT
-    if (blocked) return vec3(0.0);
+    if (visible <= 0.0) return vec3(0.0);
 #endif
 #endif
 #ifdef LOCAL_SHADOWS
@@ -145,9 +151,9 @@ vec3 rectangleLight(uint i, vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float me
     vec3 color = sceneLights[i].colorIntensity.rgb * sceneLights[i].colorIntensity.w;
     vec3 light = reflected * color * falloff * d * d / (4.0 * length(halfX) * shape.w);
 #ifdef RT_SHADOW_SPLIT
-    if (traced) return splitTraced(light, blocked);
+    if (traced) return splitTraced(light, visible);
 #endif
-    return light;
+    return light * visible;
 }
 
 // Light from scene light i. `sunIndex` is the light shadowed by

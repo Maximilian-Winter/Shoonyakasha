@@ -76,17 +76,29 @@ bool localRayBlocked(uint i, vec3 worldPos, vec3 N, vec3 lightPos, float radius)
     return lightRayBlocked(origin, target, 2.0 * spread);
 }
 
-// The same for a rectangular light (centre lightPos, half-axes halfX and
-// halfY): a ray towards a random point of the rectangle, so the penumbra
-// takes its shape, long beside a long softbox and short across it.
-bool localRayBlockedRect(uint i, vec3 worldPos, vec3 N, vec3 lightPos, vec3 halfX, vec3 halfY) {
+// Rays per pixel towards a rectangular light: one to a random point of each
+// of its 2 x 2 quarters.
+const uint RECT_LIGHT_RAYS = 4u;
+
+// The share of a rectangular light (centre lightPos, half-axes halfX and
+// halfY) that worldPos sees past the scene, from RECT_LIGHT_RAYS rays, so
+// the penumbra takes its shape, long beside a long softbox and short across
+// it. 1 or 0 with RT_HARD_LIGHT_SHADOWS, from one ray to the centre.
+float localRectVisibility(uint i, vec3 worldPos, vec3 N, vec3 lightPos, vec3 halfX, vec3 halfY) {
     vec3 origin = worldPos + N * rtLightOffset;
-    vec3 target = lightPos;
-#ifndef RT_HARD_LIGHT_SHADOWS
-    vec2 uv = lightRayNoise(i) * 2.0 - 1.0;
-    target += (halfX * uv.x + halfY * uv.y) * showroom.lightSoftness;
+    float size = 2.0 * max(length(halfX), length(halfY)) * showroom.lightSoftness;
+#ifdef RT_HARD_LIGHT_SHADOWS
+    return lightRayBlocked(origin, lightPos, size) ? 0.0 : 1.0;
+#else
+    vec2 noise = lightRayNoise(i);
+    float visible = 0.0;
+    for (uint k = 0u; k < RECT_LIGHT_RAYS; ++k) {
+        vec2 uv = (vec2(float(k & 1u), float(k >> 1u)) + noise) - 1.0;
+        vec3 target = lightPos + (halfX * uv.x + halfY * uv.y) * showroom.lightSoftness;
+        if (!lightRayBlocked(origin, target, size)) visible += 1.0;
+    }
+    return visible / float(RECT_LIGHT_RAYS);
 #endif
-    return lightRayBlocked(origin, target, 2.0 * max(length(halfX), length(halfY)) * showroom.lightSoftness);
 }
 
 #endif

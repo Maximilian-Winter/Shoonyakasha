@@ -446,7 +446,7 @@ RIGS = [
     ], ibl=0.03, floor=(0.02, 0.02, 0.025), floor_roughness=0.14, cove=(0.03, 0.025, 0.04),
         rim=(1.4, 0.1, 0.9), exposure=0.8, min_ev=0.0),
     Rig("window", "Stained glass", [
-        LightSpec((-0.9, 0.45, -0.35), 2.0, (1.0, 1.0, 1.0), 90.0, radius=0.6, cone=(70.0, 89.0),
+        LightSpec((-0.9, 0.45, -0.35), 2.0, (1.0, 1.0, 1.0), 90.0, radius=0.6, cone=(40.0, 55.0),
                   softbox=(1.5, 3.0), image=True),
         LightSpec((0.7, 0.6, 0.6), 2.2, (0.75, 0.8, 1.0), 6.0, radius=0.8, cone=(40.0, 70.0), softbox=(1.4, 1.0)),
     ], ibl=0.05, floor=(0.02, 0.02, 0.022), floor_roughness=0.05, cove=(0.05, 0.045, 0.04),
