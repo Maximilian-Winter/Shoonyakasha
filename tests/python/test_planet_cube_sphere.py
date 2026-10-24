@@ -270,5 +270,59 @@ class QuadTreeSelection(unittest.TestCase):
         self.assertEqual(sum(1 for _ in self.tree.nodes()), 6)
 
 
+def segment_meets_sphere(a, b, radius):
+    """Whether the segment from a to b passes through the sphere of `radius` around the origin."""
+    ab = tuple(b[k] - a[k] for k in range(3))
+    t = -sum(a[k] * ab[k] for k in range(3)) / sum(c * c for c in ab)
+    t = min(1.0, max(0.0, t))
+    nearest = tuple(a[k] + t * ab[k] for k in range(3))
+    return sum(c * c for c in nearest) < radius * radius
+
+
+class HorizonCulling(unittest.TestCase):
+    OCCLUDER = RADIUS - 1_650.0
+
+    def test_the_far_side_is_hidden_and_the_near_side_is_not(self):
+        camera = (0.0, 0.0, RADIUS + 1_000.0)
+        self.assertTrue(quadtree.hidden_by_horizon((0.0, 0.0, -RADIUS), 5_000.0, camera, self.OCCLUDER))
+        self.assertFalse(quadtree.hidden_by_horizon((0.0, 0.0, RADIUS), 5_000.0, camera, self.OCCLUDER))
+
+    def test_a_peak_rising_over_the_horizon_is_not_hidden(self):
+        camera = (0.0, 0.0, RADIUS + 1_000.0)
+        # 300 km around the sphere from the camera, its top 6 km up: over the horizon seen from 1 km.
+        angle = 0.3
+        top = RADIUS + 6_000.0
+        centre = (math.sin(angle) * top, 0.0, math.cos(angle) * top)
+        self.assertFalse(segment_meets_sphere(camera, centre, self.OCCLUDER))
+        self.assertFalse(quadtree.hidden_by_horizon(centre, 100.0, camera, self.OCCLUDER))
+
+    def test_a_camera_inside_the_occluder_hides_nothing(self):
+        self.assertFalse(quadtree.hidden_by_horizon((0.0, 0.0, -RADIUS), 10.0, (0.0, 0.0, 1_000.0), self.OCCLUDER))
+
+    def test_every_hidden_sphere_is_wholly_behind_the_occluder(self):
+        random = __import__("random").Random(7)
+        hidden = 0
+        for _ in range(3_000):
+            height = 10.0 ** random.uniform(0.0, 6.5)
+            camera = tuple(c * (RADIUS + height) for c in normalized(random.gauss(0, 1) for _ in range(3)))
+            direction = normalized(random.gauss(0, 1) for _ in range(3))
+            centre = tuple(c * (RADIUS + random.uniform(-2_000.0, 8_000.0)) for c in direction)
+            radius = 10.0 ** random.uniform(1.0, 4.5)
+            if not quadtree.hidden_by_horizon(centre, radius, camera, self.OCCLUDER):
+                continue
+            hidden += 1
+            for _ in range(40):
+                offset = normalized(random.gauss(0, 1) for _ in range(3))
+                point = tuple(centre[k] + offset[k] * radius * random.random() ** (1 / 3) for k in range(3))
+                self.assertTrue(segment_meets_sphere(camera, point, self.OCCLUDER))
+        self.assertGreater(hidden, 300)
+
+
+def normalized(values):
+    v = tuple(values)
+    n = math.sqrt(sum(c * c for c in v))
+    return tuple(c / n for c in v)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -69,6 +69,28 @@ def _distance(a, b):
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
 
+def hidden_by_horizon(centre, radius, camera, occluder):
+    """Whether the sphere of `radius` around `centre` lies wholly behind a
+    sphere of radius `occluder` around the origin, seen from `camera`:
+    inside the cone from the camera tangent to that sphere, and wholly
+    beyond the plane of the circle where the cone touches it (every ray
+    inside the cone meets the sphere before that plane)."""
+    d2 = camera[0] ** 2 + camera[1] ** 2 + camera[2] ** 2
+    if d2 <= occluder * occluder:
+        return False
+    d = math.sqrt(d2)
+    to_centre = (centre[0] - camera[0], centre[1] - camera[1], centre[2] - camera[2])
+    distance = _distance(centre, camera)
+    if distance <= radius:
+        return False
+    along = -(to_centre[0] * camera[0] + to_centre[1] * camera[1] + to_centre[2] * camera[2]) / d
+    if along - radius < (d2 - occluder * occluder) / d:      # not wholly beyond the tangent circle's plane
+        return False
+    cone = math.asin(occluder / d)
+    angle = math.acos(max(-1.0, min(1.0, along / distance)))
+    return angle + math.asin(min(1.0, radius / distance)) <= cone
+
+
 class QuadTree:
     def __init__(self, radius, make, release, max_level=12, split_factor=2.0, merge_ratio=1.25,
                  heights=(0.0, 0.0), height_pad=0.0, evict_frames=120):

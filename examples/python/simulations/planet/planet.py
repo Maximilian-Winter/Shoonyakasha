@@ -85,7 +85,7 @@ import flight
 from ground import GroundPatch, SIZE as PATCH_SIZE
 from instruments import Instruments
 from menu import SettingsMenu
-from quadtree import QuadTree
+from quadtree import QuadTree, hidden_by_horizon
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PIPELINE = os.path.join(HERE, "pipeline", "pipeline.json")
@@ -256,6 +256,7 @@ state = {
     "wireframe": False,
     "ocean": True,
     "ocean_chunks": 0,           # chunks the ocean draws
+    "chunks_culled": 0,          # selected chunks not drawn: out of view or behind the horizon
     "colour_mode": 0,
     "frozen": False,
     "frame": 0,
@@ -412,10 +413,27 @@ def upload_sky():
                                                      SUN_ILLUMINANCE, state["exposure"]))
 
 
+def terrain_floor():
+    """Metres above the radius that no terrain goes below: the seabed's
+    depth, or on land the continent's edge plus the hills' height, both
+    with 10 % to spare (terrain.glsl's noise stays within [-1, 1])."""
+    continent, hills = state["terrain"]["continent"], state["terrain"]["hills"]
+    return -1.1 * max(hills[2], 0.05 * continent[3] + hills[1])
+
+
+def visible(node, occluder):
+    return (in_view(node.bound_centre, node.bound_radius)
+            and not hidden_by_horizon(node.bound_centre, node.bound_radius, state["position"], occluder))
+
+
 def upload_drawn_chunks():
-    """One indexed indirect draw per chunk the tree selected, and each drawn
-    slot's centre relative to the camera (subtracted in double) and colour."""
+    """One indexed indirect draw per chunk the tree selected that is in
+    view and not behind the horizon, and each drawn slot's centre relative
+    to the camera (subtracted in double) and colour."""
     selected = state["tree"].selected if state["tree"] is not None else []
+    occluder = RADIUS + terrain_floor()
+    selected = [node for node in selected if visible(node, occluder)]
+    state["chunks_culled"] = (len(state["tree"].selected) if state["tree"] is not None else 0) - len(selected)
     camera = state["position"]
     instances = np.zeros((SLOTS, 2, 4), dtype=np.float32)
     commands = np.zeros((len(selected), 5), dtype=np.uint32)
@@ -756,7 +774,8 @@ def in_view(centre, radius):
     distance = length(to_centre)
     if distance <= radius:
         return True
-    aspect = 16.0 / 9.0
+    width, height = engine.framebuffer_size
+    aspect = width / height if width > 0 and height > 0 else 16.0 / 9.0
     half_diagonal = math.atan(math.tan(math.radians(FOV) * 0.5) * math.sqrt(1.0 + aspect * aspect))
     angle = math.acos(max(-1.0, min(1.0, dot(to_centre, state["forward"]) / distance)))
     return angle - math.asin(min(1.0, radius / distance)) < half_diagonal
@@ -902,9 +921,10 @@ def update_hud():
                            "speed factor %.2f    frame %.1f ms"
                            % (distance_text(height_above_ground()), distance_text(altitude()), state["speed"],
                               state["speed_factor"], state["frame_ms"]))
-    engine.ui.set_text(state["hud"][1], "chunks drawn %d (ocean %d)    built %d    missing %d    pool %d / %d    "
-                       "deepest level %d    split factor %.2f%s    colour: %s"
-                       % (len(tree.selected), state["ocean_chunks"], cached, len(tree.missing), pool.used, SLOTS,
+    engine.ui.set_text(state["hud"][1], "chunks drawn %d of %d (ocean %d)    built %d    missing %d    "
+                       "pool %d / %d    deepest level %d    split factor %.2f%s    colour: %s"
+                       % (len(tree.selected) - state["chunks_culled"], len(tree.selected), state["ocean_chunks"],
+                          cached, len(tree.missing), pool.used, SLOTS,
                           deepest,
                           tree.split_factor, "    LOD FROZEN" if state["frozen"] else "",
                           COLOUR_MODES[state["colour_mode"]]))
@@ -1162,8 +1182,10 @@ class CaptureTour:
             if done or self.frames >= self.MAX_FRAMES:
                 path = os.path.join(self.directory, name + ".png")
                 ok = engine.capture_screenshot(path)
-                print("[planet] %s after %d frames%s" % (path if ok else "screenshot failed", self.frames,
-                                                         "" if done else " (not settled)"), flush=True)
+                selected = len(state["tree"].selected)
+                print("[planet] %s after %d frames%s, %d of %d chunks drawn"
+                      % (path if ok else "screenshot failed", self.frames, "" if done else " (not settled)",
+                         selected - state["chunks_culled"], selected), flush=True)
                 self.captured = self.frames
         elif self.frames > self.captured + 2:
             self.shot += 1
