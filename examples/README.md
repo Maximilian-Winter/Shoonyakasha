@@ -119,7 +119,7 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 
 | | |
 |---|---|
-| [`planet`](python/simulations/planet) | A 100 km sphere on its own pipeline, flown from 5 m above the surface to 5,000 km away: positions in Python doubles, every entity placed relative to the camera each frame, and a reverse-Z projection with an infinite far plane. Uses only generated geometry. |
+| [`planet`](python/simulations/planet) | A 100 km cube-sphere on its own pipeline, flown from 5 m above the surface to 5,000 km away: positions in Python doubles, every chunk placed relative to the camera each frame, a reverse-Z projection with an infinite far plane, and a wireframe view. Uses only generated geometry. |
 
 ### games_2d
 

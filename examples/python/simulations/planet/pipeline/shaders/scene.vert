@@ -24,12 +24,12 @@ layout(location = 3) in vec3 inNormal;
 
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec3 fragColor;
-layout(location = 2) out vec2 fragLongLat;
+layout(location = 2) out vec2 fragFaceUv;
 
 void main() {
     vec4 relativePos = push.model * vec4(inPosition, 1.0);
     fragNormal = normalize(transpose(inverse(mat3(push.model))) * inNormal);
     fragColor = inColor;
-    fragLongLat = inTexCoord;
+    fragFaceUv = inTexCoord;
     gl_Position = camera.proj * camera.view * relativePos;
 }

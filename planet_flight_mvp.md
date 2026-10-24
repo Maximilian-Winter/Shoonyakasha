@@ -710,19 +710,20 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 - Done: fly from 5 m to 5,000 km away with no jitter and no z-fighting.
 
 **WP2: Cube-sphere**
-- Six face frames and `spherify`, in Python (double) and GLSL.
-- Fixed subdivision, one mesh per face, each entity transform set camera-relative every frame.
-- Done: correct winding on all faces and no gaps at face seams (wireframe check).
+- Six face frames and `spherify` in Python (double), in `cube_sphere.py`.
+- Fixed subdivision: each face 8 × 8 chunks at level 3, each chunk's vertices relative to its own centre and its entity transform set camera-relative every frame.
+- Done: correct winding on all faces and no gaps at face seams (wireframe check, and `tests/python/test_planet_cube_sphere.py`).
 
 **WP3: Quadtree LOD (CPU meshes)**
 - Chunk meshes built with numpy.
 - Split and merge with hysteresis; a parent stays visible until all four children are ready; a per-frame generation budget sorted by distance.
-- Skirts and frustum culling.
+- Skirts and frustum culling. Skirts also cover the seams between neighbouring chunks: each places a shared edge vertex through its own float32 offset, up to about 1.4 mm (0.3 px) apart 3 m above a seam.
 - Debug: colour by LOD level, freeze LOD.
 - Done: low flight over the sphere with no holes and no flicker.
 
 **WP4: GPU chunk generation**
 - Check first: how one compute pass processes a queue of chunk jobs in one frame (`repeatIndex` or a job buffer).
+- `spherify` and the face frames in GLSL, matching `cube_sphere.py`.
 - A compute pass writes chunk vertices into a pool of fixed-size slots, managed by a free list in Python.
 - One shared index buffer and `draw_indexed_indirect`; each chunk's camera-relative origin goes into an SSBO every frame.
 - Per-chunk minH/maxH come back through `request_readback`.

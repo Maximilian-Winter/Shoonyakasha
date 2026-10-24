@@ -90,6 +90,33 @@
       ]
     },
     {
+      "name": "Wireframe",
+      "type": "graphics",
+      "enabled": false,
+      "execution": {
+        "type": "opaque_geometry",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "opaque"
+      },
+      "pipeline": {
+        "vertexShader": "shaders/wire.vert.spv",
+        "fragmentShader": "shaders/wire.frag.spv",
+        "vertexInput": "standard",
+        "depthTest": true,
+        "depthWrite": false,
+        "depthCompareOp": "greater_or_equal",
+        "depthBias": { "slope": 1.5 },
+        "cullMode": "back",
+        "wireframe": true
+      },
+      "descriptorSets": [ "cameraSet", "materialSet" ],
+      "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 96, "offset": 0 } ],
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_blend" },
+        { "resource": "depth", "usage": "depth_read" }
+      ]
+    },
+    {
       "name": "UIOverlay",
       "type": "graphics",
       "execution": { "type": "ui_canvas" },

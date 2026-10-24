@@ -1,9 +1,10 @@
 #version 450
 //
 // Lambert lighting from the sun. Surfaces with a gridStrength material
-// parameter get longitude and latitude lines from their texture coordinates
-// (degrees) at five spacings, 10 down to 0.001 degrees; each spacing fades in
-// once its lines are far enough apart on screen.
+// parameter get lines from their texture coordinates, the cube face's (u, v)
+// in [-1, 1], at every power-of-two subdivision of the face, from its edges
+// (level 0) to 2^16 squares across; each level fades in once its lines are
+// far enough apart on screen.
 //
 
 layout(set = 0, binding = 0) uniform CameraUBO {
@@ -20,7 +21,7 @@ layout(push_constant) uniform PushConstants {
 
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec3 fragColor;
-layout(location = 2) in vec2 fragLongLat;
+layout(location = 2) in vec2 fragFaceUv;
 
 layout(location = 0) out vec4 outColor;
 
@@ -37,11 +38,10 @@ float gridLines(vec2 coord) {
 void main() {
     vec3 normal = normalize(fragNormal);
 
+    vec2 faceUnit = fragFaceUv * 0.5 + 0.5;   // 0 .. 1 across the face
     float lines = 0.0;
-    float spacing = 10.0;
-    for (int i = 0; i < 5; ++i) {
-        lines = max(lines, gridLines(fragLongLat / spacing) * (1.0 - 0.15 * float(i)));
-        spacing *= 0.1;
+    for (int level = 0; level <= 16; ++level) {
+        lines = max(lines, gridLines(faceUnit * exp2(float(level))) * (1.0 - 0.035 * float(level)));
     }
     lines *= push.gridStrength;
 

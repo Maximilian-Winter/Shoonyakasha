@@ -1,5 +1,5 @@
 """
-Shoonyakasha planet: precision sandbox
+Shoonyakasha planet: a cube-sphere
 
 A sphere of radius 100 km, flown around from a few metres above its surface
 to thousands of kilometres away. Positions are Python floats (64-bit) with
@@ -8,9 +8,12 @@ origin and only turns; every frame each entity is placed at its position
 minus the camera's, so the GPU sees only small numbers. The projection is
 reverse-Z with an infinite far plane.
 
-The sphere is 512 patches, each holding its vertices relative to its own
-centre. A cluster of blocks stands at 0.7 degrees north and east, on a pad
-5 cm above the ground.
+The sphere is a cube-sphere: each of the six cube faces split into 8 x 8
+chunks of 16 x 16 quads, mapped onto the sphere with `spherify`. Each chunk
+holds its vertices relative to its own centre. Lines on the ground follow
+the face coordinates, at every power-of-two subdivision of a face. A cluster
+of blocks stands on a vertex near the centre of the +Z face, on a pad 5 cm
+above the ground.
 
 Keys:
     right mouse + move     look around
@@ -19,9 +22,12 @@ Keys:
     Shift / Ctrl           4x faster / 4x slower
     mouse wheel            speed factor
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
+    6                      above the corner where the +X, +Y and +Z faces meet
+    F                      wireframe
+    C                      a colour per face
     P                      screenshot into planet_captures/
 
-    python planet.py --capture DIR     save a screenshot at each of 1 - 5 and exit
+    python planet.py --capture DIR     save a screenshot at each of 1 - 6 and exit
 """
 
 import argparse
@@ -32,14 +38,20 @@ import time
 import shoonyakasha as sk
 from shoonyakasha import keys
 
+import cube_sphere
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PIPELINE = os.path.join(HERE, "pipeline", "pipeline.json")
 CAPTURES = os.path.join(HERE, "planet_captures")
 
 RADIUS = 100_000.0               # metres
-LON_PATCHES, LAT_PATCHES = 32, 16
-QUADS = 16                       # quads along each side of a patch
-SITE_DEGREES = 180.0 / (LAT_PATCHES * QUADS)   # one grid step north and east of (0, 0): a vertex
+LEVEL = 3                        # every face is 2**LEVEL x 2**LEVEL chunks
+QUADS = 16                       # quads along each side of a chunk
+SITE_FACE = 4                    # +Z
+SITE_UV = 2.0 / (QUADS << LEVEL)  # one quad from the face's centre along u and v: a vertex
+GROUND_COLOUR = (0.30, 0.40, 0.27)
+FACE_COLOURS = ((0.62, 0.30, 0.25), (0.25, 0.50, 0.55), (0.55, 0.55, 0.30),
+                (0.40, 0.30, 0.60), (0.30, 0.55, 0.30), (0.60, 0.42, 0.25))
 SUN = (0.48, 0.42, 0.77)
 NEAR_PLANE = 0.05
 FOV = 70.0
@@ -90,12 +102,6 @@ def rotate(v, axis, angle):
     return add(add(scale(v, c), scale(cross(axis, v), s)), scale(axis, dot(axis, v) * (1.0 - c)))
 
 
-def surface_direction(lat_degrees, lon_degrees):
-    """Unit vector from the planet's centre; longitude 0 is +Z, 90 east is +X."""
-    lat, lon = math.radians(lat_degrees), math.radians(lon_degrees)
-    return (math.cos(lat) * math.sin(lon), math.sin(lat), math.cos(lat) * math.cos(lon))
-
-
 def local_frame(up):
     """(east, north) at the point of the sphere whose direction is `up`."""
     east = cross((0.0, 1.0, 0.0), up)
@@ -117,32 +123,6 @@ def euler_from_basis(right, up, forward):
 
 # ── Meshes ─────────────────────────────────────────────────────────────────
 
-def sphere_patch(lon_index, lat_index):
-    """One patch of the sphere: its centre (planet space, metres) and its
-    positions relative to that centre, normals, (longitude, latitude) in
-    degrees as texture coordinates, and indices."""
-    step = SITE_DEGREES
-    lon0 = -180.0 + lon_index * QUADS * step
-    lat0 = -90.0 + lat_index * QUADS * step
-    centre = scale(surface_direction(lat0 + 0.5 * QUADS * step, lon0 + 0.5 * QUADS * step), RADIUS)
-
-    positions, normals, uvs, indices = [], [], [], []
-    for j in range(QUADS + 1):
-        for i in range(QUADS + 1):
-            lon, lat = lon0 + i * step, lat0 + j * step
-            direction = surface_direction(lat, lon)
-            positions.append(sub(scale(direction, RADIUS), centre))
-            normals.append(direction)
-            uvs.append((lon, lat))
-    row = QUADS + 1
-    for j in range(QUADS):
-        for i in range(QUADS):
-            a = j * row + i            # east is +i, north is +j: counter-clockwise seen from outside
-            b, c, d = a + 1, a + row + 1, a + row
-            indices += [a, b, c, a, c, d]
-    return centre, positions, normals, uvs, indices
-
-
 def box():
     """A unit cube centred on the origin, as triangles with flat normals."""
     positions, normals = [], []
@@ -161,29 +141,41 @@ def box():
 
 # Each placed entity: (entity, position in planet space). Rebased every frame.
 placed = []
+# (entity, face) of every chunk.
+chunks = []
 state = {
     "camera": None,
     "position": (0.0, 0.0, RADIUS + 5.0),
     "forward": (0.0, 0.0, 1.0),
     "speed_factor": 1.0,
     "hud": None,
+    "wireframe": False,
+    "face_colours": False,
 }
 
 
 def site_frame():
-    up = surface_direction(SITE_DEGREES, SITE_DEGREES)
+    up = cube_sphere.direction(SITE_FACE, SITE_UV, SITE_UV)
     east, north = local_frame(up)
     return scale(up, RADIUS), up, east, north
 
 
 def build_planet():
-    for lat_index in range(LAT_PATCHES):
-        for lon_index in range(LON_PATCHES):
-            centre, positions, normals, uvs, indices = sphere_patch(lon_index, lat_index)
-            entity = engine.create_mesh(positions, indices, normals=normals, uvs=uvs, name="Patch")
-            engine.scene.set_material_vec4(entity, "baseColorFactor", (0.30, 0.40, 0.27, 1.0))
-            engine.scene.set_material_float(entity, "gridStrength", 1.0)
-            placed.append((entity, centre))
+    for face in range(6):
+        for y in range(1 << LEVEL):
+            for x in range(1 << LEVEL):
+                centre, positions, normals, uvs, indices = cube_sphere.chunk_mesh(face, LEVEL, x, y, QUADS, RADIUS)
+                entity = engine.create_mesh(positions, indices, normals=normals, uvs=uvs, name="Chunk")
+                engine.scene.set_material_float(entity, "gridStrength", 1.0)
+                placed.append((entity, centre))
+                chunks.append((entity, face))
+    colour_chunks()
+
+
+def colour_chunks():
+    for entity, face in chunks:
+        colour = FACE_COLOURS[face] if state["face_colours"] else GROUND_COLOUR
+        engine.scene.set_material_vec4(entity, "baseColorFactor", colour + (1.0,))
 
 
 def build_site():
@@ -271,6 +263,12 @@ def teleport(preset):
     elif preset == 2:
         state["position"] = add(origin, scale(up, 1_000.0))
         state["forward"] = normalize(add(north, scale(up, -0.25)))
+    elif preset == 6:
+        # 3 km above the cube corner shared by +X, +Y and +Z, looking down at it.
+        corner = normalize((1.0, 1.0, 1.0))
+        corner_east, corner_north = local_frame(corner)
+        state["position"] = scale(corner, RADIUS + 3_000.0)
+        state["forward"] = normalize(add(scale(corner, -0.98), scale(corner_north, 0.2)))
     else:
         height = {3: 50_000.0, 4: 1_000_000.0, 5: 5_000_000.0}[preset]
         state["position"] = scale(up, RADIUS + height)
@@ -323,9 +321,19 @@ def on_init():
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
+def set_wireframe(on):
+    state["wireframe"] = on
+    engine.set_pass_enabled("Wireframe", on)
+
+
 def on_key(key):
-    if keys.NUM_1 <= key <= keys.NUM_5:
+    if keys.NUM_1 <= key <= keys.NUM_6:
         teleport(key - keys.NUM_0)
+    elif key == keys.F:
+        set_wireframe(not state["wireframe"])
+    elif key == keys.C:
+        state["face_colours"] = not state["face_colours"]
+        colour_chunks()
     elif key == keys.P:
         os.makedirs(CAPTURES, exist_ok=True)
         path = os.path.join(CAPTURES, time.strftime("planet_%Y%m%d_%H%M%S.png"))
@@ -338,28 +346,39 @@ def on_scroll(x_offset, y_offset):
 
 
 class CaptureTour:
-    """--capture: each preset in turn, a screenshot once it has settled for
-    a few frames, then exit."""
+    """--capture: each shot in turn, a screenshot once it has settled for a
+    few frames, then exit."""
 
     SETTLE_FRAMES = 30
+    # (file name, preset, wireframe, a colour per face)
+    SHOTS = [("preset_%d" % p, p, False, False) for p in range(1, 7)] + [
+        ("preset_1_wireframe", 1, True, False),
+        ("preset_6_wireframe_faces", 6, True, True),
+        ("preset_4_faces", 4, False, True),
+    ]
 
     def __init__(self, directory):
         os.makedirs(directory, exist_ok=True)
         self.directory = directory
-        self.preset = 1
+        self.shot = 0
         self.frames = 0
 
     def __call__(self, dt):
+        name, preset, wireframe, face_colours = self.SHOTS[self.shot]
         self.frames += 1
         if self.frames == 1:
-            teleport(self.preset)
+            teleport(preset)
+            set_wireframe(wireframe)
+            if state["face_colours"] != face_colours:
+                state["face_colours"] = face_colours
+                colour_chunks()
         elif self.frames == self.SETTLE_FRAMES:
-            path = os.path.join(self.directory, "preset_%d.png" % self.preset)
+            path = os.path.join(self.directory, name + ".png")
             print("[planet]", path if engine.capture_screenshot(path) else "screenshot failed", flush=True)
         elif self.frames > self.SETTLE_FRAMES + 2:
-            self.preset += 1
+            self.shot += 1
             self.frames = 0
-            if self.preset > 5:
+            if self.shot == len(self.SHOTS):
                 os._exit(0)        # the engine has no quit call
         return True
 
