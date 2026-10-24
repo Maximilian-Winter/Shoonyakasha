@@ -852,6 +852,7 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 - WP14c: Clouds on the world.
   - Their shadows on the ground and the sea: the terrain, ocean and scene shaders sample the cloud density along the sun's direction (or a small cloud-shadow map built per frame).
   - Wind: the coverage drifts with time.
+  - As built: `cloudShadow` in `clouds.glsl` (four base-density samples along the sun through the layer; without the detail noise) scales the sunlight of the terrain, the sea and the blocks, with 30 % of the stopped light let through as diffuse (without it, the shadows were near black from orbit). The cloud parameters moved into `cameraSet`. The wind moves the coverage noise in Python (15 m/s, times the warp); the detail noise follows at the same speed in metres (it drifted 37 times faster before). Cost from the capture tour: 0.2 to 1.3 ms more in most views, 2.8 ms inside the layer (9.7 ms against 6.9), where every surface pixel's march starts in cloud.
 - WP14d: From everywhere.
   - Seen from orbit (the shell's tops lit, the terminator), from inside (flying through: fog in the cockpit), and from below at sunset (lit from underneath).
   - The capture tour gains these views.

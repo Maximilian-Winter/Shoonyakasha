@@ -1,10 +1,9 @@
 // The cloud layer: a shell between clouds.layer.x and .y metres above the
-// sphere. Include after camera.glsl, terrain.glsl (for noise3) and
-// atmosphere.glsl, and after declaring a uniform block `clouds` with the
-// fields of CloudParams in pipeline.json:
+// sphere. Include after camera.glsl (which declares `clouds`, CloudParams
+// in pipeline.json), terrain.glsl (for noise3) and atmosphere.glsl:
 //     vec4 layer;      // bottom, top (m), coverage (0 none .. 1 overcast), extinction per metre at full density
 //     vec4 shape;      // coverage noise frequency (per unit of direction), detail scale (m), detail erosion, 1 on / 0 off
-//     vec4 wind;       // xyz: offset of the coverage noise (moves with the wind)
+//     vec4 wind;       // xyz: offset of the coverage noise, in its units (moves with the wind)
 //
 // Density at a point: the coverage, a noise on the direction from the
 // planet's centre (the weather, the same at every height) raised so that
@@ -42,8 +41,38 @@ float cloudBaseDensity(vec3 p) {
 float cloudDensity(vec3 p) {
     float base = cloudBaseDensity(p);
     if (base <= 0.0) return 0.0;
-    float detail = fbm3(p / clouds.shape.y + clouds.wind.xyz * 37.0, 3, 2.3, 0.5) * 0.5 + 0.5;
+    // The detail drifts with the coverage: the same wind, in metres.
+    vec3 drift = clouds.wind.xyz * (atmosphere.radii.x / clouds.shape.x / clouds.shape.y);
+    float detail = fbm3(p / clouds.shape.y + drift, 3, 2.3, 0.5) * 0.5 + 0.5;
     return max(base - clouds.shape.z * detail * (1.0 - base), 0.0);
+}
+
+// The share of the sunlight that comes through the clouds to `p` (planet
+// space): the base density at CLOUD_SHADOW_STEPS points along the sun's
+// direction through the layer (from `p` where it is inside; at most
+// CLOUD_SHADOW_LENGTH of it), as a transmittance, plus CLOUD_DIFFUSE of
+// what they stop, which reaches the ground scattered through them. 1
+// above the layer.
+const int CLOUD_SHADOW_STEPS = 4;
+const float CLOUD_SHADOW_LENGTH = 6000.0;
+const float CLOUD_DIFFUSE = 0.3;
+
+float cloudShadow(vec3 p) {
+    if (clouds.shape.w == 0.0) return 1.0;
+    vec3 sun = atmosphere.sun.xyz;
+    float r = atmosphere.radii.x;
+    vec2 top = raySphere(p, sun, r + clouds.layer.y);
+    if (top.y <= 0.0) return 1.0;
+    vec2 bottom = raySphere(p, sun, r + clouds.layer.x);
+    float start = (bottom.x <= 0.0 && bottom.y > 0.0) ? bottom.y : 0.0;   // below the layer: from where it is entered
+    float span = min(top.y - start, CLOUD_SHADOW_LENGTH);
+    if (span <= 0.0) return 1.0;
+    float density = 0.0;
+    for (int k = 0; k < CLOUD_SHADOW_STEPS; ++k) {
+        density += cloudBaseDensity(p + sun * (start + (float(k) + 0.5) / float(CLOUD_SHADOW_STEPS) * span));
+    }
+    float through = exp(-density / float(CLOUD_SHADOW_STEPS) * span * clouds.layer.w);
+    return through + (1.0 - through) * CLOUD_DIFFUSE;
 }
 
 float henyeyGreenstein(float mu, float g) {

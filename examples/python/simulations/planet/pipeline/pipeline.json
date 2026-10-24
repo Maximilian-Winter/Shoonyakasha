@@ -261,15 +261,15 @@
         { "binding": 5, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "sunShadowMap",
           "autoBindResource": "sunShadowMap", "autoBindSampler": "shadowCompare" },
         { "binding": 6, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "ShadowParams",
-          "autoBindBuffer": "ShadowParams" }
+          "autoBindBuffer": "ShadowParams" },
+        { "binding": 7, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "CloudParams",
+          "autoBindBuffer": "CloudParams" }
       ]
     },
     "cloudPassSet": {
       "bindings": [
         { "binding": 0, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "sceneDepth",
-          "autoBindResource": "depth", "autoBindSampler": "nearestClamp" },
-        { "binding": 1, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "CloudParams",
-          "autoBindBuffer": "CloudParams" }
+          "autoBindResource": "depth", "autoBindSampler": "nearestClamp" }
       ]
     },
     "cloudResultSet": {

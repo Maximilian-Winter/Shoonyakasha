@@ -46,3 +46,10 @@ layout(set = CAMERA_SET, binding = 6) uniform ShadowParams {
     vec4 texel;            // metres across one texel of each cascade
     vec4 settings;         // x: 1 with shadows, 0 without; y: the shadow map's size in texels
 } shadow;
+
+// The cloud layer (clouds.glsl).
+layout(set = CAMERA_SET, binding = 7) uniform CloudParams {
+    vec4 layer;
+    vec4 shape;
+    vec4 wind;
+} clouds;

@@ -314,6 +314,8 @@ state = {
     "clouds": True,              # the cloud layer
     "cloud_coverage": 0.45,      # share of the sky the clouds cover, 0 .. 1
     "cloud_density": 0.04,       # extinction per metre at full density
+    "cloud_wind": (0.0, 0.0, 0.0),  # the coverage noise's offset, in its units (clouds.glsl)
+    "wind_speed": 15.0,          # metres a second the clouds drift
     "horizon_sun": None,         # the sun's direction the chunks' horizons are measured towards
     "rebuild": [],               # built chunks still to build again for horizon_sun, nearest last
     "gamepad_held": set(),       # gamepad buttons held last frame
@@ -563,6 +565,18 @@ def upload_clouds():
     """The cloud layer's parameters (CloudParams, clouds.glsl)."""
     engine.set_custom_vec4("planet.clouds.layer", CLOUD_LAYER + (state["cloud_coverage"], state["cloud_density"]))
     engine.set_custom_vec4("planet.clouds.shape", CLOUD_SHAPE + (1.0 if state["clouds"] else 0.0,))
+    engine.set_custom_vec4("planet.clouds.wind", state["cloud_wind"] + (0.0,))
+
+
+def blow_clouds(dt):
+    """Move the clouds' weather with the wind by `dt` seconds (times the
+    time warp): the menu's wind speed in metres a second, along the
+    coverage noise's x, in its units (a unit is RADIUS / its frequency
+    metres)."""
+    step = state["wind_speed"] * dt * WARPS[state["warp"]] * CLOUD_SHAPE[0] / RADIUS
+    wind = state["cloud_wind"]
+    state["cloud_wind"] = (wind[0] + step, wind[1], wind[2])
+    engine.set_custom_vec4("planet.clouds.wind", state["cloud_wind"] + (0.0,))
 
 
 def upload_orbit_path():
@@ -1030,6 +1044,7 @@ def frame(dt):
     view_rotation = euler_from_basis(right, up, forward)
     engine.scene.set_rotation(state["camera"], view_rotation)
     upload_shadow_cascades(forward)
+    blow_clouds(dt)
     if state["mode"] != state["shown_mode"]:
         show_mode()
     if state["mode"] == "ship":
@@ -1238,6 +1253,8 @@ def menu_items():
          "set": set_and("cloud_coverage", upload_clouds), "format": "%.2f"},
         {"slider": "Cloud density", "min": 0.005, "max": 0.1, "get": lambda: state["cloud_density"],
          "set": set_and("cloud_density", upload_clouds), "format": "%.3f /m"},
+        {"slider": "Wind", "min": 0.0, "max": 60.0, "get": lambda: state["wind_speed"],
+         "set": lambda v: state.update(wind_speed=v), "format": "%.0f m/s"},
         {"toggle": "Wireframe", "get": lambda: state["wireframe"], "set": set_wireframe},
         {"toggle": "Debug text", "get": lambda: state["debug_text"], "set": lambda on: state.update(debug_text=on)},
         {"button": "Colour: terrain / face / level",

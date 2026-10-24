@@ -16,12 +16,6 @@
 
 layout(set = 1, binding = 0) uniform sampler2D sceneDepth;
 
-layout(set = 1, binding = 1) uniform CloudParams {
-    vec4 layer;
-    vec4 shape;
-    vec4 wind;
-} clouds;
-
 #include "clouds.glsl"
 
 layout(location = 0) in vec2 fragTexCoord;

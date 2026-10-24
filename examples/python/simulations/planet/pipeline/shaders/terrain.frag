@@ -13,6 +13,7 @@
 #include "atmosphere.glsl"
 #include "shading.glsl"
 #include "shadow.glsl"
+#include "clouds.glsl"
 
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec4 fragColour;
@@ -53,6 +54,7 @@ void main() {
     vec3 albedo = fragColour.r < 0.0 ? groundColour(radial, fragRadialHeight.w, normal)
                                      : withGrid(fragColour.rgb, fragColour.a, fragFaceUv);
     vec3 p = camera.cameraFromCentre.xyz + fragRelativePos;
-    float sunShare = min(sunShadow(fragRelativePos, normal), horizonShadow(fragHorizon, radial, length(fragRelativePos)));
+    float sunShare = min(sunShadow(fragRelativePos, normal), horizonShadow(fragHorizon, radial, length(fragRelativePos)))
+                   * cloudShadow(p);
     outColor = vec4(lightSurface(albedo, p, normal, radial, sunShare), 1.0);
 }
