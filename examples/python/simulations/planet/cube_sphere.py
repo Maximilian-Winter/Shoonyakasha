@@ -94,6 +94,24 @@ def chunk_centre(face, level, x, y, radius):
     return (c[0] * radius, c[1] * radius, c[2] * radius)
 
 
+def stride_weights(i, j, stride, quads):
+    """The surface of a chunk's grid taken every `stride` vertices (its
+    ancestor's surface, `stride` = 2 ** levels up), at grid vertex (i, j):
+    ((i, j) of the vertices, weight) of the triangle around it. Each
+    stride x stride cell splits along its diagonal from its lowest to its
+    highest corner, as chunk_mesh splits its quads (pipeline/shaders/
+    morph.glsl does the same)."""
+    li = min((i // stride) * stride, quads - stride)
+    lj = min((j // stride) * stride, quads - stride)
+    fi, fj = (i - li) / stride, (j - lj) / stride
+    a, b, c, d = (li, lj), (li + stride, lj), (li + stride, lj + stride), (li, lj + stride)
+    if fi >= fj:
+        weights = ((a, 1.0 - fi), (b, fi - fj), (c, fj))
+    else:
+        weights = ((a, 1.0 - fj), (c, fi), (d, fj - fi))
+    return tuple((vertex, w) for vertex, w in weights if w != 0.0)
+
+
 def chunk_mesh(face, level, x, y, quads, radius, skirt_depth=0.0):
     """One chunk of the sphere of `radius`, built with numpy. Returns its
     centre (planet space, a tuple) and numpy arrays: positions relative to

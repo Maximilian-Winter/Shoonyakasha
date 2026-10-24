@@ -279,6 +279,72 @@ def segment_meets_sphere(a, b, radius):
     return sum(c * c for c in nearest) < radius * radius
 
 
+@unittest.skipUnless(HAVE_NUMPY, "needs numpy")
+class Morphing(unittest.TestCase):
+    QUADS = 16
+
+    def parent_edges(self):
+        """The parent's triangle edges, as pairs of its grid coordinates."""
+        _, _, _, _, indices = cube_sphere.chunk_mesh(4, 1, 0, 0, self.QUADS, RADIUS)
+        row = self.QUADS + 1
+        grid = (self.QUADS + 1) ** 2
+        edges = set()
+        for t in range(0, len(indices), 3):
+            corners = [int(k) for k in indices[t:t + 3]]
+            if max(corners) >= grid:
+                continue
+            for a, b in ((0, 1), (1, 2), (2, 0)):
+                p, q = corners[a], corners[b]
+                edges.add(frozenset(((p % row, p // row), (q % row, q // row))))
+        return edges
+
+    def test_the_quads_split_along_the_rising_diagonal(self):
+        edges = self.parent_edges()
+        self.assertIn(frozenset(((0, 0), (1, 1))), edges)
+        self.assertNotIn(frozenset(((1, 0), (0, 1))), edges)
+
+    def test_every_odd_vertex_morphs_to_the_middle_of_a_parent_edge(self):
+        edges = self.parent_edges()
+        for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):      # the four children
+            for j in range(self.QUADS + 1):
+                for i in range(self.QUADS + 1):
+                    weights = cube_sphere.stride_weights(i, j, 2, self.QUADS)
+                    if (i % 2, j % 2) == (0, 0):
+                        self.assertEqual(weights, (((i, j), 1.0),))
+                        continue
+                    (a, wa), (b, wb) = weights
+                    self.assertEqual((wa, wb), (0.5, 0.5))
+                    # Child grid coordinates in the parent's: the child covers half the parent's quads.
+                    pa = ((dx * self.QUADS + a[0]) // 2, (dy * self.QUADS + a[1]) // 2)
+                    pb = ((dx * self.QUADS + b[0]) // 2, (dy * self.QUADS + b[1]) // 2)
+                    self.assertTrue(all(c % 2 == 0 for c in a + b))
+                    self.assertEqual((a[0] + b[0], a[1] + b[1]), (2 * i, 2 * j))
+                    self.assertIn(frozenset((pa, pb)), edges, (dx, dy, i, j))
+
+    def test_a_coarser_stride_is_its_ancestors_triangles_through_the_finer_ones(self):
+        for stride in (4, 8, 16):
+            for j in range(self.QUADS + 1):
+                for i in range(self.QUADS + 1):
+                    weights = cube_sphere.stride_weights(i, j, stride, self.QUADS)
+                    self.assertAlmostEqual(sum(w for _, w in weights), 1.0, places=12)
+                    self.assertTrue(all(w > 0.0 for _, w in weights))
+                    self.assertTrue(all(v[0] % stride == 0 and v[1] % stride == 0 for v, _ in weights))
+                    # The weights put (i, j) back together from the corners.
+                    self.assertAlmostEqual(sum(v[0] * w for v, w in weights), i, places=12)
+                    self.assertAlmostEqual(sum(v[1] * w for v, w in weights), j, places=12)
+                    if i % stride == 0 and j % stride == 0:
+                        self.assertEqual(weights, (((i, j), 1.0),))
+                    # On a stride-2 surface's vertex, the stride-4 surface is the stride-4 surface of
+                    # that vertex's stride-2 sources: the levels nest.
+                    if stride == 4 and (i % 2, j % 2) != (0, 0):
+                        nested = {}
+                        for (v, w) in cube_sphere.stride_weights(i, j, 2, self.QUADS):
+                            for (u, x) in cube_sphere.stride_weights(v[0], v[1], 4, self.QUADS):
+                                nested[u] = nested.get(u, 0.0) + w * x
+                        for v, w in weights:
+                            self.assertAlmostEqual(nested.get(v, 0.0), w, places=12)
+
+
 class FaceCoordinates(unittest.TestCase):
     def test_face_uv_inverts_direction_across_every_face_and_up_to_the_corners(self):
         for face in range(6):

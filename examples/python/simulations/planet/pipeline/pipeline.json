@@ -126,7 +126,8 @@
       "elementCount": 2048,
       "fields": [
         { "name": "origin", "type": "vec4" },
-        { "name": "colour", "type": "vec4" }
+        { "name": "colour", "type": "vec4" },
+        { "name": "morph", "type": "vec4" }
       ]
     },
     "ChunkDraws": {
@@ -253,7 +254,9 @@
     "chunkInstanceSet": {
       "bindings": [
         { "binding": 0, "type": "storage_buffer", "stages": [ "vertex" ], "name": "ChunkInstances",
-          "autoBindBuffer": "ChunkInstances" }
+          "autoBindBuffer": "ChunkInstances" },
+        { "binding": 1, "type": "storage_buffer", "stages": [ "vertex" ], "name": "ChunkPool",
+          "autoBindBuffer": "ChunkPool" }
       ]
     },
     "materialSet": {

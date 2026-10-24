@@ -76,6 +76,7 @@ Keys:
     python planet.py --orbit-check     fly one orbit from preset 9 at 16x, report the drift, then exit
     python planet.py --landing-check   land the ship on a mountain near the site, report how it stands, then exit
     python planet.py --crack-check     measure the gaps between levels in steep terrain against the skirts, then exit
+    python planet.py --morph-check     come down from 20 km, check every swap of chunks happens fully morphed, then exit
 """
 
 import argparse
@@ -104,6 +105,8 @@ RADIUS = 100_000.0               # metres
 QUADS = 16                       # quads along each side of a chunk
 MAX_LEVEL = 12                   # a level-12 chunk is 38 m across, its quads 2.4 m
 SPLIT_FACTOR = 1.25              # split when nearer than this many chunk edges
+MORPH_START = 0.8                # morphing starts at this share of the parent's split distance; matches morph.glsl
+MORPH_LEVELS = 4                 # ancestors a vertex morphs towards at most; matches morph.glsl
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -147,6 +150,7 @@ SUN_ILLUMINANCE = 20.0
 EXPOSURE = 0.4
 NEAR_PLANE = 0.05
 FOV = 70.0
+PIXEL_ANGLE = math.radians(FOV) / 900.0   # radians across a pixel at the window's 900 rows
 LOOK_RADIANS_PER_PIXEL = 0.0025
 MIN_ALTITUDE = 0.3               # the camera stays this far above the ground
 # The ship (flight.py).
@@ -172,6 +176,8 @@ parser.add_argument("--verify", action="store_true",
                     help="check the chunks the GPU built against cube_sphere.chunk_mesh, print the result and exit")
 parser.add_argument("--orbit-check", action="store_true",
                     help="fly one orbit from preset 9 at 16x, print how far it drifted and exit")
+parser.add_argument("--morph-check", action="store_true",
+                    help="come down from 20 km and check every swap of chunks happens fully morphed")
 parser.add_argument("--crack-check", action="store_true",
                     help="measure the gaps between chunks of different levels in steep terrain against the skirts")
 parser.add_argument("--landing-check", action="store_true",
@@ -450,6 +456,12 @@ def skirt_depth(node):
     return max(SKIRT_FRACTION * node.edge, node.high - node.low)
 
 
+def parent_split_distance(node):
+    """The distance from its bounding sphere at which a node's parent splits
+    (the parent's edge is twice the node's); 0 for the roots."""
+    return state["tree"].split_factor * 2.0 * node.edge if node.level > 0 else 0.0
+
+
 def terrain_floor():
     """Metres above the radius that no terrain goes below: the seabed's
     depth, or on land the continent's edge plus the hills' and the detail's
@@ -467,18 +479,20 @@ def visible(node, occluder):
 def upload_drawn_chunks():
     """One indexed indirect draw per chunk the tree selected that is in
     view and not behind the horizon, and each drawn slot's centre relative
-    to the camera (subtracted in double) and colour."""
+    to the camera (subtracted in double), colour, and its parent's split
+    distance and the levels above it, for morph.glsl."""
     selected = state["tree"].selected if state["tree"] is not None else []
     occluder = RADIUS + terrain_floor()
     selected = [node for node in selected if visible(node, occluder)]
     state["chunks_culled"] = (len(state["tree"].selected) if state["tree"] is not None else 0) - len(selected)
     camera = state["position"]
-    instances = np.zeros((SLOTS, 2, 4), dtype=np.float32)
+    instances = np.zeros((SLOTS, 3, 4), dtype=np.float32)
     commands = np.zeros((len(selected), 5), dtype=np.uint32)
     for row, node in enumerate(selected):
         slot = node.chunk
         instances[slot, 0, :3] = sub(node.centre, camera)
         instances[slot, 1] = chunk_colour(node)
+        instances[slot, 2, :2] = (parent_split_distance(node), node.level)
         # indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
         commands[row] = (state["index_count"], 1, 0, slot * VERTICES_PER_CHUNK, slot)
     engine.set_buffer("ChunkInstances", instances)
@@ -1067,6 +1081,8 @@ def on_init():
         engine.ecs.add_system("PlanetVerify", Verify(), priority=-2)
     elif args.orbit_check:
         engine.ecs.add_system("PlanetOrbitCheck", OrbitCheck(), priority=-2)
+    elif args.morph_check:
+        engine.ecs.add_system("PlanetMorphCheck", MorphCheck(), priority=-2)
     elif args.crack_check:
         engine.ecs.add_system("PlanetCrackCheck", CrackCheck(), priority=-2)
     elif args.landing_check:
@@ -1349,9 +1365,9 @@ class CaptureTour:
                 path = os.path.join(self.directory, name + ".png")
                 ok = engine.capture_screenshot(path)
                 selected = len(state["tree"].selected)
-                print("[planet] %s after %d frames%s, %d of %d chunks drawn"
+                print("[planet] %s after %d frames%s, %d of %d chunks drawn, frame %.1f ms"
                       % (path if ok else "screenshot failed", self.frames, "" if done else " (not settled)",
-                         selected - state["chunks_culled"], selected), flush=True)
+                         selected - state["chunks_culled"], selected, state["frame_ms"]), flush=True)
                 self.captured = self.frames
         elif self.frames > self.captured + 2:
             self.shot += 1
@@ -1445,6 +1461,134 @@ class Verify:
         os._exit(0 if ok else 1)
 
 
+class MorphCheck:
+    """--morph-check: once every chunk is built for the view 20 km above the
+    site, the free camera comes down to 100 m, moving north at a third of
+    its height per second of flight, in FRAMES steps (one per frame).
+    Each frame it compares
+    the drawn chunks with the frame before's: a chunk that appeared because
+    its parent split, or that went because it merged, swaps drawn surfaces,
+    which is invisible when every vertex of the chunk was fully morphed then
+    (morph.glsl). The vertices lie in the node's bounding sphere, so the
+    least factor is the one at the sphere's distance from the camera.
+    Swaps where the children were built only after the camera came within
+    the split distance are counted apart (they appear late, closer).
+    Prints the swaps, the late ones and where they happened, and the least
+    factor of the others, and exits with status 0 when none were late and
+    that factor is at least 0.99, 1 otherwise."""
+
+    FRAMES = 2400
+    START, END = 20_000.0, 100.0
+
+    def __init__(self):
+        self.frame = -1
+        self.previous = None
+        self.swaps = 0
+        self.late = 0
+        self.least = 1.0
+        self.travelled = 0.0             # metres north of the site
+        self.step_length = 0.0           # metres the camera moved in the last frame
+        self.late_heights = []           # the camera's height at each late swap
+
+    def settled_at_start(self):
+        """Puts the camera where the descent starts and keeps it there until
+        every chunk it needs is built."""
+        _, up, _, north = site_frame()
+        state["mode"] = "camera"
+        state["position"] = scale(up, RADIUS + (state["site_height"] or 0.0) + self.START)
+        state["forward"] = normalize(add(north, scale(up, -0.3)))
+        return settled()
+
+    def factor(self, node, camera):
+        if node.level == 0:
+            return 1.0
+        split = state["tree"].split_factor * 2.0 * node.edge
+        distance = max(0.0, length(sub(camera, node.bound_centre)) - node.bound_radius)
+        t = max(0.0, min(1.0, (distance - MORPH_START * split) / ((1.0 - MORPH_START) * split)))
+        return t * t * (3.0 - 2.0 * t)
+
+    def __call__(self, dt):
+        tree = state["tree"]
+        if tree is None or not tree.selected:
+            return True
+        if self.frame < 0 and not self.settled_at_start():
+            return True
+        camera = state["position"]          # where the drawn selection was made
+        drawn = {node.key(): node for node in tree.selected}
+        if self.previous is not None:
+            before = self.previous
+            for key in drawn.keys() - before.keys():
+                parent = before.get((key[0], key[1] - 1, key[2] // 2, key[3] // 2)) if key[1] > 0 else None
+                if parent is None:
+                    continue                 # not a split of a drawn parent
+                self.swaps += 1
+                parent_distance = max(0.0, length(sub(camera, parent.bound_centre)) - parent.bound_radius)
+                if parent_distance < tree.split_factor * parent.edge - 2.0 * self.step_length:
+                    self.late += 1
+                    self.late_heights.append(length(camera) - RADIUS)
+                else:
+                    self.least = min(self.least, self.factor(drawn[key], camera))
+            for key in before.keys() - drawn.keys():
+                if key[1] == 0 or (key[0], key[1] - 1, key[2] // 2, key[3] // 2) not in drawn:
+                    continue                 # not a merge into its parent
+                self.swaps += 1
+                self.least = min(self.least, self.factor(before[key], camera))
+        self.previous = drawn
+        self.frame += 1
+        if self.frame == self.FRAMES:
+            print("[planet] coming down from %.0f m to %.0f m in %d frames: %d swaps, %d late (children built "
+                  "after the split distance), least morph factor of the others %.4f"
+                  % (self.START, self.END, self.FRAMES, self.swaps, self.late, self.least), flush=True)
+            if self.late_heights:
+                print("[planet]   late swaps at camera heights from %.0f m to %.0f m (median %.0f m)"
+                      % (min(self.late_heights), max(self.late_heights),
+                         sorted(self.late_heights)[len(self.late_heights) // 2]), flush=True)
+            os._exit(0 if self.least >= 0.99 and self.late == 0 else 1)
+        # The next frame's camera.
+        _, up, east, north = site_frame()
+        height = self.START * (self.END / self.START) ** (self.frame / self.FRAMES)
+        self.travelled += height / 3.0 / 60.0
+        spot = normalize(add(up, scale(north, self.travelled / RADIUS)))
+        new_position = scale(spot, RADIUS + (state["site_height"] or 0.0) + height)
+        self.step_length = length(sub(new_position, camera))
+        state["mode"] = "camera"
+        state["position"] = new_position
+        state["forward"] = normalize(add(north, scale(spot, -0.3)))
+        return True
+
+
+def morph_factor(node, point, level=1):
+    """morph.glsl's factor towards the surface of a node's ancestor `level`
+    levels up, for a vertex at `point` (planet space) and the camera's
+    present position; 0 where the node has no such ancestor."""
+    if level > min(MORPH_LEVELS, node.level):
+        return 0.0
+    split = parent_split_distance(node) * 2.0 ** (level - 1)
+    distance = length(sub(point, state["position"]))
+    t = max(0.0, min(1.0, (distance - MORPH_START * split) / ((1.0 - MORPH_START) * split)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def morphed_point(node, built, i, j):
+    """Grid vertex (i, j) of a built chunk (its ChunkPool rows `built`) in
+    planet space, morphed as morph.glsl morphs it for the camera's present
+    position: towards its parent's surface, then its grandparent's, and so
+    on."""
+    row = QUADS + 1
+    vertex = lambda ij: add(node.centre, tuple(float(c) for c in built[ij[1] * row + ij[0], :3]))
+    own = vertex((i, j))
+    point = own
+    for level in range(1, MORPH_LEVELS + 1):
+        f = morph_factor(node, own, level)
+        if f <= 0.0:
+            break
+        surface = (0.0, 0.0, 0.0)
+        for ij, w in cube_sphere.stride_weights(i, j, 1 << level, QUADS):
+            surface = add(surface, scale(vertex(ij), w))
+        point = add(point, scale(sub(surface, point), f))
+    return point
+
+
 class CrackCheck:
     """--crack-check: at each view in VIEWS, once settled, freezes the level
     of detail, reads ChunkPool back and, for every drawn chunk's edge whose
@@ -1516,6 +1660,7 @@ class CrackCheck:
             return None
 
         edges, largest_gap, largest_share = 0, 0.0, 0.0
+        largest_drawn_gap, largest_drawn_share, largest_drawn_pixels = 0.0, 0.0, 0.0
         for node in selected:
             u0, v0, size = cube_sphere.chunk_bounds(node.level, node.x, node.y)
             # Per edge: its grid indices in order, and a point just outside its middle.
@@ -1537,6 +1682,9 @@ class CrackCheck:
                 step = 1 << (node.level - neighbour)
                 coarse_skirt = skirt_depth(other)
                 points = [add(node.centre, tuple(float(c) for c in built[k, :3])) for k in indices]
+                # As drawn: both chunks' vertices morphed (morph.glsl), the coarse ones found by position.
+                drawn_points = [morphed_point(node, built, k % row, k // row) for k in indices]
+                coarse = gpu[other.chunk][:row * row, :3].astype(np.float64) + np.array(other.centre)
                 for i in range(row):
                     i0 = (i // step) * step
                     if i0 == i:
@@ -1551,13 +1699,32 @@ class CrackCheck:
                         largest_share = share
                         where = (node.level, neighbour, gap, fine_skirt if gap > 0.0 else coarse_skirt,
                                  length(sub(points[i], state["position"])))
-        self.worst = max(self.worst, largest_share)
+                    ends = []
+                    for p in (a, b):
+                        kc = int(np.argmin(((coarse - np.array(p)) ** 2).sum(axis=1)))
+                        ends.append(morphed_point(other, gpu[other.chunk], kc % row, kc // row))
+                    drawn_line = add(ends[0], scale(sub(ends[1], ends[0]), t))
+                    drawn_gap = length(drawn_points[i]) - length(drawn_line)
+                    distance = length(sub(drawn_points[i], state["position"]))
+                    largest_drawn_share = max(largest_drawn_share,
+                                              drawn_gap / fine_skirt if drawn_gap > 0.0 else -drawn_gap / coarse_skirt)
+                    largest_drawn_pixels = max(largest_drawn_pixels, abs(drawn_gap) / distance / PIXEL_ANGLE)
+                    if abs(drawn_gap) > largest_drawn_gap:
+                        largest_drawn_gap = abs(drawn_gap)
+                        drawn_where = (node.level, neighbour, morph_factor(node, points[i]),
+                                       max(morph_factor(other, p) for p in (a, b)), distance)
+        self.worst = max(self.worst, largest_share, largest_drawn_share)
         print("[planet] %s: %d chunks selected, %d edges with a coarser neighbour, largest gap %.3f m, "
               "largest gap / skirt %.3f" % (self.VIEWS[self.view][0], len(selected), edges, largest_gap,
                                             largest_share), flush=True)
+        print("[planet]   as drawn (morphed): largest gap %.3f m, largest gap / skirt %.3f, largest gap %.2f pixels"
+              % (largest_drawn_gap, largest_drawn_share, largest_drawn_pixels), flush=True)
         if largest_share > 0.0:
             print("[planet]   there: level %d beside level %d, gap %+.2f m, skirt %.2f m, %.0f m from the camera"
                   % where, flush=True)
+        if largest_drawn_gap > 0.0:
+            print("[planet]   largest as drawn: level %d beside level %d, the finer edge morphed %.3f, the coarser "
+                  "%.3f, %.0f m from the camera" % drawn_where, flush=True)
 
 
 class LandingCheck:

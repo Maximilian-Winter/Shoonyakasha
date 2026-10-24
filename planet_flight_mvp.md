@@ -818,6 +818,8 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
   - At a split, the drawn surface must not move. Check: a `--morph-check` that reads the morphed positions back (a compute copy of the vertex shader's result, or the same function in Python) at the split distance, against the parent's surface.
   - A neighbour at a coarser level must meet the morphed edge, so the crack check runs on the morphed positions too.
   - Physics keeps the true terrain (the ground patch is unaffected); the gear may sit up to the morph's difference above or below what is drawn far from the camera, never near it (chunks near the camera are fully at their own level).
+- As built: `morph.glsl` blends each vertex through up to four ancestor surfaces (the chunk's own grid at strides 2 to 16), each by its ancestor's split distance; one level only left coarse chunks morphing beside finer ones fully blended to their unmorphed grid (gaps of 120 to 770 m, 90 to 200 km away). `ChunkInstances` gained a `morph` vec4. Morphing starts at 0.8 of the split distance (0.7 softened the planet seen from 50 km).
+- Measured: `--morph-check` (20 km to 100 m in 2,400 frames): 532 swaps, none late, every one with its vertices fully morphed (least factor 1.0000). At 6 times that speed, still none late. `--crack-check` as drawn: gaps up to 68 m at 90 to 170 km, at most 0.52 pixels and 1.3 % of their skirt. Frame times with and without morphing are within the run-to-run spread.
 - Done: flying low and fast, no vertex visibly jumps; the crack check still passes.
 
 **WP13: Shadows** (mountains and the cockpit)
