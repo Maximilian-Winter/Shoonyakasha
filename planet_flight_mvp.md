@@ -787,6 +787,7 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 
 **WP11 and onward: Polish (any order)**
 - Horizon culling, CDLOD morphing, Hillaire LUTs, derivative fBm, reentry effects, clouds, a moon, orbit display.
+  - Orbit display, as built: the conic from the ship's position and velocity (`flight.orbit_path`), drawn as a depth-tested line strip after the atmosphere, from the cockpit and from outside.
 - Gathered while building WP1–WP9:
   - Culling the terrain's chunks against the view and the horizon before the indirect draw (WP4 draws every chunk the tree selects; the engine's per-entity culling no longer applies).
     - As built: in Python before the draw commands are written: the view cone that holds the screen's diagonal (with the framebuffer's aspect), and a horizon test against a sphere at the terrain's floor, bounded from the terrain function's parameters. Draws 194 of 564 chunks at preset 1, 131 of 387 at preset 2, 79 of 300 at preset 7, 68 of 111 in orbit; from 1,000 km and beyond the six roots stay drawn. Every capture below its text lines is pixel-identical to before.

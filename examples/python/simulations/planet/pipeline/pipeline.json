@@ -16,6 +16,11 @@
         { "name": "normalV", "type": "vec4", "location": 1 },
         { "name": "radialHeight", "type": "vec4", "location": 2 }
       ]
+    },
+    "orbitVertex": {
+      "attributes": [
+        { "name": "position", "type": "vec4", "location": 0 }
+      ]
     }
   },
   "bufferLayouts": {
@@ -134,6 +139,24 @@
       "usage": "storage_buffer",
       "packing": "std430",
       "elementCount": 10244,
+      "fields": [ { "name": "word", "type": "uint" } ]
+    },
+    "OrbitPoints": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 256,
+      "fields": [ { "name": "position", "type": "vec4" } ]
+    },
+    "OrbitIndices": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 256,
+      "fields": [ { "name": "index", "type": "uint" } ]
+    },
+    "OrbitDraws": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 9,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
     "MaterialPushConstants": {
@@ -466,6 +489,40 @@
       },
       "descriptorSets": [ "cameraSet", "atmosphereInputSet" ],
       "outputs": [ { "resource": "swapchain", "usage": "color_write" } ]
+    },
+    {
+      "name": "OrbitPath",
+      "type": "graphics",
+      "execution": {
+        "type": "draw_indexed_indirect",
+        "vertexBuffer": { "buffer": "OrbitPoints" },
+        "indexBuffer": { "buffer": "OrbitIndices", "type": "uint32" },
+        "arguments": { "buffer": "OrbitDraws", "offset": 16 },
+        "count": { "buffer": "OrbitDraws", "offset": 0, "maxDrawCount": 1 }
+      },
+      "pipeline": {
+        "vertexShader": "shaders/orbit.vert.spv",
+        "fragmentShader": "shaders/orbit.frag.spv",
+        "vertexInput": "orbitVertex",
+        "topology": "line_strip",
+        "lineWidth": 2.0,
+        "depthTest": true,
+        "depthWrite": false,
+        "depthCompareOp": "greater_or_equal",
+        "cullMode": "none",
+        "blending": "custom",
+        "srcColorFactor": "src_alpha",
+        "dstColorFactor": "one_minus_src_alpha"
+      },
+      "descriptorSets": [ "cameraSet" ],
+      "inputs": [
+        { "resource": "transmittanceLut", "usage": "shader_read" },
+        { "resource": "multiScatteringLut", "usage": "shader_read" }
+      ],
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_blend" },
+        { "resource": "depth", "usage": "depth_read" }
+      ]
     },
     {
       "name": "HudSymbols",

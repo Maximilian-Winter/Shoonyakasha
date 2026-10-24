@@ -151,6 +151,7 @@ PATCH_MARGIN = 4.0               # metres the ground patch reaches beyond the sh
 THROTTLE_RATE = 0.5              # throttle per second while W or S is held
 MOUSE_STICK = 0.04               # stick per pixel of mouse movement
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
+ORBIT_POINTS = 256               # points of the drawn orbit path; matches OrbitPoints in pipeline.json
 
 parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
@@ -278,6 +279,7 @@ state = {
     "sun_azimuth": SUN_AZIMUTH,
     "density": 1.0,              # times the atmosphere's coefficients
     "ozone": True,               # the ozone layer's absorption
+    "orbit_path": True,          # draw the path the ship would coast along
     "multiple_scattering": True,  # light scattered more than once, from the multiple scattering table
     "exposure": EXPOSURE,
     "mode": "camera",            # "camera": the free camera; "ship": the view from the ship
@@ -474,6 +476,26 @@ def upload_drawn_chunks():
     engine.set_buffer("OceanDraws", np.uint32([len(wet)]))
     if len(wet):
         engine.set_buffer("OceanDraws", wet, offset=DRAWS_OFFSET)
+
+
+def upload_orbit_path():
+    """The path the ship would coast along (flight.orbit_path), relative to
+    the camera (subtracted in double), as one indexed indirect draw for
+    OrbitPath; none without a ship, with the path switched off, or when
+    there is no path."""
+    ship = state["ship"]
+    points = []
+    if ship is not None and state["orbit_path"]:
+        points = flight.orbit_path(flight_planet, ship.position, ship.velocity, count=ORBIT_POINTS)
+    if points:
+        camera = state["position"]
+        relative = np.zeros((len(points), 4), dtype=np.float32)
+        relative[:, :3] = [sub(p, camera) for p in points]
+        engine.set_buffer("OrbitPoints", relative)
+        # count, padding, then indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
+        engine.set_buffer("OrbitDraws", np.uint32([1, 0, 0, 0, len(points), 1, 0, 0, 0]))
+    else:
+        engine.set_buffer("OrbitDraws", np.uint32([0]))
 
 
 def read_back_heights():
@@ -849,6 +871,7 @@ def frame(dt):
     camera = state["position"]
     engine.set_custom_vec4("planet.cameraFromCentre", camera + (0.0,))
     upload_drawn_chunks()
+    upload_orbit_path()
     ground = site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
@@ -969,6 +992,7 @@ def on_init():
     engine.set_custom_float("planet.radius", RADIUS)
     upload_terrain()
     upload_chunk_indices()
+    engine.set_buffer("OrbitIndices", np.arange(ORBIT_POINTS, dtype=np.uint32))
     build_site()
     build_hud()
     build_cockpit()
@@ -1048,6 +1072,7 @@ def menu_items():
          "get": lambda: state["tree"].split_factor if state["tree"] is not None else SPLIT_FACTOR,
          "set": set_split, "format": "%.2f"},
         {"toggle": "Ocean", "get": lambda: state["ocean"], "set": set_ocean},
+        {"toggle": "Orbit path", "get": lambda: state["orbit_path"], "set": lambda on: state.update(orbit_path=on)},
         {"toggle": "Wireframe", "get": lambda: state["wireframe"], "set": set_wireframe},
         {"toggle": "Debug text", "get": lambda: state["debug_text"], "set": lambda on: state.update(debug_text=on)},
         {"button": "Colour: terrain / face / level",
@@ -1210,6 +1235,7 @@ class CaptureTour:
         ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN),
         ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
         ("preset_2_twilight", 2, False, 0, None, (-3.0, 90.0)),
+        ("orbit_from_afar", 9, False, 0, None, DAY_SUN, lambda: teleport(4)),
         ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
         ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
         ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),

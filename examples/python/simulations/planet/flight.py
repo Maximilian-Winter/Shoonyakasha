@@ -397,5 +397,45 @@ def orbit(planet, position, velocity):
     return a * (1.0 - e) - planet.radius, a * (1.0 + e) - planet.radius
 
 
+def orbit_path(planet, position, velocity, count=256, reach=10.0):
+    """`count` points along the path the ship would coast along, from its
+    position onwards in the direction it moves: a whole ellipse, evenly
+    spaced in eccentric anomaly; or, on an escape, the open branch out to
+    `reach` times its present distance from the centre. An empty list when
+    it moves straight towards or away from the centre (no plane to draw
+    in)."""
+    mu = planet.gm
+    r = length(position)
+    h = cross(position, velocity)
+    if length(h) < 1e-9 * r * max(length(velocity), 1e-9):
+        return []
+    eccentricity_vector = sub(scale(cross(velocity, h), 1.0 / mu), scale(position, 1.0 / r))
+    e = length(eccentricity_vector)
+    # Perifocal frame: P towards periapsis (or the position on a circle), Q a quarter turn on.
+    along = normalize(eccentricity_vector) if e > 1e-9 else scale(position, 1.0 / r)
+    normal = normalize(h)
+    across = cross(normal, along)
+    p = dot(h, h) / mu                                   # the conic's semi-latus rectum
+    nu0 = math.atan2(dot(position, across), dot(position, along))   # the ship's true anomaly
+    points = []
+    if e < 1.0:
+        a = p / (1.0 - e * e)
+        b = a * math.sqrt(1.0 - e * e)
+        e0 = 2.0 * math.atan(math.sqrt((1.0 - e) / (1.0 + e)) * math.tan(nu0 / 2.0))
+        for i in range(count):
+            angle = e0 + 2.0 * math.pi * i / (count - 1)
+            x, y = a * (math.cos(angle) - e), b * math.sin(angle)
+            points.append(add(scale(along, x), scale(across, y)))
+        return points
+    # Open: from the ship's true anomaly to where the distance reaches `reach` times r.
+    limit = math.acos(max(-1.0, min(1.0, (p / (reach * r) - 1.0) / e)))
+    end = max(limit, nu0)
+    for i in range(count):
+        nu = nu0 + (end - nu0) * i / (count - 1)
+        radius = p / (1.0 + e * math.cos(nu))
+        points.append(add(scale(along, radius * math.cos(nu)), scale(across, radius * math.sin(nu))))
+    return points
+
+
 def circular_speed(planet, height):
     return math.sqrt(planet.gm / (planet.radius + height))

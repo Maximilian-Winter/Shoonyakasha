@@ -77,6 +77,53 @@ class Orbits(unittest.TestCase):
         self.assertEqual(flight.orbit(planet, ship.position, ship.velocity)[1], math.inf)
 
 
+class OrbitPath(unittest.TestCase):
+    def assert_close(self, a, b, delta):
+        self.assertLess(flight.length(flight.sub(a, b)), delta)
+
+    def test_a_circular_orbit_is_a_circle_starting_at_the_ship(self):
+        planet = flight.Planet()
+        ship = level_ship(40_000.0, planet, speed=flight.circular_speed(planet, 40_000.0))
+        points = flight.orbit_path(planet, ship.position, ship.velocity, count=64)
+        self.assertEqual(len(points), 64)
+        self.assert_close(points[0], ship.position, 1e-3)
+        self.assert_close(points[-1], ship.position, 1e-3)
+        for p in points:
+            self.assertAlmostEqual(flight.length(p), planet.radius + 40_000.0, delta=1e-3)
+
+    def test_an_ellipse_stays_between_its_periapsis_and_apoapsis_and_runs_the_ships_way(self):
+        planet = flight.Planet()
+        ship = level_ship(20_000.0, planet, speed=flight.circular_speed(planet, 20_000.0) * 1.15)
+        ship.velocity = flight.add(ship.velocity, (0.0, 0.0, 60.0))      # climbing too
+        periapsis, apoapsis = flight.orbit(planet, ship.position, ship.velocity)
+        points = flight.orbit_path(planet, ship.position, ship.velocity)
+        self.assert_close(points[0], ship.position, 1e-3)
+        self.assertGreater(flight.dot(flight.sub(points[1], points[0]), ship.velocity), 0.0)
+        heights = [flight.length(p) - planet.radius for p in points]
+        self.assertAlmostEqual(min(heights), periapsis, delta=50.0)
+        self.assertAlmostEqual(max(heights), apoapsis, delta=50.0)
+        for p in points:       # every point lies in the plane of the motion
+            self.assertAlmostEqual(flight.dot(flight.normalize(p),
+                                              flight.normalize(flight.cross(ship.position, ship.velocity))), 0.0,
+                                   places=9)
+
+    def test_an_escape_runs_out_to_the_reach(self):
+        planet = flight.Planet()
+        escape = math.sqrt(2.0 * planet.gm / (planet.radius + 1_000.0)) * 1.2
+        ship = level_ship(1_000.0, planet, speed=escape)
+        points = flight.orbit_path(planet, ship.position, ship.velocity, reach=10.0)
+        self.assert_close(points[0], ship.position, 1e-3)
+        distances = [flight.length(p) for p in points]
+        self.assertTrue(all(b >= a for a, b in zip(distances, distances[1:])))
+        self.assertAlmostEqual(distances[-1], 10.0 * (planet.radius + 1_000.0), delta=1.0)
+
+    def test_moving_straight_up_has_no_path(self):
+        planet = flight.Planet()
+        ship = level_ship(1_000.0, planet)
+        ship.velocity = (0.0, 0.0, 300.0)
+        self.assertEqual(flight.orbit_path(planet, ship.position, ship.velocity), [])
+
+
 class ClimbToOrbit(unittest.TestCase):
     """A scripted ascent with assist off: burn at 60 degrees until the
     apoapsis is 40 km up, coast to it, burn along the velocity until the
