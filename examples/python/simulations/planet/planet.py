@@ -132,6 +132,9 @@ ATMOSPHERE_TOP = 20_000.0
 RAYLEIGH_SCALE_HEIGHT, MIE_SCALE_HEIGHT = 2_500.0, 400.0
 RAYLEIGH = (1.857e-5, 4.339e-5, 1.0592e-4)          # scattering per metre at height 0
 MIE_SCATTERING, MIE_ABSORPTION, MIE_G = 1.279e-5, 1.408e-5, 0.8
+# Ozone: Earth's absorption at its peak times 3.2, peaking at 25 km / 3.2, a tent 15 km / 3.2 to each side.
+OZONE_ABSORPTION = (2.08e-6, 6.02e-6, 2.72e-7)
+OZONE_PEAK, OZONE_HALF_WIDTH = 7_800.0, 4_700.0
 SUN_ILLUMINANCE = 20.0
 EXPOSURE = 0.4
 NEAR_PLANE = 0.05
@@ -274,6 +277,8 @@ state = {
     "sun_elevation": SUN_ELEVATION,
     "sun_azimuth": SUN_AZIMUTH,
     "density": 1.0,              # times the atmosphere's coefficients
+    "ozone": True,               # the ozone layer's absorption
+    "multiple_scattering": True,  # light scattered more than once, from the multiple scattering table
     "exposure": EXPOSURE,
     "mode": "camera",            # "camera": the free camera; "ship": the view from the ship
     "ship": None,
@@ -415,6 +420,10 @@ def upload_sky():
     engine.set_custom_vec4("planet.atmosphere.rayleigh", scale(RAYLEIGH, density) + (MIE_G,))
     engine.set_custom_vec4("planet.atmosphere.mie", (MIE_SCATTERING * density, MIE_ABSORPTION * density,
                                                      SUN_ILLUMINANCE, state["exposure"]))
+    ozone = density if state["ozone"] else 0.0
+    engine.set_custom_vec4("planet.atmosphere.ozone", scale(OZONE_ABSORPTION, ozone) + (OZONE_PEAK,))
+    engine.set_custom_vec4("planet.atmosphere.settings",
+                           (OZONE_HALF_WIDTH, 1.0 if state["multiple_scattering"] else 0.0, 0.0, 0.0))
 
 
 def skirt_depth(node):
@@ -1028,6 +1037,9 @@ def menu_items():
          "set": set_and("exposure", upload_sky), "format": "%.2f"},
         {"slider": "Atmosphere density", "min": 0.25, "max": 4.0, "get": lambda: state["density"],
          "set": set_density, "format": "x%.2f"},
+        {"toggle": "Multiple scattering", "get": lambda: state["multiple_scattering"],
+         "set": set_and("multiple_scattering", upload_sky)},
+        {"toggle": "Ozone", "get": lambda: state["ozone"], "set": set_and("ozone", upload_sky)},
         {"slider": "Sun elevation", "min": -20.0, "max": 90.0, "get": lambda: state["sun_elevation"],
          "set": set_and("sun_elevation", upload_sky), "format": "%.0f deg"},
         {"slider": "Sun azimuth", "min": 0.0, "max": 360.0, "get": lambda: state["sun_azimuth"],
@@ -1197,6 +1209,7 @@ class CaptureTour:
          lambda: state["menu"].show(True), lambda: setattr(state["controls"], "throttle", 0.6)),
         ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN),
         ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
+        ("preset_2_twilight", 2, False, 0, None, (-3.0, 90.0)),
         ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
         ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
         ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),

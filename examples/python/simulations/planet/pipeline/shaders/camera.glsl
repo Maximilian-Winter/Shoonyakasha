@@ -26,4 +26,13 @@ layout(set = CAMERA_SET, binding = 2) uniform AtmosphereParams {
     vec4 rayleigh;
     vec4 mie;
     vec4 sun;
+    vec4 ozone;
+    vec4 settings;
 } atmosphere;
+
+// The atmosphere's lookup tables (atmosphere.glsl), built each frame by the
+// TransmittanceLut and MultiScatteringLut passes.
+layout(set = CAMERA_SET, binding = 3) uniform sampler2D transmittanceLut;
+layout(set = CAMERA_SET, binding = 4) uniform sampler2D multiScatteringLut;
+#define ATMOSPHERE_TRANSMITTANCE_LUT
+#define ATMOSPHERE_MULTI_SCATTERING_LUT

@@ -1,0 +1,94 @@
+#version 450
+//
+// The atmosphere's multiple scattering table (atmosphere.glsl), after
+// Hillaire 2020: per texel, a point at the texel's height with the sun at
+// its zenith cosine. Over DIRECTIONS directions spread evenly over the
+// sphere, a ray from the point to the ground or the top of the atmosphere
+// gathers the sunlight scattered once towards the point (isotropically, by
+// air and haze, and off the ground with GROUND_ALBEDO), L, and the share of
+// light the air along it scatters, f. Their averages over the sphere give
+// the light scattered twice, L2, and the share scattered again, fms; the
+// texel holds L2 / (1 - fms), every further order summed as a geometric
+// series, per unit of the sun's illuminance and of the scattering at the
+// point.
+//
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform AtmosphereParams {
+    vec4 radii;
+    vec4 rayleigh;
+    vec4 mie;
+    vec4 sun;
+    vec4 ozone;
+    vec4 settings;
+} atmosphere;
+
+layout(set = 0, binding = 1) uniform sampler2D transmittanceLut;
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D multiScatteringImage;
+
+#include "atmosphere.glsl"
+
+const int DIRECTIONS_SIDE = 8;              // DIRECTIONS = 8 x 8
+const int STEPS = 20;
+const vec3 GROUND_ALBEDO = vec3(0.3);
+
+// Transmittance from `p` to space along the unit direction `toward`: 0
+// where the planet is in the way.
+vec3 transmittanceToward(vec3 p, vec3 toward) {
+    vec2 hit = raySphere(p, toward, atmosphere.radii.x);
+    if (hit.y > 0.0 && hit.x > 0.0) return vec3(0.0);
+    float r = length(p);
+    return texture(transmittanceLut, transmittanceLutUv(max(r, atmosphere.radii.x), dot(p, toward) / r)).rgb;
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(texel, MULTI_SCATTERING_SIZE))) return;
+    vec2 uv = vec2(texel) / vec2(MULTI_SCATTERING_SIZE - 1);
+    float sunMu = uv.x * 2.0 - 1.0;
+    float bottom = atmosphere.radii.x, top = atmosphere.radii.y;
+    float r = clamp(bottom + uv.y * (top - bottom), bottom + 1.0, top - 1.0);
+    vec3 p = vec3(0.0, r, 0.0);
+    vec3 sun = vec3(sqrt(max(1.0 - sunMu * sunMu, 0.0)), sunMu, 0.0);
+
+    vec3 secondOrder = vec3(0.0), scatteredShare = vec3(0.0);
+    for (int a = 0; a < DIRECTIONS_SIDE; ++a) {
+        for (int b = 0; b < DIRECTIONS_SIDE; ++b) {
+            float cosTheta = 1.0 - 2.0 * (float(a) + 0.5) / float(DIRECTIONS_SIDE);
+            float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+            float phi = 2.0 * ATMOSPHERE_PI * (float(b) + 0.5) / float(DIRECTIONS_SIDE);
+            vec3 rd = vec3(sinTheta * cos(phi), cosTheta, sinTheta * sin(phi));
+
+            vec2 ground = raySphere(p, rd, bottom);
+            bool hitsGround = ground.y > 0.0 && ground.x > 0.0;
+            float distance = hitsGround ? ground.x : max(raySphere(p, rd, top).y, 0.0);
+            float dt = distance / float(STEPS);
+
+            vec3 throughput = vec3(1.0), light = vec3(0.0), share = vec3(0.0);
+            for (int s = 0; s < STEPS; ++s) {
+                vec3 x = p + rd * (dt * (float(s) + 0.5));
+                vec3 density = airDensity(x);
+                vec3 scattering = atmosphere.rayleigh.rgb * density.x + atmosphere.mie.x * density.y;
+                vec3 extinct = max(extinction(density), vec3(1e-12));
+                vec3 stepTransmittance = exp(-extinct * dt);
+                // Scattering integrated over the step against the extinction within it.
+                vec3 integrated = (scattering - scattering * stepTransmittance) / extinct;
+                light += throughput * integrated * transmittanceToward(x, sun) / (4.0 * ATMOSPHERE_PI);
+                share += throughput * integrated;
+                throughput *= stepTransmittance;
+            }
+            if (hitsGround) {
+                vec3 x = p + rd * distance;
+                float sunCos = max(dot(normalize(x), sun), 0.0);
+                light += throughput * transmittanceToward(x, sun) * sunCos * GROUND_ALBEDO / ATMOSPHERE_PI;
+            }
+            secondOrder += light;
+            scatteredShare += share;
+        }
+    }
+    float count = float(DIRECTIONS_SIDE * DIRECTIONS_SIDE);
+    secondOrder /= count;
+    scatteredShare /= count;
+    imageStore(multiScatteringImage, texel, vec4(secondOrder / (1.0 - scatteredShare), 1.0));
+}

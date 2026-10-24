@@ -1,0 +1,39 @@
+#version 450
+//
+// The atmosphere's transmittance table (atmosphere.glsl): per texel, the
+// radius r and zenith cosine mu that transmittanceLutRMu gives its (u, v),
+// and exp(-optical depth) from there to the top of the atmosphere along
+// that direction, over TRANSMITTANCE_STEPS steps.
+//
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform AtmosphereParams {
+    vec4 radii;
+    vec4 rayleigh;
+    vec4 mie;
+    vec4 sun;
+    vec4 ozone;
+    vec4 settings;
+} atmosphere;
+
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D transmittanceImage;
+
+#include "atmosphere.glsl"
+
+const int TRANSMITTANCE_STEPS = 40;
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(texel, TRANSMITTANCE_SIZE))) return;
+    vec2 rMu = transmittanceLutRMu(vec2(texel) / vec2(TRANSMITTANCE_SIZE - 1));
+    vec3 ro = vec3(0.0, rMu.x, 0.0);
+    vec3 rd = vec3(sqrt(max(1.0 - rMu.y * rMu.y, 0.0)), rMu.y, 0.0);
+    float distance = max(raySphere(ro, rd, atmosphere.radii.y).y, 0.0);
+    float dt = distance / float(TRANSMITTANCE_STEPS);
+    vec3 depth = vec3(0.0);
+    for (int i = 0; i < TRANSMITTANCE_STEPS; ++i) {
+        depth += extinction(airDensity(ro + rd * (dt * (float(i) + 0.5)))) * dt;
+    }
+    imageStore(transmittanceImage, texel, vec4(exp(-depth), 1.0));
+}
