@@ -10,10 +10,12 @@ reverse-Z with an infinite far plane.
 
 The sphere is a cube-sphere: six cube faces mapped onto the sphere with
 `spherify`, each the root of a quadtree (quadtree.py). Each frame the tree
-picks the chunks to draw, finer near the camera, and a few missing chunks
-are built with numpy, nearest first and those in view before the rest.
-Every chunk is 16 x 16 quads with its vertices relative to its own centre,
-and skirts along its edges hide the cracks between levels. Lines on the
+picks the chunks to draw, finer near the camera, and up to 16 missing
+chunks, those in view first and nearest first, are built on the GPU into
+slots of a buffer pool (pipeline/shaders/chunk_build.comp). All the drawn
+chunks are one indirect draw call. Every chunk is 16 x 16 quads with its
+vertices relative to its own centre, and skirts along its edges hide the
+cracks between levels. Lines on the
 ground follow the face coordinates, at every power-of-two subdivision of a
 face. A cluster of blocks stands on the +Z face, on a pad 5 cm above the
 ground.
@@ -33,6 +35,7 @@ Keys:
     P                      screenshot into planet_captures/
 
     python planet.py --capture DIR     screenshots at the presets, then exit
+    python planet.py --verify          compare the GPU's chunks with cube_sphere.chunk_mesh, then exit
 """
 
 import argparse
@@ -40,6 +43,7 @@ import math
 import os
 import time
 
+import numpy as np
 import shoonyakasha as sk
 from shoonyakasha import keys
 
@@ -54,8 +58,12 @@ RADIUS = 100_000.0               # metres
 QUADS = 16                       # quads along each side of a chunk
 MAX_LEVEL = 12                   # a level-12 chunk is 38 m across, its quads 2.4 m
 SPLIT_FACTOR = 1.25              # split when nearer than this many chunk edges
-BUILD_PER_FRAME = 8              # chunks built per frame at most
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
+# The GPU chunk pool; these match pipeline.json and chunk_build.comp.
+SLOTS = 2048                     # chunks the pool holds
+MAX_JOBS = 16                    # chunks BuildChunks builds per frame at most
+VERTICES_PER_CHUNK = (QUADS + 1) ** 2 + 4 * (QUADS + 1)
+DRAWS_OFFSET = 16                # bytes before the draw commands in ChunkDraws: the count, then padding
 SITE_FACE = 4                    # +Z
 SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a vertex of every chunk from level 3 down
 GROUND_COLOUR = (0.30, 0.40, 0.27)
@@ -70,6 +78,8 @@ MIN_ALTITUDE = 0.3               # the camera stays this far above the sphere
 
 parser = argparse.ArgumentParser(description="Planet with quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
+parser.add_argument("--verify", action="store_true",
+                    help="compare the chunks the GPU built with cube_sphere.chunk_mesh, print the result and exit")
 args = parser.parse_args()
 
 sk.shaders.compile_dir(os.path.join(HERE, "pipeline", "shaders"))
@@ -169,9 +179,45 @@ state = {
     "frozen": False,
     "frame": 0,
     "frame_ms": 16.0,            # frame time, smoothed
-    "shown": set(),              # chunk entities drawn this frame
     "tree": None,
 }
+
+
+class ChunkPool:
+    """Slots of the GPU's ChunkPool buffer, and the chunks to build into
+    them this frame."""
+
+    def __init__(self):
+        self.free = list(range(SLOTS - 1, -1, -1))
+        self.jobs = []           # (jobA, jobB) per chunk to build this frame
+
+    def make(self, node):
+        """A slot for `node` with a job to build it, or None when the pool is
+        full or this frame's jobs are taken."""
+        if not self.free or len(self.jobs) == MAX_JOBS:
+            return None
+        slot = self.free.pop()
+        self.jobs.append(((float(node.face), float(node.level), float(node.x), float(node.y)),
+                          (float(slot), SKIRT_FRACTION * node.edge, 0.0, 0.0)))
+        return slot
+
+    def release(self, node):
+        self.free.append(node.chunk)
+
+    def submit_jobs(self):
+        """Hand this frame's jobs to BuildChunks and start the next frame's list."""
+        padded = self.jobs + [((0.0,) * 4, (0.0,) * 4)] * (MAX_JOBS - len(self.jobs))
+        engine.set_custom_vec4_array("planet.jobA", [a for a, _ in padded])
+        engine.set_custom_vec4_array("planet.jobB", [b for _, b in padded])
+        engine.set_custom_uint("planet.jobCount", len(self.jobs))
+        self.jobs = []
+
+    @property
+    def used(self):
+        return SLOTS - len(self.free)
+
+
+pool = ChunkPool()
 
 
 def site_frame():
@@ -189,28 +235,31 @@ def chunk_colour(node):
     return GROUND_COLOUR
 
 
-def make_chunk(node):
-    """Build a node's chunk: a hidden mesh entity."""
-    _, positions, normals, uvs, indices = cube_sphere.chunk_mesh(
-        node.face, node.level, node.x, node.y, QUADS, RADIUS, skirt_depth=SKIRT_FRACTION * node.edge)
-    entity = engine.create_mesh(positions.astype("float32").ravel(), indices,
-                                normals=normals.astype("float32").ravel(),
-                                uvs=uvs.astype("float32").ravel(), name="Chunk")
-    engine.scene.set_visible(entity, False)
-    engine.scene.set_material_float(entity, "gridStrength", 1.0)
-    engine.scene.set_material_vec4(entity, "baseColorFactor", chunk_colour(node) + (1.0,))
-    return entity
+def upload_chunk_indices():
+    """The index list every chunk shares (grid, then skirts drawn from both
+    sides), as cube_sphere.chunk_mesh makes it."""
+    _, _, _, _, indices = cube_sphere.chunk_mesh(4, 0, 0, 0, QUADS, RADIUS, skirt_depth=1.0)
+    state["index_count"] = len(indices)
+    engine.set_buffer("ChunkIndices", indices)
 
 
-def release_chunk(node):
-    state["shown"].discard(node.chunk)
-    engine.scene.destroy_entity(node.chunk)
-
-
-def colour_chunks():
-    for node in state["tree"].nodes():
-        if node.chunk is not None:
-            engine.scene.set_material_vec4(node.chunk, "baseColorFactor", chunk_colour(node) + (1.0,))
+def upload_drawn_chunks():
+    """One indexed indirect draw per chunk the tree selected, and each drawn
+    slot's centre relative to the camera (subtracted in double) and colour."""
+    selected = state["tree"].selected
+    camera = state["position"]
+    instances = np.zeros((SLOTS, 2, 4), dtype=np.float32)
+    commands = np.zeros((len(selected), 5), dtype=np.uint32)
+    for row, node in enumerate(selected):
+        slot = node.chunk
+        instances[slot, 0, :3] = sub(node.centre, camera)
+        instances[slot, 1] = chunk_colour(node) + (1.0,)
+        # indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
+        commands[row] = (state["index_count"], 1, 0, slot * VERTICES_PER_CHUNK, slot)
+    engine.set_buffer("ChunkInstances", instances)
+    engine.set_buffer("ChunkDraws", np.uint32([len(selected)]))
+    if len(selected):
+        engine.set_buffer("ChunkDraws", commands, offset=DRAWS_OFFSET)
 
 
 def build_site():
@@ -334,16 +383,10 @@ def update_level_of_detail():
     state["frame"] += 1
     if not state["frozen"]:
         tree.update(state["position"], state["frame"])
-        tree.build(BUILD_PER_FRAME,
+        tree.build(MAX_JOBS,
                    priority=lambda distance, node: (not in_view(node.centre, node.bound_radius), distance))
         tree.evict(state["frame"])
-
-    shown = {node.chunk for node in tree.selected}
-    for entity in state["shown"] - shown:
-        engine.scene.set_visible(entity, False)
-    for entity in shown - state["shown"]:
-        engine.scene.set_visible(entity, True)
-    state["shown"] = shown
+    pool.submit_jobs()
 
 
 def frame(dt):
@@ -356,8 +399,7 @@ def frame(dt):
 
     # Camera-relative placement: subtract in double, then hand floats over.
     camera = state["position"]
-    for node in state["tree"].selected:
-        engine.scene.set_position(node.chunk, sub(node.centre, camera))
+    upload_drawn_chunks()
     for entity, position in placed:
         engine.scene.set_position(entity, sub(position, camera))
     right, up, forward = camera_basis()
@@ -372,10 +414,11 @@ def frame(dt):
         deepest = max(node.level for node in tree.selected)
         engine.ui.set_text(state["hud"][0], "altitude %s    speed %.0f m/s    speed factor %.2f    frame %.1f ms"
                            % (shown, state["speed"], state["speed_factor"], state["frame_ms"]))
-        engine.ui.set_text(state["hud"][1], "chunks drawn %d    built %d    missing %d    deepest level %d    "
-                           "split factor %.2f%s    colour: %s"
-                           % (len(tree.selected), cached, len(tree.missing), deepest, tree.split_factor,
-                              "    LOD FROZEN" if state["frozen"] else "", COLOUR_MODES[state["colour_mode"]]))
+        engine.ui.set_text(state["hud"][1], "chunks drawn %d    built %d    missing %d    pool %d / %d    "
+                           "deepest level %d    split factor %.2f%s    colour: %s"
+                           % (len(tree.selected), cached, len(tree.missing), pool.used, SLOTS, deepest,
+                              tree.split_factor, "    LOD FROZEN" if state["frozen"] else "",
+                              COLOUR_MODES[state["colour_mode"]]))
     return True
 
 
@@ -389,7 +432,9 @@ def on_init():
     state["camera"] = camera
 
     engine.set_custom_vec4("planet.sunDirection", normalize(SUN) + (0.0,))
-    state["tree"] = QuadTree(RADIUS, make_chunk, release_chunk, max_level=MAX_LEVEL, split_factor=SPLIT_FACTOR)
+    engine.set_custom_float("planet.radius", RADIUS)
+    upload_chunk_indices()
+    state["tree"] = QuadTree(RADIUS, pool.make, pool.release, max_level=MAX_LEVEL, split_factor=SPLIT_FACTOR)
     build_site()
     build_hud()
     teleport(1)
@@ -398,6 +443,8 @@ def on_init():
     engine.ecs.add_system("PlanetFrame", frame, priority=-1)
     if args.capture:
         engine.ecs.add_system("PlanetCapture", CaptureTour(args.capture), priority=-2)
+    elif args.verify:
+        engine.ecs.add_system("PlanetVerify", Verify(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -408,7 +455,6 @@ def set_wireframe(on):
 
 def set_colour_mode(mode):
     state["colour_mode"] = mode
-    colour_chunks()
 
 
 def on_key(key):
@@ -479,6 +525,69 @@ class CaptureTour:
             if self.shot == len(self.SHOTS):
                 os._exit(0)        # the engine has no quit call
         return True
+
+
+class Verify:
+    """--verify: at preset 1, once no chunks are missing, read ChunkPool back
+    and compare every built chunk with cube_sphere.chunk_mesh rounded to
+    32-bit floats: positions relative to the chunk's centre, in units in the
+    last place (ULPs) of the chunk's largest coordinate and in metres,
+    directions, and
+    face coordinates. Prints the largest differences and exits with status
+    0 when no position is more than one ULP off, 1 otherwise."""
+
+    MIN_FRAMES, MAX_FRAMES = 10, 1200
+    TOLERANCE_ULPS = 1.0
+
+    def __init__(self):
+        self.frames = 0
+        self.requested = None
+
+    def __call__(self, dt):
+        self.frames += 1
+        if self.frames == 1:
+            teleport(1)
+        elif self.requested is None:
+            if (self.frames >= self.MIN_FRAMES and not state["tree"].missing) or self.frames >= self.MAX_FRAMES:
+                engine.request_readback("ChunkPool")
+                self.requested = self.frames
+        else:
+            readback = engine.get_readback("ChunkPool")
+            if readback is not None:
+                self.compare(readback)
+        return True
+
+    def compare(self, readback):
+        gpu = np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, VERTICES_PER_CHUNK, 8)
+        worst = {"position (ULPs)": 0.0, "position (m), all levels": 0.0,
+                 "position (m), levels 8 and finer": 0.0, "direction (ULPs)": 0.0, "face uv": 0.0}
+        chunks = 0
+        for node in state["tree"].nodes():
+            if node.chunk is None:
+                continue
+            _, positions, normals, uvs, _ = cube_sphere.chunk_mesh(
+                node.face, node.level, node.x, node.y, QUADS, RADIUS, skirt_depth=SKIRT_FRACTION * node.edge)
+            built = gpu[node.chunk]
+            expected = positions.astype(np.float32)
+            metres = float(np.abs(built[:, :3] - positions).max())
+            # One ULP of the chunk's farthest vertex from its centre.
+            ulp = float(np.spacing(np.abs(expected).max()))
+            worst["position (ULPs)"] = max(worst["position (ULPs)"],
+                                           float(np.abs(built[:, :3] - expected).max()) / ulp)
+            worst["position (m), all levels"] = max(worst["position (m), all levels"], metres)
+            if node.level >= 8:
+                worst["position (m), levels 8 and finer"] = max(worst["position (m), levels 8 and finer"], metres)
+            expected = normals.astype(np.float32)
+            worst["direction (ULPs)"] = max(worst["direction (ULPs)"], float(
+                (np.abs(built[:, 4:7] - expected) / np.spacing(np.abs(expected))).max()))
+            worst["face uv"] = max(worst["face uv"],
+                                   float(np.abs(built[:, [3, 7]] - uvs.astype(np.float32)).max()))
+            chunks += 1
+        print("[planet] verified %d chunks against cube_sphere.chunk_mesh:" % chunks, flush=True)
+        for name, value in worst.items():
+            print("[planet]   largest %s difference %.3g" % (name, value), flush=True)
+        ok = chunks > 0 and worst["position (ULPs)"] <= self.TOLERANCE_ULPS
+        os._exit(0 if ok else 1)
 
 
 engine.set_on_init(on_init)

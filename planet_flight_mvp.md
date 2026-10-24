@@ -723,17 +723,19 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 - Done: low flight over the sphere with no holes and no flicker.
 
 **WP4: GPU chunk generation**
-- Check first: how one compute pass processes a queue of chunk jobs in one frame (`repeatIndex` or a job buffer).
-- `spherify` and the face frames in GLSL, matching `cube_sphere.py`.
-- A compute pass writes chunk vertices into a pool of fixed-size slots, managed by a free list in Python.
-- One shared index buffer and `draw_indexed_indirect`; each chunk's camera-relative origin goes into an SSBO every frame.
-- Per-chunk minH/maxH come back through `request_readback`.
+- Job queue: one `compute_dispatch` of 16 workgroups, one per job; the jobs (face, level, x, y, slot, skirt depth) and their count are custom values, and workgroups past the count return at once.
+- `spherify` and the face frames in GLSL, matching `cube_sphere.py`, in 64-bit floats (`shaderFloat64`, enabled by the device where supported): positions relative to the chunk's centre in 32-bit floats would carry about 1 cm of error at R = 100 km.
+- A compute pass writes chunk vertices into a pool of 2048 fixed-size slots, managed by a free list in Python.
+- One shared index buffer and `draw_indexed_indirect` with a count; each chunk's camera-relative origin and colour go into an SSBO every frame, indexed by `firstInstance`.
+- `--verify` reads the pool back: every chunk matches `cube_sphere.chunk_mesh` to within one ULP of the chunk's largest coordinate (15 µm at levels 8 and finer), directions and face coordinates exactly.
+- Measured: Python per frame 0.9 ms median, 1.7 ms p95; frame time 1.2 ms median; the drawn chunks are not frustum culled.
 - Done: same picture as WP3, generated on the GPU, and pool usage shown as a stat.
 
 **WP5: Terrain function**
 - `terrainHeight(dir)` (continents, ridged mountains, hills) in a shared GLSL include.
 - Colour by height, slope and latitude.
 - Parameters as custom uniforms; `regenerate()` from Python.
+- Per-chunk minH/maxH come back through `request_readback`, to tighten the quadtree's bounding spheres.
 - Done: changing a parameter from Python rebuilds the planet.
 
 **WP6: Atmosphere MVP**

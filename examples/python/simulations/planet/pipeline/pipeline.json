@@ -9,6 +9,12 @@
         { "name": "texCoord", "type": "vec2", "location": 2 },
         { "name": "normal", "type": "vec3", "location": 3 }
       ]
+    },
+    "chunkVertex": {
+      "attributes": [
+        { "name": "positionU", "type": "vec4", "location": 0 },
+        { "name": "normalV", "type": "vec4", "location": 1 }
+      ]
     }
   },
   "bufferLayouts": {
@@ -21,6 +27,48 @@
         { "name": "proj", "type": "mat4", "source": "scene.camera.projection" },
         { "name": "sunDirection", "type": "vec4", "source": "scene.custom.planet.sunDirection" }
       ]
+    },
+    "ChunkJobs": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "jobA", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobA[i]" },
+        { "name": "jobB", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobB[i]" },
+        { "name": "jobCount", "type": "uint", "source": "scene.custom.planet.jobCount", "default": 0 },
+        { "name": "radius", "type": "float", "source": "scene.custom.planet.radius" }
+      ]
+    },
+    "ChunkPool": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 731136,
+      "fields": [
+        { "name": "positionU", "type": "vec4" },
+        { "name": "normalV", "type": "vec4" }
+      ],
+      "target": { "name": "ChunkPool", "readback": { "frequency": "manual" } }
+    },
+    "ChunkIndices": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 2304,
+      "fields": [ { "name": "index", "type": "uint" } ]
+    },
+    "ChunkInstances": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 2048,
+      "fields": [
+        { "name": "origin", "type": "vec4" },
+        { "name": "colour", "type": "vec4" }
+      ]
+    },
+    "ChunkDraws": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 10244,
+      "fields": [ { "name": "word", "type": "uint" } ]
     },
     "MaterialPushConstants": {
       "usage": "push_constant",
@@ -45,13 +93,22 @@
   "descriptorSetLayouts": {
     "cameraSet": {
       "bindings": [
-        {
-          "binding": 0,
-          "type": "uniform_buffer",
-          "stages": [ "vertex", "fragment" ],
-          "name": "CameraUBO",
-          "autoBindBuffer": "CameraUBO"
-        }
+        { "binding": 0, "type": "uniform_buffer", "stages": [ "vertex", "fragment" ], "name": "CameraUBO",
+          "autoBindBuffer": "CameraUBO" }
+      ]
+    },
+    "chunkBuildSet": {
+      "bindings": [
+        { "binding": 0, "type": "uniform_buffer", "stages": [ "compute" ], "name": "ChunkJobs",
+          "autoBindBuffer": "ChunkJobs" },
+        { "binding": 1, "type": "storage_buffer", "stages": [ "compute" ], "name": "ChunkPool",
+          "autoBindBuffer": "ChunkPool" }
+      ]
+    },
+    "chunkInstanceSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": [ "vertex" ], "name": "ChunkInstances",
+          "autoBindBuffer": "ChunkInstances" }
       ]
     },
     "materialSet": {
@@ -66,7 +123,44 @@
   ],
   "passes": [
     {
-      "name": "Scene",
+      "name": "BuildChunks",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [ 64, 1, 1 ],
+        "dispatch": { "x": 16, "y": 1, "z": 1 }
+      },
+      "pipeline": { "computeShader": "shaders/chunk_build.comp.spv" },
+      "descriptorSets": [ "chunkBuildSet" ],
+      "hasSideEffects": true
+    },
+    {
+      "name": "Terrain",
+      "type": "graphics",
+      "execution": {
+        "type": "draw_indexed_indirect",
+        "vertexBuffer": { "buffer": "ChunkPool" },
+        "indexBuffer": { "buffer": "ChunkIndices", "type": "uint32" },
+        "arguments": { "buffer": "ChunkDraws", "offset": 16 },
+        "count": { "buffer": "ChunkDraws", "offset": 0, "maxDrawCount": 2048 }
+      },
+      "pipeline": {
+        "vertexShader": "shaders/terrain.vert.spv",
+        "fragmentShader": "shaders/terrain.frag.spv",
+        "vertexInput": "chunkVertex",
+        "depthTest": true,
+        "depthWrite": true,
+        "depthCompareOp": "greater_or_equal",
+        "cullMode": "back"
+      },
+      "descriptorSets": [ "cameraSet", "chunkInstanceSet" ],
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_write", "clear": [ 0.0, 0.0, 0.0, 1.0 ] },
+        { "resource": "depth", "usage": "depth_write", "clear": { "depth": 0.0, "stencil": 0 } }
+      ]
+    },
+    {
+      "name": "Blocks",
       "type": "graphics",
       "execution": {
         "type": "opaque_geometry",
@@ -85,8 +179,8 @@
       "descriptorSets": [ "cameraSet", "materialSet" ],
       "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 96, "offset": 0 } ],
       "outputs": [
-        { "resource": "swapchain", "usage": "color_write", "clear": [ 0.0, 0.0, 0.0, 1.0 ] },
-        { "resource": "depth", "usage": "depth_write", "clear": { "depth": 0.0, "stencil": 0 } }
+        { "resource": "swapchain", "usage": "color_write" },
+        { "resource": "depth", "usage": "depth_write" }
       ]
     },
     {
@@ -94,14 +188,16 @@
       "type": "graphics",
       "enabled": false,
       "execution": {
-        "type": "opaque_geometry",
-        "sortMode": "front_to_back",
-        "entityDataBinding": "opaque"
+        "type": "draw_indexed_indirect",
+        "vertexBuffer": { "buffer": "ChunkPool" },
+        "indexBuffer": { "buffer": "ChunkIndices", "type": "uint32" },
+        "arguments": { "buffer": "ChunkDraws", "offset": 16 },
+        "count": { "buffer": "ChunkDraws", "offset": 0, "maxDrawCount": 2048 }
       },
       "pipeline": {
-        "vertexShader": "shaders/wire.vert.spv",
+        "vertexShader": "shaders/terrain.vert.spv",
         "fragmentShader": "shaders/wire.frag.spv",
-        "vertexInput": "standard",
+        "vertexInput": "chunkVertex",
         "depthTest": true,
         "depthWrite": false,
         "depthCompareOp": "greater_or_equal",
@@ -109,8 +205,7 @@
         "cullMode": "back",
         "wireframe": true
       },
-      "descriptorSets": [ "cameraSet", "materialSet" ],
-      "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 96, "offset": 0 } ],
+      "descriptorSets": [ "cameraSet", "chunkInstanceSet" ],
       "outputs": [
         { "resource": "swapchain", "usage": "color_blend" },
         { "resource": "depth", "usage": "depth_read" }

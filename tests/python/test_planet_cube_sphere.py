@@ -137,6 +137,29 @@ class CubeSphereChunkMeshes(unittest.TestCase):
             self.assertIn((a, c, b), oriented)
 
 
+@unittest.skipUnless(HAVE_NUMPY, "needs numpy")
+class GpuChunkBuffers(unittest.TestCase):
+    """pipeline.json's chunk buffers fit the chunks cube_sphere.chunk_mesh
+    lays out, which chunk_build.comp writes: 16 x 16 quads with skirts."""
+
+    QUADS, SLOTS = 16, 2048
+
+    def setUp(self):
+        import json
+        document = json.loads((PLANET / "pipeline" / "pipeline.json").read_text(encoding="utf-8"))
+        self.layouts = document["bufferLayouts"]
+        _, self.positions, _, _, self.indices = cube_sphere.chunk_mesh(4, 0, 0, 0, self.QUADS, RADIUS, 1.0)
+
+    def test_the_pool_holds_every_slot_and_the_indices_fit_one_chunk(self):
+        self.assertEqual(self.layouts["ChunkPool"]["elementCount"], self.SLOTS * len(self.positions))
+        self.assertEqual(self.layouts["ChunkIndices"]["elementCount"], len(self.indices))
+        self.assertLess(int(self.indices.max()), len(self.positions))
+
+    def test_the_draw_buffer_holds_a_count_and_a_command_per_slot(self):
+        self.assertEqual(self.layouts["ChunkDraws"]["elementCount"], 4 + 5 * self.SLOTS)
+        self.assertEqual(self.layouts["ChunkInstances"]["elementCount"], self.SLOTS)
+
+
 class FakeChunks:
     """Stands in for the engine: counts chunks made and released."""
 
