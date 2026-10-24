@@ -156,6 +156,17 @@ class Planet:
             g = add(g, self.moon.gravity(position, self.time))
         return g
 
+    def surface_motion(self, position, dt=0.0):
+        """(velocity, acceleration, displacement over the next `dt` seconds)
+        of the surface of the body `position` is reckoned around
+        (reference): the moon's within its sphere of influence, else the
+        planet's, which are 0."""
+        moon = self.moon
+        if moon is not None and length(sub(position, moon.position(self.time))) < moon.influence:
+            return (moon.velocity(self.time), moon.acceleration(self.time),
+                    sub(moon.position(self.time + dt), moon.position(self.time)))
+        return (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+
     def density(self, position):
         height = max(length(position) - self.radius, -2_000.0)
         return self.air_density * self.density_factor * math.exp(-height / self.scale_height)
@@ -195,6 +206,10 @@ class Moon:
         angle = self.phase + self.rate * time
         speed = self.distance * self.rate
         return add(scale(self.u, -speed * math.sin(angle)), scale(self.v, speed * math.cos(angle)))
+
+    def acceleration(self, time):
+        """Its centre's acceleration: rate^2 * distance towards the planet's centre."""
+        return scale(self.position(time), -self.rate * self.rate)
 
     def gravity(self, position, time):
         """Its pull at `position` relative to the planet's centre: towards
@@ -299,18 +314,21 @@ class Ship:
         p = self.params
         return math.sqrt(p.touchdown_speed * p.touchdown_speed + 2.0 * p.assist_brake * max(height, 0.0))
 
-    def _thrust(self, planet, controls, gravity, aero, gear_height=None):
+    def _thrust(self, planet, controls, gravity, aero, gear_height=None, surface=None):
         """The thrusters' force in the body: (right, up, back) components.
-        `gear_height`: the gear's height above the ground, when known."""
+        `gear_height`: the gear's height above the ground, when known.
+        `surface`: (velocity, acceleration, ...) of the surface the assist's
+        velocities are relative to; still when None."""
         p = self.params
         right, up, forward = self.axes()
         if controls.assist:
+            surface_velocity, surface_acceleration = surface[:2] if surface else ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
             climb = controls.vertical * p.assist_climb_rate
             if gear_height is not None:
                 climb = max(climb, -self.descent_limit(gear_height))
             wanted = add(scale(forward, controls.throttle * p.assist_max_speed), scale(up, climb))
-            accel = sub(scale(sub(wanted, self.velocity), p.assist_gain),
-                        add(gravity, scale(aero, 1.0 / p.mass)))
+            accel = sub(scale(sub(wanted, sub(self.velocity, surface_velocity)), p.assist_gain),
+                        sub(add(gravity, scale(aero, 1.0 / p.mass)), surface_acceleration))
             force = scale(accel, p.mass)
             body = (dot(force, right), dot(force, up), -dot(force, forward))
         else:
@@ -327,8 +345,15 @@ class Ship:
 
     def step(self, planet, controls, dt, ground=None):
         """Advance by `dt` seconds; `ground(point)` gives (depth, normal) of
-        the surface under a world point, or None where it is not known."""
+        the surface under a world point, or None where it is not known. The
+        surface moves as planet.surface_motion gives it: the assist, the
+        contacts and a crashed ship go by velocities relative to it, and
+        the position moves by the velocity relative to the surface plus the
+        surface's own displacement over the step."""
+        surface = planet.surface_motion(self.position, dt)
         if self.crashed:
+            self.velocity = surface[0]
+            self.position = add(self.position, surface[2])
             return
         p = self.params
         if not self.idle(controls):
@@ -344,10 +369,11 @@ class Ship:
             above = -under[0]
             gear_height = above - max(-arm[1] for arm in p.gear)
             reach = max(length(arm) for arm in p.gear + p.hull)
-            near = above <= reach + length(self.velocity) * dt + CONTACT_SLOP
+            near = above <= reach + length(sub(self.velocity, surface[0])) * dt + CONTACT_SLOP
         gravity = planet.gravity(self.position)
         aero = self.aerodynamic_force(planet)
-        self.thrust = (0.0, 0.0, 0.0) if resting else self._thrust(planet, controls, gravity, aero, gear_height)
+        self.thrust = ((0.0, 0.0, 0.0) if resting
+                       else self._thrust(planet, controls, gravity, aero, gear_height, surface))
         right, up, forward = self.axes()
         thrust_world = add(add(scale(right, self.thrust[0]), scale(up, self.thrust[1])),
                            scale(forward, -self.thrust[2]))
@@ -357,10 +383,10 @@ class Ship:
         self.on_ground = False
         self.impact_speed = 0.0
         if near:
-            self._contact(ground, dt)
+            self._contact(ground, dt, surface[0])
             if self.crashed:
                 return
-        self.position = add(self.position, scale(self.velocity, dt))
+        self.position = add(self.position, add(scale(sub(self.velocity, surface[0]), dt), surface[2]))
         w = self.angular_velocity
         dq = quat_multiply(self.orientation, (0.0, w[0], w[1], w[2]))
         self.orientation = quat_normalize(tuple(self.orientation[i] + 0.5 * dt * dq[i] for i in range(4)))
@@ -397,8 +423,11 @@ class Ship:
         inertia = self.params.inertia
         self.angular_velocity = tuple(self.angular_velocity[i] + turn[i] / inertia[i] for i in range(3))
 
-    def _contact(self, ground, dt):
+    def _contact(self, ground, dt, surface_velocity=(0.0, 0.0, 0.0)):
+        """Impulses at the contact points touching the surface (moving at
+        `surface_velocity`), and whether the ship crashed."""
         p = self.params
+        relative = lambda arm: sub(self._point_velocity(arm), surface_velocity)
         q = self.orientation
         inverse = quat_conjugate(q)
         contacts = []
@@ -407,7 +436,7 @@ class Ship:
             if hit is None:
                 continue
             depth, normal = hit
-            approach = -dot(self._point_velocity(arm), normal)
+            approach = -dot(relative(arm), normal)
             if depth + max(approach, 0.0) * dt <= 0.0:
                 continue                         # stays clear of the surface this step
             if is_gear and depth > -GEAR_TOUCH:
@@ -427,18 +456,18 @@ class Ship:
                              "mass": 1.0 / self._inverse_mass_along(arm, normal_body),
                              "normal_impulse": 0.0, "friction_impulse": (0.0, 0.0, 0.0)})
         if self.crashed:
-            self.velocity = (0.0, 0.0, 0.0)
+            self.velocity = surface_velocity
             self.angular_velocity = (0.0, 0.0, 0.0)
             return
         for _ in range(CONTACT_ITERATIONS):
             for c in contacts:
                 arm, normal = c["arm"], c["normal"]
-                along = dot(self._point_velocity(arm), normal)
+                along = dot(relative(arm), normal)
                 total = max(c["normal_impulse"] + (c["target"] - along) * c["mass"], 0.0)
                 self._apply_impulse(arm, scale(normal, total - c["normal_impulse"]))
                 c["normal_impulse"] = total
 
-                v = self._point_velocity(arm)
+                v = relative(arm)
                 sliding = sub(v, scale(normal, dot(v, normal)))
                 speed = length(sliding)
                 if speed < 1e-9:

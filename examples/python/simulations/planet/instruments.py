@@ -88,9 +88,9 @@ class Instruments:
         ui.set_visible(self.throttle, r["throttle"] > 0.0)
         flight, orbit = self.displays
         ui.set_text(flight[1], "FLIGHT")
-        ui.set_text(flight[2], "speed       %7.0f m/s\nclimb       %+7.1f m/s\nabove ground %s\nsea level   %s\n"
+        ui.set_text(flight[2], "speed       %7.0f m/s\nclimb       %+7.1f m/s\nabove ground %s\n%-12s%s\n"
                                "throttle    %7.0f %%\nassist      %7s"
-                    % (r["speed"], r["climb"], r["agl_text"], r["asl_text"], r["throttle"] * 100.0,
+                    % (r["speed"], r["climb"], r["agl_text"], r["datum"], r["asl_text"], r["throttle"] * 100.0,
                        "on" if r["assist"] else "off"))
         ui.set_text(orbit[1], "ORBIT  " + r["body"].upper())
         ui.set_text(orbit[2], "periapsis   %s\napoapsis    %s\nspeed       %7.0f m/s\ncircular    %7.0f m/s\n"

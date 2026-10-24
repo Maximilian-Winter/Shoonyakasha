@@ -1,16 +1,17 @@
 """
-A patch of the planet's surface from terrain heights measured at a square
+A patch of a body's surface from terrain heights measured at a square
 grid of directions, for the ship's contacts.
 
 The grid lies in the plane tangent to the sphere at the patch's centre
 direction, SIZE x SIZE points `spacing` metres apart along its east and
-north axes; each point's direction is from the planet's centre through it.
-Heights below sea level count as sea level, so the sea is a floor.
+north axes; each point's direction is from the body's centre through it.
+On a body with a sea, heights below sea level count as sea level, so the
+sea is a floor.
 
-`GroundPatch.query` answers for a point in planet space: the surface
-under it, interpolated bilinearly between the four grid heights around it
-(in the tangent plane's coordinates, where the point's direction meets the
-plane), and the surface's normal from the same cell. Points outside the
+`GroundPatch.query` answers for a point relative to the body's centre: the
+surface under it, interpolated bilinearly between the four grid heights
+around it (in the tangent plane's coordinates, where the point's direction
+meets the plane), and the surface's normal from the same cell. Points outside the
 grid take the nearest cell's edge; points further outside than half the
 patch's width have no answer.
 """
@@ -58,11 +59,12 @@ def tangent_axes(centre):
 
 
 class GroundPatch:
-    def __init__(self, radius, centre, spacing):
+    def __init__(self, radius, centre, spacing, sea=True):
         """A grid around the unit direction `centre` of a sphere of `radius`
         metres, its points `spacing` metres apart; heights come with
-        `set_heights`."""
+        `set_heights`. `sea`: heights below 0 count as 0."""
         self.radius = radius
+        self.sea = sea
         self.centre = _normalize(centre)
         self.spacing = spacing
         self.east, self.north = tangent_axes(self.centre)
@@ -78,7 +80,7 @@ class GroundPatch:
 
     def set_heights(self, heights):
         """Terrain heights (m) at `directions`, in their order."""
-        self.heights = [max(float(h), 0.0) for h in heights]
+        self.heights = [max(float(h), 0.0) if self.sea else float(h) for h in heights]
         self.points = [_scale(d, self.radius + h) for d, h in zip(self.directions, self.heights)]
 
     def grid_coordinates(self, point):

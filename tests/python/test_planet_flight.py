@@ -500,5 +500,109 @@ class Ground(unittest.TestCase):
         self.assertGreater(flight.length(ship.position) - planet.radius, 0.0)
 
 
+def moon_ground(planet):
+    """The sphere of the moon's radius, where the moon is at the planet's time, as the ground."""
+    moon = planet.moon
+
+    def query(point):
+        offset = flight.sub(point, moon.position(planet.time))
+        r = flight.length(offset)
+        return moon.radius - r, flight.scale(offset, 1.0 / r)
+    return query
+
+
+def ship_on_moon(planet, height):
+    """A ship `height` metres above the moon's radius over its +Z pole (off
+    the plane of its orbit), level, nose along +X, moving with the moon."""
+    moon = planet.moon
+    position = flight.add(moon.position(planet.time), (0.0, 0.0, moon.radius + height))
+    right, up, back = (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0)
+    return flight.Ship(position=position, velocity=moon.velocity(planet.time),
+                       orientation=flight.quat_from_basis(right, up, back))
+
+
+def fly_over_moon(ship, planet, controls, seconds):
+    """Fly over the moon's ground, the planet's clock running with the flight;
+    returns the fastest a point reached the surface at."""
+    ground = moon_ground(planet)
+    fastest = 0.0
+    for _ in range(int(round(seconds / DT))):
+        ship.step(planet, controls, DT, ground)
+        planet.time += DT
+        fastest = max(fastest, ship.impact_speed)
+    return fastest
+
+
+def on_moon(ship, planet):
+    """(height above the moon's radius, speed relative to the moon)."""
+    moon = planet.moon
+    offset = flight.sub(ship.position, moon.position(planet.time))
+    return (flight.length(offset) - moon.radius,
+            flight.length(flight.sub(ship.velocity, moon.velocity(planet.time))))
+
+
+class MoonGround(unittest.TestCase):
+    def test_the_surface_moves_with_the_moon_inside_its_sphere_of_influence_only(self):
+        planet = planet_with_moon()
+        moon = planet.moon
+        velocity, acceleration, shift = planet.surface_motion(
+            flight.add(moon.position(0.0), (0.0, 0.0, 30_000.0)), 2.0)
+        self.assertEqual(velocity, moon.velocity(0.0))
+        self.assertAlmostEqual(flight.length(acceleration), moon.rate ** 2 * moon.distance, delta=1e-9)
+        self.assertLess(flight.dot(acceleration, moon.position(0.0)), 0.0)
+        self.assertEqual(shift, flight.sub(moon.position(2.0), moon.position(0.0)))
+        self.assertEqual(planet.surface_motion((0.0, 0.0, planet.radius + 1_000.0), 2.0),
+                         ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)))
+
+    def test_a_ship_set_down_on_the_moon_rests_there_as_it_moves(self):
+        planet = planet_with_moon()
+        ship = ship_on_moon(planet, GEAR_HEIGHT + 1.0)
+        fly_over_moon(ship, planet, flight.Controls(assist=False), 20.0)
+        height, speed = on_moon(ship, planet)
+        self.assertFalse(ship.crashed)
+        self.assertTrue(ship.on_ground)
+        self.assertAlmostEqual(height, GEAR_HEIGHT, delta=0.02)
+        self.assertLess(speed, 0.02)
+
+    def test_a_ship_at_rest_on_the_moon_does_not_creep(self):
+        planet = planet_with_moon(phase=1.0)
+        ship = ship_on_moon(planet, GEAR_HEIGHT + 0.5)
+        fly_over_moon(ship, planet, flight.Controls(assist=False), 10.0)
+        settled = flight.sub(ship.position, planet.moon.position(planet.time))
+        fly_over_moon(ship, planet, flight.Controls(assist=False), 120.0)
+        moved = flight.sub(flight.sub(ship.position, planet.moon.position(planet.time)), settled)
+        self.assertLess(flight.length(moved), 0.005)
+
+    def test_assist_hovers_over_the_moon(self):
+        planet = planet_with_moon()
+        ship = ship_on_moon(planet, 50.0)
+        fly_over_moon(ship, planet, flight.Controls(assist=True), 20.0)
+        height, speed = on_moon(ship, planet)
+        self.assertAlmostEqual(height, 50.0, delta=0.5)
+        self.assertLess(speed, 0.05)
+
+    def test_holding_full_down_with_assist_lands_on_the_moon(self):
+        planet = planet_with_moon()
+        ship = ship_on_moon(planet, GEAR_HEIGHT + 300.0)
+        fastest = fly_over_moon(ship, planet, flight.Controls(vertical=-1.0, assist=True), 60.0)
+        height, speed = on_moon(ship, planet)
+        self.assertFalse(ship.crashed)
+        self.assertTrue(ship.on_ground)
+        self.assertLess(fastest, 0.5 * ship.params.gear_crash_speed)
+        self.assertAlmostEqual(height, GEAR_HEIGHT, delta=0.05)
+        self.assertLess(speed, 0.05)
+
+    def test_a_crashed_ship_moves_with_the_moon(self):
+        planet = planet_with_moon()
+        ship = ship_on_moon(planet, GEAR_HEIGHT + 10.0)
+        ship.velocity = flight.add(ship.velocity, (0.0, 0.0, -20.0))
+        fly_over_moon(ship, planet, flight.Controls(assist=False), 2.0)
+        self.assertTrue(ship.crashed)
+        where = flight.sub(ship.position, planet.moon.position(planet.time))
+        fly_over_moon(ship, planet, flight.Controls(throttle=1.0, assist=False), 5.0)
+        moved = flight.sub(flight.sub(ship.position, planet.moon.position(planet.time)), where)
+        self.assertLess(flight.length(moved), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -98,6 +98,12 @@ class Query(unittest.TestCase):
         depth, _ = patch.query(point_at(patch, 0.0, 0.0, 4.0))
         self.assertAlmostEqual(depth, -4.0, delta=1e-3)
 
+    def test_without_a_sea_the_ground_below_zero_is_the_floor(self):
+        patch = ground.GroundPatch(RADIUS, CENTRE, 5.0, sea=False)
+        patch.set_heights([-300.0] * (ground.SIZE * ground.SIZE))
+        depth, _ = patch.query(point_at(patch, 0.0, 0.0, -296.0))
+        self.assertAlmostEqual(depth, -4.0, delta=1e-3)
+
     def test_points_just_outside_take_the_edge_and_far_ones_have_no_answer(self):
         patch = ground.GroundPatch(RADIUS, CENTRE, 5.0)
         patch.set_heights([10.0] * (ground.SIZE * ground.SIZE))
