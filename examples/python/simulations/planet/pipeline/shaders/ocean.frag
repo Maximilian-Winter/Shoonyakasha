@@ -5,8 +5,11 @@
 // one minus the alpha written). Light reflected by the surface (Schlick
 // Fresnel, water's F0 of 0.02) shows the sky and the sun; light that enters
 // shows the water's colour, more of it the more water the view crosses
-// down to the sea floor. Small ripples, moving with time, tilt the normal;
-// they fade out with distance.
+// down to the sea floor, whose depth comes from the terrain function at
+// each pixel (terrainSeaFloor). Small ripples, moving with time, tilt the
+// normal; they fade out with distance, and the sun's highlight widens
+// instead (its shininess falls from SHININESS to FAR_SHININESS between
+// RIPPLE_FADE and FAR_DISTANCE), standing for waves too small to see.
 //
 
 #define CAMERA_SET 0
@@ -15,8 +18,7 @@
 #include "atmosphere.glsl"
 
 layout(location = 0) in vec3 fragRadial;
-layout(location = 1) in float fragWaterDepth;
-layout(location = 2) in vec3 fragRelativePos;
+layout(location = 1) in vec3 fragRelativePos;
 
 layout(location = 0) out vec4 outColor;
 
@@ -26,6 +28,8 @@ const float RIPPLE_SIZE = 20.0;                  // metres
 const float RIPPLE_TILT = 0.08;
 const float RIPPLE_FADE = 3000.0;                // metres from the camera where the ripples have faded
 const float SHININESS = 400.0;
+const float FAR_SHININESS = 30.0;
+const float FAR_DISTANCE = 20000.0;              // metres
 
 vec3 rippledNormal(vec3 p, vec3 radial, float distance) {
     vec3 axis = abs(radial.y) < 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0);
@@ -53,7 +57,8 @@ void main() {
 
     // Light that enters the water, scattered back out by it, and how much of
     // the sea floor shows through the water the view crosses.
-    float path = max(fragWaterDepth, 0.0) / max(dot(radial, toCamera), 0.05);
+    float waterDepth = max(-terrainSeaFloor(radial), 0.0);
+    float path = waterDepth / max(dot(radial, toCamera), 0.05);
     float opacity = 1.0 - exp(-path / CLEARNESS);
     vec3 body = WATER / ATMOSPHERE_PI * (sunlight * max(dot(radial, sunDir), 0.0) + skylight);
 
@@ -61,7 +66,9 @@ void main() {
     // sky light over pi) and the sun's highlight (normalised Blinn-Phong).
     vec3 sky = skylight / ATMOSPHERE_PI;
     vec3 halfway = normalize(toCamera + sunDir);
-    float highlight = pow(max(dot(normal, halfway), 0.0), SHININESS) * (SHININESS + 8.0) / (8.0 * ATMOSPHERE_PI);
+    // Geometric between the near and far shininess, so the widening is even in the exponent.
+    float shininess = SHININESS * pow(FAR_SHININESS / SHININESS, smoothstep(RIPPLE_FADE, FAR_DISTANCE, distance));
+    float highlight = pow(max(dot(normal, halfway), 0.0), shininess) * (shininess + 8.0) / (8.0 * ATMOSPHERE_PI);
     vec3 sun = sunlight * highlight * fresnel * step(0.0, dot(normal, sunDir));
 
     vec3 colour = fresnel * sky + sun + (1.0 - fresnel) * opacity * body;

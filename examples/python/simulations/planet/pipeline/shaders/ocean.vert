@@ -22,14 +22,12 @@ layout(location = 1) in vec4 inNormalV;
 layout(location = 2) in vec4 inRadialHeight;
 
 layout(location = 0) out vec3 fragRadial;
-layout(location = 1) out float fragWaterDepth;   // metres from sea level down to the sea floor
-layout(location = 2) out vec3 fragRelativePos;
+layout(location = 1) out vec3 fragRelativePos;
 
 void main() {
     ChunkInstance chunk = chunks.instances[gl_InstanceIndex];
     vec3 relativePos = chunk.origin.xyz + inPositionU.xyz - inRadialHeight.xyz * inRadialHeight.w;
     fragRadial = inRadialHeight.xyz;
-    fragWaterDepth = -inRadialHeight.w;
     fragRelativePos = relativePos;
     gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
 }

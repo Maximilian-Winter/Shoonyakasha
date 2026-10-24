@@ -161,6 +161,15 @@ float terrainHeightNatural(vec3 dir) {
     return mix(seabed, onLand, land);
 }
 
+// terrainHeightNatural where it is below sea level, and evaluated only as
+// far as needed: away from the coasts (continent below -0.05) the land's
+// layers have no weight, so only the continent and the seabed are.
+float terrainSeaFloor(vec3 dir) {
+    float c = terrainContinent(dir);
+    if (c < -0.05) return -terrain.hills.z * smoothstep(0.0, -0.3, c);
+    return terrainHeightNatural(dir);
+}
+
 // The terrain with the pad: the pad's height within its flat radius, easing
 // into the natural terrain by the outer radius. Distances are chords, which
 // keep their precision in 32-bit floats where an angle from acos would not.
