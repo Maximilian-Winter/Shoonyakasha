@@ -6,18 +6,36 @@ A planet of radius 100 km with procedural terrain (continents, oceans, ridged mo
 python planet.py
 python planet.py --capture DIR     # screenshots at the presets, then exit
 python planet.py --verify          # check the GPU's chunks against cube_sphere.chunk_mesh, then exit
+python planet.py --orbit-check     # fly one orbit from preset 9 at 16x, report the drift, then exit
 ```
 
-| Key | |
+**Tab** switches between the free camera and the ship.
+
+| Free camera | |
 |---|---|
 | Right mouse + move | Look around; the horizon stays level |
 | **W/A/S/D** | Fly forward, left, back, right |
 | **E / Q** | Up / down |
 | **Shift / Ctrl** | 4× faster / 4× slower |
 | Mouse wheel | Speed factor |
+
+| Ship | |
+|---|---|
+| **W / S** | Throttle up / down (50 % a second) |
+| **Backspace** | Throttle to 0 |
+| Arrows, right mouse + move | Pitch and yaw |
+| **A / D** | Roll left / right |
+| **E / Q** | Thrust up / down |
+| **L** | Translation assist on / off |
+| **, / .** | Time warp down / up: 1×, 2×, 4×, 8×, 16× |
+
+| Anywhere | |
+|---|---|
 | **1 – 5** | 5 m above the blocks, 1 km above them, then 50 km, 1,000 km, 5,000 km above the sphere |
 | **6** | 8 km above the corner where the +X, +Y and +Z faces meet |
 | **7** | 2 km above the sea, 25 km north-west of the blocks, looking further north-west |
+| **8** | The ship at rest on the pad, 7 m south of the blocks, facing north, translation assist on |
+| **9** | The ship in a circular orbit 40 km above the blocks, moving east with its nose 40° down, assist off |
 | **N** | New terrain seed |
 | **M / J** | Mountains 25 % higher / lower |
 | **H / G** | Hills 25 % higher / lower |
@@ -31,7 +49,7 @@ python planet.py --verify          # check the GPU's chunks against cube_sphere.
 | **[ / ]** | Split factor down / up |
 | **P** | Screenshot into `planet_captures/` |
 
-Flight speed is half the height above the ground or the sea per second (at least 1 m/s), times the speed factor; the camera stays at least 0.3 m above the ground and the sea. The overlay shows the heights above the ground or the sea and above sea level (the sphere), speed and frame time; the chunks drawn (and of them, those the ocean draws), built and missing, the slots of the chunk pool in use, the deepest level drawn and the split factor; and the seed, the mountain and hill heights, the sun's elevation at the blocks, the atmosphere's density and the exposure.
+The free camera flies at half its height above the ground or the sea per second (at least 1 m/s), times the speed factor, and stays at least 0.3 m above them. The overlay's first line shows, for the free camera, the heights above the ground or the sea and above sea level (the sphere), speed and frame time; for the ship, the throttle, translation assist, speed, climb rate, the same heights, the periapsis and apoapsis of the orbit it would coast along, the time warp, whether it rests on the ground, and frame time. The others show the chunks drawn (and of them, those the ocean draws), built and missing, the slots of the chunk pool in use, the deepest level drawn and the split factor; and the seed, the mountain and hill heights, the sun's elevation at the blocks, the atmosphere's density and the exposure.
 
 ## How it works
 
@@ -66,7 +84,13 @@ Flight speed is half the height above the ground or the sea per second (at least
   - Chunks no frame has used for 120 frames are released.
   - Every chunk the tree selects is drawn; none are culled.
 - **Starting and changing the terrain:** the quadtree is made once a probe has returned the site's natural height, which becomes the pad's height. Changing a parameter (**N**, **M**, **J**, **H**, **G**) releases every chunk, measures the site again and builds the planet again.
+- **The ship** ([`flight.py`](flight.py)) is a rigid body in doubles: position, velocity, an orientation quaternion and an angular velocity, with a camera's body axes (forward −Z, up +Y). Its view is the camera's in ship mode. Every frame the time since the last (times the warp) is flown in steps of 1/120 s, at most 64 a frame, with semi-implicit Euler (velocity first, then position).
+  - Forces: gravity GM/r² towards the centre (4.905 m/s² at the radius, half of Earth's); drag ½ρv²·C<sub>d</sub>A against the velocity (C<sub>d</sub>A = 12 m²); lift ½ρv<sub>f</sub>|v<sub>f</sub>|·C<sub>L</sub>A along the ship's up for the speed v<sub>f</sub> along its nose (C<sub>L</sub>A = 8 m²); the thrusters: 600 kN forward, 150 kN in each other direction. The air's density is 1.225 kg/m³ × e<sup>−h/2.5 km</sup> (the atmosphere's scale height), times the atmosphere's density factor. Mass 20 t.
+  - Rotation assist (always): the stick asks for rates up to 0.8, 0.6 and 1.5 rad/s of pitch, yaw and roll, which the torque (200 kN m at most per axis) pushes towards.
+  - Translation assist (**L**): the throttle asks for a speed along the nose (up to 1,500 m/s) and **E / Q** for a climb rate (up to 60 m/s); the thrusters push towards that velocity and hold the ship against gravity, drag and lift, within their limits. Off, the throttle drives the main engine and **E / Q** the vertical thrusters.
+  - The ship rests on the ground or the sea 2 m above them, by the probe under it: on touching, it stops moving into the surface and loses 5 % of its speed along it each step.
+  - A circular orbit at 40 km is 592 m/s, about 25 minutes round.
 - **The wireframe pass** draws the chunks again in line mode, with a slope-scaled depth bias (`"depthBias": {"slope": 1.5}`; positive is nearer with reverse-Z) so the lines pass the depth test against their own surface.
 - **The blocks** stand on the pad on the +Z face at u = v = 1/64: a 20 m slab 5 cm above the ground, cubes of 0.5, 1 and 4 m, and a 30 m mast.
 
-`tests/python/test_planet_cube_sphere.py` checks the face frames, `spherify`, the winding, the skirts, that neighbouring chunks share their edge vertices exactly, that the pipeline's chunk buffers fit the chunk layout, and the quadtree's selection, hysteresis, build order, bounds through a height range, and eviction. `--verify` reads `ChunkPool` back and checks every built chunk: directions and face coordinates equal to `cube_sphere.chunk_mesh`'s; positions equal to direction × (radius + height − skirt) − centre from its directions and the GPU's heights, to within one unit in the last place of the chunk's largest coordinate; normals of unit length on the outer side; and the lowest and highest heights in `ChunkHeights` equal to those in the pool. It exits with status 1 if any of these fails.
+`tests/python/test_planet_flight.py` checks the flight model: quaternions and axes, a circular orbit held for five minutes, orbit elements, a scripted climb from the ground to orbit, free fall, terminal speed and drag, assisted hover and speed, the rotation assist, and resting on the ground. `--orbit-check` flies one orbit in the running example and exits with status 1 if the heights left 100 m around 40 km. `tests/python/test_planet_cube_sphere.py` checks the face frames, `spherify`, the winding, the skirts, that neighbouring chunks share their edge vertices exactly, that the pipeline's chunk buffers fit the chunk layout, and the quadtree's selection, hysteresis, build order, bounds through a height range, and eviction. `--verify` reads `ChunkPool` back and checks every built chunk: directions and face coordinates equal to `cube_sphere.chunk_mesh`'s; positions equal to direction × (radius + height − skirt) − centre from its directions and the GPU's heights, to within one unit in the last place of the chunk's largest coordinate; normals of unit length on the outer side; and the lowest and highest heights in `ChunkHeights` equal to those in the pool. It exits with status 1 if any of these fails.

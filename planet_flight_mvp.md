@@ -760,7 +760,9 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 **WP8: Flight model**
 - Python, double precision, a fixed 1/120 s step with an accumulator inside `set_on_update`.
 - Inverse-square gravity; drag and lift use the same density curve as the atmosphere pass.
-- Rotation and translation assist with an on/off toggle; keyboard and gamepad mapping.
+- Rotation and translation assist with an on/off toggle; keyboard and mouse mapping. A gamepad needs gamepad axes and buttons in the Python bindings first; they are not there.
+- `flight.py` is engine-independent and unit-tested; the free camera stays as a separate mode (Tab). Time warp up to 16×; the ship rests on the ground through the height probe until WP10.
+- Measured: a scripted ascent (60° burn to a 40 km apoapsis, coast, prograde burn) reaches a 30 × 74 km orbit 189 s after lift-off; `--orbit-check` flies one full orbit at 40 km (1,486 s) in the example and stays within 39,989.8–40,000 m (the 10 m loss is drag from the thin air there).
 - Done: climb to orbit, and the orbit holds for several minutes without drift.
 
 **WP9: Cockpit and HUD**

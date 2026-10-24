@@ -27,14 +27,27 @@ scattering by air and haze raymarched along each pixel's view ray
 (pipeline/shaders/atmosphere.glsl), and tone maps the result.
 
 Keys:
+    Tab                    free camera / ship
+  free camera:
     right mouse + move     look around
     W/A/S/D                fly forward, left, back, right
     E / Q                  up / down
     Shift / Ctrl           4x faster / 4x slower
     mouse wheel            speed factor
+  ship (flight.py):
+    W / S                  throttle up / down
+    Backspace              throttle to 0
+    arrows, right mouse    pitch and yaw
+    A / D                  roll left / right
+    E / Q                  thrust up / down
+    L                      translation assist on / off
+    , / .                  time warp down / up (1x to 16x)
+  anywhere:
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
     7                      2 km up, 25 km north-west of the blocks, looking further north-west
+    8                      the ship at rest on the pad
+    9                      the ship in a circular orbit 40 km up
     N                      new terrain seed
     M / J                  mountains higher / lower
     H / G                  hills higher / lower
@@ -50,6 +63,7 @@ Keys:
 
     python planet.py --capture DIR     screenshots at the presets, then exit
     python planet.py --verify          check the GPU's chunks against cube_sphere.chunk_mesh, then exit
+    python planet.py --orbit-check     fly one orbit from preset 9 at 16x, report the drift, then exit
 """
 
 import argparse
@@ -63,6 +77,7 @@ import shoonyakasha as sk
 from shoonyakasha import keys
 
 import cube_sphere
+import flight
 from quadtree import QuadTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -113,11 +128,22 @@ NEAR_PLANE = 0.05
 FOV = 70.0
 LOOK_RADIANS_PER_PIXEL = 0.0025
 MIN_ALTITUDE = 0.3               # the camera stays this far above the ground
+# The ship (flight.py).
+FLIGHT_STEP = 1.0 / 120.0        # seconds per physics step
+MAX_STEPS_PER_FRAME = 64
+WARPS = (1, 2, 4, 8, 16)         # time warps
+SHIP_CLEARANCE = 2.0             # metres from the ship's centre to the ground it rests on
+GROUND_FRICTION = 0.05           # share of the speed along the ground lost per step while resting on it
+THROTTLE_RATE = 0.5              # throttle per second while W or S is held
+MOUSE_STICK = 0.04               # stick per pixel of mouse movement
+ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
 
 parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
 parser.add_argument("--verify", action="store_true",
                     help="check the chunks the GPU built against cube_sphere.chunk_mesh, print the result and exit")
+parser.add_argument("--orbit-check", action="store_true",
+                    help="fly one orbit from preset 9 at 16x, print how far it drifted and exit")
 args = parser.parse_args()
 
 sk.shaders.compile_dir(os.path.join(HERE, "pipeline", "shaders"))
@@ -233,7 +259,15 @@ state = {
     "sun_azimuth": SUN_AZIMUTH,
     "density": 1.0,              # times the atmosphere's coefficients
     "exposure": EXPOSURE,
+    "mode": "camera",            # "camera": the free camera; "ship": the view from the ship
+    "ship": None,
+    "controls": flight.Controls(),
+    "warp": 0,                   # index into WARPS
+    "accumulator": 0.0,          # seconds of flight not yet stepped
+    "flight_time": 0.0,          # seconds of flight stepped
+    "landed": False,
 }
+flight_planet = flight.Planet(radius=RADIUS, scale_height=RAYLEIGH_SCALE_HEIGHT)
 
 
 class ChunkPool:
@@ -516,9 +550,15 @@ def fly(dt):
 
 
 def teleport(preset):
+    """Presets 1 - 7 move the free camera; 8 and 9 place the ship."""
     _, up, east, north = site_frame()
     ground = site_ground()
-    state["teleport_when_known"] = preset if preset in (1, 2) and state["site_height"] is None else None
+    state["teleport_when_known"] = preset if preset in (1, 2, 8) and state["site_height"] is None else None
+    state["ground"] = None
+    if preset in (8, 9):
+        place_ship(preset)
+        return
+    state["mode"] = "camera"
     if preset == 1:
         # 5 m up, 25 m south-west of the blocks, looking at them.
         state["position"] = add(ground, add(scale(up, 5.0), add(scale(east, -18.0), scale(north, -18.0))))
@@ -542,7 +582,89 @@ def teleport(preset):
         height = {3: 50_000.0, 4: 1_000_000.0, 5: 5_000_000.0}[preset]
         state["position"] = scale(up, RADIUS + height)
         state["forward"] = normalize(add(scale(up, -0.98), scale(north, 0.2)))
-    state["ground"] = None
+
+
+# ── Ship ───────────────────────────────────────────────────────────────────
+
+def board_ship():
+    """Ship mode; a ship at rest where the camera is, facing its way, if there is none yet."""
+    if state["ship"] is None:
+        right, up, forward = camera_basis()
+        state["ship"] = flight.Ship(position=state["position"],
+                                    orientation=flight.quat_from_basis(right, up, scale(forward, -1.0)))
+    state["mode"] = "ship"
+
+
+def leave_ship():
+    """Camera mode, from where the ship is, facing its way with the horizon level."""
+    state["mode"] = "camera"
+    _, _, forward = state["ship"].axes()
+    radial = normalize(state["position"])
+    if abs(dot(forward, radial)) > 0.99:
+        forward = local_frame(radial)[1]
+    state["forward"] = normalize(forward)
+
+
+def place_ship(preset):
+    """8: at rest on the pad 7 m south of the blocks, facing north,
+    translation assist on. 9: in a circular orbit ORBIT_HEIGHT above the
+    blocks, moving east with the nose 40 degrees down, where the planet is,
+    assist off."""
+    _, up, east, north = site_frame()
+    if preset == 8:
+        position = add(site_ground(), add(scale(up, SHIP_CLEARANCE), scale(north, -7.0)))
+        forward, velocity, assist = north, (0.0, 0.0, 0.0), True
+    else:
+        position, assist = scale(up, RADIUS + ORBIT_HEIGHT), False
+        velocity = scale(east, flight.circular_speed(flight_planet, ORBIT_HEIGHT))
+        down = math.radians(40.0)
+        forward = normalize(add(scale(east, math.cos(down)), scale(up, -math.sin(down))))
+    up = normalize(sub(up, scale(forward, dot(up, forward))))
+    right = cross(forward, up)
+    state["ship"] = flight.Ship(position=position, velocity=velocity,
+                                orientation=flight.quat_from_basis(right, up, scale(forward, -1.0)))
+    state["controls"] = flight.Controls(assist=assist)
+    state["mode"] = "ship"
+    state["position"] = position
+    state["forward"] = forward
+
+
+def read_ship_controls(dt):
+    controls = state["controls"]
+    down = engine.input.is_key_down
+    if down(keys.W):
+        controls.throttle = min(1.0, controls.throttle + THROTTLE_RATE * dt)
+    if down(keys.S):
+        controls.throttle = max(0.0, controls.throttle - THROTTLE_RATE * dt)
+    pitch = float(down(keys.UP)) - float(down(keys.DOWN))
+    yaw = float(down(keys.RIGHT)) - float(down(keys.LEFT))
+    if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
+        dx, dy = engine.input.get_mouse_delta()
+        pitch -= dy * MOUSE_STICK
+        yaw += dx * MOUSE_STICK
+    clamp = lambda value: max(-1.0, min(1.0, value))
+    controls.pitch, controls.yaw = clamp(pitch), clamp(yaw)
+    controls.roll = float(down(keys.D)) - float(down(keys.A))
+    controls.vertical = float(down(keys.E)) - float(down(keys.Q))
+
+
+def fly_ship(dt):
+    """Advance the ship by this frame's time (times the warp) in fixed steps,
+    resting it on the ground under it."""
+    ship = state["ship"]
+    state["accumulator"] += dt * WARPS[state["warp"]]
+    steps = 0
+    while state["accumulator"] >= FLIGHT_STEP and steps < MAX_STEPS_PER_FRAME:
+        ship.step(flight_planet, state["controls"], FLIGHT_STEP)
+        if state["ground"] is not None:
+            state["landed"] = ship.rest_on(flight_planet, surface_height(), SHIP_CLEARANCE, GROUND_FRICTION)
+        state["accumulator"] -= FLIGHT_STEP
+        state["flight_time"] += FLIGHT_STEP
+        steps += 1
+    if steps == MAX_STEPS_PER_FRAME:
+        state["accumulator"] = 0.0      # too far behind: drop the rest rather than fall further behind
+    state["position"] = ship.position
+    state["forward"] = ship.axes()[2]
 
 
 def in_view(centre, radius):
@@ -581,12 +703,16 @@ def frame(dt):
         if state["teleport_when_known"]:
             teleport(state["teleport_when_known"])
 
-    if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
-        dx, dy = engine.input.get_mouse_delta()
-        look(dx, dy)
-    state["speed"] = 0.0
-    fly(dt)
-    keep_above_ground()
+    if state["mode"] == "ship":
+        read_ship_controls(dt)
+        fly_ship(dt)
+    else:
+        if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
+            dx, dy = engine.input.get_mouse_delta()
+            look(dx, dy)
+        state["speed"] = 0.0
+        fly(dt)
+        keep_above_ground()
     update_level_of_detail()
 
     # Camera-relative placement: subtract in double, then hand floats over.
@@ -596,7 +722,7 @@ def frame(dt):
     ground = site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
-    right, up, forward = camera_basis()
+    right, up, forward = state["ship"].axes() if state["mode"] == "ship" else camera_basis()
     engine.scene.set_rotation(state["camera"], euler_from_basis(right, up, forward))
 
     state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * dt * 1000.0
@@ -612,10 +738,23 @@ def update_hud():
     terrain = state["terrain"]
     cached = sum(1 for node in tree.nodes() if node.chunk is not None)
     deepest = max(node.level for node in tree.selected)
-    engine.ui.set_text(state["hud"][0], "above ground %s    above sea level %s    speed %.0f m/s    "
-                       "speed factor %.2f    frame %.1f ms"
-                       % (distance_text(height_above_ground()), distance_text(altitude()), state["speed"],
-                          state["speed_factor"], state["frame_ms"]))
+    if state["mode"] == "ship":
+        ship, controls = state["ship"], state["controls"]
+        periapsis, apoapsis = flight.orbit(flight_planet, ship.position, ship.velocity)
+        climb = dot(ship.velocity, normalize(ship.position))
+        engine.ui.set_text(state["hud"][0], "SHIP    throttle %3.0f%%    assist %s    speed %.0f m/s    climb %+.0f m/s    "
+                           "above ground %s    above sea level %s    periapsis %s    apoapsis %s    warp x%d%s    "
+                           "frame %.1f ms"
+                           % (controls.throttle * 100.0, "on" if controls.assist else "off", length(ship.velocity),
+                              climb, distance_text(height_above_ground()), distance_text(altitude()),
+                              "below ground" if periapsis < 0.0 else distance_text(periapsis),
+                              "escape" if apoapsis == math.inf else distance_text(apoapsis),
+                              WARPS[state["warp"]], "    LANDED" if state["landed"] else "", state["frame_ms"]))
+    else:
+        engine.ui.set_text(state["hud"][0], "CAMERA    above ground %s    above sea level %s    speed %.0f m/s    "
+                           "speed factor %.2f    frame %.1f ms"
+                           % (distance_text(height_above_ground()), distance_text(altitude()), state["speed"],
+                              state["speed_factor"], state["frame_ms"]))
     engine.ui.set_text(state["hud"][1], "chunks drawn %d (ocean %d)    built %d    missing %d    pool %d / %d    "
                        "deepest level %d    split factor %.2f%s    colour: %s"
                        % (len(tree.selected), state["ocean_chunks"], cached, len(tree.missing), pool.used, SLOTS,
@@ -652,6 +791,8 @@ def on_init():
         engine.ecs.add_system("PlanetCapture", CaptureTour(args.capture), priority=-2)
     elif args.verify:
         engine.ecs.add_system("PlanetVerify", Verify(), priority=-2)
+    elif args.orbit_check:
+        engine.ecs.add_system("PlanetOrbitCheck", OrbitCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -671,8 +812,19 @@ def change_terrain(name, index, factor):
 
 def on_key(key):
     tree = state["tree"]
-    if keys.NUM_1 <= key <= keys.NUM_7:
+    if keys.NUM_1 <= key <= keys.NUM_9:
         teleport(key - keys.NUM_0)
+    elif key == keys.TAB:
+        if state["mode"] == "ship":
+            leave_ship()
+        else:
+            board_ship()
+    elif key == keys.L:
+        state["controls"].assist = not state["controls"].assist
+    elif key == keys.BACKSPACE:
+        state["controls"].throttle = 0.0
+    elif key in (keys.COMMA, keys.PERIOD):
+        state["warp"] = max(0, min(len(WARPS) - 1, state["warp"] + (1 if key == keys.PERIOD else -1)))
     elif key == keys.O:
         state["ocean"] = not state["ocean"]
         engine.set_pass_enabled("Ocean", state["ocean"])
@@ -692,6 +844,7 @@ def on_key(key):
         upload_sky()
     elif key in (keys.T, keys.Y):
         state["density"] *= 1.25 if key == keys.T else 1 / 1.25
+        flight_planet.density_factor = state["density"]
         upload_sky()
     elif key in (keys.B, keys.V):
         state["exposure"] *= 1.25 if key == keys.B else 1 / 1.25
@@ -736,6 +889,8 @@ class CaptureTour:
         ("preset_7_coast", 7, False, 0, None, DAY_SUN),
         ("preset_7_sun_on_the_sea", 7, False, 0, None, (12.0, 135.0)),
         ("preset_3_ocean_sun", 3, False, 0, None, (50.0, 135.0)),
+        ("preset_8_ship_on_the_pad", 8, False, 0, None, DAY_SUN),
+        ("preset_9_ship_in_orbit", 9, False, 0, None, DAY_SUN),
         ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN),
         ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
         ("preset_3_mountains_higher", 3, False, 0, ("mountains", 1, 1.5), DAY_SUN),
@@ -856,6 +1011,44 @@ class Verify:
               and worst["face uv"] == 0 and worst["normal length - 1"] < 1e-5 and lowest_normal_dot > 0.0
               and worst["lowest/highest height (m)"] == 0)
         os._exit(0 if ok else 1)
+
+
+class OrbitCheck:
+    """--orbit-check: the ship in preset 9's circular orbit, coasting at 16x
+    for one orbital period. Prints the periapsis and apoapsis at the start
+    and the end and the range of heights flown, and exits with status 0 when
+    the heights stayed within 100 m of the orbit's, 1 otherwise."""
+
+    TOLERANCE = 100.0
+
+    def __init__(self):
+        self.start = None
+        self.low = math.inf
+        self.high = -math.inf
+
+    def __call__(self, dt):
+        if state["tree"] is None:
+            return True
+        if self.start is None:
+            teleport(9)
+            state["warp"] = len(WARPS) - 1
+            ship = state["ship"]
+            self.start = state["flight_time"]
+            self.period = 2.0 * math.pi * math.sqrt((RADIUS + ORBIT_HEIGHT) ** 3 / flight_planet.gm)
+            self.orbit0 = flight.orbit(flight_planet, ship.position, ship.velocity)
+            return True
+        ship = state["ship"]
+        height = length(ship.position) - RADIUS
+        self.low, self.high = min(self.low, height), max(self.high, height)
+        if state["flight_time"] - self.start >= self.period:
+            orbit1 = flight.orbit(flight_planet, ship.position, ship.velocity)
+            print("[planet] one orbit (%.0f s of flight) at %d m:" % (self.period, ORBIT_HEIGHT), flush=True)
+            print("[planet]   periapsis / apoapsis at the start %.1f / %.1f m, at the end %.1f / %.1f m"
+                  % (self.orbit0 + orbit1), flush=True)
+            print("[planet]   heights flown %.1f to %.1f m" % (self.low, self.high), flush=True)
+            ok = max(abs(self.low - ORBIT_HEIGHT), abs(self.high - ORBIT_HEIGHT)) <= self.TOLERANCE
+            os._exit(0 if ok else 1)
+        return True
 
 
 engine.set_on_init(on_init)
