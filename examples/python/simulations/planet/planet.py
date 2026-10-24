@@ -21,6 +21,11 @@ its vertices relative to its own centre, and skirts along its edges hide
 the cracks between levels. A cluster of blocks stands on the +Z face, on a
 pad 5 cm above the ground.
 
+The scene is lit by sunlight that comes through the atmosphere and drawn
+in HDR; a fullscreen pass then adds the atmosphere in front of it, single
+scattering by air and haze raymarched along each pixel's view ray
+(pipeline/shaders/atmosphere.glsl), and tone maps the result.
+
 Keys:
     right mouse + move     look around
     W/A/S/D                fly forward, left, back, right
@@ -32,6 +37,9 @@ Keys:
     N                      new terrain seed
     M / J                  mountains higher / lower
     H / G                  hills higher / lower
+    Z / X                  sun lower / higher, seen from the blocks
+    T / Y                  atmosphere denser / thinner
+    B / V                  exposure up / down
     F                      wireframe
     C                      colour: terrain, per face, per level
     K                      freeze the level of detail
@@ -88,7 +96,17 @@ TERRAIN_COLOUR = (-1.0, 0.0, 0.0)  # tells terrain.frag to colour by height, slo
 FACE_COLOURS = ((0.62, 0.30, 0.25), (0.25, 0.50, 0.55), (0.55, 0.55, 0.30),
                 (0.40, 0.30, 0.60), (0.30, 0.55, 0.30), (0.60, 0.42, 0.25))
 COLOUR_MODES = ("terrain", "face", "level")
-SUN = (0.48, 0.42, 0.77)
+SUN_ELEVATION, SUN_AZIMUTH = 40.0, 200.0   # degrees, seen from the site; azimuth from east towards north
+DAY_SUN = (SUN_ELEVATION, SUN_AZIMUTH)
+# The atmosphere (atmosphere.glsl), the defaults in pipeline.json: a top 20 km up, scale heights of
+# 2.5 km (air) and 400 m (haze), and Earth's coefficients times 3.2, which keeps Earth's optical
+# depth straight up for the shorter scale heights.
+ATMOSPHERE_TOP = 20_000.0
+RAYLEIGH_SCALE_HEIGHT, MIE_SCALE_HEIGHT = 2_500.0, 400.0
+RAYLEIGH = (1.857e-5, 4.339e-5, 1.0592e-4)          # scattering per metre at height 0
+MIE_SCATTERING, MIE_ABSORPTION, MIE_G = 1.279e-5, 1.408e-5, 0.8
+SUN_ILLUMINANCE = 20.0
+EXPOSURE = 0.4
 NEAR_PLANE = 0.05
 FOV = 70.0
 LOOK_RADIANS_PER_PIXEL = 0.0025
@@ -207,6 +225,10 @@ state = {
     "site_height": None,         # natural terrain height at the site, the pad's height, from the probes
     "teleport_when_known": None,  # a preset to jump to again once the site's height is known
     "terrain": {name: list(value) for name, value in TERRAIN.items()},
+    "sun_elevation": SUN_ELEVATION,
+    "sun_azimuth": SUN_AZIMUTH,
+    "density": 1.0,              # times the atmosphere's coefficients
+    "exposure": EXPOSURE,
 }
 
 
@@ -308,6 +330,25 @@ def upload_terrain():
     engine.set_custom_vec4("planet.terrain.site", up + (state["site_height"] if known else 0.0,))
     engine.set_custom_vec4("planet.terrain.siteShape",
                            (SITE_FLAT_RADIUS, SITE_BLEND_RADIUS, RADIUS, 1.0 if known else 0.0))
+
+
+def sun_direction():
+    """Towards the sun, from the sun's elevation and azimuth seen from the site."""
+    _, up, east, north = site_frame()
+    elevation, azimuth = math.radians(state["sun_elevation"]), math.radians(state["sun_azimuth"])
+    level = add(scale(east, math.cos(azimuth)), scale(north, math.sin(azimuth)))
+    return normalize(add(scale(up, math.sin(elevation)), scale(level, math.cos(elevation))))
+
+
+def upload_sky():
+    """The sun's direction and the atmosphere's parameters."""
+    engine.set_custom_vec4("planet.sunDirection", sun_direction() + (0.0,))
+    density = state["density"]
+    engine.set_custom_vec4("planet.atmosphere.radii",
+                           (RADIUS, RADIUS + ATMOSPHERE_TOP, RAYLEIGH_SCALE_HEIGHT, MIE_SCALE_HEIGHT))
+    engine.set_custom_vec4("planet.atmosphere.rayleigh", scale(RAYLEIGH, density) + (MIE_G,))
+    engine.set_custom_vec4("planet.atmosphere.mie", (MIE_SCATTERING * density, MIE_ABSORPTION * density,
+                                                     SUN_ILLUMINANCE, state["exposure"]))
 
 
 def upload_drawn_chunks():
@@ -528,6 +569,7 @@ def frame(dt):
 
     # Camera-relative placement: subtract in double, then hand floats over.
     camera = state["position"]
+    engine.set_custom_vec4("planet.cameraFromCentre", camera + (0.0,))
     upload_drawn_chunks()
     ground = site_ground()
     for entity, offset in blocks:
@@ -557,9 +599,11 @@ def update_hud():
                        % (len(tree.selected), cached, len(tree.missing), pool.used, SLOTS, deepest,
                           tree.split_factor, "    LOD FROZEN" if state["frozen"] else "",
                           COLOUR_MODES[state["colour_mode"]]))
-    engine.ui.set_text(state["hud"][2], "seed %.1f %.1f %.1f    mountains %.0f m    hills %.0f m"
+    engine.ui.set_text(state["hud"][2], "seed %.1f %.1f %.1f    mountains %.0f m    hills %.0f m    "
+                       "sun %.0f deg up at the site    atmosphere density x%.2f    exposure %.3f"
                        % (terrain["seed"][0], terrain["seed"][1], terrain["seed"][2],
-                          terrain["mountains"][1], terrain["hills"][1]))
+                          terrain["mountains"][1], terrain["hills"][1], state["sun_elevation"],
+                          state["density"], state["exposure"]))
 
 
 def on_init():
@@ -571,7 +615,7 @@ def on_init():
     engine.scene.set_camera_reverse_z(camera, True)
     state["camera"] = camera
 
-    engine.set_custom_vec4("planet.sunDirection", normalize(SUN) + (0.0,))
+    upload_sky()
     engine.set_custom_float("planet.radius", RADIUS)
     upload_terrain()
     upload_chunk_indices()
@@ -617,6 +661,15 @@ def on_key(key):
         change_terrain("hills", 1, 1.25)
     elif key == keys.G:
         change_terrain("hills", 1, 1 / 1.25)
+    elif key in (keys.Z, keys.X):
+        state["sun_elevation"] = max(-90.0, min(90.0, state["sun_elevation"] + (3.0 if key == keys.X else -3.0)))
+        upload_sky()
+    elif key in (keys.T, keys.Y):
+        state["density"] *= 1.25 if key == keys.T else 1 / 1.25
+        upload_sky()
+    elif key in (keys.B, keys.V):
+        state["exposure"] *= 1.25 if key == keys.B else 1 / 1.25
+        upload_sky()
     elif key == keys.F:
         set_wireframe(not state["wireframe"])
     elif key == keys.C:
@@ -648,13 +701,15 @@ class CaptureTour:
     MAX_FRAMES), then exit. Waits for the site's height first."""
 
     MIN_FRAMES, MAX_FRAMES = 10, 600
-    # (file name, preset, wireframe, colour mode, terrain change or None)
-    SHOTS = [("preset_%d" % p, p, False, 0, None) for p in range(1, 7)] + [
-        ("preset_1_wireframe_levels", 1, True, 2, None),
-        ("preset_2_levels", 2, False, 2, None),
-        ("preset_2_wireframe", 2, True, 0, None),
-        ("preset_6_wireframe_faces", 6, True, 1, None),
-        ("preset_3_mountains_higher", 3, False, 0, ("mountains", 1, 1.5)),
+    # (file name, preset, wireframe, colour mode, terrain change or None, sun elevation and azimuth)
+    SHOTS = [("preset_%d" % p, p, False, 0, None, DAY_SUN) for p in range(1, 7)] + [
+        ("preset_1_sunset", 1, False, 0, None, (3.0, 45.0)),
+        ("preset_2_sunset", 2, False, 0, None, (2.0, 90.0)),
+        ("preset_3_low_sun", 3, False, 0, None, (8.0, 45.0)),
+        ("preset_4_terminator", 4, False, 0, None, (0.0, 200.0)),
+        ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN),
+        ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
+        ("preset_3_mountains_higher", 3, False, 0, ("mountains", 1, 1.5), DAY_SUN),
     ]
 
     def __init__(self, directory):
@@ -667,11 +722,13 @@ class CaptureTour:
     def __call__(self, dt):
         if state["site_height"] is None:
             return True
-        name, preset, wireframe, colour_mode, change = self.SHOTS[self.shot]
+        name, preset, wireframe, colour_mode, change, sun = self.SHOTS[self.shot]
         self.frames += 1
         if self.frames == 1:
             if change is not None:
                 change_terrain(*change)
+            state["sun_elevation"], state["sun_azimuth"] = sun
+            upload_sky()
             teleport(preset)
             set_wireframe(wireframe)
             set_colour_mode(colour_mode)

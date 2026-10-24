@@ -26,7 +26,24 @@
       "fields": [
         { "name": "view", "type": "mat4", "source": "scene.camera.view" },
         { "name": "proj", "type": "mat4", "source": "scene.camera.projection" },
-        { "name": "sunDirection", "type": "vec4", "source": "scene.custom.planet.sunDirection" }
+        { "name": "sunDirection", "type": "vec4", "source": "scene.custom.planet.sunDirection" },
+        { "name": "invView", "type": "mat4", "source": "scene.camera.invView" },
+        { "name": "invProj", "type": "mat4", "source": "scene.camera.invProj" },
+        { "name": "cameraFromCentre", "type": "vec4", "source": "scene.custom.planet.cameraFromCentre" }
+      ]
+    },
+    "AtmosphereParams": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "radii", "type": "vec4", "source": "scene.custom.planet.atmosphere.radii",
+          "default": [ 100000.0, 120000.0, 2500.0, 400.0 ] },
+        { "name": "rayleigh", "type": "vec4", "source": "scene.custom.planet.atmosphere.rayleigh",
+          "default": [ 1.857e-5, 4.339e-5, 1.0592e-4, 0.8 ] },
+        { "name": "mie", "type": "vec4", "source": "scene.custom.planet.atmosphere.mie",
+          "default": [ 1.279e-5, 1.408e-5, 20.0, 0.4 ] },
+        { "name": "sun", "type": "vec4", "source": "scene.custom.planet.sunDirection" }
       ]
     },
     "TerrainParams": {
@@ -132,7 +149,17 @@
         { "binding": 0, "type": "uniform_buffer", "stages": [ "vertex", "fragment" ], "name": "CameraUBO",
           "autoBindBuffer": "CameraUBO" },
         { "binding": 1, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "TerrainParams",
-          "autoBindBuffer": "TerrainParams" }
+          "autoBindBuffer": "TerrainParams" },
+        { "binding": 2, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "AtmosphereParams",
+          "autoBindBuffer": "AtmosphereParams" }
+      ]
+    },
+    "atmosphereInputSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "hdrColor",
+          "autoBindResource": "hdrColor", "autoBindSampler": "nearestClamp" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "sceneDepth",
+          "autoBindResource": "depth", "autoBindSampler": "nearestClamp" }
       ]
     },
     "chunkBuildSet": {
@@ -161,8 +188,13 @@
       ]
     }
   },
+  "samplers": {
+    "nearestClamp": { "magFilter": "nearest", "minFilter": "nearest", "mipmapMode": "nearest",
+                      "addressMode": "clamp_to_edge" }
+  },
   "resources": [
     { "name": "swapchain", "kind": "image", "imported": true },
+    { "name": "hdrColor", "kind": "image", "image": { "format": "R16G16B16A16_SFLOAT" } },
     { "name": "depth", "kind": "image", "image": { "format": "D32_SFLOAT" } }
   ],
   "passes": [
@@ -199,7 +231,7 @@
       },
       "descriptorSets": [ "cameraSet", "chunkInstanceSet" ],
       "outputs": [
-        { "resource": "swapchain", "usage": "color_write", "clear": [ 0.0, 0.0, 0.0, 1.0 ] },
+        { "resource": "hdrColor", "usage": "color_write", "clear": [ 0.0, 0.0, 0.0, 1.0 ] },
         { "resource": "depth", "usage": "depth_write", "clear": { "depth": 0.0, "stencil": 0 } }
       ]
     },
@@ -223,7 +255,7 @@
       "descriptorSets": [ "cameraSet", "materialSet" ],
       "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 96, "offset": 0 } ],
       "outputs": [
-        { "resource": "swapchain", "usage": "color_write" },
+        { "resource": "hdrColor", "usage": "color_write" },
         { "resource": "depth", "usage": "depth_write" }
       ]
     },
@@ -251,9 +283,28 @@
       },
       "descriptorSets": [ "cameraSet", "chunkInstanceSet" ],
       "outputs": [
-        { "resource": "swapchain", "usage": "color_blend" },
+        { "resource": "hdrColor", "usage": "color_blend" },
         { "resource": "depth", "usage": "depth_read" }
       ]
+    },
+    {
+      "name": "Atmosphere",
+      "type": "graphics",
+      "execution": { "type": "fullscreen" },
+      "inputs": [
+        { "resource": "hdrColor", "usage": "shader_read" },
+        { "resource": "depth", "usage": "shader_read" }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/atmosphere.frag.spv",
+        "vertexInput": "none",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none"
+      },
+      "descriptorSets": [ "cameraSet", "atmosphereInputSet" ],
+      "outputs": [ { "resource": "swapchain", "usage": "color_write" } ]
     },
     {
       "name": "UIOverlay",

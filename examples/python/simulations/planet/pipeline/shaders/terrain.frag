@@ -2,32 +2,22 @@
 //
 // The terrain's fragment shader. With a chunk colour whose red is below 0,
 // the ground is coloured by height, slope, latitude and a moisture noise;
-// otherwise it takes the chunk's colour. Shaded as in shading.glsl.
+// otherwise it takes the chunk's colour, with face lines (shading.glsl).
+// Lit by the sunlight that comes through the atmosphere and a sky light
+// (atmosphere.glsl), in HDR.
 //
 
-#include "shading.glsl"
-
-layout(set = 0, binding = 0) uniform CameraUBO {
-    mat4 view;
-    mat4 proj;
-    vec4 sunDirection;
-} camera;
-
-layout(set = 0, binding = 1) uniform TerrainParams {
-    vec4 continent;
-    vec4 mountains;
-    vec4 hills;
-    vec4 seed;
-    vec4 site;
-    vec4 siteShape;
-} terrain;
-
+#define CAMERA_SET 0
+#include "camera.glsl"
 #include "terrain.glsl"
+#include "atmosphere.glsl"
+#include "shading.glsl"
 
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec4 fragColour;
 layout(location = 2) in vec2 fragFaceUv;
 layout(location = 3) in vec4 fragRadialHeight;
+layout(location = 4) in vec3 fragRelativePos;
 
 layout(location = 0) out vec4 outColor;
 
@@ -58,8 +48,8 @@ vec3 groundColour(vec3 radial, float height, vec3 normal) {
 void main() {
     vec3 normal = normalize(fragNormal);
     vec3 radial = normalize(fragRadialHeight.xyz);
-    vec3 albedo = fragColour.r < 0.0 ? groundColour(radial, fragRadialHeight.w, normal) : fragColour.rgb;
-    vec3 lit = shade(albedo, fragColour.a, fragFaceUv, normal, camera.sunDirection.xyz);
-    // The swapchain is sRGB: writing to it encodes the linear colour.
-    outColor = vec4(lit, 1.0);
+    vec3 albedo = fragColour.r < 0.0 ? groundColour(radial, fragRadialHeight.w, normal)
+                                     : withGrid(fragColour.rgb, fragColour.a, fragFaceUv);
+    vec3 p = camera.cameraFromCentre.xyz + fragRelativePos;
+    outColor = vec4(lightSurface(albedo, p, normal, radial), 1.0);
 }

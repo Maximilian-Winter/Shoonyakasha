@@ -6,11 +6,8 @@
 // centre relative to the camera and its colour.
 //
 
-layout(set = 0, binding = 0) uniform CameraUBO {
-    mat4 view;
-    mat4 proj;
-    vec4 sunDirection;
-} camera;
+#define CAMERA_SET 0
+#include "camera.glsl"
 
 struct ChunkInstance {
     vec4 origin;           // xyz: the chunk's centre minus the camera's position
@@ -29,6 +26,7 @@ layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec4 fragColour;
 layout(location = 2) out vec2 fragFaceUv;
 layout(location = 3) out vec4 fragRadialHeight;
+layout(location = 4) out vec3 fragRelativePos;
 
 void main() {
     ChunkInstance chunk = chunks.instances[gl_InstanceIndex];
@@ -37,5 +35,6 @@ void main() {
     fragColour = chunk.colour;
     fragFaceUv = vec2(inPositionU.w, inNormalV.w);
     fragRadialHeight = inRadialHeight;
+    fragRelativePos = relativePos;
     gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
 }

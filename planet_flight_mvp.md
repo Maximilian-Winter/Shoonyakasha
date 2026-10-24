@@ -744,6 +744,10 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 **WP6: Atmosphere MVP**
 - A fullscreen single-scattering pass that reads depth (distance rebuilt from reverse-Z).
 - Sun transmittance applied to terrain lighting.
+- The scene draws into an HDR image; the atmosphere pass applies exposure and ACES tone mapping.
+- Parameters for R = 100 km: top at R + 20 km, scale heights 2.5 km (Rayleigh) and 400 m (Mie), Earth's coefficients × 3.2 (Earth's vertical optical depth). Tried × 8: the sky turns teal, since blue is then extinguished along the path. Sunsets stay pale at × 3.2, because the low path to the sun is short on a small planet; the density can be raised at run time.
+- Surfaces are Lambert (albedo / π); exposure 0.4.
+- Measured: frame time about 2.4 ms on the ground at day, 5.5–6 ms with a low sun or from orbit.
 - Done: a blue sky from the ground, a thin atmosphere shell from orbit, red light at the terminator.
 
 **WP7: Ocean**
