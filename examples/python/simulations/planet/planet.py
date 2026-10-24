@@ -113,6 +113,10 @@ MORPH_LEVELS = 4                 # ancestors a vertex morphs towards at most; ma
 SHADOW_SPLITS = (0.05, 12.0, 150.0, 2_000.0, 20_000.0)
 SHADOW_RESOLUTION = 2048         # matches sunShadowMap in pipeline.json
 SHADOW_REACH = 5_000.0
+# The cloud layer (clouds.glsl): bottom and top (m); the coverage noise's frequency per unit of
+# direction (cells of about 2.5 km), the detail noise's scale (m) and how much it erodes.
+CLOUD_LAYER = (1_500.0, 3_500.0)
+CLOUD_SHAPE = (40.0, 900.0, 0.8)
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -307,6 +311,9 @@ state = {
     "ozone": True,               # the ozone layer's absorption
     "orbit_path": True,          # draw the path the ship would coast along
     "shadows": True,             # the sun's shadow cascades
+    "clouds": True,              # the cloud layer
+    "cloud_coverage": 0.45,      # share of the sky the clouds cover, 0 .. 1
+    "cloud_density": 0.04,       # extinction per metre at full density
     "horizon_sun": None,         # the sun's direction the chunks' horizons are measured towards
     "rebuild": [],               # built chunks still to build again for horizon_sun, nearest last
     "gamepad_held": set(),       # gamepad buttons held last frame
@@ -550,6 +557,12 @@ def upload_shadow_cascades(forward):
     engine.set_custom_vec4("planet.shadow.splits", tuple(c.far for c in cascades))
     engine.set_custom_vec4("planet.shadow.texel", tuple(c.texel for c in cascades))
     engine.set_custom_vec4("planet.shadow.settings", (1.0 if on else 0.0, float(SHADOW_RESOLUTION), 0.0, 0.0))
+
+
+def upload_clouds():
+    """The cloud layer's parameters (CloudParams, clouds.glsl)."""
+    engine.set_custom_vec4("planet.clouds.layer", CLOUD_LAYER + (state["cloud_coverage"], state["cloud_density"]))
+    engine.set_custom_vec4("planet.clouds.shape", CLOUD_SHAPE + (1.0 if state["clouds"] else 0.0,))
 
 
 def upload_orbit_path():
@@ -1132,6 +1145,7 @@ def on_init():
     state["camera"] = camera
 
     upload_sky()
+    upload_clouds()
     engine.set_custom_float("planet.radius", RADIUS)
     upload_terrain()
     upload_chunk_indices()
@@ -1219,6 +1233,11 @@ def menu_items():
         {"toggle": "Ocean", "get": lambda: state["ocean"], "set": set_ocean},
         {"toggle": "Orbit path", "get": lambda: state["orbit_path"], "set": lambda on: state.update(orbit_path=on)},
         {"toggle": "Shadows", "get": lambda: state["shadows"], "set": lambda on: state.update(shadows=on)},
+        {"toggle": "Clouds", "get": lambda: state["clouds"], "set": set_and("clouds", upload_clouds)},
+        {"slider": "Cloud cover", "min": 0.0, "max": 1.0, "get": lambda: state["cloud_coverage"],
+         "set": set_and("cloud_coverage", upload_clouds), "format": "%.2f"},
+        {"slider": "Cloud density", "min": 0.005, "max": 0.1, "get": lambda: state["cloud_density"],
+         "set": set_and("cloud_density", upload_clouds), "format": "%.3f /m"},
         {"toggle": "Wireframe", "get": lambda: state["wireframe"], "set": set_wireframe},
         {"toggle": "Debug text", "get": lambda: state["debug_text"], "set": lambda on: state.update(debug_text=on)},
         {"button": "Colour: terrain / face / level",

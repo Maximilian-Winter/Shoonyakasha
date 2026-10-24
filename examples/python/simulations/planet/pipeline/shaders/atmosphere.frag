@@ -4,7 +4,8 @@
 // pixel: the view ray from the camera, the distance to what the depth
 // buffer holds there (reverse-Z: 0 is the sky), the scene seen through the
 // atmosphere plus the light it scatters towards the camera
-// (atmosphere.glsl), and the sun's disk where the ray reaches the sky.
+// (atmosphere.glsl), and the sun's disk where the ray reaches the sky; then
+// the clouds over it.
 //
 
 #define CAMERA_SET 0
@@ -14,6 +15,36 @@
 
 layout(set = 1, binding = 0) uniform sampler2D hdrColor;
 layout(set = 1, binding = 1) uniform sampler2D sceneDepth;
+layout(set = 2, binding = 0) uniform sampler2D cloudLayer;      // rgb: the clouds' light; a: their transmittance
+layout(set = 2, binding = 1) uniform sampler2D cloudDistance;   // x: their mean distance (m); y: the scene's distance
+
+// The clouds at this pixel from their lower-resolution images: the four
+// nearest texels, weighted bilinearly and by how close the scene distance
+// each was marched to is to this pixel's, so clouds do not bleed across
+// the edges of nearer things. Returns the clouds' light and transmittance;
+// `distance` their mean distance.
+vec4 upsampledClouds(vec2 uv, float sceneDistance, out float distance) {
+    ivec2 size = textureSize(cloudLayer, 0);
+    vec2 coord = uv * vec2(size) - 0.5;
+    ivec2 base = ivec2(floor(coord));
+    vec2 f = coord - vec2(base);
+    float here = min(sceneDistance, 1e9);
+    vec4 cloud = vec4(0.0);
+    float mean = 0.0, total = 0.0;
+    for (int y = 0; y <= 1; ++y) {
+        for (int x = 0; x <= 1; ++x) {
+            ivec2 texel = clamp(base + ivec2(x, y), ivec2(0), size - 1);
+            vec2 d = texelFetch(cloudDistance, texel, 0).xy;
+            float bilinear = (x == 1 ? f.x : 1.0 - f.x) * (y == 1 ? f.y : 1.0 - f.y);
+            float w = bilinear / (1e-3 + abs(d.y - here) / max(here, 1.0)) + 1e-6;
+            cloud += texelFetch(cloudLayer, texel, 0) * w;
+            mean += d.x * w;
+            total += w;
+        }
+    }
+    distance = mean / total;
+    return cloud / total;
+}
 
 layout(location = 0) in vec2 fragTexCoord;
 
@@ -45,6 +76,18 @@ void main() {
         colour = atmosphere.mie.z * SUN_DISK * smoothstep(SUN_COS_OUTER, SUN_COS_INNER, mu) * vec3(1.0);
     }
     colour = colour * transmittance + inscatter;
+
+    // The clouds (clouds.frag, at lower resolution): the air in front of
+    // them, their light seen through it, and what lies behind them through
+    // them.
+    float cloudAt;
+    vec4 cloud = upsampledClouds(fragTexCoord, sceneDistance, cloudAt);
+    if (cloud.a < 0.999) {
+        cloudAt = min(cloudAt, sceneDistance);
+        vec3 inFront, throughFront;
+        atmosphereAlong(ro, rd, cloudAt, inFront, throughFront);
+        colour = inFront + throughFront * cloud.rgb + cloud.a * (colour - inFront);
+    }
 
     // The swapchain is sRGB: writing to it encodes the linear colour.
     outColor = vec4(ACESFilm(colour * atmosphere.mie.w), 1.0);

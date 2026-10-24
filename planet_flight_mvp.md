@@ -848,6 +848,7 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 - WP14b: Frame time.
   - The cloud march runs at half or quarter resolution into its own image and is upsampled with the depth buffer, or is spread over frames with reprojection.
   - Target: under about 2 ms at 1600 × 900. Measure before and after.
+  - As built (WP14a and WP14b together): a `Clouds` pass of its own at a quarter of the resolution each way (the whole frame at full resolution cost up to 15 ms), 64 steps spaced with the square of their index, at most 50 km of the layer (from the camera, the layer was cut off from orbit), four octaves of multiple scattering (with single scattering, the clouds were blue-grey walls), coverage cut down by the height profile (with the coverage alone, they were walls with flat tops), and a structureless per-pixel jitter (interleaved gradient noise left streaks without temporal accumulation). The atmosphere pass upsamples depth-aware. Cost against no clouds, from the capture tour's frame times: up to about 2 ms, the most inside the layer (6.9 ms against 5.0). Left: grain on the nearest clouds, which temporal accumulation would remove.
 - WP14c: Clouds on the world.
   - Their shadows on the ground and the sea: the terrain, ocean and scene shaders sample the cloud density along the sun's direction (or a small cloud-shadow map built per frame).
   - Wind: the coverage drifts with time.
