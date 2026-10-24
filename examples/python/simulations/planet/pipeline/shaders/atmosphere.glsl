@@ -135,11 +135,12 @@ vec3 skylightAt(vec3 p, vec3 radial) {
 }
 
 // The radiance of a diffuse (Lambert) surface at `p` (planet space) with
-// `albedo`, facing `normal`, where up is `radial`.
-vec3 lightSurface(vec3 albedo, vec3 p, vec3 normal, vec3 radial) {
+// `albedo`, facing `normal`, where up is `radial`, with `sunShare` of the
+// sunlight reaching it (1 lit, 0 in shadow).
+vec3 lightSurface(vec3 albedo, vec3 p, vec3 normal, vec3 radial, float sunShare) {
     float sunCos = max(dot(normal, atmosphere.sun.xyz), 0.0);
     float skyCos = 0.5 + 0.5 * dot(normal, radial);
-    return albedo / ATMOSPHERE_PI * (sunlightAt(p) * sunCos + skylightAt(p, radial) * skyCos);
+    return albedo / ATMOSPHERE_PI * (sunlightAt(p) * sunCos * sunShare + skylightAt(p, radial) * skyCos);
 }
 #endif
 

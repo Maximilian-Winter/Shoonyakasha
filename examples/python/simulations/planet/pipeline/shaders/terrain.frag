@@ -12,6 +12,7 @@
 #include "terrain.glsl"
 #include "atmosphere.glsl"
 #include "shading.glsl"
+#include "shadow.glsl"
 
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec4 fragColour;
@@ -51,5 +52,5 @@ void main() {
     vec3 albedo = fragColour.r < 0.0 ? groundColour(radial, fragRadialHeight.w, normal)
                                      : withGrid(fragColour.rgb, fragColour.a, fragFaceUv);
     vec3 p = camera.cameraFromCentre.xyz + fragRelativePos;
-    outColor = vec4(lightSurface(albedo, p, normal, radial), 1.0);
+    outColor = vec4(lightSurface(albedo, p, normal, radial, sunShadow(fragRelativePos, normal)), 1.0);
 }

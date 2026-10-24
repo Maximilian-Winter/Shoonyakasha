@@ -827,6 +827,7 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
   - A depth-only pass draws the selected chunks from the sun, with an orthographic projection fitted around the camera. The light's matrix is built in Python in doubles, relative to the camera, like everything else.
   - `terrain.frag`, `ocean.frag` and `scene.frag` sample it (comparison sampler, PCF). Reverse-Z and the bias to use are settled here.
   - First see whether the engine's own cascaded sun shadows (`set_sun_shadows`) can serve the custom pipeline's passes; if not, the shadow pass lives in `pipeline.json`.
+  - As built (with WP13b's cascades for the terrain): the engine's cascades snap to the world origin, which here is the camera, so they would shimmer as it moves; `shadows.py` fits four cascades in Python instead (splits at 40 m, 400 m, 3 km and 20 km, 2048² each, casters 5 km towards the sun), snapped in planet space. `ShadowTerrain{cascade}` draws the selected chunks within 25 km, morphed, with the cascade from `pass.repeatIndex`. The terrain, sea and blocks receive; the sky light is not shadowed. About 0.5 to 1.5 ms per frame.
 - WP13b: Cascades.
   - Three or four cascades from the cockpit out to about 20 km, split logarithmically, each fitted to its slice of the view and snapped to its texels so shadows do not shimmer as the camera moves.
   - The cockpit and the blocks cast and receive in the nearest cascade: the cockpit's interior shadowed by its frame.

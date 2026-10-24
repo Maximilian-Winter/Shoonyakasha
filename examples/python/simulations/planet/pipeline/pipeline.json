@@ -142,6 +142,26 @@
       "elementCount": 10244,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
+    "ShadowParams": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "viewProj", "type": "mat4", "arrayCount": 4, "source": "scene.custom.planet.shadow.viewProj[i]" },
+        { "name": "splits", "type": "vec4", "source": "scene.custom.planet.shadow.splits",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "texel", "type": "vec4", "source": "scene.custom.planet.shadow.texel",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "settings", "type": "vec4", "source": "scene.custom.planet.shadow.settings",
+          "default": [ 0.0, 2048.0, 0.0, 0.0 ] }
+      ]
+    },
+    "ShadowDraws": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 10244,
+      "fields": [ { "name": "word", "type": "uint" } ]
+    },
     "OrbitPoints": {
       "usage": "storage_buffer",
       "packing": "std430",
@@ -208,7 +228,17 @@
         { "binding": 3, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "transmittanceLut",
           "autoBindResource": "transmittanceLut", "autoBindSampler": "linearClamp" },
         { "binding": 4, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "multiScatteringLut",
-          "autoBindResource": "multiScatteringLut", "autoBindSampler": "linearClamp" }
+          "autoBindResource": "multiScatteringLut", "autoBindSampler": "linearClamp" },
+        { "binding": 5, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "sunShadowMap",
+          "autoBindResource": "sunShadowMap", "autoBindSampler": "shadowCompare" },
+        { "binding": 6, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "ShadowParams",
+          "autoBindBuffer": "ShadowParams" }
+      ]
+    },
+    "shadowSet": {
+      "bindings": [
+        { "binding": 0, "type": "uniform_buffer", "stages": [ "vertex" ], "name": "ShadowParams",
+          "autoBindBuffer": "ShadowParams" }
       ]
     },
     "transmittanceLutSet": {
@@ -275,7 +305,9 @@
   "samplers": {
     "nearestClamp": { "magFilter": "nearest", "minFilter": "nearest", "mipmapMode": "nearest",
                       "addressMode": "clamp_to_edge" },
-    "linearClamp": { "magFilter": "linear", "minFilter": "linear", "addressMode": "clamp_to_edge" }
+    "linearClamp": { "magFilter": "linear", "minFilter": "linear", "addressMode": "clamp_to_edge" },
+    "shadowCompare": { "magFilter": "linear", "minFilter": "linear", "addressMode": "clamp_to_edge",
+                       "compareEnable": true, "compareOp": "less_or_equal" }
   },
   "resources": [
     { "name": "swapchain", "kind": "image", "imported": true },
@@ -284,7 +316,9 @@
     { "name": "transmittanceLut", "kind": "image",
       "image": { "format": "R16G16B16A16_SFLOAT", "width": 256, "height": 64 } },
     { "name": "multiScatteringLut", "kind": "image",
-      "image": { "format": "R16G16B16A16_SFLOAT", "width": 32, "height": 32 } }
+      "image": { "format": "R16G16B16A16_SFLOAT", "width": 32, "height": 32 } },
+    { "name": "sunShadowMap", "kind": "image",
+      "image": { "format": "D32_SFLOAT", "width": 2048, "height": 2048, "arrayLayers": 4, "viewType": "2d_array" } }
   ],
   "passes": [
     {
@@ -325,6 +359,35 @@
       "hasSideEffects": true
     },
     {
+      "name": "ShadowTerrain{cascade}",
+      "type": "graphics",
+      "repeat": { "count": 4, "index": "cascade" },
+      "execution": {
+        "type": "draw_indexed_indirect",
+        "vertexBuffer": { "buffer": "ChunkPool" },
+        "indexBuffer": { "buffer": "ChunkIndices", "type": "uint32" },
+        "arguments": { "buffer": "ShadowDraws", "offset": 16 },
+        "count": { "buffer": "ShadowDraws", "offset": 0, "maxDrawCount": 2048 }
+      },
+      "pipeline": {
+        "vertexShader": "shaders/shadow_terrain.vert.spv",
+        "vertexInput": "chunkVertex",
+        "depthTest": true,
+        "depthWrite": true,
+        "depthCompareOp": "less_or_equal",
+        "cullMode": "none",
+        "depthClamp": true,
+        "depthBias": { "constant": 0.0, "slope": 1.5 }
+      },
+      "descriptorSets": [ "shadowSet", "chunkInstanceSet" ],
+      "pushConstants": [ { "stages": [ "vertex" ], "size": 4,
+                           "bindings": [ { "name": "pass.repeatIndex", "type": "uint" } ] } ],
+      "outputs": [
+        { "resource": "sunShadowMap", "usage": "depth_write", "layer": "{cascade}",
+          "clear": { "depth": 1.0, "stencil": 0 } }
+      ]
+    },
+    {
       "name": "Terrain",
       "type": "graphics",
       "execution": {
@@ -346,7 +409,8 @@
       "descriptorSets": [ "cameraSet", "chunkInstanceSet" ],
       "inputs": [
         { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" }
+        { "resource": "multiScatteringLut", "usage": "shader_read" },
+        { "resource": "sunShadowMap", "usage": "shader_read" }
       ],
       "outputs": [
         { "resource": "hdrColor", "usage": "color_write", "clear": [ 0.0, 0.0, 0.0, 1.0 ] },
@@ -375,7 +439,8 @@
       "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 112, "offset": 0 } ],
       "inputs": [
         { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" }
+        { "resource": "multiScatteringLut", "usage": "shader_read" },
+        { "resource": "sunShadowMap", "usage": "shader_read" }
       ],
       "outputs": [
         { "resource": "hdrColor", "usage": "color_write" },
@@ -403,7 +468,8 @@
       "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 112, "offset": 0 } ],
       "inputs": [
         { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" }
+        { "resource": "multiScatteringLut", "usage": "shader_read" },
+        { "resource": "sunShadowMap", "usage": "shader_read" }
       ],
       "outputs": [
         { "resource": "hdrColor", "usage": "color_write" },
@@ -435,7 +501,8 @@
       "descriptorSets": [ "cameraSet", "chunkInstanceSet" ],
       "inputs": [
         { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" }
+        { "resource": "multiScatteringLut", "usage": "shader_read" },
+        { "resource": "sunShadowMap", "usage": "shader_read" }
       ],
       "outputs": [
         { "resource": "hdrColor", "usage": "color_blend" },
@@ -467,7 +534,8 @@
       "descriptorSets": [ "cameraSet", "chunkInstanceSet" ],
       "inputs": [
         { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" }
+        { "resource": "multiScatteringLut", "usage": "shader_read" },
+        { "resource": "sunShadowMap", "usage": "shader_read" }
       ],
       "outputs": [
         { "resource": "hdrColor", "usage": "color_blend" },
@@ -482,7 +550,8 @@
         { "resource": "hdrColor", "usage": "shader_read" },
         { "resource": "depth", "usage": "shader_read" },
         { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" }
+        { "resource": "multiScatteringLut", "usage": "shader_read" },
+        { "resource": "sunShadowMap", "usage": "shader_read" }
       ],
       "pipeline": {
         "vertexShader": "shaders/fullscreen.vert.spv",
@@ -504,7 +573,8 @@
         { "resource": "hdrColor", "usage": "shader_read" },
         { "resource": "depth", "usage": "shader_read" },
         { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" }
+        { "resource": "multiScatteringLut", "usage": "shader_read" },
+        { "resource": "sunShadowMap", "usage": "shader_read" }
       ],
       "pipeline": {
         "vertexShader": "shaders/fullscreen.vert.spv",
@@ -545,7 +615,8 @@
       "descriptorSets": [ "cameraSet" ],
       "inputs": [
         { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" }
+        { "resource": "multiScatteringLut", "usage": "shader_read" },
+        { "resource": "sunShadowMap", "usage": "shader_read" }
       ],
       "outputs": [
         { "resource": "swapchain", "usage": "color_blend" },
@@ -569,7 +640,8 @@
       "descriptorSets": [ "cameraSet", "hudSet" ],
       "inputs": [
         { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" }
+        { "resource": "multiScatteringLut", "usage": "shader_read" },
+        { "resource": "sunShadowMap", "usage": "shader_read" }
       ],
       "outputs": [ { "resource": "swapchain", "usage": "color_blend" } ]
     },

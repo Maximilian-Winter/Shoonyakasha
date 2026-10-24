@@ -9,6 +9,7 @@
 #include "camera.glsl"
 #include "atmosphere.glsl"
 #include "shading.glsl"
+#include "shadow.glsl"
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -26,5 +27,6 @@ layout(location = 0) out vec4 outColor;
 void main() {
     vec3 albedo = withGrid(push.baseColorFactor.rgb * fragColor, push.gridStrength, fragFaceUv);
     vec3 p = camera.cameraFromCentre.xyz + fragRelativePos;
-    outColor = vec4(lightSurface(albedo, p, normalize(fragNormal), normalize(p)), 1.0);
+    vec3 normal = normalize(fragNormal);
+    outColor = vec4(lightSurface(albedo, p, normal, normalize(p), sunShadow(fragRelativePos, normal)), 1.0);
 }

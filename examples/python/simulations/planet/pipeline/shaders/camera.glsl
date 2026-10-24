@@ -36,3 +36,13 @@ layout(set = CAMERA_SET, binding = 3) uniform sampler2D transmittanceLut;
 layout(set = CAMERA_SET, binding = 4) uniform sampler2D multiScatteringLut;
 #define ATMOSPHERE_TRANSMITTANCE_LUT
 #define ATMOSPHERE_MULTI_SCATTERING_LUT
+
+// The sun's shadow cascades (shadows.py, shadow.glsl): the map, one layer
+// per cascade, and how to reach it.
+layout(set = CAMERA_SET, binding = 5) uniform sampler2DArrayShadow sunShadowMap;
+layout(set = CAMERA_SET, binding = 6) uniform ShadowParams {
+    mat4 viewProj[4];      // a position relative to the camera to the cascade's clip space (depth 0 at the sun)
+    vec4 splits;           // metres along the view where each cascade ends
+    vec4 texel;            // metres across one texel of each cascade
+    vec4 settings;         // x: 1 with shadows, 0 without; y: the shadow map's size in texels
+} shadow;

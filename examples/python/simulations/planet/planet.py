@@ -92,6 +92,7 @@ from shoonyakasha import keys
 import cockpit
 import cube_sphere
 import flight
+import shadows
 from ground import GroundPatch, SIZE as PATCH_SIZE
 from instruments import Instruments
 from menu import SettingsMenu
@@ -107,6 +108,11 @@ MAX_LEVEL = 12                   # a level-12 chunk is 38 m across, its quads 2.
 SPLIT_FACTOR = 1.25              # split when nearer than this many chunk edges
 MORPH_START = 0.8                # morphing starts at this share of the parent's split distance; matches morph.glsl
 MORPH_LEVELS = 4                 # ancestors a vertex morphs towards at most; matches morph.glsl
+# The sun's shadow cascades (shadows.py): where they split the view (m), the map's size per side,
+# and how far towards the sun beyond a cascade casters count (m).
+SHADOW_SPLITS = (0.05, 40.0, 400.0, 3_000.0, 20_000.0)
+SHADOW_RESOLUTION = 2048         # matches sunShadowMap in pipeline.json
+SHADOW_REACH = 5_000.0
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -299,6 +305,7 @@ state = {
     "density": 1.0,              # times the atmosphere's coefficients
     "ozone": True,               # the ozone layer's absorption
     "orbit_path": True,          # draw the path the ship would coast along
+    "shadows": True,             # the sun's shadow cascades
     "gamepad_held": set(),       # gamepad buttons held last frame
     "reentry_pass": False,       # whether the ReentryGlow pass is enabled
     "multiple_scattering": True,  # light scattered more than once, from the multiple scattering table
@@ -480,22 +487,30 @@ def upload_drawn_chunks():
     """One indexed indirect draw per chunk the tree selected that is in
     view and not behind the horizon, and each drawn slot's centre relative
     to the camera (subtracted in double), colour, and its parent's split
-    distance and the levels above it, for morph.glsl."""
-    selected = state["tree"].selected if state["tree"] is not None else []
+    distance and the levels above it, for morph.glsl. The shadow cascades
+    draw every selected chunk within their reach, in view or not."""
+    all_selected = state["tree"].selected if state["tree"] is not None else []
     occluder = RADIUS + terrain_floor()
-    selected = [node for node in selected if visible(node, occluder)]
-    state["chunks_culled"] = (len(state["tree"].selected) if state["tree"] is not None else 0) - len(selected)
+    selected = [node for node in all_selected if visible(node, occluder)]
+    state["chunks_culled"] = len(all_selected) - len(selected)
     camera = state["position"]
     instances = np.zeros((SLOTS, 3, 4), dtype=np.float32)
-    commands = np.zeros((len(selected), 5), dtype=np.uint32)
-    for row, node in enumerate(selected):
+    for node in all_selected:
         slot = node.chunk
         instances[slot, 0, :3] = sub(node.centre, camera)
         instances[slot, 1] = chunk_colour(node)
         instances[slot, 2, :2] = (parent_split_distance(node), node.level)
-        # indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
-        commands[row] = (state["index_count"], 1, 0, slot * VERTICES_PER_CHUNK, slot)
     engine.set_buffer("ChunkInstances", instances)
+    # indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
+    draw = lambda node: (state["index_count"], 1, 0, node.chunk * VERTICES_PER_CHUNK, node.chunk)
+    commands = np.array([draw(node) for node in selected], dtype=np.uint32).reshape(-1, 5)
+    reach = SHADOW_SPLITS[-1] + SHADOW_REACH
+    casters = [node for node in all_selected
+               if length(sub(node.bound_centre, camera)) - node.bound_radius < reach]
+    engine.set_buffer("ShadowDraws", np.uint32([len(casters)]))
+    if casters:
+        engine.set_buffer("ShadowDraws", np.array([draw(node) for node in casters], dtype=np.uint32),
+                          offset=DRAWS_OFFSET)
     engine.set_buffer("ChunkDraws", np.uint32([len(selected)]))
     if len(selected):
         engine.set_buffer("ChunkDraws", commands, offset=DRAWS_OFFSET)
@@ -505,6 +520,22 @@ def upload_drawn_chunks():
     engine.set_buffer("OceanDraws", np.uint32([len(wet)]))
     if len(wet):
         engine.set_buffer("OceanDraws", wet, offset=DRAWS_OFFSET)
+
+
+def upload_shadow_cascades(forward):
+    """The sun's shadow cascades (shadows.py) for the view along `forward`,
+    switched off with the menu's Shadows or while the sun is below the
+    horizon at the camera."""
+    sun = sun_direction()
+    on = state["shadows"] and dot(sun, normalize(state["position"])) > -0.1
+    width, height = engine.framebuffer_size
+    aspect = width / height if width > 0 and height > 0 else 16.0 / 9.0
+    cascades = shadows.fit_cascades(state["position"], forward, sun, FOV, aspect, SHADOW_SPLITS,
+                                    SHADOW_RESOLUTION, SHADOW_REACH)
+    engine.set_custom_mat4_array("planet.shadow.viewProj", [c.matrix for c in cascades])
+    engine.set_custom_vec4("planet.shadow.splits", tuple(c.far for c in cascades))
+    engine.set_custom_vec4("planet.shadow.texel", tuple(c.texel for c in cascades))
+    engine.set_custom_vec4("planet.shadow.settings", (1.0 if on else 0.0, float(SHADOW_RESOLUTION), 0.0, 0.0))
 
 
 def upload_orbit_path():
@@ -946,6 +977,7 @@ def frame(dt):
     right, up, forward = state["ship"].axes() if state["mode"] == "ship" else camera_basis()
     view_rotation = euler_from_basis(right, up, forward)
     engine.scene.set_rotation(state["camera"], view_rotation)
+    upload_shadow_cascades(forward)
     if state["mode"] != state["shown_mode"]:
         show_mode()
     if state["mode"] == "ship":
@@ -1147,6 +1179,7 @@ def menu_items():
          "set": set_split, "format": "%.2f"},
         {"toggle": "Ocean", "get": lambda: state["ocean"], "set": set_ocean},
         {"toggle": "Orbit path", "get": lambda: state["orbit_path"], "set": lambda on: state.update(orbit_path=on)},
+        {"toggle": "Shadows", "get": lambda: state["shadows"], "set": lambda on: state.update(shadows=on)},
         {"toggle": "Wireframe", "get": lambda: state["wireframe"], "set": set_wireframe},
         {"toggle": "Debug text", "get": lambda: state["debug_text"], "set": lambda on: state.update(debug_text=on)},
         {"button": "Colour: terrain / face / level",
