@@ -128,6 +128,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         cbool loadSkins
         cbool loadAnimations
         cbool loadLights
+        cbool streamTextures
         cbool flattenHierarchy
         int maxTextureSize
         cbool generateMipmaps

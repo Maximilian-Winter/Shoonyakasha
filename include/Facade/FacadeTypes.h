@@ -249,6 +249,7 @@ struct GltfOptions {
     bool loadSkins        = true;
     bool loadAnimations   = true;
     bool loadLights       = false;  // see GltfLoadOptions::loadLights
+    bool streamTextures   = false;  // see GltfLoadOptions::streamTextures
     bool flattenHierarchy = false;  // see GltfLoadOptions::flattenHierarchy
     int  maxTextureSize   = 0;
     bool generateMipmaps  = true;

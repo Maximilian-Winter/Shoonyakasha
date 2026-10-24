@@ -11,6 +11,7 @@
 #include <glm/glm.hpp>
 #include <string>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace Shoonyakasha {
@@ -246,6 +247,14 @@ public:
     /// @pre Scene services are initialized; call from setOnInit() or later.
     GltfResult loadGltfScene(const std::string& path,
                              const GltfOptions& opts = {});
+
+    /// Textures loaded with GltfOptions::streamTextures: how many have
+    /// finished (uploaded, or failed to decode) and how many were requested.
+    std::pair<size_t, size_t> getTextureStreamingProgress() const;
+
+    /// Bytes of streamed textures uploaded per frame at most (at least one
+    /// texture a frame while any are waiting); 16 MiB by default.
+    void setTextureUploadBudget(size_t bytes);
 
     /// A mesh entity drawing triangles from arrays, flat: `positions` x, y, z
     /// per vertex; `indices` three per triangle, counter-clockwise from the

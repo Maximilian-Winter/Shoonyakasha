@@ -28,6 +28,7 @@ Native `GltfLoadResult` also exposes primitive, root/node, skeleton, and clip ob
 | `load_skins` | `loadSkins` | true |
 | `load_animations` | `loadAnimations` | true |
 | `load_lights` | `loadLights` | false |
+| `stream_textures` | `streamTextures` | false |
 | `flatten_hierarchy` | `flattenHierarchy` | false |
 | `max_texture_size` | `maxTextureSize` | 0 |
 | `generate_mipmaps` | `generateMipmaps` | true |

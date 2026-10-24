@@ -73,6 +73,8 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `is_recording (read-only property)` | bool | Whether a recording is in progress. |
 | `recorded_frame_count (read-only property)` | int | Frames written to the current or most recent recording. |
 | `load_gltf_scene(path, **kwargs)` | GltfResult | Load a glTF scene. |
+| `get_texture_streaming_progress()` | tuple | `(finished, requested)`: textures loaded with `stream_textures=True` that were uploaded or failed to decode, and all requested so far. |
+| `set_texture_upload_budget(megabytes)` | None | Megabytes of streamed textures uploaded per frame at most, at least one texture a frame while any are waiting; 16 by default. |
 | `create_mesh(positions, indices=None, normals=None, uvs=None, colors=None, name="", tangents=None)` | int | An entity drawing triangles from arrays (lists of tuples, N x k arrays or flat). See [meshes from arrays](../../guides/loading-scenes.md#meshes-from-arrays). Raises `ValueError` when the arrays do not fit. |
 | `set_mesh(entity, positions, indices=None, normals=None, uvs=None, colors=None, tangents=None)` | None | Replace a mesh entity's triangles, keeping its material and transform. |
 | `create_directional_light(direction, color=(1.0, 1.0, 1.0), intensity=2.0)` | int | Create a directional light entity. |

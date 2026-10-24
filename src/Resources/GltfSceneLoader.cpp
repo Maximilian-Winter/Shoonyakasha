@@ -32,8 +32,12 @@
 #include <stb_image.h>
 
 #include <iostream>
+#include <condition_variable>
+#include <deque>
 #include <fstream>
 #include <iterator>
+#include <mutex>
+#include <thread>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -639,7 +643,220 @@ std::shared_ptr<MorphTargetSet> readMorphTargets(const cgltf_primitive& primitiv
     return set;
 }
 
+// What decoding a texture needs, apart from the glTF data: the file to
+// read, or the embedded image's bytes, and how the texture is made.
+struct TextureRequest {
+    std::string cacheKey;              // the file's path, or the embedded image's key
+    std::vector<uint8_t> bytes;        // the embedded image's file bytes; empty: read cacheKey
+    bool ktx2 = false;                 // a KHR_texture_basisu KTX2 image
+    bool srgb = false;
+    bool normalMap = false;
+    bool compress = false;             // compress_textures, where the device samples BC formats
+    bool bc = false;                   // the device samples BC formats
+    bool generateMipmaps = true;
+    uint32_t maxSize = 0;
+};
+
+// The minimal sampler state gltfSampler reads, kept past cgltf_free.
+cgltf_sampler samplerState(const cgltf_sampler& sampler) {
+    cgltf_sampler state{};
+    state.mag_filter = sampler.mag_filter;
+    state.min_filter = sampler.min_filter;
+    state.wrap_s = sampler.wrap_s;
+    state.wrap_t = sampler.wrap_t;
+    return state;
+}
+
+// Every texture field of a primitive, and of its variants' materials.
+template <typename Fn>
+void forEachTexture(GltfPrimitive& primitive, Fn&& fn) {
+    for (GPUTexture* texture : {&primitive.albedoMap, &primitive.normalMap, &primitive.metallicRoughnessMap,
+                                &primitive.aoMap, &primitive.emissiveMap, &primitive.clearcoatMap,
+                                &primitive.clearcoatRoughnessMap, &primitive.transmissionMap, &primitive.thicknessMap,
+                                &primitive.iridescenceMap, &primitive.iridescenceThicknessMap, &primitive.sheenColorMap,
+                                &primitive.sheenRoughnessMap, &primitive.specularMap, &primitive.specularColorMap,
+                                &primitive.anisotropyMap}) {
+        fn(*texture);
+    }
+    for (auto& [index, variant] : primitive.materialVariants) {
+        if (variant) forEachTexture(*variant, fn);
+    }
+}
+
 } // namespace
+
+// A texture decoded on the CPU, ready to upload: mip levels in `format`
+// (levels), or one RGBA8 image whose mips the GPU makes when
+// generateMipmaps (image). `ktxFailed`: a KTX2 file libktx could not read;
+// `error`: nothing to upload.
+struct DecodedTexture {
+    uint32_t width = 0, height = 0;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    std::vector<std::vector<uint8_t>> levels;
+    RgbaImage image;
+    bool generateMipmaps = true;
+    bool ktxFailed = false;
+    std::string error;
+
+    size_t bytes() const {
+        size_t total = image.texels.size();
+        for (const auto& level : levels) total += level.size();
+        return total;
+    }
+};
+
+namespace {
+
+// Reads and decodes the texture `request` describes: PNG, JPEG and the other
+// formats stb_image reads, or KTX2; resized to request.maxSize and, with
+// request.compress, block-compressed with its mips. Safe on any thread.
+DecodedTexture decodeTexture(const TextureRequest& request) {
+    DecodedTexture out;
+    out.generateMipmaps = request.generateMipmaps;
+    std::vector<uint8_t> fileBytes;
+    const std::vector<uint8_t>* bytes = &request.bytes;
+    if (request.bytes.empty()) {
+        std::ifstream file(request.cacheKey, std::ios::binary);
+        fileBytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+        bytes = &fileBytes;
+    }
+    if (bytes->empty()) {
+        out.error = "cannot read " + request.cacheKey;
+        out.ktxFailed = request.ktx2;
+        return out;
+    }
+
+    RgbaImage decoded;
+    if (request.ktx2) {
+        KtxImage ktx = decodeKtx2(bytes->data(), bytes->size(), request.srgb, request.bc, request.maxSize);
+        if (!ktx.error.empty()) {
+            out.error = "KTX2 texture " + request.cacheKey + ": " + ktx.error;
+            out.ktxFailed = true;
+            return out;
+        }
+        if (!ktx.levels.empty()) {
+            out.width = ktx.width;
+            out.height = ktx.height;
+            out.format = ktx.format;
+            out.levels = std::move(ktx.levels);
+            return out;
+        }
+        decoded = std::move(ktx.single);
+    } else {
+        int width = 0, height = 0, channels = 0;
+        stbi_uc* pixels = stbi_load_from_memory(bytes->data(), static_cast<int>(bytes->size()), &width, &height,
+                                                &channels, STBI_rgb_alpha);
+        if (!pixels) {
+            out.error = "cannot decode " + request.cacheKey;
+            return out;
+        }
+        decoded.width = static_cast<uint32_t>(width);
+        decoded.height = static_cast<uint32_t>(height);
+        decoded.texels.assign(pixels, pixels + static_cast<size_t>(width) * height * 4);
+        stbi_image_free(pixels);
+    }
+    decoded = fitImage(std::move(decoded), request.maxSize, request.srgb);
+
+    if (request.compress) {
+        // Mips from the CPU: a block-compressed image cannot be blitted.
+        BlockFormat block = BlockFormat::BC1;
+        VkFormat format = request.srgb ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_BC1_RGB_UNORM_BLOCK;
+        if (request.normalMap) {
+            block = BlockFormat::BC5;
+            format = VK_FORMAT_BC5_UNORM_BLOCK;
+        } else if (hasTransparency(decoded)) {
+            block = BlockFormat::BC3;
+            format = request.srgb ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK;
+        }
+        out.width = decoded.width;
+        out.height = decoded.height;
+        out.format = format;
+        std::vector<RgbaImage> mips;
+        if (request.generateMipmaps) {
+            mips = mipChain(std::move(decoded), request.srgb);
+        } else {
+            mips.push_back(std::move(decoded));
+        }
+        for (const auto& mip : mips) out.levels.push_back(compressBlocks(mip, block));
+        return out;
+    }
+    out.width = decoded.width;
+    out.height = decoded.height;
+    out.format = request.srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    out.image = std::move(decoded);
+    return out;
+}
+
+} // namespace
+
+// Textures loaded with streamTextures: worker threads decode the queued
+// requests; the main thread uploads what they finish
+// (updateTextureStreaming). The mutex guards queue, done and stopping;
+// the members after them are the main thread's alone.
+struct GltfSceneLoader::TextureStreaming {
+    struct Job {
+        TextureRequest request;
+        std::optional<TextureRequest> fallback;   // the texture's own image, for a KTX2 file that fails
+        std::string key;                          // the texture cache key
+        GPUTexture placeholder;
+        DecodedTexture result;
+    };
+
+    std::mutex mutex;
+    std::condition_variable wake;
+    std::deque<std::unique_ptr<Job>> queue;
+    std::deque<std::unique_ptr<Job>> done;
+    std::vector<std::thread> workers;
+    bool stopping = false;
+
+    std::unordered_map<std::string, GPUTexture> pending;     // texture cache key -> placeholder
+    std::unordered_map<VkSampler, cgltf_sampler> samplerStates;   // glTF samplers given to placeholders
+    std::vector<GPUTexture> placeholders;                     // all made, destroyed with the loader
+    size_t requested = 0;
+    size_t finished = 0;
+
+    void enqueue(std::unique_ptr<Job> job) {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            queue.push_back(std::move(job));
+            if (workers.empty()) {
+                const unsigned cores = std::max(std::thread::hardware_concurrency(), 3u);
+                const unsigned count = std::min(cores - 2u, 8u);
+                for (unsigned i = 0; i < count; ++i) workers.emplace_back([this] { run(); });
+            }
+        }
+        wake.notify_one();
+    }
+
+    void run() {
+        for (;;) {
+            std::unique_ptr<Job> job;
+            {
+                std::unique_lock<std::mutex> lock(mutex);
+                wake.wait(lock, [&] { return stopping || !queue.empty(); });
+                if (stopping) return;
+                job = std::move(queue.front());
+                queue.pop_front();
+            }
+            job->result = decodeTexture(job->request);
+            if (job->result.ktxFailed && job->fallback) {
+                std::cerr << "[GltfSceneLoader] " << job->result.error << std::endl;
+                job->result = decodeTexture(*job->fallback);
+            }
+            std::lock_guard<std::mutex> lock(mutex);
+            done.push_back(std::move(job));
+        }
+    }
+
+    ~TextureStreaming() {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            stopping = true;
+        }
+        wake.notify_all();
+        for (auto& worker : workers) worker.join();
+    }
+};
 
 // ═══════════════════════════════════════════════════════════════
 // Material Push Constants Layout
@@ -675,6 +892,14 @@ void GltfSceneLoader::releaseCachedGeometry() {
 }
 
 void GltfSceneLoader::destroyTextureCache() {
+    if (m_streaming) {
+        std::vector<GPUTexture> placeholders = std::move(m_streaming->placeholders);
+        m_streaming.reset();   // stops and joins the worker threads
+        for (auto& placeholder : placeholders) {
+            GPUResourceFactory::destroyTexture(m_device.getAllocator().getHandle(), m_device.getLogicalDevice(),
+                                               placeholder);
+        }
+    }
     for (auto& [key, texture] : m_textureCache) {
         GPUResourceFactory::destroyTexture(
             m_device.getAllocator().getHandle(),
@@ -1616,17 +1841,12 @@ GPUTexture GltfSceneLoader::loadTexture(
         return GPUTexture{};
     }
     std::string cacheKey;
-    bool isEmbedded = false;
 
     if (image->uri) {
         cacheKey = resolveTexturePath(image->uri);
     } else if (image->buffer_view) {
-        // Embedded texture — data lives in the glTF/glb buffer.
-        isEmbedded = true;
-        // Keyed by source file plus the view's offset and size. The old key was
-        // the buffer_view *pointer*, which is only valid until cgltf_free() at the
-        // end of this load; with a cache that spans loads, a later allocation
-        // landing on the same address would return an unrelated texture.
+        // Embedded texture: keyed by the source file plus the view's offset
+        // and size, which stay valid after cgltf_free.
         cacheKey = m_currentFile.string() + "_bv_"
                  + std::to_string(image->buffer_view->offset) + "_"
                  + std::to_string(image->buffer_view->size);
@@ -1655,8 +1875,102 @@ GPUTexture GltfSceneLoader::loadTexture(
     if (cacheIt != m_textureCache.end()) {
         return sampled(cacheIt->second);
     }
-    // A made texture gets a sampler and goes into the cache.
-    auto finish = [&](GPUTexture texture) {
+
+    // The request for an image of this texture: the file's path, or a copy
+    // of the embedded bytes, which outlive the glTF data.
+    const bool bc = m_device.getEnabledFeatures().textureCompressionBC;
+    auto requestFor = [&](const cgltf_image* source, bool ktx2) {
+        TextureRequest request;
+        if (source->uri) {
+            request.cacheKey = resolveTexturePath(source->uri);
+        } else if (source->buffer_view) {
+            request.cacheKey = m_currentFile.string() + "_bv_" + std::to_string(source->buffer_view->offset) + "_" +
+                               std::to_string(source->buffer_view->size);
+            const uint8_t* bytes = cgltf_buffer_view_data(source->buffer_view);
+            if (bytes) request.bytes.assign(bytes, bytes + source->buffer_view->size);
+        }
+        request.ktx2 = ktx2;
+        request.srgb = srgb;
+        request.normalMap = normalMap;
+        request.compress = compress;
+        request.bc = bc;
+        request.generateMipmaps = m_options.generateMipmaps;
+        request.maxSize = maxSize;
+        return request;
+    };
+    TextureRequest request = requestFor(image, basisu);
+    std::optional<TextureRequest> fallback;
+    if (basisu && source->image) fallback = requestFor(source->image, false);
+
+    if (m_options.streamTextures) {
+        if (!m_streaming) m_streaming = std::make_unique<TextureStreaming>();
+        // A placeholder per texture until it streams in, its glTF sampler's
+        // state kept for the real one.
+        auto placeholderFor = [&](GPUTexture placeholder) {
+            GPUTexture texture = sampled(placeholder);
+            if (texture.sampler != placeholder.sampler && textureView.texture->sampler) {
+                m_streaming->samplerStates[texture.sampler] = samplerState(*textureView.texture->sampler);
+            }
+            return texture;
+        };
+        if (auto it = m_streaming->pending.find(fullCacheKey); it != m_streaming->pending.end()) {
+            return placeholderFor(it->second);
+        }
+        const uint8_t white[4] = {255, 255, 255, 255};
+        const uint8_t flat[4] = {128, 128, 255, 255};
+        GPUTexture placeholder = GPUResourceFactory::createTexture2DWithData(
+            m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getGraphicsQueue(),
+            m_device.getCommandPool(), 1, 1, srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
+            normalMap ? flat : white, 4, false);
+        placeholder.sampler = GPUResourceFactory::createSampler(
+            m_device.getLogicalDevice(), VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, 1.0f,
+            VK_SAMPLER_MIPMAP_MODE_LINEAR, 1.0f);
+        placeholder.exists = true;
+        m_streaming->placeholders.push_back(placeholder);
+        m_streaming->pending[fullCacheKey] = placeholder;
+        auto job = std::make_unique<TextureStreaming::Job>();
+        job->request = std::move(request);
+        job->fallback = std::move(fallback);
+        job->key = fullCacheKey;
+        job->placeholder = placeholder;
+        ++m_streaming->requested;
+        m_streaming->enqueue(std::move(job));
+        return placeholderFor(placeholder);
+    }
+
+    DecodedTexture decoded = decodeTexture(request);
+    if (decoded.ktxFailed && fallback) {
+        std::cerr << "[GltfSceneLoader] " << decoded.error << std::endl;
+        decoded = decodeTexture(*fallback);
+    }
+    if (!decoded.error.empty()) {
+        std::cerr << "[GltfSceneLoader] " << decoded.error << std::endl;
+        return GPUTexture{};
+    }
+    GPUTexture texture = uploadTextures({&decoded}).front();
+    m_textureCache[fullCacheKey] = texture;
+    return sampled(texture);
+}
+
+std::vector<GPUTexture> GltfSceneLoader::uploadTextures(const std::vector<DecodedTexture*>& decoded) {
+    // A single RGBA8 image becomes level 0, its mips made on the GPU.
+    std::vector<GPUResourceFactory::TextureLevels> sources;
+    for (DecodedTexture* texture : decoded) {
+        GPUResourceFactory::TextureLevels source;
+        source.width = texture->width;
+        source.height = texture->height;
+        source.format = texture->format;
+        if (texture->levels.empty()) {
+            texture->levels.push_back(std::move(texture->image.texels));
+            source.generateMipmaps = texture->generateMipmaps;
+        }
+        source.levels = &texture->levels;
+        sources.push_back(source);
+    }
+    std::vector<GPUTexture> textures = GPUResourceFactory::createTextures2D(
+        m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getGraphicsQueue(),
+        m_device.getCommandPool(), sources);
+    for (GPUTexture& texture : textures) {
         texture.sampler = GPUResourceFactory::createSampler(
             m_device.getLogicalDevice(),
             VK_FILTER_LINEAR, VK_FILTER_LINEAR,
@@ -1666,125 +1980,78 @@ GPUTexture GltfSceneLoader::loadTexture(
             static_cast<float>(texture.mipLevels)
         );
         texture.exists = true;
-        m_textureCache[fullCacheKey] = texture;
-        return sampled(texture);
+    }
+    return textures;
+}
+
+void GltfSceneLoader::updateTextureStreaming(entt::registry& registry, size_t byteBudget) {
+    if (!m_streaming) return;
+    std::vector<std::unique_ptr<TextureStreaming::Job>> ready;
+    {
+        std::lock_guard<std::mutex> lock(m_streaming->mutex);
+        size_t bytes = 0;
+        while (!m_streaming->done.empty() && (ready.empty() || bytes < byteBudget)) {
+            bytes += m_streaming->done.front()->result.bytes();
+            ready.push_back(std::move(m_streaming->done.front()));
+            m_streaming->done.pop_front();
+        }
+    }
+    if (ready.empty()) return;
+
+    // Each placeholder's view, and what takes its place.
+    struct Replacement {
+        GPUTexture texture;
+        VkSampler placeholderSampler;
     };
-
-    RgbaImage decoded;
-    if (basisu) {
-        std::vector<uint8_t> fileBytes;
-        const uint8_t* bytes = nullptr;
-        size_t size = 0;
-        if (isEmbedded) {
-            bytes = cgltf_buffer_view_data(image->buffer_view);
-            size = image->buffer_view->size;
-        } else {
-            std::ifstream file(cacheKey, std::ios::binary);
-            fileBytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-            bytes = fileBytes.data();
-            size = fileBytes.size();
+    std::unordered_map<VkImageView, Replacement> replacements;
+    std::vector<TextureStreaming::Job*> uploaded;
+    std::vector<DecodedTexture*> decoded;
+    for (auto& job : ready) {
+        ++m_streaming->finished;
+        m_streaming->pending.erase(job->key);
+        if (!job->result.error.empty()) {
+            std::cerr << "[GltfSceneLoader] " << job->result.error << std::endl;
+            continue;
         }
-        KtxImage ktx = bytes && size ? decodeKtx2(bytes, size, srgb, m_device.getEnabledFeatures().textureCompressionBC,
-                                                  maxSize)
-                                     : KtxImage{};
-        if (!bytes || !size) ktx.error = "no data";
-        if (!ktx.error.empty()) {
-            std::cerr << "[GltfSceneLoader] KTX2 texture " << cacheKey << ": " << ktx.error << std::endl;
-            if (!source->image) return GPUTexture{};
-            // The texture's own image, as a texture without the extension.
-            cgltf_texture plain = *source;
-            plain.has_basisu = 0;
-            plain.basisu_image = nullptr;
-            cgltf_texture_view view = textureView;
-            view.texture = &plain;
-            return loadTexture(nullptr, view, srgb, normalMap);
-        }
-        if (!ktx.levels.empty()) {
-            return finish(GPUResourceFactory::createTexture2DWithLevels(
-                m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getGraphicsQueue(),
-                m_device.getCommandPool(), ktx.width, ktx.height, ktx.format, ktx.levels));
-        }
-        decoded = std::move(ktx.single);
+        uploaded.push_back(job.get());
+        decoded.push_back(&job->result);
     }
-
-    // Load image with stb_image
-    int width = 0, height = 0, channels = 0;
-    stbi_uc* pixels = nullptr;
-
-    if (basisu) {
-        // Decoded from the KTX2 image above.
-    } else if (isEmbedded) {
-        // 蘊中取像 — Extract the image from within the vessel
-        const cgltf_buffer_view* bv = image->buffer_view;
-        const uint8_t* bufData = static_cast<const uint8_t*>(bv->buffer->data) + bv->offset;
-        pixels = stbi_load_from_memory(bufData, static_cast<int>(bv->size),
-                                       &width, &height, &channels, STBI_rgb_alpha);
-        if (!pixels) {
-            std::cerr << "[GltfSceneLoader] Failed to decode embedded texture"
-                      << (image->name ? std::string(" '") + image->name + "'" : "")
-                      << " (mime: " << (image->mime_type ? image->mime_type : "unknown") << ")"
-                      << std::endl;
-            return GPUTexture{};
-        }
-        std::cout << "[GltfSceneLoader] Loaded embedded texture"
-                  << (image->name ? std::string(" '") + image->name + "'" : "")
-                  << " (" << width << "x" << height << ")" << std::endl;
-    } else {
-        pixels = stbi_load(cacheKey.c_str(), &width, &height, &channels, STBI_rgb_alpha);
-        if (!pixels) {
-            std::cerr << "[GltfSceneLoader] Failed to load texture: " << cacheKey << std::endl;
-            return GPUTexture{};
-        }
+    const std::vector<GPUTexture> textures = uploadTextures(decoded);
+    for (size_t i = 0; i < uploaded.size(); ++i) {
+        m_textureCache[uploaded[i]->key] = textures[i];
+        replacements[uploaded[i]->placeholder.view] = {textures[i], uploaded[i]->placeholder.sampler};
     }
+    if (replacements.empty()) return;
 
-    if (pixels) {
-        decoded.width = static_cast<uint32_t>(width);
-        decoded.height = static_cast<uint32_t>(height);
-        decoded.texels.assign(pixels, pixels + static_cast<size_t>(width) * height * 4);
-        stbi_image_free(pixels);
-    }
-    decoded = fitImage(std::move(decoded), maxSize, srgb);
-
-    GPUTexture texture;
-    if (compress) {
-        // Mips from the CPU: a block-compressed decoded cannot be blitted.
-        BlockFormat block = BlockFormat::BC1;
-        VkFormat format = srgb ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_BC1_RGB_UNORM_BLOCK;
-        if (normalMap) {
-            block = BlockFormat::BC5;
-            format = VK_FORMAT_BC5_UNORM_BLOCK;
-        } else if (hasTransparency(decoded)) {
-            block = BlockFormat::BC3;
-            format = srgb ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK;
+    // A texture that is a placeholder becomes the real one, with the real
+    // one's default sampler or the glTF sampler the placeholder was given.
+    auto replace = [&](GPUTexture& texture) {
+        if (texture.view == VK_NULL_HANDLE) return;
+        auto it = replacements.find(texture.view);
+        if (it == replacements.end()) return;
+        GPUTexture real = it->second.texture;
+        if (texture.sampler != it->second.placeholderSampler) {
+            auto state = m_streaming->samplerStates.find(texture.sampler);
+            if (state != m_streaming->samplerStates.end()) {
+                if (VkSampler sampler = gltfSampler(&state->second, real.mipLevels)) real.sampler = sampler;
+            }
         }
-        const uint32_t baseWidth = decoded.width, baseHeight = decoded.height;
-        std::vector<RgbaImage> mips;
-        if (m_options.generateMipmaps) {
-            mips = mipChain(std::move(decoded), srgb);
-        } else {
-            mips.push_back(std::move(decoded));
-        }
-        std::vector<std::vector<uint8_t>> levels;
-        for (const auto& mip : mips) levels.push_back(compressBlocks(mip, block));
-        texture = GPUResourceFactory::createTexture2DWithLevels(
-            m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getGraphicsQueue(),
-            m_device.getCommandPool(), baseWidth, baseHeight, format, levels);
-    } else {
-        texture = GPUResourceFactory::createTexture2DWithData(
-            m_device.getAllocator().getHandle(),
-            m_device.getLogicalDevice(),
-            m_device.getGraphicsQueue(),
-            m_device.getCommandPool(),
-            decoded.width,
-            decoded.height,
-            srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
-            decoded.texels.data(),
-            decoded.texels.size(),
-            m_options.generateMipmaps
-        );
+        texture = real;
+    };
+    auto replaceIn = [&](MaterialComponentV5& material) {
+        for (auto& [name, texture] : material.textures) replace(texture);
+    };
+    for (auto [entity, material] : registry.view<MaterialComponentV5>().each()) replaceIn(material);
+    for (auto [entity, variants] : registry.view<MaterialVariantsComponent>().each()) {
+        replaceIn(variants.defaultMaterial);
+        for (auto& [index, material] : variants.variants) replaceIn(material);
     }
+    for (auto& [key, primitive] : m_primitiveCache) forEachTexture(primitive, replace);
+}
 
-    return finish(texture);
+std::pair<size_t, size_t> GltfSceneLoader::textureStreamingProgress() const {
+    if (!m_streaming) return {0, 0};
+    return {m_streaming->finished, m_streaming->requested};
 }
 
 entt::entity GltfSceneLoader::createEntity(

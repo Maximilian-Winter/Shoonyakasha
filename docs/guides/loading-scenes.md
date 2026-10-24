@@ -69,6 +69,15 @@ Uncompressed textures take 4 bytes per texel, so this is a quarter to an eighth 
 
 A texture with a `KHR_texture_basisu` source is read from its KTX2 file with libktx (ETC1S and UASTC, with or without supercompression). A KTX2 file with mip levels is transcoded level by level to BC7, sRGB for colour textures, where the GPU samples BC formats, and to 8-bit RGBA otherwise; `max_texture_size` skips the levels larger than it. A KTX2 file with one level is transcoded to 8-bit RGBA and then treated like a PNG: resized, mipmapped and, with `compress_textures`, compressed as above. When the KTX2 file cannot be read, the texture's own `source` image is used if it has one.
 
+## Streaming textures
+
+`stream_textures=True` (C++ `GltfOptions::streamTextures`) makes `load_gltf_scene` return once the geometry and materials are in, without decoding a texture. Each texture is a 1 x 1 placeholder at first, white, or flat for normal maps, which leaves a material its factors. Worker threads read and decode the textures, with `max_texture_size`, `compress_textures` and KTX2 applied as in a normal load. Each frame the main thread uploads finished ones, up to `engine.set_texture_upload_budget(megabytes)` a frame (at least one texture while any are waiting), and puts each in place of its placeholder in the materials that use it, material variants included. `engine.get_texture_streaming_progress()` returns how many textures have finished, uploaded or failed to decode, and how many were requested. A texture that fails to decode keeps its placeholder.
+
+```python
+result = engine.load_gltf_scene("bistro.gltf", max_texture_size=1024, stream_textures=True)
+finished, requested = engine.get_texture_streaming_progress()   # from a later frame
+```
+
 ## Levels of detail
 
 `lods=True` (C++ `GltfOptions::generateLods`) gives each static triangle mesh of at least 64 triangles up to four coarser levels of detail, simplified with meshoptimizer to about half the triangles of the level before. They share the mesh's vertices and follow its full index list in the same index buffer (`MeshComponent::lods`), and the mesh's open borders stay in place. Each level records how far its surface may lie from the full mesh's, counting how far its normals stray. Skinned and morphed meshes get none.

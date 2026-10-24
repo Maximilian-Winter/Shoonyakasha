@@ -159,6 +159,10 @@ protected:
     entt::registry& getRegistry();
     ResourceManager& getResourceManager();
     GltfSceneLoader& getGltfLoader();
+
+    /// Bytes of streamed textures uploaded per frame at most (at least one
+    /// texture a frame while any are waiting).
+    void setTextureUploadBudget(size_t bytes) { m_textureUploadBudget = bytes; }
     Logger& getLogger();
     EventDispatcher& getEventDispatcher();
     ECS::StandaloneInputHandler& getInputHandler();
@@ -319,6 +323,7 @@ private:
     std::unique_ptr<DescriptorManager> m_descriptorManager;
     std::unique_ptr<ResourceManager> m_resourceManager;
     std::unique_ptr<GltfSceneLoader> m_gltfLoader;
+    size_t m_textureUploadBudget = size_t{16} << 20;
     std::unique_ptr<Sprite2DManager> m_sprite2DManager;
     std::unique_ptr<FontLoader> m_fontLoader;
     std::vector<VkCommandBuffer> m_commandBuffers;

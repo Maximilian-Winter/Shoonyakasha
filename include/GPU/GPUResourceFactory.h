@@ -135,6 +135,28 @@ public:
         const std::vector<std::vector<uint8_t>>& levels
     );
 
+    // One texture for createTextures2D: its mip levels' bytes as
+    // createTexture2DWithLevels takes them, or, with generateMipmaps, only
+    // level 0, the GPU blitting the rest.
+    struct TextureLevels {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        VkFormat format = VK_FORMAT_UNDEFINED;
+        const std::vector<std::vector<uint8_t>>* levels = nullptr;
+        bool generateMipmaps = false;
+    };
+
+    // A sampled texture for each entry of `textures`, in order, uploaded
+    // through one staging buffer and one command buffer, with one wait for
+    // `queue`.
+    static std::vector<GPUTexture> createTextures2D(
+        VmaAllocator allocator,
+        VkDevice device,
+        VkQueue queue,
+        VkCommandPool cmdPool,
+        const std::vector<TextureLevels>& textures
+    );
+
     // A sampled image of `width` x `height` texels of `format`, from `size`
     // bytes of rows of tightly packed texels, top row first, with a
     // clamp-to-edge sampler, linear where the format filters, nearest

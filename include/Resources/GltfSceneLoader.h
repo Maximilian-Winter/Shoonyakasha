@@ -215,6 +215,11 @@ struct GltfLoadOptions {
     // KHR_lights_punctual: an entity with a LightComponent for each node's
     // light (GltfLoadResult::lights).
     bool loadLights             = false;
+    // Load returns once the geometry is in; worker threads decode the
+    // textures, and updateTextureStreaming uploads them over the following
+    // frames. Until then each texture is a 1x1 placeholder: white, or flat
+    // for normal maps.
+    bool streamTextures         = false;
 
     // Transform handling.
     //
@@ -273,6 +278,8 @@ struct MeshArrays {
 
 struct PrimitiveGeometry;
 
+struct DecodedTexture;   // a texture decoded on the CPU (GltfSceneLoader.cpp)
+
 class GltfSceneLoader {
 public:
     explicit GltfSceneLoader(VulkanDevice& device);
@@ -314,7 +321,19 @@ public:
     /// in flight draws them. Returns an error message, empty on success.
     std::string setMeshGeometry(entt::registry& registry, entt::entity entity, const MeshArrays& arrays);
 
+    /// Textures loaded with GltfLoadOptions::streamTextures: upload those the
+    /// worker threads have decoded, until `byteBudget` bytes (at least one
+    /// texture), and put each in place of its placeholder in the registry's
+    /// materials and material variants. Call from the main thread.
+    void updateTextureStreaming(entt::registry& registry, size_t byteBudget);
+
+    /// Streamed textures finished (uploaded, or failed to decode) and
+    /// requested so far.
+    std::pair<size_t, size_t> textureStreamingProgress() const;
+
 private:
+    struct TextureStreaming;
+    std::unique_ptr<TextureStreaming> m_streaming;
     /// Check `arrays` and upload them into `out`'s geometry and bounds.
     std::string buildMeshPrimitive(const MeshArrays& arrays, GltfPrimitive& out);
 
@@ -350,6 +369,10 @@ private:
     /// Destroy every cached texture. Only safe once nothing references them —
     /// i.e. at destruction, after the scene holding the materials is gone.
     void destroyTextureCache();
+
+    /// The textures `decoded` describes, on the GPU with the default sampler,
+    /// in order, uploaded with one submission.
+    std::vector<Shoonyakasha::GPUTexture> uploadTextures(const std::vector<DecodedTexture*>& decoded);
 
     // ─── Internal Processing ────────────────────────────────
 

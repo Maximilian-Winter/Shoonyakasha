@@ -397,6 +397,94 @@ GPUTexture GPUResourceFactory::createTexture2DWithLevels(
     return texture;
 }
 
+std::vector<GPUTexture> GPUResourceFactory::createTextures2D(
+    VmaAllocator allocator,
+    VkDevice device,
+    VkQueue queue,
+    VkCommandPool cmdPool,
+    const std::vector<TextureLevels>& textures
+) {
+    std::vector<GPUTexture> out;
+    if (textures.empty()) return out;
+
+    // Every level's bytes in one staging buffer, each starting on a 16-byte
+    // boundary (a whole texel block for every format uploaded).
+    auto align = [](VkDeviceSize value) { return (value + 15) & ~VkDeviceSize{15}; };
+    VkDeviceSize total = 0;
+    for (const auto& texture : textures) {
+        for (const auto& level : *texture.levels) total = align(total) + level.size();
+    }
+    GPUBuffer staging = createBuffer(allocator, std::max<VkDeviceSize>(total, 16), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                     VMA_MEMORY_USAGE_CPU_ONLY);
+    auto* mapped = static_cast<uint8_t*>(mapBuffer(allocator, staging));
+
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandPool = cmdPool;
+    cmdAllocInfo.commandBufferCount = 1;
+    VkCommandBuffer cmdBuffer;
+    vkAllocateCommandBuffers(device, &cmdAllocInfo, &cmdBuffer);
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+
+    VkDeviceSize offset = 0;
+    for (const auto& source : textures) {
+        const auto& levels = *source.levels;
+        const uint32_t mipLevels = source.generateMipmaps
+            ? calculateMipLevels(source.width, source.height)
+            : static_cast<uint32_t>(std::max<size_t>(levels.size(), 1));
+        VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        if (source.generateMipmaps) usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        GPUTexture texture = createTexture2D(allocator, device, source.width, source.height, source.format, usage,
+                                             mipLevels);
+
+        std::vector<VkBufferImageCopy> regions;
+        const size_t given = source.generateMipmaps ? std::min<size_t>(levels.size(), 1) : levels.size();
+        for (uint32_t mip = 0; mip < given; ++mip) {
+            offset = align(offset);
+            std::memcpy(mapped + offset, levels[mip].data(), levels[mip].size());
+            VkBufferImageCopy region{};
+            region.bufferOffset = offset;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel = mip;
+            region.imageSubresource.layerCount = 1;
+            region.imageExtent = {std::max(source.width >> mip, 1u), std::max(source.height >> mip, 1u), 1};
+            regions.push_back(region);
+            offset += levels[mip].size();
+        }
+
+        transitionImageLayout(cmdBuffer, texture.image, source.format, VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels);
+        if (!regions.empty()) {
+            vkCmdCopyBufferToImage(cmdBuffer, staging.buffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   static_cast<uint32_t>(regions.size()), regions.data());
+        }
+        if (source.generateMipmaps) {
+            generateMipmaps(cmdBuffer, texture.image, source.format, source.width, source.height, mipLevels);
+        } else {
+            transitionImageLayout(cmdBuffer, texture.image, source.format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
+        }
+        out.push_back(texture);
+    }
+    unmapBuffer(allocator, staging);
+    vkEndCommandBuffer(cmdBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmdBuffer;
+    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+
+    vkFreeCommandBuffers(device, cmdPool, 1, &cmdBuffer);
+    destroyBuffer(allocator, staging);
+    return out;
+}
+
 GPUTexture GPUResourceFactory::createTextureCube(
     VmaAllocator allocator,
     VkDevice device,

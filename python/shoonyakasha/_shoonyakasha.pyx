@@ -2064,6 +2064,8 @@ cdef class Engine:
             opts.loadAnimations = kwargs['load_animations']
         if 'load_lights' in kwargs:
             opts.loadLights = kwargs['load_lights']
+        if 'stream_textures' in kwargs:
+            opts.streamTextures = kwargs['stream_textures']
         if 'flatten_hierarchy' in kwargs:
             opts.flattenHierarchy = kwargs['flatten_hierarchy']
         if 'max_texture_size' in kwargs:
@@ -2082,6 +2084,17 @@ cdef class Engine:
         cdef string cpp_path = path.encode('utf-8')
         cdef CppGltfResult result = self._ptr.loadGltfScene(cpp_path, opts)
         return _wrap_gltf_result(result)
+
+    def get_texture_streaming_progress(self):
+        """(finished, requested): textures loaded with stream_textures=True that
+        have been uploaded (or failed to decode), and all requested so far."""
+        cdef pair[size_t, size_t] progress = self._ptr.getTextureStreamingProgress()
+        return (progress.first, progress.second)
+
+    def set_texture_upload_budget(self, double megabytes):
+        """Megabytes of streamed textures uploaded per frame at most (at least
+        one texture a frame while any are waiting); 16 by default."""
+        self._ptr.setTextureUploadBudget(<size_t>(max(megabytes, 0.0) * 1024 * 1024))
 
     def create_directional_light(self, direction, color=(1.0, 1.0, 1.0),
                                   float intensity=2.0):

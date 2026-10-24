@@ -175,6 +175,7 @@ public:
     using ApplicationBase::loadGltfScene;
     using ApplicationBase::createMesh;
     using ApplicationBase::getGltfLoader;
+    using ApplicationBase::setTextureUploadBudget;
     using ApplicationBase::createDirectionalLight;
     using ApplicationBase::createPointLight;
     using ApplicationBase::createSprite;
@@ -259,6 +260,7 @@ static GltfLoadOptions toLoadOptions(const GltfOptions& fo) {
     lo.loadSkins        = fo.loadSkins;
     lo.loadAnimations   = fo.loadAnimations;
     lo.loadLights       = fo.loadLights;
+    lo.streamTextures   = fo.streamTextures;
     lo.flattenHierarchy = fo.flattenHierarchy;
     lo.maxTextureSize   = fo.maxTextureSize;
     lo.generateMipmaps  = fo.generateMipmaps;
@@ -405,6 +407,14 @@ GltfResult EngineAPI::loadGltfScene(const std::string& path, const GltfOptions& 
     // Auto-create bone SSBOs for any newly loaded skinned entities
     m_impl->app->createBoneSSBOs();
     return toGltfResult(lr);
+}
+
+std::pair<size_t, size_t> EngineAPI::getTextureStreamingProgress() const {
+    return m_impl->app->getGltfLoader().textureStreamingProgress();
+}
+
+void EngineAPI::setTextureUploadBudget(size_t bytes) {
+    m_impl->app->setTextureUploadBudget(bytes);
 }
 
 namespace {

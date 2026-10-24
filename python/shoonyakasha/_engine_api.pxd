@@ -12,6 +12,7 @@
 from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.memory cimport shared_ptr
+from libcpp.utility cimport pair
 from libcpp cimport bool as cbool
 from libc.stdint cimport uint8_t, uint32_t, uint64_t
 from cpython.ref cimport PyObject
@@ -536,6 +537,8 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         EntityHandle createCamera(const vec3& pos, float fov, float speed,
                                   float nearPlane, float farPlane)
         CppGltfResult loadGltfScene(const string& path, const GltfOptions& opts) except +
+        pair[size_t, size_t] getTextureStreamingProgress()
+        void setTextureUploadBudget(size_t bytes)
 
         # Frame capture
         cbool captureScreenshot(const string& path) except +
