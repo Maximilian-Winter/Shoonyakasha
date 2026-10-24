@@ -803,4 +803,72 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
     - As built: `InputAPI::isGamepadConnected`, `isGamepadButtonDown`, `getGamepadAxis` (and `engine.input.*`, `keys.GAMEPAD_*`) read the gamepad the input system already polled. The ship's sticks, triggers and buttons add to the keys; analogue vertical thrust makes slow descents easy.
   - A systematic search for cracks between levels in steep terrain (only stills were inspected).
     - As built: `--crack-check` measures every gap to a coarser neighbour against its skirt at six views. With skirts of 5 % of the edge, the default terrain was covered at up to 0.79 of a skirt, and mountains twice as high were not (an 11 m gap against a 7.7 m skirt, 864 m from the camera). Skirts now reach down by the larger of that and the chunk's height range, which bounds the gap; the largest share is 0.24.
-  - The terrain's lighting: the sun shadowed by mountains, and the cockpit's interior shadowed by its frame.
+  - The terrain's lighting: the sun shadowed by mountains, and the cockpit's interior shadowed by its frame. (Planned as WP13.)
+  - Still open: redder sunsets as an option (the sunlight's path through the air computed as if the planet were larger), if wanted.
+
+**WP12: CDLOD morphing** (no popping between levels)
+- Today a chunk's vertices jump when it splits or merges: the finer grid's odd vertices appear at the terrain's height, where the coarser chunk had them on a straight line between its vertices.
+- WP12a: Morph in the vertex shaders.
+  - Each drawn chunk gets a morph factor per vertex, from its distance to the camera against the node's split distance: 0 well inside it, 1 at the distance where the parent would draw instead.
+  - The odd grid vertices move from the coarser surface (the line between their even neighbours) to their own height as the factor goes from 1 to 0. The vertex shader reads the neighbours from `ChunkPool` (a storage buffer, by vertex index), so the vertex layout stays.
+  - Normals blend in the same way. The skirts follow their edge vertex.
+  - `ChunkInstances` gains what the factor needs (the node's split distance; one vec4).
+  - The terrain, ocean and wireframe vertex shaders share one morph function.
+- WP12b: Checks and edges.
+  - At a split, the drawn surface must not move. Check: a `--morph-check` that reads the morphed positions back (a compute copy of the vertex shader's result, or the same function in Python) at the split distance, against the parent's surface.
+  - A neighbour at a coarser level must meet the morphed edge, so the crack check runs on the morphed positions too.
+  - Physics keeps the true terrain (the ground patch is unaffected); the gear may sit up to the morph's difference above or below what is drawn far from the camera, never near it (chunks near the camera are fully at their own level).
+- Done: flying low and fast, no vertex visibly jumps; the crack check still passes.
+
+**WP13: Shadows** (mountains and the cockpit)
+- WP13a: A sun shadow map for the terrain.
+  - A depth-only pass draws the selected chunks from the sun, with an orthographic projection fitted around the camera. The light's matrix is built in Python in doubles, relative to the camera, like everything else.
+  - `terrain.frag`, `ocean.frag` and `scene.frag` sample it (comparison sampler, PCF). Reverse-Z and the bias to use are settled here.
+  - First see whether the engine's own cascaded sun shadows (`set_sun_shadows`) can serve the custom pipeline's passes; if not, the shadow pass lives in `pipeline.json`.
+- WP13b: Cascades.
+  - Three or four cascades from the cockpit out to about 20 km, split logarithmically, each fitted to its slice of the view and snapped to its texels so shadows do not shimmer as the camera moves.
+  - The cockpit and the blocks cast and receive in the nearest cascade: the cockpit's interior shadowed by its frame.
+- WP13c: Long mountain shadows at low sun, beyond the cascades.
+  - Per chunk vertex, the angle of the terrain's horizon towards the sun, found in `chunk_build.comp` by marching the terrain function towards the sun. It is rebuilt when the sun moves more than a little (the chunks are rebuilt, as on a terrain change).
+  - The terrain beyond the last cascade is in shadow where the sun is below that horizon.
+  - Optional: the atmosphere's scattering shadowed by the terrain (light shafts at sunset).
+- Done: at a low sun, mountains cast shadows across valleys near and far, and the cockpit's frame casts shadows on the dashboard, without shimmer when flying.
+
+**WP14: Clouds**
+- WP14a: A cloud layer in the atmosphere pass.
+  - A shell, about 1.5 to 4 km up. Its density comes from a coverage noise on the sphere (weather) times a shape noise in 3D, in a shared `clouds.glsl`.
+  - The atmosphere pass raymarches the shell along each view ray, up to the scene's distance. Light: the sun's transmittance (from the table) times the cloud's own optical depth towards the sun over a few steps; Henyey-Greenstein with a forward and a back lobe; and an ambient term from the sky.
+  - The clouds sit inside the atmosphere's scattering (the air in front of them still scatters).
+  - Coverage, density and the layer's heights go in the menu.
+- WP14b: Frame time.
+  - The cloud march runs at half or quarter resolution into its own image and is upsampled with the depth buffer, or is spread over frames with reprojection.
+  - Target: under about 2 ms at 1600 × 900. Measure before and after.
+- WP14c: Clouds on the world.
+  - Their shadows on the ground and the sea: the terrain, ocean and scene shaders sample the cloud density along the sun's direction (or a small cloud-shadow map built per frame).
+  - Wind: the coverage drifts with time.
+- WP14d: From everywhere.
+  - Seen from orbit (the shell's tops lit, the terminator), from inside (flying through: fog in the cockpit), and from below at sunset (lit from underneath).
+  - The capture tour gains these views.
+- Done: clouds that look right from the ground, inside them, and from orbit, within the frame budget.
+
+**WP15: A moon**
+- WP15a: Gravity and orbits with two bodies.
+  - The moon follows a fixed circular (or Kepler) orbit around the planet, its position a function of time.
+  - `flight.py` sums the gravity of both. The orbit display, the HUD's periapsis and apoapsis, and the orbit path are relative to the body whose sphere of influence the ship is in (patched conics), shown on the ORBIT display.
+  - Choose the moon's size, mass and distance so a transfer takes minutes at 16×. As a guess: a 25 km radius, a fifth of the surface gravity, about 600 km out.
+  - Tests: a moon orbit holds, the planet's orbits stay as they are far from the moon, and the sphere-of-influence switch is continuous.
+- WP15b: The planet code as a body.
+  - A `Body` holds a radius, terrain parameters, an atmosphere (or none), a quadtree and its place.
+  - Bodies share the chunk pool: a job carries its body, and `BuildChunks` reads the body's terrain parameters from an array, or from a second parameter block.
+  - The probes and the ground patch follow the body under the ship.
+- WP15c: The moon drawn.
+  - A cratered terrain function (craters as a sum of shaped bowls from a hashed lattice, plus noise) with grey colours.
+  - No atmosphere of its own: it is seen through the planet's when behind it. The atmosphere pass's depth handles what is in front.
+  - The sun lights it; the planet may eclipse it (optional).
+- WP15d: Going there.
+  - Presets: in orbit around the moon, and on its surface.
+  - Landing on the moon: contacts and the landing check on its ground. Assisted descent without air.
+  - The capture tour shows the moon from the planet, and the planet from the moon.
+- Done: fly from the pad to orbit, to the moon, land on it, and come back.
+
+Suggested order: WP12 (smallest, improves every view), WP13, WP14, WP15 (largest). WP13a and WP14a are each worth a look before the rest of their package, since the frame time decides how far they go.
