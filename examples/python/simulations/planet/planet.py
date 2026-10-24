@@ -117,6 +117,7 @@ SHADOW_REACH = 5_000.0
 # direction (cells of about 2.5 km), the detail noise's scale (m) and how much it erodes.
 CLOUD_LAYER = (1_500.0, 3_500.0)
 CLOUD_SHAPE = (40.0, 900.0, 0.8)
+CLOUD_COVERAGE = 0.45            # share of the sky the clouds cover at the start
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -312,7 +313,7 @@ state = {
     "orbit_path": True,          # draw the path the ship would coast along
     "shadows": True,             # the sun's shadow cascades
     "clouds": True,              # the cloud layer
-    "cloud_coverage": 0.45,      # share of the sky the clouds cover, 0 .. 1
+    "cloud_coverage": CLOUD_COVERAGE,  # share of the sky the clouds cover, 0 .. 1
     "cloud_density": 0.04,       # extinction per metre at full density
     "cloud_wind": (0.0, 0.0, 0.0),  # the coverage noise's offset, in its units (clouds.glsl)
     "wind_speed": 15.0,          # metres a second the clouds drift
@@ -1367,6 +1368,35 @@ def settled():
     return state["tree"] is not None and not state["tree"].missing and not state["rebuild"] and not pool.pending
 
 
+def look_up(degrees):
+    """The free camera's view turned `degrees` up from level, keeping its heading."""
+    radial = normalize(state["position"])
+    level = normalize(sub(state["forward"], scale(radial, dot(state["forward"], radial))))
+    up = math.radians(degrees)
+    state["forward"] = normalize(add(scale(level, math.cos(up)), scale(radial, math.sin(up))))
+
+
+def overcast():
+    """Clouds over 95 % of the sky."""
+    state["cloud_coverage"] = 0.95
+    upload_clouds()
+
+
+def lift_camera(height):
+    """The free camera `height` metres above the sea, where it is, looking level."""
+    radial = normalize(state["position"])
+    state["position"] = scale(radial, RADIUS + height)
+    look_up(0.0)
+
+
+def lift_ship(height):
+    """The ship `height` metres above the sea, where it is, at rest in the air with assist on."""
+    ship = state["ship"]
+    ship.position = scale(normalize(ship.position), RADIUS + height)
+    ship.velocity = (0.0, 0.0, 0.0)
+    state["position"] = ship.position
+
+
 def mid_reentry():
     """The ship 17 km above the blocks at 640 m/s eastwards, 8 degrees
     below level, its nose along its path: in the reentry glow."""
@@ -1437,6 +1467,10 @@ class CaptureTour:
         ("preset_2_twilight", 2, False, 0, None, (-3.0, 90.0)),
         ("orbit_from_afar", 9, False, 0, None, DAY_SUN, lambda: teleport(4)),
         ("reentry", 9, False, 0, None, DAY_SUN, mid_reentry),
+        ("clouds_terminator", 3, False, 0, None, (0.0, 200.0)),
+        ("clouds_below_sunset", 1, False, 0, None, (4.0, 45.0), lambda: look_up(25.0)),
+        ("clouds_inside", 2, False, 0, None, DAY_SUN, overcast, lambda: lift_camera(2_500.0)),
+        ("clouds_cockpit_inside", 8, False, 0, None, DAY_SUN, overcast, lambda: lift_ship(2_500.0)),
         ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
         ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
         ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),
@@ -1462,6 +1496,8 @@ class CaptureTour:
                 change_terrain(*change)
             state["sun_elevation"], state["sun_azimuth"] = sun
             upload_sky()
+            state["cloud_coverage"], state["cloud_wind"] = CLOUD_COVERAGE, (0.0, 0.0, 0.0)
+            upload_clouds()
             teleport(preset)
             set_wireframe(wireframe)
             set_colour_mode(colour_mode)

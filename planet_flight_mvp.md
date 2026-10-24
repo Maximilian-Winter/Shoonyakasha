@@ -856,6 +856,7 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 - WP14d: From everywhere.
   - Seen from orbit (the shell's tops lit, the terminator), from inside (flying through: fog in the cockpit), and from below at sunset (lit from underneath).
   - The capture tour gains these views.
+  - As built: the capture tour gains the clouds at the terminator from 50 km, from below at a low sun, from inside an overcast layer with the free camera and from the cockpit; each shot starts from the default cover and wind. Inside the layer the fog was a dark blue-grey (only the sky's light reached the depths), so 5 % of the sunlight above the clouds now lights them from all around; inside it is a bright grey. Clouds a little past the terminator stay lit, as they should: from 3.5 km the horizon dips 15° on this planet.
 - Done: clouds that look right from the ground, inside them, and from orbit, within the frame budget.
 
 **WP15: A moon**

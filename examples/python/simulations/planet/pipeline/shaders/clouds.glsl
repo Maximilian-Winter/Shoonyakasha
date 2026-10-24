@@ -17,6 +17,7 @@ const float CLOUD_MAX_LENGTH = 50000.0;     // metres of the shell marched at mo
 const int CLOUD_SUN_STEPS = 4;              // towards the sun, each twice the last
 const float CLOUD_SUN_FIRST = 80.0;         // metres: the first of them (the four reach 1.2 km)
 const int CLOUD_OCTAVES = 4;                // of multiple scattering
+const float CLOUD_AMBIENT_SUN = 0.05;       // the sunlight scattered through the layer from everywhere, per sr
 
 float cloudHeightFraction(vec3 p) {
     return (length(p) - atmosphere.radii.x - clouds.layer.x) / (clouds.layer.y - clouds.layer.x);
@@ -115,7 +116,9 @@ void cloudShell(vec3 ro, vec3 rd, float tMax, out vec2 a, out vec2 b) {
 // banding into noise. The sunlight inside the clouds stands for light
 // scattered many times by CLOUD_OCTAVES octaves, each with 0.3 times the
 // extinction, half the phase function's anisotropy and half the weight of
-// the last.
+// the last. Light from all around adds the sky's and CLOUD_AMBIENT_SUN of
+// the sunlight above the clouds (scattered through the whole layer, it
+// lights even their depths), both brighter towards the layer's top.
 vec4 marchClouds(vec3 ro, vec3 rd, float tMax, float jitter, out float distance) {
     distance = 0.0;
     vec2 a, b;
@@ -159,8 +162,10 @@ vec4 marchClouds(vec3 ro, vec3 rd, float tMax, float jitter, out float distance)
             octavePhase *= 0.5;
         }
         vec3 radial = normalize(p);
-        vec3 lit = sunlightAt(p) * scattered
-                 + skylightAt(p, radial) / ATMOSPHERE_PI * (0.4 + 0.6 * cloudHeightFraction(p));
+        float height = cloudHeightFraction(p);
+        vec3 sunlight = sunlightAt(p);
+        vec3 lit = sunlight * scattered
+                 + (skylightAt(p, radial) / ATMOSPHERE_PI + sunlight * CLOUD_AMBIENT_SUN) * (0.4 + 0.6 * height);
         float stepTransmittance = exp(-sigma * dt);
         float added = transmittance * (1.0 - stepTransmittance);
         light += lit * added;
