@@ -13,7 +13,8 @@
     "chunkVertex": {
       "attributes": [
         { "name": "positionU", "type": "vec4", "location": 0 },
-        { "name": "normalV", "type": "vec4", "location": 1 }
+        { "name": "normalV", "type": "vec4", "location": 1 },
+        { "name": "radialHeight", "type": "vec4", "location": 2 }
       ]
     }
   },
@@ -28,6 +29,25 @@
         { "name": "sunDirection", "type": "vec4", "source": "scene.custom.planet.sunDirection" }
       ]
     },
+    "TerrainParams": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "continent", "type": "vec4", "source": "scene.custom.planet.terrain.continent",
+          "default": [ 1.5, 0.6, 0.05, 800.0 ] },
+        { "name": "mountains", "type": "vec4", "source": "scene.custom.planet.terrain.mountains",
+          "default": [ 6.0, 3000.0, 2.0, 8.0 ] },
+        { "name": "hills", "type": "vec4", "source": "scene.custom.planet.terrain.hills",
+          "default": [ 40.0, 150.0, 1500.0, 6.0 ] },
+        { "name": "seed", "type": "vec4", "source": "scene.custom.planet.terrain.seed",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "site", "type": "vec4", "source": "scene.custom.planet.terrain.site",
+          "default": [ 0.0, 0.0, 1.0, 0.0 ] },
+        { "name": "siteShape", "type": "vec4", "source": "scene.custom.planet.terrain.siteShape",
+          "default": [ 150.0, 600.0, 100000.0, 0.0 ] }
+      ]
+    },
     "ChunkJobs": {
       "usage": "uniform_buffer",
       "packing": "std140",
@@ -35,6 +55,7 @@
       "fields": [
         { "name": "jobA", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobA[i]" },
         { "name": "jobB", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobB[i]" },
+        { "name": "probe", "type": "vec4", "arrayCount": 4, "source": "scene.custom.planet.probe[i]" },
         { "name": "jobCount", "type": "uint", "source": "scene.custom.planet.jobCount", "default": 0 },
         { "name": "radius", "type": "float", "source": "scene.custom.planet.radius" }
       ]
@@ -45,9 +66,24 @@
       "elementCount": 731136,
       "fields": [
         { "name": "positionU", "type": "vec4" },
-        { "name": "normalV", "type": "vec4" }
+        { "name": "normalV", "type": "vec4" },
+        { "name": "radialHeight", "type": "vec4" }
       ],
       "target": { "name": "ChunkPool", "readback": { "frequency": "manual" } }
+    },
+    "ChunkHeights": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 2048,
+      "fields": [ { "name": "lowHighStamp", "type": "vec4" } ],
+      "target": { "name": "ChunkHeights", "readback": { "frequency": "per_frame" } }
+    },
+    "ProbeHeights": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 4,
+      "fields": [ { "name": "height", "type": "vec4" } ],
+      "target": { "name": "ProbeHeights", "readback": { "frequency": "per_frame" } }
     },
     "ChunkIndices": {
       "usage": "storage_buffer",
@@ -94,7 +130,9 @@
     "cameraSet": {
       "bindings": [
         { "binding": 0, "type": "uniform_buffer", "stages": [ "vertex", "fragment" ], "name": "CameraUBO",
-          "autoBindBuffer": "CameraUBO" }
+          "autoBindBuffer": "CameraUBO" },
+        { "binding": 1, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "TerrainParams",
+          "autoBindBuffer": "TerrainParams" }
       ]
     },
     "chunkBuildSet": {
@@ -102,7 +140,13 @@
         { "binding": 0, "type": "uniform_buffer", "stages": [ "compute" ], "name": "ChunkJobs",
           "autoBindBuffer": "ChunkJobs" },
         { "binding": 1, "type": "storage_buffer", "stages": [ "compute" ], "name": "ChunkPool",
-          "autoBindBuffer": "ChunkPool" }
+          "autoBindBuffer": "ChunkPool" },
+        { "binding": 2, "type": "uniform_buffer", "stages": [ "compute" ], "name": "TerrainParams",
+          "autoBindBuffer": "TerrainParams" },
+        { "binding": 3, "type": "storage_buffer", "stages": [ "compute" ], "name": "ChunkHeights",
+          "autoBindBuffer": "ChunkHeights" },
+        { "binding": 4, "type": "storage_buffer", "stages": [ "compute" ], "name": "ProbeHeights",
+          "autoBindBuffer": "ProbeHeights" }
       ]
     },
     "chunkInstanceSet": {
@@ -128,7 +172,7 @@
       "execution": {
         "type": "compute_dispatch",
         "workgroupSize": [ 64, 1, 1 ],
-        "dispatch": { "x": 16, "y": 1, "z": 1 }
+        "dispatch": { "x": 17, "y": 1, "z": 1 }
       },
       "pipeline": { "computeShader": "shaders/chunk_build.comp.spv" },
       "descriptorSets": [ "chunkBuildSet" ],

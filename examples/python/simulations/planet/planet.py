@@ -1,24 +1,25 @@
 """
-Shoonyakasha planet: a cube-sphere with quadtree level of detail
+Shoonyakasha planet: procedural terrain on a cube-sphere with quadtree level
+of detail
 
-A sphere of radius 100 km, flown around from a few metres above its surface
+A planet of radius 100 km, flown around from a few metres above its ground
 to thousands of kilometres away. Positions are Python floats (64-bit) with
 the planet's centre at the origin. The engine's camera stays at its own
-origin and only turns; every frame each entity is placed at its position
-minus the camera's, so the GPU sees only small numbers. The projection is
-reverse-Z with an infinite far plane.
+origin and only turns; every frame each chunk and entity is placed at its
+position minus the camera's, so the GPU sees only small numbers. The
+projection is reverse-Z with an infinite far plane.
 
-The sphere is a cube-sphere: six cube faces mapped onto the sphere with
+The planet is a cube-sphere: six cube faces mapped onto the sphere with
 `spherify`, each the root of a quadtree (quadtree.py). Each frame the tree
 picks the chunks to draw, finer near the camera, and up to 16 missing
 chunks, those in view first and nearest first, are built on the GPU into
-slots of a buffer pool (pipeline/shaders/chunk_build.comp). All the drawn
-chunks are one indirect draw call. Every chunk is 16 x 16 quads with its
-vertices relative to its own centre, and skirts along its edges hide the
-cracks between levels. Lines on the
-ground follow the face coordinates, at every power-of-two subdivision of a
-face. A cluster of blocks stands on the +Z face, on a pad 5 cm above the
-ground.
+slots of a buffer pool (pipeline/shaders/chunk_build.comp), raised by the
+terrain function in pipeline/shaders/terrain.glsl. Each chunk's lowest and
+highest heights come back to Python and tighten its node's bounds. All the
+drawn chunks are one indirect draw call. Every chunk is 16 x 16 quads with
+its vertices relative to its own centre, and skirts along its edges hide
+the cracks between levels. A cluster of blocks stands on the +Z face, on a
+pad 5 cm above the ground.
 
 Keys:
     right mouse + move     look around
@@ -28,19 +29,23 @@ Keys:
     mouse wheel            speed factor
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
+    N                      new terrain seed
+    M / J                  mountains higher / lower
+    H / G                  hills higher / lower
     F                      wireframe
-    C                      colour: ground, per face, per level
+    C                      colour: terrain, per face, per level
     K                      freeze the level of detail
     [ / ]                  split factor down / up
     P                      screenshot into planet_captures/
 
     python planet.py --capture DIR     screenshots at the presets, then exit
-    python planet.py --verify          compare the GPU's chunks with cube_sphere.chunk_mesh, then exit
+    python planet.py --verify          check the GPU's chunks against cube_sphere.chunk_mesh, then exit
 """
 
 import argparse
 import math
 import os
+import random
 import time
 
 import numpy as np
@@ -59,27 +64,40 @@ QUADS = 16                       # quads along each side of a chunk
 MAX_LEVEL = 12                   # a level-12 chunk is 38 m across, its quads 2.4 m
 SPLIT_FACTOR = 1.25              # split when nearer than this many chunk edges
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
+HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
+ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
 # The GPU chunk pool; these match pipeline.json and chunk_build.comp.
 SLOTS = 2048                     # chunks the pool holds
 MAX_JOBS = 16                    # chunks BuildChunks builds per frame at most
+PROBES = 4                       # directions BuildChunks evaluates the terrain at
 VERTICES_PER_CHUNK = (QUADS + 1) ** 2 + 4 * (QUADS + 1)
+FLOATS_PER_VERTEX = 12           # position and u, normal and v, direction and height
 DRAWS_OFFSET = 16                # bytes before the draw commands in ChunkDraws: the count, then padding
+# The terrain's parameters (terrain.glsl), the defaults in pipeline.json.
+TERRAIN = {
+    "continent": [1.5, 0.6, 0.05, 800.0],   # frequency, warp, sea level bias, height scale (m)
+    "mountains": [6.0, 3000.0, 2.0, 8.0],   # frequency, height (m), mask frequency, octaves
+    "hills": [40.0, 150.0, 1500.0, 6.0],    # frequency, height (m), ocean depth (m), octaves
+    "seed": [0.0, 0.0, 0.0, 0.0],           # offset added to the noise input
+}
 SITE_FACE = 4                    # +Z
 SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a vertex of every chunk from level 3 down
-GROUND_COLOUR = (0.30, 0.40, 0.27)
+SITE_FLAT_RADIUS = 150.0         # metres of flat pad around the site
+SITE_BLEND_RADIUS = 600.0        # metres from the site where the terrain is its own again
+TERRAIN_COLOUR = (-1.0, 0.0, 0.0)  # tells terrain.frag to colour by height, slope and latitude
 FACE_COLOURS = ((0.62, 0.30, 0.25), (0.25, 0.50, 0.55), (0.55, 0.55, 0.30),
                 (0.40, 0.30, 0.60), (0.30, 0.55, 0.30), (0.60, 0.42, 0.25))
-COLOUR_MODES = ("ground", "face", "level")
+COLOUR_MODES = ("terrain", "face", "level")
 SUN = (0.48, 0.42, 0.77)
 NEAR_PLANE = 0.05
 FOV = 70.0
 LOOK_RADIANS_PER_PIXEL = 0.0025
-MIN_ALTITUDE = 0.3               # the camera stays this far above the sphere
+MIN_ALTITUDE = 0.3               # the camera stays this far above the ground
 
-parser = argparse.ArgumentParser(description="Planet with quadtree level of detail")
+parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
 parser.add_argument("--verify", action="store_true",
-                    help="compare the chunks the GPU built with cube_sphere.chunk_mesh, print the result and exit")
+                    help="check the chunks the GPU built against cube_sphere.chunk_mesh, print the result and exit")
 args = parser.parse_args()
 
 sk.shaders.compile_dir(os.path.join(HERE, "pipeline", "shaders"))
@@ -147,6 +165,10 @@ def level_colour(level):
     return tuple(0.45 + 0.30 * math.cos(2.0 * math.pi * (hue - offset)) for offset in (0.0, 1 / 3, 2 / 3))
 
 
+def distance_text(metres):
+    return "%.1f m" % metres if abs(metres) < 10_000.0 else "%.1f km" % (metres / 1000.0)
+
+
 # ── Meshes ─────────────────────────────────────────────────────────────────
 
 def box():
@@ -165,8 +187,8 @@ def box():
 
 # ── World ──────────────────────────────────────────────────────────────────
 
-# Each block: (entity, position in planet space). Rebased every frame.
-placed = []
+# Each block: (entity, offset in planet space from the site's point on the sphere).
+blocks = []
 state = {
     "camera": None,
     "position": (0.0, 0.0, RADIUS + 5.0),
@@ -179,17 +201,24 @@ state = {
     "frozen": False,
     "frame": 0,
     "frame_ms": 16.0,            # frame time, smoothed
-    "tree": None,
+    "tree": None,                # made once the site's height is known
+    "terrain_version": 0,        # counts terrain changes; probe results carry the version they were made with
+    "ground": None,              # terrain height under the camera, from the probes
+    "site_height": None,         # natural terrain height at the site, the pad's height, from the probes
+    "teleport_when_known": None,  # a preset to jump to again once the site's height is known
+    "terrain": {name: list(value) for name, value in TERRAIN.items()},
 }
 
 
 class ChunkPool:
-    """Slots of the GPU's ChunkPool buffer, and the chunks to build into
-    them this frame."""
+    """Slots of the GPU's ChunkPool buffer, the chunks to build into them
+    this frame, and the built chunks whose heights have not come back yet."""
 
     def __init__(self):
         self.free = list(range(SLOTS - 1, -1, -1))
         self.jobs = []           # (jobA, jobB) per chunk to build this frame
+        self.pending = {}        # slot: (node, stamp) until the slot's heights come back
+        self.stamp = 0
 
     def make(self, node):
         """A slot for `node` with a job to build it, or None when the pool is
@@ -197,20 +226,34 @@ class ChunkPool:
         if not self.free or len(self.jobs) == MAX_JOBS:
             return None
         slot = self.free.pop()
+        self.stamp += 1
         self.jobs.append(((float(node.face), float(node.level), float(node.x), float(node.y)),
-                          (float(slot), SKIRT_FRACTION * node.edge, 0.0, 0.0)))
+                          (float(slot), SKIRT_FRACTION * node.edge, float(self.stamp), 0.0)))
+        self.pending[slot] = (node, float(self.stamp))
         return slot
 
     def release(self, node):
+        self.pending.pop(node.chunk, None)
         self.free.append(node.chunk)
 
-    def submit_jobs(self):
-        """Hand this frame's jobs to BuildChunks and start the next frame's list."""
+    def submit_jobs(self, probe_directions):
+        """Hand this frame's jobs and the probes (direction and a value
+        their results carry back) to BuildChunks, and start the next frame's
+        list."""
         padded = self.jobs + [((0.0,) * 4, (0.0,) * 4)] * (MAX_JOBS - len(self.jobs))
         engine.set_custom_vec4_array("planet.jobA", [a for a, _ in padded])
         engine.set_custom_vec4_array("planet.jobB", [b for _, b in padded])
         engine.set_custom_uint("planet.jobCount", len(self.jobs))
+        engine.set_custom_vec4_array("planet.probe", probe_directions)
         self.jobs = []
+
+    def take_heights(self, heights):
+        """Give each pending node whose job's heights arrived (rows of lowest,
+        highest, stamp per slot) its height range."""
+        for slot, (node, stamp) in list(self.pending.items()):
+            if heights[slot, 2] == stamp:
+                node.set_heights(float(heights[slot, 0]), float(heights[slot, 1]))
+                del self.pending[slot]
 
     @property
     def used(self):
@@ -220,19 +263,32 @@ class ChunkPool:
 pool = ChunkPool()
 
 
+def new_tree():
+    return QuadTree(RADIUS, pool.make, pool.release, max_level=MAX_LEVEL, split_factor=SPLIT_FACTOR,
+                    heights=ROOT_HEIGHTS, height_pad=HEIGHT_PAD)
+
+
 def site_frame():
+    """The site's point on the sphere (height 0), its up, east and north."""
     up = cube_sphere.direction(SITE_FACE, SITE_UV, SITE_UV)
     east, north = local_frame(up)
     return scale(up, RADIUS), up, east, north
 
 
+def site_ground():
+    """The site's point on the ground, once its height is known (else on the sphere)."""
+    origin, up, _, _ = site_frame()
+    return add(origin, scale(up, state["site_height"] or 0.0))
+
+
 def chunk_colour(node):
+    """(r, g, b, grid strength) of a chunk in the current colour mode."""
     mode = COLOUR_MODES[state["colour_mode"]]
     if mode == "face":
-        return FACE_COLOURS[node.face]
+        return FACE_COLOURS[node.face] + (1.0,)
     if mode == "level":
-        return level_colour(node.level)
-    return GROUND_COLOUR
+        return level_colour(node.level) + (1.0,)
+    return TERRAIN_COLOUR + (0.0,)
 
 
 def upload_chunk_indices():
@@ -243,17 +299,28 @@ def upload_chunk_indices():
     engine.set_buffer("ChunkIndices", indices)
 
 
+def upload_terrain():
+    """The terrain's parameters, and the pad around the site once its height is known."""
+    for name, value in state["terrain"].items():
+        engine.set_custom_vec4("planet.terrain." + name, tuple(value))
+    _, up, _, _ = site_frame()
+    known = state["site_height"] is not None
+    engine.set_custom_vec4("planet.terrain.site", up + (state["site_height"] if known else 0.0,))
+    engine.set_custom_vec4("planet.terrain.siteShape",
+                           (SITE_FLAT_RADIUS, SITE_BLEND_RADIUS, RADIUS, 1.0 if known else 0.0))
+
+
 def upload_drawn_chunks():
     """One indexed indirect draw per chunk the tree selected, and each drawn
     slot's centre relative to the camera (subtracted in double) and colour."""
-    selected = state["tree"].selected
+    selected = state["tree"].selected if state["tree"] is not None else []
     camera = state["position"]
     instances = np.zeros((SLOTS, 2, 4), dtype=np.float32)
     commands = np.zeros((len(selected), 5), dtype=np.uint32)
     for row, node in enumerate(selected):
         slot = node.chunk
         instances[slot, 0, :3] = sub(node.centre, camera)
-        instances[slot, 1] = chunk_colour(node) + (1.0,)
+        instances[slot, 1] = chunk_colour(node)
         # indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
         commands[row] = (state["index_count"], 1, 0, slot * VERTICES_PER_CHUNK, slot)
     engine.set_buffer("ChunkInstances", instances)
@@ -262,9 +329,50 @@ def upload_drawn_chunks():
         engine.set_buffer("ChunkDraws", commands, offset=DRAWS_OFFSET)
 
 
+def read_back_heights():
+    """Chunk heights into the tree's nodes, and the probes' heights made
+    with the current terrain version: the ground under the camera, and the
+    site's natural height."""
+    readback = engine.get_readback("ChunkHeights")
+    if readback is not None:
+        pool.take_heights(np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, 4))
+    readback = engine.get_readback("ProbeHeights")
+    if readback is not None:
+        probes = np.frombuffer(readback["data"], dtype=np.float32).reshape(PROBES, 4)
+        version = float(state["terrain_version"])
+        if probes[0, 1] == version:
+            state["ground"] = float(probes[0, 0])
+        if probes[1, 1] == version and state["site_height"] is None:
+            state["site_height"] = float(probes[1, 0])
+
+
+def start_terrain():
+    """Once the site's natural height is known: the pad at that height, and
+    a tree to build the planet with it."""
+    upload_terrain()
+    state["terrain_version"] += 1
+    state["ground"] = None
+    state["tree"] = new_tree()
+
+
+def regenerate():
+    """Apply changed terrain parameters: every chunk is released, the
+    site's height is measured again, and the planet is built again."""
+    if state["tree"] is not None:
+        for node in state["tree"].nodes():
+            if node.chunk is not None:
+                pool.release(node)
+                node.chunk = None
+    state["tree"] = None
+    state["site_height"] = None
+    state["ground"] = None
+    state["terrain_version"] += 1
+    upload_terrain()
+
+
 def build_site():
     """Blocks around the site, in metres east, up and north of it."""
-    origin, up, east, north = site_frame()
+    _, up, east, north = site_frame()
     rotation = euler_from_basis(east, up, scale(north, -1.0))
     positions, normals = box()
     pieces = [
@@ -281,14 +389,14 @@ def build_site():
         engine.scene.set_scale(entity, size)
         engine.scene.set_material_vec4(entity, "baseColorFactor", colour + (1.0,))
         engine.scene.set_material_float(entity, "gridStrength", 0.0)
-        placed.append((entity, add(origin, add(scale(east, e), add(scale(up, u), scale(north, n))))))
+        blocks.append((entity, add(scale(east, e), add(scale(up, u), scale(north, n)))))
 
 
 def build_hud():
     ui = engine.ui
     canvas = ui.create_canvas(reference_size=(1600, 900))
     lines = []
-    for row in range(2):
+    for row in range(3):
         text = ui.create_text(canvas, "", size=22, color=(0.92, 0.92, 0.88, 1.0))
         ui.set_rect(text, anchor_min=(0, 0), anchor_max=(1, 0), pivot=(0, 0),
                     position=(20, 16 + 30 * row), size=(-40, 30))
@@ -299,7 +407,18 @@ def build_hud():
 # ── Camera ─────────────────────────────────────────────────────────────────
 
 def altitude():
+    """Height above the sphere of radius RADIUS (sea level)."""
     return length(state["position"]) - RADIUS
+
+
+def height_above_ground():
+    return altitude() - (state["ground"] or 0.0)
+
+
+def keep_above_ground():
+    floor = RADIUS + (state["ground"] or 0.0) + MIN_ALTITUDE
+    if length(state["position"]) < floor:
+        state["position"] = scale(normalize(state["position"]), floor)
 
 
 def camera_basis():
@@ -330,37 +449,37 @@ def fly(dt):
             move = add(move, direction)
     if length(move) == 0.0:
         return
-    speed = max(altitude(), 2.0) * 0.5 * state["speed_factor"]
+    speed = max(height_above_ground(), 2.0) * 0.5 * state["speed_factor"]
     if engine.input.is_key_down(keys.LEFT_SHIFT):
         speed *= 4.0
     if engine.input.is_key_down(keys.LEFT_CONTROL):
         speed *= 0.25
-    position = add(state["position"], scale(normalize(move), speed * dt))
-    if length(position) < RADIUS + MIN_ALTITUDE:
-        position = scale(normalize(position), RADIUS + MIN_ALTITUDE)
-    state["position"] = position
+    state["position"] = add(state["position"], scale(normalize(move), speed * dt))
     state["speed"] = speed
 
 
 def teleport(preset):
-    origin, up, east, north = site_frame()
+    _, up, east, north = site_frame()
+    ground = site_ground()
+    state["teleport_when_known"] = preset if preset in (1, 2) and state["site_height"] is None else None
     if preset == 1:
         # 5 m up, 25 m south-west of the blocks, looking at them.
-        state["position"] = add(origin, add(scale(up, 5.0), add(scale(east, -18.0), scale(north, -18.0))))
+        state["position"] = add(ground, add(scale(up, 5.0), add(scale(east, -18.0), scale(north, -18.0))))
         state["forward"] = normalize(add(add(scale(east, 1.0), scale(north, 1.0)), scale(up, -0.2)))
     elif preset == 2:
-        state["position"] = add(origin, scale(up, 1_000.0))
+        state["position"] = add(ground, scale(up, 1_000.0))
         state["forward"] = normalize(add(north, scale(up, -0.25)))
     elif preset == 6:
-        # 3 km above the cube corner shared by +X, +Y and +Z, looking down at it.
+        # 8 km above the sphere at the cube corner shared by +X, +Y and +Z, looking down at it.
         corner = normalize((1.0, 1.0, 1.0))
         corner_east, corner_north = local_frame(corner)
-        state["position"] = scale(corner, RADIUS + 3_000.0)
+        state["position"] = scale(corner, RADIUS + 8_000.0)
         state["forward"] = normalize(add(scale(corner, -0.98), scale(corner_north, 0.2)))
     else:
         height = {3: 50_000.0, 4: 1_000_000.0, 5: 5_000_000.0}[preset]
         state["position"] = scale(up, RADIUS + height)
         state["forward"] = normalize(add(scale(up, -0.98), scale(north, 0.2)))
+    state["ground"] = None
 
 
 def in_view(centre, radius):
@@ -381,45 +500,66 @@ def in_view(centre, radius):
 def update_level_of_detail():
     tree = state["tree"]
     state["frame"] += 1
-    if not state["frozen"]:
+    if tree is not None and not state["frozen"]:
         tree.update(state["position"], state["frame"])
         tree.build(MAX_JOBS,
-                   priority=lambda distance, node: (not in_view(node.centre, node.bound_radius), distance))
+                   priority=lambda distance, node: (not in_view(node.bound_centre, node.bound_radius), distance))
         tree.evict(state["frame"])
-    pool.submit_jobs()
+    _, site_up, _, _ = site_frame()
+    version = float(state["terrain_version"])
+    probes = [normalize(state["position"]), site_up] + [(0.0, 1.0, 0.0)] * (PROBES - 2)
+    pool.submit_jobs([tuple(d) + (version,) for d in probes])
 
 
 def frame(dt):
+    read_back_heights()
+    if state["tree"] is None and state["site_height"] is not None:
+        start_terrain()
+        if state["teleport_when_known"]:
+            teleport(state["teleport_when_known"])
+
     if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
         dx, dy = engine.input.get_mouse_delta()
         look(dx, dy)
     state["speed"] = 0.0
     fly(dt)
+    keep_above_ground()
     update_level_of_detail()
 
     # Camera-relative placement: subtract in double, then hand floats over.
     camera = state["position"]
     upload_drawn_chunks()
-    for entity, position in placed:
-        engine.scene.set_position(entity, sub(position, camera))
+    ground = site_ground()
+    for entity, offset in blocks:
+        engine.scene.set_position(entity, sub(add(ground, offset), camera))
     right, up, forward = camera_basis()
     engine.scene.set_rotation(state["camera"], euler_from_basis(right, up, forward))
 
     state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * dt * 1000.0
     if state["hud"] is not None:
-        tree = state["tree"]
-        h = altitude()
-        shown = "%.1f m" % h if h < 10_000.0 else "%.1f km" % (h / 1000.0)
-        cached = sum(1 for node in tree.nodes() if node.chunk is not None)
-        deepest = max(node.level for node in tree.selected)
-        engine.ui.set_text(state["hud"][0], "altitude %s    speed %.0f m/s    speed factor %.2f    frame %.1f ms"
-                           % (shown, state["speed"], state["speed_factor"], state["frame_ms"]))
-        engine.ui.set_text(state["hud"][1], "chunks drawn %d    built %d    missing %d    pool %d / %d    "
-                           "deepest level %d    split factor %.2f%s    colour: %s"
-                           % (len(tree.selected), cached, len(tree.missing), pool.used, SLOTS, deepest,
-                              tree.split_factor, "    LOD FROZEN" if state["frozen"] else "",
-                              COLOUR_MODES[state["colour_mode"]]))
+        update_hud()
     return True
+
+
+def update_hud():
+    tree = state["tree"]
+    if tree is None:
+        return
+    terrain = state["terrain"]
+    cached = sum(1 for node in tree.nodes() if node.chunk is not None)
+    deepest = max(node.level for node in tree.selected)
+    engine.ui.set_text(state["hud"][0], "above ground %s    above sea level %s    speed %.0f m/s    "
+                       "speed factor %.2f    frame %.1f ms"
+                       % (distance_text(height_above_ground()), distance_text(altitude()), state["speed"],
+                          state["speed_factor"], state["frame_ms"]))
+    engine.ui.set_text(state["hud"][1], "chunks drawn %d    built %d    missing %d    pool %d / %d    "
+                       "deepest level %d    split factor %.2f%s    colour: %s"
+                       % (len(tree.selected), cached, len(tree.missing), pool.used, SLOTS, deepest,
+                          tree.split_factor, "    LOD FROZEN" if state["frozen"] else "",
+                          COLOUR_MODES[state["colour_mode"]]))
+    engine.ui.set_text(state["hud"][2], "seed %.1f %.1f %.1f    mountains %.0f m    hills %.0f m"
+                       % (terrain["seed"][0], terrain["seed"][1], terrain["seed"][2],
+                          terrain["mountains"][1], terrain["hills"][1]))
 
 
 def on_init():
@@ -433,8 +573,8 @@ def on_init():
 
     engine.set_custom_vec4("planet.sunDirection", normalize(SUN) + (0.0,))
     engine.set_custom_float("planet.radius", RADIUS)
+    upload_terrain()
     upload_chunk_indices()
-    state["tree"] = QuadTree(RADIUS, pool.make, pool.release, max_level=MAX_LEVEL, split_factor=SPLIT_FACTOR)
     build_site()
     build_hud()
     teleport(1)
@@ -457,19 +597,35 @@ def set_colour_mode(mode):
     state["colour_mode"] = mode
 
 
+def change_terrain(name, index, factor):
+    state["terrain"][name][index] *= factor
+    regenerate()
+
+
 def on_key(key):
     tree = state["tree"]
     if keys.NUM_1 <= key <= keys.NUM_6:
         teleport(key - keys.NUM_0)
+    elif key == keys.N:
+        state["terrain"]["seed"] = [random.uniform(-100.0, 100.0) for _ in range(3)] + [0.0]
+        regenerate()
+    elif key == keys.M:
+        change_terrain("mountains", 1, 1.25)
+    elif key == keys.J:
+        change_terrain("mountains", 1, 1 / 1.25)
+    elif key == keys.H:
+        change_terrain("hills", 1, 1.25)
+    elif key == keys.G:
+        change_terrain("hills", 1, 1 / 1.25)
     elif key == keys.F:
         set_wireframe(not state["wireframe"])
     elif key == keys.C:
         set_colour_mode((state["colour_mode"] + 1) % len(COLOUR_MODES))
     elif key == keys.K:
         state["frozen"] = not state["frozen"]
-    elif key == keys.LEFT_BRACKET:
+    elif key == keys.LEFT_BRACKET and tree is not None:
         tree.split_factor = max(0.5, tree.split_factor / 1.25)
-    elif key == keys.RIGHT_BRACKET:
+    elif key == keys.RIGHT_BRACKET and tree is not None:
         tree.split_factor = min(8.0, tree.split_factor * 1.25)
     elif key == keys.P:
         os.makedirs(CAPTURES, exist_ok=True)
@@ -482,17 +638,23 @@ def on_scroll(x_offset, y_offset):
     state["speed_factor"] = max(0.01, min(100.0, state["speed_factor"] * 1.25 ** y_offset))
 
 
+def settled():
+    """The tree made, no chunks missing, and every built chunk's heights back."""
+    return state["tree"] is not None and not state["tree"].missing and not pool.pending
+
+
 class CaptureTour:
-    """--capture: each shot in turn, a screenshot once no chunks are missing
-    (or after MAX_FRAMES), then exit."""
+    """--capture: each shot in turn, a screenshot once settled (or after
+    MAX_FRAMES), then exit. Waits for the site's height first."""
 
     MIN_FRAMES, MAX_FRAMES = 10, 600
-    # (file name, preset, wireframe, colour mode)
-    SHOTS = [("preset_%d" % p, p, False, 0) for p in range(1, 7)] + [
-        ("preset_1_wireframe_levels", 1, True, 2),
-        ("preset_2_levels", 2, False, 2),
-        ("preset_2_wireframe", 2, True, 0),
-        ("preset_6_wireframe_faces", 6, True, 1),
+    # (file name, preset, wireframe, colour mode, terrain change or None)
+    SHOTS = [("preset_%d" % p, p, False, 0, None) for p in range(1, 7)] + [
+        ("preset_1_wireframe_levels", 1, True, 2, None),
+        ("preset_2_levels", 2, False, 2, None),
+        ("preset_2_wireframe", 2, True, 0, None),
+        ("preset_6_wireframe_faces", 6, True, 1, None),
+        ("preset_3_mountains_higher", 3, False, 0, ("mountains", 1, 1.5)),
     ]
 
     def __init__(self, directory):
@@ -503,20 +665,23 @@ class CaptureTour:
         self.captured = None
 
     def __call__(self, dt):
-        name, preset, wireframe, colour_mode = self.SHOTS[self.shot]
+        if state["site_height"] is None:
+            return True
+        name, preset, wireframe, colour_mode, change = self.SHOTS[self.shot]
         self.frames += 1
         if self.frames == 1:
+            if change is not None:
+                change_terrain(*change)
             teleport(preset)
             set_wireframe(wireframe)
-            if state["colour_mode"] != colour_mode:
-                set_colour_mode(colour_mode)
+            set_colour_mode(colour_mode)
         elif self.captured is None:
-            settled = self.frames >= self.MIN_FRAMES and not state["tree"].missing
-            if settled or self.frames >= self.MAX_FRAMES:
+            done = self.frames >= self.MIN_FRAMES and settled()
+            if done or self.frames >= self.MAX_FRAMES:
                 path = os.path.join(self.directory, name + ".png")
                 ok = engine.capture_screenshot(path)
                 print("[planet] %s after %d frames%s" % (path if ok else "screenshot failed", self.frames,
-                                                         "" if settled else " (not settled)"), flush=True)
+                                                         "" if done else " (not settled)"), flush=True)
                 self.captured = self.frames
         elif self.frames > self.captured + 2:
             self.shot += 1
@@ -528,13 +693,17 @@ class CaptureTour:
 
 
 class Verify:
-    """--verify: at preset 1, once no chunks are missing, read ChunkPool back
-    and compare every built chunk with cube_sphere.chunk_mesh rounded to
-    32-bit floats: positions relative to the chunk's centre, in units in the
-    last place (ULPs) of the chunk's largest coordinate and in metres,
-    directions, and
-    face coordinates. Prints the largest differences and exits with status
-    0 when no position is more than one ULP off, 1 otherwise."""
+    """--verify: at preset 1, once settled, read ChunkPool back and check
+    every built chunk against cube_sphere.chunk_mesh:
+      - directions and face coordinates equal to its, rounded to 32-bit;
+      - positions equal to direction * (radius + height - skirt) - centre
+        worked out from its directions and the GPU's heights, to within one
+        unit in the last place (ULP) of the chunk's largest coordinate;
+      - normals of unit length, on the outer side;
+      - each slot's lowest and highest grid heights in ChunkHeights equal to
+        those of the heights in the pool.
+    Prints the largest differences and exits with status 0 when all hold,
+    1 otherwise."""
 
     MIN_FRAMES, MAX_FRAMES = 10, 1200
     TOLERANCE_ULPS = 1.0
@@ -544,49 +713,62 @@ class Verify:
         self.requested = None
 
     def __call__(self, dt):
+        if state["site_height"] is None:
+            return True
         self.frames += 1
         if self.frames == 1:
             teleport(1)
         elif self.requested is None:
-            if (self.frames >= self.MIN_FRAMES and not state["tree"].missing) or self.frames >= self.MAX_FRAMES:
+            if (self.frames >= self.MIN_FRAMES and settled()) or self.frames >= self.MAX_FRAMES:
                 engine.request_readback("ChunkPool")
                 self.requested = self.frames
         else:
             readback = engine.get_readback("ChunkPool")
             if readback is not None:
-                self.compare(readback)
+                self.check(readback)
         return True
 
-    def compare(self, readback):
-        gpu = np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, VERTICES_PER_CHUNK, 8)
-        worst = {"position (ULPs)": 0.0, "position (m), all levels": 0.0,
-                 "position (m), levels 8 and finer": 0.0, "direction (ULPs)": 0.0, "face uv": 0.0}
+    def check(self, readback):
+        gpu = np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, VERTICES_PER_CHUNK,
+                                                                       FLOATS_PER_VERTEX)
+        heights = np.frombuffer(engine.get_readback("ChunkHeights")["data"], dtype=np.float32).reshape(SLOTS, 4)
+        grid = (QUADS + 1) ** 2
+        worst = {"position (ULPs)": 0.0, "direction (ULPs)": 0.0, "face uv": 0.0,
+                 "normal length - 1": 0.0, "lowest/highest height (m)": 0.0}
+        lowest_normal_dot = 1.0
         chunks = 0
         for node in state["tree"].nodes():
             if node.chunk is None:
                 continue
-            _, positions, normals, uvs, _ = cube_sphere.chunk_mesh(
+            centre, positions, directions, uvs, _ = cube_sphere.chunk_mesh(
                 node.face, node.level, node.x, node.y, QUADS, RADIUS, skirt_depth=SKIRT_FRACTION * node.edge)
             built = gpu[node.chunk]
-            expected = positions.astype(np.float32)
-            metres = float(np.abs(built[:, :3] - positions).max())
-            # One ULP of the chunk's farthest vertex from its centre.
+            height = built[:, 11].astype(np.float64)
+            expected = (positions + directions * height[:, None]).astype(np.float32)
             ulp = float(np.spacing(np.abs(expected).max()))
             worst["position (ULPs)"] = max(worst["position (ULPs)"],
                                            float(np.abs(built[:, :3] - expected).max()) / ulp)
-            worst["position (m), all levels"] = max(worst["position (m), all levels"], metres)
-            if node.level >= 8:
-                worst["position (m), levels 8 and finer"] = max(worst["position (m), levels 8 and finer"], metres)
-            expected = normals.astype(np.float32)
+            expected = directions.astype(np.float32)
             worst["direction (ULPs)"] = max(worst["direction (ULPs)"], float(
-                (np.abs(built[:, 4:7] - expected) / np.spacing(np.abs(expected))).max()))
+                (np.abs(built[:, 8:11] - expected) / np.spacing(np.abs(expected))).max()))
             worst["face uv"] = max(worst["face uv"],
                                    float(np.abs(built[:, [3, 7]] - uvs.astype(np.float32)).max()))
+            normals = built[:, 4:7].astype(np.float64)
+            worst["normal length - 1"] = max(worst["normal length - 1"],
+                                             float(np.abs(np.linalg.norm(normals, axis=1) - 1.0).max()))
+            lowest_normal_dot = min(lowest_normal_dot, float((normals * directions).sum(axis=1).min()))
+            worst["lowest/highest height (m)"] = max(
+                worst["lowest/highest height (m)"],
+                abs(float(heights[node.chunk, 0]) - float(built[:grid, 11].min())),
+                abs(float(heights[node.chunk, 1]) - float(built[:grid, 11].max())))
             chunks += 1
-        print("[planet] verified %d chunks against cube_sphere.chunk_mesh:" % chunks, flush=True)
+        print("[planet] checked %d chunks against cube_sphere.chunk_mesh:" % chunks, flush=True)
         for name, value in worst.items():
             print("[planet]   largest %s difference %.3g" % (name, value), flush=True)
-        ok = chunks > 0 and worst["position (ULPs)"] <= self.TOLERANCE_ULPS
+        print("[planet]   smallest normal . direction %.3f" % lowest_normal_dot, flush=True)
+        ok = (chunks > 0 and worst["position (ULPs)"] <= self.TOLERANCE_ULPS and worst["direction (ULPs)"] == 0
+              and worst["face uv"] == 0 and worst["normal length - 1"] < 1e-5 and lowest_normal_dot > 0.0
+              and worst["lowest/highest height (m)"] == 0)
         os._exit(0 if ok else 1)
 
 

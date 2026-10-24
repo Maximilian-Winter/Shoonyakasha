@@ -732,10 +732,13 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 - Done: same picture as WP3, generated on the GPU, and pool usage shown as a stat.
 
 **WP5: Terrain function**
-- `terrainHeight(dir)` (continents, ridged mountains, hills) in a shared GLSL include.
+- `terrainHeight(dir)` (continents, ridged mountains, hills) in a shared GLSL include, `terrain.glsl`, with 3D gradient noise over integer-hashed lattice points.
 - Colour by height, slope and latitude.
 - Parameters as custom uniforms; `regenerate()` from Python.
-- Per-chunk minH/maxH come back through `request_readback`, to tighten the quadtree's bounding spheres.
+- Per-chunk minH/maxH come back through a per-frame readback (with each job's stamp), to tighten the quadtree's bounding spheres; until then a node uses its parent's range.
+- Normals from the terrain at four points around each vertex along tangents that depend on its direction only, so chunks sharing a vertex agree.
+- Height probes (an extra workgroup of `BuildChunks`, read back every frame, tagged with a terrain version): the ground under the camera (keeps it above the ground, height above ground in the HUD) and the site's natural height.
+- A flat pad around the site (150 m, easing out by 600 m) at the site's natural height; the quadtree starts once that height is known.
 - Done: changing a parameter from Python rebuilds the planet.
 
 **WP6: Atmosphere MVP**

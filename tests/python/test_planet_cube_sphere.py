@@ -238,6 +238,28 @@ class QuadTreeSelection(unittest.TestCase):
         self.run_frames(tuple(c * (RADIUS + past_merge) for c in direction), 3)
         self.assertIn(node, self.tree.selected)
 
+    def test_bounds_hold_the_patch_through_its_height_range(self):
+        node = quadtree.Node(4, 5, 13, 17, RADIUS, -500.0, 3000.0, 0.05)
+        u0, v0, size = cube_sphere.chunk_bounds(5, 13, 17)
+        for su, sv, h in itertools.product((0.0, 0.3, 1.0), (0.0, 0.7, 1.0), (-500.0, 0.0, 3000.0)):
+            d = cube_sphere.direction(4, u0 + su * size, v0 + sv * size)
+            point = tuple(c * (RADIUS + h) for c in d)
+            self.assertLessEqual(math.dist(point, node.bound_centre), node.bound_radius)
+        wide = node.bound_radius
+        node.set_heights(100.0, 140.0)
+        self.assertTrue(node.measured)
+        self.assertLess(node.bound_radius, wide)
+
+    def test_children_start_with_their_parents_height_range(self):
+        self.tree = quadtree.QuadTree(RADIUS, self.chunks.make, self.chunks.release, max_level=self.MAX_LEVEL,
+                                      split_factor=2.0, heights=(-100.0, 900.0))
+        root = self.tree.roots[4]
+        root.set_heights(10.0, 50.0)
+        self.run_frames(self.ground, 1, budget=0)
+        self.assertTrue(root.children)
+        for child in root.children:
+            self.assertEqual((child.low, child.high, child.measured), (10.0, 50.0, False))
+
     def test_unused_subtrees_are_released(self):
         self.run_frames(self.ground, 200)
         self.assertGreater(len(self.chunks.live), 6)

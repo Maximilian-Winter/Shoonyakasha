@@ -14,7 +14,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
 
 struct ChunkInstance {
     vec4 origin;           // xyz: the chunk's centre minus the camera's position
-    vec4 colour;           // rgb: albedo; a: grid strength
+    vec4 colour;           // rgb: albedo, or r < 0 for the terrain's own colours; a: grid strength
 };
 
 layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
@@ -23,10 +23,12 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
 
 layout(location = 0) in vec4 inPositionU;
 layout(location = 1) in vec4 inNormalV;
+layout(location = 2) in vec4 inRadialHeight;
 
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec4 fragColour;
 layout(location = 2) out vec2 fragFaceUv;
+layout(location = 3) out vec4 fragRadialHeight;
 
 void main() {
     ChunkInstance chunk = chunks.instances[gl_InstanceIndex];
@@ -34,5 +36,6 @@ void main() {
     fragNormal = inNormalV.xyz;
     fragColour = chunk.colour;
     fragFaceUv = vec2(inPositionU.w, inNormalV.w);
+    fragRadialHeight = inRadialHeight;
     gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
 }
