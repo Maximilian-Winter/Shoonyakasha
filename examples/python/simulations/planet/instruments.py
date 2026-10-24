@@ -81,7 +81,7 @@ class Instruments:
         ui.set_text(self.heading, "%03d" % (int(round(r["heading"])) % 360))
         ui.set_text(self.status, "THR %3.0f%%  ASSIST %s  WARP x%d%s"
                     % (r["throttle"] * 100.0, "ON" if r["assist"] else "OFF", r["warp"],
-                       "   LANDED" if r["landed"] else ""))
+                       "   " + r["contact"]))
         # The fill spans the bar from its left to the throttle's fraction of its width.
         ui.set_rect(self.throttle, anchor_min=(0, 0), anchor_max=(max(r["throttle"], 0.0), 1), pivot=(0, 0),
                     position=(0, 0), size=(0, 0))

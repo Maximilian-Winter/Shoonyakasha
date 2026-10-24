@@ -66,6 +66,7 @@ Keys:
     python planet.py --capture DIR     screenshots at the presets, then exit
     python planet.py --verify          check the GPU's chunks against cube_sphere.chunk_mesh, then exit
     python planet.py --orbit-check     fly one orbit from preset 9 at 16x, report the drift, then exit
+    python planet.py --landing-check   land the ship on a mountain near the site, report how it stands, then exit
 """
 
 import argparse
@@ -81,6 +82,7 @@ from shoonyakasha import keys
 import cockpit
 import cube_sphere
 import flight
+from ground import GroundPatch, SIZE as PATCH_SIZE
 from instruments import Instruments
 from menu import SettingsMenu
 from quadtree import QuadTree
@@ -99,7 +101,8 @@ ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks a
 # The GPU chunk pool; these match pipeline.json and chunk_build.comp.
 SLOTS = 2048                     # chunks the pool holds
 MAX_JOBS = 16                    # chunks BuildChunks builds per frame at most
-PROBES = 4                       # directions BuildChunks evaluates the terrain at
+PROBES = 32                      # directions BuildChunks evaluates the terrain at
+EXTRA_PROBES = 4                 # the last probes, for directions a check asks for
 VERTICES_PER_CHUNK = (QUADS + 1) ** 2 + 4 * (QUADS + 1)
 FLOATS_PER_VERTEX = 12           # position and u, normal and v, direction and height
 DRAWS_OFFSET = 16                # bytes before the draw commands in ChunkDraws: the count, then padding
@@ -137,8 +140,9 @@ MIN_ALTITUDE = 0.3               # the camera stays this far above the ground
 FLIGHT_STEP = 1.0 / 120.0        # seconds per physics step
 MAX_STEPS_PER_FRAME = 64
 WARPS = (1, 2, 4, 8, 16)         # time warps
-SHIP_CLEARANCE = 2.0             # metres from the ship's centre to the ground it rests on
-GROUND_FRICTION = 0.05           # share of the speed along the ground lost per step while resting on it
+SHIP_CLEARANCE = 2.0             # metres from the ship's centre down to its gear
+SHIP_REACH = 8.0                 # metres from the ship's centre to its farthest contact point
+PATCH_MARGIN = 4.0               # metres the ground patch reaches beyond the ship
 THROTTLE_RATE = 0.5              # throttle per second while W or S is held
 MOUSE_STICK = 0.04               # stick per pixel of mouse movement
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
@@ -149,6 +153,8 @@ parser.add_argument("--verify", action="store_true",
                     help="check the chunks the GPU built against cube_sphere.chunk_mesh, print the result and exit")
 parser.add_argument("--orbit-check", action="store_true",
                     help="fly one orbit from preset 9 at 16x, print how far it drifted and exit")
+parser.add_argument("--landing-check", action="store_true",
+                    help="land the ship on the highest spot found around the site, print how it stands and exit")
 args = parser.parse_args()
 
 sk.shaders.compile_dir(os.path.join(HERE, "pipeline", "shaders"))
@@ -270,13 +276,18 @@ state = {
     "warp": 0,                   # index into WARPS
     "accumulator": 0.0,          # seconds of flight not yet stepped
     "flight_time": 0.0,          # seconds of flight stepped
-    "landed": False,
+    "patch": None,               # the ground patch around the ship (ground.py), from the probes
+    "probe_requests": {},        # stamp: (terrain version, ground patch or None, extra directions) not read back yet
+    "extra_probes": [],          # directions a check asks the terrain's height at
+    "extra_heights": [],         # (direction, height) for the extra probes last read back
+    "probe_latency": 3.0,        # frames from asking for probes to using their heights
     "cockpit": None,
     "instruments": None,
     "menu": None,
     "shown_mode": None,          # the mode show_mode last set up
     "debug_text": True,
     "planet_edit": None,         # terrain parameters the menu changes until Apply
+    "scripted_controls": False,  # the ship's controls are set by a check, not read from the keys
 }
 flight_planet = flight.Planet(radius=RADIUS, scale_height=RAYLEIGH_SCALE_HEIGHT)
 
@@ -426,20 +437,35 @@ def upload_drawn_chunks():
 
 
 def read_back_heights():
-    """Chunk heights into the tree's nodes, and the probes' heights made
-    with the current terrain version: the ground under the camera, and the
-    site's natural height."""
+    """Chunk heights into the tree's nodes, and the probes' heights when
+    they were made with the current terrain version: the ground under the
+    camera, the site's natural height, and the ground patch around the
+    ship. Each probe result carries the stamp of the frame that asked for
+    it, which also gives the probes' latency."""
     readback = engine.get_readback("ChunkHeights")
     if readback is not None:
         pool.take_heights(np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, 4))
     readback = engine.get_readback("ProbeHeights")
-    if readback is not None:
-        probes = np.frombuffer(readback["data"], dtype=np.float32).reshape(PROBES, 4)
-        version = float(state["terrain_version"])
-        if probes[0, 1] == version:
-            state["ground"] = float(probes[0, 0])
-        if probes[1, 1] == version and state["site_height"] is None:
-            state["site_height"] = float(probes[1, 0])
+    if readback is None:
+        return
+    probes = np.frombuffer(readback["data"], dtype=np.float32).reshape(PROBES, 4)
+    stamp = float(probes[0, 1])
+    requests = state["probe_requests"]
+    request = requests.get(stamp)
+    for old in [s for s in requests if s <= stamp]:
+        del requests[old]
+    if request is None or request[0] != state["terrain_version"]:
+        return
+    state["probe_latency"] = state["frame"] + 1 - stamp
+    state["ground"] = float(probes[0, 0])
+    if state["site_height"] is None:
+        state["site_height"] = float(probes[1, 0])
+    _, patch, extra = request
+    if patch is not None:
+        patch.set_heights(probes[2:2 + PATCH_SIZE * PATCH_SIZE, 0])
+        state["patch"] = patch
+    first = PROBES - EXTRA_PROBES
+    state["extra_heights"] = [(d, float(h)) for d, h in zip(extra, probes[first:first + len(extra), 0])]
 
 
 def start_terrain():
@@ -448,6 +474,7 @@ def start_terrain():
     upload_terrain()
     state["terrain_version"] += 1
     state["ground"] = None
+    state["patch"] = None
     state["tree"] = new_tree()
 
 
@@ -462,6 +489,7 @@ def regenerate():
     state["tree"] = None
     state["site_height"] = None
     state["ground"] = None
+    state["patch"] = None
     state["terrain_version"] += 1
     state["planet_edit"] = {name: list(value) for name, value in state["terrain"].items()}
     upload_terrain()
@@ -588,6 +616,7 @@ def teleport(preset):
     ground = site_ground()
     state["teleport_when_known"] = preset if preset in (1, 2, 8) and state["site_height"] is None else None
     state["ground"] = None
+    state["patch"] = None
     if preset in (8, 9):
         place_ship(preset)
         return
@@ -681,16 +710,39 @@ def read_ship_controls(dt):
     controls.vertical = float(down(keys.E)) - float(down(keys.Q))
 
 
+def ground_patch_request(ship):
+    """A ground patch to measure around where the ship will be when its
+    heights come back: ahead along its velocity over the ground by the
+    probes' latency (times the warp), reaching that far again either way
+    beyond the ship's contact points."""
+    radial = normalize(ship.position)
+    along = sub(ship.velocity, scale(radial, dot(ship.velocity, radial)))
+    ahead = state["probe_latency"] * state["frame_ms"] / 1000.0 * WARPS[state["warp"]]
+    half = SHIP_REACH + PATCH_MARGIN + length(along) * ahead
+    return GroundPatch(RADIUS, add(ship.position, scale(along, ahead)), 2.0 * half / (PATCH_SIZE - 1))
+
+
+def ground_under_ship(seconds):
+    """The ground patch's query for the ship's contacts, or None when there
+    is no patch or the ship cannot reach its highest point within `seconds`."""
+    patch, ship = state["patch"], state["ship"]
+    if patch is None:
+        return None
+    clearance = length(ship.position) - RADIUS - patch.highest
+    if clearance > SHIP_REACH + length(ship.velocity) * seconds:
+        return None
+    return patch.query
+
+
 def fly_ship(dt):
-    """Advance the ship by this frame's time (times the warp) in fixed steps,
-    resting it on the ground under it."""
+    """Advance the ship by this frame's time (times the warp) in fixed
+    steps, against the ground patch under it."""
     ship = state["ship"]
     state["accumulator"] += dt * WARPS[state["warp"]]
+    ground = ground_under_ship(state["accumulator"] + FLIGHT_STEP)
     steps = 0
     while state["accumulator"] >= FLIGHT_STEP and steps < MAX_STEPS_PER_FRAME:
-        ship.step(flight_planet, state["controls"], FLIGHT_STEP)
-        if state["ground"] is not None:
-            state["landed"] = ship.rest_on(flight_planet, surface_height(), SHIP_CLEARANCE, GROUND_FRICTION)
+        ship.step(flight_planet, state["controls"], FLIGHT_STEP, ground)
         state["accumulator"] -= FLIGHT_STEP
         state["flight_time"] += FLIGHT_STEP
         steps += 1
@@ -723,10 +775,17 @@ def update_level_of_detail():
         tree.build(MAX_JOBS,
                    priority=lambda distance, node: (not in_view(node.bound_centre, node.bound_radius), distance))
         tree.evict(state["frame"])
+    # The probes: the ground under the camera, the site, and the ground patch around the ship.
     _, site_up, _, _ = site_frame()
-    version = float(state["terrain_version"])
-    probes = [normalize(state["position"]), site_up] + [(0.0, 1.0, 0.0)] * (PROBES - 2)
-    pool.submit_jobs([tuple(d) + (version,) for d in probes])
+    ship = state["ship"]
+    patch = ground_patch_request(ship) if state["mode"] == "ship" and not ship.crashed else None
+    probes = [normalize(state["position"]), site_up] + (patch.directions if patch is not None else [])
+    extra = list(state["extra_probes"][:EXTRA_PROBES])
+    probes += [(0.0, 1.0, 0.0)] * (PROBES - EXTRA_PROBES - len(probes))
+    probes += extra + [(0.0, 1.0, 0.0)] * (EXTRA_PROBES - len(extra))
+    stamp = float(state["frame"])
+    state["probe_requests"][stamp] = (state["terrain_version"], patch, extra)
+    pool.submit_jobs([tuple(d) + (stamp,) for d in probes])
 
 
 def frame(dt):
@@ -737,7 +796,8 @@ def frame(dt):
             teleport(state["teleport_when_known"])
 
     if state["mode"] == "ship":
-        read_ship_controls(dt)
+        if not state["scripted_controls"]:
+            read_ship_controls(dt)
         fly_ship(dt)
     else:
         if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
@@ -804,13 +864,19 @@ def update_cockpit(right, up, forward, view_rotation):
         "throttle": controls.throttle,
         "assist": controls.assist,
         "warp": WARPS[state["warp"]],
-        "landed": state["landed"],
+        "contact": contact_text(ship),
         "periapsis_text": "%11s" % ("below ground" if periapsis < 0.0 else distance_text(periapsis)),
         "apoapsis_text": "%11s" % ("escape" if apoapsis == math.inf else distance_text(apoapsis)),
         "circular": flight.circular_speed(flight_planet, max(altitude(), 0.0)),
         "density": density,
         "dynamic_pressure": 0.5 * density * speed * speed,
     })
+
+
+def contact_text(ship):
+    if ship.crashed:
+        return "CRASHED (8 or 9 for a new ship)"
+    return "LANDED" if ship.on_ground else ""
 
 
 def update_hud():
@@ -833,7 +899,7 @@ def update_hud():
                               climb, distance_text(height_above_ground()), distance_text(altitude()),
                               "below ground" if periapsis < 0.0 else distance_text(periapsis),
                               "escape" if apoapsis == math.inf else distance_text(apoapsis),
-                              WARPS[state["warp"]], "    LANDED" if state["landed"] else "", state["frame_ms"]))
+                              WARPS[state["warp"]], "    " + contact_text(ship), state["frame_ms"]))
     else:
         engine.ui.set_text(state["hud"][0], "CAMERA    above ground %s    above sea level %s    speed %.0f m/s    "
                            "speed factor %.2f    frame %.1f ms"
@@ -881,6 +947,8 @@ def on_init():
         engine.ecs.add_system("PlanetVerify", Verify(), priority=-2)
     elif args.orbit_check:
         engine.ecs.add_system("PlanetOrbitCheck", OrbitCheck(), priority=-2)
+    elif args.landing_check:
+        engine.ecs.add_system("PlanetLandingCheck", LandingCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -1186,6 +1254,158 @@ class Verify:
         ok = (chunks > 0 and worst["position (ULPs)"] <= self.TOLERANCE_ULPS and worst["direction (ULPs)"] == 0
               and worst["face uv"] == 0 and worst["normal length - 1"] < 1e-5 and lowest_normal_dot > 0.0
               and worst["lowest/highest height (m)"] == 0)
+        os._exit(0 if ok else 1)
+
+
+class LandingCheck:
+    """--landing-check: measures the ground 9 km below spots on rings 10 to
+    60 km around the site with the free camera, takes the highest, and
+    brings the ship down onto it from 40 m above with translation assist
+    at a tenth of the full climb rate downwards; once it touches, lets go
+    of the controls for five seconds. Prints the slope there, how far each
+    gear point is below the ground patch's surface, how far the patch's
+    height under the ship is from the probe's, each gear point's height
+    above the terrain probed at its own direction, and the ship's speed.
+    Then a ship coasts straight at the spot from 1.5 km up and 1.5 km
+    away at 400 m/s and 16x warp; prints whether it crashed and how high
+    its centre ended above the ground. Exits with status 0 when the ship
+    stood on its gear (every gear point within 5 cm of both the patch's
+    surface and the terrain), at rest, uncrashed, and the diving ship
+    crashed with its centre at least 1 m above the ground and within reach
+    of it; 1 otherwise."""
+
+    RINGS = (10_000.0, 20_000.0, 35_000.0, 60_000.0)
+    AZIMUTHS = 16
+    FRAMES_PER_SPOT = 8                 # more than the probes' latency
+    GEAR_TOLERANCE = 0.05
+    REST_SECONDS = 5.0
+    TIMEOUT_SECONDS = 90.0
+    DIVE_SPEED = 400.0
+    DIVE_MIN_CENTRE_HEIGHT = 1.0        # m; half the gear's depth below the centre
+
+    def __init__(self):
+        _, up, east, north = site_frame()
+        self.spots = []
+        for ring in self.RINGS:
+            for k in range(self.AZIMUTHS):
+                azimuth = 2.0 * math.pi * k / self.AZIMUTHS
+                level = add(scale(east, math.cos(azimuth)), scale(north, math.sin(azimuth)))
+                self.spots.append(normalize(add(up, scale(level, ring / RADIUS))))
+        self.spot = -1
+        self.frames = 0
+        self.best = None                # (ground height, direction)
+        self.touched = None             # flight time when the ship touched
+        self.diving = None              # flight time when the dive started
+
+    def __call__(self, dt):
+        if state["tree"] is None:
+            return True
+        if self.best is None or self.spot < len(self.spots):
+            return self.search()
+        if self.diving is not None:
+            return self.dive()
+        return self.land()
+
+    def search(self):
+        self.frames += 1
+        if self.spot >= 0 and self.frames < self.FRAMES_PER_SPOT:
+            return True
+        if self.spot >= 0 and state["ground"] is not None:
+            height = state["ground"]
+            if self.best is None or height > self.best[0]:
+                self.best = (height, self.spots[self.spot])
+        self.spot += 1
+        self.frames = 0
+        if self.spot < len(self.spots):
+            state["mode"] = "camera"
+            state["position"] = scale(self.spots[self.spot], RADIUS + 9_000.0)
+            state["ground"] = None
+        else:
+            height, up = self.best
+            east, north = local_frame(up)
+            state["ship"] = flight.Ship(position=scale(up, RADIUS + height + 40.0),
+                                        orientation=flight.quat_from_basis(east, up, scale(north, -1.0)))
+            state["controls"] = flight.Controls(vertical=-0.1, assist=True)
+            state["scripted_controls"] = True
+            state["mode"] = "ship"
+            state["warp"] = 0
+            state["patch"] = None
+            self.start = state["flight_time"]
+            print("[planet] the highest spot found: %.0f m" % height, flush=True)
+        return True
+
+    def land(self):
+        ship = state["ship"]
+        now = state["flight_time"]
+        if self.touched is None and (ship.on_ground or ship.crashed):
+            self.touched = now
+            state["controls"] = flight.Controls(assist=True)
+        if self.touched is not None:
+            q = ship.orientation
+            state["extra_probes"] = [normalize(add(ship.position, flight.quat_rotate(q, arm)))
+                                     for arm in ship.params.gear]
+        if self.touched is not None and now - self.touched >= self.REST_SECONDS or now - self.start > self.TIMEOUT_SECONDS:
+            self.report(ship)
+        return True
+
+    def report(self, ship):
+        patch = state["patch"]
+        ok = patch is not None and not ship.crashed and ship.on_ground
+        if patch is not None:
+            depth, normal = patch.query(ship.position)
+            radial = normalize(ship.position)
+            slope = math.degrees(math.acos(max(-1.0, min(1.0, dot(normal, radial)))))
+            patch_height = length(ship.position) - RADIUS + depth / dot(radial, normal)
+            q = ship.orientation
+            gear = [patch.query(add(ship.position, flight.quat_rotate(q, arm)))[0] for arm in ship.params.gear]
+            print("[planet] on a %.1f degree slope at %.0f m:" % (slope, patch_height), flush=True)
+            print("[planet]   gear points below the surface: %s m" % ", ".join("%+.3f" % d for d in gear),
+                  flush=True)
+            print("[planet]   patch height under the ship minus the probe's: %+.3f m"
+                  % (patch_height - (state["ground"] or 0.0)), flush=True)
+            # Each gear point's height above the terrain itself, measured at its direction.
+            terrain = [length(add(ship.position, flight.quat_rotate(q, arm))) - RADIUS - max(h, 0.0)
+                       for arm, (_, h) in zip(ship.params.gear, state["extra_heights"])]
+            print("[planet]   gear points above the terrain at their directions: %s m"
+                  % ", ".join("%+.3f" % d for d in terrain), flush=True)
+            ok = (ok and max(abs(d) for d in gear) <= self.GEAR_TOLERANCE and len(terrain) == len(gear)
+                  and max(abs(d) for d in terrain) <= self.GEAR_TOLERANCE)
+        speed = length(ship.velocity)
+        print("[planet]   speed %.4f m/s, %s, touched %s s after the start"
+              % (speed, contact_text(ship) or "in the air",
+                 "never" if self.touched is None else "%.1f" % (self.touched - self.start)), flush=True)
+        self.landed_ok = ok and speed < 0.05
+        self.start_dive()
+
+    def start_dive(self):
+        """A ship 1.5 km above the spot and 1.5 km south of it, coasting
+        straight at it at DIVE_SPEED, at the highest warp."""
+        height, up = self.best
+        east, north = local_frame(up)
+        target = scale(up, RADIUS + height)
+        position = add(target, add(scale(up, 1_500.0), scale(north, -1_500.0)))
+        state["ship"] = flight.Ship(position=position,
+                                    velocity=scale(normalize(sub(target, position)), self.DIVE_SPEED),
+                                    orientation=flight.quat_from_basis(east, up, scale(north, -1.0)))
+        state["controls"] = flight.Controls(assist=False)
+        state["warp"] = len(WARPS) - 1
+        state["patch"] = None
+        state["extra_probes"] = []
+        self.diving = state["flight_time"]
+        self.crash_frames = 0
+
+    def dive(self):
+        ship = state["ship"]
+        if ship.crashed:
+            self.crash_frames += 1
+            state["warp"] = 0
+        if self.crash_frames < self.FRAMES_PER_SPOT and state["flight_time"] - self.diving < self.TIMEOUT_SECONDS:
+            return True
+        above = height_above_ground()
+        print("[planet] a dive at %.0f m/s and x%d warp: %s, the centre %.2f m above the ground, impact %.0f m/s"
+              % (self.DIVE_SPEED, WARPS[-1], "crashed" if ship.crashed else "not crashed", above,
+                 ship.impact_speed), flush=True)
+        ok = self.landed_ok and ship.crashed and self.DIVE_MIN_CENTRE_HEIGHT < above < SHIP_REACH + 2.0
         os._exit(0 if ok else 1)
 
 

@@ -188,16 +188,109 @@ class Assist(unittest.TestCase):
         self.assertGreater(forward[2], 0.05)        # towards +Z, the ship's up
 
 
+def level_ground(planet):
+    """The sphere of the planet's radius as the ground."""
+    def query(point):
+        r = flight.length(point)
+        return planet.radius - r, flight.scale(point, 1.0 / r)
+    return query
+
+
+def sloping_ground(planet, degrees):
+    """A plane through the +Z pole on the sphere, tilted `degrees` about the
+    Y axis, so it falls away towards -X."""
+    a = math.radians(degrees)
+    normal = (math.sin(a), 0.0, math.cos(a))
+    anchor = (0.0, 0.0, planet.radius)
+    return normal, lambda point: (flight.dot(flight.sub(anchor, point), normal), normal)
+
+
+def fly_over(ship, planet, controls, seconds, ground):
+    for _ in range(int(round(seconds / DT))):
+        ship.step(planet, controls, DT, ground)
+
+
+GEAR_HEIGHT = 2.0       # the gear points' distance below the ship's centre
+
+
 class Ground(unittest.TestCase):
-    def test_a_ship_rests_on_the_ground_and_stops(self):
+    def test_a_ship_dropped_onto_level_ground_settles_on_its_gear(self):
         planet = flight.Planet()
-        ship = level_ship(10.0, planet, speed=5.0)
-        coast = flight.Controls(assist=False)
-        for _ in range(int(10 / DT)):
-            ship.step(planet, coast, DT)
-            ship.rest_on(planet, ground=0.0, clearance=2.0, friction=0.05)
-        self.assertAlmostEqual(flight.length(ship.position) - planet.radius, 2.0, delta=0.01)
-        self.assertLess(flight.length(ship.velocity), 0.1)
+        ship = level_ship(GEAR_HEIGHT + 3.0, planet)
+        fly_over(ship, planet, flight.Controls(assist=False), 10.0, level_ground(planet))
+        self.assertFalse(ship.crashed)
+        self.assertTrue(ship.on_ground)
+        self.assertAlmostEqual(flight.length(ship.position) - planet.radius, GEAR_HEIGHT, delta=0.02)
+        self.assertLess(flight.length(ship.velocity), 0.02)
+        self.assertLess(max(abs(w) for w in ship.angular_velocity), 0.01)
+
+    def test_a_ship_sliding_along_the_ground_stops(self):
+        planet = flight.Planet()
+        ship = level_ship(GEAR_HEIGHT, planet, speed=20.0)
+        fly_over(ship, planet, flight.Controls(assist=False), 10.0, level_ground(planet))
+        self.assertFalse(ship.crashed)
+        self.assertLess(flight.length(ship.velocity), 0.02)
+        self.assertAlmostEqual(flight.length(ship.position) - planet.radius, GEAR_HEIGHT, delta=0.02)
+
+    def test_on_a_slope_it_turns_onto_its_gear_and_holds(self):
+        planet = flight.Planet()
+        normal, slope = sloping_ground(planet, 20.0)
+        ship = level_ship(GEAR_HEIGHT + 1.5, planet)
+        fly_over(ship, planet, flight.Controls(assist=False), 10.0, slope)
+        self.assertFalse(ship.crashed)
+        _, up, _ = ship.axes()
+        self.assertGreater(flight.dot(up, normal), 0.999)
+        before = ship.position
+        fly_over(ship, planet, flight.Controls(assist=False), 5.0, slope)
+        self.assertLess(flight.length(flight.sub(ship.position, before)), 0.05)
+        depth, _ = slope(ship.position)
+        self.assertAlmostEqual(-depth, GEAR_HEIGHT, delta=0.03)
+
+    def test_coming_down_slowly_with_assist_lands_and_rests(self):
+        planet = flight.Planet()
+        ship = level_ship(GEAR_HEIGHT + 20.0, planet)
+        fly_over(ship, planet, flight.Controls(vertical=-0.1, assist=True), 15.0, level_ground(planet))
+        fly_over(ship, planet, flight.Controls(assist=True), 5.0, level_ground(planet))
+        self.assertFalse(ship.crashed)
+        self.assertTrue(ship.on_ground)
+        self.assertEqual(ship.thrust, (0.0, 0.0, 0.0))
+        self.assertAlmostEqual(flight.length(ship.position) - planet.radius, GEAR_HEIGHT, delta=0.02)
+
+    def test_thrusting_up_lifts_it_off(self):
+        planet = flight.Planet()
+        ship = level_ship(GEAR_HEIGHT, planet)
+        fly_over(ship, planet, flight.Controls(assist=True), 2.0, level_ground(planet))
+        fly_over(ship, planet, flight.Controls(vertical=0.5, assist=True), 3.0, level_ground(planet))
+        self.assertFalse(ship.on_ground)
+        self.assertGreater(flight.length(ship.position) - planet.radius, GEAR_HEIGHT + 10.0)
+
+    def test_hitting_the_ground_too_fast_crashes_and_stops_the_ship(self):
+        planet = flight.Planet()
+        ship = level_ship(GEAR_HEIGHT + 10.0, planet)
+        ship.velocity = (5.0, 0.0, -20.0)
+        fly_over(ship, planet, flight.Controls(assist=False), 2.0, level_ground(planet))
+        self.assertTrue(ship.crashed)
+        self.assertGreater(ship.impact_speed, ship.params.gear_crash_speed)
+        where = ship.position
+        fly_over(ship, planet, flight.Controls(throttle=1.0, assist=False), 1.0, level_ground(planet))
+        self.assertEqual(ship.position, where)
+        self.assertGreater(flight.length(ship.position) - planet.radius, 0.0)
+
+    def test_the_hull_crashes_at_a_lower_speed_than_the_gear(self):
+        planet = flight.Planet()
+        ship = level_ship(1.5 + 2.0, planet)            # upside down: the roof 1.5 m above the centre, 2 m up
+        ship.orientation = flight.quat_multiply(ship.orientation, (0.0, 0.0, 0.0, 1.0))   # rolled 180 degrees
+        fly_over(ship, planet, flight.Controls(assist=False), 2.0, level_ground(planet))
+        self.assertTrue(ship.crashed)
+        self.assertLess(ship.impact_speed, ship.params.gear_crash_speed)
+
+    def test_a_fast_ship_does_not_pass_through_the_ground_in_one_step(self):
+        planet = flight.Planet(density_factor=0.0)
+        ship = level_ship(GEAR_HEIGHT + 0.5, planet)
+        ship.velocity = (0.0, 0.0, -3_000.0)            # 25 m per step
+        fly_over(ship, planet, flight.Controls(assist=False), 0.1, level_ground(planet))
+        self.assertTrue(ship.crashed)
+        self.assertGreater(flight.length(ship.position) - planet.radius, 0.0)
 
 
 if __name__ == "__main__":

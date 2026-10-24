@@ -20,6 +20,24 @@ a forward speed and the vertical thrusters for a climb rate; the
 thrusters push towards that velocity and hold the ship against gravity,
 drag and lift. With it off, the throttle drives the main engine and the
 vertical thrusters push up or down.
+
+Ground contact: the ship's shape is a few points in its body, the landing
+gear and the hull (nose, tail, wing tips, roof). `Ship.step` takes a
+`ground` function that gives, for a point in the world, how far it is
+below the surface along the surface's normal, and that normal. Each step,
+the points that touch the surface or would reach it within the step get
+impulses along the normal, which stop them moving into it and push them
+out of it, and friction impulses along it, up to `friction` times the
+normal impulse; both turn the ship as well as move it, so it settles on
+its gear on a slope. They are solved together over a few iterations, with
+the impulses summed per point. A point reaching the surface faster than
+its limit (the gear's, or the hull's) crashes the ship: it stops where it
+is and no longer flies.
+
+When its gear touches the surface with the throttle at zero, no upward
+thrust and the stick let go, the ship rests: no thrust and no torque, so
+it settles on the ground under gravity. It rests until one of those
+controls moves.
 """
 
 import math
@@ -72,6 +90,11 @@ def quat_rotate(q, v):
     u = (x, y, z)
     t = scale(cross(u, v), 2.0)
     return add(add(v, scale(t, w)), cross(u, t))
+
+
+def quat_conjugate(q):
+    """The inverse of the unit quaternion `q`."""
+    return (q[0], -q[1], -q[2], -q[3])
 
 
 def quat_normalize(q):
@@ -138,6 +161,18 @@ class ShipParams:
     assist_max_speed: float = 1_500.0                   # m/s forward at full throttle, assisted
     assist_climb_rate: float = 60.0                     # m/s up at full vertical stick, assisted
     assist_gain: float = 1.5                            # 1/s
+    # Contact points in the body (right, up, back), metres from the centre.
+    gear: tuple = ((0.0, -2.0, -4.0), (-2.5, -2.0, 2.5), (2.5, -2.0, 2.5))
+    hull: tuple = ((0.0, -0.5, -7.0), (0.0, 0.0, 6.0), (-6.0, -0.8, 2.5), (6.0, -0.8, 2.5), (0.0, 1.5, 0.0))
+    gear_crash_speed: float = 10.0                      # m/s into the surface
+    hull_crash_speed: float = 3.0                       # m/s into the surface
+    friction: float = 0.6                               # friction impulse per normal impulse, at most
+
+
+CONTACT_ITERATIONS = 8
+CONTACT_STIFFNESS = 0.2         # share of a point's depth pushed out per step
+CONTACT_SLOP = 0.01             # m of depth left alone
+GEAR_TOUCH = 0.05               # m: a gear point this close to the surface touches it
 
 
 @dataclass
@@ -158,6 +193,10 @@ class Ship:
     angular_velocity: tuple = (0.0, 0.0, 0.0)       # rad/s, in the body
     params: ShipParams = field(default_factory=ShipParams)
     thrust: tuple = (0.0, 0.0, 0.0)                 # N, in the body, the last step's
+    on_ground: bool = False                         # a gear point touched the surface in the last step
+    resting: bool = False                           # thrusters and torque off until the controls move
+    crashed: bool = False
+    impact_speed: float = 0.0                       # m/s, the fastest a point reached the surface at in the last step
 
     def axes(self):
         """(right, up, forward) in the world."""
@@ -194,48 +233,130 @@ class Ship:
                 max(-p.rcs_thrust, min(p.rcs_thrust, body[1])),
                 max(-p.main_thrust, min(p.rcs_thrust, body[2])))
 
-    def step(self, planet, controls, dt):
+    @staticmethod
+    def idle(controls):
+        """The throttle at zero, no upward thrust and the stick let go."""
+        return (controls.throttle == 0.0 and controls.vertical <= 0.0
+                and controls.pitch == 0.0 and controls.yaw == 0.0 and controls.roll == 0.0)
+
+    def step(self, planet, controls, dt, ground=None):
+        """Advance by `dt` seconds; `ground(point)` gives (depth, normal) of
+        the surface under a world point, or None where it is not known."""
+        if self.crashed:
+            return
         p = self.params
+        if not self.idle(controls):
+            self.resting = False
+        elif self.on_ground:
+            self.resting = True
+        resting = self.resting
         gravity = planet.gravity(self.position)
         aero = self.aerodynamic_force(planet)
-        self.thrust = self._thrust(planet, controls, gravity, aero)
+        self.thrust = (0.0, 0.0, 0.0) if resting else self._thrust(planet, controls, gravity, aero)
         right, up, forward = self.axes()
         thrust_world = add(add(scale(right, self.thrust[0]), scale(up, self.thrust[1])),
                            scale(forward, -self.thrust[2]))
         accel = add(gravity, scale(add(thrust_world, aero), 1.0 / p.mass))
         self.velocity = add(self.velocity, scale(accel, dt))
+        self._spin(controls, dt, resting)
+        self.on_ground = False
+        if ground is not None:
+            self._contact(ground, dt)
+            if self.crashed:
+                return
         self.position = add(self.position, scale(self.velocity, dt))
-        self._rotate(controls, dt)
+        w = self.angular_velocity
+        dq = quat_multiply(self.orientation, (0.0, w[0], w[1], w[2]))
+        self.orientation = quat_normalize(tuple(self.orientation[i] + 0.5 * dt * dq[i] for i in range(4)))
 
-    def _rotate(self, controls, dt):
+    def _spin(self, controls, dt, resting):
+        """The angular velocity after this step's torque."""
         p = self.params
         wanted = (controls.pitch * p.max_rates[0], -controls.yaw * p.max_rates[1], -controls.roll * p.max_rates[2])
         w = self.angular_velocity
         inertia = p.inertia
-        torque = tuple(max(-p.max_torque, min(p.max_torque, inertia[i] * (wanted[i] - w[i]) * p.rotation_gain))
-                       for i in range(3))
+        torque = (0.0, 0.0, 0.0) if resting else tuple(
+            max(-p.max_torque, min(p.max_torque, inertia[i] * (wanted[i] - w[i]) * p.rotation_gain))
+            for i in range(3))
         spin = cross(w, tuple(inertia[i] * w[i] for i in range(3)))   # the gyroscopic term, w x (I w)
-        w = tuple(w[i] + (torque[i] - spin[i]) / inertia[i] * dt for i in range(3))
-        self.angular_velocity = w
-        dq = quat_multiply(self.orientation, (0.0, w[0], w[1], w[2]))
-        self.orientation = quat_normalize(tuple(self.orientation[i] + 0.5 * dt * dq[i] for i in range(4)))
+        self.angular_velocity = tuple(w[i] + (torque[i] - spin[i]) / inertia[i] * dt for i in range(3))
 
-    def rest_on(self, planet, ground, clearance, friction):
-        """Keep the ship `clearance` metres above a surface `ground` metres
-        above the radius: on touching it, stop falling into it, and lose
-        `friction` of the speed along it. Returns whether it touches."""
-        r = length(self.position)
-        floor = planet.radius + ground + clearance
-        if r >= floor:
-            return False
-        radial = scale(self.position, 1.0 / r)
-        self.position = scale(radial, floor)
-        into = dot(self.velocity, radial)
-        if into < 0.0:
-            self.velocity = sub(self.velocity, scale(radial, into))
-        along = sub(self.velocity, scale(radial, dot(self.velocity, radial)))
-        self.velocity = sub(self.velocity, scale(along, friction))
-        return True
+    # ── Contacts ──
+
+    def _point_velocity(self, arm_body):
+        """World velocity of the body point at `arm_body` from the centre."""
+        return add(self.velocity, quat_rotate(self.orientation, cross(self.angular_velocity, arm_body)))
+
+    def _inverse_mass_along(self, arm_body, direction_body):
+        """1 / (the mass an impulse along `direction_body` at `arm_body` meets)."""
+        arm_cross = cross(arm_body, direction_body)
+        inertia = self.params.inertia
+        return 1.0 / self.params.mass + sum(arm_cross[i] * arm_cross[i] / inertia[i] for i in range(3))
+
+    def _apply_impulse(self, arm_body, impulse_world):
+        q = self.orientation
+        self.velocity = add(self.velocity, scale(impulse_world, 1.0 / self.params.mass))
+        impulse_body = quat_rotate(quat_conjugate(q), impulse_world)
+        turn = cross(arm_body, impulse_body)
+        inertia = self.params.inertia
+        self.angular_velocity = tuple(self.angular_velocity[i] + turn[i] / inertia[i] for i in range(3))
+
+    def _contact(self, ground, dt):
+        p = self.params
+        q = self.orientation
+        inverse = quat_conjugate(q)
+        contacts = []
+        self.impact_speed = 0.0
+        for arm, is_gear in [(a, True) for a in p.gear] + [(a, False) for a in p.hull]:
+            hit = ground(add(self.position, quat_rotate(q, arm)))
+            if hit is None:
+                continue
+            depth, normal = hit
+            approach = -dot(self._point_velocity(arm), normal)
+            if depth + max(approach, 0.0) * dt <= 0.0:
+                continue                         # stays clear of the surface this step
+            if is_gear and depth > -GEAR_TOUCH:
+                self.on_ground = True
+            if approach > 0.0:
+                self.impact_speed = max(self.impact_speed, approach)
+                if approach > (p.gear_crash_speed if is_gear else p.hull_crash_speed):
+                    self.crashed = True
+            if depth > CONTACT_SLOP:
+                target = CONTACT_STIFFNESS * (depth - CONTACT_SLOP) / dt
+            elif depth < 0.0:
+                target = depth / dt              # may close the gap within the step, no faster
+            else:
+                target = 0.0
+            normal_body = quat_rotate(inverse, normal)
+            contacts.append({"arm": arm, "normal": normal, "target": target,
+                             "mass": 1.0 / self._inverse_mass_along(arm, normal_body),
+                             "normal_impulse": 0.0, "friction_impulse": (0.0, 0.0, 0.0)})
+        if self.crashed:
+            self.velocity = (0.0, 0.0, 0.0)
+            self.angular_velocity = (0.0, 0.0, 0.0)
+            return
+        for _ in range(CONTACT_ITERATIONS):
+            for c in contacts:
+                arm, normal = c["arm"], c["normal"]
+                along = dot(self._point_velocity(arm), normal)
+                total = max(c["normal_impulse"] + (c["target"] - along) * c["mass"], 0.0)
+                self._apply_impulse(arm, scale(normal, total - c["normal_impulse"]))
+                c["normal_impulse"] = total
+
+                v = self._point_velocity(arm)
+                sliding = sub(v, scale(normal, dot(v, normal)))
+                speed = length(sliding)
+                if speed < 1e-9:
+                    continue
+                direction = scale(sliding, 1.0 / speed)
+                mass = 1.0 / self._inverse_mass_along(arm, quat_rotate(inverse, direction))
+                friction = sub(c["friction_impulse"], scale(direction, speed * mass))
+                limit = p.friction * c["normal_impulse"]
+                size = length(friction)
+                if size > limit:
+                    friction = scale(friction, limit / size)
+                self._apply_impulse(arm, sub(friction, c["friction_impulse"]))
+                c["friction_impulse"] = friction
 
 
 def orbit(planet, position, velocity):

@@ -775,7 +775,22 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 **WP10: Collision**
 - A GPU height query (compute plus readback) with probe points ahead along the velocity to cover the readback delay.
 - Simple contact response.
+- Starting point: `BuildChunks` already evaluates the terrain at 4 probe directions per frame (read back per frame, tagged with the terrain version), and `Ship.rest_on` keeps the ship above the one probe under it. What is missing:
+  - probes ahead along the velocity (as far as the ship travels in the readback delay, about 3 frames, times the time warp), so a fast ship does not sink into a slope it flies into;
+  - the ground's normal from probes around the contact point, for the contact response (now straight up from the planet's centre);
+  - a contact response along that normal, with friction, and a touchdown speed limit above which the ship is crashed (shown on the HUD, reset with a preset);
+  - the ship's shape as a few contact points (gear, nose, wing tips) instead of one, so it can sit on a slope.
+- As built: 32 probes. Each result carries the stamp of the frame that asked for it, which gives the latency (about 3 frames) and the terrain version. 25 of them are a 5 × 5 ground patch (`ground.py`) in the tangent plane, centred ahead by the latency times the frame time and the warp, reaching that far again beyond the ship's 8 m reach plus 4 m; it is interpolated bilinearly, with the sea as a floor. `Ship.step` takes the patch's query and solves 3 gear and 5 hull points with sequential impulses (normal and Coulomb friction, 8 iterations, speculative for points reaching the surface within the step). Crash limits are 10 m/s on the gear and 3 m/s on the hull. On its gear with idle controls the ship rests (no thrust, no torque) until a control moves; otherwise assist would hold it hovering just above a slope.
+- Measured: `--landing-check` lands with assist on the highest of 64 spots around the site (2,478 m, an 11.6° slope); the gear rests 2 to 4 cm above the terrain probed at its own directions, the bilinear patch's error on 6 m cells. A 400 m/s dive at 16× warp crashes with the centre 3.26 m above the ground; with no lookahead it ended at 0.32 m, the hull 2 m into the mountain.
 - Done: land on a mountain without sinking or hovering.
 
 **WP11 and onward: Polish (any order)**
 - Horizon culling, CDLOD morphing, Hillaire LUTs, derivative fBm, reentry effects, clouds, a moon, orbit display.
+- Gathered while building WP1–WP9:
+  - Culling the terrain's chunks against the view and the horizon before the indirect draw (WP4 draws every chunk the tree selects; the engine's per-entity culling no longer applies).
+  - Detail below the terrain's finest noise octave (about 80 m): detail noise in the shaders, or more octaves where the chunks are fine enough.
+  - Water depth per pixel from the depth buffer instead of per vertex (shallow water shows the coarse chunks' facets from far away); rougher water further away, so the sun's glint spreads naturally.
+  - Redder sunsets without a teal sky (multiple scattering, or the Hillaire LUTs above).
+  - Gamepad axes and buttons in the Python bindings, then a gamepad mapping for the ship.
+  - A systematic search for cracks between levels in steep terrain (only stills were inspected).
+  - The terrain's lighting: the sun shadowed by mountains, and the cockpit's interior shadowed by its frame.

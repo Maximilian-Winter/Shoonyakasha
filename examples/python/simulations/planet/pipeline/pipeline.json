@@ -73,7 +73,7 @@
       "fields": [
         { "name": "jobA", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobA[i]" },
         { "name": "jobB", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobB[i]" },
-        { "name": "probe", "type": "vec4", "arrayCount": 4, "source": "scene.custom.planet.probe[i]" },
+        { "name": "probe", "type": "vec4", "arrayCount": 32, "source": "scene.custom.planet.probe[i]" },
         { "name": "jobCount", "type": "uint", "source": "scene.custom.planet.jobCount", "default": 0 },
         { "name": "radius", "type": "float", "source": "scene.custom.planet.radius" }
       ]
@@ -99,7 +99,7 @@
     "ProbeHeights": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 4,
+      "elementCount": 32,
       "fields": [ { "name": "height", "type": "vec4" } ],
       "target": { "name": "ProbeHeights", "readback": { "frequency": "per_frame" } }
     },
