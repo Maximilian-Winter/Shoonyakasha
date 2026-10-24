@@ -122,7 +122,8 @@ MAX_JOBS = 16                    # chunks BuildChunks builds per frame at most
 PROBES = 128                     # directions BuildChunks evaluates the terrain at
 EXTRA_PROBES = 4                 # the last probes, for directions a check asks for
 VERTICES_PER_CHUNK = (QUADS + 1) ** 2 + 4 * (QUADS + 1)
-FLOATS_PER_VERTEX = 12           # position and u, normal and v, direction and height
+FLOATS_PER_VERTEX = 16           # position and u, normal and v, direction and height, horizon and padding
+HORIZON_SUN_STEP = math.radians(0.5)   # the sun's move after which the chunks' horizons are measured again
 DRAWS_OFFSET = 16                # bytes before the draw commands in ChunkDraws: the count, then padding
 # The terrain's parameters (terrain.glsl), the defaults in pipeline.json.
 TERRAIN = {
@@ -306,6 +307,8 @@ state = {
     "ozone": True,               # the ozone layer's absorption
     "orbit_path": True,          # draw the path the ship would coast along
     "shadows": True,             # the sun's shadow cascades
+    "horizon_sun": None,         # the sun's direction the chunks' horizons are measured towards
+    "rebuild": [],               # built chunks still to build again for horizon_sun, nearest last
     "gamepad_held": set(),       # gamepad buttons held last frame
     "reentry_pass": False,       # whether the ReentryGlow pass is enabled
     "multiple_scattering": True,  # light scattered more than once, from the multiple scattering table
@@ -349,11 +352,22 @@ class ChunkPool:
         if not self.free or len(self.jobs) == MAX_JOBS:
             return None
         slot = self.free.pop()
+        self.add_job(node, slot)
+        return slot
+
+    def rebuild(self, node):
+        """A job to build `node` again in its own slot; False when this
+        frame's jobs are taken. The slot keeps its old chunk until then."""
+        if len(self.jobs) == MAX_JOBS:
+            return False
+        self.add_job(node, node.chunk)
+        return True
+
+    def add_job(self, node, slot):
         self.stamp += 1
         self.jobs.append(((float(node.face), float(node.level), float(node.x), float(node.y)),
                           (float(slot), SKIRT_FRACTION * node.edge, float(self.stamp), 0.0)))
         self.pending[slot] = (node, float(self.stamp))
-        return slot
 
     def release(self, node):
         self.pending.pop(node.chunk, None)
@@ -923,6 +937,30 @@ def in_view(centre, radius):
 
 # ── Per frame ──────────────────────────────────────────────────────────────
 
+def rebuild_for_sun(tree):
+    """When the sun has moved more than HORIZON_SUN_STEP from the direction
+    the chunks' horizons were measured towards (chunk_build.comp), measure
+    towards the new one: every built chunk is built again in its own slot,
+    nearest first, in the jobs this frame's new chunks leave over."""
+    sun = sun_direction()
+    if state["horizon_sun"] is None or dot(sun, state["horizon_sun"]) < math.cos(HORIZON_SUN_STEP):
+        state["horizon_sun"] = sun
+        engine.set_custom_vec4("planet.horizonSun", sun + (0.0,))
+        camera = state["position"]
+        built = [node for node in tree.nodes() if node.chunk is not None]
+        built.sort(key=lambda node: length(sub(node.bound_centre, camera)), reverse=True)
+        state["rebuild"] = built                       # popped from the end: nearest first
+    queue = state["rebuild"]
+    while queue:
+        node = queue[-1]
+        if node.chunk is None:
+            queue.pop()                                # released since
+            continue
+        if not pool.rebuild(node):
+            break
+        queue.pop()
+
+
 def update_level_of_detail():
     tree = state["tree"]
     state["frame"] += 1
@@ -931,6 +969,7 @@ def update_level_of_detail():
         tree.build(MAX_JOBS,
                    priority=lambda distance, node: (not in_view(node.bound_centre, node.bound_radius), distance))
         tree.evict(state["frame"])
+        rebuild_for_sun(tree)
     # The probes: the ground under the camera, the site, and the ground patch around the ship.
     _, site_up, _, _ = site_frame()
     ship = state["ship"]
@@ -1287,8 +1326,9 @@ def on_scroll(x_offset, y_offset):
 
 
 def settled():
-    """The tree made, no chunks missing, and every built chunk's heights back."""
-    return state["tree"] is not None and not state["tree"].missing and not pool.pending
+    """The tree made, no chunks missing, none still to build again for the
+    sun, and every built chunk's heights back."""
+    return state["tree"] is not None and not state["tree"].missing and not state["rebuild"] and not pool.pending
 
 
 def mid_reentry():

@@ -1,7 +1,19 @@
 // The sun's shadow at a surface: 1 lit, 0 in shadow. Include after
-// camera.glsl.
+// camera.glsl and atmosphere.glsl.
 //
-// The cascade is the first whose far distance (shadow.splits) is beyond
+// horizonShadow: the shadow of distant terrain, from the sine of the
+// horizon towards the sun's azimuth that chunk_build.comp measured at the
+// vertices (300 m to 40 km away): lit where the sun stands above it,
+// softened over about a degree near the camera and up to about four beyond
+// 60 km, where the vertices are kilometres apart (about a twentieth of
+// their distance) and a sharp edge would follow their triangles.
+
+float horizonShadow(float sinHorizon, vec3 radial, float distance) {
+    float soft = 0.015 + 0.06 * smoothstep(5000.0, 60000.0, distance);
+    return smoothstep(-soft, soft, dot(atmosphere.sun.xyz, radial) - sinHorizon);
+}
+
+// sunShadow: the shadow map's. The cascade is the first whose far distance (shadow.splits) is beyond
 // the point's distance along the view. The point is pushed along its
 // normal by two of that cascade's texels, so a surface does not shadow
 // itself, and compared with the map at nine places a texel apart (each a

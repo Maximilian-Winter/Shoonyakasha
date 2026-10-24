@@ -20,6 +20,7 @@
 
 layout(location = 0) in vec3 fragRadial;
 layout(location = 1) in vec3 fragRelativePos;
+layout(location = 2) in float fragHorizon;
 
 layout(location = 0) out vec4 outColor;
 
@@ -53,7 +54,7 @@ void main() {
     float cosView = max(dot(normal, toCamera), 0.02);
     float fresnel = 0.02 + 0.98 * pow(1.0 - cosView, 5.0);
 
-    vec3 sunlight = sunlightAt(p) * sunShadow(fragRelativePos, radial);
+    vec3 sunlight = sunlightAt(p) * min(sunShadow(fragRelativePos, radial), horizonShadow(fragHorizon, radial, distance));
     vec3 skylight = skylightAt(p, radial);
 
     // Light that enters the water, scattered back out by it, and how much of

@@ -13,6 +13,9 @@
 // centimetre of error at a radius of 100 km. Heights are 32-bit, from
 // terrainHeight (terrain.glsl).
 //
+// Each vertex also holds the sine of the terrain's horizon towards the
+// sun's azimuth (horizonTowardsSun), for shadows beyond the shadow map.
+//
 // Each slot's lowest and highest grid height go to ChunkHeights with the
 // job's stamp. Workgroup MAX_JOBS evaluates the terrain at the probe
 // directions into ProbeHeights, each with the probe's w: probe 1 the
@@ -34,12 +37,14 @@ layout(set = 0, binding = 0) uniform ChunkJobs {
     vec4 probe[PROBES];    // xyz: unit direction; w: copied to the result
     uint jobCount;
     float radius;
+    vec4 horizonSun;       // xyz: unit direction towards the sun the horizons are measured towards
 } jobs;
 
 struct ChunkVertex {
     vec4 positionU;        // xyz: position relative to the chunk's centre; w: face u
     vec4 normalV;          // xyz: surface normal; w: face v
     vec4 radialHeight;     // xyz: direction from the planet's centre; w: height (m)
+    vec4 horizon;          // x: sine of the terrain's horizon towards the sun's azimuth
 };
 
 layout(std430, set = 0, binding = 1) writeonly buffer ChunkPool {
@@ -115,8 +120,41 @@ vec3 surfaceNormal(dvec3 d, double radius, double step) {
     return vec3(normalize(cross(p1 - p3, p2 - p4)));
 }
 
+// The sine of the terrain's horizon seen from the point at direction `d`
+// and height `h`, looking along the ground towards the sun's azimuth
+// (jobs.horizonSun): the highest elevation, above the plane square to `d`,
+// of the terrain at HORIZON_STEPS distances along the great circle that
+// way, spaced evenly in their logarithm from `near` to HORIZON_FAR.
+// Heights below sea level count as sea level, both the point's and the
+// terrain's, so the sea's surface gets its horizon. -1 with the sun
+// overhead, where there is no azimuth.
+const int HORIZON_STEPS = 20;
+const float HORIZON_NEAR = 300.0;
+const float HORIZON_FAR = 40000.0;
+
+float horizonTowardsSun(vec3 d, float h, float radius, float near) {
+    vec3 sun = jobs.horizonSun.xyz;
+    vec3 along = sun - d * dot(sun, d);
+    if (dot(along, along) < 1e-8) return -1.0;
+    along = normalize(along);
+    vec3 from = d * (radius + max(h, 0.0));
+    float highest = -1.0;
+    for (int i = 0; i < HORIZON_STEPS; ++i) {
+        float s = near * pow(HORIZON_FAR / near, float(i) / float(HORIZON_STEPS - 1));
+        float angle = s / radius;
+        vec3 dk = d * cos(angle) + along * sin(angle);
+        vec3 to = dk * (radius + max(terrainHeight(dk), 0.0)) - from;
+        highest = max(highest, dot(to, d) / length(to));
+    }
+    return highest;
+}
+
 // Writes vertex `k` of `slot`, at grid coordinates `ij`, `below` metres
-// under the terrain; returns the terrain's height there.
+// under the terrain; returns the terrain's height there. Its horizon is
+// measured from two of the chunk's vertex spacings out (at least
+// HORIZON_NEAR): finer features cannot be drawn by the chunk's triangles,
+// and would make neighbouring vertices' horizons differ by more than they
+// can show.
 float writeVertex(uint slot, int k, ivec2 ij, int face, int x, int y, double cells, double radius, dvec3 centre,
                   double step, float below) {
     double u = -1.0LF + 2.0LF * double(x * QUADS + ij.x) / cells;
@@ -128,6 +166,9 @@ float writeVertex(uint slot, int k, ivec2 ij, int face, int x, int y, double cel
     pool.vertices[index].positionU = vec4(vec3(d * r - centre), float(u));
     pool.vertices[index].normalV = vec4(surfaceNormal(d, radius, step), float(v));
     pool.vertices[index].radialHeight = vec4(vec3(d), h);
+    float spacing = float(radius * 2.0LF / cells);        // metres between vertices, near enough
+    float near = min(max(HORIZON_NEAR, 2.0 * spacing), 0.5 * HORIZON_FAR);
+    pool.vertices[index].horizon = vec4(horizonTowardsSun(vec3(d), h, float(radius), near), 0.0, 0.0, 0.0);
     return h;
 }
 

@@ -12,8 +12,9 @@
 // smoothstep(MORPH_START * Sk, Sk, distance from the camera to the
 // vertex) and Sk is the k-th ancestor's split distance, S1 * 2^(k - 1)
 // (ChunkInstance.morph: x S1, y the levels the chunk has above it; the
-// roots have none and do not morph). A skirt vertex keeps its offset from
-// its edge vertex.
+// roots have none and do not morph). Normals, directions, heights and
+// horizons blend alike. A skirt vertex keeps its offset from its edge
+// vertex.
 //
 // A parent splits when the camera comes within S1 of its bounding sphere,
 // which holds every vertex of the chunk, so the chunk appears with every
@@ -37,6 +38,7 @@ struct ChunkVertex {
     vec4 positionU;        // xyz: position relative to the chunk's centre; w: face u
     vec4 normalV;          // xyz: surface normal; w: face v
     vec4 radialHeight;     // xyz: direction from the planet's centre; w: height (m)
+    vec4 horizon;          // x: sine of the terrain's horizon towards the sun's azimuth
 };
 
 layout(std430, set = 1, binding = 1) readonly buffer ChunkPool {
@@ -87,7 +89,7 @@ ChunkVertex morphedVertex(uint vertexIndex, uint slot, vec3 origin, vec4 morph) 
     float distance = length(origin + edge.positionU.xyz);
 
     vec3 position = edge.positionU.xyz, normal = edge.normalV.xyz, radial = edge.radialHeight.xyz;
-    float height = edge.radialHeight.w;
+    float height = edge.radialHeight.w, horizon = edge.horizon.x;
     for (int level = 1; level <= levels; ++level) {
         float f = morphFactor(distance, morph.x * float(1 << (level - 1)));
         if (f <= 0.0) break;                      // the factors fall with the level
@@ -101,11 +103,13 @@ ChunkVertex morphedVertex(uint vertexIndex, uint slot, vec3 origin, vec4 morph) 
         normal = mix(normal, w.x * a.normalV.xyz + w.y * b.normalV.xyz + w.z * c.normalV.xyz, f);
         radial = mix(radial, w.x * a.radialHeight.xyz + w.y * b.radialHeight.xyz + w.z * c.radialHeight.xyz, f);
         height = mix(height, w.x * a.radialHeight.w + w.y * b.radialHeight.w + w.z * c.radialHeight.w, f);
+        horizon = mix(horizon, w.x * a.horizon.x + w.y * b.horizon.x + w.z * c.horizon.x, f);
     }
     ChunkVertex morphed = own;
     // A skirt vertex moves with its edge vertex.
     morphed.positionU.xyz = own.positionU.xyz + (position - edge.positionU.xyz);
     morphed.normalV.xyz = normalize(normal);
     morphed.radialHeight = vec4(normalize(radial), height);
+    morphed.horizon.x = horizon;
     return morphed;
 }

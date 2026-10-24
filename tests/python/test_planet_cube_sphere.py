@@ -156,7 +156,7 @@ class GpuChunkBuffers(unittest.TestCase):
         self.assertLess(int(self.indices.max()), len(self.positions))
 
     def test_the_draw_buffers_hold_a_count_and_a_command_per_slot(self):
-        for name in ("ChunkDraws", "OceanDraws"):
+        for name in ("ChunkDraws", "OceanDraws", "ShadowDraws"):
             self.assertEqual(self.layouts[name]["elementCount"], 4 + 5 * self.SLOTS, name)
         self.assertEqual(self.layouts["ChunkInstances"]["elementCount"], self.SLOTS)
 

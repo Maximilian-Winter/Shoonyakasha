@@ -836,6 +836,7 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
   - Per chunk vertex, the angle of the terrain's horizon towards the sun, found in `chunk_build.comp` by marching the terrain function towards the sun. It is rebuilt when the sun moves more than a little (the chunks are rebuilt, as on a terrain change).
   - The terrain beyond the last cascade is in shadow where the sun is below that horizon.
   - Optional: the atmosphere's scattering shadowed by the terrain (light shafts at sunset).
+  - As built: the vertex grew to four vec4s for the horizon's sine. The march starts at two of the chunk's vertex spacings (at least 300 m): from 300 m everywhere, coarse chunks' neighbouring vertices saw different small ridges and the shadows traced their triangles. The softening widens with distance (1° to about 4° beyond 60 km). The terrain and the sea use it everywhere (the lesser of it and the map); a sun move over 0.5° rebuilds every chunk in place, nearest first, which takes 30 to 70 frames. The light shafts are not built.
 - Done: at a low sun, mountains cast shadows across valleys near and far, and the cockpit's frame casts shadows on the dashboard, without shimmer when flying.
 
 **WP14: Clouds**

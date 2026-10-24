@@ -28,6 +28,7 @@ layout(location = 1) out vec4 fragColour;
 layout(location = 2) out vec2 fragFaceUv;
 layout(location = 3) out vec4 fragRadialHeight;
 layout(location = 4) out vec3 fragRelativePos;
+layout(location = 5) out float fragHorizon;
 
 void main() {
     ChunkInstance chunk = chunks.instances[gl_InstanceIndex];
@@ -38,5 +39,6 @@ void main() {
     fragFaceUv = vec2(v.positionU.w, v.normalV.w);
     fragRadialHeight = v.radialHeight;
     fragRelativePos = relativePos;
+    fragHorizon = v.horizon.x;
     gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
 }

@@ -14,7 +14,8 @@
       "attributes": [
         { "name": "positionU", "type": "vec4", "location": 0 },
         { "name": "normalV", "type": "vec4", "location": 1 },
-        { "name": "radialHeight", "type": "vec4", "location": 2 }
+        { "name": "radialHeight", "type": "vec4", "location": 2 },
+        { "name": "horizon", "type": "vec4", "location": 3 }
       ]
     },
     "orbitVertex": {
@@ -86,7 +87,9 @@
         { "name": "jobB", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobB[i]" },
         { "name": "probe", "type": "vec4", "arrayCount": 128, "source": "scene.custom.planet.probe[i]" },
         { "name": "jobCount", "type": "uint", "source": "scene.custom.planet.jobCount", "default": 0 },
-        { "name": "radius", "type": "float", "source": "scene.custom.planet.radius" }
+        { "name": "radius", "type": "float", "source": "scene.custom.planet.radius" },
+        { "name": "horizonSun", "type": "vec4", "source": "scene.custom.planet.horizonSun",
+          "default": [ 0.0, 1.0, 0.0, 0.0 ] }
       ]
     },
     "ChunkPool": {
@@ -96,7 +99,8 @@
       "fields": [
         { "name": "positionU", "type": "vec4" },
         { "name": "normalV", "type": "vec4" },
-        { "name": "radialHeight", "type": "vec4" }
+        { "name": "radialHeight", "type": "vec4" },
+        { "name": "horizon", "type": "vec4" }
       ],
       "target": { "name": "ChunkPool", "readback": { "frequency": "manual" } }
     },

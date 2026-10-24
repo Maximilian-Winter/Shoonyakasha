@@ -23,6 +23,7 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
 
 layout(location = 0) out vec3 fragRadial;
 layout(location = 1) out vec3 fragRelativePos;
+layout(location = 2) out float fragHorizon;
 
 void main() {
     ChunkInstance chunk = chunks.instances[gl_InstanceIndex];
@@ -30,5 +31,6 @@ void main() {
     vec3 relativePos = chunk.origin.xyz + v.positionU.xyz - v.radialHeight.xyz * v.radialHeight.w;
     fragRadial = v.radialHeight.xyz;
     fragRelativePos = relativePos;
+    fragHorizon = v.horizon.x;
     gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
 }

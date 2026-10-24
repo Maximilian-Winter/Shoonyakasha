@@ -19,6 +19,7 @@ layout(location = 1) in vec4 fragColour;
 layout(location = 2) in vec2 fragFaceUv;
 layout(location = 3) in vec4 fragRadialHeight;
 layout(location = 4) in vec3 fragRelativePos;
+layout(location = 5) in float fragHorizon;
 
 layout(location = 0) out vec4 outColor;
 
@@ -52,5 +53,6 @@ void main() {
     vec3 albedo = fragColour.r < 0.0 ? groundColour(radial, fragRadialHeight.w, normal)
                                      : withGrid(fragColour.rgb, fragColour.a, fragFaceUv);
     vec3 p = camera.cameraFromCentre.xyz + fragRelativePos;
-    outColor = vec4(lightSurface(albedo, p, normal, radial, sunShadow(fragRelativePos, normal)), 1.0);
+    float sunShare = min(sunShadow(fragRelativePos, normal), horizonShadow(fragHorizon, radial, length(fragRelativePos)));
+    outColor = vec4(lightSurface(albedo, p, normal, radial, sunShare), 1.0);
 }
