@@ -59,6 +59,8 @@ Keys:
     C                      colour: terrain, per face, per level
     K                      freeze the level of detail
     [ / ]                  split factor down / up
+    F1                     settings menu
+    I                      debug text
     P                      screenshot into planet_captures/
 
     python planet.py --capture DIR     screenshots at the presets, then exit
@@ -76,8 +78,11 @@ import numpy as np
 import shoonyakasha as sk
 from shoonyakasha import keys
 
+import cockpit
 import cube_sphere
 import flight
+from instruments import Instruments
+from menu import SettingsMenu
 from quadtree import QuadTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -266,6 +271,12 @@ state = {
     "accumulator": 0.0,          # seconds of flight not yet stepped
     "flight_time": 0.0,          # seconds of flight stepped
     "landed": False,
+    "cockpit": None,
+    "instruments": None,
+    "menu": None,
+    "shown_mode": None,          # the mode show_mode last set up
+    "debug_text": True,
+    "planet_edit": None,         # terrain parameters the menu changes until Apply
 }
 flight_planet = flight.Planet(radius=RADIUS, scale_height=RAYLEIGH_SCALE_HEIGHT)
 
@@ -452,6 +463,7 @@ def regenerate():
     state["site_height"] = None
     state["ground"] = None
     state["terrain_version"] += 1
+    state["planet_edit"] = {name: list(value) for name, value in state["terrain"].items()}
     upload_terrain()
 
 
@@ -474,7 +486,28 @@ def build_site():
         engine.scene.set_scale(entity, size)
         engine.scene.set_material_vec4(entity, "baseColorFactor", colour + (1.0,))
         engine.scene.set_material_float(entity, "gridStrength", 0.0)
+        engine.scene.set_render_layer_mask(entity, 1)
         blocks.append((entity, add(scale(east, e), add(scale(up, u), scale(north, n)))))
+
+
+def build_cockpit():
+    """The cockpit mesh (cockpit.py), in the camera's space; hidden until ship mode."""
+    positions, normals, colours = cockpit.cockpit_mesh()
+    entity = engine.create_mesh(positions, normals=normals, colors=colours, name="Cockpit")
+    engine.scene.set_material_vec4(entity, "baseColorFactor", (1.0, 1.0, 1.0, 1.0))
+    engine.scene.set_material_float(entity, "gridStrength", 0.0)
+    engine.scene.set_render_layer_mask(entity, 1)
+    engine.scene.set_visible(entity, False)
+    state["cockpit"] = entity
+
+
+def show_mode():
+    """What the mode shows: in the ship, the cockpit, its displays, the HUD."""
+    ship = state["mode"] == "ship"
+    engine.scene.set_visible(state["cockpit"], ship)
+    state["instruments"].show(ship)
+    engine.set_pass_enabled("HudSymbols", ship)
+    state["shown_mode"] = state["mode"]
 
 
 def build_hud():
@@ -723,7 +756,13 @@ def frame(dt):
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
     right, up, forward = state["ship"].axes() if state["mode"] == "ship" else camera_basis()
-    engine.scene.set_rotation(state["camera"], euler_from_basis(right, up, forward))
+    view_rotation = euler_from_basis(right, up, forward)
+    engine.scene.set_rotation(state["camera"], view_rotation)
+    if state["mode"] != state["shown_mode"]:
+        show_mode()
+    if state["mode"] == "ship":
+        update_cockpit(right, up, forward, view_rotation)
+    state["menu"].update()
 
     state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * dt * 1000.0
     if state["hud"] is not None:
@@ -731,10 +770,55 @@ def frame(dt):
     return True
 
 
+def update_cockpit(right, up, forward, view_rotation):
+    """The cockpit and its displays turned with the view, the HUD's
+    directions, and the instruments' readings."""
+    ship = state["ship"]
+    controls = state["controls"]
+    engine.scene.set_position(state["cockpit"], (0.0, 0.0, 0.0))
+    engine.scene.set_rotation(state["cockpit"], view_rotation)
+
+    def to_world(v):
+        return add(add(scale(right, v[0]), scale(up, v[1])), scale(forward, -v[2]))
+
+    state["instruments"].place(to_world, euler_from_basis)
+
+    radial = normalize(ship.position)
+    speed = length(ship.velocity)
+    engine.set_custom_vec4("planet.hud.up", radial + (0.0,))
+    prograde = scale(ship.velocity, 1.0 / speed) if speed > 1.0 else forward
+    engine.set_custom_vec4("planet.hud.prograde", prograde + (1.0 if speed > 1.0 else 0.0,))
+
+    east, north = local_frame(radial)
+    level = sub(forward, scale(radial, dot(forward, radial)))
+    heading = math.degrees(math.atan2(dot(level, east), dot(level, north))) % 360.0
+    periapsis, apoapsis = flight.orbit(flight_planet, ship.position, ship.velocity)
+    density = flight_planet.density(ship.position)
+    state["instruments"].update({
+        "speed": speed,
+        "climb": dot(ship.velocity, radial),
+        "height_text": distance_text(height_above_ground()),
+        "agl_text": "%11s" % distance_text(height_above_ground()),
+        "asl_text": "%11s" % distance_text(altitude()),
+        "heading": heading,
+        "throttle": controls.throttle,
+        "assist": controls.assist,
+        "warp": WARPS[state["warp"]],
+        "landed": state["landed"],
+        "periapsis_text": "%11s" % ("below ground" if periapsis < 0.0 else distance_text(periapsis)),
+        "apoapsis_text": "%11s" % ("escape" if apoapsis == math.inf else distance_text(apoapsis)),
+        "circular": flight.circular_speed(flight_planet, max(altitude(), 0.0)),
+        "density": density,
+        "dynamic_pressure": 0.5 * density * speed * speed,
+    })
+
+
 def update_hud():
     tree = state["tree"]
     if tree is None:
         return
+    for line in state["hud"]:
+        engine.ui.set_visible(line, state["debug_text"])
     terrain = state["terrain"]
     cached = sum(1 for node in tree.nodes() if node.chunk is not None)
     deepest = max(node.level for node in tree.selected)
@@ -783,6 +867,10 @@ def on_init():
     upload_chunk_indices()
     build_site()
     build_hud()
+    build_cockpit()
+    state["instruments"] = Instruments(engine, cockpit.SCREENS)
+    state["planet_edit"] = {name: list(value) for name, value in state["terrain"].items()}
+    state["menu"] = SettingsMenu(engine, "Settings   (F1 to hide)", menu_items())
     teleport(1)
 
     # Before the transform system (priority 0), so this frame's positions are used.
@@ -794,6 +882,84 @@ def on_init():
     elif args.orbit_check:
         engine.ecs.add_system("PlanetOrbitCheck", OrbitCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
+
+
+def menu_items():
+    """The settings menu (menu.py): the simulation's settings take effect at
+    once; the planet's are kept in planet_edit until Apply builds it again."""
+    edit = lambda name, index: (lambda: state["planet_edit"][name][index])
+
+    def edit_set(name, index):
+        def setter(value):
+            state["planet_edit"][name][index] = value
+        return setter
+
+    def set_and(key, then):
+        def setter(value):
+            state[key] = value
+            then()
+        return setter
+
+    def set_density(value):
+        state["density"] = value
+        flight_planet.density_factor = value
+        upload_sky()
+
+    def set_ocean(on):
+        state["ocean"] = on
+        engine.set_pass_enabled("Ocean", on)
+
+    def set_assist(on):
+        state["controls"].assist = on
+
+    def set_split(value):
+        if state["tree"] is not None:
+            state["tree"].split_factor = value
+
+    def apply_planet():
+        state["terrain"] = {name: list(value) for name, value in state["planet_edit"].items()}
+        regenerate()
+
+    return [
+        {"heading": "Simulation"},
+        {"slider": "Time warp", "min": 0, "max": len(WARPS) - 1, "get": lambda: state["warp"],
+         "set": lambda v: state.update(warp=int(round(v))), "show": lambda v: "x%d" % WARPS[int(round(v))]},
+        {"toggle": "Translation assist", "get": lambda: state["controls"].assist, "set": set_assist},
+        {"slider": "Exposure", "min": 0.05, "max": 2.0, "get": lambda: state["exposure"],
+         "set": set_and("exposure", upload_sky), "format": "%.2f"},
+        {"slider": "Atmosphere density", "min": 0.25, "max": 4.0, "get": lambda: state["density"],
+         "set": set_density, "format": "x%.2f"},
+        {"slider": "Sun elevation", "min": -20.0, "max": 90.0, "get": lambda: state["sun_elevation"],
+         "set": set_and("sun_elevation", upload_sky), "format": "%.0f deg"},
+        {"slider": "Sun azimuth", "min": 0.0, "max": 360.0, "get": lambda: state["sun_azimuth"],
+         "set": set_and("sun_azimuth", upload_sky), "format": "%.0f deg"},
+        {"slider": "Split factor", "min": 0.5, "max": 4.0,
+         "get": lambda: state["tree"].split_factor if state["tree"] is not None else SPLIT_FACTOR,
+         "set": set_split, "format": "%.2f"},
+        {"toggle": "Ocean", "get": lambda: state["ocean"], "set": set_ocean},
+        {"toggle": "Wireframe", "get": lambda: state["wireframe"], "set": set_wireframe},
+        {"toggle": "Debug text", "get": lambda: state["debug_text"], "set": lambda on: state.update(debug_text=on)},
+        {"button": "Colour: terrain / face / level",
+         "do": lambda: set_colour_mode((state["colour_mode"] + 1) % len(COLOUR_MODES))},
+        {"heading": "Planet"},
+        {"button": "New seed", "do": new_seed},
+        {"slider": "Mountain height", "min": 0.0, "max": 8000.0, "get": edit("mountains", 1),
+         "set": edit_set("mountains", 1), "format": "%.0f m"},
+        {"slider": "Hill height", "min": 0.0, "max": 600.0, "get": edit("hills", 1),
+         "set": edit_set("hills", 1), "format": "%.0f m"},
+        {"slider": "Continent frequency", "min": 0.5, "max": 4.0, "get": edit("continent", 0),
+         "set": edit_set("continent", 0), "format": "%.2f"},
+        {"slider": "Sea level bias", "min": -0.4, "max": 0.4, "get": edit("continent", 2),
+         "set": edit_set("continent", 2), "format": "%+.2f"},
+        {"slider": "Ocean depth", "min": 0.0, "max": 4000.0, "get": edit("hills", 2),
+         "set": edit_set("hills", 2), "format": "%.0f m"},
+        {"button": "Apply: build the planet again", "do": apply_planet},
+    ]
+
+
+def new_seed():
+    state["terrain"]["seed"] = [random.uniform(-100.0, 100.0) for _ in range(3)] + [0.0]
+    regenerate()
 
 
 def set_wireframe(on):
@@ -829,8 +995,11 @@ def on_key(key):
         state["ocean"] = not state["ocean"]
         engine.set_pass_enabled("Ocean", state["ocean"])
     elif key == keys.N:
-        state["terrain"]["seed"] = [random.uniform(-100.0, 100.0) for _ in range(3)] + [0.0]
-        regenerate()
+        new_seed()
+    elif key == keys.F1:
+        state["menu"].show(not state["menu"].visible)
+    elif key == keys.I:
+        state["debug_text"] = not state["debug_text"]
     elif key == keys.M:
         change_terrain("mountains", 1, 1.25)
     elif key == keys.J:
@@ -880,7 +1049,8 @@ class CaptureTour:
     MAX_FRAMES), then exit. Waits for the site's height first."""
 
     MIN_FRAMES, MAX_FRAMES = 10, 600
-    # (file name, preset, wireframe, colour mode, terrain change or None, sun elevation and azimuth)
+    # (file name, preset, wireframe, colour mode, terrain change or None, sun elevation and azimuth,
+    #  then any functions to call once it is set up)
     SHOTS = [("preset_%d" % p, p, False, 0, None, DAY_SUN) for p in range(1, 7)] + [
         ("preset_1_sunset", 1, False, 0, None, (3.0, 45.0)),
         ("preset_2_sunset", 2, False, 0, None, (2.0, 90.0)),
@@ -891,6 +1061,9 @@ class CaptureTour:
         ("preset_3_ocean_sun", 3, False, 0, None, (50.0, 135.0)),
         ("preset_8_ship_on_the_pad", 8, False, 0, None, DAY_SUN),
         ("preset_9_ship_in_orbit", 9, False, 0, None, DAY_SUN),
+        ("preset_8_ship_sunset", 8, False, 0, None, (6.0, 90.0)),
+        ("preset_8_menu_and_throttle", 8, False, 0, None, DAY_SUN,
+         lambda: state["menu"].show(True), lambda: setattr(state["controls"], "throttle", 0.6)),
         ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN),
         ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
         ("preset_3_mountains_higher", 3, False, 0, ("mountains", 1, 1.5), DAY_SUN),
@@ -906,7 +1079,7 @@ class CaptureTour:
     def __call__(self, dt):
         if state["site_height"] is None:
             return True
-        name, preset, wireframe, colour_mode, change, sun = self.SHOTS[self.shot]
+        name, preset, wireframe, colour_mode, change, sun, *setup = self.SHOTS[self.shot]
         self.frames += 1
         if self.frames == 1:
             if change is not None:
@@ -916,6 +1089,9 @@ class CaptureTour:
             teleport(preset)
             set_wireframe(wireframe)
             set_colour_mode(colour_mode)
+            state["menu"].show(False)
+            for action in setup:
+                action()
         elif self.captured is None:
             done = self.frames >= self.MIN_FRAMES and settled()
             if done or self.frames >= self.MAX_FRAMES:

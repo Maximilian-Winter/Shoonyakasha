@@ -140,7 +140,21 @@
         { "name": "gridStrength", "type": "float", "source": "entity.material.params.gridStrength" },
         { "name": "padding0", "type": "float", "source": "const.0" },
         { "name": "padding1", "type": "float", "source": "const.0" },
-        { "name": "padding2", "type": "float", "source": "const.0" }
+        { "name": "padding2", "type": "float", "source": "const.0" },
+        { "name": "emissiveFactor", "type": "vec4", "source": "entity.material.params.emissiveFactor",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] }
+      ]
+    },
+    "HudParams": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "up", "type": "vec4", "source": "scene.custom.planet.hud.up", "default": [ 0.0, 1.0, 0.0, 0.0 ] },
+        { "name": "prograde", "type": "vec4", "source": "scene.custom.planet.hud.prograde",
+          "default": [ 0.0, 0.0, -1.0, 0.0 ] },
+        { "name": "colour", "type": "vec4", "source": "scene.custom.planet.hud.colour",
+          "default": [ 0.35, 1.0, 0.45, 1.0 ] }
       ]
     }
   },
@@ -191,7 +205,14 @@
     },
     "materialSet": {
       "bindings": [
-        { "binding": 0, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "albedoMap" }
+        { "binding": 0, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "albedoMap" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "emissiveMap" }
+      ]
+    },
+    "hudSet": {
+      "bindings": [
+        { "binding": 0, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "HudParams",
+          "autoBindBuffer": "HudParams" }
       ]
     }
   },
@@ -248,7 +269,8 @@
       "execution": {
         "type": "opaque_geometry",
         "sortMode": "front_to_back",
-        "entityDataBinding": "opaque"
+        "entityDataBinding": "opaque",
+        "renderLayerMask": 1
       },
       "pipeline": {
         "vertexShader": "shaders/scene.vert.spv",
@@ -260,7 +282,31 @@
         "cullMode": "back"
       },
       "descriptorSets": [ "cameraSet", "materialSet" ],
-      "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 96, "offset": 0 } ],
+      "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 112, "offset": 0 } ],
+      "outputs": [
+        { "resource": "hdrColor", "usage": "color_write" },
+        { "resource": "depth", "usage": "depth_write" }
+      ]
+    },
+    {
+      "name": "Screens",
+      "type": "graphics",
+      "execution": {
+        "type": "opaque_geometry",
+        "entityDataBinding": "opaque",
+        "renderLayerMask": 2
+      },
+      "pipeline": {
+        "vertexShader": "shaders/scene.vert.spv",
+        "fragmentShader": "shaders/screen.frag.spv",
+        "vertexInput": "standard",
+        "depthTest": true,
+        "depthWrite": true,
+        "depthCompareOp": "greater_or_equal",
+        "cullMode": "back"
+      },
+      "descriptorSets": [ "cameraSet", "materialSet" ],
+      "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 112, "offset": 0 } ],
       "outputs": [
         { "resource": "hdrColor", "usage": "color_write" },
         { "resource": "depth", "usage": "depth_write" }
@@ -340,6 +386,23 @@
       },
       "descriptorSets": [ "cameraSet", "atmosphereInputSet" ],
       "outputs": [ { "resource": "swapchain", "usage": "color_write" } ]
+    },
+    {
+      "name": "HudSymbols",
+      "type": "graphics",
+      "enabled": false,
+      "execution": { "type": "fullscreen" },
+      "pipeline": {
+        "vertexShader": "shaders/fullscreen.vert.spv",
+        "fragmentShader": "shaders/hud.frag.spv",
+        "vertexInput": "none",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "blending": "additive"
+      },
+      "descriptorSets": [ "cameraSet", "hudSet" ],
+      "outputs": [ { "resource": "swapchain", "usage": "color_blend" } ]
     },
     {
       "name": "UIOverlay",

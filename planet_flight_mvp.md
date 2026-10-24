@@ -768,6 +768,8 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 **WP9: Cockpit and HUD**
 - A cockpit mesh in camera space, drawn after the atmosphere pass.
 - A Canvas HUD with speed, altitude above ground and above sea level, horizon and prograde marker.
+- As built: the cockpit is generated geometry (`cockpit.py`), drawn into the HDR image before the atmosphere (which adds nothing visible at a metre). The horizon, pitch ladder, prograde marker and nose cross are a fullscreen GLSL pass that tests each pixel's view direction (collimated; canvas elements cannot rotate with the roll). The numbers are a screen canvas; two dashboard displays are world canvases drawn by their own pass from `emissiveMap`, on their own render layer.
+- Added: a settings menu (F1) on a screen canvas for the simulation's settings and the planet's generation parameters (applied with a button).
 - Done: the full flight from ground to orbit in cockpit view.
 
 **WP10: Collision**
