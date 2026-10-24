@@ -19,7 +19,10 @@ torque holds (always). With translation assist on, the throttle asks for
 a forward speed and the vertical thrusters for a climb rate; the
 thrusters push towards that velocity and hold the ship against gravity,
 drag and lift. With it off, the throttle drives the main engine and the
-vertical thrusters push up or down.
+vertical thrusters push up or down. Over known ground, translation
+assist descends no faster than it can brake to `touchdown_speed` at the
+gear's height above the ground, decelerating at `assist_brake`:
+sqrt(touchdown_speed^2 + 2 assist_brake height).
 
 Ground contact: the ship's shape is a few points in its body, the landing
 gear and the hull (nose, tail, wing tips, roof). `Ship.step` takes a
@@ -161,6 +164,8 @@ class ShipParams:
     assist_max_speed: float = 1_500.0                   # m/s forward at full throttle, assisted
     assist_climb_rate: float = 60.0                     # m/s up at full vertical stick, assisted
     assist_gain: float = 1.5                            # 1/s
+    touchdown_speed: float = 3.0                        # m/s: assist's descent at the ground, at most
+    assist_brake: float = 1.5                           # m/s^2: assist's deceleration over the ground
     # Contact points in the body (right, up, back), metres from the centre.
     gear: tuple = ((0.0, -2.0, -4.0), (-2.5, -2.0, 2.5), (2.5, -2.0, 2.5))
     hull: tuple = ((0.0, -0.5, -7.0), (0.0, 0.0, 6.0), (-6.0, -0.8, 2.5), (6.0, -0.8, 2.5), (0.0, 1.5, 0.0))
@@ -216,13 +221,21 @@ class Ship:
         lift = scale(up, 0.5 * rho * along * abs(along) * self.params.lift_area)
         return add(drag, lift)
 
-    def _thrust(self, planet, controls, gravity, aero):
-        """The thrusters' force in the body: (right, up, back) components."""
+    def descent_limit(self, height):
+        """The fastest assisted descent (m/s) with the gear `height` metres above the ground."""
+        p = self.params
+        return math.sqrt(p.touchdown_speed * p.touchdown_speed + 2.0 * p.assist_brake * max(height, 0.0))
+
+    def _thrust(self, planet, controls, gravity, aero, gear_height=None):
+        """The thrusters' force in the body: (right, up, back) components.
+        `gear_height`: the gear's height above the ground, when known."""
         p = self.params
         right, up, forward = self.axes()
         if controls.assist:
-            wanted = add(scale(forward, controls.throttle * p.assist_max_speed),
-                         scale(up, controls.vertical * p.assist_climb_rate))
+            climb = controls.vertical * p.assist_climb_rate
+            if gear_height is not None:
+                climb = max(climb, -self.descent_limit(gear_height))
+            wanted = add(scale(forward, controls.throttle * p.assist_max_speed), scale(up, climb))
             accel = sub(scale(sub(wanted, self.velocity), p.assist_gain),
                         add(gravity, scale(aero, 1.0 / p.mass)))
             force = scale(accel, p.mass)
@@ -250,9 +263,18 @@ class Ship:
         elif self.on_ground:
             self.resting = True
         resting = self.resting
+        # The ground under the centre: the gear's height above it, and whether a contact point can reach it.
+        under = ground(self.position) if ground is not None else None
+        gear_height = None
+        near = False
+        if under is not None:
+            above = -under[0]
+            gear_height = above - max(-arm[1] for arm in p.gear)
+            reach = max(length(arm) for arm in p.gear + p.hull)
+            near = above <= reach + length(self.velocity) * dt + CONTACT_SLOP
         gravity = planet.gravity(self.position)
         aero = self.aerodynamic_force(planet)
-        self.thrust = (0.0, 0.0, 0.0) if resting else self._thrust(planet, controls, gravity, aero)
+        self.thrust = (0.0, 0.0, 0.0) if resting else self._thrust(planet, controls, gravity, aero, gear_height)
         right, up, forward = self.axes()
         thrust_world = add(add(scale(right, self.thrust[0]), scale(up, self.thrust[1])),
                            scale(forward, -self.thrust[2]))
@@ -260,7 +282,8 @@ class Ship:
         self.velocity = add(self.velocity, scale(accel, dt))
         self._spin(controls, dt, resting)
         self.on_ground = False
-        if ground is not None:
+        self.impact_speed = 0.0
+        if near:
             self._contact(ground, dt)
             if self.crashed:
                 return
@@ -306,7 +329,6 @@ class Ship:
         q = self.orientation
         inverse = quat_conjugate(q)
         contacts = []
-        self.impact_speed = 0.0
         for arm, is_gear in [(a, True) for a in p.gear] + [(a, False) for a in p.hull]:
             hit = ground(add(self.position, quat_rotate(q, arm)))
             if hit is None:

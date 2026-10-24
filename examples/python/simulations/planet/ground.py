@@ -75,13 +75,11 @@ class GroundPatch:
             for j in range(SIZE) for i in range(SIZE)]
         self.heights = None
         self.points = None
-        self.highest = None
 
     def set_heights(self, heights):
         """Terrain heights (m) at `directions`, in their order."""
         self.heights = [max(float(h), 0.0) for h in heights]
         self.points = [_scale(d, self.radius + h) for d, h in zip(self.directions, self.heights)]
-        self.highest = max(self.heights)
 
     def grid_coordinates(self, point):
         """(x, y): where `point`'s direction meets the tangent plane, in grid

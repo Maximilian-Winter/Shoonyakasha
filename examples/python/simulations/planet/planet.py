@@ -288,6 +288,7 @@ state = {
     "debug_text": True,
     "planet_edit": None,         # terrain parameters the menu changes until Apply
     "scripted_controls": False,  # the ship's controls are set by a check, not read from the keys
+    "impact_speed": 0.0,         # m/s, the fastest a contact point reached the surface at this frame
 }
 flight_planet = flight.Planet(radius=RADIUS, scale_height=RAYLEIGH_SCALE_HEIGHT)
 
@@ -722,16 +723,10 @@ def ground_patch_request(ship):
     return GroundPatch(RADIUS, add(ship.position, scale(along, ahead)), 2.0 * half / (PATCH_SIZE - 1))
 
 
-def ground_under_ship(seconds):
-    """The ground patch's query for the ship's contacts, or None when there
-    is no patch or the ship cannot reach its highest point within `seconds`."""
-    patch, ship = state["patch"], state["ship"]
-    if patch is None:
-        return None
-    clearance = length(ship.position) - RADIUS - patch.highest
-    if clearance > SHIP_REACH + length(ship.velocity) * seconds:
-        return None
-    return patch.query
+def ground_under_ship():
+    """The ground patch's query for the ship, or None while there is no patch."""
+    patch = state["patch"]
+    return patch.query if patch is not None else None
 
 
 def fly_ship(dt):
@@ -739,10 +734,12 @@ def fly_ship(dt):
     steps, against the ground patch under it."""
     ship = state["ship"]
     state["accumulator"] += dt * WARPS[state["warp"]]
-    ground = ground_under_ship(state["accumulator"] + FLIGHT_STEP)
+    ground = ground_under_ship()
+    state["impact_speed"] = 0.0
     steps = 0
     while state["accumulator"] >= FLIGHT_STEP and steps < MAX_STEPS_PER_FRAME:
         ship.step(flight_planet, state["controls"], FLIGHT_STEP, ground)
+        state["impact_speed"] = max(state["impact_speed"], ship.impact_speed)
         state["accumulator"] -= FLIGHT_STEP
         state["flight_time"] += FLIGHT_STEP
         steps += 1
@@ -1260,19 +1257,20 @@ class Verify:
 class LandingCheck:
     """--landing-check: measures the ground 9 km below spots on rings 10 to
     60 km around the site with the free camera, takes the highest, and
-    brings the ship down onto it from 40 m above with translation assist
-    at a tenth of the full climb rate downwards; once it touches, lets go
-    of the controls for five seconds. Prints the slope there, how far each
-    gear point is below the ground patch's surface, how far the patch's
-    height under the ship is from the probe's, each gear point's height
-    above the terrain probed at its own direction, and the ship's speed.
-    Then a ship coasts straight at the spot from 1.5 km up and 1.5 km
-    away at 400 m/s and 16x warp; prints whether it crashed and how high
-    its centre ended above the ground. Exits with status 0 when the ship
-    stood on its gear (every gear point within 5 cm of both the patch's
-    surface and the terrain), at rest, uncrashed, and the diving ship
-    crashed with its centre at least 1 m above the ground and within reach
-    of it; 1 otherwise."""
+    brings the ship down onto it from 500 m above with translation assist
+    and full downward thrust asked for; once it touches, lets go of the
+    controls for five seconds. Prints the touchdown speed, the slope there,
+    how far each gear point is below the ground patch's surface, how far
+    the patch's height under the ship is from the probe's, each gear
+    point's height above the terrain probed at its own direction, and the
+    ship's speed. Then a ship coasts straight at the spot from 1.5 km up
+    and 1.5 km away at 400 m/s and 16x warp; prints whether it crashed and
+    how high its centre ended above the ground. Exits with status 0 when
+    the ship touched down under half the gear's crash speed and stood on
+    its gear (every gear point within 5 cm of both the patch's surface and
+    the terrain), at rest, uncrashed, and the diving ship crashed with its
+    centre at least 1 m above the ground and within reach of it; 1
+    otherwise."""
 
     RINGS = (10_000.0, 20_000.0, 35_000.0, 60_000.0)
     AZIMUTHS = 16
@@ -1296,6 +1294,7 @@ class LandingCheck:
         self.best = None                # (ground height, direction)
         self.touched = None             # flight time when the ship touched
         self.diving = None              # flight time when the dive started
+        self.touchdown_speed = 0.0
 
     def __call__(self, dt):
         if state["tree"] is None:
@@ -1323,9 +1322,9 @@ class LandingCheck:
         else:
             height, up = self.best
             east, north = local_frame(up)
-            state["ship"] = flight.Ship(position=scale(up, RADIUS + height + 40.0),
+            state["ship"] = flight.Ship(position=scale(up, RADIUS + height + 500.0),
                                         orientation=flight.quat_from_basis(east, up, scale(north, -1.0)))
-            state["controls"] = flight.Controls(vertical=-0.1, assist=True)
+            state["controls"] = flight.Controls(vertical=-1.0, assist=True)
             state["scripted_controls"] = True
             state["mode"] = "ship"
             state["warp"] = 0
@@ -1337,6 +1336,8 @@ class LandingCheck:
     def land(self):
         ship = state["ship"]
         now = state["flight_time"]
+        if self.touched is None:
+            self.touchdown_speed = max(self.touchdown_speed, state["impact_speed"])
         if self.touched is None and (ship.on_ground or ship.crashed):
             self.touched = now
             state["controls"] = flight.Controls(assist=True)
@@ -1358,7 +1359,8 @@ class LandingCheck:
             patch_height = length(ship.position) - RADIUS + depth / dot(radial, normal)
             q = ship.orientation
             gear = [patch.query(add(ship.position, flight.quat_rotate(q, arm)))[0] for arm in ship.params.gear]
-            print("[planet] on a %.1f degree slope at %.0f m:" % (slope, patch_height), flush=True)
+            print("[planet] touched down at %.1f m/s on a %.1f degree slope at %.0f m:"
+                  % (self.touchdown_speed, slope, patch_height), flush=True)
             print("[planet]   gear points below the surface: %s m" % ", ".join("%+.3f" % d for d in gear),
                   flush=True)
             print("[planet]   patch height under the ship minus the probe's: %+.3f m"
@@ -1368,7 +1370,8 @@ class LandingCheck:
                        for arm, (_, h) in zip(ship.params.gear, state["extra_heights"])]
             print("[planet]   gear points above the terrain at their directions: %s m"
                   % ", ".join("%+.3f" % d for d in terrain), flush=True)
-            ok = (ok and max(abs(d) for d in gear) <= self.GEAR_TOLERANCE and len(terrain) == len(gear)
+            ok = (ok and self.touchdown_speed < 0.5 * ship.params.gear_crash_speed
+                  and max(abs(d) for d in gear) <= self.GEAR_TOLERANCE and len(terrain) == len(gear)
                   and max(abs(d) for d in terrain) <= self.GEAR_TOLERANCE)
         speed = length(ship.velocity)
         print("[planet]   speed %.4f m/s, %s, touched %s s after the start"

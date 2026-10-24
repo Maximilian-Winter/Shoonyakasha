@@ -256,6 +256,34 @@ class Ground(unittest.TestCase):
         self.assertEqual(ship.thrust, (0.0, 0.0, 0.0))
         self.assertAlmostEqual(flight.length(ship.position) - planet.radius, GEAR_HEIGHT, delta=0.02)
 
+    def test_holding_full_down_with_assist_lands_without_crashing(self):
+        planet = flight.Planet()
+        for height in (30.0, 300.0, 1_500.0):
+            ship = level_ship(GEAR_HEIGHT + height, planet)
+            fastest = 0.0
+            for _ in range(int(200 / DT)):
+                ship.step(planet, flight.Controls(vertical=-1.0, assist=True), DT, level_ground(planet))
+                fastest = max(fastest, ship.impact_speed)
+                if ship.on_ground:
+                    break
+            self.assertFalse(ship.crashed, "from %.0f m" % height)
+            self.assertTrue(ship.on_ground, "from %.0f m" % height)
+            self.assertLess(fastest, 0.5 * ship.params.gear_crash_speed, "from %.0f m" % height)
+
+    def test_the_descent_limit_leaves_assist_alone_high_above_the_ground(self):
+        planet = flight.Planet()
+        ship = level_ship(20_000.0, planet)
+        fly_over(ship, planet, flight.Controls(vertical=-1.0, assist=True), 20.0, level_ground(planet))
+        descent = -flight.dot(ship.velocity, flight.normalize(ship.position))
+        self.assertAlmostEqual(descent, ship.params.assist_climb_rate, delta=1.0)
+
+    def test_the_descent_limit_brakes_to_the_touchdown_speed(self):
+        ship = level_ship(0.0, flight.Planet())
+        p = ship.params
+        self.assertAlmostEqual(ship.descent_limit(0.0), p.touchdown_speed)
+        self.assertAlmostEqual(ship.descent_limit(-1.0), p.touchdown_speed)
+        self.assertAlmostEqual(ship.descent_limit(100.0) ** 2, p.touchdown_speed ** 2 + 2.0 * p.assist_brake * 100.0)
+
     def test_thrusting_up_lifts_it_off(self):
         planet = flight.Planet()
         ship = level_ship(GEAR_HEIGHT, planet)
