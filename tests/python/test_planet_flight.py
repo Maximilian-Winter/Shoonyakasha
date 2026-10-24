@@ -117,6 +117,18 @@ class OrbitPath(unittest.TestCase):
         self.assertTrue(all(b >= a for a, b in zip(distances, distances[1:])))
         self.assertAlmostEqual(distances[-1], 10.0 * (planet.radius + 1_000.0), delta=1.0)
 
+    def test_a_slow_nearly_vertical_descent_is_a_thin_ellipse(self):
+        planet = flight.Planet()
+        for velocity in ((1e-4, 0.0, -6.0), (0.02, 0.0, -0.5), (3e-7, 1e-7, -2.0)):
+            ship = level_ship(30.0, planet)
+            ship.velocity = velocity
+            points = flight.orbit_path(planet, ship.position, ship.velocity)
+            self.assertEqual(len(points), 256)
+            self.assert_close(points[0], ship.position, 1e-3)
+            for p in points:
+                self.assertTrue(all(math.isfinite(c) for c in p))
+                self.assertLessEqual(flight.length(p), flight.length(ship.position) + 1.0)
+
     def test_moving_straight_up_has_no_path(self):
         planet = flight.Planet()
         ship = level_ship(1_000.0, planet)

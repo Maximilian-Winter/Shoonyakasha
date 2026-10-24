@@ -400,8 +400,8 @@ def orbit(planet, position, velocity):
 def orbit_path(planet, position, velocity, count=256, reach=10.0):
     """`count` points along the path the ship would coast along, from its
     position onwards in the direction it moves: a whole ellipse, evenly
-    spaced in eccentric anomaly; or, on an escape, the open branch out to
-    `reach` times its present distance from the centre. An empty list when
+    spaced in eccentric anomaly, when its energy is negative; otherwise the
+    open branch out to `reach` times its present distance from the centre. An empty list when
     it moves straight towards or away from the centre (no plane to draw
     in)."""
     mu = planet.gm
@@ -418,10 +418,15 @@ def orbit_path(planet, position, velocity, count=256, reach=10.0):
     p = dot(h, h) / mu                                   # the conic's semi-latus rectum
     nu0 = math.atan2(dot(position, across), dot(position, along))   # the ship's true anomaly
     points = []
-    if e < 1.0:
-        a = p / (1.0 - e * e)
-        b = a * math.sqrt(1.0 - e * e)
-        e0 = 2.0 * math.atan(math.sqrt((1.0 - e) / (1.0 + e)) * math.tan(nu0 / 2.0))
+    energy = 0.5 * dot(velocity, velocity) - mu / r
+    if energy < 0.0:
+        # Bound: an ellipse, also where rounding puts e at 1 or just above for a nearly radial
+        # motion. The semi-axes from the energy and p, and the ship's eccentric anomaly from
+        # its distance and radial speed, which keep their precision for thin ellipses.
+        e = min(e, 1.0 - 1e-15)
+        a = -mu / (2.0 * energy)
+        b = math.sqrt(a * p)
+        e0 = math.atan2(dot(position, velocity) / math.sqrt(mu * a), 1.0 - r / a)
         for i in range(count):
             angle = e0 + 2.0 * math.pi * i / (count - 1)
             x, y = a * (math.cos(angle) - e), b * math.sin(angle)
