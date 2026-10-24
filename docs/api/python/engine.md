@@ -4,7 +4,7 @@ Access: `sk.Engine(...)`. [Other language reference](../cpp/engine-api.md).
 
 [Binding implementation](../../../python/shoonyakasha/_shoonyakasha.pyx). Import the package as `import shoonyakasha as sk`.
 
-Owns the application and provides callbacks and convenience constructors. `run()` blocks until the window closes. Keep sub-API access and scene setup in the engine's lifetime.
+Owns the application and provides callbacks and convenience constructors. `run()` blocks until the window closes. Keep sub-API access and scene setup in the engine's lifetime. An engine is freed, with its GPU resources and Vulkan device, when it is garbage collected or, at the latest, when the interpreter exits; the engine and its sub-APIs must not be used from `atexit` handlers registered before `shoonyakasha` was imported.
 
 ## Initialization and callbacks
 

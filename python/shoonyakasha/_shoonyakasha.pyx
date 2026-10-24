@@ -1688,6 +1688,22 @@ cdef class UI:
 # Engine — Python wrapper for EngineAPI (the main entry point)
 # ═══════════════════════════════════════════════════════════════
 
+import atexit as _atexit
+import weakref as _weakref
+
+# Engines not yet freed. At interpreter exit each one's GPU resources and
+# device are destroyed, whether or not the script still references it.
+_live_engines = _weakref.WeakSet()
+
+
+def _release_engines():
+    for engine in list(_live_engines):
+        (<Engine>engine)._release()
+
+
+_atexit.register(_release_engines)
+
+
 cdef class Engine:
     """Main engine entry point.
 
@@ -1714,6 +1730,7 @@ cdef class Engine:
 
     # Keep Python references to callbacks to prevent GC
     cdef list _callback_refs
+    cdef object __weakref__
 
     def __cinit__(self):
         self._ptr = NULL
@@ -1780,10 +1797,15 @@ cdef class Engine:
                     pair[string, uint32_t](k.encode('utf-8'), <uint32_t>v))
 
         self._ptr = new CppEngineAPI(cfg)
+        _live_engines.add(self)
 
     def __dealloc__(self):
+        self._release()
+
+    cdef void _release(self):
         if self._ptr != NULL:
             del self._ptr
+            self._ptr = NULL
 
     # ── Lifecycle ─────────────────────────────────────────────
 
