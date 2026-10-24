@@ -14,7 +14,7 @@
 struct ChunkInstance {
     vec4 origin;           // xyz: the chunk's centre minus the camera's position
     vec4 colour;           // rgb: albedo, or r < 0 for the terrain's own colours; a: grid strength
-    vec4 morph;            // x: the parent's split distance (m); y: the levels above the chunk
+    vec4 morph;            // x: the parent's split distance (m); y: the levels above the chunk; z: its body
 };
 
 layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
@@ -29,6 +29,7 @@ layout(location = 2) out vec2 fragFaceUv;
 layout(location = 3) out vec4 fragRadialHeight;
 layout(location = 4) out vec3 fragRelativePos;
 layout(location = 5) out float fragHorizon;
+layout(location = 6) flat out int fragBody;
 
 void main() {
     ChunkInstance chunk = chunks.instances[gl_InstanceIndex];
@@ -40,5 +41,6 @@ void main() {
     fragRadialHeight = v.radialHeight;
     fragRelativePos = relativePos;
     fragHorizon = v.horizon.x;
+    fragBody = int(chunk.morph.z);
     gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
 }

@@ -187,6 +187,8 @@ MOON_RADIUS = 25_000.0
 MOON_GRAVITY = 0.981
 MOON_DISTANCE = 600_000.0
 MOON_PHASE = 0.6
+MOON_HEIGHTS = (-2000.0, 1500.0)  # the moon's roots' height range until their chunks are measured
+MOON_FLOOR = -2000.0             # metres above the moon's radius that its terrain (moon.glsl) stays above
 
 parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
@@ -273,26 +275,6 @@ def distance_text(metres):
 
 # ── Meshes ─────────────────────────────────────────────────────────────────
 
-def sphere(subdivisions):
-    """A unit sphere centred on the origin, as triangles with smooth
-    normals: an octahedron whose triangles are split in four
-    `subdivisions` times, each new corner pushed out to the sphere."""
-    triangles = []
-    corners = ((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0))
-    for i in range(4):
-        a, b = corners[i], corners[(i + 1) % 4]
-        triangles.append(((0, 0, 1), a, b))
-        triangles.append(((0, 0, -1), b, a))
-    for _ in range(subdivisions):
-        finer = []
-        for a, b, c in triangles:
-            ab, bc, ca = (normalize(scale(add(p, q), 0.5)) for p, q in ((a, b), (b, c), (c, a)))
-            finer += [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)]
-        triangles = finer
-    positions = [p for triangle in triangles for p in triangle]
-    return positions, list(positions)
-
-
 def box():
     """A unit cube centred on the origin, as triangles with flat normals."""
     positions, normals = [], []
@@ -345,7 +327,6 @@ state = {
     "rebuild": [],               # built chunks still to build again for horizon_sun, nearest last
     "gamepad_held": set(),       # gamepad buttons held last frame
     "reentry_pass": False,       # whether the ReentryGlow pass is enabled
-    "moon_entity": None,
     "multiple_scattering": True,  # light scattered more than once, from the multiple scattering table
     "exposure": EXPOSURE,
     "mode": "camera",            # "camera": the free camera; "ship": the view from the ship
@@ -412,15 +393,16 @@ class ChunkPool:
         self.body.pop(node.chunk, None)
         self.free.append(node.chunk)
 
-    def submit_jobs(self, probe_directions):
-        """Hand this frame's jobs and the probes (direction and a value
-        their results carry back) to BuildChunks, and start the next frame's
-        list."""
+    def submit_jobs(self, probes, stamp):
+        """Hand this frame's jobs, the probes (direction and body index)
+        and the stamp their results carry back to BuildChunks, and start the
+        next frame's list."""
         padded = self.jobs + [((0.0,) * 4, (0.0,) * 4)] * (MAX_JOBS - len(self.jobs))
         engine.set_custom_vec4_array("planet.jobA", [a for a, _ in padded])
         engine.set_custom_vec4_array("planet.jobB", [b for _, b in padded])
         engine.set_custom_uint("planet.jobCount", len(self.jobs))
-        engine.set_custom_vec4_array("planet.probe", probe_directions)
+        engine.set_custom_vec4_array("planet.probe", probes)
+        engine.set_custom_float("planet.probeStamp", stamp)
         self.jobs = []
 
     def take_heights(self, heights):
@@ -442,14 +424,20 @@ pool = ChunkPool()
 class Body:
     """A body drawn with terrain from the chunk pool: its index (its chunk
     jobs carry it, and BuildChunks reads its radius by it), its radius, its
-    terrain's parameters, its orbit (an object with position(time) and
-    velocity(time) around the planet's centre, or None for the planet),
-    whether the ocean is drawn on it, and its quadtree once made. Its
-    tree's chunks and its ground patches are relative to its centre."""
+    terrain's parameters (the planet's; None for the moon, whose terrain
+    has fixed parameters in moon.glsl), its orbit (an object with
+    position(time) and velocity(time) around the planet's centre, or None
+    for the planet), whether the ocean is drawn on it, metres above its
+    radius its terrain stays above (`floor`, or None to work it out from
+    `terrain`), its roots' height range until measured, and its quadtree
+    once made. Its tree's chunks and its ground patches are relative to its
+    centre."""
 
-    def __init__(self, index, name, radius, terrain, orbit=None, ocean=False):
+    def __init__(self, index, name, radius, terrain, orbit=None, ocean=False, floor=None, heights=ROOT_HEIGHTS):
         self.index, self.name, self.radius = index, name, radius
         self.terrain = terrain
+        self.floor = floor
+        self.heights = heights
         self.orbit = orbit
         self.ocean = ocean
         self.tree = None
@@ -468,7 +456,7 @@ class Body:
 
     def new_tree(self):
         return QuadTree(self.radius, lambda node: pool.make(node, self), pool.release, max_level=MAX_LEVEL,
-                        split_factor=SPLIT_FACTOR, heights=ROOT_HEIGHTS, height_pad=HEIGHT_PAD)
+                        split_factor=SPLIT_FACTOR, heights=self.heights, height_pad=HEIGHT_PAD)
 
 
 planet = Body(0, "planet", RADIUS, {name: list(value) for name, value in TERRAIN.items()}, ocean=True)
@@ -476,8 +464,13 @@ bodies = [planet]
 
 
 def body_under(point):
-    """The body whose surface (sphere) is nearest `point`."""
-    return min(bodies, key=lambda body: length(body.relative(point)) - body.radius)
+    """The body `point` is reckoned around, as flight.reference reckons
+    orbits: the body with an orbit whose sphere of influence holds it,
+    else the planet."""
+    for body in bodies:
+        if body.orbit is not None and length(body.relative(point)) < body.orbit.influence:
+            return body
+    return planet
 
 
 def site_frame():
@@ -560,10 +553,12 @@ def parent_split_distance(node, tree):
 
 
 def terrain_floor(body):
-    """Metres above `body`'s radius that no terrain goes below: the
-    seabed's depth, or on land the continent's edge plus the hills' and the
-    detail's heights, both with 10 % to spare (terrain.glsl's noise stays
-    within [-1, 1])."""
+    """Metres above `body`'s radius that no terrain goes below: its
+    `floor`, or from its terrain parameters the seabed's depth, or on land
+    the continent's edge plus the hills' and the detail's heights, both
+    with 10 % to spare (terrain.glsl's noise stays within [-1, 1])."""
+    if body.floor is not None:
+        return body.floor
     terrain = body.terrain
     return -1.1 * max(terrain["hills"][2], 0.05 * terrain["continent"][3] + terrain["hills"][1] + terrain["detail"][1])
 
@@ -597,7 +592,7 @@ def upload_drawn_chunks():
             slot = node.chunk
             instances[slot, 0, :3] = sub(node.centre, eye)
             instances[slot, 1] = chunk_colour(node)
-            instances[slot, 2, :2] = (parent_split_distance(node, body.tree), node.level)
+            instances[slot, 2, :3] = (parent_split_distance(node, body.tree), node.level, body.index)
             if length(sub(node.bound_centre, eye)) - node.bound_radius < reach:
                 casters.append(node)
             if not visible(node, centre, eye, occluder):
@@ -717,13 +712,16 @@ def read_back_heights():
 
 
 def start_terrain():
-    """Once the site's natural height is known: the pad at that height, and
-    a tree to build the planet with it."""
+    """Once the site's natural height is known: the pad at that height, a
+    tree to build the planet with it, and a tree for each other body that
+    has none yet."""
     upload_terrain()
     state["terrain_version"] += 1
     state["ground"] = None
     state["patch"] = None
-    planet.tree = planet.new_tree()
+    for body in bodies:
+        if body is planet or body.tree is None:
+            body.tree = body.new_tree()
 
 
 def regenerate():
@@ -770,17 +768,13 @@ def build_moon():
     """The moon (flight.Moon) circling in the plane of the site's up and
     east, so that it passes over the site moving east like preset 9's
     orbit, starting MOON_PHASE radians east of the site's zenith; drawn as
-    a grey sphere of its radius."""
+    body 1 with its cratered terrain (moon.glsl); its tree is made with
+    the planet's (start_terrain)."""
     _, up, east, _ = site_frame()
     flight_planet.moon = flight.Moon(radius=MOON_RADIUS, surface_gravity=MOON_GRAVITY, distance=MOON_DISTANCE,
                                      phase=MOON_PHASE, u=up, v=east, primary_gm=flight_planet.gm)
-    positions, normals = sphere(4)
-    entity = engine.create_mesh(positions, normals=normals, name="Moon")
-    engine.scene.set_scale(entity, (MOON_RADIUS,) * 3)
-    engine.scene.set_material_vec4(entity, "baseColorFactor", (0.55, 0.55, 0.53, 1.0))
-    engine.scene.set_material_float(entity, "gridStrength", 0.0)
-    engine.scene.set_render_layer_mask(entity, 1)
-    state["moon_entity"] = entity
+    moon = Body(1, "moon", MOON_RADIUS, None, orbit=flight_planet.moon, floor=MOON_FLOOR, heights=MOON_HEIGHTS)
+    bodies.append(moon)
 
 
 def build_cockpit():
@@ -1135,14 +1129,15 @@ def update_level_of_detail():
     ship = state["ship"]
     patch = ground_patch_request(ship) if state["mode"] == "ship" and not ship.crashed else None
     ground_body = body_under(state["position"])
-    probes = [normalize(ground_body.relative(state["position"])), site_up]
-    probes += patch[1].directions if patch is not None else []
+    probes = [(normalize(ground_body.relative(state["position"])), ground_body), (site_up, planet)]
+    probes += [(d, patch[0]) for d in patch[1].directions] if patch is not None else []
     extra = list(state["extra_probes"][:EXTRA_PROBES])
-    probes += [(0.0, 1.0, 0.0)] * (PROBES - EXTRA_PROBES - len(probes))
-    probes += extra + [(0.0, 1.0, 0.0)] * (EXTRA_PROBES - len(extra))
+    unused = ((0.0, 1.0, 0.0), planet)
+    probes += [unused] * (PROBES - EXTRA_PROBES - len(probes))
+    probes += [(d, planet) for d in extra] + [unused] * (EXTRA_PROBES - len(extra))
     stamp = float(state["frame"])
     state["probe_requests"][stamp] = (state["terrain_version"], ground_body, patch, extra)
-    pool.submit_jobs([tuple(d) + (stamp,) for d in probes])
+    pool.submit_jobs([tuple(d) + (float(body.index),) for d, body in probes], stamp)
 
 
 def frame(dt):
@@ -1165,9 +1160,13 @@ def frame(dt):
         state["speed"] = 0.0
         fly(dt)
         keep_above_ground()
-        # The world's clock runs on (the moon moves) while the ship waits.
+        # The world's clock runs on (the moon moves) while the ship waits; the camera moves with the
+        # body under it.
+        body = body_under(state["position"])
+        before = body.centre()
         state["flight_time"] += dt * WARPS[state["warp"]]
         flight_planet.time = state["flight_time"]
+        state["position"] = add(state["position"], sub(body.centre(), before))
     update_level_of_detail()
 
     # Camera-relative placement: subtract in double, then hand floats over.
@@ -1178,7 +1177,6 @@ def frame(dt):
     ground = site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
-    engine.scene.set_position(state["moon_entity"], sub(flight_planet.moon.position(flight_planet.time), camera))
     right, up, forward = state["ship"].axes() if state["mode"] == "ship" else camera_basis()
     view_rotation = euler_from_basis(right, up, forward)
     engine.scene.set_rotation(state["camera"], view_rotation)
@@ -1315,8 +1313,6 @@ def on_init():
 
     upload_sky()
     upload_clouds()
-    radii = [body.radius for body in bodies]
-    engine.set_custom_vec4("planet.radii", tuple(radii + [0.0] * (4 - len(radii))))
     upload_terrain()
     upload_chunk_indices()
     engine.set_buffer("OrbitIndices", np.arange(ORBIT_POINTS, dtype=np.uint32))
@@ -1324,6 +1320,8 @@ def on_init():
     build_hud()
     build_cockpit()
     build_moon()
+    radii = [body.radius for body in bodies]
+    engine.set_custom_vec4("planet.radii", tuple(radii + [0.0] * (4 - len(radii))))
     state["instruments"] = Instruments(engine, cockpit.SCREENS)
     state["planet_edit"] = {name: list(value) for name, value in planet.terrain.items()}
     state["menu"] = SettingsMenu(engine, "Settings   (F1 to hide)", menu_items())
@@ -1570,6 +1568,29 @@ def mid_reentry():
     state["forward"] = forward
 
 
+def moon_body():
+    return next(body for body in bodies if body.name == "moon")
+
+
+def look_at_moon():
+    """The free camera's view turned towards the moon's centre."""
+    state["forward"] = normalize(sub(moon_body().centre(), state["position"]))
+
+
+def near_moon(height, sun_elevation, down=0.0):
+    """The free camera `height` metres above the moon's sphere where the
+    sun stands `sun_elevation` degrees up, looking level across the sun's
+    direction, turned `down` degrees below level."""
+    moon = moon_body()
+    sun = sun_direction()
+    across = normalize(cross(sun, (0.0, 1.0, 0.0) if abs(sun[1]) < 0.9 else (1.0, 0.0, 0.0)))
+    up = rotate(sun, across, math.radians(90.0 - sun_elevation))
+    state["mode"] = "camera"
+    state["position"] = add(moon.centre(), scale(up, moon.radius + height))
+    tilt = math.radians(down)
+    state["forward"] = normalize(add(scale(across, math.cos(tilt)), scale(up, -math.sin(tilt))))
+
+
 def near_mountain(sun_elevation, sun_azimuth, top=False):
     """The free camera 2.7 km above the sphere, 600 m south-west of a peak
     60 km from the site at 67.5 degrees from east (2,460 m high with the
@@ -1633,6 +1654,10 @@ class CaptureTour:
         ("mountain_top_no_detail", 7, False, 0, ("detail", 1, 0.0), DAY_SUN,
          lambda: near_mountain(15.0, 135.0, top=True)),
         ("preset_3_mountains_higher", 3, False, 0, ("mountains", 1, 1.5), DAY_SUN),
+        ("moon_from_the_site", 1, False, 0, None, DAY_SUN, look_at_moon),
+        ("moon_from_afar", 1, False, 0, None, DAY_SUN, lambda: near_moon(40_000.0, 30.0, down=45.0)),
+        ("moon_surface", 1, False, 0, None, DAY_SUN, lambda: near_moon(300.0, 15.0, down=12.0)),
+        ("moon_low_sun", 1, False, 0, None, DAY_SUN, lambda: near_moon(1_000.0, 5.0, down=25.0)),
     ]
 
     def __init__(self, directory):
@@ -1665,7 +1690,7 @@ class CaptureTour:
             if done or self.frames >= self.MAX_FRAMES:
                 path = os.path.join(self.directory, name + ".png")
                 ok = engine.capture_screenshot(path)
-                selected = len(planet.tree.selected)
+                selected = sum(len(body.tree.selected) for body in bodies if body.tree is not None)
                 print("[planet] %s after %d frames%s, %d of %d chunks drawn, frame %.1f ms"
                       % (path if ok else "screenshot failed", self.frames, "" if done else " (not settled)",
                          selected - state["chunks_culled"], selected, state["frame_ms"]), flush=True)
@@ -1724,15 +1749,15 @@ class Verify:
         worst = {"position (ULPs)": 0.0, "direction (ULPs)": 0.0, "face uv": 0.0,
                  "normal length - 1": 0.0, "lowest/highest height (m)": 0.0}
         lowest_normal_dot = 1.0
-        chunks = 0
-        for node in planet.tree.nodes():
-            if node.chunk is None:
-                continue
+        chunks = {body.name: 0 for body in bodies}
+        built_nodes = [(body, node) for body in bodies if body.tree is not None
+                       for node in body.tree.nodes() if node.chunk is not None]
+        for body, node in built_nodes:
             built = gpu[node.chunk]
             # The skirt's depth as the GPU works it out, in 32-bit: the job's, or the grid's height range.
             depth = max(np.float32(SKIRT_FRACTION * node.edge), built[:grid, 11].max() - built[:grid, 11].min())
             centre, positions, directions, uvs, _ = cube_sphere.chunk_mesh(
-                node.face, node.level, node.x, node.y, QUADS, RADIUS, skirt_depth=float(depth))
+                node.face, node.level, node.x, node.y, QUADS, body.radius, skirt_depth=float(depth))
             height = built[:, 11].astype(np.float64)
             expected = (positions + directions * height[:, None]).astype(np.float32)
             ulp = float(np.spacing(np.abs(expected).max()))
@@ -1751,12 +1776,13 @@ class Verify:
                 worst["lowest/highest height (m)"],
                 abs(float(heights[node.chunk, 0]) - float(built[:grid, 11].min())),
                 abs(float(heights[node.chunk, 1]) - float(built[:grid, 11].max())))
-            chunks += 1
-        print("[planet] checked %d chunks against cube_sphere.chunk_mesh:" % chunks, flush=True)
+            chunks[body.name] += 1
+        print("[planet] checked %s against cube_sphere.chunk_mesh:"
+              % ", ".join("%d chunks of the %s" % (n, name) for name, n in chunks.items()), flush=True)
         for name, value in worst.items():
             print("[planet]   largest %s difference %.3g" % (name, value), flush=True)
         print("[planet]   smallest normal . direction %.3f" % lowest_normal_dot, flush=True)
-        ok = (chunks > 0 and worst["position (ULPs)"] <= self.TOLERANCE_ULPS and worst["direction (ULPs)"] == 0
+        ok = (all(n > 0 for n in chunks.values()) and worst["position (ULPs)"] <= self.TOLERANCE_ULPS and worst["direction (ULPs)"] == 0
               and worst["face uv"] == 0 and worst["normal length - 1"] < 1e-5 and lowest_normal_dot > 0.0
               and worst["lowest/highest height (m)"] == 0)
         os._exit(0 if ok else 1)

@@ -11,16 +11,17 @@
 // Face coordinates, the cube point, spherify and the position relative to
 // the chunk's centre are worked out in 64-bit floats and stored as 32-bit:
 // in 32-bit, radius * (direction - centre direction) would carry about a
-// centimetre of error at a radius of 100 km. Heights are 32-bit, from
-// terrainHeight (terrain.glsl).
+// centimetre of error at a radius of 100 km. Heights are 32-bit, from the
+// body's terrain (bodyHeight): body 0, the planet, terrainHeight
+// (terrain.glsl); body 1, the moon, moonHeight (moon.glsl).
 //
 // Each vertex also holds the sine of the terrain's horizon towards the
 // sun's azimuth (horizonTowardsSun), for shadows beyond the shadow map.
 //
 // Each slot's lowest and highest grid height go to ChunkHeights with the
-// job's stamp. Workgroup MAX_JOBS evaluates the terrain at the probe
-// directions into ProbeHeights, each with the probe's w: probe 1 the
-// natural terrain (terrainHeightNatural), the others terrainHeight.
+// job's stamp. Workgroup MAX_JOBS evaluates the terrain of the body in
+// each probe's w at its direction into ProbeHeights, each with
+// probeStamp: probe 1 the planet's natural terrain (terrainHeightNatural).
 //
 
 layout(local_size_x = 64) in;
@@ -35,8 +36,9 @@ const int VERTICES = GRID + 4 * ROW;
 layout(set = 0, binding = 0) uniform ChunkJobs {
     vec4 jobA[MAX_JOBS];   // face, level, x, y
     vec4 jobB[MAX_JOBS];   // slot, skirt depth (metres), stamp, body
-    vec4 probe[PROBES];    // xyz: unit direction; w: copied to the result
+    vec4 probe[PROBES];    // xyz: unit direction; w: the body
     uint jobCount;
+    float probeStamp;      // copied to the probes' results
     vec4 radii;            // each body's radius (m), by its index
     vec4 horizonSun;       // xyz: unit direction towards the sun the horizons are measured towards
 } jobs;
@@ -67,10 +69,35 @@ layout(std430, set = 0, binding = 3) writeonly buffer ChunkHeights {
 } chunkHeights;
 
 layout(std430, set = 0, binding = 4) writeonly buffer ProbeHeights {
-    vec4 probeHeights[];   // per probe: height (m), the probe's w
+    vec4 probeHeights[];   // per probe: height (m), probeStamp
 } probes;
 
 #include "terrain.glsl"
+#include "moon.glsl"
+
+const int PLANET = 0;
+const int MOON = 1;
+
+// The body this invocation builds or probes, and its radius (m).
+int body;
+float bodyRadius;
+
+// The terrain's height (m) at unit direction `d` from the centre of `body`.
+float bodyHeight(vec3 d) {
+    return body == MOON ? moonHeight(d, bodyRadius, 0.0) : terrainHeight(d);
+}
+
+// bodyHeight for the normals of a chunk whose vertices are `spacing`
+// metres apart: on the moon without the craters whose radius is less than
+// two spacings, whose slopes the vertices would sample out of step.
+float bodyHeightForNormals(vec3 d, float spacing) {
+    return body == MOON ? moonHeight(d, bodyRadius, 2.0 * spacing) : terrainHeight(d);
+}
+
+// A height as the surface's: on the planet, below sea level is the sea's surface.
+float surfaceHeight(float h) {
+    return body == PLANET ? max(h, 0.0) : h;
+}
 
 // (normal, u axis, v axis) per face: +X, -X, +Y, -Y, +Z, -Z, as cube_sphere.FACES.
 const dvec3 FACE_N[6] = dvec3[6](dvec3(1, 0, 0), dvec3(-1, 0, 0), dvec3(0, 1, 0),
@@ -105,19 +132,20 @@ ivec2 skirtCorner(int e, int t) {
     return ivec2(0, QUADS - t);
 }
 
-// The surface normal at direction `d`, from heights `step` radians away
-// along two tangents that depend on `d` alone, so every chunk holding `d`
-// gets the same normal.
+// The surface normal at direction `d`, from heights (bodyHeightForNormals)
+// `step` radians away along two tangents that depend on `d` alone, so every
+// chunk of a level holding `d` gets the same normal.
 vec3 surfaceNormal(dvec3 d, double radius, double step) {
+    float spacing = float(radius * step * 1.5LF);         // metres between the chunk's vertices, near enough
     dvec3 axis = abs(d.y) < 0.9LF ? dvec3(0, 1, 0) : dvec3(1, 0, 0);
     dvec3 t1 = normalize(cross(axis, d));
     dvec3 t2 = cross(d, t1);
     dvec3 d1 = normalize(d + step * t1), d2 = normalize(d + step * t2);
     dvec3 d3 = normalize(d - step * t1), d4 = normalize(d - step * t2);
-    dvec3 p1 = d1 * (radius + double(terrainHeight(vec3(d1))));
-    dvec3 p2 = d2 * (radius + double(terrainHeight(vec3(d2))));
-    dvec3 p3 = d3 * (radius + double(terrainHeight(vec3(d3))));
-    dvec3 p4 = d4 * (radius + double(terrainHeight(vec3(d4))));
+    dvec3 p1 = d1 * (radius + double(bodyHeightForNormals(vec3(d1), spacing)));
+    dvec3 p2 = d2 * (radius + double(bodyHeightForNormals(vec3(d2), spacing)));
+    dvec3 p3 = d3 * (radius + double(bodyHeightForNormals(vec3(d3), spacing)));
+    dvec3 p4 = d4 * (radius + double(bodyHeightForNormals(vec3(d4), spacing)));
     return vec3(normalize(cross(p1 - p3, p2 - p4)));
 }
 
@@ -125,9 +153,10 @@ vec3 surfaceNormal(dvec3 d, double radius, double step) {
 // and height `h`, looking along the ground towards the sun's azimuth
 // (jobs.horizonSun): the highest elevation, above the plane square to `d`,
 // of the terrain at HORIZON_STEPS distances along the great circle that
-// way, spaced evenly in their logarithm from `near` to HORIZON_FAR.
-// Heights below sea level count as sea level, both the point's and the
-// terrain's, so the sea's surface gets its horizon. -1 with the sun
+// way, spaced evenly in their logarithm from `near` to HORIZON_FAR or
+// 0.4 of the radius, whichever is less. On the planet heights below sea
+// level count as sea level, both the point's and the terrain's, so the
+// sea's surface gets its horizon (surfaceHeight). -1 with the sun
 // overhead, where there is no azimuth.
 const int HORIZON_STEPS = 20;
 const float HORIZON_NEAR = 300.0;
@@ -138,13 +167,14 @@ float horizonTowardsSun(vec3 d, float h, float radius, float near) {
     vec3 along = sun - d * dot(sun, d);
     if (dot(along, along) < 1e-8) return -1.0;
     along = normalize(along);
-    vec3 from = d * (radius + max(h, 0.0));
+    vec3 from = d * (radius + surfaceHeight(h));
+    float far = min(HORIZON_FAR, 0.4 * radius);
     float highest = -1.0;
     for (int i = 0; i < HORIZON_STEPS; ++i) {
-        float s = near * pow(HORIZON_FAR / near, float(i) / float(HORIZON_STEPS - 1));
+        float s = near * pow(far / near, float(i) / float(HORIZON_STEPS - 1));
         float angle = s / radius;
         vec3 dk = d * cos(angle) + along * sin(angle);
-        vec3 to = dk * (radius + max(terrainHeight(dk), 0.0)) - from;
+        vec3 to = dk * (radius + surfaceHeight(bodyHeight(dk))) - from;
         highest = max(highest, dot(to, d) / length(to));
     }
     return highest;
@@ -161,14 +191,14 @@ float writeVertex(uint slot, int k, ivec2 ij, int face, int x, int y, double cel
     double u = -1.0LF + 2.0LF * double(x * QUADS + ij.x) / cells;
     double v = -1.0LF + 2.0LF * double(y * QUADS + ij.y) / cells;
     dvec3 d = direction(face, u, v);
-    float h = terrainHeight(vec3(d));
+    float h = bodyHeight(vec3(d));
     double r = radius + double(h) - double(below);
     uint index = slot * uint(VERTICES) + uint(k);
     pool.vertices[index].positionU = vec4(vec3(d * r - centre), float(u));
     pool.vertices[index].normalV = vec4(surfaceNormal(d, radius, step), float(v));
     pool.vertices[index].radialHeight = vec4(vec3(d), h);
     float spacing = float(radius * 2.0LF / cells);        // metres between vertices, near enough
-    float near = min(max(HORIZON_NEAR, 2.0 * spacing), 0.5 * HORIZON_FAR);
+    float near = min(max(HORIZON_NEAR, 2.0 * spacing), 0.2 * float(radius));
     pool.vertices[index].horizon = vec4(horizonTowardsSun(vec3(d), h, float(radius), near), 0.0, 0.0, 0.0);
     return h;
 }
@@ -176,8 +206,10 @@ float writeVertex(uint slot, int k, ivec2 ij, int face, int x, int y, double cel
 void evaluateProbes() {
     for (uint i = gl_LocalInvocationID.x; i < uint(PROBES); i += 64u) {
         vec3 dir = normalize(jobs.probe[i].xyz);
-        float h = i == 1u ? terrainHeightNatural(dir) : terrainHeight(dir);
-        probes.probeHeights[i] = vec4(h, jobs.probe[i].w, 0.0, 0.0);
+        body = int(jobs.probe[i].w);
+        bodyRadius = jobs.radii[body];
+        float h = i == 1u ? terrainHeightNatural(dir) : bodyHeight(dir);
+        probes.probeHeights[i] = vec4(h, jobs.probeStamp, 0.0, 0.0);
     }
 }
 
@@ -196,7 +228,9 @@ void main() {
     int y = int(a.w);
     uint slot = uint(b.x);
     float skirt = b.y;
-    double radius = double(jobs.radii[int(b.w)]);
+    body = int(b.w);
+    bodyRadius = jobs.radii[body];
+    double radius = double(bodyRadius);
 
     double cells = double(QUADS << level);
     double halfQuads = double(QUADS / 2);

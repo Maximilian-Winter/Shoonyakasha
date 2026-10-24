@@ -87,6 +87,7 @@
         { "name": "jobB", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobB[i]" },
         { "name": "probe", "type": "vec4", "arrayCount": 128, "source": "scene.custom.planet.probe[i]" },
         { "name": "jobCount", "type": "uint", "source": "scene.custom.planet.jobCount", "default": 0 },
+        { "name": "probeStamp", "type": "float", "source": "scene.custom.planet.probeStamp", "default": 0.0 },
         { "name": "radii", "type": "vec4", "source": "scene.custom.planet.radii" },
         { "name": "horizonSun", "type": "vec4", "source": "scene.custom.planet.horizonSun",
           "default": [ 0.0, 1.0, 0.0, 0.0 ] }

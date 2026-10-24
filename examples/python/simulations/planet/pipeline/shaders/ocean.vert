@@ -12,7 +12,7 @@
 struct ChunkInstance {
     vec4 origin;           // xyz: the chunk's centre minus the camera's position
     vec4 colour;
-    vec4 morph;            // x: the parent's split distance (m); y: the levels above the chunk
+    vec4 morph;            // x: the parent's split distance (m); y: the levels above the chunk; z: its body
 };
 
 layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {

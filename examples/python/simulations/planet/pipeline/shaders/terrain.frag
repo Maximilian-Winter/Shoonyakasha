@@ -1,10 +1,11 @@
 #version 450
 //
 // The terrain's fragment shader. With a chunk colour whose red is below 0,
-// the ground is coloured by height, slope, latitude and a moisture noise;
-// otherwise it takes the chunk's colour, with face lines (shading.glsl).
-// Lit by the sunlight that comes through the atmosphere and a sky light
-// (atmosphere.glsl), in HDR.
+// the planet's ground is coloured by height, slope, latitude and a
+// moisture noise, and the moon's grey (moonColour); otherwise it takes the
+// chunk's colour, with face lines (shading.glsl). The planet is lit by the
+// sunlight that comes through the atmosphere and a sky light
+// (atmosphere.glsl), the moon by the sunlight alone, in HDR.
 //
 
 #define CAMERA_SET 0
@@ -21,6 +22,7 @@ layout(location = 2) in vec2 fragFaceUv;
 layout(location = 3) in vec4 fragRadialHeight;
 layout(location = 4) in vec3 fragRelativePos;
 layout(location = 5) in float fragHorizon;
+layout(location = 6) flat in int fragBody;
 
 layout(location = 0) out vec4 outColor;
 
@@ -48,13 +50,36 @@ vec3 groundColour(vec3 radial, float height, vec3 normal) {
     return mix(colour, SNOW, snow);
 }
 
+// The moon's ground: grey highlands and darker maria, from a low-frequency
+// noise, varied by a finer one, lighter on steep slopes.
+const vec3 MOON_HIGHLAND = vec3(0.17, 0.165, 0.155);
+const vec3 MOON_MARE = vec3(0.075, 0.073, 0.07);
+
+vec3 moonColour(vec3 radial, vec3 normal) {
+    float slope = 1.0 - dot(normal, radial);
+    float mare = smoothstep(0.05, 0.2, fbm3(radial * 1.5 + vec3(11.7, 3.3, 8.9), 4, 2.0, 0.5));
+    vec3 colour = mix(MOON_HIGHLAND, MOON_MARE, mare);
+    colour *= 0.85 + 0.3 * (fbm3(radial * 60.0 + vec3(2.9, 5.1, 7.7), 4, 2.0, 0.5) + 0.5);
+    return colour + 0.05 * smoothstep(0.15, 0.4, slope);
+}
+
+const int MOON = 1;          // the moon's body index, as chunk_build.comp
+
 void main() {
     vec3 normal = normalize(fragNormal);
     vec3 radial = normalize(fragRadialHeight.xyz);
+    vec3 p = camera.cameraFromCentre.xyz + fragRelativePos;
+    float terrainShadow = min(sunShadow(fragRelativePos, normal),
+                              horizonShadow(fragHorizon, radial, length(fragRelativePos)));
+    if (fragBody == MOON) {
+        // No air: the sunlight alone (sunlightAt is 0 in the planet's shadow), no sky light, no clouds.
+        vec3 albedo = fragColour.r < 0.0 ? moonColour(radial, normal)
+                                         : withGrid(fragColour.rgb, fragColour.a, fragFaceUv);
+        float sunCos = max(dot(normal, atmosphere.sun.xyz), 0.0);
+        outColor = vec4(albedo / ATMOSPHERE_PI * sunlightAt(p) * sunCos * terrainShadow, 1.0);
+        return;
+    }
     vec3 albedo = fragColour.r < 0.0 ? groundColour(radial, fragRadialHeight.w, normal)
                                      : withGrid(fragColour.rgb, fragColour.a, fragFaceUv);
-    vec3 p = camera.cameraFromCentre.xyz + fragRelativePos;
-    float sunShare = min(sunShadow(fragRelativePos, normal), horizonShadow(fragHorizon, radial, length(fragRelativePos)))
-                   * cloudShadow(p);
-    outColor = vec4(lightSurface(albedo, p, normal, radial, sunShare), 1.0);
+    outColor = vec4(lightSurface(albedo, p, normal, radial, terrainShadow * cloudShadow(p)), 1.0);
 }
