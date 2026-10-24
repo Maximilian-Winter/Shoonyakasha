@@ -34,6 +34,7 @@ Keys:
     mouse wheel            speed factor
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
+    7                      2 km up, 25 km north-west of the blocks, looking further north-west
     N                      new terrain seed
     M / J                  mountains higher / lower
     H / G                  hills higher / lower
@@ -41,6 +42,7 @@ Keys:
     T / Y                  atmosphere denser / thinner
     B / V                  exposure up / down
     F                      wireframe
+    O                      ocean
     C                      colour: terrain, per face, per level
     K                      freeze the level of detail
     [ / ]                  split factor down / up
@@ -215,6 +217,8 @@ state = {
     "speed_factor": 1.0,
     "hud": None,
     "wireframe": False,
+    "ocean": True,
+    "ocean_chunks": 0,           # chunks the ocean draws
     "colour_mode": 0,
     "frozen": False,
     "frame": 0,
@@ -368,6 +372,12 @@ def upload_drawn_chunks():
     engine.set_buffer("ChunkDraws", np.uint32([len(selected)]))
     if len(selected):
         engine.set_buffer("ChunkDraws", commands, offset=DRAWS_OFFSET)
+    # The ocean redraws the chunks whose height range reaches below sea level.
+    wet = commands[[row for row, node in enumerate(selected) if node.low < 0.0]]
+    state["ocean_chunks"] = len(wet)
+    engine.set_buffer("OceanDraws", np.uint32([len(wet)]))
+    if len(wet):
+        engine.set_buffer("OceanDraws", wet, offset=DRAWS_OFFSET)
 
 
 def read_back_heights():
@@ -452,12 +462,18 @@ def altitude():
     return length(state["position"]) - RADIUS
 
 
+def surface_height():
+    """The height of what is under the camera: the ground, or the sea where
+    the ground is below sea level."""
+    return max(state["ground"] or 0.0, 0.0)
+
+
 def height_above_ground():
-    return altitude() - (state["ground"] or 0.0)
+    return altitude() - surface_height()
 
 
 def keep_above_ground():
-    floor = RADIUS + (state["ground"] or 0.0) + MIN_ALTITUDE
+    floor = RADIUS + surface_height() + MIN_ALTITUDE
     if length(state["position"]) < floor:
         state["position"] = scale(normalize(state["position"]), floor)
 
@@ -510,6 +526,12 @@ def teleport(preset):
     elif preset == 2:
         state["position"] = add(ground, scale(up, 1_000.0))
         state["forward"] = normalize(add(north, scale(up, -0.25)))
+    elif preset == 7:
+        # 2 km above the sphere, 25 km north-west of the blocks, looking further north-west.
+        north_west = normalize(sub(north, east))
+        spot = normalize(add(up, scale(north_west, 25_000.0 / RADIUS)))
+        state["position"] = scale(spot, RADIUS + 2_000.0)
+        state["forward"] = normalize(add(north_west, scale(spot, -0.15)))
     elif preset == 6:
         # 8 km above the sphere at the cube corner shared by +X, +Y and +Z, looking down at it.
         corner = normalize((1.0, 1.0, 1.0))
@@ -594,9 +616,10 @@ def update_hud():
                        "speed factor %.2f    frame %.1f ms"
                        % (distance_text(height_above_ground()), distance_text(altitude()), state["speed"],
                           state["speed_factor"], state["frame_ms"]))
-    engine.ui.set_text(state["hud"][1], "chunks drawn %d    built %d    missing %d    pool %d / %d    "
+    engine.ui.set_text(state["hud"][1], "chunks drawn %d (ocean %d)    built %d    missing %d    pool %d / %d    "
                        "deepest level %d    split factor %.2f%s    colour: %s"
-                       % (len(tree.selected), cached, len(tree.missing), pool.used, SLOTS, deepest,
+                       % (len(tree.selected), state["ocean_chunks"], cached, len(tree.missing), pool.used, SLOTS,
+                          deepest,
                           tree.split_factor, "    LOD FROZEN" if state["frozen"] else "",
                           COLOUR_MODES[state["colour_mode"]]))
     engine.ui.set_text(state["hud"][2], "seed %.1f %.1f %.1f    mountains %.0f m    hills %.0f m    "
@@ -648,8 +671,11 @@ def change_terrain(name, index, factor):
 
 def on_key(key):
     tree = state["tree"]
-    if keys.NUM_1 <= key <= keys.NUM_6:
+    if keys.NUM_1 <= key <= keys.NUM_7:
         teleport(key - keys.NUM_0)
+    elif key == keys.O:
+        state["ocean"] = not state["ocean"]
+        engine.set_pass_enabled("Ocean", state["ocean"])
     elif key == keys.N:
         state["terrain"]["seed"] = [random.uniform(-100.0, 100.0) for _ in range(3)] + [0.0]
         regenerate()
@@ -707,6 +733,9 @@ class CaptureTour:
         ("preset_2_sunset", 2, False, 0, None, (2.0, 90.0)),
         ("preset_3_low_sun", 3, False, 0, None, (8.0, 45.0)),
         ("preset_4_terminator", 4, False, 0, None, (0.0, 200.0)),
+        ("preset_7_coast", 7, False, 0, None, DAY_SUN),
+        ("preset_7_sun_on_the_sea", 7, False, 0, None, (12.0, 135.0)),
+        ("preset_3_ocean_sun", 3, False, 0, None, (50.0, 135.0)),
         ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN),
         ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
         ("preset_3_mountains_higher", 3, False, 0, ("mountains", 1, 1.5), DAY_SUN),

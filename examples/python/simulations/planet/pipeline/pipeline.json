@@ -29,7 +29,8 @@
         { "name": "sunDirection", "type": "vec4", "source": "scene.custom.planet.sunDirection" },
         { "name": "invView", "type": "mat4", "source": "scene.camera.invView" },
         { "name": "invProj", "type": "mat4", "source": "scene.camera.invProj" },
-        { "name": "cameraFromCentre", "type": "vec4", "source": "scene.custom.planet.cameraFromCentre" }
+        { "name": "cameraFromCentre", "type": "vec4", "source": "scene.custom.planet.cameraFromCentre" },
+        { "name": "time", "type": "float", "source": "scene.time.elapsed" }
       ]
     },
     "AtmosphereParams": {
@@ -118,6 +119,12 @@
       ]
     },
     "ChunkDraws": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 10244,
+      "fields": [ { "name": "word", "type": "uint" } ]
+    },
+    "OceanDraws": {
       "usage": "storage_buffer",
       "packing": "std430",
       "elementCount": 10244,
@@ -256,6 +263,34 @@
       "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 96, "offset": 0 } ],
       "outputs": [
         { "resource": "hdrColor", "usage": "color_write" },
+        { "resource": "depth", "usage": "depth_write" }
+      ]
+    },
+    {
+      "name": "Ocean",
+      "type": "graphics",
+      "execution": {
+        "type": "draw_indexed_indirect",
+        "vertexBuffer": { "buffer": "ChunkPool" },
+        "indexBuffer": { "buffer": "ChunkIndices", "type": "uint32" },
+        "arguments": { "buffer": "OceanDraws", "offset": 16 },
+        "count": { "buffer": "OceanDraws", "offset": 0, "maxDrawCount": 2048 }
+      },
+      "pipeline": {
+        "vertexShader": "shaders/ocean.vert.spv",
+        "fragmentShader": "shaders/ocean.frag.spv",
+        "vertexInput": "chunkVertex",
+        "depthTest": true,
+        "depthWrite": true,
+        "depthCompareOp": "greater_or_equal",
+        "cullMode": "back",
+        "blending": "custom",
+        "srcColorFactor": "one",
+        "dstColorFactor": "one_minus_src_alpha"
+      },
+      "descriptorSets": [ "cameraSet", "chunkInstanceSet" ],
+      "outputs": [
+        { "resource": "hdrColor", "usage": "color_blend" },
         { "resource": "depth", "usage": "depth_write" }
       ]
     },

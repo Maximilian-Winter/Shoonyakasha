@@ -752,6 +752,9 @@ The milestones from §9, cut to fit this engine. Each package ends with a check 
 
 **WP7: Ocean**
 - A water sphere at radius R with colour by depth, Fresnel and sun highlight, drawn as a transparent pass after the terrain.
+- Geometry: the terrain's chunks drawn again from the pool with each vertex moved to sea level (position − direction × height), only those whose height range reaches below 0, through a second indirect draw list; the same LOD and skirts.
+- Water depth from the sea floor's height per vertex (shallow water shows the coarse chunks' facets from far away); premultiplied blending over the sea floor; the ocean writes depth, so the atmosphere fogs the surface.
+- The camera stays above max(ground, sea level).
 - Done: coastlines visible from low altitude and from orbit.
 
 **WP8: Flight model**

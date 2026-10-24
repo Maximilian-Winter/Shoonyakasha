@@ -8,6 +8,7 @@ layout(set = CAMERA_SET, binding = 0) uniform CameraUBO {
     mat4 invView;
     mat4 invProj;
     vec4 cameraFromCentre; // xyz: the camera's position relative to the planet's centre (m)
+    float time;            // seconds since the engine started
 } camera;
 
 layout(set = CAMERA_SET, binding = 1) uniform TerrainParams {

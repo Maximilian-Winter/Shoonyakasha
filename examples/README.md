@@ -119,7 +119,7 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 
 | | |
 |---|---|
-| [`planet`](python/simulations/planet) | A 100 km planet with procedural terrain (continents, oceans, ridged mountains, hills, biome colours) and a raymarched atmosphere (Rayleigh and Mie single scattering, sunlight dimmed on the ground, HDR) on its own pipeline, flown from 5 m above the ground to 5,000 km away: quadtree level of detail down to 2.4 m quads with skirts, built in 64-bit floats by a compute pass into a pool of chunk slots and drawn with one indirect draw call; positions in Python doubles, every chunk placed relative to the camera each frame, a reverse-Z projection with an infinite far plane, and a wireframe view. Uses only generated geometry; needs numpy and `shaderFloat64`. |
+| [`planet`](python/simulations/planet) | A 100 km planet with procedural terrain (continents, ridged mountains, hills, biome colours), an ocean with Fresnel reflection and sun glint, and a raymarched atmosphere (Rayleigh and Mie single scattering, sunlight dimmed on the ground, HDR) on its own pipeline, flown from 5 m above the ground to 5,000 km away: quadtree level of detail down to 2.4 m quads with skirts, built in 64-bit floats by a compute pass into a pool of chunk slots and drawn with one indirect draw call; positions in Python doubles, every chunk placed relative to the camera each frame, a reverse-Z projection with an infinite far plane, and a wireframe view. Uses only generated geometry; needs numpy and `shaderFloat64`. |
 
 ### games_2d
 
