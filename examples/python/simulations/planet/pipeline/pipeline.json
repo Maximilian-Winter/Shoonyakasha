@@ -1,0 +1,99 @@
+{
+  "version": 3,
+  "name": "planet",
+  "vertexFormats": {
+    "standard": {
+      "attributes": [
+        { "name": "position", "type": "vec3", "location": 0 },
+        { "name": "color", "type": "vec3", "location": 1 },
+        { "name": "texCoord", "type": "vec2", "location": 2 },
+        { "name": "normal", "type": "vec3", "location": 3 }
+      ]
+    }
+  },
+  "bufferLayouts": {
+    "CameraUBO": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "view", "type": "mat4", "source": "scene.camera.view" },
+        { "name": "proj", "type": "mat4", "source": "scene.camera.projection" },
+        { "name": "sunDirection", "type": "vec4", "source": "scene.custom.planet.sunDirection" }
+      ]
+    },
+    "MaterialPushConstants": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": { "offset": 0, "stages": [ "vertex", "fragment" ] },
+      "fields": [
+        { "name": "model", "type": "mat4", "source": "entity.transform.worldMatrix" },
+        { "name": "baseColorFactor", "type": "vec4", "source": "entity.material.params.baseColorFactor" },
+        { "name": "gridStrength", "type": "float", "source": "entity.material.params.gridStrength" },
+        { "name": "padding0", "type": "float", "source": "const.0" },
+        { "name": "padding1", "type": "float", "source": "const.0" },
+        { "name": "padding2", "type": "float", "source": "const.0" }
+      ]
+    }
+  },
+  "entityDataBindings": {
+    "opaque": {
+      "perDraw": { "layoutRef": "MaterialPushConstants" },
+      "material": { "layoutRef": "materialSet" }
+    }
+  },
+  "descriptorSetLayouts": {
+    "cameraSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [ "vertex", "fragment" ],
+          "name": "CameraUBO",
+          "autoBindBuffer": "CameraUBO"
+        }
+      ]
+    },
+    "materialSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "albedoMap" }
+      ]
+    }
+  },
+  "resources": [
+    { "name": "swapchain", "kind": "image", "imported": true },
+    { "name": "depth", "kind": "image", "image": { "format": "D32_SFLOAT" } }
+  ],
+  "passes": [
+    {
+      "name": "Scene",
+      "type": "graphics",
+      "execution": {
+        "type": "opaque_geometry",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "opaque"
+      },
+      "pipeline": {
+        "vertexShader": "shaders/scene.vert.spv",
+        "fragmentShader": "shaders/scene.frag.spv",
+        "vertexInput": "standard",
+        "depthTest": true,
+        "depthWrite": true,
+        "depthCompareOp": "greater_or_equal",
+        "cullMode": "back"
+      },
+      "descriptorSets": [ "cameraSet", "materialSet" ],
+      "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 96, "offset": 0 } ],
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_write", "clear": [ 0.0, 0.0, 0.0, 1.0 ] },
+        { "resource": "depth", "usage": "depth_write", "clear": { "depth": 0.0, "stencil": 0 } }
+      ]
+    },
+    {
+      "name": "UIOverlay",
+      "type": "graphics",
+      "execution": { "type": "ui_canvas" },
+      "outputs": [ { "resource": "swapchain", "usage": "color_blend", "present": true } ]
+    }
+  ]
+}

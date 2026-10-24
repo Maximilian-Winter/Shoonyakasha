@@ -115,6 +115,12 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 | [`wave_optics`](python/rendering/wave_optics) | A spectral, polarised path tracer on its own pipeline, after Steinberg and coauthors' physical light transport: a compact disc's diffraction rainbows, a thin film's interference colours and glossy highlights follow the coherence of the lamp's light, set by its size and distance. The lamp can be a bulb, a sodium or mercury lamp or an RGB LED. `--scene` shows Khronos's thin-film sample models instead (glTF-Sample-Assets). Gold and silver with measured refractive indices, a polariser in front of the camera, a view of the coherence width. Needs ray queries. |
 | [`optics`](python/rendering/optics) | Optics episodes on the wave optics pipeline, each beside plots of its physics. `gold.py`: why gold is gold, spheres of gold, copper, silver and aluminium from their measured refractive indices, with each metal's reflectance and n and k, a wavelength cursor and a single wavelength view. `brewster.py`: Brewster's angle, a glass slab whose reflection a polariser on the camera takes away, with the reflectance of s and p light against the angle of incidence. Needs ray queries. |
 
+### simulations
+
+| | |
+|---|---|
+| [`planet`](python/simulations/planet) | A 100 km sphere on its own pipeline, flown from 5 m above the surface to 5,000 km away: positions in Python doubles, every entity placed relative to the camera each frame, and a reverse-Z projection with an infinite far plane. Uses only generated geometry. |
+
 ### games_2d
 
 | | |
