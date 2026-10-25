@@ -2986,11 +2986,12 @@ void RenderGraph::setExternalImage(const std::string& name, VkImageView view, Vk
 }
 
 std::string RenderGraph::setExternalImageData(const std::string& name, const void* data, size_t size,
-                                              uint32_t width, uint32_t height, VkFormat format) {
+                                              uint32_t width, uint32_t height, VkFormat format, bool mipmaps) {
     Shoonyakasha::GPUTexture texture;
     const std::string error = Shoonyakasha::GPUResourceFactory::createTextureFromTexels(
         m_device.getAllocator().getHandle(), m_device.getLogicalDevice(), m_device.getPhysicalDevice(),
-        m_device.getGraphicsQueue(), m_device.getCommandPool(), data, size, width, height, format, texture);
+        m_device.getGraphicsQueue(), m_device.getCommandPool(), data, size, width, height, format, texture,
+        mipmaps);
     if (!error.empty()) return error;
 
     setExternalImage(name, texture.view, texture.sampler);

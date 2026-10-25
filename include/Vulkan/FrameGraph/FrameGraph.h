@@ -1199,10 +1199,12 @@ public:
     // the bindings with "externalImage": name, as setExternalImage. The
     // graph owns it, and frees an image it owns once one replacing it is set
     // and no frame in flight can sample it any more. The format must be a
-    // colour format the device can sample. Uploading waits for the graphics
-    // queue. Returns an error message, empty on success.
+    // colour format the device can sample. With `mipmaps` it has a full mip
+    // chain made from the texels (GPUResourceFactory::createTextureFromTexels).
+    // Uploading waits for the graphics queue. Returns an error message, empty
+    // on success.
     std::string setExternalImageData(const std::string& name, const void* data, size_t size,
-                                     uint32_t width, uint32_t height, VkFormat format);
+                                     uint32_t width, uint32_t height, VkFormat format, bool mipmaps = false);
 
     // ── Material textures ──
     // Material descriptor sets are shared by the textures they hold and kept

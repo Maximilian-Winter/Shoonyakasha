@@ -708,7 +708,8 @@ bool EngineAPI::setPipelineImage(const std::string& name, const std::string& pat
 }
 
 std::string EngineAPI::setPipelineImageData(const std::string& name, const void* data, size_t size,
-                                            uint32_t width, uint32_t height, const std::string& format) {
+                                            uint32_t width, uint32_t height, const std::string& format,
+                                            bool mipmaps) {
     if (!m_impl->app || !m_impl->app->hasDevice()) return "the engine is not running";
     VkFormat vkFormat = VK_FORMAT_UNDEFINED;
     try {
@@ -716,7 +717,7 @@ std::string EngineAPI::setPipelineImageData(const std::string& name, const void*
     } catch (const std::exception&) {
         return "unknown format '" + format + "'";
     }
-    return m_impl->app->getRenderGraph().setExternalImageData(name, data, size, width, height, vkFormat);
+    return m_impl->app->getRenderGraph().setExternalImageData(name, data, size, width, height, vkFormat, mipmaps);
 }
 
 bool EngineAPI::rayQuerySupported() const {

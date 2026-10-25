@@ -2461,7 +2461,7 @@ cdef class Engine:
             raise ValueError(error.decode('utf-8'))
 
     def set_pipeline_image_data(self, str name, data, uint32_t width=0, uint32_t height=0,
-                                str format="R8G8B8A8_SRGB"):
+                                str format="R8G8B8A8_SRGB", bint mipmaps=False):
         """Make the image the pipeline's "externalImage": name bindings sample
         from texels in memory instead of a file.
 
@@ -2470,6 +2470,10 @@ cdef class Engine:
         shaped (height, width, channels) or (height, width), whose shape gives
         the size, or bytes with `width` and `height`. `format` is a pipeline
         JSON format name; the bytes must be width x height texels of it.
+        With `mipmaps` the image gets a full mip chain made from the texels,
+        and its own sampler filters between the levels (a binding's
+        autoBindSampler needs a maxLod above 0 to reach them); the device
+        must be able to blit the format with linear filtering.
         The engine keeps the image until a later one replaces it. Uploading
         waits for the GPU, so this suits images that change now and then.
         May be called from on_init. Raises ValueError when the bytes or the
@@ -2486,7 +2490,7 @@ cdef class Engine:
         if view.shape[0] == 0:
             raise ValueError("the image has no texels")
         error = self._ptr.setPipelineImageData(name.encode('utf-8'), &view[0], view.shape[0],
-                                               width, height, format.encode('utf-8'))
+                                               width, height, format.encode('utf-8'), mipmaps)
         if not error.empty():
             raise ValueError(error.decode('utf-8'))
 

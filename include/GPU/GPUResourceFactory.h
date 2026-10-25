@@ -180,8 +180,10 @@ public:
     // bytes of rows of tightly packed texels, top row first, with a
     // clamp-to-edge sampler, linear where the format filters, nearest
     // otherwise. The format must be a colour format the device samples.
-    // Uploading waits for `queue`. Returns an error message, empty when
-    // `out` holds the texture.
+    // With `mipmaps`, a full mip chain is made from the texels by linear
+    // blits and the sampler filters between levels; the format must then
+    // support blitting with linear filtering. Uploading waits for `queue`.
+    // Returns an error message, empty when `out` holds the texture.
     static std::string createTextureFromTexels(
         VmaAllocator allocator,
         VkDevice device,
@@ -193,7 +195,8 @@ public:
         uint32_t width,
         uint32_t height,
         VkFormat format,
-        GPUTexture& out
+        GPUTexture& out,
+        bool mipmaps = false
     );
 
     // Create a cubemap texture

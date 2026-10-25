@@ -955,7 +955,7 @@ void GPUResourceFactory::destroyDefaultTextures(
 std::string GPUResourceFactory::createTextureFromTexels(
     VmaAllocator allocator, VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue,
     VkCommandPool cmdPool, const void* data, size_t size, uint32_t width, uint32_t height, VkFormat format,
-    GPUTexture& out
+    GPUTexture& out, bool mipmaps
 ) {
     const uint32_t texelSize = copiedTexelSize(format);
     if (texelSize == 0 || isDepthFormat(format)) return "the format is not a colour format images can be made of";
@@ -971,14 +971,20 @@ std::string GPUResourceFactory::createTextureFromTexels(
     if (!(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) || !(features & VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
         return "this device cannot sample images of this format";
     }
+    const VkFormatFeatureFlags blitting = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+                                          VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    if (mipmaps && (features & blitting) != blitting) {
+        return "this device cannot make mipmaps of images of this format";
+    }
 
     GPUTexture texture = createTexture2DWithData(allocator, device, queue, cmdPool, width, height, format, data,
-                                                 size, false);
+                                                 size, mipmaps);
     if (texture.view == VK_NULL_HANDLE) return "the image could not be created";
     const VkFilter filter = (features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) ? VK_FILTER_LINEAR
                                                                                           : VK_FILTER_NEAREST;
     texture.sampler = createSampler(device, filter, filter, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 1.0f,
-                                    VK_SAMPLER_MIPMAP_MODE_NEAREST, 1.0f);
+                                    mipmaps ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST,
+                                    mipmaps ? static_cast<float>(texture.mipLevels) : 1.0f);
     texture.exists = true;
     out = texture;
     return {};
