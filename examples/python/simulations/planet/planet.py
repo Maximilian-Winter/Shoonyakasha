@@ -41,6 +41,8 @@ Keys:
     A / D                  roll left / right
     E / Q                  thrust up / down
     L                      translation assist on / off
+    R                      chase view / cockpit
+    U                      the model's cabin / the generated cockpit
     , / .                  time warp down / up (1x to 16x)
   ship, gamepad (adding to the keys):
     left stick             pitch and roll
@@ -50,11 +52,12 @@ Keys:
     B                      throttle to 0
     bumpers                time warp down / up
     Y / Start              free camera or ship / settings menu
+    X                      chase view / cockpit
   anywhere:
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
     7                      2 km up, 25 km north-west of the blocks, looking further north-west
-    8                      the ship at rest on the pad
+    8                      the ship at rest beside the blocks
     9                      the ship in a circular orbit 40 km up
     Shift+8                the ship at rest on the moon, between the sun and the planet
     Shift+9                the ship in a circular orbit 10 km above the moon
@@ -74,6 +77,8 @@ Keys:
     P                      screenshot into planet_captures/
 
     python planet.py --capture DIR     screenshots at the presets, then exit
+    python planet.py --generated-cockpit   start with the generated cockpit instead of the model's cabin
+    python planet.py --capture DIR --shots NAME...   only the shots whose names contain one of these
     python planet.py --verify          check the GPU's chunks against cube_sphere.chunk_mesh, then exit
     python planet.py --orbit-check     fly one orbit from preset 9 at 16x, report the drift, then exit
     python planet.py --landing-check   land the ship on a mountain near the site, report how it stands, then exit
@@ -92,11 +97,12 @@ import numpy as np
 import shoonyakasha as sk
 from shoonyakasha import keys
 
-import cockpit
 import cube_sphere
 import flight
 import shadows
 from ground import GroundPatch, SIZE as PATCH_SIZE
+import cockpit
+from cards import Card
 from instruments import Instruments
 from menu import SettingsMenu
 from quadtree import QuadTree, hidden_by_horizon
@@ -127,7 +133,7 @@ ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks a
 # The GPU chunk pool; these match pipeline.json and chunk_build.comp.
 SLOTS = 2048                     # chunks the pool holds
 MAX_JOBS = 16                    # chunks BuildChunks builds per frame at most
-PROBES = 128                     # directions BuildChunks evaluates the terrain at
+PROBES = 176                     # directions BuildChunks evaluates the terrain at
 EXTRA_PROBES = 4                 # the last probes, for directions a check asks for
 VERTICES_PER_CHUNK = (QUADS + 1) ** 2 + 4 * (QUADS + 1)
 FLOATS_PER_VERTEX = 16           # position and u, normal and v, direction and height, horizon and padding
@@ -172,16 +178,33 @@ MIN_ALTITUDE = 0.3               # the camera stays this far above the ground
 FLIGHT_STEP = 1.0 / 120.0        # seconds per physics step
 MAX_STEPS_PER_FRAME = 64
 WARPS = (1, 2, 4, 8, 16)         # time warps
-SHIP_CLEARANCE = 2.0             # metres from the ship's centre down to its gear
-SHIP_REACH = 8.0                 # metres from the ship's centre to its farthest contact point
+SHIP_CLEARANCE = -flight.ShipParams().gear[0][1]   # metres from the ship's centre down to its gear
+SHIP_REACH = max(math.sqrt(sum(c * c for c in arm))  # metres from the ship's centre to its farthest contact point
+                 for arm in flight.ShipParams().gear + flight.ShipParams().hull)
+# The ship's model (models/f117, the F-117 by Muhamad Mirza Arrafi, CC-BY-4.0): its units per metre,
+# and the ship's centre in its units.
+SHIP_MODEL = os.path.join(HERE, "models", "f117", "scene.gltf")
+SHIP_MODEL_UNITS = 6.592
+SHIP_MODEL_CENTRE = (0.0, 12.7, 9.9)
+# In the model's units: the pilot's eye, and the cabin's two multi-function displays on its front
+# panel (their centres, width and height, and the panel's up).
+PILOT_EYE = (0.0, 22.05, 40.5)
+MFD_CENTRES = ((1.62, 20.53, 43.89), (-1.46, 20.53, 43.89))
+MFD_SIZE = (1.12, 1.095)
+MFD_UP = (0.0, 1.089, -0.119)
+MFD_LIFT = 0.003                 # metres the displays' canvases sit in front of the panel
+COCKPIT_LOOK_DOWN = 4.0          # degrees the cockpit view looks below the ship's nose
+CHASE_UP, CHASE_BACK = 7.0, 32.0  # metres above and behind the ship of the chase view's camera
+CHASE_AHEAD = 20.0               # metres ahead of the ship the chase view looks at
 PATCH_MARGIN = 4.0               # metres the ground patch reaches beyond the ship
 THROTTLE_RATE = 0.5              # throttle per second while W or S is held
 MOUSE_STICK = 0.04               # stick per pixel of mouse movement
 GAMEPAD_DEAD_ZONE = 0.12         # of a stick's travel, read as 0
 # Gamepad buttons and the keys they press: A assist, B throttle to 0, the bumpers time warp,
-# Y ship or free camera, Start the menu.
+# Y ship or free camera, X chase view, Start the menu.
 GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAMEPAD_LEFT_BUMPER: keys.COMMA,
-                keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1}
+                keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
+                keys.GAMEPAD_X: keys.R}
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
 ORBIT_POINTS = 256               # points of the drawn orbit path; matches OrbitPoints in pipeline.json
 # The moon (flight.Moon): radius, surface gravity (a fifth of the planet's), distance from the
@@ -197,6 +220,10 @@ MOON_FLOOR = -2000.0             # metres above the moon's radius that its terra
 
 parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
+parser.add_argument("--shots", nargs="+", metavar="NAME",
+                    help="with --capture: only the shots whose names contain one of these")
+parser.add_argument("--generated-cockpit", action="store_true",
+                    help="start with the generated cockpit (cockpit.py) instead of the model's cabin")
 parser.add_argument("--verify", action="store_true",
                     help="check the chunks the GPU built against cube_sphere.chunk_mesh, print the result and exit")
 parser.add_argument("--orbit-check", action="store_true",
@@ -306,7 +333,7 @@ state = {
     "forward": (0.0, 0.0, 1.0),
     "speed": 0.0,
     "speed_factor": 1.0,
-    "hud": None,
+    "cards": None,               # (the view's card, the debug card)
     "wireframe": False,
     "ocean": True,
     "ocean_chunks": 0,           # chunks the ocean draws
@@ -349,11 +376,15 @@ state = {
     "extra_heights": [],         # ((direction, body), height) for the extra probes last read back
     "moon_landing": None,        # Shift+8's spot on the moon (direction from its centre) until its ground is known
     "probe_latency": 3.0,        # frames from asking for probes to using their heights
-    "cockpit": None,
     "instruments": None,
     "menu": None,
-    "shown_mode": None,          # the mode show_mode last set up
-    "debug_text": True,
+    "shown_mode": None,          # (mode, chase, generated_cockpit) show_mode last set up
+    "chase": False,              # in the ship: the chase view instead of the cockpit
+    "generated_cockpit": False,  # the cockpit view in the generated cockpit instead of the model's cabin
+    "cockpit": None,             # the generated cockpit's mesh entity
+    "cabin_screens": None,       # the displays on the model's cabin's panel (cockpit_screens)
+    "ship_model": None,          # (root entity, its mesh entities): the ship's model
+    "debug_text": False,
     "planet_edit": None,         # terrain parameters the menu changes until Apply
     "scripted_controls": False,  # the ship's controls are set by a check, not read from the keys
     "impact_speed": 0.0,         # m/s, the fastest a contact point reached the surface at this frame
@@ -709,7 +740,7 @@ def read_back_heights():
         return
     state["probe_latency"] = state["frame"] + 1 - stamp
     _, ground_body, patch, extra = request
-    state["ground"] = float(probes[0, 0]) if ground_body is body_under(state["position"]) else None
+    state["ground"] = float(probes[0, 0]) if ground_body is body_under(viewpoint()) else None
     if state["site_height"] is None:
         state["site_height"] = float(probes[1, 0])
     if patch is not None:
@@ -785,8 +816,13 @@ def build_moon():
     bodies.append(moon)
 
 
+def cockpit_view():
+    return state["mode"] == "ship" and not state["chase"]
+
+
 def build_cockpit():
-    """The cockpit mesh (cockpit.py), in the camera's space; hidden until ship mode."""
+    """The generated cockpit's mesh (cockpit.py), in the camera's space;
+    hidden until show_mode shows it."""
     positions, normals, colours = cockpit.cockpit_mesh()
     entity = engine.create_mesh(positions, normals=normals, colors=colours, name="Cockpit")
     engine.scene.set_material_vec4(entity, "baseColorFactor", (1.0, 1.0, 1.0, 1.0))
@@ -796,15 +832,121 @@ def build_cockpit():
     state["cockpit"] = entity
 
 
+def generated_cockpit_view():
+    return cockpit_view() and state["generated_cockpit"]
+
+
 def show_mode():
-    """What the mode shows: in the ship, the cockpit, its displays, the HUD."""
-    ship = state["mode"] == "ship"
-    engine.scene.set_visible(state["cockpit"], ship)
-    state["instruments"].show(ship)
-    engine.set_pass_enabled("HudSymbols", ship)
-    if not ship:
+    """What the mode shows: in the ship's cockpit view, the displays and
+    the HUD, and in the generated cockpit its mesh."""
+    in_cockpit = cockpit_view()
+    state["instruments"].show(in_cockpit)
+    engine.scene.set_visible(state["cockpit"], generated_cockpit_view())
+    if not in_cockpit:
         set_reentry_pass(False)
-    state["shown_mode"] = state["mode"]
+    state["shown_mode"] = (state["mode"], state["chase"], state["generated_cockpit"])
+
+
+def build_ship_model():
+    """The ship's model, its meshes parented to one entity that is scaled
+    from the model's units to metres, each mesh moved so that the ship's
+    centre (SHIP_MODEL_CENTRE) is at the entity's origin; hidden until
+    place_ship_model shows it."""
+    result = engine.load_gltf_scene(SHIP_MODEL, flatten_hierarchy=True)
+    if not result.success:
+        print("[planet] the ship's model did not load:", result.error, flush=True)
+        return
+    root = engine.scene.create_entity("ShipModel")
+    engine.scene.set_scale(root, (1.0 / SHIP_MODEL_UNITS,) * 3)
+    glass = [entity for entity in result.entities if "Glass" in engine.scene.get_name(entity)]
+    for entity in result.entities:
+        engine.scene.set_parent(entity, root)
+        engine.scene.set_position(entity, scale(SHIP_MODEL_CENTRE, -1.0))
+        engine.scene.set_material_float(entity, "gridStrength", 0.0)
+        engine.scene.set_render_layer_mask(entity, 1)
+        engine.scene.set_visible(entity, False)
+    state["ship_model"] = (root, result.entities, glass)
+
+
+def model_to_ship(point):
+    """A point in the model's units as metres (right, up, back) from the
+    ship's centre."""
+    x, y, z = (point[i] - SHIP_MODEL_CENTRE[i] for i in range(3))
+    return (-x / SHIP_MODEL_UNITS, y / SHIP_MODEL_UNITS, -z / SHIP_MODEL_UNITS)
+
+
+def cockpit_eye(ship):
+    """The pilot's eye (PILOT_EYE) in the world; in the generated cockpit
+    the ship's centre."""
+    if state["generated_cockpit"]:
+        return ship.position
+    right, up, forward = ship.axes()
+    r, u, b = model_to_ship(PILOT_EYE)
+    return add(ship.position, add(add(scale(right, r), scale(up, u)), scale(forward, -b)))
+
+
+def cockpit_screens():
+    """The multi-function displays as (centre, right, up, (width, height))
+    in the camera's space at the pilot's eye (right +X, up +Y, back +Z),
+    each MFD_LIFT in front of the panel."""
+    eye = model_to_ship(PILOT_EYE)
+    _, up_y, up_back = model_to_ship(add(MFD_UP, SHIP_MODEL_CENTRE))
+    up = normalize((0.0, up_y, up_back))
+    normal = (0.0, -up[2], up[1])
+    size = (MFD_SIZE[0] / SHIP_MODEL_UNITS, MFD_SIZE[1] / SHIP_MODEL_UNITS)
+    return [(add(sub(model_to_ship(centre), eye), scale(normal, MFD_LIFT)), (1.0, 0.0, 0.0), up, size)
+            for centre in MFD_CENTRES]
+
+
+def place_ship_model(camera):
+    """The ship's model where the ship is, relative to `camera`, turned
+    with it (the model's nose is its +Z, its up +Y); shown while there is
+    a ship, without its canopy glass in the cockpit view and not at all
+    in the generated cockpit."""
+    if state["ship_model"] is None:
+        return
+    root, meshes, glass = state["ship_model"]
+    ship = state["ship"]
+    shown = ship is not None
+    for entity in meshes:
+        engine.scene.set_visible(entity, shown and not generated_cockpit_view()
+                                 and not (entity in glass and cockpit_view()))
+    if shown:
+        right, up, forward = ship.axes()
+        engine.scene.set_position(root, sub(ship.position, camera))
+        engine.scene.set_rotation(root, euler_from_basis(scale(right, -1.0), up, scale(forward, -1.0)))
+
+
+def chase_view(ship):
+    """(eye, (right, up, forward)): the chase view's camera CHASE_UP above
+    and CHASE_BACK behind the ship along its own axes, looking at the
+    point CHASE_AHEAD ahead of it."""
+    right, up, forward = ship.axes()
+    eye = add(ship.position, add(scale(up, CHASE_UP), scale(forward, -CHASE_BACK)))
+    look = normalize(sub(add(ship.position, scale(forward, CHASE_AHEAD)), eye))
+    side = normalize(cross(look, up))
+    return eye, (side, cross(side, look), look)
+
+
+def view_basis():
+    """(right, up, forward) of the view: the free camera's, the chase
+    view's, in the generated cockpit the ship's, or in the model's cabin
+    the ship's turned COCKPIT_LOOK_DOWN below its nose."""
+    if state["mode"] != "ship":
+        return camera_basis()
+    if state["chase"]:
+        return chase_view(state["ship"])[1]
+    right, up, forward = state["ship"].axes()
+    if state["generated_cockpit"]:
+        return right, up, forward
+    c, s = math.cos(math.radians(COCKPIT_LOOK_DOWN)), math.sin(math.radians(COCKPIT_LOOK_DOWN))
+    return right, add(scale(up, c), scale(forward, s)), sub(scale(forward, c), scale(up, s))
+
+
+def viewpoint():
+    """Where heights and the probe under the camera are measured: the ship
+    in ship mode, else the camera."""
+    return state["ship"].position if state["mode"] == "ship" else state["position"]
 
 
 def set_reentry_pass(on):
@@ -814,16 +956,11 @@ def set_reentry_pass(on):
         state["reentry_pass"] = on
 
 
-def build_hud():
-    ui = engine.ui
-    canvas = ui.create_canvas(reference_size=(1600, 900))
-    lines = []
-    for row in range(3):
-        text = ui.create_text(canvas, "", size=22, color=(0.92, 0.92, 0.88, 1.0))
-        ui.set_rect(text, anchor_min=(0, 0), anchor_max=(1, 0), pivot=(0, 0),
-                    position=(20, 16 + 30 * row), size=(-40, 30))
-        lines.append(text)
-    state["hud"] = lines
+def build_cards():
+    """The view's card at the top left and the debug card at the bottom
+    left (cards.py)."""
+    canvas = engine.ui.create_canvas(reference_size=(1600, 900))
+    state["cards"] = (Card(engine.ui, canvas, (0, 0), 12), Card(engine.ui, canvas, (0, 1), 16))
 
 
 # ── Camera ─────────────────────────────────────────────────────────────────
@@ -831,21 +968,21 @@ def build_hud():
 def altitude():
     """Height above the sphere of the body under the camera (on the
     planet, sea level)."""
-    body = body_under(state["position"])
-    return length(body.relative(state["position"])) - body.radius
+    body = body_under(viewpoint())
+    return length(body.relative(viewpoint())) - body.radius
 
 
 def surface_height():
     """The height of what is under the camera: the ground, or the sea where
     the ground is below sea level on a body with an ocean."""
     ground = state["ground"] or 0.0
-    return max(ground, 0.0) if body_under(state["position"]).ocean else ground
+    return max(ground, 0.0) if body_under(viewpoint()).ocean else ground
 
 
 def datum_name():
     """What altitude() is measured from: sea level, or on a body without
     a sea, its radius."""
-    return "sea level" if body_under(state["position"]).ocean else "the radius"
+    return "sea level" if body_under(viewpoint()).ocean else "the radius"
 
 
 def height_above_ground():
@@ -966,13 +1103,13 @@ def leave_ship():
 
 
 def place_ship(preset):
-    """8: at rest on the pad 7 m south of the blocks, facing north,
+    """8: at rest 16 m south of the blocks, facing north,
     translation assist on. 9: in a circular orbit ORBIT_HEIGHT above the
     blocks, moving east with the nose 40 degrees down, where the planet is,
     assist off."""
     _, up, east, north = site_frame()
     if preset == 8:
-        position = add(site_ground(), add(scale(up, SHIP_CLEARANCE), scale(north, -7.0)))
+        position = add(site_ground(), add(scale(up, SHIP_CLEARANCE), scale(north, -16.0)))
         forward, velocity, assist = north, (0.0, 0.0, 0.0), True
     else:
         position, assist = scale(up, RADIUS + ORBIT_HEIGHT), False
@@ -1144,8 +1281,8 @@ def fly_ship(dt):
     if steps == MAX_STEPS_PER_FRAME:
         state["accumulator"] = 0.0      # too far behind: drop the rest rather than fall further behind
     flight_planet.time = state["flight_time"]
-    state["position"] = ship.position
-    state["forward"] = ship.axes()[2]
+    state["position"] = chase_view(ship)[0] if state["chase"] else cockpit_eye(ship)
+    state["forward"] = view_basis()[2]
 
 
 def in_view(centre, radius):
@@ -1213,8 +1350,8 @@ def update_level_of_detail():
     _, site_up, _, _ = site_frame()
     ship = state["ship"]
     patch = ground_patch_request(ship) if state["mode"] == "ship" and not ship.crashed else None
-    ground_body = body_under(state["position"])
-    probes = [(normalize(ground_body.relative(state["position"])), ground_body), (site_up, planet)]
+    ground_body = body_under(viewpoint())
+    probes = [(normalize(ground_body.relative(viewpoint())), ground_body), (site_up, planet)]
     probes += [(d, patch[0]) for d in patch[1].directions] if patch is not None else []
     extra = list(state["extra_probes"][:EXTRA_PROBES])
     unused = ((0.0, 1.0, 0.0), planet)
@@ -1263,67 +1400,74 @@ def frame(dt):
     ground = site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
-    right, up, forward = state["ship"].axes() if state["mode"] == "ship" else camera_basis()
+    place_ship_model(camera)
+    right, up, forward = view_basis()
     view_rotation = euler_from_basis(right, up, forward)
     engine.scene.set_rotation(state["camera"], view_rotation)
     upload_shadow_cascades(forward)
     blow_clouds(dt)
-    if state["mode"] != state["shown_mode"]:
+    if (state["mode"], state["chase"], state["generated_cockpit"]) != state["shown_mode"]:
         show_mode()
-    if state["mode"] == "ship":
+    if cockpit_view():
         update_cockpit(right, up, forward, view_rotation)
     state["menu"].update()
 
     state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * dt * 1000.0
-    if state["hud"] is not None:
-        update_hud()
+    if state["cards"] is not None:
+        update_cards()
     return True
 
 
 def update_cockpit(right, up, forward, view_rotation):
-    """The cockpit and its displays turned with the view, the HUD's
-    directions, and the instruments' readings."""
+    """The displays placed on the cabin's panel (or the generated cockpit
+    turned with the view, and the displays on its dashboard), the reentry
+    glow's directions, and the instruments drawn from the readings."""
     ship = state["ship"]
     controls = state["controls"]
-    engine.scene.set_position(state["cockpit"], (0.0, 0.0, 0.0))
-    engine.scene.set_rotation(state["cockpit"], view_rotation)
+    ship_right, ship_up, ship_forward = ship.axes()
 
     def to_world(v):
-        return add(add(scale(right, v[0]), scale(up, v[1])), scale(forward, -v[2]))
+        return add(add(scale(ship_right, v[0]), scale(ship_up, v[1])), scale(ship_forward, -v[2]))
 
-    state["instruments"].place(to_world, euler_from_basis)
+    if state["generated_cockpit"]:
+        engine.scene.set_position(state["cockpit"], (0.0, 0.0, 0.0))
+        engine.scene.set_rotation(state["cockpit"], view_rotation)
+        state["instruments"].place(cockpit.SCREENS, to_world, euler_from_basis)
+    else:
+        state["instruments"].place(state["cabin_screens"], to_world, euler_from_basis)
 
     body_below = body_under(ship.position)
     radial = radial_up(ship.position)
     velocity = ship_velocity()
     speed = length(velocity)
-    engine.set_custom_vec4("planet.hud.up", radial + (0.0,))
-    prograde = scale(velocity, 1.0 / speed) if speed > 1.0 else forward
-    engine.set_custom_vec4("planet.hud.prograde", prograde + (1.0 if speed > 1.0 else 0.0,))
+    moving = scale(velocity, 1.0 / speed) if speed > 1.0 else None
+    engine.set_custom_vec4("planet.hud.prograde", (moving or ship_forward) + (1.0 if moving else 0.0,))
     glow = flight.reentry_glow(flight_planet, ship.position, ship.velocity)
     engine.set_custom_vec4("planet.hud.reentry", (glow, 0.0, 0.0, 0.0))
     set_reentry_pass(glow > 0.0)
 
     east, north = local_frame(radial)
-    level = sub(forward, scale(radial, dot(forward, radial)))
+    level = sub(ship_forward, scale(radial, dot(ship_forward, radial)))
     heading = math.degrees(math.atan2(dot(level, east), dot(level, north))) % 360.0
     body, periapsis, apoapsis, circular = ship_orbit()
     density = flight_planet.density(ship.position)
-    state["instruments"].update({
+    agl = distance_text(height_above_ground())
+    state["instruments"].update((right, up, forward, ship_forward, radial, moving), {
         "body": body,
         "speed": speed,
         "climb": dot(velocity, radial),
-        "height_text": distance_text(height_above_ground()),
-        "agl_text": "%11s" % distance_text(height_above_ground()),
-        "datum": "sea level" if body_below.ocean else "radius",
-        "asl_text": "%11s" % distance_text(altitude()),
+        "height": tuple(agl.split(" ")),
+        "agl": agl,
+        "datum": datum_name(),
+        "datum_short": "ASL" if body_below.ocean else "ALT",
+        "datum_height": distance_text(altitude()),
         "heading": heading,
         "throttle": controls.throttle,
         "assist": controls.assist,
         "warp": WARPS[state["warp"]],
         "contact": contact_text(ship),
-        "periapsis_text": "%11s" % ("below ground" if periapsis < 0.0 else distance_text(periapsis)),
-        "apoapsis_text": "%11s" % ("escape" if apoapsis == math.inf else distance_text(apoapsis)),
+        "periapsis": "below ground" if periapsis < 0.0 else distance_text(periapsis),
+        "apoapsis": "escape" if apoapsis == math.inf else distance_text(apoapsis),
         "circular": circular,
         "density": density,
         "dynamic_pressure": 0.5 * density * speed * speed,
@@ -1353,50 +1497,70 @@ def contact_text(ship):
     return "LANDED" if ship.on_ground else ""
 
 
-def update_hud():
+def update_cards():
+    """The view's card (in the free camera and the chase view) and, when
+    debug text is on, the debug card."""
+    view_card, debug_card = state["cards"]
+    if state["mode"] == "ship" and state["chase"]:
+        ship, controls = state["ship"], state["controls"]
+        body, periapsis, apoapsis, _ = ship_orbit()
+        velocity = ship_velocity()
+        rows = [
+            ("SPEED", "%.0f m/s" % length(velocity)),
+            ("CLIMB", "%+.1f m/s" % dot(velocity, radial_up(ship.position))),
+            ("ABOVE GROUND", distance_text(height_above_ground())),
+            ("ABOVE " + datum_name().upper(), distance_text(altitude())),
+            ("THROTTLE", "%.0f %%" % (controls.throttle * 100.0)),
+            ("ASSIST", "on" if controls.assist else "off"),
+            ("TIME WARP", "x%d" % WARPS[state["warp"]]),
+            ("ORBIT AROUND THE " + body.upper(),),
+            ("PERIAPSIS", "below ground" if periapsis < 0.0 else distance_text(periapsis)),
+            ("APOAPSIS", "escape" if apoapsis == math.inf else distance_text(apoapsis)),
+        ]
+        if contact_text(ship):
+            rows.append(("STATE", contact_text(ship).split(" (")[0].lower()))
+        view_card.update("CHASE VIEW", rows)
+        view_card.show(True)
+    elif state["mode"] != "ship":
+        view_card.update("FREE CAMERA", [
+            ("ABOVE GROUND", distance_text(height_above_ground())),
+            ("ABOVE " + datum_name().upper(), distance_text(altitude())),
+            ("SPEED", "%.0f m/s" % state["speed"]),
+            ("SPEED FACTOR", "x%.2f" % state["speed_factor"]),
+            ("TIME WARP", "x%d" % WARPS[state["warp"]]),
+        ])
+        view_card.show(True)
+    else:
+        view_card.show(False)
+
+    debug_card.show(state["debug_text"])
     tree = planet.tree
-    if tree is None:
+    if not state["debug_text"] or tree is None:
         return
-    for line in state["hud"]:
-        engine.ui.set_visible(line, state["debug_text"])
     terrain = planet.terrain
     trees = [body.tree for body in bodies if body.tree is not None]
     selected = sum(len(t.selected) for t in trees)
     cached = sum(1 for t in trees for node in t.nodes() if node.chunk is not None)
     missing = sum(len(t.missing) for t in trees)
     deepest = max(node.level for t in trees for node in t.selected)
-    if state["mode"] == "ship":
-        ship, controls = state["ship"], state["controls"]
-        body, periapsis, apoapsis, _ = ship_orbit()
-        velocity = ship_velocity()
-        climb = dot(velocity, radial_up(ship.position))
-        engine.ui.set_text(state["hud"][0], "SHIP    throttle %3.0f%%    assist %s    speed %.0f m/s    climb %+.0f m/s    "
-                           "above ground %s    above %s %s    around the %s: periapsis %s    apoapsis %s    "
-                           "warp x%d%s    frame %.1f ms"
-                           % (controls.throttle * 100.0, "on" if controls.assist else "off", length(velocity),
-                              climb, distance_text(height_above_ground()), datum_name(),
-                              distance_text(altitude()), body,
-                              "below ground" if periapsis < 0.0 else distance_text(periapsis),
-                              "escape" if apoapsis == math.inf else distance_text(apoapsis),
-                              WARPS[state["warp"]], "    " + contact_text(ship), state["frame_ms"]))
-    else:
-        engine.ui.set_text(state["hud"][0], "CAMERA    above ground %s    above %s %s    speed %.0f m/s    "
-                           "speed factor %.2f    frame %.1f ms"
-                           % (distance_text(height_above_ground()), datum_name(), distance_text(altitude()),
-                              state["speed"],
-                              state["speed_factor"], state["frame_ms"]))
-    engine.ui.set_text(state["hud"][1], "chunks drawn %d of %d (ocean %d)    built %d    missing %d    "
-                       "pool %d / %d    deepest level %d    split factor %.2f%s    colour: %s"
-                       % (selected - state["chunks_culled"], selected, state["ocean_chunks"],
-                          cached, missing, pool.used, SLOTS,
-                          deepest,
-                          tree.split_factor, "    LOD FROZEN" if state["frozen"] else "",
-                          COLOUR_MODES[state["colour_mode"]]))
-    engine.ui.set_text(state["hud"][2], "seed %.1f %.1f %.1f    mountains %.0f m    hills %.0f m    "
-                       "sun %.0f deg up at the site    atmosphere density x%.2f    exposure %.3f"
-                       % (terrain["seed"][0], terrain["seed"][1], terrain["seed"][2],
-                          terrain["mountains"][1], terrain["hills"][1], state["sun_elevation"],
-                          state["density"], state["exposure"]))
+    debug_card.update("DEBUG", [
+        ("FRAME", "%.1f ms" % state["frame_ms"]),
+        ("CHUNKS DRAWN", "%d of %d" % (selected - state["chunks_culled"], selected)),
+        ("OCEAN CHUNKS", "%d" % state["ocean_chunks"]),
+        ("CHUNKS BUILT", "%d" % cached),
+        ("POOL", "%d / %d" % (pool.used, SLOTS)),
+        ("MISSING", "%d" % missing),
+        ("DEEPEST LEVEL", "%d" % deepest),
+        ("SPLIT FACTOR", "%.2f%s" % (tree.split_factor, "  frozen" if state["frozen"] else "")),
+        ("COLOUR", COLOUR_MODES[state["colour_mode"]]),
+        ("TERRAIN",),
+        ("SEED", "%.1f  %.1f  %.1f" % tuple(terrain["seed"][:3])),
+        ("MOUNTAINS", "%.0f m" % terrain["mountains"][1]),
+        ("HILLS", "%.0f m" % terrain["hills"][1]),
+        ("SUN", "%.0f deg up at the site" % state["sun_elevation"]),
+        ("ATMOSPHERE", "density x%.2f" % state["density"]),
+        ("EXPOSURE", "%.3f" % state["exposure"]),
+    ])
 
 
 def on_init():
@@ -1414,12 +1578,15 @@ def on_init():
     upload_chunk_indices()
     engine.set_buffer("OrbitIndices", np.arange(ORBIT_POINTS, dtype=np.uint32))
     build_site()
-    build_hud()
-    build_cockpit()
+    build_cards()
     build_moon()
+    build_ship_model()
     radii = [body.radius for body in bodies]
     engine.set_custom_vec4("planet.radii", tuple(radii + [0.0] * (4 - len(radii))))
-    state["instruments"] = Instruments(engine, cockpit.SCREENS)
+    build_cockpit()
+    state["generated_cockpit"] = args.generated_cockpit
+    state["cabin_screens"] = cockpit_screens()
+    state["instruments"] = Instruments(engine, len(state["cabin_screens"]), FOV)
     state["planet_edit"] = {name: list(value) for name, value in planet.terrain.items()}
     state["menu"] = SettingsMenu(engine, "Settings   (F1 to hide)", menu_items())
     teleport(1)
@@ -1427,7 +1594,7 @@ def on_init():
     # Before the transform system (priority 0), so this frame's positions are used.
     engine.ecs.add_system("PlanetFrame", frame, priority=-1)
     if args.capture:
-        engine.ecs.add_system("PlanetCapture", CaptureTour(args.capture), priority=-2)
+        engine.ecs.add_system("PlanetCapture", CaptureTour(args.capture, args.shots), priority=-2)
     elif args.verify:
         engine.ecs.add_system("PlanetVerify", Verify(), priority=-2)
     elif args.orbit_check:
@@ -1561,6 +1728,10 @@ def on_key(key):
             leave_ship()
         else:
             board_ship()
+    elif key == keys.R:
+        state["chase"] = not state["chase"]
+    elif key == keys.U:
+        state["generated_cockpit"] = not state["generated_cockpit"]
     elif key == keys.L:
         state["controls"].assist = not state["controls"].assist
     elif key == keys.BACKSPACE:
@@ -1740,7 +1911,7 @@ class CaptureTour:
         ("preset_8_ship_sunset", 8, False, 0, None, (6.0, 90.0)),
         ("preset_8_menu_and_throttle", 8, False, 0, None, DAY_SUN,
          lambda: state["menu"].show(True), lambda: setattr(state["controls"], "throttle", 0.6)),
-        ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN),
+        ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN, lambda: state.update(debug_text=True)),
         ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
         ("preset_2_twilight", 2, False, 0, None, (-3.0, 90.0)),
         ("orbit_from_afar", 9, False, 0, None, DAY_SUN, lambda: teleport(4)),
@@ -1761,11 +1932,20 @@ class CaptureTour:
         ("moon_low_sun", 1, False, 0, None, DAY_SUN, lambda: near_moon(1_000.0, 5.0, down=25.0)),
         ("ship_on_the_moon", 1, False, 0, None, DAY_SUN, lambda: teleport(8, moon=True)),
         ("ship_around_the_moon", 1, False, 0, None, DAY_SUN, lambda: teleport(9, moon=True)),
+        ("generated_cockpit_on_the_pad", 8, False, 0, None, DAY_SUN,
+         lambda: state.update(generated_cockpit=True)),
+        ("chase_on_the_pad", 8, False, 0, None, DAY_SUN, lambda: state.update(chase=True)),
+        ("chase_in_orbit", 9, False, 0, None, DAY_SUN, lambda: state.update(chase=True)),
+        ("chase_on_the_moon", 1, False, 0, None, DAY_SUN, lambda: teleport(8, moon=True),
+         lambda: state.update(chase=True)),
     ]
 
-    def __init__(self, directory):
+    def __init__(self, directory, names=None):
+        """`names`: only the shots whose names contain one of these."""
         os.makedirs(directory, exist_ok=True)
         self.directory = directory
+        if names:
+            self.SHOTS = [shot for shot in self.SHOTS if any(name in shot[0] for name in names)]
         self.shot = 0
         self.frames = 0
         self.captured = None
@@ -1782,6 +1962,9 @@ class CaptureTour:
             upload_sky()
             state["cloud_coverage"], state["cloud_wind"] = CLOUD_COVERAGE, (0.0, 0.0, 0.0)
             upload_clouds()
+            state["chase"] = False
+            state["generated_cockpit"] = False
+            state["debug_text"] = False
             teleport(preset)
             set_wireframe(wireframe)
             set_colour_mode(colour_mode)
@@ -2161,11 +2344,12 @@ class LandingCheck:
     """--landing-check, on the planet, and --moon-landing-check, on the
     moon: measures the ground 9 km below spots on rings around a centre
     (on the planet 10 to 60 km around the site, on the moon 2 to 12 km
-    around moon_spot) with the free camera, takes the highest on the
-    planet and the lowest on the moon (a crater's floor), and brings the
+    around moon_spot) with the free camera, and the slope there from
+    probes 20 m east and north; of those no steeper than 10 degrees takes
+    the highest on the planet and the lowest on the moon, and brings the
     ship down onto it from 500 m above with translation assist and full
     downward thrust asked for; once it touches, lets go of the controls
-    for five seconds on the planet, thirty on the moon. Prints the
+    for ten seconds on the planet, thirty on the moon. Prints the
     touchdown speed, the slope there, how far each gear point is below the
     ground patch's surface, how far the patch's height under the ship is
     from the probe's, each gear point's height above the terrain probed at
@@ -2180,11 +2364,13 @@ class LandingCheck:
     otherwise. Positions are reckoned from the body's centre and speeds
     relative to its surface."""
 
+    MAX_SLOPE = 10.0                    # degrees: steeper spots are left out
+    SLOPE_SPAN = 20.0                   # m east and north of a spot where its slope is measured
     RINGS = {"planet": (10_000.0, 20_000.0, 35_000.0, 60_000.0), "moon": (2_000.0, 4_000.0, 7_000.0, 12_000.0)}
     AZIMUTHS = 16
     FRAMES_PER_SPOT = 8                 # more than the probes' latency
     GEAR_TOLERANCE = 0.05
-    REST_SECONDS = {"planet": 5.0, "moon": 30.0}
+    REST_SECONDS = {"planet": 10.0, "moon": 30.0}
     TIMEOUT_SECONDS = 90.0
     DIVE_SPEED = 400.0
     DIVE_MIN_CENTRE_HEIGHT = 1.0        # m; half the gear's depth below the centre
@@ -2228,17 +2414,21 @@ class LandingCheck:
             return True
         if self.spot >= 0 and state["ground"] is not None:
             height = state["ground"]
-            if self.best is None or (height < self.best[0] if self.lowest else height > self.best[0]):
+            slope = self.slope()
+            if slope is not None and slope <= self.MAX_SLOPE and (
+                    self.best is None or (height < self.best[0] if self.lowest else height > self.best[0])):
                 self.best = (height, self.spots[self.spot])
                 self.best_place = (self.rings[self.spot // self.AZIMUTHS],
-                                   360.0 * (self.spot % self.AZIMUTHS) / self.AZIMUTHS)
+                                   360.0 * (self.spot % self.AZIMUTHS) / self.AZIMUTHS, slope)
         self.spot += 1
         self.frames = 0
         if self.spot < len(self.spots):
             state["mode"] = "camera"
             state["position"] = add(self.body.centre(), scale(self.spots[self.spot], self.body.radius + 9_000.0))
             state["ground"] = None
+            state["extra_probes"] = self.slope_probes(self.spots[self.spot])
         else:
+            state["extra_probes"] = []
             height, up = self.best
             east, north = local_frame(up)
             state["ship"] = flight.Ship(position=self.at(up, height + 500.0), velocity=self.body.velocity(),
@@ -2249,10 +2439,29 @@ class LandingCheck:
             state["warp"] = 0
             state["patch"] = None
             self.start = state["flight_time"]
-            print("[planet] the %s spot found on the %s: %.0f m, %.0f km from %s at %.1f degrees from east"
-                  % ("lowest" if self.lowest else "highest", self.body.name, height, self.best_place[0] / 1000.0, self.around, self.best_place[1]),
-                  flush=True)
+            print("[planet] the %s spot found on the %s with a slope of at most %.0f degrees: %.0f m, %.0f km from %s "
+                  "at %.1f degrees from east, %.1f degrees steep"
+                  % ("lowest" if self.lowest else "highest", self.body.name, self.MAX_SLOPE, height,
+                     self.best_place[0] / 1000.0, self.around, self.best_place[1], self.best_place[2]), flush=True)
         return True
+
+    def slope_probes(self, direction):
+        """Probes at `direction` and SLOPE_SPAN east and north of it."""
+        east, north = local_frame(direction)
+        step = self.SLOPE_SPAN / self.body.radius
+        return [(d, self.body) for d in (direction, normalize(add(direction, scale(east, step))),
+                                         normalize(add(direction, scale(north, step))))]
+
+    def slope(self):
+        """The slope (degrees) at the spot from its slope_probes once their
+        heights are back, else None."""
+        asked = state["extra_probes"]
+        if not asked or [probe for probe, _ in state["extra_heights"]] != asked:
+            return None
+        surface = (lambda h: max(h, 0.0)) if self.body.ocean else (lambda h: h)
+        here, east, north = (surface(h) for _, h in state["extra_heights"])
+        rise = math.hypot(east - here, north - here) / self.SLOPE_SPAN
+        return math.degrees(math.atan(rise))
 
     def at(self, direction, height):
         """The point `height` above the body's radius at `direction` from its centre, now."""

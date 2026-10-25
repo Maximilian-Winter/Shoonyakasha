@@ -254,9 +254,12 @@ class ShipParams:
     assist_gain: float = 1.5                            # 1/s
     touchdown_speed: float = 3.0                        # m/s: assist's descent at the ground, at most
     assist_brake: float = 1.5                           # m/s^2: assist's deceleration over the ground
-    # Contact points in the body (right, up, back), metres from the centre.
-    gear: tuple = ((0.0, -2.0, -4.0), (-2.5, -2.0, 2.5), (2.5, -2.0, 2.5))
-    hull: tuple = ((0.0, -0.5, -7.0), (0.0, 0.0, 6.0), (-6.0, -0.8, 2.5), (6.0, -0.8, 2.5), (0.0, 1.5, 0.0))
+    # Contact points in the body (right, up, back), metres from the centre, where the F-117 model
+    # (models/f117) has them: the nose wheel and the two main wheels; the nose, the tail, the wing
+    # tips, the cockpit's roof and the two fins' tops.
+    gear: tuple = ((0.0, -1.95, -4.35), (-2.14, -1.95, 1.15), (2.14, -1.95, 1.15))
+    hull: tuple = ((0.0, 0.0, -9.5), (0.0, -0.3, 8.7), (-6.6, 0.0, 6.9), (6.6, 0.0, 6.9), (0.0, 1.9, -5.3),
+                   (-1.7, 2.1, 9.9), (1.7, 2.1, 9.9))
     gear_crash_speed: float = 10.0                      # m/s into the surface
     hull_crash_speed: float = 3.0                       # m/s into the surface
     friction: float = 0.6                               # friction impulse per normal impulse, at most

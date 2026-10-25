@@ -389,7 +389,7 @@ def fly_over(ship, planet, controls, seconds, ground):
         ship.step(planet, controls, DT, ground)
 
 
-GEAR_HEIGHT = 2.0       # the gear points' distance below the ship's centre
+GEAR_HEIGHT = -flight.ShipParams().gear[0][1]       # the gear points' distance below the ship's centre
 
 
 class Ground(unittest.TestCase):
@@ -485,7 +485,7 @@ class Ground(unittest.TestCase):
 
     def test_the_hull_crashes_at_a_lower_speed_than_the_gear(self):
         planet = flight.Planet()
-        ship = level_ship(1.5 + 2.0, planet)            # upside down: the roof 1.5 m above the centre, 2 m up
+        ship = level_ship(1.9 + 2.0, planet)            # upside down: the roof 1.9 m above the centre, 2 m up
         ship.orientation = flight.quat_multiply(ship.orientation, (0.0, 0.0, 0.0, 1.0))   # rolled 180 degrees
         fly_over(ship, planet, flight.Controls(assist=False), 2.0, level_ground(planet))
         self.assertTrue(ship.crashed)

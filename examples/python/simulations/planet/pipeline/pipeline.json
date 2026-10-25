@@ -85,7 +85,7 @@
       "fields": [
         { "name": "jobA", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobA[i]" },
         { "name": "jobB", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.jobB[i]" },
-        { "name": "probe", "type": "vec4", "arrayCount": 128, "source": "scene.custom.planet.probe[i]" },
+        { "name": "probe", "type": "vec4", "arrayCount": 176, "source": "scene.custom.planet.probe[i]" },
         { "name": "jobCount", "type": "uint", "source": "scene.custom.planet.jobCount", "default": 0 },
         { "name": "probeStamp", "type": "float", "source": "scene.custom.planet.probeStamp", "default": 0.0 },
         { "name": "radii", "type": "vec4", "source": "scene.custom.planet.radii" },
@@ -115,7 +115,7 @@
     "ProbeHeights": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 128,
+      "elementCount": 176,
       "fields": [ { "name": "height", "type": "vec4" } ],
       "target": { "name": "ProbeHeights", "readback": { "frequency": "per_frame" } }
     },
@@ -509,7 +509,7 @@
         "depthTest": true,
         "depthWrite": true,
         "depthCompareOp": "greater_or_equal",
-        "cullMode": "back"
+        "cullMode": "none"
       },
       "descriptorSets": [ "cameraSet", "materialSet" ],
       "pushConstants": [ { "stages": [ "vertex", "fragment" ], "size": 112, "offset": 0 } ],
@@ -724,28 +724,6 @@
         { "resource": "swapchain", "usage": "color_blend" },
         { "resource": "depth", "usage": "depth_read" }
       ]
-    },
-    {
-      "name": "HudSymbols",
-      "type": "graphics",
-      "enabled": false,
-      "execution": { "type": "fullscreen" },
-      "pipeline": {
-        "vertexShader": "shaders/fullscreen.vert.spv",
-        "fragmentShader": "shaders/hud.frag.spv",
-        "vertexInput": "none",
-        "depthTest": false,
-        "depthWrite": false,
-        "cullMode": "none",
-        "blending": "additive"
-      },
-      "descriptorSets": [ "cameraSet", "hudSet" ],
-      "inputs": [
-        { "resource": "transmittanceLut", "usage": "shader_read" },
-        { "resource": "multiScatteringLut", "usage": "shader_read" },
-        { "resource": "sunShadowMap", "usage": "shader_read" }
-      ],
-      "outputs": [ { "resource": "swapchain", "usage": "color_blend" } ]
     },
     {
       "name": "UIOverlay",

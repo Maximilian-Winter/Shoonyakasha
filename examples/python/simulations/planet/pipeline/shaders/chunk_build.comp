@@ -27,7 +27,7 @@
 layout(local_size_x = 64) in;
 
 const int MAX_JOBS = 16;
-const int PROBES = 128;
+const int PROBES = 176;
 const int QUADS = 16;
 const int ROW = QUADS + 1;
 const int GRID = ROW * ROW;

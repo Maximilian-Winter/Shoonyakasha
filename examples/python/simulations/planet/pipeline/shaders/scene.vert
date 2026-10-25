@@ -1,6 +1,6 @@
 #version 450
 //
-// The blocks' vertex shader, camera-relative. The camera sits at the world
+// The entities' vertex shader (the blocks, the ship's model), camera-relative. The camera sits at the world
 // origin: the view matrix holds only its rotation, and each entity's model
 // matrix places it at its position minus the camera's, worked out in double
 // precision on the CPU. The projection is reverse-Z with an infinite far
