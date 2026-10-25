@@ -18,25 +18,40 @@ layout(set = 1, binding = 1) uniform sampler2D sceneDepth;
 layout(set = 2, binding = 0) uniform sampler2D cloudLayer;      // rgb: the clouds' light; a: their transmittance
 layout(set = 2, binding = 1) uniform sampler2D cloudDistance;   // x: their mean distance (m); y: the scene's distance
 
-// The clouds at this pixel from their lower-resolution images: the four
-// nearest texels, weighted bilinearly and by how close the scene distance
-// each was marched to is to this pixel's, so clouds do not bleed across
-// the edges of nearer things. Returns the clouds' light and transmittance;
-// `distance` their mean distance.
+// The clouds at this pixel from their lower-resolution images: the 4 x 4
+// nearest texels, weighted by a cubic B-spline (so features a few texels
+// across come out round, not square) and by how close the scene distance
+// each was marched to is to this pixel's: a texel whose distance differs by
+// CLOUD_DEPTH_TOLERANCE of it counts half, so clouds do not bleed across the
+// edges of nearer things while smooth ground keeps the smooth blend.
+// Returns the clouds' light and transmittance; `distance` their mean
+// distance.
+const float CLOUD_DEPTH_TOLERANCE = 0.05;
+
+// The cubic B-spline's weights for the four texels around a point `f`
+// (0 .. 1) past the second.
+vec4 bSplineWeights(float f) {
+    float f2 = f * f, f3 = f2 * f;
+    return vec4(1.0 - 3.0 * f + 3.0 * f2 - f3, 4.0 - 6.0 * f2 + 3.0 * f3,
+                1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3, f3) / 6.0;
+}
+
 vec4 upsampledClouds(vec2 uv, float sceneDistance, out float distance) {
     ivec2 size = textureSize(cloudLayer, 0);
     vec2 coord = uv * vec2(size) - 0.5;
-    ivec2 base = ivec2(floor(coord));
-    vec2 f = coord - vec2(base);
+    ivec2 base = ivec2(floor(coord)) - 1;
+    vec2 f = coord - floor(coord);
+    vec4 wx = bSplineWeights(f.x), wy = bSplineWeights(f.y);
     float here = min(sceneDistance, 1e9);
     vec4 cloud = vec4(0.0);
     float mean = 0.0, total = 0.0;
-    for (int y = 0; y <= 1; ++y) {
-        for (int x = 0; x <= 1; ++x) {
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 4; ++x) {
             ivec2 texel = clamp(base + ivec2(x, y), ivec2(0), size - 1);
             vec2 d = texelFetch(cloudDistance, texel, 0).xy;
-            float bilinear = (x == 1 ? f.x : 1.0 - f.x) * (y == 1 ? f.y : 1.0 - f.y);
-            float w = bilinear / (1e-3 + abs(d.y - here) / max(here, 1.0)) + 1e-6;
+            float spline = wx[x] * wy[y];
+            float difference = abs(d.y - here) / (max(here, 1.0) * CLOUD_DEPTH_TOLERANCE);
+            float w = spline / (1.0 + difference * difference) + 1e-6;
             cloud += texelFetch(cloudLayer, texel, 0) * w;
             mean += d.x * w;
             total += w;

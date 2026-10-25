@@ -51,7 +51,7 @@ Keys:
     A                      translation assist on / off
     B                      throttle to 0
     bumpers                time warp down / up
-    Y / Start              free camera or ship / settings menu
+    Y / Start / Back       free camera or ship / settings menu / the controls
     X                      chase view / cockpit
   anywhere:
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
@@ -73,6 +73,7 @@ Keys:
     K                      freeze the level of detail
     [ / ]                  split factor down / up
     F1                     settings menu
+    F2                     the controls
     I                      debug text
     P                      screenshot into planet_captures/
 
@@ -101,8 +102,11 @@ import cube_sphere
 import flight
 import shadows
 from ground import GroundPatch, SIZE as PATCH_SIZE
+import ground_textures
 import cockpit
 from cards import Card
+from help_sheet import HelpOverlay
+from hints import HintBar
 from instruments import Instruments
 from menu import SettingsMenu
 from quadtree import QuadTree, hidden_by_horizon
@@ -127,6 +131,8 @@ SHADOW_REACH = 5_000.0
 CLOUD_LAYER = (1_500.0, 3_500.0)
 CLOUD_SHAPE = (40.0, 900.0, 0.8)
 CLOUD_COVERAGE = 0.45            # share of the sky the clouds cover at the start
+# The ground's textures (ground_textures.py, ground.glsl): metres per tile at the near and far scale.
+GROUND_SCALES = (5.0, 47.0)
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -201,10 +207,10 @@ THROTTLE_RATE = 0.5              # throttle per second while W or S is held
 MOUSE_STICK = 0.04               # stick per pixel of mouse movement
 GAMEPAD_DEAD_ZONE = 0.12         # of a stick's travel, read as 0
 # Gamepad buttons and the keys they press: A assist, B throttle to 0, the bumpers time warp,
-# Y ship or free camera, X chase view, Start the menu.
+# Y ship or free camera, X chase view, Start the menu, Back the controls sheet.
 GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAMEPAD_LEFT_BUMPER: keys.COMMA,
                 keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
-                keys.GAMEPAD_X: keys.R}
+                keys.GAMEPAD_X: keys.R, keys.GAMEPAD_BACK: keys.F2}
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
 ORBIT_POINTS = 256               # points of the drawn orbit path; matches OrbitPoints in pipeline.json
 # The moon (flight.Moon): radius, surface gravity (a fifth of the planet's), distance from the
@@ -357,6 +363,9 @@ state = {
     "cloud_density": 0.04,       # extinction per metre at full density
     "cloud_wind": (0.0, 0.0, 0.0),  # the coverage noise's offset, in its units (clouds.glsl)
     "wind_speed": 15.0,          # metres a second the clouds drift
+    "ground_textures": False,    # whether the ground's textures were loaded
+    "texture_strength": 1.0,     # how much the ground's textures show, 0 .. 1
+    "texture_relief": 1.0,       # the strength of their normal maps
     "horizon_sun": None,         # the sun's direction the chunks' horizons are measured towards
     "rebuild": [],               # built chunks still to build again for horizon_sun, nearest last
     "gamepad_held": set(),       # gamepad buttons held last frame
@@ -385,6 +394,10 @@ state = {
     "cabin_screens": None,       # the displays on the model's cabin's panel (cockpit_screens)
     "ship_model": None,          # (root entity, its mesh entities): the ship's model
     "debug_text": False,
+    "hint_bar": None,            # the button hints along the bottom (hints.py)
+    "hints": True,               # whether the hint bar shows
+    "help": None,                # the controls sheet (help_sheet.py)
+    "input": "keys",             # "keys" or "pad": what the hints name, the device last used
     "planet_edit": None,         # terrain parameters the menu changes until Apply
     "scripted_controls": False,  # the ship's controls are set by a check, not read from the keys
     "impact_speed": 0.0,         # m/s, the fastest a contact point reached the surface at this frame
@@ -683,6 +696,33 @@ def upload_clouds():
     engine.set_custom_vec4("planet.clouds.wind", state["cloud_wind"] + (0.0,))
 
 
+def load_ground_textures():
+    """Hand the ground's textures to the pipeline (ground_textures.py) and
+    their mean albedos to GroundParams; without them the ground keeps its
+    procedural colours."""
+    means = ground_textures.load(engine)
+    state["ground_textures"] = means is not None
+    if means is None:
+        print("ground textures: none in textures/; run `python ground_textures.py` to download them", flush=True)
+        return
+    engine.set_custom_vec4_array("planet.ground.means", [m + (0.0,) for m in means])
+
+
+def upload_ground():
+    """GroundParams' tiling offsets for the camera's position relative to
+    each body's centre (in double, less their whole tiles) and its
+    settings."""
+    camera = state["position"]
+    offsets = []
+    for body in bodies:
+        relative = sub(camera, body.centre())
+        for size in GROUND_SCALES:
+            offsets.append(tuple(v / size - math.floor(v / size) for v in relative) + (0.0,))
+    engine.set_custom_vec4_array("planet.ground.offsets", offsets + [(0.0,) * 4] * (4 - len(offsets)))
+    strength = state["texture_strength"] if state["ground_textures"] else 0.0
+    engine.set_custom_vec4("planet.ground.settings", (strength, state["texture_relief"]) + GROUND_SCALES)
+
+
 def blow_clouds(dt):
     """Move the clouds' weather with the wind by `dt` seconds (times the
     time warp): the menu's wind speed in metres a second, along the
@@ -957,10 +997,11 @@ def set_reentry_pass(on):
 
 
 def build_cards():
-    """The view's card at the top left and the debug card at the bottom
-    left (cards.py)."""
+    """The view's card at the top left, the debug card at the bottom left
+    (cards.py) and the hint bar along the bottom (hints.py)."""
     canvas = engine.ui.create_canvas(reference_size=(1600, 900))
-    state["cards"] = (Card(engine.ui, canvas, (0, 0), 12), Card(engine.ui, canvas, (0, 1), 16))
+    state["cards"] = (Card(engine.ui, canvas, (0, 0), 12), Card(engine.ui, canvas, (0, 1), 16, margin=(24, 76)))
+    state["hint_bar"] = HintBar(engine.ui, canvas)
 
 
 # ── Camera ─────────────────────────────────────────────────────────────────
@@ -1226,14 +1267,21 @@ def read_ship_controls(dt):
     controls.vertical = clamp(float(down(keys.E)) - float(down(keys.Q)) - axis(keys.GAMEPAD_RIGHT_Y))
 
 
+PAD_AXES = (keys.GAMEPAD_LEFT_X, keys.GAMEPAD_LEFT_Y, keys.GAMEPAD_RIGHT_X, keys.GAMEPAD_RIGHT_Y)
+
+
 def read_gamepad_buttons():
     """Gamepad buttons on the frame they are pressed, as the keys of
-    GAMEPAD_KEYS."""
+    GAMEPAD_KEYS. A button pressed, a stick moved out of its dead zone or a
+    trigger pulled makes the hints name the gamepad's controls."""
     held = set()
     if engine.input.is_gamepad_connected():
         held = {b for b in GAMEPAD_KEYS if engine.input.is_gamepad_button_down(b)}
+        if (held - state["gamepad_held"] or any(stick(engine.input.get_gamepad_axis(a)) for a in PAD_AXES)
+                or trigger(keys.GAMEPAD_LEFT_TRIGGER) > 0.2 or trigger(keys.GAMEPAD_RIGHT_TRIGGER) > 0.2):
+            state["input"] = "pad"
     for button in held - state["gamepad_held"]:
-        on_key(GAMEPAD_KEYS[button])
+        on_key(GAMEPAD_KEYS[button], from_pad=True)
     state["gamepad_held"] = held
 
 
@@ -1372,6 +1420,8 @@ def frame(dt):
 
     if not state["scripted_controls"]:
         read_gamepad_buttons()
+    if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
+        state["input"] = "keys"
     if state["mode"] == "ship":
         if not state["scripted_controls"]:
             read_ship_controls(dt)
@@ -1405,12 +1455,16 @@ def frame(dt):
     view_rotation = euler_from_basis(right, up, forward)
     engine.scene.set_rotation(state["camera"], view_rotation)
     upload_shadow_cascades(forward)
+    upload_ground()
     blow_clouds(dt)
     if (state["mode"], state["chase"], state["generated_cockpit"]) != state["shown_mode"]:
         show_mode()
     if cockpit_view():
         update_cockpit(right, up, forward, view_rotation)
     state["menu"].update()
+    state["hint_bar"].show(state["hints"])
+    if state["hints"]:
+        state["hint_bar"].update(current_hints())
 
     state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * dt * 1000.0
     if state["cards"] is not None:
@@ -1499,8 +1553,13 @@ def contact_text(ship):
 
 def update_cards():
     """The view's card (in the free camera and the chase view) and, when
-    debug text is on, the debug card."""
+    debug text is on, the debug card; neither while the controls sheet is
+    open."""
     view_card, debug_card = state["cards"]
+    if state["help"].visible:
+        view_card.show(False)
+        debug_card.show(False)
+        return
     if state["mode"] == "ship" and state["chase"]:
         ship, controls = state["ship"], state["controls"]
         body, periapsis, apoapsis, _ = ship_orbit()
@@ -1563,6 +1622,94 @@ def update_cards():
     ])
 
 
+def current_hints():
+    """The hint bar's hints for what is on the screen and in control, named
+    for the keyboard or the gamepad, whichever was used last."""
+    pad = state["input"] == "pad"
+    if state["help"].visible:
+        return [(("pad:Back",) if pad else ("F2",), "Close the controls")]
+    if state["menu"].visible:
+        return [(("pad:Start",) if pad else ("F1",), "Close settings"), (("Wheel",), "Scroll"),
+                (("pad:Back",) if pad else ("F2",), "Controls")]
+    if state["mode"] != "ship":
+        if pad:
+            return [(("pad:Y",), "Board the ship"), (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
+        return [(("RMB",), "Look"), (("W", "A", "S", "D"), "Fly"), (("E", "Q"), "Up, down"),
+                (("Shift", "Ctrl"), "Faster, slower"), (("Wheel",), "Speed"), (("1-9",), "Places"),
+                (("Tab",), "Board the ship"), (("F1",), "Settings"), (("F2",), "Controls")]
+    view = "Cockpit" if state["chase"] else "Chase view"
+    hints = []
+    if state["ship"].crashed:
+        hints = [(("8",), "New ship on the pad"), (("9",), "New ship in orbit")]
+    if pad:
+        return hints + [(("pad:LS",), "Pitch, roll"), (("pad:RS",), "Yaw, up, down"),
+                        (("pad:LT", "pad:RT"), "Throttle"), (("pad:A",), "Assist"), (("pad:B",), "Cut throttle"),
+                        (("pad:X",), view), (("pad:LB", "pad:RB"), "Warp"), (("pad:Y",), "Free camera"),
+                        (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
+    return hints + [(("W", "S"), "Throttle"), (("Arrows",), "Pitch, yaw"), (("A", "D"), "Roll"),
+                    (("E", "Q"), "Up, down"), (("L",), "Assist"), (("R",), view), ((",", "."), "Warp"),
+                    (("Tab",), "Free camera"), (("F1",), "Settings"), (("F2",), "Controls")]
+
+
+# The controls sheet (F2, help_sheet.py): columns of (heading, rows of (caps, what they do)).
+HELP_COLUMNS = [
+    [("Free camera", [
+        (("RMB",), "Look around"),
+        (("W", "A", "S", "D"), "Fly"),
+        (("E", "Q"), "Up / down"),
+        (("Shift", "Ctrl"), "4x faster / slower"),
+        (("Wheel",), "Speed factor"),
+        (("Tab",), "Board the ship"),
+    ]), ("Ship", [
+        (("W", "S"), "Throttle up / down"),
+        (("Backspace",), "Throttle to 0"),
+        (("Arrows", "RMB"), "Pitch and yaw"),
+        (("A", "D"), "Roll"),
+        (("E", "Q"), "Thrust up / down"),
+        (("L",), "Translation assist"),
+        (("R",), "Chase view / cockpit"),
+        (("U",), "Cabin / generated cockpit"),
+        ((",", "."), "Time warp down / up"),
+    ])],
+    [("Ship, gamepad", [
+        (("pad:LS",), "Pitch and roll"),
+        (("pad:RS",), "Yaw, thrust up / down"),
+        (("pad:LT", "pad:RT"), "Throttle down / up"),
+        (("pad:A",), "Translation assist"),
+        (("pad:B",), "Throttle to 0"),
+        (("pad:X",), "Chase view / cockpit"),
+        (("pad:LB", "pad:RB"), "Time warp down / up"),
+        (("pad:Y",), "Free camera / ship"),
+        (("pad:Start",), "Settings"),
+        (("pad:Back",), "These controls"),
+    ]), ("Places", [
+        (("1-5",), "5 m to 5,000 km up"),
+        (("6",), "Over a cube corner"),
+        (("7",), "Over the sea"),
+        (("8", "9"), "Ship on the pad / in orbit"),
+        (("Shift", "8", "9"), "Ship on / around the moon"),
+    ])],
+    [("World", [
+        (("N",), "New terrain seed"),
+        (("M", "J"), "Mountains higher / lower"),
+        (("H", "G"), "Hills higher / lower"),
+        (("Z", "X"), "Sun lower / higher"),
+        (("T", "Y"), "Air denser / thinner"),
+        (("B", "V"), "Exposure up / down"),
+    ]), ("View", [
+        (("F1",), "Settings"),
+        (("F2",), "These controls"),
+        (("I",), "Debug card"),
+        (("F",), "Wireframe"),
+        (("O",), "Ocean"),
+        (("C",), "Colour: terrain / face / level"),
+        (("K",), "Freeze the level of detail"),
+        (("[", "]"), "Split factor down / up"),
+        (("P",), "Screenshot"),
+    ])],
+]
+
+
 def on_init():
     camera = engine.scene.create_entity("Camera")
     engine.scene.add_component(camera, "Camera")
@@ -1574,6 +1721,7 @@ def on_init():
 
     upload_sky()
     upload_clouds()
+    load_ground_textures()
     upload_terrain()
     upload_chunk_indices()
     engine.set_buffer("OrbitIndices", np.arange(ORBIT_POINTS, dtype=np.uint32))
@@ -1588,7 +1736,8 @@ def on_init():
     state["cabin_screens"] = cockpit_screens()
     state["instruments"] = Instruments(engine, len(state["cabin_screens"]), FOV)
     state["planet_edit"] = {name: list(value) for name, value in planet.terrain.items()}
-    state["menu"] = SettingsMenu(engine, "Settings   (F1 to hide)", menu_items())
+    state["menu"] = SettingsMenu(engine, "Settings", menu_items())
+    state["help"] = HelpOverlay(engine, "CONTROLS", HELP_COLUMNS, footer="F2, or Back on a gamepad, to close")
     teleport(1)
 
     # Before the transform system (priority 0), so this frame's positions are used.
@@ -1649,53 +1798,91 @@ def menu_items():
     return [
         {"heading": "Simulation"},
         {"slider": "Time warp", "min": 0, "max": len(WARPS) - 1, "get": lambda: state["warp"],
-         "set": lambda v: state.update(warp=int(round(v))), "show": lambda v: "x%d" % WARPS[int(round(v))]},
-        {"toggle": "Translation assist", "get": lambda: state["controls"].assist, "set": set_assist},
+         "set": lambda v: state.update(warp=int(round(v))), "show": lambda v: "x%d" % WARPS[int(round(v))],
+         "keys": (",", "."), "hint": "How much faster than real time the ship flies and the moon moves."},
+        {"toggle": "Translation assist", "get": lambda: state["controls"].assist, "set": set_assist,
+         "keys": ("L",), "hint": "The throttle asks for a speed and E / Q for a climb rate; the thrusters hold them."},
+        {"heading": "Sky"},
         {"slider": "Exposure", "min": 0.05, "max": 2.0, "get": lambda: state["exposure"],
-         "set": set_and("exposure", upload_sky), "format": "%.2f"},
+         "set": set_and("exposure", upload_sky), "format": "%.2f", "keys": ("B", "V"),
+         "hint": "The image's brightness before tone mapping."},
         {"slider": "Atmosphere density", "min": 0.25, "max": 4.0, "get": lambda: state["density"],
-         "set": set_density, "format": "x%.2f"},
+         "set": set_density, "format": "x%.2f", "keys": ("T", "Y"),
+         "hint": "Scales the air and the haze: the sky's colour, the haze far off and the drag on the ship."},
         {"toggle": "Multiple scattering", "get": lambda: state["multiple_scattering"],
-         "set": set_and("multiple_scattering", upload_sky)},
-        {"toggle": "Ozone", "get": lambda: state["ozone"], "set": set_and("ozone", upload_sky)},
+         "set": set_and("multiple_scattering", upload_sky),
+         "hint": "The light the air scatters more than once, from the multiple scattering table."},
+        {"toggle": "Ozone", "get": lambda: state["ozone"], "set": set_and("ozone", upload_sky),
+         "hint": "The ozone layer's absorption of the light passing through it."},
         {"slider": "Sun elevation", "min": -20.0, "max": 90.0, "get": lambda: state["sun_elevation"],
-         "set": set_and("sun_elevation", upload_sky), "format": "%.0f deg"},
+         "set": set_and("sun_elevation", upload_sky), "format": "%.0f deg", "keys": ("Z", "X"),
+         "hint": "The sun's height above the horizon, seen from the blocks."},
         {"slider": "Sun azimuth", "min": 0.0, "max": 360.0, "get": lambda: state["sun_azimuth"],
-         "set": set_and("sun_azimuth", upload_sky), "format": "%.0f deg"},
+         "set": set_and("sun_azimuth", upload_sky), "format": "%.0f deg",
+         "hint": "The sun's direction seen from the blocks, from east towards north."},
+        {"heading": "Clouds"},
+        {"toggle": "Clouds", "get": lambda: state["clouds"], "set": set_and("clouds", upload_clouds),
+         "hint": "The cloud layer between 1.5 and 3.5 km, and its shadows."},
+        {"slider": "Cloud cover", "min": 0.0, "max": 1.0, "get": lambda: state["cloud_coverage"],
+         "set": set_and("cloud_coverage", upload_clouds), "format": "%.2f",
+         "hint": "The share of the sky the clouds cover."},
+        {"slider": "Cloud density", "min": 0.005, "max": 0.1, "get": lambda: state["cloud_density"],
+         "set": set_and("cloud_density", upload_clouds), "format": "%.3f /m",
+         "hint": "How much light a metre of cloud stops at full density."},
+        {"slider": "Wind", "min": 0.0, "max": 60.0, "get": lambda: state["wind_speed"],
+         "set": lambda v: state.update(wind_speed=v), "format": "%.0f m/s",
+         "hint": "How fast the clouds drift, times the time warp."},
+        {"heading": "Ground"},
+        {"slider": "Ground textures", "min": 0.0, "max": 1.0, "get": lambda: state["texture_strength"],
+         "set": lambda v: state.update(texture_strength=v), "format": "%.2f",
+         "hint": "How much the ground's textures show over its colours; 0 leaves the colours alone. "
+                 "Needs the textures (python ground_textures.py)."},
+        {"slider": "Ground relief", "min": 0.0, "max": 2.0, "get": lambda: state["texture_relief"],
+         "set": lambda v: state.update(texture_relief=v), "format": "%.2f",
+         "hint": "The strength of the textures' normal maps in the light."},
+        {"toggle": "Ocean", "get": lambda: state["ocean"], "set": set_ocean, "keys": ("O",),
+         "hint": "The sea's surface; off, the sea floor shows."},
+        {"toggle": "Shadows", "get": lambda: state["shadows"], "set": lambda on: state.update(shadows=on),
+         "hint": "The sun's shadow cascades, out to 20 km."},
+        {"heading": "Display"},
+        {"toggle": "Button hints", "get": lambda: state["hints"], "set": lambda on: state.update(hints=on),
+         "hint": "The bar of keys or gamepad buttons along the bottom of the screen."},
+        {"toggle": "Orbit path", "get": lambda: state["orbit_path"], "set": lambda on: state.update(orbit_path=on),
+         "hint": "The path the ship would coast along, around the body it is reckoned around."},
+        {"toggle": "Debug text", "get": lambda: state["debug_text"], "set": lambda on: state.update(debug_text=on),
+         "keys": ("I",), "hint": "The debug card: frame time, chunks, the pool and the terrain's settings."},
+        {"toggle": "Wireframe", "get": lambda: state["wireframe"], "set": set_wireframe, "keys": ("F",),
+         "hint": "The chunks' edges drawn over the terrain."},
         {"slider": "Split factor", "min": 0.5, "max": 4.0,
          "get": lambda: planet.tree.split_factor if planet.tree is not None else SPLIT_FACTOR,
-         "set": set_split, "format": "%.2f"},
-        {"toggle": "Ocean", "get": lambda: state["ocean"], "set": set_ocean},
-        {"toggle": "Orbit path", "get": lambda: state["orbit_path"], "set": lambda on: state.update(orbit_path=on)},
-        {"toggle": "Shadows", "get": lambda: state["shadows"], "set": lambda on: state.update(shadows=on)},
-        {"toggle": "Clouds", "get": lambda: state["clouds"], "set": set_and("clouds", upload_clouds)},
-        {"slider": "Cloud cover", "min": 0.0, "max": 1.0, "get": lambda: state["cloud_coverage"],
-         "set": set_and("cloud_coverage", upload_clouds), "format": "%.2f"},
-        {"slider": "Cloud density", "min": 0.005, "max": 0.1, "get": lambda: state["cloud_density"],
-         "set": set_and("cloud_density", upload_clouds), "format": "%.3f /m"},
-        {"slider": "Wind", "min": 0.0, "max": 60.0, "get": lambda: state["wind_speed"],
-         "set": lambda v: state.update(wind_speed=v), "format": "%.0f m/s"},
-        {"toggle": "Wireframe", "get": lambda: state["wireframe"], "set": set_wireframe},
-        {"toggle": "Debug text", "get": lambda: state["debug_text"], "set": lambda on: state.update(debug_text=on)},
+         "set": set_split, "format": "%.2f", "keys": ("[", "]"),
+         "hint": "A chunk splits within this many of its edge lengths of the camera; higher is finer and slower."},
         {"button": "Colour: terrain / face / level",
-         "do": lambda: set_colour_mode((state["colour_mode"] + 1) % len(COLOUR_MODES))},
+         "do": lambda: set_colour_mode((state["colour_mode"] + 1) % len(COLOUR_MODES)), "keys": ("C",),
+         "hint": "Colour the ground by its terrain, by cube face or by quadtree level."},
         {"heading": "Planet"},
-        {"button": "New seed", "do": new_seed},
+        {"button": "New seed", "do": new_seed, "keys": ("N",),
+         "hint": "Builds a new planet from a random seed at once."},
         {"slider": "Mountain height", "min": 0.0, "max": 8000.0, "get": edit("mountains", 1),
-         "set": edit_set("mountains", 1), "format": "%.0f m"},
+         "set": edit_set("mountains", 1), "format": "%.0f m", "hint": "Taken on by Apply, below."},
         {"slider": "Hill height", "min": 0.0, "max": 600.0, "get": edit("hills", 1),
-         "set": edit_set("hills", 1), "format": "%.0f m"},
+         "set": edit_set("hills", 1), "format": "%.0f m", "hint": "Taken on by Apply, below."},
         {"slider": "Continent frequency", "min": 0.5, "max": 4.0, "get": edit("continent", 0),
-         "set": edit_set("continent", 0), "format": "%.2f"},
+         "set": edit_set("continent", 0), "format": "%.2f",
+         "hint": "More, smaller continents as it rises. Taken on by Apply, below."},
         {"slider": "Sea level bias", "min": -0.4, "max": 0.4, "get": edit("continent", 2),
-         "set": edit_set("continent", 2), "format": "%+.2f"},
+         "set": edit_set("continent", 2), "format": "%+.2f",
+         "hint": "Raises the land out of the sea as it rises. Taken on by Apply, below."},
         {"slider": "Ocean depth", "min": 0.0, "max": 4000.0, "get": edit("hills", 2),
-         "set": edit_set("hills", 2), "format": "%.0f m"},
+         "set": edit_set("hills", 2), "format": "%.0f m", "hint": "Taken on by Apply, below."},
         {"slider": "Detail height", "min": 0.0, "max": 30.0, "get": edit("detail", 1),
-         "set": edit_set("detail", 1), "format": "%.1f m"},
+         "set": edit_set("detail", 1), "format": "%.1f m",
+         "hint": "The relief of the ground's finest bumps, 80 m and less across. Taken on by Apply, below."},
         {"slider": "Erosion", "min": 0.0, "max": 4.0, "get": edit("detail", 3),
-         "set": edit_set("detail", 3), "format": "%.2f"},
-        {"button": "Apply: build the planet again", "do": apply_planet},
+         "set": edit_set("detail", 3), "format": "%.2f",
+         "hint": "How much the slopes smooth the hills and the detail. Taken on by Apply, below."},
+        {"button": "Apply: build the planet again", "do": apply_planet,
+         "hint": "Builds the planet again with the settings above."},
     ]
 
 
@@ -1718,7 +1905,10 @@ def change_terrain(name, index, factor):
     regenerate()
 
 
-def on_key(key):
+def on_key(key, from_pad=False):
+    """A key pressed, or the key a gamepad button stands for (`from_pad`)."""
+    if not from_pad:
+        state["input"] = "keys"
     tree = planet.tree
     if keys.NUM_1 <= key <= keys.NUM_9:
         shift = engine.input.is_key_down(keys.LEFT_SHIFT) or engine.input.is_key_down(keys.RIGHT_SHIFT)
@@ -1745,6 +1935,8 @@ def on_key(key):
         new_seed()
     elif key == keys.F1:
         state["menu"].show(not state["menu"].visible)
+    elif key == keys.F2:
+        state["help"].show(not state["help"].visible)
     elif key == keys.I:
         state["debug_text"] = not state["debug_text"]
     elif key == keys.M:
@@ -1783,6 +1975,9 @@ def on_key(key):
 
 
 def on_scroll(x_offset, y_offset):
+    state["input"] = "keys"
+    if state["menu"].pointer_over:
+        return
     state["speed_factor"] = max(0.01, min(100.0, state["speed_factor"] * 1.25 ** y_offset))
 
 
@@ -1911,6 +2106,8 @@ class CaptureTour:
         ("preset_8_ship_sunset", 8, False, 0, None, (6.0, 90.0)),
         ("preset_8_menu_and_throttle", 8, False, 0, None, DAY_SUN,
          lambda: state["menu"].show(True), lambda: setattr(state["controls"], "throttle", 0.6)),
+        ("controls_sheet", 1, False, 0, None, DAY_SUN, lambda: state["help"].show(True)),
+        ("chase_gamepad_hints", 8, False, 0, None, DAY_SUN, lambda: state.update(chase=True, input="pad")),
         ("preset_1_wireframe_levels", 1, True, 2, None, DAY_SUN, lambda: state.update(debug_text=True)),
         ("preset_2_wireframe", 2, True, 0, None, DAY_SUN),
         ("preset_2_twilight", 2, False, 0, None, (-3.0, 90.0)),
@@ -1920,6 +2117,9 @@ class CaptureTour:
         ("clouds_below_sunset", 1, False, 0, None, (4.0, 45.0), lambda: look_up(25.0)),
         ("clouds_inside", 2, False, 0, None, DAY_SUN, overcast, lambda: lift_camera(2_500.0)),
         ("clouds_cockpit_inside", 8, False, 0, None, DAY_SUN, overcast, lambda: lift_ship(2_500.0)),
+        ("clouds_from_above", 2, False, 0, None, DAY_SUN, lambda: lift_camera(6_000.0), lambda: look_up(-25.0)),
+        ("clouds_level", 2, False, 0, None, DAY_SUN, lambda: lift_camera(2_500.0)),
+        ("clouds_from_below", 2, False, 0, None, DAY_SUN, lambda: lift_camera(800.0), lambda: look_up(10.0)),
         ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
         ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
         ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),
@@ -1969,6 +2169,8 @@ class CaptureTour:
             set_wireframe(wireframe)
             set_colour_mode(colour_mode)
             state["menu"].show(False)
+            state["help"].show(False)
+            state["input"] = "keys"
             for action in setup:
                 action()
         elif self.captured is None:

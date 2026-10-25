@@ -147,6 +147,17 @@
       "elementCount": 10244,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
+    "GroundParams": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "offsets", "type": "vec4", "arrayCount": 4, "source": "scene.custom.planet.ground.offsets[i]" },
+        { "name": "means", "type": "vec4", "arrayCount": 7, "source": "scene.custom.planet.ground.means[i]" },
+        { "name": "settings", "type": "vec4", "source": "scene.custom.planet.ground.settings",
+          "default": [ 0.0, 1.0, 5.0, 47.0 ] }
+      ]
+    },
     "CloudParams": {
       "usage": "uniform_buffer",
       "packing": "std140",
@@ -335,6 +346,40 @@
           "autoBindBuffer": "ChunkPool" }
       ]
     },
+    "groundSet": {
+      "bindings": [
+        { "binding": 0, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "GroundParams",
+          "autoBindBuffer": "GroundParams" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundAlbedo0",
+          "externalImage": "groundAlbedo0", "autoBindSampler": "groundRepeat" },
+        { "binding": 2, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundAlbedo1",
+          "externalImage": "groundAlbedo1", "autoBindSampler": "groundRepeat" },
+        { "binding": 3, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundAlbedo2",
+          "externalImage": "groundAlbedo2", "autoBindSampler": "groundRepeat" },
+        { "binding": 4, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundAlbedo3",
+          "externalImage": "groundAlbedo3", "autoBindSampler": "groundRepeat" },
+        { "binding": 5, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundAlbedo4",
+          "externalImage": "groundAlbedo4", "autoBindSampler": "groundRepeat" },
+        { "binding": 6, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundAlbedo5",
+          "externalImage": "groundAlbedo5", "autoBindSampler": "groundRepeat" },
+        { "binding": 7, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundAlbedo6",
+          "externalImage": "groundAlbedo6", "autoBindSampler": "groundRepeat" },
+        { "binding": 8, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundNormal0",
+          "externalImage": "groundNormal0", "autoBindSampler": "groundRepeat" },
+        { "binding": 9, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundNormal1",
+          "externalImage": "groundNormal1", "autoBindSampler": "groundRepeat" },
+        { "binding": 10, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundNormal2",
+          "externalImage": "groundNormal2", "autoBindSampler": "groundRepeat" },
+        { "binding": 11, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundNormal3",
+          "externalImage": "groundNormal3", "autoBindSampler": "groundRepeat" },
+        { "binding": 12, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundNormal4",
+          "externalImage": "groundNormal4", "autoBindSampler": "groundRepeat" },
+        { "binding": 13, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundNormal5",
+          "externalImage": "groundNormal5", "autoBindSampler": "groundRepeat" },
+        { "binding": 14, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "groundNormal6",
+          "externalImage": "groundNormal6", "autoBindSampler": "groundRepeat" }
+      ]
+    },
     "materialSet": {
       "bindings": [
         { "binding": 0, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "albedoMap" },
@@ -353,7 +398,9 @@
                       "addressMode": "clamp_to_edge" },
     "linearClamp": { "magFilter": "linear", "minFilter": "linear", "addressMode": "clamp_to_edge" },
     "shadowCompare": { "magFilter": "linear", "minFilter": "linear", "addressMode": "clamp_to_edge",
-                       "compareEnable": true, "compareOp": "less_or_equal" }
+                       "compareEnable": true, "compareOp": "less_or_equal" },
+    "groundRepeat": { "magFilter": "linear", "minFilter": "linear", "mipmapMode": "linear",
+                      "addressMode": "repeat", "anisotropyEnable": true, "maxAnisotropy": 16, "maxLod": 16 }
   },
   "resources": [
     { "name": "swapchain", "kind": "image", "imported": true },
@@ -482,7 +529,7 @@
         "depthCompareOp": "greater_or_equal",
         "cullMode": "back"
       },
-      "descriptorSets": [ "cameraSet", "chunkInstanceSet" ],
+      "descriptorSets": [ "cameraSet", "chunkInstanceSet", "groundSet" ],
       "inputs": [
         { "resource": "transmittanceLut", "usage": "shader_read" },
         { "resource": "multiScatteringLut", "usage": "shader_read" },

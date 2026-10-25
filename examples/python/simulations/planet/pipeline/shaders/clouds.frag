@@ -48,7 +48,10 @@ void main() {
         vec4 viewPos = camera.invProj * vec4(ndc, depth, 1.0);
         sceneDistance = length(viewPos.xyz / viewPos.w);
     }
+    // The angle a pixel of this image spans: the projection's scale over its height.
+    float pixelAngle = 2.0 * abs(dFdy(fragTexCoord.y)) / abs(camera.proj[1][1]);
     float distance;
-    outCloud = marchClouds(camera.cameraFromCentre.xyz, rd, sceneDistance, jitter(gl_FragCoord.xy), distance);
+    outCloud = marchClouds(camera.cameraFromCentre.xyz, rd, sceneDistance, jitter(gl_FragCoord.xy), pixelAngle,
+                           distance);
     outDistance = vec2(distance, min(sceneDistance, 1e9));
 }

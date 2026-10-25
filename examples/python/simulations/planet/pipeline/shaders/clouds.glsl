@@ -7,10 +7,12 @@
 //
 // Density at a point: the coverage, a noise on the direction from the
 // planet's centre (the weather, the same at every height) raised so that
-// the requested share of the sky is cloud, cut down by a profile over the
-// layer's height (rising over its lowest tenth, falling over its upper
-// half), so that only the densest weather reaches the layer's top and
-// bottom: flat bases and rounded tops. A 3D detail noise erodes the edges.
+// the requested share of the sky is cloud, less a threshold that rises
+// from the layer's bottom to its top, so that denser weather reaches
+// higher: each cloud is a dome whose height follows its weather, on a flat
+// base where the density fades in over the layer's lowest 6 %. A 3D detail
+// noise erodes the edges. The noises' octaves are each turned by
+// CLOUD_ROTATION, so their lattices do not line up along the axes.
 
 const int CLOUD_STEPS = 64;                 // along the view ray through the shell, growing with distance
 const float CLOUD_MAX_LENGTH = 50000.0;     // metres of the shell marched at most, from where the ray enters it
@@ -23,28 +25,75 @@ float cloudHeightFraction(vec3 p) {
     return (length(p) - atmosphere.radii.x - clouds.layer.x) / (clouds.layer.y - clouds.layer.x);
 }
 
-// The weather at the unit direction `dir`: 0 clear, rising to 1 in the
-// densest cloud; about clouds.layer.z of the sky is above 0.
-float cloudCoverage(vec3 dir) {
-    float n = fbm3(dir * clouds.shape.x + clouds.wind.xyz, 3, 2.0, 0.5) * 0.5 + 0.5;
-    float c = clouds.layer.z;
-    return smoothstep(1.0 - c - 0.05, 1.0 - c + 0.35, n);
+// A rotation about an axis off every coordinate axis.
+const mat3 CLOUD_ROTATION = mat3(0.00, 0.80, 0.60,
+                                 -0.80, 0.36, -0.48,
+                                 -0.60, -0.48, 0.64);
+
+// fBm of noise3 with each octave turned by CLOUD_ROTATION, filtered for a
+// pixel `cell` lattice cells across at the first octave: an octave fades
+// out as its cells shrink from 4 to 2 pixels across, before its features
+// are single pixels. `slope` is about how
+// fast the sum changes per lattice cell of the first octave, over the
+// octaves kept.
+float cloudFbm(vec3 p, int octaves, float lacunarity, float cell, out float slope) {
+    float amplitude = 0.5, sum = 0.0, frequency = 1.0;
+    slope = 0.0;
+    for (int i = 0; i < octaves; ++i) {
+        float keep = 1.0 - smoothstep(0.25, 0.5, cell);
+        if (keep <= 0.0) break;
+        sum += amplitude * keep * noise3(p);
+        slope += amplitude * keep * frequency;
+        p = CLOUD_ROTATION * p * lacunarity + vec3(19.1, 7.3, 3.7);
+        cell *= lacunarity;
+        frequency *= lacunarity;
+        amplitude *= 0.5;
+    }
+    return sum;
 }
 
-// Density without the detail noise: for the light's march towards the sun.
-float cloudBaseDensity(vec3 p) {
+const float CLOUD_EDGE_WIDEN_MAX = 0.2;   // of the coverage noise, the most its edges widen by
+
+// The weather at the unit direction `dir`, for a pixel `footprint` metres
+// across at the point: 0 clear, rising to 1 in the densest cloud; about
+// clouds.layer.z of the sky is above 0. The rise is widened by how much the
+// noise changes across the pixel (at most CLOUD_EDGE_WIDEN_MAX), so a
+// cloud's edge is never sharper than a pixel.
+float cloudCoverage(vec3 dir, float footprint) {
+    float slope;
+    float cell = footprint * clouds.shape.x / atmosphere.radii.x;
+    float n = cloudFbm(CLOUD_ROTATION * dir * clouds.shape.x + clouds.wind.xyz, 4, 2.03, cell, slope) * 0.5 + 0.5;
+    float c = clouds.layer.z;
+    float widen = min(0.5 * slope * cell, CLOUD_EDGE_WIDEN_MAX);
+    return smoothstep(1.0 - c - 0.05 - widen, 1.0 - c + 0.35 + widen, n);
+}
+
+// The coverage a point needs to be inside a cloud at the height fraction
+// `f`: none up to 8 % of the layer, rising to all of it at the top.
+float cloudThreshold(float f) {
+    return smoothstep(0.08, 1.0, f);
+}
+
+// Density without the detail noise, for a pixel `footprint` metres across.
+float cloudBaseDensity(vec3 p, float footprint) {
     float f = cloudHeightFraction(p);
     if (f <= 0.0 || f >= 1.0) return 0.0;
-    float profile = smoothstep(0.0, 0.1, f) * smoothstep(1.0, 0.5, f);
-    return clamp((cloudCoverage(normalize(p)) + profile - 1.0) * 2.0, 0.0, 1.0);
+    float coverage = cloudCoverage(normalize(p), footprint);
+    return clamp((coverage - cloudThreshold(f)) * 2.5, 0.0, 1.0) * smoothstep(0.0, 0.06, f);
 }
 
-float cloudDensity(vec3 p) {
-    float base = cloudBaseDensity(p);
+// The same, unfiltered: for the light's march towards the sun and the shadows.
+float cloudBaseDensity(vec3 p) {
+    return cloudBaseDensity(p, 0.0);
+}
+
+float cloudDensity(vec3 p, float footprint) {
+    float base = cloudBaseDensity(p, footprint);
     if (base <= 0.0) return 0.0;
     // The detail drifts with the coverage: the same wind, in metres.
     vec3 drift = clouds.wind.xyz * (atmosphere.radii.x / clouds.shape.x / clouds.shape.y);
-    float detail = fbm3(p / clouds.shape.y + drift, 3, 2.3, 0.5) * 0.5 + 0.5;
+    float slope;
+    float detail = cloudFbm(p / clouds.shape.y + drift, 3, 2.3, footprint / clouds.shape.y, slope) * 0.5 + 0.5;
     return max(base - clouds.shape.z * detail * (1.0 - base), 0.0);
 }
 
@@ -118,8 +167,9 @@ void cloudShell(vec3 ro, vec3 rd, float tMax, out vec2 a, out vec2 b) {
 // extinction, half the phase function's anisotropy and half the weight of
 // the last. Light from all around adds the sky's and CLOUD_AMBIENT_SUN of
 // the sunlight above the clouds (scattered through the whole layer, it
-// lights even their depths), both brighter towards the layer's top.
-vec4 marchClouds(vec3 ro, vec3 rd, float tMax, float jitter, out float distance) {
+// lights even their depths), both brighter towards the layer's top. The
+// density is filtered for a pixel `pixelAngle` radians across.
+vec4 marchClouds(vec3 ro, vec3 rd, float tMax, float jitter, float pixelAngle, out float distance) {
     distance = 0.0;
     vec2 a, b;
     cloudShell(ro, rd, tMax, a, b);
@@ -142,7 +192,7 @@ vec4 marchClouds(vec3 ro, vec3 rd, float tMax, float jitter, out float distance)
         previous = s;
         float t = s < lenA ? a.x + s : b.x + (s - lenA);
         vec3 p = ro + rd * t;
-        float density = cloudDensity(p);
+        float density = cloudDensity(p, t * pixelAngle);
         if (density <= 0.0) continue;
         float sigma = density * sigmaMax;
         // The cloud between the point and the sun.
