@@ -72,7 +72,7 @@ def cloud_items(world, keys=None):
 
 
 def ground_items(world, keys=None):
-    """The ground textures' strength and relief, the ocean and the shadows."""
+    """The ground textures' strength and relief, the ocean, the shadows and the vegetation."""
     return _with_keys([
         {"heading": "Ground"},
         {"slider": "Ground textures", "min": 0.0, "max": 1.0, "get": lambda: world.texture_strength,
@@ -86,6 +86,14 @@ def ground_items(world, keys=None):
          "hint": "The sea's surface; off, the sea floor shows."},
         {"toggle": "Shadows", "get": lambda: world.shadows, "set": lambda on: setattr(world, "shadows", on),
          "hint": "The sun's shadow cascades, out to 20 km."},
+        {"toggle": "Vegetation", "get": lambda: world.vegetation, "set": lambda on: setattr(world, "vegetation", on),
+         "hint": "Trees and bushes where the ground is forest, grass or dry, within the vegetation's range."},
+        {"slider": "Vegetation density", "min": 0.0, "max": 1.0, "get": lambda: world.vegetation_density,
+         "set": lambda v: setattr(world, "vegetation_density", v), "format": "%.2f",
+         "hint": "Times the biome's chance of a plant in each 10 m cell."},
+        {"slider": "Vegetation range", "min": 500.0, "max": 5000.0, "get": lambda: world.vegetation_range,
+         "set": lambda v: setattr(world, "vegetation_range", v), "format": "%.0f m",
+         "hint": "How far from the camera trees grow; they shrink away over its last 15 %."},
     ], keys)
 
 

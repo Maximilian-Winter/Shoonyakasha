@@ -1,6 +1,7 @@
 // The ground's textures (groundSet in pipeline.json, bound as set
-// GROUND_SET): an albedo and a normal map per layer, sampled in planet
-// space by triplanar projection at two scales.
+// GROUND_SET): an albedo and a normal map per layer (biome.glsl's), sampled
+// in planet space by triplanar projection at two scales. Include after
+// biome.glsl.
 //
 //     offsets[body * 2 + k]  xyz: the camera's position relative to the body's
 //                            centre over scale k, less its whole part (in
@@ -40,14 +41,6 @@ layout(set = GROUND_SET, binding = 12) uniform sampler2D groundNormal4;
 layout(set = GROUND_SET, binding = 13) uniform sampler2D groundNormal5;
 layout(set = GROUND_SET, binding = 14) uniform sampler2D groundNormal6;
 
-const int GROUND_SAND = 0;
-const int GROUND_DRY = 1;
-const int GROUND_GRASS = 2;
-const int GROUND_FOREST = 3;
-const int GROUND_ROCK = 4;
-const int GROUND_SNOW = 5;
-const int GROUND_MOON = 6;
-const int GROUND_LAYERS = 7;
 const float GROUND_MIN_WEIGHT = 0.02;   // layers and projections below this are not sampled
 const vec2 GROUND_FADE_PIXELS = vec2(48.0, 12.0);
 

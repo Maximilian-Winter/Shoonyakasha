@@ -49,7 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import cube_sphere, ground_textures, orbits, shadows
+from . import cube_sphere, ground_textures, orbits, shadows, vegetation
 from .vec import add, dot, euler_from_basis, length, local_frame, normalize, scale, sub
 
 #: The planet pipeline shipped with the package.
@@ -73,6 +73,16 @@ CLOUD_SHAPE = (40.0, 900.0, 0.8)
 CLOUD_COVERAGE = 0.45            # share of the sky the clouds cover at the start
 # The ground's textures (ground_textures.py, ground.glsl): metres per tile at the near and far scale.
 GROUND_SCALES = (5.0, 47.0)
+# The vegetation (vegetation.py, vegetation_scatter.comp): candidate cells per cube face side (9.6 m on
+# the planet), instances per kind (matches VegetationInstances in pipeline.json: 5 kinds, 2 vec4 each),
+# the coarsest chunk level that gets plants, the range (m), the distance (m) within which the detailed
+# meshes are drawn, and the bushes' range (m).
+VEGETATION_CELLS = 16384
+VEGETATION_CAPACITY = 16384
+VEGETATION_MIN_LEVEL = 7
+VEGETATION_RANGE = 2_500.0
+VEGETATION_NEAR = 600.0
+VEGETATION_BUSH_RANGE = 700.0
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -85,6 +95,7 @@ PATCH_PROBES = PROBES - EXTRA_PROBES - 2   # after the ground under the viewpoin
 VERTICES_PER_CHUNK = (QUADS + 1) ** 2 + 4 * (QUADS + 1)
 FLOATS_PER_VERTEX = 16           # position and u, normal and v, direction and height, horizon and padding
 HORIZON_SUN_STEP = math.radians(0.5)   # the sun's move after which the chunks' horizons are measured again
+GROUND_PROBE_REACH = 1_000.0     # metres the viewpoint may have moved from where the ground under it was probed
 DRAWS_OFFSET = 16                # bytes before the draw commands in ChunkDraws: the count, then padding
 ORBIT_POINTS = 256               # points of the drawn orbit path; matches OrbitPoints in pipeline.json
 # The terrain's parameters (terrain.glsl), the defaults in pipeline.json.
@@ -333,6 +344,10 @@ class PlanetWorld:
         self.ground_textures = False        # whether the ground's textures were loaded
         self.texture_strength = 1.0
         self.texture_relief = 1.0
+        self.vegetation = True
+        self.vegetation_density = 1.0      # times the biome's chances
+        self.vegetation_range = VEGETATION_RANGE
+        self.vegetation_draws = None       # the kinds' draws with no instances, set again each frame
         self.ocean = True
         self.wireframe = False
         self.colour_mode = 0
@@ -462,6 +477,7 @@ class PlanetWorld:
         self.load_ground_textures()
         self.upload_terrain()
         self.upload_chunk_indices()
+        self.upload_vegetation_meshes()
         engine.set_buffer("OrbitIndices", np.arange(ORBIT_POINTS, dtype=np.uint32))
         engine.set_buffer("OrbitDraws", np.uint32([0]))
         if self.with_moon:
@@ -501,6 +517,26 @@ class PlanetWorld:
         _, _, _, _, indices = cube_sphere.chunk_mesh(4, 0, 0, 0, QUADS, RADIUS, skirt_depth=1.0)
         self.index_count = len(indices)
         self.engine.set_buffer("ChunkIndices", indices)
+
+    def upload_vegetation_meshes(self):
+        """The vegetation's meshes (vegetation.py) and its draws' template."""
+        vertices, indices, ranges = vegetation.meshes()
+        self.engine.set_buffer("VegetationMesh", vertices)
+        self.engine.set_buffer("VegetationIndices", indices)
+        self.vegetation_draws = vegetation.draw_template(ranges, VEGETATION_CAPACITY)
+
+    def upload_vegetation(self):
+        """This frame's vegetation settings, and its draws with no instances,
+        which VegetationScatter fills."""
+        engine = self.engine
+        engine.set_custom_vec4("planet.vegetation.settings",
+                               (1.0 if self.vegetation else 0.0, self.vegetation_range, float(VEGETATION_CELLS),
+                                self.vegetation_density))
+        engine.set_custom_vec4("planet.vegetation.lod",
+                               (VEGETATION_NEAR, VEGETATION_BUSH_RANGE, float(VEGETATION_CAPACITY),
+                                float(VEGETATION_MIN_LEVEL)))
+        if self.vegetation_draws is not None:
+            engine.set_buffer("VegetationDraws", self.vegetation_draws)
 
     def upload_terrain(self):
         """The terrain's parameters, and the pad around the site once its height is known."""
@@ -632,6 +668,7 @@ class PlanetWorld:
         self.update_level_of_detail(patch)
         self.engine.set_custom_vec4("planet.cameraFromCentre", position + (0.0,))
         self.upload_drawn_chunks()
+        self.upload_vegetation()
         self.engine.scene.set_rotation(self.camera, euler_from_basis(right, up, forward))
         self.upload_shadow_cascades(forward)
         self.upload_ground()
@@ -640,8 +677,9 @@ class PlanetWorld:
     def read_back_heights(self):
         """Chunk heights into the trees' nodes, and the probes' heights when
         they were made with the current terrain version: the ground under the
-        viewpoint (when it is still over the body it was measured on), the
-        site's natural height, and the patch. Each probe result carries the
+        viewpoint (when it is still over the body it was measured on, within
+        GROUND_PROBE_REACH of where it was measured), the site's natural
+        height, and the patch. Each probe result carries the
         stamp of the frame that asked for it, which also gives the probes'
         latency."""
         engine = self.engine
@@ -661,8 +699,11 @@ class PlanetWorld:
         if request is None or request[0] != self.terrain_version:
             return
         self.probe_latency = self.frame + 1 - stamp
-        _, ground_body, patch, extra = request
-        self.ground = float(probes[0, 0]) if ground_body is self.body_under(self.viewpoint) else None
+        _, ground_body, ground_direction, patch, extra = request
+        here = ground_body.relative(self.viewpoint)
+        moved = length(sub(scale(normalize(here), ground_body.radius), scale(ground_direction, ground_body.radius)))
+        still_over = ground_body is self.body_under(self.viewpoint) and moved < GROUND_PROBE_REACH
+        self.ground = float(probes[0, 0]) if still_over else None
         if self.site_height is None:
             self.site_height = float(probes[1, 0])
         if patch is not None:
@@ -729,7 +770,7 @@ class PlanetWorld:
         probes += [unused] * (PROBES - EXTRA_PROBES - len(probes))
         probes += extra + [unused] * (EXTRA_PROBES - len(extra))
         stamp = float(self.frame)
-        self.probe_requests[stamp] = (self.terrain_version, ground_body, patch, extra)
+        self.probe_requests[stamp] = (self.terrain_version, ground_body, probes[0][0], patch, extra)
         self.submit_jobs([tuple(d) + (float(body.index),) for d, body in probes], stamp)
 
     def submit_jobs(self, probes, stamp):

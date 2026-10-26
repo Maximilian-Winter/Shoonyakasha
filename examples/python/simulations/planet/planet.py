@@ -1240,6 +1240,22 @@ def near_moon(height, sun_elevation, down=0.0):
     state["forward"] = normalize(add(scale(across, math.cos(tilt)), scale(up, -math.sin(tilt))))
 
 
+def over_ground(distance, azimuth, height, down):
+    """The free camera `height` metres above the site's ground level,
+    `distance` metres from the site at `azimuth` degrees from east towards
+    north, looking that way and `down` degrees below level (it stays above
+    the ground there)."""
+    _, up, east, north = world.site_frame()
+    a = math.radians(azimuth)
+    level = add(scale(east, math.cos(a)), scale(north, math.sin(a)))
+    spot = normalize(add(up, scale(level, distance / RADIUS)))
+    spot_east, spot_north = local_frame(spot)
+    ahead = normalize(add(scale(spot_east, math.cos(a)), scale(spot_north, math.sin(a))))
+    state["mode"] = "camera"
+    state["position"] = scale(spot, RADIUS + (world.site_height or 0.0) + height)
+    state["forward"] = normalize(add(ahead, scale(spot, -math.tan(math.radians(down)))))
+
+
 def near_mountain(sun_elevation, sun_azimuth, top=False):
     """The free camera 2.7 km above the sphere, 600 m south-west of a peak
     60 km from the site at 67.5 degrees from east (2,460 m high with the
@@ -1302,6 +1318,9 @@ class CaptureTour:
         ("clouds_from_above", 2, False, 0, None, DAY_SUN, lambda: lift_camera(6_000.0), lambda: look_up(-25.0)),
         ("clouds_level", 2, False, 0, None, DAY_SUN, lambda: lift_camera(2_500.0)),
         ("clouds_from_below", 2, False, 0, None, DAY_SUN, lambda: lift_camera(800.0), lambda: look_up(10.0)),
+        ("vegetation_grassland", 1, False, 0, None, DAY_SUN, lambda: over_ground(3_000.0, 180.0, 120.0, 12.0)),
+        ("vegetation_conifers", 1, False, 0, None, DAY_SUN, lambda: over_ground(6_000.0, 270.0, 1_800.0, 12.0)),
+        ("vegetation_mixed_wood", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 260.0, 10.0)),
         ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
         ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
         ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),
