@@ -14,7 +14,7 @@ from libcpp.vector cimport vector
 from libcpp.memory cimport shared_ptr
 from libcpp.utility cimport pair
 from libcpp cimport bool as cbool
-from libc.stdint cimport uint8_t, uint32_t, uint64_t
+from libc.stdint cimport uint8_t, uint32_t, uint64_t, int64_t
 from cpython.ref cimport PyObject
 
 from ._facade_types cimport (
@@ -633,3 +633,80 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
     cbool videoRecordingAvailable()
     string findFfmpeg()
     string checkPipelineJson(const string& text) except +
+
+
+# ═══════════════════════════════════════════════════════════════
+# Planet level of detail (include/Planet/PlanetLod.h)
+# ═══════════════════════════════════════════════════════════════
+
+cdef extern from "<array>" namespace "std" nogil:
+    cdef cppclass LodVec3 "std::array<double, 3>":
+        double& operator[](size_t)
+    cdef cppclass LodVec4 "std::array<double, 4>":
+        double& operator[](size_t)
+    cdef cppclass LodFloat3 "std::array<float, 3>":
+        float& operator[](size_t)
+    cdef cppclass LodFaceColours "std::array<std::array<float, 3>, 6>":
+        LodFloat3& operator[](size_t)
+
+cdef extern from "Planet/PlanetLod.h" namespace "Shoonyakasha::Planet":
+    cdef cppclass LodBody:
+        int index
+        LodVec3 centre
+        double occluder
+        cbool ocean
+
+    cdef cppclass LodView:
+        LodVec3 position
+        LodVec3 forward
+        double fovDegrees
+        double aspect
+
+    cdef cppclass LodNodeInfo:
+        int face
+        int level
+        uint32_t x
+        uint32_t y
+        int slot
+        LodVec3 centre
+        double edge
+        double low
+        double high
+        cbool measured
+        LodVec3 boundCentre
+        double boundRadius
+
+    cdef cppclass LodJob:
+        LodVec4 a
+        LodVec4 b
+
+    cdef cppclass CppPlanetLod "Shoonyakasha::Planet::PlanetLod":
+        CppPlanetLod(int slots, int maxJobs, int verticesPerChunk, double skirtFraction, int evictFrames,
+                     double mergeRatio) except +
+        void createTree(int body, double radius, double low, double high, int maxLevel, double splitFactor,
+                        double heightPad)
+        void dropTree(int body)
+        cbool hasTree(int body)
+        double splitFactor(int body)
+        void setSplitFactor(int body, double splitFactor)
+        void update(const LodView& view, const vector[LodBody]& bodies, int64_t frame, cbool frozen, cbool requeue)
+        void takeHeights(const float* rows, size_t count)
+        void writeDraws(const LodView& view, const vector[LodBody]& bodies, int colourMode, double shadowReach,
+                        uint32_t indexCount)
+        void setFaceColours(const LodFaceColours& colours)
+        const vector[LodJob]& jobs()
+        void clearJobs()
+        const vector[float]& instances()
+        const vector[uint32_t]& chunkDraws()
+        const vector[uint32_t]& oceanDraws()
+        const vector[uint32_t]& shadowDraws()
+        uint32_t culled()
+        int slots()
+        int used()
+        size_t pending()
+        size_t rebuildQueued()
+        size_t missing(int body)
+        size_t selectedCount(int body)
+        vector[LodNodeInfo] selected(int body)
+        vector[LodNodeInfo] nodes(int body)
+        vector[pair[double, LodNodeInfo]] missingNodes(int body)

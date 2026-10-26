@@ -11,7 +11,7 @@
 #
 
 from cpython.ref cimport PyObject
-from libc.stdint cimport uint8_t, uint32_t, uint64_t
+from libc.stdint cimport uint8_t, uint32_t, uint64_t, int64_t
 from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.pair cimport pair
@@ -55,6 +55,7 @@ from ._engine_api cimport (
     wrap_py_object, unwrap_py_object, make_system_update_callback,
     CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
     videoRecordingAvailable, findFfmpeg, checkPipelineJson, Readback,
+    CppPlanetLod, LodBody, LodView, LodNodeInfo, LodJob, LodFaceColours,
 )
 from libcpp.memory cimport shared_ptr
 
@@ -2721,3 +2722,200 @@ def _check_pipeline_json(str text):
     """The engine's loader error for pipeline JSON text, '' when it loads.
     shoonyakasha.pipeline.validate reports it."""
     return checkPipelineJson(text.encode('utf-8')).decode('utf-8')
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# Planet level of detail
+# ═══════════════════════════════════════════════════════════════
+
+cdef LodView _lod_view(view):
+    """A LodView from (position, forward, fov degrees, aspect)."""
+    cdef LodView out
+    position, forward, fov, aspect = view
+    for k in range(3):
+        out.position[k] = position[k]
+        out.forward[k] = forward[k]
+    out.fovDegrees = fov
+    out.aspect = aspect
+    return out
+
+
+cdef vector[LodBody] _lod_bodies(bodies):
+    """LodBody per (index, centre, occluder radius, ocean)."""
+    cdef vector[LodBody] out
+    cdef LodBody body
+    for index, centre, occluder, ocean in bodies:
+        body.index = index
+        for k in range(3):
+            body.centre[k] = centre[k]
+        body.occluder = occluder
+        body.ocean = ocean
+        out.push_back(body)
+    return out
+
+
+cdef dict _lod_node(const LodNodeInfo& node):
+    return {
+        "face": node.face, "level": node.level, "x": node.x, "y": node.y,
+        "slot": node.slot if node.slot >= 0 else None,
+        "centre": (node.centre[0], node.centre[1], node.centre[2]),
+        "edge": node.edge, "low": node.low, "high": node.high, "measured": node.measured,
+        "bound_centre": (node.boundCentre[0], node.boundCentre[1], node.boundCentre[2]),
+        "bound_radius": node.boundRadius,
+    }
+
+
+cdef class PlanetLod:
+    """The level of detail of planets drawn as cube-spheres of chunks from
+    one pool of GPU slots (include/Planet/PlanetLod.h): a quadtree per body,
+    the pool's slots and the jobs that build chunks into them, the heights
+    read back, the chunks to build again for a new sun, and the draw lists
+    with each slot's instance values. shoonyakasha.planet.world.PlanetWorld
+    drives it.
+
+    A view is (position, forward, fov degrees, aspect); bodies are a list of
+    (index, centre, occluder radius, ocean), positions in planet space, metres.
+    """
+    cdef CppPlanetLod* _ptr
+
+    def __cinit__(self, int slots, int max_jobs, int vertices_per_chunk, double skirt_fraction,
+                  int evict_frames=120, double merge_ratio=1.25):
+        self._ptr = new CppPlanetLod(slots, max_jobs, vertices_per_chunk, skirt_fraction, evict_frames, merge_ratio)
+
+    def __dealloc__(self):
+        if self._ptr != NULL:
+            del self._ptr
+            self._ptr = NULL
+
+    def create_tree(self, int body, double radius, double low, double high, int max_level, double split_factor,
+                    double height_pad):
+        """A tree for `body` with its six roots, each given a slot and a job."""
+        self._ptr.createTree(body, radius, low, high, max_level, split_factor, height_pad)
+
+    def drop_tree(self, int body):
+        """The body's tree gone, its chunks released."""
+        self._ptr.dropTree(body)
+
+    def has_tree(self, int body):
+        return self._ptr.hasTree(body)
+
+    def split_factor(self, int body):
+        return self._ptr.splitFactor(body)
+
+    def set_split_factor(self, int body, double split_factor):
+        self._ptr.setSplitFactor(body, split_factor)
+
+    def set_face_colours(self, colours):
+        """Six (r, g, b): the colours of colour mode 1."""
+        cdef LodFaceColours out
+        for face in range(6):
+            for k in range(3):
+                out[face][k] = colours[face][k]
+        self._ptr.setFaceColours(out)
+
+    def update(self, view, bodies, int64_t frame, bint frozen=False, bint requeue=False):
+        """Unless `frozen`: the trees updated for the view, their missing
+        chunks built (in view first, nearest first) and unused ones released;
+        with `requeue` every built chunk queued to be built again; then the
+        queue worked through with the jobs left."""
+        self._ptr.update(_lod_view(view), _lod_bodies(bodies), frame, frozen, requeue)
+
+    def take_heights(self, data):
+        """ChunkHeights read back: rows of (lowest, highest, stamp, unused) float32 per slot."""
+        cdef const unsigned char[::1] view = memoryview(data).cast('B')
+        if view.shape[0] == 0:
+            return
+        self._ptr.takeHeights(<const float*>&view[0], view.shape[0] // 16)
+
+    def write_draws(self, view, bodies, int colour_mode, double shadow_reach, uint32_t index_count):
+        """The draw lists and the instances for the view."""
+        self._ptr.writeDraws(_lod_view(view), _lod_bodies(bodies), colour_mode, shadow_reach, index_count)
+
+    def upload(self, Engine engine):
+        """ChunkInstances, ChunkDraws, OceanDraws and ShadowDraws handed to the engine."""
+        cdef const vector[float]* instances = &self._ptr.instances()
+        cdef const vector[uint32_t]* draws
+        cdef string error
+        error = engine._ptr.setBuffer(b"ChunkInstances", instances.data(), instances.size() * 4, 0)
+        if not error.empty():
+            raise ValueError(error.decode("utf-8"))
+        for name, which in ((b"ChunkDraws", 0), (b"OceanDraws", 1), (b"ShadowDraws", 2)):
+            draws = &self._ptr.chunkDraws() if which == 0 else (
+                &self._ptr.oceanDraws() if which == 1 else &self._ptr.shadowDraws())
+            error = engine._ptr.setBuffer(name, draws.data(), draws.size() * 4, 0)
+            if not error.empty():
+                raise ValueError(error.decode("utf-8"))
+
+    def jobs(self):
+        """This frame's jobs: ((face, level, x, y), (slot, skirt depth, stamp, body)) each."""
+        cdef const vector[LodJob]* jobs = &self._ptr.jobs()
+        out = []
+        for k in range(jobs.size()):
+            job = jobs.at(k)
+            out.append(((job.a[0], job.a[1], job.a[2], job.a[3]), (job.b[0], job.b[1], job.b[2], job.b[3])))
+        return out
+
+    def clear_jobs(self):
+        self._ptr.clearJobs()
+
+    def instances(self):
+        """The instance values as bytes: per slot three vec4 of float32."""
+        cdef const vector[float]* values = &self._ptr.instances()
+        return (<const char*>values.data())[:values.size() * 4]
+
+    def draws(self, str which):
+        """"chunk", "ocean" or "shadow" draws as bytes: a uint32 count, padding to 16 bytes, five uint32 per draw."""
+        cdef const vector[uint32_t]* values
+        if which == "chunk":
+            values = &self._ptr.chunkDraws()
+        elif which == "ocean":
+            values = &self._ptr.oceanDraws()
+        elif which == "shadow":
+            values = &self._ptr.shadowDraws()
+        else:
+            raise ValueError("chunk, ocean or shadow")
+        return (<const char*>values.data())[:values.size() * 4]
+
+    @property
+    def culled(self):
+        """Selected chunks the last write_draws left out: out of view or behind the horizon."""
+        return self._ptr.culled()
+
+    @property
+    def slots(self):
+        return self._ptr.slots()
+
+    @property
+    def used(self):
+        return self._ptr.used()
+
+    @property
+    def pending(self):
+        """Chunks waiting for their heights."""
+        return self._ptr.pending()
+
+    @property
+    def rebuild_queued(self):
+        return self._ptr.rebuildQueued()
+
+    def missing(self, int body):
+        return self._ptr.missing(body)
+
+    def selected_count(self, int body):
+        return self._ptr.selectedCount(body)
+
+    def selected(self, int body):
+        """The nodes drawn, in the order selected, as dicts."""
+        cdef vector[LodNodeInfo] nodes = self._ptr.selected(body)
+        return [_lod_node(nodes[k]) for k in range(nodes.size())]
+
+    def nodes(self, int body):
+        """Every node of the body's tree, as dicts."""
+        cdef vector[LodNodeInfo] nodes = self._ptr.nodes(body)
+        return [_lod_node(nodes[k]) for k in range(nodes.size())]
+
+    def missing_nodes(self, int body):
+        """(distance, node dict) of the missing chunks, nearest first."""
+        cdef vector[pair[double, LodNodeInfo]] nodes = self._ptr.missingNodes(body)
+        return [(nodes[k].first, _lod_node(nodes[k].second)) for k in range(nodes.size())]

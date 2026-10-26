@@ -4,12 +4,12 @@ A planet and its moon with procedural terrain on the planet pipeline (`shoonyaka
 
 | Module | |
 |---|---|
-| `world` | `PlanetWorld`: the bodies, the chunk pool, the probes, the level of detail, and what the pipeline is handed each frame. `PIPELINE`, `compile_shaders()`, and the constants below |
+| `world` | `PlanetWorld`: the bodies, the probes, the sky, and what the pipeline is handed each frame. `PIPELINE`, `compile_shaders()`, and the constants below |
 | `cameras` | `GlobeCamera`, `FocusCamera`, `cursor_ray`, `ray_sphere` |
 | `settings` | Settings-menu items for a `PlanetWorld` (for `toolkit.overlay.SettingsMenu`), and `TerrainEdit` |
 | `orbits` | `Planet` (gravity and air), `Moon` (a circular orbit on rails), `reference`, `orbit`, `orbit_path`, `circular_speed` |
 | `vec` | Vectors as tuples: `add`, `sub`, `scale`, `dot`, `cross`, `length`, `normalize`, `rotate`, `local_frame`, `euler_from_basis` |
-| `cube_sphere`, `quadtree`, `shadows` | The cube-sphere's faces and chunk meshes, the quadtree, the shadow cascades' fitting |
+| `cube_sphere`, `quadtree`, `shadows` | The cube-sphere's faces and chunk meshes, the quadtree in Python (the level of detail `sk.PlanetLod` does in C++), the shadow cascades' fitting |
 | `ground_textures` | The ground's textures: download (`python -m shoonyakasha.planet.ground_textures`) and `load(engine)` |
 
 Importing these modules does not require the engine's extension; `PlanetWorld` takes the engine as an argument.
@@ -71,16 +71,32 @@ Positions are Python floats in metres, with the planet's centre at the origin. T
 
 | Attribute | |
 |---|---|
-| `planet`, `moon`, `bodies` | The bodies (`Body`: `index`, `name`, `radius`, `terrain` (the planet's parameters), `orbit`, `ocean`, `tree`, `centre()`, `velocity()`, `relative(point)`) |
+| `planet`, `moon`, `bodies` | The bodies (`Body`: `index`, `name`, `radius`, `terrain` (the planet's parameters), `orbit`, `ocean`, `tree`, `centre()`, `velocity()`, `relative(point)`). `tree` is a `TreeView`, or None until the body's tree is made: `selected` (the nodes drawn), `missing` ((distance, node), nearest first) and `nodes()`, as `NodeInfo` copies (`face`, `level`, `x`, `y`, `chunk` (its slot or None), `centre`, `edge`, `low`, `high`, `measured`, `bound_centre`, `bound_radius`, `key()`), and `split_factor`, which can be set |
 | `time` | The world's clock in seconds; it places the moon |
 | `physics` | The `orbits.Planet` with the moon, at `time`: gravity, air density (scaled by `density`) and orbits |
 | `sun_elevation`, `sun_azimuth`, `density`, `ozone`, `multiple_scattering`, `exposure` | The sky (`upload_sky`) |
 | `clouds`, `cloud_coverage`, `cloud_density`, `wind_speed` | The clouds (`upload_clouds`; the wind is read each frame) |
 | `shadows`, `texture_strength`, `texture_relief`, `colour_mode`, `frozen` | Read each frame: the shadow cascades on or off, the ground textures' strength and normal maps, the colour mode (an index into `COLOUR_MODES`), and the level of detail kept as it is |
 | `ground`, `site_height`, `patch`, `extra_probes`, `extra_heights`, `probe_latency` | The probes: the ground under the viewpoint, the site's height, the last patch back, the up to `EXTRA_PROBES` (direction, body) pairs to measure and their heights, and the frames they take |
-| `pool`, `chunks_culled`, `ocean_chunks`, `frame` | The chunk pool, and this frame's counts |
+| `lod`, `pool`, `chunks_culled`, `ocean_chunks`, `frame` | The level of detail (`sk.PlanetLod`), the chunk pool's `slots`, `used` and `pending` (chunks waiting for their heights), and this frame's counts |
 
 The terrain's parameters, the atmosphere, the clouds, the shadow cascades and the pool's sizes are the module's constants (`TERRAIN`, `RADIUS`, `MAX_LEVEL`, `SPLIT_FACTOR`, `CLOUD_LAYER`, `SHADOW_SPLITS`, `SLOTS`, `MAX_JOBS`, `PROBES` and the others); those the pipeline's buffers and shaders depend on match `pipeline.json` and the shaders. With `pad`, the terrain is flat within 150 m of the site, at its natural height, easing back by 600 m.
+
+## `sk.PlanetLod`
+
+The level of detail in C++ (`include/Planet/PlanetLod.h`): per body a quadtree over the six cube faces, the pool's slots and the jobs that build chunks into them (each with a stamp the heights read back carry), the chunks waiting for their heights, the chunks to build again for a new sun, and the draw lists with each slot's instance values. `PlanetWorld` drives it; it does what `quadtree.py` and the pool did in Python, the same to the bit (`tests/python/test_planet_native_lod.py`).
+
+| Call | |
+|---|---|
+| `PlanetLod(slots, max_jobs, vertices_per_chunk, skirt_fraction, evict_frames=120, merge_ratio=1.25)` | An empty pool of `slots` |
+| `create_tree(body, radius, low, high, max_level, split_factor, height_pad)`, `drop_tree(body)`, `has_tree(body)` | A body's tree, its six roots given slots and jobs; dropped with its chunks released |
+| `update(view, bodies, frame, frozen=False, requeue=False)` | Unless `frozen`, each tree updated for the view, its missing chunks built (in view first, nearest first) and unused subtrees released; with `requeue` every built chunk queued to be built again, then the queue worked through with the jobs left. A view is (position, forward, fov degrees, aspect); bodies are (index, centre, the radius their terrain stays above, ocean) |
+| `jobs()`, `clear_jobs()` | This frame's jobs, ((face, level, x, y), (slot, skirt depth, stamp, body)) each |
+| `take_heights(data)` | `ChunkHeights` read back: (lowest, highest, stamp, unused) float32 per slot |
+| `write_draws(view, bodies, colour_mode, shadow_reach, index_count)`, `upload(engine)` | The draw lists and instances for the view; handed to `ChunkInstances`, `ChunkDraws`, `OceanDraws` and `ShadowDraws` |
+| `set_face_colours(colours)`, `split_factor(body)`, `set_split_factor(body, value)` | Colour mode 1's six colours; a tree's split factor |
+| `selected(body)`, `nodes(body)`, `missing_nodes(body)`, `missing(body)`, `selected_count(body)` | The trees' state, nodes as dicts |
+| `instances()`, `draws("chunk" / "ocean" / "shadow")`, `culled`, `slots`, `used`, `pending`, `rebuild_queued` | The buffers as bytes, and counts |
 
 ## Cameras
 

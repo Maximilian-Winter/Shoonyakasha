@@ -21,12 +21,15 @@ so the GPU sees only small numbers. The projection is reverse-Z with an
 infinite far plane.
 
 The planet is a cube-sphere: six cube faces mapped onto the sphere
-(cube_sphere.py), each the root of a quadtree (quadtree.py). Each frame a
-body's tree picks the chunks to draw, finer near the camera, and up to
-MAX_JOBS missing chunks, those in view first and nearest first, are built
-on the GPU into slots of a buffer pool (chunk_build.comp). Each chunk's
-lowest and highest heights come back and tighten its node's bounds. All
-the drawn chunks are one indirect draw call.
+(cube_sphere.py), each the root of a quadtree. Each frame a body's tree
+picks the chunks to draw, finer near the camera, and up to MAX_JOBS
+missing chunks, those in view first and nearest first, are built on the
+GPU into slots of a buffer pool (chunk_build.comp). Each chunk's lowest
+and highest heights come back and tighten its node's bounds. All the drawn
+chunks are one indirect draw call. The trees, the pool, culling and the
+draw lists are sk.PlanetLod's (include/Planet/PlanetLod.h, in C++), as
+quadtree.py does them in Python; `Body.tree` (TreeView) and `pool`
+(PoolView) show their state.
 
 A site on the +Z face anchors the sun's direction (by its elevation and
 azimuth seen from the site), the moon's orbit and, with `pad`, a flat pad
@@ -47,7 +50,6 @@ from pathlib import Path
 import numpy as np
 
 from . import cube_sphere, ground_textures, orbits, shadows
-from .quadtree import QuadTree, hidden_by_horizon
 from .vec import add, dot, euler_from_basis, length, local_frame, normalize, scale, sub
 
 #: The planet pipeline shipped with the package.
@@ -136,84 +138,84 @@ def compile_shaders():
         pass
 
 
-def level_colour(level):
-    """A colour per quadtree level, round the hue circle."""
-    hue = level * 0.61803398875
-    return tuple(0.45 + 0.30 * math.cos(2.0 * math.pi * (hue - offset)) for offset in (0.0, 1 / 3, 2 / 3))
+class NodeInfo:
+    """A copy of a quadtree node's state: its face, level and (x, y) on the
+    face, its chunk's slot (`chunk`, None while it has none), its centre on
+    the sphere, its edge length, its height range (`measured` once its
+    chunk's heights came back) and its bounding sphere."""
+
+    __slots__ = ("face", "level", "x", "y", "chunk", "centre", "edge", "low", "high", "measured",
+                 "bound_centre", "bound_radius")
+
+    def __init__(self, values):
+        self.face, self.level, self.x, self.y = values["face"], values["level"], values["x"], values["y"]
+        self.chunk = values["slot"]
+        self.centre, self.edge = values["centre"], values["edge"]
+        self.low, self.high, self.measured = values["low"], values["high"], values["measured"]
+        self.bound_centre, self.bound_radius = values["bound_centre"], values["bound_radius"]
+
+    def key(self):
+        return (self.face, self.level, self.x, self.y)
 
 
-class ChunkPool:
-    """Slots of the GPU's ChunkPool buffer, the chunks to build into them
-    this frame, and the built chunks whose heights have not come back yet."""
+class TreeView:
+    """A body's quadtree in the world's level of detail (sk.PlanetLod): the
+    nodes drawn (`selected`, in the order selected), the missing ones
+    (`missing`, (distance, node) nearest first) and every node (`nodes()`),
+    as NodeInfo copies taken again after anything changed; and its
+    `split_factor`, which can be set."""
 
-    def __init__(self, engine):
-        self.engine = engine
-        self.free = list(range(SLOTS - 1, -1, -1))
-        self.jobs = []           # (jobA, jobB) per chunk to build this frame
-        self.job_slots = set()   # the slots this frame's jobs build
-        self.pending = {}        # slot: (node, stamp) until the slot's heights come back
-        self.body = {}           # slot: the index of the body its chunk belongs to
-        self.stamp = 0
+    def __init__(self, world, body):
+        self.world = world
+        self.body = body
+        self.cache = {}
 
-    def make(self, node, body):
-        """A slot for `node` of `body` with a job to build it, or None when
-        the pool is full or this frame's jobs are taken."""
-        if not self.free or len(self.jobs) == MAX_JOBS:
-            return None
-        slot = self.free.pop()
-        self.body[slot] = body.index
-        self.add_job(node, slot)
-        return slot
+    def _cached(self, name, make):
+        version = self.world.lod_version
+        hit = self.cache.get(name)
+        if hit is None or hit[0] != version:
+            hit = (version, make())
+            self.cache[name] = hit
+        return hit[1]
 
-    def rebuild(self, node):
-        """A job to build `node` again in its own slot; False when this
-        frame's jobs are taken. The slot keeps its old chunk until then.
-        A slot this frame's jobs already build gets no second job: that one
-        is built with this frame's settings."""
-        if node.chunk in self.job_slots:
-            return True
-        if len(self.jobs) == MAX_JOBS:
-            return False
-        self.add_job(node, node.chunk)
-        return True
+    @property
+    def selected(self):
+        return self._cached("selected", lambda: [NodeInfo(n) for n in self.world.lod.selected(self.body)])
 
-    def add_job(self, node, slot):
-        self.stamp += 1
-        self.jobs.append(((float(node.face), float(node.level), float(node.x), float(node.y)),
-                          (float(slot), SKIRT_FRACTION * node.edge, float(self.stamp), float(self.body[slot]))))
-        self.pending[slot] = (node, float(self.stamp))
-        self.job_slots.add(slot)
+    @property
+    def missing(self):
+        return self._cached("missing", lambda: [(d, NodeInfo(n)) for d, n in self.world.lod.missing_nodes(self.body)])
 
-    def release(self, node):
-        self.pending.pop(node.chunk, None)
-        self.body.pop(node.chunk, None)
-        self.free.append(node.chunk)
+    def nodes(self):
+        return iter(self._cached("nodes", lambda: [NodeInfo(n) for n in self.world.lod.nodes(self.body)]))
 
-    def submit_jobs(self, probes, stamp):
-        """Hand this frame's jobs, the probes (direction and body index)
-        and the stamp their results carry back to BuildChunks, and start the
-        next frame's list."""
-        engine = self.engine
-        padded = self.jobs + [((0.0,) * 4, (0.0,) * 4)] * (MAX_JOBS - len(self.jobs))
-        engine.set_custom_vec4_array("planet.jobA", [a for a, _ in padded])
-        engine.set_custom_vec4_array("planet.jobB", [b for _, b in padded])
-        engine.set_custom_uint("planet.jobCount", len(self.jobs))
-        engine.set_custom_vec4_array("planet.probe", probes)
-        engine.set_custom_float("planet.probeStamp", stamp)
-        self.jobs = []
-        self.job_slots = set()
+    @property
+    def split_factor(self):
+        return self.world.lod.split_factor(self.body)
 
-    def take_heights(self, heights):
-        """Give each pending node whose job's heights arrived (rows of lowest,
-        highest, stamp per slot) its height range."""
-        for slot, (node, stamp) in list(self.pending.items()):
-            if heights[slot, 2] == stamp:
-                node.set_heights(float(heights[slot, 0]), float(heights[slot, 1]))
-                del self.pending[slot]
+    @split_factor.setter
+    def split_factor(self, value):
+        self.world.lod.set_split_factor(self.body, value)
+        self.world.lod_version += 1
+
+
+class PoolView:
+    """The chunk pool: `slots`, `used`, and `pending`, the chunks waiting for their heights."""
+
+    def __init__(self, lod):
+        self.lod = lod
+
+    @property
+    def slots(self):
+        return self.lod.slots
 
     @property
     def used(self):
-        return SLOTS - len(self.free)
+        return self.lod.used
+
+    @property
+    def pending(self):
+        return self.lod.pending
 
 
 class Body:
@@ -225,10 +227,10 @@ class Body:
     for the planet), whether the ocean is drawn on it, metres above its
     radius its terrain stays above (`floor`, or None to work it out from
     `terrain`), its roots' height range until measured, and its quadtree
-    once made. Its tree's chunks are relative to its centre. `clock` is the
-    object whose `time` places it on its orbit."""
+    (`tree`, a TreeView, or None until made). Its tree's chunks are relative
+    to its centre. The world's `physics.time` places it on its orbit."""
 
-    def __init__(self, index, name, radius, terrain, pool, clock, orbit=None, ocean=False, floor=None,
+    def __init__(self, index, name, radius, terrain, world, orbit=None, ocean=False, floor=None,
                  heights=ROOT_HEIGHTS):
         self.index, self.name, self.radius = index, name, radius
         self.terrain = terrain
@@ -236,26 +238,24 @@ class Body:
         self.heights = heights
         self.orbit = orbit
         self.ocean = ocean
-        self.pool = pool
-        self.clock = clock
-        self.tree = None
+        self.world = world
+        self.view = TreeView(world, index)
+
+    @property
+    def tree(self):
+        return self.view if self.world.lod.has_tree(self.index) else None
 
     def centre(self):
         """Its centre now, from the planet's centre."""
-        return self.orbit.position(self.clock.time) if self.orbit is not None else (0.0, 0.0, 0.0)
+        return self.orbit.position(self.world.physics.time) if self.orbit is not None else (0.0, 0.0, 0.0)
 
     def velocity(self):
         """Its velocity now."""
-        return self.orbit.velocity(self.clock.time) if self.orbit is not None else (0.0, 0.0, 0.0)
+        return self.orbit.velocity(self.world.physics.time) if self.orbit is not None else (0.0, 0.0, 0.0)
 
     def relative(self, point):
         """`point` (from the planet's centre) from its centre."""
         return sub(point, self.centre())
-
-    def new_tree(self):
-        return QuadTree(self.radius, lambda node: self.pool.make(node, self), self.pool.release,
-                        max_level=MAX_LEVEL, split_factor=SPLIT_FACTOR, heights=self.heights,
-                        height_pad=HEIGHT_PAD)
 
 
 def skirt_depth(node):
@@ -305,11 +305,12 @@ class PlanetWorld:
         self.fov = fov
         self.near = near
         self.pad = pad
-        self.pool = ChunkPool(engine)
+        self._lod = None
+        self.lod_version = 0                # counts changes to the level of detail, for TreeView's copies
         self.physics = orbits.Planet(radius=RADIUS, scale_height=RAYLEIGH_SCALE_HEIGHT)
         terrain = terrain or TERRAIN
-        self.planet = Body(0, "planet", RADIUS, {name: list(value) for name, value in terrain.items()}, self.pool,
-                           self.physics, ocean=True)
+        self.planet = Body(0, "planet", RADIUS, {name: list(value) for name, value in terrain.items()}, self,
+                           ocean=True)
         self.bodies = [self.planet]
         self.with_moon = moon
         self.camera = None
@@ -347,12 +348,24 @@ class PlanetWorld:
         self.extra_heights = []            # ((direction, body), height) for the extra probes last read back
         self.probe_latency = 3.0           # frames from asking for probes to their heights coming back
         self.horizon_sun = None            # the sun's direction the chunks' horizons are measured towards
-        self.rebuild = []                  # built chunks still to build again for horizon_sun, nearest last
         self.chunks_culled = 0             # selected chunks not drawn: out of view or behind the horizon
         self.ocean_chunks = 0              # chunks the ocean draws
         self.index_count = 0
 
     # ── Clock and bodies ──────────────────────────────────────────────────
+
+    @property
+    def lod(self):
+        """The level of detail (sk.PlanetLod), made when first asked for."""
+        if self._lod is None:
+            import shoonyakasha
+            self._lod = shoonyakasha.PlanetLod(SLOTS, MAX_JOBS, VERTICES_PER_CHUNK, SKIRT_FRACTION)
+            self._lod.set_face_colours(FACE_COLOURS)
+        return self._lod
+
+    @property
+    def pool(self):
+        return PoolView(self.lod)
 
     @property
     def time(self):
@@ -465,7 +478,7 @@ class PlanetWorld:
         _, up, east, _ = self.site_frame()
         self.physics.moon = orbits.Moon(radius=MOON_RADIUS, surface_gravity=MOON_GRAVITY, distance=MOON_DISTANCE,
                                         phase=MOON_PHASE, u=up, v=east, primary_gm=self.physics.gm)
-        self.bodies.append(Body(1, "moon", MOON_RADIUS, None, self.pool, self.physics, orbit=self.physics.moon,
+        self.bodies.append(Body(1, "moon", MOON_RADIUS, None, self, orbit=self.physics.moon,
                                 floor=MOON_FLOOR, heights=MOON_HEIGHTS))
 
     def load_ground_textures(self):
@@ -556,19 +569,16 @@ class PlanetWorld:
         self.ground = None
         self.patch = None
         for body in self.bodies:
-            if body is self.planet or body.tree is None:
-                body.tree = body.new_tree()
+            if body is self.planet or not self.lod.has_tree(body.index):
+                self.lod.create_tree(body.index, body.radius, body.heights[0], body.heights[1], MAX_LEVEL,
+                                     SPLIT_FACTOR, HEIGHT_PAD)
+        self.lod_version += 1
 
     def regenerate(self):
         """Apply changed terrain parameters: every chunk is released, the
         site's height is measured again, and the planet is built again."""
-        planet = self.planet
-        if planet.tree is not None:
-            for node in planet.tree.nodes():
-                if node.chunk is not None:
-                    self.pool.release(node)
-                    node.chunk = None
-        planet.tree = None
+        self.lod.drop_tree(self.planet.index)
+        self.lod_version += 1
         self.site_height = None
         self.ground = None
         self.patch = None
@@ -588,9 +598,10 @@ class PlanetWorld:
     def settled(self):
         """The planet's tree made, no body's chunks missing, none still to
         build again for the sun, and every built chunk's heights back."""
-        return (self.planet.tree is not None
-                and not any(body.tree.missing for body in self.bodies if body.tree is not None)
-                and not self.rebuild and not self.pool.pending)
+        lod = self.lod
+        return (lod.has_tree(self.planet.index)
+                and not any(lod.missing(body.index) for body in self.bodies if lod.has_tree(body.index))
+                and not lod.rebuild_queued and not lod.pending)
 
     # ── Per frame ─────────────────────────────────────────────────────────
 
@@ -602,7 +613,7 @@ class PlanetWorld:
         if viewpoint is not None:
             self.viewpoint = viewpoint
         self.read_back_heights()
-        if self.planet.tree is None and self.site_height is not None:
+        if not self.lod.has_tree(self.planet.index) and self.site_height is not None:
             self.start_terrain()
             return True
         return False
@@ -636,7 +647,8 @@ class PlanetWorld:
         engine = self.engine
         readback = engine.get_readback("ChunkHeights")
         if readback is not None:
-            self.pool.take_heights(np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, 4))
+            self.lod.take_heights(readback["data"])
+            self.lod_version += 1
         readback = engine.get_readback("ProbeHeights")
         if readback is None:
             return
@@ -672,66 +684,42 @@ class PlanetWorld:
         angle = math.acos(max(-1.0, min(1.0, dot(to_centre, self.forward) / distance)))
         return angle - math.asin(min(1.0, radius / distance)) < half_diagonal
 
-    def visible(self, node, centre, eye, occluder):
-        """Whether `node` of the body at `centre` is in view and not behind
-        the body's horizon; `eye`: the camera from the body's centre."""
-        return (self.in_view(add(centre, node.bound_centre), node.bound_radius)
-                and not hidden_by_horizon(node.bound_centre, node.bound_radius, eye, occluder))
+    def lod_view(self):
+        """The view for sk.PlanetLod: (position, forward, fov, aspect)."""
+        width, height = self.engine.framebuffer_size
+        aspect = width / height if width > 0 and height > 0 else 16.0 / 9.0
+        return (self.position, self.forward, self.fov, aspect)
 
-    def chunk_colour(self, node):
-        """(r, g, b, grid strength) of a chunk in the current colour mode."""
-        mode = COLOUR_MODES[self.colour_mode]
-        if mode == "face":
-            return FACE_COLOURS[node.face] + (1.0,)
-        if mode == "level":
-            return level_colour(node.level) + (1.0,)
-        return TERRAIN_COLOUR + (0.0,)
+    def lod_bodies(self):
+        """The bodies for sk.PlanetLod: (index, centre, the radius their terrain stays above, ocean)."""
+        return [(body.index, body.centre(), body.radius + terrain_floor(body), body.ocean) for body in self.bodies]
 
-    def rebuild_for_sun(self):
-        """When the sun has moved more than HORIZON_SUN_STEP from the direction
-        the chunks' horizons were measured towards (chunk_build.comp), measure
-        towards the new one: every built chunk of every body is built again in
-        its own slot, nearest first, in the jobs this frame's new chunks leave
-        over."""
+    def sun_moved(self):
+        """Whether the sun has moved more than HORIZON_SUN_STEP from the
+        direction the chunks' horizons were measured towards
+        (chunk_build.comp); if so the new direction is handed over to measure
+        towards."""
         sun = self.sun_direction()
         if self.horizon_sun is None or dot(sun, self.horizon_sun) < math.cos(HORIZON_SUN_STEP):
             self.horizon_sun = sun
             self.engine.set_custom_vec4("planet.horizonSun", sun + (0.0,))
-            distances = []
-            for body in self.bodies:
-                if body.tree is None:
-                    continue
-                eye = body.relative(self.position)
-                distances += [(length(sub(node.bound_centre, eye)), node)
-                              for node in body.tree.nodes() if node.chunk is not None]
-            distances.sort(key=lambda pair: pair[0], reverse=True)
-            self.rebuild = [node for _, node in distances]   # popped from the end: nearest first
-        queue = self.rebuild
-        while queue:
-            node = queue[-1]
-            if node.chunk is None:
-                queue.pop()                                # released since
-                continue
-            if not self.pool.rebuild(node):
-                break
-            queue.pop()
+            return True
+        return False
 
     def update_level_of_detail(self, patch=None):
-        """Each body's tree updated for the camera (from the body's centre),
-        its missing chunks built, those in view first, and its unused ones
-        evicted; then the sun's rebuilds and this frame's probes: the ground
-        under the viewpoint on the body under it, the site, the patch's
-        directions and the extra probes."""
+        """Each body's tree updated for the camera, its missing chunks built,
+        those in view first, and its unused ones released (sk.PlanetLod);
+        when the sun has moved, every built chunk built again, nearest first,
+        in the jobs new chunks leave over; then this frame's jobs and probes:
+        the ground under the viewpoint on the body under it, the site, the
+        patch's directions and the extra probes."""
         self.frame += 1
-        trees = [body for body in self.bodies if body.tree is not None]
-        if trees and not self.frozen:
-            for body in trees:
-                centre = body.centre()
-                body.tree.update(body.relative(self.position), self.frame)
-                body.tree.build(MAX_JOBS, priority=lambda distance, node, centre=centre: (
-                    not self.in_view(add(centre, node.bound_centre), node.bound_radius), distance))
-                body.tree.evict(self.frame)
-            self.rebuild_for_sun()
+        lod = self.lod
+        requeue = False
+        if any(lod.has_tree(body.index) for body in self.bodies) and not self.frozen:
+            requeue = self.sun_moved()
+        lod.update(self.lod_view(), self.lod_bodies(), self.frame, self.frozen, requeue)
+        self.lod_version += 1
         _, site_up, _, _ = self.site_frame()
         ground_body = self.body_under(self.viewpoint)
         probes = [(normalize(ground_body.relative(self.viewpoint)), ground_body), (site_up, self.planet)]
@@ -742,7 +730,21 @@ class PlanetWorld:
         probes += extra + [unused] * (EXTRA_PROBES - len(extra))
         stamp = float(self.frame)
         self.probe_requests[stamp] = (self.terrain_version, ground_body, patch, extra)
-        self.pool.submit_jobs([tuple(d) + (float(body.index),) for d, body in probes], stamp)
+        self.submit_jobs([tuple(d) + (float(body.index),) for d, body in probes], stamp)
+
+    def submit_jobs(self, probes, stamp):
+        """Hand this frame's jobs, the probes (direction and body index) and
+        the stamp their results carry back to BuildChunks, and start the next
+        frame's list."""
+        engine = self.engine
+        jobs = self.lod.jobs()
+        padded = jobs + [((0.0,) * 4, (0.0,) * 4)] * (MAX_JOBS - len(jobs))
+        engine.set_custom_vec4_array("planet.jobA", [a for a, _ in padded])
+        engine.set_custom_vec4_array("planet.jobB", [b for _, b in padded])
+        engine.set_custom_uint("planet.jobCount", len(jobs))
+        engine.set_custom_vec4_array("planet.probe", probes)
+        engine.set_custom_float("planet.probeStamp", stamp)
+        self.lod.clear_jobs()
 
     def upload_drawn_chunks(self):
         """One indexed indirect draw per chunk the bodies' trees selected that
@@ -750,50 +752,13 @@ class PlanetWorld:
         centre relative to the camera (its body's centre plus its own, less the
         camera, in double), colour, and its parent's split distance and the
         levels above it, for morph.glsl. The shadow cascades draw every
-        selected chunk within their reach, in view or not."""
-        engine = self.engine
-        camera = self.position
-        reach = SHADOW_SPLITS[-1] + SHADOW_REACH
-        instances = np.zeros((SLOTS, 3, 4), dtype=np.float32)
-        selected, casters, wet_nodes = [], [], []
-        culled = 0
-        for body in self.bodies:
-            if body.tree is None:
-                continue
-            centre = body.centre()
-            eye = sub(camera, centre)
-            occluder = body.radius + terrain_floor(body)
-            for node in body.tree.selected:
-                slot = node.chunk
-                instances[slot, 0, :3] = sub(node.centre, eye)
-                instances[slot, 1] = self.chunk_colour(node)
-                instances[slot, 2, :3] = (parent_split_distance(node, body.tree), node.level, body.index)
-                if length(sub(node.bound_centre, eye)) - node.bound_radius < reach:
-                    casters.append(node)
-                if not self.visible(node, centre, eye, occluder):
-                    culled += 1
-                    continue
-                selected.append(node)
-                # The ocean redraws the chunks whose height range reaches below sea level.
-                if body.ocean and node.low < 0.0:
-                    wet_nodes.append(node)
-        self.chunks_culled = culled
-        engine.set_buffer("ChunkInstances", instances)
-        # indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
-        draw = lambda node: (self.index_count, 1, 0, node.chunk * VERTICES_PER_CHUNK, node.chunk)  # noqa: E731
-        commands = np.array([draw(node) for node in selected], dtype=np.uint32).reshape(-1, 5)
-        engine.set_buffer("ShadowDraws", np.uint32([len(casters)]))
-        if casters:
-            engine.set_buffer("ShadowDraws", np.array([draw(node) for node in casters], dtype=np.uint32),
-                              offset=DRAWS_OFFSET)
-        engine.set_buffer("ChunkDraws", np.uint32([len(selected)]))
-        if len(selected):
-            engine.set_buffer("ChunkDraws", commands, offset=DRAWS_OFFSET)
-        wet = np.array([draw(node) for node in wet_nodes], dtype=np.uint32).reshape(-1, 5)
-        self.ocean_chunks = len(wet)
-        engine.set_buffer("OceanDraws", np.uint32([len(wet)]))
-        if len(wet):
-            engine.set_buffer("OceanDraws", wet, offset=DRAWS_OFFSET)
+        selected chunk within their reach, in view or not (sk.PlanetLod)."""
+        lod = self.lod
+        lod.write_draws(self.lod_view(), self.lod_bodies(), self.colour_mode, SHADOW_SPLITS[-1] + SHADOW_REACH,
+                        self.index_count)
+        lod.upload(self.engine)
+        self.chunks_culled = lod.culled
+        self.ocean_chunks = int(np.frombuffer(lod.draws("ocean"), dtype=np.uint32, count=1)[0])
 
     def upload_shadow_cascades(self, forward):
         """The sun's shadow cascades (shadows.py) for the view along `forward`,
