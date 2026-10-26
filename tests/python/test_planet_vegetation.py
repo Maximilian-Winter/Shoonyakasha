@@ -1,9 +1,10 @@
 """Tests for the vegetation's meshes of shoonyakasha.planet (vegetation.py):
 every kind is one unit tall from its base, its normals are those of its
 triangles and point out (wood away from the trunk's axis, foliage away from
-its crown, cones' bases down), foliage and wood are marked, the meshes fit
-the pipeline's buffers, and the draws' template gives each kind its range
-and its instances' first index.
+its crown, cones' bases down), foliage and wood are marked, grass blades
+face up with their normals leaning further up and are darker at their base, the
+meshes fit the pipeline's buffers, and the draws' template gives each kind
+its range and its instances' first index.
 
     python -m unittest discover -s tests/python
 """
@@ -42,6 +43,7 @@ class VegetationMeshTest(unittest.TestCase):
 
     def test_normals_are_the_triangles_and_unit(self):
         tri = self.vertices.reshape(-1, 3, 12)
+        tri = tri[tri[:, 0, 7] < 1.5]
         a, b, c = tri[:, 0, :3], tri[:, 1, :3], tri[:, 2, :3]
         n = np.cross(b - a, c - a)
         n /= np.linalg.norm(n, axis=1, keepdims=True)
@@ -75,18 +77,35 @@ class VegetationMeshTest(unittest.TestCase):
             middles = sides[:, :, :3].mean(axis=1)
             self.assertTrue((np.einsum("ij,ij->i", sides[:, 0, [4, 6]], middles[:, [0, 2]]) > 0.0).all(), name)
 
+    def test_grass_blades_face_up_lean_further_up_and_darken_at_their_base(self):
+        part = self.kind("grass")
+        self.assertTrue((part[:, 7] == 2.0).all())
+        np.testing.assert_allclose(np.linalg.norm(part[:, 4:7], axis=1), 1.0, atol=1e-5)
+        self.assertTrue((part[:, 5] > 0.8).all())
+        tri = part.reshape(-1, 3, 12)
+        a, b, c = tri[:, 0, :3], tri[:, 1, :3], tri[:, 2, :3]
+        n = np.cross(b - a, c - a)
+        self.assertTrue((n[:, 1] > 0.0).all())
+        self.assertTrue((np.einsum("ij,ij->i", n, tri[:, 0, 4:7]) > 0.0).all())
+        base = part[part[:, 1] < 1e-6]
+        tip = part[part[:, 1] > 0.7]
+        self.assertTrue((base[:, 9].max() < tip[:, 9].min()))
+
     def test_meshes_fit_the_pipeline_buffers(self):
         layouts = json.loads(world.PIPELINE.read_text(encoding="utf-8"))["bufferLayouts"]
         self.assertLessEqual(len(self.vertices), layouts["VegetationMesh"]["elementCount"])
         self.assertLessEqual(len(self.indices), layouts["VegetationIndices"]["elementCount"])
+        trees = len(vegetation.KINDS) - 1
         self.assertEqual(layouts["VegetationInstances"]["elementCount"],
-                         len(vegetation.KINDS) * world.VEGETATION_CAPACITY * 2)
+                         (trees * world.VEGETATION_CAPACITY + world.GRASS_CAPACITY) * 2)
         self.assertGreaterEqual(layouts["VegetationDraws"]["elementCount"], len(vegetation.KINDS) * 5)
 
     def test_draw_template(self):
-        words = vegetation.draw_template(self.ranges, 100).reshape(-1, 5)
+        firsts = [7 * kind + 3 for kind in range(len(self.ranges))]
+        words = vegetation.draw_template(self.ranges, firsts).reshape(-1, 5)
+        self.assertEqual(len(words), len(vegetation.KINDS))
         for kind, (first, count) in enumerate(self.ranges):
-            self.assertEqual(tuple(words[kind]), (count, 0, first, 0, kind * 100))
+            self.assertEqual(tuple(words[kind]), (count, 0, first, 0, firsts[kind]))
 
 
 if __name__ == "__main__":

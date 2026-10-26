@@ -28,134 +28,32 @@
 
 layout(local_size_x = 64) in;
 
-layout(set = 0, binding = 0) uniform TerrainParams {
-    vec4 continent;
-    vec4 mountains;
-    vec4 hills;
-    vec4 seed;
-    vec4 site;
-    vec4 siteShape;
-    vec4 detail;
-} terrain;
-
-#define VEGETATION_SET 0
-#define VEGETATION_PARAMS 1
-#include "vegetation.glsl"
-
-layout(std430, set = 0, binding = 2) readonly buffer ChunkDraws {
-    uint words[];
-} chunkDraws;
-
-layout(std430, set = 0, binding = 3) writeonly buffer VegetationInstances {
-    vec4 data[];
-} instances;
-
-layout(std430, set = 0, binding = 4) buffer VegetationDraws {
-    uint words[];
-} draws;
-
-struct ChunkInstance {
-    vec4 origin;           // xyz: the chunk's centre minus the camera's position
-    vec4 colour;
-    vec4 morph;            // x: the parent's split distance; y: the levels above the chunk; z: its body
-};
-
-layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
-    ChunkInstance instances[];
-} chunks;
-
-#include "terrain.glsl"
-#include "biome.glsl"
-#include "morph.glsl"
+#include "vegetation_scatter.glsl"
 
 const int KIND_CONIFER = 0;
 const int KIND_BROADLEAF = 2;
 const int KIND_BUSH = 4;
 const float FADE_START = 0.85;      // of the range: where heights start to shrink
 
-// The cube face whose normal is nearest the unit direction `d` (cube_sphere.FACES' order).
-int faceOf(vec3 d) {
-    vec3 a = abs(d);
-    if (a.x >= a.y && a.x >= a.z) return d.x > 0.0 ? 0 : 1;
-    if (a.y >= a.z) return d.y > 0.0 ? 2 : 3;
-    return d.z > 0.0 ? 4 : 5;
-}
-
-uint nextHash(inout uint h) {
-    h = h * 747796405u + 2891336453u;
-    uint w = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
-    return (w >> 22u) ^ w;
-}
-
-float nextRandom(inout uint h) {
-    return float(nextHash(h) & 0xFFFFFFu) / 16777216.0;
-}
-
-// The grid vertex (i, j) of the chunk at `base`, unmorphed.
-ChunkVertex gridVertex(uint base, int i, int j) {
-    return pool.vertices[base + uint(j * MORPH_ROW + i)];
-}
-
-// The three grid vertices around (fi, fj) (grid coordinates) and their
-// weights, split along each quad's rising diagonal as the chunk's mesh is.
-void gridTriangle(float fi, float fj, out ivec2 a, out ivec2 b, out ivec2 c, out vec3 w) {
-    int i = clamp(int(floor(fi)), 0, MORPH_QUADS - 1);
-    int j = clamp(int(floor(fj)), 0, MORPH_QUADS - 1);
-    float x = clamp(fi - float(i), 0.0, 1.0), y = clamp(fj - float(j), 0.0, 1.0);
-    a = ivec2(i, j);
-    if (x >= y) {
-        b = ivec2(i + 1, j);
-        c = ivec2(i + 1, j + 1);
-        w = vec3(1.0 - x, x - y, y);
-    } else {
-        b = ivec2(i + 1, j + 1);
-        c = ivec2(i, j + 1);
-        w = vec3(1.0 - y, x, y - x);
-    }
-}
-
 void main() {
-    uint group = gl_WorkGroupID.x;
-    if (vegetation.settings.x == 0.0 || group >= chunkDraws.words[0]) return;
-    uint slot = chunkDraws.words[4u + group * 5u + 4u];
-    ChunkInstance chunk = chunks.instances[slot];
-    if (int(chunk.morph.z) != 0 || chunk.morph.y < vegetation.lod.w) return;
+    ScatterChunk chunk;
     float range = vegetation.settings.y;
-    uint base = slot * uint(MORPH_VERTICES);
-    ChunkVertex first = gridVertex(base, 0, 0);
-    ChunkVertex last = gridVertex(base, MORPH_QUADS, MORPH_QUADS);
-    float halfDiagonal = 0.5 * length(last.positionU.xyz - first.positionU.xyz) + 50.0;
-    if (length(chunk.origin.xyz) - halfDiagonal > range) return;
-
-    float u0 = first.positionU.w, v0 = first.normalV.w, u1 = last.positionU.w, v1 = last.normalV.w;
-    int face = faceOf(gridVertex(base, MORPH_QUADS / 2, MORPH_QUADS / 2).radialHeight.xyz);
+    if (vegetation.settings.x == 0.0 || !scatterChunk(gl_WorkGroupID.x, vegetation.lod.w, range, chunk)) return;
     float cells = vegetation.settings.z;
-    int cu0 = int(floor((u0 + 1.0) * 0.5 * cells)), cu1 = int(ceil((u1 + 1.0) * 0.5 * cells));
-    int cv0 = int(floor((v0 + 1.0) * 0.5 * cells)), cv1 = int(ceil((v1 + 1.0) * 0.5 * cells));
-    uint across = uint(max(cu1 - cu0, 0)), count = across * uint(max(cv1 - cv0, 0));
+    int cu0, cv0;
+    uint across, count;
+    scatterCells(chunk, cells, cu0, cv0, across, count);
     float density = vegetation.settings.w;
     uint capacity = uint(vegetation.lod.z);
 
     for (uint k = gl_LocalInvocationID.x; k < count; k += 64u) {
-        int cu = cu0 + int(k % across), cv = cv0 + int(k / across);
-        uint h = terrainHash(ivec3(cu, cv, face));
-        float pu = -1.0 + 2.0 * (float(cu) + nextRandom(h)) / cells;
-        float pv = -1.0 + 2.0 * (float(cv) + nextRandom(h)) / cells;
-        if (pu < u0 || pu >= u1 || pv < v0 || pv >= v1) continue;     // another chunk's
-        float fi = (pu - u0) / (u1 - u0) * float(MORPH_QUADS);
-        float fj = (pv - v0) / (v1 - v0) * float(MORPH_QUADS);
-        ivec2 a, b, c;
-        vec3 w;
-        gridTriangle(fi, fj, a, b, c, w);
-        ChunkVertex va = gridVertex(base, a.x, a.y), vb = gridVertex(base, b.x, b.y), vc = gridVertex(base, c.x, c.y);
-        vec3 position = w.x * va.positionU.xyz + w.y * vb.positionU.xyz + w.z * vc.positionU.xyz;
-        float distance = length(chunk.origin.xyz + position);
-        if (distance > range) continue;
-        float pick = nextRandom(h);
+        Candidate x;
+        if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, 0, range, x)) continue;
+        float pick = nextRandom(x.hash);
         if (pick > 0.95 * density) continue;                          // above the densest biome's chance
-        vec3 radial = normalize(w.x * va.radialHeight.xyz + w.y * vb.radialHeight.xyz + w.z * vc.radialHeight.xyz);
-        float height = w.x * va.radialHeight.w + w.y * vb.radialHeight.w + w.z * vc.radialHeight.w;
-        vec3 normal = normalize(w.x * va.normalV.xyz + w.y * vb.normalV.xyz + w.z * vc.normalV.xyz);
+        vec3 radial, normal;
+        float height;
+        candidateGround(chunk, x, radial, height, normal);
         float weights[GROUND_LAYERS];
         vec3 colours[GROUND_LAYERS];
         groundLayers(radial, height, normal, weights, colours);
@@ -168,36 +66,24 @@ void main() {
         if (pick < treeChance) {
             float coniferShare = clamp(0.2 + smoothstep(0.35, 0.65, abs(radial.y)) + smoothstep(900.0, 1600.0, height),
                                        0.0, 1.0);
-            bool conifer = nextRandom(h) < coniferShare;
+            bool conifer = nextRandom(x.hash) < coniferShare;
             kind = conifer ? KIND_CONIFER : KIND_BROADLEAF;
-            size = conifer ? mix(9.0, 18.0, nextRandom(h)) : mix(7.0, 13.0, nextRandom(h));
-            if (distance > vegetation.lod.x) kind += 1;
-        } else if (pick < treeChance + bushChance && distance < vegetation.lod.y) {
+            size = conifer ? mix(9.0, 18.0, nextRandom(x.hash)) : mix(7.0, 13.0, nextRandom(x.hash));
+            if (x.distance > vegetation.lod.x) kind += 1;
+        } else if (pick < treeChance + bushChance && x.distance < vegetation.lod.y) {
             kind = KIND_BUSH;
-            size = mix(1.2, 2.6, nextRandom(h));
+            size = mix(1.2, 2.6, nextRandom(x.hash));
         } else {
             continue;
         }
-        size *= smoothstep(range, range * FADE_START, distance);
+        size *= smoothstep(range, range * FADE_START, x.distance);
         if (size < 0.05) continue;
-        float turn = 6.2831853 * nextRandom(h);
-        float tint = nextRandom(h);
-
-        // On the surface as drawn.
-        uint ia = base + uint(a.y * MORPH_ROW + a.x), ib = base + uint(b.y * MORPH_ROW + b.x);
-        uint ic = base + uint(c.y * MORPH_ROW + c.x);
-        ChunkVertex ma = morphedVertex(ia, slot, chunk.origin.xyz, chunk.morph);
-        ChunkVertex mb = morphedVertex(ib, slot, chunk.origin.xyz, chunk.morph);
-        ChunkVertex mc = morphedVertex(ic, slot, chunk.origin.xyz, chunk.morph);
-        vec3 drawn = w.x * ma.positionU.xyz + w.y * mb.positionU.xyz + w.z * mc.positionU.xyz;
-
-        uint index = atomicAdd(draws.words[uint(kind) * 5u + 1u], 1u);
-        if (index >= capacity) {
-            atomicAdd(draws.words[uint(kind) * 5u + 1u], 0xFFFFFFFFu);   // give it back
-            continue;
-        }
-        uint at = (uint(kind) * capacity + index) * 2u;
-        instances.data[at] = vec4(chunk.origin.xyz + drawn, size);
+        float turn = 6.2831853 * nextRandom(x.hash);
+        float tint = nextRandom(x.hash);
+        vec3 drawn = candidateDrawn(chunk, x);
+        uint at;
+        if (!claimInstance(uint(kind), uint(kind) * capacity, capacity, at)) continue;
+        instances.data[at] = vec4(drawn, size);
         instances.data[at + 1u] = vec4(cos(turn), sin(turn), tint, 0.0);
     }
 }

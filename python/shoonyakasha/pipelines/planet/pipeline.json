@@ -163,7 +163,9 @@
           "default": [ 0.0, 2500.0, 16384.0, 1.0 ] },
         { "name": "lod", "type": "vec4", "source": "scene.custom.planet.vegetation.lod",
           "default": [ 600.0, 700.0, 16384.0, 7.0 ] },
-        { "name": "camera", "type": "vec4", "source": "scene.custom.planet.cameraFromCentre" }
+        { "name": "camera", "type": "vec4", "source": "scene.custom.planet.cameraFromCentre" },
+        { "name": "grass", "type": "vec4", "source": "scene.custom.planet.vegetation.grass",
+          "default": [ 0.0, 150.0, 131072.0, 65536.0 ] }
       ]
     },
     "VegetationMesh": {
@@ -185,14 +187,14 @@
     "VegetationInstances": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 163840,
+      "elementCount": 294912,
       "fields": [ { "name": "data", "type": "vec4" } ],
       "memory": { "location": "device_local" }
     },
     "VegetationDraws": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 28,
+      "elementCount": 32,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
     "GroundParams": {
@@ -546,6 +548,18 @@
       "hasSideEffects": true
     },
     {
+      "name": "GrassScatter",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [ 64, 1, 1 ],
+        "dispatch": { "x": 2048, "y": 1, "z": 1 }
+      },
+      "pipeline": { "computeShader": "shaders/grass_scatter.comp.spv" },
+      "descriptorSets": [ "vegetationScatterSet", "vegetationChunkSet" ],
+      "hasSideEffects": true
+    },
+    {
       "name": "ShadowTerrain{cascade}",
       "type": "graphics",
       "repeat": { "count": 4, "index": "cascade" },
@@ -664,7 +678,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 5, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 6, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/vegetation.vert.spv",

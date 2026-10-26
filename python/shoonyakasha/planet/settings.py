@@ -72,7 +72,7 @@ def cloud_items(world, keys=None):
 
 
 def ground_items(world, keys=None):
-    """The ground textures' strength and relief, the ocean, the shadows and the vegetation."""
+    """The ground textures' strength and relief, the ocean, the shadows, the vegetation and the grass."""
     return _with_keys([
         {"heading": "Ground"},
         {"slider": "Ground textures", "min": 0.0, "max": 1.0, "get": lambda: world.texture_strength,
@@ -94,6 +94,11 @@ def ground_items(world, keys=None):
         {"slider": "Vegetation range", "min": 500.0, "max": 5000.0, "get": lambda: world.vegetation_range,
          "set": lambda v: setattr(world, "vegetation_range", v), "format": "%.0f m",
          "hint": "How far from the camera trees grow; they shrink away over its last 15 %."},
+        {"toggle": "Grass", "get": lambda: world.grass, "set": lambda on: setattr(world, "grass", on),
+         "hint": "Tufts of grass near the camera, green in grass and forest, towards straw on dry ground."},
+        {"slider": "Grass range", "min": 50.0, "max": 400.0, "get": lambda: world.grass_range,
+         "set": lambda v: setattr(world, "grass_range", v), "format": "%.0f m",
+         "hint": "How far from the camera grass grows; tufts shrink away over its last 30 %."},
     ], keys)
 
 

@@ -83,6 +83,11 @@ VEGETATION_MIN_LEVEL = 7
 VEGETATION_RANGE = 2_500.0
 VEGETATION_NEAR = 600.0
 VEGETATION_BUSH_RANGE = 700.0
+# The grass (grass_scatter.comp): candidate cells per cube face side (1.2 m on the planet), tufts at
+# most (after the other kinds' instances; matches VegetationInstances), and its range (m).
+GRASS_CELLS = 131072
+GRASS_CAPACITY = 65536
+GRASS_RANGE = 150.0
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -347,6 +352,8 @@ class PlanetWorld:
         self.vegetation = True
         self.vegetation_density = 1.0      # times the biome's chances
         self.vegetation_range = VEGETATION_RANGE
+        self.grass = True
+        self.grass_range = GRASS_RANGE
         self.vegetation_draws = None       # the kinds' draws with no instances, set again each frame
         self.ocean = True
         self.wireframe = False
@@ -523,7 +530,8 @@ class PlanetWorld:
         vertices, indices, ranges = vegetation.meshes()
         self.engine.set_buffer("VegetationMesh", vertices)
         self.engine.set_buffer("VegetationIndices", indices)
-        self.vegetation_draws = vegetation.draw_template(ranges, VEGETATION_CAPACITY)
+        firsts = [kind * VEGETATION_CAPACITY for kind in range(len(vegetation.KINDS))]
+        self.vegetation_draws = vegetation.draw_template(ranges, firsts)
 
     def upload_vegetation(self):
         """This frame's vegetation settings, and its draws with no instances,
@@ -535,6 +543,8 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.vegetation.lod",
                                (VEGETATION_NEAR, VEGETATION_BUSH_RANGE, float(VEGETATION_CAPACITY),
                                 float(VEGETATION_MIN_LEVEL)))
+        engine.set_custom_vec4("planet.vegetation.grass",
+                               (1.0 if self.grass else 0.0, self.grass_range, float(GRASS_CELLS), float(GRASS_CAPACITY)))
         if self.vegetation_draws is not None:
             engine.set_buffer("VegetationDraws", self.vegetation_draws)
 
