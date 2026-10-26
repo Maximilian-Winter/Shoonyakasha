@@ -2,12 +2,14 @@
 The ground's textures: an albedo and a normal map for each of the
 terrain's layers, CC0 scans from Poly Haven and ambientCG.
 
-    python ground_textures.py      # download the missing ones into textures/
+    python -m shoonyakasha.planet.ground_textures    # download the missing ones
 
-`load(engine)` hands those found in textures/ to the pipeline's
-"groundAlbedo<N>" and "groundNormal<N>" external images, with mipmaps, and
-returns each layer's mean albedo (linear RGB), or None when any file is
-missing.
+They are kept in DIRECTORY: the SHOONYAKASHA_GROUND_TEXTURES environment
+variable's directory, else shoonyakasha/ground_textures in the user's
+cache (%LOCALAPPDATA% on Windows, $XDG_CACHE_HOME or ~/.cache elsewhere).
+`load(engine)` hands those found there to the pipeline's "groundAlbedo<N>"
+and "groundNormal<N>" external images, with mipmaps, and returns each
+layer's mean albedo (linear RGB), or None when any file is missing.
 """
 
 import io
@@ -19,7 +21,20 @@ import zipfile
 
 import numpy as np
 
-DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "textures")
+
+
+def _directory():
+    chosen = os.environ.get("SHOONYAKASHA_GROUND_TEXTURES")
+    if chosen:
+        return chosen
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        cache = os.environ["LOCALAPPDATA"]
+    else:
+        cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(cache, "shoonyakasha", "ground_textures")
+
+
+DIRECTORY = _directory()
 
 # (layer, source, asset id), in the order of the shader's layers (ground.glsl).
 LAYERS = [
@@ -32,7 +47,7 @@ LAYERS = [
     ("moon", "ambientcg", "Ground054"),
 ]
 
-USER_AGENT = "Shoonyakasha planet example"
+USER_AGENT = "Shoonyakasha"
 
 
 def paths(layer):

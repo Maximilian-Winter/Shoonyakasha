@@ -1,29 +1,14 @@
-"""Tests for the planet example's key caps (examples/python/simulations/planet/hints.py)
-and ground textures (ground_textures.py), loaded from their files.
+"""Tests for the ground textures of shoonyakasha.planet (ground_textures.py).
 
     python -m unittest discover -s tests/python
 """
 
-import importlib.util
 import tempfile
 import unittest
-from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[2]
-PLANET = REPO / "examples" / "python" / "simulations" / "planet"
-
-
-def load(name):
-    spec = importlib.util.spec_from_file_location("planet_" + name, PLANET / (name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-hints = load("hints")
-ground_textures = load("ground_textures")
+from shoonyakasha.planet import ground_textures
 
 
 class FakeEngine:
@@ -34,27 +19,6 @@ class FakeEngine:
 
     def set_pipeline_image_data(self, name, data, format="R8G8B8A8_SRGB", mipmaps=False):
         self.images[name] = (data.shape, format, mipmaps)
-
-
-class CapTest(unittest.TestCase):
-    def test_pad_prefix(self):
-        self.assertEqual(hints.cap_text("pad:A"), ("A", True))
-        self.assertEqual(hints.cap_text("A"), ("A", False))
-        self.assertEqual(hints.cap_width("pad:Start"), hints.cap_width("Start"))
-
-    def test_caps_at_least_square(self):
-        self.assertEqual(hints.cap_width("I"), hints.CAP_HEIGHT)
-        self.assertGreater(hints.cap_width("Backspace"), hints.CAP_HEIGHT)
-
-    def test_row_width_adds_up(self):
-        one = [(("W", "S"), "Throttle")]
-        two = one + [(("Tab",), "Free camera")]
-        expected = hints.hint_width(one[0]) + hints.HINT_GAP + hints.hint_width(two[1])
-        self.assertAlmostEqual(hints.row_width(two), expected)
-        self.assertEqual(hints.row_width([]), 0.0)
-
-    def test_label_widens_a_hint(self):
-        self.assertGreater(hints.hint_width((("F1",), "Settings")), hints.hint_width((("F1",), "")))
 
 
 class GroundTexturesTest(unittest.TestCase):

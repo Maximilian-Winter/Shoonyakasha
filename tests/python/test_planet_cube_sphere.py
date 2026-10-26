@@ -1,31 +1,17 @@
-"""Tests for the planet example's cube-sphere geometry and quadtree
-(examples/python/simulations/planet/cube_sphere.py and quadtree.py), loaded
-from their files. The chunk meshes need numpy; those tests skip without it.
+"""Tests for the cube-sphere geometry and quadtree of shoonyakasha.planet
+(cube_sphere.py and quadtree.py), and the planet example's pipeline's chunk
+buffers. The chunk meshes need numpy; those tests skip without it.
 
     python -m unittest discover -s tests/python
 """
 
-import importlib.util
 import itertools
 import math
-import sys
 import unittest
-from pathlib import Path
-
-REPO = Path(__file__).resolve().parents[2]
-PLANET = REPO / "examples" / "python" / "simulations" / "planet"
 
 
-def _load(name):
-    spec = importlib.util.spec_from_file_location(name, PLANET / (name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module          # quadtree.py imports cube_sphere by name
-    spec.loader.exec_module(module)
-    return module
 
-
-cube_sphere = _load("cube_sphere")
-quadtree = _load("quadtree")
+from shoonyakasha.planet import cube_sphere, quadtree, world
 
 try:
     import numpy  # noqa: F401
@@ -139,14 +125,14 @@ class CubeSphereChunkMeshes(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_NUMPY, "needs numpy")
 class GpuChunkBuffers(unittest.TestCase):
-    """pipeline.json's chunk buffers fit the chunks cube_sphere.chunk_mesh
+    """The planet pipeline's chunk buffers fit the chunks cube_sphere.chunk_mesh
     lays out, which chunk_build.comp writes: 16 x 16 quads with skirts."""
 
     QUADS, SLOTS = 16, 2048
 
     def setUp(self):
         import json
-        document = json.loads((PLANET / "pipeline" / "pipeline.json").read_text(encoding="utf-8"))
+        document = json.loads(world.PIPELINE.read_text(encoding="utf-8"))
         self.layouts = document["bufferLayouts"]
         _, self.positions, _, _, self.indices = cube_sphere.chunk_mesh(4, 0, 0, 0, self.QUADS, RADIUS, 1.0)
 

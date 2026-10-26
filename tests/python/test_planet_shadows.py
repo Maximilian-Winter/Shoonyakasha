@@ -1,20 +1,13 @@
-"""Tests for the planet example's shadow cascades
-(examples/python/simulations/planet/shadows.py), loaded from its file.
+"""Tests for the shadow cascades of shoonyakasha.planet (shadows.py).
 
     python -m unittest discover -s tests/python
 """
 
-import importlib.util
 import math
 import random
 import unittest
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-_SPEC = importlib.util.spec_from_file_location(
-    "planet_shadows", REPO / "examples" / "python" / "simulations" / "planet" / "shadows.py")
-shadows = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(shadows)
+from shoonyakasha.planet import shadows
 
 SPLITS = (0.05, 40.0, 400.0, 3000.0, 20000.0)
 FOV, ASPECT, RESOLUTION, REACH = 70.0, 16.0 / 9.0, 2048, 5000.0

@@ -178,6 +178,49 @@ Only registered models and bindings participate: Bullet, autonomous GPU state an
 engine-time shaders require application adapters. Fixed stepping does not promise
 bitwise reproducibility across hardware. Branching, audio and visual editing are deferred.
 
+## Overlays
+
+`shoonyakasha.toolkit.overlay` draws on screen canvases with the engine's UI
+directly (no `Context`): cards of readings, a bar of button hints, a sheet of the
+controls and a settings menu, in one style (a dark panel with a gold hairline,
+gold headings over faint rules).
+
+```python
+from shoonyakasha.toolkit import overlay
+
+# Fragment: engine is running (on_init or later) and canvas is a screen canvas.
+card = overlay.Card(engine.ui, canvas, corner=(0, 0), max_rows=8)
+card.update("FREE CAMERA", [("SPEED", "12 m/s"), ("ORBIT",), ("PERIAPSIS", "40 km")])
+bar = overlay.HintBar(engine.ui, canvas)
+bar.update([(("W", "S"), "Throttle"), (("pad:A",), "Assist")])
+sheet = overlay.HelpOverlay(engine, "CONTROLS", [[("Ship", [(("W", "S"), "Throttle")])]])
+menu = overlay.SettingsMenu(engine, "Settings", [
+    {"heading": "Sky"},
+    {"slider": "Exposure", "min": 0.05, "max": 2.0, "get": get_exposure, "set": set_exposure,
+     "format": "%.2f", "keys": ("B", "V"), "hint": "The image's brightness."},
+])
+```
+
+- `Card(ui, canvas, corner, max_rows, margin=(24, 24), width=300)`: `update(title, rows)`
+  with rows ("LABEL", "value") or ("HEADING",); the panel fits its rows and only what
+  changed is handed to the canvas. `show(on)`.
+- `HintBar(ui, canvas)`: `update(hints)`, each hint (caps, label), centred along the
+  bottom and redrawn only when they change; `show(on)`. A cap named "pad:X" is a
+  gamepad's button or stick, A, B, X and Y in their usual colours. `KeyCaps(ui, parent)`
+  lays hints out at a point of any element. Text is measured with Pillow from the
+  default font, or estimated without it.
+- `HelpOverlay(engine, title, columns, footer="")`: columns of (heading, rows), each
+  row (caps, text), centred over everything; `show(on)`, `visible`.
+- `SettingsMenu(engine, title, items, close_keys=("F1",))`: headings, sliders, toggles
+  and buttons in a scroll view down the right side, with key caps beside an item that
+  has `keys` and a footer showing the `hint` of the item under the pointer. Call
+  `update()` each frame: it hands the pointer's changes to the setters and moves the
+  widgets to what the getters say. Its widgets stay out of keyboard navigation;
+  `pointer_over` says whether the pointer is over it.
+
+`shoonyakasha.planet.settings` gives such items for a planet's sky, clouds, ground
+and terrain.
+
 ## Capture
 
 `Exporter(engine, playback, context=None)` exposes `start(path, duration=None,

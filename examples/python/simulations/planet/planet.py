@@ -1,30 +1,17 @@
 """
 Shoonyakasha planet: procedural terrain on a cube-sphere with quadtree level
-of detail
+of detail, flown over by a ship
 
-A planet of radius 100 km, flown around from a few metres above its ground
-to thousands of kilometres away. Positions are Python floats (64-bit) with
-the planet's centre at the origin. The engine's camera stays at its own
-origin and only turns; every frame each chunk and entity is placed at its
-position minus the camera's, so the GPU sees only small numbers. The
-projection is reverse-Z with an infinite far plane.
-
-The planet is a cube-sphere: six cube faces mapped onto the sphere with
-`spherify`, each the root of a quadtree (quadtree.py). Each frame the tree
-picks the chunks to draw, finer near the camera, and up to 16 missing
-chunks, those in view first and nearest first, are built on the GPU into
-slots of a buffer pool (pipeline/shaders/chunk_build.comp), raised by the
-terrain function in pipeline/shaders/terrain.glsl. Each chunk's lowest and
-highest heights come back to Python and tighten its node's bounds. All the
-drawn chunks are one indirect draw call. Every chunk is 16 x 16 quads with
-its vertices relative to its own centre, and skirts along its edges hide
-the cracks between levels. A cluster of blocks stands on the +Z face, on a
-pad 5 cm above the ground.
-
-The scene is lit by sunlight that comes through the atmosphere and drawn
-in HDR; a fullscreen pass then adds the atmosphere in front of it, single
-scattering by air and haze raymarched along each pixel's view ray
-(pipeline/shaders/atmosphere.glsl), and tone maps the result.
+A planet of radius 100 km and its moon, flown around from a few metres
+above the ground to thousands of kilometres away, with a free camera or a
+ship (flight.py) seen from its cockpit or a chase view. The planet, the
+moon, the terrain's chunks built on the GPU, the atmosphere, the clouds,
+the ocean and the shadows are shoonyakasha.planet's PlanetWorld, on the
+planet pipeline; the cards, the hint bar, the controls sheet and the
+settings menu are shoonyakasha.toolkit.overlay's. Positions are Python
+floats (64-bit) with the planet's centre at the origin; the engine's camera
+stays at its own origin and only turns. A cluster of blocks stands on the
++Z face, on a pad 5 cm above the ground.
 
 Keys:
     Tab                    free camera / ship
@@ -97,86 +84,24 @@ import time
 import numpy as np
 import shoonyakasha as sk
 from shoonyakasha import keys
+from shoonyakasha.planet import cube_sphere
+from shoonyakasha.planet import settings as planet_settings
+from shoonyakasha.planet import world as planet_world
+from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, local_frame, normalize, rotate, scale, sub
+from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, SettingsMenu
+from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, FLOATS_PER_VERTEX, FOV, MAX_LEVEL,
+                                       MORPH_LEVELS, MORPH_START, ORBIT_POINTS, QUADS, RADIUS, SKIRT_FRACTION, SLOTS,
+                                       SUN_AZIMUTH, SUN_ELEVATION, VERTICES_PER_CHUNK)
 
-import cube_sphere
 import flight
-import shadows
 from ground import GroundPatch, SIZE as PATCH_SIZE
-import ground_textures
 import cockpit
-from cards import Card
-from help_sheet import HelpOverlay
-from hints import HintBar
 from instruments import Instruments
-from menu import SettingsMenu
-from quadtree import QuadTree, hidden_by_horizon
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PIPELINE = os.path.join(HERE, "pipeline", "pipeline.json")
 CAPTURES = os.path.join(HERE, "planet_captures")
 
-RADIUS = 100_000.0               # metres
-QUADS = 16                       # quads along each side of a chunk
-MAX_LEVEL = 12                   # a level-12 chunk is 38 m across, its quads 2.4 m
-SPLIT_FACTOR = 1.25              # split when nearer than this many chunk edges
-MORPH_START = 0.8                # morphing starts at this share of the parent's split distance; matches morph.glsl
-MORPH_LEVELS = 4                 # ancestors a vertex morphs towards at most; matches morph.glsl
-# The sun's shadow cascades (shadows.py): where they split the view (m), the map's size per side,
-# and how far towards the sun beyond a cascade casters count (m).
-SHADOW_SPLITS = (0.05, 12.0, 150.0, 2_000.0, 20_000.0)
-SHADOW_RESOLUTION = 2048         # matches sunShadowMap in pipeline.json
-SHADOW_REACH = 5_000.0
-# The cloud layer (clouds.glsl): bottom and top (m); the coverage noise's frequency per unit of
-# direction (cells of about 2.5 km), the detail noise's scale (m) and how much it erodes.
-CLOUD_LAYER = (1_500.0, 3_500.0)
-CLOUD_SHAPE = (40.0, 900.0, 0.8)
-CLOUD_COVERAGE = 0.45            # share of the sky the clouds cover at the start
-# The ground's textures (ground_textures.py, ground.glsl): metres per tile at the near and far scale.
-GROUND_SCALES = (5.0, 47.0)
-SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
-HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
-ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
-# The GPU chunk pool; these match pipeline.json and chunk_build.comp.
-SLOTS = 2048                     # chunks the pool holds
-MAX_JOBS = 16                    # chunks BuildChunks builds per frame at most
-PROBES = 176                     # directions BuildChunks evaluates the terrain at
-EXTRA_PROBES = 4                 # the last probes, for directions a check asks for
-VERTICES_PER_CHUNK = (QUADS + 1) ** 2 + 4 * (QUADS + 1)
-FLOATS_PER_VERTEX = 16           # position and u, normal and v, direction and height, horizon and padding
-HORIZON_SUN_STEP = math.radians(0.5)   # the sun's move after which the chunks' horizons are measured again
-DRAWS_OFFSET = 16                # bytes before the draw commands in ChunkDraws: the count, then padding
-# The terrain's parameters (terrain.glsl), the defaults in pipeline.json.
-TERRAIN = {
-    "continent": [1.5, 0.6, 0.05, 800.0],   # frequency, warp, sea level bias, height scale (m)
-    "mountains": [6.0, 3000.0, 2.0, 8.0],   # frequency, height (m), mask frequency, octaves
-    "hills": [40.0, 150.0, 1500.0, 6.0],    # frequency, height (m), ocean depth (m), octaves
-    "seed": [0.0, 0.0, 0.0, 0.0],           # offset added to the noise input
-    "detail": [80.0, 15.0, 4.0, 0.5],       # wavelength (m), height (m), octaves, erosion
-}
-SITE_FACE = 4                    # +Z
-SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a vertex of every chunk from level 3 down
-SITE_FLAT_RADIUS = 150.0         # metres of flat pad around the site
-SITE_BLEND_RADIUS = 600.0        # metres from the site where the terrain is its own again
-TERRAIN_COLOUR = (-1.0, 0.0, 0.0)  # tells terrain.frag to colour by height, slope and latitude
-FACE_COLOURS = ((0.62, 0.30, 0.25), (0.25, 0.50, 0.55), (0.55, 0.55, 0.30),
-                (0.40, 0.30, 0.60), (0.30, 0.55, 0.30), (0.60, 0.42, 0.25))
-COLOUR_MODES = ("terrain", "face", "level")
-SUN_ELEVATION, SUN_AZIMUTH = 40.0, 200.0   # degrees, seen from the site; azimuth from east towards north
 DAY_SUN = (SUN_ELEVATION, SUN_AZIMUTH)
-# The atmosphere (atmosphere.glsl), the defaults in pipeline.json: a top 20 km up, scale heights of
-# 2.5 km (air) and 400 m (haze), and Earth's coefficients times 3.2, which keeps Earth's optical
-# depth straight up for the shorter scale heights.
-ATMOSPHERE_TOP = 20_000.0
-RAYLEIGH_SCALE_HEIGHT, MIE_SCALE_HEIGHT = 2_500.0, 400.0
-RAYLEIGH = (1.857e-5, 4.339e-5, 1.0592e-4)          # scattering per metre at height 0
-MIE_SCATTERING, MIE_ABSORPTION, MIE_G = 1.279e-5, 1.408e-5, 0.8
-# Ozone: Earth's absorption at its peak times 3.2, peaking at 25 km / 3.2, a tent 15 km / 3.2 to each side.
-OZONE_ABSORPTION = (2.08e-6, 6.02e-6, 2.72e-7)
-OZONE_PEAK, OZONE_HALF_WIDTH = 7_800.0, 4_700.0
-SUN_ILLUMINANCE = 20.0
-EXPOSURE = 0.4
-NEAR_PLANE = 0.05
-FOV = 70.0
 PIXEL_ANGLE = math.radians(FOV) / 900.0   # radians across a pixel at the window's 900 rows
 LOOK_RADIANS_PER_PIXEL = 0.0025
 MIN_ALTITUDE = 0.3               # the camera stays this far above the ground
@@ -212,17 +137,8 @@ GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAM
                 keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
                 keys.GAMEPAD_X: keys.R, keys.GAMEPAD_BACK: keys.F2}
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
-ORBIT_POINTS = 256               # points of the drawn orbit path; matches OrbitPoints in pipeline.json
-# The moon (flight.Moon): radius, surface gravity (a fifth of the planet's), distance from the
-# planet's centre, and where it starts, in radians east of the site's zenith along its orbit.
-MOON_RADIUS = 25_000.0
-MOON_GRAVITY = 0.981
-MOON_DISTANCE = 600_000.0
-MOON_PHASE = 0.6
-MOON_HEIGHTS = (-2000.0, 1500.0)  # the moon's roots' height range until their chunks are measured
 MOON_ORBIT_HEIGHT = 10_000.0     # Shift+9's circular orbit of the moon
 MOON_HOVER_HEIGHT = 2_000.0      # Shift+8's ship waits this far above the moon's radius until its ground is known
-MOON_FLOOR = -2000.0             # metres above the moon's radius that its terrain (moon.glsl) stays above
 
 parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
@@ -244,69 +160,11 @@ parser.add_argument("--moon-landing-check", action="store_true",
                     help="land the ship on the highest spot found on the moon, print how it stands and exit")
 args = parser.parse_args()
 
-sk.shaders.compile_dir(os.path.join(HERE, "pipeline", "shaders"))
-engine = sk.Engine(title="Shoonyakasha - planet", width=1600, height=900, pipeline_json_path=PIPELINE)
-
-
-# ── Vectors (tuples of Python floats) ──────────────────────────────────────
-
-def add(a, b):
-    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
-
-
-def sub(a, b):
-    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
-
-
-def scale(a, s):
-    return (a[0] * s, a[1] * s, a[2] * s)
-
-
-def dot(a, b):
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-
-def cross(a, b):
-    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
-
-
-def length(a):
-    return math.sqrt(dot(a, a))
-
-
-def normalize(a):
-    return scale(a, 1.0 / length(a))
-
-
-def rotate(v, axis, angle):
-    """`v` turned by `angle` radians about the unit vector `axis` (Rodrigues)."""
-    c, s = math.cos(angle), math.sin(angle)
-    return add(add(scale(v, c), scale(cross(axis, v), s)), scale(axis, dot(axis, v) * (1.0 - c)))
-
-
-def local_frame(up):
-    """(east, north) at the point of the sphere whose direction is `up`."""
-    east = cross((0.0, 1.0, 0.0), up)
-    if length(east) < 1e-9:
-        east = (1.0, 0.0, 0.0)
-    east = normalize(east)
-    return east, cross(up, east)
-
-
-def euler_from_basis(right, up, forward):
-    """The engine's Euler rotation (x pitch, y yaw, z roll; applied Y, then
-    X, then Z) whose rotation matrix has columns right, up and -forward."""
-    back = scale(forward, -1.0)
-    pitch = math.asin(max(-1.0, min(1.0, -back[1])))
-    yaw = math.atan2(back[0], back[2])
-    roll = math.atan2(right[1], up[1])
-    return (pitch, yaw, roll)
-
-
-def level_colour(level):
-    """A colour per quadtree level, round the hue circle."""
-    hue = level * 0.61803398875
-    return tuple(0.45 + 0.30 * math.cos(2.0 * math.pi * (hue - offset)) for offset in (0.0, 1 / 3, 2 / 3))
+planet_world.compile_shaders()
+engine = sk.Engine(title="Shoonyakasha - planet", width=1600, height=900,
+                   pipeline_json_path=str(planet_world.PIPELINE))
+world = planet_world.PlanetWorld(engine, fov=FOV)
+planet, bodies, pool = world.planet, world.bodies, world.pool
 
 
 def distance_text(metres):
@@ -334,57 +192,22 @@ def box():
 # Each block: (entity, offset in planet space from the site's point on the sphere).
 blocks = []
 state = {
-    "camera": None,
     "position": (0.0, 0.0, RADIUS + 5.0),
     "forward": (0.0, 0.0, 1.0),
     "speed": 0.0,
     "speed_factor": 1.0,
     "cards": None,               # (the view's card, the debug card)
-    "wireframe": False,
-    "ocean": True,
-    "ocean_chunks": 0,           # chunks the ocean draws
-    "chunks_culled": 0,          # selected chunks not drawn: out of view or behind the horizon
-    "colour_mode": 0,
-    "frozen": False,
-    "frame": 0,
     "frame_ms": 16.0,            # frame time, smoothed
-    "terrain_version": 0,        # counts terrain changes; probe results carry the version they were made with
-    "ground": None,              # terrain height under the camera on the body under it, from the probes
-    "site_height": None,         # natural terrain height at the site, the pad's height, from the probes
     "teleport_when_known": None,  # a preset to jump to again once the site's height is known
-    "sun_elevation": SUN_ELEVATION,
-    "sun_azimuth": SUN_AZIMUTH,
-    "density": 1.0,              # times the atmosphere's coefficients
-    "ozone": True,               # the ozone layer's absorption
     "orbit_path": True,          # draw the path the ship would coast along
-    "shadows": True,             # the sun's shadow cascades
-    "clouds": True,              # the cloud layer
-    "cloud_coverage": CLOUD_COVERAGE,  # share of the sky the clouds cover, 0 .. 1
-    "cloud_density": 0.04,       # extinction per metre at full density
-    "cloud_wind": (0.0, 0.0, 0.0),  # the coverage noise's offset, in its units (clouds.glsl)
-    "wind_speed": 15.0,          # metres a second the clouds drift
-    "ground_textures": False,    # whether the ground's textures were loaded
-    "texture_strength": 1.0,     # how much the ground's textures show, 0 .. 1
-    "texture_relief": 1.0,       # the strength of their normal maps
-    "horizon_sun": None,         # the sun's direction the chunks' horizons are measured towards
-    "rebuild": [],               # built chunks still to build again for horizon_sun, nearest last
     "gamepad_held": set(),       # gamepad buttons held last frame
     "reentry_pass": False,       # whether the ReentryGlow pass is enabled
-    "multiple_scattering": True,  # light scattered more than once, from the multiple scattering table
-    "exposure": EXPOSURE,
     "mode": "camera",            # "camera": the free camera; "ship": the view from the ship
     "ship": None,
     "controls": flight.Controls(),
     "warp": 0,                   # index into WARPS
     "accumulator": 0.0,          # seconds of flight not yet stepped
-    "flight_time": 0.0,          # seconds of flight stepped
-    "patch": None,               # (body, ground patch around the ship relative to it (ground.py)), from the probes
-    "probe_requests": {},        # stamp: (terrain version, body under the camera, "patch" or None, extra directions)
-                                 # not read back yet
-    "extra_probes": [],          # (direction, body) a check or a preset asks the terrain's height at
-    "extra_heights": [],         # ((direction, body), height) for the extra probes last read back
     "moon_landing": None,        # Shift+8's spot on the moon (direction from its centre) until its ground is known
-    "probe_latency": 3.0,        # frames from asking for probes to using their heights
     "instruments": None,
     "menu": None,
     "shown_mode": None,          # (mode, chase, generated_cockpit) show_mode last set up
@@ -394,435 +217,27 @@ state = {
     "cabin_screens": None,       # the displays on the model's cabin's panel (cockpit_screens)
     "ship_model": None,          # (root entity, its mesh entities): the ship's model
     "debug_text": False,
-    "hint_bar": None,            # the button hints along the bottom (hints.py)
+    "hint_bar": None,            # the button hints along the bottom (toolkit.overlay.HintBar)
     "hints": True,               # whether the hint bar shows
-    "help": None,                # the controls sheet (help_sheet.py)
+    "help": None,                # the controls sheet (toolkit.overlay.HelpOverlay)
     "input": "keys",             # "keys" or "pad": what the hints name, the device last used
-    "planet_edit": None,         # terrain parameters the menu changes until Apply
+    "terrain_edit": None,        # the terrain parameters the menu changes until Apply (planet.settings)
     "scripted_controls": False,  # the ship's controls are set by a check, not read from the keys
     "impact_speed": 0.0,         # m/s, the fastest a contact point reached the surface at this frame
 }
-flight_planet = flight.Planet(radius=RADIUS, scale_height=RAYLEIGH_SCALE_HEIGHT)
-
-
-class ChunkPool:
-    """Slots of the GPU's ChunkPool buffer, the chunks to build into them
-    this frame, and the built chunks whose heights have not come back yet."""
-
-    def __init__(self):
-        self.free = list(range(SLOTS - 1, -1, -1))
-        self.jobs = []           # (jobA, jobB) per chunk to build this frame
-        self.pending = {}        # slot: (node, stamp) until the slot's heights come back
-        self.body = {}           # slot: the index of the body its chunk belongs to
-        self.stamp = 0
-
-    def make(self, node, body):
-        """A slot for `node` of `body` with a job to build it, or None when
-        the pool is full or this frame's jobs are taken."""
-        if not self.free or len(self.jobs) == MAX_JOBS:
-            return None
-        slot = self.free.pop()
-        self.body[slot] = body.index
-        self.add_job(node, slot)
-        return slot
-
-    def rebuild(self, node):
-        """A job to build `node` again in its own slot; False when this
-        frame's jobs are taken. The slot keeps its old chunk until then."""
-        if len(self.jobs) == MAX_JOBS:
-            return False
-        self.add_job(node, node.chunk)
-        return True
-
-    def add_job(self, node, slot):
-        self.stamp += 1
-        self.jobs.append(((float(node.face), float(node.level), float(node.x), float(node.y)),
-                          (float(slot), SKIRT_FRACTION * node.edge, float(self.stamp), float(self.body[slot]))))
-        self.pending[slot] = (node, float(self.stamp))
-
-    def release(self, node):
-        self.pending.pop(node.chunk, None)
-        self.body.pop(node.chunk, None)
-        self.free.append(node.chunk)
-
-    def submit_jobs(self, probes, stamp):
-        """Hand this frame's jobs, the probes (direction and body index)
-        and the stamp their results carry back to BuildChunks, and start the
-        next frame's list."""
-        padded = self.jobs + [((0.0,) * 4, (0.0,) * 4)] * (MAX_JOBS - len(self.jobs))
-        engine.set_custom_vec4_array("planet.jobA", [a for a, _ in padded])
-        engine.set_custom_vec4_array("planet.jobB", [b for _, b in padded])
-        engine.set_custom_uint("planet.jobCount", len(self.jobs))
-        engine.set_custom_vec4_array("planet.probe", probes)
-        engine.set_custom_float("planet.probeStamp", stamp)
-        self.jobs = []
-
-    def take_heights(self, heights):
-        """Give each pending node whose job's heights arrived (rows of lowest,
-        highest, stamp per slot) its height range."""
-        for slot, (node, stamp) in list(self.pending.items()):
-            if heights[slot, 2] == stamp:
-                node.set_heights(float(heights[slot, 0]), float(heights[slot, 1]))
-                del self.pending[slot]
-
-    @property
-    def used(self):
-        return SLOTS - len(self.free)
-
-
-pool = ChunkPool()
-
-
-class Body:
-    """A body drawn with terrain from the chunk pool: its index (its chunk
-    jobs carry it, and BuildChunks reads its radius by it), its radius, its
-    terrain's parameters (the planet's; None for the moon, whose terrain
-    has fixed parameters in moon.glsl), its orbit (an object with
-    position(time) and velocity(time) around the planet's centre, or None
-    for the planet), whether the ocean is drawn on it, metres above its
-    radius its terrain stays above (`floor`, or None to work it out from
-    `terrain`), its roots' height range until measured, and its quadtree
-    once made. Its tree's chunks and its ground patches are relative to its
-    centre."""
-
-    def __init__(self, index, name, radius, terrain, orbit=None, ocean=False, floor=None, heights=ROOT_HEIGHTS):
-        self.index, self.name, self.radius = index, name, radius
-        self.terrain = terrain
-        self.floor = floor
-        self.heights = heights
-        self.orbit = orbit
-        self.ocean = ocean
-        self.tree = None
-
-    def centre(self):
-        """Its centre at the flight's time, from the planet's centre."""
-        return self.orbit.position(flight_planet.time) if self.orbit is not None else (0.0, 0.0, 0.0)
-
-    def velocity(self):
-        """Its velocity at the flight's time."""
-        return self.orbit.velocity(flight_planet.time) if self.orbit is not None else (0.0, 0.0, 0.0)
-
-    def relative(self, point):
-        """`point` (from the planet's centre) from its centre."""
-        return sub(point, self.centre())
-
-    def new_tree(self):
-        return QuadTree(self.radius, lambda node: pool.make(node, self), pool.release, max_level=MAX_LEVEL,
-                        split_factor=SPLIT_FACTOR, heights=self.heights, height_pad=HEIGHT_PAD)
-
-
-planet = Body(0, "planet", RADIUS, {name: list(value) for name, value in TERRAIN.items()}, ocean=True)
-bodies = [planet]
-
-
-def body_under(point):
-    """The body `point` is reckoned around, as flight.reference reckons
-    orbits: the body with an orbit whose sphere of influence holds it,
-    else the planet."""
-    for body in bodies:
-        if body.orbit is not None and length(body.relative(point)) < body.orbit.influence:
-            return body
-    return planet
-
-
-def site_frame():
-    """The site's point on the sphere (height 0), its up, east and north."""
-    up = cube_sphere.direction(SITE_FACE, SITE_UV, SITE_UV)
-    east, north = local_frame(up)
-    return scale(up, RADIUS), up, east, north
-
-
-def site_ground():
-    """The site's point on the ground, once its height is known (else on the sphere)."""
-    origin, up, _, _ = site_frame()
-    return add(origin, scale(up, state["site_height"] or 0.0))
-
-
-def chunk_colour(node):
-    """(r, g, b, grid strength) of a chunk in the current colour mode."""
-    mode = COLOUR_MODES[state["colour_mode"]]
-    if mode == "face":
-        return FACE_COLOURS[node.face] + (1.0,)
-    if mode == "level":
-        return level_colour(node.level) + (1.0,)
-    return TERRAIN_COLOUR + (0.0,)
-
-
-def upload_chunk_indices():
-    """The index list every chunk shares (grid, then skirts drawn from both
-    sides), as cube_sphere.chunk_mesh makes it."""
-    _, _, _, _, indices = cube_sphere.chunk_mesh(4, 0, 0, 0, QUADS, RADIUS, skirt_depth=1.0)
-    state["index_count"] = len(indices)
-    engine.set_buffer("ChunkIndices", indices)
-
-
-def upload_terrain():
-    """The terrain's parameters, and the pad around the site once its height is known."""
-    for name, value in planet.terrain.items():
-        engine.set_custom_vec4("planet.terrain." + name, tuple(value))
-    _, up, _, _ = site_frame()
-    known = state["site_height"] is not None
-    engine.set_custom_vec4("planet.terrain.site", up + (state["site_height"] if known else 0.0,))
-    engine.set_custom_vec4("planet.terrain.siteShape",
-                           (SITE_FLAT_RADIUS, SITE_BLEND_RADIUS, RADIUS, 1.0 if known else 0.0))
-
-
-def sun_direction():
-    """Towards the sun, from the sun's elevation and azimuth seen from the site."""
-    _, up, east, north = site_frame()
-    elevation, azimuth = math.radians(state["sun_elevation"]), math.radians(state["sun_azimuth"])
-    level = add(scale(east, math.cos(azimuth)), scale(north, math.sin(azimuth)))
-    return normalize(add(scale(up, math.sin(elevation)), scale(level, math.cos(elevation))))
-
-
-def upload_sky():
-    """The sun's direction and the atmosphere's parameters."""
-    engine.set_custom_vec4("planet.sunDirection", sun_direction() + (0.0,))
-    density = state["density"]
-    engine.set_custom_vec4("planet.atmosphere.radii",
-                           (RADIUS, RADIUS + ATMOSPHERE_TOP, RAYLEIGH_SCALE_HEIGHT, MIE_SCALE_HEIGHT))
-    engine.set_custom_vec4("planet.atmosphere.rayleigh", scale(RAYLEIGH, density) + (MIE_G,))
-    engine.set_custom_vec4("planet.atmosphere.mie", (MIE_SCATTERING * density, MIE_ABSORPTION * density,
-                                                     SUN_ILLUMINANCE, state["exposure"]))
-    ozone = density if state["ozone"] else 0.0
-    engine.set_custom_vec4("planet.atmosphere.ozone", scale(OZONE_ABSORPTION, ozone) + (OZONE_PEAK,))
-    engine.set_custom_vec4("planet.atmosphere.settings",
-                           (OZONE_HALF_WIDTH, 1.0 if state["multiple_scattering"] else 0.0, 0.0, 0.0))
-
-
-def skirt_depth(node):
-    """How far a built chunk's skirts reach below its edges, as
-    chunk_build.comp makes them: SKIRT_FRACTION of its edge, or its grid's
-    height range."""
-    return max(SKIRT_FRACTION * node.edge, node.high - node.low)
-
-
-def parent_split_distance(node, tree):
-    """The distance from its bounding sphere at which a node's parent in
-    `tree` splits (the parent's edge is twice the node's); 0 for the
-    roots."""
-    return tree.split_factor * 2.0 * node.edge if node.level > 0 else 0.0
-
-
-def terrain_floor(body):
-    """Metres above `body`'s radius that no terrain goes below: its
-    `floor`, or from its terrain parameters the seabed's depth, or on land
-    the continent's edge plus the hills' and the detail's heights, both
-    with 10 % to spare (terrain.glsl's noise stays within [-1, 1])."""
-    if body.floor is not None:
-        return body.floor
-    terrain = body.terrain
-    return -1.1 * max(terrain["hills"][2], 0.05 * terrain["continent"][3] + terrain["hills"][1] + terrain["detail"][1])
-
-
-def visible(node, centre, eye, occluder):
-    """Whether `node` of the body at `centre` is in view and not behind
-    the body's horizon; `eye`: the camera from the body's centre."""
-    return (in_view(add(centre, node.bound_centre), node.bound_radius)
-            and not hidden_by_horizon(node.bound_centre, node.bound_radius, eye, occluder))
-
-
-def upload_drawn_chunks():
-    """One indexed indirect draw per chunk the bodies' trees selected that
-    is in view and not behind its body's horizon, and each drawn slot's
-    centre relative to the camera (its body's centre plus its own, less the
-    camera, in double), colour, and its parent's split distance and the
-    levels above it, for morph.glsl. The shadow cascades draw every
-    selected chunk within their reach, in view or not."""
-    camera = state["position"]
-    reach = SHADOW_SPLITS[-1] + SHADOW_REACH
-    instances = np.zeros((SLOTS, 3, 4), dtype=np.float32)
-    selected, casters, wet_nodes = [], [], []
-    culled = 0
-    for body in bodies:
-        if body.tree is None:
-            continue
-        centre = body.centre()
-        eye = sub(camera, centre)
-        occluder = body.radius + terrain_floor(body)
-        for node in body.tree.selected:
-            slot = node.chunk
-            instances[slot, 0, :3] = sub(node.centre, eye)
-            instances[slot, 1] = chunk_colour(node)
-            instances[slot, 2, :3] = (parent_split_distance(node, body.tree), node.level, body.index)
-            if length(sub(node.bound_centre, eye)) - node.bound_radius < reach:
-                casters.append(node)
-            if not visible(node, centre, eye, occluder):
-                culled += 1
-                continue
-            selected.append(node)
-            # The ocean redraws the chunks whose height range reaches below sea level.
-            if body.ocean and node.low < 0.0:
-                wet_nodes.append(node)
-    state["chunks_culled"] = culled
-    engine.set_buffer("ChunkInstances", instances)
-    # indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
-    draw = lambda node: (state["index_count"], 1, 0, node.chunk * VERTICES_PER_CHUNK, node.chunk)
-    commands = np.array([draw(node) for node in selected], dtype=np.uint32).reshape(-1, 5)
-    engine.set_buffer("ShadowDraws", np.uint32([len(casters)]))
-    if casters:
-        engine.set_buffer("ShadowDraws", np.array([draw(node) for node in casters], dtype=np.uint32),
-                          offset=DRAWS_OFFSET)
-    engine.set_buffer("ChunkDraws", np.uint32([len(selected)]))
-    if len(selected):
-        engine.set_buffer("ChunkDraws", commands, offset=DRAWS_OFFSET)
-    wet = np.array([draw(node) for node in wet_nodes], dtype=np.uint32).reshape(-1, 5)
-    state["ocean_chunks"] = len(wet)
-    engine.set_buffer("OceanDraws", np.uint32([len(wet)]))
-    if len(wet):
-        engine.set_buffer("OceanDraws", wet, offset=DRAWS_OFFSET)
-
-
-def upload_shadow_cascades(forward):
-    """The sun's shadow cascades (shadows.py) for the view along `forward`,
-    switched off with the menu's Shadows or while the sun is below the
-    horizon at the camera."""
-    sun = sun_direction()
-    on = state["shadows"] and dot(sun, normalize(state["position"])) > -0.1
-    width, height = engine.framebuffer_size
-    aspect = width / height if width > 0 and height > 0 else 16.0 / 9.0
-    cascades = shadows.fit_cascades(state["position"], forward, sun, FOV, aspect, SHADOW_SPLITS,
-                                    SHADOW_RESOLUTION, SHADOW_REACH)
-    engine.set_custom_mat4_array("planet.shadow.viewProj", [c.matrix for c in cascades])
-    engine.set_custom_vec4("planet.shadow.splits", tuple(c.far for c in cascades))
-    engine.set_custom_vec4("planet.shadow.texel", tuple(c.texel for c in cascades))
-    engine.set_custom_vec4("planet.shadow.settings", (1.0 if on else 0.0, float(SHADOW_RESOLUTION), 0.0, 0.0))
-
-
-def upload_clouds():
-    """The cloud layer's parameters (CloudParams, clouds.glsl)."""
-    engine.set_custom_vec4("planet.clouds.layer", CLOUD_LAYER + (state["cloud_coverage"], state["cloud_density"]))
-    engine.set_custom_vec4("planet.clouds.shape", CLOUD_SHAPE + (1.0 if state["clouds"] else 0.0,))
-    engine.set_custom_vec4("planet.clouds.wind", state["cloud_wind"] + (0.0,))
-
-
-def load_ground_textures():
-    """Hand the ground's textures to the pipeline (ground_textures.py) and
-    their mean albedos to GroundParams; without them the ground keeps its
-    procedural colours."""
-    means = ground_textures.load(engine)
-    state["ground_textures"] = means is not None
-    if means is None:
-        print("ground textures: none in textures/; run `python ground_textures.py` to download them", flush=True)
-        return
-    engine.set_custom_vec4_array("planet.ground.means", [m + (0.0,) for m in means])
-
-
-def upload_ground():
-    """GroundParams' tiling offsets for the camera's position relative to
-    each body's centre (in double, less their whole tiles) and its
-    settings."""
-    camera = state["position"]
-    offsets = []
-    for body in bodies:
-        relative = sub(camera, body.centre())
-        for size in GROUND_SCALES:
-            offsets.append(tuple(v / size - math.floor(v / size) for v in relative) + (0.0,))
-    engine.set_custom_vec4_array("planet.ground.offsets", offsets + [(0.0,) * 4] * (4 - len(offsets)))
-    strength = state["texture_strength"] if state["ground_textures"] else 0.0
-    engine.set_custom_vec4("planet.ground.settings", (strength, state["texture_relief"]) + GROUND_SCALES)
-
-
-def blow_clouds(dt):
-    """Move the clouds' weather with the wind by `dt` seconds (times the
-    time warp): the menu's wind speed in metres a second, along the
-    coverage noise's x, in its units (a unit is RADIUS / its frequency
-    metres)."""
-    step = state["wind_speed"] * dt * WARPS[state["warp"]] * CLOUD_SHAPE[0] / RADIUS
-    wind = state["cloud_wind"]
-    state["cloud_wind"] = (wind[0] + step, wind[1], wind[2])
-    engine.set_custom_vec4("planet.clouds.wind", state["cloud_wind"] + (0.0,))
-
-
-def upload_orbit_path():
-    """The path the ship would coast along (flight.orbit_path) around the
-    body it is reckoned around (flight.reference), drawn where that body
-    is now, relative to the camera (subtracted in double), as one indexed
-    indirect draw for OrbitPath; none without a ship, with the path
-    switched off, or when there is no path."""
-    ship = state["ship"]
-    points = []
-    if ship is not None and state["orbit_path"]:
-        body, position, velocity = flight.reference(flight_planet, ship.position, ship.velocity)
-        centre = body.position(flight_planet.time) if body is flight_planet.moon else (0.0, 0.0, 0.0)
-        points = [add(centre, p) for p in flight.orbit_path(body, position, velocity, count=ORBIT_POINTS)]
-    if points:
-        camera = state["position"]
-        relative = np.zeros((len(points), 4), dtype=np.float32)
-        relative[:, :3] = [sub(p, camera) for p in points]
-        engine.set_buffer("OrbitPoints", relative)
-        # count, padding, then indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
-        engine.set_buffer("OrbitDraws", np.uint32([1, 0, 0, 0, len(points), 1, 0, 0, 0]))
-    else:
-        engine.set_buffer("OrbitDraws", np.uint32([0]))
-
-
-def read_back_heights():
-    """Chunk heights into the trees' nodes, and the probes' heights when
-    they were made with the current terrain version: the ground under the
-    camera (when it is still over the body it was measured on), the site's
-    natural height, and the ground patch around the ship. Each probe result
-    carries the stamp of the frame that asked for it, which also gives the
-    probes' latency."""
-    readback = engine.get_readback("ChunkHeights")
-    if readback is not None:
-        pool.take_heights(np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, 4))
-    readback = engine.get_readback("ProbeHeights")
-    if readback is None:
-        return
-    probes = np.frombuffer(readback["data"], dtype=np.float32).reshape(PROBES, 4)
-    stamp = float(probes[0, 1])
-    requests = state["probe_requests"]
-    request = requests.get(stamp)
-    for old in [s for s in requests if s <= stamp]:
-        del requests[old]
-    if request is None or request[0] != state["terrain_version"]:
-        return
-    state["probe_latency"] = state["frame"] + 1 - stamp
-    _, ground_body, patch, extra = request
-    state["ground"] = float(probes[0, 0]) if ground_body is body_under(viewpoint()) else None
-    if state["site_height"] is None:
-        state["site_height"] = float(probes[1, 0])
-    if patch is not None:
-        patch[1].set_heights(probes[2:2 + PATCH_SIZE * PATCH_SIZE, 0])
-        state["patch"] = patch
-    first = PROBES - EXTRA_PROBES
-    state["extra_heights"] = [(d, float(h)) for d, h in zip(extra, probes[first:first + len(extra), 0])]
-
-
-def start_terrain():
-    """Once the site's natural height is known: the pad at that height, a
-    tree to build the planet with it, and a tree for each other body that
-    has none yet."""
-    upload_terrain()
-    state["terrain_version"] += 1
-    state["ground"] = None
-    state["patch"] = None
-    for body in bodies:
-        if body is planet or body.tree is None:
-            body.tree = body.new_tree()
 
 
 def regenerate():
-    """Apply changed terrain parameters: every chunk is released, the
-    site's height is measured again, and the planet is built again."""
-    if planet.tree is not None:
-        for node in planet.tree.nodes():
-            if node.chunk is not None:
-                pool.release(node)
-                node.chunk = None
-    planet.tree = None
-    state["site_height"] = None
-    state["ground"] = None
-    state["patch"] = None
-    state["terrain_version"] += 1
-    state["planet_edit"] = {name: list(value) for name, value in planet.terrain.items()}
-    upload_terrain()
+    """The planet built again with its terrain's parameters
+    (PlanetWorld.regenerate), and the menu's copy of them reset."""
+    world.regenerate()
+    if state["terrain_edit"] is not None:
+        state["terrain_edit"].reset()
 
 
 def build_site():
     """Blocks around the site, in metres east, up and north of it."""
-    _, up, east, north = site_frame()
+    _, up, east, north = world.site_frame()
     rotation = euler_from_basis(east, up, scale(north, -1.0))
     positions, normals = box()
     pieces = [
@@ -841,19 +256,6 @@ def build_site():
         engine.scene.set_material_float(entity, "gridStrength", 0.0)
         engine.scene.set_render_layer_mask(entity, 1)
         blocks.append((entity, add(scale(east, e), add(scale(up, u), scale(north, n)))))
-
-
-def build_moon():
-    """The moon (flight.Moon) circling in the plane of the site's up and
-    east, so that it passes over the site moving east like preset 9's
-    orbit, starting MOON_PHASE radians east of the site's zenith; drawn as
-    body 1 with its cratered terrain (moon.glsl); its tree is made with
-    the planet's (start_terrain)."""
-    _, up, east, _ = site_frame()
-    flight_planet.moon = flight.Moon(radius=MOON_RADIUS, surface_gravity=MOON_GRAVITY, distance=MOON_DISTANCE,
-                                     phase=MOON_PHASE, u=up, v=east, primary_gm=flight_planet.gm)
-    moon = Body(1, "moon", MOON_RADIUS, None, orbit=flight_planet.moon, floor=MOON_FLOOR, heights=MOON_HEIGHTS)
-    bodies.append(moon)
 
 
 def cockpit_view():
@@ -998,7 +400,7 @@ def set_reentry_pass(on):
 
 def build_cards():
     """The view's card at the top left, the debug card at the bottom left
-    (cards.py) and the hint bar along the bottom (hints.py)."""
+    and the hint bar along the bottom (toolkit.overlay)."""
     canvas = engine.ui.create_canvas(reference_size=(1600, 900))
     state["cards"] = (Card(engine.ui, canvas, (0, 0), 12), Card(engine.ui, canvas, (0, 1), 16, margin=(24, 76)))
     state["hint_bar"] = HintBar(engine.ui, canvas)
@@ -1006,54 +408,17 @@ def build_cards():
 
 # ── Camera ─────────────────────────────────────────────────────────────────
 
-def altitude():
-    """Height above the sphere of the body under the camera (on the
-    planet, sea level)."""
-    body = body_under(viewpoint())
-    return length(body.relative(viewpoint())) - body.radius
-
-
-def surface_height():
-    """The height of what is under the camera: the ground, or the sea where
-    the ground is below sea level on a body with an ocean."""
-    ground = state["ground"] or 0.0
-    return max(ground, 0.0) if body_under(viewpoint()).ocean else ground
-
-
-def datum_name():
-    """What altitude() is measured from: sea level, or on a body without
-    a sea, its radius."""
-    return "sea level" if body_under(viewpoint()).ocean else "the radius"
-
-
-def height_above_ground():
-    return altitude() - surface_height()
-
-
-def keep_above_ground():
-    body = body_under(state["position"])
-    floor = body.radius + surface_height() + MIN_ALTITUDE
-    offset = body.relative(state["position"])
-    if length(offset) < floor:
-        state["position"] = add(body.centre(), scale(normalize(offset), floor))
-
-
-def radial_up(point):
-    """Up at `point`: away from the centre of the body under it."""
-    return normalize(body_under(point).relative(point))
-
-
 def camera_basis():
     """(right, up, forward), with the horizon level: up lies in the plane of
     the forward direction and the radial up of the body under the camera."""
-    radial = radial_up(state["position"])
+    radial = world.radial_up(state["position"])
     forward = state["forward"]
     right = normalize(cross(forward, radial))
     return right, cross(right, forward), forward
 
 
 def look(dx, dy):
-    radial = radial_up(state["position"])
+    radial = world.radial_up(state["position"])
     forward = rotate(state["forward"], radial, -dx * LOOK_RADIANS_PER_PIXEL)
     right = normalize(cross(forward, radial))
     pitched = rotate(forward, right, -dy * LOOK_RADIANS_PER_PIXEL)
@@ -1071,7 +436,7 @@ def fly(dt):
             move = add(move, direction)
     if length(move) == 0.0:
         return
-    speed = max(height_above_ground(), 2.0) * 0.5 * state["speed_factor"]
+    speed = max(world.height_above_ground(viewpoint()), 2.0) * 0.5 * state["speed_factor"]
     if engine.input.is_key_down(keys.LEFT_SHIFT):
         speed *= 4.0
     if engine.input.is_key_down(keys.LEFT_CONTROL):
@@ -1083,11 +448,11 @@ def fly(dt):
 def teleport(preset, moon=False):
     """Presets 1 - 7 move the free camera; 8 and 9 place the ship, with
     `moon` on or around the moon."""
-    _, up, east, north = site_frame()
-    ground = site_ground()
-    state["teleport_when_known"] = preset if preset in (1, 2, 8) and state["site_height"] is None else None
-    state["ground"] = None
-    state["patch"] = None
+    _, up, east, north = world.site_frame()
+    ground = world.site_ground()
+    state["teleport_when_known"] = preset if preset in (1, 2, 8) and world.site_height is None else None
+    world.ground = None
+    world.patch = None
     state["moon_landing"] = None
     if preset in (8, 9) and moon:
         state["teleport_when_known"] = None
@@ -1137,7 +502,7 @@ def leave_ship():
     """Camera mode, from where the ship is, facing its way with the horizon level."""
     state["mode"] = "camera"
     _, _, forward = state["ship"].axes()
-    radial = radial_up(state["position"])
+    radial = world.radial_up(state["position"])
     if abs(dot(forward, radial)) > 0.99:
         forward = local_frame(radial)[1]
     state["forward"] = normalize(forward)
@@ -1148,13 +513,13 @@ def place_ship(preset):
     translation assist on. 9: in a circular orbit ORBIT_HEIGHT above the
     blocks, moving east with the nose 40 degrees down, where the planet is,
     assist off."""
-    _, up, east, north = site_frame()
+    _, up, east, north = world.site_frame()
     if preset == 8:
-        position = add(site_ground(), add(scale(up, SHIP_CLEARANCE), scale(north, -16.0)))
+        position = add(world.site_ground(), add(scale(up, SHIP_CLEARANCE), scale(north, -16.0)))
         forward, velocity, assist = north, (0.0, 0.0, 0.0), True
     else:
         position, assist = scale(up, RADIUS + ORBIT_HEIGHT), False
-        velocity = scale(east, flight.circular_speed(flight_planet, ORBIT_HEIGHT))
+        velocity = scale(east, flight.circular_speed(world.physics, ORBIT_HEIGHT))
         down = math.radians(40.0)
         forward = normalize(add(scale(east, math.cos(down)), scale(up, -math.sin(down))))
     new_ship(position, velocity, forward, up, assist)
@@ -1178,8 +543,8 @@ def moon_spot():
     planet, seen from the moon: the ground there is lit and has the planet
     in its sky (straight towards the sun when they are opposite)."""
     moon = moon_body()
-    towards = add(sun_direction(), normalize(scale(moon.centre(), -1.0)))
-    return normalize(towards) if length(towards) > 1e-3 else sun_direction()
+    towards = add(world.sun_direction(), normalize(scale(moon.centre(), -1.0)))
+    return normalize(towards) if length(towards) > 1e-3 else world.sun_direction()
 
 
 def place_ship_at_moon(preset):
@@ -1200,7 +565,7 @@ def place_ship_at_moon(preset):
         feet = [normalize(add(scale(up, moon.radius), flight.quat_rotate(q, arm)))
                 for arm in state["ship"].params.gear]
         state["moon_landing"] = up
-        state["extra_probes"] = [(up, moon)] + [(d, moon) for d in feet]
+        world.extra_probes = [(up, moon)] + [(d, moon) for d in feet]
         return
     up = normalize(sub(up, scale(orbit_normal, dot(up, orbit_normal))))
     along = cross(orbit_normal, up)
@@ -1219,8 +584,8 @@ def set_down_on_moon():
     spot = state["moon_landing"]
     if spot is None or state["mode"] != "ship":
         return
-    asked = state["extra_probes"]
-    heights = state["extra_heights"]
+    asked = world.extra_probes
+    heights = world.extra_heights
     if [probe for probe, _ in heights] != asked:
         return
     body = asked[0][1]
@@ -1228,7 +593,7 @@ def set_down_on_moon():
     new_ship(add(body.centre(), scale(spot, body.radius + ground + SHIP_CLEARANCE)), body.velocity(),
              local_frame(spot)[1], spot, True)
     state["moon_landing"] = None
-    state["extra_probes"] = []
+    world.extra_probes = []
 
 
 def stick(value):
@@ -1291,12 +656,12 @@ def ground_patch_request(ship):
     heights come back: ahead along its velocity over that body's ground by
     the probes' latency (times the warp), reaching that far again either
     way beyond the ship's contact points."""
-    body = body_under(ship.position)
+    body = world.body_under(ship.position)
     position = body.relative(ship.position)
     velocity = sub(ship.velocity, body.velocity())
     radial = normalize(position)
     along = sub(velocity, scale(radial, dot(velocity, radial)))
-    ahead = state["probe_latency"] * state["frame_ms"] / 1000.0 * WARPS[state["warp"]]
+    ahead = world.probe_latency * state["frame_ms"] / 1000.0 * WARPS[state["warp"]]
     half = SHIP_REACH + PATCH_MARGIN + length(along) * ahead
     return body, GroundPatch(body.radius, add(position, scale(along, ahead)), 2.0 * half / (PATCH_SIZE - 1),
                              sea=body.ocean)
@@ -1305,9 +670,9 @@ def ground_patch_request(ship):
 def ground_under_ship():
     """The ground patch's query for the ship, taking points from the
     planet's centre, or None while there is no patch."""
-    if state["patch"] is None:
+    if world.patch is None:
         return None
-    body, patch = state["patch"]
+    body, patch = world.patch
     return lambda point: patch.query(body.relative(point))
 
 
@@ -1320,103 +685,37 @@ def fly_ship(dt):
     state["impact_speed"] = 0.0
     steps = 0
     while state["accumulator"] >= FLIGHT_STEP and steps < MAX_STEPS_PER_FRAME:
-        flight_planet.time = state["flight_time"]
-        ship.step(flight_planet, state["controls"], FLIGHT_STEP, ground)
+        ship.step(world.physics, state["controls"], FLIGHT_STEP, ground)
         state["impact_speed"] = max(state["impact_speed"], ship.impact_speed)
         state["accumulator"] -= FLIGHT_STEP
-        state["flight_time"] += FLIGHT_STEP
+        world.time += FLIGHT_STEP
         steps += 1
     if steps == MAX_STEPS_PER_FRAME:
         state["accumulator"] = 0.0      # too far behind: drop the rest rather than fall further behind
-    flight_planet.time = state["flight_time"]
     state["position"] = chase_view(ship)[0] if state["chase"] else cockpit_eye(ship)
     state["forward"] = view_basis()[2]
 
 
-def in_view(centre, radius):
-    """Whether a sphere around `centre` (planet space) is roughly in view: a
-    cone around the camera's forward direction that holds the screen."""
-    to_centre = sub(centre, state["position"])
-    distance = length(to_centre)
-    if distance <= radius:
-        return True
-    width, height = engine.framebuffer_size
-    aspect = width / height if width > 0 and height > 0 else 16.0 / 9.0
-    half_diagonal = math.atan(math.tan(math.radians(FOV) * 0.5) * math.sqrt(1.0 + aspect * aspect))
-    angle = math.acos(max(-1.0, min(1.0, dot(to_centre, state["forward"]) / distance)))
-    return angle - math.asin(min(1.0, radius / distance)) < half_diagonal
+def orbit_path_points():
+    """ORBIT_POINTS points of the path the ship would coast along
+    (flight.orbit_path) around the body it is reckoned around
+    (flight.reference), where that body is now; none without a ship or with
+    the path switched off."""
+    ship = state["ship"]
+    if ship is None or not state["orbit_path"]:
+        return []
+    body, position, velocity = flight.reference(world.physics, ship.position, ship.velocity)
+    centre = body.position(world.time) if body is world.physics.moon else (0.0, 0.0, 0.0)
+    return [add(centre, p) for p in flight.orbit_path(body, position, velocity, count=ORBIT_POINTS)]
 
 
 # ── Per frame ──────────────────────────────────────────────────────────────
 
-def rebuild_for_sun():
-    """When the sun has moved more than HORIZON_SUN_STEP from the direction
-    the chunks' horizons were measured towards (chunk_build.comp), measure
-    towards the new one: every built chunk of every body is built again in
-    its own slot, nearest first, in the jobs this frame's new chunks leave
-    over."""
-    sun = sun_direction()
-    if state["horizon_sun"] is None or dot(sun, state["horizon_sun"]) < math.cos(HORIZON_SUN_STEP):
-        state["horizon_sun"] = sun
-        engine.set_custom_vec4("planet.horizonSun", sun + (0.0,))
-        distances = []
-        for body in bodies:
-            if body.tree is None:
-                continue
-            eye = body.relative(state["position"])
-            distances += [(length(sub(node.bound_centre, eye)), node)
-                          for node in body.tree.nodes() if node.chunk is not None]
-        distances.sort(key=lambda pair: pair[0], reverse=True)
-        state["rebuild"] = [node for _, node in distances]   # popped from the end: nearest first
-    queue = state["rebuild"]
-    while queue:
-        node = queue[-1]
-        if node.chunk is None:
-            queue.pop()                                # released since
-            continue
-        if not pool.rebuild(node):
-            break
-        queue.pop()
-
-
-def update_level_of_detail():
-    """Each body's tree updated for the camera (from the body's centre),
-    its missing chunks built, those in view first, and its unused ones
-    evicted; then the sun's rebuilds and this frame's probes."""
-    state["frame"] += 1
-    trees = [body for body in bodies if body.tree is not None]
-    if trees and not state["frozen"]:
-        for body in trees:
-            centre = body.centre()
-            body.tree.update(body.relative(state["position"]), state["frame"])
-            body.tree.build(MAX_JOBS, priority=lambda distance, node, centre=centre: (
-                not in_view(add(centre, node.bound_centre), node.bound_radius), distance))
-            body.tree.evict(state["frame"])
-        rebuild_for_sun()
-    # The probes: the ground under the camera on the body under it, the site, and the ground patch
-    # around the ship.
-    _, site_up, _, _ = site_frame()
-    ship = state["ship"]
-    patch = ground_patch_request(ship) if state["mode"] == "ship" and not ship.crashed else None
-    ground_body = body_under(viewpoint())
-    probes = [(normalize(ground_body.relative(viewpoint())), ground_body), (site_up, planet)]
-    probes += [(d, patch[0]) for d in patch[1].directions] if patch is not None else []
-    extra = list(state["extra_probes"][:EXTRA_PROBES])
-    unused = ((0.0, 1.0, 0.0), planet)
-    probes += [unused] * (PROBES - EXTRA_PROBES - len(probes))
-    probes += extra + [unused] * (EXTRA_PROBES - len(extra))
-    stamp = float(state["frame"])
-    state["probe_requests"][stamp] = (state["terrain_version"], ground_body, patch, extra)
-    pool.submit_jobs([tuple(d) + (float(body.index),) for d, body in probes], stamp)
-
-
 def frame(dt):
-    read_back_heights()
+    started = world.begin_frame(viewpoint())
     set_down_on_moon()
-    if planet.tree is None and state["site_height"] is not None:
-        start_terrain()
-        if state["teleport_when_known"]:
-            teleport(state["teleport_when_known"])
+    if started and state["teleport_when_known"]:
+        teleport(state["teleport_when_known"])
 
     if not state["scripted_controls"]:
         read_gamepad_buttons()
@@ -1432,31 +731,28 @@ def frame(dt):
             look(dx, dy)
         state["speed"] = 0.0
         fly(dt)
-        keep_above_ground()
+        state["position"] = world.keep_above_ground(state["position"], MIN_ALTITUDE)
         # The world's clock runs on (the moon moves) while the ship waits; the camera moves with the
         # body under it.
-        body = body_under(state["position"])
+        body = world.body_under(state["position"])
         before = body.centre()
-        state["flight_time"] += dt * WARPS[state["warp"]]
-        flight_planet.time = state["flight_time"]
+        world.time += dt * WARPS[state["warp"]]
         state["position"] = add(state["position"], sub(body.centre(), before))
-    update_level_of_detail()
 
-    # Camera-relative placement: subtract in double, then hand floats over.
+    # The world for the view: the level of detail, the probes (with the ground patch around the
+    # ship), and everything placed relative to the camera, subtracted in double.
     camera = state["position"]
-    engine.set_custom_vec4("planet.cameraFromCentre", camera + (0.0,))
-    upload_drawn_chunks()
-    upload_orbit_path()
-    ground = site_ground()
+    right, up, forward = view_basis()
+    ship = state["ship"]
+    patch = ground_patch_request(ship) if state["mode"] == "ship" and not ship.crashed else None
+    world.end_frame(camera, (right, up, forward), dt, warp=WARPS[state["warp"]], viewpoint=viewpoint(),
+                    patch=patch)
+    world.set_orbit_path(orbit_path_points())
+    ground = world.site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
     place_ship_model(camera)
-    right, up, forward = view_basis()
     view_rotation = euler_from_basis(right, up, forward)
-    engine.scene.set_rotation(state["camera"], view_rotation)
-    upload_shadow_cascades(forward)
-    upload_ground()
-    blow_clouds(dt)
     if (state["mode"], state["chase"], state["generated_cockpit"]) != state["shown_mode"]:
         show_mode()
     if cockpit_view():
@@ -1490,13 +786,13 @@ def update_cockpit(right, up, forward, view_rotation):
     else:
         state["instruments"].place(state["cabin_screens"], to_world, euler_from_basis)
 
-    body_below = body_under(ship.position)
-    radial = radial_up(ship.position)
+    body_below = world.body_under(ship.position)
+    radial = world.radial_up(ship.position)
     velocity = ship_velocity()
     speed = length(velocity)
     moving = scale(velocity, 1.0 / speed) if speed > 1.0 else None
     engine.set_custom_vec4("planet.hud.prograde", (moving or ship_forward) + (1.0 if moving else 0.0,))
-    glow = flight.reentry_glow(flight_planet, ship.position, ship.velocity)
+    glow = flight.reentry_glow(world.physics, ship.position, ship.velocity)
     engine.set_custom_vec4("planet.hud.reentry", (glow, 0.0, 0.0, 0.0))
     set_reentry_pass(glow > 0.0)
 
@@ -1504,17 +800,17 @@ def update_cockpit(right, up, forward, view_rotation):
     level = sub(ship_forward, scale(radial, dot(ship_forward, radial)))
     heading = math.degrees(math.atan2(dot(level, east), dot(level, north))) % 360.0
     body, periapsis, apoapsis, circular = ship_orbit()
-    density = flight_planet.density(ship.position)
-    agl = distance_text(height_above_ground())
+    density = world.physics.density(ship.position)
+    agl = distance_text(world.height_above_ground(viewpoint()))
     state["instruments"].update((right, up, forward, ship_forward, radial, moving), {
         "body": body,
         "speed": speed,
         "climb": dot(velocity, radial),
         "height": tuple(agl.split(" ")),
         "agl": agl,
-        "datum": datum_name(),
+        "datum": world.datum_name(viewpoint()),
         "datum_short": "ASL" if body_below.ocean else "ALT",
-        "datum_height": distance_text(altitude()),
+        "datum_height": distance_text(world.altitude(viewpoint())),
         "heading": heading,
         "throttle": controls.throttle,
         "assist": controls.assist,
@@ -1531,7 +827,7 @@ def update_cockpit(right, up, forward, view_rotation):
 
 def ship_velocity():
     """The ship's velocity relative to the body under it."""
-    return sub(state["ship"].velocity, body_under(state["ship"].position).velocity())
+    return sub(state["ship"].velocity, world.body_under(state["ship"].position).velocity())
 
 
 def ship_orbit():
@@ -1539,9 +835,9 @@ def ship_orbit():
     (flight.reference): (that body's name, periapsis and apoapsis heights,
     the circular speed at the ship's distance from it)."""
     ship = state["ship"]
-    body, position, velocity = flight.reference(flight_planet, ship.position, ship.velocity)
+    body, position, velocity = flight.reference(world.physics, ship.position, ship.velocity)
     periapsis, apoapsis = flight.orbit(body, position, velocity)
-    name = "moon" if body is flight_planet.moon else "planet"
+    name = "moon" if body is world.physics.moon else "planet"
     return name, periapsis, apoapsis, math.sqrt(body.gm / length(position))
 
 
@@ -1566,9 +862,9 @@ def update_cards():
         velocity = ship_velocity()
         rows = [
             ("SPEED", "%.0f m/s" % length(velocity)),
-            ("CLIMB", "%+.1f m/s" % dot(velocity, radial_up(ship.position))),
-            ("ABOVE GROUND", distance_text(height_above_ground())),
-            ("ABOVE " + datum_name().upper(), distance_text(altitude())),
+            ("CLIMB", "%+.1f m/s" % dot(velocity, world.radial_up(ship.position))),
+            ("ABOVE GROUND", distance_text(world.height_above_ground(viewpoint()))),
+            ("ABOVE " + world.datum_name(viewpoint()).upper(), distance_text(world.altitude(viewpoint()))),
             ("THROTTLE", "%.0f %%" % (controls.throttle * 100.0)),
             ("ASSIST", "on" if controls.assist else "off"),
             ("TIME WARP", "x%d" % WARPS[state["warp"]]),
@@ -1582,8 +878,8 @@ def update_cards():
         view_card.show(True)
     elif state["mode"] != "ship":
         view_card.update("FREE CAMERA", [
-            ("ABOVE GROUND", distance_text(height_above_ground())),
-            ("ABOVE " + datum_name().upper(), distance_text(altitude())),
+            ("ABOVE GROUND", distance_text(world.height_above_ground(viewpoint()))),
+            ("ABOVE " + world.datum_name(viewpoint()).upper(), distance_text(world.altitude(viewpoint()))),
             ("SPEED", "%.0f m/s" % state["speed"]),
             ("SPEED FACTOR", "x%.2f" % state["speed_factor"]),
             ("TIME WARP", "x%d" % WARPS[state["warp"]]),
@@ -1604,21 +900,21 @@ def update_cards():
     deepest = max(node.level for t in trees for node in t.selected)
     debug_card.update("DEBUG", [
         ("FRAME", "%.1f ms" % state["frame_ms"]),
-        ("CHUNKS DRAWN", "%d of %d" % (selected - state["chunks_culled"], selected)),
-        ("OCEAN CHUNKS", "%d" % state["ocean_chunks"]),
+        ("CHUNKS DRAWN", "%d of %d" % (selected - world.chunks_culled, selected)),
+        ("OCEAN CHUNKS", "%d" % world.ocean_chunks),
         ("CHUNKS BUILT", "%d" % cached),
         ("POOL", "%d / %d" % (pool.used, SLOTS)),
         ("MISSING", "%d" % missing),
         ("DEEPEST LEVEL", "%d" % deepest),
-        ("SPLIT FACTOR", "%.2f%s" % (tree.split_factor, "  frozen" if state["frozen"] else "")),
-        ("COLOUR", COLOUR_MODES[state["colour_mode"]]),
+        ("SPLIT FACTOR", "%.2f%s" % (tree.split_factor, "  frozen" if world.frozen else "")),
+        ("COLOUR", COLOUR_MODES[world.colour_mode]),
         ("TERRAIN",),
         ("SEED", "%.1f  %.1f  %.1f" % tuple(terrain["seed"][:3])),
         ("MOUNTAINS", "%.0f m" % terrain["mountains"][1]),
         ("HILLS", "%.0f m" % terrain["hills"][1]),
-        ("SUN", "%.0f deg up at the site" % state["sun_elevation"]),
-        ("ATMOSPHERE", "density x%.2f" % state["density"]),
-        ("EXPOSURE", "%.3f" % state["exposure"]),
+        ("SUN", "%.0f deg up at the site" % world.sun_elevation),
+        ("ATMOSPHERE", "density x%.2f" % world.density),
+        ("EXPOSURE", "%.3f" % world.exposure),
     ])
 
 
@@ -1651,7 +947,7 @@ def current_hints():
                     (("Tab",), "Free camera"), (("F1",), "Settings"), (("F2",), "Controls")]
 
 
-# The controls sheet (F2, help_sheet.py): columns of (heading, rows of (caps, what they do)).
+# The controls sheet (F2, toolkit.overlay.HelpOverlay): columns of (heading, rows of (caps, what they do)).
 HELP_COLUMNS = [
     [("Free camera", [
         (("RMB",), "Look around"),
@@ -1711,31 +1007,15 @@ HELP_COLUMNS = [
 
 
 def on_init():
-    camera = engine.scene.create_entity("Camera")
-    engine.scene.add_component(camera, "Camera")
-    engine.scene.set_camera_main(camera, True)
-    engine.scene.set_camera_fov(camera, FOV)
-    engine.scene.set_camera_near(camera, NEAR_PLANE)
-    engine.scene.set_camera_reverse_z(camera, True)
-    state["camera"] = camera
-
-    upload_sky()
-    upload_clouds()
-    load_ground_textures()
-    upload_terrain()
-    upload_chunk_indices()
-    engine.set_buffer("OrbitIndices", np.arange(ORBIT_POINTS, dtype=np.uint32))
+    world.setup()
     build_site()
     build_cards()
-    build_moon()
     build_ship_model()
-    radii = [body.radius for body in bodies]
-    engine.set_custom_vec4("planet.radii", tuple(radii + [0.0] * (4 - len(radii))))
     build_cockpit()
     state["generated_cockpit"] = args.generated_cockpit
     state["cabin_screens"] = cockpit_screens()
     state["instruments"] = Instruments(engine, len(state["cabin_screens"]), FOV)
-    state["planet_edit"] = {name: list(value) for name, value in planet.terrain.items()}
+    state["terrain_edit"] = planet_settings.TerrainEdit(world)
     state["menu"] = SettingsMenu(engine, "Settings", menu_items())
     state["help"] = HelpOverlay(engine, "CONTROLS", HELP_COLUMNS, footer="F2, or Back on a gamepad, to close")
     teleport(1)
@@ -1759,41 +1039,18 @@ def on_init():
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
+# Keys that change settings in the menu too, shown beside them.
+MENU_KEYS = {"Exposure": ("B", "V"), "Atmosphere density": ("T", "Y"), "Sun elevation": ("Z", "X"),
+             "Ocean": ("O",), "Wireframe": ("F",), "Split factor": ("[", "]"),
+             "Colour: terrain / face / level": ("C",), "New seed": ("N",)}
+
+
 def menu_items():
-    """The settings menu (menu.py): the simulation's settings take effect at
-    once; the planet's are kept in planet_edit until Apply builds it again."""
-    edit = lambda name, index: (lambda: state["planet_edit"][name][index])
-
-    def edit_set(name, index):
-        def setter(value):
-            state["planet_edit"][name][index] = value
-        return setter
-
-    def set_and(key, then):
-        def setter(value):
-            state[key] = value
-            then()
-        return setter
-
-    def set_density(value):
-        state["density"] = value
-        flight_planet.density_factor = value
-        upload_sky()
-
-    def set_ocean(on):
-        state["ocean"] = on
-        engine.set_pass_enabled("Ocean", on)
-
+    """The settings menu (toolkit.overlay.SettingsMenu): the simulation's and the display's own
+    settings, and planet.settings' sky, clouds, ground, view and planet,
+    the planet's kept in its TerrainEdit until Apply builds it again."""
     def set_assist(on):
         state["controls"].assist = on
-
-    def set_split(value):
-        if planet.tree is not None:
-            planet.tree.split_factor = value
-
-    def apply_planet():
-        planet.terrain = {name: list(value) for name, value in state["planet_edit"].items()}
-        regenerate()
 
     return [
         {"heading": "Simulation"},
@@ -1802,48 +1059,8 @@ def menu_items():
          "keys": (",", "."), "hint": "How much faster than real time the ship flies and the moon moves."},
         {"toggle": "Translation assist", "get": lambda: state["controls"].assist, "set": set_assist,
          "keys": ("L",), "hint": "The throttle asks for a speed and E / Q for a climb rate; the thrusters hold them."},
-        {"heading": "Sky"},
-        {"slider": "Exposure", "min": 0.05, "max": 2.0, "get": lambda: state["exposure"],
-         "set": set_and("exposure", upload_sky), "format": "%.2f", "keys": ("B", "V"),
-         "hint": "The image's brightness before tone mapping."},
-        {"slider": "Atmosphere density", "min": 0.25, "max": 4.0, "get": lambda: state["density"],
-         "set": set_density, "format": "x%.2f", "keys": ("T", "Y"),
-         "hint": "Scales the air and the haze: the sky's colour, the haze far off and the drag on the ship."},
-        {"toggle": "Multiple scattering", "get": lambda: state["multiple_scattering"],
-         "set": set_and("multiple_scattering", upload_sky),
-         "hint": "The light the air scatters more than once, from the multiple scattering table."},
-        {"toggle": "Ozone", "get": lambda: state["ozone"], "set": set_and("ozone", upload_sky),
-         "hint": "The ozone layer's absorption of the light passing through it."},
-        {"slider": "Sun elevation", "min": -20.0, "max": 90.0, "get": lambda: state["sun_elevation"],
-         "set": set_and("sun_elevation", upload_sky), "format": "%.0f deg", "keys": ("Z", "X"),
-         "hint": "The sun's height above the horizon, seen from the blocks."},
-        {"slider": "Sun azimuth", "min": 0.0, "max": 360.0, "get": lambda: state["sun_azimuth"],
-         "set": set_and("sun_azimuth", upload_sky), "format": "%.0f deg",
-         "hint": "The sun's direction seen from the blocks, from east towards north."},
-        {"heading": "Clouds"},
-        {"toggle": "Clouds", "get": lambda: state["clouds"], "set": set_and("clouds", upload_clouds),
-         "hint": "The cloud layer between 1.5 and 3.5 km, and its shadows."},
-        {"slider": "Cloud cover", "min": 0.0, "max": 1.0, "get": lambda: state["cloud_coverage"],
-         "set": set_and("cloud_coverage", upload_clouds), "format": "%.2f",
-         "hint": "The share of the sky the clouds cover."},
-        {"slider": "Cloud density", "min": 0.005, "max": 0.1, "get": lambda: state["cloud_density"],
-         "set": set_and("cloud_density", upload_clouds), "format": "%.3f /m",
-         "hint": "How much light a metre of cloud stops at full density."},
-        {"slider": "Wind", "min": 0.0, "max": 60.0, "get": lambda: state["wind_speed"],
-         "set": lambda v: state.update(wind_speed=v), "format": "%.0f m/s",
-         "hint": "How fast the clouds drift, times the time warp."},
-        {"heading": "Ground"},
-        {"slider": "Ground textures", "min": 0.0, "max": 1.0, "get": lambda: state["texture_strength"],
-         "set": lambda v: state.update(texture_strength=v), "format": "%.2f",
-         "hint": "How much the ground's textures show over its colours; 0 leaves the colours alone. "
-                 "Needs the textures (python ground_textures.py)."},
-        {"slider": "Ground relief", "min": 0.0, "max": 2.0, "get": lambda: state["texture_relief"],
-         "set": lambda v: state.update(texture_relief=v), "format": "%.2f",
-         "hint": "The strength of the textures' normal maps in the light."},
-        {"toggle": "Ocean", "get": lambda: state["ocean"], "set": set_ocean, "keys": ("O",),
-         "hint": "The sea's surface; off, the sea floor shows."},
-        {"toggle": "Shadows", "get": lambda: state["shadows"], "set": lambda on: state.update(shadows=on),
-         "hint": "The sun's shadow cascades, out to 20 km."},
+    ] + planet_settings.sky_items(world, MENU_KEYS, site="the blocks") + planet_settings.cloud_items(world, MENU_KEYS) \
+        + planet_settings.ground_items(world, MENU_KEYS) + [
         {"heading": "Display"},
         {"toggle": "Button hints", "get": lambda: state["hints"], "set": lambda on: state.update(hints=on),
          "hint": "The bar of keys or gamepad buttons along the bottom of the screen."},
@@ -1851,58 +1068,26 @@ def menu_items():
          "hint": "The path the ship would coast along, around the body it is reckoned around."},
         {"toggle": "Debug text", "get": lambda: state["debug_text"], "set": lambda on: state.update(debug_text=on),
          "keys": ("I",), "hint": "The debug card: frame time, chunks, the pool and the terrain's settings."},
-        {"toggle": "Wireframe", "get": lambda: state["wireframe"], "set": set_wireframe, "keys": ("F",),
-         "hint": "The chunks' edges drawn over the terrain."},
-        {"slider": "Split factor", "min": 0.5, "max": 4.0,
-         "get": lambda: planet.tree.split_factor if planet.tree is not None else SPLIT_FACTOR,
-         "set": set_split, "format": "%.2f", "keys": ("[", "]"),
-         "hint": "A chunk splits within this many of its edge lengths of the camera; higher is finer and slower."},
-        {"button": "Colour: terrain / face / level",
-         "do": lambda: set_colour_mode((state["colour_mode"] + 1) % len(COLOUR_MODES)), "keys": ("C",),
-         "hint": "Colour the ground by its terrain, by cube face or by quadtree level."},
-        {"heading": "Planet"},
-        {"button": "New seed", "do": new_seed, "keys": ("N",),
-         "hint": "Builds a new planet from a random seed at once."},
-        {"slider": "Mountain height", "min": 0.0, "max": 8000.0, "get": edit("mountains", 1),
-         "set": edit_set("mountains", 1), "format": "%.0f m", "hint": "Taken on by Apply, below."},
-        {"slider": "Hill height", "min": 0.0, "max": 600.0, "get": edit("hills", 1),
-         "set": edit_set("hills", 1), "format": "%.0f m", "hint": "Taken on by Apply, below."},
-        {"slider": "Continent frequency", "min": 0.5, "max": 4.0, "get": edit("continent", 0),
-         "set": edit_set("continent", 0), "format": "%.2f",
-         "hint": "More, smaller continents as it rises. Taken on by Apply, below."},
-        {"slider": "Sea level bias", "min": -0.4, "max": 0.4, "get": edit("continent", 2),
-         "set": edit_set("continent", 2), "format": "%+.2f",
-         "hint": "Raises the land out of the sea as it rises. Taken on by Apply, below."},
-        {"slider": "Ocean depth", "min": 0.0, "max": 4000.0, "get": edit("hills", 2),
-         "set": edit_set("hills", 2), "format": "%.0f m", "hint": "Taken on by Apply, below."},
-        {"slider": "Detail height", "min": 0.0, "max": 30.0, "get": edit("detail", 1),
-         "set": edit_set("detail", 1), "format": "%.1f m",
-         "hint": "The relief of the ground's finest bumps, 80 m and less across. Taken on by Apply, below."},
-        {"slider": "Erosion", "min": 0.0, "max": 4.0, "get": edit("detail", 3),
-         "set": edit_set("detail", 3), "format": "%.2f",
-         "hint": "How much the slopes smooth the hills and the detail. Taken on by Apply, below."},
-        {"button": "Apply: build the planet again", "do": apply_planet,
-         "hint": "Builds the planet again with the settings above."},
-    ]
+    ] + planet_settings.view_items(world, MENU_KEYS) \
+        + planet_settings.planet_items(world, state["terrain_edit"], new_seed, MENU_KEYS)
 
 
 def new_seed():
-    planet.terrain["seed"] = [random.uniform(-100.0, 100.0) for _ in range(3)] + [0.0]
-    regenerate()
+    world.new_seed([random.uniform(-100.0, 100.0) for _ in range(3)])
+    state["terrain_edit"].reset()
 
 
 def set_wireframe(on):
-    state["wireframe"] = on
-    engine.set_pass_enabled("Wireframe", on)
+    world.set_wireframe(on)
 
 
 def set_colour_mode(mode):
-    state["colour_mode"] = mode
+    world.colour_mode = mode
 
 
 def change_terrain(name, index, factor):
-    planet.terrain[name][index] *= factor
-    regenerate()
+    world.change_terrain(name, index, factor)
+    state["terrain_edit"].reset()
 
 
 def on_key(key, from_pad=False):
@@ -1929,8 +1114,7 @@ def on_key(key, from_pad=False):
     elif key in (keys.COMMA, keys.PERIOD):
         state["warp"] = max(0, min(len(WARPS) - 1, state["warp"] + (1 if key == keys.PERIOD else -1)))
     elif key == keys.O:
-        state["ocean"] = not state["ocean"]
-        engine.set_pass_enabled("Ocean", state["ocean"])
+        world.set_ocean(not world.ocean)
     elif key == keys.N:
         new_seed()
     elif key == keys.F1:
@@ -1948,21 +1132,20 @@ def on_key(key, from_pad=False):
     elif key == keys.G:
         change_terrain("hills", 1, 1 / 1.25)
     elif key in (keys.Z, keys.X):
-        state["sun_elevation"] = max(-90.0, min(90.0, state["sun_elevation"] + (3.0 if key == keys.X else -3.0)))
-        upload_sky()
+        world.sun_elevation = max(-90.0, min(90.0, world.sun_elevation + (3.0 if key == keys.X else -3.0)))
+        world.upload_sky()
     elif key in (keys.T, keys.Y):
-        state["density"] *= 1.25 if key == keys.T else 1 / 1.25
-        flight_planet.density_factor = state["density"]
-        upload_sky()
+        world.density *= 1.25 if key == keys.T else 1 / 1.25
+        world.upload_sky()
     elif key in (keys.B, keys.V):
-        state["exposure"] *= 1.25 if key == keys.B else 1 / 1.25
-        upload_sky()
+        world.exposure *= 1.25 if key == keys.B else 1 / 1.25
+        world.upload_sky()
     elif key == keys.F:
-        set_wireframe(not state["wireframe"])
+        set_wireframe(not world.wireframe)
     elif key == keys.C:
-        set_colour_mode((state["colour_mode"] + 1) % len(COLOUR_MODES))
+        set_colour_mode((world.colour_mode + 1) % len(COLOUR_MODES))
     elif key == keys.K:
-        state["frozen"] = not state["frozen"]
+        world.frozen = not world.frozen
     elif key == keys.LEFT_BRACKET and tree is not None:
         tree.split_factor = max(0.5, tree.split_factor / 1.25)
     elif key == keys.RIGHT_BRACKET and tree is not None:
@@ -1985,8 +1168,7 @@ def settled():
     """The planet's tree made, no body's chunks missing, none still to
     build again for the sun, every built chunk's heights back, and no ship
     waiting to be set down on the moon."""
-    return (planet.tree is not None and not any(body.tree.missing for body in bodies if body.tree is not None)
-            and not state["rebuild"] and not pool.pending and state["moon_landing"] is None)
+    return world.settled() and state["moon_landing"] is None
 
 
 def look_up(degrees):
@@ -1999,8 +1181,8 @@ def look_up(degrees):
 
 def overcast():
     """Clouds over 95 % of the sky."""
-    state["cloud_coverage"] = 0.95
-    upload_clouds()
+    world.cloud_coverage = 0.95
+    world.upload_clouds()
 
 
 def lift_camera(height):
@@ -2021,7 +1203,7 @@ def lift_ship(height):
 def mid_reentry():
     """The ship 17 km above the blocks at 640 m/s eastwards, 8 degrees
     below level, its nose along its path: in the reentry glow."""
-    _, up, east, _ = site_frame()
+    _, up, east, _ = world.site_frame()
     down = math.radians(8.0)
     forward = normalize(add(scale(east, math.cos(down)), scale(up, -math.sin(down))))
     ship_up = normalize(sub(up, scale(forward, dot(up, forward))))
@@ -2049,7 +1231,7 @@ def near_moon(height, sun_elevation, down=0.0):
     sun stands `sun_elevation` degrees up, looking level across the sun's
     direction, turned `down` degrees below level."""
     moon = moon_body()
-    sun = sun_direction()
+    sun = world.sun_direction()
     across = normalize(cross(sun, (0.0, 1.0, 0.0) if abs(sun[1]) < 0.9 else (1.0, 0.0, 0.0)))
     up = rotate(sun, across, math.radians(90.0 - sun_elevation))
     state["mode"] = "camera"
@@ -2065,7 +1247,7 @@ def near_mountain(sun_elevation, sun_azimuth, top=False):
     `top`, 2,520 m above the sphere over the peak, looking south-west and
     down 20 degrees. The sun at `sun_elevation` and `sun_azimuth` (degrees,
     from east towards north) seen from the peak."""
-    _, up, east, north = site_frame()
+    _, up, east, north = world.site_frame()
     azimuth = math.radians(67.5)
     level = add(scale(east, math.cos(azimuth)), scale(north, math.sin(azimuth)))
     peak = normalize(add(up, scale(level, 60_000.0 / RADIUS)))
@@ -2081,9 +1263,9 @@ def near_mountain(sun_elevation, sun_azimuth, top=False):
     elevation, azimuth = math.radians(sun_elevation), math.radians(sun_azimuth)
     sun = add(scale(peak, math.sin(elevation)),
               scale(add(scale(peak_east, math.cos(azimuth)), scale(peak_north, math.sin(azimuth))), math.cos(elevation)))
-    state["sun_elevation"] = math.degrees(math.asin(max(-1.0, min(1.0, dot(sun, up)))))
-    state["sun_azimuth"] = math.degrees(math.atan2(dot(sun, north), dot(sun, east))) % 360.0
-    upload_sky()
+    world.sun_elevation = math.degrees(math.asin(max(-1.0, min(1.0, dot(sun, up)))))
+    world.sun_azimuth = math.degrees(math.atan2(dot(sun, north), dot(sun, east))) % 360.0
+    world.upload_sky()
 
 
 class CaptureTour:
@@ -2151,17 +1333,17 @@ class CaptureTour:
         self.captured = None
 
     def __call__(self, dt):
-        if state["site_height"] is None:
+        if world.site_height is None:
             return True
         name, preset, wireframe, colour_mode, change, sun, *setup = self.SHOTS[self.shot]
         self.frames += 1
         if self.frames == 1:
             if change is not None:
                 change_terrain(*change)
-            state["sun_elevation"], state["sun_azimuth"] = sun
-            upload_sky()
-            state["cloud_coverage"], state["cloud_wind"] = CLOUD_COVERAGE, (0.0, 0.0, 0.0)
-            upload_clouds()
+            world.sun_elevation, world.sun_azimuth = sun
+            world.upload_sky()
+            world.cloud_coverage, world.cloud_wind = CLOUD_COVERAGE, (0.0, 0.0, 0.0)
+            world.upload_clouds()
             state["chase"] = False
             state["generated_cockpit"] = False
             state["debug_text"] = False
@@ -2181,7 +1363,7 @@ class CaptureTour:
                 selected = sum(len(body.tree.selected) for body in bodies if body.tree is not None)
                 print("[planet] %s after %d frames%s, %d of %d chunks drawn, frame %.1f ms"
                       % (path if ok else "screenshot failed", self.frames, "" if done else " (not settled)",
-                         selected - state["chunks_culled"], selected, state["frame_ms"]), flush=True)
+                         selected - world.chunks_culled, selected, state["frame_ms"]), flush=True)
                 self.captured = self.frames
         elif self.frames > self.captured + 2:
             self.shot += 1
@@ -2214,7 +1396,7 @@ class Verify:
         self.requested = None
 
     def __call__(self, dt):
-        if state["site_height"] is None:
+        if world.site_height is None:
             return True
         self.frames += 1
         if self.frames == 1:
@@ -2308,9 +1490,9 @@ class MorphCheck:
     def settled_at_start(self):
         """Puts the camera where the descent starts and keeps it there until
         every chunk it needs is built."""
-        _, up, _, north = site_frame()
+        _, up, _, north = world.site_frame()
         state["mode"] = "camera"
-        state["position"] = scale(up, RADIUS + (state["site_height"] or 0.0) + self.START)
+        state["position"] = scale(up, RADIUS + (world.site_height or 0.0) + self.START)
         state["forward"] = normalize(add(north, scale(up, -0.3)))
         return settled()
 
@@ -2360,11 +1542,11 @@ class MorphCheck:
                          sorted(self.late_heights)[len(self.late_heights) // 2]), flush=True)
             os._exit(0 if self.least >= 0.99 and self.late == 0 else 1)
         # The next frame's camera.
-        _, up, east, north = site_frame()
+        _, up, east, north = world.site_frame()
         height = self.START * (self.END / self.START) ** (self.frame / self.FRAMES)
         self.travelled += height / 3.0 / 60.0
         spot = normalize(add(up, scale(north, self.travelled / RADIUS)))
-        new_position = scale(spot, RADIUS + (state["site_height"] or 0.0) + height)
+        new_position = scale(spot, RADIUS + (world.site_height or 0.0) + height)
         self.step_length = length(sub(new_position, camera))
         state["mode"] = "camera"
         state["position"] = new_position
@@ -2378,7 +1560,7 @@ def morph_factor(node, point, level=1):
     present position; 0 where the node has no such ancestor."""
     if level > min(MORPH_LEVELS, node.level):
         return 0.0
-    split = parent_split_distance(node, planet.tree) * 2.0 ** (level - 1)
+    split = planet_world.parent_split_distance(node, planet.tree) * 2.0 ** (level - 1)
     distance = length(sub(point, state["position"]))
     t = max(0.0, min(1.0, (distance - MORPH_START * split) / ((1.0 - MORPH_START) * split)))
     return t * t * (3.0 - 2.0 * t)
@@ -2438,11 +1620,11 @@ class CrackCheck:
             return True
         self.frames += 1
         if self.frames == 1:
-            state["frozen"] = False
+            world.frozen = False
             self.VIEWS[self.view][1]()
         elif not self.requested:
             if (self.frames >= self.MIN_FRAMES and settled()) or self.frames >= self.MAX_FRAMES:
-                state["frozen"] = True
+                world.frozen = True
                 previous = engine.get_readback("ChunkPool")
                 self.after = previous["frame"] if previous is not None else -1
                 engine.request_readback("ChunkPool")
@@ -2486,7 +1668,7 @@ class CrackCheck:
                 ([j * row for j in range(row)], (u0 - 1e-4 * size, v0 + 0.5 * size)),
             ]
             built = gpu[node.chunk]
-            fine_skirt = skirt_depth(node)
+            fine_skirt = planet_world.skirt_depth(node)
             for indices, (u, v) in sides:
                 # Past a face's edge the cube point leaves the cube; normalising puts it on the sphere.
                 other = selected_at(normalize(cube_sphere.spherify(cube_sphere.cube_point(node.face, u, v))))
@@ -2495,7 +1677,7 @@ class CrackCheck:
                 neighbour = other.level
                 edges += 1
                 step = 1 << (node.level - neighbour)
-                coarse_skirt = skirt_depth(other)
+                coarse_skirt = planet_world.skirt_depth(other)
                 points = [add(node.centre, tuple(float(c) for c in built[k, :3])) for k in indices]
                 # As drawn: both chunks' vertices morphed (morph.glsl), the coarse ones found by position.
                 drawn_points = [morphed_point(node, built, k % row, k // row) for k in indices]
@@ -2582,7 +1764,7 @@ class LandingCheck:
         self.rings = self.RINGS[body_name]
         self.lowest = self.body is not planet
         if self.body is planet:
-            _, up, east, north = site_frame()
+            _, up, east, north = world.site_frame()
             self.around = "the site"
         else:
             up = moon_spot()
@@ -2614,8 +1796,8 @@ class LandingCheck:
         self.frames += 1
         if self.spot >= 0 and self.frames < self.FRAMES_PER_SPOT:
             return True
-        if self.spot >= 0 and state["ground"] is not None:
-            height = state["ground"]
+        if self.spot >= 0 and world.ground is not None:
+            height = world.ground
             slope = self.slope()
             if slope is not None and slope <= self.MAX_SLOPE and (
                     self.best is None or (height < self.best[0] if self.lowest else height > self.best[0])):
@@ -2627,10 +1809,10 @@ class LandingCheck:
         if self.spot < len(self.spots):
             state["mode"] = "camera"
             state["position"] = add(self.body.centre(), scale(self.spots[self.spot], self.body.radius + 9_000.0))
-            state["ground"] = None
-            state["extra_probes"] = self.slope_probes(self.spots[self.spot])
+            world.ground = None
+            world.extra_probes = self.slope_probes(self.spots[self.spot])
         else:
-            state["extra_probes"] = []
+            world.extra_probes = []
             height, up = self.best
             east, north = local_frame(up)
             state["ship"] = flight.Ship(position=self.at(up, height + 500.0), velocity=self.body.velocity(),
@@ -2639,8 +1821,8 @@ class LandingCheck:
             state["scripted_controls"] = True
             state["mode"] = "ship"
             state["warp"] = 0
-            state["patch"] = None
-            self.start = state["flight_time"]
+            world.patch = None
+            self.start = world.time
             print("[planet] the %s spot found on the %s with a slope of at most %.0f degrees: %.0f m, %.0f km from %s "
                   "at %.1f degrees from east, %.1f degrees steep"
                   % ("lowest" if self.lowest else "highest", self.body.name, self.MAX_SLOPE, height,
@@ -2657,11 +1839,11 @@ class LandingCheck:
     def slope(self):
         """The slope (degrees) at the spot from its slope_probes once their
         heights are back, else None."""
-        asked = state["extra_probes"]
-        if not asked or [probe for probe, _ in state["extra_heights"]] != asked:
+        asked = world.extra_probes
+        if not asked or [probe for probe, _ in world.extra_heights] != asked:
             return None
         surface = (lambda h: max(h, 0.0)) if self.body.ocean else (lambda h: h)
-        here, east, north = (surface(h) for _, h in state["extra_heights"])
+        here, east, north = (surface(h) for _, h in world.extra_heights)
         rise = math.hypot(east - here, north - here) / self.SLOPE_SPAN
         return math.degrees(math.atan(rise))
 
@@ -2674,7 +1856,7 @@ class LandingCheck:
 
     def land(self):
         ship = state["ship"]
-        now = state["flight_time"]
+        now = world.time
         if self.touched is None:
             self.touchdown_speed = max(self.touchdown_speed, state["impact_speed"])
         if self.touched is None and (ship.on_ground or ship.crashed):
@@ -2682,14 +1864,14 @@ class LandingCheck:
             state["controls"] = flight.Controls(assist=True)
         if self.touched is not None:
             q = ship.orientation
-            state["extra_probes"] = [(normalize(self.body.relative(add(ship.position, flight.quat_rotate(q, arm)))),
+            world.extra_probes = [(normalize(self.body.relative(add(ship.position, flight.quat_rotate(q, arm)))),
                                       self.body) for arm in ship.params.gear]
         if self.touched is not None and now - self.touched >= self.REST_SECONDS[self.body.name] or now - self.start > self.TIMEOUT_SECONDS:
             self.report(ship)
         return True
 
     def report(self, ship):
-        patch = state["patch"][1] if state["patch"] is not None else None
+        patch = world.patch[1] if world.patch is not None else None
         ok = patch is not None and not ship.crashed and ship.on_ground
         if patch is not None:
             centre = self.body.relative(ship.position)
@@ -2704,11 +1886,11 @@ class LandingCheck:
             print("[planet]   gear points below the surface: %s m" % ", ".join("%+.3f" % d for d in gear),
                   flush=True)
             print("[planet]   patch height under the ship minus the probe's: %+.3f m"
-                  % (patch_height - (state["ground"] or 0.0)), flush=True)
+                  % (patch_height - (world.ground or 0.0)), flush=True)
             # Each gear point's height above the terrain itself, measured at its direction.
             surface = (lambda h: max(h, 0.0)) if self.body.ocean else (lambda h: h)
             terrain = [length(add(centre, flight.quat_rotate(q, arm))) - self.body.radius - surface(h)
-                       for arm, (_, h) in zip(ship.params.gear, state["extra_heights"])]
+                       for arm, (_, h) in zip(ship.params.gear, world.extra_heights)]
             print("[planet]   gear points above the terrain at their directions: %s m"
                   % ", ".join("%+.3f" % d for d in terrain), flush=True)
             # The patch's surface against the terrain's at each gear point.
@@ -2739,9 +1921,9 @@ class LandingCheck:
                                     orientation=flight.quat_from_basis(east, up, scale(north, -1.0)))
         state["controls"] = flight.Controls(assist=False)
         state["warp"] = len(WARPS) - 1
-        state["patch"] = None
-        state["extra_probes"] = []
-        self.diving = state["flight_time"]
+        world.patch = None
+        world.extra_probes = []
+        self.diving = world.time
         self.crash_frames = 0
 
     def dive(self):
@@ -2749,9 +1931,9 @@ class LandingCheck:
         if ship.crashed:
             self.crash_frames += 1
             state["warp"] = 0
-        if self.crash_frames < self.FRAMES_PER_SPOT and state["flight_time"] - self.diving < self.TIMEOUT_SECONDS:
+        if self.crash_frames < self.FRAMES_PER_SPOT and world.time - self.diving < self.TIMEOUT_SECONDS:
             return True
-        above = height_above_ground()
+        above = world.height_above_ground(viewpoint())
         print("[planet] a dive at %.0f m/s and x%d warp: %s, the centre %.2f m above the ground, impact %.0f m/s"
               % (self.DIVE_SPEED, WARPS[-1], "crashed" if ship.crashed else "not crashed", above,
                  ship.impact_speed), flush=True)
@@ -2778,18 +1960,18 @@ class OrbitCheck:
             return True
         if self.start is None:
             teleport(9)
-            flight_planet.moon_pulls = False
+            world.physics.moon_pulls = False
             state["warp"] = len(WARPS) - 1
             ship = state["ship"]
-            self.start = state["flight_time"]
-            self.period = 2.0 * math.pi * math.sqrt((RADIUS + ORBIT_HEIGHT) ** 3 / flight_planet.gm)
-            self.orbit0 = flight.orbit(flight_planet, ship.position, ship.velocity)
+            self.start = world.time
+            self.period = 2.0 * math.pi * math.sqrt((RADIUS + ORBIT_HEIGHT) ** 3 / world.physics.gm)
+            self.orbit0 = flight.orbit(world.physics, ship.position, ship.velocity)
             return True
         ship = state["ship"]
         height = length(ship.position) - RADIUS
         self.low, self.high = min(self.low, height), max(self.high, height)
-        if state["flight_time"] - self.start >= self.period:
-            orbit1 = flight.orbit(flight_planet, ship.position, ship.velocity)
+        if world.time - self.start >= self.period:
+            orbit1 = flight.orbit(world.physics, ship.position, ship.velocity)
             print("[planet] one orbit (%.0f s of flight) at %d m:" % (self.period, ORBIT_HEIGHT), flush=True)
             print("[planet]   periapsis / apoapsis at the start %.1f / %.1f m, at the end %.1f / %.1f m"
                   % (self.orbit0 + orbit1), flush=True)

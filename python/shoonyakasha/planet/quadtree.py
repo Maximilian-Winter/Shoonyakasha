@@ -19,7 +19,7 @@ The tree does not touch the engine: `make(node)` builds a node's chunk and
 
 import math
 
-import cube_sphere
+from . import cube_sphere
 
 
 class Node:
