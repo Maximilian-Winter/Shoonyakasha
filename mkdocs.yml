@@ -140,6 +140,7 @@ nav:
           - glTF results: api/python/gltf-result.md
           - Constants: api/python/constants.md
           - Utilities: api/python/utilities.md
+          - Planets: api/python/planet.md
   - Contributing:
       - Documentation workflow: maintenance.md
       - Refresh audit: audit.md
