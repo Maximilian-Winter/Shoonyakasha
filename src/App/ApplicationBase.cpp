@@ -225,6 +225,18 @@ void ApplicationBase::registerSystems() {
                                                       &m_uiContext->focus());
 }
 
+namespace {
+
+/// The directory a pipeline's files are in: `path` itself when it is a
+/// directory, otherwise the directory holding the file.
+std::filesystem::path pipelineDirectory(const std::string& path) {
+    std::error_code ec;
+    const std::filesystem::path absolute = std::filesystem::absolute(path, ec);
+    return std::filesystem::is_directory(absolute, ec) ? absolute : absolute.parent_path();
+}
+
+} // namespace
+
 std::string ApplicationBase::defaultPipelinePath() {
     if (const char* env = std::getenv("SHOONYAKASHA_DEFAULT_PIPELINE"); env && *env) {
         return env;
@@ -245,7 +257,7 @@ std::string ApplicationBase::iblShaderDirectory() const {
         return "shaders/ibl/";
     }
     const std::filesystem::path beside =
-        std::filesystem::absolute(m_config.pipelineJsonPath, ec).parent_path() / "shaders" / "ibl";
+        pipelineDirectory(m_config.pipelineJsonPath) / "shaders" / "ibl";
     if (std::filesystem::exists(beside / probe, ec)) {
         return beside.generic_string() + "/";
     }
@@ -258,9 +270,9 @@ std::string ApplicationBase::uiShaderDirectory() const {
     const char* probe = "ui.frag.spv";
     std::error_code ec;
     const std::filesystem::path candidates[] = {
-        std::filesystem::absolute(m_config.pipelineJsonPath, ec).parent_path() / "shaders" / "ui",
+        pipelineDirectory(m_config.pipelineJsonPath) / "shaders" / "ui",
         std::filesystem::path("shaders") / "ui",
-        std::filesystem::path(defaultPipelinePath()).parent_path() / "shaders" / "ui",
+        pipelineDirectory(defaultPipelinePath()) / "shaders" / "ui",
     };
     for (const auto& dir : candidates) {
         if (std::filesystem::exists(dir / probe, ec)) return dir.generic_string() + "/";
@@ -274,9 +286,9 @@ std::string ApplicationBase::skinningShaderPath() const {
     const char* name = "skin_vertices.comp.spv";
     std::error_code ec;
     const std::filesystem::path candidates[] = {
-        std::filesystem::absolute(m_config.pipelineJsonPath, ec).parent_path() / "shaders" / "skinning",
+        pipelineDirectory(m_config.pipelineJsonPath) / "shaders" / "skinning",
         std::filesystem::path("shaders") / "skinning",
-        std::filesystem::path(defaultPipelinePath()).parent_path() / "shaders" / "skinning",
+        pipelineDirectory(defaultPipelinePath()) / "shaders" / "skinning",
     };
     for (const auto& dir : candidates) {
         if (std::filesystem::exists(dir / name, ec)) return (dir / name).generic_string();

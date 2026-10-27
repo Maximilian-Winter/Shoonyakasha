@@ -1,0 +1,267 @@
+{
+  "descriptorSetLayouts": {
+    "cameraSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "Camera",
+          "autoBindBuffer": "Camera"
+        }
+      ]
+    },
+    "settingsSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment",
+            "compute"
+          ],
+          "name": "Settings",
+          "autoBindBuffer": "Settings"
+        },
+        {
+          "binding": 1,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "Cascades",
+          "autoBindBuffer": "Cascades"
+        },
+        {
+          "binding": 2,
+          "type": "uniform_buffer",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "Showroom",
+          "autoBindBuffer": "Showroom"
+        }
+      ]
+    },
+    "exposureReadSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "fragment"
+          ],
+          "name": "Settings",
+          "autoBindBuffer": "Settings"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "exposureImage",
+          "autoBindResource": "exposure",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
+    "materialSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "albedoMap"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "normalMap"
+        },
+        {
+          "binding": 2,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "metallicRoughnessMap"
+        },
+        {
+          "binding": 3,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "aoMap"
+        },
+        {
+          "binding": 4,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "emissiveMap"
+        },
+        {
+          "binding": 5,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "clearcoatMap"
+        },
+        {
+          "binding": 6,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "clearcoatRoughnessMap"
+        }
+      ]
+    },
+    "skeletonSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_buffer",
+          "stages": [
+            "vertex"
+          ],
+          "name": "boneMatrices",
+          "autoBindBuffer": "entity.skeleton.boneMatrices"
+        }
+      ]
+    },
+    "shadowMapSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "shadowMap",
+          "autoBindResource": "shadowMap",
+          "autoBindSampler": "shadowCompare"
+        }
+      ]
+    },
+    "rayTracingSceneSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "acceleration_structure",
+          "stages": [
+            "fragment"
+          ],
+          "name": "scene"
+        }
+      ]
+    },
+    "vsmSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "vsmPageTable",
+          "autoBindResource": "vsmPageTable"
+        },
+        {
+          "binding": 1,
+          "type": "storage_image",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "vsmPageTag",
+          "autoBindResource": "vsmPageTag"
+        },
+        {
+          "binding": 2,
+          "type": "storage_image",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "vsmPhysical",
+          "autoBindResource": "vsmPhysical"
+        },
+        {
+          "binding": 3,
+          "type": "storage_image",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "vsmOwner",
+          "autoBindResource": "vsmOwner"
+        },
+        {
+          "binding": 4,
+          "type": "storage_image",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "vsmAge",
+          "autoBindResource": "vsmAge"
+        },
+        {
+          "binding": 5,
+          "type": "storage_image",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "vsmRequest",
+          "autoBindResource": "vsmRequest"
+        },
+        {
+          "binding": 6,
+          "type": "storage_image",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "vsmState",
+          "autoBindResource": "vsmState"
+        },
+        {
+          "binding": 7,
+          "type": "storage_image",
+          "stages": [
+            "vertex",
+            "fragment",
+            "compute"
+          ],
+          "name": "vsmLevelInfo",
+          "autoBindResource": "vsmLevelInfo"
+        }
+      ]
+    }
+  }
+}

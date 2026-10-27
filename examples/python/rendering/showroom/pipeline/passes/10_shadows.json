@@ -1,0 +1,451 @@
+{
+  "descriptorSetLayouts": {
+    "cascadesSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "vertex"
+          ],
+          "name": "Cascades",
+          "autoBindBuffer": "Cascades"
+        }
+      ]
+    },
+    "localShadowWriteSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "vertex"
+          ],
+          "name": "LocalShadowMatrices",
+          "autoBindBuffer": "LocalShadowMatrices"
+        }
+      ]
+    }
+  },
+  "passes": [
+    {
+      "name": "ShadowOpaque{cascade}",
+      "type": "graphics",
+      "repeat": {
+        "count": 4,
+        "index": "cascade"
+      },
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "opaque",
+        "view": "shadows.sun.cascades[{cascade}]",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "shadowOpaque"
+      },
+      "outputs": [
+        {
+          "resource": "shadowMap",
+          "usage": "depth_write",
+          "layer": "{cascade}",
+          "clear": {
+            "depth": 1.0,
+            "stencil": 0
+          }
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/shadow.vert.spv",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthClamp": true,
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        }
+      },
+      "descriptorSets": [
+        "cascadesSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "name": "ShadowMasked{cascade}",
+      "type": "graphics",
+      "repeat": {
+        "count": 4,
+        "index": "cascade"
+      },
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "mask",
+        "view": "shadows.sun.cascades[{cascade}]",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "shadowMasked"
+      },
+      "outputs": [
+        {
+          "resource": "shadowMap",
+          "usage": "depth_write",
+          "layer": "{cascade}"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/shadow_masked.vert.spv",
+        "fragmentShader": "../shaders/shadow_masked.frag.spv",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthClamp": true,
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        }
+      },
+      "descriptorSets": [
+        "cascadesSet",
+        "materialSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 88
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "name": "ShadowSkinned{cascade}",
+      "type": "graphics",
+      "repeat": {
+        "count": 4,
+        "index": "cascade"
+      },
+      "execution": {
+        "type": "skinned_shadow_casters",
+        "view": "shadows.sun.cascades[{cascade}]",
+        "entityDataBinding": "shadowSkinned"
+      },
+      "outputs": [
+        {
+          "resource": "shadowMap",
+          "usage": "depth_write",
+          "layer": "{cascade}"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/shadow_skinned.vert.spv",
+        "vertexInput": "skinned",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthClamp": true,
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        }
+      },
+      "descriptorSets": [
+        "cascadesSet",
+        "skeletonSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "name": "SpotShadowOpaque{s}",
+      "type": "graphics",
+      "repeat": {
+        "count": 8,
+        "index": "s"
+      },
+      "viewport": "scene.shadows.spot[{s}].rect",
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "opaque",
+        "view": "shadows.spot[{s}]",
+        "entityDataBinding": "shadowOpaque"
+      },
+      "outputs": [
+        {
+          "resource": "localShadowAtlas",
+          "usage": "depth_write",
+          "clear": {
+            "depth": 1.0,
+            "stencil": 0
+          }
+        }
+      ],
+      "pipeline": {
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        },
+        "vertexShader": "../shaders/spot_shadow.vert.spv"
+      },
+      "descriptorSets": [
+        "localShadowWriteSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ]
+    },
+    {
+      "name": "SpotShadowMasked{s}",
+      "type": "graphics",
+      "repeat": {
+        "count": 8,
+        "index": "s"
+      },
+      "viewport": "scene.shadows.spot[{s}].rect",
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "mask",
+        "view": "shadows.spot[{s}]",
+        "entityDataBinding": "shadowMasked"
+      },
+      "outputs": [
+        {
+          "resource": "localShadowAtlas",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        },
+        "vertexShader": "../shaders/spot_shadow_masked.vert.spv",
+        "fragmentShader": "../shaders/shadow_masked.frag.spv"
+      },
+      "descriptorSets": [
+        "localShadowWriteSet",
+        "materialSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 88
+        }
+      ]
+    },
+    {
+      "name": "SpotShadowSkinned{s}",
+      "type": "graphics",
+      "repeat": {
+        "count": 8,
+        "index": "s"
+      },
+      "viewport": "scene.shadows.spot[{s}].rect",
+      "execution": {
+        "type": "skinned_shadow_casters",
+        "view": "shadows.spot[{s}]",
+        "entityDataBinding": "shadowSkinned"
+      },
+      "outputs": [
+        {
+          "resource": "localShadowAtlas",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        },
+        "vertexInput": "skinned",
+        "vertexShader": "../shaders/spot_shadow_skinned.vert.spv"
+      },
+      "descriptorSets": [
+        "localShadowWriteSet",
+        "skeletonSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ]
+    },
+    {
+      "name": "PointShadowOpaque{f}",
+      "type": "graphics",
+      "repeat": {
+        "count": 24,
+        "index": "f"
+      },
+      "viewport": "scene.shadows.point.faces[{f}].rect",
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "opaque",
+        "view": "shadows.point.faces[{f}]",
+        "entityDataBinding": "shadowOpaque"
+      },
+      "outputs": [
+        {
+          "resource": "localShadowAtlas",
+          "usage": "depth_write",
+          "clear": {
+            "depth": 1.0,
+            "stencil": 0
+          }
+        }
+      ],
+      "pipeline": {
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        },
+        "vertexShader": "../shaders/point_shadow.vert.spv"
+      },
+      "descriptorSets": [
+        "localShadowWriteSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ]
+    },
+    {
+      "name": "PointShadowMasked{f}",
+      "type": "graphics",
+      "repeat": {
+        "count": 24,
+        "index": "f"
+      },
+      "viewport": "scene.shadows.point.faces[{f}].rect",
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "mask",
+        "view": "shadows.point.faces[{f}]",
+        "entityDataBinding": "shadowMasked"
+      },
+      "outputs": [
+        {
+          "resource": "localShadowAtlas",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        },
+        "vertexShader": "../shaders/point_shadow_masked.vert.spv",
+        "fragmentShader": "../shaders/shadow_masked.frag.spv"
+      },
+      "descriptorSets": [
+        "localShadowWriteSet",
+        "materialSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 88
+        }
+      ]
+    },
+    {
+      "name": "PointShadowSkinned{f}",
+      "type": "graphics",
+      "repeat": {
+        "count": 24,
+        "index": "f"
+      },
+      "viewport": "scene.shadows.point.faces[{f}].rect",
+      "execution": {
+        "type": "skinned_shadow_casters",
+        "view": "shadows.point.faces[{f}]",
+        "entityDataBinding": "shadowSkinned"
+      },
+      "outputs": [
+        {
+          "resource": "localShadowAtlas",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none",
+        "depthBias": {
+          "constant": 0.0,
+          "slope": 1.5
+        },
+        "vertexInput": "skinned",
+        "vertexShader": "../shaders/point_shadow_skinned.vert.spv"
+      },
+      "descriptorSets": [
+        "localShadowWriteSet",
+        "skeletonSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ]
+    }
+  ]
+}

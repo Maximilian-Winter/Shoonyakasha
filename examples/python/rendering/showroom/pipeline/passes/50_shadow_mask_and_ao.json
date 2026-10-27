@@ -1,0 +1,280 @@
+{
+  "descriptorSetLayouts": {
+    "depthNormalSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    },
+    "aoDenoiseSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "aoRaw",
+          "autoBindResource": "aoRaw",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    }
+  },
+  "passes": [
+    {
+      "name": "ShadowMask",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "shadowMap",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "shadowMask",
+          "usage": "color_write",
+          "clear": [
+            1.0,
+            1.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/fullscreen.vert.spv",
+        "fragmentShader": "../shaders/shadow_mask.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "depthNormalSet",
+        "cameraSet",
+        "shadowMapSet",
+        "settingsSet"
+      ],
+      "enabled": false
+    },
+    {
+      "name": "ShadowMaskVSM",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "vsmPageTable",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmPhysical",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "shadowMask",
+          "usage": "color_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/fullscreen.vert.spv",
+        "fragmentShader": "../shaders/shadow_mask_vsm.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "depthNormalSet",
+        "cameraSet",
+        "settingsSet",
+        "vsmSet"
+      ]
+    },
+    {
+      "name": "ShadowMaskRT",
+      "type": "graphics",
+      "enabled": false,
+      "requires": [
+        "rayQuery"
+      ],
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "vsmPageTable",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmPhysical",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "shadowMask",
+          "usage": "color_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/fullscreen.vert.spv",
+        "fragmentShader": "../shaders/shadow_rt.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "depthNormalSet",
+        "cameraSet",
+        "rayTracingSceneSet",
+        "settingsSet",
+        "vsmSet"
+      ]
+    },
+    {
+      "name": "GTAO",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "aoRaw",
+          "usage": "color_write",
+          "clear": [
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/fullscreen.vert.spv",
+        "fragmentShader": "../shaders/gtao.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "depthNormalSet",
+        "cameraSet",
+        "settingsSet"
+      ]
+    },
+    {
+      "name": "AODenoise",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "aoRaw",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "ao",
+          "usage": "color_write",
+          "clear": [
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/fullscreen.vert.spv",
+        "fragmentShader": "../shaders/ao_denoise.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none"
+      },
+      "descriptorSets": [
+        "aoDenoiseSet",
+        "cameraSet"
+      ]
+    }
+  ]
+}

@@ -20,6 +20,7 @@ checks that the two agree.
 
 import difflib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -35,6 +36,10 @@ __all__ = [
     "validate",
     "validate_json",
     "check",
+    "load_document",
+    "files",
+    "fetch",
+    "PipelineFileError",
 ]
 
 #: The default pipeline shipped with the package: deferred PBR lighting with
@@ -150,7 +155,7 @@ def _expand_repeats(passes, source, problems):
             expanded.append(pass_decl)
             continue
         name = pass_decl.get("name", "<unnamed>")
-        where = "%s passes[%d] '%s' repeat" % (source, index, name)
+        where = "%s passes[%d] '%s' repeat" % (pass_decl.get(_FILE, source), index, name)
         spec = pass_decl["repeat"]
         count = spec.get("count") if isinstance(spec, dict) else None
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:
@@ -175,10 +180,17 @@ def _expand_repeats(passes, source, problems):
     return expanded
 
 
-def validate_json(document, base_dir=None, source="<json>"):
-    """Validate an already-parsed pipeline. Returns a list of Problem."""
+def validate_json(document, base_dir=None, source="<json>", origins=None):
+    """Validate an already-parsed pipeline. Returns a list of Problem.
+
+    `origins` maps (section, name) to the file that defined a named entry,
+    as load_document fills it; problems are reported against that file."""
     problems = []
     base_dir = Path(base_dir) if base_dir else None
+    origins = origins or {}
+
+    def file_of(section, name):
+        return origins.get((section, name), source)
 
     if not isinstance(document, dict):
         return [Problem(source, "top level must be a JSON object")]
@@ -191,7 +203,7 @@ def validate_json(document, base_dir=None, source="<json>"):
         resources = []
 
     for index, resource in enumerate(resources):
-        where = "%s resources[%d]" % (source, index)
+        where = "%s resources[%d]" % (resource.get(_FILE, source) if isinstance(resource, dict) else source, index)
         if not isinstance(resource, dict):
             problems.append(Problem(where, "must be an object"))
             continue
@@ -199,7 +211,7 @@ def validate_json(document, base_dir=None, source="<json>"):
         if not name:
             problems.append(Problem(where, "missing 'name'"))
             continue
-        where = "%s resources[%d] '%s'" % (source, index, name)
+        where = "%s resources[%d] '%s'" % (resource.get(_FILE, source), index, name)
         if name in declared:
             problems.append(Problem(where, "declared more than once"))
         declared[name] = resource
@@ -222,7 +234,7 @@ def validate_json(document, base_dir=None, source="<json>"):
         layouts = {}
 
     for name, layout in layouts.items():
-        where = "%s bufferLayouts '%s'" % (source, name)
+        where = "%s bufferLayouts '%s'" % (file_of("bufferLayouts", name), name)
         if not isinstance(layout, dict):
             problems.append(Problem(where, "must be an object"))
             continue
@@ -267,7 +279,7 @@ def validate_json(document, base_dir=None, source="<json>"):
         for binding in bindings if isinstance(bindings, list) else []:
             if not isinstance(binding, dict) or "source" not in binding:
                 continue
-            where = "%s descriptorSetLayouts '%s' binding %s" % (source, layout_name, binding.get("binding"))
+            where = "%s descriptorSetLayouts '%s' binding %s" % (file_of("descriptorSetLayouts", layout_name), layout_name, binding.get("binding"))
             binding_source = str(binding["source"])
             if not _check_enum(binding_source, frozenset(BINDING_SOURCES), where, "source", problems):
                 continue
@@ -300,12 +312,12 @@ def validate_json(document, base_dir=None, source="<json>"):
     passes = _expand_repeats(passes, source, problems)
 
     for index, pass_decl in enumerate(passes):
-        where = "%s passes[%d]" % (source, index)
+        where = "%s passes[%d]" % (pass_decl.get(_FILE, source) if isinstance(pass_decl, dict) else source, index)
         if not isinstance(pass_decl, dict):
             problems.append(Problem(where, "must be an object"))
             continue
         name = pass_decl.get("name", "<unnamed>")
-        where = "%s passes[%d] '%s'" % (source, index, name)
+        where = "%s passes[%d] '%s'" % (pass_decl.get(_FILE, source), index, name)
 
         if "name" not in pass_decl:
             problems.append(Problem(where, "missing 'name'"))
@@ -428,7 +440,7 @@ def validate_json(document, base_dir=None, source="<json>"):
         if isinstance(original, dict) and "repeat" in original:
             pass_names.add(original.get("name"))   # a repeated pass's declared name
     for preset_name, preset in presets.items():
-        where = "%s presets '%s'" % (source, preset_name)
+        where = "%s presets '%s'" % (file_of("presets", preset_name), preset_name)
         if not isinstance(preset, dict):
             problems.append(Problem(where, "must be an object"))
             continue
@@ -507,21 +519,341 @@ def _engine_loader_error(document):
         from ._shoonyakasha import _check_pipeline_json
     except ImportError:
         return None
-    return _check_pipeline_json(json.dumps(document)) or None
+    return _check_pipeline_json(json.dumps(_without_file_tags(document))) or None
+
+
+# ── Pipelines split across files ───────────────────────────────
+
+#: Key load_document(tag=True) adds to each pass and resource: the file it came from.
+_FILE = "__file__"
+
+#: Sections keyed by name, combined across files; and lists, appended.
+_NAMED_SECTIONS = ("samplers", "vertexFormats", "uniformBuffers", "entityDataBindings",
+                   "bufferLayouts", "descriptorSetLayouts", "presets")
+_LIST_SECTIONS = ("resources", "passes")
+_SHADER_KEYS = ("vertexShader", "fragmentShader", "computeShader", "geometryShader",
+                "tessControlShader", "tessEvaluationShader", "taskShader", "meshShader")
+
+
+class PipelineFileError(ValueError):
+    """A pipeline's files cannot be read or merged; `where` names the file."""
+
+    def __init__(self, where, message):
+        super().__init__("%s: %s" % (where, message))
+        self.where = where
+        self.message = message
+
+
+def _resolve_beside(value, directory):
+    """A relative path naming a file in `directory` becomes the path to that file."""
+    if not isinstance(value, str) or not value or Path(value).is_absolute():
+        return value
+    beside = directory / value
+    return os.path.normpath(str(beside)).replace("\\", "/") if beside.exists() else value
+
+
+def _resolve_paths(document, directory):
+    """Shader paths and file-source paths beside `directory`, as the engine resolves them."""
+    for pass_decl in document.get("passes", []) if isinstance(document.get("passes"), list) else []:
+        pipe = pass_decl.get("pipeline") if isinstance(pass_decl, dict) else None
+        if not isinstance(pipe, dict):
+            continue
+        for key in _SHADER_KEYS + ("rayGenShader",):
+            if key in pipe:
+                pipe[key] = _resolve_beside(pipe[key], directory)
+        if isinstance(pipe.get("missShaders"), list):
+            pipe["missShaders"] = [_resolve_beside(m, directory) for m in pipe["missShaders"]]
+        for group in pipe.get("hitGroups", []) if isinstance(pipe.get("hitGroups"), list) else []:
+            if isinstance(group, dict):
+                for key in ("closestHit", "anyHit", "intersection"):
+                    if key in group:
+                        group[key] = _resolve_beside(group[key], directory)
+    layouts = document.get("bufferLayouts")
+    for layout in layouts.values() if isinstance(layouts, dict) else []:
+        source = layout.get("source") if isinstance(layout, dict) else None
+        if isinstance(source, dict) and source.get("type") == "file" and "path" in source:
+            source["path"] = _resolve_beside(source["path"], directory)
+
+
+def _pipeline_file(path):
+    path = Path(path)
+    return path / "pipeline.json" if path.is_dir() else path
+
+
+def _expand_include(directory, include):
+    """The files `include` names, relative to `directory`: itself, or every
+    match of a * and ? pattern in its last part, in name order."""
+    full = directory / include
+    if any(c in str(full.parent) for c in "*?"):
+        raise ValueError("only the last part of an include may be a pattern")
+    if not any(c in full.name for c in "*?"):
+        return [full]
+    pattern = re.compile(".*".join(re.escape(p).replace("\\?", ".") for p in full.name.split("*")) + r"\Z")
+    return sorted(p for p in full.parent.iterdir() if p.is_file() and pattern.match(p.name)) \
+        if full.parent.is_dir() else []
+
+
+def load_document(path, origins=None, tag=False):
+    """The pipeline at `path` with the files it includes merged, as the
+    engine reads it: a pipeline JSON file, or a directory holding
+    pipeline.json.
+
+    A file's "include" lists more files, relative to it, in order; a name
+    may end in a pattern with * and ?, which includes every file it matches
+    in name order. Included files are merged in the order listed, then the
+    including file's own keys: "passes" and "resources" are appended, the
+    named sections (samplers, vertexFormats, uniformBuffers,
+    entityDataBindings, bufferLayouts, descriptorSetLayouts, presets) are
+    combined, and any other key may appear in only one file or with the
+    same value. Relative shader and buffer-file paths resolve beside the
+    file that names them. Raises PipelineFileError for a file that cannot
+    be read, a name defined in two files, an include that names no file,
+    and a file that includes itself.
+
+    `origins`, when given, is filled with (section, name) -> file for named
+    entries, and ("file", n) -> the nth file read. With `tag`, each pass and
+    resource holds the file it came from under "__file__"."""
+    root = _pipeline_file(path)
+    base = root.parent
+    origins = {} if origins is None else origins
+    document = {}
+    stack = []
+    read = []
+
+    def label(file):
+        try:
+            return file.relative_to(base).as_posix()
+        except ValueError:
+            return str(file)
+
+    def twice(what, first, second):
+        raise PipelineFileError(second, "%s is also defined in %s" % (what, first))
+
+    def merge(file):
+        file = Path(os.path.normpath(str(file)))
+        name = label(file)
+        if file in stack:
+            raise PipelineFileError(label(stack[-1]), "includes %s, which includes it" % name)
+        origins[("file", len(read))] = name
+        read.append(name)
+        try:
+            data = json.loads(file.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            raise PipelineFileError(name, "file not found") from None
+        except json.JSONDecodeError as exc:
+            raise PipelineFileError("%s:%d:%d" % (name, exc.lineno, exc.colno), "invalid JSON: %s" % exc.msg) from None
+        if not isinstance(data, dict):
+            raise PipelineFileError(name, "does not hold a JSON object")
+        _resolve_paths(data, file.parent.absolute())
+
+        stack.append(file)
+        includes = data.get("include", [])
+        if not isinstance(includes, list) or not all(isinstance(i, str) for i in includes):
+            raise PipelineFileError(name, "'include' must be a list of paths")
+        for include in includes:
+            try:
+                found = _expand_include(file.parent, include)
+            except ValueError as exc:
+                raise PipelineFileError(name, "include '%s': %s" % (include, exc)) from None
+            if not found or (len(found) == 1 and not found[0].is_file()):
+                raise PipelineFileError(name, "include '%s' names no file" % include)
+            for included in found:
+                merge(included)
+        stack.pop()
+
+        for key, value in data.items():
+            if key == "include":
+                continue
+            if key in _LIST_SECTIONS:
+                if not isinstance(value, list):
+                    raise PipelineFileError(name, "'%s' must be a list" % key)
+                for item in value:
+                    if isinstance(item, dict) and isinstance(item.get("name"), str):
+                        entry = (key, item["name"])
+                        if entry in origins:
+                            twice("%s '%s'" % entry, origins[entry], name)
+                        origins[entry] = name
+                        if tag:
+                            item[_FILE] = name
+                    document.setdefault(key, []).append(item)
+            elif key in _NAMED_SECTIONS:
+                if not isinstance(value, dict):
+                    raise PipelineFileError(name, "'%s' must be an object keyed by name" % key)
+                section = document.setdefault(key, {})
+                for entry_name, body in value.items():
+                    entry = (key, entry_name)
+                    if entry in origins:
+                        twice("%s '%s'" % entry, origins[entry], name)
+                    origins[entry] = name
+                    section[entry_name] = body
+            elif key in document and document[key] != value:
+                twice("'%s'" % key, origins[(key, None)], name)
+            else:
+                origins.setdefault((key, None), name)
+                document[key] = value
+
+    merge(root)
+    return document
+
+
+def files(path):
+    """Every file of the pipeline at `path`: its pipeline JSON first, then
+    each file it includes, in the order load_document reads them. Watch
+    their modification times to reload a pipeline when any of them changes."""
+    origins = {}
+    load_document(path, origins)
+    base = _pipeline_file(path).parent
+    return [base / origins[("file", n)] for n in range(sum(1 for k in origins if k[0] == "file"))]
+
+
+def _is_url(path):
+    return isinstance(path, str) and path.startswith(("http://", "https://"))
+
+
+def _download(url, timeout):
+    import urllib.request
+    request = urllib.request.Request(url, headers={"User-Agent": "shoonyakasha"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def _referenced_files(document):
+    """The relative shader and buffer-file paths a pipeline JSON names."""
+    names = []
+    for pass_decl in document.get("passes", []) if isinstance(document.get("passes"), list) else []:
+        pipe = pass_decl.get("pipeline") if isinstance(pass_decl, dict) else None
+        if not isinstance(pipe, dict):
+            continue
+        names += [pipe.get(k) for k in _SHADER_KEYS + ("rayGenShader",)]
+        names += pipe.get("missShaders", []) if isinstance(pipe.get("missShaders"), list) else []
+        for group in pipe.get("hitGroups", []) if isinstance(pipe.get("hitGroups"), list) else []:
+            if isinstance(group, dict):
+                names += [group.get(k) for k in ("closestHit", "anyHit", "intersection")]
+    layouts = document.get("bufferLayouts")
+    for layout in layouts.values() if isinstance(layouts, dict) else []:
+        source = layout.get("source") if isinstance(layout, dict) else None
+        if isinstance(source, dict) and source.get("type") == "file":
+            names.append(source.get("path"))
+    return [n for n in names if isinstance(n, str) and n and "://" not in n and not n.startswith("/")]
+
+
+def fetch(url, cache=None, timeout=60):
+    """Download the pipeline at `url` into a local directory and return its
+    path, to give the engine (sk.Engine does this itself for a URL).
+
+    `url` names a pipeline JSON, or ends in "/" for the pipeline.json there.
+    The files it includes, and the shader and buffer files ("source":
+    {"type": "file"}) they name by relative paths, are downloaded beside it,
+    keeping their paths relative to the pipeline JSON. Includes must name
+    their files: patterns cannot be listed over HTTP. Every file must lie
+    under the pipeline JSON's directory URL.
+
+    `cache` is the directory to download into; by default one per URL under
+    ~/.cache/shoonyakasha/pipelines. Files already there are replaced.
+    Raises PipelineFileError naming the URL that failed."""
+    import hashlib
+    import posixpath
+    import urllib.error
+    import urllib.parse
+
+    if url.endswith("/"):
+        url += "pipeline.json"
+    base = url.rsplit("/", 1)[0] + "/"
+    if cache is None:
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+        cache = Path.home() / ".cache" / "shoonyakasha" / "pipelines" / digest
+    cache = Path(cache)
+
+    def local_name(file_url):
+        """`file_url` relative to `base`, or PipelineFileError when it lies outside."""
+        if not file_url.startswith(base):
+            raise PipelineFileError(file_url, "lies outside the pipeline's URL %s" % base)
+        relative = urllib.parse.unquote(urllib.parse.urlsplit(file_url[len(base):]).path)
+        if not relative or relative.startswith("/") or ".." in relative.split("/"):
+            raise PipelineFileError(file_url, "lies outside the pipeline's URL %s" % base)
+        return relative
+
+    def get(file_url):
+        relative = local_name(file_url)
+        try:
+            data = _download(file_url, timeout)
+        except (urllib.error.URLError, OSError) as exc:
+            raise PipelineFileError(file_url, "download failed: %s" % exc) from None
+        target = cache / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".partial")
+        partial.write_bytes(data)
+        os.replace(partial, target)
+        return data
+
+    seen = set()
+
+    def fetch_json(file_url, chain):
+        if file_url in chain:
+            raise PipelineFileError(chain[-1], "includes %s, which includes it" % file_url)
+        if file_url in seen:
+            return
+        seen.add(file_url)
+        data = get(file_url)
+        try:
+            document = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise PipelineFileError(file_url, "invalid JSON: %s" % exc) from None
+        if not isinstance(document, dict):
+            raise PipelineFileError(file_url, "does not hold a JSON object")
+        directory = file_url.rsplit("/", 1)[0] + "/"
+        includes = document.get("include", [])
+        if not isinstance(includes, list) or not all(isinstance(i, str) for i in includes):
+            raise PipelineFileError(file_url, "'include' must be a list of paths")
+        for include in includes:
+            if any(c in include for c in "*?"):
+                raise PipelineFileError(file_url, "include '%s' is a pattern, which cannot be listed over HTTP; "
+                                                  "name each file" % include)
+            fetch_json(_join_url(directory, include, posixpath), chain + [file_url])
+        for name in _referenced_files(document):
+            file_url_ = _join_url(directory, name, posixpath)
+            if file_url_ not in seen:
+                seen.add(file_url_)
+                get(file_url_)
+
+    fetch_json(url, [])
+    return cache / local_name(url)
+
+
+def _join_url(directory, relative, posixpath):
+    """`relative` resolved against the directory URL `directory`, with . and .. removed."""
+    import urllib.parse
+    parts = urllib.parse.urlsplit(directory)
+    path = posixpath.normpath(posixpath.join(parts.path, relative))
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, "", ""))
+
+
+def _without_file_tags(document):
+    """`document` with the "__file__" tags load_document(tag=True) adds removed."""
+    if not isinstance(document, dict) or not any(
+            isinstance(item, dict) and _FILE in item
+            for key in _LIST_SECTIONS if isinstance(document.get(key), list) for item in document[key]):
+        return document
+    clean = dict(document)
+    for key in _LIST_SECTIONS:
+        if isinstance(document.get(key), list):
+            clean[key] = [{k: v for k, v in item.items() if k != _FILE} if isinstance(item, dict) else item
+                          for item in document[key]]
+    return clean
 
 
 def validate(path):
-    """Validate a pipeline JSON file. Returns a list of Problem."""
+    """Validate a pipeline: a pipeline JSON file, or a directory holding
+    pipeline.json, with the files it includes (load_document). Problems name
+    the file they are in. Returns a list of Problem."""
     path = Path(path)
+    origins = {}
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return [Problem(str(path), "file not found")]
-    except json.JSONDecodeError as exc:
-        return [Problem("%s:%d:%d" % (path, exc.lineno, exc.colno),
-                        "invalid JSON: %s" % exc.msg)]
-
-    return validate_json(document, base_dir=path.parent, source=path.name)
+        document = load_document(path, origins, tag=True)
+    except PipelineFileError as exc:
+        return [Problem(exc.where, exc.message)]
+    root = _pipeline_file(path)
+    return validate_json(document, base_dir=root.parent, source=root.name, origins=origins)
 
 
 def check(path, warnings_are_errors=False):

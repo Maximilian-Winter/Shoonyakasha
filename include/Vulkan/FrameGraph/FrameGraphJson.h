@@ -101,7 +101,30 @@ struct PipelineCapabilities {
 void loadGraphFromJson(FrameGraphBuilder& builder, const nlohmann::json& json,
                        const PipelineCapabilities& capabilities = {});
 
-// Load from a JSON file path
+/// The pipeline JSON at `path`, with the files it includes merged in: the
+/// document loadGraphFromJson reads.
+///
+/// `path` is a pipeline JSON file, or a directory holding one named
+/// pipeline.json. A file's "include" lists more files, relative to it, in
+/// order; a name may end in a pattern with * and ?, which includes every
+/// file it matches in name order. Included files may include others.
+/// Included files are merged in the order listed, then the including file's
+/// own keys:
+/// - "passes" and "resources" are appended, so passes run in the order the
+///   files are listed;
+/// - the named sections (samplers, vertexFormats, uniformBuffers,
+///   entityDataBindings, bufferLayouts, descriptorSetLayouts, presets) are
+///   combined;
+/// - any other key may appear in only one file, or with the same value.
+/// A name defined in two files, a pass or resource name repeated across
+/// files, an include that names no file, and a file that includes itself
+/// throw std::runtime_error naming the files. Relative shader and
+/// buffer-file paths in each file resolve beside that file
+/// (resolveShaderPathsAgainst). `files`, when given, receives every file
+/// read, the given one first.
+nlohmann::json loadPipelineDocument(const std::string& path, std::vector<std::string>* files = nullptr);
+
+/// loadPipelineDocument, then loadGraphFromJson.
 void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath,
                        const PipelineCapabilities& capabilities = {});
 

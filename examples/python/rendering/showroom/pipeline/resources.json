@@ -1,0 +1,278 @@
+{
+  "resources": [
+    {
+      "name": "swapchain",
+      "kind": "image",
+      "imported": true
+    },
+    {
+      "name": "shadowMap",
+      "kind": "image",
+      "image": {
+        "format": "D32_SFLOAT",
+        "width": 2048,
+        "height": 2048,
+        "arrayLayers": 4,
+        "viewType": "2d_array"
+      }
+    },
+    {
+      "name": "localShadowAtlas",
+      "kind": "image",
+      "image": {
+        "format": "D32_SFLOAT",
+        "width": 4096,
+        "height": 4096
+      }
+    },
+    {
+      "name": "gAlbedo",
+      "kind": "image",
+      "image": {
+        "format": "R8G8B8A8_SRGB"
+      }
+    },
+    {
+      "name": "gNormal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT"
+      }
+    },
+    {
+      "name": "gMaterial",
+      "kind": "image",
+      "image": {
+        "format": "R8G8B8A8_UNORM"
+      }
+    },
+    {
+      "name": "gVelocity",
+      "kind": "image",
+      "image": {
+        "format": "R16G16_SFLOAT"
+      }
+    },
+    {
+      "name": "gDepth",
+      "kind": "image",
+      "image": {
+        "format": "D32_SFLOAT"
+      }
+    },
+    {
+      "name": "hdrColor",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "reflection",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "reflectionScale",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "shadowLit",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "shadowTotal",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "taaColor",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "sceneColor",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT"
+      }
+    },
+    {
+      "name": "taaHistory",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "accumColor",
+      "kind": "image",
+      "image": {
+        "format": "R32G32B32A32_SFLOAT",
+        "persistent": true
+      }
+    },
+    {
+      "name": "shadowMask",
+      "kind": "image",
+      "image": {
+        "format": "R8G8_UNORM"
+      }
+    },
+    {
+      "name": "aoRaw",
+      "kind": "image",
+      "image": {
+        "format": "R8_UNORM"
+      }
+    },
+    {
+      "name": "ao",
+      "kind": "image",
+      "image": {
+        "format": "R8_UNORM"
+      }
+    },
+    {
+      "name": "bloomChain",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "widthScale": 0.5,
+        "heightScale": 0.5,
+        "mipLevels": 6
+      }
+    },
+    {
+      "name": "lightImage",
+      "kind": "image",
+      "image": {
+        "format": "R16G16B16A16_SFLOAT",
+        "width": 512,
+        "height": 512,
+        "mipLevels": 7
+      }
+    },
+    {
+      "name": "exposure",
+      "kind": "image",
+      "image": {
+        "format": "R32_SFLOAT",
+        "width": 1,
+        "height": 1,
+        "persistent": true
+      }
+    },
+    {
+      "name": "lightClusters",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "width": 3457,
+        "height": 64
+      }
+    },
+    {
+      "name": "vsmPageTable",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "width": 32,
+        "height": 256,
+        "persistent": true
+      }
+    },
+    {
+      "name": "vsmPageTag",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "width": 32,
+        "height": 256,
+        "persistent": true
+      }
+    },
+    {
+      "name": "vsmPhysical",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "width": 8192,
+        "height": 8192,
+        "persistent": true
+      }
+    },
+    {
+      "name": "vsmOwner",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "width": 64,
+        "height": 64,
+        "persistent": true
+      }
+    },
+    {
+      "name": "vsmAge",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "width": 64,
+        "height": 64,
+        "persistent": true
+      }
+    },
+    {
+      "name": "vsmRequest",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "width": 32,
+        "height": 256,
+        "persistent": true
+      }
+    },
+    {
+      "name": "vsmState",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "width": 16,
+        "height": 1,
+        "persistent": true
+      }
+    },
+    {
+      "name": "vsmLevelInfo",
+      "kind": "image",
+      "image": {
+        "format": "R32_UINT",
+        "width": 8,
+        "height": 1,
+        "persistent": true
+      }
+    },
+    {
+      "name": "vsmRaster",
+      "kind": "image",
+      "image": {
+        "format": "D16_UNORM",
+        "width": 4096,
+        "height": 4096
+      }
+    }
+  ]
+}

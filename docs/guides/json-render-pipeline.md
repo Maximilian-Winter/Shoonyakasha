@@ -54,7 +54,7 @@ def on_key(key):
 engine.set_on_key_pressed(on_key)
 ```
 
-To reload on save, an ECS system can do the same when `compile_dir` returns compiled outputs or the JSON file's modification time changes.
+To reload on save, an ECS system can do the same when `compile_dir` returns compiled outputs or the modification time of one of the pipeline's JSON files changes; `sk.pipeline.files(path)` lists them, for a pipeline [split across files](../reference/pipeline-json.md#splitting-a-pipeline-across-files) too.
 
 Parameters, `set_custom_*` values, `set_buffer` data and pipeline images stay. Passes switched with `set_pass_enabled` or `apply_pipeline_preset` keep their state; the others take the JSON's `enabled`. A JSON file that does not load or a graph that does not compile raises `RuntimeError` with the reason, and the previous graph is compiled again; if that fails too, for example because its SPIR-V is gone, no frames are drawn until a reload succeeds. Call it from a key callback, `on_update`, an ECS system, a UI callback or `on_post_render`; from `on_init` and `on_pre_render` it raises. In C++, `EngineAPI::reloadPipeline()` returns the error message, empty on success.
 

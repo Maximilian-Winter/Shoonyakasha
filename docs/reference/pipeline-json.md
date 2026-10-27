@@ -20,6 +20,29 @@ This reference describes the current [C++ parser](../../src/Vulkan/FrameGraph/Fr
 
 These sections are conditionally parsed. Their absence is not a useful runnable pipeline: normal windowed applications need resources, a rendering pass, and a final present output. `standardBuffers` is obsolete. Unknown keys are not comprehensively rejected; accepted JSON is not proof a key is implemented.
 
+## Splitting a pipeline across files
+
+A pipeline may be split into several JSON files. `include`, a list of paths relative to the file that names them, merges more files in:
+
+```json
+{
+  "name": "Showroom",
+  "include": ["data.json", "resources.json", "layouts.json", "passes/*.json", "presets.json"]
+}
+```
+
+The engine loads a pipeline from its JSON file, or from a directory holding one named `pipeline.json` (`pipeline_json_path` in Python, `pipelineJsonPath` in C++). The included files are merged in the order listed, and after them the including file's own keys:
+
+- `passes` and `resources` are appended, so passes run in the order of the files that hold them.
+- The sections keyed by name (`samplers`, `vertexFormats`, `uniformBuffers`, `entityDataBindings`, `bufferLayouts`, `descriptorSetLayouts`, `presets`) are combined.
+- Any other key, such as `name` or `ui`, may be in one file only, or in several with the same value.
+
+A path may end in a pattern with `*` and `?` (`passes/*.json`), which includes the files it matches in name order; only its last part may be one. Included files may include others. Relative shader paths, and the paths of buffers filled from a file, are looked for beside the file that names them. A name defined in two files, a pass or resource declared twice, an include that names no file, and a file that includes itself are errors naming the files. The [showroom pipeline](../../examples/python/rendering/showroom/pipeline/README.md) is split this way.
+
+In Python, `sk.pipeline.validate` and `sk.pipeline.check` take the pipeline's JSON file or directory and name the file each problem is in. `sk.pipeline.load_document(path)` returns the merged document, and `sk.pipeline.files(path)` every file it was read from. In C++, `FrameGraph::loadPipelineDocument` returns the merged document.
+
+`sk.pipeline.fetch(url)` downloads a pipeline from an `http` or `https` URL into a local directory and returns the path of its JSON file: the file the URL names (or `pipeline.json` for a URL ending in `/`), the files it includes, and the shader and buffer files they name by relative paths. Over HTTP an include must name its file, not a pattern, and every file must lie under the directory URL of the pipeline's JSON. `sk.Engine(pipeline_json_path=url)` fetches a URL itself.
+
 ## Resources and accesses
 
 Each resource requires `name` and `kind` (`image` or `buffer`). `imported` defaults false. Imported resources need native backing; ApplicationBase supplies the imported `swapchain` image.

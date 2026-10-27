@@ -855,6 +855,16 @@ std::string checkPipelineJson(const std::string& text) {
     }
 }
 
+std::string loadPipelineDocumentText(const std::string& path, std::string& error) {
+    try {
+        error.clear();
+        return FrameGraph::loadPipelineDocument(path).dump();
+    } catch (const std::exception& e) {
+        error = e.what();
+        return {};
+    }
+}
+
 bool EngineAPI::captureScreenshot(const std::string& path) {
     return m_impl->app->captureScreenshot(path);
 }

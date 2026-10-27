@@ -1,0 +1,84 @@
+{
+  "descriptorSetLayouts": {
+    "overlaySceneSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "name": "SpriteSceneUBO",
+          "autoBindBuffer": "OverlayScene"
+        }
+      ]
+    },
+    "overlayTextureSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "spriteTexture"
+        }
+      ]
+    }
+  },
+  "passes": [
+    {
+      "name": "Overlay",
+      "type": "graphics",
+      "execution": {
+        "type": "sprite_geometry",
+        "sortMode": "sort_key",
+        "entityDataBinding": "overlay"
+      },
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_blend"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/overlay.vert.spv",
+        "fragmentShader": "../shaders/overlay.frag.spv",
+        "vertexInput": "sprite2d",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "blending": "alpha"
+      },
+      "descriptorSets": [
+        "overlaySceneSet",
+        "overlayTextureSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 112
+        }
+      ]
+    },
+    {
+      "name": "UIOverlay",
+      "type": "graphics",
+      "execution": {
+        "type": "ui_canvas"
+      },
+      "outputs": [
+        {
+          "resource": "swapchain",
+          "usage": "color_blend",
+          "present": true
+        }
+      ]
+    }
+  ]
+}

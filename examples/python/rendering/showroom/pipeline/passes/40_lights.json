@@ -1,0 +1,168 @@
+{
+  "descriptorSetLayouts": {
+    "lightClusterWriteSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "storage_image",
+          "stages": [
+            "compute"
+          ],
+          "name": "clusters",
+          "autoBindResource": "lightClusters"
+        }
+      ]
+    },
+    "lightsComputeSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "uniform_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "Lights",
+          "autoBindBuffer": "Lights"
+        },
+        {
+          "binding": 1,
+          "type": "storage_buffer",
+          "stages": [
+            "compute"
+          ],
+          "name": "SceneLights",
+          "autoBindBuffer": "SceneLights"
+        }
+      ]
+    },
+    "lightImageSourceSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "source",
+          "externalImage": "lightImage",
+          "autoBindSampler": "linearClamp"
+        }
+      ]
+    },
+    "lightImageDown{m}": {
+      "repeat": {
+        "count": 6,
+        "index": "m",
+        "first": 1
+      },
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "fragment"
+          ],
+          "name": "source",
+          "autoBindResource": "lightImage",
+          "autoBindSampler": "linearClamp",
+          "mip": "{m-1}"
+        }
+      ]
+    }
+  },
+  "passes": [
+    {
+      "name": "LightImage",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "outputs": [
+        {
+          "resource": "lightImage",
+          "usage": "color_write",
+          "mip": 0
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/fullscreen.vert.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "fragmentShader": "../shaders/light_image.frag.spv"
+      },
+      "descriptorSets": [
+        "lightImageSourceSet"
+      ]
+    },
+    {
+      "name": "LightImageDown{m}",
+      "type": "graphics",
+      "execution": {
+        "type": "fullscreen"
+      },
+      "inputs": [
+        {
+          "resource": "lightImage",
+          "usage": "shader_read",
+          "mip": "{m-1}"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "lightImage",
+          "usage": "color_write",
+          "mip": "{m}"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/fullscreen.vert.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "none",
+        "fragmentShader": "../shaders/light_image_down.frag.spv"
+      },
+      "descriptorSets": [
+        "lightImageDown{m}"
+      ],
+      "repeat": {
+        "count": 6,
+        "index": "m",
+        "first": 1
+      }
+    },
+    {
+      "name": "LightClusters",
+      "type": "compute",
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          64,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 55,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "outputs": [
+        {
+          "resource": "lightClusters",
+          "usage": "storage_image_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "../shaders/light_clusters.comp.spv"
+      },
+      "descriptorSets": [
+        "lightClusterWriteSet",
+        "cameraSet",
+        "lightsComputeSet"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,948 @@
+{
+  "vertexFormats": {
+    "skinned": {
+      "attributes": [
+        {
+          "name": "position",
+          "type": "vec3",
+          "location": 0
+        },
+        {
+          "name": "normal",
+          "type": "vec3",
+          "location": 1
+        },
+        {
+          "name": "texCoord",
+          "type": "vec2",
+          "location": 2
+        },
+        {
+          "name": "jointIndices",
+          "type": "uvec4",
+          "location": 3
+        },
+        {
+          "name": "jointWeights",
+          "type": "vec4",
+          "location": 4
+        },
+        {
+          "name": "tangent",
+          "type": "vec4",
+          "location": 5
+        }
+      ]
+    },
+    "sprite2d": {
+      "attributes": [
+        {
+          "name": "position",
+          "type": "vec3",
+          "location": 0
+        },
+        {
+          "name": "uv",
+          "type": "vec2",
+          "location": 1
+        }
+      ]
+    }
+  },
+  "bufferLayouts": {
+    "Camera": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "view",
+          "type": "mat4",
+          "source": "scene.camera.view"
+        },
+        {
+          "name": "proj",
+          "type": "mat4",
+          "source": "scene.camera.projection"
+        },
+        {
+          "name": "invView",
+          "type": "mat4",
+          "source": "scene.camera.invView"
+        },
+        {
+          "name": "invProj",
+          "type": "mat4",
+          "source": "scene.camera.invProj"
+        },
+        {
+          "name": "position",
+          "type": "vec4",
+          "source": "scene.camera.positionVec4"
+        },
+        {
+          "name": "params",
+          "type": "vec4",
+          "source": "scene.camera.nearFarFovAspect"
+        },
+        {
+          "name": "prevViewProj",
+          "type": "mat4",
+          "source": "scene.camera.prevViewProjection"
+        },
+        {
+          "name": "resolution",
+          "type": "vec2",
+          "source": "scene.screen.renderResolution"
+        },
+        {
+          "name": "frame",
+          "type": "uint",
+          "source": "scene.time.frame"
+        },
+        {
+          "name": "taa",
+          "type": "uint",
+          "source": "scene.custom.default.taa",
+          "default": 1
+        }
+      ]
+    },
+    "Lights": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "lightCount",
+          "type": "uint",
+          "source": "scene.lights.count"
+        },
+        {
+          "name": "pad0",
+          "type": "float",
+          "source": "const.0"
+        },
+        {
+          "name": "pad1",
+          "type": "float",
+          "source": "const.0"
+        },
+        {
+          "name": "pad2",
+          "type": "float",
+          "source": "const.0"
+        }
+      ]
+    },
+    "Cascades": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "cascadeViewProj",
+          "type": "mat4",
+          "source": "scene.shadows.sun.cascades[i].viewProj",
+          "arrayCount": 4
+        },
+        {
+          "name": "splits",
+          "type": "vec4",
+          "source": "scene.shadows.sun.splits"
+        },
+        {
+          "name": "texelWorldSize",
+          "type": "vec4",
+          "source": "scene.shadows.sun.texelWorldSize"
+        },
+        {
+          "name": "sunDirection",
+          "type": "vec4",
+          "source": "scene.shadows.sun.direction",
+          "default": [
+            0,
+            -1,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "sunEnabled",
+          "type": "uint",
+          "source": "scene.shadows.sun.enabled"
+        },
+        {
+          "name": "sunLightIndex",
+          "type": "int",
+          "source": "scene.shadows.sun.lightIndex",
+          "default": -1
+        },
+        {
+          "name": "cascadeCount",
+          "type": "uint",
+          "source": "scene.shadows.sun.cascadeCount"
+        }
+      ]
+    },
+    "Settings": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "exposure",
+          "type": "float",
+          "source": "scene.custom.default.exposure",
+          "default": 1.0
+        },
+        {
+          "name": "iblIntensity",
+          "type": "float",
+          "source": "scene.custom.default.iblIntensity",
+          "default": 1.0
+        },
+        {
+          "name": "skyBlur",
+          "type": "float",
+          "source": "scene.custom.default.skyBlur",
+          "default": 0.0
+        },
+        {
+          "name": "shadowSoftness",
+          "type": "float",
+          "source": "scene.custom.default.shadowSoftness",
+          "default": 1.5
+        },
+        {
+          "name": "shadowNormalBias",
+          "type": "float",
+          "source": "scene.custom.default.shadowNormalBias",
+          "default": 1.0
+        },
+        {
+          "name": "shadowDepthBias",
+          "type": "float",
+          "source": "scene.custom.default.shadowDepthBias",
+          "default": 0.0002
+        },
+        {
+          "name": "cascadeBlend",
+          "type": "float",
+          "source": "scene.custom.default.cascadeBlend",
+          "default": 0.1
+        },
+        {
+          "name": "contactShadowLength",
+          "type": "float",
+          "source": "scene.custom.default.contactShadowLength",
+          "default": 0.25
+        },
+        {
+          "name": "contactShadowThickness",
+          "type": "float",
+          "source": "scene.custom.default.contactShadowThickness",
+          "default": 0.1
+        },
+        {
+          "name": "shadowAmbient",
+          "type": "float",
+          "source": "scene.custom.default.shadowAmbient",
+          "default": 1.0
+        },
+        {
+          "name": "debugView",
+          "type": "uint",
+          "source": "scene.custom.default.debugView",
+          "default": 0
+        },
+        {
+          "name": "aoRadius",
+          "type": "float",
+          "source": "scene.custom.default.aoRadius",
+          "default": 0.6
+        },
+        {
+          "name": "aoIntensity",
+          "type": "float",
+          "source": "scene.custom.default.aoIntensity",
+          "default": 1.0
+        },
+        {
+          "name": "bloomIntensity",
+          "type": "float",
+          "source": "scene.custom.default.bloomIntensity",
+          "default": 0.04
+        },
+        {
+          "name": "bloomRadius",
+          "type": "float",
+          "source": "scene.custom.default.bloomRadius",
+          "default": 1.0
+        },
+        {
+          "name": "autoExposure",
+          "type": "uint",
+          "source": "scene.custom.default.autoExposure",
+          "default": 1
+        },
+        {
+          "name": "exposureAdaptSpeed",
+          "type": "float",
+          "source": "scene.custom.default.exposureAdaptSpeed",
+          "default": 1.5
+        },
+        {
+          "name": "exposureMinEV",
+          "type": "float",
+          "source": "scene.custom.default.exposureMinEV",
+          "default": -4.0
+        },
+        {
+          "name": "exposureMaxEV",
+          "type": "float",
+          "source": "scene.custom.default.exposureMaxEV",
+          "default": 14.0
+        },
+        {
+          "name": "deltaTime",
+          "type": "float",
+          "source": "scene.time.delta",
+          "default": 0.016
+        },
+        {
+          "name": "sunAngle",
+          "type": "float",
+          "source": "scene.custom.default.sunAngle",
+          "default": 0.4
+        },
+        {
+          "name": "toneMapper",
+          "type": "uint",
+          "source": "scene.custom.default.toneMapper",
+          "default": 0
+        },
+        {
+          "name": "accumulate",
+          "type": "uint",
+          "source": "scene.custom.showroom.accumulate",
+          "default": 0
+        },
+        {
+          "name": "accumFrame",
+          "type": "uint",
+          "source": "scene.custom.showroom.accumFrame",
+          "default": 0
+        },
+        {
+          "name": "accumSource",
+          "type": "uint",
+          "source": "scene.custom.showroom.accumSource",
+          "default": 0
+        },
+        {
+          "name": "vignette",
+          "type": "float",
+          "source": "scene.custom.showroom.vignette",
+          "default": 0.0
+        },
+        {
+          "name": "grain",
+          "type": "float",
+          "source": "scene.custom.showroom.grain",
+          "default": 0.0
+        },
+        {
+          "name": "frame",
+          "type": "uint",
+          "source": "scene.time.frame",
+          "default": 0
+        },
+        {
+          "name": "dof",
+          "type": "uint",
+          "source": "scene.custom.showroom.dof",
+          "default": 0
+        },
+        {
+          "name": "dofFocus",
+          "type": "float",
+          "source": "scene.custom.showroom.dofFocus",
+          "default": 10.0
+        },
+        {
+          "name": "dofFStop",
+          "type": "float",
+          "source": "scene.custom.showroom.dofFStop",
+          "default": 2.8
+        }
+      ]
+    },
+    "ShadowDraw": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": [
+          "vertex"
+        ]
+      },
+      "fields": [
+        {
+          "name": "model",
+          "type": "mat4",
+          "source": "entity.transform.worldMatrix"
+        },
+        {
+          "name": "cascade",
+          "type": "uint",
+          "source": "pass.repeatIndex"
+        }
+      ]
+    },
+    "MaskedShadowDraw": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": [
+          "vertex",
+          "fragment"
+        ]
+      },
+      "fields": [
+        {
+          "name": "model",
+          "type": "mat4",
+          "source": "entity.transform.worldMatrix"
+        },
+        {
+          "name": "baseColorFactor",
+          "type": "vec4",
+          "source": "entity.material.params.baseColorFactor",
+          "default": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "cascade",
+          "type": "uint",
+          "source": "pass.repeatIndex"
+        },
+        {
+          "name": "alphaCutoff",
+          "type": "float",
+          "source": "entity.material.alphaCutoff",
+          "default": 0.5
+        }
+      ]
+    },
+    "MaterialDraw": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": [
+          "vertex",
+          "fragment"
+        ]
+      },
+      "fields": [
+        {
+          "name": "model",
+          "type": "mat4",
+          "source": "entity.transform.worldMatrix"
+        },
+        {
+          "name": "prevModel",
+          "type": "mat4",
+          "source": "entity.transform.previousWorldMatrix"
+        },
+        {
+          "name": "baseColorFactor",
+          "type": "vec4",
+          "source": "entity.material.params.baseColorFactor",
+          "default": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "emissiveFactor",
+          "type": "vec4",
+          "source": "entity.material.params.emissiveFactor",
+          "default": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "metallicFactor",
+          "type": "float",
+          "source": "entity.material.params.metallicFactor",
+          "default": 0.0
+        },
+        {
+          "name": "roughnessFactor",
+          "type": "float",
+          "source": "entity.material.params.roughnessFactor",
+          "default": 0.5
+        },
+        {
+          "name": "alphaCutoff",
+          "type": "float",
+          "source": "entity.material.alphaCutoff",
+          "default": 0.5
+        },
+        {
+          "name": "hasNormalMap",
+          "type": "float",
+          "source": "entity.material.textures.normalMap.exists"
+        },
+        {
+          "name": "hasMetalRoughMap",
+          "type": "float",
+          "source": "entity.material.textures.metallicRoughnessMap.exists"
+        },
+        {
+          "name": "clearcoatFactor",
+          "type": "float",
+          "source": "entity.material.params.clearcoatFactor",
+          "default": 0.0
+        },
+        {
+          "name": "clearcoatRoughness",
+          "type": "float",
+          "source": "entity.material.params.clearcoatRoughnessFactor",
+          "default": 0.03
+        },
+        {
+          "name": "exposureCompensation",
+          "type": "float",
+          "source": "entity.material.params.exposureCompensation",
+          "default": 0.0
+        }
+      ]
+    },
+    "LocalShadowMatrices": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "spotViewProj",
+          "type": "mat4",
+          "source": "scene.shadows.spot[i].viewProj",
+          "arrayCount": 8
+        },
+        {
+          "name": "pointFaceViewProj",
+          "type": "mat4",
+          "source": "scene.shadows.point.faces[i].viewProj",
+          "arrayCount": 24
+        },
+        {
+          "name": "spotParams",
+          "type": "vec4",
+          "source": "scene.shadows.spot[i].params",
+          "arrayCount": 8
+        },
+        {
+          "name": "pointPositionFar",
+          "type": "vec4",
+          "source": "scene.shadows.point[i].positionFar",
+          "arrayCount": 4
+        },
+        {
+          "name": "pointDepthParams",
+          "type": "vec4",
+          "source": "scene.shadows.point[i].depthParams",
+          "arrayCount": 4
+        },
+        {
+          "name": "spotRect",
+          "type": "vec4",
+          "source": "scene.shadows.spot[i].rect",
+          "arrayCount": 8
+        },
+        {
+          "name": "pointFaceRect",
+          "type": "vec4",
+          "source": "scene.shadows.point.faces[i].rect",
+          "arrayCount": 24
+        },
+        {
+          "name": "spotLightIndex",
+          "type": "int",
+          "source": "scene.shadows.spot[i].lightIndex",
+          "arrayCount": 8,
+          "default": -1
+        },
+        {
+          "name": "pointLightIndex",
+          "type": "int",
+          "source": "scene.shadows.point[i].lightIndex",
+          "arrayCount": 4,
+          "default": -1
+        }
+      ]
+    },
+    "Showroom": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "sunDirection",
+          "type": "vec4",
+          "source": "scene.shadows.sun.direction",
+          "default": [
+            0,
+            -1,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "cameraPosition",
+          "type": "vec4",
+          "source": "scene.camera.positionVec4"
+        },
+        {
+          "name": "vsmDirty0",
+          "type": "vec4",
+          "source": "scene.custom.showroom.vsmDirty0",
+          "default": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "vsmDirty1",
+          "type": "vec4",
+          "source": "scene.custom.showroom.vsmDirty1",
+          "default": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "vsmDirty2",
+          "type": "vec4",
+          "source": "scene.custom.showroom.vsmDirty2",
+          "default": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "vsmDirty3",
+          "type": "vec4",
+          "source": "scene.custom.showroom.vsmDirty3",
+          "default": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "vsmFirstLevel",
+          "type": "float",
+          "source": "scene.custom.showroom.vsmFirstLevel",
+          "default": 4.0
+        },
+        {
+          "name": "vsmDepthRange",
+          "type": "float",
+          "source": "scene.custom.showroom.vsmDepthRange",
+          "default": 200.0
+        },
+        {
+          "name": "vsmLevelBias",
+          "type": "float",
+          "source": "scene.custom.showroom.vsmLevelBias",
+          "default": 0.0
+        },
+        {
+          "name": "vsmSoftness",
+          "type": "float",
+          "source": "scene.custom.showroom.vsmSoftness",
+          "default": 1.5
+        },
+        {
+          "name": "vsmNormalBias",
+          "type": "float",
+          "source": "scene.custom.showroom.vsmNormalBias",
+          "default": 1.0
+        },
+        {
+          "name": "vsmDepthBias",
+          "type": "float",
+          "source": "scene.custom.showroom.vsmDepthBias",
+          "default": 0.002
+        },
+        {
+          "name": "vsmEpoch",
+          "type": "uint",
+          "source": "scene.custom.showroom.vsmEpoch",
+          "default": 0
+        },
+        {
+          "name": "vsmContent",
+          "type": "uint",
+          "source": "scene.custom.showroom.vsmContent",
+          "default": 0
+        },
+        {
+          "name": "sunEnabled",
+          "type": "uint",
+          "source": "scene.shadows.sun.enabled"
+        },
+        {
+          "name": "sunShadowMode",
+          "type": "uint",
+          "source": "scene.custom.showroom.sunShadowMode",
+          "default": 1
+        },
+        {
+          "name": "lightSoftness",
+          "type": "float",
+          "source": "scene.custom.showroom.lightSoftness",
+          "default": 1.0
+        },
+        {
+          "name": "reflections",
+          "type": "float",
+          "source": "scene.custom.showroom.reflections",
+          "default": 1.0
+        },
+        {
+          "name": "areaLights",
+          "type": "float",
+          "source": "scene.custom.showroom.areaLights",
+          "default": 1.0
+        },
+        {
+          "name": "softboxGrid",
+          "type": "float",
+          "source": "scene.custom.showroom.softboxGrid",
+          "default": -1.0
+        }
+      ]
+    },
+    "OverlayScene": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        {
+          "name": "viewProjection",
+          "type": "mat4",
+          "source": "scene.camera.viewProjection"
+        },
+        {
+          "name": "resolution",
+          "type": "vec2",
+          "source": "scene.screen.resolution"
+        },
+        {
+          "name": "padding",
+          "type": "vec2",
+          "source": "const.0"
+        }
+      ]
+    },
+    "OverlayDraw": {
+      "usage": "push_constant",
+      "packing": "scalar",
+      "binding": {
+        "offset": 0,
+        "stages": [
+          "vertex",
+          "fragment"
+        ]
+      },
+      "fields": [
+        {
+          "name": "model",
+          "type": "mat4",
+          "source": "entity.transform.worldMatrix"
+        },
+        {
+          "name": "tintColor",
+          "type": "vec4",
+          "source": "entity.material.params.tintColor"
+        },
+        {
+          "name": "uvRect",
+          "type": "vec4",
+          "source": "entity.material.params.uvRect"
+        },
+        {
+          "name": "screenSpace",
+          "type": "float",
+          "source": "entity.material.params.screenSpace"
+        },
+        {
+          "name": "padding1",
+          "type": "float",
+          "source": "const.0"
+        },
+        {
+          "name": "padding2",
+          "type": "float",
+          "source": "const.0"
+        },
+        {
+          "name": "padding3",
+          "type": "float",
+          "source": "const.0"
+        }
+      ]
+    },
+    "LTC": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 4096,
+      "fields": [
+        {
+          "name": "inverseMatrix",
+          "type": "vec4"
+        }
+      ],
+      "source": {
+        "type": "file",
+        "path": "ltc.bin"
+      },
+      "memory": {
+        "location": "device_local"
+      }
+    },
+    "SceneLights": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 8192,
+      "fields": [
+        {
+          "name": "positionType",
+          "type": "vec4"
+        },
+        {
+          "name": "colorIntensity",
+          "type": "vec4"
+        },
+        {
+          "name": "directionRange",
+          "type": "vec4"
+        },
+        {
+          "name": "attenuation",
+          "type": "vec4"
+        },
+        {
+          "name": "source",
+          "type": "vec4"
+        },
+        {
+          "name": "shape",
+          "type": "vec4"
+        }
+      ],
+      "source": {
+        "type": "scene",
+        "data": "lights"
+      }
+    }
+  },
+  "entityDataBindings": {
+    "shadowOpaque": {
+      "perDraw": {
+        "layoutRef": "ShadowDraw"
+      }
+    },
+    "shadowMasked": {
+      "perDraw": {
+        "layoutRef": "MaskedShadowDraw"
+      },
+      "material": {
+        "layoutRef": "materialSet"
+      }
+    },
+    "shadowSkinned": {
+      "perDraw": {
+        "layoutRef": "ShadowDraw"
+      },
+      "skeleton": {
+        "layoutRef": "skeletonSet"
+      }
+    },
+    "material": {
+      "perDraw": {
+        "layoutRef": "MaterialDraw"
+      },
+      "material": {
+        "layoutRef": "materialSet"
+      }
+    },
+    "skinnedMaterial": {
+      "perDraw": {
+        "layoutRef": "MaterialDraw"
+      },
+      "material": {
+        "layoutRef": "materialSet"
+      },
+      "skeleton": {
+        "layoutRef": "skeletonSet"
+      }
+    },
+    "overlay": {
+      "perDraw": {
+        "layoutRef": "OverlayDraw"
+      },
+      "material": {
+        "layoutRef": "overlayTextureSet"
+      }
+    }
+  },
+  "samplers": {
+    "nearestClamp": {
+      "magFilter": "nearest",
+      "minFilter": "nearest",
+      "mipmapMode": "nearest",
+      "addressMode": "clamp_to_edge"
+    },
+    "linearClamp": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "addressMode": "clamp_to_edge"
+    },
+    "shadowCompare": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "addressMode": "clamp_to_edge",
+      "compareEnable": true,
+      "compareOp": "less_or_equal"
+    },
+    "trilinearClamp": {
+      "magFilter": "linear",
+      "minFilter": "linear",
+      "mipmapMode": "linear",
+      "addressMode": "clamp_to_edge",
+      "maxLod": 16.0
+    }
+  }
+}

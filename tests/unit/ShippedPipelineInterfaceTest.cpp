@@ -19,6 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -30,15 +31,29 @@ namespace fs = std::filesystem;
 
 namespace {
 
-/// Every JSON file under examples/ that declares render passes.
+/// Every pipeline under examples/: the JSON files that declare render passes
+/// or include other files, less those another one includes.
 std::vector<fs::path> pipelineFiles() {
-    std::vector<fs::path> files;
+    std::vector<fs::path> candidates;
     const fs::path root = fs::path(SHOONYAKASHA_SOURCE_DIR) / "examples";
     for (const auto& entry : fs::recursive_directory_iterator(root)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".json") continue;
         std::ifstream in(entry.path());
         const auto json = nlohmann::json::parse(in, nullptr, /*allow_exceptions=*/false);
-        if (json.is_object() && json.contains("passes")) files.push_back(entry.path());
+        if (json.is_object() && (json.contains("passes") || json.contains("include"))) {
+            candidates.push_back(entry.path());
+        }
+    }
+    std::vector<std::string> included;
+    for (const auto& file : candidates) {
+        std::vector<std::string> read;
+        loadPipelineDocument(file.string(), &read);
+        for (size_t i = 1; i < read.size(); ++i) included.push_back(fs::path(read[i]).lexically_normal().generic_string());
+    }
+    std::vector<fs::path> files;
+    for (const auto& file : candidates) {
+        const std::string name = file.lexically_normal().generic_string();
+        if (std::find(included.begin(), included.end(), name) == included.end()) files.push_back(file);
     }
     return files;
 }

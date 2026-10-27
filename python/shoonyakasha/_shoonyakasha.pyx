@@ -54,7 +54,7 @@ from ._engine_api cimport (
     make_float2_callback, make_int_bool_callback,
     wrap_py_object, unwrap_py_object, make_system_update_callback,
     CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
-    videoRecordingAvailable, findFfmpeg, checkPipelineJson, Readback,
+    videoRecordingAvailable, findFfmpeg, checkPipelineJson, loadPipelineDocumentText, Readback,
     CppPlanetLod, LodBody, LodView, LodNodeInfo, LodJob, LodFaceColours,
     CppComputeContext, CppComputeBuffer, CppComputeKernel, ComputeKernelInfo, ComputeKernelBinding,
     ComputeBindingType, ComputeUint3, CppComputeImage, CppComputeBinding, ComputeBindingDim,
@@ -2424,8 +2424,10 @@ cdef class Engine:
             hdr_environment_path: HDR environment map, or an .ibl file made
                 by bake_environment. Empty: a pipeline that samples IBL gets a
                 uniform environment_color instead.
-            pipeline_json_path: JSON render graph. Empty: the default
-                pipeline, shoonyakasha.pipeline.DEFAULT.
+            pipeline_json_path: JSON render graph: a pipeline JSON file, a
+                directory holding pipeline.json, or an http(s) URL, which
+                shoonyakasha.pipeline.fetch downloads first. Empty: the
+                default pipeline, shoonyakasha.pipeline.DEFAULT.
             max_frames_in_flight: Vulkan frames in flight
             render_graph_parameters: Dict of str→int for SSBO sizing etc.
             environment_color: (r, g, b) of the uniform environment used
@@ -2439,6 +2441,8 @@ cdef class Engine:
         from . import pipeline as _pipeline
         if not pipeline_json_path:
             pipeline_json_path = str(_pipeline.DEFAULT)
+        elif _pipeline._is_url(pipeline_json_path):
+            pipeline_json_path = str(_pipeline.fetch(pipeline_json_path))
         # Where the engine finds the shaders the default pipeline ships for
         # its own use (UI, skinning), whatever pipeline this engine runs.
         import os as _os
@@ -3377,6 +3381,14 @@ def _check_pipeline_json(str text):
     """The engine's loader error for pipeline JSON text, '' when it loads.
     shoonyakasha.pipeline.validate reports it."""
     return checkPipelineJson(text.encode('utf-8')).decode('utf-8')
+
+
+def _load_pipeline_document(path):
+    """The pipeline at `path` with its includes merged, as the engine reads
+    it: (JSON text, '') on success, ('', error) on failure."""
+    cdef string error
+    cdef string text = loadPipelineDocumentText(str(path).encode('utf-8'), error)
+    return text.decode('utf-8'), error.decode('utf-8')
 
 
 

@@ -721,6 +721,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
     cbool videoRecordingAvailable()
     string findFfmpeg()
     string checkPipelineJson(const string& text) except +
+    string loadPipelineDocumentText(const string& path, string& error) except +
 
 
 # ═══════════════════════════════════════════════════════════════

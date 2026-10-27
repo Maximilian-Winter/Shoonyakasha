@@ -15,13 +15,16 @@ import math
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "python"))
+# SplitPipelines.test_engine_merges_the_same sets this to test the installed package.
+if not os.environ.get("SHOONYAKASHA_INSTALLED_ONLY"):
+    sys.path.insert(0, str(REPO / "python"))
 
 from shoonyakasha import assets, keys, mathutil, pipeline, shaders  # noqa: E402
 
@@ -410,12 +413,20 @@ class PipelineValidation(unittest.TestCase):
                 self.assertIsInstance(self.problems(document), list)
 
     def test_every_shipped_pipeline_validates(self):
-        checked = 0
+        # Pipelines are the JSON files that declare passes or include other
+        # files, less those another one includes.
+        candidates = []
         for path in sorted((REPO / "examples").rglob("*.json")):
             if "cmake-build" in str(path) or path.name.endswith(".gltf"):
                 continue
             document = path.read_text(encoding="utf-8")
-            if '"passes"' not in document:
+            if '"passes"' in document or '"include"' in document:
+                candidates.append(path)
+        included = {os.path.normcase(os.path.normpath(p))
+                    for path in candidates for p in pipeline.files(path)[1:]}
+        checked = 0
+        for path in candidates:
+            if os.path.normcase(os.path.normpath(path)) in included:
                 continue
             errors = [p for p in pipeline.validate(path) if p.is_error]
             self.assertEqual([], errors, "%s: %s" % (path.name, errors))
@@ -531,6 +542,144 @@ class ValidatorAgreesWithTheEngineLoader(unittest.TestCase):
                 python = [p for p in problems if p.is_error and p not in engine]
                 self.assertEqual(loads, not engine, engine)
                 self.assertEqual(loads, not python, python)
+
+
+class SplitPipelines(unittest.TestCase):
+    """Pipelines split across files: pipeline.load_document, files and
+    validate, and the same merge in the engine (FrameGraph::loadPipelineDocument)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def write(self, name, document):
+        path = self.tmp / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def compute_pass(name, shader=None):
+        decl = {"name": name, "type": "compute", "hasSideEffects": True,
+                "outputs": [{"resource": "buf", "usage": "shader_read_write"}]}
+        if shader:
+            decl["pipeline"] = {"computeShader": shader}
+        return decl
+
+    def split(self):
+        (self.tmp / "shaders").mkdir()
+        (self.tmp / "shaders" / "a.comp.spv").write_bytes(b"x")
+        self.write("pipeline.json", {"name": "P", "include": ["resources.json", "passes/*.json"],
+                                     "passes": [self.compute_pass("last")]})
+        self.write("resources.json", {"resources": [{"name": "buf", "kind": "buffer", "buffer": {"size": 64}}]})
+        self.write("passes/20_b.json", {"passes": [self.compute_pass("b")],
+                                        "bufferLayouts": {"L": {"fields": [{"name": "x", "type": "float"}]}}})
+        self.write("passes/10_a.json", {"passes": [self.compute_pass("a", "../shaders/a.comp.spv")]})
+
+    def test_merge_order_and_files(self):
+        self.split()
+        document = pipeline.load_document(self.tmp)
+        self.assertEqual([p["name"] for p in document["passes"]], ["a", "b", "last"])
+        self.assertEqual(list(document["bufferLayouts"]), ["L"])
+        self.assertNotIn("include", document)
+        shader = document["passes"][0]["pipeline"]["computeShader"]
+        self.assertEqual(Path(shader), (self.tmp / "shaders" / "a.comp.spv").absolute())
+        self.assertEqual([p.relative_to(self.tmp).as_posix() for p in pipeline.files(self.tmp)],
+                         ["pipeline.json", "resources.json", "passes/10_a.json", "passes/20_b.json"])
+
+    def test_problems_name_their_file(self):
+        self.split()
+        self.write("passes/20_b.json", {"passes": [dict(self.compute_pass("b"), type="graphix")]})
+        problems = [p for p in pipeline.validate(self.tmp) if p.is_error]
+        self.assertTrue(any(p.where.startswith("passes/20_b.json passes") for p in problems), problems)
+
+    def test_duplicates_and_bad_includes(self):
+        self.split()
+        self.write("passes/30_c.json", {"passes": [self.compute_pass("a")]})
+        problems = pipeline.validate(self.tmp)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("passes 'a' is also defined in passes/10_a.json", str(problems[0]))
+        self.assertEqual(problems[0].where, "passes/30_c.json")
+
+        self.write("pipeline.json", {"include": ["missing.json"]})
+        self.assertIn("names no file", pipeline.validate(self.tmp)[0].message)
+        self.write("pipeline.json", {"include": ["loop.json"]})
+        self.write("loop.json", {"include": ["pipeline.json"]})
+        self.assertIn("which includes it", pipeline.validate(self.tmp)[0].message)
+
+    def serve(self, directory):
+        """An HTTP server for `directory` on a free port, stopped after the test: its base URL."""
+        import functools
+        import http.server
+        import threading
+
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), functools.partial(Quiet, directory=str(directory)))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return "http://127.0.0.1:%d/" % server.server_address[1]
+
+    def test_fetch_over_http(self):
+        self.split()
+        (self.tmp / "data.bin").write_bytes(b"\0" * 8)
+        self.write("pipeline.json", {"name": "P", "include": ["resources.json", "passes/10_a.json", "passes/20_b.json"],
+                                     "bufferLayouts": {"D": {"source": {"type": "file", "path": "data.bin"},
+                                                             "elementCount": 2, "fields": [
+                                                                 {"name": "x", "type": "float"}]}}})
+        base = self.serve(self.tmp)
+        cache = self.tmp / "cache"
+        local = pipeline.fetch(base, cache=cache)
+        self.assertEqual(local, cache / "pipeline.json")
+        for name in ("resources.json", "passes/10_a.json", "passes/20_b.json", "shaders/a.comp.spv", "data.bin"):
+            self.assertTrue((cache / name).is_file(), name)
+        fetched = pipeline.load_document(local)
+        self.assertEqual([p["name"] for p in fetched["passes"]], ["a", "b"])
+        self.assertEqual(Path(fetched["passes"][0]["pipeline"]["computeShader"]),
+                         (cache / "shaders" / "a.comp.spv").absolute())
+
+        self.write("pipeline.json", {"include": ["passes/*.json"]})
+        with self.assertRaisesRegex(pipeline.PipelineFileError, "pattern"):
+            pipeline.fetch(base, cache=cache)
+        self.write("pipeline.json", {"include": ["../outside.json"]})
+        with self.assertRaisesRegex(pipeline.PipelineFileError, "outside"):
+            pipeline.fetch(base, cache=cache)
+        self.write("pipeline.json", {"include": ["gone.json"]})
+        with self.assertRaisesRegex(pipeline.PipelineFileError, "gone.json: download failed"):
+            pipeline.fetch(base, cache=cache)
+
+    def test_engine_merges_the_same(self):
+        try:
+            from shoonyakasha._shoonyakasha import _load_pipeline_document  # noqa: F401
+        except ImportError:
+            # This interpreter has the source tree first on sys.path; run the
+            # comparison where the installed package is imported.
+            here = Path(__file__).resolve().parent
+            script = ("import sys, unittest; sys.argv = ['x']; import test_utilities as t; "
+                      "r = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromName("
+                      "'SplitPipelines.engine_comparison', t)); sys.exit(0 if r.wasSuccessful() else 1)")
+            result = subprocess.run([sys.executable, "-c", script], cwd=here, capture_output=True, text=True,
+                                    env=dict(os.environ, SHOONYAKASHA_INSTALLED_ONLY="1"))
+            self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
+            return
+        self.engine_comparison()
+
+    def engine_comparison(self):
+        from shoonyakasha._shoonyakasha import _load_pipeline_document
+        self.split()
+        text, error = _load_pipeline_document(self.tmp)
+        self.assertEqual(error, "")
+        self.assertEqual(json.loads(text), pipeline.load_document(self.tmp))
+        showroom = REPO / "examples" / "python" / "rendering" / "showroom" / "pipeline"
+        text, error = _load_pipeline_document(showroom)
+        self.assertEqual(error, "")
+        self.assertEqual(json.loads(text), pipeline.load_document(showroom))
+        self.write("pipeline.json", {"include": ["missing.json"]})
+        self.assertIn("names no file", _load_pipeline_document(self.tmp)[1])
 
 
 class KeyCodes(unittest.TestCase):

@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <cstring>  // For strerror
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <cerrno>
 
@@ -2522,8 +2523,9 @@ void resolveShaderPathsAgainst(nlohmann::json& json, const std::filesystem::path
 
 } // namespace
 
-void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath,
-                       const PipelineCapabilities& capabilities) {
+/// The JSON in `filePath`. Throws std::runtime_error with the reason when it
+/// cannot be opened, and naming the file when it does not parse.
+static nlohmann::json readJsonFile(const std::string& filePath) {
     nlohmann::json json;
     {
         // Capture errno before any other operations
@@ -2574,10 +2576,159 @@ void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath,
 
             throw std::runtime_error("Cannot open frame graph file: '" + filePath + "' - " + errorDetail);
         }
-        file >> json;
-    } // File closed here before modifying builder
-    resolveShaderPathsAgainst(json, std::filesystem::absolute(filePath).parent_path());
-    loadGraphFromJson(builder, json, capabilities);
+        try {
+            file >> json;
+        } catch (const nlohmann::json::parse_error& e) {
+            throw std::runtime_error("'" + filePath + "': " + e.what());
+        }
+    }
+    return json;
+}
+
+namespace {
+
+/// Sections whose entries are keyed by name, combined across files.
+constexpr const char* kNamedSections[] = {"samplers", "vertexFormats", "uniformBuffers", "entityDataBindings",
+                                          "bufferLayouts", "descriptorSetLayouts", "presets"};
+/// Sections that are lists, appended across files.
+constexpr const char* kListSections[] = {"resources", "passes"};
+
+bool isOneOf(const std::string& key, const char* const* begin, const char* const* end) {
+    return std::any_of(begin, end, [&](const char* k) { return key == k; });
+}
+
+/// Whether `name` holds a * or ? pattern.
+bool isPattern(const std::string& name) {
+    return name.find_first_of("*?") != std::string::npos;
+}
+
+/// Whether `text` matches the * and ? pattern `pattern`.
+bool matches(const char* pattern, const char* text) {
+    if (*pattern == '\0') return *text == '\0';
+    if (*pattern == '*') return matches(pattern + 1, text) || (*text != '\0' && matches(pattern, text + 1));
+    if (*text != '\0' && (*pattern == '?' || *pattern == *text)) return matches(pattern + 1, text + 1);
+    return false;
+}
+
+/// The files `include` (relative to `dir`) names: itself, or for a pattern
+/// in its last part, every file matching it, in name order.
+std::vector<std::filesystem::path> expandInclude(const std::filesystem::path& dir, const std::string& include) {
+    const std::filesystem::path full = dir / include;
+    if (!isPattern(full.filename().string())) {
+        if (isPattern(full.parent_path().string())) {
+            throw std::runtime_error("only the last part of an include may be a pattern");
+        }
+        return {full};
+    }
+    if (isPattern(full.parent_path().string())) {
+        throw std::runtime_error("only the last part of an include may be a pattern");
+    }
+    std::vector<std::filesystem::path> out;
+    std::error_code ec;
+    const std::string pattern = full.filename().string();
+    for (const auto& entry : std::filesystem::directory_iterator(full.parent_path(), ec)) {
+        if (entry.is_regular_file() && matches(pattern.c_str(), entry.path().filename().string().c_str())) {
+            out.push_back(entry.path());
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+struct DocumentMerge {
+    nlohmann::json document = nlohmann::json::object();
+    std::map<std::string, std::string> origin;   // "section/name" or "key" -> file that defined it
+    std::vector<std::string> stack;              // files being read, outermost first
+    std::vector<std::string>* files = nullptr;
+
+    [[noreturn]] void twice(const std::string& what, const std::string& first, const std::string& second) {
+        throw std::runtime_error("pipeline: " + what + " is defined in both '" + first + "' and '" + second + "'");
+    }
+
+    void mergeFile(const std::filesystem::path& path) {
+        const std::string name = path.lexically_normal().generic_string();
+        if (std::find(stack.begin(), stack.end(), name) != stack.end()) {
+            throw std::runtime_error("pipeline: '" + name + "' includes itself (through '" + stack.back() + "')");
+        }
+        if (files) files->push_back(name);
+        nlohmann::json json = readJsonFile(name);
+        if (!json.is_object()) throw std::runtime_error("pipeline: '" + name + "' does not hold a JSON object");
+        const std::filesystem::path dir = std::filesystem::absolute(path).parent_path();
+        resolveShaderPathsAgainst(json, dir);
+
+        stack.push_back(name);
+        if (json.contains("include")) {
+            const auto& includes = json["include"];
+            if (!includes.is_array()) throw std::runtime_error("pipeline: 'include' in '" + name + "' is not a list");
+            for (const auto& include : includes) {
+                if (!include.is_string()) {
+                    throw std::runtime_error("pipeline: 'include' in '" + name + "' holds something other than a path");
+                }
+                const std::string text = include.get<std::string>();
+                std::vector<std::filesystem::path> found;
+                try {
+                    found = expandInclude(dir, text);
+                } catch (const std::runtime_error& e) {
+                    throw std::runtime_error("pipeline: include '" + text + "' in '" + name + "': " + e.what());
+                }
+                std::error_code ec;
+                if (found.empty() || (found.size() == 1 && !std::filesystem::is_regular_file(found[0], ec))) {
+                    throw std::runtime_error("pipeline: include '" + text + "' in '" + name + "' names no file");
+                }
+                for (const auto& file : found) mergeFile(file);
+            }
+        }
+        stack.pop_back();
+
+        for (auto& [key, value] : json.items()) {
+            if (key == "include") continue;
+            if (isOneOf(key, std::begin(kListSections), std::end(kListSections))) {
+                if (!value.is_array()) throw std::runtime_error("pipeline: '" + key + "' in '" + name + "' is not a list");
+                auto& list = document[key];
+                if (list.is_null()) list = nlohmann::json::array();
+                for (auto& item : value) {
+                    if (item.is_object() && item.contains("name") && item["name"].is_string()) {
+                        const std::string id = key + " '" + item["name"].get<std::string>() + "'";
+                        auto [it, added] = origin.emplace(id, name);
+                        if (!added) twice(id, it->second, name);
+                    }
+                    list.push_back(std::move(item));
+                }
+            } else if (isOneOf(key, std::begin(kNamedSections), std::end(kNamedSections))) {
+                if (!value.is_object()) throw std::runtime_error("pipeline: '" + key + "' in '" + name + "' is not an object");
+                auto& section = document[key];
+                if (section.is_null()) section = nlohmann::json::object();
+                for (auto& [entry, body] : value.items()) {
+                    const std::string id = key + " '" + entry + "'";
+                    auto [it, added] = origin.emplace(id, name);
+                    if (!added) twice(id, it->second, name);
+                    section[entry] = std::move(body);
+                }
+            } else if (document.contains(key) && document[key] != value) {
+                twice("'" + key + "'", origin[key], name);
+            } else {
+                origin.emplace(key, name);
+                document[key] = std::move(value);
+            }
+        }
+    }
+};
+
+} // namespace
+
+nlohmann::json loadPipelineDocument(const std::string& path, std::vector<std::string>* files) {
+    std::filesystem::path file = path;
+    std::error_code ec;
+    if (std::filesystem::is_directory(file, ec)) file /= "pipeline.json";
+    DocumentMerge merge;
+    merge.files = files;
+    merge.mergeFile(file);
+    return std::move(merge.document);
+}
+
+void loadGraphFromFile(FrameGraphBuilder& builder, const std::string& filePath,
+                       const PipelineCapabilities& capabilities) {
+    loadGraphFromJson(builder, loadPipelineDocument(filePath), capabilities);
 }
 
 // ═══════════════════════════════════════════════════════════════

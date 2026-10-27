@@ -1,0 +1,298 @@
+{
+  "passes": [
+    {
+      "name": "GBufferOpaque",
+      "type": "graphics",
+      "execution": {
+        "type": "opaque_geometry",
+        "alphaFilter": "opaque",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "material"
+      },
+      "inputs": [
+        {
+          "resource": "exposure",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "gAlbedo",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "gNormal",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "hdrColor",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "gVelocity",
+          "usage": "color_write",
+          "clear": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_write",
+          "clear": {
+            "depth": 1.0,
+            "stencil": 0
+          }
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/gbuffer.vert.spv",
+        "fragmentShader": "../shaders/gbuffer.frag.spv",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet",
+        "exposureReadSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 192
+        }
+      ]
+    },
+    {
+      "name": "GBufferMasked",
+      "type": "graphics",
+      "execution": {
+        "type": "opaque_geometry",
+        "alphaFilter": "mask",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "material"
+      },
+      "inputs": [
+        {
+          "resource": "exposure",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "gAlbedo",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "color_write"
+        },
+        {
+          "resource": "hdrColor",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gVelocity",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/gbuffer.vert.spv",
+        "fragmentShader": "../shaders/gbuffer_masked.frag.spv",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet",
+        "exposureReadSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 192
+        }
+      ]
+    },
+    {
+      "name": "GBufferSkinned",
+      "type": "graphics",
+      "execution": {
+        "type": "skinned_geometry",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "skinnedMaterial",
+        "alphaFilter": "opaque"
+      },
+      "inputs": [
+        {
+          "resource": "exposure",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "gAlbedo",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "color_write"
+        },
+        {
+          "resource": "hdrColor",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gVelocity",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/gbuffer_skinned.vert.spv",
+        "fragmentShader": "../shaders/gbuffer.frag.spv",
+        "vertexInput": "skinned",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet",
+        "exposureReadSet",
+        "skeletonSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 192
+        }
+      ]
+    },
+    {
+      "name": "GBufferSkinnedMasked",
+      "type": "graphics",
+      "execution": {
+        "type": "skinned_geometry",
+        "sortMode": "front_to_back",
+        "entityDataBinding": "skinnedMaterial",
+        "alphaFilter": "mask"
+      },
+      "inputs": [
+        {
+          "resource": "exposure",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "gAlbedo",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gMaterial",
+          "usage": "color_write"
+        },
+        {
+          "resource": "hdrColor",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gVelocity",
+          "usage": "color_write"
+        },
+        {
+          "resource": "gDepth",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/gbuffer_skinned.vert.spv",
+        "fragmentShader": "../shaders/gbuffer_masked.frag.spv",
+        "vertexInput": "skinned",
+        "depthTest": true,
+        "depthWrite": true,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "cameraSet",
+        "materialSet",
+        "exposureReadSet",
+        "skeletonSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 192
+        }
+      ]
+    }
+  ]
+}

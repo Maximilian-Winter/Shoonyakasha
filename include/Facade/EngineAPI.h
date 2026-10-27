@@ -61,6 +61,12 @@ std::string findFfmpeg();
 /// empty when it loads.
 std::string checkPipelineJson(const std::string& text);
 
+/// The pipeline at `path` (a pipeline JSON file, or a directory holding
+/// pipeline.json) with its includes merged, as JSON text, as the engine
+/// reads it (FrameGraph::loadPipelineDocument). On failure returns empty
+/// text and sets `error`.
+std::string loadPipelineDocumentText(const std::string& path, std::string& error);
+
 
 /// A completed readback (EngineAPI::getReadback). `data` stays valid until
 /// the next frame begins.

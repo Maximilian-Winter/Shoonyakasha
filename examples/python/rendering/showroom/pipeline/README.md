@@ -41,7 +41,7 @@ The pipeline starts as `high`. As in the default pipeline, ray tracing covers on
 
 ## Settings
 
-`scene.custom.showroom.*` values, with defaults in `pipeline.json` (`engine.set_custom_float("showroom.vsmSoftness", 2.0)`):
+`scene.custom.showroom.*` values, with defaults in `data.json` (`engine.set_custom_float("showroom.vsmSoftness", 2.0)`):
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -160,7 +160,26 @@ Like the shadow rays, the acceleration structure holds only static, opaque, shad
 
 ## Changing it
 
-The pipeline is generated from the default one plus the additions above. Edit `pipeline.json` and the shaders directly, as with any copy. Shaders recompile with `sk.shaders.compile_dir("shaders")`, and `sk.pipeline.check("pipeline.json")` validates the JSON without starting the engine.
+The pipeline is generated from the default one plus the additions above. Edit its JSON files and the shaders directly, as with any copy. Shaders recompile with `sk.shaders.compile_dir("shaders")`, and `sk.pipeline.check("pipeline.json")` validates the JSON without starting the engine.
+
+The pipeline is [split across files](../../../../../docs/reference/pipeline-json.md#splitting-a-pipeline-across-files). `pipeline.json` names the pipeline, holds its canvas UI setting and includes the rest in order:
+
+| File | Holds |
+|---|---|
+| `data.json` | Vertex formats, buffer layouts (the settings' defaults among them), entity data bindings and samplers |
+| `resources.json` | Images and buffers |
+| `layouts.json` | Descriptor set layouts that passes in more than one of the files below use |
+| `passes/10_shadows.json` | Sun cascades (the `cascades` preset), spot and point light shadows into the atlas |
+| `passes/20_gbuffer.json` | The G-buffer |
+| `passes/30_virtual_shadow_maps.json` | The sun's virtual shadow map: marking, allocating, clearing and drawing pages |
+| `passes/40_lights.json` | The light image for textured area lights, and the light clusters |
+| `passes/50_shadow_mask_and_ao.json` | The sun's shadow mask (cascades, virtual shadow map or ray traced) and ambient occlusion |
+| `passes/60_lighting.json` | Lighting, ray-traced reflections, the reflection and shadow denoisers, and transparent surfaces |
+| `passes/70_post.json` | Temporal antialiasing, depth of field, accumulation, bloom, exposure and tone mapping |
+| `passes/80_overlay.json` | The model's credits and the canvas UI |
+| `presets.json` | The quality and shadow presets |
+
+Each pass file also holds the descriptor set layouts only its passes use. The `passes/*.json` include runs the pass files in name order, which is the order the passes run in.
 
 **Passes and shaders added over the default pipeline:**
 

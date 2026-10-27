@@ -1,0 +1,343 @@
+{
+  "descriptorSetLayouts": {
+    "vsmMarkSet": {
+      "bindings": [
+        {
+          "binding": 0,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "gDepth",
+          "autoBindResource": "gDepth",
+          "autoBindSampler": "nearestClamp"
+        },
+        {
+          "binding": 1,
+          "type": "combined_image_sampler",
+          "stages": [
+            "compute"
+          ],
+          "name": "gNormal",
+          "autoBindResource": "gNormal",
+          "autoBindSampler": "nearestClamp"
+        }
+      ]
+    }
+  },
+  "passes": [
+    {
+      "name": "VSMMark",
+      "type": "compute",
+      "hasSideEffects": true,
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          8,
+          8,
+          1
+        ],
+        "dispatch": {
+          "x": {
+            "resource": "gDepth",
+            "dimension": "width",
+            "divisor": 8
+          },
+          "y": {
+            "resource": "gDepth",
+            "dimension": "height",
+            "divisor": 8
+          },
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "gDepth",
+          "usage": "shader_read"
+        },
+        {
+          "resource": "gNormal",
+          "usage": "shader_read"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "vsmRequest",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "../shaders/vsm_mark.comp.spv"
+      },
+      "descriptorSets": [
+        "vsmMarkSet",
+        "cameraSet",
+        "settingsSet",
+        "vsmSet"
+      ]
+    },
+    {
+      "name": "VSMAllocate",
+      "type": "compute",
+      "hasSideEffects": true,
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          256,
+          1,
+          1
+        ],
+        "dispatch": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "inputs": [],
+      "outputs": [
+        {
+          "resource": "vsmRequest",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmPageTable",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmPageTag",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmOwner",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmAge",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmState",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmLevelInfo",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "../shaders/vsm_allocate.comp.spv"
+      },
+      "descriptorSets": [
+        "settingsSet",
+        "vsmSet"
+      ]
+    },
+    {
+      "name": "VSMClear",
+      "type": "compute",
+      "hasSideEffects": true,
+      "execution": {
+        "type": "compute_dispatch",
+        "workgroupSize": [
+          16,
+          16,
+          1
+        ],
+        "dispatch": {
+          "x": 64,
+          "y": 64,
+          "z": 1
+        }
+      },
+      "inputs": [
+        {
+          "resource": "vsmPageTable",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmOwner",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "vsmPhysical",
+          "usage": "shader_read_write"
+        }
+      ],
+      "pipeline": {
+        "computeShader": "../shaders/vsm_clear.comp.spv"
+      },
+      "descriptorSets": [
+        "settingsSet",
+        "vsmSet"
+      ]
+    },
+    {
+      "name": "VSMOpaque{level}",
+      "type": "graphics",
+      "repeat": {
+        "count": 8,
+        "index": "level"
+      },
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "opaque",
+        "view": "none",
+        "entityDataBinding": "shadowOpaque"
+      },
+      "inputs": [
+        {
+          "resource": "vsmPageTable",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmLevelInfo",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "vsmPhysical",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmRaster",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/vsm.vert.spv",
+        "fragmentShader": "../shaders/vsm.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "settingsSet",
+        "vsmSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ]
+    },
+    {
+      "name": "VSMMasked{level}",
+      "type": "graphics",
+      "repeat": {
+        "count": 8,
+        "index": "level"
+      },
+      "execution": {
+        "type": "shadow_casters",
+        "alphaFilter": "mask",
+        "view": "none",
+        "entityDataBinding": "shadowMasked"
+      },
+      "inputs": [
+        {
+          "resource": "vsmPageTable",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmLevelInfo",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "vsmPhysical",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmRaster",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/vsm_masked.vert.spv",
+        "fragmentShader": "../shaders/vsm_masked.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none"
+      },
+      "descriptorSets": [
+        "settingsSet",
+        "vsmSet",
+        "materialSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex",
+            "fragment"
+          ],
+          "offset": 0,
+          "size": 88
+        }
+      ]
+    },
+    {
+      "name": "VSMSkinned{level}",
+      "type": "graphics",
+      "repeat": {
+        "count": 8,
+        "index": "level"
+      },
+      "execution": {
+        "type": "skinned_shadow_casters",
+        "view": "none",
+        "entityDataBinding": "shadowSkinned"
+      },
+      "inputs": [
+        {
+          "resource": "vsmPageTable",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmLevelInfo",
+          "usage": "shader_read_write"
+        }
+      ],
+      "outputs": [
+        {
+          "resource": "vsmPhysical",
+          "usage": "shader_read_write"
+        },
+        {
+          "resource": "vsmRaster",
+          "usage": "depth_write"
+        }
+      ],
+      "pipeline": {
+        "vertexShader": "../shaders/vsm_skinned.vert.spv",
+        "fragmentShader": "../shaders/vsm.frag.spv",
+        "depthTest": false,
+        "depthWrite": false,
+        "cullMode": "none",
+        "vertexInput": "skinned"
+      },
+      "descriptorSets": [
+        "settingsSet",
+        "vsmSet",
+        "skeletonSet"
+      ],
+      "pushConstants": [
+        {
+          "stages": [
+            "vertex"
+          ],
+          "offset": 0,
+          "size": 68
+        }
+      ]
+    }
+  ]
+}
