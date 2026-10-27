@@ -1,10 +1,11 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-// One half of a time step, chosen by `mode`:
+// One third of a time step, chosen by `index`: mode = index % 3, and the
+// step's start time is `time` + (index / 3) dt.
 //
-// even mode: the galaxy centres, in invocation 0: half a step of gravity
-// and friction, a drift, and another half. Each pair pulls on each other
-// with the mean of A's mass in B's field and B's mass in A's, so the pair's
+// mode 0: the galaxy centres, in invocation 0: half a step of gravity and
+// friction, a drift, and another half. Each pair pulls on each other with
+// the mean of A's mass in B's field and B's mass in A's, so the pair's
 // momentum is kept. Friction is Chandrasekhar's,
 //
 //   F = -4 pi lnLambda M^2 rho(r) / v^2 [erf(X) - 2X/sqrt(pi) e^(-X^2)] v_hat,
@@ -13,14 +14,24 @@
 // averaged over A in B's halo and B in A's; over each half step it scales
 // the pair's relative velocity by exp(-rate * dt/2), the rate being that
 // force over the relative speed times 1/M_A + 1/M_B. `previous` keeps each
-// centre from before the step.
+// centre from before the step. Every invocation also clears its share of
+// the gas grid.
 //
-// odd mode: every particle (kick, drift, kick), the first kick from the
-// centres' places before the step, the second from after it.
+// mode 1: each gas particle adds itself and its momentum (fixed point) to
+// its cell of the gas grid: GRID^3 cells of CELL kpc, centred on the
+// galaxies' centre of mass.
 //
-// A step is an even pass then an odd one. The render graph repeats this
-// shader's pass with mode = pass.repeatIndex; model.py computes the same in
-// NumPy.
+// mode 2: every particle. A gas particle in the grid first takes on part of
+// its cell's mean velocity, 1 - exp(-gasRelax dt), which keeps the cell's
+// momentum; then, where the cell's gas density is above sfDensity, it
+// becomes a young star with probability sfEfficiency dt / t_ff, t_ff being
+// the free-fall time sqrt(3 pi / (32 rho)), its birth time the step's
+// start, and counts into `formed.x`. Then every particle steps (kick, drift,
+// kick), the first kick from the centres' places before the step, the
+// second from after it.
+//
+// The render graph repeats this shader's pass with index =
+// pass.repeatIndex; model.py computes the centres and the motion in NumPy.
 
 layout(local_size_x = 256) in;
 
@@ -40,11 +51,24 @@ layout(std140, binding = 2) uniform Params {
     float dt;
     float softening;
     float logLambda;
+    float time;          // at the start of the frame's first step
+    float gasRelax;
+    float sfDensity;
+    float sfEfficiency;
+    float gasMass;       // one gas particle's mass
 } pc;
 
-layout(push_constant) uniform Step { uint mode; } step;
+layout(std430, binding = 3) buffer Grid { ivec4 cell[]; } grid;   // momentum xyz (fixed point), gas count
+layout(std430, binding = 4) buffer Stats { uvec4 formed; } stats;   // x: stars formed
+
+layout(push_constant) uniform Step { uint index; } step;
 
 const float PI = 3.14159265;
+const uint GAS = 2u;
+const uint YOUNG = 3u;
+const int GRID = 128;         // model.GRID
+const float CELL = 1.0;       // model.CELL
+const float MOMENTUM_SCALE = 1024.0;
 
 // --- galaxy centres --------------------------------------------------------
 
@@ -121,6 +145,75 @@ void stepCentres() {
     }
 }
 
+// --- gas grid ----------------------------------------------------------------
+
+vec3 centreOfMass() {
+    vec3 sum = vec3(0.0);
+    float mass = 0.0;
+    for (uint j = 0u; j < pc.galaxyCount; ++j) {
+        sum += galaxies.g[j].positionMass.xyz * galaxies.g[j].positionMass.w;
+        mass += galaxies.g[j].positionMass.w;
+    }
+    return sum / max(mass, 1e-6);
+}
+
+// The grid cell holding `x`, or -1 outside the grid.
+int cellOf(vec3 x, vec3 origin) {
+    ivec3 c = ivec3(floor((x - origin) / CELL)) + GRID / 2;
+    if (any(lessThan(c, ivec3(0))) || any(greaterThanEqual(c, ivec3(GRID)))) return -1;
+    return (c.z * GRID + c.y) * GRID + c.x;
+}
+
+void clearGrid() {
+    uint total = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    for (uint c = gl_GlobalInvocationID.x; c < uint(GRID * GRID * GRID); c += total) grid.cell[c] = ivec4(0);
+}
+
+bool isGas(uint i) {
+    return (uint(particles.p[i].positionKind.w + 0.5) & 3u) == GAS;
+}
+
+void deposit(uint i) {
+    if (!isGas(i)) return;
+    int c = cellOf(particles.p[i].positionKind.xyz, centreOfMass());
+    if (c < 0) return;
+    ivec3 momentum = ivec3(round(particles.p[i].velocityBirth.xyz * MOMENTUM_SCALE));
+    atomicAdd(grid.cell[c].x, momentum.x);
+    atomicAdd(grid.cell[c].y, momentum.y);
+    atomicAdd(grid.cell[c].z, momentum.z);
+    atomicAdd(grid.cell[c].w, 1);
+}
+
+uint hash(uint x) {
+    // PCG
+    uint state = x * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// The gas rules for gas particle i at the start of the step beginning at `start`.
+void gasRules(uint i, float start) {
+    int c = cellOf(particles.p[i].positionKind.xyz, centreOfMass());
+    if (c < 0) return;
+    ivec4 cell = grid.cell[c];
+    if (cell.w <= 0) return;
+    vec3 mean = vec3(cell.xyz) / (MOMENTUM_SCALE * float(cell.w));
+    vec3 v = particles.p[i].velocityBirth.xyz;
+    particles.p[i].velocityBirth.xyz = v + (mean - v) * (1.0 - exp(-pc.gasRelax * pc.dt));
+
+    float rho = float(cell.w) * pc.gasMass / (CELL * CELL * CELL);
+    if (rho <= pc.sfDensity || pc.sfEfficiency <= 0.0) return;
+    float freeFall = sqrt(3.0 * PI / (32.0 * rho));
+    float chance = pc.sfEfficiency * pc.dt / freeFall;
+    float draw = float(hash(i ^ hash(floatBitsToUint(start))) >> 8) / 16777216.0;
+    if (draw < chance) {
+        uint galaxy = uint(particles.p[i].positionKind.w + 0.5) >> 2u;
+        particles.p[i].positionKind.w = float(YOUNG + 4u * galaxy);
+        particles.p[i].velocityBirth.w = start;
+        atomicAdd(stats.formed.x, 1u);
+    }
+}
+
 // --- particles ---------------------------------------------------------------
 
 vec3 acceleration(vec3 x, bool before) {
@@ -145,9 +238,17 @@ void stepParticle(uint i) {
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
-    if ((step.mode & 1u) == 0u) {
+    uint mode = step.index % 3u;
+    float start = pc.time + float(step.index / 3u) * pc.dt;
+    if (mode == 0u) {
         if (i == 0u) stepCentres();
+        clearGrid();
     } else if (i < pc.count) {
-        stepParticle(i);
+        if (mode == 1u) {
+            deposit(i);
+        } else {
+            if (isGas(i)) gasRules(i, start);
+            stepParticle(i);
+        }
     }
 }

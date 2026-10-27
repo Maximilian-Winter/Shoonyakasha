@@ -27,8 +27,23 @@
         { "name": "galaxyCount", "type": "uint", "source": "scene.custom.galaxy.galaxyCount" },
         { "name": "dt", "type": "float", "source": "scene.custom.galaxy.dt" },
         { "name": "softening", "type": "float", "source": "scene.custom.galaxy.softening" },
-        { "name": "logLambda", "type": "float", "source": "scene.custom.galaxy.logLambda" }
+        { "name": "logLambda", "type": "float", "source": "scene.custom.galaxy.logLambda" },
+        { "name": "time", "type": "float", "source": "scene.custom.galaxy.time" },
+        { "name": "gasRelax", "type": "float", "source": "scene.custom.galaxy.gasRelax" },
+        { "name": "sfDensity", "type": "float", "source": "scene.custom.galaxy.sfDensity" },
+        { "name": "sfEfficiency", "type": "float", "source": "scene.custom.galaxy.sfEfficiency" },
+        { "name": "gasMass", "type": "float", "source": "scene.custom.galaxy.gasMass" }
       ]
+    },
+    "Grid": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 2097152,
+      "fields": [{ "name": "momentumCount", "type": "ivec4" }]
+    },
+    "Stats": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 1,
+      "fields": [{ "name": "formed", "type": "uvec4" }],
+      "target": { "name": "galaxy.stats", "readback": { "frequency": "per_frame" } },
+      "memory": { "location": "device_local", "transferDirection": "gpu_to_cpu" }
     },
     "View": {
       "usage": "uniform_buffer", "packing": "std140", "updateFrequency": "per_frame",
@@ -59,7 +74,9 @@
       "bindings": [
         { "binding": 0, "type": "storage_buffer", "stages": ["compute"], "name": "particles", "autoBindBuffer": "Particles" },
         { "binding": 1, "type": "storage_buffer", "stages": ["compute"], "name": "galaxies", "autoBindBuffer": "Galaxies" },
-        { "binding": 2, "type": "uniform_buffer", "stages": ["compute"], "name": "params", "autoBindBuffer": "Params" }
+        { "binding": 2, "type": "uniform_buffer", "stages": ["compute"], "name": "params", "autoBindBuffer": "Params" },
+        { "binding": 3, "type": "storage_buffer", "stages": ["compute"], "name": "grid", "autoBindBuffer": "Grid" },
+        { "binding": 4, "type": "storage_buffer", "stages": ["compute"], "name": "stats", "autoBindBuffer": "Stats" }
       ]
     },
     "starSet": {

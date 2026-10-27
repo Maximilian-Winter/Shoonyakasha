@@ -27,12 +27,35 @@ friction from each other's halos, applied as a decay of each pair's
 relative velocity, `exp(-rate dt)`; `Params.log_lambda` (0.2) sets its
 strength and 0 turns it off.
 
-[shaders/step.comp](shaders/step.comp) runs half a time step: in its even
-mode it steps the centres, in one invocation; in its odd mode every particle
-(kick, drift, kick), its first kick from the centres before the step and its
-second from after. It includes [shaders/galaxy.glsl](shaders/galaxy.glsl).
-`model.Simulator` runs it on `sk.ComputeContext` with steps of 0.05 units;
-`step_centres` and `galaxy_acceleration` compute the same in NumPy.
+Two rules act on the gas, through a grid of 128³ cells of 1 kpc centred on
+the galaxies' centre of mass (`Params`):
+
+- **Gas dissipation:** each step a gas particle takes on part of its cell's
+  mean velocity, `1 - exp(-gas_relax dt)` (`gas_relax` 0.5 a time unit).
+  This keeps the cell's momentum, and gas streams that cross lose their
+  relative motion.
+- **Star formation:** in a cell whose gas density is above `sf_density`
+  (0.01, that is 10^8 solar masses per kpc³), a gas particle becomes a
+  young star with probability `sf_efficiency dt / t_ff`. Here
+  `sf_efficiency` is 0.05 and `t_ff = sqrt(3π / (32 ρ))` is the free-fall
+  time. The star's birth time is the step's start.
+- **Gas mass:** the galaxies' gas (`Galaxy.gas_mass`, 10^10 solar masses
+  each) is shared among their gas particles.
+
+[shaders/step.comp](shaders/step.comp) runs a third of a time step, by
+`index`: mode `index % 3`, in the step `index / 3` of the frame.
+
+- **Mode 0** steps the centres, in one invocation, and clears the grid.
+- **Mode 1** adds each gas particle and its momentum to its cell, with
+  integer atomics on fixed-point values.
+- **Mode 2** applies the gas rules, counts the stars formed into `Stats`,
+  and steps every particle (kick, drift, kick). The first kick uses the
+  centres from before the step and the second the centres from after it.
+
+It includes [shaders/galaxy.glsl](shaders/galaxy.glsl). `model.Simulator`
+runs it on `sk.ComputeContext` with steps of 0.05 units, and
+`stars_formed()` reads the count back. `step_centres` and
+`galaxy_acceleration` compute the motion in NumPy.
 
 `merger(...)` builds two galaxies:
 
@@ -56,13 +79,15 @@ second from after. It includes [shaders/galaxy.glsl](shaders/galaxy.glsl).
 horizontal, and runs it in the engine's render graph,
 [pipeline/](pipeline/pipeline.json):
 
-1. **`Step0` to `Step15`** run `step.comp` with `mode` = the pass's repeat
+1. **`Step0` to `Step23`** run `step.comp` with `index` = the pass's repeat
    index: 8 steps a frame.
 2. **`Stars`** ([shaders/star.vert](shaders/star.vert)) draws every particle
    as a soft point, adding into the HDR image `hdrColor`.
    - A star's colour and brightness come from its age: blue and bright
      under 10 Myr, through pale blue at 300 Myr and yellow-white at 3 Gyr,
      to orange and dimmer at 10 Gyr.
+   - A star formed during the run also glows pink for its first 15 Myr,
+     drawn three times as large, as a young star's ionised gas does.
    - Gas is drawn faint red, at twice the size.
    - `G` colours every particle by its galaxy instead.
 3. **`BloomDown0` to `BloomDown5` and `BloomUp4` to `BloomUp0`** build a
@@ -77,9 +102,10 @@ horizontal, and runs it in the engine's render graph,
 
 The frame's 8 steps share the simulation time owed, 8 time units a second
 (38 Myr) at time scale 1, each step at most 0.05 units long. The galaxy
-records are read back every frame. They place the cinematic camera, which
-slowly circles the galaxies' centre of mass, and give the separation the
-viewer prints every 2 seconds.
+records and `Stats` are read back every frame. They place the cinematic
+camera, which slowly circles the galaxies' centre of mass. Every 2 seconds
+the viewer prints the separation, the stars formed, and the star formation
+rate over the last 50 Myr in solar masses a year.
 
 Keys: `R` restart, `SPACE` pause, `+` and `-` time scale, `C` the
 cinematic camera, `G` colour by galaxy or by age. Hold the right mouse
@@ -96,3 +122,8 @@ button and use WASD, Q and E to fly. `--inclination`, `--ratio`,
   height.
 - **merger:** two galaxies of 16k particles; their pericentres and the time
   they merge, within 1 kpc for good.
+- **gas:**
+  - how much one step of gas dissipation changes the gas's total momentum;
+  - the star formation rate every 118 Myr for 2 Gyr, for an isolated galaxy
+    and a merger;
+  - the merger's peak must be more than twice the isolated galaxy's.

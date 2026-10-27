@@ -30,7 +30,8 @@ import model as m
 HERE = m.HERE
 PIPELINE = HERE / "pipeline"
 CAPACITY = 1 << 20           # "Particles" elementCount in pipeline/data.json
-STEPS = 8                    # Step{s} passes in pipeline/passes/10_sim.json, two a step
+STEPS = 8                    # steps a frame: Step{s} passes in pipeline/passes/10_sim.json, three a step
+SFR_WINDOW = 50.0            # Myr over which the star formation rate is averaged
 RATE = 8.0                   # simulation time units a second at time scale 1 (38 Myr)
 MAX_DT = 0.05                # the longest step; frames below RATE / (STEPS * MAX_DT) fps run slower
 ORBIT_SPEED = 0.05           # the cinematic camera's turn, radians a second
@@ -74,12 +75,15 @@ def main():
                        pipeline_json_path=str(PIPELINE))
     params = m.Params()
     state = {"time_scale": 1.0, "paused": False, "seconds": 0.0, "cinematic": args.cinematic, "color_mode": 0,
-             "orbit_angle": 0.0, "last_report": time.perf_counter(), "frames": 0}
+             "orbit_angle": 0.0, "last_report": time.perf_counter(), "frames": 0, "frame": 0}
     display = {"pointSize": 2.0, "brightness": 0.07, "exposure": 0.8, "bloom": 0.25}
 
     def set_params():
         engine.set_custom_float("galaxy.softening", params.softening)
         engine.set_custom_float("galaxy.logLambda", params.log_lambda)
+        engine.set_custom_float("galaxy.gasRelax", params.gas_relax)
+        engine.set_custom_float("galaxy.sfDensity", params.sf_density)
+        engine.set_custom_float("galaxy.sfEfficiency", params.sf_efficiency)
         for key, value in display.items():
             engine.set_custom_float("galaxy." + key, value)
         engine.set_custom_uint("galaxy.colorMode", state["color_mode"])
@@ -90,9 +94,12 @@ def main():
         particles, records = to_world(scene)
         engine.set_buffer("Particles", particles.tobytes())
         engine.set_buffer("Galaxies", records.tobytes())
+        engine.set_buffer("Stats", bytes(16))
         engine.set_custom_uint("galaxy.count", len(particles))
         engine.set_custom_uint("galaxy.galaxyCount", len(scene.galaxies))
-        state.update(galaxies=scene.galaxies, records=records, sim_time=0.0, owed=0.0)
+        engine.set_custom_float("galaxy.gasMass", scene.gas_mass)
+        state.update(galaxies=scene.galaxies, records=records, sim_time=0.0, owed=0.0, gas_mass=scene.gas_mass,
+                     formed=0, history=[(0.0, 0)], frame_times={}, loaded_frame=state["frame"])
         eye = np.array([0.0, 70.0, 110.0])
         engine.scene.set_position(state["camera"], eye)
         engine.scene.set_rotation(state["camera"], look_rotation(eye, np.zeros(3)))
@@ -105,10 +112,28 @@ def main():
         masses = records["mass"].astype(np.float64)
         return (records["position"] * masses[:, None]).sum(0) / masses.sum()
 
+    def fresh(result):
+        """Whether a readback was taken since the scene was loaded."""
+        return result is not None and result["frame"] > state["loaded_frame"]
+
     def look():
         result = engine.get_readback("Galaxies")
-        if result:
+        if fresh(result):
             state["records"] = np.frombuffer(result["data"], dtype=m.GALAXY).copy()
+        result = engine.get_readback("Stats")
+        if fresh(result) and result["frame"] in state["frame_times"]:
+            state["formed"] = int(np.frombuffer(result["data"], dtype=np.uint32)[0])
+            history = state["history"]
+            history.append((state["frame_times"][result["frame"]], state["formed"]))
+            while len(history) > 2 and (history[-1][0] - history[1][0]) * m.TIME_MYR >= SFR_WINDOW:
+                history.pop(0)
+
+    def star_formation_rate():
+        """Solar masses a year over the last SFR_WINDOW Myr."""
+        (t0, n0), (t1, n1) = state["history"][0], state["history"][-1]
+        if t1 <= t0:
+            return 0.0
+        return (n1 - n0) * state["gas_mass"] * 1e10 / ((t1 - t0) * m.TIME_MYR * 1e6)
 
     def fly_cinematic(dt):
         state["orbit_angle"] += ORBIT_SPEED * dt
@@ -140,14 +165,19 @@ def main():
     def on_update(dt):
         state["seconds"] += dt
         state["frames"] += 1
+        state["frame"] += 1
         # The frame's steps share the simulation time owed, each at most MAX_DT.
         if not state["paused"]:
             state["owed"] = min(state["owed"] + RATE * state["time_scale"] * dt, STEPS * MAX_DT)
         step = min(state["owed"] / STEPS, MAX_DT)
         state["owed"] -= step * STEPS
-        state["sim_time"] += step * STEPS
         engine.set_custom_float("galaxy.dt", step)
         engine.set_custom_float("galaxy.time", state["sim_time"])
+        state["sim_time"] += step * STEPS
+        # Readbacks name frames from 0: this is frame state["frame"] - 1.
+        times = state["frame_times"]
+        times[state["frame"] - 1] = state["sim_time"]
+        times.pop(state["frame"] - 1 - 64, None)
         look()
         if state["cinematic"]:
             fly_cinematic(dt)
@@ -155,9 +185,11 @@ def main():
         if now - state["last_report"] >= 2.0:
             r = state["records"]
             separation = float(np.linalg.norm(r["position"][0] - r["position"][1]))
-            print("%.0f Myr: separation %.1f kpc, time scale %.2f, %.0f fps%s"
-                  % (state["sim_time"] * m.TIME_MYR, separation, state["time_scale"],
-                     state["frames"] / (now - state["last_report"]), ", paused" if state["paused"] else ""))
+            print("%.0f Myr: separation %.1f kpc, %d stars formed, %.1f solar masses a year, time scale %.2f, "
+                  "%.0f fps%s"
+                  % (state["sim_time"] * m.TIME_MYR, separation, state["formed"], star_formation_rate(),
+                     state["time_scale"], state["frames"] / (now - state["last_report"]),
+                     ", paused" if state["paused"] else ""))
             state["last_report"] = now
             state["frames"] = 0
         if args.duration and state["seconds"] >= args.duration:

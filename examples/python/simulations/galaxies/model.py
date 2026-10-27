@@ -31,6 +31,9 @@ VELOCITY_KMS = 207.4     # one velocity unit in km/s
 
 BULGE, DISC, GAS, YOUNG = 0, 1, 2, 3
 MAX_GALAXIES = 4
+GRID = 128               # gas grid cells a side, centred on the galaxies' centre of mass
+CELL = 1.0               # gas grid cell size, kpc
+STEP_PASSES = 3          # step.comp passes a time step: centres and grid clear, gas deposit, particles
 
 PARTICLE = np.dtype([("position", "<f4", 3), ("kind", "<f4"), ("velocity", "<f4", 3), ("birth", "<f4")])
 assert PARTICLE.itemsize == 32
@@ -51,6 +54,7 @@ class Galaxy:
     disc_mass: float = 5.0
     disc_scale: float = 3.0      # Miyamoto-Nagai a
     disc_height: float = 0.3     # Miyamoto-Nagai b
+    gas_mass: float = 1.0        # the gas disc's mass, which its particles share
 
     @property
     def mass(self):
@@ -60,24 +64,30 @@ class Galaxy:
         """The galaxy with every mass times `factor` and every length times its cube root."""
         s = factor ** (1.0 / 3.0)
         return replace(self, halo_mass=self.halo_mass * factor, bulge_mass=self.bulge_mass * factor,
-                       disc_mass=self.disc_mass * factor, halo_scale=self.halo_scale * s,
+                       disc_mass=self.disc_mass * factor, gas_mass=self.gas_mass * factor,
+                       halo_scale=self.halo_scale * s,
                        bulge_scale=self.bulge_scale * s, disc_scale=self.disc_scale * s,
                        disc_height=self.disc_height * s)
 
 
 @dataclass(frozen=True)
 class Params:
-    """The integration's constants."""
+    """The integration's constants and the gas rules'."""
     dt: float = 0.05
     softening: float = 0.1
     log_lambda: float = 0.2     # strength of dynamical friction (its Coulomb logarithm); 0 turns it off
+    gas_relax: float = 0.5      # rate at which gas takes on its grid cell's mean velocity, per time unit
+    sf_density: float = 0.01    # gas density above which stars form, 10^10 solar masses per kpc^3
+    sf_efficiency: float = 0.05  # share of a cell's gas turned into stars per free-fall time
 
     def with_(self, **changes):
         return replace(self, **changes)
 
-    def uniform(self, count, galaxy_count):
-        """The 32 bytes of the Params uniform block of step.comp (std140)."""
-        return struct.pack("<2I3f12x", count, galaxy_count, self.dt, self.softening, self.log_lambda)
+    def uniform(self, count, galaxy_count, gas_mass, time=0.0):
+        """The 48 bytes of the Params uniform block of step.comp (std140): `gas_mass` is one
+        gas particle's mass, `time` the simulation time at the start of the frame's first step."""
+        return struct.pack("<2I8f8x", count, galaxy_count, self.dt, self.softening, self.log_lambda, time,
+                           self.gas_relax, self.sf_density, self.sf_efficiency, gas_mass)
 
 
 # --- accelerations ---------------------------------------------------------
@@ -282,6 +292,12 @@ class Scene:
     records: np.ndarray
     particles: np.ndarray
 
+    @property
+    def gas_mass(self):
+        """One gas particle's mass: the galaxies' gas shared among their gas particles."""
+        gas = int(((self.particles["kind"].astype(np.int64) & 3) == GAS).sum())
+        return sum(g.gas_mass for g in self.galaxies) / max(gas, 1)
+
 
 def merger(count=1 << 20, inclination=(0.0, 30.0), ratio=1.0, pericentre=10.0, boundness=0.05,
            separation=60.0, seed=1, base=Galaxy()):
@@ -359,16 +375,26 @@ class Simulator:
         self.params = params
         self.count = len(scene.particles)
         self.galaxy_count = len(scene.galaxies)
+        self.gas_mass = scene.gas_mass
+        self.time = 0.0
         self.kernel = ctx.kernel(SHADERS / "step.comp")
         self.particles = ctx.upload(np.ascontiguousarray(scene.particles))
         self.galaxies = ctx.upload(np.ascontiguousarray(scene.records))
-        self.uniform = ctx.upload(params.uniform(self.count, self.galaxy_count))
+        self.grid = ctx.buffer(GRID ** 3 * 16)
+        self.stats = ctx.buffer(16)
+        self.uniform = ctx.upload(params.uniform(self.count, self.galaxy_count, self.gas_mass))
 
     def step(self, steps=1):
-        bindings = [self.particles, self.galaxies, self.uniform]
+        bindings = [self.particles, self.galaxies, self.uniform, self.grid, self.stats]
+        threads = max(self.count, 1 << 16)
         for _ in range(steps):
-            self.ctx.run(self.kernel, bindings, groups=1, push=struct.pack("<I", 0))
-            self.ctx.run(self.kernel, bindings, threads=self.count, push=struct.pack("<I", 1))
+            self.uniform.upload(self.params.uniform(self.count, self.galaxy_count, self.gas_mass, self.time))
+            for mode in range(STEP_PASSES):
+                self.ctx.run(self.kernel, bindings, threads=threads, push=struct.pack("<I", mode))
+            self.time += self.params.dt
+
+    def stars_formed(self):
+        return int(self.stats.to_numpy(np.uint32)[0])
 
     def state(self):
         return self.particles.to_numpy(np.uint8).view(PARTICLE)

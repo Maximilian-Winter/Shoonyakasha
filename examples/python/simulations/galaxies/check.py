@@ -1,11 +1,13 @@
 """Checks of the galaxy model on sk.ComputeContext, without a window.
 
     python check.py              # all checks
-    python check.py merger       # one: kernels, disc, merger
+    python check.py merger       # one: kernels, disc, merger, gas
 
-kernels  one step on the GPU against model.py's NumPy accelerations
+kernels  one step on the GPU, gas rules off, against model.py's NumPy accelerations
 disc     an isolated galaxy for 2 Gyr: how far its disc stars wander in radius and height
 merger   two galaxies: their separation over time, pericentres and when they merge
+gas      the gas rules: the gas's momentum through a step of relaxing toward the cells'
+         mean velocities; the star formation rate of an isolated galaxy and of a merger
 """
 
 import sys
@@ -19,7 +21,7 @@ import model as m
 
 def kernels(ctx):
     scene = m.merger(count=4096, separation=30.0)
-    params = m.Params()
+    params = m.Params(gas_relax=0.0, sf_efficiency=0.0)
     sim = m.Simulator(ctx, scene, params)
     sim.step(1)
     gpu, records = sim.state(), sim.records()
@@ -85,7 +87,41 @@ def merger(ctx, log_lambda=None, gyr=4.0, quiet=False):
     return merged is not None
 
 
-CHECKS = {"kernels": kernels, "disc": disc, "merger": merger}
+def star_formation_rate(formed, gas_mass, time_units):
+    """Solar masses a year from `formed` gas particles over `time_units`."""
+    return formed * gas_mass * 1e10 / (time_units * m.TIME_MYR * 1e6)
+
+
+def gas(ctx, gyr=2.0):
+    scene = m.merger(count=1 << 16, separation=30.0)
+    is_gas = (scene.particles["kind"].astype(np.int64) & 3) == m.GAS
+    momenta = []
+    for relax in (0.0, 1.0):
+        sim = m.Simulator(ctx, scene, m.Params(gas_relax=relax, sf_efficiency=0.0))
+        sim.step(1)
+        momenta.append(sim.state()["velocity"][is_gas].astype(np.float64).sum(0))
+    scale = np.abs(scene.particles["velocity"][is_gas]).sum()
+    drift = float(np.abs(momenta[1] - momenta[0]).max() / scale)
+    print("gas: relaxing changes the gas's momentum by %.1e of its total |momentum|" % drift)
+
+    every = 25.0
+    rates = {}
+    for name, built in (("isolated", m.isolated(count=1 << 16)), ("merger", m.merger(count=1 << 17))):
+        sim = m.Simulator(ctx, built)
+        series, last = [], 0
+        for k in range(int(gyr * 1000.0 / m.TIME_MYR / every)):
+            sim.step(int(round(every / sim.params.dt)))
+            formed = sim.stars_formed()
+            series.append(star_formation_rate(formed - last, sim.gas_mass, every))
+            last = formed
+        gas_count = int(((built.particles["kind"].astype(np.int64) & 3) == m.GAS).sum())
+        rates[name] = series
+        print("gas, %s: star formation rate (solar masses a year) every %d Myr: %s; %.0f%% of the gas formed stars"
+              % (name, round(every * m.TIME_MYR), " ".join("%.1f" % r for r in series), 100.0 * last / gas_count))
+    return drift < 1e-3 and max(rates["merger"]) > 2.0 * max(rates["isolated"][4:])
+
+
+CHECKS = {"kernels": kernels, "disc": disc, "merger": merger, "gas": gas}
 
 
 def main():

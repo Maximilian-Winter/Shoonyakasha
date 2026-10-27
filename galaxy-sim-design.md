@@ -63,7 +63,7 @@ making. The replay scene (§5.3) has them, and a card says so.
 ### 1.3 Gas and star formation (rules)
 
 As in the nuclear simulation, rules add what the forces alone don't produce.
-Each is a compute pass:
+Both run in step.comp, modes 1 and 2 (§3):
 
 - **Gas dissipation.** Gas particles deposit mass and momentum into a
   128³ grid that follows the centre of mass (1 kpc cells; integer atomics on
@@ -77,10 +77,12 @@ Each is a compute pass:
 
 ### 1.4 Integration
 
-Leapfrog (kick-drift-kick) with a fixed step dt = 0.05 units (0.24 Myr).
-Plummer softening is 0.1 kpc inside the potentials. The viewer runs 8 steps
-a frame, with the nuclear viewer's fixed-step accumulator. One merger is
-about 650 units, about 30 seconds at time scale 1.
+Leapfrog (kick-drift-kick), with Plummer softening of 0.1 kpc inside the
+potentials. check.py steps 0.05 units (0.24 Myr). The viewer runs 8 steps a
+frame, sharing the simulation time owed between them: 8 units (38 Myr) a
+second at time scale 1, each step at most 0.05 units. Unlike the nuclear
+model's stiff forces, the smooth potentials take a step that varies from
+frame to frame. The merger, to about 900 Myr, takes about 25 seconds.
 
 ### 1.5 Reference model: full self-gravity, precomputed
 
@@ -120,20 +122,20 @@ Replay  32768 × uvec2 (packHalf2x16 pairs), filled by sk.streams.play
 
 ```text
 pipeline.json            include: data.json, resources.json, passes/*.json
-passes/10_sim.json       Step{s}, repeated 16 times: step.comp, even mode the centres (one invocation),
-                         odd mode the particles; 8 steps a frame
+passes/10_sim.json       Step{s}, repeated 24 times: step.comp, mode = s % 3:
+                         0 the centres (one invocation) and clearing the gas grid,
+                         1 gas into the grid, 2 the gas rules and every particle; 8 steps a frame
 passes/20_draw.json      Stars (point sprites, additive into hdrColor R16G16B16A16)
 passes/30_post.json      BloomDown{m}, BloomUp{m}, Tonemap -> swapchain   (bloom shaders from the showroom)
 passes/40_ui.json        UIOverlay
 ```
 
-Planned: the gas grid passes (`GridClear`, `GridDeposit`) and the gas and
-star formation rules in step.comp's odd mode (step 3), and `Replay` in
-20_draw.json (step 5).
+Planned: `Replay` in 20_draw.json (step 5).
 
-The centres and the particles are one shader in two modes, as in the
-nuclear pipeline, because the render graph repeats one pass, not a pair of
-them: Step0 (centres), Step1 (particles), Step2 (centres), and so on.
+The centres, the grid and the particles are one shader in three modes
+because the render graph repeats one pass, not a sequence of them: Step0
+(centres), Step1 (gas into the grid), Step2 (particles), Step3 (centres),
+and so on.
 
 The viewer builds a scene in NumPy when it starts (0.9 s for a million
 particles) and sends it with `set_buffer`. The `.npy` buffer `source` is not
@@ -152,8 +154,9 @@ used.
   Bulge stars are 8-12 Gyr old. Disc stars are younger outward (up to
   12 Gyr × e^(-R/R_d)), so cores are warm and tails blue.
 - **Gas:** faint red, 4 px.
-- **Young stars** (step 3) get their birth time when they form, so they
-  start blue and age along the same palette.
+- **Young stars** get their birth time when they form, so they start blue
+  and age along the same palette. For their first 15 Myr they are drawn
+  three times as large with a pink glow that fades with age.
 - **Colour by galaxy** of origin (`G`) is the other mode.
 - **Bloom and tone mapping.** The ACES curve maps luminance alone and the
   colour is scaled to it. Mapping each channel bleached dense cores to white
@@ -225,8 +228,9 @@ As in the nuclear viewer: `interface.py` and `story.py` built on
      merger (§8).
 2. **Viewer.** Implemented: the merger scene, pipeline, star sprites, HDR,
    bloom, tonemap, cinematic camera.
-3. **Gas and star formation.** Grid passes, young stars, the `Stats`
-   readback.
+3. **Gas and star formation.** Implemented: the grid, both rules, young
+   stars' glow, the `Stats` readback and the printed star formation rate;
+   `check.py gas`.
 4. **Ring galaxy scene.**
 5. **Reference run and replay.** `precompute_replay.py` and the replay scene
    through `sk.streams.play`.
@@ -302,3 +306,32 @@ A million particles, 8 steps a frame, at 1600 × 900 on the development GPU:
 - **Pale linear colours** such as (0.6, 0.75, 1.0) show almost white after
   sRGB encoding. The palette needs strongly saturated linear values,
   (0.20, 0.38, 1.0) for young stars.
+
+### 8.7 Gas and star formation
+
+Defaults: `gas_relax` 0.5, `sf_density` 0.01 (10^8 solar masses per kpc^3,
+above the quiet disc's densest 1 kpc cell, about 0.006), `sf_efficiency`
+0.05, 10^10 solar masses of gas per galaxy.
+
+- One step of relaxing toward the cells' mean velocity changes the gas's
+  total momentum by 9e-8 of its total |momentum| (fixed point at 1/1024).
+- An isolated galaxy forms about 2 solar masses of stars a year once its
+  gas has settled (none in the first 118 Myr). The real Milky Way forms 1.5
+  to 2. 32% of its gas forms stars in 2 Gyr.
+- The merger, sampled every 118 Myr:
+
+  | Myr | 0 | 118 | 236 | 354 | 472 | 590 | 708 | 826 | 944 | 1062 | 1180 | 1652 | 1770 |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | M_sun/yr | 1.1 | 4.5 | 9.5 | 13.6 | 15.4 | 13.2 | 12.2 | 17.6 | 10.3 | 5.6 | 3.5 | 0.3 | 0.5 |
+
+  It rises after the first pass (141 Myr) and peaks after the second
+  (707 Myr), at about four times two quiet discs. It then falls as the gas
+  runs out: 67% of the gas forms stars in 2 Gyr.
+- The viewer's printed rate (50 Myr average from the readback) follows the
+  same curve: 3.2 at 162 Myr, 14.6 at 540 Myr.
+- **Frame rate:**
+  - before the gas rules: 210-390 fps;
+  - with them: 125-215 fps;
+  - clearing the 32 MB grid 8 times a frame is most of the difference.
+- **Colour:** at 400 Myr pink rings of new stars show around both cores. At
+  the second pass, pink knots show inside the merging core.
