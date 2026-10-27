@@ -1,0 +1,58 @@
+#version 450
+// Self-gravitating bodies, every pair summed directly, a tile of 256 bodies
+// at a time through shared memory. One time step (kick, drift, kick) is
+// three passes, chosen by `mode`:
+//
+//   mode 0: acceleration of every body from every other, Plummer-softened:
+//           a = sum m_j (x_j - x_i) / (|x_j - x_i|^2 + softening^2)^(3/2)
+//   mode 1: half a kick from the acceleration, then a drift
+//   mode 2: half a kick from the acceleration
+//
+// A step is modes 1, 0, 2; mode 0 once before the first step.
+
+layout(local_size_x = 256) in;
+
+struct Body {
+    vec4 positionMass;
+    vec4 velocity;
+    vec4 acceleration;
+};
+
+layout(std430, binding = 0) buffer Bodies { Body b[]; } bodies;
+
+layout(push_constant) uniform Step {
+    uint mode;
+    uint count;
+    float dt;
+    float softening;
+} step;
+
+shared vec4 tile[256];
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    bool inRange = i < step.count;
+    if (step.mode == 0u) {
+        vec3 x = inRange ? bodies.b[i].positionMass.xyz : vec3(0.0);
+        vec3 a = vec3(0.0);
+        float eps2 = step.softening * step.softening;
+        for (uint base = 0u; base < step.count; base += 256u) {
+            uint j = base + gl_LocalInvocationID.x;
+            tile[gl_LocalInvocationID.x] = j < step.count ? bodies.b[j].positionMass : vec4(0.0);
+            barrier();
+            for (uint k = 0u; k < 256u; ++k) {
+                vec4 other = tile[k];
+                vec3 d = other.xyz - x;
+                float r2 = dot(d, d) + eps2;
+                a += other.w * inversesqrt(r2 * r2 * r2) * d;
+            }
+            barrier();
+        }
+        if (inRange) bodies.b[i].acceleration = vec4(a, 0.0);
+        return;
+    }
+    if (!inRange) return;
+    vec3 v = bodies.b[i].velocity.xyz + 0.5 * step.dt * bodies.b[i].acceleration.xyz;
+    bodies.b[i].velocity.xyz = v;
+    if (step.mode == 1u) bodies.b[i].positionMass.xyz += step.dt * v;
+}

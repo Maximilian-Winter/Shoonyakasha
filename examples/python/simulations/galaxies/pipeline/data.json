@@ -56,8 +56,18 @@
         { "name": "pointSize", "type": "float", "source": "scene.custom.galaxy.pointSize" },
         { "name": "brightness", "type": "float", "source": "scene.custom.galaxy.brightness" },
         { "name": "colorMode", "type": "uint", "source": "scene.custom.galaxy.colorMode" },
-        { "name": "time", "type": "float", "source": "scene.custom.galaxy.time" }
+        { "name": "time", "type": "float", "source": "scene.custom.galaxy.time" },
+        { "name": "replayCount", "type": "uint", "source": "scene.custom.galaxy.replayCount" },
+        { "name": "replayAhead", "type": "float", "source": "scene.custom.galaxy.replayAhead" }
       ]
+    },
+    "Replay": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 65536,
+      "fields": [{ "name": "packed", "type": "uvec4" }]
+    },
+    "ReplayStars": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 65536,
+      "fields": [{ "name": "codeBirth", "type": "vec2" }]
     },
     "Post": {
       "usage": "uniform_buffer", "packing": "std140", "updateFrequency": "per_frame",
@@ -84,6 +94,13 @@
       "bindings": [
         { "binding": 0, "type": "storage_buffer", "stages": ["vertex"], "name": "particles", "autoBindBuffer": "Particles" },
         { "binding": 1, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "name": "view", "autoBindBuffer": "View" }
+      ]
+    },
+    "replaySet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["vertex"], "name": "replay", "autoBindBuffer": "Replay" },
+        { "binding": 1, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "name": "view", "autoBindBuffer": "View" },
+        { "binding": 2, "type": "storage_buffer", "stages": ["vertex"], "name": "stars", "autoBindBuffer": "ReplayStars" }
       ]
     },
     "bloomDownFirstSet": {

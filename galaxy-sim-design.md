@@ -97,13 +97,22 @@ frame to frame. The merger, to about 900 Myr, takes about 25 seconds.
 
 ### 1.5 Reference model: full self-gravity, precomputed
 
-`precompute_replay.py` runs the same starting galaxies with every particle
-massive. Each galaxy has 16k halo, 4k bulge and 12k disc particles: 65,536
-in all, summed directly in tiles of 256 on `sk.ComputeContext`. That is
-4.3 × 10^9 pairs a step, about 0.2 s on the development GPU. 3000 steps take
-about 10 minutes. The script writes the stars every 8 steps as half-float
-(x, y, z, kind): 375 frames of 32k stars, 98 MB, into
-`recordings/<scene>.npy`.
+Implemented as `precompute_replay.py`. It runs the merger's starting
+galaxies with every body massive, summed directly in tiles of 256 by
+`shaders/nbody.comp` on `sk.ComputeContext`. Each galaxy has:
+- a live Hernquist halo of 32k bodies and a bulge of 8k, both with Jeans
+  velocities;
+- an exponential disc of 24k with Toomre Q = 1.5.
+
+That is 131,072 bodies, or 1.7 × 10^10 pairs a step: 32 ms (§8.9). 1.5 Gyr
+(6364 steps) takes 208 s.
+
+Every 20 steps the script writes the 65,536 bulge and disc stars as half
+floats (x, y, z, 0, vx, vy, vz, 0) in world coordinates: 319 frames 4.7 Myr
+apart, 334 MB, into `recordings/merger.npy`. Beside it go
+`merger_stars.npy` (kind + 4 × galaxy, birth time per star) and
+`merger.json` (frame interval, run constants, the measured pericentres and
+merger time).
 
 ## 2. Particle Data
 
@@ -122,7 +131,8 @@ Galaxy (96 bytes, at most 4)
 
 Stats   uint starsFormed, uint gasLeft, ... (readback per_frame)
 Grid    128^3 × uvec4 (mass, momentum fixed point), cleared each step
-Replay  32768 × uvec2 (packHalf2x16 pairs), filled by sk.streams.play
+Replay       65536 × uvec4 (half floats x y, z 0, vx vy, vz 0), filled by sk.streams.play
+ReplayStars  65536 × vec2 (kind + 4 * galaxy, birth time), set when the replay starts
 ```
 
 1,048,576 particles: per galaxy 10% bulge, 70% disc, 20% gas.
@@ -141,7 +151,8 @@ passes/30_post.json      BloomDown{m}, BloomUp{m}, Tonemap -> swapchain   (bloom
 passes/40_ui.json        UIOverlay
 ```
 
-Planned: `Replay` in 20_draw.json (step 5).
+20_draw.json also holds `ReplayStars` (shaders/replay.vert), enabled in the
+replay scene in place of `Step{s}` and `Stars`.
 
 The centres, the grid and the particles are one shader in three modes
 because the render graph repeats one pass, not a sequence of them: Step0
@@ -201,11 +212,18 @@ Implemented as `model.ring`:
 
 ### 5.3 Self-gravity replay (key 3)
 
-The recording from §1.5, played with `sk.streams.play(engine, "Replay",
-"recordings/merger.npy", rate=30)`. Pause, speed and restart act on the
-player. The discs here grow spiral arms and bars of their own, which the
-live model can't; a card says which model is which. Without the recording,
-the scene says how to make it.
+Implemented (`replay.py`). The recording from §1.5 is played with
+`sk.streams.play(engine, "Replay", "recordings/merger.npy", loop=True)`:
+- The viewer sets `player.rate` each frame from the time scale (38 Myr a
+  second at 1), and to 0 while paused.
+- It keeps the playback's clock beside the player. From that, each star is
+  moved on along its recorded velocity past its frame, so motion stays
+  smooth between frames 4.7 Myr apart.
+- Restart starts a new player from the first frame.
+
+The discs here grow spiral arms and bars of their own, which the live model
+can't; a card says which model is which. Without the recording, the viewer
+prints how to make it and stays in its scene.
 
 ## 6. Interface
 
@@ -252,8 +270,8 @@ As in the nuclear viewer: `interface.py` and `story.py` built on
 4. **Ring galaxy scene.** Implemented: `model.ring`, the compressed-gas
    star formation, the grid's centre, scene keys `1` and `2`; `check.py
    ring`.
-5. **Reference run and replay.** `precompute_replay.py` and the replay scene
-   through `sk.streams.play`.
+5. **Reference run and replay.** Implemented: `shaders/nbody.comp`,
+   `precompute_replay.py`, `replay.py`, the ReplayStars pass and key `3`.
 6. **Interface.** Readings, cards, settings, screenshots; README.
 
 Each step ends with the full test suites run, as before. Measurements go
@@ -402,3 +420,28 @@ With only the density threshold, almost no stars formed in the ring.
   rest frame, and the camera follows its remaining drift.
 - **In the viewer:** two bright rings with pink knots of new stars, from
   320 to 770 Myr, at 210-220 fps.
+
+### 8.9 The self-gravitating reference run
+
+- **Speed:** nbody.comp's force pass (`inversesqrt`, tiles of 256 in shared
+  memory) sums 450 billion pairs a second at 16k bodies and 534 billion at
+  65k: 8 ms a step. The 0.2 s a step estimated in §1.5's plan was 25 times
+  too slow, so the run uses 131,072 bodies (32 ms a step).
+- **The run:** 1.5 Gyr, 6364 steps of 0.05, softening 0.2 kpc, takes 208 s.
+  The galaxies' centres are the median of each galaxy's bulge stars.
+  - pericentres: 141 Myr at 8.5 kpc, 382 at 1.5, 429 at 1.1;
+  - merged (within 1 kpc for good) at 462 Myr;
+  - total momentum changes by 1.6e-4 of the sum of |m v|.
+- **Against the live model:** passes at 141 and 707 Myr, merged at 895
+  (§8.2). The live halos, deforming and dragging on each other, merge the
+  galaxies in half the time of the tuned friction rule.
+- **What it shows:**
+  - by 98 Myr, both discs have grown spiral arms of their own;
+  - at 249 Myr, long tails and a bridge;
+  - at 281-348 Myr, barred, elongated cores;
+  - from 450 Myr, one elongated remnant.
+- **Playback:** 108 frames played by 511 Myr (511 / 4.7 Myr a frame), none
+  late, 2400 frames a second. The first recording held positions alone. At
+  time scale 1 (38 Myr a second) that is 8 frames a second; recording
+  velocities and moving each star on between frames doubled the file to
+  334 MB.

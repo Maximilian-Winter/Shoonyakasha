@@ -7,6 +7,8 @@ design is in [galaxy-sim-design.md](../../../../galaxy-sim-design.md).
 python viewer.py                          # two galaxies of half a million particles each
 python viewer.py --inclination 0 150      # the second disc turning against the orbit
 python viewer.py --scene ring             # a companion falls through a disc: a ring galaxy
+python precompute_replay.py               # the merger with every particle massive -> recordings/ (3.5 minutes)
+python viewer.py --scene replay           # play it back
 python check.py                           # the model's checks on the GPU, without a window
 python check.py merger                    # one of them: kernels, disc, merger
 ```
@@ -92,7 +94,8 @@ horizontal, and runs it in the engine's render graph,
 
 1. **`Step0` to `Step23`** run `step.comp` with `index` = the pass's repeat
    index: 8 steps a frame.
-2. **`Stars`** ([shaders/star.vert](shaders/star.vert)) draws every particle
+2. **`Stars`** ([shaders/star.vert](shaders/star.vert), colours in
+   [shaders/view.glsl](shaders/view.glsl)) draws every particle
    as a soft point, adding into the HDR image `hdrColor`.
    - A star's colour and brightness come from its age: blue and bright
      under 10 Myr, through pale blue at 300 Myr and yellow-white at 3 Gyr,
@@ -114,17 +117,54 @@ horizontal, and runs it in the engine's render graph,
 The frame's 8 steps share the simulation time owed, 8 time units a second
 (38 Myr) at time scale 1, each step at most 0.05 units long. The galaxy
 records and `Stats` are read back every frame. They place the cinematic
-camera, which slowly circles `grid_centre`; in the ring scene, the camera
+camera, which slowly circles `grid_centre` (the origin in the replay); in the ring scene, the camera
 otherwise moves along with the target galaxy as it drifts. Every 2 seconds
 the viewer prints the separation, the stars formed, and the star formation
 rate over the last 50 Myr in solar masses a year.
 
-Keys: `1` the merger, `2` the ring galaxy, `R` restart, `SPACE` pause, `+`
+Keys: `1` the merger, `2` the ring galaxy, `3` the replay, `R` restart, `SPACE` pause, `+`
 and `-` time scale, `C` the cinematic camera, `G` colour by galaxy or by
 age. Hold the right mouse button and use WASD, Q and E to fly. `--scene`
 picks the first scene; `--inclination`, `--ratio` and `--pericentre` set up
-the merger; `--count` sets the particles of both. `--duration` and
+the merger; `--count` sets the particles of the live scenes. `--duration` and
 `--screenshot` run for a while, save a frame and quit.
+
+## The self-gravity replay
+
+[precompute_replay.py](precompute_replay.py) runs the merger's starting
+galaxies with every body massive: per galaxy a live Hernquist halo (32,768
+bodies) and bulge (8,192), with isotropic speeds from the Jeans equation,
+and an exponential disc (24,576) with Toomre's Q = 1.5. The halos deform
+and drag on each other, and the discs feel their own gravity.
+
+[shaders/nbody.comp](shaders/nbody.comp) sums every pair directly, a tile
+of 256 bodies at a time in shared memory, Plummer-softened at 0.2 kpc, on
+`sk.ComputeContext`. A step (kick, drift, kick) is three passes, mode 1, 0,
+2.
+
+Every 20 steps (4.7 Myr) the script writes the bulge and disc stars in the
+viewer's world coordinates (`model.TO_WORLD`):
+
+| File | Contents |
+|---|---|
+| `recordings/merger.npy` | frames × stars × 8 half floats: x, y, z, 0, vx, vy, vz, 0 |
+| `recordings/merger_stars.npy` | per star, kind + 4 × galaxy and birth time |
+| `recordings/merger.json` | frame interval, run constants, pericentres, merger time, momentum drift |
+
+`--gyr`, `--halo`, `--bulge`, `--disc`, `--dt`, `--softening`, `--every`
+and `--out` change the run.
+
+In the viewer, key `3` plays it ([replay.py](replay.py)):
+- `sk.streams.play` writes its frames into the pipeline buffer `Replay`,
+  `rate` frames a second. The viewer sets the rate from the time scale each
+  frame, 0 while paused.
+- `Replay` keeps the playback's clock beside the player. That gives the
+  simulation time, for the stars' ages, and how far past the frame written
+  last the playback is.
+- The `ReplayStars` pass ([shaders/replay.vert](shaders/replay.vert)) draws
+  each star that far along its recorded velocity, in the same colours as
+  the live stars, 10 times as bright for its fewer stars.
+- It replaces `Step0`-`Step23` and `Stars`, which are switched off.
 
 ## Checks
 

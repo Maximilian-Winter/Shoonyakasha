@@ -30,6 +30,9 @@ TIME_MYR = 4.714         # one time unit in Myr
 VELOCITY_KMS = 207.4     # one velocity unit in km/s
 
 BULGE, DISC, GAS, YOUNG = 0, 1, 2, 3
+# Model coordinates to the viewer's world coordinates (rows times this matrix): the model's xy
+# plane becomes the world's xz plane, y up.
+TO_WORLD = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 MAX_GALAXIES = 4
 GRID = 128               # gas grid cells a side, centred on grid_centre
 NEAR = 48.0              # kpc: galaxies this close to the heaviest count toward grid_centre
@@ -227,13 +230,18 @@ def make_galaxy(rng, galaxy, count, index, position, velocity, spin, fractions=(
 
 def make_bulge(rng, galaxy, count, softening, cut=5.0):
     """A Hernquist bulge with isotropic speeds from the Jeans equation in its galaxy's spherical mass."""
-    a = galaxy.bulge_scale
+    return make_spheroid(rng, galaxy, count, galaxy.bulge_scale, softening, cut)
+
+
+def make_spheroid(rng, galaxy, count, a, softening, cut):
+    """`count` positions and velocities of a Hernquist sphere of scale `a` out to `cut`, centred
+    on the origin, with isotropic speeds from the Jeans equation in its galaxy's spherical mass."""
     u = rng.uniform(0.0, 1.0, 4 * count)
     r = a * np.sqrt(u) / (1.0 - np.sqrt(u))      # Hernquist: M(<r)/M = r^2 / (r + a)^2
     r = r[r < cut][:count]
     direction = rng.normal(size=(count, 3))
     direction /= np.linalg.norm(direction, axis=1, keepdims=True)
-    grid = np.geomspace(1e-3, 200.0, 2000)
+    grid = np.geomspace(1e-3, 2000.0, 4000)
     rho = 1.0 / (grid * (grid + a) ** 3)
     enclosed = (galaxy.halo_mass * grid ** 2 / (grid + galaxy.halo_scale) ** 2
                 + galaxy.bulge_mass * grid ** 2 / (grid + a) ** 2

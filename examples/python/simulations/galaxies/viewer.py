@@ -3,13 +3,14 @@
     python viewer.py                            # two equal disc galaxies merge
     python viewer.py --inclination 0 150        # the second disc turning against the orbit
     python viewer.py --scene ring               # a companion falls through a disc: a ring galaxy
+    python viewer.py --scene replay             # the merger with every particle massive (precompute_replay.py)
     python viewer.py --duration 30 --screenshot merger.png
 
-Keys: 1 the merger, 2 the ring galaxy, R restart, SPACE pause, + and - run
-faster or slower, C the cinematic camera (a slow orbit around the centre of
-the galaxies near the heaviest, model.grid_centre), G colour by galaxy or
-by age. Hold the right mouse button and use WASD, Q and E to fly the
-camera.
+Keys: 1 the merger, 2 the ring galaxy, 3 the self-gravity replay, R
+restart, SPACE pause, + and - run faster or slower, C the cinematic camera
+(a slow orbit around the centre of the galaxies near the heaviest,
+model.grid_centre, or the origin in the replay), G colour by galaxy or by
+age. Hold the right mouse button and use WASD, Q and E to fly the camera.
 
 The galaxies run on the GPU every frame (pipeline/, which repeats
 shaders/step.comp, the same shader check.py runs): their centres, then a
@@ -18,6 +19,11 @@ drawn as glowing points into an HDR image, bloomed and tone mapped. The
 galaxies are read back every frame for the camera and the printed separation. The
 model's xy plane (the merger's orbital plane, the ring target's disc) is
 drawn as the horizontal plane.
+
+The replay (replay.py) plays recordings/merger.npy, made by
+precompute_replay.py, into the pipeline buffer "Replay" with
+sk.streams.play, and draws it with the ReplayStars pass in place of the
+simulation and the Stars pass.
 """
 
 import argparse
@@ -29,6 +35,7 @@ import shoonyakasha as sk
 from shoonyakasha.mathutil import look_rotation
 
 import model as m
+from replay import Replay
 
 HERE = m.HERE
 PIPELINE = HERE / "pipeline"
@@ -38,22 +45,22 @@ SFR_WINDOW = 50.0            # Myr over which the star formation rate is average
 RATE = 8.0                   # simulation time units a second at time scale 1 (38 Myr)
 MAX_DT = 0.05                # the longest step; frames below RATE / (STEPS * MAX_DT) fps run slower
 ORBIT_SPEED = 0.05           # the cinematic camera's turn, radians a second
-SCENES = ("merger", "ring")
-EYES = {"merger": (0.0, 70.0, 110.0), "ring": (0.0, 32.0, 58.0)}   # where each scene's camera starts
-ORBITS = {"merger": (130.0, 55.0), "ring": (85.0, 40.0)}           # the cinematic camera's radius and height
+SCENES = ("merger", "ring", "replay")
+EYES = {"merger": (0.0, 70.0, 110.0), "ring": (0.0, 32.0, 58.0), "replay": (0.0, 55.0, 85.0)}
+ORBITS = {"merger": (130.0, 55.0), "ring": (85.0, 40.0), "replay": (100.0, 45.0)}  # cinematic radius, height
+RECORDING = HERE / "recordings" / "merger"
+REPLAY_BRIGHTNESS = 10.0     # the replay's 65,536 stars are drawn this much brighter than the million
 
-# Model coordinates to world coordinates: the orbital plane (model xy) becomes world xz, y up.
-TO_WORLD = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 
 
 def to_world(scene):
     """The scene's particles and galaxy records turned into world coordinates."""
     particles = scene.particles.copy()
-    particles["position"] = particles["position"] @ TO_WORLD
-    particles["velocity"] = particles["velocity"] @ TO_WORLD
+    particles["position"] = particles["position"] @ m.TO_WORLD
+    particles["velocity"] = particles["velocity"] @ m.TO_WORLD
     records = scene.records.copy()
     for field in ("position", "previous", "velocity", "spin"):
-        records[field] = records[field] @ TO_WORLD
+        records[field] = records[field] @ m.TO_WORLD
     return particles, records
 
 
@@ -86,6 +93,7 @@ def main():
              "color_mode": 0,
              "orbit_angle": 0.0, "last_report": time.perf_counter(), "frames": 0, "frame": 0}
     display = {"pointSize": 2.0, "brightness": 0.07, "exposure": 0.8, "bloom": 0.25}
+    replay = Replay(engine, RECORDING)
 
     def set_params():
         engine.set_custom_float("galaxy.softening", params.softening)
@@ -96,6 +104,8 @@ def main():
         engine.set_custom_float("galaxy.sfCompression", params.sf_compression)
         for key, value in display.items():
             engine.set_custom_float("galaxy." + key, value)
+        if state["scene"] == "replay":
+            engine.set_custom_float("galaxy.brightness", display["brightness"] * REPLAY_BRIGHTNESS)
         engine.set_custom_uint("galaxy.colorMode", state["color_mode"])
 
     def build(name):
@@ -105,6 +115,13 @@ def main():
                         pericentre=args.pericentre)
 
     def load(name):
+        if name == "replay":
+            load_replay()
+            return
+        replay.stop()
+        engine.set_pass_enabled("Step{s}", True)
+        engine.set_pass_enabled("Stars", True)
+        engine.set_pass_enabled("ReplayStars", False)
         scene = build(name)
         particles, records = to_world(scene)
         engine.set_buffer("Particles", particles.tobytes())
@@ -126,6 +143,27 @@ def main():
         else:
             print("merger: %d particles, inclinations %s, mass ratio %g, pericentre %g kpc"
                   % (len(particles), tuple(args.inclination), args.ratio, args.pericentre))
+
+    def load_replay():
+        if not replay.available:
+            print("replay: no recording at %s.npy; make it with python precompute_replay.py" % RECORDING)
+            if "galaxies" not in state:
+                load("merger")
+            return
+        replay.stop()
+        meta = replay.start()
+        engine.set_pass_enabled("Step{s}", False)
+        engine.set_pass_enabled("Stars", False)
+        engine.set_pass_enabled("ReplayStars", True)
+        engine.set_custom_uint("galaxy.replayCount", replay.count)
+        state.update(scene="replay", sim_time=0.0, loaded_frame=state["frame"])
+        eye = np.array(EYES["replay"])
+        engine.scene.set_position(state["camera"], eye)
+        engine.scene.set_rotation(state["camera"], look_rotation(eye, np.zeros(3)))
+        set_params()
+        print("replay: %d bodies, %d stars recorded, %d frames %.1f Myr apart; pericentres %s, merged at %s Myr"
+              % (meta["bodies"], meta["stars"], meta["frames"], meta["frame_myr"],
+                 [(p["myr"], p["kpc"]) for p in meta["pericentres"]], meta["merged_myr"]))
 
     def fresh(result):
         """Whether a readback was taken since the scene was loaded."""
@@ -161,7 +199,7 @@ def main():
 
     def fly_cinematic(dt):
         state["orbit_angle"] += ORBIT_SPEED * dt
-        centre = m.grid_centre(state["records"], len(state["galaxies"]))
+        centre = np.zeros(3) if state["scene"] == "replay" else m.grid_centre(state["records"], len(state["galaxies"]))
         a = state["orbit_angle"]
         radius, height = ORBITS[state["scene"]]
         eye = centre + np.array([radius * math.sin(a), height, radius * math.cos(a)])
@@ -173,7 +211,7 @@ def main():
         load(state["scene"])
 
     def on_key(key):
-        scenes = {ord("1"): "merger", ord("2"): "ring"}
+        scenes = {ord("1"): "merger", ord("2"): "ring", ord("3"): "replay"}
         if key in scenes:
             load(scenes[key])
         elif key == sk.keys.R:
@@ -194,6 +232,9 @@ def main():
         state["seconds"] += dt
         state["frames"] += 1
         state["frame"] += 1
+        if state["scene"] == "replay":
+            update_replay(dt)
+            return
         # The frame's steps share the simulation time owed, each at most MAX_DT.
         if not state["paused"]:
             state["owed"] = min(state["owed"] + RATE * state["time_scale"] * dt, STEPS * MAX_DT)
@@ -220,6 +261,25 @@ def main():
                      ", paused" if state["paused"] else ""))
             state["last_report"] = now
             state["frames"] = 0
+        finish()
+
+    def update_replay(dt):
+        speed = 0.0 if state["paused"] else RATE * state["time_scale"]
+        state["sim_time"], ahead = replay.update(dt, speed)
+        engine.set_custom_float("galaxy.time", state["sim_time"])
+        engine.set_custom_float("galaxy.replayAhead", ahead)
+        if state["cinematic"]:
+            fly_cinematic(dt)
+        now = time.perf_counter()
+        if now - state["last_report"] >= 2.0:
+            print("replay, %.0f Myr: time scale %.2f, %d frames played, %d late, %.0f fps%s"
+                  % (state["sim_time"] * m.TIME_MYR, state["time_scale"], replay.player.played, replay.player.late,
+                     state["frames"] / (now - state["last_report"]), ", paused" if state["paused"] else ""))
+            state["last_report"] = now
+            state["frames"] = 0
+        finish()
+
+    def finish():
         if args.duration and state["seconds"] >= args.duration:
             if args.screenshot and not state.get("captured"):
                 engine.capture_screenshot(args.screenshot)
