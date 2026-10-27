@@ -1,0 +1,80 @@
+{
+  "params": {
+    "d_core": 1.0,
+    "d_unlike": 1.0,
+    "d_protons": 0.1,
+    "d_neutrons": 0.1,
+    "a": 4.0,
+    "r0": 1.0,
+    "kc": 0.16,
+    "mass": 1.0,
+    "min_distance": 0.05,
+    "screen_start": 0.0,
+    "screen_end": 0.0
+  },
+  "nuclei": {
+    "H-1": {
+      "z": 1,
+      "n": 0,
+      "binding_energy": 0.0,
+      "binding_energy_per_nucleon": 0.0,
+      "file": "H-1.npy"
+    },
+    "H-2": {
+      "z": 1,
+      "n": 1,
+      "binding_energy": 1.0,
+      "binding_energy_per_nucleon": 0.5,
+      "file": "H-2.npy"
+    },
+    "H-3": {
+      "z": 1,
+      "n": 2,
+      "binding_energy": 2.009999990463257,
+      "binding_energy_per_nucleon": 0.6699999968210856,
+      "file": "H-3.npy"
+    },
+    "He-3": {
+      "z": 2,
+      "n": 1,
+      "binding_energy": 1.9233523607254028,
+      "binding_energy_per_nucleon": 0.6411174535751343,
+      "file": "He-3.npy"
+    },
+    "He-4": {
+      "z": 2,
+      "n": 2,
+      "binding_energy": 3.8922226428985596,
+      "binding_energy_per_nucleon": 0.9730556607246399,
+      "file": "He-4.npy"
+    },
+    "C-12": {
+      "z": 6,
+      "n": 6,
+      "binding_energy": 19.702850580215454,
+      "binding_energy_per_nucleon": 1.6419042150179546,
+      "file": "C-12.npy"
+    },
+    "Fe-56": {
+      "z": 26,
+      "n": 30,
+      "binding_energy": 118.47408330440521,
+      "binding_energy_per_nucleon": 2.1156086304358075,
+      "file": "Fe-56.npy"
+    },
+    "U-235": {
+      "z": 92,
+      "n": 143,
+      "binding_energy": 448.3397439159453,
+      "binding_energy_per_nucleon": 1.9078286975146608,
+      "file": "U-235.npy"
+    },
+    "U-238": {
+      "z": 92,
+      "n": 146,
+      "binding_energy": 453.55501502752304,
+      "binding_energy_per_nucleon": 1.9056933404517775,
+      "file": "U-238.npy"
+    }
+  }
+}

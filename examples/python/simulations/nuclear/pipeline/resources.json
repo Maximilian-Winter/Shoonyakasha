@@ -1,0 +1,6 @@
+{
+  "resources": [
+    { "name": "swapchain", "kind": "image", "imported": true },
+    { "name": "depth", "kind": "image", "image": { "format": "D32_SFLOAT" } }
+  ]
+}

@@ -1,0 +1,127 @@
+#version 450
+// One half of a time step for every nucleon, chosen by `mode`:
+//
+// even mode: the force on each nucleon and its share of the potential
+// energy, from every other nucleon (all pairs, a tile of 128 at a time):
+//
+//   strong force   V(r) = dCore e^(-2a(r - r0)) - 2 D e^(-a(r - r0)): a Morse
+//                  potential whose repulsive core is the same for every pair
+//                  and whose attraction D is dUnlike between a proton and a
+//                  neutron, dProtons between two protons and dNeutrons
+//                  between two neutrons
+//   Coulomb        protons only: V(r) = kc S(r) / r, where the screening
+//                  S(r) is 1 below screenStart and falls smoothly to 0 at
+//                  screenEnd (no screening when screenEnd is 0)
+//
+//   With `isolate`, nucleons only feel those with the same nucleusId, so
+//   many nuclei can relax side by side in one buffer.
+//
+// odd mode: velocity from that force, then position from velocity
+// (semi-implicit Euler), with damping that takes energy out.
+//
+// A step is an even pass then an odd one. The render graph repeats this
+// shader's pass with mode = pass.repeatIndex.
+
+layout(local_size_x = 128) in;
+
+struct Nucleon {
+    vec3 position;
+    float type;          // 0 neutron, 1 proton
+    vec3 velocity;
+    float energy;        // kinetic energy
+    vec3 force;
+    uint nucleusId;
+};
+
+layout(std430, binding = 0) buffer Nucleons { Nucleon n[]; } nucleons;
+layout(std430, binding = 1) buffer Potentials { float potential[]; } potentials;
+
+layout(std140, binding = 2) uniform Params {
+    float dCore;
+    float dUnlike;
+    float dProtons;
+    float dNeutrons;
+    float a;
+    float r0;
+    float kc;
+    float minDistance;   // pairs closer than this count as this far apart
+    float dt;
+    float damping;
+    float mass;
+    uint count;
+    uint isolate;
+    float screenStart;
+    float screenEnd;
+} pc;
+
+layout(push_constant) uniform Step { uint mode; } step;
+
+shared vec4 tilePositionType[128];
+shared uint tileNucleus[128];
+
+void computeForces() {
+    uint i = gl_GlobalInvocationID.x;
+    uint lane = gl_LocalInvocationID.x;
+    bool inRange = i < pc.count;
+    vec3 p = inRange ? nucleons.n[i].position : vec3(0.0);
+    float type = inRange ? nucleons.n[i].type : 0.0;
+    uint nucleus = inRange ? nucleons.n[i].nucleusId : 0u;
+
+    vec3 force = vec3(0.0);
+    float potential = 0.0;
+    for (uint base = 0u; base < pc.count; base += 128u) {
+        uint j = base + lane;
+        tilePositionType[lane] = j < pc.count ? vec4(nucleons.n[j].position, nucleons.n[j].type)
+                                              : vec4(0.0, 0.0, 0.0, -1.0);
+        tileNucleus[lane] = j < pc.count ? nucleons.n[j].nucleusId : 0xffffffffu;
+        barrier();
+        if (inRange) {
+            for (uint k = 0u; k < 128u; ++k) {
+                vec4 q = tilePositionType[k];
+                if (q.w < 0.0 || base + k == i) continue;
+                if (pc.isolate != 0u && tileNucleus[k] != nucleus) continue;
+                vec3 d = p - q.xyz;                         // from the other nucleon to this one
+                float r = max(length(d), pc.minDistance);
+                vec3 dir = d / max(length(d), 1e-6);
+                float depth = type != q.w ? pc.dUnlike : (type > 0.5 ? pc.dProtons : pc.dNeutrons);
+                float e1 = exp(-pc.a * (r - pc.r0));
+                potential += 0.5 * (pc.dCore * e1 * e1 - 2.0 * depth * e1);
+                force += 2.0 * pc.a * (pc.dCore * e1 * e1 - depth * e1) * dir;   // -dV/dr along dir
+                if (type > 0.5 && q.w > 0.5) {
+                    float s = 1.0, ds = 0.0;                // S(r) and dS/dr
+                    if (pc.screenEnd > 0.0 && r > pc.screenStart) {
+                        float width = pc.screenEnd - pc.screenStart;
+                        float x = min((r - pc.screenStart) / width, 1.0);
+                        s = 1.0 - x * x * (3.0 - 2.0 * x);
+                        ds = -6.0 * x * (1.0 - x) / width;
+                    }
+                    potential += 0.5 * pc.kc * s / r;
+                    force += pc.kc * (s / (r * r) - ds / r) * dir;
+                }
+            }
+        }
+        barrier();
+    }
+    if (inRange) {
+        nucleons.n[i].force = force;
+        potentials.potential[i] = potential;
+    }
+}
+
+void integrate() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.count) return;
+    vec3 v = nucleons.n[i].velocity + nucleons.n[i].force / pc.mass * pc.dt;
+    v *= max(0.0, 1.0 - pc.damping * pc.dt);
+    nucleons.n[i].velocity = v;
+    nucleons.n[i].position += v * pc.dt;
+    nucleons.n[i].energy = 0.5 * pc.mass * dot(v, v);
+}
+
+void main() {
+    if ((step.mode & 1u) == 0u) {
+        computeForces();
+    } else {
+        integrate();
+    }
+}

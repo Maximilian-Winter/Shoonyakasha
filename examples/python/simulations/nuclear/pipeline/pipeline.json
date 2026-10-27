@@ -1,0 +1,5 @@
+{
+  "name": "NuclearSimulation",
+  "description": "Nucleons stepped on the GPU every frame (shaders/step.comp, the same shader the offline tools run), kicked once per kick sequence by the application (shaders/kick.comp), and drawn as lit spheres, with trails behind free neutrons and flashes where nuclei split or react.",
+  "include": ["data.json", "resources.json", "passes/10_kicks.json", "passes/20_physics.json", "passes/30_draw.json"]
+}

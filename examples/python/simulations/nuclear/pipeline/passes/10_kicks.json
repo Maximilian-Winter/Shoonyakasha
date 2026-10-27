@@ -1,0 +1,14 @@
+{
+  "passes": [
+    {
+      "name": "Kick{k}",
+      "type": "compute",
+      "repeat": { "count": 2, "index": "k" },
+      "execution": { "type": "compute_dispatch", "dispatch": { "x": 128, "y": 1, "z": 1 } },
+      "pipeline": { "computeShader": "../../shaders/kick.comp.spv" },
+      "descriptorSets": ["kickSet"],
+      "pushConstants": [{ "stages": ["compute"], "size": 4, "bindings": [{ "name": "pass.repeatIndex", "type": "uint" }] }],
+      "hasSideEffects": true
+    }
+  ]
+}

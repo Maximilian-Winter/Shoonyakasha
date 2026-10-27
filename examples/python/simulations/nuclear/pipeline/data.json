@@ -1,0 +1,106 @@
+{
+  "bufferLayouts": {
+    "Nucleons": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 16384,
+      "fields": [
+        { "name": "position", "type": "vec3" },
+        { "name": "type", "type": "float" },
+        { "name": "velocity", "type": "vec3" },
+        { "name": "energy", "type": "float" },
+        { "name": "force", "type": "vec3" },
+        { "name": "nucleusId", "type": "uint" }
+      ],
+      "target": { "name": "nuclear.nucleons", "readback": { "frequency": "manual" } },
+      "memory": { "location": "device_local", "transferDirection": "gpu_to_cpu" }
+    },
+    "Potentials": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 16384,
+      "fields": [{ "name": "potential", "type": "float" }]
+    },
+    "Kicks": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 16384,
+      "fields": [{ "name": "dvScale", "type": "vec4" }]
+    },
+    "KickState": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 1,
+      "fields": [{ "name": "applied", "type": "uint" }]
+    },
+    "Params": {
+      "usage": "uniform_buffer", "packing": "std140", "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "dCore", "type": "float", "source": "scene.custom.nuclear.dCore" },
+        { "name": "dUnlike", "type": "float", "source": "scene.custom.nuclear.dUnlike" },
+        { "name": "dProtons", "type": "float", "source": "scene.custom.nuclear.dProtons" },
+        { "name": "dNeutrons", "type": "float", "source": "scene.custom.nuclear.dNeutrons" },
+        { "name": "a", "type": "float", "source": "scene.custom.nuclear.a" },
+        { "name": "r0", "type": "float", "source": "scene.custom.nuclear.r0" },
+        { "name": "kc", "type": "float", "source": "scene.custom.nuclear.kc" },
+        { "name": "minDistance", "type": "float", "source": "scene.custom.nuclear.minDistance" },
+        { "name": "dt", "type": "float", "source": "scene.custom.nuclear.dt" },
+        { "name": "damping", "type": "float", "source": "scene.custom.nuclear.damping" },
+        { "name": "mass", "type": "float", "source": "scene.custom.nuclear.mass" },
+        { "name": "count", "type": "uint", "source": "scene.custom.nuclear.count" },
+        { "name": "isolate", "type": "uint", "source": "scene.custom.nuclear.isolate" },
+        { "name": "screenStart", "type": "float", "source": "scene.custom.nuclear.screenStart" },
+        { "name": "screenEnd", "type": "float", "source": "scene.custom.nuclear.screenEnd" }
+      ]
+    },
+    "KickParams": {
+      "usage": "uniform_buffer", "packing": "std140", "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "count", "type": "uint", "source": "scene.custom.nuclear.count" },
+        { "name": "sequence", "type": "uint", "source": "scene.custom.nuclear.kickSequence" },
+        { "name": "mass", "type": "float", "source": "scene.custom.nuclear.mass" }
+      ]
+    },
+    "View": {
+      "usage": "uniform_buffer", "packing": "std140", "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "view", "type": "mat4", "source": "scene.camera.view" },
+        { "name": "proj", "type": "mat4", "source": "scene.camera.projection" },
+        { "name": "screen", "type": "vec2", "source": "scene.screen.resolution" },
+        { "name": "count", "type": "uint", "source": "scene.custom.nuclear.count" },
+        { "name": "radius", "type": "float", "source": "scene.custom.nuclear.radius" },
+        { "name": "glowEnergy", "type": "float", "source": "scene.custom.nuclear.glowEnergy" },
+        { "name": "trailTime", "type": "float", "source": "scene.custom.nuclear.trailTime" },
+        { "name": "time", "type": "float", "source": "scene.custom.nuclear.time" }
+      ]
+    },
+    "Marks": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 16384,
+      "fields": [{ "name": "mark", "type": "uint" }]
+    },
+    "Flashes": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 64,
+      "fields": [
+        { "name": "placeStart", "type": "vec4" },
+        { "name": "strength", "type": "vec4" }
+      ]
+    }
+  },
+  "descriptorSetLayouts": {
+    "stepSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["compute"], "name": "nucleons", "autoBindBuffer": "Nucleons" },
+        { "binding": 1, "type": "storage_buffer", "stages": ["compute"], "name": "potentials", "autoBindBuffer": "Potentials" },
+        { "binding": 2, "type": "uniform_buffer", "stages": ["compute"], "name": "params", "autoBindBuffer": "Params" }
+      ]
+    },
+    "kickSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["compute"], "name": "nucleons", "autoBindBuffer": "Nucleons" },
+        { "binding": 1, "type": "storage_buffer", "stages": ["compute"], "name": "kicks", "autoBindBuffer": "Kicks" },
+        { "binding": 2, "type": "storage_buffer", "stages": ["compute"], "name": "kickState", "autoBindBuffer": "KickState" },
+        { "binding": 3, "type": "uniform_buffer", "stages": ["compute"], "name": "params", "autoBindBuffer": "KickParams" }
+      ]
+    },
+    "drawSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["vertex"], "name": "nucleons", "autoBindBuffer": "Nucleons" },
+        { "binding": 1, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "name": "view", "autoBindBuffer": "View" },
+        { "binding": 2, "type": "storage_buffer", "stages": ["vertex"], "name": "marks", "autoBindBuffer": "Marks" },
+        { "binding": 3, "type": "storage_buffer", "stages": ["vertex"], "name": "flashes", "autoBindBuffer": "Flashes" }
+      ]
+    }
+  }
+}
