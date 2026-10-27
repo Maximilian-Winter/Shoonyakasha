@@ -357,7 +357,7 @@ The four key parameters and what they control:
 9. **Visual polish** — glow, trails, flash effects
 10. **Scale bridge** — connect energy output to macro-scale effects in the planet engine
 
-**Status:** steps 2–6 are done (all pairs, so no spatial hash): the realistic model, the scenario setting (§9.4), neutron capture and emission by rule (§9.5, §9.6), and the runtime viewer with the fission demo. Step 7 runs with a capture radius by rule (§9.9, §9.10). Next: steps 8–9.
+**Status:** steps 2–6 are done (all pairs, so no spatial hash): the realistic model, the scenario setting (§9.4), neutron capture and emission by rule (§9.5, §9.6), and the runtime viewer with the fission demo. Step 7 runs with a capture radius by rule (§9.9, §9.10), and step 8 needs no rule (§9.11). Next: step 9.
 
 ---
 
@@ -470,3 +470,29 @@ With it the mean free path is d³ / π·10², about 1.4 spacings at 21. In the v
 | 30 | at 1 unit | the first nucleus splits; none of its neutrons is captured |
 
 Splits outnumber captures because heavy fragments sometimes split again (§9.6).
+
+### 9.11 Fusion
+
+Light nuclei need no rule: the potentials alone give a Coulomb barrier, fusion, and the real reaction channels. Two scenario nuclei head on, their total momentum zero, 16 random orientations each, products after 150–600 time units (groups linked closer than 3):
+
+| D + D, each at | Products |
+|---|---|
+| 0.22 | D + D 14, He-4 2 |
+| 0.25 | He-4 16 |
+| 0.30 | He-4 8, D + D 8 |
+| 0.40 | D + D 9, T + p 4, He-3 + n 2, He-4 1 |
+| 0.50 | D + D 7, T + p 6, He-3 + n 3 |
+| 0.80 | D + D 13, T + p 2, He-3 + n 1 |
+| 1.0 (8 orientations) | D + D 5, D + n + p 3 |
+| 2.0 – 3.0 (8 orientations) | mostly free nucleons |
+
+| D + T, closing at | Products |
+|---|---|
+| 0.30 | D + T 16 |
+| 0.40 | D + T 15, He-4 + n 1 |
+| 0.50 | He-4 + n 16 |
+| 0.60 – 1.0 | He-4 + n 13–14, the rest D + T or other |
+| 1.4 | He-4 + n 8, D + T 7 |
+| 2.0 | D + D + n 10, D + T 4, T + n + p 2 |
+
+Below the barrier the nuclei bounce. Above it they merge into a hot compound nucleus: D + D into He-4, which at higher energy gives off a nucleon as T + p or He-3 + n, the two real D + D channels; D + T into He-5, which gives off a neutron, leaving He-4. Faster still, the nuclei break up. The energy released is small because the model's light nuclei are under-bound (§9.2): scenario D binds 1.00 units, T 2.01, He-4 3.76, so D + T → He-4 + n releases 0.75 units (real: 17.6 MeV, about 4.2 units), and D + D → T + p releases 0.01 (real: 4.0 MeV). The neutron from D + T at 0.5 leaves at 0.15–0.73; most of the energy stays in the He-4 as internal motion, which a real nucleus would lose as a gamma ray.

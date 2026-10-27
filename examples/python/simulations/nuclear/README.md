@@ -10,7 +10,7 @@ python precompute.py                      # ground states of H-1 ... U-238 -> co
 python precompute.py --setting scenario   # the viewer's nuclei -> configs/scenario/
 python viewer.py                          # a neutron into U-235
 python viewer.py --scene chain            # 64 U-235 nuclei and one neutron
-python viewer.py --scene fusion --speed 3 # two deuterons
+python viewer.py --scene fusion           # deuterium and tritium: He-4 and a neutron
 ```
 
 ## The model
@@ -88,7 +88,9 @@ too apart from what emission radiates:
 `FissionTracker` finds the splits. Every nucleon carries the id of the nucleus
 it belongs to; a nucleus has split when its nucleons lie in two or more groups
 of at least 20, nucleons closer than 3 linking a group. Each fragment then
-gets a new id.
+gets a new id. `ReactionTracker` names the groups by their protons and
+neutrons (`nucleus_name`: p, n, D, T, He-4, ...) and reports a change in that
+list once it has lasted 5 time units.
 
 ## The viewer
 
@@ -100,7 +102,8 @@ graph, [pipeline/](pipeline/pipeline.json):
 2. `Step0` to `Step15` run `step.comp` with `mode` = the pass's repeat index:
    8 steps a frame.
 3. `Nucleons` draws every nucleon as a lit sphere, protons orange and
-   neutrons blue, glowing with kinetic energy.
+   neutrons blue, glowing with kinetic energy (fully at 6 units in fission
+   and the chain reaction, 0.3 in fusion).
 
 Every step is 0.02 time units long. A frame runs its steps once real time has
 gathered enough for them (20 time units a second at time scale 1) and
@@ -111,8 +114,10 @@ sent with `set_buffer("Kicks", ...)`.
 Keys: `1` fission, `2` chain reaction, `3` fusion, `R` restart, `SPACE`
 pause, `+` and `-` time scale. Hold the right mouse button and use WASD, Q
 and E to fly the camera. `--lattice` and `--spacing` set the chain
-reaction's cube of nuclei; `--duration` and `--screenshot` run for a while,
-save a frame and quit.
+reaction's cube of nuclei. In fusion, `--reaction dt` (deuterium and
+tritium) or `dd` (two deuterium) picks the nuclei and `--speed` their closing
+speed, 0.5 unless given; the viewer prints each reaction. `--duration` and
+`--screenshot` run for a while, save a frame and quit.
 
 ## The tools
 

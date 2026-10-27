@@ -2,7 +2,8 @@
 
     python viewer.py                  # fission: a neutron into U-235
     python viewer.py --scene chain    # 64 U-235 nuclei and one neutron
-    python viewer.py --scene fusion --speed 3
+    python viewer.py --scene fusion   # deuterium and tritium: He-4 and a neutron
+    python viewer.py --scene fusion --reaction dd --speed 0.9
     python viewer.py --scene chain --duration 20 --screenshot chain.png
 
 Keys: 1 fission, 2 chain reaction, 3 fusion, R restart, SPACE pause,
@@ -19,7 +20,8 @@ A free neutron near a uranium nucleus is turned toward it
 its heat into stretching (events.CaptureRule); a nucleus that has split is found
 (events.FissionTracker), and each fragment gives off a neutron and radiates
 part of its heat (events.emission_kicks). All are sent to the GPU as kicks
-the pipeline applies once.
+the pipeline applies once. In fusion, which needs no rule, each reaction is
+printed (events.ReactionTracker).
 """
 
 import argparse
@@ -42,6 +44,8 @@ RATE = 20.0                  # simulation time units a second at time scale 1
 DT = 0.02                    # every step's length; frames below RATE / (SUBSTEPS * DT) fps run slower
 CAPTURE_RADIUS = 10.0        # free neutrons this close to a uranium nucleus's centre are turned toward it
 SCENES = ("fission", "chain", "fusion")
+REACTIONS = {"dt": ("H-2", "H-3"), "dd": ("H-2", "H-2")}
+GLOW = {"fission": 6.0, "chain": 6.0, "fusion": 0.3}   # kinetic energy at which a nucleon glows fully
 
 
 def nucleus(name, center=(0.0, 0.0, 0.0), rotation=None, nucleus_id=1):
@@ -70,10 +74,11 @@ def neutron(position, velocity):
     return out
 
 
-def build(scene, speed, rng, spacing=21.0, lattice=4):
+def build(scene, speed, rng, spacing=21.0, lattice=4, reaction="dt"):
     """The nucleons of `scene` and where the camera looks from and at. The
     chain reaction's nuclei sit on a cube of `lattice` nuclei a side,
-    `spacing` apart."""
+    `spacing` apart. Fusion's two nuclei (REACTIONS[reaction]) close at
+    `speed`, their total momentum zero."""
     if scene == "fission":
         parts = [nucleus("U-235"), neutron((-14.0, 0.6, 0.0), (speed, 0.0, 0.0))]
         return np.concatenate(parts), (0.0, 6.0, 32.0), (0.0, 0.0, 0.0)
@@ -87,10 +92,11 @@ def build(scene, speed, rng, spacing=21.0, lattice=4):
         eye = tuple(-corner * np.array([2.7, 2.0, 5.6]))
         return np.concatenate(parts), eye, (0.0, 0.0, 0.0)
     if scene == "fusion":
-        a = nucleus("H-2", (-8.0, 0.0, 0.0), random_rotation(rng), nucleus_id=1)
-        b = nucleus("H-2", (8.0, 0.0, 0.0), random_rotation(rng), nucleus_id=2)
-        a["velocity"] = (speed, 0.0, 0.0)
-        b["velocity"] = (-speed, 0.0, 0.0)
+        first, second = REACTIONS[reaction]
+        a = nucleus(first, (-8.0, 0.0, 0.0), random_rotation(rng), nucleus_id=1)
+        b = nucleus(second, (8.0, 0.0, 0.0), random_rotation(rng), nucleus_id=2)
+        a["velocity"] = (speed * len(b) / (len(a) + len(b)), 0.0, 0.0)
+        b["velocity"] = (-speed * len(a) / (len(a) + len(b)), 0.0, 0.0)
         return np.concatenate([a, b]), (0.0, 4.0, 22.0), (0.0, 0.0, 0.0)
     raise ValueError(scene)
 
@@ -99,7 +105,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--scene", choices=SCENES, default="fission")
     parser.add_argument("--speed", type=float, default=None,
-                        help="incoming neutron speed (fission, chain) or each deuteron's (fusion)")
+                        help="incoming neutron speed (fission, chain) or the two nuclei's closing speed (fusion)")
+    parser.add_argument("--reaction", choices=sorted(REACTIONS), default="dt",
+                        help="fusion's nuclei: dt deuterium and tritium, dd two deuterium")
     parser.add_argument("--spacing", type=float, default=21.0, help="distance between the chain reaction's nuclei")
     parser.add_argument("--lattice", type=int, default=4, help="the chain reaction's nuclei a side of its cube")
     parser.add_argument("--duration", type=float, default=0.0, help="quit after this many seconds (0: run until closed)")
@@ -124,22 +132,24 @@ def main():
                            ("dNeutrons", p.d_neutrons), ("a", p.a), ("r0", p.r0), ("kc", p.kc),
                            ("minDistance", p.min_distance), ("screenStart", p.screen_start),
                            ("screenEnd", p.screen_end), ("dt", 0.0), ("damping", 0.0), ("mass", p.mass),
-                           ("radius", 0.5), ("glowEnergy", 6.0)):
+                           ("radius", 0.5), ("glowEnergy", GLOW[state["scene"]])):
             engine.set_custom_float("nuclear." + key, value)
         engine.set_custom_uint("nuclear.isolate", 0)
 
     def load(scene):
-        speed = args.speed if args.speed is not None else {"fission": 1.0, "chain": 1.0, "fusion": 2.5}[scene]
-        nucleons, eye, target = build(scene, speed, rng, args.spacing, args.lattice)
+        speed = args.speed if args.speed is not None else {"fission": 1.0, "chain": 1.0, "fusion": 0.5}[scene]
+        nucleons, eye, target = build(scene, speed, rng, args.spacing, args.lattice, args.reaction)
         if len(nucleons) > CAPACITY:
             raise ValueError("%d nucleons; the pipeline holds %d" % (len(nucleons), CAPACITY))
         state.update(scene=scene, count=len(nucleons), tracker=ev.FissionTracker(), capture=ev.CaptureRule(),
+                     reactions=ev.ReactionTracker(),
                      events=0, neutrons=0, captures=0, eye=eye, target=target, read_frame=-1, sim_time=0.0,
                      owed=0.0, frame_times={}, loaded_frame=state["frame"], frame_step=0.0)
         engine.set_buffer("Nucleons", nucleons.tobytes())
         engine.set_custom_uint("nuclear.count", len(nucleons))
         engine.scene.set_position(state["camera"], eye)
         engine.scene.set_rotation(state["camera"], look_rotation(eye, target))
+        set_params()
         print("%s: %d nucleons" % (scene, len(nucleons)))
 
     def look():
@@ -156,6 +166,10 @@ def main():
         land_time = state["sim_time"] - state["frame_step"]
         nucleons = np.frombuffer(result["data"], dtype=NUCLEON)[:state["count"]]
         fissions, labels = state["tracker"].update(nucleons["position"])
+        if state["scene"] == "fusion":
+            reaction = state["reactions"].update(nucleons, read_time, labels)
+            if reaction:
+                print("reaction: %s -> %s" % (" + ".join(reaction[0]), " + ".join(reaction[1])))
         kicks = np.zeros(CAPACITY, dtype=ev.KICK)
         kicks["scale"] = 1.0
         mine = kicks[:state["count"]]

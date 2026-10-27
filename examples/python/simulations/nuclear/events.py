@@ -1,9 +1,11 @@
-"""Nuclei found in the nucleons, fissions found between looks, and the
-rules for neutron capture and emission.
+"""Nuclei found in the nucleons, fissions and reactions found between
+looks, and the rules for neutron capture and emission.
 
 Nuclei are the groups of nucleons that pairs closer than `bond` link. A
 FissionTracker follows them from look to look: a nucleus whose nucleons now
-lie in two or more groups of at least `min_fragment` nucleons has split.
+lie in two or more groups of at least `min_fragment` nucleons has split. A
+ReactionTracker names the nuclei by their protons and neutrons and reports
+when that list changes.
 
 Three rules add what the potentials do not produce (nuclear-sim-design.md,
 sections 9.5, 9.6 and 9.10). Momentum is unchanged by each, and energy too
@@ -281,6 +283,59 @@ def steer_kicks(state, labels, radius=10.0, min_size=200, aimed=0.99, mass=1.0, 
         kicks["dv"][nucleus] += v_cm - mass / (mass + big) * relative - v_nucleus
         turned += 1
     return kicks, turned
+
+
+ELEMENTS = ("n", "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne")
+LIGHT = {(1, 0): "p", (0, 1): "n", (1, 1): "D", (1, 2): "T"}
+
+
+def nucleus_name(z, n):
+    """`z` protons and `n` neutrons as a nucleus's name: p, n, D, T, He-4,
+    C-12, or Z92-235 past neon."""
+    if (z, n) in LIGHT:
+        return LIGHT[(z, n)]
+    symbol = ELEMENTS[z] if z < len(ELEMENTS) else "Z%d" % z
+    return "%s-%d" % (symbol, z + n)
+
+
+class ReactionTracker:
+    """Reports reactions: changes in which nuclei there are.
+
+    Each look names every group of nucleons (find_nuclei's, `bond`) by its
+    protons and neutrons. A new list of names counts once it has lasted
+    `settle` time units, so nuclei that touch and part again during a
+    collision are not reported."""
+
+    def __init__(self, bond=3.0, settle=5.0):
+        self.bond = bond
+        self.settle = settle
+        self.current = None
+        self.candidate = None
+        self.since = 0.0
+
+    def update(self, state, time, labels=None):
+        """The reaction since the last report, as (before, after) lists of
+        names, or None. `labels` are find_nuclei's for `state`, found when
+        None."""
+        if labels is None:
+            labels = find_nuclei(state["position"], self.bond)
+        protons = np.bincount(labels, weights=(state["type"] > 0.5).astype(np.float64)).astype(np.int64)
+        sizes = np.bincount(labels)
+        names = sorted((nucleus_name(int(z), int(a - z)) for z, a in zip(protons, sizes)),
+                       key=lambda name: (name in ("n", "p"), name))
+        if self.current is None:
+            self.current = names
+            return None
+        if names == self.current:
+            self.candidate = None
+            return None
+        if names != self.candidate:
+            self.candidate, self.since = names, time
+            return None
+        if time - self.since < self.settle:
+            return None
+        before, self.current, self.candidate = self.current, names, None
+        return before, names
 
 
 def apply_kicks(state, kicks):
