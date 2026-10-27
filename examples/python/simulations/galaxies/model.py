@@ -8,12 +8,12 @@ Hernquist bulge and a Miyamoto-Nagai disc in the plane normal to its spin
 axis. Stars and gas are test particles that feel the sum of the galaxies'
 potentials. The galaxy centres pull on each other and feel Chandrasekhar
 dynamical friction from each other's halos, so they lose orbital energy and
-merge. shaders/galaxies.comp steps the centres and shaders/step.comp the
+merge. shaders/step.comp steps the centres (even mode) and the
 particles; the NumPy functions here compute the same accelerations.
 
 Particles are PARTICLE records (32 bytes, the shaders' Particle struct):
 position, kind + 4 * galaxy index (kind: BULGE, DISC, GAS, YOUNG), velocity,
-and birth time (young stars).
+and birth time (stars; negative for those older than the simulation).
 """
 
 import math
@@ -76,7 +76,7 @@ class Params:
         return replace(self, **changes)
 
     def uniform(self, count, galaxy_count):
-        """The 32 bytes of the Params uniform block of step.comp and galaxies.comp (std140)."""
+        """The 32 bytes of the Params uniform block of step.comp (std140)."""
         return struct.pack("<2I3f12x", count, galaxy_count, self.dt, self.softening, self.log_lambda)
 
 
@@ -200,10 +200,16 @@ def make_galaxy(rng, galaxy, count, index, position, velocity, spin, fractions=(
     b0, d0, g0 = 0, n_bulge, n_bulge + n_disc
     pos, vel = disc(n_disc, disc_length, 0.3, 0.03, 5.0 * disc_length)
     place(slice(d0, g0), pos, vel, DISC)
+    # Disc stars are older toward the centre: up to 12 Gyr there, falling off
+    # with radius over one scale length.
+    radius = np.hypot(pos[:, 0], pos[:, 1])
+    age = 12000.0 * rng.uniform(0.02, 1.0, n_disc) * np.exp(-radius / disc_length)
+    out["birth"][d0:g0] = -age / TIME_MYR
     pos, vel = disc(n_gas, gas_length, 0.1, 0.01, 4.0 * gas_length)
     place(slice(g0, count), pos, vel, GAS)
     pos, vel = make_bulge(rng, galaxy, n_bulge, softening)
     place(slice(b0, d0), pos, vel, BULGE)
+    out["birth"][b0:d0] = -rng.uniform(8000.0, 12000.0, n_bulge) / TIME_MYR
     return out
 
 
@@ -305,7 +311,7 @@ def isolated(count=1 << 16, seed=1, base=Galaxy()):
 # --- stepping --------------------------------------------------------------
 
 def centre_forces(galaxies, x, spins, params):
-    """The gravitational force on each galaxy centre, as galaxies.comp computes it."""
+    """The gravitational force on each galaxy centre, as step.comp computes it."""
     n = len(galaxies)
     forces = np.zeros((n, 3))
     for i in range(n):
@@ -346,23 +352,23 @@ def step_centres(galaxies, x, v, spins, params):
 
 
 class Simulator:
-    """A scene on the GPU, stepped with shaders/galaxies.comp and shaders/step.comp."""
+    """A scene on the GPU, stepped with shaders/step.comp."""
 
     def __init__(self, ctx, scene, params=Params()):
         self.ctx = ctx
         self.params = params
         self.count = len(scene.particles)
         self.galaxy_count = len(scene.galaxies)
-        self.centres = ctx.kernel(SHADERS / "galaxies.comp")
         self.kernel = ctx.kernel(SHADERS / "step.comp")
         self.particles = ctx.upload(np.ascontiguousarray(scene.particles))
         self.galaxies = ctx.upload(np.ascontiguousarray(scene.records))
         self.uniform = ctx.upload(params.uniform(self.count, self.galaxy_count))
 
     def step(self, steps=1):
+        bindings = [self.particles, self.galaxies, self.uniform]
         for _ in range(steps):
-            self.ctx.run(self.centres, [self.galaxies, self.uniform], groups=1)
-            self.ctx.run(self.kernel, [self.particles, self.galaxies, self.uniform], threads=self.count)
+            self.ctx.run(self.kernel, bindings, groups=1, push=struct.pack("<I", 0))
+            self.ctx.run(self.kernel, bindings, threads=self.count, push=struct.pack("<I", 1))
 
     def state(self):
         return self.particles.to_numpy(np.uint8).view(PARTICLE)

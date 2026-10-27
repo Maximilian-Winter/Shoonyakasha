@@ -10,7 +10,7 @@ A tech demo of the engine's recent features, each used for what it is for:
 |---|---|
 | Render graph compute passes, split pipeline files | the live simulation of about a million stars, drawn in HDR with bloom |
 | `engine.compute` / `sk.ComputeContext` | the self-gravitating reference run, precomputed; tests of the live kernels without a window |
-| `.npy` buffer sources | the starting galaxies, built in NumPy, loaded straight into the pipeline's buffers |
+| `engine.set_buffer` | a million particles built in NumPy, sent when a scene starts |
 | `sk.streams.play` | the replay scene: the precomputed run streamed frame by frame into a buffer |
 | Readback | the readings: separation, closing speed, star formation rate |
 | `toolkit.overlay` | readings, explanation cards, settings menu, key hints, as in the nuclear simulation |
@@ -116,37 +116,48 @@ Replay  32768 × uvec2 (packHalf2x16 pairs), filled by sk.streams.play
 
 ## 3. GPU Pipeline
 
-`pipeline/` split like the nuclear viewer's:
+`pipeline/` split like the nuclear viewer's. Implemented so far:
 
 ```text
 pipeline.json            include: data.json, resources.json, passes/*.json
-passes/10_sim.json       Galaxies (1 thread: centres, friction) -> GridClear -> GridDeposit (gas)
-                         -> Step (kick, drift, gas relax, star formation), repeated 8 times
+passes/10_sim.json       Step{s}, repeated 16 times: step.comp, even mode the centres (one invocation),
+                         odd mode the particles; 8 steps a frame
 passes/20_draw.json      Stars (point sprites, additive into hdrColor R16G16B16A16)
-                         Replay (the same, from the Replay buffer; enabled in the replay scene)
-passes/30_post.json      BloomDown{m}, BloomUp{m}, Tonemap -> swapchain   (shaders from the showroom)
+passes/30_post.json      BloomDown{m}, BloomUp{m}, Tonemap -> swapchain   (bloom shaders from the showroom)
 passes/40_ui.json        UIOverlay
 ```
 
-Starting galaxies come from `.npy` files built by `setup.py`, which samples
-an exponential disc (R_d = 3 kpc), a Hernquist bulge, and a thinner, more
-extended gas disc. Velocities are the circular velocity of the summed
-potential plus a small dispersion. The viewer loads a scene by
-`set_buffer`-ing its particles. The files are the same bytes the pipeline's
-`source` reads.
+Planned: the gas grid passes (`GridClear`, `GridDeposit`) and the gas and
+star formation rules in step.comp's odd mode (step 3), and `Replay` in
+20_draw.json (step 5).
+
+The centres and the particles are one shader in two modes, as in the
+nuclear pipeline, because the render graph repeats one pass, not a pair of
+them: Step0 (centres), Step1 (particles), Step2 (centres), and so on.
+
+The viewer builds a scene in NumPy when it starts (0.9 s for a million
+particles) and sends it with `set_buffer`. The `.npy` buffer `source` is not
+used.
 
 ## 4. Rendering
 
-- **Stars.** Gaussian point sprites, about 1–3 px, additive in HDR:
-  - bulge: warm yellow;
-  - disc: white;
-  - young stars: blue-white, fading to white over 200 Myr;
-  - in their first 10 Myr, young stars also add a pink HII glow;
-  - gas: faint red-brown, low weight.
+- **Stars.** Gaussian point sprites, 2 px, additive in HDR. Colour and
+  brightness come from a star's age, its birth time being minus its age at
+  the start:
+  - under 10 Myr: blue, bright;
+  - 300 Myr: pale blue;
+  - 3 Gyr: yellow-white;
+  - 10 Gyr: orange, dimmer.
 
-  The other colour mode tints by galaxy of origin, so you can see where each
-  galaxy's stars end up.
-- **Bloom and tone mapping**, with exposure and bloom strength in the menu.
+  Bulge stars are 8-12 Gyr old. Disc stars are younger outward (up to
+  12 Gyr × e^(-R/R_d)), so cores are warm and tails blue.
+- **Gas:** faint red, 4 px.
+- **Young stars** (step 3) get their birth time when they form, so they
+  start blue and age along the same palette.
+- **Colour by galaxy** of origin (`G`) is the other mode.
+- **Bloom and tone mapping.** The ACES curve maps luminance alone and the
+  colour is scaled to it. Mapping each channel bleached dense cores to white
+  (§8.6).
 - **Camera.** Free flight (RMB + WASD), or a slow cinematic orbit around the
   centre of mass (`C`).
 
@@ -212,8 +223,8 @@ As in the nuclear viewer: `interface.py` and `story.py` built on
    - `shaders/galaxies.comp` and `shaders/step.comp`.
    - `check.py`: the kernels against NumPy, an isolated disc for 2 Gyr, a
      merger (§8).
-2. **Viewer.** The merger scene: pipeline, star sprites, HDR, bloom,
-   tonemap, camera.
+2. **Viewer.** Implemented: the merger scene, pipeline, star sprites, HDR,
+   bloom, tonemap, cinematic camera.
 3. **Gas and star formation.** Grid passes, young stars, the `Stats`
    readback.
 4. **Ring galaxy scene.**
@@ -274,3 +285,20 @@ backward gives the pericentre asked (10.0 kpc without friction).
 128k particles, prograde discs at 0 and 30 degrees: a bridge and two tails
 at 300 Myr, the galaxies apart again at 500, falling back at 700, one
 remnant ringed with shells by 1200-1600 Myr.
+
+### 8.5 The viewer's speed
+
+A million particles, 8 steps a frame, at 1600 × 900 on the development GPU:
+210-390 frames a second.
+
+### 8.6 Colour
+
+- **Colour by kind** (bulge yellow, disc white-blue, gas pink): cores
+  saturated to white, and the gas disc, which reaches further out than the
+  stellar disc, made the tails pink.
+- **ACES per channel** bleaches every bright core to white whatever its
+  colour. Mapping the luminance and scaling the colour keeps the cores
+  warm.
+- **Pale linear colours** such as (0.6, 0.75, 1.0) show almost white after
+  sRGB encoding. The palette needs strongly saturated linear values,
+  (0.20, 0.38, 1.0) for young stars.

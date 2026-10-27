@@ -1,0 +1,14 @@
+{
+  "passes": [
+    {
+      "name": "Step{s}",
+      "type": "compute",
+      "repeat": { "count": 16, "index": "s" },
+      "execution": { "type": "compute_dispatch", "dispatch": { "x": 4096, "y": 1, "z": 1 } },
+      "pipeline": { "computeShader": "../../shaders/step.comp.spv" },
+      "descriptorSets": ["stepSet"],
+      "pushConstants": [{ "stages": ["compute"], "size": 4, "bindings": [{ "name": "pass.repeatIndex", "type": "uint" }] }],
+      "hasSideEffects": true
+    }
+  ]
+}

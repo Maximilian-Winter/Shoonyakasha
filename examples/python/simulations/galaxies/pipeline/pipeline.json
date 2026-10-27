@@ -1,0 +1,6 @@
+{
+  "name": "GalaxyCollision",
+  "description": "Galaxy centres and a million stars and gas particles stepped on the GPU every frame (shaders/step.comp, the same shader check.py runs), drawn as glowing points into an HDR image, bloomed and tone mapped, under the screen's canvas UI.",
+  "include": ["data.json", "resources.json", "passes/10_sim.json", "passes/20_draw.json", "passes/30_post.json",
+              "passes/40_ui.json"]
+}

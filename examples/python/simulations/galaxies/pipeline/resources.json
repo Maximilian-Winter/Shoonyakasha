@@ -1,0 +1,10 @@
+{
+  "resources": [
+    { "name": "swapchain", "kind": "image", "imported": true },
+    { "name": "hdrColor", "kind": "image", "image": { "format": "R16G16B16A16_SFLOAT" } },
+    {
+      "name": "bloomChain", "kind": "image",
+      "image": { "format": "R16G16B16A16_SFLOAT", "widthScale": 0.5, "heightScale": 0.5, "mipLevels": 6 }
+    }
+  ]
+}

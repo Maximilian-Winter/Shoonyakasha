@@ -1,5 +1,5 @@
-// The galaxies' records and the acceleration of their potentials, shared by
-// galaxies.comp and step.comp (model.py computes the same in NumPy).
+// The galaxies' records and the acceleration of their potentials, for
+// step.comp (model.py computes the same in NumPy).
 //
 // A galaxy is a Hernquist halo, a Hernquist bulge and a Miyamoto-Nagai disc
 // whose axis is `spin`, all centred on `position`. `previous` is the centre
