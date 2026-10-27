@@ -1,0 +1,83 @@
+#version 450
+// The force on every nucleon and its share of the potential energy, from
+// every other nucleon (all pairs, a tile of 128 at a time):
+//
+//   strong force   V(r) = dCore e^(-2a(r - r0)) - 2 D e^(-a(r - r0)): a Morse
+//                  potential whose repulsive core is the same for every pair
+//                  and whose attraction D is dUnlike between a proton and a
+//                  neutron, dLike between two of the same kind
+//   Coulomb        protons only: V(r) = kc / r
+//
+// With `isolate`, nucleons only feel those with the same nucleusId, so many
+// nuclei can relax side by side in one buffer.
+
+layout(local_size_x = 128) in;
+
+struct Nucleon {
+    vec3 position;
+    float type;          // 0 neutron, 1 proton
+    vec3 velocity;
+    float energy;        // kinetic energy
+    vec3 force;
+    uint nucleusId;
+};
+
+layout(std430, binding = 0) buffer Nucleons { Nucleon n[]; } nucleons;
+layout(std430, binding = 1) writeonly buffer Potentials { float potential[]; } potentials;
+
+layout(push_constant) uniform Params {
+    float dCore;
+    float dUnlike;
+    float dLike;
+    float a;
+    float r0;
+    float kc;
+    float minDistance;   // pairs closer than this count as this far apart
+    uint count;
+    uint isolate;
+} pc;
+
+shared vec4 tilePositionType[128];
+shared uint tileNucleus[128];
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint lane = gl_LocalInvocationID.x;
+    bool inRange = i < pc.count;
+    vec3 p = inRange ? nucleons.n[i].position : vec3(0.0);
+    float type = inRange ? nucleons.n[i].type : 0.0;
+    uint nucleus = inRange ? nucleons.n[i].nucleusId : 0u;
+
+    vec3 force = vec3(0.0);
+    float potential = 0.0;
+    for (uint base = 0u; base < pc.count; base += 128u) {
+        uint j = base + lane;
+        tilePositionType[lane] = j < pc.count ? vec4(nucleons.n[j].position, nucleons.n[j].type)
+                                              : vec4(0.0, 0.0, 0.0, -1.0);
+        tileNucleus[lane] = j < pc.count ? nucleons.n[j].nucleusId : 0xffffffffu;
+        barrier();
+        if (inRange) {
+            for (uint k = 0u; k < 128u; ++k) {
+                vec4 q = tilePositionType[k];
+                if (q.w < 0.0 || base + k == i) continue;
+                if (pc.isolate != 0u && tileNucleus[k] != nucleus) continue;
+                vec3 d = p - q.xyz;                         // from the other nucleon to this one
+                float r = max(length(d), pc.minDistance);
+                vec3 dir = d / max(length(d), 1e-6);
+                float depth = (type == q.w) ? pc.dLike : pc.dUnlike;
+                float e1 = exp(-pc.a * (r - pc.r0));
+                potential += 0.5 * (pc.dCore * e1 * e1 - 2.0 * depth * e1);
+                force += 2.0 * pc.a * (pc.dCore * e1 * e1 - depth * e1) * dir;   // -dV/dr along dir
+                if (type > 0.5 && q.w > 0.5) {
+                    potential += 0.5 * pc.kc / r;
+                    force += pc.kc / (r * r) * dir;
+                }
+            }
+        }
+        barrier();
+    }
+    if (inRange) {
+        nucleons.n[i].force = force;
+        potentials.potential[i] = potential;
+    }
+}
