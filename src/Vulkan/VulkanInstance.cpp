@@ -10,10 +10,11 @@
 
 namespace Shoonyakasha {
 
-VulkanInstance::VulkanInstance(bool enableValidationLayers)
+VulkanInstance::VulkanInstance(bool enableValidationLayers, bool forWindow)
         : m_instance(VK_NULL_HANDLE)
         , m_debugMessenger(VK_NULL_HANDLE)
         , m_validationLayersEnabled(enableValidationLayers)
+        , m_forWindow(forWindow)
         , m_logger(nullptr)
         , m_eventDispatcher(nullptr)
 {
@@ -27,7 +28,7 @@ VulkanInstance::VulkanInstance(bool enableValidationLayers)
     }
 
     m_logger->log(LogLevel::Info, "Creating Vulkan Instance");
-    glfwInit();
+    if (m_forWindow) glfwInit();
     createInstance();
     if (m_validationLayersEnabled) {
         setupDebugMessenger();
@@ -48,7 +49,7 @@ VulkanInstance::~VulkanInstance() {
 
     // Pairs with the glfwInit() in the constructor. It used to be called from
     // ~VulkanWindow, which runs while this instance is still alive.
-    glfwTerminate();
+    if (m_forWindow) glfwTerminate();
 
     delete m_logger;
     delete m_eventDispatcher;
@@ -122,11 +123,12 @@ void VulkanInstance::setupDebugMessenger() {
 }
 
 std::vector<const char*> VulkanInstance::getRequiredExtensions() {
-    uint32_t glfwExtensionCount = 0;
-    const char** glfwExtensions;
-    glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-    std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+    std::vector<const char*> extensions;
+    if (m_forWindow) {
+        uint32_t glfwExtensionCount = 0;
+        const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        if (glfwExtensions) extensions.assign(glfwExtensions, glfwExtensions + glfwExtensionCount);
+    }
 
     if (m_validationLayersEnabled) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);

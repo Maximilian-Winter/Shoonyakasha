@@ -56,6 +56,8 @@ from ._engine_api cimport (
     CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
     videoRecordingAvailable, findFfmpeg, checkPipelineJson, Readback,
     CppPlanetLod, LodBody, LodView, LodNodeInfo, LodJob, LodFaceColours,
+    CppComputeContext, CppComputeBuffer, CppComputeKernel, ComputeKernelInfo, ComputeKernelBinding,
+    ComputeBindingType, ComputeUint3,
 )
 from libcpp.memory cimport shared_ptr
 
@@ -1709,6 +1711,307 @@ cdef class UI:
 
 
 # ═══════════════════════════════════════════════════════════════
+# Compute — compute shaders on buffers (include/Compute/Compute.h)
+# ═══════════════════════════════════════════════════════════════
+
+cdef ComputeUint3 _uint3(value, str what):
+    """An int or a sequence of up to three ints, missing ones 1."""
+    cdef ComputeUint3 out
+    values = (value,) if isinstance(value, int) else tuple(value)
+    if not 1 <= len(values) <= 3:
+        raise ValueError("%s: one to three numbers" % what)
+    values = values + (1,) * (3 - len(values))
+    for i in range(3):
+        if values[i] < 0:
+            raise ValueError("%s: negative" % what)
+        out[i] = <uint32_t>values[i]
+    return out
+
+
+cdef class GpuBuffer:
+    """A buffer in device memory, made by ComputeContext.buffer or
+    ComputeContext.upload, usable as a storage or uniform buffer.
+    upload() and the to_* methods copy and return once the copy is done.
+    """
+    cdef CppComputeBuffer _buf
+    cdef ComputeContext _context
+
+    def __init__(self):
+        raise TypeError("use ComputeContext.buffer() or ComputeContext.upload()")
+
+    @staticmethod
+    cdef GpuBuffer _wrap(CppComputeBuffer buf, ComputeContext context):
+        cdef GpuBuffer out = GpuBuffer.__new__(GpuBuffer)
+        out._buf = buf
+        out._context = context
+        return out
+
+    @property
+    def size(self):
+        """Size in bytes."""
+        return self._buf.size()
+
+    @property
+    def valid(self):
+        """False once the context is shut down."""
+        return self._buf.valid()
+
+    def __len__(self):
+        return self._buf.size()
+
+    def upload(self, data, size_t offset=0):
+        """Copy `data` (anything with the buffer protocol and contiguous
+        memory, such as a NumPy array or bytes) into the buffer at `offset`
+        bytes."""
+        cdef const unsigned char[::1] view = memoryview(data).cast('B')
+        cdef size_t n = view.shape[0]
+        if n == 0:
+            return
+        with nogil:
+            self._buf.upload(&view[0], n, offset)
+
+    def download_into(self, out, size_t offset=0):
+        """Copy bytes from the buffer at `offset` into `out`, a writable
+        object with the buffer protocol and contiguous memory, as many as it
+        holds."""
+        cdef unsigned char[::1] view = memoryview(out).cast('B')
+        cdef size_t n = view.shape[0]
+        if n == 0:
+            return
+        with nogil:
+            self._buf.download(&view[0], n, offset)
+
+    def to_bytes(self, size_t offset=0, size=None):
+        """`size` bytes (by default the rest of the buffer) from `offset`."""
+        cdef size_t total = self._buf.size()
+        if offset > total:
+            raise ValueError("offset %d is past the end of a %d-byte buffer" % (offset, total))
+        out = bytearray(total - offset if size is None else size)
+        self.download_into(out, offset)
+        return bytes(out)
+
+    def to_numpy(self, dtype="float32", shape=None):
+        """The whole buffer as a new NumPy array of `dtype`, reshaped to
+        `shape` when given. The buffer's size must be a multiple of the
+        dtype's size."""
+        import numpy as np
+        dt = np.dtype(dtype)
+        cdef size_t total = self._buf.size()
+        if total % dt.itemsize != 0:
+            raise ValueError("a %d-byte buffer is not a whole number of %s values" % (total, dt))
+        out = np.empty(total // dt.itemsize, dtype=dt)
+        self.download_into(out)
+        return out if shape is None else out.reshape(shape)
+
+    def __repr__(self):
+        return "GpuBuffer(size=%d%s)" % (self._buf.size(), "" if self._buf.valid() else ", released")
+
+
+cdef class ComputeKernel:
+    """A compute shader made by ComputeContext.kernel. Its bindings, push
+    constant size and workgroup size are read from the SPIR-V."""
+    cdef CppComputeKernel _kernel
+    cdef ComputeContext _context
+    cdef readonly object path
+
+    def __init__(self):
+        raise TypeError("use ComputeContext.kernel()")
+
+    @staticmethod
+    cdef ComputeKernel _wrap(CppComputeKernel kernel, ComputeContext context, path):
+        cdef ComputeKernel out = ComputeKernel.__new__(ComputeKernel)
+        out._kernel = kernel
+        out._context = context
+        out.path = path
+        return out
+
+    @property
+    def bindings(self):
+        """The buffers the shader declares in set 0, ascending by binding:
+        dicts of "binding", "type" ("storage" or "uniform"), "read_only"
+        and "name"."""
+        cdef const ComputeKernelInfo* info = &self._kernel.info()
+        cdef ComputeKernelBinding b
+        out = []
+        for i in range(info.bindings.size()):
+            b = info.bindings[i]
+            out.append({
+                "binding": b.binding,
+                "type": "uniform" if b.type == ComputeBindingType.UniformBuffer else "storage",
+                "read_only": b.readOnly,
+                "name": b.name.decode("utf-8"),
+            })
+        return out
+
+    @property
+    def push_constant_size(self):
+        """Bytes of push constants, 0 when the shader has none."""
+        return self._kernel.info().pushConstantSize
+
+    @property
+    def local_size(self):
+        """The workgroup size (x, y, z)."""
+        cdef const ComputeKernelInfo* info = &self._kernel.info()
+        return (info.localSize[0], info.localSize[1], info.localSize[2])
+
+    def __repr__(self):
+        return "ComputeKernel(%r, bindings=%d, local_size=%r)" % (
+            str(self.path), len(self.bindings), self.local_size)
+
+
+cdef class ComputeContext:
+    """Runs compute shaders on buffers, synchronously.
+
+    ComputeContext() creates its own Vulkan device, with no window;
+    Engine.compute gives one on a running engine's device. Every call
+    returns once the GPU has finished.
+
+    Usage::
+
+        import numpy as np
+        import shoonyakasha as sk
+
+        with sk.ComputeContext() as ctx:
+            kernel = ctx.kernel("square.comp")      # compiled with glslc, or a .spv
+            values = np.arange(1024, dtype=np.float32)
+            result = np.empty_like(values)
+            ctx.run(kernel, [values, result], threads=values.size)
+            np.save("squares.npy", result)
+
+    A context may be used from one thread at a time; Engine.compute from
+    the engine's callbacks.
+    """
+    cdef shared_ptr[CppComputeContext] _ctx
+    cdef object _engine
+    cdef object __weakref__
+
+    def __init__(self, bint enable_validation=False):
+        """Create a Vulkan instance and a device without a window.
+        enable_validation turns on the Khronos validation layer when it is
+        installed."""
+        cdef CppComputeContext* ctx = new CppComputeContext(enable_validation)
+        self._ctx = shared_ptr[CppComputeContext](ctx)
+
+    @staticmethod
+    cdef ComputeContext _wrap(shared_ptr[CppComputeContext] ctx, engine):
+        cdef ComputeContext out = ComputeContext.__new__(ComputeContext)
+        out._ctx = ctx
+        out._engine = engine
+        return out
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        if self._engine is None:
+            self.shutdown()
+        return False
+
+    def shutdown(self):
+        """Free every buffer and kernel of this context, and its device when
+        the context created it. Using them afterwards raises RuntimeError.
+        For Engine.compute the engine does this itself after on_cleanup."""
+        self._ctx.get().shutdown()
+
+    @property
+    def is_shutdown(self):
+        return self._ctx.get().isShutdown()
+
+    def buffer(self, size_t size):
+        """A buffer of `size` bytes (at least 1) filled with zeros."""
+        cdef CppComputeBuffer buf
+        with nogil:
+            buf = self._ctx.get().createBuffer(size)
+        return GpuBuffer._wrap(buf, self)
+
+    def upload(self, data):
+        """A buffer holding a copy of `data`, anything with the buffer
+        protocol and contiguous memory."""
+        cdef const unsigned char[::1] view = memoryview(data).cast('B')
+        cdef GpuBuffer out = self.buffer(view.shape[0])
+        out.upload(data)
+        return out
+
+    def kernel(self, path, **compile_options):
+        """A kernel from a SPIR-V file, or from GLSL source (.comp), which is
+        compiled first with shoonyakasha.shaders.compile (`compile_options`
+        are passed to it: glslc, args, force)."""
+        from pathlib import Path
+        path = Path(path)
+        if path.suffix != ".spv":
+            from . import shaders
+            path = shaders.compile(path, **compile_options)
+        return ComputeKernel._wrap(self._ctx.get().loadKernel(str(path).encode("utf-8")), self, path)
+
+    def run(self, ComputeKernel kernel, bindings, groups=None, threads=None, push=None):
+        """Dispatch `kernel` and wait for it.
+
+        `bindings` holds one entry per binding of the kernel, in the order
+        of kernel.bindings: a GpuBuffer, or an array (anything with the
+        buffer protocol and contiguous memory). An array is copied to a
+        buffer before the dispatch and, when it is writable and the binding
+        is not read-only, copied back into after it.
+
+        Give either `groups`, the number of workgroups, or `threads`, the
+        number of invocations, which is divided by the kernel's local size
+        and rounded up; each is an int or up to three ints.
+
+        `push` (anything with the buffer protocol, such as bytes from
+        struct.pack or a NumPy array) is copied into the push constants; it
+        may be shorter than kernel.push_constant_size, the rest is zero.
+        """
+        if (groups is None) == (threads is None):
+            raise ValueError("give either groups or threads")
+        info = kernel.bindings
+        bindings = list(bindings)
+        if len(bindings) != len(info):
+            raise ValueError("the kernel has %d binding(s), %d were given" % (len(info), len(bindings)))
+
+        cdef vector[CppComputeBuffer] buffers
+        copy_back = []
+        cdef GpuBuffer buf
+        for item, binding in zip(bindings, info):
+            if isinstance(item, GpuBuffer):
+                buf = item
+            else:
+                buf = self.upload(item)
+                view = memoryview(item)
+                if not view.readonly and not binding["read_only"]:
+                    copy_back.append((buf, item))
+            buffers.push_back(buf._buf)
+
+        cdef ComputeUint3 count
+        cdef uint32_t local
+        if groups is not None:
+            count = _uint3(groups, "groups")
+        else:
+            count = _uint3(threads, "threads")
+            size = kernel.local_size
+            for i in range(3):
+                local = size[i]
+                count[i] = (count[i] + local - 1) // local
+
+        cdef const unsigned char[::1] constants
+        cdef const void* push_ptr = NULL
+        cdef size_t push_size = 0
+        if push is not None:
+            constants = memoryview(push).cast('B')
+            push_size = constants.shape[0]
+            if push_size:
+                push_ptr = &constants[0]
+
+        with nogil:
+            self._ctx.get().run(kernel._kernel, buffers, count, push_ptr, push_size)
+
+        for buf, item in copy_back:
+            buf.download_into(item)
+
+    def __repr__(self):
+        return "ComputeContext(%s%s)" % ("engine" if self._engine is not None else "headless",
+                                         ", shut down" if self.is_shutdown else "")
+
+
+# ═══════════════════════════════════════════════════════════════
 # Engine — Python wrapper for EngineAPI (the main entry point)
 # ═══════════════════════════════════════════════════════════════
 
@@ -2524,6 +2827,18 @@ cdef class Engine:
             out["element_count"] = r.elementCount
             out["element_stride"] = r.elementStride
         return out
+
+    @property
+    def compute(self):
+        """A ComputeContext on the engine's device, for running compute
+        shaders on buffers synchronously from the engine's callbacks (from
+        on_init on). It is shut down after on_cleanup, and its buffers and
+        kernels with it. Raises RuntimeError before the device exists.
+        """
+        cdef shared_ptr[CppComputeContext] ctx = self._ptr.compute()
+        if not ctx:
+            raise RuntimeError("the engine has no device yet: use engine.compute from on_init on")
+        return ComputeContext._wrap(ctx, self)
 
     def set_sun_shadows(self, uint32_t cascades=4, float max_distance=60.0,
                         float split_lambda=0.75, uint32_t resolution=2048,

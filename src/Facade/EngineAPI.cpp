@@ -26,6 +26,7 @@
 #include "FacadeInternal.h"
 
 #include "App/ApplicationBase.h"
+#include "Compute/Compute.h"
 #include "Vulkan/VulkanSwapChain.h"
 #include "ECS/Scene.h"
 #include "ECS/PhysicsSystem.h"
@@ -64,6 +65,9 @@ struct EngineAPI::Impl {
 
     // setRenderStatsEnabled before run(): (enabled, gpuTiming), applied in onInit
     std::optional<std::pair<bool, bool>> pendingStats;
+
+    // Made on the first compute() call, shut down after onCleanup.
+    std::shared_ptr<Compute::Context> compute;
 
     // The actual application (defined below, after Impl)
     class CallbackApp;
@@ -150,6 +154,10 @@ protected:
 
     void onCleanup() override {
         if (m_owner->onCleanupCb) m_owner->onCleanupCb();
+        if (m_owner->compute) {
+            m_owner->compute->shutdown();
+            m_owner->compute.reset();
+        }
     }
 
 private:
@@ -321,7 +329,10 @@ EngineAPI::EngineAPI(const EngineConfig& config)
     m_impl->physicsAPI = std::make_unique<PhysicsAPI>();
 }
 
-EngineAPI::~EngineAPI() = default;
+EngineAPI::~EngineAPI() {
+    // Before the app and its device go; onCleanup does this when run() ends normally.
+    if (m_impl && m_impl->compute) m_impl->compute->shutdown();
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Lifecycle
@@ -626,6 +637,12 @@ void EngineAPI::setCustomUintArray(const std::string& key, const std::vector<uin
 std::string EngineAPI::setBuffer(const std::string& name, const void* data, size_t size, size_t offset) {
     if (!m_impl->app) return "the engine is not running";
     return m_impl->app->getRenderGraph().setBufferData(name, data, size, offset);
+}
+
+std::shared_ptr<Compute::Context> EngineAPI::compute() {
+    if (!m_impl->app || !m_impl->app->hasDevice()) return nullptr;
+    if (!m_impl->compute) m_impl->compute = std::make_shared<Compute::Context>(m_impl->app->getDevice());
+    return m_impl->compute;
 }
 
 bool EngineAPI::requestReadback(const std::string& name) {

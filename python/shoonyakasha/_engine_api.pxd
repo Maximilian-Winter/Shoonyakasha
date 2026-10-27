@@ -500,6 +500,48 @@ cdef extern from "Facade/UIAPI.h" namespace "Shoonyakasha::Facade":
 # EngineAPI — full declaration
 # ═══════════════════════════════════════════════════════════════
 
+cdef extern from "<array>" namespace "std" nogil:
+    cdef cppclass ComputeUint3 "std::array<uint32_t, 3>":
+        ComputeUint3()
+        uint32_t& operator[](size_t)
+
+cdef extern from "Compute/Compute.h" namespace "Shoonyakasha::Compute":
+    cdef enum class ComputeBindingType "Shoonyakasha::Compute::KernelBinding::Type":
+        StorageBuffer "Shoonyakasha::Compute::KernelBinding::Type::StorageBuffer"
+        UniformBuffer "Shoonyakasha::Compute::KernelBinding::Type::UniformBuffer"
+
+    cdef cppclass ComputeKernelBinding "Shoonyakasha::Compute::KernelBinding":
+        uint32_t binding
+        ComputeBindingType type
+        cbool readOnly
+        string name
+
+    cdef cppclass ComputeKernelInfo "Shoonyakasha::Compute::KernelInfo":
+        vector[ComputeKernelBinding] bindings
+        uint32_t pushConstantSize
+        ComputeUint3 localSize
+
+    cdef cppclass CppComputeBuffer "Shoonyakasha::Compute::Buffer":
+        CppComputeBuffer()
+        cbool valid()
+        size_t size()
+        void upload(const void* data, size_t bytes, size_t offset) except + nogil
+        void download(void* out, size_t bytes, size_t offset) except + nogil
+
+    cdef cppclass CppComputeKernel "Shoonyakasha::Compute::Kernel":
+        CppComputeKernel()
+        cbool valid()
+        const ComputeKernelInfo& info() except +
+
+    cdef cppclass CppComputeContext "Shoonyakasha::Compute::Context":
+        CppComputeContext(cbool enableValidation) except +
+        void shutdown()
+        cbool isShutdown()
+        CppComputeBuffer createBuffer(size_t bytes) except + nogil
+        CppComputeKernel loadKernel(const string& spvPath) except +
+        void run(const CppComputeKernel& kernel, const vector[CppComputeBuffer]& bindings, ComputeUint3 groups,
+                 const void* push, size_t pushBytes) except + nogil
+
 cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
     cdef cppclass Readback "Shoonyakasha::Facade::Readback":
         Readback()
@@ -604,6 +646,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         string setPipelineImageData(const string& name, const void* data, size_t size,
                                     uint32_t width, uint32_t height, const string& format, cbool mipmaps)
         cbool getReadback(const string& name, Readback& out)
+        shared_ptr[CppComputeContext] compute() except +
         void setSunShadowSettings(uint32_t cascadeCount, float maxDistance,
                                   float splitLambda, uint32_t resolution, float casterExtension, uint32_t sun)
         mat4 getSunShadowCascade(uint32_t index, uint32_t sun)

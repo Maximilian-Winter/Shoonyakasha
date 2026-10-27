@@ -15,6 +15,7 @@
 #include <vector>
 
 namespace Shoonyakasha {
+namespace Compute { class Context; }
 namespace Facade {
 
 // Forward declare sub-APIs
@@ -377,6 +378,13 @@ public:
     /// Results arrive as many frames after the copy as there are frames in
     /// flight, and are gone once the pipeline is compiled again.
     bool getReadback(const std::string& name, Readback& out) const;
+
+    /// A compute context on the engine's device (include/Compute/Compute.h),
+    /// for running compute shaders on buffers synchronously from the
+    /// engine's callbacks. Null before the device exists, from onInit on it
+    /// is the same context each call. It is shut down after onCleanup, and
+    /// its buffers and kernels with it.
+    std::shared_ptr<Compute::Context> compute();
 
     // ═══════════════════════════════════════════════════════════
     // Sun Shadow Cascades

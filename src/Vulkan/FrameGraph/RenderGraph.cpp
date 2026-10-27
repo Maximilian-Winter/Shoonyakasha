@@ -32,6 +32,7 @@
 #include "ECS/SkeletonComponents.h"
 #include "ECS/MorphComponents.h"
 #include "GPU/GPUResourceFactory.h"
+#include "Compute/Npy.h"
 
 #include <stdexcept>
 #include <cstddef>
@@ -705,7 +706,25 @@ void RenderGraph::createDotPathSSBOs(uint32_t maxFramesInFlight) {
         std::vector<uint8_t> initialData(bufferSize, 0);
 
         // Phase 4: Load binary data from file
-        if (desc.initConfig.type == "file") {
+        const std::string& sourcePath = desc.initConfig.filePath;
+        const bool isNpy = sourcePath.size() >= 4 && sourcePath.compare(sourcePath.size() - 4, 4, ".npy") == 0;
+        if (desc.initConfig.type == "file" && isNpy) {
+            // An .npy file: its array data, without the header.
+            try {
+                const Compute::NpyArray array = Compute::loadNpy(sourcePath);
+                if (array.data.size() != static_cast<size_t>(bufferSize)) {
+                    m_logger->log(LogLevel::Warning,
+                        "  SSBO '%s': '%s' holds %zu data bytes, expected %zu. Using zeros.",
+                        name.c_str(), sourcePath.c_str(), array.data.size(), static_cast<size_t>(bufferSize));
+                } else {
+                    std::memcpy(initialData.data(), array.data.data(), array.data.size());
+                    m_logger->log(LogLevel::Info, "  Loaded %zu bytes from '%s'",
+                                  array.data.size(), sourcePath.c_str());
+                }
+            } catch (const std::exception& e) {
+                m_logger->log(LogLevel::Warning, "  SSBO '%s': %s — using zeros", name.c_str(), e.what());
+            }
+        } else if (desc.initConfig.type == "file") {
             std::ifstream file(desc.initConfig.filePath, std::ios::binary | std::ios::ate);
             if (!file.is_open()) {
                 m_logger->log(LogLevel::Warning,

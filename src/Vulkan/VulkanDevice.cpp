@@ -296,7 +296,8 @@ void VulkanDevice::createLogicalDevice() {
     m_limits = deviceProperties.limits;
 
     // Ray queries, when the device has everything they need.
-    std::vector<const char*> extensions(m_deviceExtensions.begin(), m_deviceExtensions.end());
+    std::vector<const char*> extensions;
+    if (m_surface != VK_NULL_HANDLE) extensions.assign(m_deviceExtensions.begin(), m_deviceExtensions.end());
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationFeatures{};
     accelerationFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{};
@@ -508,8 +509,8 @@ bool VulkanDevice::isDeviceSuitable(VkPhysicalDevice device) {
 
     bool extensionsSupported = checkDeviceExtensionSupport(device);
 
-    bool swapChainAdequate = false;
-    if (extensionsSupported) {
+    bool swapChainAdequate = m_surface == VK_NULL_HANDLE;
+    if (extensionsSupported && m_surface != VK_NULL_HANDLE) {
         SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
         swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
     }
@@ -606,15 +607,18 @@ QueueFamilyIndices VulkanDevice::findQueueFamilies(VkPhysicalDevice device) {
             indices.graphicsFamily = i;
         }
 
-        VkBool32 presentSupport = false;
-        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentSupport);
+        if (m_surface != VK_NULL_HANDLE) {
+            VkBool32 presentSupport = false;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentSupport);
 
-        if (presentSupport) {
-            indices.presentFamily = i;
+            if (presentSupport) {
+                indices.presentFamily = i;
+            }
         }
 
         i++;
     }
+    if (m_surface == VK_NULL_HANDLE) indices.presentFamily = indices.graphicsFamily;
 
     // Second pass: find dedicated compute queue (prefer COMPUTE without GRAPHICS)
     for (uint32_t j = 0; j < queueFamilyCount; ++j) {
@@ -662,7 +666,8 @@ bool VulkanDevice::checkDeviceExtensionSupport(VkPhysicalDevice device) {
     std::vector<VkExtensionProperties> availableExtensions(extensionCount);
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
 
-    std::set<std::string> requiredExtensions(m_deviceExtensions.begin(), m_deviceExtensions.end());
+    std::set<std::string> requiredExtensions;
+    if (m_surface != VK_NULL_HANDLE) requiredExtensions.insert(m_deviceExtensions.begin(), m_deviceExtensions.end());
 
     for (const auto& extension : availableExtensions) {
         requiredExtensions.erase(extension.extensionName);

@@ -36,7 +36,7 @@ Python code runs between frames: in the `set_on_update`, `set_on_pre_render` and
 
 [ssbo_pipeline.json](../../examples/cpp/compute/ssbo_data_flow_example/ssbo_pipeline.json) demonstrates seeded sphere/gaussian initialization and publishing a target named `particles.currentState`. A consumer can use a `buffer_ref` source referring to a target in `SharedBufferRegistry`. Native application code must arrange graph lifetimes, registration, and execution order.
 
-Binary file sources load raw layout-compatible bytes; they are not a portable schema conversion. [ssbo_pipeline_from_file.json](../../examples/cpp/compute/ssbo_data_flow_example/ssbo_pipeline_from_file.json) illustrates the file source. Keep stride, field types, and count consistent with the file producer.
+Binary file sources load raw layout-compatible bytes; they are not a portable schema conversion. [ssbo_pipeline_from_file.json](../../examples/cpp/compute/ssbo_data_flow_example/ssbo_pipeline_from_file.json) illustrates the file source. Keep stride, field types, and count consistent with the file producer. A path ending in `.npy` loads the array data of a NumPy file, without its header; its data must be exactly the buffer's size, or the buffer starts as zeros, with a warning.
 
 ## Readback and saving
 
@@ -67,3 +67,51 @@ The frame-capture methods save the presented image, a separate facility. Do not 
 Readback frequency, memory placement, transfer direction, and buffer size affect correctness and cost. The parser accepting a policy does not prove a workflow has been exercised; use the matching example and GPU validation when changing it.
 
 See [JSON policy reference](../reference/pipeline-json.md#initialization-memory-and-readback), [native frame graph](../api/cpp/frame-graph.md), and [capture](frame-capture.md).
+
+## Running compute shaders directly
+
+For precomputation (lookup tables, baked data) a compute context runs one shader on buffers and returns when the GPU is done, without a pipeline JSON or a frame loop. `sk.ComputeContext()` creates its own Vulkan device with no window; `engine.compute` is a context on a running engine's device, from `on_init` on.
+
+```python
+import struct
+import numpy as np
+import shoonyakasha as sk
+
+with sk.ComputeContext() as ctx:
+    kernel = ctx.kernel("square.comp")           # GLSL is compiled with glslc; a .spv is loaded as is
+    values = np.linspace(-1, 1, 1000, dtype=np.float32)
+    result = np.empty_like(values)
+    ctx.run(kernel, [values, result], threads=values.size, push=struct.pack("<fI", 2.0, values.size))
+    np.save("squares.npy", result)
+```
+
+A kernel's bindings, push constant size and workgroup size are read from its SPIR-V: `kernel.bindings` lists them as dicts of `binding`, `type` (`"storage"` or `"uniform"`), `read_only` and `name`, ascending by binding number. Kernels may use storage and uniform buffers in set 0 only; anything else is rejected when the kernel is loaded.
+
+`ctx.run(kernel, bindings, groups=..., threads=..., push=...)` takes one entry per binding, in the order of `kernel.bindings`:
+
+- A `GpuBuffer` stays on the GPU between runs. `ctx.buffer(size)` makes one filled with zeros, `ctx.upload(array)` one holding a copy; `buf.upload(data, offset)`, `buf.to_numpy(dtype, shape)`, `buf.to_bytes()` and `buf.download_into(array)` copy in and out.
+- An array (anything with the buffer protocol and contiguous memory) is copied to a buffer for the run, and copied back into afterwards when it is writable and the binding is not `readonly`.
+
+`groups` is the number of workgroups; `threads` is the number of invocations, divided by the local size and rounded up, so the shader must skip invocations past the end. Either is an int or up to three ints. `push` may be shorter than the kernel's push constants; the rest is zero.
+
+`ctx.shutdown()`, or leaving the `with` block, frees the context's buffers and kernels; using one afterwards raises `RuntimeError`. The engine's context is shut down after `on_cleanup`. A context is used from one thread at a time; `engine.compute` from the engine's callbacks.
+
+In C++ the same API is `Shoonyakasha::Compute::Context` in `Compute/Compute.h`, constructed without arguments for a device of its own or from a `VulkanDevice&`, with `EngineAPI::compute()` giving the engine's. `Compute/Npy.h` writes and reads `.npy` files (`saveNpy`, `loadNpy`) that `numpy.load` and `numpy.save` share:
+
+```cpp
+#include "Compute/Compute.h"
+#include "Compute/Npy.h"
+
+using namespace Shoonyakasha::Compute;
+
+Context ctx;
+Kernel kernel = ctx.loadKernel("square.comp.spv");
+std::vector<float> values(1000, 0.5f);
+Buffer in = ctx.upload(values.data(), values.size() * sizeof(float));
+Buffer out = ctx.createBuffer(values.size() * sizeof(float));
+struct { float scale; uint32_t count; } push{2.0f, uint32_t(values.size())};
+ctx.runThreads(kernel, {in, out}, push.count, 1, 1, &push, sizeof push);
+saveNpy("squares.npy", out.download<float>());
+```
+
+A `.npy` file saved this way can be the `source` of a pipeline JSON buffer, as above.

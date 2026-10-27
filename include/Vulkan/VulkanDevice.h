@@ -36,6 +36,8 @@ struct SwapChainSupportDetails {
 
 class VulkanDevice {
 public:
+    /// With `surface` VK_NULL_HANDLE the device cannot present: it enables
+    /// no swapchain extension, and its present queue is the graphics queue.
     VulkanDevice(VulkanInstance& instance, VkSurfaceKHR surface);
     ~VulkanDevice();
 

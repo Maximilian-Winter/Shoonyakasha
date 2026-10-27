@@ -14,7 +14,9 @@ namespace Shoonyakasha {
 
 class VulkanInstance {
 public:
-    explicit VulkanInstance(bool enableValidationLayers = true);
+    /// With `forWindow` false the instance enables no surface extensions and
+    /// does not initialize GLFW, for devices that never present.
+    explicit VulkanInstance(bool enableValidationLayers = true, bool forWindow = true);
     ~VulkanInstance();
 
     VkInstance getInstance() const { return m_instance; }
@@ -24,6 +26,7 @@ private:
     VkInstance m_instance;
     VkDebugUtilsMessengerEXT m_debugMessenger;
     bool m_validationLayersEnabled;
+    bool m_forWindow;
     Logger* m_logger;
     EventDispatcher* m_eventDispatcher;
     std::vector<const char*> m_validationLayers;
