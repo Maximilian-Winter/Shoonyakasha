@@ -1,0 +1,53 @@
+#version 450
+// One step of Gray-Scott reaction-diffusion on a wrapping grid.
+//
+// Each cell holds the concentrations (A, B). A is fed in at rate f, B is
+// removed at rate k + f, and B turns A into more B where they meet:
+//
+//   A' = A + (dA * laplacian(A) - A*B*B + f*(1 - A)) * dt
+//   B' = B + (dB * laplacian(B) + A*B*B - (k + f)*B) * dt
+//
+// f varies from feed.x on the first row to feed.y on the last, and k from
+// kill.x in the first column to kill.y in the last; equal ends give one
+// value for the whole grid.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(std430, binding = 0) readonly buffer Source { vec2 cells[]; } src;
+layout(std430, binding = 1) writeonly buffer Target { vec2 cells[]; } dst;
+
+layout(push_constant) uniform Push {
+    vec2 feed;     // f on the first and last row
+    vec2 kill;     // k in the first and last column
+    uvec2 size;    // grid width and height
+} pc;
+
+const float dA = 1.0;
+const float dB = 0.5;
+const float dt = 1.0;
+
+vec2 at(ivec2 p) {
+    ivec2 s = ivec2(pc.size);
+    p = (p + s) % s;
+    return src.cells[p.y * s.x + p.x];
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= int(pc.size.x) || p.y >= int(pc.size.y)) return;
+
+    vec2 c = at(p);
+    vec2 laplacian = -c
+        + 0.2 * (at(p + ivec2(1, 0)) + at(p - ivec2(1, 0)) + at(p + ivec2(0, 1)) + at(p - ivec2(0, 1)))
+        + 0.05 * (at(p + ivec2(1, 1)) + at(p + ivec2(-1, 1)) + at(p + ivec2(1, -1)) + at(p - ivec2(1, 1)));
+
+    vec2 t = vec2(p) / max(vec2(pc.size) - 1.0, vec2(1.0));
+    float f = mix(pc.feed.x, pc.feed.y, t.y);
+    float k = mix(pc.kill.x, pc.kill.y, t.x);
+
+    float a = c.x, b = c.y;
+    float reaction = a * b * b;
+    a += (dA * laplacian.x - reaction + f * (1.0 - a)) * dt;
+    b += (dB * laplacian.y + reaction - (k + f) * b) * dt;
+    dst.cells[p.y * int(pc.size.x) + p.x] = clamp(vec2(a, b), 0.0, 1.0);
+}
