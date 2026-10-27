@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <optional>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <stdexcept>
 #include <entt/entt.hpp>
@@ -69,6 +70,10 @@ struct EngineAPI::Impl {
     // Made on the first compute() call, shut down after onCleanup.
     std::shared_ptr<Compute::Context> compute;
 
+    // stream(): by buffer name. Drained once a frame before onUpdate.
+    std::unordered_map<std::string, std::shared_ptr<BufferStream>> streams;
+    std::mutex streamsMutex;
+
     // The actual application (defined below, after Impl)
     class CallbackApp;
     std::unique_ptr<CallbackApp> app;
@@ -129,7 +134,28 @@ protected:
     }
 
     void onUpdate(float dt) override {
+        applyStreams();
         if (m_owner->onUpdateCb) m_owner->onUpdateCb(dt);
+    }
+
+    // Each stream's queued writes, into the render graph's buffer data.
+    void applyStreams() {
+        std::vector<std::shared_ptr<BufferStream>> streams;
+        {
+            std::lock_guard<std::mutex> lock(m_owner->streamsMutex);
+            streams.reserve(m_owner->streams.size());
+            for (auto& [name, stream] : m_owner->streams) streams.push_back(stream);
+        }
+        for (auto& stream : streams) {
+            auto writes = stream->take();
+            if (writes.empty()) continue;
+            std::string error;
+            for (const auto& write : writes) {
+                error = getRenderGraph().setBufferData(stream->name(), write.bytes.data(), write.bytes.size(),
+                                                       write.offset);
+            }
+            stream->report(writes.size(), error);
+        }
     }
 
     void onPreRender(float dt) override {
@@ -637,6 +663,61 @@ void EngineAPI::setCustomUintArray(const std::string& key, const std::vector<uin
 std::string EngineAPI::setBuffer(const std::string& name, const void* data, size_t size, size_t offset) {
     if (!m_impl->app) return "the engine is not running";
     return m_impl->app->getRenderGraph().setBufferData(name, data, size, offset);
+}
+
+// ─── BufferStream ────────────────────────────────────────────
+
+void BufferStream::write(const void* data, size_t size, size_t offset) {
+    if (size == 0) return;
+    Write write;
+    write.offset = offset;
+    write.bytes.assign(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const size_t end = offset + size;
+    // Queued writes inside this one would be overwritten by it when applied.
+    m_queue.erase(std::remove_if(m_queue.begin(), m_queue.end(),
+                                 [&](const Write& w) {
+                                     const bool covered = w.offset >= offset && w.offset + w.bytes.size() <= end;
+                                     if (covered) m_pendingBytes -= w.bytes.size();
+                                     return covered;
+                                 }),
+                  m_queue.end());
+    m_pendingBytes += size;
+    m_queue.push_back(std::move(write));
+}
+
+size_t BufferStream::pendingBytes() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_pendingBytes;
+}
+
+uint64_t BufferStream::applied() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_applied;
+}
+
+std::string BufferStream::error() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_error;
+}
+
+std::vector<BufferStream::Write> BufferStream::take() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_pendingBytes = 0;
+    return std::exchange(m_queue, {});
+}
+
+void BufferStream::report(size_t count, const std::string& error) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_applied += count;
+    m_error = error;
+}
+
+std::shared_ptr<BufferStream> EngineAPI::stream(const std::string& name) {
+    std::lock_guard<std::mutex> lock(m_impl->streamsMutex);
+    auto& stream = m_impl->streams[name];
+    if (!stream) stream = std::make_shared<BufferStream>(name);
+    return stream;
 }
 
 std::shared_ptr<Compute::Context> EngineAPI::compute() {

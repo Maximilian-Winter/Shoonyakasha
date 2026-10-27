@@ -115,6 +115,20 @@ public:
     glm::vec3 getScale(EntityHandle entity) const;
     void setScale(EntityHandle entity, const glm::vec3& scale);
 
+    /// For each of `count` entities, its position, rotation (Euler angles in
+    /// radians) and scale from row i of `positions`, `rotations` and
+    /// `scales`, three floats each; a null array leaves that part as it is.
+    /// Entities that are not valid or have no transform are skipped. Returns
+    /// how many were set.
+    size_t setTransforms(const EntityHandle* entities, size_t count, const float* positions,
+                         const float* rotations, const float* scales);
+
+    /// Row i of `positions`, `rotations` and `scales` (three floats each)
+    /// receives the transform of entity i, as getPosition, getRotation and
+    /// getScale give it; a null array is not written.
+    void getTransforms(const EntityHandle* entities, size_t count, float* positions, float* rotations,
+                       float* scales) const;
+
     glm::vec3 getWorldPosition(EntityHandle entity) const;
     glm::mat4 getWorldMatrix(EntityHandle entity) const;
 

@@ -99,7 +99,7 @@ def on_init():
 - **What is not cached:** a uniform colour, which has no file to sit beside. Its maps are tiny; the lookup table is computed on every core in a fraction of a second.
 - **Switching** waits for the GPU to finish the frames in flight, then binds the new maps from the next frame. A path that cannot be loaded returns `False` and keeps the current environment.
 
-Dot-paths include `scene.environment.irradianceMap`, `prefilterMap`, `brdfLUT`, and `environmentMap`. Without an HDR map, or when it fails to load, a pipeline that declares an `iblSet` gets a uniform environment instead of unbound textures: every direction is `environment_color` (C++ `uniformEnvironmentColor`), default (0.25, 0.28, 0.33). The IBL compute shaders are looked for in `shaders/ibl/` under the working directory, then beside the pipeline JSON; the default pipeline ships a copy.
+Dot-paths include `scene.environment.irradianceMap`, `prefilterMap`, `brdfLUT`, and `environmentMap`. Without an HDR map, or when it fails to load, a pipeline that declares an `iblSet` gets a uniform environment instead of unbound textures: every direction is `environment_color` (C++ `uniformEnvironmentColor`), default (0.25, 0.28, 0.33). The IBL compute shaders are looked for in `shaders/ibl/` under the working directory, then beside the pipeline JSON, then beside the default pipeline, which ships a copy.
 
 The simple starter has analytic forward shading and does not consume every scene light/IBL property. Use the PBR example's shader/layout combination when learning lighting data bindings. Environment assets and their optional full-resolution versions are listed in the [asset guide](../../assets/README.md).
 

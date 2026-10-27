@@ -58,7 +58,7 @@ from ._engine_api cimport (
     CppPlanetLod, LodBody, LodView, LodNodeInfo, LodJob, LodFaceColours,
     CppComputeContext, CppComputeBuffer, CppComputeKernel, ComputeKernelInfo, ComputeKernelBinding,
     ComputeBindingType, ComputeUint3, CppComputeImage, CppComputeBinding, ComputeBindingDim,
-    ExrPixelType, saveHdr, saveExr, saveImage,
+    ExrPixelType, saveHdr, saveExr, saveImage, CppBufferStream,
 )
 from libcpp.memory cimport shared_ptr
 
@@ -391,6 +391,57 @@ cdef class Scene:
     def set_scale(self, uint32_t entity, scale):
         """Set entity scale from (x, y, z) tuple."""
         self._ptr.setScale(entity, _tuple_to_vec3(scale))
+
+    def set_transforms(self, entities, positions=None, rotations=None, scales=None):
+        """Set the transforms of many entities in one call.
+
+        `entities` is a sequence or array of N entity handles; `positions`,
+        `rotations` (Euler angles in radians) and `scales` are arrays of
+        shape (N, 3), converted to float32. One left out (None) is left as
+        it is. Entities that are not valid or have no transform are skipped.
+        Returns how many were set."""
+        import numpy as np
+        cdef const uint32_t[::1] handles = np.ascontiguousarray(entities, dtype=np.uint32).reshape(-1)
+        cdef size_t count = handles.shape[0]
+        arrays = []
+        for name, value in (("positions", positions), ("rotations", rotations), ("scales", scales)):
+            if value is None:
+                arrays.append(None)
+                continue
+            rows = np.ascontiguousarray(value, dtype=np.float32)
+            if rows.shape != (count, 3):
+                raise ValueError("%s: shape %s, expected (%d, 3)" % (name, rows.shape, count))
+            arrays.append(rows.reshape(-1))
+        if count == 0:
+            return 0
+        cdef const float[::1] p, r, s
+        cdef const float* pp = NULL
+        cdef const float* rp = NULL
+        cdef const float* sp = NULL
+        if arrays[0] is not None:
+            p = arrays[0]
+            pp = &p[0]
+        if arrays[1] is not None:
+            r = arrays[1]
+            rp = &r[0]
+        if arrays[2] is not None:
+            s = arrays[2]
+            sp = &s[0]
+        return self._ptr.setTransforms(<const EntityHandle*>&handles[0], count, pp, rp, sp)
+
+    def get_transforms(self, entities):
+        """The transforms of many entities: (positions, rotations, scales),
+        float32 arrays of shape (N, 3), as get_position, get_rotation and
+        get_scale give them."""
+        import numpy as np
+        cdef const uint32_t[::1] handles = np.ascontiguousarray(entities, dtype=np.uint32).reshape(-1)
+        cdef size_t count = handles.shape[0]
+        out = [np.zeros((count, 3), dtype=np.float32) for _ in range(3)]
+        if count == 0:
+            return tuple(out)
+        cdef float[:, ::1] p = out[0], r = out[1], s = out[2]
+        self._ptr.getTransforms(<const EntityHandle*>&handles[0], count, &p[0, 0], &r[0, 0], &s[0, 0])
+        return tuple(out)
 
     def get_world_position(self, uint32_t entity):
         """Get world-space position as (x, y, z) tuple."""
@@ -1072,6 +1123,58 @@ cdef class Ecs:
         """Detach a component. Returns True if it was present."""
         cdef string cpp_name = name.encode('utf-8')
         return self._ptr.removeComponent(entity, cpp_name)
+
+    # ── GPU components ───────────────────────────────────────
+
+    def set_gpu_component(self, uint32_t entity, str name, data):
+        """Set the row of `entity` in GPU component `name` to the bytes of
+        `data` (anything with the buffer protocol and contiguous memory:
+        a NumPy record, bytes from struct.pack).
+
+        Every frame, a pipeline buffer layout with "source": {"type":
+        "scene", "data": "components", "component": name} receives the
+        component's rows, packed in no particular order, and
+        scene.custom.components.<name>.count holds how many there are. The
+        first row fixes the row size; it must match the layout's element
+        size. A destroyed entity's rows go at the next frame. Raises
+        ValueError for a row of another size."""
+        cdef const unsigned char[::1] view = memoryview(data).cast('B')
+        cdef string error = self._ptr.setGpuComponent(
+            entity, name.encode('utf-8'), &view[0] if view.shape[0] else NULL, view.shape[0])
+        if not error.empty():
+            raise ValueError(error.decode('utf-8'))
+
+    def set_gpu_components(self, str name, entities, rows):
+        """set_gpu_component for many entities: row i of `rows` (an array
+        with one row per entity, such as shape (N, 4) float32 or a
+        structured array of N records) for entity i. Sets none when an
+        entity is not valid; raises ValueError then, or for rows of another
+        size."""
+        import numpy as np
+        cdef const uint32_t[::1] handles = np.ascontiguousarray(entities, dtype=np.uint32).reshape(-1)
+        cdef size_t count = handles.shape[0]
+        array = np.ascontiguousarray(rows)
+        if count == 0:
+            return
+        if array.shape[0] != count:
+            raise ValueError("%d entities, %d rows" % (count, array.shape[0]))
+        cdef const unsigned char[::1] view = memoryview(array).cast('B')
+        cdef string error = self._ptr.setGpuComponents(
+            name.encode('utf-8'), <const EntityHandle*>&handles[0], count, &view[0], view.shape[0] // count)
+        if not error.empty():
+            raise ValueError(error.decode('utf-8'))
+
+    def remove_gpu_component(self, uint32_t entity, str name):
+        """Remove the row of `entity` from GPU component `name`. Returns True if it had one."""
+        return self._ptr.removeGpuComponent(entity, name.encode('utf-8'))
+
+    def gpu_component_count(self, str name):
+        """How many rows GPU component `name` has."""
+        return self._ptr.gpuComponentCount(name.encode('utf-8'))
+
+    def gpu_component_stride(self, str name):
+        """The row size of GPU component `name` in bytes, 0 before its first row."""
+        return self._ptr.gpuComponentStride(name.encode('utf-8'))
 
     def get_component_names(self, uint32_t entity):
         """Names of all script-defined components attached to an entity."""
@@ -2371,6 +2474,61 @@ def _release_engines():
 _atexit.register(_release_engines)
 
 
+cdef class BufferStream:
+    """Bytes for a pipeline buffer, written from any thread: Engine.stream(name).
+
+    write() queues the bytes and returns; once a frame, before on_update,
+    the engine applies the queued writes as set_buffer does, oldest first. A
+    write that covers queued ones replaces them, so a producer faster than
+    the frame rate leaves only its newest data. A refused write (one that
+    does not fit the buffer, for instance) cannot raise in the producer's
+    thread: `error` holds the reason.
+    """
+    cdef shared_ptr[CppBufferStream] _stream
+
+    def __init__(self):
+        raise TypeError("use Engine.stream(name)")
+
+    @staticmethod
+    cdef BufferStream _wrap(shared_ptr[CppBufferStream] stream):
+        cdef BufferStream out = BufferStream.__new__(BufferStream)
+        out._stream = stream
+        return out
+
+    @property
+    def name(self):
+        return self._stream.get().name().decode("utf-8")
+
+    def write(self, data, size_t offset=0):
+        """Queue `data` (anything with the buffer protocol and contiguous
+        memory, such as a NumPy array or bytes) for byte `offset` of the
+        buffer. Safe from any thread; does not hold the GIL while copying."""
+        cdef const unsigned char[::1] view = memoryview(data).cast('B')
+        cdef size_t n = view.shape[0]
+        if n == 0:
+            return
+        with nogil:
+            self._stream.get().write(&view[0], n, offset)
+
+    @property
+    def pending_bytes(self):
+        """Bytes queued and not yet applied."""
+        return self._stream.get().pendingBytes()
+
+    @property
+    def applied(self):
+        """Writes applied so far."""
+        return self._stream.get().applied()
+
+    @property
+    def error(self):
+        """Why the last write applied was refused; '' when it was taken."""
+        return self._stream.get().error().decode("utf-8")
+
+    def __repr__(self):
+        return "BufferStream(%r, applied=%d, pending_bytes=%d)" % (self.name, self.applied, self.pending_bytes)
+
+
 cdef class Engine:
     """Main engine entry point.
 
@@ -3141,6 +3299,12 @@ cdef class Engine:
                                                width, height, format.encode('utf-8'), mipmaps)
         if not error.empty():
             raise ValueError(error.decode('utf-8'))
+
+    def stream(self, str name):
+        """The BufferStream into bufferLayouts entry `name`, a buffer
+        set_buffer accepts: the same stream each call for a name. Its write()
+        may be called from any thread, before or while the engine runs."""
+        return BufferStream._wrap(self._ptr.stream(name.encode("utf-8")))
 
     def request_readback(self, str name):
         """Copy the buffer layout or image resource `name` back at the end

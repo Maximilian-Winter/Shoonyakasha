@@ -13,7 +13,7 @@
 # The utility modules are pure Python and deliberately imported first: compiling
 # shaders or validating a pipeline should work before the extension is built, in
 # CI, or on an interpreter the current .pyd was not built for.
-from . import assets, cookies, ies, keys, mathutil, pipeline, shaders
+from . import assets, cookies, ies, keys, mathutil, pipeline, shaders, streams
 
 # The compiled extension may legitimately be absent or built for a different
 # Python version. Failing the whole package import on that hides the utilities
@@ -40,6 +40,7 @@ try:
         GpuImageLevel,
         save_hdr,
         save_exr,
+        BufferStream,
 
         # Entity handle sentinel
         NULL_ENTITY,
@@ -122,7 +123,7 @@ except ImportError as exc:                       # pragma: no cover - environmen
 
 _ENGINE_SYMBOLS = frozenset({
     "Engine", "Scene", "Input", "Physics", "Ecs", "UI", "GltfResult", "PlanetLod", "NULL_ENTITY",
-    "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage", "GpuImageLevel", "save_hdr", "save_exr",
+    "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage", "GpuImageLevel", "save_hdr", "save_exr", "BufferStream",
     "CAMERA_PERSPECTIVE", "CAMERA_ORTHOGRAPHIC",
     "LIGHT_DIRECTIONAL", "LIGHT_POINT", "LIGHT_SPOT",
     "RIGIDBODY_STATIC", "RIGIDBODY_KINEMATIC", "RIGIDBODY_DYNAMIC",
@@ -167,7 +168,7 @@ def extension_available():
 __version__ = "1.0.0"
 __all__ = [
     "Engine", "Scene", "Input", "Physics", "Ecs", "UI", "GltfResult", "PlanetLod",
-    "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage", "GpuImageLevel", "save_hdr", "save_exr",
+    "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage", "GpuImageLevel", "save_hdr", "save_exr", "BufferStream",
     "NULL_ENTITY",
     "CAMERA_PERSPECTIVE", "CAMERA_ORTHOGRAPHIC",
     "LIGHT_DIRECTIONAL", "LIGHT_POINT", "LIGHT_SPOT",
@@ -188,5 +189,5 @@ __all__ = [
     "SIZE_FIT_UNCONSTRAINED", "SIZE_FIT_MIN", "SIZE_FIT_PREFERRED",
     "video_recording_available", "find_ffmpeg",
     # Pure-Python utilities
-    "assets", "cookies", "ies", "keys", "mathutil", "pipeline", "shaders", "extension_available",
+    "assets", "cookies", "ies", "keys", "mathutil", "pipeline", "shaders", "streams", "extension_available",
 ]

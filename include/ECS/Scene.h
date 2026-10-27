@@ -10,6 +10,7 @@
 
 #include "Core.h"
 #include "Systems.h"
+#include "GpuComponents.h"
 #include "Resources/ResourceManager.h"
 #include "Vulkan/VulkanDevice.h"
 #include <nlohmann/json.hpp>
@@ -583,9 +584,15 @@ public:
     ComponentRegistry& getComponentRegistry() { return m_componentRegistry; }
     const ComponentRegistry& getComponentRegistry() const { return m_componentRegistry; }
 
+    /// Rows of bytes per entity that pipeline storage buffers receive every
+    /// frame (ECS/GpuComponents.h).
+    GpuComponentTables& getGpuComponents() { return m_gpuComponents; }
+    const GpuComponentTables& getGpuComponents() const { return m_gpuComponents; }
+
 private:
     std::string m_name;
     entt::registry m_registry;
+    GpuComponentTables m_gpuComponents;
     SystemManager m_systemManager;
     ComponentRegistry m_componentRegistry;
     ResourceManager& m_resourceManager;

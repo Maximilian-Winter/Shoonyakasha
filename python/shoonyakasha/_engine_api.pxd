@@ -155,6 +155,10 @@ cdef extern from "Facade/SceneAPI.h" namespace "Shoonyakasha::Facade":
         void setRotation(EntityHandle entity, const vec3& eulerRadians)
         vec3 getScale(EntityHandle entity) const
         void setScale(EntityHandle entity, const vec3& scale)
+        size_t setTransforms(const EntityHandle* entities, size_t count, const float* positions,
+                             const float* rotations, const float* scales)
+        void getTransforms(const EntityHandle* entities, size_t count, float* positions, float* rotations,
+                           float* scales)
         vec3 getWorldPosition(EntityHandle entity) const
         mat4 getWorldMatrix(EntityHandle entity) const
         vec3 getForward(EntityHandle entity) const
@@ -344,6 +348,14 @@ cdef extern from "Facade/EcsAPI.h" namespace "Shoonyakasha::Facade":
         shared_ptr[void] getComponent(EntityHandle entity, const string& name) const
         cbool hasComponent(EntityHandle entity, const string& name) const
         cbool removeComponent(EntityHandle entity, const string& name)
+
+        # GPU components
+        string setGpuComponent(EntityHandle entity, const string& name, const void* data, size_t size)
+        string setGpuComponents(const string& name, const EntityHandle* entities, size_t count,
+                                const void* rows, size_t stride)
+        cbool removeGpuComponent(EntityHandle entity, const string& name)
+        size_t gpuComponentCount(const string& name) const
+        size_t gpuComponentStride(const string& name) const
         vector[string] getComponentNames(EntityHandle entity) const
         vector[EntityHandle] findEntitiesWithComponent(const string& name) const
 
@@ -588,6 +600,13 @@ cdef extern from "Compute/ImageFiles.h" namespace "Shoonyakasha::Compute":
                    ExrPixelType type) except + nogil
 
 cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
+    cdef cppclass CppBufferStream "Shoonyakasha::Facade::BufferStream":
+        const string& name()
+        void write(const void* data, size_t size, size_t offset) except + nogil
+        size_t pendingBytes() nogil
+        uint64_t applied() nogil
+        string error()
+
     cdef cppclass Readback "Shoonyakasha::Facade::Readback":
         Readback()
         const void* data
@@ -687,6 +706,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         void setCustomMat4Array(const string& key, const vector[mat4]& values)
         void setCustomUintArray(const string& key, const vector[uint32_t]& values)
         string setBuffer(const string& name, const void* data, size_t size, size_t offset)
+        shared_ptr[CppBufferStream] stream(const string& name) except +
         cbool requestReadback(const string& name)
         string setPipelineImageData(const string& name, const void* data, size_t size,
                                     uint32_t width, uint32_t height, const string& format, cbool mipmaps)

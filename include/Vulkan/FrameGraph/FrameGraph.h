@@ -223,7 +223,10 @@ struct SSBOInitConfig {
 
     // "scene" source: filled from the scene every frame. "lights": the
     // scene's lights as SceneContext::PackedLight, as many as fit.
+    // "components": the rows of the GPU component sceneComponent
+    // (ECS::GpuComponentTables), as many as fit.
     std::string sceneData;
+    std::string sceneComponent;
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1785,7 +1788,8 @@ private:
     // "scene"}): one host-visible, host-coherent buffer per frame in flight,
     // mapped while it lives, written after that frame's fence.
     struct SceneSSBO {
-        std::string data;               // "lights", or "rayInstances" (filled with the acceleration structure)
+        std::string data;               // "lights", "components", or "rayInstances" (filled with the acceleration structure)
+        std::string component;          // "components": the GPU component whose rows it holds
         uint32_t capacity = 0;          // elements it holds
         uint32_t elementSize = 0;
         std::vector<std::unique_ptr<VulkanBuffer>> perFrame;
@@ -1794,6 +1798,7 @@ private:
     void createSceneSSBO(const BufferLayoutDesc& desc, const CompiledBufferLayout& layout,
                          uint32_t maxFramesInFlight);
     void fillSceneSSBOs(uint32_t frameIndex);
+    void fillComponentSSBO(const std::string& name, const SceneSSBO& ssbo, VulkanBuffer& buffer);
 
     // Phase 2: Shared buffer registry for cross-graph SSBO/UBO/image targets/references
     SharedBufferRegistry* m_sharedBufferRegistry = nullptr;

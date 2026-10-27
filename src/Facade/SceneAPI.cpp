@@ -279,6 +279,37 @@ void SceneAPI::setScale(EntityHandle entity, const glm::vec3& scale) {
     if (t) { t->scale = scale; t->isDirty = true; }
 }
 
+size_t SceneAPI::setTransforms(const EntityHandle* entities, size_t count, const float* positions,
+                               const float* rotations, const float* scales) {
+    size_t set = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (!m_impl->valid(entities[i])) continue;
+        auto* t = m_impl->registry.try_get<ECS::TransformComponent>(toEntt(entities[i]));
+        if (!t) continue;
+        if (positions) t->position = glm::vec3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+        if (rotations) t->rotation = glm::vec3(rotations[i * 3], rotations[i * 3 + 1], rotations[i * 3 + 2]);
+        if (scales) t->scale = glm::vec3(scales[i * 3], scales[i * 3 + 1], scales[i * 3 + 2]);
+        t->isDirty = true;
+        ++set;
+    }
+    return set;
+}
+
+void SceneAPI::getTransforms(const EntityHandle* entities, size_t count, float* positions, float* rotations,
+                             float* scales) const {
+    auto put = [](float* out, size_t i, const glm::vec3& v) {
+        if (!out) return;
+        out[i * 3] = v.x;
+        out[i * 3 + 1] = v.y;
+        out[i * 3 + 2] = v.z;
+    };
+    for (size_t i = 0; i < count; ++i) {
+        put(positions, i, getPosition(entities[i]));
+        put(rotations, i, getRotation(entities[i]));
+        put(scales, i, getScale(entities[i]));
+    }
+}
+
 glm::vec3 SceneAPI::getWorldPosition(EntityHandle entity) const {
     if (!m_impl->valid(entity)) return glm::vec3(0.0f);
     auto* t = m_impl->registry.try_get<ECS::TransformComponent>(toEntt(entity));

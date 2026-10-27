@@ -410,6 +410,14 @@ Layout `source` accepts `type` (`initializer` by default), `seed` (42), and per-
     "source": { "type": "scene", "data": "lights" } } }
 ```
 
+`type: scene` with `"data": "components"` and a `"component"` name makes a storage buffer the engine refills every frame from that GPU component's rows (`ecs.set_gpu_component` in Python, `EcsAPI::setGpuComponent` in C++): one row per entity, packed in no particular order, as many as `elementCount` holds (the rest are left out, with a warning). The rows must be the size of the layout's elements; when they are not, the buffer is left as it is, with a warning. `scene.custom.components.<component>.count` says how many rows there are, and rows past it hold earlier frames' data. As for lights, there is one host-visible buffer per frame in flight:
+
+```json
+{ "Particles": { "usage": "storage_buffer", "packing": "std430", "elementCount": 4096,
+    "fields": [ { "name": "positionSize", "type": "vec4" }, { "name": "color", "type": "vec4" } ],
+    "source": { "type": "scene", "data": "components", "component": "Particle" } } }
+```
+
 `type: scene` with `"data": "rayInstances"` holds a row for each instance of the scene's [acceleration structure](#descriptors-and-samplers), in the structure's order. A ray query that hits instance `rayQueryGetIntersectionInstanceIdEXT` reads that row for the surface it hit. The rows are written with the structure, so a pipeline with such a buffer also needs an `acceleration_structure` binding. As for lights, there is one host-visible buffer per frame in flight, holding as many rows as `elementCount` (the rest are left out, with a warning).
 
 Its fields must be, in this order:

@@ -81,6 +81,32 @@ public:
     std::vector<EntityHandle> findEntitiesWithComponent(const std::string& name) const;
 
     // ═══════════════════════════════════════════════════════════
+    // GPU Components (rows of bytes copied into storage buffers)
+    // ═══════════════════════════════════════════════════════════
+
+    /// Sets the row of `entity` in GPU component `name` to `size` bytes
+    /// from `data`. Every frame, a pipeline buffer layout with
+    /// "source": {"type": "scene", "data": "components", "component": name}
+    /// receives the component's rows, packed in no particular order, and
+    /// scene.custom.components.<name>.count holds how many there are. The
+    /// first row set fixes the component's row size. A destroyed entity's
+    /// rows go at the next frame. Returns an error message, empty when the
+    /// row was set.
+    std::string setGpuComponent(EntityHandle entity, const std::string& name, const void* data, size_t size);
+
+    /// setGpuComponent for `count` entities, row i from `rows + i * stride`.
+    /// Sets none when an entity is not valid.
+    std::string setGpuComponents(const std::string& name, const EntityHandle* entities, size_t count,
+                                 const void* rows, size_t stride);
+
+    /// Removes the row of `entity` from GPU component `name`; false when it had none.
+    bool removeGpuComponent(EntityHandle entity, const std::string& name);
+
+    /// How many rows GPU component `name` has, and its row size in bytes (0 before the first row).
+    size_t gpuComponentCount(const std::string& name) const;
+    size_t gpuComponentStride(const std::string& name) const;
+
+    // ═══════════════════════════════════════════════════════════
     // System Management (generic per-frame callback)
     // ═══════════════════════════════════════════════════════════
 

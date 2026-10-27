@@ -63,7 +63,7 @@ CAPABILITIES = frozenset({"rayQuery", "drawIndirectCount", "geometryShader", "te
                           "bindlessTextures"})
 
 #: What a buffer layout with "source": {"type": "scene"} holds ("data").
-SCENE_DATA = frozenset({"lights", "rayInstances"})
+SCENE_DATA = frozenset({"lights", "rayInstances", "components"})
 
 #: What a descriptor binding's "source" may name, and the binding type each takes.
 BINDING_SOURCES = {"sceneTextures": "combined_image_sampler", "material": "uniform_buffer"}
@@ -250,6 +250,8 @@ def validate_json(document, base_dir=None, source="<json>", origins=None):
         layout_source = layout.get("source")
         if isinstance(layout_source, dict) and layout_source.get("type") == "scene":
             _check_enum(str(layout_source.get("data")), SCENE_DATA, where, "source data", problems)
+            if layout_source.get("data") == "components" and not layout_source.get("component"):
+                problems.append(Problem(where, "'data': 'components' needs the 'component' whose rows it holds"))
 
         fields = layout.get("fields", [])
         if not isinstance(fields, list):

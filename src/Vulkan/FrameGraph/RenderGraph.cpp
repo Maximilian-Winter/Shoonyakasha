@@ -625,6 +625,7 @@ void RenderGraph::createSceneSSBO(const BufferLayoutDesc& desc, const CompiledBu
                                   uint32_t maxFramesInFlight) {
     SceneSSBO ssbo;
     ssbo.data = desc.initConfig.sceneData;
+    ssbo.component = desc.initConfig.sceneComponent;
     ssbo.capacity = desc.elementCount;
     ssbo.elementSize = layout.totalSize;
     const VkDeviceSize size = static_cast<VkDeviceSize>(layout.totalSize) * desc.elementCount;
@@ -647,11 +648,35 @@ void RenderGraph::createSceneSSBO(const BufferLayoutDesc& desc, const CompiledBu
     m_sceneSSBOs[desc.name] = std::move(ssbo);
 }
 
+void RenderGraph::fillComponentSSBO(const std::string& name, const SceneSSBO& ssbo, VulkanBuffer& buffer) {
+    if (!m_boundScene) return;
+    const auto* table = m_boundScene->getGpuComponents().find(ssbo.component);
+    if (!table || table->count() == 0) return;
+    if (table->stride != ssbo.elementSize) {
+        m_logger->logEvery(5.0f, LogLevel::Warning,
+                           "Component '%s' has rows of %zu bytes; the elements of '%s' are %u bytes, so it is "
+                           "left as it is", ssbo.component.c_str(), table->stride, name.c_str(), ssbo.elementSize);
+        return;
+    }
+    const size_t count = std::min<size_t>(table->count(), ssbo.capacity);
+    if (table->count() > ssbo.capacity) {
+        m_logger->logEvery(5.0f, LogLevel::Warning,
+                           "Component '%s' has %zu rows; '%s' holds %u, so the rest are left out",
+                           ssbo.component.c_str(), table->count(), name.c_str(), ssbo.capacity);
+    }
+    std::memcpy(buffer.getMappedData(), table->rows.data(), count * table->stride);
+}
+
 void RenderGraph::fillSceneSSBOs(uint32_t frameIndex) {
     if (!m_sceneContext) return;
     for (auto& [name, ssbo] : m_sceneSSBOs) {
-        if (ssbo.perFrame.empty() || ssbo.data != "lights") continue;
+        if (ssbo.perFrame.empty()) continue;
         auto& buffer = *ssbo.perFrame[frameIndex < ssbo.perFrame.size() ? frameIndex : 0];
+        if (ssbo.data == "components") {
+            fillComponentSSBO(name, ssbo, buffer);
+            continue;
+        }
+        if (ssbo.data != "lights") continue;
         // This frame's fence has passed, so the GPU is done with this
         // frame's buffer; host-coherent writes reach it at the next submit.
         const auto& lights = m_sceneContext->lights;
@@ -2757,6 +2782,14 @@ void RenderGraph::updateSceneContext(float deltaTime) {
     // If we have a bound ECS scene, update camera from it
     if (m_boundScene) {
         m_sceneContext->updateFromRegistry(m_boundScene->getRegistry());
+
+        // GPU components: rows of destroyed entities go, and each table's
+        // row count is scene.custom.components.<name>.count.
+        auto& components = m_boundScene->getGpuComponents();
+        components.dropInvalid(m_boundScene->getRegistry());
+        for (const auto& [name, table] : components.tables()) {
+            m_sceneContext->setCustom("components." + name + ".count", static_cast<uint32_t>(table.count()));
+        }
     }
 }
 

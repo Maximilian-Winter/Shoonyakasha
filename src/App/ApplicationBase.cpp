@@ -250,16 +250,18 @@ std::string ApplicationBase::defaultPipelinePath() {
 
 std::string ApplicationBase::iblShaderDirectory() const {
     // shaders/ibl/ in the working directory, as every example ships it; then
-    // beside the pipeline, which is where the default pipeline keeps its copy.
+    // beside the pipeline; then beside the default pipeline, which ships them.
     const char* probe = "equirect_to_cubemap.comp.spv";
     std::error_code ec;
     if (std::filesystem::exists(std::filesystem::path("shaders/ibl") / probe, ec)) {
         return "shaders/ibl/";
     }
-    const std::filesystem::path beside =
-        pipelineDirectory(m_config.pipelineJsonPath) / "shaders" / "ibl";
-    if (std::filesystem::exists(beside / probe, ec)) {
-        return beside.generic_string() + "/";
+    const std::filesystem::path candidates[] = {
+        pipelineDirectory(m_config.pipelineJsonPath) / "shaders" / "ibl",
+        pipelineDirectory(defaultPipelinePath()) / "shaders" / "ibl",
+    };
+    for (const auto& dir : candidates) {
+        if (std::filesystem::exists(dir / probe, ec)) return dir.generic_string() + "/";
     }
     return {};
 }
@@ -491,7 +493,7 @@ void ApplicationBase::bindIBLTextures() {
         const std::string shaderDir = iblShaderDirectory();
         if (shaderDir.empty()) {
             m_logger->log(LogLevel::Warning, "The pipeline samples IBL but no IBL shaders were found "
-                          "in shaders/ibl/ or beside the pipeline");
+                          "in shaders/ibl/, beside the pipeline or beside the default pipeline");
         } else {
             try {
                 IBLGenerator iblGenerator(*m_device, shaderDir);

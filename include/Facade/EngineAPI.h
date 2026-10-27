@@ -9,8 +9,10 @@
 
 #include "Facade/FacadeTypes.h"
 #include <glm/glm.hpp>
-#include <string>
+#include <cstdint>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -70,6 +72,52 @@ std::string loadPipelineDocumentText(const std::string& path, std::string& error
 
 /// A completed readback (EngineAPI::getReadback). `data` stays valid until
 /// the next frame begins.
+/// Bytes for a pipeline buffer, written from any thread (EngineAPI::stream).
+///
+/// write() queues bytes; once a frame, before the frame's passes see the
+/// buffer, the engine thread takes the queue and applies each write as
+/// EngineAPI::setBuffer does, oldest first. A write that covers queued ones
+/// replaces them, so a producer faster than the frame rate leaves only its
+/// newest data. The buffer keeps the bytes applied until they are written
+/// again.
+class BufferStream {
+public:
+    struct Write {
+        size_t offset = 0;
+        std::vector<uint8_t> bytes;
+    };
+
+    explicit BufferStream(std::string name) : m_name(std::move(name)) {}
+
+    const std::string& name() const { return m_name; }
+
+    /// Queues `size` bytes from `data` for byte `offset` of the buffer.
+    void write(const void* data, size_t size, size_t offset = 0);
+
+    /// Bytes queued and not yet applied.
+    size_t pendingBytes() const;
+    /// Writes applied so far.
+    uint64_t applied() const;
+    /// Why the last write applied was refused, such as not fitting the
+    /// buffer; empty when it was taken.
+    std::string error() const;
+
+    /// Called by the engine on its thread: the queued writes, oldest first,
+    /// leaving the queue empty.
+    std::vector<Write> take();
+    /// Called by the engine after applying writes taken: how many, and the
+    /// last refusal's message (empty when the last was taken).
+    void report(size_t count, const std::string& error);
+
+private:
+    std::string m_name;
+    mutable std::mutex m_mutex;
+    std::vector<Write> m_queue;
+    size_t m_pendingBytes = 0;
+    uint64_t m_applied = 0;
+    std::string m_error;
+};
+
 struct Readback {
     const void* data = nullptr;
     size_t size = 0;
@@ -372,6 +420,11 @@ public:
     /// they are checked against it then. Returns an error message, empty
     /// when the bytes were taken.
     std::string setBuffer(const std::string& name, const void* data, size_t size, size_t offset = 0);
+
+    /// The stream into bufferLayouts entry `name` (a buffer setBuffer
+    /// accepts): the same one each call for a name. Its writes are applied
+    /// once a frame, before onUpdate, while the engine runs.
+    std::shared_ptr<BufferStream> stream(const std::string& name);
 
     /// Copy the buffer layout or image resource `name` back at the end of
     /// the next frame, whatever the readback frequency its pipeline JSON

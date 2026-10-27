@@ -32,6 +32,39 @@ Python code runs between frames: in the `set_on_update`, `set_on_pre_render` and
 - **Values:** `set_custom_*` values reach every pass whose layouts read them, uploaded once per frame. Values that differ from one pass to the next come from push constants bound to `pass.repeatIndex`, `pass.repeatCount`, `pass.extent` or `pass.texelSize`; a repeated pass can index a custom array with its repeat index.
 - **Results:** `engine.request_readback(name)` and `engine.get_readback(name)` read a buffer or image a pass wrote (see [Reading back from Python](#reading-back-from-python)); `engine.get_pass_draw_stats(name)` gives a geometry pass's drawn and culled entities, and `engine.render_stats`, after `engine.enable_render_stats()`, each pass's CPU and GPU time.
 
+## Streaming data in
+
+Four ways feed a running engine from Python, besides `engine.set_buffer` on the engine's thread:
+
+**Streams from any thread.** `engine.stream(name)` is a `BufferStream` into a buffer `set_buffer` accepts: the same one each call for a name. Its `write(data, offset=0)` may be called from any thread, before or while the engine runs, and does not hold the GIL while copying. Writes are queued and applied once a frame, before `on_update`, oldest first, as `set_buffer` would; a write that covers queued ones replaces them, so a producer faster than the frame rate leaves only its newest data. A refused write cannot raise in the producer's thread: `stream.error` holds why the last applied write was refused, and `stream.applied` and `stream.pending_bytes` count what was applied and what waits.
+
+```python
+import threading
+import numpy as np
+
+stream = engine.stream("Samples")            # bufferLayouts "Samples": 1024 vec4, say
+
+def produce():
+    while running:
+        stream.write(read_sensor())          # a (1024, 4) float32 array
+
+threading.Thread(target=produce, daemon=True).start()
+```
+
+**Recordings.** `sk.streams.play(engine, buffer, source, rate=None, loop=True)` plays a recording into a buffer: a NumPy array, the path of an `.npy` file, or an http(s) URL of one, its first axis the frames. A background thread reads frames ahead (a file is memory-mapped; a URL is read from start to end), and an engine system writes one each engine frame, or `rate` per second, at offset 0. Call it from `on_init` or later. A frame not read in time is not waited for (`player.late` counts them); `player.played`, `player.done`, `player.error` and `player.stop()` follow and end playback. `sk.streams.frames(source)` iterates a recording's frames as bytes.
+
+**Transforms in bulk.** `engine.scene.set_transforms(entities, positions=None, rotations=None, scales=None)` sets the transforms of many entities from arrays of shape (N, 3), Euler angles in radians, leaving out the parts given as None; `get_transforms(entities)` returns the three arrays. In C++, `SceneAPI::setTransforms` and `getTransforms` take rows of three floats.
+
+**Component rows on the GPU.** `engine.ecs.set_gpu_component(entity, name, data)` gives an entity a row of bytes under a component name, and `set_gpu_components(name, entities, rows)` gives many entities theirs from an array with one row per entity. Every frame a buffer layout with `"source": {"type": "scene", "data": "components", "component": name}` receives the component's rows, and `scene.custom.components.<name>.count` holds how many there are (see the [reference](../reference/pipeline-json.md#initialization-memory-and-readback)). The first row fixes the row size, which must match the layout's elements. A destroyed entity's rows go at the next frame; `remove_gpu_component` removes one sooner. `gpu_component_count` and `gpu_component_stride` give a component's row count and size.
+
+```python
+rows = np.zeros((len(ships), 2, 4), np.float32)    # positionSize, color per ship
+rows[:, 0, :3] = positions
+rows[:, 0, 3] = 1.0
+rows[:, 1] = colors
+engine.ecs.set_gpu_components("Particle", ships, rows)
+```
+
 ## Initialization and sharing
 
 [ssbo_pipeline.json](../../examples/cpp/compute/ssbo_data_flow_example/ssbo_pipeline.json) demonstrates seeded sphere/gaussian initialization and publishing a target named `particles.currentState`. A consumer can use a `buffer_ref` source referring to a target in `SharedBufferRegistry`. Native application code must arrange graph lifetimes, registration, and execution order.

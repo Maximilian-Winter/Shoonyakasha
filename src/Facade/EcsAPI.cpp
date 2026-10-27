@@ -24,6 +24,7 @@ namespace Facade {
 struct EcsAPI::Impl {
     entt::registry& registry;
     ECS::SystemManager& systemManager;
+    ECS::GpuComponentTables* gpuComponents = nullptr;   // the Scene's; none without one
 
     Impl(entt::registry& r, ECS::SystemManager& sm)
         : registry(r), systemManager(sm)
@@ -54,7 +55,9 @@ struct EcsAPI::Impl {
 
 EcsAPI::EcsAPI(ECS::Scene& scene)
     : m_impl(std::make_unique<Impl>(scene.getRegistry(), scene.getSystemManager()))
-{}
+{
+    m_impl->gpuComponents = &scene.getGpuComponents();
+}
 
 #ifdef SHOONYAKASHA_TESTING
 EcsAPI::EcsAPI(entt::registry& registry, ECS::SystemManager& systemManager)
@@ -63,6 +66,44 @@ EcsAPI::EcsAPI(entt::registry& registry, ECS::SystemManager& systemManager)
 #endif
 
 EcsAPI::~EcsAPI() = default;
+
+// ═══════════════════════════════════════════════════════════════
+// GPU Components
+// ═══════════════════════════════════════════════════════════════
+
+std::string EcsAPI::setGpuComponent(EntityHandle entity, const std::string& name, const void* data, size_t size) {
+    return setGpuComponents(name, &entity, 1, data, size);
+}
+
+std::string EcsAPI::setGpuComponents(const std::string& name, const EntityHandle* entities, size_t count,
+                                     const void* rows, size_t stride) {
+    if (!m_impl->gpuComponents) return "no scene holds GPU components";
+    std::vector<entt::entity> handles;
+    handles.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        if (!m_impl->valid(entities[i])) {
+            return "entity " + std::to_string(entities[i]) + " (row " + std::to_string(i) + ") is not valid";
+        }
+        handles.push_back(toEntt(entities[i]));
+    }
+    return m_impl->gpuComponents->setMany(name, handles.data(), handles.size(), rows, stride);
+}
+
+bool EcsAPI::removeGpuComponent(EntityHandle entity, const std::string& name) {
+    return m_impl->gpuComponents && m_impl->gpuComponents->remove(toEntt(entity), name);
+}
+
+size_t EcsAPI::gpuComponentCount(const std::string& name) const {
+    if (!m_impl->gpuComponents) return 0;
+    const auto* table = m_impl->gpuComponents->find(name);
+    return table ? table->count() : 0;
+}
+
+size_t EcsAPI::gpuComponentStride(const std::string& name) const {
+    if (!m_impl->gpuComponents) return 0;
+    const auto* table = m_impl->gpuComponents->find(name);
+    return table ? table->stride : 0;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Script Component Access

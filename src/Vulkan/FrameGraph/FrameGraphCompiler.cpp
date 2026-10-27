@@ -237,7 +237,8 @@ std::string stencilAttachmentError(const PassDeclaration& pass, const CompiledPa
 std::string sceneBuffersError(const std::vector<BufferLayoutDesc>& layouts,
                               const std::unordered_map<std::string, CompiledBufferLayout>& compiled) {
     for (const auto& desc : layouts) {
-        if (desc.initConfig.type != "scene") continue;
+        // Component rows are whatever the application's rows are.
+        if (desc.initConfig.type != "scene" || desc.initConfig.sceneData == "components") continue;
         const auto it = compiled.find(desc.name);
         if (it == compiled.end()) continue;
         const auto& fields = it->second.fields;
