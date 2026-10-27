@@ -227,32 +227,43 @@ prints how to make it and stays in its scene.
 
 ## 6. Interface
 
-As in the nuclear viewer: `interface.py` and `story.py` built on
-`toolkit.overlay`.
+Implemented as in the nuclear viewer: `interface.py` and `story.py` built
+on `toolkit.overlay`.
 
-- **Readings:**
-  - time in Myr;
-  - centre separation (kpc) and closing speed (km/s);
-  - star formation rate in solar masses a year (from `Stats` read back, one
-    gas particle being about 2 × 10^4 solar masses);
-  - stars formed;
-  - gas left.
-- **Cards** for each scene:
-  - Merger: two discs; first approach; tidal tails; the bridge; friction
-    and the second pass; starburst; remnant.
-  - Ring galaxy: the plunge; the ring wave; star formation in the ring.
-  - Replay: what differs from the live model.
+- **Readings** (a `Card`):
+  - time in million years, speed;
+  - live scenes: particles; the separation of the galaxy centres, their
+    relative speed (approaching or receding), passes (and merged); the star
+    formation rate (`Stats` read back, over 50 Myr) and the stars formed, in
+    solar masses;
+  - replay: bodies, stars shown, and the run's GPU time, passes and merger
+    time from its `.json`.
+- **Cards** (a `Narration`):
+  - Merger, 7: two disc galaxies; closing in (closest approach under
+    25 kpc); tidal tails (80 Myr after the first pass); a starburst (rate
+    above 15, or 250 Myr after the first pass); friction (the first
+    apocentre); the second pass; one galaxy (merged).
+  - Ring galaxy, 4: the target and the companion; the plunge; the ring wave
+    (120 Myr after the pass); stars born in the ring (250 Myr after).
+  - Replay, 4: every particle pulls; spiral arms (90 Myr); halos that merge
+    (380 Myr); two models (520 Myr).
+
+  The viewer finds passes and apocentres from the separation read back each
+  frame, and calls the galaxies merged once they have stayed within 1 kpc
+  for 30 Myr.
 - **Settings (F1):**
-  - Simulation: screenshot, scenes, pause, restart, time scale.
-  - Scene, applied on restart: inclination, mass ratio, pericentre.
-  - Rules, applied at once: dynamical friction (ln Lambda, 0 = off), gas
-    dissipation `k_gas`, star formation threshold and efficiency.
-  - Display: colour mode, exposure, bloom, point size, cinematic camera,
-    cards, readings, hints.
+  - Simulation: screenshot, the three scenes, restart, pause, time scale.
+  - Merger, on restart: the second disc's tilt, the mass ratio, the closest
+    approach.
+  - Rules, at once: dynamical friction, gas dissipation, star formation
+    density, efficiency and compression.
+  - Display: cards, pause at each card, readings, hints, cinematic camera,
+    colour by galaxy, exposure, bloom, star brightness and size.
 - **Keys:**
   - `P` screenshot into `galaxy_captures/`, `F2` the controls sheet;
   - `H`, `[` and `]` for the cards;
-  - `1`–`3` scenes, `R` restart, `SPACE` pause, `+` and `-` time scale.
+  - `1`–`3` scenes, `R` restart, `SPACE` pause, `+` and `-` time scale;
+  - `C` cinematic camera, `G` colour by galaxy.
 
 ## 7. Implementation Order
 
@@ -272,7 +283,8 @@ As in the nuclear viewer: `interface.py` and `story.py` built on
    ring`.
 5. **Reference run and replay.** Implemented: `shaders/nbody.comp`,
    `precompute_replay.py`, `replay.py`, the ReplayStars pass and key `3`.
-6. **Interface.** Readings, cards, settings, screenshots; README.
+6. **Interface.** Implemented: `interface.py`, `story.py`, screenshots;
+   README.
 
 Each step ends with the full test suites run, as before. Measurements go
 into §8 as they are made.
@@ -445,3 +457,24 @@ With only the density threshold, almost no stars formed in the ring.
   time scale 1 (38 Myr a second) that is 8 frames a second; recording
   velocities and moving each star on between frames doubled the file to
   334 MB.
+
+### 8.10 The interface
+
+- **A card stuck on its first beat.** The merger's second card first
+  triggered on the separation being under 25 kpc. That held only while the
+  first card had to stay up, so the second card never showed, and neither
+  did any after it. Triggers test what has happened: the closest approach
+  so far, the passes, the apocentres, the time since a pass.
+- **Resizing the window restarts the simulation.** A resize recreates the
+  swapchain, and `ApplicationBase::handleSwapChainRecreation` recompiles the
+  render graph, which makes new GPU buffers. These start from the last
+  `set_buffer` data: the scene's initial state.
+
+  With the window resized at 10 s:
+  - the merger's stars formed went from 85,134 to 3,899 at 383 Myr;
+  - the galaxies fell together for a second "first pass" at 459 Myr;
+  - the viewer's clock and pass count ran on.
+
+  The nuclear viewer keeps its state in GPU buffers the same way.
+- **The menu,** checked on a stub: every button calls its action, and every
+  slider and toggle reads back what it set.

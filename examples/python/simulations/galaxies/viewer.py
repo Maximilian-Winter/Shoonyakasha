@@ -10,15 +10,19 @@ Keys: 1 the merger, 2 the ring galaxy, 3 the self-gravity replay, R
 restart, SPACE pause, + and - run faster or slower, C the cinematic camera
 (a slow orbit around the centre of the galaxies near the heaviest,
 model.grid_centre, or the origin in the replay), G colour by galaxy or by
-age. Hold the right mouse button and use WASD, Q and E to fly the camera.
+age, F1 settings, F2 the controls, P a screenshot into galaxy_captures/, H
+the explanation cards, [ and ] the previous and next card. Hold the right
+mouse button and use WASD, Q and E to fly the camera. The screen
+(interface.py) shows readings, the scene's explanation cards (story.py)
+and key hints.
 
 The galaxies run on the GPU every frame (pipeline/, which repeats
 shaders/step.comp, the same shader check.py runs): their centres, then a
 million stars and gas particles in their potentials. The particles are
 drawn as glowing points into an HDR image, bloomed and tone mapped. The
-galaxies are read back every frame for the camera and the printed separation. The
-model's xy plane (the merger's orbital plane, the ring target's disc) is
-drawn as the horizontal plane.
+galaxy records and the count of stars formed are read back every frame for
+the camera and the readings. The model's xy plane (the merger's orbital
+plane, the ring target's disc) is drawn as the horizontal plane.
 
 The replay (replay.py) plays recordings/merger.npy, made by
 precompute_replay.py, into the pipeline buffer "Replay" with
@@ -35,6 +39,7 @@ import shoonyakasha as sk
 from shoonyakasha.mathutil import look_rotation
 
 import model as m
+from interface import Interface
 from replay import Replay
 
 HERE = m.HERE
@@ -45,12 +50,13 @@ SFR_WINDOW = 50.0            # Myr over which the star formation rate is average
 RATE = 8.0                   # simulation time units a second at time scale 1 (38 Myr)
 MAX_DT = 0.05                # the longest step; frames below RATE / (STEPS * MAX_DT) fps run slower
 ORBIT_SPEED = 0.05           # the cinematic camera's turn, radians a second
+MERGED_KPC = 1.0             # centres closer than this for MERGED_MYR count as merged
+MERGED_MYR = 30.0
 SCENES = ("merger", "ring", "replay")
 EYES = {"merger": (0.0, 70.0, 110.0), "ring": (0.0, 32.0, 58.0), "replay": (0.0, 55.0, 85.0)}
 ORBITS = {"merger": (130.0, 55.0), "ring": (85.0, 40.0), "replay": (100.0, 45.0)}  # cinematic radius, height
 RECORDING = HERE / "recordings" / "merger"
 REPLAY_BRIGHTNESS = 10.0     # the replay's 65,536 stars are drawn this much brighter than the million
-
 
 
 def to_world(scene):
@@ -88,31 +94,40 @@ def main():
     sk.shaders.compile_dir(HERE / "shaders")
     engine = sk.Engine(title="Galaxy collision", width=args.width, height=args.height,
                        pipeline_json_path=str(PIPELINE))
-    params = m.Params()
+    defaults = m.Params()
+    # How the merger is set up (on restart), the rules' constants and what is
+    # drawn (at once); the settings menu (F1) changes them.
+    settings = {"tilt": args.inclination[1], "ratio": args.ratio, "pericentre": args.pericentre,
+                "log_lambda": defaults.log_lambda, "gas_relax": defaults.gas_relax,
+                "sf_density": defaults.sf_density, "sf_efficiency": defaults.sf_efficiency,
+                "sf_compression": defaults.sf_compression,
+                "explanations": True, "pause_on_cards": not args.duration, "readings": True, "key_hints": True,
+                "exposure": 0.8, "bloom": 0.25, "brightness": 0.07, "point_size": 2.0}
     state = {"scene": args.scene, "time_scale": 1.0, "paused": False, "seconds": 0.0, "cinematic": args.cinematic,
-             "color_mode": 0,
-             "orbit_angle": 0.0, "last_report": time.perf_counter(), "frames": 0, "frame": 0}
-    display = {"pointSize": 2.0, "brightness": 0.07, "exposure": 0.8, "bloom": 0.25}
+             "color_mode": 0, "orbit_angle": 0.0, "last_report": time.perf_counter(), "frames": 0, "frame": 0}
     replay = Replay(engine, RECORDING)
 
     def set_params():
+        params = defaults.with_(log_lambda=settings["log_lambda"], gas_relax=settings["gas_relax"],
+                                sf_density=settings["sf_density"], sf_efficiency=settings["sf_efficiency"],
+                                sf_compression=settings["sf_compression"])
         engine.set_custom_float("galaxy.softening", params.softening)
         engine.set_custom_float("galaxy.logLambda", params.log_lambda)
         engine.set_custom_float("galaxy.gasRelax", params.gas_relax)
         engine.set_custom_float("galaxy.sfDensity", params.sf_density)
         engine.set_custom_float("galaxy.sfEfficiency", params.sf_efficiency)
         engine.set_custom_float("galaxy.sfCompression", params.sf_compression)
-        for key, value in display.items():
+        brightness = settings["brightness"] * (REPLAY_BRIGHTNESS if state["scene"] == "replay" else 1.0)
+        for key, value in (("pointSize", settings["point_size"]), ("brightness", brightness),
+                           ("exposure", settings["exposure"]), ("bloom", settings["bloom"])):
             engine.set_custom_float("galaxy." + key, value)
-        if state["scene"] == "replay":
-            engine.set_custom_float("galaxy.brightness", display["brightness"] * REPLAY_BRIGHTNESS)
         engine.set_custom_uint("galaxy.colorMode", state["color_mode"])
 
     def build(name):
         if name == "ring":
             return m.ring(count=args.count)
-        return m.merger(count=args.count, inclination=args.inclination, ratio=args.ratio,
-                        pericentre=args.pericentre)
+        return m.merger(count=args.count, inclination=(args.inclination[0], settings["tilt"]),
+                        ratio=settings["ratio"], pericentre=settings["pericentre"])
 
     def load(name):
         if name == "replay":
@@ -130,19 +145,25 @@ def main():
         engine.set_custom_uint("galaxy.count", len(particles))
         engine.set_custom_uint("galaxy.galaxyCount", len(scene.galaxies))
         engine.set_custom_float("galaxy.gasMass", scene.gas_mass)
+        separation = float(np.linalg.norm(records["position"][1] - records["position"][0]))
         state.update(scene=name, galaxies=scene.galaxies, records=records, sim_time=0.0, owed=0.0,
                      gas_mass=scene.gas_mass, formed=0, history=[(0.0, 0)], frame_times={},
-                     loaded_frame=state["frame"], followed=records["position"][0].astype(np.float64))
+                     loaded_frame=state["frame"], followed=records["position"][0].astype(np.float64),
+                     count=len(particles), separation=separation, closest=separation, closing=0.0, passes=0,
+                     pass_myr=[],
+                     apocentres=0, approaching=True, merged=False, merged_since=None, sfr=0.0, formed_mass=0.0)
         eye = np.array(EYES[name])
         target = records["position"][0] if name == "ring" else m.grid_centre(records, len(scene.galaxies))
         engine.scene.set_position(state["camera"], eye)
         engine.scene.set_rotation(state["camera"], look_rotation(eye, target))
         set_params()
+        state["interface"].new_scene(name)
         if name == "ring":
             print("ring: %d particles, a companion of 1/5 the mass falling through the disc" % len(particles))
         else:
             print("merger: %d particles, inclinations %s, mass ratio %g, pericentre %g kpc"
-                  % (len(particles), tuple(args.inclination), args.ratio, args.pericentre))
+                  % (len(particles), (args.inclination[0], settings["tilt"]), settings["ratio"],
+                     settings["pericentre"]))
 
     def load_replay():
         if not replay.available:
@@ -156,11 +177,12 @@ def main():
         engine.set_pass_enabled("Stars", False)
         engine.set_pass_enabled("ReplayStars", True)
         engine.set_custom_uint("galaxy.replayCount", replay.count)
-        state.update(scene="replay", sim_time=0.0, loaded_frame=state["frame"])
+        state.update(scene="replay", sim_time=0.0, loaded_frame=state["frame"], replay=meta)
         eye = np.array(EYES["replay"])
         engine.scene.set_position(state["camera"], eye)
         engine.scene.set_rotation(state["camera"], look_rotation(eye, np.zeros(3)))
         set_params()
+        state["interface"].new_scene("replay")
         print("replay: %d bodies, %d stars recorded, %d frames %.1f Myr apart; pericentres %s, merged at %s Myr"
               % (meta["bodies"], meta["stars"], meta["frames"], meta["frame_myr"],
                  [(p["myr"], p["kpc"]) for p in meta["pericentres"]], meta["merged_myr"]))
@@ -173,6 +195,7 @@ def main():
         result = engine.get_readback("Galaxies")
         if fresh(result):
             state["records"] = np.frombuffer(result["data"], dtype=m.GALAXY).copy()
+            follow_passes()
             if state["scene"] == "ring" and not state["cinematic"]:
                 follow_target()
         result = engine.get_readback("Stats")
@@ -182,6 +205,34 @@ def main():
             history.append((state["frame_times"][result["frame"]], state["formed"]))
             while len(history) > 2 and (history[-1][0] - history[1][0]) * m.TIME_MYR >= SFR_WINDOW:
                 history.pop(0)
+        state["sfr"] = star_formation_rate()
+        state["formed_mass"] = state["formed"] * state["gas_mass"] * 1e10
+
+    def follow_passes():
+        """The separation (and the least so far) and closing speed of the first two galaxies, and from its change the
+        passes (closest approaches), apocentres (farthest) and whether they have merged."""
+        r = state["records"]
+        d = (r["position"][1] - r["position"][0]).astype(np.float64)
+        v = (r["velocity"][1] - r["velocity"][0]).astype(np.float64)
+        separation = float(np.linalg.norm(d))
+        state["closing"] = -float(d @ v) / max(separation, 1e-6) * m.VELOCITY_KMS
+        myr = state["sim_time"] * m.TIME_MYR
+        growing = separation > state["separation"]
+        if state["approaching"] and growing and separation > MERGED_KPC:
+            state["passes"] += 1
+            state["pass_myr"].append(myr)
+        elif not state["approaching"] and not growing and state["passes"] >= 1:
+            state["apocentres"] += 1
+        if separation != state["separation"]:
+            state["approaching"] = not growing
+        state["separation"] = separation
+        state["closest"] = min(state["closest"], separation)
+        if separation < MERGED_KPC:
+            if state["merged_since"] is None:
+                state["merged_since"] = myr
+            state["merged"] = state["merged"] or myr - state["merged_since"] >= MERGED_MYR
+        else:
+            state["merged_since"] = None
 
     def star_formation_rate():
         """Solar masses a year over the last SFR_WINDOW Myr."""
@@ -208,9 +259,14 @@ def main():
 
     def on_init():
         state["camera"] = engine.create_camera(EYES[state["scene"]], fov=50.0, speed=30.0)
+        state["interface"] = Interface(engine, state, settings, load=load, restart=lambda: load(state["scene"]),
+                                       apply=set_params)
         load(state["scene"])
 
     def on_key(key):
+        if state["interface"].key(key):
+            set_params()
+            return
         scenes = {ord("1"): "merger", ord("2"): "ring", ord("3"): "replay"}
         if key in scenes:
             load(scenes[key])
@@ -250,15 +306,14 @@ def main():
         look()
         if state["cinematic"]:
             fly_cinematic(dt)
+        state["interface"].update(dt)
         now = time.perf_counter()
         if now - state["last_report"] >= 2.0:
-            r = state["records"]
-            separation = float(np.linalg.norm(r["position"][0] - r["position"][1]))
-            print("%.0f Myr: separation %.1f kpc, %d stars formed, %.1f solar masses a year, time scale %.2f, "
-                  "%.0f fps%s"
-                  % (state["sim_time"] * m.TIME_MYR, separation, state["formed"], star_formation_rate(),
-                     state["time_scale"], state["frames"] / (now - state["last_report"]),
-                     ", paused" if state["paused"] else ""))
+            print("%s, %.0f Myr: separation %.1f kpc, %d passes%s, %d stars formed, %.1f solar masses a year, "
+                  "time scale %.2f, %.0f fps%s"
+                  % (state["scene"], state["sim_time"] * m.TIME_MYR, state["separation"], state["passes"],
+                     ", merged" if state["merged"] else "", state["formed"], state["sfr"], state["time_scale"],
+                     state["frames"] / (now - state["last_report"]), ", paused" if state["paused"] else ""))
             state["last_report"] = now
             state["frames"] = 0
         finish()
@@ -270,6 +325,7 @@ def main():
         engine.set_custom_float("galaxy.replayAhead", ahead)
         if state["cinematic"]:
             fly_cinematic(dt)
+        state["interface"].update(dt)
         now = time.perf_counter()
         if now - state["last_report"] >= 2.0:
             print("replay, %.0f Myr: time scale %.2f, %d frames played, %d late, %.0f fps%s"

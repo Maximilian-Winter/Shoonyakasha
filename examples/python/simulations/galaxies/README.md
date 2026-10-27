@@ -122,12 +122,51 @@ otherwise moves along with the target galaxy as it drifts. Every 2 seconds
 the viewer prints the separation, the stars formed, and the star formation
 rate over the last 50 Myr in solar masses a year.
 
-Keys: `1` the merger, `2` the ring galaxy, `3` the replay, `R` restart, `SPACE` pause, `+`
-and `-` time scale, `C` the cinematic camera, `G` colour by galaxy or by
-age. Hold the right mouse button and use WASD, Q and E to fly. `--scene`
+Keys: `1` the merger, `2` the ring galaxy, `3` the replay, `R` restart,
+`SPACE` pause, `+` and `-` time scale, `C` the cinematic camera, `G` colour
+by galaxy or by age, `F1` settings, `F2` the controls, `P` a screenshot,
+`H` the explanation cards, `[` and `]` the previous and next card. Hold the
+right mouse button and use WASD, Q and E to fly. `--scene`
 picks the first scene; `--inclination`, `--ratio` and `--pericentre` set up
-the merger; `--count` sets the particles of the live scenes. `--duration` and
+the merger (the menu's merger settings start from them); `--count` sets the particles of the live scenes. `--duration` and
 `--screenshot` run for a while, save a frame and quit.
+
+### The screen
+
+[interface.py](interface.py) builds it from `shoonyakasha.toolkit.overlay`:
+
+- **Readings** (top left, a `Card`):
+  - the time and speed;
+  - in the live scenes, the particles; the separation of the galaxy
+    centres, their relative speed and passes; the star formation rate and
+    the stars formed;
+  - in the replay, its bodies and stars, and the run's GPU time, passes and
+    merger time.
+
+  The viewer finds the passes and apocentres from the separation read back
+  each frame. It calls the galaxies merged once they have stayed within
+  1 kpc for 30 Myr.
+- **Explanation cards** (bottom left, a `Narration`): the scene's story from
+  [story.py](story.py). Each beat is a title, a few sentences and a trigger
+  on the collision's progress: closest approach so far, passes, apocentres,
+  time since a pass, star formation rate, merged.
+  - A beat shows when its trigger first holds.
+  - With *Pause at each new card* on (the default; off with `--duration`),
+    the simulation pauses on each new card until `SPACE`. Otherwise each
+    card stays up at least 6 seconds.
+  - `[` and `]` step through the beats reached so far.
+- **Key hints** along the bottom (a `HintBar`), and the controls sheet on
+  `F2` (a `HelpOverlay`).
+- **Settings** on `F1` (a `SettingsMenu`):
+  - a screenshot, the scenes, restart, pause and time scale;
+  - the merger's setup, applied on restart: the second disc's tilt, the
+    mass ratio, the closest approach;
+  - the rules' constants, applied at once: dynamical friction, gas
+    dissipation, the three star formation constants;
+  - what is drawn: cards, readings, hints, the cinematic camera, colour by
+    galaxy, exposure, bloom, star brightness and size.
+- **`P`** saves a screenshot into `galaxy_captures/`. The menu's Screenshot
+  button closes the menu first.
 
 ## The self-gravity replay
 
