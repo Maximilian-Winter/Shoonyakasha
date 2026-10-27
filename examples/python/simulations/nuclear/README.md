@@ -124,8 +124,10 @@ its strength the energy the emission rule radiated (at least 1); each
 fusion reaction adds one of strength 1 at its largest product.
 
 Keys: `1` fission, `2` chain reaction, `3` fusion, `R` restart, `SPACE`
-pause, `+` and `-` time scale, `F1` settings, `F2` the controls, `H` the
-explanation cards, `[` and `]` the previous and next card. Hold the right
+pause, `+` and `-` time scale, `F1` settings, `F2` the controls, `P` a
+screenshot into `nuclear_captures/` (also a button at the top of the
+settings, which closes them first), `H` the explanation cards, `[` and `]`
+the previous and next card. Hold the right
 mouse button and use WASD, Q and E to fly the camera. `--lattice` and
 `--spacing` set the chain reaction's cube of nuclei. In fusion, `--reaction
 dt` (deuterium and tritium) or `dd` (two deuterium) picks the nuclei and
@@ -149,8 +151,8 @@ frame and quit.
   seconds. `[` and `]` step through the beats reached so far.
 - **Key hints** along the bottom (a `HintBar`), and the controls sheet on
   `F2` (a `HelpOverlay`).
-- **Settings** on `F1` (a `SettingsMenu`): the scenes, pause, restart and
-  time scale; what scenes are built with, applied on restart (neutron
+- **Settings** on `F1` (a `SettingsMenu`): a screenshot, the scenes, pause,
+  restart and time scale; what scenes are built with, applied on restart (neutron
   speeds, the chain's spacing and cube side, the fusion reaction and its
   speed); the rules' constants, applied at once (the capture rule on or off,
   the capture radius, the emitted neutrons' speed, the share of heat

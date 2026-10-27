@@ -6,11 +6,15 @@ sheet and the settings menu (shoonyakasha.toolkit.overlay).
     bottom          the key hints
     F1              the settings menu, down the right side
     F2              the controls sheet
+    P               a screenshot into nuclear_captures/
 
 The menu reads and writes `settings`, a dict the viewer keeps: what the
 scenes are built with (applied when one starts), the rules' constants
 (applied at once) and what is drawn.
 """
+
+import time
+from pathlib import Path
 
 import shoonyakasha as sk
 from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, Narration, SettingsMenu
@@ -18,6 +22,7 @@ from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, Narration, 
 import story
 
 REFERENCE = (1600, 900)
+CAPTURES = Path(__file__).resolve().parent / "nuclear_captures"
 TITLES = {"fission": "FISSION", "chain": "CHAIN REACTION", "fusion": "FUSION"}
 
 HELP = [
@@ -33,10 +38,11 @@ HELP = [
     [("Explanations", [(("[", "]"), "Previous, next card"),
                        (("H",), "Show or hide the cards")]),
      ("Panels", [(("F1",), "Settings"),
-                 (("F2",), "These controls")])],
+                 (("F2",), "These controls"),
+                 (("P",), "Screenshot into nuclear_captures")])],
 ]
 HINTS = [(("1", "2", "3"), "Scenes"), (("R",), "Restart"), (("Space",), "Pause"), (("+", "-"), "Speed"),
-         (("F1",), "Settings"), (("F2",), "Controls")]
+         (("F1",), "Settings"), (("F2",), "Controls"), (("P",), "Screenshot")]
 CARD_HINTS = [(("[", "]"), "Back, next"), (("H",), "Hide")]
 CONTINUE_HINTS = [(("Space",), "Continue")] + CARD_HINTS
 
@@ -60,6 +66,7 @@ class Interface:
         self.help = HelpOverlay(engine, "CONTROLS", HELP, footer="F2 to close", reference_size=REFERENCE)
         self.menu = SettingsMenu(engine, "Settings", self.menu_items(), reference_size=REFERENCE)
         self.story = None
+        self.shot_in = 0         # frames until a screenshot asked for from the menu is taken
 
     def menu_items(self):
         s, state = self.settings, self.state
@@ -72,6 +79,8 @@ class Interface:
 
         return [
             {"heading": "Simulation"},
+            {"button": "Screenshot", "do": self.screenshot_from_menu, "keys": ("P",),
+             "hint": "Close this menu and save the view into nuclear_captures."},
             {"button": "Fission", "do": lambda: self.load("fission"), "keys": ("1",),
              "hint": "A slow neutron into a uranium-235 nucleus."},
             {"button": "Chain reaction", "do": lambda: self.load("chain"), "keys": ("2",),
@@ -128,6 +137,17 @@ class Interface:
             dict(display("flashes"), toggle="Flashes"),
         ]
 
+    def screenshot(self):
+        """Save the view as it is drawn now into CAPTURES, under the time."""
+        CAPTURES.mkdir(exist_ok=True)
+        path = CAPTURES / time.strftime("nuclear_%Y%m%d_%H%M%S.png")
+        print("screenshot ->", path if self.engine.capture_screenshot(str(path)) else "failed")
+
+    def screenshot_from_menu(self):
+        """Close the menu, then take the screenshot once it is off the screen."""
+        self.menu.show(False)
+        self.shot_in = 2
+
     def new_scene(self, scene):
         """Start the scene's story; with pause_on_cards and the cards shown, pause on its first card."""
         pausing = self.settings["pause_on_cards"] and self.settings["explanations"]
@@ -142,6 +162,8 @@ class Interface:
             self.menu.show(not self.menu.visible)
         elif key == sk.keys.F2:
             self.help.show(not self.help.visible)
+        elif key == sk.keys.P:
+            self.screenshot()
         elif key == sk.keys.H:
             self.settings["explanations"] = not self.settings["explanations"]
         elif key == sk.keys.LEFT_BRACKET and self.story:
@@ -159,6 +181,10 @@ class Interface:
     def update(self, seconds):
         """Once a frame, after the simulation's counts are current."""
         state, s = self.state, self.settings
+        if self.shot_in:
+            self.shot_in -= 1
+            if not self.shot_in:
+                self.screenshot()
         self.menu.update()
         self.hints.show(s["key_hints"])
 

@@ -7,8 +7,9 @@
     python viewer.py --scene chain --duration 20 --screenshot chain.png
 
 Keys: 1 fission, 2 chain reaction, 3 fusion, R restart, SPACE pause,
-+ and - run faster or slower, F1 settings, F2 the controls, H the
-explanation cards, [ and ] the previous and next card. Hold the right mouse
++ and - run faster or slower, F1 settings, F2 the controls, P a screenshot
+into nuclear_captures/, H the explanation cards, [ and ] the previous and
+next card. Hold the right mouse
 button and use WASD, Q and E to fly the camera. The screen (interface.py)
 shows readings, the scene's explanation cards (story.py) and key hints.
 
