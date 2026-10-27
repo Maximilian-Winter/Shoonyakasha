@@ -1,0 +1,48 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// One time step of every particle (kick, drift, kick) in the galaxies'
+// potentials: the first kick from the centres' places before the step
+// (`previous`), the second from their places after it. galaxies.comp runs
+// first in each step.
+
+layout(local_size_x = 256) in;
+
+#include "galaxy.glsl"
+
+struct Particle {
+    vec4 positionKind;   // kind + 4 * galaxy index
+    vec4 velocityBirth;
+};
+
+layout(std430, binding = 0) buffer Particles { Particle p[]; } particles;
+layout(std430, binding = 1) readonly buffer Galaxies { Galaxy g[]; } galaxies;
+
+layout(std140, binding = 2) uniform Params {
+    uint count;
+    uint galaxyCount;
+    float dt;
+    float softening;
+    float logLambda;
+} pc;
+
+vec3 acceleration(vec3 x, bool before) {
+    vec3 a = vec3(0.0);
+    for (uint j = 0u; j < pc.galaxyCount; ++j) {
+        Galaxy g = galaxies.g[j];
+        vec3 centre = before ? g.previous.xyz : g.positionMass.xyz;
+        a += galaxyAcceleration(g, x - centre, pc.softening);
+    }
+    return a;
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.count) return;
+    vec3 x = particles.p[i].positionKind.xyz;
+    vec3 v = particles.p[i].velocityBirth.xyz;
+    v += 0.5 * pc.dt * acceleration(x, true);
+    x += pc.dt * v;
+    v += 0.5 * pc.dt * acceleration(x, false);
+    particles.p[i].positionKind.xyz = x;
+    particles.p[i].velocityBirth.xyz = v;
+}
