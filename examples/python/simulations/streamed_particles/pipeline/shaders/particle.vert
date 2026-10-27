@@ -22,7 +22,7 @@ void main() {
     vec4 clip = camera.proj * camera.view * vec4(p.xyz, 1.0);
     gl_Position = clip;
     // pointSize is in world units: about its height in pixels at this distance.
-    gl_PointSize = clamp(camera.pointSize * camera.proj[1][1] * camera.screenHeight * 0.5 / max(clip.w, 1e-3),
+    gl_PointSize = clamp(camera.pointSize * abs(camera.proj[1][1]) * camera.screenHeight * 0.5 / max(clip.w, 1e-3),
                          1.0, 24.0);
 
     vec3 color = vec3(0.0);
