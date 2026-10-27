@@ -357,7 +357,7 @@ The four key parameters and what they control:
 9. **Visual polish** — glow, trails, flash effects
 10. **Scale bridge** — connect energy output to macro-scale effects in the planet engine
 
-**Status:** steps 2–6 are done (all pairs, so no spatial hash): the realistic model, the scenario setting (§9.4), neutron capture and emission by rule (§9.5, §9.6), and the runtime viewer with the fission demo. Step 7 runs but is subcritical (§9.9). Next: steps 7–9.
+**Status:** steps 2–6 are done (all pairs, so no spatial hash): the realistic model, the scenario setting (§9.4), neutron capture and emission by rule (§9.5, §9.6), and the runtime viewer with the fission demo. Step 7 runs with a capture radius by rule (§9.9, §9.10). Next: steps 8–9.
 
 ---
 
@@ -424,7 +424,7 @@ Scenario U-235 takes in a slow neutron and keeps it, but does not split: capture
 |---|---|---|---|---|---|
 | Splits (3 axes) | 0 | 1 | 1 | 3 | 3 |
 
-The rule (`events.CaptureRule`): a nucleus of at least 200 nucleons that takes in nucleons from a group of at most 4 turns all its internal kinetic energy into a stretch along its longest axis, energy and momentum unchanged. How often it does so decides the outcome (impact point and orientation random):
+A rule (`events.CaptureRule`): a nucleus of at least 200 nucleons that takes in nucleons from a group of at most 4 turns its internal kinetic energy into a stretch along its longest axis, energy and momentum unchanged. How often it does so decides the outcome (all of the energy each time, looks 2 time units apart, impact point and orientation random):
 
 | Stretch | Split |
 |---|---|
@@ -432,7 +432,14 @@ The rule (`events.CaptureRule`): a nucleus of at least 200 nucleons that takes i
 | every 8 time units, 4 or 8 times | 2 and 4 of 6 |
 | every 2 time units, only while the nucleus is lengthening | 10 of 10 |
 
-The last is the rule, for up to 200 time units after capture. Under the scenario setting, with screening, uranium splits 50–140 time units after capture, 9 of 10 times in two pieces (e.g. 142 + 94, 119 + 117, 188 + 48); left alone it does not split. Each stretch changes the kinetic energy by at most 2·10⁻⁶. Applying the kick 0.64 time units after the look it was computed from, as the viewer does, still splits 6 of 6.
+A kicked nucleus lengthens for only about 1.4 time units before it rebounds, so the stretches must come within that phase, and in the viewer a kick lands up to a few frames after the look it was worked out from (0.64 time units at 37 frames a second). Measured on one captured nucleus, four slight variations each, at different look intervals and delays:
+
+| Rule | Looks 0.16 apart, no delay | 0.64, none | 0.64, delay 0.8 | 1.0, delay 1.6 |
+|---|---|---|---|---|
+| All the energy, at most every 0.5 after the last kick landed, when lengthening at landing | 4 of 4 | 0 of 4 | 4 of 4 | 4 of 4 |
+| Half the energy, the same | 4 of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
+
+The rule of the table above (all the energy, at most every 2 time units, when lengthening at the look) splits this nucleus 4 of 4 offline with looks 0.64 apart and delays of 0.8 to 3.2, but in the engine only after 100 time units or more, or not within 200: there its stretches fall once a cycle. A stretch replaces the nucleus's internal motion, so one worked out from a look taken before the last kick landed undoes it; and whether the nucleus is lengthening when the kick lands is carried forward from the look with the forces it holds (`events.stretching`). The last row is the rule, for up to 200 time units after capture. Under the scenario setting uranium then splits 37–66 time units after capture, 10 of 10 times in two pieces (e.g. 130 + 106, 152 + 84, 186 + 50); left alone it does not split. Each stretch changes the kinetic energy by at most 4·10⁻⁶.
 
 Afterwards the heavier fragment sometimes splits again 10–25 time units later: with emission, 3–4 of 6 runs end as two fragments and the others as three. Radiating 90 % of the fragments' internal energy instead of 50 % does not change this.
 
@@ -448,4 +455,18 @@ Semi-implicit Euler conserves energy at a fixed step. Changing the step every fe
 
 ### 9.9 Chain reaction
 
-64 U-235 nuclei, 4 a side and 21 apart, and one neutron at 1 unit: the first nucleus splits, but in 464 time units none of the 4 neutrons it gives off is captured. Without the neutron no nucleus splits in 403 time units. A neutron passes about 5–6 spacings between nuclei (mean free path d³ / πR², R ≈ 5) while the cube is 3 spacings across, so most neutrons leave it. Real slow neutrons are captured by U-235 over a cross-section a few hundred times its geometric size, a wave effect a classical point neutron does not have.
+64 U-235 nuclei, 4 a side and 21 apart, and one neutron at 1 unit, without the rule of §9.10: the first nucleus splits, but in 464 time units none of the 4 neutrons it gives off is captured. Without the neutron no nucleus splits in 403 time units. A neutron passes about 5–6 spacings between nuclei (mean free path d³ / πR², R ≈ 5) while the cube is 3 spacings across, so most neutrons leave it. Real slow neutrons are captured by U-235 over a cross-section a few hundred times its geometric size, a wave effect a classical point neutron does not have.
+
+### 9.10 Capture radius
+
+A rule (`events.steer_kicks`): a free neutron (alone in its group) within 10 of the centre of a nucleus of at least 200 nucleons is turned toward that centre. The turn is elastic between the neutron and the nucleus: in their centre-of-mass frame the relative velocity keeps its length and points at the centre, so momentum and energy are unchanged (to 2·10⁻⁷) and the nucleus recoils. A neutron at 2.5 units passing 8 from a uranium's centre is turned and captured, and the uranium splits (5 of 5); one passing 12 away is left alone.
+
+With it the mean free path is d³ / π·10², about 1.4 spacings at 21. In the viewer (64 nuclei, 4 a side):
+
+| Spacing | Neutron | After 80 s (about 410 time units) |
+|---|---|---|
+| 21 | at 1 unit | 8 captures, 19 splits, still rising (13 splits at 350) |
+| 21 | at rest | nothing |
+| 30 | at 1 unit | the first nucleus splits; none of its neutrons is captured |
+
+Splits outnumber captures because heavy fragments sometimes split again (§9.6).

@@ -14,10 +14,11 @@ shaders/step.comp, the same shader the offline tools use), under the
 scenarios' setting physics.SCENARIO: Coulomb strong enough that uranium
 splits soon after capturing a neutron, screened so that nuclei side by side
 do not push each other apart. Every few frames the nucleons are read back.
-A uranium nucleus that has captured a neutron turns its heat into
-stretching (events.CaptureRule); a nucleus that has split is found
+A free neutron near a uranium nucleus is turned toward it
+(events.steer_kicks); a uranium nucleus that has captured a neutron turns
+its heat into stretching (events.CaptureRule); a nucleus that has split is found
 (events.FissionTracker), and each fragment gives off a neutron and radiates
-part of its heat (events.emission_kicks). Both are sent to the GPU as kicks
+part of its heat (events.emission_kicks). All are sent to the GPU as kicks
 the pipeline applies once.
 """
 
@@ -39,6 +40,7 @@ SUBSTEPS = 8                 # Step{s} passes in pipeline/passes/20_physics.json
 LOOK_EVERY = 4               # frames between readbacks for the fission tracker
 RATE = 20.0                  # simulation time units a second at time scale 1
 DT = 0.02                    # every step's length; frames below RATE / (SUBSTEPS * DT) fps run slower
+CAPTURE_RADIUS = 10.0        # free neutrons this close to a uranium nucleus's centre are turned toward it
 SCENES = ("fission", "chain", "fusion")
 
 
@@ -133,7 +135,7 @@ def main():
             raise ValueError("%d nucleons; the pipeline holds %d" % (len(nucleons), CAPACITY))
         state.update(scene=scene, count=len(nucleons), tracker=ev.FissionTracker(), capture=ev.CaptureRule(),
                      events=0, neutrons=0, captures=0, eye=eye, target=target, read_frame=-1, sim_time=0.0,
-                     owed=0.0)
+                     owed=0.0, frame_times={}, loaded_frame=state["frame"], frame_step=0.0)
         engine.set_buffer("Nucleons", nucleons.tobytes())
         engine.set_custom_uint("nuclear.count", len(nucleons))
         engine.scene.set_position(state["camera"], eye)
@@ -145,9 +147,13 @@ def main():
         if state["frame"] % LOOK_EVERY == 0:
             engine.request_readback("Nucleons")
         result = engine.get_readback("Nucleons")
-        if result is None or result["frame"] == state["read_frame"]:
+        if result is None or result["frame"] == state["read_frame"] or result["frame"] < state["loaded_frame"]:
             return
         state["read_frame"] = result["frame"]
+        # The simulation time of the readback, and of the start of this
+        # frame's steps, when kicks sent now are applied.
+        read_time = state["frame_times"].get(result["frame"], state["sim_time"])
+        land_time = state["sim_time"] - state["frame_step"]
         nucleons = np.frombuffer(result["data"], dtype=NUCLEON)[:state["count"]]
         fissions, labels = state["tracker"].update(nucleons["position"])
         kicks = np.zeros(CAPACITY, dtype=ev.KICK)
@@ -160,9 +166,10 @@ def main():
             state["neutrons"] += len(emitted)
             print("split: %s, %d neutrons given off, %.1f units radiated"
                   % (" + ".join(str(len(f)) for f in fragments), len(emitted), radiated))
-        _, captures, stretched = state["capture"].update(nucleons, labels, state["sim_time"], kicks=mine)
+        _, captures, stretched = state["capture"].update(nucleons, labels, read_time, now=land_time, kicks=mine)
         state["captures"] += captures
-        if not fissions and not stretched:
+        _, turned = ev.steer_kicks(nucleons, labels, radius=CAPTURE_RADIUS, kicks=mine)
+        if not fissions and not stretched and not turned:
             return
         engine.set_buffer("Kicks", kicks.tobytes())
         state["sequence"] += 1
@@ -199,7 +206,12 @@ def main():
         step = DT if state["owed"] >= SUBSTEPS * DT else 0.0
         state["owed"] -= step * SUBSTEPS
         engine.set_custom_float("nuclear.dt", step)
-        state["sim_time"] += step * SUBSTEPS
+        state["frame_step"] = step * SUBSTEPS
+        state["sim_time"] += state["frame_step"]
+        # Readbacks name frames from 0: this is frame state["frame"] - 1.
+        times = state["frame_times"]
+        times[state["frame"] - 1] = state["sim_time"]
+        times.pop(state["frame"] - 1 - 64, None)
         look()
         now = time.perf_counter()
         if now - state["last_report"] >= 2.0:

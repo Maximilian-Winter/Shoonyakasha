@@ -58,22 +58,29 @@ about 4.2 MeV.
 
 `physics.SCENARIO` is the viewer's setting: `kc` 0.36, at which uranium is
 close enough to splitting that, with the capture rule, a captured neutron
-splits it, typically 50 to 140 time units later; and Coulomb screened from
+splits it, typically 40 to 80 time units later; and Coulomb screened from
 9 to 11, beyond the size of a uranium nucleus, so that nuclei 21 apart do
 not feel each other.
 
 ## Rules
 
-Two rules in [events.py](events.py) add what the potentials do not produce.
-Both work from a look at the nucleons and give a kick per nucleon,
-`v' = v * scale + dv`, that leaves momentum unchanged, and energy too apart
-from what emission radiates:
+Three rules in [events.py](events.py) add what the potentials do not
+produce. Each works from a look at the nucleons and gives a kick per
+nucleon, `v' = v * scale + dv`, that leaves momentum unchanged, and energy
+too apart from what emission radiates:
 
+- **Capture radius** (`steer_kicks`): a free neutron within 10 of the centre
+  of a nucleus of at least 200 nucleons is turned toward that centre, in an
+  elastic turn between the two: their relative velocity keeps its length,
+  and the nucleus recoils.
 - **Capture** (`CaptureRule`): a nucleus of at least 200 nucleons that takes
-  in a free neutron (nucleons from a group of at most 4) turns its internal
-  kinetic energy into stretching along its long axis (`stretch_kicks`), at
-  most once every 2 time units and only while it is lengthening, for up to
-  200 time units.
+  in a free neutron (nucleons from a group of at most 4) turns half its
+  internal kinetic energy into stretching along its long axis
+  (`stretch_kicks`), for up to 200 time units. It does so whenever it will
+  be lengthening when the kick lands, which `stretching` works out from the
+  look's positions, velocities and forces, and only from looks taken at
+  least 0.5 time units after its last kick landed. The viewer passes both
+  times: when each readback was taken and when the kicks land.
 - **Emission** (`emission_kicks`): each fragment of a split gives off its
   outermost neutron at speed 2.5, the rest recoiling, and radiates part of
   its remaining internal kinetic energy.

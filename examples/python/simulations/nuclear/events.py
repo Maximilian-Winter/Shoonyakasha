@@ -5,9 +5,9 @@ Nuclei are the groups of nucleons that pairs closer than `bond` link. A
 FissionTracker follows them from look to look: a nucleus whose nucleons now
 lie in two or more groups of at least `min_fragment` nucleons has split.
 
-Two rules add what the potentials do not produce (nuclear-sim-design.md,
-sections 9.5 and 9.6). Both pay from a nucleus's own internal motion, so
-momentum is unchanged, and energy too apart from what emission radiates:
+Three rules add what the potentials do not produce (nuclear-sim-design.md,
+sections 9.5, 9.6 and 9.10). Momentum is unchanged by each, and energy too
+apart from what emission radiates:
 
 - emission_kicks: each fragment of a fission gives off its outermost
   neutrons, as real fragments shed neutrons because of quantum level
@@ -16,8 +16,11 @@ momentum is unchanged, and energy too apart from what emission radiates:
   into stretching along its long axis, whenever it is stretching, until it
   splits or its time is up: the excitation of a real compound nucleus flows
   into deformation. A heavy nucleus that has captured nothing is left alone.
+- steer_kicks: a free neutron that comes within a capture radius of a heavy
+  nucleus's centre is turned toward it, as a real slow neutron is captured
+  over a cross-section much larger than the nucleus.
 
-Both give a kick per nucleon, applied as v' = v * scale + dv.
+Each gives a kick per nucleon, applied as v' = v * scale + dv.
 """
 
 import numpy as np
@@ -158,14 +161,23 @@ def stretch_kicks(state, members, fraction=1.0, mass=1.0, kicks=None):
     return kicks
 
 
-def stretching(state, members):
-    """Whether the nucleons `members` are lengthening along their long axis."""
+def stretching(state, members, ahead=0.0, mass=1.0):
+    """Whether the nucleons `members` are lengthening along their long axis
+    `ahead` time units after `state`: the rate L = sum (x . u)(v . u), x and
+    v about the centre of mass and u the axis, carried forward with its own
+    rate of change, sum (v . u)^2 + (x . u)(F . u) / mass, from the forces
+    in `state`."""
     x = state["position"][members].astype(np.float64)
     x -= x.mean(axis=0)
     v = state["velocity"][members].astype(np.float64)
     v -= v.mean(axis=0)
+    f = state["force"][members].astype(np.float64)
+    f -= f.mean(axis=0)
     axis = np.linalg.eigh(x.T @ x)[1][:, -1]
-    return float(((x @ axis) * (v @ axis)).sum()) > 0.0
+    xu, vu, fu = x @ axis, v @ axis, f @ axis
+    rate = float((xu * vu).sum())
+    change = float((vu * vu).sum() + (xu * fu).sum() / mass)
+    return rate + ahead * change > 0.0
 
 
 class CaptureRule:
@@ -173,12 +185,15 @@ class CaptureRule:
 
     A nucleus of at least `min_size` nucleons captures when it takes in
     nucleons that were, at the last look, in a group of at most
-    `max_captured`. For `window` time units after that, at most once per
-    `interval`, update gives it kicks that turn the fraction `fraction` of
-    its internal kinetic energy into stretching (stretch_kicks) while it is
-    lengthening."""
+    `max_captured`. For `window` time units after that, update gives it
+    kicks that turn the fraction `fraction` of its internal kinetic energy
+    into stretching (stretch_kicks) while it will be lengthening when they
+    land (stretching, carried forward from the look), from looks
+    taken at least `interval` after its last kicks landed: a stretch
+    replaces the nucleus's internal motion, so one worked out from a look
+    older than the last would undo it."""
 
-    def __init__(self, min_size=200, max_captured=4, window=200.0, interval=2.0, fraction=1.0):
+    def __init__(self, min_size=200, max_captured=4, window=200.0, interval=0.5, fraction=0.5):
         self.min_size = min_size
         self.max_captured = max_captured
         self.window = window
@@ -188,11 +203,14 @@ class CaptureRule:
         self.excited_until = None
         self.last_stretch = None
 
-    def update(self, state, labels, time, mass=1.0, kicks=None):
-        """Kicks for this look, given `labels` (find_nuclei's) and the
-        simulation time; the first look only records the groups. Returns
+    def update(self, state, labels, time, now=None, mass=1.0, kicks=None):
+        """Kicks for this look, given `labels` (find_nuclei's), the
+        simulation time `time` the look was taken at and the time `now` its
+        kicks land at (`time` when None); the first look only records the
+        groups. Returns
         `kicks` (or None when nothing was kicked and none was given), the
         number of captures and of nuclei stretched."""
+        now = time if now is None else now
         count = len(labels)
         sizes = np.bincount(labels)
         if self.group_size is None or len(self.group_size) != count:
@@ -208,15 +226,61 @@ class CaptureRule:
                 captures += 1
             if (self.excited_until[members].max() > time
                     and time - self.last_stretch[members].max() >= self.interval
-                    and stretching(state, members)):
+                    and stretching(state, members, now - time, mass)):
                 if kicks is None:
                     kicks = np.zeros(count, dtype=KICK)
                     kicks["scale"] = 1.0
                 stretch_kicks(state, members, self.fraction, mass=mass, kicks=kicks)
-                self.last_stretch[members] = time
+                self.last_stretch[members] = now
                 stretched += 1
         self.group_size = sizes[labels]
         return kicks, captures, stretched
+
+
+def steer_kicks(state, labels, radius=10.0, min_size=200, aimed=0.99, mass=1.0, kicks=None):
+    """Kicks that turn each free neutron within `radius` of the centre of a
+    nucleus of at least `min_size` nucleons toward that centre.
+
+    A free neutron is a neutron alone in its group of `labels`. The turn is
+    an elastic one between the neutron and the nucleus: in their centre of
+    mass frame their relative velocity keeps its length and points from the
+    neutron to the nucleus's centre, so momentum and energy are unchanged
+    and the nucleus recoils. A neutron already heading for the centre
+    (cosine above `aimed`) is left alone. Writes into and returns `kicks`
+    (one KICK per nucleon of `state`, made with no effect when None) and the
+    number of neutrons turned."""
+    if kicks is None:
+        kicks = np.zeros(len(state), dtype=KICK)
+        kicks["scale"] = 1.0
+    sizes = np.bincount(labels)
+    heavy = np.nonzero(sizes >= min_size)[0]
+    free = np.nonzero((sizes[labels] == 1) & (state["type"] < 0.5))[0]
+    if len(heavy) == 0 or len(free) == 0:
+        return kicks, 0
+    positions = state["position"].astype(np.float64)
+    velocities = state["velocity"].astype(np.float64)
+    members = [np.nonzero(labels == group)[0] for group in heavy]
+    centers = np.array([positions[m].mean(axis=0) for m in members])
+    distance, nearest = cKDTree(centers).query(positions[free], distance_upper_bound=radius)
+    turned = 0
+    for n, d, k in zip(free, distance, nearest):
+        if not np.isfinite(d) or d < 1e-6:
+            continue
+        nucleus = members[k]
+        big = mass * len(nucleus)
+        v_nucleus = velocities[nucleus].mean(axis=0)
+        relative = velocities[n] - v_nucleus
+        speed = np.linalg.norm(relative)
+        inward = (centers[k] - positions[n]) / d
+        if speed < 1e-9 or relative @ inward > aimed * speed:
+            continue
+        v_cm = (mass * velocities[n] + big * v_nucleus) / (mass + big)
+        relative = speed * inward
+        kicks["scale"][n] = 0.0
+        kicks["dv"][n] = v_cm + big / (mass + big) * relative
+        kicks["dv"][nucleus] += v_cm - mass / (mass + big) * relative - v_nucleus
+        turned += 1
+    return kicks, turned
 
 
 def apply_kicks(state, kicks):
