@@ -44,7 +44,7 @@
       "type": "graphics",
       "execution": { "type": "draw", "vertexCount": 384, "instanceCount": 1, "bindDescriptorSets": true },
       "outputs": [
-        { "resource": "swapchain", "usage": "color_blend", "present": true },
+        { "resource": "swapchain", "usage": "color_blend" },
         { "resource": "depth", "usage": "depth_read" }
       ],
       "pipeline": {
@@ -58,6 +58,12 @@
         "blending": "additive"
       },
       "descriptorSets": ["drawSet"]
+    },
+    {
+      "name": "UIOverlay",
+      "type": "graphics",
+      "execution": { "type": "ui_canvas" },
+      "outputs": [{ "resource": "swapchain", "usage": "color_blend", "present": true }]
     }
   ]
 }

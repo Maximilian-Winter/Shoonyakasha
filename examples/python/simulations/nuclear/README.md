@@ -112,6 +112,7 @@ graph, [pipeline/](pipeline/pipeline.json):
    for each of the 64 entries of the `Flashes` buffer (place, start time,
    strength), growing and fading over 30 time units of simulation time; the
    larger the strength, the larger the glow.
+6. `UIOverlay` draws the screen canvases (a `ui_canvas` pass).
 
 Every step is 0.02 time units long. A frame runs its steps once real time has
 gathered enough for them (20 time units a second at time scale 1) and
@@ -123,12 +124,40 @@ its strength the energy the emission rule radiated (at least 1); each
 fusion reaction adds one of strength 1 at its largest product.
 
 Keys: `1` fission, `2` chain reaction, `3` fusion, `R` restart, `SPACE`
-pause, `+` and `-` time scale. Hold the right mouse button and use WASD, Q
-and E to fly the camera. `--lattice` and `--spacing` set the chain
-reaction's cube of nuclei. In fusion, `--reaction dt` (deuterium and
-tritium) or `dd` (two deuterium) picks the nuclei and `--speed` their closing
-speed, 0.5 unless given; the viewer prints each reaction. `--duration` and
-`--screenshot` run for a while, save a frame and quit.
+pause, `+` and `-` time scale, `F1` settings, `F2` the controls, `P` a
+screenshot into `nuclear_captures/` (also a button at the top of the
+settings, which closes them first), `H` the explanation cards, `[` and `]`
+the previous and next card. Hold the right
+mouse button and use WASD, Q and E to fly the camera. `--lattice` and
+`--spacing` set the chain reaction's cube of nuclei. In fusion, `--reaction
+dt` (deuterium and tritium) or `dd` (two deuterium) picks the nuclei and
+`--speed` their closing speed, 0.5 unless given; the viewer prints each
+split and reaction. `--duration` and `--screenshot` run for a while, save a
+frame and quit.
+
+### The screen
+
+[interface.py](interface.py) builds it from `shoonyakasha.toolkit.overlay`:
+
+- **Readings** (top left, a `Card`): simulation time and speed, the number
+  of nucleons, and the scene's events: captures, splits and neutrons given
+  off, or in fusion the reactions and the latest one, and the free neutrons.
+- **Explanation cards** (bottom left, a `Narration`): the scene's story from
+  [story.py](story.py), a list of beats, each a title, a few sentences and a
+  trigger on the simulation's progress (a capture, a split, a time since one,
+  a reaction). A beat shows when its trigger first holds. With *Pause at each
+  new card* on (the default, off with `--duration`) the simulation pauses on
+  each new card until `SPACE`; otherwise each card stays up at least 6
+  seconds. `[` and `]` step through the beats reached so far.
+- **Key hints** along the bottom (a `HintBar`), and the controls sheet on
+  `F2` (a `HelpOverlay`).
+- **Settings** on `F1` (a `SettingsMenu`): a screenshot, the scenes, pause,
+  restart and time scale; what scenes are built with, applied on restart (neutron
+  speeds, the chain's spacing and cube side, the fusion reaction and its
+  speed); the rules' constants, applied at once (the capture rule on or off,
+  the capture radius, the emitted neutrons' speed, the share of heat
+  radiated); and what is drawn (cards, readings, hints, trails and their
+  length, flashes).
 
 ## The tools
 

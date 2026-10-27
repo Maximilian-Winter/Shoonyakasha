@@ -7,8 +7,11 @@
     python viewer.py --scene chain --duration 20 --screenshot chain.png
 
 Keys: 1 fission, 2 chain reaction, 3 fusion, R restart, SPACE pause,
-+ and - run faster or slower. Hold the right mouse button and use WASD,
-Q and E to fly the camera.
++ and - run faster or slower, F1 settings, F2 the controls, P a screenshot
+into nuclear_captures/, H the explanation cards, [ and ] the previous and
+next card. Hold the right mouse
+button and use WASD, Q and E to fly the camera. The screen (interface.py)
+shows readings, the scene's explanation cards (story.py) and key hints.
 
 The nucleons run on the GPU every frame (pipeline/, which repeats
 shaders/step.comp, the same shader the offline tools use), under the
@@ -34,6 +37,7 @@ import shoonyakasha as sk
 from shoonyakasha.mathutil import look_rotation
 
 import events as ev
+from interface import Interface
 from physics import HERE, NUCLEON, SCENARIO
 
 PIPELINE = HERE / "pipeline"
@@ -43,8 +47,6 @@ SUBSTEPS = 8                 # Step{s} passes in pipeline/passes/20_physics.json
 LOOK_EVERY = 4               # frames between readbacks for the fission tracker
 RATE = 20.0                  # simulation time units a second at time scale 1
 DT = 0.02                    # every step's length; frames below RATE / (SUBSTEPS * DT) fps run slower
-CAPTURE_RADIUS = 10.0        # free neutrons this close to a uranium nucleus's centre are turned toward it
-TRAIL_TIME = 6.0             # time units of path behind each free neutron
 FLASHES = 64                 # "Flashes" elementCount in pipeline/data.json
 FLASH = np.dtype([("place", "<f4", 3), ("start", "<f4"), ("strength", "<f4"), ("unused", "<f4", 3)])
 SCENES = ("fission", "chain", "fusion")
@@ -128,6 +130,15 @@ def main():
                        pipeline_json_path=str(PIPELINE))
     state = {"scene": args.scene, "time_scale": 1.0, "paused": False, "frame": 0, "seconds": 0.0,
              "sequence": 0, "events": 0, "neutrons": 0, "last_report": time.perf_counter()}
+    # What scenes are built with (on restart), the rules' constants (at once)
+    # and what is drawn; the settings menu (F1) changes them.
+    settings = {"fission_speed": 1.0, "chain_speed": 1.0, "fusion_speed": 0.5, "spacing": args.spacing,
+                "lattice": args.lattice, "reaction": args.reaction,
+                "capture_rule": True, "capture_radius": 10.0, "emission_speed": 2.5, "radiate": 0.5,
+                "explanations": True, "readings": True, "key_hints": True, "trails": True, "trail_time": 6.0,
+                "flashes": True, "pause_on_cards": not args.duration}
+    if args.speed is not None:
+        settings[{"fission": "fission_speed", "chain": "chain_speed", "fusion": "fusion_speed"}[args.scene]] = args.speed
     rng = np.random.default_rng(1)
 
     def set_params():
@@ -136,19 +147,23 @@ def main():
                            ("dNeutrons", p.d_neutrons), ("a", p.a), ("r0", p.r0), ("kc", p.kc),
                            ("minDistance", p.min_distance), ("screenStart", p.screen_start),
                            ("screenEnd", p.screen_end), ("dt", 0.0), ("damping", 0.0), ("mass", p.mass),
-                           ("radius", 0.5), ("glowEnergy", GLOW[state["scene"]]), ("trailTime", TRAIL_TIME)):
+                           ("radius", 0.5), ("glowEnergy", GLOW[state["scene"]]),
+                           ("trailTime", settings["trail_time"] if settings["trails"] else 0.0)):
             engine.set_custom_float("nuclear." + key, value)
         engine.set_custom_uint("nuclear.isolate", 0)
 
     def load(scene):
-        speed = args.speed if args.speed is not None else {"fission": 1.0, "chain": 1.0, "fusion": 0.5}[scene]
-        nucleons, eye, target = build(scene, speed, rng, args.spacing, args.lattice, args.reaction)
+        speed = settings[scene + "_speed"]
+        nucleons, eye, target = build(scene, speed, rng, settings["spacing"], settings["lattice"],
+                                      settings["reaction"])
         if len(nucleons) > CAPACITY:
             raise ValueError("%d nucleons; the pipeline holds %d" % (len(nucleons), CAPACITY))
         state.update(scene=scene, count=len(nucleons), tracker=ev.FissionTracker(), capture=ev.CaptureRule(),
                      reactions=ev.ReactionTracker(),
                      events=0, neutrons=0, captures=0, eye=eye, target=target, read_frame=-1, sim_time=0.0,
-                     owed=0.0, frame_times={}, loaded_frame=state["frame"], frame_step=0.0)
+                     owed=0.0, frame_times={}, loaded_frame=state["frame"], frame_step=0.0,
+                     reaction=settings["reaction"], reaction_count=0, last_reaction="", free_neutrons=0,
+                     capture_time=None, split_time=None)
         engine.set_buffer("Nucleons", nucleons.tobytes())
         engine.set_custom_uint("nuclear.count", len(nucleons))
         state.update(marks=np.zeros(CAPACITY, dtype=np.uint32), flashes=np.zeros(FLASHES, dtype=FLASH), next_flash=0)
@@ -157,10 +172,13 @@ def main():
         engine.scene.set_position(state["camera"], eye)
         engine.scene.set_rotation(state["camera"], look_rotation(eye, target))
         set_params()
+        state["interface"].new_scene(scene)
         print("%s: %d nucleons" % (scene, len(nucleons)))
 
     def flash(place, start, strength):
         """A flash at `place` from simulation time `start`, in the next of the ring's slots."""
+        if not settings["flashes"]:
+            return
         slot = state["flashes"][state["next_flash"] % FLASHES]
         slot["place"], slot["start"], slot["strength"] = place, start, strength
         state["next_flash"] += 1
@@ -169,6 +187,7 @@ def main():
     def mark_free_neutrons(nucleons, labels):
         """Mark the neutrons alone in their group, which the Trails pass draws."""
         free = (np.bincount(labels)[labels] == 1) & (nucleons["type"] < 0.5)
+        state["free_neutrons"] = int(free.sum())
         marks = np.zeros(CAPACITY, dtype=np.uint32)
         marks[:len(free)] = free
         if not np.array_equal(marks, state["marks"]):
@@ -193,6 +212,8 @@ def main():
         if state["scene"] == "fusion":
             reaction = state["reactions"].update(nucleons, read_time, labels)
             if reaction:
+                state["reaction_count"] += 1
+                state["last_reaction"] = "%s > %s" % (" + ".join(reaction[0]), " + ".join(reaction[1]))
                 print("reaction: %s -> %s" % (" + ".join(reaction[0]), " + ".join(reaction[1])))
                 largest = labels == np.bincount(labels).argmax()
                 flash(nucleons["position"][largest].mean(axis=0), reaction[2], 1.0)
@@ -200,16 +221,28 @@ def main():
         kicks["scale"] = 1.0
         mine = kicks[:state["count"]]
         for fragments in fissions:
-            _, emitted, radiated = ev.emission_kicks(nucleons, fragments, per_fragment=1, speed=2.5,
-                                                     radiate=0.5, kicks=mine)
+            _, emitted, radiated = ev.emission_kicks(nucleons, fragments, per_fragment=1,
+                                                     speed=settings["emission_speed"],
+                                                     radiate=settings["radiate"], kicks=mine)
             state["events"] += 1
             state["neutrons"] += len(emitted)
+            if state["split_time"] is None:
+                state["split_time"] = read_time
             flash(nucleons["position"][np.concatenate(fragments)].mean(axis=0), read_time, max(radiated, 1.0))
             print("split: %s, %d neutrons given off, %.1f units radiated"
                   % (" + ".join(str(len(f)) for f in fragments), len(emitted), radiated))
-        _, captures, stretched = state["capture"].update(nucleons, labels, read_time, now=land_time, kicks=mine)
+        # With the capture rule off, captures are still counted; its kicks are dropped.
+        rule_kicks = mine if settings["capture_rule"] else mine.copy()
+        _, captures, stretched = state["capture"].update(nucleons, labels, read_time, now=land_time,
+                                                         kicks=rule_kicks)
+        if not settings["capture_rule"]:
+            stretched = 0
+        if captures and state["capture_time"] is None:
+            state["capture_time"] = read_time
         state["captures"] += captures
-        _, turned = ev.steer_kicks(nucleons, labels, radius=CAPTURE_RADIUS, kicks=mine)
+        turned = 0
+        if settings["capture_radius"] > 0.0:
+            _, turned = ev.steer_kicks(nucleons, labels, radius=settings["capture_radius"], kicks=mine)
         if not fissions and not stretched and not turned:
             return
         engine.set_buffer("Kicks", kicks.tobytes())
@@ -219,10 +252,14 @@ def main():
     def on_init():
         state["camera"] = engine.create_camera((0.0, 6.0, 32.0), fov=50.0, speed=12.0)
         engine.set_custom_uint("nuclear.kickSequence", 0)
+        state["interface"] = Interface(engine, state, settings, load=load, restart=lambda: load(state["scene"]),
+                                       apply=set_params)
         set_params()
         load(state["scene"])
 
     def on_key(key):
+        if state["interface"].key(key):
+            return
         scenes = {ord("1"): "fission", ord("2"): "chain", ord("3"): "fusion"}
         if key in scenes:
             load(scenes[key])
@@ -255,6 +292,7 @@ def main():
         times[state["frame"] - 1] = state["sim_time"]
         times.pop(state["frame"] - 1 - 64, None)
         look()
+        state["interface"].update(dt)
         now = time.perf_counter()
         if now - state["last_report"] >= 2.0:
             print("%s, %.0f s (%.0f time units): %d captures, %d splits, %d neutrons given off, time scale %.2f%s"

@@ -1,12 +1,14 @@
 """
 Overlays on screen canvases for programs that show a 3D view: cards of
-readings, a bar of button hints, a sheet of the controls, and a settings
-menu, all in one style (a dark panel with a gold hairline, gold headings
-over faint rules).
+readings, cards of prose, a bar of button hints, a sheet of the controls,
+and a settings menu, all in one style (a dark panel with a gold hairline,
+gold headings over faint rules).
 
     from shoonyakasha.toolkit import overlay
     card = overlay.Card(engine.ui, canvas, corner=(0, 0), max_rows=8)
     card.update("FREE CAMERA", [("SPEED", "12 m/s"), ("ORBIT",), ("PERIAPSIS", "40 km")])
+    note = overlay.Narration(engine.ui, canvas, corner=(0, 1))
+    note.update("CAPTURE", "The neutron is caught ...", step="2 / 5", hints=[(("[", "]"), "Back, next")])
     bar = overlay.HintBar(engine.ui, canvas)
     bar.update([(("W", "S"), "Throttle"), (("pad:A",), "Assist")])
     menu = overlay.SettingsMenu(engine, "Settings", items)       # menu.update() each frame
@@ -15,6 +17,11 @@ over faint rules).
 Cards: `Card.update(title, rows)` shows the rows given, each ("LABEL",
 "value") or ("HEADING",), and fits the panel's height to them. Only what
 changed since the last update is handed to the canvas.
+
+Prose: `Narration.update(title, text, step, hints)` shows a gold title,
+a step (such as "2 / 5") at its right, the text wrapped between words to
+the card's width (`wrap_text`, measured as the key caps are) and a row of
+key caps; the panel fits its lines.
 
 Hints: a hint is (caps, label), caps a tuple of key or button names, each
 drawn as a small cap, then the label. A name starting with "pad:" is a
@@ -334,6 +341,110 @@ class Card:
             self.ui.set_rect(self.panel, anchor_min=corner, anchor_max=corner, pivot=corner,
                              position=position, size=(self.width, height))
             self.state[self.panel] = height
+
+
+# ── Narration ────────────────────────────────────────────────────────────────
+
+NARRATION_WIDTH = 440
+NARRATION_TEXT = (0.9, 0.91, 0.93, 1.0)
+NARRATION_MUTED = (0.6, 0.63, 0.68, 1.0)
+NARRATION_TEXT_SIZE, NARRATION_LINE = 16, 23
+NARRATION_STEP_SIZE = 13
+NARRATION_HINTS_GAP = 10      # above the key caps' row
+
+
+def wrap_text(text, size, width):
+    """`text` broken into lines no wider than `width` canvas units at font
+    size `size`, between words; a line break in the text starts a new line,
+    and a word wider than `width` gets a line of its own."""
+    lines = []
+    for paragraph in text.split("\n"):
+        line = ""
+        for word in paragraph.split():
+            candidate = word if not line else line + " " + word
+            if line and measure.width(candidate, size) > width:
+                lines.append(line)
+                line = word
+            else:
+                line = candidate
+        lines.append(line)
+    return lines
+
+
+class Narration:
+    def __init__(self, ui, canvas, corner=(0, 1), max_lines=8, margin=(24, 24), width=NARRATION_WIDTH):
+        """A card of prose: a gold title, a step such as "2 / 5" at its
+        right, the text wrapped below in up to `max_lines` lines, and an
+        optional row of key caps. `corner` and `margin` place it as a
+        Card's."""
+        self.ui = ui
+        self.corner = corner
+        self.margin = margin
+        self.width = width
+        inner = width - 2 * CARD_PAD
+        self.panel = ui.create_panel(canvas, size=(width, 100), color=CARD_PANEL)
+        hairline = ui.create_panel(self.panel, size=(2, 100), color=CARD_HAIRLINE)
+        ui.set_rect(hairline, anchor_min=(0, 0), anchor_max=(0, 1), pivot=(0, 0), position=(0, 0), size=(2, 0))
+        self.title = self._text(CARD_TITLE_SIZE, GOLD, sk.TEXT_ALIGN_LEFT, CARD_TITLE_HEIGHT)
+        self.step = self._text(NARRATION_STEP_SIZE, NARRATION_MUTED, sk.TEXT_ALIGN_RIGHT, CARD_TITLE_HEIGHT)
+        self.rule = ui.create_panel(self.panel, size=(inner, 1), color=CARD_RULE)
+        ui.set_rect(self.rule, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0),
+                    position=(CARD_PAD, CARD_PAD - 6 + CARD_TITLE_HEIGHT - 2), size=(inner, 1))
+        self.lines = [self._text(NARRATION_TEXT_SIZE, NARRATION_TEXT, sk.TEXT_ALIGN_LEFT, NARRATION_LINE)
+                      for _ in range(max_lines)]
+        self.caps = KeyCaps(ui, self.panel)
+        self.shown = None        # (title, text, step, hints) last laid out
+        self.visible = None
+        self.show(False)
+
+    def _text(self, size, colour, align, height):
+        text = self.ui.create_text(self.panel, "", size=size, color=colour)
+        self.ui.set_rect(text, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0), position=(CARD_PAD, 0),
+                         size=(self.width - 2 * CARD_PAD, height))
+        self.ui.set_text_align(text, align, sk.TEXT_ALIGN_MIDDLE)
+        return text
+
+    def show(self, on):
+        if self.visible != on:
+            self.ui.set_visible(self.panel, on)
+            self.visible = on
+
+    def update(self, title, text, step="", hints=()):
+        """Show `title`, `step` and `text`, wrapped, and the key caps of
+        `hints` (as a HintBar's) below. Lines past `max_lines` are dropped,
+        the last one shown ending in an ellipsis. Does nothing when all
+        four are as last shown."""
+        if self.shown == (title, text, step, tuple(hints)):
+            return
+        self.shown = (title, text, step, tuple(hints))
+        ui = self.ui
+        y = CARD_PAD - 6
+        for element, value in ((self.title, title), (self.step, step)):
+            ui.set_text(element, value)
+            ui.set_position(element, (CARD_PAD, y))
+        y += CARD_TITLE_HEIGHT + 4
+        wrapped = wrap_text(text, NARRATION_TEXT_SIZE, self.width - 2 * CARD_PAD)
+        if len(wrapped) > len(self.lines):
+            wrapped = wrapped[:len(self.lines)]
+            wrapped[-1] += " …"
+        for k, element in enumerate(self.lines):
+            on = k < len(wrapped)
+            ui.set_visible(element, on)
+            if on:
+                ui.set_text(element, wrapped[k])
+                ui.set_position(element, (CARD_PAD, y))
+                y += NARRATION_LINE
+        if hints:
+            y += NARRATION_HINTS_GAP
+            self.caps.show(list(hints), CARD_PAD, y, NARRATION_MUTED)
+            y += CAP_HEIGHT
+        else:
+            self.caps.show([], CARD_PAD, y)
+        height = y + CARD_PAD - 4
+        corner = self.corner
+        position = (self.margin[0] * (1 - 2 * corner[0]), self.margin[1] * (1 - 2 * corner[1]))
+        ui.set_rect(self.panel, anchor_min=corner, anchor_max=corner, pivot=corner,
+                    position=position, size=(self.width, height))
 
 
 # ── The controls sheet ───────────────────────────────────────────────────────
