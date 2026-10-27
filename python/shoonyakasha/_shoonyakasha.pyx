@@ -58,6 +58,7 @@ from ._engine_api cimport (
     CppPlanetLod, LodBody, LodView, LodNodeInfo, LodJob, LodFaceColours,
     CppComputeContext, CppComputeBuffer, CppComputeKernel, ComputeKernelInfo, ComputeKernelBinding,
     ComputeBindingType, ComputeUint3, CppComputeImage, CppComputeBinding, ComputeBindingDim,
+    ExrPixelType, saveHdr, saveExr, saveImage,
 )
 from libcpp.memory cimport shared_ptr
 
@@ -1849,13 +1850,54 @@ def _format_for(dtype, int channels):
     return "".join(c + bits[1:] for c in "RGBA"[:channels]) + "_" + kind
 
 
+cdef _float_texels(array):
+    """`array` as contiguous float32 rows of texels: (texels, height, width, channels)."""
+    import numpy as np
+    texels = np.ascontiguousarray(array, dtype=np.float32)
+    if texels.ndim == 2:
+        return texels, texels.shape[0], texels.shape[1], 1
+    if texels.ndim == 3:
+        return texels, texels.shape[0], texels.shape[1], texels.shape[2]
+    raise ValueError("an image is (height, width) or (height, width, channels); the array has %d axes" % texels.ndim)
+
+
+def save_hdr(path, array):
+    """Write `array`, (height, width) or (height, width, channels) with 1
+    to 4 channels of values convertible to float32, as a Radiance .hdr file:
+    RGB with a shared 8-bit exponent. 1 channel is grey, 2 are red and green
+    with blue zero, and alpha is dropped."""
+    cdef const float[:, :, ::1] view
+    texels, height, width, channels = _float_texels(array)
+    view = texels.reshape(height, width, channels)
+    cdef string p = str(path).encode("utf-8")
+    cdef uint32_t w = width, h = height, c = channels
+    with nogil:
+        saveHdr(p, &view[0, 0, 0], w, h, c)
+
+
+def save_exr(path, array, bint half=True):
+    """Write `array`, (height, width) or (height, width, channels) with 1
+    to 4 channels of values convertible to float32, as an uncompressed
+    OpenEXR file of 16-bit floats, or 32-bit with half=False. 1 channel is
+    written as Y, 2 as R and G, 3 as R, G and B, 4 as R, G, B and A."""
+    cdef const float[:, :, ::1] view
+    texels, height, width, channels = _float_texels(array)
+    view = texels.reshape(height, width, channels)
+    cdef string p = str(path).encode("utf-8")
+    cdef uint32_t w = width, h = height, c = channels
+    cdef ExrPixelType kind = ExrPixelType.Half if half else ExrPixelType.Float
+    with nogil:
+        saveExr(p, &view[0, 0, 0], w, h, c, kind)
+
+
 cdef class GpuImage:
-    """An image in device memory with one mip level, made by
-    ComputeContext.image or ComputeContext.upload_image: 2D, a 2D array
-    (layers > 1; 6 x n square layers can be bound as a cube or cube array)
-    or 3D (depth > 1). Usable as a storage image and as a sampled image, as
+    """An image in device memory, made by ComputeContext.image or
+    ComputeContext.upload_image: 2D, a 2D array (layers > 1; 6 x n square
+    layers can be bound as a cube or cube array) or 3D (depth > 1), with one
+    or more mip levels. Usable as a storage image and as a sampled image, as
     far as its format supports each on the device. Copies return once the
-    copy is done.
+    copy is done; each copies one mip level, level 0 unless `mip` says
+    otherwise. Level m is max(1, size >> m) in width, height and depth.
     """
     cdef CppComputeImage _image
     cdef ComputeContext _context
@@ -1872,19 +1914,47 @@ cdef class GpuImage:
 
     @property
     def width(self):
-        return self._image.width()
+        return self._image.width(0)
 
     @property
     def height(self):
-        return self._image.height()
+        return self._image.height(0)
 
     @property
     def depth(self):
-        return self._image.depth()
+        return self._image.depth(0)
 
     @property
     def layers(self):
         return self._image.layers()
+
+    @property
+    def mips(self):
+        """The number of mip levels."""
+        return self._image.mipLevels()
+
+    def level(self, uint32_t mip):
+        """Mip level `mip`, to give ComputeContext.run in place of the image."""
+        return GpuImageLevel(self, mip)
+
+    def generate_mips(self):
+        """Fill mip levels 1 and up from level 0, each by halving the one
+        before it with linear filtering. Raises RuntimeError when the device
+        cannot blit and linearly filter the format."""
+        with nogil:
+            self._image.generateMips()
+
+    def save(self, path, uint32_t mip=0, uint32_t layer=0, bint half=True):
+        """Write one layer (of an array) or slice (of a 3D image) at mip
+        level `mip` to `path`, by its extension: .hdr, .exr (16-bit floats,
+        or 32-bit with half=False) or .npy (float32, height x width x
+        channels). Texels are converted to floats: UNORM to 0..1, sRGB
+        decoded to linear, packed formats unpacked; integer formats raise
+        ValueError."""
+        cdef string p = str(path).encode("utf-8")
+        cdef ExrPixelType kind = ExrPixelType.Half if half else ExrPixelType.Float
+        with nogil:
+            saveImage(p, self._image, mip, layer, kind)
 
     @property
     def format(self):
@@ -1897,8 +1967,12 @@ cdef class GpuImage:
 
     @property
     def nbytes(self):
-        """width x height x depth x layers x texel_size."""
-        return self._image.byteSize()
+        """Bytes of mip level 0: width x height x depth x layers x texel_size."""
+        return self._image.byteSize(0)
+
+    def level_nbytes(self, uint32_t mip):
+        """Bytes of mip level `mip`, all layers."""
+        return self._image.byteSize(mip)
 
     @property
     def valid(self):
@@ -1907,59 +1981,84 @@ cdef class GpuImage:
 
     @property
     def shape(self):
-        """The shape to_numpy returns: (height, width), preceded by depth
-        for a 3D image or by layers for an array, followed by the channels
-        when there are more than one, or by texel_size bytes for a format
-        whose channels have no single NumPy type."""
+        """level_shape(0)."""
+        return self.level_shape(0)
+
+    def level_shape(self, uint32_t mip):
+        """The shape to_numpy(mip) returns: (height, width) of the level,
+        preceded by its depth for a 3D image or by layers for an array,
+        followed by the channels when there are more than one, or by
+        texel_size bytes for a format whose channels have no single NumPy
+        type."""
+        if mip >= self._image.mipLevels():
+            raise IndexError("mip level %d of an image with %d level(s)" % (mip, self._image.mipLevels()))
         layout = _format_layout(self.format)
-        out = (self.height, self.width)
-        if self.depth > 1:
-            out = (self.depth,) + out
+        out = (self._image.height(mip), self._image.width(mip))
+        if self._image.depth(0) > 1:
+            out = (self._image.depth(mip),) + out
         if self.layers > 1:
             out = (self.layers,) + out
         if layout is None:
             return out + (self.texel_size,)
         return out + ((layout[1],) if layout[1] > 1 else ())
 
-    def upload(self, data):
+    def upload(self, data, uint32_t mip=0):
         """Copy `data` (anything with the buffer protocol and contiguous
-        memory, holding exactly nbytes bytes, texels tightly packed) into the
-        whole image."""
+        memory, holding exactly level_nbytes(mip) bytes, texels tightly
+        packed) into mip level `mip`."""
         cdef const unsigned char[::1] view = memoryview(data).cast('B')
         cdef size_t n = view.shape[0]
         cdef const unsigned char* ptr = &view[0] if n else NULL
         with nogil:
-            self._image.upload(ptr, n)
+            self._image.upload(ptr, n, mip)
 
-    def download_into(self, out):
-        """Copy the whole image into `out`, a writable object with the
-        buffer protocol and contiguous memory holding nbytes bytes."""
+    def download_into(self, out, uint32_t mip=0):
+        """Copy mip level `mip` into `out`, a writable object with the
+        buffer protocol and contiguous memory holding level_nbytes(mip)
+        bytes."""
         cdef unsigned char[::1] view = memoryview(out).cast('B')
         cdef size_t n = view.shape[0]
         cdef unsigned char* ptr = &view[0] if n else NULL
         with nogil:
-            self._image.download(ptr, n)
+            self._image.download(ptr, n, mip)
 
-    def to_bytes(self):
-        out = bytearray(self._image.byteSize())
-        self.download_into(out)
+    def to_bytes(self, uint32_t mip=0):
+        out = bytearray(self._image.byteSize(mip))
+        self.download_into(out, mip)
         return bytes(out)
 
-    def to_numpy(self):
-        """The whole image as a new NumPy array shaped as `shape`, of the
-        format's channel type (float16 for 16-bit floats, uint8 for 8-bit
-        UNORM and SRGB, uint32 for packed formats, uint8 bytes for formats
-        whose channels have no single type)."""
+    def to_numpy(self, uint32_t mip=0):
+        """Mip level `mip` as a new NumPy array shaped as level_shape(mip),
+        of the format's channel type (float16 for 16-bit floats, uint8 for
+        8-bit UNORM and SRGB, uint32 for packed formats, uint8 bytes for
+        formats whose channels have no single type)."""
         import numpy as np
         layout = _format_layout(self.format)
-        out = np.empty(self.shape, dtype=np.uint8 if layout is None else np.dtype(layout[0]))
-        self.download_into(out)
+        out = np.empty(self.level_shape(mip), dtype=np.uint8 if layout is None else np.dtype(layout[0]))
+        self.download_into(out, mip)
         return out
 
     def __repr__(self):
-        return "GpuImage(%dx%dx%d, layers=%d, %s%s)" % (
-            self.width, self.height, self.depth, self.layers, self.format,
+        return "GpuImage(%dx%dx%d, layers=%d, mips=%d, %s%s)" % (
+            self.width, self.height, self.depth, self.layers, self.mips, self.format,
             "" if self._image.valid() else ", released")
+
+
+cdef class GpuImageLevel:
+    """One mip level of a GpuImage, for ComputeContext.run: a storage image
+    is bound at that level, a sampled image with only that level. Made by
+    GpuImage.level()."""
+    cdef readonly GpuImage image
+    cdef readonly uint32_t mip
+
+    def __init__(self, GpuImage image, uint32_t mip):
+        if mip >= image.mips:
+            raise IndexError("mip level %d of an image with %d level(s)" % (mip, image.mips))
+        self.image = image
+        self.mip = mip
+
+    def __repr__(self):
+        return "GpuImageLevel(%r, mip=%d)" % (self.image, self.mip)
 
 
 cdef class ComputeKernel:
@@ -2104,16 +2203,18 @@ cdef class ComputeContext:
         return out
 
     def image(self, uint32_t width, uint32_t height, str format="R32G32B32A32_SFLOAT",
-              uint32_t depth=1, uint32_t layers=1):
+              uint32_t depth=1, uint32_t layers=1, uint32_t mips=1):
         """An image filled with zeros. `format` is a pipeline JSON format
-        name. depth > 1 makes a 3D image, layers > 1 a 2D array; not both."""
+        name. depth > 1 makes a 3D image, layers > 1 a 2D array; not both.
+        `mips` is the number of mip levels; 0 makes the full chain down to
+        1x1."""
         cdef string fmt = format.encode("utf-8")
         cdef CppComputeImage image
         with nogil:
-            image = self._ctx.get().createImage(fmt, width, height, depth, layers)
+            image = self._ctx.get().createImage(fmt, width, height, depth, layers, mips)
         return GpuImage._wrap(image, self)
 
-    def upload_image(self, array, str format=None, str kind="2d"):
+    def upload_image(self, array, str format=None, str kind="2d", uint32_t mips=1):
         """An image holding a copy of a NumPy array.
 
         `kind` "2d" takes (height, width) or (height, width, channels);
@@ -2121,7 +2222,8 @@ cdef class ComputeContext:
         width[, channels]). `format` defaults to the dtype's: float32 ->
         R32.._SFLOAT, float16 -> R16.._SFLOAT, uint8 -> R8.._UNORM, other
         integers -> .._UINT / .._SINT, with one channel per element of the
-        last axis.
+        last axis. With `mips` other than 1 (0 for the full chain) the array
+        fills level 0 and generate_mips() the rest.
         """
         import numpy as np
         array = np.ascontiguousarray(array)
@@ -2144,8 +2246,11 @@ cdef class ComputeContext:
         first = array.shape[0] if spatial == 3 else 1
         out = self.image(width, height, format,
                          depth=first if kind == "3d" else 1,
-                         layers=first if kind == "array" else 1)
+                         layers=first if kind == "array" else 1,
+                         mips=mips)
         out.upload(array)
+        if out.mips > 1:
+            out.generate_mips()
         return out
 
     def kernel(self, path, **compile_options):
@@ -2169,9 +2274,11 @@ cdef class ComputeContext:
         the binding is not read-only, copied back into after it. An image
         binding takes a GpuImage, bound as the shader's image type declares:
         2D needs depth 1 and layers 1, 2D array depth 1, 3D depth > 1, cube
-        6 square layers, cube array 6 x n. Sampled images are read with
-        linear filtering where the format allows it, nearest otherwise,
-        clamped to the edge.
+        6 square layers, cube array 6 x n. A storage image is bound at mip
+        level 0, a sampled image with all its levels; image.level(mip) binds
+        that one level instead. Sampled images are read with linear
+        filtering, between texels and mip levels, where the format allows
+        it, nearest otherwise, clamped to the edge.
 
         Give either `groups`, the number of workgroups, or `threads`, the
         number of invocations, which is divided by the kernel's local size
@@ -2196,6 +2303,10 @@ cdef class ComputeContext:
             if isinstance(item, GpuImage):
                 img = item
                 resources.push_back(CppComputeBinding(img._image))
+                continue
+            if isinstance(item, GpuImageLevel):
+                img = (<GpuImageLevel>item).image
+                resources.push_back(CppComputeBinding(img._image, (<GpuImageLevel>item).mip))
                 continue
             if binding["type"].endswith("_image"):
                 raise TypeError("binding %d ('%s') is an image: give a GpuImage (ctx.upload_image)" % (

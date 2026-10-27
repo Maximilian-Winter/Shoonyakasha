@@ -37,6 +37,9 @@ try:
         ComputeKernel,
         GpuBuffer,
         GpuImage,
+        GpuImageLevel,
+        save_hdr,
+        save_exr,
 
         # Entity handle sentinel
         NULL_ENTITY,
@@ -119,7 +122,7 @@ except ImportError as exc:                       # pragma: no cover - environmen
 
 _ENGINE_SYMBOLS = frozenset({
     "Engine", "Scene", "Input", "Physics", "Ecs", "UI", "GltfResult", "PlanetLod", "NULL_ENTITY",
-    "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage",
+    "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage", "GpuImageLevel", "save_hdr", "save_exr",
     "CAMERA_PERSPECTIVE", "CAMERA_ORTHOGRAPHIC",
     "LIGHT_DIRECTIONAL", "LIGHT_POINT", "LIGHT_SPOT",
     "RIGIDBODY_STATIC", "RIGIDBODY_KINEMATIC", "RIGIDBODY_DYNAMIC",
@@ -164,7 +167,7 @@ def extension_available():
 __version__ = "1.0.0"
 __all__ = [
     "Engine", "Scene", "Input", "Physics", "Ecs", "UI", "GltfResult", "PlanetLod",
-    "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage",
+    "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage", "GpuImageLevel", "save_hdr", "save_exr",
     "NULL_ENTITY",
     "CAMERA_PERSPECTIVE", "CAMERA_ORTHOGRAPHIC",
     "LIGHT_DIRECTIONAL", "LIGHT_POINT", "LIGHT_SPOT",

@@ -66,9 +66,9 @@ struct ContextState {
         VkSamplerCreateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         info.magFilter = info.minFilter = linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
-        info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        info.mipmapMode = linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
         info.addressModeU = info.addressModeV = info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        info.maxLod = 0.0f;
+        info.maxLod = VK_LOD_CLAMP_NONE;
         if (vkCreateSampler(vk(), &info, nullptr, &slot) != VK_SUCCESS) {
             throw std::runtime_error("compute: could not create a sampler");
         }
@@ -191,14 +191,18 @@ struct ImageState : Resource {
     VmaAllocation allocation = VK_NULL_HANDLE;
     VkFormat vkFormat = VK_FORMAT_UNDEFINED;
     std::string format;
-    uint32_t width = 0, height = 0, depth = 1, layers = 1;
+    uint32_t width = 0, height = 0, depth = 1, layers = 1, mipLevels = 1;
     size_t texelSize = 0;
     bool storage = false;          // usable as a storage image
     bool sampled = false;          // usable as a sampled image
     bool linearFilter = false;     // sampled with linear filtering
+    bool blit = false;             // generateMips can blit it
     bool cubeCompatible = false;
 
-    size_t byteSize() const { return size_t(width) * height * depth * layers * texelSize; }
+    static uint32_t level(uint32_t size, uint32_t mip) { return std::max(1u, size >> mip); }
+    size_t byteSize(uint32_t mip) const {
+        return size_t(level(width, mip)) * level(height, mip) * level(depth, mip) * layers * texelSize;
+    }
 
     void release() override {
         if (image != VK_NULL_HANDLE) vmaDestroyImage(context->allocator(), image, allocation);
@@ -285,17 +289,28 @@ void checkRange(const detail::BufferState& state, size_t bytes, size_t offset) {
     }
 }
 
-void checkImageBytes(const detail::ImageState& state, size_t bytes) {
-    if (bytes != state.byteSize()) {
-        throw std::invalid_argument("compute: the image holds " + std::to_string(state.byteSize()) +
-                                    " bytes, " + std::to_string(bytes) + " were given");
+void checkMip(const detail::ImageState& state, uint32_t mip) {
+    if (mip >= state.mipLevels) {
+        throw std::out_of_range("compute: mip level " + std::to_string(mip) + " of an image with " +
+                                std::to_string(state.mipLevels) + " level(s)");
     }
 }
 
-VkBufferImageCopy wholeImage(const detail::ImageState& state) {
+void checkImageBytes(const detail::ImageState& state, size_t bytes, uint32_t mip) {
+    checkMip(state, mip);
+    if (bytes != state.byteSize(mip)) {
+        throw std::invalid_argument("compute: mip level " + std::to_string(mip) + " of the image holds " +
+                                    std::to_string(state.byteSize(mip)) + " bytes, " + std::to_string(bytes) +
+                                    " were given");
+    }
+}
+
+VkBufferImageCopy wholeLevel(const detail::ImageState& state, uint32_t mip) {
+    using detail::ImageState;
     VkBufferImageCopy region{};
-    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, state.layers};
-    region.imageExtent = {state.width, state.height, state.depth};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, state.layers};
+    region.imageExtent = {ImageState::level(state.width, mip), ImageState::level(state.height, mip),
+                          ImageState::level(state.depth, mip)};
     return region;
 }
 
@@ -509,38 +524,77 @@ bool Image::valid() const {
     return m_state && m_state->context->alive && m_state->image != VK_NULL_HANDLE;
 }
 
-uint32_t Image::width() const { return m_state ? m_state->width : 0; }
-uint32_t Image::height() const { return m_state ? m_state->height : 0; }
-uint32_t Image::depth() const { return m_state ? m_state->depth : 0; }
+uint32_t Image::width(uint32_t mip) const { return m_state ? detail::ImageState::level(m_state->width, mip) : 0; }
+uint32_t Image::height(uint32_t mip) const { return m_state ? detail::ImageState::level(m_state->height, mip) : 0; }
+uint32_t Image::depth(uint32_t mip) const { return m_state ? detail::ImageState::level(m_state->depth, mip) : 0; }
 uint32_t Image::layers() const { return m_state ? m_state->layers : 0; }
+uint32_t Image::mipLevels() const { return m_state ? m_state->mipLevels : 0; }
 size_t Image::texelSize() const { return m_state ? m_state->texelSize : 0; }
-size_t Image::byteSize() const { return m_state ? m_state->byteSize() : 0; }
+size_t Image::byteSize(uint32_t mip) const { return m_state ? m_state->byteSize(mip) : 0; }
 
 const std::string& Image::format() const {
     static const std::string none;
     return m_state ? m_state->format : none;
 }
 
-void Image::upload(const void* data, size_t bytes) {
+void Image::upload(const void* data, size_t bytes, uint32_t mip) {
     auto& state = checked(m_state);
-    checkImageBytes(state, bytes);
+    checkImageBytes(state, bytes, mip);
     Staging staging(state.context->allocator(), bytes, false);
     std::memcpy(staging.mapped, data, bytes);
     state.context->submit([&](VkCommandBuffer cmd) {
-        const VkBufferImageCopy region = wholeImage(state);
+        const VkBufferImageCopy region = wholeLevel(state, mip);
         vkCmdCopyBufferToImage(cmd, staging.buffer, state.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
     });
 }
 
-void Image::download(void* out, size_t bytes) const {
+void Image::download(void* out, size_t bytes, uint32_t mip) const {
     auto& state = checked(m_state);
-    checkImageBytes(state, bytes);
+    checkImageBytes(state, bytes, mip);
     Staging staging(state.context->allocator(), bytes, true);
     state.context->submit([&](VkCommandBuffer cmd) {
-        const VkBufferImageCopy region = wholeImage(state);
+        const VkBufferImageCopy region = wholeLevel(state, mip);
         vkCmdCopyImageToBuffer(cmd, state.image, VK_IMAGE_LAYOUT_GENERAL, staging.buffer, 1, &region);
     });
     std::memcpy(out, staging.mapped, bytes);
+}
+
+void Image::generateMips() {
+    auto& state = checked(m_state);
+    if (state.mipLevels < 2) return;
+    if (!state.blit) {
+        throw std::runtime_error("compute: the device cannot blit and linearly filter '" + state.format +
+                                 "' images, so their mips cannot be generated");
+    }
+    using detail::ImageState;
+    state.context->submit([&](VkCommandBuffer cmd) {
+        for (uint32_t mip = 1; mip < state.mipLevels; ++mip) {
+            // The level before was written by the previous blit (or before
+            // this submit); make that visible to this one.
+            VkImageMemoryBarrier barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            barrier.oldLayout = barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = state.image;
+            barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 1, 0, state.layers};
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
+                                 0, nullptr, 1, &barrier);
+
+            VkImageBlit blit{};
+            blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 0, state.layers};
+            blit.srcOffsets[1] = {int32_t(ImageState::level(state.width, mip - 1)),
+                                  int32_t(ImageState::level(state.height, mip - 1)),
+                                  int32_t(ImageState::level(state.depth, mip - 1))};
+            blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, state.layers};
+            blit.dstOffsets[1] = {int32_t(ImageState::level(state.width, mip)),
+                                  int32_t(ImageState::level(state.height, mip)),
+                                  int32_t(ImageState::level(state.depth, mip))};
+            vkCmdBlitImage(cmd, state.image, VK_IMAGE_LAYOUT_GENERAL, state.image, VK_IMAGE_LAYOUT_GENERAL, 1, &blit,
+                           VK_FILTER_LINEAR);
+        }
+    });
 }
 
 // ─── Kernel ──────────────────────────────────────────────────
@@ -620,13 +674,21 @@ Buffer Context::upload(const void* data, size_t bytes) {
 }
 
 Image Context::createImage(const std::string& format, uint32_t width, uint32_t height, uint32_t depth,
-                           uint32_t layers) {
+                           uint32_t layers, uint32_t mipLevels) {
     m_state->check();
     if (width == 0 || height == 0 || depth == 0 || layers == 0) {
         throw std::invalid_argument("compute: an image needs a size of at least 1 in every dimension");
     }
     if (depth > 1 && layers > 1) {
         throw std::invalid_argument("compute: a 3D image (depth > 1) cannot have layers");
+    }
+    uint32_t fullChain = 1;
+    for (uint32_t largest = std::max({width, height, depth}); largest > 1; largest >>= 1) ++fullChain;
+    if (mipLevels == 0) mipLevels = fullChain;
+    if (mipLevels > fullChain) {
+        throw std::invalid_argument("compute: a " + std::to_string(width) + "x" + std::to_string(height) + "x" +
+                                    std::to_string(depth) + " image has at most " + std::to_string(fullChain) +
+                                    " mip levels, " + std::to_string(mipLevels) + " were asked for");
     }
     VkFormat vkFormat = VK_FORMAT_UNDEFINED;
     try {
@@ -650,10 +712,14 @@ Image Context::createImage(const std::string& format, uint32_t width, uint32_t h
     state->height = height;
     state->depth = depth;
     state->layers = layers;
+    state->mipLevels = mipLevels;
     state->texelSize = texelSize;
     state->storage = (features & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
     state->sampled = (features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
     state->linearFilter = (features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
+    const VkFormatFeatureFlags blitFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+                                              VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    state->blit = (features & blitFeatures) == blitFeatures;
     state->cubeCompatible = depth == 1 && width == height && layers % 6 == 0;
     if (!state->storage && !state->sampled) {
         throw std::invalid_argument("compute: the device can neither store to nor sample '" + format + "' images");
@@ -665,7 +731,7 @@ Image Context::createImage(const std::string& format, uint32_t width, uint32_t h
     info.imageType = depth > 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     info.format = vkFormat;
     info.extent = {width, height, depth};
-    info.mipLevels = 1;
+    info.mipLevels = mipLevels;
     info.arrayLayers = layers;
     info.samples = VK_SAMPLE_COUNT_1_BIT;
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -679,7 +745,7 @@ Image Context::createImage(const std::string& format, uint32_t width, uint32_t h
     if (vkGetPhysicalDeviceImageFormatProperties(m_state->device->getPhysicalDevice(), vkFormat, info.imageType,
                                                  info.tiling, info.usage, info.flags, &limits) != VK_SUCCESS ||
         width > limits.maxExtent.width || height > limits.maxExtent.height || depth > limits.maxExtent.depth ||
-        layers > limits.maxArrayLayers) {
+        layers > limits.maxArrayLayers || mipLevels > limits.maxMipLevels) {
         throw std::invalid_argument("compute: the device does not support a " + std::to_string(width) + "x" +
                                     std::to_string(height) + "x" + std::to_string(depth) + " '" + format +
                                     "' image with " + std::to_string(layers) + " layer(s)");
@@ -703,7 +769,7 @@ Image Context::createImage(const std::string& format, uint32_t width, uint32_t h
         barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = state->image;
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers};
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, layers};
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
                              0, nullptr, 1, &barrier);
         VkClearColorValue zero{};
@@ -716,8 +782,8 @@ Image Context::createImage(const std::string& format, uint32_t width, uint32_t h
 }
 
 Image Context::uploadImage(const std::string& format, uint32_t width, uint32_t height, const void* data,
-                           size_t bytes, uint32_t depth, uint32_t layers) {
-    Image image = createImage(format, width, height, depth, layers);
+                           size_t bytes, uint32_t depth, uint32_t layers, uint32_t mipLevels) {
+    Image image = createImage(format, width, height, depth, layers, mipLevels);
     image.upload(data, bytes);
     return image;
 }
@@ -813,6 +879,11 @@ void Context::run(const Kernel& kernel, const std::vector<Binding>& bindings, st
                 throw std::invalid_argument("compute: " + where + " is declared " + want.format + ", the image is " +
                                             image->format);
             }
+            if (bindings[i].m_mip >= static_cast<int64_t>(image->mipLevels)) {
+                throw std::invalid_argument("compute: " + where + ": mip level " +
+                                            std::to_string(bindings[i].m_mip) + " of an image with " +
+                                            std::to_string(image->mipLevels) + " level(s)");
+            }
             std::string error;
             viewTypes[i] = viewTypeFor(want, *image, *m_state->device, error);
             if (viewTypes[i] == VK_IMAGE_VIEW_TYPE_MAX_ENUM) {
@@ -893,7 +964,12 @@ void Context::run(const Kernel& kernel, const std::vector<Binding>& bindings, st
                 viewInfo.image = image->image;
                 viewInfo.viewType = viewTypes[i];
                 viewInfo.format = image->vkFormat;
-                viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, image->layers};
+                // A storage image at one level (the given one, or 0); a sampled
+                // image at the given level, or at all of them.
+                const int64_t mip = bindings[i].m_mip;
+                const bool allLevels = want.type == Type::SampledImage && mip < 0;
+                viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, mip < 0 ? 0u : uint32_t(mip),
+                                             allLevels ? image->mipLevels : 1u, 0, image->layers};
                 VkImageView view = VK_NULL_HANDLE;
                 if (vkCreateImageView(m_state->vk(), &viewInfo, nullptr, &view) != VK_SUCCESS) {
                     throw std::runtime_error("compute: could not create an image view");

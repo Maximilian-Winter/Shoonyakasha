@@ -345,6 +345,144 @@ class ComputeImages(unittest.TestCase):
         self.assertIsNone(layout("D24_UNORM_S8_UINT"))
 
 
+FILL_LEVEL = """#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, r32f) uniform writeonly image2D level;
+layout(push_constant) uniform Push { float value; } pc;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, imageSize(level)))) return;
+    imageStore(level, p, vec4(pc.value));
+}
+"""
+
+SAMPLE_LODS = """#version 450
+layout(local_size_x = 8) in;
+layout(binding = 0) uniform sampler2D tex;
+layout(std430, binding = 1) writeonly buffer Out { float values[]; } outv;
+void main() { outv.values[gl_LocalInvocationID.x] = textureLod(tex, vec2(0.5), float(gl_LocalInvocationID.x) * 0.5).r; }
+"""
+
+
+def srgb_to_linear(c):
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+@unittest.skipUnless(sk.extension_available(), "runs in a fresh interpreter instead (see InstalledPackage)")
+class ComputeMipsAndFiles(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        Compute.setUpClass.__func__(cls)
+
+    @classmethod
+    def tearDownClass(cls):
+        Compute.tearDownClass.__func__(cls)
+
+    kernel = Compute.kernel
+
+    def test_generated_mips_average_level_zero(self):
+        data = np.random.default_rng(2).random((8, 8), dtype=np.float32)
+        img = self.ctx.upload_image(data, mips=0)
+        self.assertEqual(img.mips, 4)
+        self.assertEqual([img.level_shape(m) for m in range(4)], [(8, 8), (4, 4), (2, 2), (1, 1)])
+        np.testing.assert_array_equal(img.to_numpy(0), data)
+        expected = data
+        for mip in range(1, 4):
+            expected = expected.reshape(expected.shape[0] // 2, 2, expected.shape[1] // 2, 2).mean(axis=(1, 3))
+            np.testing.assert_allclose(img.to_numpy(mip), expected, rtol=1e-5, atol=1e-6, err_msg="mip %d" % mip)
+
+    def test_3d_mip_shapes(self):
+        img = self.ctx.image(8, 4, "R16G16B16A16_SFLOAT", depth=2, mips=0)
+        self.assertEqual(img.mips, 4)
+        self.assertEqual(img.level_shape(1), (1, 2, 4, 4))
+        self.assertEqual(img.level_shape(3), (1, 1, 1, 4))
+        self.assertEqual(img.level_nbytes(1), 1 * 2 * 4 * 8)
+        with self.assertRaises(ValueError):
+            self.ctx.image(8, 8, mips=5)
+
+    def test_each_level_written_then_sampled_by_lod(self):
+        fill = self.kernel("fill.comp", FILL_LEVEL)
+        img = self.ctx.image(8, 8, "R32_SFLOAT", mips=0)
+        for mip in range(img.mips):
+            size = img.level_shape(mip)
+            self.ctx.run(fill, [img.level(mip)], threads=(size[1], size[0]), push=np.float32(10 * (mip + 1)).tobytes())
+        for mip in range(img.mips):
+            np.testing.assert_array_equal(img.to_numpy(mip), 10 * (mip + 1))
+        sample = self.kernel("lods.comp", SAMPLE_LODS)
+        out = np.zeros(8, dtype=np.float32)
+        self.ctx.run(sample, [img, out], groups=1)          # all levels: lod 0, 0.5, 1, ... 3.5
+        if self.linear_filtering(img):
+            np.testing.assert_allclose(out, [10, 15, 20, 25, 30, 35, 40, 40], rtol=1e-5)
+        else:
+            self.assertEqual(out[0], 10)
+            self.assertEqual(out[6], 40)
+        self.ctx.run(sample, [img.level(2), out], groups=1)  # only level 2, whatever the lod
+        np.testing.assert_array_equal(out, 30)
+        with self.assertRaises(IndexError):
+            img.level(4)
+
+    def linear_filtering(self, img):
+        """Whether the device filters R32_SFLOAT linearly, judged by sampling midway between two texels."""
+        tex = self.ctx.upload_image(np.array([[0.0, 1.0]], dtype=np.float32))
+        sample = self.kernel("sample2d.comp", SAMPLE_2D)
+        out = np.zeros((1, 4), dtype=np.float32)
+        self.ctx.run(sample, [tex, np.array([[0.5, 0.5]], np.float32), out], threads=1, push=struct.pack("<I", 1))
+        return abs(out[0, 0] - 0.5) < 1e-3
+
+    def test_save_image_files(self):
+        rgba = np.random.default_rng(3).random((5, 7, 4), dtype=np.float32) * 4
+        img = self.ctx.upload_image(rgba)
+        img.save(self.tmp / "a.npy")
+        np.testing.assert_array_equal(np.load(self.tmp / "a.npy"), rgba)
+        for half, size in ((True, 2), (False, 4)):
+            path = self.tmp / ("a_%d.exr" % size)
+            img.save(path, half=half)
+            data = path.read_bytes()
+            self.assertEqual(data[:4], b"\x76\x2f\x31\x01")
+            self.assertTrue(data.endswith(self.exr_last_row(rgba, size)), "last scanline of %s" % path.name)
+        img.save(self.tmp / "a.hdr")
+        self.assertTrue((self.tmp / "a.hdr").read_bytes().startswith(b"#?RADIANCE"))
+
+    @staticmethod
+    def exr_last_row(rgba, size):
+        """The values of the last scanline as saveExr stores them: channels A, B, G, R in turn."""
+        row = rgba[-1]
+        dtype = "<f2" if size == 2 else "<f4"
+        return b"".join(row[:, c].astype(dtype).tobytes() for c in (3, 2, 1, 0))
+
+    def test_save_layers_slices_and_mips(self):
+        layers = np.stack([np.full((4, 4), v, np.float32) for v in (1, 2, 3)])
+        img = self.ctx.upload_image(layers, kind="array", mips=0)
+        img.save(self.tmp / "l.npy", layer=2)
+        np.testing.assert_array_equal(np.load(self.tmp / "l.npy"), np.full((4, 4, 1), 3, np.float32))
+        img.save(self.tmp / "m.npy", mip=2, layer=1)
+        np.testing.assert_allclose(np.load(self.tmp / "m.npy"), np.full((1, 1, 1), 2, np.float32))
+        with self.assertRaises(ValueError):
+            img.save(self.tmp / "x.npy", layer=3)
+        with self.assertRaises(ValueError):
+            img.save(self.tmp / "x.png")
+        with self.assertRaises(ValueError):
+            self.ctx.image(2, 2, "R32_UINT").save(self.tmp / "u.exr")
+
+    def test_srgb_is_decoded(self):
+        texels = np.array([[[0, 64, 128, 255], [255, 200, 30, 128]]], dtype=np.uint8)
+        img = self.ctx.upload_image(texels, format="R8G8B8A8_SRGB")
+        img.save(self.tmp / "s.npy")
+        saved = np.load(self.tmp / "s.npy")
+        c = texels / 255.0
+        np.testing.assert_allclose(saved[..., :3], srgb_to_linear(c[..., :3]), atol=1e-6)
+        np.testing.assert_allclose(saved[..., 3], c[..., 3], atol=1e-6)
+
+    def test_save_arrays(self):
+        grey = np.linspace(0, 8, 12, dtype=np.float32).reshape(3, 4)
+        sk.save_exr(self.tmp / "g.exr", grey, half=False)
+        self.assertTrue((self.tmp / "g.exr").read_bytes().endswith(grey[-1].astype("<f4").tobytes()))
+        sk.save_hdr(self.tmp / "g.hdr", grey)
+        self.assertIn(b"-Y 3 +X 4\n", (self.tmp / "g.hdr").read_bytes())
+        with self.assertRaises(ValueError):
+            sk.save_exr(self.tmp / "bad.exr", np.zeros((2, 2, 5), np.float32))
+
+
 class InstalledPackage(unittest.TestCase):
     def test_in_fresh_interpreter(self):
         if sk.extension_available():

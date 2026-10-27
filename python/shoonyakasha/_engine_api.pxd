@@ -513,10 +513,9 @@ cdef extern from "Compute/Compute.h" namespace "Shoonyakasha::Compute":
         SampledImage "Shoonyakasha::Compute::KernelBinding::Type::SampledImage"
 
     cdef enum class ComputeBindingDim "Shoonyakasha::Compute::KernelBinding::Dim":
-        DimNone "Shoonyakasha::Compute::KernelBinding::Dim::None"
-        Image2D "Shoonyakasha::Compute::KernelBinding::Dim::Image2D"
-        Image3D "Shoonyakasha::Compute::KernelBinding::Dim::Image3D"
-        Cube "Shoonyakasha::Compute::KernelBinding::Dim::Cube"
+        Image2D
+        Image3D
+        Cube
 
     cdef cppclass ComputeKernelBinding "Shoonyakasha::Compute::KernelBinding":
         uint32_t binding
@@ -542,20 +541,23 @@ cdef extern from "Compute/Compute.h" namespace "Shoonyakasha::Compute":
     cdef cppclass CppComputeImage "Shoonyakasha::Compute::Image":
         CppComputeImage()
         cbool valid()
-        uint32_t width()
-        uint32_t height()
-        uint32_t depth()
+        uint32_t width(uint32_t mip)
+        uint32_t height(uint32_t mip)
+        uint32_t depth(uint32_t mip)
         uint32_t layers()
+        uint32_t mipLevels()
         const string& format()
         size_t texelSize()
-        size_t byteSize()
-        void upload(const void* data, size_t bytes) except + nogil
-        void download(void* out, size_t bytes) except + nogil
+        size_t byteSize(uint32_t mip)
+        void upload(const void* data, size_t bytes, uint32_t mip) except + nogil
+        void download(void* out, size_t bytes, uint32_t mip) except + nogil
+        void generateMips() except + nogil
 
     cdef cppclass CppComputeBinding "Shoonyakasha::Compute::Binding":
         CppComputeBinding()
         CppComputeBinding(const CppComputeBuffer& buffer)
         CppComputeBinding(const CppComputeImage& image)
+        CppComputeBinding(const CppComputeImage& image, uint32_t mip)
 
     cdef cppclass CppComputeKernel "Shoonyakasha::Compute::Kernel":
         CppComputeKernel()
@@ -568,10 +570,22 @@ cdef extern from "Compute/Compute.h" namespace "Shoonyakasha::Compute":
         cbool isShutdown()
         CppComputeBuffer createBuffer(size_t bytes) except + nogil
         CppComputeImage createImage(const string& format, uint32_t width, uint32_t height, uint32_t depth,
-                                    uint32_t layers) except + nogil
+                                    uint32_t layers, uint32_t mipLevels) except + nogil
         CppComputeKernel loadKernel(const string& spvPath) except +
         void run(const CppComputeKernel& kernel, const vector[CppComputeBinding]& bindings, ComputeUint3 groups,
                  const void* push, size_t pushBytes) except + nogil
+
+cdef extern from "Compute/ImageFiles.h" namespace "Shoonyakasha::Compute":
+    cdef enum class ExrPixelType "Shoonyakasha::Compute::ExrPixelType":
+        Half
+        Float
+
+    void saveHdr(const string& path, const float* texels, uint32_t width, uint32_t height,
+                 uint32_t channels) except + nogil
+    void saveExr(const string& path, const float* texels, uint32_t width, uint32_t height, uint32_t channels,
+                 ExrPixelType type) except + nogil
+    void saveImage(const string& path, const CppComputeImage& image, uint32_t mip, uint32_t layer,
+                   ExrPixelType type) except + nogil
 
 cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
     cdef cppclass Readback "Shoonyakasha::Facade::Readback":

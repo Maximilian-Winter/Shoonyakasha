@@ -113,42 +113,51 @@ private:
     std::shared_ptr<detail::BufferState> m_state;
 };
 
-/// An image in device memory with one mip level: 2D (depth 1, layers 1),
-/// a 2D array (layers > 1), or 3D (depth > 1). An array of 6 x n square
-/// layers can also be bound as a cube or cube array. Usable as a storage
-/// image and as a sampled image, as far as its format supports each on the
-/// device. Default-constructed, it holds nothing (valid() is false).
+/// An image in device memory: 2D (depth 1, layers 1), a 2D array
+/// (layers > 1), or 3D (depth > 1), with one or more mip levels. An array
+/// of 6 x n square layers can also be bound as a cube or cube array. Usable
+/// as a storage image and as a sampled image, as far as its format supports
+/// each on the device. Default-constructed, it holds nothing (valid() is
+/// false).
 ///
-/// Its texels are copied tightly packed: rows of `width` texels, `height`
-/// rows to a slice, slices (3D) or layers (arrays) one after another.
+/// Each mip level is copied tightly packed: rows of the level's width,
+/// its height in rows to a slice, slices (3D) or layers (arrays) one after
+/// another. Level m is max(1, size >> m) in each of width, height and depth.
 class Image {
 public:
     Image() = default;
 
     bool valid() const;
-    uint32_t width() const;
-    uint32_t height() const;
-    uint32_t depth() const;
+    uint32_t width(uint32_t mip = 0) const;
+    uint32_t height(uint32_t mip = 0) const;
+    uint32_t depth(uint32_t mip = 0) const;
     uint32_t layers() const;
+    uint32_t mipLevels() const;
     /// The pipeline JSON name of its format, such as "R32G32B32A32_SFLOAT".
     const std::string& format() const;
     size_t texelSize() const;
-    /// width x height x depth x layers x texelSize.
-    size_t byteSize() const;
+    /// Bytes of mip level `mip`, all layers: width x height x depth x
+    /// layers x texelSize at that level.
+    size_t byteSize(uint32_t mip = 0) const;
 
-    /// Copies byteSize() bytes from `data` into the whole image.
-    void upload(const void* data, size_t bytes);
+    /// Copies byteSize(mip) bytes from `data` into mip level `mip`.
+    void upload(const void* data, size_t bytes, uint32_t mip = 0);
 
-    /// Copies the whole image into `out`, which holds byteSize() bytes.
-    void download(void* out, size_t bytes) const;
+    /// Copies mip level `mip` into `out`, which holds byteSize(mip) bytes.
+    void download(void* out, size_t bytes, uint32_t mip = 0) const;
 
-    /// The whole image as Ts; byteSize() must be a multiple of sizeof(T).
+    /// Mip level `mip` as Ts; byteSize(mip) must be a multiple of sizeof(T).
     template <typename T>
-    std::vector<T> download() const {
-        std::vector<T> out(byteSize() / sizeof(T));
-        download(out.data(), out.size() * sizeof(T));
+    std::vector<T> download(uint32_t mip = 0) const {
+        std::vector<T> out(byteSize(mip) / sizeof(T));
+        download(out.data(), out.size() * sizeof(T), mip);
         return out;
     }
+
+    /// Fills mip levels 1 and up from level 0, each by halving the one
+    /// before it with linear filtering. Throws std::runtime_error when the
+    /// device cannot blit and linearly filter the format.
+    void generateMips();
 
 private:
     friend class Context;
@@ -156,17 +165,22 @@ private:
     std::shared_ptr<detail::ImageState> m_state;
 };
 
-/// A buffer or an image given to one binding of a kernel.
+/// A buffer or an image given to one binding of a kernel. An image bound
+/// as a storage image is bound at one mip level: `mip`, or 0 when none is
+/// given. As a sampled image it is bound with all its levels, or with only
+/// `mip` when one is given.
 class Binding {
 public:
     Binding() = default;   ///< empty; run() rejects it
     Binding(const Buffer& buffer) : m_buffer(buffer.m_state) {}
     Binding(const Image& image) : m_image(image.m_state) {}
+    Binding(const Image& image, uint32_t mip) : m_image(image.m_state), m_mip(static_cast<int64_t>(mip)) {}
 
 private:
     friend class Context;
     std::shared_ptr<detail::BufferState> m_buffer;
     std::shared_ptr<detail::ImageState> m_image;
+    int64_t m_mip = -1;    ///< -1: no level given
 };
 
 /// A compute pipeline made from one shader.
@@ -211,15 +225,18 @@ public:
     Buffer upload(const void* data, size_t bytes);
 
     /// An image filled with zeros. `format` is a pipeline JSON format name
-    /// with a known texel size. Throws std::invalid_argument for a zero
-    /// size, depth and layers both above 1, or a format that is unknown or
-    /// that the device can neither store to nor sample in compute shaders.
+    /// with a known texel size. `mipLevels` 0 makes the full chain, down to
+    /// 1x1(x1). Throws std::invalid_argument for a zero size, depth and
+    /// layers both above 1, more mip levels than the full chain, or a format
+    /// that is unknown or that the device can neither store to nor sample
+    /// in compute shaders.
     Image createImage(const std::string& format, uint32_t width, uint32_t height,
-                      uint32_t depth = 1, uint32_t layers = 1);
+                      uint32_t depth = 1, uint32_t layers = 1, uint32_t mipLevels = 1);
 
-    /// createImage, then Image::upload(data, bytes).
+    /// createImage, then Image::upload(data, bytes) into mip level 0.
     Image uploadImage(const std::string& format, uint32_t width, uint32_t height,
-                      const void* data, size_t bytes, uint32_t depth = 1, uint32_t layers = 1);
+                      const void* data, size_t bytes, uint32_t depth = 1, uint32_t layers = 1,
+                      uint32_t mipLevels = 1);
 
     /// A kernel from a SPIR-V file. Throws when the file cannot be read or
     /// reflectKernel rejects it.
@@ -231,8 +248,9 @@ public:
     /// image for an image binding. An image is bound as the shader's image
     /// type declares: 2D needs depth 1 and layers 1; 2D array, depth 1; 3D,
     /// depth > 1; cube, 6 square layers; cube array, 6 x n square layers. A
-    /// sampled image is read with linear filtering where its format allows
-    /// it (nearest otherwise) and coordinates clamped to the edge. `push` is
+    /// sampled image is read with linear filtering, between texels and
+    /// between mip levels, where its format allows it (nearest otherwise)
+    /// and coordinates clamped to the edge. See Binding for mip levels. `push` is
     /// copied into the push constants; it may be shorter than
     /// KernelInfo::pushConstantSize, and the rest is zero. Throws
     /// std::invalid_argument when the bindings or push constants do not

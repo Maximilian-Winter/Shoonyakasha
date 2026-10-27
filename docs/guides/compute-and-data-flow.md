@@ -93,13 +93,31 @@ A kernel's bindings, push constant size and workgroup size are read from its SPI
 - An array (anything with the buffer protocol and contiguous memory) is copied to a buffer for the run, and copied back into afterwards when it is writable and the binding is not `readonly`.
 - An image binding takes a `GpuImage`. `ctx.image(width, height, format, depth=1, layers=1)` makes one filled with zeros: 2D, a 2D array (`layers` > 1) or 3D (`depth` > 1), one mip level, with a pipeline JSON format name such as `"R32G32B32A32_SFLOAT"` (the default). `ctx.upload_image(array, format=None, kind="2d")` makes one from an array shaped `(height, width[, channels])`, or `(depth | layers, height, width[, channels])` with `kind="3d"` or `"array"`; without a format it takes the dtype's (float32 to `R32…_SFLOAT`, float16 to `R16…_SFLOAT`, uint8 to `R8…_UNORM`, other integers to `…_UINT` or `…_SINT`). `img.to_numpy()` returns the texels in that shape, and `img.upload()`, `img.to_bytes()` and `img.download_into()` copy tightly packed texels.
 
-An image is bound as the shader declares it: a 2D image needs depth 1 and one layer, a 2D array depth 1, a 3D image depth > 1, a cube six square layers (+X, −X, +Y, −Y, +Z, −Z), a cube array 6 × n. A storage image whose format qualifier names another format than the image's is rejected. Sampled images are read with linear filtering where the device can filter the format, nearest otherwise, clamped to the edge.
+An image is bound as the shader declares it: a 2D image needs depth 1 and one layer, a 2D array depth 1, a 3D image depth > 1, a cube six square layers (+X, −X, +Y, −Y, +Z, −Z), a cube array 6 × n. A storage image whose format qualifier names another format than the image's is rejected. Sampled images are read with linear filtering, between texels and between mip levels, where the device can filter the format, nearest otherwise, clamped to the edge.
+
+### Mip levels
+
+`ctx.image(..., mips=n)` gives an image `n` mip levels, `mips=0` the full chain down to 1×1; level m is `max(1, size >> m)` in each dimension. `img.generate_mips()` fills levels 1 and up from level 0, each by halving the one before with linear filtering, and raises `RuntimeError` where the device cannot blit and filter the format; `ctx.upload_image(array, mips=0)` uploads level 0 and generates the rest. A storage image is bound at level 0 and a sampled image with all its levels; `img.level(m)` in `run`'s bindings binds level m alone, so a kernel can write each level itself:
+
+```python
+env = ctx.image(256, 256, "R16G16B16A16_SFLOAT", layers=6, mips=0)
+for mip in range(env.mips):
+    size = env.level_shape(mip)                   # (6, height, width, 4)
+    ctx.run(prefilter, [source, env.level(mip)], threads=(size[2], size[1], 6),
+            push=struct.pack("<f", mip / (env.mips - 1)))
+```
+
+`img.upload`, `img.to_numpy`, `img.to_bytes` and `img.download_into` take a `mip` argument (default 0), and `img.level_shape(mip)` and `img.level_nbytes(mip)` give its shape and size.
+
+### Image files
+
+`img.save(path, mip=0, layer=0, half=True)` writes one layer (of an array) or slice (of a 3D image) by the path's extension: `.exr` (uncompressed, 16-bit floats, or 32-bit with `half=False`), `.hdr` (Radiance RGBE) or `.npy` (float32, height × width × channels). Texels are converted to floats: UNORM formats to 0..1, sRGB formats decoded to linear, the packed B10G11R11 and A2B10G10R10 formats unpacked; integer formats raise `ValueError`. `sk.save_exr(path, array, half=True)` and `sk.save_hdr(path, array)` write NumPy arrays shaped `(height, width)` or `(height, width, channels)`. An `.exr` stores 1 channel as Y, 2 as R and G, 3 as R, G and B, 4 as R, G, B and A; an `.hdr` stores RGB, 1 channel as grey, 2 as red and green with blue zero, and drops alpha.
 
 `groups` is the number of workgroups; `threads` is the number of invocations, divided by the local size and rounded up, so the shader must skip invocations past the end. Either is an int or up to three ints. `push` may be shorter than the kernel's push constants; the rest is zero.
 
 `ctx.shutdown()`, or leaving the `with` block, frees the context's buffers, images and kernels; using one afterwards raises `RuntimeError`. The engine's context is shut down after `on_cleanup`. A context is used from one thread at a time; `engine.compute` from the engine's callbacks.
 
-In C++ the same API is `Shoonyakasha::Compute::Context` in `Compute/Compute.h`, constructed without arguments for a device of its own or from a `VulkanDevice&`, with `EngineAPI::compute()` giving the engine's. `createImage` and `uploadImage` make `Image`s, and `run` takes a list of `Binding`s, each a `Buffer` or an `Image`. `Compute/Npy.h` writes and reads `.npy` files (`saveNpy`, `loadNpy`) that `numpy.load` and `numpy.save` share:
+In C++ the same API is `Shoonyakasha::Compute::Context` in `Compute/Compute.h`, constructed without arguments for a device of its own or from a `VulkanDevice&`, with `EngineAPI::compute()` giving the engine's. `createImage` and `uploadImage` make `Image`s, and `run` takes a list of `Binding`s, each a `Buffer`, an `Image`, or `Binding(image, mip)` for one mip level. `Compute/ImageFiles.h` has `saveExr`, `saveHdr` and `saveImage`. `Compute/Npy.h` writes and reads `.npy` files (`saveNpy`, `loadNpy`) that `numpy.load` and `numpy.save` share:
 
 ```cpp
 #include "Compute/Compute.h"
