@@ -1,0 +1,66 @@
+{
+  "name": "StreamedParticles",
+  "description": "Particles whose positions a Python thread streams in, drawn as glowing points tinted by the attractors' GPU component rows.",
+  "resources": [
+    { "name": "swapchain", "kind": "image", "imported": true }
+  ],
+  "bufferLayouts": {
+    "Camera": {
+      "usage": "uniform_buffer", "packing": "std140", "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "view", "type": "mat4", "source": "scene.camera.view" },
+        { "name": "proj", "type": "mat4", "source": "scene.camera.projection" },
+        { "name": "attractorCount", "type": "uint", "source": "scene.custom.components.Attractor.count" },
+        { "name": "screenHeight", "type": "float", "source": "scene.screen.height" },
+        { "name": "pointSize", "type": "float", "source": "scene.custom.particles.pointSize" }
+      ]
+    },
+    "Particles": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 262144,
+      "fields": [{ "name": "positionSpeed", "type": "vec4" }]
+    },
+    "Attractors": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 16,
+      "source": { "type": "scene", "data": "components", "component": "Attractor" },
+      "fields": [
+        { "name": "positionStrength", "type": "vec4" },
+        { "name": "color", "type": "vec4" }
+      ]
+    }
+  },
+  "descriptorSetLayouts": {
+    "particleSet": {
+      "bindings": [
+        { "binding": 0, "type": "uniform_buffer", "stages": ["vertex"], "name": "camera", "autoBindBuffer": "Camera" },
+        { "binding": 1, "type": "storage_buffer", "stages": ["vertex"], "name": "particles", "autoBindBuffer": "Particles" },
+        { "binding": 2, "type": "storage_buffer", "stages": ["vertex"], "name": "attractors", "autoBindBuffer": "Attractors" }
+      ]
+    }
+  },
+  "passes": [
+    {
+      "name": "Particles",
+      "type": "graphics",
+      "execution": {
+        "type": "draw",
+        "vertexCount": { "parameter": "particleCount" },
+        "instanceCount": 1,
+        "bindDescriptorSets": true
+      },
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_write", "present": true, "clear": [0.002, 0.0022, 0.004, 1.0] }
+      ],
+      "pipeline": {
+        "vertexShader": "shaders/particle.vert.spv",
+        "fragmentShader": "shaders/particle.frag.spv",
+        "topology": "point_list",
+        "vertexInput": "none",
+        "cullMode": "none",
+        "depthTest": false,
+        "depthWrite": false,
+        "blending": "additive"
+      },
+      "descriptorSets": ["particleSet"]
+    }
+  ]
+}

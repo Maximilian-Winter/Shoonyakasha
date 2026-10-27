@@ -22,17 +22,14 @@ import queue
 import threading
 from pathlib import Path
 
-__all__ = ["Player", "play", "frames"]
+__all__ = ["Player", "play", "frames", "recording_shape"]
 
 
 def _npy_frames_from_stream(stream):
     """The frames of the .npy data `stream` reads, first axis first, as bytes."""
     import numpy as np
-    from numpy.lib import format as npy
 
-    version = npy.read_magic(stream)
-    shape, fortran, dtype = (npy.read_array_header_1_0(stream) if version == (1, 0)
-                             else npy.read_array_header_2_0(stream))
+    shape, fortran, dtype = _npy_header(stream)
     if fortran:
         raise ValueError("arrays in Fortran order are not played")
     if not shape:
@@ -43,6 +40,30 @@ def _npy_frames_from_stream(stream):
         if len(data) < frame_bytes:
             raise ValueError("the recording ends inside a frame")
         yield data
+
+
+def _npy_header(stream):
+    """(shape, fortran order, dtype) from the start of .npy data `stream` reads."""
+    from numpy.lib import format as npy
+
+    version = npy.read_magic(stream)
+    return npy.read_array_header_1_0(stream) if version == (1, 0) else npy.read_array_header_2_0(stream)
+
+
+def recording_shape(source, timeout=60):
+    """The shape of the recording `source` (a NumPy array, the path of an
+    .npy file, or an http(s) URL of one), frames first. A URL's is read from
+    the start of the file, without downloading the frames."""
+    import numpy as np
+
+    if isinstance(source, (np.ndarray, np.generic)):
+        return tuple(np.shape(source))
+    if isinstance(source, str) and source.startswith(("http://", "https://")):
+        import urllib.request
+        request = urllib.request.Request(source, headers={"User-Agent": "shoonyakasha"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return tuple(_npy_header(response)[0])
+    return tuple(np.load(Path(source), mmap_mode="r").shape)
 
 
 def frames(source, loop=False, timeout=60):

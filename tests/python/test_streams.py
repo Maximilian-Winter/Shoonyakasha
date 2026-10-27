@@ -82,6 +82,13 @@ class Frames(unittest.TestCase):
         self.assertEqual(list(streams.frames(self.tmp / "r.npy")), expected)
         self.assertEqual(list(streams.frames(self.serve() + "r.npy")), expected)
 
+    def test_recording_shape(self):
+        data = recording(5, values=4)
+        np.save(self.tmp / "r.npy", data)
+        self.assertEqual(streams.recording_shape(data), (5, 4))
+        self.assertEqual(streams.recording_shape(self.tmp / "r.npy"), (5, 4))
+        self.assertEqual(streams.recording_shape(self.serve() + "r.npy"), (5, 4))
+
     def test_loop_starts_again(self):
         data = recording(3)
         frames = streams.frames(data, loop=True)
