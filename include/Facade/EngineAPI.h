@@ -383,7 +383,7 @@ public:
     /// for running compute shaders on buffers synchronously from the
     /// engine's callbacks. Null before the device exists, from onInit on it
     /// is the same context each call. It is shut down after onCleanup, and
-    /// its buffers and kernels with it.
+    /// its buffers, images and kernels with it.
     std::shared_ptr<Compute::Context> compute();
 
     // ═══════════════════════════════════════════════════════════

@@ -509,12 +509,23 @@ cdef extern from "Compute/Compute.h" namespace "Shoonyakasha::Compute":
     cdef enum class ComputeBindingType "Shoonyakasha::Compute::KernelBinding::Type":
         StorageBuffer "Shoonyakasha::Compute::KernelBinding::Type::StorageBuffer"
         UniformBuffer "Shoonyakasha::Compute::KernelBinding::Type::UniformBuffer"
+        StorageImage "Shoonyakasha::Compute::KernelBinding::Type::StorageImage"
+        SampledImage "Shoonyakasha::Compute::KernelBinding::Type::SampledImage"
+
+    cdef enum class ComputeBindingDim "Shoonyakasha::Compute::KernelBinding::Dim":
+        DimNone "Shoonyakasha::Compute::KernelBinding::Dim::None"
+        Image2D "Shoonyakasha::Compute::KernelBinding::Dim::Image2D"
+        Image3D "Shoonyakasha::Compute::KernelBinding::Dim::Image3D"
+        Cube "Shoonyakasha::Compute::KernelBinding::Dim::Cube"
 
     cdef cppclass ComputeKernelBinding "Shoonyakasha::Compute::KernelBinding":
         uint32_t binding
         ComputeBindingType type
         cbool readOnly
         string name
+        ComputeBindingDim dim
+        cbool arrayed
+        string format
 
     cdef cppclass ComputeKernelInfo "Shoonyakasha::Compute::KernelInfo":
         vector[ComputeKernelBinding] bindings
@@ -528,6 +539,24 @@ cdef extern from "Compute/Compute.h" namespace "Shoonyakasha::Compute":
         void upload(const void* data, size_t bytes, size_t offset) except + nogil
         void download(void* out, size_t bytes, size_t offset) except + nogil
 
+    cdef cppclass CppComputeImage "Shoonyakasha::Compute::Image":
+        CppComputeImage()
+        cbool valid()
+        uint32_t width()
+        uint32_t height()
+        uint32_t depth()
+        uint32_t layers()
+        const string& format()
+        size_t texelSize()
+        size_t byteSize()
+        void upload(const void* data, size_t bytes) except + nogil
+        void download(void* out, size_t bytes) except + nogil
+
+    cdef cppclass CppComputeBinding "Shoonyakasha::Compute::Binding":
+        CppComputeBinding()
+        CppComputeBinding(const CppComputeBuffer& buffer)
+        CppComputeBinding(const CppComputeImage& image)
+
     cdef cppclass CppComputeKernel "Shoonyakasha::Compute::Kernel":
         CppComputeKernel()
         cbool valid()
@@ -538,8 +567,10 @@ cdef extern from "Compute/Compute.h" namespace "Shoonyakasha::Compute":
         void shutdown()
         cbool isShutdown()
         CppComputeBuffer createBuffer(size_t bytes) except + nogil
+        CppComputeImage createImage(const string& format, uint32_t width, uint32_t height, uint32_t depth,
+                                    uint32_t layers) except + nogil
         CppComputeKernel loadKernel(const string& spvPath) except +
-        void run(const CppComputeKernel& kernel, const vector[CppComputeBuffer]& bindings, ComputeUint3 groups,
+        void run(const CppComputeKernel& kernel, const vector[CppComputeBinding]& bindings, ComputeUint3 groups,
                  const void* push, size_t pushBytes) except + nogil
 
 cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":

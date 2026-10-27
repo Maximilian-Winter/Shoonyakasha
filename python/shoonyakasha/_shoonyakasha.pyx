@@ -57,7 +57,7 @@ from ._engine_api cimport (
     videoRecordingAvailable, findFfmpeg, checkPipelineJson, Readback,
     CppPlanetLod, LodBody, LodView, LodNodeInfo, LodJob, LodFaceColours,
     CppComputeContext, CppComputeBuffer, CppComputeKernel, ComputeKernelInfo, ComputeKernelBinding,
-    ComputeBindingType, ComputeUint3,
+    ComputeBindingType, ComputeUint3, CppComputeImage, CppComputeBinding, ComputeBindingDim,
 )
 from libcpp.memory cimport shared_ptr
 
@@ -1807,6 +1807,161 @@ cdef class GpuBuffer:
         return "GpuBuffer(size=%d%s)" % (self._buf.size(), "" if self._buf.valid() else ", released")
 
 
+import re as _re
+
+_FORMAT_KINDS = {"SFLOAT": "f", "UNORM": "u", "SRGB": "u", "UINT": "u", "SNORM": "i", "SINT": "i"}
+
+
+def _format_layout(str name):
+    """(NumPy dtype string, channels) of a pipeline JSON format name whose
+    channels share one plain type ("R32G32B32A32_SFLOAT" -> ("<f4", 4)), a
+    packed format ("B10G11R11_UFLOAT_PACK32") -> ("<u4", 1), or None."""
+    parts = name.split("_")
+    if len(parts) == 3 and parts[2].startswith("PACK"):
+        return ("<u%d" % (int(parts[2][4:]) // 8), 1)
+    if len(parts) != 2 or parts[1] not in _FORMAT_KINDS:
+        return None
+    if not _re.fullmatch(r"(?:[RGBA]\d+)+", parts[0]):
+        return None
+    channels = _re.findall(r"\d+", parts[0])
+    if len(set(channels)) != 1:
+        return None
+    bits = int(channels[0])
+    if bits % 8:
+        return None
+    kind = _FORMAT_KINDS[parts[1]]
+    return ("%s%s%d" % ("|" if bits == 8 else "<", kind, bits // 8), len(channels))
+
+
+_FORMAT_FOR_DTYPE = {"f4": ("R32", "SFLOAT"), "f2": ("R16", "SFLOAT"), "u1": ("R8", "UNORM"),
+                     "u2": ("R16", "UINT"), "u4": ("R32", "UINT"), "i1": ("R8", "SINT"),
+                     "i2": ("R16", "SINT"), "i4": ("R32", "SINT")}
+
+
+def _format_for(dtype, int channels):
+    """The format name for `channels` channels of a NumPy dtype:
+    float32 -> R32.._SFLOAT, float16 -> R16.._SFLOAT, uint8 -> R8.._UNORM,
+    other integers -> .._UINT / .._SINT."""
+    key = "%s%d" % (dtype.kind, dtype.itemsize)
+    if key not in _FORMAT_FOR_DTYPE or not 1 <= channels <= 4:
+        raise ValueError("no format for %d channel(s) of %s; give format=" % (channels, dtype))
+    bits, kind = _FORMAT_FOR_DTYPE[key]
+    return "".join(c + bits[1:] for c in "RGBA"[:channels]) + "_" + kind
+
+
+cdef class GpuImage:
+    """An image in device memory with one mip level, made by
+    ComputeContext.image or ComputeContext.upload_image: 2D, a 2D array
+    (layers > 1; 6 x n square layers can be bound as a cube or cube array)
+    or 3D (depth > 1). Usable as a storage image and as a sampled image, as
+    far as its format supports each on the device. Copies return once the
+    copy is done.
+    """
+    cdef CppComputeImage _image
+    cdef ComputeContext _context
+
+    def __init__(self):
+        raise TypeError("use ComputeContext.image() or ComputeContext.upload_image()")
+
+    @staticmethod
+    cdef GpuImage _wrap(CppComputeImage image, ComputeContext context):
+        cdef GpuImage out = GpuImage.__new__(GpuImage)
+        out._image = image
+        out._context = context
+        return out
+
+    @property
+    def width(self):
+        return self._image.width()
+
+    @property
+    def height(self):
+        return self._image.height()
+
+    @property
+    def depth(self):
+        return self._image.depth()
+
+    @property
+    def layers(self):
+        return self._image.layers()
+
+    @property
+    def format(self):
+        """The pipeline JSON name of its format."""
+        return self._image.format().decode("utf-8")
+
+    @property
+    def texel_size(self):
+        return self._image.texelSize()
+
+    @property
+    def nbytes(self):
+        """width x height x depth x layers x texel_size."""
+        return self._image.byteSize()
+
+    @property
+    def valid(self):
+        """False once the context is shut down."""
+        return self._image.valid()
+
+    @property
+    def shape(self):
+        """The shape to_numpy returns: (height, width), preceded by depth
+        for a 3D image or by layers for an array, followed by the channels
+        when there are more than one, or by texel_size bytes for a format
+        whose channels have no single NumPy type."""
+        layout = _format_layout(self.format)
+        out = (self.height, self.width)
+        if self.depth > 1:
+            out = (self.depth,) + out
+        if self.layers > 1:
+            out = (self.layers,) + out
+        if layout is None:
+            return out + (self.texel_size,)
+        return out + ((layout[1],) if layout[1] > 1 else ())
+
+    def upload(self, data):
+        """Copy `data` (anything with the buffer protocol and contiguous
+        memory, holding exactly nbytes bytes, texels tightly packed) into the
+        whole image."""
+        cdef const unsigned char[::1] view = memoryview(data).cast('B')
+        cdef size_t n = view.shape[0]
+        cdef const unsigned char* ptr = &view[0] if n else NULL
+        with nogil:
+            self._image.upload(ptr, n)
+
+    def download_into(self, out):
+        """Copy the whole image into `out`, a writable object with the
+        buffer protocol and contiguous memory holding nbytes bytes."""
+        cdef unsigned char[::1] view = memoryview(out).cast('B')
+        cdef size_t n = view.shape[0]
+        cdef unsigned char* ptr = &view[0] if n else NULL
+        with nogil:
+            self._image.download(ptr, n)
+
+    def to_bytes(self):
+        out = bytearray(self._image.byteSize())
+        self.download_into(out)
+        return bytes(out)
+
+    def to_numpy(self):
+        """The whole image as a new NumPy array shaped as `shape`, of the
+        format's channel type (float16 for 16-bit floats, uint8 for 8-bit
+        UNORM and SRGB, uint32 for packed formats, uint8 bytes for formats
+        whose channels have no single type)."""
+        import numpy as np
+        layout = _format_layout(self.format)
+        out = np.empty(self.shape, dtype=np.uint8 if layout is None else np.dtype(layout[0]))
+        self.download_into(out)
+        return out
+
+    def __repr__(self):
+        return "GpuImage(%dx%dx%d, layers=%d, %s%s)" % (
+            self.width, self.height, self.depth, self.layers, self.format,
+            "" if self._image.valid() else ", released")
+
+
 cdef class ComputeKernel:
     """A compute shader made by ComputeContext.kernel. Its bindings, push
     constant size and workgroup size are read from the SPIR-V."""
@@ -1827,20 +1982,36 @@ cdef class ComputeKernel:
 
     @property
     def bindings(self):
-        """The buffers the shader declares in set 0, ascending by binding:
-        dicts of "binding", "type" ("storage" or "uniform"), "read_only"
-        and "name"."""
+        """What the shader declares in set 0, ascending by binding: dicts of
+        "binding", "type" ("storage", "uniform", "storage_image" or
+        "sampled_image"), "read_only" and "name"; images also have "dim"
+        ("2d", "3d" or "cube"), "arrayed" and "format" (the storage image's
+        format qualifier as a pipeline JSON format name, or None)."""
         cdef const ComputeKernelInfo* info = &self._kernel.info()
         cdef ComputeKernelBinding b
         out = []
         for i in range(info.bindings.size()):
             b = info.bindings[i]
-            out.append({
+            if b.type == ComputeBindingType.UniformBuffer:
+                kind = "uniform"
+            elif b.type == ComputeBindingType.StorageImage:
+                kind = "storage_image"
+            elif b.type == ComputeBindingType.SampledImage:
+                kind = "sampled_image"
+            else:
+                kind = "storage"
+            entry = {
                 "binding": b.binding,
-                "type": "uniform" if b.type == ComputeBindingType.UniformBuffer else "storage",
+                "type": kind,
                 "read_only": b.readOnly,
                 "name": b.name.decode("utf-8"),
-            })
+            }
+            if kind.endswith("_image"):
+                entry["dim"] = ("3d" if b.dim == ComputeBindingDim.Image3D else
+                                "cube" if b.dim == ComputeBindingDim.Cube else "2d")
+                entry["arrayed"] = b.arrayed
+                entry["format"] = b.format.decode("utf-8") or None
+            out.append(entry)
         return out
 
     @property
@@ -1908,7 +2079,7 @@ cdef class ComputeContext:
         return False
 
     def shutdown(self):
-        """Free every buffer and kernel of this context, and its device when
+        """Free every buffer, image and kernel of this context, and its device when
         the context created it. Using them afterwards raises RuntimeError.
         For Engine.compute the engine does this itself after on_cleanup."""
         self._ctx.get().shutdown()
@@ -1932,6 +2103,51 @@ cdef class ComputeContext:
         out.upload(data)
         return out
 
+    def image(self, uint32_t width, uint32_t height, str format="R32G32B32A32_SFLOAT",
+              uint32_t depth=1, uint32_t layers=1):
+        """An image filled with zeros. `format` is a pipeline JSON format
+        name. depth > 1 makes a 3D image, layers > 1 a 2D array; not both."""
+        cdef string fmt = format.encode("utf-8")
+        cdef CppComputeImage image
+        with nogil:
+            image = self._ctx.get().createImage(fmt, width, height, depth, layers)
+        return GpuImage._wrap(image, self)
+
+    def upload_image(self, array, str format=None, str kind="2d"):
+        """An image holding a copy of a NumPy array.
+
+        `kind` "2d" takes (height, width) or (height, width, channels);
+        "3d" (depth, height, width[, channels]); "array" (layers, height,
+        width[, channels]). `format` defaults to the dtype's: float32 ->
+        R32.._SFLOAT, float16 -> R16.._SFLOAT, uint8 -> R8.._UNORM, other
+        integers -> .._UINT / .._SINT, with one channel per element of the
+        last axis.
+        """
+        import numpy as np
+        array = np.ascontiguousarray(array)
+        spatial = {"2d": 2, "3d": 3, "array": 3}.get(kind)
+        if spatial is None:
+            raise ValueError('kind is "2d", "3d" or "array"')
+        layout = _format_layout(format) if format else None
+        if array.ndim == spatial + 1:
+            channels = array.shape[-1]
+        elif array.ndim == spatial:
+            channels = 1
+        else:
+            raise ValueError("a %s image needs %d or %d axes, the array has %d" % (
+                kind, spatial, spatial + 1, array.ndim))
+        if layout is not None and array.ndim == spatial and layout[1] > 1:
+            raise ValueError("%s has %d channels; the array needs a channel axis" % (format, layout[1]))
+        if format is None:
+            format = _format_for(array.dtype, channels)
+        height, width = array.shape[spatial - 2], array.shape[spatial - 1]
+        first = array.shape[0] if spatial == 3 else 1
+        out = self.image(width, height, format,
+                         depth=first if kind == "3d" else 1,
+                         layers=first if kind == "array" else 1)
+        out.upload(array)
+        return out
+
     def kernel(self, path, **compile_options):
         """A kernel from a SPIR-V file, or from GLSL source (.comp), which is
         compiled first with shoonyakasha.shaders.compile (`compile_options`
@@ -1947,10 +2163,15 @@ cdef class ComputeContext:
         """Dispatch `kernel` and wait for it.
 
         `bindings` holds one entry per binding of the kernel, in the order
-        of kernel.bindings: a GpuBuffer, or an array (anything with the
-        buffer protocol and contiguous memory). An array is copied to a
-        buffer before the dispatch and, when it is writable and the binding
-        is not read-only, copied back into after it.
+        of kernel.bindings. A buffer binding takes a GpuBuffer, or an array
+        (anything with the buffer protocol and contiguous memory), which is
+        copied to a buffer before the dispatch and, when it is writable and
+        the binding is not read-only, copied back into after it. An image
+        binding takes a GpuImage, bound as the shader's image type declares:
+        2D needs depth 1 and layers 1, 2D array depth 1, 3D depth > 1, cube
+        6 square layers, cube array 6 x n. Sampled images are read with
+        linear filtering where the format allows it, nearest otherwise,
+        clamped to the edge.
 
         Give either `groups`, the number of workgroups, or `threads`, the
         number of invocations, which is divided by the kernel's local size
@@ -1967,10 +2188,18 @@ cdef class ComputeContext:
         if len(bindings) != len(info):
             raise ValueError("the kernel has %d binding(s), %d were given" % (len(info), len(bindings)))
 
-        cdef vector[CppComputeBuffer] buffers
+        cdef vector[CppComputeBinding] resources
         copy_back = []
         cdef GpuBuffer buf
+        cdef GpuImage img
         for item, binding in zip(bindings, info):
+            if isinstance(item, GpuImage):
+                img = item
+                resources.push_back(CppComputeBinding(img._image))
+                continue
+            if binding["type"].endswith("_image"):
+                raise TypeError("binding %d ('%s') is an image: give a GpuImage (ctx.upload_image)" % (
+                    binding["binding"], binding["name"]))
             if isinstance(item, GpuBuffer):
                 buf = item
             else:
@@ -1978,7 +2207,7 @@ cdef class ComputeContext:
                 view = memoryview(item)
                 if not view.readonly and not binding["read_only"]:
                     copy_back.append((buf, item))
-            buffers.push_back(buf._buf)
+            resources.push_back(CppComputeBinding(buf._buf))
 
         cdef ComputeUint3 count
         cdef uint32_t local
@@ -2001,7 +2230,7 @@ cdef class ComputeContext:
                 push_ptr = &constants[0]
 
         with nogil:
-            self._ctx.get().run(kernel._kernel, buffers, count, push_ptr, push_size)
+            self._ctx.get().run(kernel._kernel, resources, count, push_ptr, push_size)
 
         for buf, item in copy_back:
             buf.download_into(item)
@@ -2831,9 +3060,9 @@ cdef class Engine:
     @property
     def compute(self):
         """A ComputeContext on the engine's device, for running compute
-        shaders on buffers synchronously from the engine's callbacks (from
-        on_init on). It is shut down after on_cleanup, and its buffers and
-        kernels with it. Raises RuntimeError before the device exists.
+        shaders on buffers and images synchronously from the engine's callbacks (from
+        on_init on). It is shut down after on_cleanup, and its buffers,
+        images and kernels with it. Raises RuntimeError before the device exists.
         """
         cdef shared_ptr[CppComputeContext] ctx = self._ptr.compute()
         if not ctx:

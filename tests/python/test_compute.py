@@ -154,14 +154,16 @@ class Compute(unittest.TestCase):
         finally:
             other.shutdown()
 
-    def test_kernels_that_are_not_buffers_only_are_rejected(self):
+    def test_unsupported_descriptor_types_are_rejected(self):
         source = """#version 450
+#extension GL_EXT_samplerless_texture_functions : require
 layout(local_size_x = 1) in;
-layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
-void main() { imageStore(img, ivec2(0), vec4(1)); }
+layout(set = 0, binding = 0) uniform texture2D tex;
+layout(std430, binding = 1) buffer Out { vec4 v; } outv;
+void main() { outv.v = texelFetch(tex, ivec2(0), 0); }
 """
-        with self.assertRaisesRegex(RuntimeError, "only buffers"):
-            self.kernel("image.comp", source)
+        with self.assertRaisesRegex(RuntimeError, "not a storage buffer, uniform buffer, storage image or sampler"):
+            self.kernel("texture.comp", source)
 
     def test_shutdown_releases_everything(self):
         with sk.ComputeContext() as ctx:
@@ -175,6 +177,172 @@ void main() { imageStore(img, ivec2(0), vec4(1)); }
             buf.to_bytes()
         with self.assertRaisesRegex(RuntimeError, "shut down"):
             ctx.run(kernel, [buf], groups=1)
+
+
+WRITE_2D = """#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, rgba32f) uniform writeonly image2D target;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, imageSize(target)))) return;
+    imageStore(target, p, vec4(p.x, p.y, p.x * p.y, 1.0));
+}
+"""
+
+WRITE_3D = """#version 450
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+layout(binding = 0, r32f) uniform writeonly image3D volume;
+void main() {
+    ivec3 p = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(p, imageSize(volume)))) return;
+    imageStore(volume, p, vec4(p.z * 100 + p.y * 10 + p.x));
+}
+"""
+
+# Doubles each layer of an array in place: read and written through one binding.
+DOUBLE_LAYERS = """#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, r32f) uniform image2DArray layers;
+void main() {
+    ivec3 p = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(p, imageSize(layers)))) return;
+    imageStore(layers, p, imageLoad(layers, p) * 2.0);
+}
+"""
+
+# Samples a texture at the given coordinates.
+SAMPLE_2D = """#version 450
+layout(local_size_x = 64) in;
+layout(binding = 0) uniform sampler2D tex;
+layout(std430, binding = 1) readonly buffer Coords { vec2 uv[]; } coords;
+layout(std430, binding = 2) writeonly buffer Out { vec4 values[]; } outv;
+layout(push_constant) uniform Push { uint count; } pc;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.count) return;
+    outv.values[i] = textureLod(tex, coords.uv[i], 0.0);
+}
+"""
+
+SAMPLE_CUBE = """#version 450
+layout(local_size_x = 6) in;
+layout(binding = 0) uniform samplerCube sky;
+layout(std430, binding = 1) writeonly buffer Out { float values[]; } outv;
+const vec3 dirs[6] = vec3[](vec3(1,0,0), vec3(-1,0,0), vec3(0,1,0), vec3(0,-1,0), vec3(0,0,1), vec3(0,0,-1));
+void main() { outv.values[gl_LocalInvocationID.x] = textureLod(sky, dirs[gl_LocalInvocationID.x], 0.0).r; }
+"""
+
+
+@unittest.skipUnless(sk.extension_available(), "runs in a fresh interpreter instead (see InstalledPackage)")
+class ComputeImages(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        Compute.setUpClass.__func__(cls)
+
+    @classmethod
+    def tearDownClass(cls):
+        Compute.tearDownClass.__func__(cls)
+
+    kernel = Compute.kernel
+
+    def test_reflection(self):
+        write = self.kernel("write2d.comp", WRITE_2D)
+        self.assertEqual(write.bindings, [{"binding": 0, "type": "storage_image", "read_only": False,
+                                           "name": "target", "dim": "2d", "arrayed": False,
+                                           "format": "R32G32B32A32_SFLOAT"}])
+        cube = self.kernel("cube.comp", SAMPLE_CUBE)
+        self.assertEqual({k: cube.bindings[0][k] for k in ("type", "dim", "arrayed", "format", "read_only")},
+                         {"type": "sampled_image", "dim": "cube", "arrayed": False, "format": None,
+                          "read_only": True})
+        layers = self.kernel("layers.comp", DOUBLE_LAYERS)
+        self.assertEqual((layers.bindings[0]["dim"], layers.bindings[0]["arrayed"]), ("2d", True))
+
+    def test_storage_image_2d(self):
+        write = self.kernel("write2d.comp", WRITE_2D)
+        width, height = 21, 13
+        img = self.ctx.image(width, height, "R32G32B32A32_SFLOAT")
+        self.assertEqual((img.shape, img.texel_size, img.nbytes), ((height, width, 4), 16, width * height * 16))
+        self.ctx.run(write, [img], threads=(width, height))
+        texels = img.to_numpy()
+        y, x = np.mgrid[0:height, 0:width].astype(np.float32)
+        np.testing.assert_array_equal(texels, np.stack([x, y, x * y, np.ones_like(x)], axis=-1))
+        path = self.tmp / "image.npy"
+        np.save(path, texels)
+        np.testing.assert_array_equal(np.load(path), texels)
+
+    def test_storage_image_3d(self):
+        write = self.kernel("write3d.comp", WRITE_3D)
+        vol = self.ctx.image(5, 6, "R32_SFLOAT", depth=7)
+        self.ctx.run(write, [vol], threads=(5, 6, 7))
+        z, y, x = np.mgrid[0:7, 0:6, 0:5]
+        np.testing.assert_array_equal(vol.to_numpy(), (z * 100 + y * 10 + x).astype(np.float32))
+
+    def test_image_array_read_and_written(self):
+        double = self.kernel("layers.comp", DOUBLE_LAYERS)
+        data = np.random.default_rng(1).random((3, 9, 10), dtype=np.float32)
+        img = self.ctx.upload_image(data, kind="array")
+        self.assertEqual((img.format, img.layers, img.width, img.height), ("R32_SFLOAT", 3, 10, 9))
+        self.ctx.run(double, [img], threads=(10, 9, 3))
+        np.testing.assert_array_equal(img.to_numpy(), data * 2)
+
+    def test_sampled_image_filters_linearly(self):
+        sample = self.kernel("sample2d.comp", SAMPLE_2D)
+        texels = np.array([[[0, 0, 0, 255], [255, 0, 0, 255]]], dtype=np.uint8)   # 2x1, uint8 -> R8G8B8A8_UNORM
+        tex = self.ctx.upload_image(texels)
+        self.assertEqual(tex.format, "R8G8B8A8_UNORM")
+        np.testing.assert_array_equal(tex.to_numpy(), texels)
+        coords = np.array([[0.25, 0.5], [0.75, 0.5], [0.5, 0.5], [-1.0, 0.5]], dtype=np.float32)
+        out = np.zeros((4, 4), dtype=np.float32)
+        self.ctx.run(sample, [tex, coords, out], threads=4, push=struct.pack("<I", 4))
+        np.testing.assert_allclose(out[:, 0], [0.0, 1.0, 0.5, 0.0], atol=1 / 255)   # centres, midway, clamped
+        np.testing.assert_allclose(out[:, 3], 1.0)
+
+    def test_cube_from_six_layers(self):
+        sample = self.kernel("cube.comp", SAMPLE_CUBE)
+        faces = np.repeat(np.arange(1, 7, dtype=np.float32), 4 * 4).reshape(6, 4, 4)
+        sky = self.ctx.upload_image(faces, kind="array")
+        out = np.zeros(6, dtype=np.float32)
+        self.ctx.run(sample, [sky, out], groups=1)
+        np.testing.assert_array_equal(out, [1, 2, 3, 4, 5, 6])   # +X, -X, +Y, -Y, +Z, -Z
+
+    def test_mismatches(self):
+        write2d = self.kernel("write2d.comp", WRITE_2D)
+        with self.assertRaisesRegex(ValueError, "declared R32G32B32A32_SFLOAT"):
+            self.ctx.run(write2d, [self.ctx.image(4, 4, "R32_SFLOAT")], groups=1)
+        with self.assertRaisesRegex(ValueError, "2D image"):
+            self.ctx.run(write2d, [self.ctx.image(4, 4, "R32G32B32A32_SFLOAT", depth=2)], groups=1)
+        with self.assertRaisesRegex(TypeError, "give a GpuImage"):
+            self.ctx.run(write2d, [self.ctx.buffer(16)], groups=1)
+        with self.assertRaisesRegex(TypeError, "give a GpuImage"):
+            self.ctx.run(write2d, [np.zeros((4, 4, 4), np.float32)], groups=1)
+        accumulate = self.kernel("accumulate.comp", ACCUMULATE)
+        with self.assertRaisesRegex(ValueError, "is a buffer, an image was given"):
+            self.ctx.run(accumulate, [self.ctx.image(4, 4, "R32_SFLOAT")], groups=1)
+        sample = self.kernel("cube.comp", SAMPLE_CUBE)
+        with self.assertRaisesRegex(ValueError, "cube"):
+            self.ctx.run(sample, [self.ctx.image(4, 8, "R32_SFLOAT", layers=6), np.zeros(6, np.float32)], groups=1)
+
+    def test_bad_images(self):
+        with self.assertRaises(ValueError):
+            self.ctx.image(4, 4, "NOT_A_FORMAT")
+        with self.assertRaises(ValueError):
+            self.ctx.image(4, 4, "D32_SFLOAT")
+        with self.assertRaises(ValueError):
+            self.ctx.image(4, 4, depth=2, layers=2)
+        img = self.ctx.image(4, 4, "R32_SFLOAT")
+        with self.assertRaises(ValueError):
+            img.upload(np.zeros(15, np.float32))
+        with self.assertRaises(ValueError):
+            self.ctx.upload_image(np.zeros((4, 4), np.float32), format="R32G32B32A32_SFLOAT")
+
+    def test_format_layouts(self):
+        layout = sk._shoonyakasha._format_layout
+        self.assertEqual(layout("R32G32B32A32_SFLOAT"), ("<f4", 4))
+        self.assertEqual(layout("R16G16_SFLOAT"), ("<f2", 2))
+        self.assertEqual(layout("R8G8B8A8_SRGB"), ("|u1", 4))
+        self.assertEqual(layout("R32_SINT"), ("<i4", 1))
+        self.assertEqual(layout("B10G11R11_UFLOAT_PACK32"), ("<u4", 1))
+        self.assertIsNone(layout("D24_UNORM_S8_UINT"))
 
 
 class InstalledPackage(unittest.TestCase):

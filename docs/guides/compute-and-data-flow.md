@@ -70,7 +70,7 @@ See [JSON policy reference](../reference/pipeline-json.md#initialization-memory-
 
 ## Running compute shaders directly
 
-For precomputation (lookup tables, baked data) a compute context runs one shader on buffers and returns when the GPU is done, without a pipeline JSON or a frame loop. `sk.ComputeContext()` creates its own Vulkan device with no window; `engine.compute` is a context on a running engine's device, from `on_init` on.
+For precomputation (lookup tables, baked data) a compute context runs one shader on buffers and images and returns when the GPU is done, without a pipeline JSON or a frame loop. `sk.ComputeContext()` creates its own Vulkan device with no window; `engine.compute` is a context on a running engine's device, from `on_init` on.
 
 ```python
 import struct
@@ -85,18 +85,21 @@ with sk.ComputeContext() as ctx:
     np.save("squares.npy", result)
 ```
 
-A kernel's bindings, push constant size and workgroup size are read from its SPIR-V: `kernel.bindings` lists them as dicts of `binding`, `type` (`"storage"` or `"uniform"`), `read_only` and `name`, ascending by binding number. Kernels may use storage and uniform buffers in set 0 only; anything else is rejected when the kernel is loaded.
+A kernel's bindings, push constant size and workgroup size are read from its SPIR-V: `kernel.bindings` lists them as dicts of `binding`, `type` (`"storage"`, `"uniform"`, `"storage_image"` or `"sampled_image"`), `read_only` and `name`, ascending by binding number; images add `dim` (`"2d"`, `"3d"` or `"cube"`), `arrayed`, and `format`, a storage image's format qualifier as a pipeline JSON format name (None without one). Kernels may use storage buffers, uniform buffers, storage images and combined image samplers (`sampler2D` and so on), in set 0 only; anything else is rejected when the kernel is loaded.
 
 `ctx.run(kernel, bindings, groups=..., threads=..., push=...)` takes one entry per binding, in the order of `kernel.bindings`:
 
 - A `GpuBuffer` stays on the GPU between runs. `ctx.buffer(size)` makes one filled with zeros, `ctx.upload(array)` one holding a copy; `buf.upload(data, offset)`, `buf.to_numpy(dtype, shape)`, `buf.to_bytes()` and `buf.download_into(array)` copy in and out.
 - An array (anything with the buffer protocol and contiguous memory) is copied to a buffer for the run, and copied back into afterwards when it is writable and the binding is not `readonly`.
+- An image binding takes a `GpuImage`. `ctx.image(width, height, format, depth=1, layers=1)` makes one filled with zeros: 2D, a 2D array (`layers` > 1) or 3D (`depth` > 1), one mip level, with a pipeline JSON format name such as `"R32G32B32A32_SFLOAT"` (the default). `ctx.upload_image(array, format=None, kind="2d")` makes one from an array shaped `(height, width[, channels])`, or `(depth | layers, height, width[, channels])` with `kind="3d"` or `"array"`; without a format it takes the dtype's (float32 to `R32…_SFLOAT`, float16 to `R16…_SFLOAT`, uint8 to `R8…_UNORM`, other integers to `…_UINT` or `…_SINT`). `img.to_numpy()` returns the texels in that shape, and `img.upload()`, `img.to_bytes()` and `img.download_into()` copy tightly packed texels.
+
+An image is bound as the shader declares it: a 2D image needs depth 1 and one layer, a 2D array depth 1, a 3D image depth > 1, a cube six square layers (+X, −X, +Y, −Y, +Z, −Z), a cube array 6 × n. A storage image whose format qualifier names another format than the image's is rejected. Sampled images are read with linear filtering where the device can filter the format, nearest otherwise, clamped to the edge.
 
 `groups` is the number of workgroups; `threads` is the number of invocations, divided by the local size and rounded up, so the shader must skip invocations past the end. Either is an int or up to three ints. `push` may be shorter than the kernel's push constants; the rest is zero.
 
-`ctx.shutdown()`, or leaving the `with` block, frees the context's buffers and kernels; using one afterwards raises `RuntimeError`. The engine's context is shut down after `on_cleanup`. A context is used from one thread at a time; `engine.compute` from the engine's callbacks.
+`ctx.shutdown()`, or leaving the `with` block, frees the context's buffers, images and kernels; using one afterwards raises `RuntimeError`. The engine's context is shut down after `on_cleanup`. A context is used from one thread at a time; `engine.compute` from the engine's callbacks.
 
-In C++ the same API is `Shoonyakasha::Compute::Context` in `Compute/Compute.h`, constructed without arguments for a device of its own or from a `VulkanDevice&`, with `EngineAPI::compute()` giving the engine's. `Compute/Npy.h` writes and reads `.npy` files (`saveNpy`, `loadNpy`) that `numpy.load` and `numpy.save` share:
+In C++ the same API is `Shoonyakasha::Compute::Context` in `Compute/Compute.h`, constructed without arguments for a device of its own or from a `VulkanDevice&`, with `EngineAPI::compute()` giving the engine's. `createImage` and `uploadImage` make `Image`s, and `run` takes a list of `Binding`s, each a `Buffer` or an `Image`. `Compute/Npy.h` writes and reads `.npy` files (`saveNpy`, `loadNpy`) that `numpy.load` and `numpy.save` share:
 
 ```cpp
 #include "Compute/Compute.h"

@@ -1,9 +1,11 @@
 //
-// Compute.cpp - Context, Buffer and Kernel (include/Compute/Compute.h)
+// Compute.cpp - Context, Buffer, Image and Kernel (include/Compute/Compute.h)
 //
 
 #include "Compute/Compute.h"
 
+#include "GPU/VkFormatUtils.h"
+#include "Vulkan/FrameGraph/FrameGraphJson.h"
 #include "Vulkan/VulkanComputePipeline.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanInstance.h"
@@ -36,6 +38,8 @@ struct ContextState {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
+    VkSampler linearSampler = VK_NULL_HANDLE;
+    VkSampler nearestSampler = VK_NULL_HANDLE;
     bool alive = false;
 
     std::vector<std::weak_ptr<Resource>> resources;
@@ -52,6 +56,23 @@ struct ContextState {
                                        [](const std::weak_ptr<Resource>& r) { return r.expired(); }),
                         resources.end());
         resources.push_back(resource);
+    }
+
+    /// The sampler sampled images are read with: clamped to the edge,
+    /// linear or nearest filtering. Made on first use.
+    VkSampler sampler(bool linear) {
+        VkSampler& slot = linear ? linearSampler : nearestSampler;
+        if (slot != VK_NULL_HANDLE) return slot;
+        VkSamplerCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        info.magFilter = info.minFilter = linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+        info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        info.addressModeU = info.addressModeV = info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        info.maxLod = 0.0f;
+        if (vkCreateSampler(vk(), &info, nullptr, &slot) != VK_SUCCESS) {
+            throw std::runtime_error("compute: could not create a sampler");
+        }
+        return slot;
     }
 
     /// Records commands with `record`, submits them to the graphics queue
@@ -131,9 +152,12 @@ struct ContextState {
         }
         resources.clear();
         if (device) {
+            if (linearSampler != VK_NULL_HANDLE) vkDestroySampler(vk(), linearSampler, nullptr);
+            if (nearestSampler != VK_NULL_HANDLE) vkDestroySampler(vk(), nearestSampler, nullptr);
             if (fence != VK_NULL_HANDLE) vkDestroyFence(vk(), fence, nullptr);
             if (pool != VK_NULL_HANDLE) vkDestroyCommandPool(vk(), pool, nullptr);
         }
+        linearSampler = nearestSampler = VK_NULL_HANDLE;
         fence = VK_NULL_HANDLE;
         pool = VK_NULL_HANDLE;
         cmd = VK_NULL_HANDLE;
@@ -161,6 +185,31 @@ struct BufferState : Resource {
     }
 };
 
+struct ImageState : Resource {
+    std::shared_ptr<ContextState> context;
+    VkImage image = VK_NULL_HANDLE;
+    VmaAllocation allocation = VK_NULL_HANDLE;
+    VkFormat vkFormat = VK_FORMAT_UNDEFINED;
+    std::string format;
+    uint32_t width = 0, height = 0, depth = 1, layers = 1;
+    size_t texelSize = 0;
+    bool storage = false;          // usable as a storage image
+    bool sampled = false;          // usable as a sampled image
+    bool linearFilter = false;     // sampled with linear filtering
+    bool cubeCompatible = false;
+
+    size_t byteSize() const { return size_t(width) * height * depth * layers * texelSize; }
+
+    void release() override {
+        if (image != VK_NULL_HANDLE) vmaDestroyImage(context->allocator(), image, allocation);
+        image = VK_NULL_HANDLE;
+        allocation = VK_NULL_HANDLE;
+    }
+    ~ImageState() override {
+        if (context->alive) release();
+    }
+};
+
 struct KernelState : Resource {
     std::shared_ptr<ContextState> context;
     KernelInfo info;
@@ -182,6 +231,8 @@ struct KernelState : Resource {
 namespace {
 
 using detail::ContextState;
+using Type = KernelBinding::Type;
+using Dim = KernelBinding::Dim;
 
 /// A host-visible buffer for one copy, freed when it goes out of scope.
 struct Staging {
@@ -220,6 +271,12 @@ detail::BufferState& checked(const std::shared_ptr<detail::BufferState>& state) 
     return *state;
 }
 
+detail::ImageState& checked(const std::shared_ptr<detail::ImageState>& state) {
+    if (!state) throw std::runtime_error("compute: the image is empty");
+    state->context->check();
+    return *state;
+}
+
 void checkRange(const detail::BufferState& state, size_t bytes, size_t offset) {
     if (offset > state.size || bytes > state.size - offset) {
         throw std::out_of_range("compute: " + std::to_string(bytes) + " bytes at offset " +
@@ -228,10 +285,104 @@ void checkRange(const detail::BufferState& state, size_t bytes, size_t offset) {
     }
 }
 
+void checkImageBytes(const detail::ImageState& state, size_t bytes) {
+    if (bytes != state.byteSize()) {
+        throw std::invalid_argument("compute: the image holds " + std::to_string(state.byteSize()) +
+                                    " bytes, " + std::to_string(bytes) + " were given");
+    }
+}
+
+VkBufferImageCopy wholeImage(const detail::ImageState& state) {
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, state.layers};
+    region.imageExtent = {state.width, state.height, state.depth};
+    return region;
+}
+
 std::string bindingName(const SpvReflectDescriptorBinding& b) {
     if (b.name && *b.name) return b.name;
     if (b.type_description && b.type_description->type_name) return b.type_description->type_name;
     return {};
+}
+
+/// The pipeline JSON format name of a storage image's format qualifier;
+/// empty for none. Throws for qualifiers without a matching engine format.
+std::string formatName(SpvImageFormat format, const std::string& where) {
+    switch (format) {
+        case SpvImageFormatUnknown: return {};
+        case SpvImageFormatRgba32f: return "R32G32B32A32_SFLOAT";
+        case SpvImageFormatRgba16f: return "R16G16B16A16_SFLOAT";
+        case SpvImageFormatRg32f: return "R32G32_SFLOAT";
+        case SpvImageFormatRg16f: return "R16G16_SFLOAT";
+        case SpvImageFormatR32f: return "R32_SFLOAT";
+        case SpvImageFormatR16f: return "R16_SFLOAT";
+        case SpvImageFormatR11fG11fB10f: return "B10G11R11_UFLOAT_PACK32";
+        case SpvImageFormatRgba16: return "R16G16B16A16_UNORM";
+        case SpvImageFormatRg16: return "R16G16_UNORM";
+        case SpvImageFormatR16: return "R16_UNORM";
+        case SpvImageFormatRgb10A2: return "A2B10G10R10_UNORM_PACK32";
+        case SpvImageFormatRgba8: return "R8G8B8A8_UNORM";
+        case SpvImageFormatRg8: return "R8G8_UNORM";
+        case SpvImageFormatR8: return "R8_UNORM";
+        case SpvImageFormatRgba8Snorm: return "R8G8B8A8_SNORM";
+        case SpvImageFormatRg8Snorm: return "R8G8_SNORM";
+        case SpvImageFormatR8Snorm: return "R8_SNORM";
+        case SpvImageFormatRgba32ui: return "R32G32B32A32_UINT";
+        case SpvImageFormatRg32ui: return "R32G32_UINT";
+        case SpvImageFormatR32ui: return "R32_UINT";
+        case SpvImageFormatR16ui: return "R16_UINT";
+        case SpvImageFormatR8ui: return "R8_UINT";
+        case SpvImageFormatR32i: return "R32_SINT";
+        case SpvImageFormatR16i: return "R16_SINT";
+        case SpvImageFormatR8i: return "R8_SINT";
+        default:
+            throw std::runtime_error("compute: " + where + " has a format qualifier with no matching engine format");
+    }
+}
+
+const char* dimName(Dim dim, bool arrayed) {
+    switch (dim) {
+        case Dim::Image2D: return arrayed ? "2D array" : "2D";
+        case Dim::Image3D: return "3D";
+        case Dim::Cube: return arrayed ? "cube array" : "cube";
+        default: return "?";
+    }
+}
+
+/// The view type `binding` needs for `image`, or a reason it cannot be bound.
+VkImageViewType viewTypeFor(const KernelBinding& binding, const detail::ImageState& image, const VulkanDevice& device,
+                            std::string& error) {
+    const bool is3D = image.depth > 1;
+    switch (binding.dim) {
+        case Dim::Image2D:
+            if (is3D) break;
+            if (!binding.arrayed) {
+                if (image.layers == 1) return VK_IMAGE_VIEW_TYPE_2D;
+                break;
+            }
+            return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+        case Dim::Image3D:
+            if (is3D) return VK_IMAGE_VIEW_TYPE_3D;
+            break;
+        case Dim::Cube:
+            if (!image.cubeCompatible) break;
+            if (!binding.arrayed) {
+                if (image.layers == 6) return VK_IMAGE_VIEW_TYPE_CUBE;
+                break;
+            }
+            if (!device.getEnabledFeatures().imageCubeArray) {
+                error = "the device has no cube array images";
+                return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
+            }
+            return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+        default:
+            break;
+    }
+    error = "the shader declares a " + std::string(dimName(binding.dim, binding.arrayed)) + " image, the image is " +
+            std::to_string(image.width) + "x" + std::to_string(image.height) +
+            (is3D ? "x" + std::to_string(image.depth) + " (3D)" : "") +
+            " with " + std::to_string(image.layers) + " layer(s)";
+    return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
 }
 
 } // namespace
@@ -270,19 +421,39 @@ KernelInfo reflectKernel(const void* spirv, size_t sizeBytes) {
         KernelBinding out;
         out.binding = b->binding;
         out.name = bindingName(*b);
-        if (b->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
-            out.type = KernelBinding::Type::StorageBuffer;
-            out.readOnly = (b->decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) != 0 ||
-                           (b->block.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) != 0;
-        } else if (b->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-            out.type = KernelBinding::Type::UniformBuffer;
-            out.readOnly = true;
-        } else {
-            throw std::runtime_error("compute: " + where +
-                                     " is not a storage or uniform buffer; only buffers are supported");
+        const bool nonWritable = (b->decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) != 0;
+        switch (b->descriptor_type) {
+            case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+                out.type = Type::StorageBuffer;
+                out.readOnly = nonWritable || (b->block.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) != 0;
+                break;
+            case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+                out.type = Type::UniformBuffer;
+                out.readOnly = true;
+                break;
+            case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+            case SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
+                const bool storage = b->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                out.type = storage ? Type::StorageImage : Type::SampledImage;
+                out.readOnly = !storage || nonWritable;
+                switch (b->image.dim) {
+                    case SpvDim2D: out.dim = Dim::Image2D; break;
+                    case SpvDim3D: out.dim = Dim::Image3D; break;
+                    case SpvDimCube: out.dim = Dim::Cube; break;
+                    default:
+                        throw std::runtime_error("compute: " + where + " is not a 2D, 3D or cube image");
+                }
+                if (b->image.ms) throw std::runtime_error("compute: " + where + " is multisampled");
+                out.arrayed = b->image.arrayed != 0;
+                if (storage) out.format = formatName(b->image.image_format, where);
+                break;
+            }
+            default:
+                throw std::runtime_error("compute: " + where +
+                                         " is not a storage buffer, uniform buffer, storage image or sampler");
         }
         if (b->count > 1) {
-            throw std::runtime_error("compute: " + where + " is an array of buffers, which is not supported");
+            throw std::runtime_error("compute: " + where + " is an array of descriptors, which is not supported");
         }
         info.bindings.push_back(out);
     }
@@ -328,6 +499,46 @@ void Buffer::download(void* out, size_t bytes, size_t offset) const {
     state.context->submit([&](VkCommandBuffer cmd) {
         VkBufferCopy region{offset, 0, bytes};
         vkCmdCopyBuffer(cmd, state.buffer, staging.buffer, 1, &region);
+    });
+    std::memcpy(out, staging.mapped, bytes);
+}
+
+// ─── Image ───────────────────────────────────────────────────
+
+bool Image::valid() const {
+    return m_state && m_state->context->alive && m_state->image != VK_NULL_HANDLE;
+}
+
+uint32_t Image::width() const { return m_state ? m_state->width : 0; }
+uint32_t Image::height() const { return m_state ? m_state->height : 0; }
+uint32_t Image::depth() const { return m_state ? m_state->depth : 0; }
+uint32_t Image::layers() const { return m_state ? m_state->layers : 0; }
+size_t Image::texelSize() const { return m_state ? m_state->texelSize : 0; }
+size_t Image::byteSize() const { return m_state ? m_state->byteSize() : 0; }
+
+const std::string& Image::format() const {
+    static const std::string none;
+    return m_state ? m_state->format : none;
+}
+
+void Image::upload(const void* data, size_t bytes) {
+    auto& state = checked(m_state);
+    checkImageBytes(state, bytes);
+    Staging staging(state.context->allocator(), bytes, false);
+    std::memcpy(staging.mapped, data, bytes);
+    state.context->submit([&](VkCommandBuffer cmd) {
+        const VkBufferImageCopy region = wholeImage(state);
+        vkCmdCopyBufferToImage(cmd, staging.buffer, state.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+    });
+}
+
+void Image::download(void* out, size_t bytes) const {
+    auto& state = checked(m_state);
+    checkImageBytes(state, bytes);
+    Staging staging(state.context->allocator(), bytes, true);
+    state.context->submit([&](VkCommandBuffer cmd) {
+        const VkBufferImageCopy region = wholeImage(state);
+        vkCmdCopyImageToBuffer(cmd, state.image, VK_IMAGE_LAYOUT_GENERAL, staging.buffer, 1, &region);
     });
     std::memcpy(out, staging.mapped, bytes);
 }
@@ -408,6 +619,109 @@ Buffer Context::upload(const void* data, size_t bytes) {
     return buffer;
 }
 
+Image Context::createImage(const std::string& format, uint32_t width, uint32_t height, uint32_t depth,
+                           uint32_t layers) {
+    m_state->check();
+    if (width == 0 || height == 0 || depth == 0 || layers == 0) {
+        throw std::invalid_argument("compute: an image needs a size of at least 1 in every dimension");
+    }
+    if (depth > 1 && layers > 1) {
+        throw std::invalid_argument("compute: a 3D image (depth > 1) cannot have layers");
+    }
+    VkFormat vkFormat = VK_FORMAT_UNDEFINED;
+    try {
+        vkFormat = FrameGraph::JsonUtils::stringToFormat(format);
+    } catch (const std::exception&) {
+    }
+    const uint32_t texelSize = copiedTexelSize(vkFormat);
+    if (vkFormat == VK_FORMAT_UNDEFINED || texelSize == 0 || isDepthFormat(vkFormat) || isStencilFormat(vkFormat)) {
+        throw std::invalid_argument("compute: '" + format + "' is not a colour format with a known texel size");
+    }
+
+    VkFormatProperties props{};
+    vkGetPhysicalDeviceFormatProperties(m_state->device->getPhysicalDevice(), vkFormat, &props);
+    const VkFormatFeatureFlags features = props.optimalTilingFeatures;
+
+    auto state = std::make_shared<detail::ImageState>();
+    state->context = m_state;
+    state->vkFormat = vkFormat;
+    state->format = format;
+    state->width = width;
+    state->height = height;
+    state->depth = depth;
+    state->layers = layers;
+    state->texelSize = texelSize;
+    state->storage = (features & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
+    state->sampled = (features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
+    state->linearFilter = (features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
+    state->cubeCompatible = depth == 1 && width == height && layers % 6 == 0;
+    if (!state->storage && !state->sampled) {
+        throw std::invalid_argument("compute: the device can neither store to nor sample '" + format + "' images");
+    }
+
+    VkImageCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.flags = state->cubeCompatible ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+    info.imageType = depth > 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
+    info.format = vkFormat;
+    info.extent = {width, height, depth};
+    info.mipLevels = 1;
+    info.arrayLayers = layers;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 (state->storage ? VK_IMAGE_USAGE_STORAGE_BIT : 0) | (state->sampled ? VK_IMAGE_USAGE_SAMPLED_BIT : 0);
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    m_state->device->shareWithCompute(info);
+
+    VkImageFormatProperties limits{};
+    if (vkGetPhysicalDeviceImageFormatProperties(m_state->device->getPhysicalDevice(), vkFormat, info.imageType,
+                                                 info.tiling, info.usage, info.flags, &limits) != VK_SUCCESS ||
+        width > limits.maxExtent.width || height > limits.maxExtent.height || depth > limits.maxExtent.depth ||
+        layers > limits.maxArrayLayers) {
+        throw std::invalid_argument("compute: the device does not support a " + std::to_string(width) + "x" +
+                                    std::to_string(height) + "x" + std::to_string(depth) + " '" + format +
+                                    "' image with " + std::to_string(layers) + " layer(s)");
+    }
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    if (vmaCreateImage(m_state->allocator(), &info, &allocInfo, &state->image, &state->allocation, nullptr) !=
+        VK_SUCCESS) {
+        throw std::runtime_error("compute: could not create a '" + format + "' image");
+    }
+    m_state->track(state);
+
+    // Kept in the general layout from here on, filled with zeros.
+    m_state->submit([&](VkCommandBuffer cmd) {
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = state->image;
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers};
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
+                             0, nullptr, 1, &barrier);
+        VkClearColorValue zero{};
+        vkCmdClearColorImage(cmd, state->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &barrier.subresourceRange);
+    });
+
+    Image out;
+    out.m_state = std::move(state);
+    return out;
+}
+
+Image Context::uploadImage(const std::string& format, uint32_t width, uint32_t height, const void* data,
+                           size_t bytes, uint32_t depth, uint32_t layers) {
+    Image image = createImage(format, width, height, depth, layers);
+    image.upload(data, bytes);
+    return image;
+}
+
 Kernel Context::loadKernel(const std::string& spvPath) {
     m_state->check();
     std::ifstream file(spvPath, std::ios::binary | std::ios::ate);
@@ -428,8 +742,12 @@ Kernel Context::loadKernel(const std::string& spvPath) {
     for (const auto& b : state->info.bindings) {
         VkDescriptorSetLayoutBinding lb{};
         lb.binding = b.binding;
-        lb.descriptorType = b.type == KernelBinding::Type::UniformBuffer ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-                                                                         : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        switch (b.type) {
+            case Type::StorageBuffer: lb.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; break;
+            case Type::UniformBuffer: lb.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; break;
+            case Type::StorageImage: lb.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; break;
+            case Type::SampledImage: lb.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; break;
+        }
         lb.descriptorCount = 1;
         lb.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         layoutBindings.push_back(lb);
@@ -455,7 +773,7 @@ Kernel Context::loadKernel(const std::string& spvPath) {
     return out;
 }
 
-void Context::run(const Kernel& kernel, const std::vector<Buffer>& bindings, std::array<uint32_t, 3> groups,
+void Context::run(const Kernel& kernel, const std::vector<Binding>& bindings, std::array<uint32_t, 3> groups,
                   const void* push, size_t pushBytes) {
     m_state->check();
     if (!kernel.m_state || kernel.m_state->context != m_state || !kernel.m_state->pipeline) {
@@ -464,14 +782,51 @@ void Context::run(const Kernel& kernel, const std::vector<Buffer>& bindings, std
     const auto& k = *kernel.m_state;
     if (bindings.size() != k.info.bindings.size()) {
         throw std::invalid_argument("compute: the kernel has " + std::to_string(k.info.bindings.size()) +
-                                    " binding(s), " + std::to_string(bindings.size()) + " buffer(s) were given");
+                                    " binding(s), " + std::to_string(bindings.size()) + " were given");
     }
+
+    // Check every binding before anything is created.
+    std::vector<VkImageViewType> viewTypes(bindings.size(), VK_IMAGE_VIEW_TYPE_MAX_ENUM);
     for (size_t i = 0; i < bindings.size(); ++i) {
-        const auto& b = bindings[i].m_state;
-        if (!b || b->context != m_state || b->buffer == VK_NULL_HANDLE) {
-            throw std::invalid_argument("compute: the buffer for binding " +
-                                        std::to_string(k.info.bindings[i].binding) +
-                                        " is empty or belongs to another context");
+        const KernelBinding& want = k.info.bindings[i];
+        const std::string where = "binding " + std::to_string(want.binding) + " ('" + want.name + "')";
+        const bool wantsImage = want.type == Type::StorageImage || want.type == Type::SampledImage;
+        const auto& buffer = bindings[i].m_buffer;
+        const auto& image = bindings[i].m_image;
+        if (wantsImage) {
+            if (!image) {
+                throw std::invalid_argument("compute: " + where +
+                                            (buffer ? " is an image, a buffer was given" : ": the image is empty"));
+            }
+            if (image->context != m_state || image->image == VK_NULL_HANDLE) {
+                throw std::invalid_argument("compute: the image for " + where + " is empty or belongs to another context");
+            }
+            if (want.type == Type::StorageImage && !image->storage) {
+                throw std::invalid_argument("compute: " + where + ": the device cannot use '" + image->format +
+                                            "' images as storage images");
+            }
+            if (want.type == Type::SampledImage && !image->sampled) {
+                throw std::invalid_argument("compute: " + where + ": the device cannot sample '" + image->format +
+                                            "' images");
+            }
+            if (!want.format.empty() && want.format != image->format) {
+                throw std::invalid_argument("compute: " + where + " is declared " + want.format + ", the image is " +
+                                            image->format);
+            }
+            std::string error;
+            viewTypes[i] = viewTypeFor(want, *image, *m_state->device, error);
+            if (viewTypes[i] == VK_IMAGE_VIEW_TYPE_MAX_ENUM) {
+                throw std::invalid_argument("compute: " + where + ": " + error);
+            }
+        } else {
+            if (!buffer) {
+                throw std::invalid_argument("compute: " + where +
+                                            (image ? " is a buffer, an image was given" : ": the buffer is empty"));
+            }
+            if (buffer->context != m_state || buffer->buffer == VK_NULL_HANDLE) {
+                throw std::invalid_argument("compute: the buffer for " + where +
+                                            " is empty or belongs to another context");
+            }
         }
     }
     if (pushBytes > k.info.pushConstantSize) {
@@ -481,15 +836,27 @@ void Context::run(const Kernel& kernel, const std::vector<Buffer>& bindings, std
     }
     if (groups[0] == 0 || groups[1] == 0 || groups[2] == 0) return;
 
-    // One pool per run, sized for this kernel.
-    uint32_t storage = 0, uniform = 0;
-    for (const auto& b : k.info.bindings) {
-        (b.type == KernelBinding::Type::UniformBuffer ? uniform : storage)++;
-    }
+    // One descriptor pool and the image views per run, freed when it ends.
+    struct Scratch {
+        VkDevice device;
+        VkDescriptorPool pool = VK_NULL_HANDLE;
+        std::vector<VkImageView> views;
+        ~Scratch() {
+            for (VkImageView view : views) vkDestroyImageView(device, view, nullptr);
+            if (pool != VK_NULL_HANDLE) vkDestroyDescriptorPool(device, pool, nullptr);
+        }
+    } scratch{m_state->vk()};
+
+    uint32_t counts[4] = {0, 0, 0, 0};
+    for (const auto& b : k.info.bindings) counts[static_cast<int>(b.type)]++;
+    const VkDescriptorType descriptorTypes[4] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                                 VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER};
     std::vector<VkDescriptorPoolSize> sizes;
-    if (storage) sizes.push_back({VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, storage});
-    if (uniform) sizes.push_back({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniform});
-    VkDescriptorPool pool = VK_NULL_HANDLE;
+    for (int t = 0; t < 4; ++t) {
+        if (counts[t]) sizes.push_back({descriptorTypes[t], counts[t]});
+    }
+
     VkDescriptorSet set = VK_NULL_HANDLE;
     if (!sizes.empty()) {
         VkDescriptorPoolCreateInfo poolInfo{};
@@ -497,43 +864,54 @@ void Context::run(const Kernel& kernel, const std::vector<Buffer>& bindings, std
         poolInfo.maxSets = 1;
         poolInfo.poolSizeCount = static_cast<uint32_t>(sizes.size());
         poolInfo.pPoolSizes = sizes.data();
-        if (vkCreateDescriptorPool(m_state->vk(), &poolInfo, nullptr, &pool) != VK_SUCCESS) {
+        if (vkCreateDescriptorPool(m_state->vk(), &poolInfo, nullptr, &scratch.pool) != VK_SUCCESS) {
             throw std::runtime_error("compute: could not create a descriptor pool");
         }
-    }
-    struct PoolGuard {
-        VkDevice device;
-        VkDescriptorPool pool;
-        ~PoolGuard() {
-            if (pool != VK_NULL_HANDLE) vkDestroyDescriptorPool(device, pool, nullptr);
-        }
-    } poolGuard{m_state->vk(), pool};
-
-    if (pool != VK_NULL_HANDLE) {
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = pool;
+        allocInfo.descriptorPool = scratch.pool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &k.setLayout;
         if (vkAllocateDescriptorSets(m_state->vk(), &allocInfo, &set) != VK_SUCCESS) {
             throw std::runtime_error("compute: could not allocate a descriptor set");
         }
+
         const VkDeviceSize maxUniform = m_state->device->getLimits().maxUniformBufferRange;
-        std::vector<VkDescriptorBufferInfo> infos(bindings.size());
+        std::vector<VkDescriptorBufferInfo> bufferInfos(bindings.size());
+        std::vector<VkDescriptorImageInfo> imageInfos(bindings.size());
         std::vector<VkWriteDescriptorSet> writes(bindings.size());
         for (size_t i = 0; i < bindings.size(); ++i) {
-            const bool isUniform = k.info.bindings[i].type == KernelBinding::Type::UniformBuffer;
-            infos[i].buffer = bindings[i].m_state->buffer;
-            infos[i].offset = 0;
-            infos[i].range = isUniform ? std::min<VkDeviceSize>(bindings[i].m_state->size, maxUniform)
-                                       : VK_WHOLE_SIZE;
+            const KernelBinding& want = k.info.bindings[i];
             writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[i].dstSet = set;
-            writes[i].dstBinding = k.info.bindings[i].binding;
+            writes[i].dstBinding = want.binding;
             writes[i].descriptorCount = 1;
-            writes[i].descriptorType = isUniform ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-                                                 : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writes[i].pBufferInfo = &infos[i];
+            writes[i].descriptorType = descriptorTypes[static_cast<int>(want.type)];
+            if (const auto& image = bindings[i].m_image) {
+                VkImageViewCreateInfo viewInfo{};
+                viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                viewInfo.image = image->image;
+                viewInfo.viewType = viewTypes[i];
+                viewInfo.format = image->vkFormat;
+                viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, image->layers};
+                VkImageView view = VK_NULL_HANDLE;
+                if (vkCreateImageView(m_state->vk(), &viewInfo, nullptr, &view) != VK_SUCCESS) {
+                    throw std::runtime_error("compute: could not create an image view");
+                }
+                scratch.views.push_back(view);
+                imageInfos[i].imageView = view;
+                imageInfos[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                if (want.type == Type::SampledImage) imageInfos[i].sampler = m_state->sampler(image->linearFilter);
+                writes[i].pImageInfo = &imageInfos[i];
+            } else {
+                const auto& buffer = bindings[i].m_buffer;
+                bufferInfos[i].buffer = buffer->buffer;
+                bufferInfos[i].offset = 0;
+                bufferInfos[i].range = want.type == Type::UniformBuffer
+                                           ? std::min<VkDeviceSize>(buffer->size, maxUniform)
+                                           : VK_WHOLE_SIZE;
+                writes[i].pBufferInfo = &bufferInfos[i];
+            }
         }
         vkUpdateDescriptorSets(m_state->vk(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
@@ -555,7 +933,7 @@ void Context::run(const Kernel& kernel, const std::vector<Buffer>& bindings, std
     });
 }
 
-void Context::runThreads(const Kernel& kernel, const std::vector<Buffer>& bindings, uint32_t threadsX,
+void Context::runThreads(const Kernel& kernel, const std::vector<Binding>& bindings, uint32_t threadsX,
                          uint32_t threadsY, uint32_t threadsZ, const void* push, size_t pushBytes) {
     const auto& local = kernel.info().localSize;
     auto groupsFor = [](uint32_t threads, uint32_t size) { return (threads + size - 1) / size; };
