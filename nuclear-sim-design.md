@@ -299,11 +299,15 @@ After generating all configs, compute binding energy per nucleon for each. Plot 
 - Render as a short line or ribbon in the velocity direction
 - Makes chain reactions visually readable — you can follow the neutrons
 
+**Implemented:** the viewer marks the neutrons alone in their group at each readback, and a `Trails` pass draws a camera-facing ribbon from each marked neutron back to x − v·6 time units, the straight path it has covered, fading toward the tail.
+
 ### 6.3 Energy Release Effects
 
 - When a nucleus splits (fission detected via deformation threshold), spawn a point light flash at the split location
 - The flash intensity scales with the energy released (difference in binding energy before and after)
 - Bloom post-process catches this and creates the visual "flash"
+
+**Implemented without bloom:** a `Flashes` pass draws each flash as a soft additive disc that grows and fades over 30 time units of simulation time. A split's flash sits at the split nucleus's centre with strength equal to the energy the emission rule radiates (at least 1); a fusion reaction's sits at its largest product with strength 1.
 
 ### 6.4 Scale Bridging (Optional — Macro Effects)
 
@@ -357,7 +361,7 @@ The four key parameters and what they control:
 9. **Visual polish** — glow, trails, flash effects
 10. **Scale bridge** — connect energy output to macro-scale effects in the planet engine
 
-**Status:** steps 2–6 are done (all pairs, so no spatial hash): the realistic model, the scenario setting (§9.4), neutron capture and emission by rule (§9.5, §9.6), and the runtime viewer with the fission demo. Step 7 runs with a capture radius by rule (§9.9, §9.10), and step 8 needs no rule (§9.11). Next: step 9.
+**Status:** steps 2–6 are done (all pairs, so no spatial hash): the realistic model, the scenario setting (§9.4), neutron capture and emission by rule (§9.5, §9.6), and the runtime viewer with the fission demo. Step 7 runs with a capture radius by rule (§9.9, §9.10), step 8 needs no rule (§9.11), and step 9 is done (§6.2, §6.3). Next: step 10.
 
 ---
 

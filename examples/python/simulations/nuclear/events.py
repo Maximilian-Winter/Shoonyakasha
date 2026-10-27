@@ -314,9 +314,9 @@ class ReactionTracker:
         self.since = 0.0
 
     def update(self, state, time, labels=None):
-        """The reaction since the last report, as (before, after) lists of
-        names, or None. `labels` are find_nuclei's for `state`, found when
-        None."""
+        """The reaction since the last report, as (before, after, start):
+        lists of names and the look time the new list first appeared at; or
+        None. `labels` are find_nuclei's for `state`, found when None."""
         if labels is None:
             labels = find_nuclei(state["position"], self.bond)
         protons = np.bincount(labels, weights=(state["type"] > 0.5).astype(np.float64)).astype(np.int64)
@@ -335,7 +335,7 @@ class ReactionTracker:
         if time - self.since < self.settle:
             return None
         before, self.current, self.candidate = self.current, names, None
-        return before, names
+        return before, names, self.since
 
 
 def apply_kicks(state, kicks):

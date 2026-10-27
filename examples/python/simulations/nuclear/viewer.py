@@ -21,7 +21,8 @@ its heat into stretching (events.CaptureRule); a nucleus that has split is found
 (events.FissionTracker), and each fragment gives off a neutron and radiates
 part of its heat (events.emission_kicks). All are sent to the GPU as kicks
 the pipeline applies once. In fusion, which needs no rule, each reaction is
-printed (events.ReactionTracker).
+printed (events.ReactionTracker). Free neutrons are marked so the pipeline
+draws a trail behind each, and every split and reaction adds a flash.
 """
 
 import argparse
@@ -43,6 +44,9 @@ LOOK_EVERY = 4               # frames between readbacks for the fission tracker
 RATE = 20.0                  # simulation time units a second at time scale 1
 DT = 0.02                    # every step's length; frames below RATE / (SUBSTEPS * DT) fps run slower
 CAPTURE_RADIUS = 10.0        # free neutrons this close to a uranium nucleus's centre are turned toward it
+TRAIL_TIME = 6.0             # time units of path behind each free neutron
+FLASHES = 64                 # "Flashes" elementCount in pipeline/data.json
+FLASH = np.dtype([("place", "<f4", 3), ("start", "<f4"), ("strength", "<f4"), ("unused", "<f4", 3)])
 SCENES = ("fission", "chain", "fusion")
 REACTIONS = {"dt": ("H-2", "H-3"), "dd": ("H-2", "H-2")}
 GLOW = {"fission": 6.0, "chain": 6.0, "fusion": 0.3}   # kinetic energy at which a nucleon glows fully
@@ -132,7 +136,7 @@ def main():
                            ("dNeutrons", p.d_neutrons), ("a", p.a), ("r0", p.r0), ("kc", p.kc),
                            ("minDistance", p.min_distance), ("screenStart", p.screen_start),
                            ("screenEnd", p.screen_end), ("dt", 0.0), ("damping", 0.0), ("mass", p.mass),
-                           ("radius", 0.5), ("glowEnergy", GLOW[state["scene"]])):
+                           ("radius", 0.5), ("glowEnergy", GLOW[state["scene"]]), ("trailTime", TRAIL_TIME)):
             engine.set_custom_float("nuclear." + key, value)
         engine.set_custom_uint("nuclear.isolate", 0)
 
@@ -147,10 +151,29 @@ def main():
                      owed=0.0, frame_times={}, loaded_frame=state["frame"], frame_step=0.0)
         engine.set_buffer("Nucleons", nucleons.tobytes())
         engine.set_custom_uint("nuclear.count", len(nucleons))
+        state.update(marks=np.zeros(CAPACITY, dtype=np.uint32), flashes=np.zeros(FLASHES, dtype=FLASH), next_flash=0)
+        engine.set_buffer("Marks", state["marks"].tobytes())
+        engine.set_buffer("Flashes", state["flashes"].tobytes())
         engine.scene.set_position(state["camera"], eye)
         engine.scene.set_rotation(state["camera"], look_rotation(eye, target))
         set_params()
         print("%s: %d nucleons" % (scene, len(nucleons)))
+
+    def flash(place, start, strength):
+        """A flash at `place` from simulation time `start`, in the next of the ring's slots."""
+        slot = state["flashes"][state["next_flash"] % FLASHES]
+        slot["place"], slot["start"], slot["strength"] = place, start, strength
+        state["next_flash"] += 1
+        engine.set_buffer("Flashes", state["flashes"].tobytes())
+
+    def mark_free_neutrons(nucleons, labels):
+        """Mark the neutrons alone in their group, which the Trails pass draws."""
+        free = (np.bincount(labels)[labels] == 1) & (nucleons["type"] < 0.5)
+        marks = np.zeros(CAPACITY, dtype=np.uint32)
+        marks[:len(free)] = free
+        if not np.array_equal(marks, state["marks"]):
+            state["marks"] = marks
+            engine.set_buffer("Marks", marks.tobytes())
 
     def look():
         """Read the nucleons back every few frames; kick nuclei that split."""
@@ -166,10 +189,13 @@ def main():
         land_time = state["sim_time"] - state["frame_step"]
         nucleons = np.frombuffer(result["data"], dtype=NUCLEON)[:state["count"]]
         fissions, labels = state["tracker"].update(nucleons["position"])
+        mark_free_neutrons(nucleons, labels)
         if state["scene"] == "fusion":
             reaction = state["reactions"].update(nucleons, read_time, labels)
             if reaction:
                 print("reaction: %s -> %s" % (" + ".join(reaction[0]), " + ".join(reaction[1])))
+                largest = labels == np.bincount(labels).argmax()
+                flash(nucleons["position"][largest].mean(axis=0), reaction[2], 1.0)
         kicks = np.zeros(CAPACITY, dtype=ev.KICK)
         kicks["scale"] = 1.0
         mine = kicks[:state["count"]]
@@ -178,6 +204,7 @@ def main():
                                                      radiate=0.5, kicks=mine)
             state["events"] += 1
             state["neutrons"] += len(emitted)
+            flash(nucleons["position"][np.concatenate(fragments)].mean(axis=0), read_time, max(radiated, 1.0))
             print("split: %s, %d neutrons given off, %.1f units radiated"
                   % (" + ".join(str(len(f)) for f in fragments), len(emitted), radiated))
         _, captures, stretched = state["capture"].update(nucleons, labels, read_time, now=land_time, kicks=mine)
@@ -222,6 +249,7 @@ def main():
         engine.set_custom_float("nuclear.dt", step)
         state["frame_step"] = step * SUBSTEPS
         state["sim_time"] += state["frame_step"]
+        engine.set_custom_float("nuclear.time", state["sim_time"])
         # Readbacks name frames from 0: this is frame state["frame"] - 1.
         times = state["frame_times"]
         times[state["frame"] - 1] = state["sim_time"]

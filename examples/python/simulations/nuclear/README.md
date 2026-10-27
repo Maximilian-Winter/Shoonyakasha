@@ -104,12 +104,23 @@ graph, [pipeline/](pipeline/pipeline.json):
 3. `Nucleons` draws every nucleon as a lit sphere, protons orange and
    neutrons blue, glowing with kinetic energy (fully at 6 units in fission
    and the chain reaction, 0.3 in fusion).
+4. `Trails` ([shaders/trail.vert](shaders/trail.vert)) adds a fading blue
+   ribbon behind each nucleon marked in the `Marks` buffer, from its position
+   back to `x - v * trailTime` (6 time units): the path a free neutron has
+   covered in that time.
+5. `Flashes` ([shaders/flash.vert](shaders/flash.vert)) adds a soft warm glow
+   for each of the 64 entries of the `Flashes` buffer (place, start time,
+   strength), growing and fading over 30 time units of simulation time; the
+   larger the strength, the larger the glow.
 
 Every step is 0.02 time units long. A frame runs its steps once real time has
 gathered enough for them (20 time units a second at time scale 1) and
 otherwise runs them with `dt` 0, so slow frames slow the simulation down.
 Every 4 frames the nucleons are read back, the rules run, and any kicks are
-sent with `set_buffer("Kicks", ...)`.
+sent with `set_buffer("Kicks", ...)`. The neutrons alone in their group are
+marked for trails. Each split adds a flash at the split nucleus's centre,
+its strength the energy the emission rule radiated (at least 1); each
+fusion reaction adds one of strength 1 at its largest product.
 
 Keys: `1` fission, `2` chain reaction, `3` fusion, `R` restart, `SPACE`
 pause, `+` and `-` time scale. Hold the right mouse button and use WASD, Q

@@ -5,7 +5,7 @@
       "type": "graphics",
       "execution": { "type": "draw", "vertexCount": 16384, "instanceCount": 1, "bindDescriptorSets": true },
       "outputs": [
-        { "resource": "swapchain", "usage": "color_write", "present": true, "clear": [0.006, 0.007, 0.012, 1.0] },
+        { "resource": "swapchain", "usage": "color_write", "clear": [0.006, 0.007, 0.012, 1.0] },
         { "resource": "depth", "usage": "depth_write", "clear": { "depth": 1.0, "stencil": 0 } }
       ],
       "pipeline": {
@@ -16,6 +16,46 @@
         "cullMode": "none",
         "depthTest": true,
         "depthWrite": true
+      },
+      "descriptorSets": ["drawSet"]
+    },
+    {
+      "name": "Trails",
+      "type": "graphics",
+      "execution": { "type": "draw", "vertexCount": 98304, "instanceCount": 1, "bindDescriptorSets": true },
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_blend" },
+        { "resource": "depth", "usage": "depth_read" }
+      ],
+      "pipeline": {
+        "vertexShader": "../../shaders/trail.vert.spv",
+        "fragmentShader": "../../shaders/trail.frag.spv",
+        "topology": "triangle_list",
+        "vertexInput": "none",
+        "cullMode": "none",
+        "depthTest": true,
+        "depthWrite": false,
+        "blending": "additive"
+      },
+      "descriptorSets": ["drawSet"]
+    },
+    {
+      "name": "Flashes",
+      "type": "graphics",
+      "execution": { "type": "draw", "vertexCount": 384, "instanceCount": 1, "bindDescriptorSets": true },
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_blend", "present": true },
+        { "resource": "depth", "usage": "depth_read" }
+      ],
+      "pipeline": {
+        "vertexShader": "../../shaders/flash.vert.spv",
+        "fragmentShader": "../../shaders/flash.frag.spv",
+        "topology": "triangle_list",
+        "vertexInput": "none",
+        "cullMode": "none",
+        "depthTest": true,
+        "depthWrite": false,
+        "blending": "additive"
       },
       "descriptorSets": ["drawSet"]
     }

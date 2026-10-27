@@ -61,7 +61,20 @@
         { "name": "screen", "type": "vec2", "source": "scene.screen.resolution" },
         { "name": "count", "type": "uint", "source": "scene.custom.nuclear.count" },
         { "name": "radius", "type": "float", "source": "scene.custom.nuclear.radius" },
-        { "name": "glowEnergy", "type": "float", "source": "scene.custom.nuclear.glowEnergy" }
+        { "name": "glowEnergy", "type": "float", "source": "scene.custom.nuclear.glowEnergy" },
+        { "name": "trailTime", "type": "float", "source": "scene.custom.nuclear.trailTime" },
+        { "name": "time", "type": "float", "source": "scene.custom.nuclear.time" }
+      ]
+    },
+    "Marks": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 16384,
+      "fields": [{ "name": "mark", "type": "uint" }]
+    },
+    "Flashes": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 64,
+      "fields": [
+        { "name": "placeStart", "type": "vec4" },
+        { "name": "strength", "type": "vec4" }
       ]
     }
   },
@@ -84,7 +97,9 @@
     "drawSet": {
       "bindings": [
         { "binding": 0, "type": "storage_buffer", "stages": ["vertex"], "name": "nucleons", "autoBindBuffer": "Nucleons" },
-        { "binding": 1, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "name": "view", "autoBindBuffer": "View" }
+        { "binding": 1, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "name": "view", "autoBindBuffer": "View" },
+        { "binding": 2, "type": "storage_buffer", "stages": ["vertex"], "name": "marks", "autoBindBuffer": "Marks" },
+        { "binding": 3, "type": "storage_buffer", "stages": ["vertex"], "name": "flashes", "autoBindBuffer": "Flashes" }
       ]
     }
   }
