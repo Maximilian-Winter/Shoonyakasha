@@ -109,9 +109,9 @@ Updated each frame from the nucleon buffer via a reduction pass. The `deformatio
 
 ## 3. GPU Compute Pipeline
 
-Two compute dispatches per simulation step: all-pairs forces, then integration. Multiple steps per frame are possible for time acceleration.
+Two compute dispatches per simulation step, both of [step.comp](examples/python/simulations/nuclear/shaders/step.comp): all-pairs forces (even mode), then integration (odd mode). The viewer's render graph runs 8 steps a frame.
 
-**Implemented: all pairs.** Forces are summed over every pair, a shared-memory tile of 128 nucleons at a time ([forces.comp](examples/python/simulations/nuclear/shaders/forces.comp)). Coulomb must reach every proton of the *same* nucleus as well as other nuclei: a U-238 nucleus is about 6·r₀ across, twice the 3·r₀ cutoff of §3.2, and the Coulomb energy that destabilizes heavy nuclei comes from those distant pairs inside it. The chain-reaction scenes (tens of uranium nuclei, ~10⁴ nucleons) are within reach of all pairs. The spatial hash (§3.1) and the centre-of-mass approximation (§3.2) stay a later option for much larger scenes, for the Morse term only.
+**Implemented: all pairs.** Forces are summed over every pair, a shared-memory tile of 128 nucleons at a time. Coulomb must reach every proton of the *same* nucleus as well as other nuclei: a U-238 nucleus is about 6·r₀ across, twice the 3·r₀ cutoff of §3.2, and the Coulomb energy that destabilizes heavy nuclei comes from those distant pairs inside it. The chain-reaction scenes (tens of uranium nuclei, ~10⁴ nucleons) are within reach of all pairs. The spatial hash (§3.1) and the centre-of-mass approximation (§3.2) stay a later option for much larger scenes, for the Morse term only.
 
 ### 3.1 Pass 1 — Spatial Hash Construction (deferred)
 
@@ -357,7 +357,7 @@ The four key parameters and what they control:
 9. **Visual polish** — glow, trails, flash effects
 10. **Scale bridge** — connect energy output to macro-scale effects in the planet engine
 
-**Status:** steps 2–4 and 6 are done for the realistic model (all pairs, so no spatial hash), and step 5 is measured (§9.3). Next: the scenario setting of §9.4 and neutron emission (§9.5), then the runtime viewer and steps 7–9.
+**Status:** steps 2–6 are done (all pairs, so no spatial hash): the realistic model, the scenario setting (§9.4), neutron capture and emission by rule (§9.5, §9.6), and the runtime viewer with the fission demo. Step 7 runs but is subcritical (§9.9). Next: steps 7–9.
 
 ---
 
@@ -395,11 +395,57 @@ At `k_c = 0.36` fission is neutron-induced, but the heavier fragment can split a
 
 No neutrons were emitted by the fragments in 800 time units; one proton was.
 
-### 9.4 Plan: two settings
+### 9.4 Two settings
 
-- **Realistic** (`k_c = 0.16`): the binding curve and the stable nuclei.
-- **Scenario** (stronger `k_c`, shown on screen as accelerated physics): the setting at which uranium splits once after capturing a neutron while the fragments hold. Uranium for scenarios is cooled under it.
+- **Realistic** (`k_c = 0.16`, no screening): the binding curve and the stable nuclei.
+- **Scenario** (`k_c = 0.36`, Coulomb screened from 9 to 11, §9.7): the viewer's setting. Uranium for scenarios is cooled under it, and kept only if it stays whole for 400 time units without damping: damping during cooling can hold together a nucleus that falls apart once it stops.
 
-### 9.5 Plan: neutron emission
+Cooled that way, scenario U-235 (binding 0.78 a nucleon) is stable alone: 27 copies with slight random motion all stay whole for 1500 time units, and a lone copy for 1600. Without a rule it also stays whole after capturing a neutron. At `k_c` 0.32 and 0.34 it is just as stable alone, and with the capture rule splits less often (6 and 4 of 8 against 8 of 8).
 
-Make neutron–neutron attraction weaker than proton–proton, so neutron-rich fragments drip neutrons, as physics rather than a scripted rule. If that fails, a rule (a nucleus past a deformation threshold emits 2–3 neutrons) is the fallback.
+### 9.5 Neutron emission: weaker neutron–neutron attraction does not do it
+
+Neutron–neutron attraction `D_nn` was lowered below proton–proton (`D_pp = 0.1`), so neutron-rich fragments might drip neutrons. Scanned over `k_c` 0.30–0.365 and `D_nn` 0.10 to −0.20, then six trials (different cooled nuclei and impact points) for the closest settings, 600 time units each:
+
+| `k_c`, `D_nn` | Cooled whole | Left alone | Hit by a slow neutron | Free neutrons |
+|---|---|---|---|---|
+| 0.355, 0.06 | 3 of 6 | 2 of 3 fall apart | 2–5 pieces | 1, once |
+| 0.360, 0.08 | 4 of 6 | 2 of 4 fall apart | 1–4 pieces | 0–1 |
+| 0.360, 0.10 | 4 of 6 | all hold | 2 of 4 split (2 and 3 pieces) | none |
+
+A weaker `D_nn` loosens the whole nucleus rather than its excess neutrons: each neutron stays held by its proton neighbours, and uranium breaks into several pieces, alone or not, before neutrons come off. At `D_nn ≤ 0` uranium cannot be cooled whole. Emitting 2–3 neutrons per fission does not emerge from these potentials; it needs a rule (a nucleus that splits gives off neutrons from its fragments) or another mechanism.
+
+The viewer uses a rule (`events.emission_kicks`): each fragment gives off its outermost neutron at 2.5 units relative to the fragment, the rest of the fragment recoils so momentum is unchanged, and the neutron is paid for from the fragment's internal kinetic energy, half of what remains then being radiated. Without radiation the total energy changes by less than 0.001.
+
+### 9.6 Capture: the compound nucleus stretches by rule
+
+Scenario U-235 takes in a slow neutron and keeps it, but does not split: capture at 1 unit leaves 5.3 units of internal kinetic energy in the 236-nucleon nucleus (6.2 at 2 units), spread over all its motion. A stretch along one axis, v ∝ (x·u) u, splits the cold nucleus when it carries enough energy:
+
+| Stretch energy | 2 | 4 | 8 | 12 | 16 – 32 |
+|---|---|---|---|---|---|
+| Splits (3 axes) | 0 | 1 | 1 | 3 | 3 |
+
+The rule (`events.CaptureRule`): a nucleus of at least 200 nucleons that takes in nucleons from a group of at most 4 turns all its internal kinetic energy into a stretch along its longest axis, energy and momentum unchanged. How often it does so decides the outcome (impact point and orientation random):
+
+| Stretch | Split |
+|---|---|
+| once | 0 of 6 |
+| every 8 time units, 4 or 8 times | 2 and 4 of 6 |
+| every 2 time units, only while the nucleus is lengthening | 10 of 10 |
+
+The last is the rule, for up to 200 time units after capture. Under the scenario setting, with screening, uranium splits 50–140 time units after capture, 9 of 10 times in two pieces (e.g. 142 + 94, 119 + 117, 188 + 48); left alone it does not split. Each stretch changes the kinetic energy by at most 2·10⁻⁶. Applying the kick 0.64 time units after the look it was computed from, as the viewer does, still splits 6 of 6.
+
+Afterwards the heavier fragment sometimes splits again 10–25 time units later: with emission, 3–4 of 6 runs end as two fragments and the others as three. Radiating 90 % of the fragments' internal energy instead of 50 % does not change this.
+
+### 9.7 Nuclei side by side: screening
+
+Bare nuclei repel each other: 27 scenario U-235 nuclei 11 apart blow apart to a radius of 1500 within 300 time units and tear into 45 pieces; with `isolate` (no forces between nuclei) all 27 stay whole. Real nuclei sit inside atoms whose electrons screen this charge. Coulomb is screened in the scenario setting: `S(r)` falls smoothly from 1 at `r = 9` (U-235's protons are at most 8.6 apart) to 0 at 11.
+
+The screening has to end before neighbouring surfaces meet. With it ending at 12 and nuclei 17 apart (surfaces 7.8 apart), a 4 × 4 × 4 lattice conserves energy (drift 0.5 in 100 time units) but the nuclei's mutual Coulomb energy drains into their internal motion, 48 to 346 units in 150 time units, until they split. Ending at 10 with nuclei 20 apart, the lattice has no internal motion after 400 time units; ending at 11, capture splits more often in two pieces than ending at 10 (9 against 7 of 10). The viewer places nuclei 21 apart.
+
+### 9.8 A fixed time step
+
+Semi-implicit Euler conserves energy at a fixed step. Changing the step every few steps does not: the 27-nucleus lattice, stepped with a random step between 0.003 and 0.02 every 8 steps, heats from 53 to 96 units of kinetic energy in 200 time units, where at a fixed step it levels off near 70; in the viewer its nuclei then split. The viewer always steps 0.02 and paces by running a frame's steps or not.
+
+### 9.9 Chain reaction
+
+64 U-235 nuclei, 4 a side and 21 apart, and one neutron at 1 unit: the first nucleus splits, but in 464 time units none of the 4 neutrons it gives off is captured. Without the neutron no nucleus splits in 403 time units. A neutron passes about 5–6 spacings between nuclei (mean free path d³ / πR², R ≈ 5) while the cube is 3 spacings across, so most neutrons leave it. Real slow neutrons are captured by U-235 over a cross-section a few hundred times its geometric size, a wave effect a classical point neutron does not have.

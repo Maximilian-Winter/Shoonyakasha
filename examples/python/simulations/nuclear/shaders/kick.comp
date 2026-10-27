@@ -1,0 +1,37 @@
+#version 450
+// Kicks from the application, applied once each: v' = v * scale + dv per
+// nucleon, when the kick sequence number differs from the last one applied.
+// mode 0 applies them; mode 1 (one invocation, a separate pass so every
+// nucleon has read the old number first) records the sequence number.
+
+layout(local_size_x = 128) in;
+
+struct Nucleon {
+    vec3 position;
+    float type;
+    vec3 velocity;
+    float energy;
+    vec3 force;
+    uint nucleusId;
+};
+
+layout(std430, binding = 0) buffer Nucleons { Nucleon n[]; } nucleons;
+layout(std430, binding = 1) readonly buffer Kicks { vec4 dvScale[]; } kicks;
+layout(std430, binding = 2) buffer KickState { uint applied; } kickState;
+layout(std140, binding = 3) uniform KickParams { uint count; uint sequence; float mass; } params;
+
+layout(push_constant) uniform Step { uint mode; } step;
+
+void main() {
+    if (kickState.applied == params.sequence) return;
+    uint i = gl_GlobalInvocationID.x;
+    if (step.mode == 1u) {
+        if (i == 0u) kickState.applied = params.sequence;
+        return;
+    }
+    if (i >= params.count) return;
+    vec4 k = kicks.dvScale[i];
+    vec3 v = nucleons.n[i].velocity * k.w + k.xyz;
+    nucleons.n[i].velocity = v;
+    nucleons.n[i].energy = 0.5 * params.mass * dot(v, v);
+}

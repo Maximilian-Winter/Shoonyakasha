@@ -1,7 +1,7 @@
 """The binding energy per nucleon of the model's nuclei, against mass number.
 
     python binding_curve.py                      # the default parameters
-    python binding_curve.py --kc 0.12 --d-like 0.5
+    python binding_curve.py --kc 0.12 --d-protons 0.2 --d-neutrons 0.05
 
 Cools a nucleus for each mass number A, with the valley of stability's
 proton number, and plots its binding energy per nucleon beside the real
@@ -34,7 +34,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     defaults = Params()
     parser.add_argument("--d-unlike", type=float, default=defaults.d_unlike)
-    parser.add_argument("--d-like", type=float, default=defaults.d_like)
+    parser.add_argument("--d-protons", type=float, default=defaults.d_protons)
+    parser.add_argument("--d-neutrons", type=float, default=defaults.d_neutrons)
     parser.add_argument("--a", type=float, default=defaults.a)
     parser.add_argument("--kc", type=float, default=defaults.kc)
     parser.add_argument("--steps", type=int, default=3000)
@@ -58,7 +59,8 @@ def curve(ctx, params, steps, seeds):
 
 def main():
     args = parse_args()
-    params = Params(d_unlike=args.d_unlike, d_like=args.d_like, a=args.a, kc=args.kc)
+    params = Params(d_unlike=args.d_unlike, d_protons=args.d_protons, d_neutrons=args.d_neutrons, a=args.a,
+                    kc=args.kc)
     with sk.ComputeContext() as ctx:
         rows = curve(ctx, params, args.steps, args.seeds)
 
@@ -78,7 +80,8 @@ def main():
     ax.axvline(56, color="orange", lw=0.8, alpha=0.6)
     ax.set_xlabel("mass number A")
     ax.set_ylabel("binding energy per nucleon (simulation units)")
-    ax.set_title("d_unlike %.2f, d_like %.2f, a %.1f, kc %.3f" % (params.d_unlike, params.d_like, params.a, params.kc))
+    ax.set_title("d_unlike %.2f, d_protons %.2f, d_neutrons %.2f, a %.1f, kc %.3f"
+                 % (params.d_unlike, params.d_protons, params.d_neutrons, params.a, params.kc))
     ax.legend()
     fig.tight_layout()
     from pathlib import Path

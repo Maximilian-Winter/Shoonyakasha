@@ -2,9 +2,10 @@
 
 Nucleons are point particles of equal mass. A Morse potential binds every
 pair at short range: its repulsive core is the same for every pair, its
-attraction stronger between a proton and a neutron than between two of the
-same kind. Protons repel each other by Coulomb's law at every range.
-forces.comp sums both over all pairs; integrate.comp steps the motion.
+attraction stronger between a proton and a neutron than between two protons
+or two neutrons. Protons repel each other by Coulomb's law at every range.
+shaders/step.comp sums both over all pairs (even mode) and steps the motion
+(odd mode); the viewer's render graph runs the same shader.
 
 Nucleons are kept as NUCLEON records (48 bytes, the shaders' Nucleon struct):
 position, type (0 neutron, 1 proton), velocity, kinetic energy, force, and
@@ -31,19 +32,32 @@ class Params:
     """The model's constants, in simulation units (r0 = 1, nucleon mass = 1)."""
     d_core: float = 1.0       # Morse core strength, every pair
     d_unlike: float = 1.0     # Morse attraction, proton-neutron
-    d_like: float = 0.1       # Morse attraction, proton-proton and neutron-neutron
+    d_protons: float = 0.1    # Morse attraction, proton-proton
+    d_neutrons: float = 0.1   # Morse attraction, neutron-neutron
     a: float = 4.0            # Morse width: larger is narrower and stiffer
     r0: float = 1.0           # equilibrium distance
     kc: float = 0.16          # Coulomb constant
     mass: float = 1.0
     min_distance: float = 0.05
+    screen_start: float = 0.0  # Coulomb fades out from here...
+    screen_end: float = 0.0    # ...to nothing here; 0: no screening
 
     def with_(self, **changes):
         return replace(self, **changes)
 
-    def forces_push(self, count, isolate):
-        return struct.pack("<7f2I", self.d_core, self.d_unlike, self.d_like, self.a, self.r0, self.kc, self.min_distance,
-                           count, 1 if isolate else 0)
+    def uniform(self, count, isolate=False, dt=0.02, damping=0.0):
+        """The 64 bytes of step.comp's Params uniform block (std140)."""
+        return struct.pack("<11f2I2f4x", self.d_core, self.d_unlike, self.d_protons, self.d_neutrons, self.a,
+                           self.r0, self.kc, self.min_distance, dt, damping, self.mass, count,
+                           1 if isolate else 0, self.screen_start, self.screen_end)
+
+
+#: The scenarios' setting: Coulomb strong enough that uranium splits soon
+#: after capturing a neutron (nuclear-sim-design.md, sections 9.3 and 9.4),
+#: and screened beyond the size of a uranium nucleus, as an atom's electrons
+#: screen it, so that nuclei placed side by side do not push each other
+#: apart. Heavy nuclei are less bound under it than in the real curve.
+SCENARIO = Params(kc=0.36, screen_start=9.0, screen_end=11.0)
 
 
 def fcc_points(count, spacing=1.0):
@@ -137,32 +151,63 @@ def relax_batch(ctx, specs, params=Params(), steps=3000, dt=0.02, damping=1.0, s
     return results
 
 
+def holds_together(ctx, results, params=Params(), time_units=400.0, dt=0.02, bond=1.6):
+    """For each cooled nucleus of `results` (relax_batch's), whether it is
+    still one piece after `time_units` without damping: damping can hold
+    together a nucleus that falls apart once it stops. They run side by
+    side in one buffer without feeling each other."""
+    parts = []
+    for k, result in enumerate(results):
+        nucleus = np.zeros(len(result["types"]), dtype=NUCLEON)
+        nucleus["position"] = result["positions"]
+        nucleus["type"] = result["types"]
+        nucleus["nucleus"] = k
+        parts.append(nucleus)
+    sim = Simulator(ctx, np.concatenate(parts), params, isolate=True)
+    sim.step(int(time_units / dt), dt=dt)
+    state = sim.state()
+    out, start = [], 0
+    for part in parts:
+        positions = state["position"][start:start + len(part)].astype(np.float64)
+        start += len(part)
+        out.append(int(components(positions, bond * params.r0).max()) == 0)
+    return out
+
+
 class Simulator:
-    """Nucleons on the GPU, stepped with forces.comp and integrate.comp."""
+    """Nucleons on the GPU, stepped with shaders/step.comp."""
 
     def __init__(self, ctx, nucleons, params=Params(), isolate=False):
         self.ctx = ctx
         self.params = params
         self.isolate = isolate
         self.count = len(nucleons)
-        self.forces = ctx.kernel(SHADERS / "forces.comp")
-        self.integrate = ctx.kernel(SHADERS / "integrate.comp")
+        self.kernel = ctx.kernel(SHADERS / "step.comp")
         self.nucleons = ctx.upload(np.ascontiguousarray(nucleons, dtype=NUCLEON))
         self.potentials = ctx.buffer(4 * self.count)
+        self.uniform = ctx.upload(params.uniform(self.count, isolate))
         self.compute_forces()
 
+    def _run(self, mode):
+        self.ctx.run(self.kernel, [self.nucleons, self.potentials, self.uniform], threads=self.count,
+                     push=struct.pack("<I", mode))
+
     def compute_forces(self):
-        self.ctx.run(self.forces, [self.nucleons, self.potentials], threads=self.count,
-                     push=self.params.forces_push(self.count, self.isolate))
+        self._run(0)
 
     def step(self, steps=1, dt=0.02, damping=0.0):
-        push = struct.pack("<3fI", dt, damping, self.params.mass, self.count)
+        self.uniform.upload(self.params.uniform(self.count, self.isolate, dt, damping))
         for _ in range(steps):
-            self.ctx.run(self.integrate, [self.nucleons], threads=self.count, push=push)
-            self.compute_forces()
+            self._run(1)
+            self._run(0)
 
     def state(self):
         return self.nucleons.to_numpy(np.uint8).view(NUCLEON)
+
+    def set_state(self, nucleons):
+        """Replace the nucleons (as many as before) and recompute the forces."""
+        self.nucleons.upload(np.ascontiguousarray(nucleons, dtype=NUCLEON))
+        self.compute_forces()
 
     def potential(self):
         """Each nucleon's share of the potential energy (half of each pair's)."""

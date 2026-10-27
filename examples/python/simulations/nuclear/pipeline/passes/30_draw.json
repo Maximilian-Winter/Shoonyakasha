@@ -1,0 +1,23 @@
+{
+  "passes": [
+    {
+      "name": "Nucleons",
+      "type": "graphics",
+      "execution": { "type": "draw", "vertexCount": 16384, "instanceCount": 1, "bindDescriptorSets": true },
+      "outputs": [
+        { "resource": "swapchain", "usage": "color_write", "present": true, "clear": [0.006, 0.007, 0.012, 1.0] },
+        { "resource": "depth", "usage": "depth_write", "clear": { "depth": 1.0, "stencil": 0 } }
+      ],
+      "pipeline": {
+        "vertexShader": "../../shaders/nucleon.vert.spv",
+        "fragmentShader": "../../shaders/nucleon.frag.spv",
+        "topology": "point_list",
+        "vertexInput": "none",
+        "cullMode": "none",
+        "depthTest": true,
+        "depthWrite": true
+      },
+      "descriptorSets": ["drawSet"]
+    }
+  ]
+}

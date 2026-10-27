@@ -2,12 +2,15 @@
   "params": {
     "d_core": 1.0,
     "d_unlike": 1.0,
-    "d_like": 0.1,
+    "d_protons": 0.1,
+    "d_neutrons": 0.1,
     "a": 4.0,
     "r0": 1.0,
     "kc": 0.16,
     "mass": 1.0,
-    "min_distance": 0.05
+    "min_distance": 0.05,
+    "screen_start": 0.0,
+    "screen_end": 0.0
   },
   "nuclei": {
     "H-1": {
