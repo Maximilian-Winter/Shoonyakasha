@@ -181,8 +181,8 @@ bitwise reproducibility across hardware. Branching, audio and visual editing are
 ## Overlays
 
 `shoonyakasha.toolkit.overlay` draws on screen canvases with the engine's UI
-directly (no `Context`): cards of readings, a bar of button hints, a sheet of the
-controls and a settings menu, in one style (a dark panel with a gold hairline,
+directly (no `Context`): cards of readings, cards of prose, a bar of button hints,
+a sheet of the controls and a settings menu, in one style (a dark panel with a gold hairline,
 gold headings over faint rules).
 
 ```python
@@ -191,6 +191,9 @@ from shoonyakasha.toolkit import overlay
 # Fragment: engine is running (on_init or later) and canvas is a screen canvas.
 card = overlay.Card(engine.ui, canvas, corner=(0, 0), max_rows=8)
 card.update("FREE CAMERA", [("SPEED", "12 m/s"), ("ORBIT",), ("PERIAPSIS", "40 km")])
+note = overlay.Narration(engine.ui, canvas, corner=(0, 1), max_lines=6)
+note.update("CAPTURE", "The neutron is caught and the nucleus heats up.", step="2 / 5",
+            hints=[(("[", "]"), "Back, next")])
 bar = overlay.HintBar(engine.ui, canvas)
 bar.update([(("W", "S"), "Throttle"), (("pad:A",), "Assist")])
 sheet = overlay.HelpOverlay(engine, "CONTROLS", [[("Ship", [(("W", "S"), "Throttle")])]])
@@ -204,6 +207,13 @@ menu = overlay.SettingsMenu(engine, "Settings", [
 - `Card(ui, canvas, corner, max_rows, margin=(24, 24), width=300)`: `update(title, rows)`
   with rows ("LABEL", "value") or ("HEADING",); the panel fits its rows and only what
   changed is handed to the canvas. `show(on)`.
+- `Narration(ui, canvas, corner=(0, 1), max_lines=8, margin=(24, 24), width=440)`:
+  `update(title, text, step="", hints=())` shows a gold title with the step at its
+  right, the text wrapped between words to the card's width, at most `max_lines`
+  lines (the last shown ending in an ellipsis when more do not fit), and the key
+  caps of `hints` below; the panel fits its lines, and an update equal to the last
+  does nothing. `show(on)`. `wrap_text(text, size, width)` gives the lines, a line
+  break in the text starting a new one.
 - `HintBar(ui, canvas)`: `update(hints)`, each hint (caps, label), centred along the
   bottom and redrawn only when they change; `show(on)`. A cap named "pad:X" is a
   gamepad's button or stick, A, B, X and Y in their usual colours. `KeyCaps(ui, parent)`

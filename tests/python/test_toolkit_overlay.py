@@ -1,4 +1,4 @@
-"""Tests for the key caps of shoonyakasha.toolkit.overlay.
+"""Tests for the key caps and text wrapping of shoonyakasha.toolkit.overlay.
 
     python -m unittest discover -s tests/python
 """
@@ -27,6 +27,26 @@ class CapTest(unittest.TestCase):
 
     def test_label_widens_a_hint(self):
         self.assertGreater(overlay.hint_width((("F1",), "Settings")), overlay.hint_width((("F1",), "")))
+
+
+class WrapTest(unittest.TestCase):
+    TEXT = ("A slow neutron drifts toward a uranium nucleus. Nothing pushes it away: "
+            "it has no charge, so the protons' repulsion does not reach it.")
+
+    def test_lines_fit_and_keep_every_word(self):
+        lines = overlay.wrap_text(self.TEXT, 16, 200)
+        self.assertGreater(len(lines), 1)
+        for line in lines:
+            self.assertLessEqual(overlay.measure.width(line, 16), 200)
+        self.assertEqual(" ".join(lines).split(), self.TEXT.split())
+
+    def test_wider_means_fewer_lines(self):
+        self.assertLess(len(overlay.wrap_text(self.TEXT, 16, 400)), len(overlay.wrap_text(self.TEXT, 16, 200)))
+
+    def test_line_breaks_and_long_words(self):
+        self.assertEqual(overlay.wrap_text("one\ntwo", 16, 500), ["one", "two"])
+        self.assertEqual(overlay.wrap_text("a " + "x" * 80 + " b", 16, 100), ["a", "x" * 80, "b"])
+        self.assertEqual(overlay.wrap_text("", 16, 100), [""])
 
 
 if __name__ == "__main__":
