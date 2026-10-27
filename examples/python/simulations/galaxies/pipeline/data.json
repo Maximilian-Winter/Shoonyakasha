@@ -32,7 +32,8 @@
         { "name": "gasRelax", "type": "float", "source": "scene.custom.galaxy.gasRelax" },
         { "name": "sfDensity", "type": "float", "source": "scene.custom.galaxy.sfDensity" },
         { "name": "sfEfficiency", "type": "float", "source": "scene.custom.galaxy.sfEfficiency" },
-        { "name": "gasMass", "type": "float", "source": "scene.custom.galaxy.gasMass" }
+        { "name": "gasMass", "type": "float", "source": "scene.custom.galaxy.gasMass" },
+        { "name": "sfCompression", "type": "float", "source": "scene.custom.galaxy.sfCompression" }
       ]
     },
     "Grid": {

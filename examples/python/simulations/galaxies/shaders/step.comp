@@ -19,16 +19,22 @@
 //
 // mode 1: each gas particle adds itself and its momentum (fixed point) to
 // its cell of the gas grid: GRID^3 cells of CELL kpc, centred on the
-// galaxies' centre of mass.
+// mass-weighted centre of the galaxies within NEAR kpc of the heaviest.
 //
 // mode 2: every particle. A gas particle in the grid first takes on part of
 // its cell's mean velocity, 1 - exp(-gasRelax dt), which keeps the cell's
-// momentum; then, where the cell's gas density is above sfDensity, it
-// becomes a young star with probability sfEfficiency dt / t_ff, t_ff being
-// the free-fall time sqrt(3 pi / (32 rho)), its birth time the step's
-// start, and counts into `formed.x`. Then every particle steps (kick, drift,
-// kick), the first kick from the centres' places before the step, the
-// second from after it.
+// momentum. Then it becomes a young star, its birth time the step's start,
+// counting into `formed.x`, with probability dt times the sum of
+//
+//   sfEfficiency / t_ff                       where the cell's gas density is above sfDensity,
+//                                             t_ff = sqrt(3 pi / (32 rho)) the free-fall time
+//   sfCompression (-div v - CONVERGENCE_MIN)  where the gas converges faster than CONVERGENCE_MIN
+//                                             and its density is above COMPRESSION_DENSITY
+//
+// div v being the divergence of the cells' mean velocities, from the six
+// neighbouring cells (a neighbour without gas counts as this cell). Then
+// every particle steps (kick, drift, kick), the first kick from the
+// centres' places before the step, the second from after it.
 //
 // The render graph repeats this shader's pass with index =
 // pass.repeatIndex; model.py computes the centres and the motion in NumPy.
@@ -56,6 +62,7 @@ layout(std140, binding = 2) uniform Params {
     float sfDensity;
     float sfEfficiency;
     float gasMass;       // one gas particle's mass
+    float sfCompression;
 } pc;
 
 layout(std430, binding = 3) buffer Grid { ivec4 cell[]; } grid;   // momentum xyz (fixed point), gas count
@@ -69,6 +76,9 @@ const uint YOUNG = 3u;
 const int GRID = 128;         // model.GRID
 const float CELL = 1.0;       // model.CELL
 const float MOMENTUM_SCALE = 1024.0;
+const float NEAR = 48.0;      // model.NEAR
+const float CONVERGENCE_MIN = 0.02;        // per time unit
+const float COMPRESSION_DENSITY = 0.001;   // 10^10 solar masses per kpc^3
 
 // --- galaxy centres --------------------------------------------------------
 
@@ -147,21 +157,47 @@ void stepCentres() {
 
 // --- gas grid ----------------------------------------------------------------
 
-vec3 centreOfMass() {
+// The mass-weighted centre of the galaxies within NEAR of the heaviest (the first of equals).
+vec3 gridCentre() {
+    uint heaviest = 0u;
+    for (uint j = 1u; j < pc.galaxyCount; ++j) {
+        if (galaxies.g[j].positionMass.w > galaxies.g[heaviest].positionMass.w) heaviest = j;
+    }
+    vec3 anchor = galaxies.g[heaviest].positionMass.xyz;
     vec3 sum = vec3(0.0);
     float mass = 0.0;
     for (uint j = 0u; j < pc.galaxyCount; ++j) {
-        sum += galaxies.g[j].positionMass.xyz * galaxies.g[j].positionMass.w;
-        mass += galaxies.g[j].positionMass.w;
+        vec4 g = galaxies.g[j].positionMass;
+        if (distance(g.xyz, anchor) > NEAR) continue;
+        sum += g.xyz * g.w;
+        mass += g.w;
     }
     return sum / max(mass, 1e-6);
 }
 
+ivec3 cellCoords(vec3 x, vec3 origin) {
+    return ivec3(floor((x - origin) / CELL)) + GRID / 2;
+}
+
+bool inGrid(ivec3 c) {
+    return all(greaterThanEqual(c, ivec3(0))) && all(lessThan(c, ivec3(GRID)));
+}
+
+int cellIndex(ivec3 c) {
+    return (c.z * GRID + c.y) * GRID + c.x;
+}
+
 // The grid cell holding `x`, or -1 outside the grid.
 int cellOf(vec3 x, vec3 origin) {
-    ivec3 c = ivec3(floor((x - origin) / CELL)) + GRID / 2;
-    if (any(lessThan(c, ivec3(0))) || any(greaterThanEqual(c, ivec3(GRID)))) return -1;
-    return (c.z * GRID + c.y) * GRID + c.x;
+    ivec3 c = cellCoords(x, origin);
+    return inGrid(c) ? cellIndex(c) : -1;
+}
+
+// The mean gas velocity of cell `c`, or `fallback` where it has no gas or lies outside the grid.
+vec3 meanVelocity(ivec3 c, vec3 fallback) {
+    if (!inGrid(c)) return fallback;
+    ivec4 cell = grid.cell[cellIndex(c)];
+    return cell.w > 0 ? vec3(cell.xyz) / (MOMENTUM_SCALE * float(cell.w)) : fallback;
 }
 
 void clearGrid() {
@@ -175,7 +211,7 @@ bool isGas(uint i) {
 
 void deposit(uint i) {
     if (!isGas(i)) return;
-    int c = cellOf(particles.p[i].positionKind.xyz, centreOfMass());
+    int c = cellOf(particles.p[i].positionKind.xyz, gridCentre());
     if (c < 0) return;
     ivec3 momentum = ivec3(round(particles.p[i].velocityBirth.xyz * MOMENTUM_SCALE));
     atomicAdd(grid.cell[c].x, momentum.x);
@@ -193,18 +229,26 @@ uint hash(uint x) {
 
 // The gas rules for gas particle i at the start of the step beginning at `start`.
 void gasRules(uint i, float start) {
-    int c = cellOf(particles.p[i].positionKind.xyz, centreOfMass());
-    if (c < 0) return;
-    ivec4 cell = grid.cell[c];
+    ivec3 cc = cellCoords(particles.p[i].positionKind.xyz, gridCentre());
+    if (!inGrid(cc)) return;
+    ivec4 cell = grid.cell[cellIndex(cc)];
     if (cell.w <= 0) return;
     vec3 mean = vec3(cell.xyz) / (MOMENTUM_SCALE * float(cell.w));
     vec3 v = particles.p[i].velocityBirth.xyz;
     particles.p[i].velocityBirth.xyz = v + (mean - v) * (1.0 - exp(-pc.gasRelax * pc.dt));
 
     float rho = float(cell.w) * pc.gasMass / (CELL * CELL * CELL);
-    if (rho <= pc.sfDensity || pc.sfEfficiency <= 0.0) return;
-    float freeFall = sqrt(3.0 * PI / (32.0 * rho));
-    float chance = pc.sfEfficiency * pc.dt / freeFall;
+    float rate = 0.0;
+    if (rho > pc.sfDensity) rate += pc.sfEfficiency / sqrt(3.0 * PI / (32.0 * rho));
+    if (rho > COMPRESSION_DENSITY && pc.sfCompression > 0.0) {
+        float divergence = (meanVelocity(cc + ivec3(1, 0, 0), mean).x - meanVelocity(cc - ivec3(1, 0, 0), mean).x
+                          + meanVelocity(cc + ivec3(0, 1, 0), mean).y - meanVelocity(cc - ivec3(0, 1, 0), mean).y
+                          + meanVelocity(cc + ivec3(0, 0, 1), mean).z - meanVelocity(cc - ivec3(0, 0, 1), mean).z)
+                         / (2.0 * CELL);
+        rate += pc.sfCompression * max(-divergence - CONVERGENCE_MIN, 0.0);
+    }
+    if (rate <= 0.0) return;
+    float chance = rate * pc.dt;
     float draw = float(hash(i ^ hash(floatBitsToUint(start))) >> 8) / 16777216.0;
     if (draw < chance) {
         uint galaxy = uint(particles.p[i].positionKind.w + 0.5) >> 2u;

@@ -70,10 +70,21 @@ Both run in step.comp, modes 1 and 2 (§3):
   fixed-point values). Each gas particle's velocity then relaxes toward its
   cell's mean velocity at a rate `k_gas`. Clouds that collide lose their
   relative motion, so gas sinks to the centres and piles up in the bridge.
-- **Star formation.** A gas particle in a cell denser than `rho_sf` becomes a
-  young star with probability `eps_sf * dt / t_ff(rho)`, using a per-particle
-  hash for the random draw. It records its birth time. It counts into an
-  atomic counter in `Stats`, which is read back as the star formation rate.
+- **Star formation.** A gas particle becomes a young star, using a
+  per-particle hash for the random draw. It records its birth time and
+  counts into an atomic counter in `Stats`, which is read back as the star
+  formation rate. Its probability is `dt` times the sum of:
+  - **dense gas:** `eps_sf / t_ff(rho)` where the cell is denser than
+    `rho_sf`;
+  - **compressed gas:** `sf_compression * (-div v - 0.02)` where the gas
+    converges faster than 0.02 a time unit and is denser than 0.001
+    (§8.8).
+
+  Over the passage of a compression, the compressed-gas term turns about
+  `sf_compression * ln(density ratio)` of the gas into stars.
+- **The grid's centre** is the mass-weighted centre of the galaxies within
+  48 kpc of the heaviest, so a companion that flies off does not drag the
+  grid off the target.
 
 ### 1.4 Integration
 
@@ -181,6 +192,13 @@ A small companion (mass ratio 1:5) drops straight through the centre of a
 disc, along its axis. The sudden pull and release drive an expanding ring of
 compressed gas and young stars outward, like the Cartwheel galaxy.
 
+Implemented as `model.ring`:
+- the companion passes 1 kpc from the centre at 1.5 times the escape speed,
+  its disc tilted 30°;
+- the scene is set in the target's rest frame, with the target at the
+  origin;
+- in the viewer the camera moves with the target as it drifts.
+
 ### 5.3 Self-gravity replay (key 3)
 
 The recording from §1.5, played with `sk.streams.play(engine, "Replay",
@@ -231,7 +249,9 @@ As in the nuclear viewer: `interface.py` and `story.py` built on
 3. **Gas and star formation.** Implemented: the grid, both rules, young
    stars' glow, the `Stats` readback and the printed star formation rate;
    `check.py gas`.
-4. **Ring galaxy scene.**
+4. **Ring galaxy scene.** Implemented: `model.ring`, the compressed-gas
+   star formation, the grid's centre, scene keys `1` and `2`; `check.py
+   ring`.
 5. **Reference run and replay.** `precompute_replay.py` and the replay scene
    through `sk.streams.play`.
 6. **Interface.** Readings, cards, settings, screenshots; README.
@@ -335,3 +355,50 @@ above the quiet disc's densest 1 kpc cell, about 0.006), `sf_efficiency`
   - clearing the 32 MB grid 8 times a frame is most of the difference.
 - **Colour:** at 400 Myr pink rings of new stars show around both cores. At
   the second pass, pink knots show inside the merging core.
+
+### 8.8 The ring galaxy and compressed gas
+
+With only the density threshold, almost no stars formed in the ring.
+
+- **Densities, star formation off:** the ring raises the outer gas density
+  about tenfold. Taking the densest cell in each band of radius:
+  - 0.0008 rises to 0.0079 at 9-12 kpc (180 Myr);
+  - 0.0004 rises to 0.0079 at 15-20 kpc (260 Myr).
+
+  That is still under 0.01, the threshold.
+- **Lower thresholds:**
+  - at 0.005, 44 young stars formed beyond 6 kpc by 470 Myr;
+  - at 0.003, 262; isolated galaxies formed 3 solar masses a year instead
+    of 2.
+
+  A threshold can't tell the ring from a disc's centre, which is always
+  dense.
+- **The compressed-gas term** (converging flow, as in Katz 1992), measured
+  by radius at 470 Myr: young stars at 0-3/3-6/6-9/9-12/12-15/15-20/20-30
+  kpc, with the star formation rate in solar masses a year (isolated galaxy
+  over the first 118-Myr bins; merger peak; ring's first bin):
+
+  | sf_compression | ring young stars by radius | isolated | merger peak | ring, first 118 Myr |
+  |---|---|---|---|---|
+  | 0 | 2587 / 25 / 0 / 0 / 0 / 0 / 0 | 0.0-2.3 | 17.6 (second pass) | 0.4 |
+  | 0.1 | 3412 / 1711 / 1257 / 569 / 30 / 14 / 45 | 0.8-3.1 | 22.6 (first pass) | 6.9 |
+  | 0.3 | 4745 / 4224 / 3089 / 1447 / 90 / 32 / 128 | 2.1-4.0 | 32.7 (first pass) | 17.6 |
+  | 1.0 | 6049 / 7597 / 5341 / 2883 / 283 / 90 / 277 | 6.2-6.6 | 52.0, gas gone by 950 Myr | 37.4 |
+
+  At 1.0 the isolated galaxy's start (13k gas particles, noisy cell means)
+  and the merger's first pass use up the gas. 0.3 is the default.
+- **The grid's centre.** Centred on all the galaxies' centre of mass, the
+  grid followed the companion as it left. By 420 Myr the centre was 63 kpc
+  from the target, and the target's gas fell off the grid's edge. Centring
+  on the galaxies near the heaviest raised the ring's late star formation
+  (third 118-Myr bin) from 1.6 to 3.5 solar masses a year.
+- **The rings** (`check.py ring`, 256k particles): the target's disc stars
+  are most overdense at 7.5 kpc at 100 Myr and 11.5 kpc at 150 Myr, which
+  is 78 km/s outward (the Cartwheel's ring expands at about 53 km/s).
+  Second and third rings follow inside, at 6 kpc at 200 Myr and 10 kpc at
+  300 Myr.
+- **The zero-momentum frame** moved the target at 0.84 units (174 km/s),
+  and it left the viewer's camera. The scene is now set in the target's
+  rest frame, and the camera follows its remaining drift.
+- **In the viewer:** two bright rings with pink knots of new stars, from
+  320 to 770 Myr, at 210-220 fps.

@@ -6,6 +6,7 @@ design is in [galaxy-sim-design.md](../../../../galaxy-sim-design.md).
 ```sh
 python viewer.py                          # two galaxies of half a million particles each
 python viewer.py --inclination 0 150      # the second disc turning against the orbit
+python viewer.py --scene ring             # a companion falls through a disc: a ring galaxy
 python check.py                           # the model's checks on the GPU, without a window
 python check.py merger                    # one of them: kernels, disc, merger
 ```
@@ -27,18 +28,24 @@ friction from each other's halos, applied as a decay of each pair's
 relative velocity, `exp(-rate dt)`; `Params.log_lambda` (0.2) sets its
 strength and 0 turns it off.
 
-Two rules act on the gas, through a grid of 128³ cells of 1 kpc centred on
-the galaxies' centre of mass (`Params`):
+Two rules act on the gas, through a grid of 128³ cells of 1 kpc. The grid is
+centred on the mass-weighted centre of the galaxies within 48 kpc of the
+heaviest (`grid_centre`), so a galaxy that flies off does not drag the grid
+away. The rules' constants are in `Params`:
 
 - **Gas dissipation:** each step a gas particle takes on part of its cell's
   mean velocity, `1 - exp(-gas_relax dt)` (`gas_relax` 0.5 a time unit).
   This keeps the cell's momentum, and gas streams that cross lose their
   relative motion.
-- **Star formation:** in a cell whose gas density is above `sf_density`
-  (0.01, that is 10^8 solar masses per kpc³), a gas particle becomes a
-  young star with probability `sf_efficiency dt / t_ff`. Here
-  `sf_efficiency` is 0.05 and `t_ff = sqrt(3π / (32 ρ))` is the free-fall
-  time. The star's birth time is the step's start.
+- **Star formation:** a gas particle becomes a young star, its birth time
+  the step's start, with probability `dt` times the sum of two rates:
+  - **Dense gas:** where the cell's gas density is above `sf_density` (0.01,
+    that is 10^8 solar masses per kpc³), `sf_efficiency / t_ff`, with
+    `sf_efficiency` 0.05 and `t_ff = sqrt(3π / (32 ρ))` the free-fall time.
+  - **Compressed gas:** where the gas converges faster than 0.02 a time unit
+    and its density is above 0.001, `sf_compression × (−div v − 0.02)`,
+    with `sf_compression` 0.3. `div v` is the divergence of the cells' mean
+    velocities, taken from the six neighbouring cells.
 - **Gas mass:** the galaxies' gas (`Galaxy.gas_mass`, 10^10 solar masses
   each) is shared among their gas particles.
 
@@ -70,6 +77,10 @@ runs it on `sk.ComputeContext` with steps of 0.05 units, and
   approach to `separation` is that motion run backward without friction.
 - **The discs' tilts** come from `inclination`, in degrees from the orbit's
   axis; above 90° a disc turns against the orbit.
+
+`ring(...)` builds a ring galaxy. The target disc is at rest at the
+origin. A companion of 1/5 its mass falls through it along its axis, 1 kpc
+from its centre, at 1.5 times the escape speed, its own disc tilted 30°.
 
 `isolated(...)` builds one galaxy at rest.
 
@@ -103,14 +114,16 @@ horizontal, and runs it in the engine's render graph,
 The frame's 8 steps share the simulation time owed, 8 time units a second
 (38 Myr) at time scale 1, each step at most 0.05 units long. The galaxy
 records and `Stats` are read back every frame. They place the cinematic
-camera, which slowly circles the galaxies' centre of mass. Every 2 seconds
+camera, which slowly circles `grid_centre`; in the ring scene, the camera
+otherwise moves along with the target galaxy as it drifts. Every 2 seconds
 the viewer prints the separation, the stars formed, and the star formation
 rate over the last 50 Myr in solar masses a year.
 
-Keys: `R` restart, `SPACE` pause, `+` and `-` time scale, `C` the
-cinematic camera, `G` colour by galaxy or by age. Hold the right mouse
-button and use WASD, Q and E to fly. `--inclination`, `--ratio`,
-`--pericentre` and `--count` set up the merger. `--duration` and
+Keys: `1` the merger, `2` the ring galaxy, `R` restart, `SPACE` pause, `+`
+and `-` time scale, `C` the cinematic camera, `G` colour by galaxy or by
+age. Hold the right mouse button and use WASD, Q and E to fly. `--scene`
+picks the first scene; `--inclination`, `--ratio` and `--pericentre` set up
+the merger; `--count` sets the particles of both. `--duration` and
 `--screenshot` run for a while, save a frame and quit.
 
 ## Checks
@@ -127,3 +140,8 @@ button and use WASD, Q and E to fly. `--inclination`, `--ratio`,
   - the star formation rate every 118 Myr for 2 Gyr, for an isolated galaxy
     and a merger;
   - the merger's peak must be more than twice the isolated galaxy's.
+- **ring:**
+  - the radius, between 5 and 15 kpc, where the target's disc stars are
+    most overdense against the start, at 100 and 150 Myr;
+  - the first ring's speed;
+  - young stars by radius at 450 Myr.

@@ -1,20 +1,23 @@
-"""Watch two galaxies collide.
+"""Watch galaxies collide.
 
-    python viewer.py
+    python viewer.py                            # two equal disc galaxies merge
     python viewer.py --inclination 0 150        # the second disc turning against the orbit
+    python viewer.py --scene ring               # a companion falls through a disc: a ring galaxy
     python viewer.py --duration 30 --screenshot merger.png
 
-Keys: R restart, SPACE pause, + and - run faster or slower, C the
-cinematic camera (a slow orbit around the galaxies' centre of mass), G
-colour by galaxy or by age. Hold the right mouse button and use WASD, Q and
-E to fly the camera.
+Keys: 1 the merger, 2 the ring galaxy, R restart, SPACE pause, + and - run
+faster or slower, C the cinematic camera (a slow orbit around the centre of
+the galaxies near the heaviest, model.grid_centre), G colour by galaxy or
+by age. Hold the right mouse button and use WASD, Q and E to fly the
+camera.
 
 The galaxies run on the GPU every frame (pipeline/, which repeats
 shaders/step.comp, the same shader check.py runs): their centres, then a
 million stars and gas particles in their potentials. The particles are
 drawn as glowing points into an HDR image, bloomed and tone mapped. The
 galaxies are read back every frame for the camera and the printed separation. The
-model's orbital plane, xy, is drawn as the horizontal plane.
+model's xy plane (the merger's orbital plane, the ring target's disc) is
+drawn as the horizontal plane.
 """
 
 import argparse
@@ -35,6 +38,9 @@ SFR_WINDOW = 50.0            # Myr over which the star formation rate is average
 RATE = 8.0                   # simulation time units a second at time scale 1 (38 Myr)
 MAX_DT = 0.05                # the longest step; frames below RATE / (STEPS * MAX_DT) fps run slower
 ORBIT_SPEED = 0.05           # the cinematic camera's turn, radians a second
+SCENES = ("merger", "ring")
+EYES = {"merger": (0.0, 70.0, 110.0), "ring": (0.0, 32.0, 58.0)}   # where each scene's camera starts
+ORBITS = {"merger": (130.0, 55.0), "ring": (85.0, 40.0)}           # the cinematic camera's radius and height
 
 # Model coordinates to world coordinates: the orbital plane (model xy) becomes world xz, y up.
 TO_WORLD = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
@@ -53,11 +59,13 @@ def to_world(scene):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--scene", choices=SCENES, default="merger")
     parser.add_argument("--count", type=int, default=CAPACITY, help="stars and gas particles, at most %d" % CAPACITY)
     parser.add_argument("--inclination", type=float, nargs=2, default=(0.0, 30.0), metavar=("FIRST", "SECOND"),
-                        help="each disc's tilt from the orbit's axis, degrees; above 90 it turns against the orbit")
-    parser.add_argument("--ratio", type=float, default=1.0, help="the second galaxy's mass over the first's")
-    parser.add_argument("--pericentre", type=float, default=10.0, help="closest approach of the first pass, kpc")
+                        help="merger: each disc's tilt from the orbit's axis, degrees; above 90 it turns "
+                             "against the orbit")
+    parser.add_argument("--ratio", type=float, default=1.0, help="merger: the second galaxy's mass over the first's")
+    parser.add_argument("--pericentre", type=float, default=10.0, help="merger: closest approach of the first pass, kpc")
     parser.add_argument("--cinematic", action="store_true", help="start with the cinematic camera")
     parser.add_argument("--duration", type=float, default=0.0, help="quit after this many seconds (0: run until closed)")
     parser.add_argument("--screenshot", metavar="PNG", help="save a frame at --duration, then quit")
@@ -74,7 +82,8 @@ def main():
     engine = sk.Engine(title="Galaxy collision", width=args.width, height=args.height,
                        pipeline_json_path=str(PIPELINE))
     params = m.Params()
-    state = {"time_scale": 1.0, "paused": False, "seconds": 0.0, "cinematic": args.cinematic, "color_mode": 0,
+    state = {"scene": args.scene, "time_scale": 1.0, "paused": False, "seconds": 0.0, "cinematic": args.cinematic,
+             "color_mode": 0,
              "orbit_angle": 0.0, "last_report": time.perf_counter(), "frames": 0, "frame": 0}
     display = {"pointSize": 2.0, "brightness": 0.07, "exposure": 0.8, "bloom": 0.25}
 
@@ -84,13 +93,19 @@ def main():
         engine.set_custom_float("galaxy.gasRelax", params.gas_relax)
         engine.set_custom_float("galaxy.sfDensity", params.sf_density)
         engine.set_custom_float("galaxy.sfEfficiency", params.sf_efficiency)
+        engine.set_custom_float("galaxy.sfCompression", params.sf_compression)
         for key, value in display.items():
             engine.set_custom_float("galaxy." + key, value)
         engine.set_custom_uint("galaxy.colorMode", state["color_mode"])
 
-    def load():
-        scene = m.merger(count=args.count, inclination=args.inclination, ratio=args.ratio,
-                         pericentre=args.pericentre)
+    def build(name):
+        if name == "ring":
+            return m.ring(count=args.count)
+        return m.merger(count=args.count, inclination=args.inclination, ratio=args.ratio,
+                        pericentre=args.pericentre)
+
+    def load(name):
+        scene = build(name)
         particles, records = to_world(scene)
         engine.set_buffer("Particles", particles.tobytes())
         engine.set_buffer("Galaxies", records.tobytes())
@@ -98,19 +113,19 @@ def main():
         engine.set_custom_uint("galaxy.count", len(particles))
         engine.set_custom_uint("galaxy.galaxyCount", len(scene.galaxies))
         engine.set_custom_float("galaxy.gasMass", scene.gas_mass)
-        state.update(galaxies=scene.galaxies, records=records, sim_time=0.0, owed=0.0, gas_mass=scene.gas_mass,
-                     formed=0, history=[(0.0, 0)], frame_times={}, loaded_frame=state["frame"])
-        eye = np.array([0.0, 70.0, 110.0])
+        state.update(scene=name, galaxies=scene.galaxies, records=records, sim_time=0.0, owed=0.0,
+                     gas_mass=scene.gas_mass, formed=0, history=[(0.0, 0)], frame_times={},
+                     loaded_frame=state["frame"], followed=records["position"][0].astype(np.float64))
+        eye = np.array(EYES[name])
+        target = records["position"][0] if name == "ring" else m.grid_centre(records, len(scene.galaxies))
         engine.scene.set_position(state["camera"], eye)
-        engine.scene.set_rotation(state["camera"], look_rotation(eye, np.zeros(3)))
+        engine.scene.set_rotation(state["camera"], look_rotation(eye, target))
         set_params()
-        print("merger: %d particles, inclinations %s, mass ratio %g, pericentre %g kpc"
-              % (len(particles), tuple(args.inclination), args.ratio, args.pericentre))
-
-    def centre_of_mass():
-        records = state["records"][:len(state["galaxies"])]
-        masses = records["mass"].astype(np.float64)
-        return (records["position"] * masses[:, None]).sum(0) / masses.sum()
+        if name == "ring":
+            print("ring: %d particles, a companion of 1/5 the mass falling through the disc" % len(particles))
+        else:
+            print("merger: %d particles, inclinations %s, mass ratio %g, pericentre %g kpc"
+                  % (len(particles), tuple(args.inclination), args.ratio, args.pericentre))
 
     def fresh(result):
         """Whether a readback was taken since the scene was loaded."""
@@ -120,6 +135,8 @@ def main():
         result = engine.get_readback("Galaxies")
         if fresh(result):
             state["records"] = np.frombuffer(result["data"], dtype=m.GALAXY).copy()
+            if state["scene"] == "ring" and not state["cinematic"]:
+                follow_target()
         result = engine.get_readback("Stats")
         if fresh(result) and result["frame"] in state["frame_times"]:
             state["formed"] = int(np.frombuffer(result["data"], dtype=np.uint32)[0])
@@ -135,21 +152,32 @@ def main():
             return 0.0
         return (n1 - n0) * state["gas_mass"] * 1e10 / ((t1 - t0) * m.TIME_MYR * 1e6)
 
+    def follow_target():
+        """Move the camera with the ring scene's target galaxy, so it stays in view as it drifts."""
+        target = state["records"]["position"][0].astype(np.float64)
+        eye = np.array(engine.scene.get_position(state["camera"])) + target - state["followed"]
+        engine.scene.set_position(state["camera"], eye)
+        state["followed"] = target
+
     def fly_cinematic(dt):
         state["orbit_angle"] += ORBIT_SPEED * dt
-        centre = centre_of_mass()
+        centre = m.grid_centre(state["records"], len(state["galaxies"]))
         a = state["orbit_angle"]
-        eye = centre + np.array([130.0 * math.sin(a), 55.0, 130.0 * math.cos(a)])
+        radius, height = ORBITS[state["scene"]]
+        eye = centre + np.array([radius * math.sin(a), height, radius * math.cos(a)])
         engine.scene.set_position(state["camera"], eye)
         engine.scene.set_rotation(state["camera"], look_rotation(eye, centre))
 
     def on_init():
-        state["camera"] = engine.create_camera((0.0, 70.0, 110.0), fov=50.0, speed=30.0)
-        load()
+        state["camera"] = engine.create_camera(EYES[state["scene"]], fov=50.0, speed=30.0)
+        load(state["scene"])
 
     def on_key(key):
-        if key == sk.keys.R:
-            load()
+        scenes = {ord("1"): "merger", ord("2"): "ring"}
+        if key in scenes:
+            load(scenes[key])
+        elif key == sk.keys.R:
+            load(state["scene"])
         elif key == sk.keys.SPACE:
             state["paused"] = not state["paused"]
         elif key == sk.keys.C:

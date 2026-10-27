@@ -31,7 +31,8 @@ VELOCITY_KMS = 207.4     # one velocity unit in km/s
 
 BULGE, DISC, GAS, YOUNG = 0, 1, 2, 3
 MAX_GALAXIES = 4
-GRID = 128               # gas grid cells a side, centred on the galaxies' centre of mass
+GRID = 128               # gas grid cells a side, centred on grid_centre
+NEAR = 48.0              # kpc: galaxies this close to the heaviest count toward grid_centre
 CELL = 1.0               # gas grid cell size, kpc
 STEP_PASSES = 3          # step.comp passes a time step: centres and grid clear, gas deposit, particles
 
@@ -79,6 +80,7 @@ class Params:
     gas_relax: float = 0.5      # rate at which gas takes on its grid cell's mean velocity, per time unit
     sf_density: float = 0.01    # gas density above which stars form, 10^10 solar masses per kpc^3
     sf_efficiency: float = 0.05  # share of a cell's gas turned into stars per free-fall time
+    sf_compression: float = 0.3  # share of converging gas turned into stars per unit of compression
 
     def with_(self, **changes):
         return replace(self, **changes)
@@ -86,8 +88,8 @@ class Params:
     def uniform(self, count, galaxy_count, gas_mass, time=0.0):
         """The 48 bytes of the Params uniform block of step.comp (std140): `gas_mass` is one
         gas particle's mass, `time` the simulation time at the start of the frame's first step."""
-        return struct.pack("<2I8f8x", count, galaxy_count, self.dt, self.softening, self.log_lambda, time,
-                           self.gas_relax, self.sf_density, self.sf_efficiency, gas_mass)
+        return struct.pack("<2I9f4x", count, galaxy_count, self.dt, self.softening, self.log_lambda, time,
+                           self.gas_relax, self.sf_density, self.sf_efficiency, gas_mass, self.sf_compression)
 
 
 # --- accelerations ---------------------------------------------------------
@@ -251,18 +253,21 @@ def pair_potential(galaxy_a, galaxy_b, distance, spins, softening, far=2000.0):
     return float(np.sum((force[1:] + force[:-1]) * np.diff(r)) / 2.0) - galaxy_a.mass * galaxy_b.mass / far
 
 
-def approach(galaxies, spins, pericentre, boundness, separation, params=None):
-    """The centres' positions and velocities `separation` apart, before they pass at `pericentre`
-    in the xy plane turning anticlockwise. At pericentre their relative speed is (1 - boundness)
-    times the speed that would just let them escape; the approach is the motion from there
-    run backward, without friction."""
+def approach(galaxies, spins, pericentre, boundness, separation, params=None, along=1):
+    """The centres' positions and velocities `separation` apart, before they pass at `pericentre`.
+    At pericentre the second galaxy lies along +x from the first and moves along axis `along`
+    (1: +y, in the xy plane turning anticlockwise; 2: +z) relative to it, at (1 - boundness)
+    times the speed that would just let them escape; the approach is the motion from there run
+    backward, without friction."""
     params = params or Params()
     ma, mb = galaxies[0].mass, galaxies[1].mass
     reduced = ma * mb / (ma + mb)
     escape = math.sqrt(-2.0 * pair_potential(galaxies[0], galaxies[1], pericentre, spins, params.softening) / reduced)
     speed = (1.0 - boundness) * escape
     x = np.array([[-pericentre * mb / (ma + mb), 0.0, 0.0], [pericentre * ma / (ma + mb), 0.0, 0.0]])
-    v = np.array([[0.0, -speed * mb / (ma + mb), 0.0], [0.0, speed * ma / (ma + mb), 0.0]])
+    v = np.zeros((2, 3))
+    v[0, along] = -speed * mb / (ma + mb)
+    v[1, along] = speed * ma / (ma + mb)
     back = params.with_(dt=-abs(params.dt), log_lambda=0.0)
     for _ in range(100000):
         if np.linalg.norm(x[1] - x[0]) >= separation:
@@ -283,6 +288,16 @@ def galaxy_records(galaxies, positions, velocities, spins):
         out[i]["shape"] = (g.halo_scale, g.bulge_scale, g.disc_scale, g.disc_height)
         out[i]["masses"] = (g.halo_mass, g.bulge_mass, g.disc_mass, 0.0)
     return out
+
+
+def grid_centre(records, count):
+    """The mass-weighted centre of the first `count` galaxy records within NEAR of the
+    heaviest (the first of equals): the gas grid's centre, as step.comp finds it."""
+    records = records[:count]
+    anchor = records["position"][int(np.argmax(records["mass"]))].astype(np.float64)
+    near = np.linalg.norm(records["position"] - anchor, axis=1) <= NEAR
+    masses = records["mass"][near].astype(np.float64)
+    return (records["position"][near] * masses[:, None]).sum(0) / masses.sum()
 
 
 @dataclass
@@ -308,6 +323,28 @@ def merger(count=1 << 20, inclination=(0.0, 30.0), ratio=1.0, pericentre=10.0, b
     gals = [base, base.scaled(ratio)]
     spins = [spin_axis(inclination[0], 0.0), spin_axis(inclination[1], 60.0)]
     xs, vs = approach(gals, spins, pericentre, boundness, separation)
+    total = gals[0].mass + gals[1].mass
+    counts = [int(count * gals[0].mass / total)]
+    counts.append(count - counts[0])
+    parts = [make_galaxy(rng, g, n, i, x, v, s) for i, (g, n, x, v, s) in enumerate(zip(gals, counts, xs, vs, spins))]
+    return Scene(gals, galaxy_records(gals, xs, vs, spins), np.concatenate(parts))
+
+
+def ring(count=1 << 20, ratio=0.2, offset=1.0, boundness=-0.5, separation=40.0, tilt=30.0, seed=1,
+         base=Galaxy()):
+    """A disc galaxy at rest at the origin in the xy plane and a companion `ratio` times its
+    mass falling through it along its axis, from +z, `offset` kpc from its centre at the moment
+    it crosses the plane, at (1 - boundness) times the escape speed there. The companion's
+    disc is tilted `tilt` degrees from the target's."""
+    rng = np.random.default_rng(seed)
+    gals = [base, base.scaled(ratio)]
+    spins = [np.array([0.0, 0.0, 1.0]), spin_axis(tilt, 0.0)]
+    xs, vs = approach(gals, spins, offset, boundness, separation, along=2)
+    if xs[1][2] < xs[0][2]:                 # fall from +z, moving -z
+        xs = [x * np.array([1.0, 1.0, -1.0]) for x in xs]
+        vs = [v * np.array([1.0, 1.0, -1.0]) for v in vs]
+    xs = [x - xs[0] for x in xs]            # the target at rest at the origin
+    vs = [v - vs[0] for v in vs]
     total = gals[0].mass + gals[1].mass
     counts = [int(count * gals[0].mass / total)]
     counts.append(count - counts[0])

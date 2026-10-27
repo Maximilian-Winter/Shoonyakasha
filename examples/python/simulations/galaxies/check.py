@@ -1,13 +1,15 @@
 """Checks of the galaxy model on sk.ComputeContext, without a window.
 
     python check.py              # all checks
-    python check.py merger       # one: kernels, disc, merger, gas
+    python check.py merger       # one: kernels, disc, merger, gas, ring
 
 kernels  one step on the GPU, gas rules off, against model.py's NumPy accelerations
 disc     an isolated galaxy for 2 Gyr: how far its disc stars wander in radius and height
 merger   two galaxies: their separation over time, pericentres and when they merge
 gas      the gas rules: the gas's momentum through a step of relaxing toward the cells'
          mean velocities; the star formation rate of an isolated galaxy and of a merger
+ring     a companion through a disc: the first ring of the target's stars, 100 and 150 Myr
+         after the start, and where stars have formed by 450 Myr
 """
 
 import sys
@@ -121,7 +123,43 @@ def gas(ctx, gyr=2.0):
     return drift < 1e-3 and max(rates["merger"]) > 2.0 * max(rates["isolated"][4:])
 
 
-CHECKS = {"kernels": kernels, "disc": disc, "merger": merger, "gas": gas}
+def ring_peak(particles, centre, start, bins):
+    """The middle of the bin of radius, 5 to 15 kpc, where the target's disc stars are most
+    overdense against the start."""
+    def radii(p, c):
+        code = p["kind"].astype(np.int64)
+        target = ((code >> 2) == 0) & ((code & 3) == m.DISC)
+        return np.hypot(*(p["position"][target] - c)[:, :2].T)
+    now = np.histogram(radii(particles, centre), bins)[0].astype(np.float64)
+    before = np.histogram(radii(start, np.zeros(3)), bins)[0].astype(np.float64)
+    middle = 0.5 * (bins[1:] + bins[:-1])
+    ratio = np.where((middle >= 5.0) & (middle <= 15.0), now / np.maximum(before, 1.0), 0.0)
+    return float(middle[int(np.argmax(ratio))])
+
+
+def ring(ctx):
+    scene = m.ring(count=1 << 18)
+    sim = m.Simulator(ctx, scene)
+    bins = np.arange(0.0, 31.0, 1.0)
+    peaks = []
+    for myr in (100.0, 150.0, 450.0):
+        sim.step(int(round(myr / m.TIME_MYR / sim.params.dt)) - int(round(sim.time / sim.params.dt)))
+        state = sim.state()
+        centre = sim.records()["position"][0]
+        peaks.append(ring_peak(state, centre, scene.particles, bins))
+    speed = (peaks[1] - peaks[0]) / 50.0 * 977.8          # kpc/Myr to km/s
+    code = state["kind"].astype(np.int64)
+    young = (code & 3) == m.YOUNG
+    radius = np.hypot(*(state["position"][young] - centre)[:, :2].T)
+    bands = [0, 3, 6, 9, 12, 15, 20, 30]
+    counts = np.histogram(radius, bands)[0]
+    print("ring: the first ring at %.1f kpc at 100 Myr, %.1f at 150 (%.0f km/s outward); "
+          "at 450 Myr, young stars by radius %s kpc: %s"
+          % (peaks[0], peaks[1], speed, "/".join(str(b) for b in bands), counts.tolist()))
+    return peaks[1] >= peaks[0] + 2.0 and counts[2:].sum() > 1000
+
+
+CHECKS = {"kernels": kernels, "disc": disc, "merger": merger, "gas": gas, "ring": ring}
 
 
 def main():
