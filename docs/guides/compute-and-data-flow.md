@@ -67,6 +67,8 @@ engine.ecs.set_gpu_components("Particle", ships, rows)
 
 ## Initialization and sharing
 
+A storage buffer starts from its `source`, then from the bytes `set_buffer` writes into it. State that passes build up in it, such as a simulation's particles, stays through a window resize or a `render_scale` change; reloading the pipeline starts it again (see the [reference](../reference/pipeline-json.md#initialization-memory-and-readback)).
+
 [ssbo_pipeline.json](../../examples/cpp/compute/ssbo_data_flow_example/ssbo_pipeline.json) demonstrates seeded sphere/gaussian initialization and publishing a target named `particles.currentState`. A consumer can use a `buffer_ref` source referring to a target in `SharedBufferRegistry`. Native application code must arrange graph lifetimes, registration, and execution order.
 
 Binary file sources load raw layout-compatible bytes; they are not a portable schema conversion. [ssbo_pipeline_from_file.json](../../examples/cpp/compute/ssbo_data_flow_example/ssbo_pipeline_from_file.json) illustrates the file source. Keep stride, field types, and count consistent with the file producer. A path ending in `.npy` loads the array data of a NumPy file, without its header; its data must be exactly the buffer's size, or the buffer starts as zeros, with a warning.

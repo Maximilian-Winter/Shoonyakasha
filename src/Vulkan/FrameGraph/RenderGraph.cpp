@@ -899,15 +899,13 @@ void RenderGraph::createDotPathSSBOs(uint32_t maxFramesInFlight) {
         // Phase 3: Add TRANSFER_SRC_BIT when readback or gpu_to_cpu/bidirectional is needed
         // Any of them may hold the arguments of indirect passes, the
         // vertices and indices of draws, or the texels of texel buffers.
+        // Copied from by readbacks and by recompile(), which carries the
+        // contents over into the next graph's buffer.
         VkBufferUsageFlags usageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                                         VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
                                         VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
                                         VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
-        if (desc.readbackPolicy.enabled ||
-            desc.memoryPolicy.transferDirection == TransferDirection::GpuToCpu ||
-            desc.memoryPolicy.transferDirection == TransferDirection::Bidirectional) {
-            usageFlags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        }
 
         ssbo.buffer = std::make_unique<VulkanBuffer>(
             m_device,
@@ -1989,12 +1987,59 @@ bool RenderGraph::recompile(VkExtent2D referenceExtent, uint32_t swapchainImageC
                             uint32_t maxFramesInFlight) {
     m_logger->log(LogLevel::Info, "Recompiling render graph");
 
+    // The storage buffers outlive compile(), to be copied into the new ones,
+    // and so do the bytes setBufferData has not copied yet: compile() queues
+    // every set byte again.
+    std::unordered_map<std::string, DotPathSSBO> previous = std::move(m_dotPathSSBOs);
+    m_dotPathSSBOs.clear();
+    std::unordered_map<std::string, std::vector<uint8_t>> unapplied;
+    for (const auto& [name, data] : m_bufferData) unapplied[name] = data.toCopy;
+
     // Staging buffers and registry entries are made again by compile().
     // Physical resources (owned VulkanImages/Buffers) are cleaned up
     // by their unique_ptrs when the CompileResult is replaced.
     releaseCompiled(m_builder);
 
-    return compile(referenceExtent, swapchainImageCount, maxFramesInFlight);
+    if (!compile(referenceExtent, swapchainImageCount, maxFramesInFlight)) return false;
+    carryOverStorageBuffers(previous, unapplied);
+    return true;
+}
+
+void RenderGraph::carryOverStorageBuffers(
+        const std::unordered_map<std::string, DotPathSSBO>& previous,
+        const std::unordered_map<std::string, std::vector<uint8_t>>& unapplied) {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    size_t carried = 0;
+    for (const auto& [name, old] : previous) {
+        const auto now = m_dotPathSSBOs.find(name);
+        if (!old.buffer || now == m_dotPathSSBOs.end() || now->second.size != old.size) continue;
+        if (cmd == VK_NULL_HANDLE) cmd = m_device.beginSingleTimeCommands();
+        const VkBufferCopy region{0, 0, old.size};
+        vkCmdCopyBuffer(cmd, old.buffer->getBuffer(), now->second.buffer->getBuffer(), 1, &region);
+        ++carried;
+
+        // Only what had not reached the old buffer goes in on top.
+        const auto data = m_bufferData.find(name);
+        if (data == m_bufferData.end()) continue;
+        const auto waiting = unapplied.find(name);
+        auto& toCopy = data->second.toCopy;
+        if (waiting == unapplied.end()) {
+            std::fill(toCopy.begin(), toCopy.end(), uint8_t{0});
+        } else {
+            std::copy(waiting->second.begin(), waiting->second.begin() +
+                      static_cast<std::ptrdiff_t>(std::min(waiting->second.size(), toCopy.size())), toCopy.begin());
+        }
+        data->second.pending = std::find(toCopy.begin(), toCopy.end(), uint8_t{1}) != toCopy.end();
+    }
+    if (cmd == VK_NULL_HANDLE) return;
+    VkMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+    m_device.endSingleTimeCommands(cmd);
+    m_logger->log(LogLevel::Info, "Kept the contents of %zu storage buffer(s) through the recompile", carried);
 }
 
 std::string RenderGraph::reload(const std::string& filePath, VkExtent2D referenceExtent,

@@ -1532,6 +1532,11 @@ public:
     const std::vector<QueueBatch>& getQueueBatches() const { return m_compiled.queueBatches; }
 
     // ── Hot-reload ──
+    /// Compile the current graph again, for a new extent or frame count (a
+    /// resize, a render scale). The GPU must be idle. Each storage buffer of
+    /// the bufferLayouts keeps its contents when the new graph has one of the
+    /// same name and size; bytes set with setBufferData that had not reached
+    /// the GPU are still copied in after.
     bool recompile(VkExtent2D referenceExtent, uint32_t swapchainImageCount = 1,
                    uint32_t maxFramesInFlight = 2);
 
@@ -1768,6 +1773,11 @@ private:
     };
     std::unordered_map<std::string, DotPathSSBO> m_dotPathSSBOs;
     void createDotPathSSBOs(uint32_t maxFramesInFlight);
+    /// Copy each of `previous`'s storage buffers into the new one of the
+    /// same name and size, then queue the bytes of `unapplied` (the bytes
+    /// setBufferData had not yet copied, by buffer) instead of all set bytes.
+    void carryOverStorageBuffers(const std::unordered_map<std::string, DotPathSSBO>& previous,
+                                 const std::unordered_map<std::string, std::vector<uint8_t>>& unapplied);
 
     // Bytes the application set into a uniform or storage buffer
     // (setBufferData), each with a flag per byte that is set and, for storage

@@ -1,0 +1,31 @@
+{
+  "frame_myr": 4.714,
+  "frames": 319,
+  "steps": 6364,
+  "dt": 0.05,
+  "softening": 0.2,
+  "bodies": 131072,
+  "stars": 65536,
+  "per_galaxy": {
+    "halo": 32768,
+    "bulge": 8192,
+    "disc": 24576
+  },
+  "seconds": 208.3,
+  "pericentres": [
+    {
+      "myr": 141,
+      "kpc": 8.5
+    },
+    {
+      "myr": 382,
+      "kpc": 1.5
+    },
+    {
+      "myr": 429,
+      "kpc": 1.1
+    }
+  ],
+  "merged_myr": 462,
+  "momentum_drift": 0.00015682920638937503
+}
