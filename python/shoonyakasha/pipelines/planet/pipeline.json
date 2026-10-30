@@ -82,7 +82,11 @@
         { "name": "siteShape", "type": "vec4", "source": "scene.custom.planet.terrain.siteShape",
           "default": [ 150.0, 600.0, 100000.0, 0.0 ] },
         { "name": "detail", "type": "vec4", "source": "scene.custom.planet.terrain.detail",
-          "default": [ 80.0, 15.0, 4.0, 0.5 ] }
+          "default": [ 80.0, 15.0, 4.0, 0.5 ] },
+        { "name": "climate", "type": "vec4", "source": "scene.custom.planet.terrain.climate",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "biomeView", "type": "vec4", "source": "scene.custom.planet.terrain.biomeView",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] }
       ]
     },
     "ChunkJobs": {
@@ -162,10 +166,12 @@
         { "name": "settings", "type": "vec4", "source": "scene.custom.planet.vegetation.settings",
           "default": [ 0.0, 2500.0, 16384.0, 1.0 ] },
         { "name": "lod", "type": "vec4", "source": "scene.custom.planet.vegetation.lod",
-          "default": [ 600.0, 700.0, 16384.0, 7.0 ] },
+          "default": [ 600.0, 700.0, 32768.0, 7.0 ] },
         { "name": "camera", "type": "vec4", "source": "scene.custom.planet.cameraFromCentre" },
         { "name": "grass", "type": "vec4", "source": "scene.custom.planet.vegetation.grass",
-          "default": [ 0.0, 150.0, 131072.0, 65536.0 ] }
+          "default": [ 0.0, 150.0, 131072.0, 65536.0 ] },
+        { "name": "thinning", "type": "vec4", "source": "scene.custom.planet.vegetation.thinning",
+          "default": [ 2500.0, 0.0, 0.0, 0.0 ] }
       ]
     },
     "VegetationMesh": {
@@ -187,7 +193,7 @@
     "VegetationInstances": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 294912,
+      "elementCount": 458752,
       "fields": [ { "name": "data", "type": "vec4" } ],
       "memory": { "location": "device_local" }
     },

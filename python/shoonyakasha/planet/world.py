@@ -76,13 +76,15 @@ GROUND_SCALES = (5.0, 47.0)
 # The vegetation (vegetation.py, vegetation_scatter.comp): candidate cells per cube face side (9.6 m on
 # the planet), instances per kind (matches VegetationInstances in pipeline.json: 5 kinds, 2 vec4 each),
 # the coarsest chunk level that gets plants, the range (m), the distance (m) within which the detailed
-# meshes are drawn, and the bushes' range (m).
+# meshes are drawn, the bushes' range (m), and the share of a kind's instances that trees beyond the
+# detailed meshes' distance may fill in the densest forest (vegetation_thinning).
 VEGETATION_CELLS = 16384
-VEGETATION_CAPACITY = 16384
+VEGETATION_CAPACITY = 32768
 VEGETATION_MIN_LEVEL = 7
 VEGETATION_RANGE = 2_500.0
 VEGETATION_NEAR = 600.0
 VEGETATION_BUSH_RANGE = 700.0
+VEGETATION_BUDGET = 0.85
 # The grass (grass_scatter.comp): candidate cells per cube face side (1.2 m on the planet), tufts at
 # most (after the other kinds' instances; matches VegetationInstances), and its range (m).
 GRASS_CELLS = 131072
@@ -115,10 +117,10 @@ SITE_FACE = 4                    # +Z
 SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a vertex of every chunk from level 3 down
 SITE_FLAT_RADIUS = 150.0         # metres of flat pad around the site
 SITE_BLEND_RADIUS = 600.0        # metres from the site where the terrain is its own again
-TERRAIN_COLOUR = (-1.0, 0.0, 0.0)  # tells terrain.frag to colour by height, slope and latitude
+TERRAIN_COLOUR = (-1.0, 0.0, 0.0)  # tells terrain.frag to colour the ground by its biomes, height and slope
 FACE_COLOURS = ((0.62, 0.30, 0.25), (0.25, 0.50, 0.55), (0.55, 0.55, 0.30),
                 (0.40, 0.30, 0.60), (0.30, 0.55, 0.30), (0.60, 0.42, 0.25))
-COLOUR_MODES = ("terrain", "face", "level")
+COLOUR_MODES = ("terrain", "face", "level", "biome")
 SUN_ELEVATION, SUN_AZIMUTH = 40.0, 200.0   # degrees, seen from the site; azimuth from east towards north
 # The atmosphere (atmosphere.glsl), the defaults in pipeline.json: a top 20 km up, scale heights of
 # 2.5 km (air) and 400 m (haze), and Earth's coefficients times 3.2, which keeps Earth's optical
@@ -288,6 +290,19 @@ def parent_split_distance(node, tree):
     return tree.split_factor * 2.0 * node.edge if node.level > 0 else 0.0
 
 
+def vegetation_thinning(vegetation_range):
+    """The distance within which every tree kept is drawn (vegetation_scatter.comp
+    keeps one at distance d beyond it with a chance of (it / d)^2): where a tree
+    grows in every cell, the trees from VEGETATION_NEAR to the range,
+    2 pi F^2 ln(range / VEGETATION_NEAR) over a cell's area for F below
+    VEGETATION_NEAR, fill VEGETATION_BUDGET of a kind's instances. The
+    range itself when that is nearer."""
+    cell = (math.pi / 2.0 * RADIUS / VEGETATION_CELLS) ** 2
+    spread = math.log(max(vegetation_range / VEGETATION_NEAR, 1.0001))
+    full = math.sqrt(VEGETATION_BUDGET * VEGETATION_CAPACITY * cell / (2.0 * math.pi * spread))
+    return min(full, vegetation_range)
+
+
 def terrain_floor(body):
     """Metres above `body`'s radius that no terrain goes below: its
     `floor`, or from its terrain parameters the seabed's depth, or on land
@@ -307,8 +322,12 @@ class PlanetWorld:
     `ozone`, `multiple_scattering`, `exposure` (upload_sky); `clouds`,
     `cloud_coverage`, `cloud_density` (upload_clouds); `wind_speed` (m/s, the
     clouds' drift); `shadows`; `texture_strength`, `texture_relief` (the
-    ground's textures); `colour_mode` (an index into COLOUR_MODES);
-    `frozen` (the level of detail kept as it is). `set_ocean` and
+    ground's textures); `temperature_offset` (degrees C), `moisture_offset`,
+    `flora_hue`, `soil_hue` (degrees; the climate and its palette,
+    biome.glsl); `colour_mode` (an index into COLOUR_MODES; "biome" shows
+    the biomes' flat colours); `frozen` (the level of detail kept as it
+    is). `ground_climate` is (temperature, moisture) under the viewpoint
+    from the probes, with the offsets, or None. `set_ocean` and
     `set_wireframe` switch those passes. The planet's terrain parameters
     are `planet.terrain`; `regenerate` builds it again with them.
 
@@ -355,6 +374,10 @@ class PlanetWorld:
         self.grass = True
         self.grass_range = GRASS_RANGE
         self.vegetation_draws = None       # the kinds' draws with no instances, set again each frame
+        self.temperature_offset = 0.0      # degrees C added to the climate's temperature
+        self.moisture_offset = 0.0         # added to the climate's moisture
+        self.flora_hue = 0.0               # degrees the plants' colours turn
+        self.soil_hue = 0.0                # degrees the soils' colours turn
         self.ocean = True
         self.wireframe = False
         self.colour_mode = 0
@@ -363,11 +386,13 @@ class PlanetWorld:
         self.frame = 0
         self.terrain_version = 0           # counts terrain changes; probe results carry the version they were made with
         self.ground = None                 # terrain height under the viewpoint on the body under it, from the probes
+        self.ground_base_climate = None    # (temperature, moisture) there without the offsets, on the planet
         self.site_height = None            # natural terrain height at the site, from the probes
         self.patch = None                  # (body, patch) whose heights came back last
         self.probe_requests = {}           # stamp: (terrain version, body under the viewpoint, patch, extra probes)
         self.extra_probes = []             # (direction, body) to measure the terrain's height at
         self.extra_heights = []            # ((direction, body), height) for the extra probes last read back
+        self.extra_climates = []           # ((direction, body), (temperature, moisture) or None off the planet)
         self.probe_latency = 3.0           # frames from asking for probes to their heights coming back
         self.horizon_sun = None            # the sun's direction the chunks' horizons are measured towards
         self.chunks_culled = 0             # selected chunks not drawn: out of view or behind the horizon
@@ -545,6 +570,8 @@ class PlanetWorld:
                                 float(VEGETATION_MIN_LEVEL)))
         engine.set_custom_vec4("planet.vegetation.grass",
                                (1.0 if self.grass else 0.0, self.grass_range, float(GRASS_CELLS), float(GRASS_CAPACITY)))
+        engine.set_custom_vec4("planet.vegetation.thinning",
+                               (vegetation_thinning(self.vegetation_range), 0.0, 0.0, 0.0))
         if self.vegetation_draws is not None:
             engine.set_buffer("VegetationDraws", self.vegetation_draws)
 
@@ -558,6 +585,30 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.terrain.site", up + (self.site_height if known else 0.0,))
         engine.set_custom_vec4("planet.terrain.siteShape",
                                (SITE_FLAT_RADIUS, SITE_BLEND_RADIUS, RADIUS, 1.0 if known and self.pad else 0.0))
+
+    def upload_climate(self):
+        """The climate settings and whether the biome view is on."""
+        engine = self.engine
+        engine.set_custom_vec4("planet.terrain.climate",
+                               (self.temperature_offset, self.moisture_offset, math.radians(self.flora_hue),
+                                math.radians(self.soil_hue)))
+        biome_view = COLOUR_MODES[self.colour_mode] == "biome"
+        engine.set_custom_vec4("planet.terrain.biomeView", (1.0 if biome_view else 0.0, 0.0, 0.0, 0.0))
+
+    def with_climate_settings(self, climate):
+        """A probe's (temperature in degrees C, moisture) with the climate
+        settings' offsets, the moisture clamped to 0 .. 1, as biome.glsl
+        takes them; None stays None."""
+        if climate is None:
+            return None
+        temperature, moisture = climate
+        return temperature + self.temperature_offset, min(max(moisture + self.moisture_offset, 0.0), 1.0)
+
+    @property
+    def ground_climate(self):
+        """The climate under the viewpoint (with_climate_settings); None off
+        the planet or until measured."""
+        return self.with_climate_settings(self.ground_base_climate)
 
     def upload_sky(self):
         """The sun's direction and the atmosphere's parameters."""
@@ -613,6 +664,7 @@ class PlanetWorld:
         self.upload_terrain()
         self.terrain_version += 1
         self.ground = None
+        self.ground_base_climate = None
         self.patch = None
         for body in self.bodies:
             if body is self.planet or not self.lod.has_tree(body.index):
@@ -627,6 +679,7 @@ class PlanetWorld:
         self.lod_version += 1
         self.site_height = None
         self.ground = None
+        self.ground_base_climate = None
         self.patch = None
         self.terrain_version += 1
         self.upload_terrain()
@@ -668,7 +721,8 @@ class PlanetWorld:
         """The level of detail and the probes for the camera at `position`
         looking along `basis` (right, up, forward), the drawn chunks, the
         camera's turn, the shadow cascades and the ground textures' offsets
-        for it, and the clouds blown on by `dt` seconds times `warp`.
+        for it, the climate settings, and the clouds blown on by `dt`
+        seconds times `warp`.
         `viewpoint` is where the ground is probed (the camera's position
         without one); `patch` is (body, patch) to probe, or None."""
         right, up, forward = basis
@@ -679,6 +733,7 @@ class PlanetWorld:
         self.engine.set_custom_vec4("planet.cameraFromCentre", position + (0.0,))
         self.upload_drawn_chunks()
         self.upload_vegetation()
+        self.upload_climate()
         self.engine.scene.set_rotation(self.camera, euler_from_basis(right, up, forward))
         self.upload_shadow_cascades(forward)
         self.upload_ground()
@@ -714,6 +769,8 @@ class PlanetWorld:
         moved = length(sub(scale(normalize(here), ground_body.radius), scale(ground_direction, ground_body.radius)))
         still_over = ground_body is self.body_under(self.viewpoint) and moved < GROUND_PROBE_REACH
         self.ground = float(probes[0, 0]) if still_over else None
+        on_planet = still_over and ground_body is self.planet
+        self.ground_base_climate = (float(probes[0, 2]), float(probes[0, 3])) if on_planet else None
         if self.site_height is None:
             self.site_height = float(probes[1, 0])
         if patch is not None:
@@ -721,6 +778,8 @@ class PlanetWorld:
             self.patch = patch
         first = PROBES - EXTRA_PROBES
         self.extra_heights = [(d, float(h)) for d, h in zip(extra, probes[first:first + len(extra), 0])]
+        self.extra_climates = [(d, (float(p[2]), float(p[3])) if d[1] is self.planet else None)
+                               for d, p in zip(extra, probes[first:first + len(extra)])]
 
     def in_view(self, centre, radius):
         """Whether a sphere around `centre` (planet space) is roughly in view: a

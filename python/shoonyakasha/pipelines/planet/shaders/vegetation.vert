@@ -6,11 +6,12 @@
 // VegetationInstances by gl_InstanceIndex (the draw's first instance is its
 // kind's first). The mesh's y is the plant's up, away from the planet's
 // centre; it is scaled by the plant's height and turned about its up.
-// The normal's w marks the parts: 0 wood, 1 foliage, 2 grass. Foliage and
-// grass are tinted by the plant's tint, from 80 % to 115 % of their colour;
-// grass turns towards straw by how dry its ground is, and sways: its tips
-// move up to GRASS_SWAY of their height along the wind, a sine of the time
-// whose phase follows the tuft's place on the planet.
+// The normal's w marks the parts: 0 wood, 1 foliage, 2 grass. Wood takes
+// the mesh's colour; foliage and grass the mesh's shade times the plant's
+// colour (vegetationUnpackColour), tinted by the plant's tint from 80 % to
+// 115 %. Grass sways: its tips move up to GRASS_SWAY of their height along
+// the wind, a sine of the time whose phase follows the tuft's place on the
+// planet.
 //
 
 #define CAMERA_SET 0
@@ -32,7 +33,6 @@ layout(location = 1) out vec3 fragColour;
 layout(location = 2) out vec3 fragRelativePos;
 layout(location = 3) flat out float fragTwoSided;   // 1: a back face is lit with its normal turned round
 
-const vec3 STRAW = vec3(0.42, 0.36, 0.16);
 const float GRASS_SWAY = 0.12;
 
 void main() {
@@ -42,16 +42,16 @@ void main() {
     vegetationFrame(camera.cameraFromCentre.xyz, placed.xyz, look.xy, right, up, ahead);
     vec3 offset = (right * inPosition.x + up * inPosition.y + ahead * inPosition.z) * placed.w;
     bool grass = inNormal.w > 1.5;
-    vec3 colour = inColour.rgb;
+    bool living = inNormal.w > 0.5;
+    vec3 colour = living ? inColour.rgb * vegetationUnpackColour(look.w) : inColour.rgb;
     if (grass) {
-        colour = mix(colour, STRAW, look.w);
         vec3 wind = normalize(vec3(1.0, 0.0, 0.3) - up * dot(vec3(1.0, 0.0, 0.3), up));
         float phase = dot(camera.cameraFromCentre.xyz + placed.xyz, vec3(0.37, 0.53, 0.29));
         offset += wind * (GRASS_SWAY * inPosition.y * inPosition.y * placed.w * sin(camera.time * 2.1 + phase));
     }
     vec3 relativePos = placed.xyz + offset;
     fragNormal = normalize(right * inNormal.x + up * inNormal.y + ahead * inNormal.z);
-    fragColour = colour * mix(1.0, mix(0.8, 1.15, look.z), min(inNormal.w, 1.0));
+    fragColour = living ? colour * mix(0.8, 1.15, look.z) : colour;
     fragRelativePos = relativePos;
     fragTwoSided = grass ? 0.0 : 1.0;
     gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);

@@ -10,16 +10,19 @@
 // one candidate at a point jittered within it by a hash of the cell. A
 // candidate belongs to the chunk whose face coordinates hold it, so each is
 // considered once. Within the range it is kept by a draw from the hash
-// against the layers at its point (biome.glsl's groundLayers, from the
-// chunk's grid unmorphed): a tree where there is forest (and a few in grass
-// and dry ground), a bush in grass and dry ground (and a few in forest),
-// within their range, none on sand, rock, snow or the sea floor, scaled by
-// settings.w. Conifers rather than broadleaf trees towards the poles and
-// high up. A kept plant stands on the chunk's surface as drawn (morph.glsl's
-// morphed vertices, split along the chunk's quads' diagonals), its height
-// shrinking to nothing over the last 15 % of the range, with a hashed size,
-// turn and tint. The detailed meshes within vegetation.lod.x, the simple
-// ones beyond.
+// against what grows at its point (biome.glsl's biomePlants, from the
+// chunk's grid unmorphed): a tree by the biomes' tree chance (thinned in
+// clearings, gathered in groves), else a bush by their bush chance within
+// the bushes' range, none on beaches, rock, snow or the sea floor, scaled by
+// settings.w. Beyond vegetation.thinning.x a tree is kept with a chance of
+// (thinning.x / its distance)^2, a second draw from the hash, so the trees
+// in view fit their kinds' instances. A tree is a conifer by the biomes'
+// conifers' share. A kept
+// plant stands on the chunk's surface as drawn (morph.glsl's morphed
+// vertices, split along the chunk's quads' diagonals), its height shrinking
+// to nothing over the last 15 % of the range, with a hashed size, turn and
+// tint, and its biomes' foliage colour (darker for conifers). The detailed
+// meshes within vegetation.lod.x, the simple ones beyond.
 //
 // Each kept plant takes the next instance of its kind (an atomic add on
 // its draw's instance count in VegetationDraws, which the CPU sets to zero
@@ -34,6 +37,9 @@ const int KIND_CONIFER = 0;
 const int KIND_BROADLEAF = 2;
 const int KIND_BUSH = 4;
 const float FADE_START = 0.85;      // of the range: where heights start to shrink
+const float MAX_TREE_CHANCE = 0.97;
+const float CONIFER_SHADE = 0.6;    // a conifer's foliage, of its biomes' foliage colour
+const float BROADLEAF_SHADE = 0.75;
 
 void main() {
     ScatterChunk chunk;
@@ -50,29 +56,30 @@ void main() {
         Candidate x;
         if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, 0, range, x)) continue;
         float pick = nextRandom(x.hash);
-        if (pick > 0.95 * density) continue;                          // above the densest biome's chance
-        vec3 radial, normal;
+        float thin = nextRandom(x.hash);
+        if (pick >= density) continue;                                // chances are at most 1
+        vec3 radial, normal, climate;
         float height;
-        candidateGround(chunk, x, radial, height, normal);
-        float weights[GROUND_LAYERS];
-        vec3 colours[GROUND_LAYERS];
-        groundLayers(radial, height, normal, weights, colours);
-        if (height < 0.0) continue;
-        float forest = weights[GROUND_FOREST], grass = weights[GROUND_GRASS], dry = weights[GROUND_DRY];
-        float treeChance = density * (0.85 * forest + 0.04 * grass + 0.01 * dry);
-        float bushChance = density * (0.10 * forest + 0.12 * grass + 0.05 * dry);
+        candidateGround(chunk, x, radial, height, normal, climate);
+        vec3 leaf, grass;
+        vec4 plants = biomePlants(radial, height, normal, climate, leaf, grass);
+        float treeChance = density * min(plants.x, MAX_TREE_CHANCE);
+        float bushChance = density * plants.z;
         int kind;
         float size;
+        vec3 foliage;
         if (pick < treeChance) {
-            float coniferShare = clamp(0.2 + smoothstep(0.35, 0.65, abs(radial.y)) + smoothstep(900.0, 1600.0, height),
-                                       0.0, 1.0);
-            bool conifer = nextRandom(x.hash) < coniferShare;
+            float full = vegetation.thinning.x;
+            if (x.distance > full && thin * x.distance * x.distance >= full * full) continue;
+            bool conifer = nextRandom(x.hash) < plants.y;
             kind = conifer ? KIND_CONIFER : KIND_BROADLEAF;
             size = conifer ? mix(9.0, 18.0, nextRandom(x.hash)) : mix(7.0, 13.0, nextRandom(x.hash));
+            foliage = leaf * (conifer ? CONIFER_SHADE : BROADLEAF_SHADE);
             if (x.distance > vegetation.lod.x) kind += 1;
         } else if (pick < treeChance + bushChance && x.distance < vegetation.lod.y) {
             kind = KIND_BUSH;
             size = mix(1.2, 2.6, nextRandom(x.hash));
+            foliage = leaf * BROADLEAF_SHADE;
         } else {
             continue;
         }
@@ -84,6 +91,6 @@ void main() {
         uint at;
         if (!claimInstance(uint(kind), uint(kind) * capacity, capacity, at)) continue;
         instances.data[at] = vec4(drawn, size);
-        instances.data[at + 1u] = vec4(cos(turn), sin(turn), tint, 0.0);
+        instances.data[at + 1u] = vec4(cos(turn), sin(turn), tint, vegetationPackColour(foliage));
     }
 }

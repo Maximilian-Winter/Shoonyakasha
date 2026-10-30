@@ -5,13 +5,12 @@
 // draws of the planet, at least level GRASS_MIN_LEVEL, within the grass's
 // range (vegetation.grass.y), each cube face divided into
 // vegetation.grass.z x grass.z cells (about 1.2 m at 131,072). A candidate
-// is kept by a draw from its cell's hash against the ground's layers there
-// (biome.glsl): a tuft with a chance of 0.9 in grass, 0.45 on dry ground
-// and 0.3 in forest, times vegetation.settings.w, none on sand, rock, snow
-// or the sea floor. A tuft's mesh is scaled by 0.3 to 0.7, shrinking to
-// nothing over the last 30 % of the range, turned and tinted by the hash,
-// and carries how dry the ground is (the dry layer's share of the three),
-// which turns it from green towards straw. It takes the next instance of draw
+// is kept by a draw from its cell's hash against the biomes' grass chance
+// there (biome.glsl's biomePlants), times vegetation.settings.w, none on
+// beaches, rock, snow or the sea floor. A tuft's mesh is scaled by 0.3 to
+// 0.7, shrinking to nothing over the last 30 % of the range, turned and
+// tinted by the hash, and coloured as its biomes' grass (the ground's plants,
+// towards straw where the biomes' grass is dry). It takes the next instance of draw
 // VEGETATION_GRASS, its instances after the other kinds' (5 times
 // vegetation.lod.z), at most vegetation.grass.w of them.
 //
@@ -41,17 +40,13 @@ void main() {
         Candidate x;
         if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, GRASS_SALT, range, x)) continue;
         float pick = nextRandom(x.hash);
-        if (pick > 0.9 * density) continue;                           // above the densest biome's chance
-        vec3 radial, normal;
+        if (pick >= 0.95 * density) continue;                         // above the densest biome's chance
+        vec3 radial, normal, climate;
         float height;
-        candidateGround(chunk, x, radial, height, normal);
-        float weights[GROUND_LAYERS];
-        vec3 colours[GROUND_LAYERS];
-        groundLayers(radial, height, normal, weights, colours);
-        if (height < 0.0) continue;
-        float forest = weights[GROUND_FOREST], grass = weights[GROUND_GRASS], dry = weights[GROUND_DRY];
-        if (pick >= density * (0.9 * grass + 0.45 * dry + 0.3 * forest)) continue;
-        float dryness = dry / max(grass + dry + forest, 1e-3);
+        candidateGround(chunk, x, radial, height, normal, climate);
+        vec3 leaf, grass;
+        vec4 plants = biomePlants(radial, height, normal, climate, leaf, grass);
+        if (pick >= density * plants.w) continue;
         float size = mix(0.3, 0.7, nextRandom(x.hash)) * smoothstep(range, range * GRASS_FADE_START, x.distance);
         if (size < 0.03) continue;
         float turn = 6.2831853 * nextRandom(x.hash);
@@ -60,6 +55,6 @@ void main() {
         uint at;
         if (!claimInstance(uint(VEGETATION_GRASS), first, capacity, at)) continue;
         instances.data[at] = vec4(drawn, size);
-        instances.data[at + 1u] = vec4(cos(turn), sin(turn), tint, dryness);
+        instances.data[at + 1u] = vec4(cos(turn), sin(turn), tint, vegetationPackColour(grass));
     }
 }

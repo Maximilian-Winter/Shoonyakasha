@@ -1,12 +1,14 @@
 #version 450
 //
 // The terrain's fragment shader. With a chunk colour whose red is below 0,
-// the planet's ground is coloured by height, slope, latitude and a
-// moisture noise, and the moon's grey (moonColour), both detailed by the
-// ground's textures (ground.glsl); otherwise it takes the chunk's colour,
-// with face lines (shading.glsl). The planet is lit by the sunlight that
-// comes through the atmosphere and a sky light (atmosphere.glsl), the moon
-// by the sunlight alone, in HDR.
+// the planet's ground is coloured by its biomes, height and slope from the
+// vertices' climate (biome.glsl's groundLayers), and the moon's grey
+// (moonColour), both detailed by the ground's textures (ground.glsl); with
+// the biome view on (terrain.biomeView.x), the planet's ground takes its
+// biomes' flat colours (biomeViewColour) instead. Otherwise it takes the
+// chunk's colour, with face lines (shading.glsl). The planet is lit by the
+// sunlight that comes through the atmosphere and a sky light
+// (atmosphere.glsl), the moon by the sunlight alone, in HDR.
 //
 
 #define CAMERA_SET 0
@@ -27,6 +29,7 @@ layout(location = 3) in vec4 fragRadialHeight;
 layout(location = 4) in vec3 fragRelativePos;
 layout(location = 5) in float fragHorizon;
 layout(location = 6) flat in int fragBody;
+layout(location = 7) in vec3 fragClimate;
 
 layout(location = 0) out vec4 outColor;
 
@@ -64,8 +67,10 @@ void main() {
         weights[GROUND_MOON] = 1.0;
         colours[GROUND_MOON] = moonColour(radial, normal);
         groundTextured(weights, colours, fragRelativePos, fragBody, normal, albedo, shaded);
+    } else if (terrain.biomeView.x > 0.5) {
+        albedo = biomeViewColour(radial, fragRadialHeight.w, normal, fragClimate);
     } else {
-        groundLayers(radial, fragRadialHeight.w, normal, weights, colours);
+        groundLayers(radial, fragRadialHeight.w, normal, fragClimate, weights, colours);
         groundTextured(weights, colours, fragRelativePos, fragBody, normal, albedo, shaded);
     }
     if (fragBody == MOON) {

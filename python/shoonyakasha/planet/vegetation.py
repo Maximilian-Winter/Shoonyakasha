@@ -13,7 +13,9 @@ face's normal), in the kinds vegetation_scatter.comp places:
                       up (grass_scatter.comp places them)
 
 A vertex is three vec4: position (xyz), normal (xyz; w 0 for wood, 1 for
-foliage, 2 for grass) and colour (linear albedo). `meshes()` gives them all
+foliage, 2 for grass) and colour: linear albedo for wood, and for foliage
+and grass a grey shade that vegetation.vert multiplies by the plant's
+colour from its biome. `meshes()` gives them all
 in one vertex array and one index array, with each kind's (first index,
 index count); `draw_template(ranges, firsts)` the kinds' indexed indirect
 draws with no instances, each kind's first instance from `firsts`.
@@ -25,11 +27,10 @@ import numpy as np
 
 KINDS = ("conifer", "conifer far", "broadleaf", "broadleaf far", "bush", "grass")
 WOOD = (0.2, 0.12, 0.065)
-CONIFER = (0.05, 0.12, 0.055)
-BROADLEAF = (0.09, 0.18, 0.05)
-BUSH = (0.11, 0.19, 0.05)
-GRASS_BASE = (0.05, 0.12, 0.03)
-GRASS_TIP = (0.16, 0.28, 0.07)
+FOLIAGE = (1.0, 1.0, 1.0)     # shades of the plant's colour
+BUSH = (1.1, 1.1, 1.1)
+GRASS_BASE = (0.4, 0.4, 0.4)
+GRASS_TIP = (1.0, 1.0, 1.0)
 GRASS_BLADES = 7
 GRASS_UP = 0.65               # of a blade's normal: the share that is straight up
 
@@ -149,15 +150,15 @@ def _kind(name):
         b.prism(6, 0.035, -0.05, 0.25, WOOD)
         for bottom, top, radius, shade, twist in ((0.16, 0.62, 0.27, 1.0, 0.0), (0.38, 0.82, 0.21, 1.08, 0.4),
                                                   (0.58, 1.0, 0.14, 1.16, 0.8)):
-            b.cone(8, radius, bottom, top, tuple(c * shade for c in CONIFER), twist)
+            b.cone(8, radius, bottom, top, tuple(c * shade for c in FOLIAGE), twist)
     elif name == "conifer far":
-        b.cone(5, 0.25, 0.12, 1.0, CONIFER)
+        b.cone(5, 0.25, 0.12, 1.0, FOLIAGE)
     elif name == "broadleaf":
         b.prism(6, 0.05, -0.05, 0.5, WOOD)
-        b.blob(1, (0.0, 0.66, 0.0), (0.4, 0.34, 0.4), BROADLEAF, 0.12, 7)
+        b.blob(1, (0.0, 0.66, 0.0), (0.4, 0.34, 0.4), FOLIAGE, 0.12, 7)
     elif name == "broadleaf far":
         b.prism(3, 0.05, -0.05, 0.4, WOOD)
-        b.blob(0, (0.0, 0.64, 0.0), (0.4, 0.36, 0.4), BROADLEAF, 0.0, 0)
+        b.blob(0, (0.0, 0.64, 0.0), (0.4, 0.36, 0.4), FOLIAGE, 0.0, 0)
     elif name == "bush":
         b.blob(1, (0.0, 0.42, 0.0), (0.6, 0.45, 0.6), BUSH, 0.1, 11)
     elif name == "grass":

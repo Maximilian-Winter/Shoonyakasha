@@ -4,12 +4,14 @@ shoonyakasha.toolkit.overlay.SettingsMenu: a heading, then sliders, toggles
 and buttons that read and change the world's settings.
 
     items = (settings.sky_items(world) + settings.cloud_items(world) + settings.ground_items(world)
-             + settings.view_items(world) + settings.planet_items(world, edit, new_seed))
+             + settings.climate_items(world) + settings.view_items(world)
+             + settings.planet_items(world, edit, new_seed))
 
 Each function takes `keys`, a dict from an item's name to the key names
 that change it too, shown as caps beside it.
 """
 
+from . import biomes
 from . import world as world_module
 
 
@@ -102,6 +104,39 @@ def ground_items(world, keys=None):
     ], keys)
 
 
+def next_palette(world):
+    """The flora's and soil's hue turns of the palette after the one they
+    match in biomes.PALETTES (the first when they match none); returns its name."""
+    current = next((i for i, (_, flora, soil) in enumerate(biomes.PALETTES)
+                    if flora == world.flora_hue and soil == world.soil_hue), -1)
+    name, world.flora_hue, world.soil_hue = biomes.PALETTES[(current + 1) % len(biomes.PALETTES)]
+    return name
+
+
+def climate_items(world, keys=None):
+    """The climate's temperature and moisture offsets, the flora's and the
+    soil's hue turns, and the palettes, all taking effect at once."""
+    names = " / ".join(name for name, _, _ in biomes.PALETTES)
+    return _with_keys([
+        {"heading": "Climate"},
+        {"slider": "Temperature", "min": -20.0, "max": 20.0, "get": lambda: world.temperature_offset,
+         "set": lambda v: setattr(world, "temperature_offset", v), "format": "%+.1f C",
+         "hint": "Added to the temperature everywhere: colder moves the snow, the tundra and the taiga "
+                 "towards the equator and down the mountains."},
+        {"slider": "Moisture", "min": -0.5, "max": 0.5, "get": lambda: world.moisture_offset,
+         "set": lambda v: setattr(world, "moisture_offset", v), "format": "%+.2f",
+         "hint": "Added to the moisture everywhere: drier turns forests to grassland and grassland to desert."},
+        {"slider": "Flora hue", "min": -180.0, "max": 180.0, "get": lambda: world.flora_hue,
+         "set": lambda v: setattr(world, "flora_hue", v), "format": "%+.0f deg",
+         "hint": "Turns the colour of the plants and the ground they cover around the colour wheel."},
+        {"slider": "Soil hue", "min": -180.0, "max": 180.0, "get": lambda: world.soil_hue,
+         "set": lambda v: setattr(world, "soil_hue", v), "format": "%+.0f deg",
+         "hint": "Turns the colour of the bare ground and the sand around the colour wheel."},
+        {"button": "Palette: " + names, "do": lambda: next_palette(world),
+         "hint": "Sets the flora's and the soil's hues to the next palette: " + names + "."},
+    ], keys)
+
+
 def view_items(world, keys=None):
     """The wireframe, the split factor and the colour mode, under no heading."""
     planet = world.planet
@@ -117,9 +152,9 @@ def view_items(world, keys=None):
          "get": lambda: planet.tree.split_factor if planet.tree is not None else world_module.SPLIT_FACTOR,
          "set": set_split, "format": "%.2f",
          "hint": "A chunk splits within this many of its edge lengths of the camera; higher is finer and slower."},
-        {"button": "Colour: terrain / face / level",
+        {"button": "Colour: terrain / face / level / biome",
          "do": lambda: setattr(world, "colour_mode", (world.colour_mode + 1) % len(world_module.COLOUR_MODES)),
-         "hint": "Colour the ground by its terrain, by cube face or by quadtree level."},
+         "hint": "Colour the ground by its terrain, by cube face, by quadtree level or by its biomes' flat colours."},
     ], keys)
 
 

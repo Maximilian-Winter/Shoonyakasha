@@ -5,7 +5,8 @@
 // firstInstance is the slot, which indexes ChunkInstances for the chunk's
 // centre relative to the camera, its colour and what morphing needs.
 // Vertices are morphed towards their ancestors' surfaces by distance
-// (morph.glsl), reading the ancestors' vertices from ChunkPool.
+// (morph.glsl), reading the ancestors' vertices from ChunkPool. The
+// vertices' climate (horizon.yzw) goes on to the fragment shader.
 //
 
 #define CAMERA_SET 0
@@ -30,6 +31,7 @@ layout(location = 3) out vec4 fragRadialHeight;
 layout(location = 4) out vec3 fragRelativePos;
 layout(location = 5) out float fragHorizon;
 layout(location = 6) flat out int fragBody;
+layout(location = 7) out vec3 fragClimate;
 
 void main() {
     ChunkInstance chunk = chunks.instances[gl_InstanceIndex];
@@ -42,5 +44,6 @@ void main() {
     fragRelativePos = relativePos;
     fragHorizon = v.horizon.x;
     fragBody = int(chunk.morph.z);
+    fragClimate = v.horizon.yzw;
     gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
 }

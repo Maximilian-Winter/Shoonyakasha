@@ -16,12 +16,16 @@
 // (terrain.glsl); body 1, the moon, moonHeight (moon.glsl).
 //
 // Each vertex also holds the sine of the terrain's horizon towards the
-// sun's azimuth (horizonTowardsSun), for shadows beyond the shadow map.
+// sun's azimuth (horizonTowardsSun), for shadows beyond the shadow map, and
+// on the planet its climate (climate.glsl's climateAt: temperature,
+// moisture and cover; zeros on the moon).
 //
 // Each slot's lowest and highest grid height go to ChunkHeights with the
 // job's stamp. Workgroup MAX_JOBS evaluates the terrain of the body in
 // each probe's w at its direction into ProbeHeights, each with
 // probeStamp: probe 1 the planet's natural terrain (terrainHeightNatural).
+// On the planet a probe also carries the climate's temperature and
+// moisture there.
 //
 
 layout(local_size_x = 64) in;
@@ -47,7 +51,7 @@ struct ChunkVertex {
     vec4 positionU;        // xyz: position relative to the chunk's centre; w: face u
     vec4 normalV;          // xyz: surface normal; w: face v
     vec4 radialHeight;     // xyz: direction from the planet's centre; w: height (m)
-    vec4 horizon;          // x: sine of the terrain's horizon towards the sun's azimuth
+    vec4 horizon;          // x: sine of the terrain's horizon towards the sun's azimuth; yzw: the climate
 };
 
 layout(std430, set = 0, binding = 1) writeonly buffer ChunkPool {
@@ -62,6 +66,8 @@ layout(set = 0, binding = 2) uniform TerrainParams {
     vec4 site;
     vec4 siteShape;
     vec4 detail;
+    vec4 climate;
+    vec4 biomeView;
 } terrain;
 
 layout(std430, set = 0, binding = 3) writeonly buffer ChunkHeights {
@@ -69,10 +75,11 @@ layout(std430, set = 0, binding = 3) writeonly buffer ChunkHeights {
 } chunkHeights;
 
 layout(std430, set = 0, binding = 4) writeonly buffer ProbeHeights {
-    vec4 probeHeights[];   // per probe: height (m), probeStamp
+    vec4 probeHeights[];   // per probe: height (m), probeStamp, temperature (degrees C), moisture
 } probes;
 
 #include "terrain.glsl"
+#include "climate.glsl"
 #include "moon.glsl"
 
 const int PLANET = 0;
@@ -199,7 +206,8 @@ float writeVertex(uint slot, int k, ivec2 ij, int face, int x, int y, double cel
     pool.vertices[index].radialHeight = vec4(vec3(d), h);
     float spacing = float(radius * 2.0LF / cells);        // metres between vertices, near enough
     float near = min(max(HORIZON_NEAR, 2.0 * spacing), 0.2 * float(radius));
-    pool.vertices[index].horizon = vec4(horizonTowardsSun(vec3(d), h, float(radius), near), 0.0, 0.0, 0.0);
+    vec3 climate = body == PLANET ? climateAt(vec3(d), h) : vec3(0.0);
+    pool.vertices[index].horizon = vec4(horizonTowardsSun(vec3(d), h, float(radius), near), climate);
     return h;
 }
 
@@ -209,7 +217,8 @@ void evaluateProbes() {
         body = int(jobs.probe[i].w);
         bodyRadius = jobs.radii[body];
         float h = i == 1u ? terrainHeightNatural(dir) : bodyHeight(dir);
-        probes.probeHeights[i] = vec4(h, jobs.probeStamp, 0.0, 0.0);
+        vec2 climate = body == PLANET ? climateAt(dir, h).xy : vec2(0.0);
+        probes.probeHeights[i] = vec4(h, jobs.probeStamp, climate);
     }
 }
 

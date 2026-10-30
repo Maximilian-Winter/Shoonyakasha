@@ -11,6 +11,8 @@
 //     vec4 siteShape;   // flat radius (m), radius where the terrain is its own again (m),
 //                       // planet radius (m), 1 with the pad or 0 without
 //     vec4 detail;      // wavelength (m), height (m), octaves, erosion of the hills and the detail
+//     vec4 climate;     // the climate settings (biome.glsl)
+//     vec4 biomeView;   // x: 1 shows the biomes' flat colours (biome.glsl)
 //
 // The noise hashes integer lattice coordinates, so the same `dir` gives the
 // same height in every chunk and every pass.

@@ -3,8 +3,9 @@ every kind is one unit tall from its base, its normals are those of its
 triangles and point out (wood away from the trunk's axis, foliage away from
 its crown, cones' bases down), foliage and wood are marked, grass blades
 face up with their normals leaning further up and are darker at their base, the
-meshes fit the pipeline's buffers, and the draws' template gives each kind
-its range and its instances' first index.
+meshes fit the pipeline's buffers, the trees thinned with distance fit their
+kinds' instances where a tree grows in every cell, and the draws' template
+gives each kind its range and its instances' first index.
 
     python -m unittest discover -s tests/python
 """
@@ -99,6 +100,17 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertEqual(layouts["VegetationInstances"]["elementCount"],
                          (trees * world.VEGETATION_CAPACITY + world.GRASS_CAPACITY) * 2)
         self.assertGreaterEqual(layouts["VegetationDraws"]["elementCount"], len(vegetation.KINDS) * 5)
+
+    def test_thinned_trees_fit_their_kinds_instances(self):
+        cell = (np.pi / 2.0 * world.RADIUS / world.VEGETATION_CELLS) ** 2
+        for vegetation_range in (500.0, 700.0, 1_000.0, 2_500.0, 5_000.0):
+            full = world.vegetation_thinning(vegetation_range)
+            self.assertLessEqual(full, vegetation_range)
+            r = np.linspace(0.0, vegetation_range, 200_001)[1:]
+            kept = 2.0 * np.pi * r * np.minimum(1.0, (full / r) ** 2) / cell * (r[1] - r[0])
+            near, far = kept[r <= world.VEGETATION_NEAR].sum(), kept[r > world.VEGETATION_NEAR].sum()
+            self.assertLess(near, world.VEGETATION_CAPACITY, vegetation_range)
+            self.assertLess(far, 0.9 * world.VEGETATION_CAPACITY, vegetation_range)
 
     def test_draw_template(self):
         firsts = [7 * kind + 3 for kind in range(len(self.ranges))]

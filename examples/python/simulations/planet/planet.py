@@ -56,7 +56,7 @@ Keys:
     B / V                  exposure up / down
     F                      wireframe
     O                      ocean
-    C                      colour: terrain, per face, per level
+    C                      colour: terrain, per face, per level, per biome
     K                      freeze the level of detail
     [ / ]                  split factor down / up
     F1                     settings menu
@@ -84,7 +84,7 @@ import time
 import numpy as np
 import shoonyakasha as sk
 from shoonyakasha import keys
-from shoonyakasha.planet import cube_sphere
+from shoonyakasha.planet import biomes, cube_sphere
 from shoonyakasha.planet import settings as planet_settings
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, local_frame, normalize, rotate, scale, sub
@@ -877,9 +877,11 @@ def update_cards():
         view_card.update("CHASE VIEW", rows)
         view_card.show(True)
     elif state["mode"] != "ship":
+        on_planet = world.body_under(viewpoint()) is world.planet
         view_card.update("FREE CAMERA", [
             ("ABOVE GROUND", distance_text(world.height_above_ground(viewpoint()))),
             ("ABOVE " + world.datum_name(viewpoint()).upper(), distance_text(world.altitude(viewpoint()))),
+        ] + (biomes.card_rows(world.ground_climate) if on_planet else []) + [
             ("SPEED", "%.0f m/s" % state["speed"]),
             ("SPEED FACTOR", "x%.2f" % state["speed_factor"]),
             ("TIME WARP", "x%d" % WARPS[state["warp"]]),
@@ -998,7 +1000,7 @@ HELP_COLUMNS = [
         (("I",), "Debug card"),
         (("F",), "Wireframe"),
         (("O",), "Ocean"),
-        (("C",), "Colour: terrain / face / level"),
+        (("C",), "Colour: terrain / face / level / biome"),
         (("K",), "Freeze the level of detail"),
         (("[", "]"), "Split factor down / up"),
         (("P",), "Screenshot"),
@@ -1042,7 +1044,7 @@ def on_init():
 # Keys that change settings in the menu too, shown beside them.
 MENU_KEYS = {"Exposure": ("B", "V"), "Atmosphere density": ("T", "Y"), "Sun elevation": ("Z", "X"),
              "Ocean": ("O",), "Wireframe": ("F",), "Split factor": ("[", "]"),
-             "Colour: terrain / face / level": ("C",), "New seed": ("N",)}
+             "Colour: terrain / face / level / biome": ("C",), "New seed": ("N",)}
 
 
 def menu_items():
@@ -1060,7 +1062,7 @@ def menu_items():
         {"toggle": "Translation assist", "get": lambda: state["controls"].assist, "set": set_assist,
          "keys": ("L",), "hint": "The throttle asks for a speed and E / Q for a climb rate; the thrusters hold them."},
     ] + planet_settings.sky_items(world, MENU_KEYS, site="the blocks") + planet_settings.cloud_items(world, MENU_KEYS) \
-        + planet_settings.ground_items(world, MENU_KEYS) + [
+        + planet_settings.ground_items(world, MENU_KEYS) + planet_settings.climate_items(world, MENU_KEYS) + [
         {"heading": "Display"},
         {"toggle": "Button hints", "get": lambda: state["hints"], "set": lambda on: state.update(hints=on),
          "hint": "The bar of keys or gamepad buttons along the bottom of the screen."},

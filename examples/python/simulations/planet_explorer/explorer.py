@@ -50,7 +50,7 @@ import time
 
 import shoonyakasha as sk
 from shoonyakasha import keys
-from shoonyakasha.planet import cameras
+from shoonyakasha.planet import biomes, cameras
 from shoonyakasha.planet import settings as planet_settings
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.vec import add, dot, length, normalize, scale, sub
@@ -222,11 +222,14 @@ def update_cards():
     altitude = world.altitude(cam.position)
     if state["mode"] == "globe":
         lat, lon = latitude_longitude(cam.target)
+        climate = next((c for (_, b), c in world.extra_climates if b is body), None)
+        biome_rows = biomes.card_rows(world.with_climate_settings(climate)) if body is world.planet else []
         view_card.update("GLOBE VIEW", [
             ("BODY", body.name),
             ("LATITUDE", "%+.3f deg" % lat),
             ("LONGITUDE", "%+.3f deg" % lon),
             ("GROUND THERE", distance_text(cam.target_height)),
+        ] + biome_rows + [
             ("RANGE", distance_text(cam.range)),
             ("CAMERA ABOVE " + world.datum_name(cam.position).upper(), distance_text(altitude)),
             ("HEADING", "%.0f deg" % (math.degrees(cam.heading) % 360.0)),
@@ -264,7 +267,8 @@ def menu_items():
          "keys": (",", "."), "hint": "How much faster than real time the moon moves and the clouds drift."},
         {"toggle": "Paused", "get": lambda: state["paused"], "set": lambda on: state.update(paused=on),
          "keys": ("Space",), "hint": "The world's clock stopped: the moon and the clouds stay where they are."},
-    ] + planet_settings.sky_items(world) + planet_settings.cloud_items(world) + planet_settings.ground_items(world) + [
+    ] + planet_settings.sky_items(world) + planet_settings.cloud_items(world) + planet_settings.ground_items(world) \
+        + planet_settings.climate_items(world) + [
         {"heading": "Display"},
         {"toggle": "Button hints", "get": lambda: state["hints"], "set": lambda on: state.update(hints=on),
          "hint": "The bar of keys and buttons along the bottom of the screen."},
@@ -378,6 +382,31 @@ def towards_sun(body):
     return world.sun_direction()
 
 
+def at(latitude, longitude):
+    """The direction at `latitude` and `longitude` (degrees, as latitude_longitude)."""
+    def direction(body):
+        la, lo = math.radians(latitude), math.radians(longitude)
+        return (math.cos(la) * math.sin(lo), math.sin(la), math.cos(la) * math.cos(lo))
+    return direction
+
+
+def with_settings(setup, colour_mode=None, palette=None):
+    """`setup`, then the colour mode (a name in COLOUR_MODES) and the palette (a name in biomes.PALETTES)."""
+    def run():
+        setup()
+        if colour_mode is not None:
+            world.colour_mode = planet_world.COLOUR_MODES.index(colour_mode)
+        if palette is not None:
+            _, world.flora_hue, world.soil_hue = next(p for p in biomes.PALETTES if p[0] == palette)
+    return run
+
+
+# A spot of each biome on the default planet: (name, latitude, longitude).
+BIOME_SPOTS = [("tropical_forest", 1.0, 4.0), ("savanna", -9.0, -44.0), ("desert", 27.0, -48.0),
+               ("steppe", -33.0, -40.0), ("grassland", 41.0, -6.0), ("deciduous_forest", -11.0, -8.0),
+               ("taiga", -53.0, 4.0), ("tundra", -61.0, -16.0)]
+
+
 class CaptureTour:
     """--capture: each shot in turn, a screenshot once the world has
     settled (or after MAX_FRAMES), then exit."""
@@ -394,6 +423,14 @@ class CaptureTour:
         ("focus_moon", focus_on("moon", 3.0, 200.0, 15.0)),
         ("menu", lambda: (start_view(), state["menu"].show(True))),
         ("controls", lambda: (start_view(), state["help"].show(True))),
+        ("biomes_whole_planet", with_settings(globe_at("planet", site_up, 400_000.0, 0.0, 0.0), "biome")),
+        ("biomes_whole_planet_south", with_settings(globe_at("planet", at(-45.0, 0.0), 400_000.0, 0.0, 0.0),
+                                                    "biome")),
+    ] + [("biome_" + name, globe_at("planet", at(lat, lon), 900.0, 30.0, 76.0))
+         for name, lat, lon in BIOME_SPOTS] + [
+        ("palette_" + palette.lower(), with_settings(globe_at("planet", at(-11.0, -8.0), 900.0, 30.0, 76.0),
+                                                     palette=palette))
+        for palette, _, _ in biomes.PALETTES[1:]
     ]
 
     def __init__(self, directory, names=None):
@@ -413,6 +450,8 @@ class CaptureTour:
             state["menu"].show(False)
             state["help"].show(False)
             state["paused"] = True
+            world.colour_mode = 0
+            world.flora_hue = world.soil_hue = 0.0
             setup()
         elif self.captured is None:
             done = self.frames >= self.MIN_FRAMES and world.settled()
@@ -434,7 +473,7 @@ class CaptureTour:
 def on_init():
     world.setup()
     canvas = engine.ui.create_canvas(reference_size=(1600, 900))
-    state["cards"] = (Card(engine.ui, canvas, (0, 0), 10), Card(engine.ui, canvas, (0, 1), 6, margin=(24, 76)))
+    state["cards"] = (Card(engine.ui, canvas, (0, 0), 11), Card(engine.ui, canvas, (0, 1), 6, margin=(24, 76)))
     state["hint_bar"] = HintBar(engine.ui, canvas)
     state["terrain_edit"] = planet_settings.TerrainEdit(world)
     state["menu"] = SettingsMenu(engine, "Settings", menu_items())

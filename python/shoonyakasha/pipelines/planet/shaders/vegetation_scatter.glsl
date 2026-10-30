@@ -3,8 +3,9 @@
 // chunk a workgroup places plants on (one per draw of ChunkDraws), the cells
 // of a cube face's grid that chunk holds, a cell's candidate (a point
 // jittered within the cell by a hash of it, kept when it lies in the chunk
-// and within range), the ground under it from the chunk's grid unmorphed,
-// its place on the surface as drawn (morphed), and claiming an instance.
+// and within range), the ground and climate under it from the chunk's grid
+// unmorphed, its place on the surface as drawn (morphed), and claiming an
+// instance.
 
 layout(local_size_x = 64) in;
 
@@ -16,6 +17,8 @@ layout(set = 0, binding = 0) uniform TerrainParams {
     vec4 site;
     vec4 siteShape;
     vec4 detail;
+    vec4 climate;
+    vec4 biomeView;
 } terrain;
 
 #define VEGETATION_SET 0
@@ -163,13 +166,16 @@ bool scatterCandidate(ScatterChunk chunk, float cells, int cu0, int cv0, uint ac
 }
 
 // The ground under a candidate on the unmorphed grid: its direction from
-// the planet's centre, its height and the surface's normal.
-void candidateGround(ScatterChunk chunk, Candidate x, out vec3 radial, out float height, out vec3 normal) {
+// the planet's centre, its height, the surface's normal and the climate
+// (horizon.yzw).
+void candidateGround(ScatterChunk chunk, Candidate x, out vec3 radial, out float height, out vec3 normal,
+                     out vec3 climate) {
     ChunkVertex va = gridVertex(chunk.base, x.a.x, x.a.y), vb = gridVertex(chunk.base, x.b.x, x.b.y);
     ChunkVertex vc = gridVertex(chunk.base, x.c.x, x.c.y);
     radial = normalize(x.w.x * va.radialHeight.xyz + x.w.y * vb.radialHeight.xyz + x.w.z * vc.radialHeight.xyz);
     height = x.w.x * va.radialHeight.w + x.w.y * vb.radialHeight.w + x.w.z * vc.radialHeight.w;
     normal = normalize(x.w.x * va.normalV.xyz + x.w.y * vb.normalV.xyz + x.w.z * vc.normalV.xyz);
+    climate = x.w.x * va.horizon.yzw + x.w.y * vb.horizon.yzw + x.w.z * vc.horizon.yzw;
 }
 
 // A candidate's position relative to the camera on the surface as drawn.

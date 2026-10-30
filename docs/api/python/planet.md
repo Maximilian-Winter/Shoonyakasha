@@ -6,7 +6,8 @@ A planet and its moon with procedural terrain on the planet pipeline (`shoonyaka
 |---|---|
 | `world` | `PlanetWorld`: the bodies, the probes, the sky, and what the pipeline is handed each frame. `PIPELINE`, `compile_shaders()`, and the constants below |
 | `cameras` | `GlobeCamera`, `FocusCamera`, `cursor_ray`, `ray_sphere` |
-| `settings` | Settings-menu items for a `PlanetWorld` (for `toolkit.overlay.SettingsMenu`), and `TerrainEdit` |
+| `settings` | Settings-menu items for a `PlanetWorld` (for `toolkit.overlay.SettingsMenu`), `TerrainEdit` and `next_palette` |
+| `biomes` | The biomes as the shaders classify them: `NAMES`, `weights(temperature, moisture)`, `dominant`, `snowy`, `card_rows(climate)`, and the `PALETTES` |
 | `orbits` | `Planet` (gravity and air), `Moon` (a circular orbit on rails), `reference`, `orbit`, `orbit_path`, `circular_speed` |
 | `vec` | Vectors as tuples: `add`, `sub`, `scale`, `dot`, `cross`, `length`, `normalize`, `rotate`, `local_frame`, `euler_from_basis` |
 | `cube_sphere`, `quadtree`, `shadows` | The cube-sphere's faces and chunk meshes, the quadtree in Python (the level of detail `sk.PlanetLod` does in C++), the shadow cascades' fitting |
@@ -57,7 +58,7 @@ Positions are Python floats in metres, with the planet's centre at the origin. T
 |---|---|
 | `setup()` | From `on_init`: the camera entity, the sky, clouds and terrain settings, the chunks' index buffer, the ground's textures (when downloaded) and, with `moon`, the moon |
 | `begin_frame(viewpoint=None)` | The chunks' and probes' heights read back, with `viewpoint` where the ground is measured; the terrain started once the site's height is known. Returns True in the frame it starts |
-| `end_frame(position, basis, dt, warp=1.0, viewpoint=None, patch=None)` | The level of detail and the probes for the camera at `position` with `basis` (right, up, forward), the drawn chunks, the camera entity's rotation, the shadow cascades and the ground textures' offsets, and the clouds blown on by `dt` times `warp` seconds. `patch` is (body, patch) to probe: an object with `directions` (up to `PATCH_PROBES`) and `set_heights(heights)` |
+| `end_frame(position, basis, dt, warp=1.0, viewpoint=None, patch=None)` | The level of detail and the probes for the camera at `position` with `basis` (right, up, forward), the drawn chunks, the camera entity's rotation, the shadow cascades and the ground textures' offsets, the climate settings, and the clouds blown on by `dt` times `warp` seconds. `patch` is (body, patch) to probe: an object with `directions` (up to `PATCH_PROBES`) and `set_heights(heights)` |
 | `set_orbit_path(points)` | A line through up to `ORBIT_POINTS` points (planet space) over the scene, depth-tested; none when empty |
 | `upload_sky()`, `upload_clouds()`, `upload_terrain()` | Hand changed settings to the pipeline |
 | `set_ocean(on)`, `set_wireframe(on)` | Those passes on or off |
@@ -69,6 +70,7 @@ Positions are Python floats in metres, with the planet's centre at the origin. T
 | `keep_above_ground(point, clearance)` | `point` raised to `clearance` above that ground when it is below |
 | `site_frame()`, `site_ground()`, `sun_direction()` | The site on the +Z face (its point, up, east and north), its point on the ground, and the sun's direction from its elevation and azimuth seen there |
 | `in_view(centre, radius)` | Whether a sphere is roughly in the camera's view |
+| `with_climate_settings(climate)` | A probe's (temperature, moisture) with the climate settings' offsets, the moisture clamped to 0 to 1; None stays None |
 
 | Attribute | |
 |---|---|
@@ -79,8 +81,9 @@ Positions are Python floats in metres, with the planet's centre at the origin. T
 | `clouds`, `cloud_coverage`, `cloud_density`, `wind_speed` | The clouds (`upload_clouds`; the wind is read each frame) |
 | `vegetation`, `vegetation_density`, `vegetation_range` | Read each frame: the vegetation on or off, its chances' scale (0 to 1) and the trees' and bushes' range in metres (2,500 at the start) |
 | `grass`, `grass_range` | Read each frame: the grass on or off and its range in metres (150 at the start) |
-| `shadows`, `texture_strength`, `texture_relief`, `colour_mode`, `frozen` | Read each frame: the shadow cascades on or off, the ground textures' strength and normal maps, the colour mode (an index into `COLOUR_MODES`), and the level of detail kept as it is |
-| `ground`, `site_height`, `patch`, `extra_probes`, `extra_heights`, `probe_latency` | The probes: the ground under the viewpoint (kept only while the viewpoint is within 1 km of where it was measured), the site's height, the last patch back, the up to `EXTRA_PROBES` (direction, body) pairs to measure and their heights, and the frames they take |
+| `temperature_offset`, `moisture_offset`, `flora_hue`, `soil_hue` | Read each frame: degrees C added to the climate's temperature, added to its moisture, and the plants' and the soils' colours turned around the colour wheel in degrees (see Biomes) |
+| `shadows`, `texture_strength`, `texture_relief`, `colour_mode`, `frozen` | Read each frame: the shadow cascades on or off, the ground textures' strength and normal maps, the colour mode (an index into `COLOUR_MODES`: terrain, face, level, biome), and the level of detail kept as it is |
+| `ground`, `ground_climate`, `site_height`, `patch`, `extra_probes`, `extra_heights`, `extra_climates`, `probe_latency` | The probes: the ground under the viewpoint (kept only while the viewpoint is within 1 km of where it was measured) and on the planet its (temperature, moisture) with the climate settings' offsets, the site's height, the last patch back, the up to `EXTRA_PROBES` (direction, body) pairs to measure, their heights and their (temperature, moisture) without the offsets (None off the planet), and the frames they take |
 | `lod`, `pool`, `chunks_culled`, `ocean_chunks`, `frame` | The level of detail (`sk.PlanetLod`), the chunk pool's `slots`, `used` and `pending` (chunks waiting for their heights), and this frame's counts |
 
 The terrain's parameters, the atmosphere, the clouds, the shadow cascades and the pool's sizes are the module's constants (`TERRAIN`, `RADIUS`, `MAX_LEVEL`, `SPLIT_FACTOR`, `CLOUD_LAYER`, `SHADOW_SPLITS`, `SLOTS`, `MAX_JOBS`, `PROBES` and the others); those the pipeline's buffers and shaders depend on match `pipeline.json` and the shaders. With `pad`, the terrain is flat within 150 m of the site, at its natural height, easing back by 600 m.
@@ -101,11 +104,17 @@ The level of detail in C++ (`include/Planet/PlanetLod.h`): per body a quadtree o
 | `selected(body)`, `nodes(body)`, `missing_nodes(body)`, `missing(body)`, `selected_count(body)` | The trees' state, nodes as dicts |
 | `instances()`, `draws("chunk" / "ocean" / "shadow")`, `culled`, `slots`, `used`, `pending`, `rebuild_queued` | The buffers as bytes, and counts |
 
+## Biomes
+
+Each of the planet's chunk vertices carries its climate (`climate.glsl`): a temperature that falls from 30 degrees C at the equator to -14 at the poles and by 8.5 degrees per kilometre of height, a moisture that is high at the equator and near 60 degrees of latitude, low near 30 degrees and at the poles and lower inland, and a cover noise about 400 m across; each with noise. The shaders (`biome.glsl`) add `temperature_offset` and `moisture_offset` and weigh eight biomes by temperature and moisture: desert, savanna, tropical forest, steppe, grassland, deciduous forest, taiga and tundra, blending at the edges between them. The biomes colour the ground and decide what grows: snow lies below -6 degrees, sand on beaches, rock on steep slopes. `biomes.weights` and `biomes.dominant` classify as the shaders do; `biomes.card_rows(world.ground_climate)` names the biome under the viewpoint.
+
+`flora_hue` turns the plants' colours and the forests' and grass's on the ground around the colour wheel, `soil_hue` the bare ground's, keeping their brightness; `biomes.PALETTES` are named pairs of them (Earth, Crimson, Violet, Amber, Teal). The colour mode "biome" shows each biome in a flat colour.
+
 ## Vegetation
 
-Low-poly conifers, broadleaf trees and bushes grow on the planet within `vegetation_range` of the camera, placed on the GPU each frame by `VegetationScatter` where the ground's layers are forest, grass or dry ground, and drawn with sun and cloud shadows; the [planet example's README](../../../examples/python/simulations/planet/README.md) has how they are placed. Each of the five kinds (conifer, conifer far, broadleaf, broadleaf far, bush) holds up to `VEGETATION_CAPACITY` plants in view at a time.
+Low-poly conifers, broadleaf trees and bushes grow on the planet within `vegetation_range` of the camera, placed on the GPU each frame by `VegetationScatter` by their biomes' chances, coloured by their biomes, and drawn with sun and cloud shadows; the [planet example's README](../../../examples/python/simulations/planet/README.md) has how they are placed. Each of the five kinds (conifer, conifer far, broadleaf, broadleaf far, bush) holds up to `VEGETATION_CAPACITY` plants in view at a time.
 
-Tufts of grass grow within `grass_range` of the camera, placed by `GrassScatter` on a finer grid in grass, on dry ground and in forest, and drawn by the same `Vegetation` pass as a sixth kind, swaying in the wind and turning towards straw on dry ground; they cast no shadows. Up to `GRASS_CAPACITY` tufts are in view at a time. `vegetation` and `vegetation_density` apply to the grass too.
+Tufts of grass grow within `grass_range` of the camera, placed by `GrassScatter` on a finer grid by their biomes' grass chances, and drawn by the same `Vegetation` pass as a sixth kind in their biomes' grass colour, swaying in the wind; they cast no shadows. Up to `GRASS_CAPACITY` tufts are in view at a time. `vegetation` and `vegetation_density` apply to the grass too.
 
 ## Cameras
 
@@ -136,7 +145,7 @@ Both have `update(dt, active=True)` once a frame (`active` False while the point
 
 ## Settings
 
-`sky_items(world, keys=None, site="the site")`, `cloud_items`, `ground_items` (with the vegetation's on, density and range, and the grass's on and range) and `view_items(world, keys=None)` give items for `toolkit.overlay.SettingsMenu` that read and change the world's settings; `planet_items(world, edit, new_seed, keys=None)` gives a new seed (`new_seed()`, at once) and the terrain's parameters, held in `edit` (a `TerrainEdit(world)`) until its Apply builds the planet again (`TerrainEdit.apply`; `reset()` takes the planet's parameters again). `keys` maps an item's name to key names shown beside it.
+`sky_items(world, keys=None, site="the site")`, `cloud_items`, `ground_items` (with the vegetation's on, density and range, and the grass's on and range), `climate_items` (the temperature and moisture offsets, the flora's and soil's hues, and a button that sets the next palette, `next_palette(world)`) and `view_items(world, keys=None)` give items for `toolkit.overlay.SettingsMenu` that read and change the world's settings; `planet_items(world, edit, new_seed, keys=None)` gives a new seed (`new_seed()`, at once) and the terrain's parameters, held in `edit` (a `TerrainEdit(world)`) until its Apply builds the planet again (`TerrainEdit.apply`; `reset()` takes the planet's parameters again). `keys` maps an item's name to key names shown beside it.
 
 ## Ground textures
 
