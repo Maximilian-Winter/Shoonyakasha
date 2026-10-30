@@ -1,0 +1,43 @@
+{
+  "passes": [
+    {
+      "name": "Stars",
+      "type": "graphics",
+      "execution": { "type": "draw", "vertexCount": 1048576, "instanceCount": 1, "bindDescriptorSets": true },
+      "outputs": [
+        { "resource": "hdrColor", "usage": "color_write", "clear": [0.0, 0.0, 0.0, 1.0] }
+      ],
+      "pipeline": {
+        "vertexShader": "../../shaders/star.vert.spv",
+        "fragmentShader": "../../shaders/star.frag.spv",
+        "topology": "point_list",
+        "vertexInput": "none",
+        "cullMode": "none",
+        "depthTest": false,
+        "depthWrite": false,
+        "blending": "additive"
+      },
+      "descriptorSets": ["starSet"]
+    },
+    {
+      "name": "ReplayStars",
+      "type": "graphics",
+      "enabled": false,
+      "execution": { "type": "draw", "vertexCount": 65536, "instanceCount": 1, "bindDescriptorSets": true },
+      "outputs": [
+        { "resource": "hdrColor", "usage": "color_blend" }
+      ],
+      "pipeline": {
+        "vertexShader": "../../shaders/replay.vert.spv",
+        "fragmentShader": "../../shaders/star.frag.spv",
+        "topology": "point_list",
+        "vertexInput": "none",
+        "cullMode": "none",
+        "depthTest": false,
+        "depthWrite": false,
+        "blending": "additive"
+      },
+      "descriptorSets": ["replaySet"]
+    }
+  ]
+}

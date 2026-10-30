@@ -1,0 +1,136 @@
+{
+  "bufferLayouts": {
+    "Particles": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 1048576,
+      "fields": [
+        { "name": "positionKind", "type": "vec4" },
+        { "name": "velocityBirth", "type": "vec4" }
+      ]
+    },
+    "Galaxies": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 4,
+      "fields": [
+        { "name": "positionMass", "type": "vec4" },
+        { "name": "velocity", "type": "vec4" },
+        { "name": "previous", "type": "vec4" },
+        { "name": "spin", "type": "vec4" },
+        { "name": "shape", "type": "vec4" },
+        { "name": "masses", "type": "vec4" }
+      ],
+      "target": { "name": "galaxy.galaxies", "readback": { "frequency": "per_frame" } },
+      "memory": { "location": "device_local", "transferDirection": "gpu_to_cpu" }
+    },
+    "Params": {
+      "usage": "uniform_buffer", "packing": "std140", "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "count", "type": "uint", "source": "scene.custom.galaxy.count" },
+        { "name": "galaxyCount", "type": "uint", "source": "scene.custom.galaxy.galaxyCount" },
+        { "name": "dt", "type": "float", "source": "scene.custom.galaxy.dt" },
+        { "name": "softening", "type": "float", "source": "scene.custom.galaxy.softening" },
+        { "name": "logLambda", "type": "float", "source": "scene.custom.galaxy.logLambda" },
+        { "name": "time", "type": "float", "source": "scene.custom.galaxy.time" },
+        { "name": "gasRelax", "type": "float", "source": "scene.custom.galaxy.gasRelax" },
+        { "name": "sfDensity", "type": "float", "source": "scene.custom.galaxy.sfDensity" },
+        { "name": "sfEfficiency", "type": "float", "source": "scene.custom.galaxy.sfEfficiency" },
+        { "name": "gasMass", "type": "float", "source": "scene.custom.galaxy.gasMass" },
+        { "name": "sfCompression", "type": "float", "source": "scene.custom.galaxy.sfCompression" }
+      ]
+    },
+    "Grid": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 2097152,
+      "fields": [{ "name": "momentumCount", "type": "ivec4" }]
+    },
+    "Stats": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 1,
+      "fields": [{ "name": "formed", "type": "uvec4" }],
+      "target": { "name": "galaxy.stats", "readback": { "frequency": "per_frame" } },
+      "memory": { "location": "device_local", "transferDirection": "gpu_to_cpu" }
+    },
+    "View": {
+      "usage": "uniform_buffer", "packing": "std140", "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "view", "type": "mat4", "source": "scene.camera.view" },
+        { "name": "proj", "type": "mat4", "source": "scene.camera.projection" },
+        { "name": "screen", "type": "vec2", "source": "scene.screen.resolution" },
+        { "name": "count", "type": "uint", "source": "scene.custom.galaxy.count" },
+        { "name": "pointSize", "type": "float", "source": "scene.custom.galaxy.pointSize" },
+        { "name": "brightness", "type": "float", "source": "scene.custom.galaxy.brightness" },
+        { "name": "colorMode", "type": "uint", "source": "scene.custom.galaxy.colorMode" },
+        { "name": "time", "type": "float", "source": "scene.custom.galaxy.time" },
+        { "name": "replayCount", "type": "uint", "source": "scene.custom.galaxy.replayCount" },
+        { "name": "replayAhead", "type": "float", "source": "scene.custom.galaxy.replayAhead" }
+      ]
+    },
+    "Replay": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 65536,
+      "fields": [{ "name": "packed", "type": "uvec4" }]
+    },
+    "ReplayStars": {
+      "usage": "storage_buffer", "packing": "std430", "elementCount": 65536,
+      "fields": [{ "name": "codeBirth", "type": "vec2" }]
+    },
+    "Post": {
+      "usage": "uniform_buffer", "packing": "std140", "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "exposure", "type": "float", "source": "scene.custom.galaxy.exposure" },
+        { "name": "bloom", "type": "float", "source": "scene.custom.galaxy.bloom" }
+      ]
+    }
+  },
+  "samplers": {
+    "linearClamp": { "magFilter": "linear", "minFilter": "linear", "addressMode": "clamp_to_edge" }
+  },
+  "descriptorSetLayouts": {
+    "stepSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["compute"], "name": "particles", "autoBindBuffer": "Particles" },
+        { "binding": 1, "type": "storage_buffer", "stages": ["compute"], "name": "galaxies", "autoBindBuffer": "Galaxies" },
+        { "binding": 2, "type": "uniform_buffer", "stages": ["compute"], "name": "params", "autoBindBuffer": "Params" },
+        { "binding": 3, "type": "storage_buffer", "stages": ["compute"], "name": "grid", "autoBindBuffer": "Grid" },
+        { "binding": 4, "type": "storage_buffer", "stages": ["compute"], "name": "stats", "autoBindBuffer": "Stats" }
+      ]
+    },
+    "starSet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["vertex"], "name": "particles", "autoBindBuffer": "Particles" },
+        { "binding": 1, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "name": "view", "autoBindBuffer": "View" }
+      ]
+    },
+    "replaySet": {
+      "bindings": [
+        { "binding": 0, "type": "storage_buffer", "stages": ["vertex"], "name": "replay", "autoBindBuffer": "Replay" },
+        { "binding": 1, "type": "uniform_buffer", "stages": ["vertex", "fragment"], "name": "view", "autoBindBuffer": "View" },
+        { "binding": 2, "type": "storage_buffer", "stages": ["vertex"], "name": "stars", "autoBindBuffer": "ReplayStars" }
+      ]
+    },
+    "bloomDownFirstSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "source",
+          "autoBindResource": "hdrColor", "autoBindSampler": "linearClamp" }
+      ]
+    },
+    "bloomDown{m}": {
+      "repeat": { "count": 5, "index": "m", "first": 1 },
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "source",
+          "autoBindResource": "bloomChain", "autoBindSampler": "linearClamp", "mip": "{m-1}" }
+      ]
+    },
+    "bloomUp{m}": {
+      "repeat": { "count": 5, "index": "m", "first": 4, "step": -1 },
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "source",
+          "autoBindResource": "bloomChain", "autoBindSampler": "linearClamp", "mip": "{m+1}" }
+      ]
+    },
+    "tonemapSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": ["fragment"], "name": "hdrColor",
+          "autoBindResource": "hdrColor", "autoBindSampler": "linearClamp" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": ["fragment"], "name": "bloom",
+          "autoBindResource": "bloomChain", "autoBindSampler": "linearClamp", "mip": 0 },
+        { "binding": 2, "type": "uniform_buffer", "stages": ["fragment"], "name": "post", "autoBindBuffer": "Post" }
+      ]
+    }
+  }
+}

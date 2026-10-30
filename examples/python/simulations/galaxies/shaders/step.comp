@@ -1,0 +1,298 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// One third of a time step, chosen by `index`: mode = index % 3, and the
+// step's start time is `time` + (index / 3) dt.
+//
+// mode 0: the galaxy centres, in invocation 0: half a step of gravity and
+// friction, a drift, and another half. Each pair pulls on each other with
+// the mean of A's mass in B's field and B's mass in A's, so the pair's
+// momentum is kept. Friction is Chandrasekhar's,
+//
+//   F = -4 pi lnLambda M^2 rho(r) / v^2 [erf(X) - 2X/sqrt(pi) e^(-X^2)] v_hat,
+//   X = v / (sqrt(2) sigma(r)),  sigma = v_circ,halo / sqrt(2),
+//
+// averaged over A in B's halo and B in A's; over each half step it scales
+// the pair's relative velocity by exp(-rate * dt/2), the rate being that
+// force over the relative speed times 1/M_A + 1/M_B. `previous` keeps each
+// centre from before the step. Every invocation also clears its share of
+// the gas grid.
+//
+// mode 1: each gas particle adds itself and its momentum (fixed point) to
+// its cell of the gas grid: GRID^3 cells of CELL kpc, centred on the
+// mass-weighted centre of the galaxies within NEAR kpc of the heaviest.
+//
+// mode 2: every particle. A gas particle in the grid first takes on part of
+// its cell's mean velocity, 1 - exp(-gasRelax dt), which keeps the cell's
+// momentum. Then it becomes a young star, its birth time the step's start,
+// counting into `formed.x`, with probability dt times the sum of
+//
+//   sfEfficiency / t_ff                       where the cell's gas density is above sfDensity,
+//                                             t_ff = sqrt(3 pi / (32 rho)) the free-fall time
+//   sfCompression (-div v - CONVERGENCE_MIN)  where the gas converges faster than CONVERGENCE_MIN
+//                                             and its density is above COMPRESSION_DENSITY
+//
+// div v being the divergence of the cells' mean velocities, from the six
+// neighbouring cells (a neighbour without gas counts as this cell). Then
+// every particle steps (kick, drift, kick), the first kick from the
+// centres' places before the step, the second from after it.
+//
+// The render graph repeats this shader's pass with index =
+// pass.repeatIndex; model.py computes the centres and the motion in NumPy.
+
+layout(local_size_x = 256) in;
+
+#include "galaxy.glsl"
+
+struct Particle {
+    vec4 positionKind;   // kind + 4 * galaxy index
+    vec4 velocityBirth;
+};
+
+layout(std430, binding = 0) buffer Particles { Particle p[]; } particles;
+layout(std430, binding = 1) buffer Galaxies { Galaxy g[]; } galaxies;
+
+layout(std140, binding = 2) uniform Params {
+    uint count;
+    uint galaxyCount;
+    float dt;
+    float softening;
+    float logLambda;
+    float time;          // at the start of the frame's first step
+    float gasRelax;
+    float sfDensity;
+    float sfEfficiency;
+    float gasMass;       // one gas particle's mass
+    float sfCompression;
+} pc;
+
+layout(std430, binding = 3) buffer Grid { ivec4 cell[]; } grid;   // momentum xyz (fixed point), gas count
+layout(std430, binding = 4) buffer Stats { uvec4 formed; } stats;   // x: stars formed
+
+layout(push_constant) uniform Step { uint index; } step;
+
+const float PI = 3.14159265;
+const uint GAS = 2u;
+const uint YOUNG = 3u;
+const int GRID = 128;         // model.GRID
+const float CELL = 1.0;       // model.CELL
+const float MOMENTUM_SCALE = 1024.0;
+const float NEAR = 48.0;      // model.NEAR
+const float CONVERGENCE_MIN = 0.02;        // per time unit
+const float COMPRESSION_DENSITY = 0.001;   // 10^10 solar masses per kpc^3
+
+// --- galaxy centres --------------------------------------------------------
+
+float erfApprox(float x) {
+    // Abramowitz and Stegun 7.1.26, x >= 0
+    float t = 1.0 / (1.0 + 0.3275911 * x);
+    float y = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+    return 1.0 - y * exp(-x * x);
+}
+
+// Friction force over speed for `mover` in `field`'s halo.
+float frictionTerm(Galaxy mover, Galaxy field, float r, float speed) {
+    float a = field.shape.x;
+    float m = field.masses.x;
+    float rho = m * a / (2.0 * PI * r * pow(r + a, 3.0));
+    float sigma = sqrt(m * r / ((r + a) * (r + a)) / 2.0);
+    float x = speed / (sqrt(2.0) * sigma);
+    float shape = erfApprox(x) - 2.0 * x / sqrt(PI) * exp(-x * x);
+    float mass = mover.positionMass.w;
+    return 4.0 * PI * pc.logLambda * mass * mass * rho * shape / (speed * speed * speed);
+}
+
+vec3 forceOn(uint i, vec3 x[4]) {
+    vec3 force = vec3(0.0);
+    Galaxy a = galaxies.g[i];
+    for (uint j = 0u; j < pc.galaxyCount; ++j) {
+        if (j == i) continue;
+        Galaxy b = galaxies.g[j];
+        vec3 d = x[i] - x[j];
+        force += 0.5 * (a.positionMass.w * galaxyAcceleration(b, d, pc.softening)
+                        - b.positionMass.w * galaxyAcceleration(a, -d, pc.softening));
+    }
+    return force;
+}
+
+void kick(uint n, vec3 x[4], inout vec3 v[4], float dt) {
+    vec3 f[4];
+    for (uint i = 0u; i < n; ++i) f[i] = forceOn(i, x);
+    for (uint i = 0u; i < n; ++i) v[i] += dt * f[i] / galaxies.g[i].positionMass.w;
+    if (pc.logLambda <= 0.0) return;
+    for (uint i = 0u; i < n; ++i) {
+        for (uint j = i + 1u; j < n; ++j) {
+            Galaxy a = galaxies.g[i];
+            Galaxy b = galaxies.g[j];
+            vec3 rel = v[i] - v[j];
+            float speed = length(rel);
+            if (speed < 1e-6) continue;
+            float r = sqrt(dot(x[i] - x[j], x[i] - x[j]) + pc.softening * pc.softening);
+            float ma = a.positionMass.w;
+            float mb = b.positionMass.w;
+            float rate = 0.5 * (frictionTerm(a, b, r, speed) + frictionTerm(b, a, r, speed)) * (1.0 / ma + 1.0 / mb);
+            vec3 change = rel * (exp(-rate * dt) - 1.0);
+            v[i] += change * mb / (ma + mb);
+            v[j] -= change * ma / (ma + mb);
+        }
+    }
+}
+
+void stepCentres() {
+    uint n = min(pc.galaxyCount, 4u);
+    vec3 x[4];
+    vec3 v[4];
+    for (uint i = 0u; i < 4u; ++i) {
+        x[i] = i < n ? galaxies.g[i].positionMass.xyz : vec3(0.0);
+        v[i] = i < n ? galaxies.g[i].velocity.xyz : vec3(0.0);
+    }
+    for (uint i = 0u; i < n; ++i) galaxies.g[i].previous = vec4(x[i], 0.0);
+    kick(n, x, v, 0.5 * pc.dt);
+    for (uint i = 0u; i < n; ++i) x[i] += pc.dt * v[i];
+    kick(n, x, v, 0.5 * pc.dt);
+    for (uint i = 0u; i < n; ++i) {
+        galaxies.g[i].positionMass.xyz = x[i];
+        galaxies.g[i].velocity.xyz = v[i];
+    }
+}
+
+// --- gas grid ----------------------------------------------------------------
+
+// The mass-weighted centre of the galaxies within NEAR of the heaviest (the first of equals).
+vec3 gridCentre() {
+    uint heaviest = 0u;
+    for (uint j = 1u; j < pc.galaxyCount; ++j) {
+        if (galaxies.g[j].positionMass.w > galaxies.g[heaviest].positionMass.w) heaviest = j;
+    }
+    vec3 anchor = galaxies.g[heaviest].positionMass.xyz;
+    vec3 sum = vec3(0.0);
+    float mass = 0.0;
+    for (uint j = 0u; j < pc.galaxyCount; ++j) {
+        vec4 g = galaxies.g[j].positionMass;
+        if (distance(g.xyz, anchor) > NEAR) continue;
+        sum += g.xyz * g.w;
+        mass += g.w;
+    }
+    return sum / max(mass, 1e-6);
+}
+
+ivec3 cellCoords(vec3 x, vec3 origin) {
+    return ivec3(floor((x - origin) / CELL)) + GRID / 2;
+}
+
+bool inGrid(ivec3 c) {
+    return all(greaterThanEqual(c, ivec3(0))) && all(lessThan(c, ivec3(GRID)));
+}
+
+int cellIndex(ivec3 c) {
+    return (c.z * GRID + c.y) * GRID + c.x;
+}
+
+// The grid cell holding `x`, or -1 outside the grid.
+int cellOf(vec3 x, vec3 origin) {
+    ivec3 c = cellCoords(x, origin);
+    return inGrid(c) ? cellIndex(c) : -1;
+}
+
+// The mean gas velocity of cell `c`, or `fallback` where it has no gas or lies outside the grid.
+vec3 meanVelocity(ivec3 c, vec3 fallback) {
+    if (!inGrid(c)) return fallback;
+    ivec4 cell = grid.cell[cellIndex(c)];
+    return cell.w > 0 ? vec3(cell.xyz) / (MOMENTUM_SCALE * float(cell.w)) : fallback;
+}
+
+void clearGrid() {
+    uint total = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+    for (uint c = gl_GlobalInvocationID.x; c < uint(GRID * GRID * GRID); c += total) grid.cell[c] = ivec4(0);
+}
+
+bool isGas(uint i) {
+    return (uint(particles.p[i].positionKind.w + 0.5) & 3u) == GAS;
+}
+
+void deposit(uint i) {
+    if (!isGas(i)) return;
+    int c = cellOf(particles.p[i].positionKind.xyz, gridCentre());
+    if (c < 0) return;
+    ivec3 momentum = ivec3(round(particles.p[i].velocityBirth.xyz * MOMENTUM_SCALE));
+    atomicAdd(grid.cell[c].x, momentum.x);
+    atomicAdd(grid.cell[c].y, momentum.y);
+    atomicAdd(grid.cell[c].z, momentum.z);
+    atomicAdd(grid.cell[c].w, 1);
+}
+
+uint hash(uint x) {
+    // PCG
+    uint state = x * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// The gas rules for gas particle i at the start of the step beginning at `start`.
+void gasRules(uint i, float start) {
+    ivec3 cc = cellCoords(particles.p[i].positionKind.xyz, gridCentre());
+    if (!inGrid(cc)) return;
+    ivec4 cell = grid.cell[cellIndex(cc)];
+    if (cell.w <= 0) return;
+    vec3 mean = vec3(cell.xyz) / (MOMENTUM_SCALE * float(cell.w));
+    vec3 v = particles.p[i].velocityBirth.xyz;
+    particles.p[i].velocityBirth.xyz = v + (mean - v) * (1.0 - exp(-pc.gasRelax * pc.dt));
+
+    float rho = float(cell.w) * pc.gasMass / (CELL * CELL * CELL);
+    float rate = 0.0;
+    if (rho > pc.sfDensity) rate += pc.sfEfficiency / sqrt(3.0 * PI / (32.0 * rho));
+    if (rho > COMPRESSION_DENSITY && pc.sfCompression > 0.0) {
+        float divergence = (meanVelocity(cc + ivec3(1, 0, 0), mean).x - meanVelocity(cc - ivec3(1, 0, 0), mean).x
+                          + meanVelocity(cc + ivec3(0, 1, 0), mean).y - meanVelocity(cc - ivec3(0, 1, 0), mean).y
+                          + meanVelocity(cc + ivec3(0, 0, 1), mean).z - meanVelocity(cc - ivec3(0, 0, 1), mean).z)
+                         / (2.0 * CELL);
+        rate += pc.sfCompression * max(-divergence - CONVERGENCE_MIN, 0.0);
+    }
+    if (rate <= 0.0) return;
+    float chance = rate * pc.dt;
+    float draw = float(hash(i ^ hash(floatBitsToUint(start))) >> 8) / 16777216.0;
+    if (draw < chance) {
+        uint galaxy = uint(particles.p[i].positionKind.w + 0.5) >> 2u;
+        particles.p[i].positionKind.w = float(YOUNG + 4u * galaxy);
+        particles.p[i].velocityBirth.w = start;
+        atomicAdd(stats.formed.x, 1u);
+    }
+}
+
+// --- particles ---------------------------------------------------------------
+
+vec3 acceleration(vec3 x, bool before) {
+    vec3 a = vec3(0.0);
+    for (uint j = 0u; j < pc.galaxyCount; ++j) {
+        Galaxy g = galaxies.g[j];
+        vec3 centre = before ? g.previous.xyz : g.positionMass.xyz;
+        a += galaxyAcceleration(g, x - centre, pc.softening);
+    }
+    return a;
+}
+
+void stepParticle(uint i) {
+    vec3 x = particles.p[i].positionKind.xyz;
+    vec3 v = particles.p[i].velocityBirth.xyz;
+    v += 0.5 * pc.dt * acceleration(x, true);
+    x += pc.dt * v;
+    v += 0.5 * pc.dt * acceleration(x, false);
+    particles.p[i].positionKind.xyz = x;
+    particles.p[i].velocityBirth.xyz = v;
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint mode = step.index % 3u;
+    float start = pc.time + float(step.index / 3u) * pc.dt;
+    if (mode == 0u) {
+        if (i == 0u) stepCentres();
+        clearGrid();
+    } else if (i < pc.count) {
+        if (mode == 1u) {
+            deposit(i);
+        } else {
+            if (isGas(i)) gasRules(i, start);
+            stepParticle(i);
+        }
+    }
+}

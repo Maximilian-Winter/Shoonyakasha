@@ -1,0 +1,10 @@
+{
+  "passes": [
+    {
+      "name": "UIOverlay",
+      "type": "graphics",
+      "execution": { "type": "ui_canvas" },
+      "outputs": [{ "resource": "swapchain", "usage": "color_blend", "present": true }]
+    }
+  ]
+}
