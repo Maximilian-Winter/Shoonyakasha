@@ -1,6 +1,6 @@
 # Planets: `shoonyakasha.planet`
 
-A planet and its moon with procedural terrain on the planet pipeline (`shoonyakasha/pipelines/planet/`): a cube-sphere with quadtree level of detail whose chunks a compute pass builds, an atmosphere, clouds, an ocean, sun shadows and ground textures. The [planet example](../../../examples/python/simulations/planet/README.md) flies a ship over it; the [planet explorer](../../../examples/python/simulations/planet_explorer/README.md) looks at it like a globe or a planetarium. Needs numpy, and a GPU with 64-bit float shaders (`shaderFloat64`).
+A planet and its moon with procedural terrain on the planet pipeline (`shoonyakasha/pipelines/planet/`): a cube-sphere with quadtree level of detail whose chunks a compute pass builds, an atmosphere, clouds, an ocean, sun shadows and ground textures. The [planet example](../../../examples/python/simulations/planet/README.md) flies a ship over it; the [planet explorer](../../../examples/python/simulations/planet_explorer/README.md) looks at it like a globe or a planetarium. Needs numpy, Pillow (which bakes the vegetation's textures), and a GPU with 64-bit float shaders (`shaderFloat64`).
 
 | Module | |
 |---|---|
@@ -12,7 +12,9 @@ A planet and its moon with procedural terrain on the planet pipeline (`shoonyaka
 | `vec` | Vectors as tuples: `add`, `sub`, `scale`, `dot`, `cross`, `length`, `normalize`, `rotate`, `local_frame`, `euler_from_basis` |
 | `cube_sphere`, `quadtree`, `shadows` | The cube-sphere's faces and chunk meshes, the quadtree in Python (the level of detail `sk.PlanetLod` does in C++), the shadow cascades' fitting |
 | `ground_textures` | The ground's textures: download (`python -m shoonyakasha.planet.ground_textures`) and `load(engine)` |
-| `vegetation` | The vegetation's low-poly meshes, grass among them (`meshes()`), and their draws (`draw_template(ranges, firsts)`) |
+| `vegetation` | The vegetation's meshes of bark and foliage cards, impostor quads and grass (`meshes(impostor_rects)`, `trees()`, `impostor_width`), and their draws (`draw_template(ranges, firsts)`) |
+| `vegetation_textures` | The foliage atlas and bark tile, baked from CC0 scans or drawn: download (`python -m shoonyakasha.planet.vegetation_textures`), `atlas()`, `card_rect(name)`, `bark()` |
+| `vegetation_impostors` | The trees' impostors drawn from their meshes: `bake(trees, atlas, bark)` |
 
 Importing these modules does not require the engine's extension; `PlanetWorld` takes the engine as an argument.
 
@@ -56,7 +58,7 @@ Positions are Python floats in metres, with the planet's centre at the origin. T
 
 | Call | |
 |---|---|
-| `setup()` | From `on_init`: the camera entity, the sky, clouds and terrain settings, the chunks' index buffer, the ground's textures (when downloaded) and, with `moon`, the moon |
+| `setup()` | From `on_init`: the camera entity, the sky, clouds and terrain settings, the chunks' index buffer, the ground's textures (when downloaded), the vegetation's textures, impostors and meshes and, with `moon`, the moon |
 | `begin_frame(viewpoint=None)` | The chunks' and probes' heights read back, with `viewpoint` where the ground is measured; the terrain started once the site's height is known. Returns True in the frame it starts |
 | `end_frame(position, basis, dt, warp=1.0, viewpoint=None, patch=None)` | The level of detail and the probes for the camera at `position` with `basis` (right, up, forward), the drawn chunks, the camera entity's rotation, the shadow cascades and the ground textures' offsets, the climate settings, and the clouds blown on by `dt` times `warp` seconds. `patch` is (body, patch) to probe: an object with `directions` (up to `PATCH_PROBES`) and `set_heights(heights)` |
 | `set_orbit_path(points)` | A line through up to `ORBIT_POINTS` points (planet space) over the scene, depth-tested; none when empty |
@@ -112,9 +114,9 @@ Each of the planet's chunk vertices carries its climate (`climate.glsl`): a temp
 
 ## Vegetation
 
-Low-poly conifers, broadleaf trees and bushes grow on the planet within `vegetation_range` of the camera, placed on the GPU each frame by `VegetationScatter` by their biomes' chances, coloured by their biomes, and drawn with sun and cloud shadows; the [planet example's README](../../../examples/python/simulations/planet/README.md) has how they are placed. Each of the five kinds (conifer, conifer far, broadleaf, broadleaf far, bush) holds up to `VEGETATION_CAPACITY` plants in view at a time.
+Trees (spruces, pines, two broadleaf trees, acacias), bushes, shrubs and cacti grow on the planet within `vegetation_range` of the camera, placed on the GPU each frame by `VegetationScatter` by their biomes' chances and forms, coloured by their biomes, and drawn with sun and cloud shadows; the [planet example's README](../../../examples/python/simulations/planet/README.md) has how they are placed and drawn. They are built of bark and alpha-tested foliage cards showing an atlas that `setup` bakes (`vegetation_textures`): from the CC0 scans that `python -m shoonyakasha.planet.vegetation_textures` downloads into `SHOONYAKASHA_VEGETATION_TEXTURES` or `shoonyakasha/vegetation_textures` in the user's cache (`vegetation_scans` is True when they were used), else from leaves drawn in the module. Beyond `VEGETATION_NEAR` a tree is its impostor (`vegetation_impostors`), one quad facing the camera. Each kind of `vegetation.KINDS` but grass holds up to `VEGETATION_CAPACITY` plants in view at a time.
 
-Tufts of grass grow within `grass_range` of the camera, placed by `GrassScatter` on a finer grid by their biomes' grass chances, and drawn by the same `Vegetation` pass as a sixth kind in their biomes' grass colour, swaying in the wind; they cast no shadows. Up to `GRASS_CAPACITY` tufts are in view at a time. `vegetation` and `vegetation_density` apply to the grass too.
+Tufts of grass grow within `grass_range` of the camera, placed by `GrassScatter` on a finer grid by their biomes' grass chances, and drawn by the same `Vegetation` pass as the last kind, crossed cards in their biomes' grass colour, swaying in the wind; they cast no shadows. Up to `GRASS_CAPACITY` tufts are in view at a time. `vegetation` and `vegetation_density` apply to the grass too.
 
 ## Cameras
 

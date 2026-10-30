@@ -49,7 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import cube_sphere, ground_textures, orbits, shadows, vegetation
+from . import cube_sphere, ground_textures, orbits, shadows, vegetation, vegetation_impostors, vegetation_textures
 from .vec import add, dot, euler_from_basis, length, local_frame, normalize, scale, sub
 
 #: The planet pipeline shipped with the package.
@@ -82,7 +82,7 @@ VEGETATION_CELLS = 16384
 VEGETATION_CAPACITY = 32768
 VEGETATION_MIN_LEVEL = 7
 VEGETATION_RANGE = 2_500.0
-VEGETATION_NEAR = 600.0
+VEGETATION_NEAR = 250.0
 VEGETATION_BUSH_RANGE = 700.0
 VEGETATION_BUDGET = 0.85
 # The grass (grass_scatter.comp): candidate cells per cube face side (1.2 m on the planet), tufts at
@@ -374,6 +374,7 @@ class PlanetWorld:
         self.grass = True
         self.grass_range = GRASS_RANGE
         self.vegetation_draws = None       # the kinds' draws with no instances, set again each frame
+        self.vegetation_scans = False      # whether the vegetation's textures came from the downloaded scans
         self.temperature_offset = 0.0      # degrees C added to the climate's temperature
         self.moisture_offset = 0.0         # added to the climate's moisture
         self.flora_hue = 0.0               # degrees the plants' colours turn
@@ -551,8 +552,19 @@ class PlanetWorld:
         self.engine.set_buffer("ChunkIndices", indices)
 
     def upload_vegetation_meshes(self):
-        """The vegetation's meshes (vegetation.py) and its draws' template."""
-        vertices, indices, ranges = vegetation.meshes()
+        """The vegetation's textures (vegetation_textures: the foliage atlas
+        and the bark), the trees' impostors baked from their meshes and those
+        (vegetation_impostors), the meshes (vegetation.py) and the draws'
+        template."""
+        engine = self.engine
+        atlas, bark = vegetation_textures.atlas(), vegetation_textures.bark()
+        albedo, normals, rects = vegetation_impostors.bake(vegetation.trees(), atlas, bark)
+        engine.set_pipeline_image_data("vegetationAtlas", atlas, format="R8G8B8A8_SRGB", mipmaps=True)
+        engine.set_pipeline_image_data("vegetationBark", bark, format="R8G8B8A8_SRGB", mipmaps=True)
+        engine.set_pipeline_image_data("vegetationImpostor", albedo, format="R8G8B8A8_SRGB", mipmaps=True)
+        engine.set_pipeline_image_data("vegetationImpostorNormal", normals, format="R8G8B8A8_UNORM", mipmaps=True)
+        self.vegetation_scans = vegetation_textures.available()
+        vertices, indices, ranges = vegetation.meshes(rects)
         self.engine.set_buffer("VegetationMesh", vertices)
         self.engine.set_buffer("VegetationIndices", indices)
         firsts = [kind * VEGETATION_CAPACITY for kind in range(len(vegetation.KINDS))]

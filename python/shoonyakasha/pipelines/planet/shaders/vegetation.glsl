@@ -11,14 +11,25 @@
 //                drawn with a chance of the square of this distance over its own
 //
 // Kinds (one indirect draw each, their instances from kind * instances per
-// kind): 0 conifer near, 1 conifer far, 2 broadleaf near, 3 broadleaf far,
-// 4 bush; and 5 grass, its tufts after the other kinds' instances. An
-// instance is two vec4: (position relative to the camera, height in metres)
-// and (cosine and sine of its turn about its up, tint 0 .. 1, and its
-// foliage's colour packed by vegetationPackColour).
+// kind, as shoonyakasha.planet.vegetation.KINDS): each tree near and far
+// (its impostor) in turn, conifer a and b, broadleaf a and b, acacia (0 to
+// 9); then bush, shrub, cactus (10 to 12); and grass (13), its tufts after
+// the other kinds' instances. An instance is two vec4: (position relative to
+// the camera, height in metres) and (cosine and sine of its turn about its
+// up, tint 0 .. 1, and its foliage's colour packed by vegetationPackColour).
+//
+// A mesh vertex's normal.w is its part (VEGETATION_PART_*), position.w and
+// colour.w its texture's (u, v), colour.rgb its shade.
 
-const int VEGETATION_KINDS = 6;
-const int VEGETATION_GRASS = 5;
+const int VEGETATION_KINDS = 14;
+const int VEGETATION_GRASS = 13;
+const int VEGETATION_TREE_KINDS = 10;         // the trees' kinds come first, near then far each
+
+const int VEGETATION_PART_BARK = 0;
+const int VEGETATION_PART_CARD = 1;
+const int VEGETATION_PART_GRASS = 2;
+const int VEGETATION_PART_IMPOSTOR = 3;
+const int VEGETATION_PART_PLAIN = 4;
 
 layout(set = VEGETATION_SET, binding = VEGETATION_PARAMS) uniform VegetationParams {
     vec4 settings;
@@ -43,6 +54,12 @@ vec3 vegetationUnpackColour(float packed) {
     return root * root;
 }
 
+// How much wider than its mesh a plant is drawn, from its tint (0 .. 1):
+// 0.85 to 1.15, unrelated to the tint's own effect.
+float vegetationWidth(float tint) {
+    return mix(0.85, 1.15, fract(tint * 7.31));
+}
+
 // The frame of an instance at `relative` (to the camera), whose position
 // from the planet's centre is `fromCentre` + `relative`: its up, away from
 // the centre, and two horizontal axes turned by its (cos, sin).
@@ -53,4 +70,12 @@ void vegetationFrame(vec3 fromCentre, vec3 relative, vec2 turn, out vec3 right, 
     vec3 north = cross(up, east);
     right = east * turn.x + north * turn.y;
     ahead = cross(right, up);
+}
+
+// An impostor's frame: its quad stands along `up` and faces `towards`
+// (flattened square to `up`); `right` is across it, `facing` out of it.
+void vegetationBillboard(vec3 up, vec3 towards, out vec3 right, out vec3 facing) {
+    facing = towards - up * dot(towards, up);
+    facing = length(facing) < 1e-6 ? cross(up, vec3(1.0, 0.0, 0.0)) : normalize(facing);
+    right = normalize(cross(up, facing));
 }

@@ -5,13 +5,15 @@
 // that vegetation_scatter.comp or grass_scatter.comp kept, from
 // VegetationInstances by gl_InstanceIndex (the draw's first instance is its
 // kind's first). The mesh's y is the plant's up, away from the planet's
-// centre; it is scaled by the plant's height and turned about its up.
-// The normal's w marks the parts: 0 wood, 1 foliage, 2 grass. Wood takes
-// the mesh's colour; foliage and grass the mesh's shade times the plant's
-// colour (vegetationUnpackColour), tinted by the plant's tint from 80 % to
-// 115 %. Grass sways: its tips move up to GRASS_SWAY of their height along
-// the wind, a sine of the time whose phase follows the tuft's place on the
-// planet.
+// centre; it is scaled by the plant's height, across by vegetationWidth,
+// and turned about its up, except an impostor's quad, which turns to face
+// the camera. Foliage cards and grass sway in the wind: their points move
+// along it by up to SWAY of their height above the plant's base squared
+// (GRASS_SWAY for grass), a sine of the time whose phase follows the
+// plant's place on the planet. The fragment shader gets the part, the
+// texture's (u, v), the shade, the plant's colour (tinted from 80 % to
+// 115 %; white for bark) and the plant's frame (an impostor's facing the
+// camera).
 //
 
 #define CAMERA_SET 0
@@ -24,35 +26,55 @@ layout(std430, set = 1, binding = 1) readonly buffer VegetationInstances {
     vec4 data[];
 } instances;
 
-layout(location = 0) in vec4 inPosition;
-layout(location = 1) in vec4 inNormal;     // w: 0 wood, 1 foliage, 2 grass
-layout(location = 2) in vec4 inColour;
+layout(location = 0) in vec4 inPosition;   // w: u
+layout(location = 1) in vec4 inNormal;     // w: the part
+layout(location = 2) in vec4 inColour;     // rgb: shade; w: v
 
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec3 fragColour;
 layout(location = 2) out vec3 fragRelativePos;
-layout(location = 3) flat out float fragTwoSided;   // 1: a back face is lit with its normal turned round
+layout(location = 3) flat out int fragPart;
+layout(location = 4) out vec2 fragUv;
+layout(location = 5) out float fragShade;
+layout(location = 6) flat out vec3 fragRight;
+layout(location = 7) flat out vec3 fragUp;
+layout(location = 8) flat out vec3 fragFacing;
 
+const float SWAY = 0.015;
 const float GRASS_SWAY = 0.12;
 
 void main() {
     vec4 placed = instances.data[gl_InstanceIndex * 2];
     vec4 look = instances.data[gl_InstanceIndex * 2 + 1];
+    int part = int(inNormal.w + 0.5);
+    float width = vegetationWidth(look.z);
     vec3 right, up, ahead;
     vegetationFrame(camera.cameraFromCentre.xyz, placed.xyz, look.xy, right, up, ahead);
-    vec3 offset = (right * inPosition.x + up * inPosition.y + ahead * inPosition.z) * placed.w;
-    bool grass = inNormal.w > 1.5;
-    bool living = inNormal.w > 0.5;
-    vec3 colour = living ? inColour.rgb * vegetationUnpackColour(look.w) : inColour.rgb;
-    if (grass) {
+    vec3 offset, normal;
+    if (part == VEGETATION_PART_IMPOSTOR) {
+        vegetationBillboard(up, -placed.xyz, right, ahead);
+        offset = (right * inPosition.x * width + up * inPosition.y) * placed.w;
+        normal = ahead;
+    } else {
+        offset = (right * inPosition.x * width + up * inPosition.y + ahead * inPosition.z * width) * placed.w;
+        normal = normalize(right * inNormal.x / width + up * inNormal.y + ahead * inNormal.z / width);
+    }
+    if (part == VEGETATION_PART_CARD || part == VEGETATION_PART_GRASS) {
         vec3 wind = normalize(vec3(1.0, 0.0, 0.3) - up * dot(vec3(1.0, 0.0, 0.3), up));
         float phase = dot(camera.cameraFromCentre.xyz + placed.xyz, vec3(0.37, 0.53, 0.29));
-        offset += wind * (GRASS_SWAY * inPosition.y * inPosition.y * placed.w * sin(camera.time * 2.1 + phase));
+        float sway = part == VEGETATION_PART_GRASS ? GRASS_SWAY : SWAY;
+        offset += wind * (sway * inPosition.y * inPosition.y * placed.w * sin(camera.time * 2.1 + phase));
     }
     vec3 relativePos = placed.xyz + offset;
-    fragNormal = normalize(right * inNormal.x + up * inNormal.y + ahead * inNormal.z);
-    fragColour = living ? colour * mix(0.8, 1.15, look.z) : colour;
+    fragNormal = normal;
+    vec3 colour = vegetationUnpackColour(look.w) * mix(0.8, 1.15, look.z);
+    fragColour = part == VEGETATION_PART_BARK ? vec3(1.0) : colour;
     fragRelativePos = relativePos;
-    fragTwoSided = grass ? 0.0 : 1.0;
+    fragPart = part;
+    fragUv = vec2(inPosition.w, inColour.w);
+    fragShade = inColour.r;
+    fragRight = right;
+    fragUp = up;
+    fragFacing = ahead;
     gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
 }

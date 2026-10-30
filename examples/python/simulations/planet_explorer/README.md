@@ -1,9 +1,10 @@
 # Planet explorer
 
-The planet and its moon of [`shoonyakasha.planet`](../../../../docs/api/python/planet.md), looked at like a digital globe or a planetarium of the system: procedural terrain from a few metres above the ground to the whole system, an atmosphere, clouds, an ocean, sun shadows and ground textures, with the terrain's settings in a menu. Needs numpy and a GPU with 64-bit float shaders (`shaderFloat64`).
+The planet and its moon of [`shoonyakasha.planet`](../../../../docs/api/python/planet.md), looked at like a digital globe or a planetarium of the system: procedural terrain from a few metres above the ground to the whole system, an atmosphere, clouds, an ocean, sun shadows and ground textures, with the terrain's settings in a menu. Needs numpy, Pillow and a GPU with 64-bit float shaders (`shaderFloat64`).
 
 ```
-python -m shoonyakasha.planet.ground_textures   # download the ground's textures (once)
+python -m shoonyakasha.planet.ground_textures       # download the ground's textures (once)
+python -m shoonyakasha.planet.vegetation_textures   # download the leaf and bark scans (once)
 python explorer.py
 python explorer.py --capture DIR [--shots NAME...]   # screenshots of the views, then exit
 ```

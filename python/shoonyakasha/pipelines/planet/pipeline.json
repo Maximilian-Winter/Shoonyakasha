@@ -177,7 +177,7 @@
     "VegetationMesh": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 4096,
+      "elementCount": 8192,
       "fields": [
         { "name": "position", "type": "vec4" },
         { "name": "normal", "type": "vec4" },
@@ -193,14 +193,14 @@
     "VegetationInstances": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 458752,
+      "elementCount": 983040,
       "fields": [ { "name": "data", "type": "vec4" } ],
       "memory": { "location": "device_local" }
     },
     "VegetationDraws": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 32,
+      "elementCount": 72,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
     "GroundParams": {
@@ -432,6 +432,19 @@
           "autoBindBuffer": "VegetationInstances" }
       ]
     },
+    "vegetationTextureSet": {
+      "bindings": [
+        { "binding": 0, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "vegetationAtlas",
+          "externalImage": "vegetationAtlas", "autoBindSampler": "groundRepeat" },
+        { "binding": 1, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "vegetationBark",
+          "externalImage": "vegetationBark", "autoBindSampler": "groundRepeat" },
+        { "binding": 2, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "vegetationImpostor",
+          "externalImage": "vegetationImpostor", "autoBindSampler": "groundRepeat" },
+        { "binding": 3, "type": "combined_image_sampler", "stages": [ "fragment" ],
+          "name": "vegetationImpostorNormal", "externalImage": "vegetationImpostorNormal",
+          "autoBindSampler": "groundRepeat" }
+      ]
+    },
     "groundSet": {
       "bindings": [
         { "binding": 0, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "GroundParams",
@@ -628,10 +641,11 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 5, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 13, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/shadow_vegetation.vert.spv",
+        "fragmentShader": "shaders/shadow_vegetation.frag.spv",
         "vertexInput": "vegetationVertex",
         "depthTest": true,
         "depthWrite": true,
@@ -640,7 +654,7 @@
         "depthClamp": true,
         "depthBias": { "constant": 0.0, "slope": 1.5 }
       },
-      "descriptorSets": [ "shadowSet", "vegetationDrawSet" ],
+      "descriptorSets": [ "shadowSet", "vegetationDrawSet", "vegetationTextureSet" ],
       "pushConstants": [ { "stages": [ "vertex" ], "size": 4,
                            "bindings": [ { "name": "pass.repeatIndex", "type": "uint" } ] } ],
       "outputs": [
@@ -684,7 +698,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 6, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 14, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/vegetation.vert.spv",
@@ -695,7 +709,7 @@
         "depthCompareOp": "greater_or_equal",
         "cullMode": "none"
       },
-      "descriptorSets": [ "cameraSet", "vegetationDrawSet" ],
+      "descriptorSets": [ "cameraSet", "vegetationDrawSet", "vegetationTextureSet" ],
       "inputs": [
         { "resource": "transmittanceLut", "usage": "shader_read" },
         { "resource": "multiScatteringLut", "usage": "shader_read" },

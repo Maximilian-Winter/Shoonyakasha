@@ -102,6 +102,20 @@ const float BIOME_PLANTS[BIOMES * 5] = float[BIOMES * 5](
     0.80, 0.95, 0.08, 0.30, 0.20,     // taiga
     0.00, 1.00, 0.08, 0.50, 0.45);    // tundra
 
+// Per biome: the acacias' share of its broadleaf trees, and the shrubs'
+// and the cacti's shares of its bushes.
+const float BIOME_FORMS[BIOMES * 3] = float[BIOMES * 3](
+    1.0, 0.5, 0.5,      // desert
+    0.9, 0.3, 0.0,      // savanna
+    0.0, 0.0, 0.0,      // tropical
+    0.6, 0.7, 0.05,     // steppe
+    0.0, 0.3, 0.0,      // grassland
+    0.0, 0.0, 0.0,      // deciduous
+    0.0, 0.3, 0.0,      // taiga
+    0.0, 1.0, 0.0);     // tundra
+
+const vec3 CACTUS = vec3(0.10, 0.17, 0.07);
+
 // The biome view's flat colours (sRGB-ish, shown as albedo).
 const vec3 BIOME_VIEW[BIOMES] = vec3[BIOMES](
     vec3(0.85, 0.70, 0.30), vec3(0.75, 0.55, 0.15), vec3(0.05, 0.40, 0.10), vec3(0.65, 0.65, 0.35),
@@ -128,6 +142,7 @@ vec3 hueTurn(vec3 colour, float angle) {
 vec3 biomeSoil(int b) { return hueTurn(BIOME_SOIL[b], terrain.climate.w); }
 vec3 biomePlant(int b) { return hueTurn(BIOME_PLANT[b], terrain.climate.z); }
 vec3 biomeCanopy(int b) { return hueTurn(BIOME_CANOPY[b], terrain.climate.z); }
+vec3 biomeCactus() { return hueTurn(CACTUS, terrain.climate.z); }
 
 // Weights of the four bands below, between and above three edges.
 vec4 biomeBands(float x, vec3 edges, float blend) {
@@ -247,10 +262,12 @@ vec3 biomeViewColour(vec3 radial, float height, vec3 normal, vec3 climate) {
 // times the cover's grove or clearing; `leaf` the trees' and bushes'
 // foliage colour (the canopy's times LEAF_FROM_CANOPY) and `grass` the
 // grass's (its ground's plants, towards the soil by how dry the biome's
-// grass is), on the palette.
-vec4 biomePlants(vec3 radial, float height, vec3 normal, vec3 climate, out vec3 leaf, out vec3 grass) {
+// grass is), on the palette; `forms` the biomes' BIOME_FORMS weighted.
+vec4 biomePlants(vec3 radial, float height, vec3 normal, vec3 climate, out vec3 leaf, out vec3 grass,
+                 out vec3 forms) {
     leaf = vec3(0.0);
     grass = vec3(0.0);
+    forms = vec3(0.0);
     if (height < 0.0) return vec4(0.0);
     vec3 c = climateWithSettings(climate);
     float rock, snow, beach;
@@ -265,6 +282,7 @@ vec4 biomePlants(vec3 radial, float height, vec3 normal, vec3 climate, out vec3 
         plants += w * vec4(BIOME_PLANTS[b * 5], BIOME_PLANTS[b * 5 + 1], BIOME_PLANTS[b * 5 + 2],
                            BIOME_PLANTS[b * 5 + 3]);
         leaf += w * biomeCanopy(b) * LEAF_FROM_CANOPY;
+        forms += w * vec3(BIOME_FORMS[b * 3], BIOME_FORMS[b * 3 + 1], BIOME_FORMS[b * 3 + 2]);
         grass += w * mix(biomePlant(b), mix(biomeSoil(b), biomePlant(b), 0.5), BIOME_PLANTS[b * 5 + 4] * 0.5);
     }
     plants.x *= mix(0.2, 1.4, smoothstep(0.25, 0.75, c.z));

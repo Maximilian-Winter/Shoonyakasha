@@ -44,8 +44,8 @@ void main() {
         vec3 radial, normal, climate;
         float height;
         candidateGround(chunk, x, radial, height, normal, climate);
-        vec3 leaf, grass;
-        vec4 plants = biomePlants(radial, height, normal, climate, leaf, grass);
+        vec3 leaf, grass, forms;
+        vec4 plants = biomePlants(radial, height, normal, climate, leaf, grass, forms);
         if (pick >= density * plants.w) continue;
         float size = mix(0.3, 0.7, nextRandom(x.hash)) * smoothstep(range, range * GRASS_FADE_START, x.distance);
         if (size < 0.03) continue;
