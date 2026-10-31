@@ -138,7 +138,7 @@ def climate_items(world, keys=None):
 
 
 def view_items(world, keys=None):
-    """The wireframe, the split factor and the colour mode, under no heading."""
+    """Anti-aliasing, the wireframe, the split factor and the colour mode, under no heading."""
     planet = world.planet
 
     def set_split(value):
@@ -146,6 +146,9 @@ def view_items(world, keys=None):
             planet.tree.split_factor = value
 
     return _with_keys([
+        {"toggle": "Anti-aliasing", "get": lambda: world.taa, "set": lambda on: setattr(world, "taa", on),
+         "hint": "Temporal anti-aliasing: each frame samples other points of its pixels and is blended "
+                 "with the frames before, which smooths edges and stops foliage crawling."},
         {"toggle": "Wireframe", "get": lambda: world.wireframe, "set": world.set_wireframe,
          "hint": "The chunks' edges drawn over the terrain."},
         {"slider": "Split factor", "min": 0.5, "max": 4.0,

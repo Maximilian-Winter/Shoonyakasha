@@ -4,7 +4,7 @@
 // origin: the view matrix holds only its rotation, and each entity's model
 // matrix places it at its position minus the camera's, worked out in double
 // precision on the CPU. The projection is reverse-Z with an infinite far
-// plane.
+// plane. Positions are jittered for the TAA pass (camera.glsl's jittered).
 //
 
 #define CAMERA_SET 0
@@ -31,5 +31,5 @@ void main() {
     fragColor = inColor;
     fragFaceUv = inTexCoord;
     fragRelativePos = relativePos.xyz;
-    gl_Position = camera.proj * camera.view * relativePos;
+    gl_Position = jittered(camera.proj * camera.view * relativePos);
 }

@@ -85,6 +85,10 @@ VEGETATION_RANGE = 2_500.0
 VEGETATION_NEAR = 250.0
 VEGETATION_BUSH_RANGE = 700.0
 VEGETATION_BUDGET = 0.85
+# Temporal anti-aliasing (taa.frag): the jitter's cycle in frames, and how far (m) the camera may move in
+# one frame before the history is dropped (a jump, not a flight).
+TAA_JITTER_FRAMES = 8
+TAA_RESET_DISTANCE = 5_000.0
 # The grass (grass_scatter.comp): candidate cells per cube face side (1.2 m on the planet), tufts at
 # most (after the other kinds' instances; matches VegetationInstances), and its range (m).
 GRASS_CELLS = 131072
@@ -290,6 +294,26 @@ def parent_split_distance(node, tree):
     return tree.split_factor * 2.0 * node.edge if node.level > 0 else 0.0
 
 
+def halton(index, base):
+    """The radical inverse of `index` in `base`: the Halton sequence's
+    `index`-th value, in [0, 1)."""
+    result, fraction = 0.0, 1.0
+    while index > 0:
+        fraction /= base
+        result += fraction * (index % base)
+        index //= base
+    return result
+
+
+def taa_jitter(frame, size):
+    """This frame's jitter in clip units for a `size` (width, height) image:
+    the Halton (2, 3) sequence's points 1 to TAA_JITTER_FRAMES in turn, each
+    within half a pixel of the pixel's centre."""
+    index = frame % TAA_JITTER_FRAMES + 1
+    width, height = max(size[0], 1), max(size[1], 1)
+    return ((halton(index, 2) - 0.5) * 2.0 / width, (halton(index, 3) - 0.5) * 2.0 / height)
+
+
 def vegetation_thinning(vegetation_range):
     """The distance within which every tree kept is drawn (vegetation_scatter.comp
     keeps one at distance d beyond it with a chance of (it / d)^2): where a tree
@@ -325,8 +349,8 @@ class PlanetWorld:
     ground's textures); `temperature_offset` (degrees C), `moisture_offset`,
     `flora_hue`, `soil_hue` (degrees; the climate and its palette,
     biome.glsl); `colour_mode` (an index into COLOUR_MODES; "biome" shows
-    the biomes' flat colours); `frozen` (the level of detail kept as it
-    is). `ground_climate` is (temperature, moisture) under the viewpoint
+    the biomes' flat colours); `taa` (temporal anti-aliasing, taa.frag);
+    `frozen` (the level of detail kept as it is). `ground_climate` is (temperature, moisture) under the viewpoint
     from the probes, with the offsets, or None. `set_ocean` and
     `set_wireframe` switch those passes. The planet's terrain parameters
     are `planet.terrain`; `regenerate` builds it again with them.
@@ -380,6 +404,9 @@ class PlanetWorld:
         self.flora_hue = 0.0               # degrees the plants' colours turn
         self.soil_hue = 0.0                # degrees the soils' colours turn
         self.ocean = True
+        self.taa = True                    # temporal anti-aliasing
+        self.taa_frame = 0                 # frames drawn with it, for the jitter
+        self.taa_previous = None           # the camera's position the frame before, while it is on
         self.wireframe = False
         self.colour_mode = 0
         self.frozen = False
@@ -598,6 +625,27 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.terrain.siteShape",
                                (SITE_FLAT_RADIUS, SITE_BLEND_RADIUS, RADIUS, 1.0 if known and self.pad else 0.0))
 
+    def upload_taa(self, position):
+        """Temporal anti-aliasing for the camera at `position`: this frame's
+        jitter, whether it is on, whether the history is dropped (the first
+        frame, after turning it on, or after the camera jumped more than
+        TAA_RESET_DISTANCE), and how far the camera moved since the frame
+        before, subtracted in double."""
+        engine = self.engine
+        if not self.taa:
+            self.taa_previous = None
+            engine.set_custom_vec4("planet.taa", (0.0, 0.0, 0.0, 1.0))
+            engine.set_custom_vec4("planet.taaMotion", (0.0, 0.0, 0.0, 0.0))
+            return
+        previous = self.taa_previous
+        motion = sub(position, previous) if previous is not None else (0.0, 0.0, 0.0)
+        reset = previous is None or length(motion) > TAA_RESET_DISTANCE
+        jitter = taa_jitter(self.taa_frame, self.engine.framebuffer_size)
+        engine.set_custom_vec4("planet.taa", (jitter[0], jitter[1], 1.0, 1.0 if reset else 0.0))
+        engine.set_custom_vec4("planet.taaMotion", tuple(motion) + (0.0,))
+        self.taa_previous = position
+        self.taa_frame += 1
+
     def upload_climate(self):
         """The climate settings and whether the biome view is on."""
         engine = self.engine
@@ -733,8 +781,8 @@ class PlanetWorld:
         """The level of detail and the probes for the camera at `position`
         looking along `basis` (right, up, forward), the drawn chunks, the
         camera's turn, the shadow cascades and the ground textures' offsets
-        for it, the climate settings, and the clouds blown on by `dt`
-        seconds times `warp`.
+        for it, the climate settings, temporal anti-aliasing (upload_taa),
+        and the clouds blown on by `dt` seconds times `warp`.
         `viewpoint` is where the ground is probed (the camera's position
         without one); `patch` is (body, patch) to probe, or None."""
         right, up, forward = basis
@@ -746,6 +794,7 @@ class PlanetWorld:
         self.upload_drawn_chunks()
         self.upload_vegetation()
         self.upload_climate()
+        self.upload_taa(position)
         self.engine.scene.set_rotation(self.camera, euler_from_basis(right, up, forward))
         self.upload_shadow_cascades(forward)
         self.upload_ground()

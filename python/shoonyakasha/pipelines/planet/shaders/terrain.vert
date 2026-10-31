@@ -7,6 +7,7 @@
 // Vertices are morphed towards their ancestors' surfaces by distance
 // (morph.glsl), reading the ancestors' vertices from ChunkPool. The
 // vertices' climate (horizon.yzw) goes on to the fragment shader.
+// Positions are jittered for the TAA pass (camera.glsl's jittered).
 //
 
 #define CAMERA_SET 0
@@ -45,5 +46,5 @@ void main() {
     fragHorizon = v.horizon.x;
     fragBody = int(chunk.morph.z);
     fragClimate = v.horizon.yzw;
-    gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
+    gl_Position = jittered(camera.proj * camera.view * vec4(relativePos, 1.0));
 }

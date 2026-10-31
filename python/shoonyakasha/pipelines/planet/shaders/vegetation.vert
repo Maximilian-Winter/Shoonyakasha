@@ -13,7 +13,8 @@
 // plant's place on the planet. The fragment shader gets the part, the
 // texture's (u, v), the shade, the plant's colour (tinted from 80 % to
 // 115 %; white for bark) and the plant's frame (an impostor's facing the
-// camera).
+// camera). Positions are jittered for the TAA pass (camera.glsl's
+// jittered).
 //
 
 #define CAMERA_SET 0
@@ -76,5 +77,5 @@ void main() {
     fragRight = right;
     fragUp = up;
     fragFacing = ahead;
-    gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
+    gl_Position = jittered(camera.proj * camera.view * vec4(relativePos, 1.0));
 }

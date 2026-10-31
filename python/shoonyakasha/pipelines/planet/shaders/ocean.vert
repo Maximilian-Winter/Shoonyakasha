@@ -3,7 +3,8 @@
 // The ocean's vertex shader: the terrain's chunks again, morphed as the
 // terrain's are (morph.glsl), each vertex moved down (or up) along its
 // direction to sea level, the sphere of the planet's radius. A skirt vertex
-// keeps its skirt depth below sea level.
+// keeps its skirt depth below sea level. Positions are jittered for the
+// TAA pass (camera.glsl's jittered).
 //
 
 #define CAMERA_SET 0
@@ -32,5 +33,5 @@ void main() {
     fragRadial = v.radialHeight.xyz;
     fragRelativePos = relativePos;
     fragHorizon = v.horizon.x;
-    gl_Position = camera.proj * camera.view * vec4(relativePos, 1.0);
+    gl_Position = jittered(camera.proj * camera.view * vec4(relativePos, 1.0));
 }

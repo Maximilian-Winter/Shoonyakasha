@@ -9,7 +9,18 @@ layout(set = CAMERA_SET, binding = 0) uniform CameraUBO {
     mat4 invProj;
     vec4 cameraFromCentre; // xyz: the camera's position relative to the planet's centre (m)
     float time;            // seconds since the engine started
+    mat4 prevViewProj;     // the frame before's projection times view (the camera turns about its origin)
+    vec4 taa;              // xy: this frame's jitter in clip units; z: 1 with temporal anti-aliasing;
+                           // w: 1 when the history is to be dropped
+    vec4 taaMotion;        // xyz: the camera's position now less the frame before's (m)
 } camera;
+
+// A clip position moved by this frame's jitter (none without temporal
+// anti-aliasing), for the passes whose image the TAA pass resolves.
+vec4 jittered(vec4 clip) {
+    clip.xy += camera.taa.xy * clip.w;
+    return clip;
+}
 
 layout(set = CAMERA_SET, binding = 1) uniform TerrainParams {
     vec4 continent;
