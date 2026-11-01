@@ -83,6 +83,10 @@ public:
     bool hasTree(int body) const;
     double splitFactor(int body) const;
     void setSplitFactor(int body, double splitFactor);
+    /// The deepest level a body's tree splits to; lowered, the deeper
+    /// subtrees are no longer selected and their chunks go as unused ones do.
+    int maxLevel(int body) const;
+    void setMaxLevel(int body, int maxLevel);
 
     /// Unless `frozen`: each body's tree updated for the camera, its missing
     /// chunks built and its unused ones released; with `requeue` every

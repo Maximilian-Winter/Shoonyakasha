@@ -157,5 +157,47 @@ class NativeLodMatchesPython(unittest.TestCase):
         self.assertGreater(compared["jobs"], 1_000)
 
 
+class NativeLodMaxLevel(unittest.TestCase):
+    """A tree's max_level raised and lowered with the camera 2 m above the ground: the deepest
+    selected level follows it, and lowered, the deeper chunks are released."""
+
+    def test_raise_and_lower(self):
+        if not sk.extension_available():
+            self.skipTest("the comparison in a fresh interpreter covers the extension")
+        lod = sk.PlanetLod(SLOTS, JOBS, VERTICES, SKIRT, evict_frames=30)
+        lod.create_tree(0, RADIUS, -2000.0, 6000.0, 12, 1.25, 0.05)
+        self.assertEqual(lod.max_level(0), 12)
+        site = cube_sphere.direction(4, 1.0 / 64.0, 1.0 / 64.0)
+        east = normalize((site[2], 0.0, -site[0]))
+        view = (tuple(c * (RADIUS + 1002.0) for c in site), east, 70.0, 16.0 / 9.0)
+        bodies = [(0, (0.0, 0.0, 0.0), RADIUS - 1650.0, True)]
+        gpu = np.zeros((SLOTS, 4), dtype=np.float32)
+        history = []
+        frame = [0]
+
+        def run(frames):
+            for _ in range(frames):
+                frame[0] += 1
+                for job in lod.jobs():
+                    gpu[int(job[1][0])] = (990.0, 1010.0, job[1][2], 0.0)
+                lod.clear_jobs()
+                history.append(gpu.copy())
+                if len(history) > LATENCY:
+                    lod.take_heights(history.pop(0).tobytes())
+                lod.update(view, bodies, frame[0])
+            return max(n["level"] for n in lod.selected(0))
+
+        self.assertEqual(run(400), 12)
+        used = lod.used
+        lod.set_max_level(0, 14)
+        self.assertEqual(lod.max_level(0), 14)
+        self.assertEqual(run(200), 14)
+        self.assertGreater(lod.used, used)
+        lod.set_max_level(0, 12)
+        self.assertEqual(run(1), 12)
+        run(100)
+        self.assertEqual(lod.used, used)
+
+
 if __name__ == "__main__":
     unittest.main()

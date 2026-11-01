@@ -3642,6 +3642,13 @@ cdef class PlanetLod:
     def set_split_factor(self, int body, double split_factor):
         self._ptr.setSplitFactor(body, split_factor)
 
+    def max_level(self, int body):
+        return self._ptr.maxLevel(body)
+
+    def set_max_level(self, int body, int max_level):
+        """The deepest level the body's tree splits to; lowered, the deeper chunks go as unused ones do."""
+        self._ptr.setMaxLevel(body, max_level)
+
     def set_face_colours(self, colours):
         """Six (r, g, b): the colours of colour mode 1."""
         cdef LodFaceColours out

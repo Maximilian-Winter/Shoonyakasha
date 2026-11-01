@@ -28,7 +28,9 @@ The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
 cockpit, and gets in with F within BOARD_REACH of it. A ship the player
 left is parked: it moves with the body under it until boarded. On foot
-the time warp is 1x.
+the time warp is 1x, and the body under the player splits to
+FOOT_MAX_LEVEL instead of MAX_LEVEL, so the ground drawn near the player
+follows the terrain the physics stands on more closely.
 
 Keys:
     Tab                    free camera / on foot (from the ship: the free camera)
@@ -184,6 +186,7 @@ BOARD_REACH = 3.0                # m from the boarding point the player gets in 
 BOARD_OUT = 3.5                  # m left of the ship's centre line the boarding point is, outside the hull
 SPAWN_LIFT = 1.0                 # m above the ground a player is put down, to fall onto it
 HOLD_MARGIN = 1.0                # m inside the terrain mesh's edges the player must be to move
+FOOT_MAX_LEVEL = 14              # the deepest level the body under the player splits to on foot (0.6 m quads)
 SHIP_HULL_POINTS = np.array(flight.ShipParams().hull + flight.ShipParams().gear, dtype=np.float32)
 FOOT_GAMEPAD_KEYS = {keys.GAMEPAD_X: keys.F, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
                      keys.GAMEPAD_BACK: keys.F2}
@@ -1061,6 +1064,18 @@ def place_eye():
     state["forward"] = state["foot_basis"][2]
 
 
+def set_max_levels():
+    """FOOT_MAX_LEVEL for the body under the player on foot, MAX_LEVEL for every other tree."""
+    for body in bodies:
+        tree = body.tree
+        if tree is None:
+            continue
+        foot = state["mode"] == "foot" and state["player"] is not None and state["bubble"].body is body
+        wanted = FOOT_MAX_LEVEL if foot else MAX_LEVEL
+        if tree.max_level != wanted:
+            tree.max_level = wanted
+
+
 def capture_mouse():
     """The mouse captured on foot, freed off foot and while the menu or the
     controls are open; Escape frees it until the next change."""
@@ -1115,6 +1130,8 @@ def frame(dt):
     if state["mode"] == "foot":
         place_eye()
     capture_mouse()
+
+    set_max_levels()
 
     # The world for the view: the level of detail, the probes (with the ground patch around the
     # ship), and everything placed relative to the camera, subtracted in double.
@@ -2013,29 +2030,31 @@ class MorphCheck:
         return True
 
 
-def morph_factor(node, point, level=1):
+def morph_factor(node, point, level=1, body=None):
     """morph.glsl's factor towards the surface of a node's ancestor `level`
-    levels up, for a vertex at `point` (planet space) and the camera's
-    present position; 0 where the node has no such ancestor."""
+    levels up, for a vertex at `point` (relative to the centre of `body`,
+    the planet when None) and the camera's present position; 0 where the
+    node has no such ancestor."""
+    body = planet if body is None else body
     if level > min(MORPH_LEVELS, node.level):
         return 0.0
-    split = planet_world.parent_split_distance(node, planet.tree) * 2.0 ** (level - 1)
-    distance = length(sub(point, state["position"]))
+    split = planet_world.parent_split_distance(node, body.tree) * 2.0 ** (level - 1)
+    distance = length(sub(point, body.relative(state["position"])))
     t = max(0.0, min(1.0, (distance - MORPH_START * split) / ((1.0 - MORPH_START) * split)))
     return t * t * (3.0 - 2.0 * t)
 
 
-def morphed_point(node, built, i, j):
-    """Grid vertex (i, j) of a built chunk (its ChunkPool rows `built`) in
-    planet space, morphed as morph.glsl morphs it for the camera's present
-    position: towards its parent's surface, then its grandparent's, and so
-    on."""
+def morphed_point(node, built, i, j, body=None):
+    """Grid vertex (i, j) of a built chunk (its ChunkPool rows `built`) of
+    `body` (the planet when None) relative to the body's centre, morphed as
+    morph.glsl morphs it for the camera's present position: towards its
+    parent's surface, then its grandparent's, and so on."""
     row = QUADS + 1
     vertex = lambda ij: add(node.centre, tuple(float(c) for c in built[ij[1] * row + ij[0], :3]))
     own = vertex((i, j))
     point = own
     for level in range(1, MORPH_LEVELS + 1):
-        f = morph_factor(node, own, level)
+        f = morph_factor(node, own, level, body)
         if f <= 0.0:
             break
         surface = (0.0, 0.0, 0.0)
@@ -2043,6 +2062,32 @@ def morphed_point(node, built, i, j):
             surface = add(surface, scale(vertex(ij), w))
         point = add(point, scale(sub(surface, point), f))
     return point
+
+
+def drawn_height(body, gpu, point):
+    """(metres above `body`'s radius, level of the chunk) of its surface as
+    drawn (its selected chunks, morphed for the camera's present position,
+    each quad split from its lowest to its highest corner) where the line
+    from its centre through `point` (relative to its centre) meets it, from
+    the ChunkPool rows `gpu`; None where no selected chunk holds that
+    direction."""
+    d = normalize(point)
+    face, u, v = cube_sphere.face_uv(d)
+    for node in body.tree.selected:
+        if node.face != face or node.chunk is None:
+            continue
+        u0, v0, size = cube_sphere.chunk_bounds(node.level, node.x, node.y)
+        if not (u0 <= u <= u0 + size and v0 <= v <= v0 + size):
+            continue
+        x, y = (u - u0) / size * QUADS, (v - v0) / size * QUADS
+        i, j = min(int(x), QUADS - 1), min(int(y), QUADS - 1)
+        fi, fj = x - i, y - j
+        corner = lambda di, dj: np.array(morphed_point(node, gpu[node.chunk], i + di, j + dj, body))
+        a, c = corner(0, 0), corner(1, 1)
+        b = corner(1, 0) if fi >= fj else corner(0, 1)
+        n = np.cross(b - a, c - a)
+        return float(np.dot(a, n) / np.dot(np.array(d), n)) - body.radius, node.level
+    return None
 
 
 class CrackCheck:
@@ -2660,17 +2705,25 @@ def point_triangle_distance(p, a, b, c):
 
 
 class WalkCheck:
-    """--walk-check: on the planet 3 km north of the site, then on the moon
+    """--walk-check: on the planet 3 km north of the site, on the planet in
+    the mountains 600 m south-west of near_mountain's peak, then on the moon
     at moon_spot, a player put down from the free camera walks a circle of
     LAP metres at WALK speed, then at RUN, its heading turned each frame by
-    its distance along the ground over the circle's radius. While it is on
+    its distance along the ground over the circle's radius, and by
+    STUCK_TURN more when it covered less than STUCK_DISTANCE in the last
+    second (stopped by ground too steep to climb). While it is on
     the ground, the gap between its capsule's lower sphere and the nearest
     triangle of the terrain mesh around its feet is measured. The feet must stay
     within TOLERANCE of the ground and never more than BELOW under it, and
-    each lap must cover at least MIN_LAP_SHARE of its length. Prints per
-    body and speed the distance, the share of the time on the ground and
-    the gaps' range, and exits with status 0 when every lap passed, 1
-    otherwise."""
+    each lap must cover at least MIN_LAP_SHARE of its length. Every
+    SAMPLE_EVERY metres the player stops for SAMPLE_WAIT, the level of
+    detail is frozen and ChunkPool read back, and the terrain mesh's height is compared with the
+    drawn surface's (drawn_height) under the feet and at SAMPLE_POINTS
+    points SAMPLE_RING metres around them, which must stay within
+    MATCH_TOLERANCE of each other. Prints per body and speed the
+    distance, the share of the time on the ground, the gaps' range and the
+    largest differences between the mesh and the drawn surface, and exits
+    with status 0 when every lap passed, 1 otherwise."""
 
     LAP = 200.0
     TOLERANCE = 0.05
@@ -2679,9 +2732,16 @@ class WalkCheck:
     START_HEIGHT = 2.0
     SETTLE_SECONDS = 2.0
     PLACE_FRAMES = 10
+    SAMPLE_EVERY = 20.0
+    SAMPLE_RING = 1.0
+    SAMPLE_POINTS = 8
+    MATCH_TOLERANCE = 0.1
+    SAMPLE_WAIT = 1.0                   # s standing before the level of detail is frozen
+    STUCK_DISTANCE = 1.0
+    STUCK_TURN = math.radians(45.0)
 
     def __init__(self):
-        self.bodies = ["planet", "moon"]
+        self.bodies = ["planet", "mountains", "moon"]
         self.results = []
         self.start_body()
 
@@ -2698,7 +2758,7 @@ class WalkCheck:
         return True
 
     def body(self):
-        return planet if self.bodies[0] == "planet" else moon_body()
+        return moon_body() if self.bodies[0] == "moon" else planet
 
     def next_stage(self, stage):
         self.stage, self.frames, self.clock = stage, 0, 0.0
@@ -2707,9 +2767,15 @@ class WalkCheck:
         drop_bubble()
         state["scripted_controls"] = True
         body = self.body()
-        if body is planet:
-            _, up, _, north = world.site_frame()
+        _, up, east, north = world.site_frame()
+        if self.bodies[0] == "planet":
             self.home = normalize(add(up, scale(north, 3_000.0 / RADIUS)))
+        elif self.bodies[0] == "mountains":
+            azimuth = math.radians(67.5)
+            level = add(scale(east, math.cos(azimuth)), scale(north, math.sin(azimuth)))
+            peak = normalize(add(up, scale(level, 60_000.0 / RADIUS)))
+            peak_east, peak_north = local_frame(peak)
+            self.home = normalize(add(peak, scale(normalize(add(peak_east, peak_north)), -600.0 / RADIUS)))
         else:
             self.home = moon_spot()
         state["mode"] = "camera"
@@ -2745,6 +2811,11 @@ class WalkCheck:
         self.ground_time = self.time = 0.0
         self.low, self.high = math.inf, -math.inf
         self.last = state["bubble"].body_relative(state["player"].feet())
+        self.next_sample = self.SAMPLE_EVERY
+        self.mesh_above = self.mesh_below = 0.0     # m the mesh was above / below the drawn surface at most
+        self.turns = 0
+        self.levels = set()                         # levels of the chunks the drawn surface was measured on
+        self.second = (0.0, 0.0)                    # (lap time, distance) a second ago
 
     def gap(self):
         """The gap between the capsule's lower sphere and the nearest of
@@ -2784,6 +2855,11 @@ class WalkCheck:
         self.distance += along
         self.time += dt
         player.heading = rotate(player.heading, up, along / (self.LAP / (2.0 * math.pi)))
+        if self.time - self.second[0] >= 1.0:
+            if self.distance - self.second[1] < self.STUCK_DISTANCE:
+                player.heading = rotate(player.heading, up, self.STUCK_TURN)
+                self.turns += 1
+            self.second = (self.time, self.distance)
         if player.on_ground and not player.held:
             self.ground_time += dt
             gap = self.gap()
@@ -2791,14 +2867,58 @@ class WalkCheck:
                 self.low, self.high = min(self.low, gap), max(self.high, gap)
         if self.distance >= self.LAP or self.time > 4.0 * self.LAP / (RUN_SPEED if controls.run else WALK_SPEED):
             self.finish_lap()
+        elif self.distance >= self.next_sample:
+            self.next_sample += self.SAMPLE_EVERY
+            self.stage, self.frames = "sample", 0
+
+    def sample(self, dt):
+        """Standing still with the level of detail frozen: the mesh against
+        the drawn surface around the feet, once ChunkPool comes back."""
+        controls = state["foot_controls"]
+        controls.forward = 0.0
+        if self.frames == 1:
+            self.waited = 0.0
+        if self.waited < self.SAMPLE_WAIT:
+            self.waited += dt
+            return
+        if not world.frozen:
+            world.frozen = True
+            previous = engine.get_readback("ChunkPool")
+            self.after = previous["frame"] if previous is not None else -1
+            engine.request_readback("ChunkPool")
+            return
+        readback = engine.get_readback("ChunkPool")
+        if readback is None or readback["frame"] <= self.after:
+            return
+        gpu = np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, VERTICES_PER_CHUNK,
+                                                                        FLOATS_PER_VERTEX)
+        bubble, patch = state["bubble"], state["terrain_collider"].patch
+        feet = bubble.body_relative(state["player"].feet())
+        east, north = local_frame(normalize(feet))
+        points = [feet] + [add(feet, add(scale(east, self.SAMPLE_RING * math.cos(a)),
+                                         scale(north, self.SAMPLE_RING * math.sin(a))))
+                           for a in (2.0 * math.pi * k / self.SAMPLE_POINTS for k in range(self.SAMPLE_POINTS))]
+        for p in points:
+            mesh, drawn = patch.height(p), drawn_height(bubble.body, gpu, p)
+            if mesh is not None and drawn is not None:
+                self.mesh_above = max(self.mesh_above, mesh - drawn[0])
+                self.mesh_below = max(self.mesh_below, drawn[0] - mesh)
+                self.levels.add(drawn[1])
+        world.frozen = False
+        self.last = feet
+        self.stage, self.frames = "lap", 0
 
     def finish_lap(self):
         name, speed = self.bodies[0], self.speeds.pop(0)
         ok = (self.distance >= self.MIN_LAP_SHARE * self.LAP and self.low >= -self.BELOW
-              and self.high <= self.TOLERANCE)
-        print("[planet] walk on the %s, %s: %.1f m in %.1f s, %.0f %% on the ground, feet %+.3f to %+.3f m from it: %s"
+              and self.high <= self.TOLERANCE and max(self.mesh_above, self.mesh_below) <= self.MATCH_TOLERANCE)
+        print("[planet] walk on the %s, %s: %.1f m in %.1f s, %.0f %% on the ground, feet %+.3f to %+.3f m from it, "
+              "the mesh up to %.3f m above and %.3f m below the drawn surface (chunks of level %s), "
+              "%d turns away from steep ground: %s"
               % (name, speed, self.distance, self.time, 100.0 * self.ground_time / max(self.time, 1e-9),
-                 self.low, self.high, "passed" if ok else "FAILED"), flush=True)
+                 self.low, self.high, self.mesh_above, self.mesh_below,
+                 ", ".join(str(v) for v in sorted(self.levels)), self.turns, "passed" if ok else "FAILED"),
+              flush=True)
         self.results.append(ok)
         if self.speeds:
             self.start_lap()

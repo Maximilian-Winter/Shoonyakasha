@@ -78,7 +78,7 @@ Positions are Python floats in metres, with the planet's centre at the origin. T
 
 | Attribute | |
 |---|---|
-| `planet`, `moon`, `bodies` | The bodies (`Body`: `index`, `name`, `radius`, `terrain` (the planet's parameters), `orbit`, `ocean`, `tree`, `centre()`, `velocity()`, `relative(point)`). `tree` is a `TreeView`, or None until the body's tree is made: `selected` (the nodes drawn), `missing` ((distance, node), nearest first) and `nodes()`, as `NodeInfo` copies (`face`, `level`, `x`, `y`, `chunk` (its slot or None), `centre`, `edge`, `low`, `high`, `measured`, `bound_centre`, `bound_radius`, `key()`), and `split_factor`, which can be set |
+| `planet`, `moon`, `bodies` | The bodies (`Body`: `index`, `name`, `radius`, `terrain` (the planet's parameters), `orbit`, `ocean`, `tree`, `centre()`, `velocity()`, `relative(point)`). `tree` is a `TreeView`, or None until the body's tree is made: `selected` (the nodes drawn), `missing` ((distance, node), nearest first) and `nodes()`, as `NodeInfo` copies (`face`, `level`, `x`, `y`, `chunk` (its slot or None), `centre`, `edge`, `low`, `high`, `measured`, `bound_centre`, `bound_radius`, `key()`), and `split_factor` and `max_level` (the deepest level it splits to, `MAX_LEVEL` at the start), which can be set |
 | `time` | The world's clock in seconds; it places the moon |
 | `physics` | The `orbits.Planet` with the moon, at `time`: gravity, air density (scaled by `density`) and orbits |
 | `sun_elevation`, `sun_azimuth`, `density`, `ozone`, `multiple_scattering`, `exposure` | The sky (`upload_sky`) |
@@ -104,7 +104,7 @@ The level of detail in C++ (`include/Planet/PlanetLod.h`): per body a quadtree o
 | `jobs()`, `clear_jobs()` | This frame's jobs, ((face, level, x, y), (slot, skirt depth, stamp, body)) each |
 | `take_heights(data)` | `ChunkHeights` read back: (lowest, highest, stamp, unused) float32 per slot |
 | `write_draws(view, bodies, colour_mode, shadow_reach, index_count)`, `upload(engine)` | The draw lists and instances for the view; handed to `ChunkInstances`, `ChunkDraws`, `OceanDraws` and `ShadowDraws` |
-| `set_face_colours(colours)`, `split_factor(body)`, `set_split_factor(body, value)` | Colour mode 1's six colours; a tree's split factor |
+| `set_face_colours(colours)`, `split_factor(body)`, `set_split_factor(body, value)`, `max_level(body)`, `set_max_level(body, level)` | Colour mode 1's six colours; a tree's split factor and deepest level (lowered, the deeper chunks go as unused ones do) |
 | `selected(body)`, `nodes(body)`, `missing_nodes(body)`, `missing(body)`, `selected_count(body)` | The trees' state, nodes as dicts |
 | `instances()`, `draws("chunk" / "ocean" / "shadow")`, `culled`, `slots`, `used`, `pending`, `rebuild_queued` | The buffers as bytes, and counts |
 

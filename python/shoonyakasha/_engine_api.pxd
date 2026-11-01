@@ -799,6 +799,8 @@ cdef extern from "Planet/PlanetLod.h" namespace "Shoonyakasha::Planet":
         cbool hasTree(int body)
         double splitFactor(int body)
         void setSplitFactor(int body, double splitFactor)
+        int maxLevel(int body)
+        void setMaxLevel(int body, int maxLevel)
         void update(const LodView& view, const vector[LodBody]& bodies, int64_t frame, cbool frozen, cbool requeue)
         void takeHeights(const float* rows, size_t count)
         void writeDraws(const LodView& view, const vector[LodBody]& bodies, int colourMode, double shadowReach,

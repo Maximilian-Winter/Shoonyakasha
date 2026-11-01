@@ -270,6 +270,15 @@ void PlanetLod::setSplitFactor(int body, double splitFactor) {
     if (Tree* t = tree(body)) t->splitFactor = splitFactor;
 }
 
+int PlanetLod::maxLevel(int body) const {
+    const Tree* t = tree(body);
+    return t ? t->maxLevel : 0;
+}
+
+void PlanetLod::setMaxLevel(int body, int maxLevel) {
+    if (Tree* t = tree(body)) t->maxLevel = maxLevel;
+}
+
 void PlanetLod::collectNodes(const Tree& t, std::vector<uint32_t>& out) const {
     std::vector<uint32_t> stack(t.roots.begin(), t.roots.end());
     while (!stack.empty()) {

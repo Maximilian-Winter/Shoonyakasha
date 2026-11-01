@@ -185,7 +185,8 @@ class TreeView:
     nodes drawn (`selected`, in the order selected), the missing ones
     (`missing`, (distance, node) nearest first) and every node (`nodes()`),
     as NodeInfo copies taken again after anything changed; and its
-    `split_factor`, which can be set."""
+    `split_factor` and `max_level`, the deepest level it splits to, which
+    can be set."""
 
     def __init__(self, world, body):
         self.world = world
@@ -218,6 +219,15 @@ class TreeView:
     @split_factor.setter
     def split_factor(self, value):
         self.world.lod.set_split_factor(self.body, value)
+        self.world.lod_version += 1
+
+    @property
+    def max_level(self):
+        return self.world.lod.max_level(self.body)
+
+    @max_level.setter
+    def max_level(self, value):
+        self.world.lod.set_max_level(self.body, value)
         self.world.lod_version += 1
 
 
