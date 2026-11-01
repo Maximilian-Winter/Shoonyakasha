@@ -1,0 +1,52 @@
+#version 450
+//
+// Evaluates the terrain at the directions in ColliderRequests for the
+// physics' terrain patches (shoonyakasha.planet.collider_probes): one
+// invocation per request, the first params.x of them. Each request is a
+// unit direction from its body's centre (xyz) and the body (w): 0 the planet
+// (terrainHeight, terrain.glsl), 1 the moon (moonHeight, moon.glsl, with
+// every crater size). Each result is the height (m) and params.y, the stamp
+// of the frame that asked for it.
+//
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 0) uniform ColliderParams {
+    vec4 params;           // x: request count; y: stamp
+    vec4 radii;            // each body's radius (m), by its index
+} collider;
+
+layout(set = 0, binding = 1) uniform TerrainParams {
+    vec4 continent;
+    vec4 mountains;
+    vec4 hills;
+    vec4 seed;
+    vec4 site;
+    vec4 siteShape;
+    vec4 detail;
+    vec4 climate;
+    vec4 biomeView;
+} terrain;
+
+layout(std430, set = 0, binding = 2) readonly buffer ColliderRequests {
+    vec4 requests[];       // xyz: unit direction; w: the body
+} requests;
+
+layout(std430, set = 0, binding = 3) writeonly buffer ColliderHeights {
+    vec4 heights[];        // height (m), stamp, 0, 0
+} results;
+
+#include "terrain.glsl"
+#include "moon.glsl"
+
+const int MOON = 1;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= uint(collider.params.x)) return;
+    vec4 request = requests.requests[i];
+    vec3 dir = normalize(request.xyz);
+    int body = int(request.w);
+    float h = body == MOON ? moonHeight(dir, collider.radii[body], 0.0) : terrainHeight(dir);
+    results.heights[i] = vec4(h, collider.params.y, 0.0, 0.0);
+}

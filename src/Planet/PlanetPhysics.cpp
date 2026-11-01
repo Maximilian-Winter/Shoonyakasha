@@ -1,0 +1,400 @@
+#include "Planet/PlanetPhysics.h"
+
+// Jolt.h comes first: it sets up the macros every other Jolt header uses.
+#include <Jolt/Jolt.h>
+
+#include <Jolt/Core/Factory.h>
+#include <Jolt/Core/JobSystemThreadPool.h>
+#include <Jolt/Core/TempAllocator.h>
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/RegisterTypes.h>
+
+#include <algorithm>
+#include <cmath>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <thread>
+
+namespace Shoonyakasha::Planet {
+
+namespace {
+
+namespace Layers {
+constexpr JPH::ObjectLayer NON_MOVING = 0;
+constexpr JPH::ObjectLayer MOVING = 1;
+constexpr JPH::uint COUNT = 2;
+}  // namespace Layers
+
+class BroadPhaseLayers final : public JPH::BroadPhaseLayerInterface {
+public:
+    JPH::uint GetNumBroadPhaseLayers() const override { return Layers::COUNT; }
+
+    JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override {
+        return JPH::BroadPhaseLayer(static_cast<JPH::BroadPhaseLayer::Type>(layer));
+    }
+
+#if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
+    const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer layer) const override {
+        return layer.GetValue() == Layers::NON_MOVING ? "NON_MOVING" : "MOVING";
+    }
+#endif
+};
+
+class ObjectVsBroadPhase final : public JPH::ObjectVsBroadPhaseLayerFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer layer, JPH::BroadPhaseLayer broadPhase) const override {
+        return layer == Layers::MOVING || broadPhase.GetValue() == Layers::MOVING;
+    }
+};
+
+class ObjectPairs final : public JPH::ObjectLayerPairFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override {
+        return a == Layers::MOVING || b == Layers::MOVING;
+    }
+};
+
+void initialiseJolt() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        JPH::RegisterDefaultAllocator();
+        JPH::Factory::sInstance = new JPH::Factory();
+        JPH::RegisterTypes();
+    });
+}
+
+JPH::Vec3 toVec3(const PhysicsVec3& v) {
+    return JPH::Vec3(static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2]));
+}
+
+JPH::RVec3 toRVec3(const PhysicsVec3& v) {
+    return JPH::RVec3(static_cast<JPH::Real>(v[0]), static_cast<JPH::Real>(v[1]), static_cast<JPH::Real>(v[2]));
+}
+
+JPH::Quat toQuat(const PhysicsQuat& q) {
+    return JPH::Quat(static_cast<float>(q[1]), static_cast<float>(q[2]), static_cast<float>(q[3]),
+                     static_cast<float>(q[0])).Normalized();
+}
+
+template <typename V>
+PhysicsVec3 fromVec3(const V& v) {
+    return {static_cast<double>(v.GetX()), static_cast<double>(v.GetY()), static_cast<double>(v.GetZ())};
+}
+
+PhysicsQuat fromQuat(const JPH::Quat& q) {
+    return {static_cast<double>(q.GetW()), static_cast<double>(q.GetX()), static_cast<double>(q.GetY()),
+            static_cast<double>(q.GetZ())};
+}
+
+JPH::EMotionType toMotionType(PhysicsMotion motion) {
+    switch (motion) {
+        case PhysicsMotion::Static: return JPH::EMotionType::Static;
+        case PhysicsMotion::Kinematic: return JPH::EMotionType::Kinematic;
+        case PhysicsMotion::Dynamic: return JPH::EMotionType::Dynamic;
+    }
+    return JPH::EMotionType::Static;
+}
+
+PhysicsMotion fromMotionType(JPH::EMotionType motion) {
+    switch (motion) {
+        case JPH::EMotionType::Static: return PhysicsMotion::Static;
+        case JPH::EMotionType::Kinematic: return PhysicsMotion::Kinematic;
+        case JPH::EMotionType::Dynamic: return PhysicsMotion::Dynamic;
+    }
+    return PhysicsMotion::Static;
+}
+
+constexpr JPH::uint MAX_BODY_PAIRS = 65536;
+constexpr JPH::uint MAX_CONTACT_CONSTRAINTS = 16384;
+constexpr size_t TEMP_ALLOCATOR_BYTES = 16 * 1024 * 1024;
+
+}  // namespace
+
+struct PlanetPhysics::Impl {
+    BroadPhaseLayers broadPhaseLayers;
+    ObjectVsBroadPhase objectVsBroadPhase;
+    ObjectPairs objectPairs;
+    std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
+    std::unique_ptr<JPH::JobSystemThreadPool> jobSystem;
+    JPH::PhysicsSystem system;
+    JPH::BodyIDVector scratch;
+
+    JPH::BodyInterface& bodies() { return system.GetBodyInterface(); }
+    const JPH::BodyInterface& bodies() const { return system.GetBodyInterface(); }
+
+    JPH::BodyID added(uint32_t id) const {
+        JPH::BodyID body(id);
+        if (!system.GetBodyInterface().IsAdded(body)) {
+            throw std::invalid_argument("no body " + std::to_string(id));
+        }
+        return body;
+    }
+
+    uint32_t add(JPH::BodyCreationSettings& settings) {
+        JPH::Body* body = bodies().CreateBody(settings);
+        if (body == nullptr) {
+            throw std::runtime_error("PlanetPhysics: the world holds no more bodies");
+        }
+        bool moving = settings.mMotionType != JPH::EMotionType::Static;
+        bodies().AddBody(body->GetID(), moving ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+        return body->GetID().GetIndexAndSequenceNumber();
+    }
+
+    uint32_t addSolid(const JPH::ShapeSettings& shape, const PhysicsVec3& position, const PhysicsQuat& rotation,
+                      PhysicsMotion motion, double mass, double friction, double restitution) {
+        JPH::ShapeSettings::ShapeResult result = shape.Create();
+        if (result.HasError()) {
+            throw std::invalid_argument(std::string("PlanetPhysics: ") + result.GetError().c_str());
+        }
+        JPH::BodyCreationSettings settings(result.Get(), toRVec3(position), toQuat(rotation), toMotionType(motion),
+                                           motion == PhysicsMotion::Static ? Layers::NON_MOVING : Layers::MOVING);
+        settings.mAllowDynamicOrKinematic = true;
+        settings.mFriction = static_cast<float>(friction);
+        settings.mRestitution = static_cast<float>(restitution);
+        if (mass > 0.0) {
+            settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+            settings.mMassPropertiesOverride.mMass = static_cast<float>(mass);
+        }
+        return add(settings);
+    }
+};
+
+PlanetPhysics::PlanetPhysics(uint32_t maxBodies, int threads) : m_impl(std::make_unique<Impl>()) {
+    initialiseJolt();
+    if (threads < 0) {
+        int hardware = static_cast<int>(std::thread::hardware_concurrency());
+        threads = std::clamp(hardware - 1, 1, 4);
+    }
+    m_impl->tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(TEMP_ALLOCATOR_BYTES);
+    m_impl->jobSystem = std::make_unique<JPH::JobSystemThreadPool>(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers,
+                                                                   threads);
+    m_impl->system.Init(maxBodies, 0, MAX_BODY_PAIRS, MAX_CONTACT_CONSTRAINTS, m_impl->broadPhaseLayers,
+                        m_impl->objectVsBroadPhase, m_impl->objectPairs);
+    m_impl->system.SetGravity(JPH::Vec3::sZero());
+}
+
+PlanetPhysics::~PlanetPhysics() {
+    JPH::BodyIDVector all;
+    m_impl->system.GetBodies(all);
+    if (!all.empty()) {
+        JPH::BodyInterface& bodies = m_impl->bodies();
+        bodies.RemoveBodies(all.data(), static_cast<int>(all.size()));
+        bodies.DestroyBodies(all.data(), static_cast<int>(all.size()));
+    }
+}
+
+uint32_t PlanetPhysics::createBox(const PhysicsVec3& halfExtents, const PhysicsVec3& position,
+                                  const PhysicsQuat& rotation, PhysicsMotion motion, double density, double mass,
+                                  double friction, double restitution) {
+    JPH::Vec3 half = toVec3(halfExtents);
+    float convex = std::min(JPH::cDefaultConvexRadius, 0.5f * half.ReduceMin());
+    JPH::BoxShapeSettings shape(half, convex);
+    shape.SetDensity(static_cast<float>(density));
+    return m_impl->addSolid(shape, position, rotation, motion, mass, friction, restitution);
+}
+
+uint32_t PlanetPhysics::createSphere(double radius, const PhysicsVec3& position, PhysicsMotion motion,
+                                     double density, double mass, double friction, double restitution) {
+    JPH::SphereShapeSettings shape(static_cast<float>(radius));
+    shape.SetDensity(static_cast<float>(density));
+    return m_impl->addSolid(shape, position, {1.0, 0.0, 0.0, 0.0}, motion, mass, friction, restitution);
+}
+
+uint32_t PlanetPhysics::createGridMesh(const float* points, uint32_t columns, uint32_t rows,
+                                       const PhysicsVec3& position, double friction) {
+    if (columns < 2 || rows < 2) {
+        throw std::invalid_argument("PlanetPhysics: a grid mesh needs at least 2 x 2 points");
+    }
+    JPH::VertexList vertices;
+    vertices.reserve(static_cast<size_t>(columns) * rows);
+    for (size_t k = 0; k < static_cast<size_t>(columns) * rows; ++k) {
+        vertices.push_back(JPH::Float3(points[3 * k], points[3 * k + 1], points[3 * k + 2]));
+    }
+    JPH::IndexedTriangleList triangles;
+    triangles.reserve(static_cast<size_t>(columns - 1) * (rows - 1) * 2);
+    for (uint32_t j = 0; j + 1 < rows; ++j) {
+        for (uint32_t i = 0; i + 1 < columns; ++i) {
+            uint32_t k = j * columns + i;
+            triangles.push_back(JPH::IndexedTriangle(k, k + 1, k + columns));
+            triangles.push_back(JPH::IndexedTriangle(k + 1, k + columns + 1, k + columns));
+        }
+    }
+    JPH::MeshShapeSettings shape(std::move(vertices), std::move(triangles));
+    JPH::ShapeSettings::ShapeResult result = shape.Create();
+    if (result.HasError()) {
+        throw std::invalid_argument(std::string("PlanetPhysics: ") + result.GetError().c_str());
+    }
+    JPH::BodyCreationSettings settings(result.Get(), toRVec3(position), JPH::Quat::sIdentity(),
+                                       JPH::EMotionType::Static, Layers::NON_MOVING);
+    settings.mFriction = static_cast<float>(friction);
+    return m_impl->add(settings);
+}
+
+void PlanetPhysics::remove(uint32_t body) {
+    JPH::BodyID id = m_impl->added(body);
+    m_impl->bodies().RemoveBody(id);
+    m_impl->bodies().DestroyBody(id);
+}
+
+bool PlanetPhysics::contains(uint32_t body) const {
+    return m_impl->bodies().IsAdded(JPH::BodyID(body));
+}
+
+void PlanetPhysics::getTransform(uint32_t body, PhysicsVec3& position, PhysicsQuat& rotation) const {
+    JPH::RVec3 p;
+    JPH::Quat q;
+    m_impl->bodies().GetPositionAndRotation(m_impl->added(body), p, q);
+    position = fromVec3(p);
+    rotation = fromQuat(q);
+}
+
+void PlanetPhysics::setTransform(uint32_t body, const PhysicsVec3& position, const PhysicsQuat& rotation,
+                                 bool activate) {
+    m_impl->bodies().SetPositionAndRotation(m_impl->added(body), toRVec3(position), toQuat(rotation),
+                                            activate ? JPH::EActivation::Activate
+                                                     : JPH::EActivation::DontActivate);
+}
+
+void PlanetPhysics::getVelocity(uint32_t body, PhysicsVec3& linear, PhysicsVec3& angular) const {
+    JPH::Vec3 v;
+    JPH::Vec3 w;
+    m_impl->bodies().GetLinearAndAngularVelocity(m_impl->added(body), v, w);
+    linear = fromVec3(v);
+    angular = fromVec3(w);
+}
+
+void PlanetPhysics::setVelocity(uint32_t body, const PhysicsVec3& linear, const PhysicsVec3& angular) {
+    m_impl->bodies().SetLinearAndAngularVelocity(m_impl->added(body), toVec3(linear), toVec3(angular));
+}
+
+void PlanetPhysics::addForce(uint32_t body, const PhysicsVec3& force) {
+    m_impl->bodies().AddForce(m_impl->added(body), toVec3(force), JPH::EActivation::Activate);
+}
+
+void PlanetPhysics::addImpulse(uint32_t body, const PhysicsVec3& impulse) {
+    m_impl->bodies().AddImpulse(m_impl->added(body), toVec3(impulse));
+}
+
+void PlanetPhysics::setMotion(uint32_t body, PhysicsMotion motion) {
+    JPH::BodyID id = m_impl->added(body);
+    bool moving = motion != PhysicsMotion::Static;
+    JPH::BodyInterface& bodies = m_impl->bodies();
+    bodies.SetObjectLayer(id, moving ? Layers::MOVING : Layers::NON_MOVING);
+    bodies.SetMotionType(id, toMotionType(motion),
+                         moving ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+}
+
+PhysicsMotion PlanetPhysics::motion(uint32_t body) const {
+    return fromMotionType(m_impl->bodies().GetMotionType(m_impl->added(body)));
+}
+
+double PlanetPhysics::mass(uint32_t body) const {
+    JPH::BodyLockRead lock(m_impl->system.GetBodyLockInterface(), m_impl->added(body));
+    const JPH::Body& b = lock.GetBody();
+    if (b.IsStatic()) {
+        return 0.0;
+    }
+    float inverse = b.GetMotionProperties()->GetInverseMassUnchecked();
+    return inverse > 0.0f ? 1.0 / static_cast<double>(inverse) : 0.0;
+}
+
+bool PlanetPhysics::isActive(uint32_t body) const {
+    return m_impl->bodies().IsActive(m_impl->added(body));
+}
+
+void PlanetPhysics::activate(uint32_t body) {
+    m_impl->bodies().ActivateBody(m_impl->added(body));
+}
+
+void PlanetPhysics::getTransforms(const uint32_t* bodies, size_t count, double* out) const {
+    for (size_t k = 0; k < count; ++k) {
+        PhysicsVec3 p;
+        PhysicsQuat q;
+        getTransform(bodies[k], p, q);
+        std::copy(p.begin(), p.end(), out + 7 * k);
+        std::copy(q.begin(), q.end(), out + 7 * k + 3);
+    }
+}
+
+bool PlanetPhysics::castRay(const PhysicsVec3& origin, const PhysicsVec3& direction, double maxDistance,
+                            PhysicsRayHit& hit) const {
+    PhysicsVec3 reach{direction[0] * maxDistance, direction[1] * maxDistance, direction[2] * maxDistance};
+    JPH::RRayCast ray(toRVec3(origin), toVec3(reach));
+    JPH::RayCastResult result;
+    if (!m_impl->system.GetNarrowPhaseQuery().CastRay(ray, result)) {
+        return false;
+    }
+    JPH::RVec3 point = ray.GetPointOnRay(result.mFraction);
+    JPH::BodyLockRead lock(m_impl->system.GetBodyLockInterface(), result.mBodyID);
+    if (!lock.Succeeded()) {
+        return false;
+    }
+    hit.body = result.mBodyID.GetIndexAndSequenceNumber();
+    hit.point = fromVec3(point);
+    hit.normal = fromVec3(lock.GetBody().GetWorldSpaceSurfaceNormal(result.mSubShapeID2, point));
+    hit.fraction = static_cast<double>(result.mFraction);
+    return true;
+}
+
+void PlanetPhysics::applyCentralGravity(const PhysicsVec3& centre, double gm) {
+    JPH::BodyIDVector& active = m_impl->scratch;
+    m_impl->system.GetActiveBodies(JPH::EBodyType::RigidBody, active);
+    const JPH::BodyLockInterfaceNoLock& locks = m_impl->system.GetBodyLockInterfaceNoLock();
+    for (const JPH::BodyID& id : active) {
+        JPH::BodyLockWrite lock(locks, id);
+        if (!lock.Succeeded()) {
+            continue;
+        }
+        JPH::Body& body = lock.GetBody();
+        if (!body.IsDynamic()) {
+            continue;
+        }
+        JPH::RVec3 p = body.GetCenterOfMassPosition();
+        double dx = centre[0] - static_cast<double>(p.GetX());
+        double dy = centre[1] - static_cast<double>(p.GetY());
+        double dz = centre[2] - static_cast<double>(p.GetZ());
+        double r2 = dx * dx + dy * dy + dz * dz;
+        if (r2 <= 0.0) {
+            continue;
+        }
+        float inverse = body.GetMotionProperties()->GetInverseMass();
+        if (inverse <= 0.0f) {
+            continue;
+        }
+        double scale = gm / (r2 * std::sqrt(r2)) / static_cast<double>(inverse);
+        body.AddForce(JPH::Vec3(static_cast<float>(dx * scale), static_cast<float>(dy * scale),
+                                static_cast<float>(dz * scale)));
+    }
+}
+
+void PlanetPhysics::step(double dt) {
+    m_impl->system.Update(static_cast<float>(dt), 1, m_impl->tempAllocator.get(), m_impl->jobSystem.get());
+}
+
+void PlanetPhysics::shiftOrigin(const PhysicsVec3& offset) {
+    JPH::BodyIDVector all;
+    m_impl->system.GetBodies(all);
+    JPH::BodyInterface& bodies = m_impl->bodies();
+    JPH::RVec3 shift = toRVec3(offset);
+    for (const JPH::BodyID& id : all) {
+        bodies.SetPosition(id, bodies.GetPosition(id) - shift, JPH::EActivation::DontActivate);
+    }
+}
+
+uint32_t PlanetPhysics::bodyCount() const {
+    return m_impl->system.GetNumBodies();
+}
+
+uint32_t PlanetPhysics::activeCount() const {
+    return m_impl->system.GetNumActiveBodies(JPH::EBodyType::RigidBody);
+}
+
+}  // namespace Shoonyakasha::Planet

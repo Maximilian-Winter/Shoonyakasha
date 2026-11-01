@@ -36,6 +36,7 @@ find_package(Vulkan REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
 find_package(Bullet CONFIG REQUIRED)
+find_package(Jolt CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(unofficial-spirv-reflect CONFIG REQUIRED)
@@ -133,6 +134,8 @@ target_link_libraries(Shoonyakasha
         draco::draco
         # KTX2 and Basis Universal textures (Resources/GltfSceneLoader.cpp).
         KTX::ktx
+        # Rigid bodies for the planet example (Planet/PlanetPhysics.cpp).
+        Jolt::Jolt
 )
 
 # Input method composition (Platform/NativeWindowWin32.cpp) and UI Automation

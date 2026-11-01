@@ -56,6 +56,7 @@ from ._engine_api cimport (
     CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
     videoRecordingAvailable, findFfmpeg, checkPipelineJson, loadPipelineDocumentText, Readback,
     CppPlanetLod, LodBody, LodView, LodNodeInfo, LodJob, LodFaceColours,
+    CppPlanetPhysics, PhysicsMotion, PhysicsRayHit, LodVec3, LodVec4,
     CppComputeContext, CppComputeBuffer, CppComputeKernel, ComputeKernelInfo, ComputeKernelBinding,
     ComputeBindingType, ComputeUint3, CppComputeImage, CppComputeBinding, ComputeBindingDim,
     ExrPixelType, saveHdr, saveExr, saveImage, CppBufferStream,
@@ -3750,3 +3751,174 @@ cdef class PlanetLod:
         """(distance, node dict) of the missing chunks, nearest first."""
         cdef vector[pair[double, LodNodeInfo]] nodes = self._ptr.missingNodes(body)
         return [(nodes[k].first, _lod_node(nodes[k].second)) for k in range(nodes.size())]
+
+
+# ═══════════════════════════════════════════════════════════════
+# Planet physics (include/Planet/PlanetPhysics.h)
+# ═══════════════════════════════════════════════════════════════
+
+_PHYSICS_MOTIONS = ("static", "kinematic", "dynamic")
+
+
+cdef PhysicsMotion _physics_motion(str name) except *:
+    if name == "static":
+        return PhysicsMotion.Static
+    if name == "kinematic":
+        return PhysicsMotion.Kinematic
+    if name == "dynamic":
+        return PhysicsMotion.Dynamic
+    raise ValueError("motion must be 'static', 'kinematic' or 'dynamic', not %r" % (name,))
+
+
+cdef LodVec3 _physics_vec3(value) except *:
+    cdef LodVec3 out
+    for k in range(3):
+        out[k] = value[k]
+    return out
+
+
+cdef LodVec4 _physics_quat(value) except *:
+    cdef LodVec4 out
+    for k in range(4):
+        out[k] = value[k]
+    return out
+
+
+cdef tuple _physics_tuple3(const LodVec3& v):
+    return (v[0], v[1], v[2])
+
+
+cdef class PlanetPhysics:
+    """Rigid bodies on Jolt Physics (include/Planet/PlanetPhysics.h), for
+    shoonyakasha.planet.bubble: no global gravity (apply_central_gravity
+    pulls the awake dynamic bodies towards a point, for the next step), and
+    positions in the caller's frame, which shift_origin translates.
+    Positions are metres, rotations unit quaternions (w, x, y, z), motions
+    "static", "kinematic" or "dynamic". Bodies are named by an int id, valid
+    until remove; a call with an id not in the world raises ValueError.
+
+    Static bodies collide with moving ones only. Every box and sphere can
+    change its motion later (set_motion)."""
+    cdef CppPlanetPhysics* _ptr
+
+    def __cinit__(self, uint32_t max_bodies=4096, int threads=-1):
+        self._ptr = new CppPlanetPhysics(max_bodies, threads)
+
+    def __dealloc__(self):
+        if self._ptr != NULL:
+            del self._ptr
+            self._ptr = NULL
+
+    def create_box(self, half_extents, position, rotation=(1.0, 0.0, 0.0, 0.0), str motion="dynamic",
+                   double density=500.0, double mass=0.0, double friction=0.7, double restitution=0.1):
+        """A box of `half_extents` (m); its mass `mass` (kg) when above 0,
+        otherwise from `density` (kg/m^3)."""
+        return self._ptr.createBox(_physics_vec3(half_extents), _physics_vec3(position), _physics_quat(rotation),
+                                   _physics_motion(motion), density, mass, friction, restitution)
+
+    def create_sphere(self, double radius, position, str motion="dynamic", double density=500.0,
+                      double mass=0.0, double friction=0.7, double restitution=0.1):
+        """A sphere; its mass as create_box's."""
+        return self._ptr.createSphere(radius, _physics_vec3(position), _physics_motion(motion), density, mass,
+                                      friction, restitution)
+
+    def create_grid_mesh(self, points, uint32_t columns, uint32_t rows, position, double friction=0.8):
+        """A static triangle mesh from `columns` x `rows` points relative to
+        `position`, row by row: `points` is a buffer of float32 x, y, z (a
+        NumPy array of shape (rows, columns, 3), say). Each cell is two
+        triangles, facing the side cross(next column - point, next row -
+        point) points to."""
+        cdef const unsigned char[::1] view = memoryview(points).cast('B')
+        if view.shape[0] != <Py_ssize_t>columns * rows * 12:
+            raise ValueError("points: %d bytes for %d x %d float32 points" % (view.shape[0], columns, rows))
+        return self._ptr.createGridMesh(<const float*>&view[0], columns, rows, _physics_vec3(position), friction)
+
+    def remove(self, uint32_t body):
+        self._ptr.remove(body)
+
+    def contains(self, uint32_t body):
+        return self._ptr.contains(body)
+
+    def get_transform(self, uint32_t body):
+        """(position, rotation)."""
+        cdef LodVec3 p
+        cdef LodVec4 q
+        self._ptr.getTransform(body, p, q)
+        return _physics_tuple3(p), (q[0], q[1], q[2], q[3])
+
+    def set_transform(self, uint32_t body, position, rotation, bint activate=True):
+        self._ptr.setTransform(body, _physics_vec3(position), _physics_quat(rotation), activate)
+
+    def get_velocity(self, uint32_t body):
+        """(linear (m/s), angular (rad/s))."""
+        cdef LodVec3 v
+        cdef LodVec3 w
+        self._ptr.getVelocity(body, v, w)
+        return _physics_tuple3(v), _physics_tuple3(w)
+
+    def set_velocity(self, uint32_t body, linear, angular=(0.0, 0.0, 0.0)):
+        self._ptr.setVelocity(body, _physics_vec3(linear), _physics_vec3(angular))
+
+    def add_force(self, uint32_t body, force):
+        """A force (N) through the centre of mass for the next step; wakes the body."""
+        self._ptr.addForce(body, _physics_vec3(force))
+
+    def add_impulse(self, uint32_t body, impulse):
+        """An impulse (N s) through the centre of mass; wakes the body."""
+        self._ptr.addImpulse(body, _physics_vec3(impulse))
+
+    def set_motion(self, uint32_t body, str motion):
+        self._ptr.setMotion(body, _physics_motion(motion))
+
+    def motion(self, uint32_t body):
+        return _PHYSICS_MOTIONS[<int>self._ptr.motion(body)]
+
+    def mass(self, uint32_t body):
+        """kg; 0 for static bodies."""
+        return self._ptr.mass(body)
+
+    def is_active(self, uint32_t body):
+        """Whether the body is awake."""
+        return self._ptr.isActive(body)
+
+    def activate(self, uint32_t body):
+        self._ptr.activate(body)
+
+    def get_transforms(self, bodies):
+        """The bodies' positions and rotations as bytes: 7 float64 per body
+        (x, y, z, w, qx, qy, qz), in their order."""
+        cdef vector[uint32_t] ids = [int(b) for b in bodies]
+        cdef vector[double] out
+        out.resize(ids.size() * 7)
+        if ids.size() > 0:
+            self._ptr.getTransforms(ids.data(), ids.size(), out.data())
+        return (<const char*>out.data())[:out.size() * 8]
+
+    def cast_ray(self, origin, direction, double max_distance):
+        """(body, point, normal, fraction) of the nearest surface along the
+        unit `direction` from `origin` within `max_distance` metres, or None."""
+        cdef PhysicsRayHit hit
+        if not self._ptr.castRay(_physics_vec3(origin), _physics_vec3(direction), max_distance, hit):
+            return None
+        return hit.body, _physics_tuple3(hit.point), _physics_tuple3(hit.normal), hit.fraction
+
+    def apply_central_gravity(self, centre, double gm):
+        """For the next step, each awake dynamic body pulled towards
+        `centre` with acceleration gm / r^2 (gm in m^3/s^2)."""
+        self._ptr.applyCentralGravity(_physics_vec3(centre), gm)
+
+    def step(self, double dt):
+        self._ptr.step(dt)
+
+    def shift_origin(self, offset):
+        """Every body moved by -offset, without waking any."""
+        self._ptr.shiftOrigin(_physics_vec3(offset))
+
+    @property
+    def body_count(self):
+        return self._ptr.bodyCount()
+
+    @property
+    def active_count(self):
+        """Awake bodies."""
+        return self._ptr.activeCount()

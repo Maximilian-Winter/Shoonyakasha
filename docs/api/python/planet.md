@@ -10,6 +10,8 @@ A planet and its moon with procedural terrain on the planet pipeline (`shoonyaka
 | `biomes` | The biomes as the shaders classify them: `NAMES`, `weights(temperature, moisture)`, `dominant`, `snowy`, `card_rows(climate)`, and the `PALETTES` |
 | `orbits` | `Planet` (gravity and air), `Moon` (a circular orbit on rails), `reference`, `orbit`, `orbit_path`, `circular_speed` |
 | `vec` | Vectors as tuples: `add`, `sub`, `scale`, `dot`, `cross`, `length`, `normalize`, `rotate`, `local_frame`, `euler_from_basis` |
+| `bubble` | `Bubble`: a frame for rigid bodies (`sk.PlanetPhysics`) near a point on the planet or the moon, with gravity towards the body's centre and rebasing |
+| `collider_probes` | The terrain under a bubble as a mesh in its physics: `ColliderPatch`, `ColliderProbes` (the `ColliderProbes` pass's requests and results), `TerrainCollider` |
 | `cube_sphere`, `quadtree`, `shadows` | The cube-sphere's faces and chunk meshes, the quadtree in Python (the level of detail `sk.PlanetLod` does in C++), the shadow cascades' fitting |
 | `ground_textures` | The ground's textures: download (`python -m shoonyakasha.planet.ground_textures`) and `load(engine)` |
 | `vegetation` | The vegetation's meshes of bark and foliage cards, impostor quads and grass (`meshes(impostor_rects)`, `trees()`, `impostor_width`), and their draws (`draw_template(ranges, firsts)`) |
@@ -105,6 +107,31 @@ The level of detail in C++ (`include/Planet/PlanetLod.h`): per body a quadtree o
 | `set_face_colours(colours)`, `split_factor(body)`, `set_split_factor(body, value)` | Colour mode 1's six colours; a tree's split factor |
 | `selected(body)`, `nodes(body)`, `missing_nodes(body)`, `missing(body)`, `selected_count(body)` | The trees' state, nodes as dicts |
 | `instances()`, `draws("chunk" / "ocean" / "shadow")`, `culled`, `slots`, `used`, `pending`, `rebuild_queued` | The buffers as bytes, and counts |
+
+## Physics
+
+`sk.PlanetPhysics(max_bodies=4096, threads=-1)` holds rigid bodies on Jolt Physics in single precision (`include/Planet/PlanetPhysics.h`), stepped on `threads` worker threads (-1: up to four, one fewer than the hardware has). It has no gravity of its own. Positions are metres in the caller's frame, rotations unit quaternions (w, x, y, z), motions `"static"`, `"kinematic"` or `"dynamic"`. Static bodies collide with moving ones only. Bodies are int ids; a call with an id that is not in the world raises `ValueError`.
+
+| Call | |
+|---|---|
+| `create_box(half_extents, position, rotation=(1, 0, 0, 0), motion="dynamic", density=500.0, mass=0.0, friction=0.7, restitution=0.1)` | A box; its mass `mass` kg when above 0, else from `density` (kg/m³) |
+| `create_sphere(radius, position, motion="dynamic", density=500.0, mass=0.0, friction=0.7, restitution=0.1)` | A sphere |
+| `create_grid_mesh(points, columns, rows, position, friction=0.8)` | A static triangle mesh from a grid of float32 points (x, y, z, row by row) relative to `position`; each cell is two triangles facing the side cross(next column − point, next row − point) points to |
+| `remove(body)`, `contains(body)` | |
+| `get_transform(body)`, `set_transform(body, position, rotation, activate=True)` | (position, rotation) |
+| `get_velocity(body)`, `set_velocity(body, linear, angular=(0, 0, 0))` | (linear m/s, angular rad/s) |
+| `add_force(body, force)`, `add_impulse(body, impulse)` | A force (N) for the next step, or an impulse (N s), through the centre of mass; both wake the body |
+| `set_motion(body, motion)`, `motion(body)` | The motion, with the collisions of the new motion; turned kinematic or dynamic, the body wakes |
+| `mass(body)`, `is_active(body)`, `activate(body)` | Mass in kg (0 when static); whether it is awake |
+| `get_transforms(bodies)` | The bodies' positions and rotations as bytes, 7 float64 each (x, y, z, w, qx, qy, qz), in their order |
+| `cast_ray(origin, direction, max_distance)` | (body, point, normal, fraction) of the nearest surface along the unit `direction`, or None |
+| `apply_central_gravity(centre, gm)` | For the next step, each awake dynamic body pulled towards `centre` with gm / r² |
+| `step(dt)`, `shift_origin(offset)` | One step; every body moved by −`offset` without waking any |
+| `body_count`, `active_count` | Bodies, and awake bodies |
+
+`bubble.Bubble(physics, body, gm, origin)` is a frame for those bodies on `body` (a `PlanetWorld` body) whose GM is `gm`. Bubble coordinates are positions relative to the body's centre minus `origin` (body-relative); the axes are the body's, so on the moon the frame moves with it. `to_bubble(point)` and `to_world(p)` convert from and to planet space, `body_relative(p)`, `up(p)` and `gravity(p)` give the point from the body's centre, the way up there and gravity's acceleration. `step(dt)` applies gravity towards the body's centre and steps the physics. `maybe_rebase(focus)` moves the origin to `focus` (bubble coordinates) once it is `REBASE_DISTANCE` (500 m) or more away: `rebase(offset)` shifts every body by −`offset` and calls each of `listeners` with it. `anchor`, `east` and `north` are the frame of the plane the terrain collider's grid lies in; the anchor moves to the origin once the origin is more than `ANCHOR_REACH` (1 km) from it. `RADIUS` is the bubble's reach, 2 km from the origin.
+
+`collider_probes` builds the terrain under a bubble as a mesh body. `ColliderPatch(body, anchor, east, north, cell, columns=65, spacing=0.5)` is a grid of directions in the plane tangent to the body's sphere at `anchor`, centred on grid cell `cell` of that plane, so patches of one anchor share their directions where they overlap; `set_heights(heights)` (below sea level counts as sea level on a body with a sea), `points()`, `offset(point)`, `covers(point, margin=0.0)` and `normal(point)` take points relative to the body's centre. `ColliderProbes(engine)` hands a patch's directions (up to 4,225) to the pipeline's `ColliderProbes` pass with a stamp (`request(patch, version)`), takes the heights back by stamp some frames later (`read(version)`, dropping those asked for under another terrain version), and tells the pass to measure nothing in frames without a request (`end_frame()`). `TerrainCollider(bubble, probes)` keeps one patch as a static mesh body: `update(focus, velocity, latency, version)` builds a patch whose heights came back and asks for a new one, centred ahead of `focus` by `velocity` times `latency` seconds, when that point is more than a quarter of the patch's width from its centre or the terrain version changed; the mesh in use stays until then. `covers(p, margin=0.0)` takes bubble coordinates; `drop()` removes the mesh.
 
 ## Biomes
 

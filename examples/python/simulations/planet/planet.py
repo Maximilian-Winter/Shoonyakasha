@@ -13,6 +13,14 @@ floats (64-bit) with the planet's centre at the origin; the engine's camera
 stays at its own origin and only turns. A cluster of blocks stands on the
 +Z face, on a pad 5 cm above the ground.
 
+Crates (props.py) are rigid bodies in a physics bubble around the view
+(shoonyakasha.planet.bubble, on sk.PlanetPhysics), on the body under it,
+falling towards that body's centre onto a mesh of the terrain around the
+view (shoonyakasha.planet.collider_probes). The bubble steps at
+FLIGHT_STEP in real time, whatever the time warp; it and its crates are
+dropped when the view moves to the other body or more than Bubble.RADIUS
+above the ground.
+
 Keys:
     Tab                    free camera / ship
   free camera:
@@ -48,6 +56,7 @@ Keys:
     9                      the ship in a circular orbit 40 km up
     Shift+8                the ship at rest on the moon, between the sun and the planet
     Shift+9                the ship in a circular orbit 10 km above the moon
+    0 / Shift+0            drop a crate / a stack of 10 crates in front of the view
     N                      new terrain seed
     M / J                  mountains higher / lower
     H / G                  hills higher / lower
@@ -73,6 +82,7 @@ Keys:
     python planet.py --moon-landing-check   the same on the moon
     python planet.py --crack-check     measure the gaps between levels in steep terrain against the skirts, then exit
     python planet.py --morph-check     come down from 20 km, check every swap of chunks happens fully morphed, then exit
+    python planet.py --prop-rest-check   drop crates on the planet and the moon, check they come to rest and stay there
 """
 
 import argparse
@@ -87,6 +97,8 @@ from shoonyakasha import keys
 from shoonyakasha.planet import biomes, cube_sphere
 from shoonyakasha.planet import settings as planet_settings
 from shoonyakasha.planet import world as planet_world
+from shoonyakasha.planet.bubble import Bubble
+from shoonyakasha.planet.collider_probes import ColliderProbes, TerrainCollider
 from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, local_frame, normalize, rotate, scale, sub
 from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, SettingsMenu
 from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, FLOATS_PER_VERTEX, FOV, MAX_LEVEL,
@@ -97,6 +109,7 @@ import flight
 from ground import GroundPatch, SIZE as PATCH_SIZE
 import cockpit
 from instruments import Instruments
+from props import Props, stack_offsets, yaw_rotation
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CAPTURES = os.path.join(HERE, "planet_captures")
@@ -139,6 +152,13 @@ GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAM
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
 MOON_ORBIT_HEIGHT = 10_000.0     # Shift+9's circular orbit of the moon
 MOON_HOVER_HEIGHT = 2_000.0      # Shift+8's ship waits this far above the moon's radius until its ground is known
+# The physics bubble and its crates.
+MAX_PHYSICS_STEPS_PER_FRAME = 8
+CRATE_SIZE = 0.6                 # m along each edge
+CRATE_DENSITY = 500.0            # kg/m^3
+CRATE_AHEAD = 3.0                # m in front of the view a crate is dropped
+STACK_COUNT = 10
+JUMP_DISTANCE = 50.0             # m the viewpoint may move in a frame and still count as moving, not jumping
 
 parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
@@ -158,6 +178,8 @@ parser.add_argument("--landing-check", action="store_true",
                     help="land the ship on the highest spot found around the site, print how it stands and exit")
 parser.add_argument("--moon-landing-check", action="store_true",
                     help="land the ship on the highest spot found on the moon, print how it stands and exit")
+parser.add_argument("--prop-rest-check", action="store_true",
+                    help="drop crates on the planet and the moon, check they come to rest and stay there, and exit")
 args = parser.parse_args()
 
 planet_world.compile_shaders()
@@ -224,7 +246,14 @@ state = {
     "terrain_edit": None,        # the terrain parameters the menu changes until Apply (planet.settings)
     "scripted_controls": False,  # the ship's controls are set by a check, not read from the keys
     "impact_speed": 0.0,         # m/s, the fastest a contact point reached the surface at this frame
+    "bubble": None,              # the physics bubble (shoonyakasha.planet.bubble), while there is one
+    "terrain_collider": None,    # its terrain mesh (collider_probes.TerrainCollider)
+    "physics_accumulator": 0.0,  # seconds of the bubble's physics not yet stepped
+    "focus": None,               # the view in bubble coordinates last frame
 }
+physics = sk.PlanetPhysics()
+collider_probes = ColliderProbes(engine)
+props = Props(engine, box())
 
 
 def regenerate():
@@ -709,6 +738,89 @@ def orbit_path_points():
     return [add(centre, p) for p in flight.orbit_path(body, position, velocity, count=ORBIT_POINTS)]
 
 
+# ── Physics bubble ─────────────────────────────────────────────────────────
+
+def body_gm(body):
+    return world.physics.gm if body is planet else world.physics.moon.gm
+
+
+def ensure_bubble():
+    """The bubble on the body under the viewpoint, made around it if there
+    is none there; a bubble on the other body is dropped first."""
+    body = world.body_under(viewpoint())
+    bubble = state["bubble"]
+    if bubble is not None and bubble.body is body:
+        return bubble
+    drop_bubble()
+    bubble = Bubble(physics, body, body_gm(body), body.relative(viewpoint()))
+    state["bubble"] = bubble
+    state["terrain_collider"] = TerrainCollider(bubble, collider_probes)
+    state["physics_accumulator"] = 0.0
+    state["focus"] = None
+    return bubble
+
+
+def drop_bubble():
+    """The bubble, its crates and its terrain mesh gone."""
+    bubble = state["bubble"]
+    if bubble is None:
+        return
+    props.clear(bubble)
+    state["terrain_collider"].drop()
+    state["bubble"] = state["terrain_collider"] = None
+
+
+def drop_crates(count):
+    """`count` crates stacked CRATE_AHEAD in front of the view, square to
+    the body's up there and turned with the view's heading."""
+    bubble = ensure_bubble()
+    _, _, forward = view_basis()
+    p = bubble.to_bubble(add(state["position"], scale(forward, CRATE_AHEAD)))
+    up = bubble.up(p)
+    heading = sub(forward, scale(up, dot(forward, up)))
+    heading = normalize(heading) if length(heading) > 1e-6 else local_frame(up)[1]
+    right = normalize(cross(heading, up))
+    rotation = flight.quat_from_basis(right, up, scale(heading, -1.0))
+    for height in stack_offsets(count, CRATE_SIZE):
+        props.spawn_crate(bubble, add(p, scale(up, height)), rotation, CRATE_SIZE, CRATE_DENSITY)
+
+
+def step_bubble(dt):
+    """The bubble following the viewpoint: dropped when the viewpoint is
+    over the other body or more than Bubble.RADIUS above the ground;
+    otherwise rebased to it once far enough from its origin, its terrain
+    mesh kept around it (ahead along its velocity by the probes' latency;
+    a move of JUMP_DISTANCE or more in a frame counts as no velocity),
+    its crates kept on that mesh, and its physics stepped by `dt` in fixed
+    steps of FLIGHT_STEP."""
+    bubble = state["bubble"]
+    if bubble is None:
+        return
+    view = viewpoint()
+    if world.body_under(view) is not bubble.body or world.height_above_ground(view) > Bubble.RADIUS:
+        drop_bubble()
+        return
+    here = bubble.body.relative(view)
+    last = state["focus"]
+    velocity = (0.0, 0.0, 0.0)
+    if last is not None and dt > 0.0 and length(sub(here, last)) < JUMP_DISTANCE:
+        velocity = scale(sub(here, last), 1.0 / dt)
+    state["focus"] = here
+    bubble.maybe_rebase(sub(here, bubble.origin))
+    latency = world.probe_latency * state["frame_ms"] / 1000.0
+    terrain = state["terrain_collider"]
+    terrain.update(sub(here, bubble.origin), velocity, latency, world.terrain_version)
+    props.update(bubble, terrain)
+    state["physics_accumulator"] += dt
+    steps = 0
+    while state["physics_accumulator"] >= FLIGHT_STEP and steps < MAX_PHYSICS_STEPS_PER_FRAME:
+        bubble.step(FLIGHT_STEP)
+        state["physics_accumulator"] -= FLIGHT_STEP
+        steps += 1
+    if steps == MAX_PHYSICS_STEPS_PER_FRAME:
+        state["physics_accumulator"] = 0.0
+
+
 # ── Per frame ──────────────────────────────────────────────────────────────
 
 def frame(dt):
@@ -738,6 +850,7 @@ def frame(dt):
         before = body.centre()
         world.time += dt * WARPS[state["warp"]]
         state["position"] = add(state["position"], sub(body.centre(), before))
+    step_bubble(dt)
 
     # The world for the view: the level of detail, the probes (with the ground patch around the
     # ship), and everything placed relative to the camera, subtracted in double.
@@ -751,6 +864,9 @@ def frame(dt):
     ground = world.site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
+    if state["bubble"] is not None:
+        props.draw(state["bubble"], camera)
+    collider_probes.end_frame()
     place_ship_model(camera)
     view_rotation = euler_from_basis(right, up, forward)
     if (state["mode"], state["chase"], state["generated_cockpit"]) != state["shown_mode"]:
@@ -917,6 +1033,10 @@ def update_cards():
         ("SUN", "%.0f deg up at the site" % world.sun_elevation),
         ("ATMOSPHERE", "density x%.2f" % world.density),
         ("EXPOSURE", "%.3f" % world.exposure),
+        ("PHYSICS",),
+        ("BODIES", "%d, %d awake" % (physics.body_count, physics.active_count)),
+        ("CRATES", "%d" % len(props.crates)),
+        ("TERRAIN MESHES", "%d built" % (state["terrain_collider"].builds if state["terrain_collider"] else 0)),
     ])
 
 
@@ -934,7 +1054,7 @@ def current_hints():
             return [(("pad:Y",), "Board the ship"), (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
         return [(("RMB",), "Look"), (("W", "A", "S", "D"), "Fly"), (("E", "Q"), "Up, down"),
                 (("Shift", "Ctrl"), "Faster, slower"), (("Wheel",), "Speed"), (("1-9",), "Places"),
-                (("Tab",), "Board the ship"), (("F1",), "Settings"), (("F2",), "Controls")]
+                (("0",), "Drop a crate"), (("Tab",), "Board the ship"), (("F1",), "Settings"), (("F2",), "Controls")]
     view = "Cockpit" if state["chase"] else "Chase view"
     hints = []
     if state["ship"].crashed:
@@ -986,6 +1106,9 @@ HELP_COLUMNS = [
         (("7",), "Over the sea"),
         (("8", "9"), "Ship on the pad / in orbit"),
         (("Shift", "8", "9"), "Ship on / around the moon"),
+    ]), ("Physics", [
+        (("0",), "Drop a crate"),
+        (("Shift", "0"), "Drop a stack of 10 crates"),
     ])],
     [("World", [
         (("N",), "New terrain seed"),
@@ -1038,6 +1161,8 @@ def on_init():
         engine.ecs.add_system("PlanetLandingCheck", LandingCheck("planet"), priority=-2)
     elif args.moon_landing_check:
         engine.ecs.add_system("PlanetLandingCheck", LandingCheck("moon"), priority=-2)
+    elif args.prop_rest_check:
+        engine.ecs.add_system("PlanetPropRestCheck", PropRestCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -1097,8 +1222,10 @@ def on_key(key, from_pad=False):
     if not from_pad:
         state["input"] = "keys"
     tree = planet.tree
-    if keys.NUM_1 <= key <= keys.NUM_9:
-        shift = engine.input.is_key_down(keys.LEFT_SHIFT) or engine.input.is_key_down(keys.RIGHT_SHIFT)
+    shift = engine.input.is_key_down(keys.LEFT_SHIFT) or engine.input.is_key_down(keys.RIGHT_SHIFT)
+    if key == keys.NUM_0:
+        drop_crates(STACK_COUNT if shift else 1)
+    elif keys.NUM_1 <= key <= keys.NUM_9:
         teleport(key - keys.NUM_0, moon=shift)
     elif key == keys.TAB:
         if state["mode"] == "ship":
@@ -2002,6 +2129,209 @@ class OrbitCheck:
             ok = max(abs(self.low - ORBIT_HEIGHT), abs(self.high - ORBIT_HEIGHT)) <= self.TOLERANCE
             os._exit(0 if ok else 1)
         return True
+
+
+class PropRestCheck:
+    """--prop-rest-check: on the planet 3 km north of the site, then on the
+    moon at moon_spot, the free camera HEIGHT metres above the ground. Once
+    the bubble's terrain mesh is under it, CRATES crates (CRATE_SIZE,
+    CRATE_DENSITY) and SMALL boxes (SMALL_SIZE, SMALL_DENSITY) are dropped
+    DROP_HEIGHT above the mesh at points of a grid around the camera where
+    the mesh is no steeper than MAX_SLOPE, each square to the mesh's
+    normal there and turned about it at random.
+    After SETTLE_SECONDS every one must be asleep and on the mesh; over the
+    next HOLD_SECONDS none may move more than TOLERANCE. Then the camera
+    moves AWAY metres east and back until the bubble has rebased at least
+    REBASES times, and back over the boxes, after RETURN_SECONDS, none may
+    have moved more than TOLERANCE from where it rested. Positions are
+    reckoned from the body's centre. Prints per body the slopes under the
+    boxes, how many slept, the largest movements and the rebases, and exits
+    with status 0 when both bodies passed, 1 otherwise."""
+
+    HEIGHT = 6.0
+    CRATES, SMALL = 20, 10
+    SMALL_SIZE, SMALL_DENSITY = 0.3, 2_600.0
+    DROP_HEIGHT = 0.2
+    GRID_STEP = 2.0                     # m between candidate points
+    GRID_REACH = 9.0                    # m from the camera candidate points reach
+    MAX_SLOPE = 30.0                    # degrees
+    SETTLE_SECONDS = 10.0
+    HOLD_SECONDS = 30.0
+    TOLERANCE = 0.01                    # m
+    AWAY = 600.0                        # m east the camera moves to make the bubble rebase
+    AWAY_HEIGHT = 50.0                  # m above the ground at home while away
+    MOVE_SECONDS = 1.5
+    REBASES = 5
+    RETURN_SECONDS = 2.0
+    PLACE_FRAMES = 10                   # frames for the ground under a new place to come back
+
+    def __init__(self):
+        self.bodies = ["planet", "moon"]
+        self.results = []
+        self.random = random.Random(1)
+        self.start_body()
+
+    def start_body(self):
+        self.stage = "place"
+        self.frames = 0
+        self.clock = 0.0
+        self.rebases = 0
+        self.moves = 0
+
+    def __call__(self, dt):
+        if planet.tree is None:
+            return True
+        self.frames += 1
+        self.clock += dt
+        getattr(self, self.stage)()
+        return True
+
+    def body(self):
+        return planet if self.bodies[0] == "planet" else moon_body()
+
+    def direction(self):
+        if self.body() is planet:
+            _, up, _, north = world.site_frame()
+            return normalize(add(up, scale(north, 3_000.0 / RADIUS)))
+        return moon_spot()
+
+    def put_camera(self, direction, height):
+        body = self.body()
+        state["mode"] = "camera"
+        state["position"] = add(body.centre(), scale(direction, body.radius + height))
+        state["forward"] = local_frame(direction)[1]
+
+    def next_stage(self, stage):
+        self.stage, self.frames, self.clock = stage, 0, 0.0
+
+    def place(self):
+        """The camera 5 km above the spot until the ground there is known, then HEIGHT above it."""
+        drop_bubble()
+        self.home = self.direction()
+        self.put_camera(self.home, 5_000.0)
+        self.next_stage("lower")
+
+    def lower(self):
+        if self.frames < self.PLACE_FRAMES or world.ground is None:
+            return
+        self.ground = world.surface_height(state["position"])
+        self.put_camera(self.home, self.ground + self.HEIGHT)
+        self.next_stage("wait_for_mesh")
+
+    def wait_for_mesh(self):
+        if self.frames < self.PLACE_FRAMES:
+            return
+        bubble = ensure_bubble()
+        terrain = state["terrain_collider"]
+        if terrain.patch is None or not terrain.covers(bubble.to_bubble(state["position"]), self.GRID_REACH + 2.0):
+            return
+        self.drop(bubble, terrain.patch)
+        self.next_stage("settle")
+
+    def drop(self, bubble, patch):
+        """The boxes at grid points no steeper than MAX_SLOPE, nearest the camera first."""
+        here = bubble.body.relative(state["position"])
+        east, north = local_frame(normalize(here))
+        steps = int(self.GRID_REACH / self.GRID_STEP)
+        candidates = sorted(((i * i + j * j, i, j) for i in range(-steps, steps + 1)
+                             for j in range(-steps, steps + 1)))
+        sizes = [(CRATE_SIZE, CRATE_DENSITY)] * self.CRATES + [(self.SMALL_SIZE, self.SMALL_DENSITY)] * self.SMALL
+        self.slopes = []
+        for _, i, j in candidates:
+            if len(self.slopes) == len(sizes):
+                break
+            spot = add(here, add(scale(east, i * self.GRID_STEP), scale(north, j * self.GRID_STEP)))
+            normal = patch.normal(spot)
+            if normal is None:
+                continue
+            up = normalize(spot)
+            slope = math.degrees(math.acos(max(-1.0, min(1.0, dot(normal, up)))))
+            if slope > self.MAX_SLOPE:
+                continue
+            size, density = sizes[len(self.slopes)]
+            xy = patch.offset(spot)
+            mid = (patch.columns - 1) // 2
+            ci = min(max(int(round(xy[0] / patch.spacing)) + mid, 0), patch.columns - 1)
+            cj = min(max(int(round(xy[1] / patch.spacing)) + mid, 0), patch.columns - 1)
+            ground = scale(up, bubble.body.radius + float(patch.heights[cj, ci]))
+            centre = add(ground, scale(normal, self.DROP_HEIGHT + 0.5 * size))
+            east_n = normalize(sub(east, scale(normal, dot(east, normal))))
+            rotation = yaw_rotation(east_n, normal, cross(east_n, normal), self.random.uniform(0.0, 2.0 * math.pi))
+            props.spawn_crate(bubble, sub(centre, bubble.origin), rotation, size, density)
+            self.slopes.append(slope)
+
+    def positions(self):
+        bubble = state["bubble"]
+        return [bubble.body_relative(p) for p, _ in props.transforms(bubble)]
+
+    def settle(self):
+        if self.clock < self.SETTLE_SECONDS:
+            return
+        self.asleep = sum(1 for c in props.crates if not c.frozen and not physics.is_active(c.body))
+        self.frozen = sum(1 for c in props.crates if c.frozen)
+        self.rested = self.positions()
+        self.next_stage("hold")
+
+    def largest_move(self):
+        return max(length(sub(a, b)) for a, b in zip(self.positions(), self.rested))
+
+    def hold(self):
+        if self.clock < self.HOLD_SECONDS:
+            return
+        self.held_move = self.largest_move()
+        bubble = state["bubble"]
+        bubble.listeners.append(self.count_rebase)
+        self.next_stage("move")
+
+    def count_rebase(self, offset):
+        self.rebases += 1
+
+    def move(self):
+        if self.frames == 1:
+            away = self.moves % 2 == 0
+            east, _ = local_frame(self.home)
+            direction = normalize(add(self.home, scale(east, self.AWAY / self.body().radius))) if away else self.home
+            self.put_camera(direction, self.ground + (self.AWAY_HEIGHT if away else self.HEIGHT))
+            self.moves += 1
+        if self.clock < self.MOVE_SECONDS:
+            return
+        if self.rebases >= self.REBASES and self.moves % 2 == 0:
+            self.next_stage("back")
+        else:
+            self.next_stage("move")
+
+    def back(self):
+        if self.clock < self.RETURN_SECONDS:
+            return
+        moved = self.largest_move()
+        count = len(props.crates)
+        ok = (count == self.CRATES + self.SMALL and self.asleep == count and self.frozen == 0
+              and self.held_move <= self.TOLERANCE and moved <= self.TOLERANCE and self.rebases >= self.REBASES)
+        name = self.bodies[0]
+        print("[planet] prop rest on the %s: %d boxes on slopes of %.1f to %.1f degrees"
+              % (name, count, min(self.slopes), max(self.slopes)), flush=True)
+        print("[planet]   after %.0f s: %d asleep, %d off the terrain mesh"
+              % (self.SETTLE_SECONDS, self.asleep, self.frozen), flush=True)
+        print("[planet]   largest move over the next %.0f s: %.4f m" % (self.HOLD_SECONDS, self.held_move), flush=True)
+        print("[planet]   after %d rebases (%d terrain meshes built): largest move %.4f m"
+              % (self.rebases, state["terrain_collider"].builds, moved), flush=True)
+        if not ok:
+            patch = state["terrain_collider"].patch
+            for k, (crate, now, rested) in enumerate(zip(props.crates, self.positions(), self.rested)):
+                if length(sub(now, rested)) > self.TOLERANCE or physics.is_active(crate.body):
+                    normal = patch.normal(now) if patch is not None else None
+                    under = (math.degrees(math.acos(max(-1.0, min(1.0, dot(normal, normalize(now))))))
+                             if normal is not None else math.nan)
+                    print("[planet]   box %d (%.1f m): dropped on %.1f degrees, moved %.3f m, now on %.1f degrees%s"
+                          % (k, crate.size, self.slopes[k], length(sub(now, rested)), under,
+                             ", awake" if physics.is_active(crate.body) else ""), flush=True)
+        print("[planet]   %s" % ("passed" if ok else "FAILED"), flush=True)
+        self.results.append(ok)
+        self.bodies.pop(0)
+        drop_bubble()
+        if not self.bodies:
+            os._exit(0 if all(self.results) else 1)
+        self.start_body()
 
 
 engine.set_on_init(on_init)

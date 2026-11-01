@@ -16,6 +16,7 @@
     "nlohmann-json",
     "entt",
     "bullet3",
+    "joltphysics",
     "glfw3",
     "glm",
     "spirv-reflect",

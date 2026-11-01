@@ -11,6 +11,7 @@ find_dependency(Vulkan)
 find_dependency(nlohmann_json CONFIG)
 find_dependency(EnTT CONFIG)
 find_dependency(Bullet CONFIG)
+find_dependency(Jolt CONFIG)
 find_dependency(glfw3 CONFIG)
 find_dependency(glm CONFIG)
 # Linked privately, but a static Shoonyakasha still needs them at link time.

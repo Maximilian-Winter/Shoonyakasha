@@ -819,3 +819,49 @@ cdef extern from "Planet/PlanetLod.h" namespace "Shoonyakasha::Planet":
         vector[LodNodeInfo] selected(int body)
         vector[LodNodeInfo] nodes(int body)
         vector[pair[double, LodNodeInfo]] missingNodes(int body)
+
+# ═══════════════════════════════════════════════════════════════
+# Planet physics (include/Planet/PlanetPhysics.h)
+# ═══════════════════════════════════════════════════════════════
+
+cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
+    cdef enum class PhysicsMotion "Shoonyakasha::Planet::PhysicsMotion":
+        Static "Shoonyakasha::Planet::PhysicsMotion::Static"
+        Kinematic "Shoonyakasha::Planet::PhysicsMotion::Kinematic"
+        Dynamic "Shoonyakasha::Planet::PhysicsMotion::Dynamic"
+
+    cdef cppclass PhysicsRayHit:
+        uint32_t body
+        LodVec3 point
+        LodVec3 normal
+        double fraction
+
+    cdef cppclass CppPlanetPhysics "Shoonyakasha::Planet::PlanetPhysics":
+        CppPlanetPhysics(uint32_t maxBodies, int threads) except +
+        uint32_t createBox(const LodVec3& halfExtents, const LodVec3& position, const LodVec4& rotation,
+                           PhysicsMotion motion, double density, double mass, double friction,
+                           double restitution) except +
+        uint32_t createSphere(double radius, const LodVec3& position, PhysicsMotion motion, double density,
+                              double mass, double friction, double restitution) except +
+        uint32_t createGridMesh(const float* points, uint32_t columns, uint32_t rows, const LodVec3& position,
+                                double friction) except +
+        void remove(uint32_t body) except +
+        cbool contains(uint32_t body)
+        void getTransform(uint32_t body, LodVec3& position, LodVec4& rotation) except +
+        void setTransform(uint32_t body, const LodVec3& position, const LodVec4& rotation, cbool activate) except +
+        void getVelocity(uint32_t body, LodVec3& linear, LodVec3& angular) except +
+        void setVelocity(uint32_t body, const LodVec3& linear, const LodVec3& angular) except +
+        void addForce(uint32_t body, const LodVec3& force) except +
+        void addImpulse(uint32_t body, const LodVec3& impulse) except +
+        void setMotion(uint32_t body, PhysicsMotion motion) except +
+        PhysicsMotion motion(uint32_t body) except +
+        double mass(uint32_t body) except +
+        cbool isActive(uint32_t body) except +
+        void activate(uint32_t body) except +
+        void getTransforms(const uint32_t* bodies, size_t count, double* out) except +
+        cbool castRay(const LodVec3& origin, const LodVec3& direction, double maxDistance, PhysicsRayHit& hit)
+        void applyCentralGravity(const LodVec3& centre, double gm)
+        void step(double dt)
+        void shiftOrigin(const LodVec3& offset)
+        uint32_t bodyCount()
+        uint32_t activeCount()
