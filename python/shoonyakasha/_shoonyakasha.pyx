@@ -3843,16 +3843,19 @@ cdef class PlanetPhysics:
         return self._ptr.createCapsule(radius, half_height, _physics_vec3(position), _physics_quat(rotation),
                                        _physics_motion(motion), density, mass, friction, restitution)
 
-    def create_grid_mesh(self, points, uint32_t columns, uint32_t rows, position, double friction=0.8):
+    def create_grid_mesh(self, points, uint32_t columns, uint32_t rows, position, double friction=0.8,
+                         bint coarse=False):
         """A static triangle mesh from `columns` x `rows` points relative to
         `position`, row by row: `points` is a buffer of float32 x, y, z (a
         NumPy array of shape (rows, columns, 3), say). Each cell is two
         triangles, facing the side cross(next column - point, next row -
-        point) points to."""
+        point) points to. A ground mesh, which near moving bodies collide
+        with, or with `coarse` a coarse ground mesh, which far ones do."""
         cdef const unsigned char[::1] view = memoryview(points).cast('B')
         if view.shape[0] != <Py_ssize_t>columns * rows * 12:
             raise ValueError("points: %d bytes for %d x %d float32 points" % (view.shape[0], columns, rows))
-        return self._ptr.createGridMesh(<const float*>&view[0], columns, rows, _physics_vec3(position), friction)
+        return self._ptr.createGridMesh(<const float*>&view[0], columns, rows, _physics_vec3(position), friction,
+                                        coarse)
 
     def create_convex_hull(self, points, position, rotation=(1.0, 0.0, 0.0, 0.0), str motion="dynamic",
                            double density=500.0, double mass=0.0, double friction=0.7, double restitution=0.1):
@@ -3952,6 +3955,20 @@ cdef class PlanetPhysics:
     def motion(self, uint32_t body):
         return _PHYSICS_MOTIONS[<int>self._ptr.motion(body)]
 
+    def set_far(self, uint32_t body, bint far=True):
+        """Whether a moving body is far (it collides with the coarse ground,
+        not the fine) or near (the other way round); static bodies stay as
+        they are. set_motion makes a moving body near."""
+        self._ptr.setFar(body, far)
+
+    def is_far(self, uint32_t body):
+        return self._ptr.isFar(body)
+
+    def set_linear_damping(self, uint32_t body, double damping):
+        """The share of a moving body's velocity it loses a second (0.05,
+        Jolt's default, at first); static bodies stay as they are."""
+        self._ptr.setLinearDamping(body, damping)
+
     def set_pass_through(self, uint32_t body, character=None):
         """The body passes through the character's capsule and its inner
         body, and they through it; None: through no character. A body passes
@@ -3968,6 +3985,10 @@ cdef class PlanetPhysics:
 
     def activate(self, uint32_t body):
         self._ptr.activate(body)
+
+    def deactivate(self, uint32_t body):
+        """The body put to sleep where it is, until something wakes it."""
+        self._ptr.deactivate(body)
 
     def get_transforms(self, bodies):
         """The bodies' positions and rotations as bytes: 7 float64 per body

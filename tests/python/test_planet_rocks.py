@@ -141,7 +141,7 @@ class ExampleRocksTest(unittest.TestCase):
         self.bubble = Bubble(self.physics, Body(radius), 4.905 * radius ** 2, (0.0, radius, 0.0))
         self.engine = FakeEngine()
         self.world = FakeWorld(self.engine)
-        self.props = props.Props(self.engine, ([], []), on_remove=lambda p: self.rocks.released(p))
+        self.props = props.Props(self.engine, ([], []), self.world, on_remove=lambda p: self.rocks.released(p))
         self.rocks = example_rocks.Rocks(self.engine, self.world, self.props)
         self.radius = radius
 

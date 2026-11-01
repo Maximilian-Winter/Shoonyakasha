@@ -17,12 +17,17 @@ heights back from ColliderHeights some frames later, by stamp. Results
 asked for under an earlier terrain version (PlanetWorld.terrain_version)
 are dropped.
 
+The pass measures one patch a frame: a second request in a frame is
+refused, and `read` gives every caller in a frame the same patch, so
+several colliders can share the probes.
+
 `TerrainCollider`: keeps one patch as a static mesh body in the bubble's
 physics around a point it is given each frame (the focus, ahead along its
 velocity by the probes' latency), asking for a new patch once that point
 is more than a quarter of the patch's width from the patch's centre or the
 terrain changed. The mesh in use stays until the new one's heights come
-back.
+back. With `coarse` its mesh is coarse ground, which only far bodies
+collide with (sk.PlanetPhysics.set_far).
 """
 
 import math
@@ -147,9 +152,15 @@ class ColliderProbes:
         self.pending = {}            # stamp: (terrain version, patch)
         self.asked = False           # whether this frame asked for a patch
         self.idle = True             # whether the pass was last told to measure nothing
+        self.read_frame = None       # the frame of the readback last taken
+        self.arrived = None          # the patch it brought
 
     def request(self, patch, version):
-        """Ask for `patch`'s heights under terrain version `version`."""
+        """Ask for `patch`'s heights under terrain version `version`; False,
+        asking nothing, when a patch was asked for this frame already (the
+        pass measures one a frame)."""
+        if self.asked:
+            return False
         directions = patch.directions.reshape(-1, 3)
         count = len(directions)
         if count > CAPACITY:
@@ -163,12 +174,23 @@ class ColliderProbes:
         self.pending[self.stamp] = (version, patch)
         self.asked = True
         self.idle = False
+        return True
 
     def read(self, version):
         """The patch whose heights came back this frame, with them set, or
-        None. Requests older than the one that came back are dropped."""
+        None; the same to every caller in a frame. Requests older than the
+        one that came back are dropped."""
         readback = self.engine.get_readback("ColliderHeights")
-        if readback is None or not self.pending:
+        if readback is None:
+            return None
+        if readback.get("frame") is not None and readback.get("frame") == self.read_frame:
+            return self.arrived
+        self.read_frame = readback.get("frame")
+        self.arrived = self.take(readback, version)
+        return self.arrived
+
+    def take(self, readback, version):
+        if not self.pending:
             return None
         rows = np.frombuffer(readback["data"], dtype=np.float32).reshape(-1, 4)
         stamp = int(rows[0, 1])
@@ -197,12 +219,13 @@ class ColliderProbes:
 
 
 class TerrainCollider:
-    def __init__(self, bubble, probes, columns=COLUMNS, spacing=SPACING, friction=0.8):
+    def __init__(self, bubble, probes, columns=COLUMNS, spacing=SPACING, friction=0.8, coarse=False):
         self.bubble = bubble
         self.probes = probes
         self.columns = columns
         self.spacing = spacing
         self.friction = friction
+        self.coarse = coarse         # its mesh is coarse ground (sk.PlanetPhysics.create_grid_mesh)
         self.patch = None            # the patch the mesh body was built from
         self.version = None          # the terrain version it was measured under
         self.mesh = None             # its body id
@@ -226,9 +249,10 @@ class TerrainCollider:
             xy = self.patch.offset(ahead)
             if xy is not None and max(abs(xy[0]), abs(xy[1])) <= RECENTRE_FRACTION * self.patch.size:
                 return
-        self.requested = ColliderPatch(self.bubble.body, self.bubble.anchor, self.bubble.east, self.bubble.north,
-                                       self.cell(ahead), self.columns, self.spacing)
-        self.probes.request(self.requested, version)
+        patch = ColliderPatch(self.bubble.body, self.bubble.anchor, self.bubble.east, self.bubble.north,
+                              self.cell(ahead), self.columns, self.spacing)
+        if self.probes.request(patch, version):
+            self.requested = patch
 
     def cell(self, point):
         """The grid cell of the bubble's anchor plane nearest under `point` (body-relative)."""
@@ -243,7 +267,7 @@ class TerrainCollider:
         centre_bubble = sub(centre, self.bubble.origin)
         relative = (patch.points() - origin - np.asarray(centre_bubble, dtype=np.float64)).astype(np.float32)
         mesh = self.bubble.physics.create_grid_mesh(np.ascontiguousarray(relative), patch.columns, patch.columns,
-                                                    centre_bubble, friction=self.friction)
+                                                    centre_bubble, friction=self.friction, coarse=self.coarse)
         if self.mesh is not None:
             self.bubble.physics.remove(self.mesh)
         self.mesh, self.patch, self.version = mesh, patch, version

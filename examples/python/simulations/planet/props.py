@@ -1,19 +1,49 @@
 """
-Props in the physics bubble (shoonyakasha.planet.bubble): crates and loose
-rocks, each a body in the bubble's physics and a mesh entity drawn where
-the body is.
+Props: crates and loose rocks, each drawn by a mesh entity, in one of
+three states:
+
+- "jolt": a body in the physics bubble (shoonyakasha.planet.bubble), near
+  (on the fine terrain mesh) while over that mesh, far (on the coarse one)
+  otherwise (sk.PlanetPhysics.set_far);
+- "flying": out of the physics, coasting around the body it is reckoned
+  around: its position and velocity from that body's centre in doubles,
+  pulled towards the centre by the body's gravity and, on the planet,
+  slowed by the air (drag coefficient DRAG on its cross-section), turning
+  at a constant angular velocity; it changes body at the moon's sphere of
+  influence (orbits.reference);
+- "resting": out of the physics, lying where it came down.
 
 A crate is a box; a loose rock (rocks.py) is a rock taken out of the
-scatter, a convex hull, named by its cell (`key`). Each prop has a radius,
-that of the sphere around it, which the gravity gun holds it out by.
+scatter, a convex hull, named by its cell (`key`). Each prop has a radius
+(the sphere around it, which the gravity gun holds it out by), a rest
+height (from its centre down to the ground it lies on) and its shape and
+mass, to be made again in the physics.
 
-`Props.update` keeps each prop on the terrain mesh (collider_probes'
-TerrainCollider): a dynamic prop that is awake and not over the mesh
-(FREEZE_MARGIN plus its size inside its edges) turns static until the
-mesh is under it again, so it does not fall through the ground; a prop
-farther than Bubble.RADIUS from the bubble's origin is removed, a rock's
-removal told to `on_remove`. `Props.draw` places the entities relative to
-the camera, subtracted in 64-bit floats.
+`Props.update` (each frame there is a bubble) moves props between the
+states. A prop in the physics leaves it when it is more than
+Bubble.RADIUS from the bubble's origin, asleep and not over the fine
+terrain mesh (MARGIN plus its size inside its edges), or over neither
+mesh and less than CLEARANCE above the ground: resting when asleep or
+slower than REST_SPEED on the ground as last measured (within LANDED of
+its rest height), else flying. A prop out of the physics on the bubble's
+body comes back within Bubble.RADIUS less REENTER of the origin: a resting
+one over the fine mesh, asleep, a flying one over either mesh or more
+than twice CLEARANCE above the ground. In the physics a prop faster than FAST_SPEED
+is not damped (it keeps its speed, as in flight), a slower one is by
+DAMPING, which helps it settle. `Props.drag` (each physics step) slows the
+props in the physics on the planet faster than DRAG_SPEED by the air as
+flying ones are. `Props.fly` moves the flying props on by
+seconds of the world's clock, in steps of at most FLY_STEP; one whose
+height above the ground as last measured, less its speed downwards times
+the probes' latency, is below its rest height lands there and rests.
+`Props.probe` measures the ground under the flying props and those in the
+physics over neither mesh with the world's extra probes, the longest
+unmeasured first, while nothing else uses those probes; until a prop's
+ground is measured it is taken as the highest its body's terrain reaches
+(HIGHEST). `Props.leave_all` takes every prop out of the physics (when
+the bubble goes). `Props.draw` places the entities relative to the
+camera, subtracted in 64-bit floats. `on_remove(prop)` is told of each
+rock removed.
 """
 
 import math
@@ -21,44 +51,77 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from shoonyakasha.planet.vec import add, cross, euler_from_basis, length, scale, sub
+from shoonyakasha.planet.orbits import reference
+from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, normalize, scale, sub
 
-from flight import quat_from_basis, quat_rotate
+from flight import quat_from_basis, quat_multiply, quat_normalize, quat_rotate
 
-FREEZE_MARGIN = 0.5              # m inside the terrain mesh's edges a prop counts as over it
+MARGIN = 0.5                     # m inside a terrain mesh's edges (plus its size) a prop counts as over it
 CRATE_COLOUR = (0.62, 0.45, 0.25)
+CLEARANCE = 50.0                 # m above the ground a prop may be in the physics with no terrain mesh under it
+REENTER = 100.0                  # m inside Bubble.RADIUS a prop comes back into the physics
+REST_SPEED = 0.5                 # m/s: slower than this, a prop leaving the physics on the ground rests
+LANDED = 0.3                     # m above its rest height a prop counts as on the ground
+FLY_STEP = 1.0 / 120.0           # s
+DRAG = 1.0                       # drag coefficient
+DRAG_SPEED = 5.0                 # m/s: slower props in the physics feel no drag
+FAST_SPEED = 5.0                 # m/s: faster props in the physics are not damped
+DAMPING = 0.05                   # the physics' linear damping (Jolt's default) of slower ones
+HIGHEST = {"planet": 6_000.0, "moon": 1_500.0}   # m above its radius a body's terrain reaches at most
 
 
 @dataclass
 class Prop:
-    body: int                    # physics body id
+    body: int                    # physics body id while in the physics, else None
     entity: int                  # mesh entity
     size: float                  # m: a crate's edge, a rock's diameter
     radius: float                # m: the sphere around it
+    shape: tuple                 # ("box", half extents, mass) or ("hull", points (N x 3 float32), mass)
+    rest: float                  # m from its centre down to the ground it lies on
+    on: object                   # the world body it is reckoned around
     key: tuple = None            # a rock's cell (shoonyakasha.planet.rocks)
-    frozen: bool = False         # turned static while off the terrain mesh
+    state: str = "jolt"
+    far: bool = False            # in the physics: on the coarse terrain mesh
+    fast: bool = False           # in the physics: faster than FAST_SPEED, undamped
+    position: tuple = None       # out of the physics: from its body's centre
+    velocity: tuple = (0.0, 0.0, 0.0)
+    rotation: tuple = (1.0, 0.0, 0.0, 0.0)
+    spin: tuple = (0.0, 0.0, 0.0)  # angular velocity, rad/s
+    ground: float = None         # m: the terrain's height under it as last measured
+    measured: int = -1           # the probe round that measured it
+
+    @property
+    def mass(self):
+        return self.shape[2]
 
 
 class Props:
-    def __init__(self, engine, mesh, on_remove=None):
-        """`mesh`: (positions, normals) of a unit cube centred on the origin;
-        `on_remove(prop)` is called for each rock removed."""
+    def __init__(self, engine, mesh, world, on_remove=None):
+        """`mesh`: (positions, normals) of a unit cube centred on the origin."""
         self.engine = engine
         self.mesh = mesh
+        self.world = world
         self.on_remove = on_remove
         self.crates = []
         self.rocks = []
+        self.asked = None            # the probes asked for: [(direction, body)]
+        self.asking = []             # the props they were asked for
+        self.round = 0               # probe rounds taken
 
     @property
     def all(self):
         return self.crates + self.rocks
 
+    def in_physics(self):
+        return [p for p in self.all if p.body is not None]
+
     def spawn_crate(self, bubble, position, rotation, size=0.6, density=500.0, colour=CRATE_COLOUR, mass=None):
         """A crate of `size` metres at bubble coordinates `position`, turned
         by `rotation`, of `mass` kg, or of `density` when None."""
         half = 0.5 * size
-        body = bubble.physics.create_box((half, half, half), position, rotation, motion="dynamic",
-                                         density=density, mass=mass or 0.0, friction=0.7, restitution=0.1)
+        physics = bubble.physics
+        body = physics.create_box((half, half, half), position, rotation, motion="dynamic", density=density,
+                                  mass=mass or 0.0, friction=0.7, restitution=0.1)
         positions, normals = self.mesh
         entity = self.engine.create_mesh(positions, normals=normals, name="Crate")
         scene = self.engine.scene
@@ -66,18 +129,22 @@ class Props:
         scene.set_material_vec4(entity, "baseColorFactor", tuple(colour) + (1.0,))
         scene.set_material_float(entity, "gridStrength", 0.0)
         scene.set_render_layer_mask(entity, 1)
-        crate = Prop(body, entity, size, 0.5 * math.sqrt(3.0) * size)
+        crate = Prop(body, entity, size, 0.5 * math.sqrt(3.0) * size, ("box", (half, half, half), physics.mass(body)),
+                     half, bubble.body)
         self.crates.append(crate)
         return crate
 
-    def add_rock(self, body, entity, size, radius, key):
+    def add_rock(self, body, entity, size, radius, key, shape, rest, on):
         """A loose rock: its body (dynamic) and entity, made by rocks.py."""
-        rock = Prop(body, entity, size, radius, key)
+        rock = Prop(body, entity, size, radius, shape, rest, on, key)
         self.rocks.append(rock)
         return rock
 
+    def find(self, body):
+        return next((p for p in self.all if p.body == body), None)
+
     def remove(self, bubble, prop):
-        if bubble is not None and bubble.physics.contains(prop.body):
+        if prop.body is not None and bubble is not None and bubble.physics.contains(prop.body):
             bubble.physics.remove(prop.body)
         self.engine.scene.destroy_entity(prop.entity)
         if prop.key is not None:
@@ -92,45 +159,231 @@ class Props:
             self.remove(bubble, prop)
 
     def transforms(self, bubble, props=None):
-        """(position, rotation) of each prop (of `props`, all when None) in bubble coordinates, in their order."""
-        props = self.all if props is None else props
+        """(position, rotation) of each prop in the physics (of `props`, all
+        of them when None) in bubble coordinates, in their order."""
+        props = self.in_physics() if props is None else props
         if not props:
             return []
         data = np.frombuffer(bubble.physics.get_transforms([p.body for p in props]), dtype=np.float64).reshape(-1, 7)
         return [(tuple(row[:3]), tuple(row[3:])) for row in data]
 
-    def update(self, bubble, terrain):
-        """Freeze props off the terrain mesh, thaw those over it, and
-        remove those beyond the bubble's radius."""
+    # ── Into and out of the physics ──
+
+    def leave(self, bubble, prop):
+        """`prop` out of the physics where it is: resting when asleep, or
+        slow on its measured ground; else flying."""
         physics = bubble.physics
-        props = self.all
+        asleep = not physics.is_active(prop.body)
+        p, q = physics.get_transform(prop.body)
+        v, w = physics.get_velocity(prop.body)
+        physics.remove(prop.body)
+        prop.body = None
+        prop.on = bubble.body
+        prop.position = bubble.body_relative(p)
+        prop.rotation = q
+        grounded = prop.ground is not None and self.height(prop, prop.position) < prop.rest + LANDED
+        if asleep or (length(v) <= REST_SPEED and grounded):
+            prop.state, prop.velocity, prop.spin = "resting", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+        else:
+            prop.state, prop.velocity, prop.spin = "flying", v, w
+
+    def enter(self, bubble, prop):
+        """`prop` into the physics where it is, moving as it was; a resting one asleep."""
+        physics = bubble.physics
+        p = sub(prop.position, bubble.origin)
+        kind, form, mass = prop.shape
+        if kind == "box":
+            body = physics.create_box(form, p, prop.rotation, motion="dynamic", mass=mass, friction=0.7,
+                                      restitution=0.1)
+        else:
+            body = physics.create_convex_hull(form, p, prop.rotation, motion="dynamic", mass=mass, friction=0.8,
+                                              restitution=0.05)
+        physics.set_velocity(body, prop.velocity, prop.spin)
+        if prop.state == "resting":
+            physics.deactivate(body)
+        prop.body, prop.state, prop.far, prop.fast = body, "jolt", False, False
+
+    def leave_all(self, bubble):
+        for prop in self.in_physics():
+            self.leave(bubble, prop)
+
+    def height(self, prop, position):
+        """m above the ground under `position` (from the prop's body's centre)."""
+        ground = prop.ground if prop.ground is not None else HIGHEST.get(prop.on.name, 6_000.0)
+        return length(position) - prop.on.radius - ground
+
+    def update(self, bubble, fine, coarse):
+        """The props moved between the states (see the module's docstring);
+        `fine` and `coarse` are the terrain colliders."""
+        physics = bubble.physics
+        inside = props = self.in_physics()
         for prop, (p, _) in zip(props, self.transforms(bubble, props)):
+            margin = MARGIN + prop.size
             if length(p) > bubble.RADIUS:
-                self.remove(bubble, prop)
+                self.leave(bubble, prop)
                 continue
-            over = terrain.covers(p, FREEZE_MARGIN + prop.size)
-            if prop.frozen and over:
-                physics.set_motion(prop.body, "dynamic")
-                prop.frozen = False
-            elif not prop.frozen and not over and physics.is_active(prop.body):
-                physics.set_motion(prop.body, "static")
-                prop.frozen = True
+            if fine.covers(p, margin):
+                far = False
+            elif not physics.is_active(prop.body):
+                self.leave(bubble, prop)
+                continue
+            elif coarse.covers(p, margin):
+                far = True
+            elif self.height(prop, bubble.body_relative(p)) < CLEARANCE:
+                self.leave(bubble, prop)
+                continue
+            else:
+                far = True
+            if far != prop.far:
+                physics.set_far(prop.body, far)
+                prop.far = far
+            fast = length(physics.get_velocity(prop.body)[0]) > FAST_SPEED
+            if fast != prop.fast:
+                physics.set_linear_damping(prop.body, 0.0 if fast else DAMPING)
+                prop.fast = fast
+        for prop in self.all:
+            if prop.body is not None or prop in inside or prop.on is not bubble.body:
+                continue
+            p = sub(prop.position, bubble.origin)
+            if length(p) > bubble.RADIUS - REENTER:
+                continue
+            margin = MARGIN + prop.size
+            if prop.state == "resting":
+                back = fine.covers(p, margin)
+            else:
+                back = (fine.covers(p, margin) or coarse.covers(p, margin)
+                        or self.height(prop, prop.position) > 2.0 * CLEARANCE)
+            if back:
+                self.enter(bubble, prop)
+
+    def drag(self, bubble):
+        """For the next step, the air's drag on the props in the physics
+        moving faster than DRAG_SPEED, on the planet."""
+        world = self.world
+        if bubble.body is not world.planet:
+            return
+        physics = bubble.physics
+        for prop in self.in_physics():
+            v = physics.get_velocity(prop.body)[0]
+            speed = length(v)
+            if speed < DRAG_SPEED:
+                continue
+            p = bubble.body_relative(physics.get_transform(prop.body)[0])
+            area = 0.6 * math.pi * prop.radius * prop.radius
+            physics.add_force(prop.body, scale(v, -0.5 * world.physics.density(p) * speed * DRAG * area))
+
+    # ── Out of the physics ──
+
+    def body_of(self, orbiting):
+        """The world body of an orbits body (orbits.Planet or orbits.Moon)."""
+        world = self.world
+        return world.moon if orbiting is world.physics.moon else world.planet
+
+    def gm(self, body):
+        world = self.world
+        return world.physics.moon.gm if body is world.moon else world.physics.gm
+
+    def fly(self, dt, latency):
+        """The flying props moved on by `dt` seconds of the world's clock;
+        `latency` the probes' in seconds."""
+        world = self.world
+        for prop in self.all:
+            if prop.state != "flying" or prop.body is not None:
+                continue
+            # Reckoned around the body whose sphere of influence it is in.
+            centre, motion = prop.on.centre(), prop.on.velocity()
+            orbiting, p, v = reference(world.physics, add(centre, prop.position), add(motion, prop.velocity))
+            body = self.body_of(orbiting)
+            if body is not prop.on:
+                prop.on, prop.position, prop.velocity, prop.ground = body, p, v, None
+            gm = self.gm(prop.on)
+            on_planet = prop.on is world.planet
+            area = 0.6 * math.pi * prop.radius * prop.radius
+            p, v, q, w = prop.position, prop.velocity, prop.rotation, prop.spin
+            spin = math.sqrt(dot(w, w))
+            left = dt
+            while left > 1e-12:
+                h = min(FLY_STEP, left)
+                r = length(p)
+                a = scale(p, -gm / (r * r * r))
+                if on_planet:
+                    speed = length(v)
+                    a = add(a, scale(v, -0.5 * world.physics.density(p) * speed * DRAG * area / prop.mass))
+                v = add(v, scale(a, h))
+                p = add(p, scale(v, h))
+                if spin > 0.0:
+                    q = quat_normalize(quat_multiply(axis_angle(scale(w, 1.0 / spin), spin * h), q))
+                left -= h
+            prop.position, prop.velocity, prop.rotation = p, v, q
+            if prop.ground is None:
+                continue
+            up = normalize(p)
+            down = max(-dot(v, up), 0.0)
+            if self.height(prop, p) - down * latency < prop.rest:
+                prop.position = scale(up, prop.on.radius + prop.ground + prop.rest)
+                prop.state, prop.velocity, prop.spin = "resting", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+
+    def needs_ground(self, bubble):
+        """The props whose ground is measured: flying, or in the physics over neither terrain mesh."""
+        props = [p for p in self.all if p.state == "flying" and p.body is None]
+        if bubble is not None:
+            props += [p for p in self.in_physics() if p.far]
+        return props
+
+    def probe(self, bubble, probes):
+        """The ground under the props that need it, with `probes` of the
+        world's extra probes a round, while nothing else uses them."""
+        world = self.world
+        if world.extra_probes and world.extra_probes != self.asked:
+            return
+        if self.asked is not None:
+            if [probe for probe, _ in world.extra_heights] != self.asked:
+                return
+            self.round += 1
+            for prop, (_, height) in zip(self.asking, world.extra_heights):
+                prop.ground, prop.measured = height, self.round
+            self.asked = None
+        wanted = sorted(self.needs_ground(bubble), key=lambda p: p.measured)[:probes]
+        if not wanted:
+            world.extra_probes = []
+            return
+        asked = []
+        for prop in wanted:
+            if prop.body is not None:
+                position = bubble.body_relative(bubble.physics.get_transform(prop.body)[0])
+            else:
+                position = prop.position
+            asked.append((normalize(position), prop.on))
+        world.extra_probes = asked
+        self.asked, self.asking = asked, wanted
+
+    # ── Per frame ──
 
     def draw(self, bubble, camera):
-        """The props' entities where their bodies are, relative to `camera` (from the planet's centre)."""
+        """The props' entities where they are, relative to `camera` (from the planet's centre)."""
         scene = self.engine.scene
-        props = self.all
-        for prop, (p, q) in zip(props, self.transforms(bubble, props)):
-            scene.set_position(prop.entity, sub(bubble.to_world(p), camera))
+        placed = []
+        if bubble is not None:
+            props = self.in_physics()
+            placed = [(prop, bubble.to_world(p), q) for prop, (p, q) in zip(props, self.transforms(bubble, props))]
+        placed += [(prop, add(prop.on.centre(), prop.position), prop.rotation)
+                   for prop in self.all if prop.body is None]
+        for prop, world_position, q in placed:
+            scene.set_position(prop.entity, sub(world_position, camera))
             x, y, z = quat_rotate(q, (1.0, 0.0, 0.0)), quat_rotate(q, (0.0, 1.0, 0.0)), quat_rotate(q, (0.0, 0.0, 1.0))
             scene.set_rotation(prop.entity, euler_from_basis(x, y, scale(z, -1.0)))
 
     def grabbable(self, physics):
-        """(body, radius, mass) of each prop that is not frozen."""
-        return [(p.body, p.radius, physics.mass(p.body)) for p in self.all if not p.frozen]
+        """(body, radius, mass) of each prop in the physics."""
+        return [(p.body, p.radius, physics.mass(p.body)) for p in self.in_physics()]
 
     def awake(self, bubble):
-        return sum(1 for p in self.all if not p.frozen and bubble.physics.is_active(p.body))
+        return sum(1 for p in self.in_physics() if bubble.physics.is_active(p.body))
+
+
+def axis_angle(axis, angle):
+    s = math.sin(0.5 * angle)
+    return (math.cos(0.5 * angle), axis[0] * s, axis[1] * s, axis[2] * s)
 
 
 def stack_offsets(count, size):

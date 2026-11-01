@@ -4,7 +4,8 @@ example's directory on sys.path, on sk.PlanetPhysics in a Bubble over a
 flat mesh at the top of a sphere, held by the example's Player: grabbing,
 holding and dropping a crate, pulling a far one in until it is grabbed, a
 crate too heavy on the planet but not on the moon, the punt's speeds and
-recoil, the ground punt lifting the player, turning the held crate, and
+recoil, the charged punt (full speed for a light crate, a plain punt after
+a click or within the cooldown), the ground punt lifting the player, turning the held crate, and
 the hold distance's range. Where this interpreter's shoonyakasha has no
 extension, the tests run in a fresh interpreter.
 
@@ -160,6 +161,34 @@ class GunTest(unittest.TestCase):
             self.assertIsNone(s.gun.held)
             self.assertAlmostEqual(sum((b - a) * f for a, b, f in zip(v0, v1, forward)), speed, delta=0.01 * speed)
             self.assertAlmostEqual(-sum((b - a) * f for a, b, f in zip(p0, p1, forward)), recoil, delta=0.01 * recoil)
+
+    def charged(self, s, crate, seconds):
+        """`crate` held, the punt control held for `seconds` and let go; its speed after."""
+        s.controls.punt, s.controls.punt_held = True, True
+        s.run(seconds)
+        s.controls.punt_held = False
+        s.run(STEP)
+        return math.sqrt(sum(c * c for c in s.physics.get_velocity(crate)[0]))
+
+    def test_charged_punt(self):
+        s = Scene(MOON)
+        crate = s.crate_at_hold_point(5.0)
+        s.click()
+        s.run(0.5)
+        self.assertEqual(s.gun.held, crate)
+        self.assertAlmostEqual(self.charged(s, crate, 1.6), s.gun.p.charged_speed, delta=2.0)
+        self.assertIsNone(s.gun.held)
+        # A charge within the cooldown (about 1.4 s after the last) is a plain punt; a click too.
+        for seconds in (0.5, 0.1):
+            s.physics.set_velocity(crate, (0.0, 0.0, 0.0))
+            s.physics.set_transform(crate, s.gun.hold_point(s.player.eye(), s.player.basis()[2]),
+                                    (1.0, 0.0, 0.0, 0.0))
+            s.controls.grab = False
+            s.run(0.1)
+            s.click()
+            s.run(0.3)
+            self.assertEqual(s.gun.held, crate)
+            self.assertAlmostEqual(self.charged(s, crate, seconds), s.gun.p.punt_speed, delta=1.0)
 
     def test_ground_punt_lifts_the_player(self):
         s = Scene()

@@ -35,23 +35,33 @@ namespace Shoonyakasha::Planet {
 
 namespace {
 
+/// Object layers: static bodies, the fine and the coarse ground meshes,
+/// and moving bodies near (on the fine ground) and far (on the coarse).
+/// Two broad phase layers: what does not move, and what does.
 namespace Layers {
 constexpr JPH::ObjectLayer NON_MOVING = 0;
 constexpr JPH::ObjectLayer MOVING = 1;
-constexpr JPH::uint COUNT = 2;
+constexpr JPH::ObjectLayer GROUND = 2;
+constexpr JPH::ObjectLayer COARSE_GROUND = 3;
+constexpr JPH::ObjectLayer FAR = 4;
+constexpr JPH::uint BROAD_PHASE_COUNT = 2;
+
+bool moving(JPH::ObjectLayer layer) {
+    return layer == MOVING || layer == FAR;
+}
 }  // namespace Layers
 
 class BroadPhaseLayers final : public JPH::BroadPhaseLayerInterface {
 public:
-    JPH::uint GetNumBroadPhaseLayers() const override { return Layers::COUNT; }
+    JPH::uint GetNumBroadPhaseLayers() const override { return Layers::BROAD_PHASE_COUNT; }
 
     JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override {
-        return JPH::BroadPhaseLayer(static_cast<JPH::BroadPhaseLayer::Type>(layer));
+        return JPH::BroadPhaseLayer(Layers::moving(layer) ? 1 : 0);
     }
 
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
     const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer layer) const override {
-        return layer.GetValue() == Layers::NON_MOVING ? "NON_MOVING" : "MOVING";
+        return layer.GetValue() == 0 ? "NON_MOVING" : "MOVING";
     }
 #endif
 };
@@ -59,14 +69,18 @@ public:
 class ObjectVsBroadPhase final : public JPH::ObjectVsBroadPhaseLayerFilter {
 public:
     bool ShouldCollide(JPH::ObjectLayer layer, JPH::BroadPhaseLayer broadPhase) const override {
-        return layer == Layers::MOVING || broadPhase.GetValue() == Layers::MOVING;
+        return Layers::moving(layer) || broadPhase.GetValue() == 1;
     }
 };
 
 class ObjectPairs final : public JPH::ObjectLayerPairFilter {
 public:
     bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override {
-        return a == Layers::MOVING || b == Layers::MOVING;
+        if (!Layers::moving(a) && !Layers::moving(b)) {
+            return false;
+        }
+        return !((a == Layers::MOVING && b == Layers::COARSE_GROUND) || (b == Layers::MOVING && a == Layers::COARSE_GROUND) ||
+                 (a == Layers::FAR && b == Layers::GROUND) || (b == Layers::FAR && a == Layers::GROUND));
     }
 };
 
@@ -323,7 +337,7 @@ uint32_t PlanetPhysics::createCapsule(double radius, double halfHeight, const Ph
 }
 
 uint32_t PlanetPhysics::createGridMesh(const float* points, uint32_t columns, uint32_t rows,
-                                       const PhysicsVec3& position, double friction) {
+                                       const PhysicsVec3& position, double friction, bool coarse) {
     if (columns < 2 || rows < 2) {
         throw std::invalid_argument("PlanetPhysics: a grid mesh needs at least 2 x 2 points");
     }
@@ -347,7 +361,7 @@ uint32_t PlanetPhysics::createGridMesh(const float* points, uint32_t columns, ui
         throw std::invalid_argument(std::string("PlanetPhysics: ") + result.GetError().c_str());
     }
     JPH::BodyCreationSettings settings(result.Get(), toRVec3(position), JPH::Quat::sIdentity(),
-                                       JPH::EMotionType::Static, Layers::NON_MOVING);
+                                       JPH::EMotionType::Static, coarse ? Layers::COARSE_GROUND : Layers::GROUND);
     settings.mFriction = static_cast<float>(friction);
     return m_impl->add(settings);
 }
@@ -511,6 +525,27 @@ void PlanetPhysics::setPassThrough(uint32_t body, int character) {
     m_impl->setGroup(id, JPH::CollisionGroup(m_impl->characterGroups, static_cast<uint32_t>(character), 0));
 }
 
+void PlanetPhysics::setFar(uint32_t body, bool far) {
+    JPH::BodyID id = m_impl->added(body);
+    JPH::BodyInterface& bodies = m_impl->bodies();
+    if (!Layers::moving(bodies.GetObjectLayer(id))) {
+        return;
+    }
+    bodies.SetObjectLayer(id, far ? Layers::FAR : Layers::MOVING);
+}
+
+void PlanetPhysics::setLinearDamping(uint32_t body, double damping) {
+    JPH::BodyLockWrite lock(m_impl->system.GetBodyLockInterface(), m_impl->added(body));
+    JPH::MotionProperties* motion = lock.GetBody().GetMotionPropertiesUnchecked();
+    if (motion != nullptr) {
+        motion->SetLinearDamping(static_cast<float>(damping));
+    }
+}
+
+bool PlanetPhysics::isFar(uint32_t body) const {
+    return m_impl->bodies().GetObjectLayer(m_impl->added(body)) == Layers::FAR;
+}
+
 PhysicsMotion PlanetPhysics::motion(uint32_t body) const {
     return fromMotionType(m_impl->bodies().GetMotionType(m_impl->added(body)));
 }
@@ -533,6 +568,10 @@ void PlanetPhysics::activate(uint32_t body) {
     m_impl->bodies().ActivateBody(m_impl->added(body));
 }
 
+void PlanetPhysics::deactivate(uint32_t body) {
+    m_impl->bodies().DeactivateBody(m_impl->added(body));
+}
+
 void PlanetPhysics::getTransforms(const uint32_t* bodies, size_t count, double* out) const {
     for (size_t k = 0; k < count; ++k) {
         PhysicsVec3 p;
@@ -549,12 +588,14 @@ bool PlanetPhysics::castRay(const PhysicsVec3& origin, const PhysicsVec3& direct
     JPH::RRayCast ray(toRVec3(origin), toVec3(reach));
     JPH::RayCastResult result;
     bool found = false;
+    const JPH::BroadPhaseLayerFilter& broadPhase = m_impl->system.GetDefaultBroadPhaseLayerFilter(Layers::MOVING);
+    const JPH::ObjectLayerFilter& layers = m_impl->system.GetDefaultLayerFilter(Layers::MOVING);
     if (skipCharacter >= 0) {
         uint32_t id = static_cast<uint32_t>(skipCharacter);
         SkipCharacter filter(m_impl->character(id).GetInnerBodyID(), id);
-        found = m_impl->system.GetNarrowPhaseQuery().CastRay(ray, result, {}, {}, filter);
+        found = m_impl->system.GetNarrowPhaseQuery().CastRay(ray, result, broadPhase, layers, filter);
     } else {
-        found = m_impl->system.GetNarrowPhaseQuery().CastRay(ray, result);
+        found = m_impl->system.GetNarrowPhaseQuery().CastRay(ray, result, broadPhase, layers);
     }
     if (!found) {
         return false;

@@ -17,7 +17,8 @@ moved by:
 The tip and the beam are drawn unlit (the Screens pass, render layer 2,
 which shows a white emissive texture, white_texture, times the material's
 emissiveFactor) with GLOW's strength for the gun's status (gun.Gun.status), pulsing at
-PULSE_HZ while holding. The beam runs through BEAM_SEGMENTS straight
+PULSE_HZ while holding, and while a punt charges brighter (up to
+1 + CHARGE_GLOW times) and whiter with the charge. The beam runs through BEAM_SEGMENTS straight
 pieces, bowed sideways by up to BEAM_WOBBLE in the middle and wobbling
 over time.
 """
@@ -47,6 +48,7 @@ GLOW_COLOUR = (1.0, 0.55, 0.18)
 HEAVY_COLOUR = (1.0, 0.16, 0.1)
 GLOW = {"idle": 0.4, "can_grab": 1.5, "too_heavy": 1.5, "holding": 2.5}
 PULSE_HZ = 2.0
+CHARGE_GLOW = 3.0                    # the tip's glow at full charge, times more
 BEAM_SEGMENTS = 8
 BEAM_WIDTH = 0.008                   # m
 BEAM_WOBBLE = 0.04                   # m
@@ -173,6 +175,10 @@ class Viewmodel:
         if status == "holding":
             strength *= 1.0 + 0.25 * math.sin(2.0 * math.pi * PULSE_HZ * self.time)
         colour = HEAVY_COLOUR if status == "too_heavy" else GLOW_COLOUR
+        charge = gun.charge
+        if charge > 0.0:
+            strength *= 1.0 + CHARGE_GLOW * charge
+            colour = tuple(c + (1.0 - c) * charge for c in colour)
         scene.set_material_vec4(self.tip, "emissiveFactor", tuple(c * strength for c in colour) + (0.0,))
 
         self.show_beam(held is not None)

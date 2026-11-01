@@ -863,7 +863,7 @@ cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
                                PhysicsMotion motion, double density, double mass, double friction,
                                double restitution) except +
         uint32_t createGridMesh(const float* points, uint32_t columns, uint32_t rows, const LodVec3& position,
-                                double friction) except +
+                                double friction, cbool coarse) except +
         uint32_t createConvexHull(const float* points, size_t count, const LodVec3& position, const LodVec4& rotation,
                                   PhysicsMotion motion, double density, double mass, double friction,
                                   double restitution) except +
@@ -889,9 +889,13 @@ cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
         void setMotion(uint32_t body, PhysicsMotion motion) except +
         PhysicsMotion motion(uint32_t body) except +
         void setPassThrough(uint32_t body, int character) except +
+        void setFar(uint32_t body, cbool far) except +
+        cbool isFar(uint32_t body) except +
+        void setLinearDamping(uint32_t body, double damping) except +
         double mass(uint32_t body) except +
         cbool isActive(uint32_t body) except +
         void activate(uint32_t body) except +
+        void deactivate(uint32_t body) except +
         void getTransforms(const uint32_t* bodies, size_t count, double* out) except +
         cbool castRay(const LodVec3& origin, const LodVec3& direction, double maxDistance, PhysicsRayHit& hit,
                       int skipCharacter) except +

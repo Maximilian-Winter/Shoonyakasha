@@ -48,10 +48,11 @@ class FakePhysics:
     def step(self, dt):
         self.steps.append(("step", dt))
 
-    def create_grid_mesh(self, points, columns, rows, position, friction=0.8):
+    def create_grid_mesh(self, points, columns, rows, position, friction=0.8, coarse=False):
         body = self.next_id
         self.next_id += 1
         self.meshes[body] = (np.array(points), columns, rows, position)
+        self.coarse = coarse
         return body
 
     def remove(self, body):
@@ -190,13 +191,18 @@ class TerrainColliderTest(unittest.TestCase):
         self.probes = ColliderProbes(self.engine)
         self.terrain = TerrainCollider(self.bubble, self.probes)
 
+    def frame(self, focus, velocity, latency, version):
+        """One frame: the collider updated, then the frame's end."""
+        self.terrain.update(focus, velocity, latency, version)
+        self.probes.end_frame()
+
     def test_mesh_built_when_the_heights_come_back(self):
         here = (0.0, 0.0, 0.0)
-        self.terrain.update(here, (0.0, 0.0, 0.0), 0.05, version=1)
+        self.frame(here, (0.0, 0.0, 0.0), 0.05, version=1)
         self.assertIsNone(self.terrain.mesh)
         self.assertEqual(self.engine.buffers["ColliderRequests"].shape, (COLUMNS * COLUMNS, 4))
         self.engine.answer(lambda d: 5.0)
-        self.terrain.update(here, (0.0, 0.0, 0.0), 0.05, version=1)
+        self.frame(here, (0.0, 0.0, 0.0), 0.05, version=1)
         points, columns, rows, position = self.physics.meshes[self.terrain.mesh]
         self.assertEqual((columns, rows), (COLUMNS, COLUMNS))
         self.assertAlmostEqual(length(add(self.bubble.origin, position)), RADIUS, places=6)
@@ -208,29 +214,29 @@ class TerrainColliderTest(unittest.TestCase):
 
     def test_new_patch_once_the_focus_moves_a_quarter_away(self):
         east = self.bubble.east
-        self.terrain.update((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
+        self.frame((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
         self.engine.answer(lambda d: 0.0)
-        self.terrain.update((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
+        self.frame((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
         first = self.terrain.mesh
-        self.terrain.update(scale(east, 7.0), (0.0, 0.0, 0.0), 0.05, version=1)
+        self.frame(scale(east, 7.0), (0.0, 0.0, 0.0), 0.05, version=1)
         self.assertIsNone(self.terrain.requested)
         # 2 s of 2 m/s ahead: 11 m from the centre, more than a quarter of 32 m.
-        self.terrain.update(scale(east, 7.0), scale(east, 2.0), 2.0, version=1)
+        self.frame(scale(east, 7.0), scale(east, 2.0), 2.0, version=1)
         self.assertIsNotNone(self.terrain.requested)
         self.assertEqual(self.terrain.requested.cell, (22, 0))
         self.engine.answer(lambda d: 0.0)
-        self.terrain.update(scale(east, 7.0), (0.0, 0.0, 0.0), 0.05, version=1)
+        self.frame(scale(east, 7.0), (0.0, 0.0, 0.0), 0.05, version=1)
         self.assertNotEqual(self.terrain.mesh, first)
         self.assertEqual(list(self.physics.meshes), [self.terrain.mesh])
 
     def test_heights_from_an_earlier_terrain_are_dropped(self):
-        self.terrain.update((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
+        self.frame((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
         self.engine.answer(lambda d: 0.0)
-        self.terrain.update((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=2)
+        self.frame((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=2)
         self.assertIsNone(self.terrain.mesh)
         self.assertIsNotNone(self.terrain.requested)        # asked again under version 2
         self.engine.answer(lambda d: 0.0)
-        self.terrain.update((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=2)
+        self.frame((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=2)
         self.assertIsNotNone(self.terrain.mesh)
 
     def test_pass_told_to_measure_nothing_when_idle(self):
@@ -240,10 +246,37 @@ class TerrainColliderTest(unittest.TestCase):
         self.probes.end_frame()
         self.assertEqual(self.engine.custom["planet.collider.params"][0], 0.0)
 
+    def test_two_colliders_share_the_probes(self):
+        coarse = TerrainCollider(self.bubble, self.probes, spacing=4.0, coarse=True)
+        here = (0.0, 0.0, 0.0)
+        # One patch a frame: the fine collider asks first, the coarse one the frame after.
+        self.terrain.update(here, here, 0.05, version=1)
+        coarse.update(here, here, 0.05, version=1)
+        self.assertIsNotNone(self.terrain.requested)
+        self.assertIsNone(coarse.requested)
+        self.probes.end_frame()
+        self.engine.answer(lambda d: 1.0)
+        self.engine.readback["frame"] = 1
+        self.terrain.update(here, here, 0.05, version=1)
+        coarse.update(here, here, 0.05, version=1)
+        self.probes.end_frame()
+        self.assertIsNotNone(self.terrain.mesh)
+        self.assertIsNotNone(coarse.requested)
+        self.assertFalse(self.physics.coarse)
+        self.engine.answer(lambda d: 2.0)
+        self.engine.readback["frame"] = 2
+        self.terrain.update(here, here, 0.05, version=1)
+        coarse.update(here, here, 0.05, version=1)
+        self.assertIsNotNone(coarse.mesh)
+        self.assertTrue(self.physics.coarse)
+        self.assertEqual(coarse.patch.size, 256.0)
+        self.assertTrue(coarse.covers(scale(self.bubble.east, 100.0)))
+        self.assertFalse(self.terrain.covers(scale(self.bubble.east, 100.0)))
+
     def test_drop_removes_the_mesh(self):
-        self.terrain.update((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
+        self.frame((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
         self.engine.answer(lambda d: 0.0)
-        self.terrain.update((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
+        self.frame((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.05, version=1)
         self.terrain.drop()
         self.assertEqual(self.physics.meshes, {})
         self.assertFalse(self.terrain.covers((0.0, 0.0, 0.0)))

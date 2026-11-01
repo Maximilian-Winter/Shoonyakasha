@@ -1,6 +1,7 @@
 """Tests for sk.PlanetPhysics (include/Planet/PlanetPhysics.h): bodies
 falling under central gravity onto a grid mesh and coming to rest, the
-origin shifted without waking them, ray casts, a turned capsule, strikes
+origin shifted without waking them, ray casts, near and far bodies on the
+fine and the coarse ground, linear damping by default and none once set, a turned capsule, strikes
 on watched bodies reported above a momentum, motion changes, batched
 transforms and errors; characters standing and walking on a mesh along
 any up, moved by an origin shift, riding a kinematic platform, holding
@@ -131,6 +132,39 @@ class PlanetPhysicsTest(unittest.TestCase):
         hit = w.physics.cast_ray((1.2, 5.0, 0.0), (0.0, -1.0, 0.0), 10.0)
         self.assertAlmostEqual(hit[1][1], 1.5 + math.sqrt(0.4 ** 2 - 0.2 ** 2), delta=1e-3)
         self.assertEqual(w.physics.cast_ray((1.5, 5.0, 0.0), (0.0, -1.0, 0.0), 10.0)[0], w.mesh)
+
+    def test_near_and_far_bodies_on_fine_and_coarse_ground(self):
+        w = World()
+        coarse_points = flat_grid(21, 1.0)
+        w.physics.create_grid_mesh(coarse_points, 21, 21, (0.0, 0.5, 0.0), coarse=True)
+        near = w.physics.create_box((0.2, 0.2, 0.2), (-3.0, 1.5, 0.0))
+        far = w.physics.create_box((0.2, 0.2, 0.2), (3.0, 1.5, 0.0))
+        w.physics.set_far(far)
+        self.assertTrue(w.physics.is_far(far))
+        self.assertFalse(w.physics.is_far(near))
+        w.run(2.0)
+        # The near box on the fine mesh at 0, through the coarse one; the far box on the coarse mesh at 0.5.
+        self.assertAlmostEqual(w.physics.get_transform(near)[0][1], 0.2, delta=0.03)
+        self.assertAlmostEqual(w.physics.get_transform(far)[0][1], 0.7, delta=0.03)
+        # Rays see what a near body does.
+        self.assertEqual(w.physics.cast_ray((5.0, 3.0, 5.0), (0.0, -1.0, 0.0), 10.0)[0], w.mesh)
+        # set_motion makes a moving body near; static bodies stay as they are.
+        w.physics.set_motion(far, "dynamic")
+        self.assertFalse(w.physics.is_far(far))
+        w.physics.set_far(w.mesh)
+        self.assertFalse(w.physics.is_far(w.mesh))
+
+    def test_linear_damping(self):
+        physics = sk.PlanetPhysics(max_bodies=8, threads=1)
+        damped = physics.create_box((0.2, 0.2, 0.2), (0.0, 0.0, 0.0))
+        free = physics.create_box((0.2, 0.2, 0.2), (0.0, 5.0, 0.0))
+        physics.set_linear_damping(free, 0.0)
+        for body in (damped, free):
+            physics.set_velocity(body, (150.0, 0.0, 0.0))
+        for _ in range(120):
+            physics.step(STEP)
+        self.assertAlmostEqual(physics.get_velocity(free)[0][0], 150.0, places=3)
+        self.assertAlmostEqual(physics.get_velocity(damped)[0][0], 150.0 * (1.0 - 0.05 * STEP) ** 120, delta=0.05)
 
     def test_strikes_on_watched_bodies(self):
         w = World()

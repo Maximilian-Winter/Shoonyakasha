@@ -39,12 +39,18 @@ towards it reaches.
   for SNAG_TIME (snagged), after first coming within it (or after
   REACH_TIME). The hold
   distance runs from MIN_HOLD to MAX_HOLD.
-- **Punt:** the held body, or a target within punt_range, gets an
-  impulse along the view of its mass times min(punt_speed,
+- **Punt:** the held body (once the punt control is let go, see the
+  charged punt), or a target within punt_range, gets an impulse along
+  the view of its mass times min(punt_speed,
   punt_impulse / mass); a target that cannot move (static or kinematic)
   takes punt_impulse. The player gets recoil_factor of that impulse
   back, over its mass, at most MAX_RECOIL m/s: punting the ground pushes
   the player off it.
+- **Charged punt:** while holding, pressing punt starts a charge, which
+  fires when the punt control is let go: within CLICK_TIME, or within
+  charge_cooldown of the last charged punt, a plain punt; else the body
+  gets at least charged_speed times the charge (its time held over
+  charge_time, at most 1) times min(1, charged_mass / its mass).
 """
 
 import math
@@ -63,6 +69,7 @@ TURN_SMOOTHING = 0.03                # s the hold point's velocity relative to t
 PULL_KEEP_DEG = 30.0                 # degrees off the view a body being pulled stays the target within
 MIN_SPARE = 0.5                      # m/s^2: the least acceleration the hold is taken to have to stop with
 SNAG_TIME = 0.25                     # s a held body may stay more than drop_distance off before it is dropped
+CLICK_TIME = 0.25                    # s the punt control may be held and still punt plainly
 ROTATE_RADIANS_PER_PIXEL = 0.005
 TOO_HEAVY_SHARE = 0.9                # of hold_force a body's weight may be
 
@@ -82,12 +89,17 @@ class GunParams:
     punt_speed: float = 30.0         # m/s, at most from a punt
     recoil_factor: float = 0.6       # share of the punt's impulse back into the player
     drop_distance: float = 1.2       # m: drop if the object is this far off the hold point
+    charge_time: float = 1.5         # s to full charge
+    charged_speed: float = 240.0     # m/s at full charge, for light objects
+    charged_mass: float = 30.0       # kg: full charged speed up to this mass
+    charge_cooldown: float = 2.0     # s after a charged punt before the next
 
 
 @dataclass
 class GunControls:
     grab: bool = False               # held: grab or pull; pressed while holding: drop
     punt: bool = False               # asked to punt; taken by the next step
+    punt_held: bool = False          # the punt control held (charging while holding something)
     rotate: tuple = (0.0, 0.0)       # pixels of mouse movement turning the held body, taken by the next step
     distance: float = 0.0            # wheel notches changing the hold distance, taken by the next step
 
@@ -136,6 +148,8 @@ class Gun:
         self.pulling = None                  # the body being pulled
         self.grab_was = False
         self.since_punt = math.inf           # s
+        self.since_charged = math.inf        # s since the last charged punt
+        self.charging = None                 # s the punt control has been held while holding, or None
         self.last_punt = None                # (body or None, speed given, recoil velocity)
 
     @property
@@ -195,6 +209,7 @@ class Gun:
         eye = player.eye()
         right, up, forward = player.basis()
         self.since_punt += dt
+        self.since_charged += dt
         if self.held is not None and (not physics.contains(self.held) or physics.motion(self.held) != "dynamic"):
             self.drop()
         pressed = controls.grab and not self.grab_was
@@ -212,8 +227,15 @@ class Gun:
                                      axis_rotation((1.0, 0.0, 0.0), dy * ROTATE_RADIANS_PER_PIXEL))
                 self.relative = quat_normalize(quat_multiply(turn, self.relative))
             controls.rotate = (0.0, 0.0)
-            if controls.punt:
-                self.punt(self.held, forward)
+            if self.charging is not None:
+                self.charging += dt
+                if not controls.punt_held:
+                    self.release(forward)
+                else:
+                    self.hold(eye, right, up, forward, dt)
+            elif controls.punt:
+                self.charging = 0.0
+                self.hold(eye, right, up, forward, dt)
             elif pressed:
                 self.drop()
                 self.latch = True
@@ -277,6 +299,7 @@ class Gun:
             self.physics.set_pass_through(self.held, None)
         self.held = None
         self.last_offset = None
+        self.charging = None
 
     def pull(self, body, eye):
         physics = self.physics
@@ -339,13 +362,33 @@ class Gun:
         blend = min(1.0, 10.0 * dt)
         physics.set_velocity(body, v, add(w, scale(sub(w_wanted, w), blend)))
 
-    def punt(self, body, forward):
-        """`body` (None: something that cannot move) punted along `forward`, the player recoiling."""
+    @property
+    def charge(self):
+        """0 to 1: how far the punt being held has charged."""
+        if self.charging is None or self.charging < CLICK_TIME or self.since_charged < self.p.charge_cooldown:
+            return 0.0
+        return min(1.0, self.charging / self.p.charge_time)
+
+    def release(self, forward):
+        """The punt control let go while charging: a charged punt, or a plain one after a click."""
+        charge = self.charge
+        self.charging = None
+        if self.held is None:
+            return
+        self.punt(self.held, forward, charge)
+        if charge > 0.0:
+            self.since_charged = 0.0
+
+    def punt(self, body, forward, charge=0.0):
+        """`body` (None: something that cannot move) punted along `forward`,
+        the player recoiling; with `charge`, faster for light bodies."""
         if body is None:
             impulse, speed = self.p.punt_impulse, None
         else:
             m = self.physics.mass(body)
             speed = min(self.p.punt_speed, self.p.punt_impulse / m)
+            if charge > 0.0:
+                speed = max(speed, self.p.charged_speed * charge * min(1.0, self.p.charged_mass / m))
             impulse = m * speed
             if body == self.held:
                 self.drop()

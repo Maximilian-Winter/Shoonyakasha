@@ -150,7 +150,9 @@ class Rocks:
         scene.set_material_vec4(entity, "baseColorFactor", tuple(rock.colour) + (1.0,))
         scene.set_material_float(entity, "gridStrength", 0.0)
         scene.set_render_layer_mask(entity, 1)
-        self.props.add_rock(body, entity, 2.0 * rock.radius, rock.radius, key)
+        points = (self.unit_points[rock.kind] * np.array(rock.scale)).astype(np.float32)
+        self.props.add_rock(body, entity, 2.0 * rock.radius, rock.radius, key,
+                            ("hull", points, physics.mass(body)), 0.5 * rock.scale[1], bubble.body)
         return True
 
     def released(self, prop):

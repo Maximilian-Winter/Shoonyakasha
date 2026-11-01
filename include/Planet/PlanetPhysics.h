@@ -40,13 +40,17 @@ struct CharacterGround {
 
 /// Rigid bodies on Jolt Physics (single precision), with no global
 /// gravity: applyCentralGravity pulls the awake dynamic bodies towards a
-/// point each step. Positions are in the caller's frame, which shiftOrigin
+/// point each step. A moving body's velocity is damped by Jolt's default
+/// (0.05 of it a second) until setLinearDamping changes it. Positions are in the caller's frame, which shiftOrigin
 /// translates; rotations are unit quaternions, (w, x, y, z).
 ///
-/// Static bodies collide with moving ones only; kinematic and dynamic
-/// bodies collide with everything. Every box and sphere can change its
-/// motion later (setMotion). Bodies are named by a 32-bit id, which stays
-/// valid until remove.
+/// Static bodies (and the ground meshes) collide with moving ones only;
+/// kinematic and dynamic bodies collide with each other and with static
+/// bodies. Ground meshes are fine or coarse: a moving body is near or far
+/// (setFar), and collides with the fine ground when near, with the coarse
+/// ground when far. Every box and sphere can change its motion later
+/// (setMotion). Bodies are named by a 32-bit id, which stays valid until
+/// remove.
 ///
 /// Characters are capsules moved by their velocity (Jolt's
 /// CharacterVirtual), each with its own up: its position is at the
@@ -82,9 +86,10 @@ public:
     /// A static triangle mesh from a grid of `columns` x `rows` points
     /// (x, y, z each, row by row), relative to `position`. Each cell is two
     /// triangles, wound counter-clockwise seen from the side that
-    /// cross(next column - point, next row - point) points to.
+    /// cross(next column - point, next row - point) points to. A ground
+    /// mesh, or with `coarse` a coarse ground mesh (see the class).
     uint32_t createGridMesh(const float* points, uint32_t columns, uint32_t rows, const PhysicsVec3& position,
-                            double friction);
+                            double friction, bool coarse = false);
 
     /// The convex hull of `count` points (x, y, z each) relative to
     /// `position`, turned by `rotation`; its mass as createBox's.
@@ -128,8 +133,15 @@ public:
     void addImpulse(uint32_t body, const PhysicsVec3& impulse);
 
     /// The body's motion, and its collisions those of the new motion; a
-    /// body turned kinematic or dynamic is woken.
+    /// body turned kinematic or dynamic is woken, and near.
     void setMotion(uint32_t body, PhysicsMotion motion);
+    /// Whether a moving body is far (on the coarse ground) or near (on the
+    /// fine ground); static bodies stay as they are.
+    void setFar(uint32_t body, bool far);
+    bool isFar(uint32_t body) const;
+    /// The share of a moving body's velocity it loses a second (Jolt's
+    /// linear damping); static bodies stay as they are.
+    void setLinearDamping(uint32_t body, double damping);
     PhysicsMotion motion(uint32_t body) const;
     /// The body passes through the character's capsule and its inner body,
     /// and they through it; `character` -1: through no character. A body
@@ -140,13 +152,16 @@ public:
     /// Whether the body is awake.
     bool isActive(uint32_t body) const;
     void activate(uint32_t body);
+    /// The body put to sleep where it is, until something wakes it.
+    void deactivate(uint32_t body);
 
     /// Position (3) and rotation (4) of each of `count` bodies into `out`,
     /// 7 doubles per body.
     void getTransforms(const uint32_t* bodies, size_t count, double* out) const;
 
     /// The nearest surface along `direction` (unit) from `origin` within
-    /// `maxDistance` metres; false when there is none. With `skipCharacter`
+    /// `maxDistance` metres that a near moving body would hit (not the
+    /// coarse ground); false when there is none. With `skipCharacter`
     /// (a character's id, or -1 for none), the ray passes through that
     /// character's inner body and the bodies passing through it.
     bool castRay(const PhysicsVec3& origin, const PhysicsVec3& direction, double maxDistance,
