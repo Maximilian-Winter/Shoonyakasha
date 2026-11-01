@@ -3834,6 +3834,15 @@ cdef class PlanetPhysics:
         return self._ptr.createSphere(radius, _physics_vec3(position), _physics_motion(motion), density, mass,
                                       friction, restitution)
 
+    def create_capsule(self, double radius, double half_height, position, rotation=(1.0, 0.0, 0.0, 0.0),
+                       str motion="dynamic", double density=500.0, double mass=0.0, double friction=0.7,
+                       double restitution=0.1):
+        """A capsule along its Y axis: a cylinder `half_height` metres either
+        side of its centre, capped by half spheres of `radius`, turned by
+        `rotation`; its mass as create_box's."""
+        return self._ptr.createCapsule(radius, half_height, _physics_vec3(position), _physics_quat(rotation),
+                                       _physics_motion(motion), density, mass, friction, restitution)
+
     def create_grid_mesh(self, points, uint32_t columns, uint32_t rows, position, double friction=0.8):
         """A static triangle mesh from `columns` x `rows` points relative to
         `position`, row by row: `points` is a buffer of float32 x, y, z (a

@@ -33,6 +33,10 @@
 // its draw's instance count in VegetationDraws, which the CPU sets to zero
 // each frame); one past the kind's capacity is given back.
 //
+// Trees and cacti within vegetation.nearby.x of the camera are also listed
+// in NearbyTrees (listNearby), which the CPU reads back for their trunks'
+// colliders, with the stamp vegetation.nearby.y.
+//
 
 layout(local_size_x = 64) in;
 
@@ -57,7 +61,34 @@ const float MAX_TREE_CHANCE = 0.97;
 const float CONIFER_SHADE = 0.6;    // a conifer's foliage, of its biomes' foliage colour
 const float BROADLEAF_SHADE = 0.75;
 
+layout(std430, set = 0, binding = 5) buffer NearbyTrees {
+    uint words[];          // count (the CPU sets it to 0), stamp, 2 unused, then NEARBY_WORDS per plant
+} nearby;
+
+const uint NEARBY_HEADER = 4u;
+const uint NEARBY_WORDS = 12u;
+
+// A plant with a trunk (a tree or a cactus) within vegetation.nearby.x of
+// the camera, appended to NearbyTrees: its base relative to the camera and
+// its height, its tint, kind, cube face and cell. Those past the capacity
+// are dropped.
+void listNearby(vec3 drawn, float size, float tint, int kind, int face, ivec2 cell) {
+    uint index = atomicAdd(nearby.words[0], 1u);
+    if (index >= uint(vegetation.nearby.z)) return;
+    uint at = NEARBY_HEADER + index * NEARBY_WORDS;
+    nearby.words[at] = floatBitsToUint(drawn.x);
+    nearby.words[at + 1u] = floatBitsToUint(drawn.y);
+    nearby.words[at + 2u] = floatBitsToUint(drawn.z);
+    nearby.words[at + 3u] = floatBitsToUint(size);
+    nearby.words[at + 4u] = floatBitsToUint(tint);
+    nearby.words[at + 5u] = uint(kind);
+    nearby.words[at + 6u] = uint(face);
+    nearby.words[at + 7u] = uint(cell.x);
+    nearby.words[at + 8u] = uint(cell.y);
+}
+
 void main() {
+    if (gl_GlobalInvocationID.x == 0u) nearby.words[1] = uint(vegetation.nearby.y);
     ScatterChunk chunk;
     float range = vegetation.settings.y;
     if (vegetation.settings.x == 0.0 || !scatterChunk(gl_WorkGroupID.x, vegetation.lod.w, range, chunk)) return;
@@ -111,6 +142,9 @@ void main() {
         float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow) * smoothstep(range, range * FADE_START, x.distance);
         if (size < 0.05) continue;
         vec3 drawn = candidateDrawn(chunk, x);
+        if ((kind < VEGETATION_TREE_KINDS || kind == KIND_CACTUS) && x.distance <= vegetation.nearby.x) {
+            listNearby(drawn, size, tint, kind, chunk.face, x.cell);
+        }
         uint at;
         if (!claimInstance(uint(kind), uint(kind) * capacity, capacity, at)) continue;
         instances.data[at] = vec4(drawn, size);

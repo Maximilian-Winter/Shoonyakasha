@@ -859,6 +859,9 @@ cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
                            double restitution) except +
         uint32_t createSphere(double radius, const LodVec3& position, PhysicsMotion motion, double density,
                               double mass, double friction, double restitution) except +
+        uint32_t createCapsule(double radius, double halfHeight, const LodVec3& position, const LodVec4& rotation,
+                               PhysicsMotion motion, double density, double mass, double friction,
+                               double restitution) except +
         uint32_t createGridMesh(const float* points, uint32_t columns, uint32_t rows, const LodVec3& position,
                                 double friction) except +
         uint32_t createConvexHull(const float* points, size_t count, const LodVec3& position, const LodVec4& rotation,

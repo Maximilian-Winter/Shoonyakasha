@@ -1,6 +1,6 @@
 """Tests for sk.PlanetPhysics (include/Planet/PlanetPhysics.h): bodies
 falling under central gravity onto a grid mesh and coming to rest, the
-origin shifted without waking them, ray casts, motion changes, batched
+origin shifted without waking them, ray casts, a turned capsule, motion changes, batched
 transforms and errors; characters standing and walking on a mesh along
 any up, moved by an origin shift, riding a kinematic platform, holding
 up bodies that land on them, letting bodies set to pass through them fall
@@ -118,6 +118,18 @@ class PlanetPhysicsTest(unittest.TestCase):
         self.assertAlmostEqual(hit[1][1], 1.0, delta=1e-3)
         self.assertIsNone(w.physics.cast_ray((0.0, 10.0, 0.0), (0.0, 1.0, 0.0), 20.0))
         self.assertIsNone(w.physics.cast_ray((0.0, 10.0, 0.0), (0.0, -1.0, 0.0), 5.0))
+
+    def test_capsule(self):
+        w = World()
+        # Lying along X: turned a quarter about Z, from (-1.4, 1.5, 0) to (1.4, 1.5, 0), 0.4 thick.
+        s = math.sqrt(0.5)
+        capsule = w.physics.create_capsule(0.4, 1.0, (0.0, 1.5, 0.0), (s, 0.0, 0.0, s), motion="static")
+        hit = w.physics.cast_ray((0.5, 5.0, 0.0), (0.0, -1.0, 0.0), 10.0)
+        self.assertEqual(hit[0], capsule)
+        self.assertAlmostEqual(hit[1][1], 1.9, delta=1e-3)
+        hit = w.physics.cast_ray((1.2, 5.0, 0.0), (0.0, -1.0, 0.0), 10.0)
+        self.assertAlmostEqual(hit[1][1], 1.5 + math.sqrt(0.4 ** 2 - 0.2 ** 2), delta=1e-3)
+        self.assertEqual(w.physics.cast_ray((1.5, 5.0, 0.0), (0.0, -1.0, 0.0), 10.0)[0], w.mesh)
 
     def test_static_bodies_stay_and_turn_dynamic(self):
         w = World()

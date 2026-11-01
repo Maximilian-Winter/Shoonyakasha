@@ -37,6 +37,7 @@ layout(set = VEGETATION_SET, binding = VEGETATION_PARAMS) uniform VegetationPara
     vec4 camera;
     vec4 grass;
     vec4 thinning;
+    vec4 nearby;           // x: radius (m) of the trees listed in NearbyTrees; y: stamp; z: capacity
 } vegetation;
 
 // A linear colour (each channel 0 .. 1) in one float: the square roots of

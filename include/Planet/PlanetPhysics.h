@@ -71,6 +71,13 @@ public:
     uint32_t createSphere(double radius, const PhysicsVec3& position, PhysicsMotion motion, double density,
                           double mass, double friction, double restitution);
 
+    /// A capsule along its Y axis: a cylinder `halfHeight` metres either
+    /// side of its centre, capped by half spheres of `radius`, turned by
+    /// `rotation`; its mass as createBox's.
+    uint32_t createCapsule(double radius, double halfHeight, const PhysicsVec3& position,
+                           const PhysicsQuat& rotation, PhysicsMotion motion, double density, double mass,
+                           double friction, double restitution);
+
     /// A static triangle mesh from a grid of `columns` x `rows` points
     /// (x, y, z each, row by row), relative to `position`. Each cell is two
     /// triangles, wound counter-clockwise seen from the side that

@@ -265,6 +265,14 @@ uint32_t PlanetPhysics::createSphere(double radius, const PhysicsVec3& position,
     return m_impl->addSolid(shape, position, {1.0, 0.0, 0.0, 0.0}, motion, mass, friction, restitution);
 }
 
+uint32_t PlanetPhysics::createCapsule(double radius, double halfHeight, const PhysicsVec3& position,
+                                      const PhysicsQuat& rotation, PhysicsMotion motion, double density,
+                                      double mass, double friction, double restitution) {
+    JPH::CapsuleShapeSettings shape(static_cast<float>(halfHeight), static_cast<float>(radius));
+    shape.SetDensity(static_cast<float>(density));
+    return m_impl->addSolid(shape, position, rotation, motion, mass, friction, restitution);
+}
+
 uint32_t PlanetPhysics::createGridMesh(const float* points, uint32_t columns, uint32_t rows,
                                        const PhysicsVec3& position, double friction) {
     if (columns < 2 || rows < 2) {

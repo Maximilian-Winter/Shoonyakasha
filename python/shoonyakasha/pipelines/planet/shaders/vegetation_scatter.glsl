@@ -139,6 +139,7 @@ void scatterCells(ScatterChunk chunk, float cells, out int cu0, out int cv0, out
 // to the chunk's centre on the unmorphed grid, its distance from the camera,
 // and its hash after the two draws that jittered it.
 struct Candidate {
+    ivec2 cell;            // the cell of the face's grid
     ivec2 a, b, c;
     vec3 w;
     vec3 position;
@@ -151,6 +152,7 @@ struct Candidate {
 bool scatterCandidate(ScatterChunk chunk, float cells, int cu0, int cv0, uint across, uint k, int salt,
                       float range, out Candidate x) {
     int cu = cu0 + int(k % across), cv = cv0 + int(k / across);
+    x.cell = ivec2(cu, cv);
     x.hash = terrainHash(ivec3(cu, cv, chunk.face + salt));
     float pu = -1.0 + 2.0 * (float(cu) + nextRandom(x.hash)) / cells;
     float pv = -1.0 + 2.0 * (float(cv) + nextRandom(x.hash)) / cells;

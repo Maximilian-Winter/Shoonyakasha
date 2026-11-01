@@ -22,7 +22,9 @@ FLIGHT_STEP in real time, whatever the time warp; it and its crates are
 dropped when the view moves to the other body or more than Bubble.RADIUS
 above the ground. With a player on foot, the bubble follows the player
 instead, and holds it, and the ship while it is within Bubble.RADIUS (a
-kinematic hull of its contact points, moved with it).
+kinematic hull of its contact points, moved with it). On the planet the
+trees and cacti within TRUNK_RADIUS of the camera get trunks (trunks.py,
+from shoonyakasha.planet.nearby_trees).
 
 The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
@@ -111,6 +113,7 @@ Keys:
     python planet.py --walk-check      walk 200 m circles on the planet and the moon, check the feet stay on the ground
     python planet.py --hold-check      hold a crate with the gravity gun while turning, walking, jumping and rebasing
     python planet.py --punt-check      punt crates and the ground, check the speeds, the recoil and the jump's height
+    python planet.py --trunk-check     walk into the trees nearest the blocks, check the feet stop at their trunks
 """
 
 import argparse
@@ -127,6 +130,7 @@ from shoonyakasha.planet import settings as planet_settings
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.collider_probes import ColliderProbes, TerrainCollider
+from shoonyakasha.planet.nearby_trees import NearbyTrees
 from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, local_frame, normalize, rotate, scale, sub
 from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, SettingsMenu
 from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, FLOATS_PER_VERTEX, FOV, MAX_LEVEL,
@@ -142,6 +146,7 @@ from instruments import Instruments
 from player import Controls as FootControls, Player
 from player import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from props import Props, stack_offsets, yaw_rotation
+from trunks import Trunks
 from viewmodel import Viewmodel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -190,6 +195,7 @@ MOON_HOVER_HEIGHT = 2_000.0      # Shift+8's ship waits this far above the moon'
 # The physics bubble and its crates.
 MAX_PHYSICS_STEPS_PER_FRAME = 8
 CRATE_SIZE = 0.6                 # m along each edge
+TRUNK_RADIUS = 40.0              # m from the camera the trees and cacti on the planet get trunks (trunks.py)
 CRATE_DENSITY = 500.0            # kg/m^3
 CRATE_AHEAD = 3.0                # m in front of the view a crate is dropped
 STACK_COUNT = 10
@@ -232,6 +238,8 @@ parser.add_argument("--hold-check", action="store_true",
                     help="hold a crate with the gravity gun while turning, walking, jumping and rebasing, and exit")
 parser.add_argument("--punt-check", action="store_true",
                     help="punt crates of 5, 50 and 500 kg and the ground, check speeds, recoil and height, and exit")
+parser.add_argument("--trunk-check", action="store_true",
+                    help="walk into the trees nearest the blocks, check the feet stop at their trunks, and exit")
 args = parser.parse_args()
 
 planet_world.compile_shaders()
@@ -310,6 +318,7 @@ state = {
     "viewmodel": None,           # the gun's viewmodel (viewmodel.Viewmodel)
     "look_delta": (0.0, 0.0),    # pixels the mouse turned the view this frame, on foot
     "punt_held": False,          # the punt button or trigger held last frame
+    "trunk_plants": None,        # (terrain version, vegetation on, its density) the trunks were made under
     "head_bob": True,
     "captured": False,           # whether the frame last asked for the mouse captured
     "parked": None,              # (body, position relative to it) of a ship the player left
@@ -318,6 +327,8 @@ state = {
 }
 physics = sk.PlanetPhysics()
 collider_probes = ColliderProbes(engine)
+nearby_trees = NearbyTrees(engine)
+trunks = Trunks()
 props = Props(engine, box())
 
 
@@ -829,11 +840,12 @@ def ensure_bubble(point=None):
 
 
 def drop_bubble():
-    """The bubble, its crates, the player, the ship's hull and its terrain mesh gone."""
+    """The bubble, its crates, its trunks, the player, the ship's hull and its terrain mesh gone."""
     bubble = state["bubble"]
     if bubble is None:
         return
     props.clear(bubble)
+    trunks.clear(bubble)
     remove_player()
     remove_ship_body()
     state["terrain_collider"].drop()
@@ -868,7 +880,9 @@ def step_bubble(dt):
     otherwise rebased to the focus once far enough from its origin, its
     terrain mesh kept around it (ahead along its velocity by the probes'
     latency; a move of JUMP_DISTANCE or more in a frame counts as no
-    velocity), its crates kept on that mesh, and its physics stepped by
+    velocity), its trunks updated from the nearby trees that came back (all
+    removed when the terrain or the vegetation changed), its crates kept
+    on that mesh, and its physics stepped by
     `dt` in fixed steps of FLIGHT_STEP: each step the player (with the
     controls on foot, standing still otherwise; held where the mesh does
     not reach) and on foot its gravity gun (the gun drops what it holds
@@ -895,6 +909,13 @@ def step_bubble(dt):
     latency = world.probe_latency * state["frame_ms"] / 1000.0
     terrain = state["terrain_collider"]
     terrain.update(sub(here, bubble.origin), velocity, latency, world.terrain_version)
+    plants = (world.terrain_version, world.vegetation, world.vegetation_density)
+    if plants != state["trunk_plants"]:
+        trunks.clear(bubble)
+        state["trunk_plants"] = plants
+    trees = nearby_trees.read()
+    if trees is not None and bubble.body is planet:
+        trunks.update(bubble, trees, state["position"], TRUNK_RADIUS)
     props.update(bubble, terrain)
     state["physics_accumulator"] += dt
     count = min(int(state["physics_accumulator"] / FLIGHT_STEP), MAX_PHYSICS_STEPS_PER_FRAME)
@@ -1205,6 +1226,8 @@ def frame(dt):
     right, up, forward = view_basis()
     ship = state["ship"]
     patch = ground_patch_request(ship) if state["mode"] == "ship" and not ship.crashed else None
+    bubble = state["bubble"]
+    nearby_trees.request(camera, TRUNK_RADIUS if bubble is not None and bubble.body is planet else 0.0)
     world.end_frame(camera, (right, up, forward), dt, warp=WARPS[state["warp"]], viewpoint=viewpoint(),
                     patch=patch)
     world.set_orbit_path(orbit_path_points())
@@ -1398,6 +1421,7 @@ def update_cards():
         ("PHYSICS",),
         ("BODIES", "%d, %d awake" % (physics.body_count, physics.active_count)),
         ("CRATES", "%d" % len(props.crates)),
+        ("TRUNKS", "%d" % len(trunks.trunks)),
         ("TERRAIN MESHES", "%d built" % (state["terrain_collider"].builds if state["terrain_collider"] else 0)),
     ])
 
@@ -1579,6 +1603,8 @@ def on_init():
         engine.ecs.add_system("PlanetHoldCheck", HoldCheck(), priority=-2)
     elif args.punt_check:
         engine.ecs.add_system("PlanetPuntCheck", PuntCheck(), priority=-2)
+    elif args.trunk_check:
+        engine.ecs.add_system("PlanetTrunkCheck", TrunkCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -3328,6 +3354,137 @@ class PuntCheck(GunCheck):
               % (name, "; ".join(rows), rise, wanted_height, "passed" if ok else "FAILED"), flush=True)
         self.clear()
         self.next_body(ok)
+
+
+class TrunkCheck:
+    """--trunk-check: a player put down from preset 1 (5 m above the
+    blocks) waits until it has stood on the ground for SETTLE seconds with
+    at least one trunk in the bubble, then walks at each of the TARGETS
+    trunks nearest it within REACH: put down START metres from the trunk's
+    axis on the side it stood on, lifted LIFT, facing the trunk, it stands
+    for SETTLE seconds and walks towards it for WALK seconds. Its feet must
+    stop TOLERANCE from the trunk's radius plus its own from the axis.
+    Prints each trunk's kind, radius and where the feet stopped, and exits
+    with status 0 when every walk passed, 1 otherwise."""
+
+    TARGETS = 5
+    REACH = 15.0
+    START = 3.0
+    LIFT = 1.5
+    SETTLE = 1.0
+    WALK = 2.5
+    TOLERANCE = 0.05
+    TIMEOUT = 60.0
+
+    def __init__(self):
+        self.stage, self.clock, self.frames = "place", 0.0, 0
+        self.results = []
+
+    def __call__(self, dt):
+        if planet.tree is None:
+            return True
+        self.frames += 1
+        self.clock += dt
+        getattr(self, self.stage)(dt)
+        return True
+
+    def next_stage(self, stage):
+        self.stage, self.clock, self.frames = stage, 0.0, 0
+
+    def place(self, dt):
+        if not settled():
+            return
+        state["scripted_controls"] = True
+        teleport(1)
+        self.next_stage("spawn")
+
+    def spawn(self, dt):
+        if self.frames < 10 or not settled():
+            return
+        go_on_foot()
+        if state["player"] is not None:
+            self.next_stage("wait")
+
+    def wait(self, dt):
+        player = state["player"]
+        if not player.on_ground or not trunks.trunks:
+            self.clock = 0.0
+            if self.frames > 60 * self.TIMEOUT:
+                print("[planet] trunks: none came within %.0f m: FAILED" % TRUNK_RADIUS, flush=True)
+                os._exit(1)
+            return
+        if self.clock < self.SETTLE:
+            return
+        bubble = state["bubble"]
+        feet = player.feet()
+        near = []
+        for key, trunk in trunks.trunks.items():
+            base = self.base(trunk)
+            d = self.across(sub(base, feet), bubble.up(base))
+            if d <= self.REACH:
+                near.append((d, key))
+        self.targets = [key for _, key in sorted(near)[:self.TARGETS]]
+        print("[planet] trunks: %d in the bubble, walking at the %d nearest" % (len(trunks.trunks), len(self.targets)),
+              flush=True)
+        self.next_target()
+
+    @staticmethod
+    def base(trunk):
+        bubble = state["bubble"]
+        return bubble.to_bubble(add(bubble.body.centre(), trunk.base))
+
+    @staticmethod
+    def across(v, up):
+        """`v` without its part along `up`: its length."""
+        return length(sub(v, scale(up, dot(v, up))))
+
+    def next_target(self):
+        if not self.targets:
+            os._exit(0 if self.results and all(self.results) else 1)
+        self.key = self.targets.pop(0)
+        trunk = trunks.trunks.get(self.key)
+        if trunk is None:
+            print("[planet]   a trunk left the bubble before its walk: FAILED", flush=True)
+            self.results.append(False)
+            self.next_target()
+            return
+        player, bubble = state["player"], state["bubble"]
+        base = self.base(trunk)
+        up = bubble.up(base)
+        away = sub(player.feet(), base)
+        away = sub(away, scale(up, dot(away, up)))
+        away = normalize(away) if length(away) > 1e-3 else local_frame(up)[0]
+        physics.character_set_position(player.character, add(base, add(scale(away, self.START), scale(up, self.LIFT))))
+        physics.character_set_velocity(player.character, (0.0, 0.0, 0.0))
+        player.heading = player.level(scale(away, -1.0), up)
+        player.pitch = 0.0
+        state["foot_controls"] = FootControls()
+        self.closest = math.inf
+        self.next_stage("approach")
+
+    def approach(self, dt):
+        trunk = trunks.trunks.get(self.key)
+        player, bubble = state["player"], state["bubble"]
+        if trunk is None:
+            print("[planet]   a trunk left the bubble during its walk: FAILED", flush=True)
+            self.results.append(False)
+            self.next_target()
+            return
+        if self.clock < self.SETTLE:
+            return
+        state["foot_controls"].forward = 1.0
+        base = self.base(trunk)
+        self.closest = min(self.closest, self.across(sub(player.feet(), base), bubble.up(base)))
+        if self.clock < self.SETTLE + self.WALK:
+            return
+        state["foot_controls"].forward = 0.0
+        radius = trunk.radius
+        wanted = radius + PLAYER_RADIUS
+        ok = abs(self.closest - wanted) <= self.TOLERANCE
+        self.results.append(ok)
+        print("[planet]   %s, trunk radius %.3f m: the feet stopped %.3f m from its axis (%.3f): %s"
+              % (trunk.kind, radius, self.closest, wanted, "passed" if ok else "FAILED"), flush=True)
+        self.next_target()
 
 
 engine.set_on_init(on_init)

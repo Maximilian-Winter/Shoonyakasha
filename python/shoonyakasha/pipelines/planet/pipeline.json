@@ -197,8 +197,17 @@
         { "name": "grass", "type": "vec4", "source": "scene.custom.planet.vegetation.grass",
           "default": [ 0.0, 150.0, 131072.0, 65536.0 ] },
         { "name": "thinning", "type": "vec4", "source": "scene.custom.planet.vegetation.thinning",
-          "default": [ 2500.0, 0.0, 0.0, 0.0 ] }
+          "default": [ 2500.0, 0.0, 0.0, 0.0 ] },
+        { "name": "nearby", "type": "vec4", "source": "scene.custom.planet.vegetation.nearby",
+          "default": [ 0.0, 0.0, 256.0, 0.0 ] }
       ]
+    },
+    "NearbyTrees": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 3076,
+      "fields": [ { "name": "word", "type": "uint" } ],
+      "target": { "name": "NearbyTrees", "readback": { "frequency": "per_frame" } }
     },
     "VegetationMesh": {
       "usage": "storage_buffer",
@@ -461,7 +470,9 @@
         { "binding": 3, "type": "storage_buffer", "stages": [ "compute" ], "name": "VegetationInstances",
           "autoBindBuffer": "VegetationInstances" },
         { "binding": 4, "type": "storage_buffer", "stages": [ "compute" ], "name": "VegetationDraws",
-          "autoBindBuffer": "VegetationDraws" }
+          "autoBindBuffer": "VegetationDraws" },
+        { "binding": 5, "type": "storage_buffer", "stages": [ "compute" ], "name": "NearbyTrees",
+          "autoBindBuffer": "NearbyTrees" }
       ]
     },
     "vegetationChunkSet": {
