@@ -40,6 +40,7 @@ layout(location = 5) out float fragShade;
 layout(location = 6) flat out vec3 fragRight;
 layout(location = 7) flat out vec3 fragUp;
 layout(location = 8) flat out vec3 fragFacing;
+layout(location = 9) flat out int fragOnMoon;
 
 const float SWAY = 0.015;
 const float GRASS_SWAY = 0.12;
@@ -50,7 +51,7 @@ void main() {
     int part = int(inNormal.w + 0.5);
     float width = vegetationWidth(look.z);
     vec3 right, up, ahead;
-    vegetationFrame(camera.cameraFromCentre.xyz, placed.xyz, look.xy, right, up, ahead);
+    vegetationFrame(vegetationCameraFromCentre(look.w), placed.xyz, look.xy, right, up, ahead);
     vec3 offset, normal;
     if (part == VEGETATION_PART_IMPOSTOR) {
         vegetationBillboard(up, -placed.xyz, right, ahead);
@@ -77,5 +78,6 @@ void main() {
     fragRight = right;
     fragUp = up;
     fragFacing = ahead;
+    fragOnMoon = vegetationOnMoon(look.w) ? 1 : 0;
     gl_Position = jittered(camera.proj * camera.view * vec4(relativePos, 1.0));
 }

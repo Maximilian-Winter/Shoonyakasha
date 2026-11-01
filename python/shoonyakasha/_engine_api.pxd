@@ -895,6 +895,9 @@ cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
         void getTransforms(const uint32_t* bodies, size_t count, double* out) except +
         cbool castRay(const LodVec3& origin, const LodVec3& direction, double maxDistance, PhysicsRayHit& hit,
                       int skipCharacter) except +
+        void watchStrikes(uint32_t body, cbool watched) except +
+        void setStrikeMomentum(double momentum)
+        vector[uint32_t] takeStruck()
         void applyCentralGravity(const LodVec3& centre, double gm)
         void step(double dt)
         void shiftOrigin(const LodVec3& offset)

@@ -11,7 +11,7 @@
 // 0.7, shrinking to nothing over the last 30 % of the range, turned and
 // tinted by the hash, and coloured as its biomes' grass (the ground's plants,
 // towards straw where the biomes' grass is dry). It takes the next instance of draw
-// VEGETATION_GRASS, its instances after the other kinds' (5 times
+// VEGETATION_GRASS, its instances after the other kinds' (VEGETATION_GRASS times
 // vegetation.lod.z), at most vegetation.grass.w of them.
 //
 
@@ -27,7 +27,7 @@ void main() {
     ScatterChunk chunk;
     float range = vegetation.grass.y;
     if (vegetation.settings.x == 0.0 || vegetation.grass.x == 0.0 ||
-        !scatterChunk(gl_WorkGroupID.x, GRASS_MIN_LEVEL, range, chunk)) return;
+        !scatterChunk(gl_WorkGroupID.x, GRASS_MIN_LEVEL, range, false, chunk)) return;
     float cells = vegetation.grass.z;
     int cu0, cv0;
     uint across, count;

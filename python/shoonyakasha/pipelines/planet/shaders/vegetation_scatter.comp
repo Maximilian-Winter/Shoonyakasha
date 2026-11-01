@@ -1,9 +1,9 @@
 #version 450
 //
-// Places the vegetation for this frame: one workgroup per chunk ChunkDraws
-// draws (its count first, then five words per draw, the slot last), of the
-// planet (body 0), at least the coarsest level vegetation.lod.w, within the
-// range of the camera.
+// Places the vegetation and the rocks for this frame: one workgroup per
+// chunk ChunkDraws draws (its count first, then five words per draw, the
+// slot last), of the planet (body 0) or the moon (body 1), at least the
+// coarsest level vegetation.lod.w, within the range of the camera.
 //
 // Each cube face is divided into vegetation.settings.z x settings.z cells
 // in face coordinates, the same whatever the chunks are, and each cell has
@@ -29,12 +29,24 @@
 // their impostors beyond. The draws from the hash come in the same order
 // whatever is kept, so a plant keeps its form and size at any distance.
 //
-// Each kept plant takes the next instance of its kind (an atomic add on
-// its draw's instance count in VegetationDraws, which the CPU sets to zero
-// each frame); one past the kind's capacity is given back.
+// Rocks (with vegetation.rocks.x on): a cell of that grid with no tree or
+// bush within the bushes' range holds a boulder by the boulder chance
+// (rockChances), on the moon by that chance alone (no trees, bushes or
+// grass grow there), its grid MOON_ROCK_CELLS of the planet's cells per
+// side. Small rocks lie on a finer grid of vegetation.rocks.z
+// cells per face side (MOON_ROCK_CELLS of that on the moon), on chunks of
+// at least ROCK_MIN_LEVEL within vegetation.rocks.y, by the small rocks'
+// chance. A rock's size shrinks to
+// nothing over the last 15 % of its range; on the moon its colour carries
+// VEGETATION_ON_MOON. A rock whose cell is in TakenRocks (rockTaken) is
+// left out.
 //
-// Trees and cacti within vegetation.nearby.x of the camera are also listed
-// in NearbyTrees (listNearby), which the CPU reads back for their trunks'
+// Each kept plant or rock takes the next instance of its kind (an atomic
+// add on its draw's instance count in VegetationDraws, which the CPU sets
+// to zero each frame); one past the kind's capacity is given back.
+//
+// Trees, cacti and rocks within vegetation.nearby.x of the camera are also
+// listed in NearbyTrees (listNearby), which the CPU reads back for their
 // colliders, with the stamp vegetation.nearby.y.
 //
 
@@ -51,28 +63,45 @@ const int KIND_ACACIA = 8;
 const int KIND_BUSH = 10;
 const int KIND_SHRUB = 11;
 const int KIND_CACTUS = 12;
-// Each kind's heights (m), lowest and highest.
-const vec2 HEIGHTS[13] = vec2[13](vec2(9.0, 18.0), vec2(9.0, 18.0), vec2(12.0, 22.0), vec2(12.0, 22.0),
+const int KIND_ROCK = VEGETATION_ROCK;
+const int KIND_BOULDER = VEGETATION_BOULDER;
+// Each kind's heights (m), lowest and highest; a rock's height above its base (it is about 2.6 times as
+// wide, a boulder 1.8 times).
+const vec2 HEIGHTS[15] = vec2[15](vec2(9.0, 18.0), vec2(9.0, 18.0), vec2(12.0, 22.0), vec2(12.0, 22.0),
                                   vec2(7.0, 13.0), vec2(7.0, 13.0), vec2(9.0, 16.0), vec2(9.0, 16.0),
                                   vec2(5.0, 9.0), vec2(5.0, 9.0), vec2(1.2, 2.6), vec2(0.5, 1.3),
-                                  vec2(2.5, 7.0));
+                                  vec2(2.5, 7.0), vec2(0.08, 0.23), vec2(0.45, 1.4));
 const float FADE_START = 0.85;      // of the range: where heights start to shrink
 const float MAX_TREE_CHANCE = 0.97;
 const float CONIFER_SHADE = 0.6;    // a conifer's foliage, of its biomes' foliage colour
 const float BROADLEAF_SHADE = 0.75;
+const float ROCK_MIN_LEVEL = 10.0;
+const int MOON_SALT = 40;           // tells the moon's boulder grid from the planet's in the hash
+const int ROCK_SALT = 16;           // the small rocks' grid; 8 more on the moon
+const float MOON_ROCK_CELLS = 0.25; // the moon's grids' cells per face side, of the planet's: as large as the
+                                    // planet's on a quarter of its radius
+const vec3 PLANET_ROCK = vec3(0.39, 0.35, 0.33);
+const vec3 MOON_ROCK = vec3(0.2, 0.195, 0.185);
 
 layout(std430, set = 0, binding = 5) buffer NearbyTrees {
     uint words[];          // count (the CPU sets it to 0), stamp, 2 unused, then NEARBY_WORDS per plant
 } nearby;
 
+layout(std430, set = 0, binding = 6) readonly buffer TakenRocks {
+    uint words[];          // TAKEN_SLOTS entries of two words, the first TAKEN_EMPTY where none
+} taken;
+
 const uint NEARBY_HEADER = 4u;
 const uint NEARBY_WORDS = 12u;
+const uint TAKEN_SLOTS = 8192u;
+const uint TAKEN_EMPTY = 0xFFFFFFFFu;
 
-// A plant with a trunk (a tree or a cactus) within vegetation.nearby.x of
-// the camera, appended to NearbyTrees: its base relative to the camera and
-// its height, its tint, kind, cube face and cell. Those past the capacity
-// are dropped.
-void listNearby(vec3 drawn, float size, float tint, int kind, int face, ivec2 cell) {
+// A plant with a trunk (a tree or a cactus) or a rock within
+// vegetation.nearby.x of the camera, appended to NearbyTrees: its base
+// relative to the camera and its height, its tint, kind, cube face, cell,
+// body and the cosine and sine of its turn. Those past the capacity are
+// dropped.
+void listNearby(vec3 drawn, float size, float tint, int kind, int face, ivec2 cell, int body, float turn) {
     uint index = atomicAdd(nearby.words[0], 1u);
     if (index >= uint(vegetation.nearby.z)) return;
     uint at = NEARBY_HEADER + index * NEARBY_WORDS;
@@ -85,69 +114,192 @@ void listNearby(vec3 drawn, float size, float tint, int kind, int face, ivec2 ce
     nearby.words[at + 6u] = uint(face);
     nearby.words[at + 7u] = uint(cell.x);
     nearby.words[at + 8u] = uint(cell.y);
+    nearby.words[at + 9u] = uint(body);
+    nearby.words[at + 10u] = floatBitsToUint(cos(turn));
+    nearby.words[at + 11u] = floatBitsToUint(sin(turn));
+}
+
+// Whether the rock of `cell` on `grid` (0 the trees' and boulders', 1 the
+// small rocks') of `face` of `body` is in TakenRocks: an open-addressing
+// table of (body | face << 1 | grid << 4 | cell.x << 8, cell.y), probed
+// linearly from takenSlot (as shoonyakasha.planet.rocks).
+uint takenSlot(uvec2 key) {
+    return ((key.x * 0x9E3779B1u) ^ (key.y * 0x85EBCA77u) ^ (key.x >> 16)) & (TAKEN_SLOTS - 1u);
+}
+
+bool rockTaken(int body, int face, int grid, ivec2 cell) {
+    if (vegetation.rocks.w < 0.5) return false;
+    uvec2 key = uvec2(uint(body) | (uint(face) << 1) | (uint(grid) << 4) | ((uint(cell.x) & 0xFFFFu) << 8),
+                      uint(cell.y));
+    uint slot = takenSlot(key);
+    for (uint i = 0u; i < TAKEN_SLOTS; ++i) {
+        uvec2 entry = uvec2(taken.words[2u * slot], taken.words[2u * slot + 1u]);
+        if (entry.x == TAKEN_EMPTY) return false;
+        if (entry == key) return true;
+        slot = (slot + 1u) & (TAKEN_SLOTS - 1u);
+    }
+    return false;
+}
+
+// The chances of a small rock and of a boulder on the ground under a
+// candidate. On the planet: none on the sea floor; small rocks on dry
+// biomes (desert, steppe, tundra) and rock (groundCover's steep or high
+// rock), fewer on snow, none on beaches; boulders on the rock, a few on dry
+// biomes. On the moon: by the slope, so crater walls and rims hold the most.
+void rockChances(int body, vec3 radial, float height, vec3 normal, vec3 climate, out float small,
+                 out float boulder) {
+    float slope = 1.0 - dot(normal, radial);
+    if (body == 1) {
+        float steep = smoothstep(0.03, 0.2, slope);
+        small = min(0.24 + 2.4 * steep, 1.0);
+        boulder = 0.3 + 0.7 * steep;
+        return;
+    }
+    small = 0.0;
+    boulder = 0.0;
+    if (height < 0.0) return;
+    vec3 c = climateWithSettings(climate);
+    float rock, snow, beach;
+    groundCover(height, slope, c.x, rock, snow, beach);
+    float biomes[BIOMES];
+    biomeWeights(c.x, c.y, biomes);
+    float dry = biomes[BIOME_DESERT] + biomes[BIOME_STEPPE] + biomes[BIOME_TUNDRA];
+    float open = 1.0 - beach;
+    small = (0.03 + 0.3 * dry + 0.5 * rock) * open * (1.0 - 0.7 * snow);
+    boulder = (0.015 * dry + 0.25 * rock) * open;
+}
+
+vec3 rockColour(int body) {
+    return body == 1 ? MOON_ROCK : PLANET_ROCK;
+}
+
+float packedRockColour(int body) {
+    return vegetationPackColour(rockColour(body)) + (body == 1 ? VEGETATION_ON_MOON : 0.0);
+}
+
+// A kept plant or rock: listed when near, and given the next instance of its kind.
+void place(ScatterChunk chunk, Candidate x, int kind, float size, float turn, float tint, float colour) {
+    vec3 drawn = candidateDrawn(chunk, x);
+    bool trunk = kind < VEGETATION_TREE_KINDS || kind == KIND_CACTUS;
+    bool rock = kind == KIND_ROCK || kind == KIND_BOULDER;
+    if ((trunk || rock) && x.distance <= vegetation.nearby.x) {
+        listNearby(drawn, size, tint, kind, chunk.face, x.cell, chunk.body, turn);
+    }
+    uint capacity = uint(vegetation.lod.z);
+    uint at;
+    if (!claimInstance(uint(kind), uint(kind) * capacity, capacity, at)) return;
+    instances.data[at] = vec4(drawn, size);
+    instances.data[at + 1u] = vec4(cos(turn), sin(turn), tint, colour);
 }
 
 void main() {
     if (gl_GlobalInvocationID.x == 0u) nearby.words[1] = uint(vegetation.nearby.y);
+    bool plants = vegetation.settings.x != 0.0;
+    bool rocks = vegetation.rocks.x != 0.0;
     ScatterChunk chunk;
     float range = vegetation.settings.y;
-    if (vegetation.settings.x == 0.0 || !scatterChunk(gl_WorkGroupID.x, vegetation.lod.w, range, chunk)) return;
-    float cells = vegetation.settings.z;
+    if (!(plants || rocks) || !scatterChunk(gl_WorkGroupID.x, vegetation.lod.w, range, rocks, chunk)) return;
+    bool moon = chunk.body == 1;
+    float density = vegetation.settings.w;
+    float bushRange = vegetation.lod.y;
+
+    // The trees' grid: trees and bushes on the planet, boulders on both bodies (on the moon a quarter of
+    // the cells per side, as large as the planet's, within the bushes' range).
+    float gridRange = moon ? bushRange : range;
+    if (((plants && !moon) || rocks) && chunk.nearest <= gridRange) {
+        float cells = vegetation.settings.z * (moon ? MOON_ROCK_CELLS : 1.0);
+        int cu0, cv0;
+        uint across, count;
+        scatterCells(chunk, cells, cu0, cv0, across, count);
+        for (uint k = gl_LocalInvocationID.x; k < count; k += 64u) {
+            Candidate x;
+            if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, moon ? MOON_SALT : 0, gridRange, x)) continue;
+            float pick = nextRandom(x.hash);
+            float thin = nextRandom(x.hash);
+            float form = nextRandom(x.hash);
+            float variant = nextRandom(x.hash);
+            float grow = nextRandom(x.hash);
+            float turn = 6.2831853 * nextRandom(x.hash);
+            float tint = nextRandom(x.hash);
+            if (pick >= density) continue;                            // chances are at most 1
+            vec3 radial, normal, climate;
+            float height;
+            candidateGround(chunk, x, radial, height, normal, climate);
+            float treeChance = 0.0, bushChance = 0.0;
+            vec3 leaf, grass, forms;
+            vec4 chances = vec4(0.0);
+            if (plants && !moon) {
+                chances = biomePlants(radial, height, normal, climate, leaf, grass, forms);
+                treeChance = density * min(chances.x, MAX_TREE_CHANCE);
+                bushChance = density * chances.z;
+            }
+            int kind;
+            float colour;
+            if (pick < treeChance) {
+                float full = vegetation.thinning.x;
+                if (x.distance > full && thin * x.distance * x.distance >= full * full) continue;
+                vec3 foliage;
+                if (form < chances.y) {
+                    kind = variant < 0.6 ? KIND_CONIFER_A : KIND_CONIFER_B;
+                    foliage = leaf * CONIFER_SHADE;
+                } else {
+                    bool acacia = (form - chances.y) / max(1.0 - chances.y, 1e-4) < forms.x;
+                    kind = acacia ? KIND_ACACIA : variant < 0.5 ? KIND_BROADLEAF_A : KIND_BROADLEAF_B;
+                    foliage = leaf * BROADLEAF_SHADE;
+                }
+                if (x.distance > vegetation.lod.x) kind += 1;
+                colour = vegetationPackColour(foliage);
+            } else if (x.distance >= bushRange) {
+                continue;
+            } else if (pick < treeChance + bushChance) {
+                bool cactus = form < forms.z;
+                bool shrub = !cactus && (form - forms.z) / max(1.0 - forms.z, 1e-4) < forms.y;
+                kind = cactus ? KIND_CACTUS : shrub ? KIND_SHRUB : KIND_BUSH;
+                colour = vegetationPackColour(cactus ? biomeCactus() : leaf * BROADLEAF_SHADE);
+            } else {
+                if (!rocks) continue;
+                float small, boulder;
+                rockChances(chunk.body, radial, height, normal, climate, small, boulder);
+                if (pick >= treeChance + bushChance + density * boulder) continue;
+                if (rockTaken(chunk.body, chunk.face, 0, x.cell)) continue;
+                kind = KIND_BOULDER;
+                colour = packedRockColour(chunk.body);
+                float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow)
+                             * smoothstep(bushRange, bushRange * FADE_START, x.distance);
+                if (size >= 0.05) place(chunk, x, kind, size, turn, tint, colour);
+                continue;
+            }
+            float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow) * smoothstep(range, range * FADE_START, x.distance);
+            if (size < 0.05) continue;
+            place(chunk, x, kind, size, turn, tint, colour);
+        }
+    }
+
+    // The small rocks' grid.
+    float rockRange = vegetation.rocks.y;
+    if (!rocks || chunk.morph.y < ROCK_MIN_LEVEL || chunk.nearest > rockRange) return;
+    float cells = vegetation.rocks.z * (moon ? MOON_ROCK_CELLS : 1.0);
     int cu0, cv0;
     uint across, count;
     scatterCells(chunk, cells, cu0, cv0, across, count);
-    float density = vegetation.settings.w;
-    uint capacity = uint(vegetation.lod.z);
-
     for (uint k = gl_LocalInvocationID.x; k < count; k += 64u) {
         Candidate x;
-        if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, 0, range, x)) continue;
+        if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, ROCK_SALT + 8 * chunk.body, rockRange, x)) continue;
         float pick = nextRandom(x.hash);
-        float thin = nextRandom(x.hash);
-        float form = nextRandom(x.hash);
-        float variant = nextRandom(x.hash);
         float grow = nextRandom(x.hash);
         float turn = 6.2831853 * nextRandom(x.hash);
         float tint = nextRandom(x.hash);
-        if (pick >= density) continue;                                // chances are at most 1
+        if (pick >= density) continue;
         vec3 radial, normal, climate;
         float height;
         candidateGround(chunk, x, radial, height, normal, climate);
-        vec3 leaf, grass, forms;
-        vec4 plants = biomePlants(radial, height, normal, climate, leaf, grass, forms);
-        float treeChance = density * min(plants.x, MAX_TREE_CHANCE);
-        float bushChance = density * plants.z;
-        int kind;
-        vec3 foliage;
-        if (pick < treeChance) {
-            float full = vegetation.thinning.x;
-            if (x.distance > full && thin * x.distance * x.distance >= full * full) continue;
-            if (form < plants.y) {
-                kind = variant < 0.6 ? KIND_CONIFER_A : KIND_CONIFER_B;
-                foliage = leaf * CONIFER_SHADE;
-            } else {
-                bool acacia = (form - plants.y) / max(1.0 - plants.y, 1e-4) < forms.x;
-                kind = acacia ? KIND_ACACIA : variant < 0.5 ? KIND_BROADLEAF_A : KIND_BROADLEAF_B;
-                foliage = leaf * BROADLEAF_SHADE;
-            }
-            if (x.distance > vegetation.lod.x) kind += 1;
-        } else if (pick < treeChance + bushChance && x.distance < vegetation.lod.y) {
-            bool cactus = form < forms.z;
-            bool shrub = !cactus && (form - forms.z) / max(1.0 - forms.z, 1e-4) < forms.y;
-            kind = cactus ? KIND_CACTUS : shrub ? KIND_SHRUB : KIND_BUSH;
-            foliage = cactus ? biomeCactus() : leaf * BROADLEAF_SHADE;
-        } else {
-            continue;
-        }
-        float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow) * smoothstep(range, range * FADE_START, x.distance);
-        if (size < 0.05) continue;
-        vec3 drawn = candidateDrawn(chunk, x);
-        if ((kind < VEGETATION_TREE_KINDS || kind == KIND_CACTUS) && x.distance <= vegetation.nearby.x) {
-            listNearby(drawn, size, tint, kind, chunk.face, x.cell);
-        }
-        uint at;
-        if (!claimInstance(uint(kind), uint(kind) * capacity, capacity, at)) continue;
-        instances.data[at] = vec4(drawn, size);
-        instances.data[at + 1u] = vec4(cos(turn), sin(turn), tint, vegetationPackColour(foliage));
+        float small, boulder;
+        rockChances(chunk.body, radial, height, normal, climate, small, boulder);
+        if (pick >= density * small) continue;
+        if (rockTaken(chunk.body, chunk.face, 1, x.cell)) continue;
+        float size = mix(HEIGHTS[KIND_ROCK].x, HEIGHTS[KIND_ROCK].y, grow)
+                     * smoothstep(rockRange, rockRange * FADE_START, x.distance);
+        if (size < 0.02) continue;
+        place(chunk, x, KIND_ROCK, size, turn, tint, packedRockColour(chunk.body));
     }
 }

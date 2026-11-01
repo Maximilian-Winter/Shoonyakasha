@@ -15,6 +15,12 @@ the kinds vegetation_scatter.comp and grass_scatter.comp place:
     bush                      a mound of cluster cards
     shrub                     a few upright cards of bare twigs and leaves
     cactus                    a ribbed column with an arm or two
+    rock, boulder             a lumpy, flat-shaded stone (an icosphere
+                              pushed in and out by smooth lobes, squashed),
+                              reaching ROCK_SINK below its base into the
+                              ground; rock_points(name) gives its points for
+                              a convex hull, rock_triangles(name) its
+                              triangles for a mesh of its own
     grass                     three crossed cards of a tuft
 
 A vertex is three vec4: position (xyz) and the texture's u; the normal
@@ -41,8 +47,12 @@ import numpy as np
 from . import vegetation_textures
 
 TREES = ("conifer_a", "conifer_b", "broadleaf_a", "broadleaf_b", "acacia")
-KINDS = tuple(k for tree in TREES for k in (tree, tree + "_far")) + ("bush", "shrub", "cactus", "grass")
+KINDS = tuple(k for tree in TREES for k in (tree, tree + "_far")) + ("bush", "shrub", "cactus", "rock", "boulder",
+                                                                      "grass")
 GRASS = KINDS.index("grass")
+# name: (seed, height over width before scaling, the icosphere's subdivisions)
+ROCKS = {"rock": (21, 0.55, 1), "boulder": (22, 0.7, 2)}
+ROCK_SINK = 0.25             # units a rock reaches below its base
 
 PART_BARK, PART_CARD, PART_GRASS, PART_IMPOSTOR, PART_PLAIN = range(5)
 CROWN_NORMAL = 0.75          # of a card's normal: the share pointing out from the crown's centre
@@ -251,6 +261,76 @@ def _cactus():
     return b
 
 
+def _icosphere(subdivisions):
+    """The unit directions and triangles of an icosahedron split `subdivisions` times."""
+    t = (1.0 + math.sqrt(5.0)) / 2.0
+    points = [_unit(p) for p in ((-1, t, 0), (1, t, 0), (-1, -t, 0), (1, -t, 0), (0, -1, t), (0, 1, t),
+                                 (0, -1, -t), (0, 1, -t), (t, 0, -1), (t, 0, 1), (-t, 0, -1), (-t, 0, 1))]
+    faces = [(0, 11, 5), (0, 5, 1), (0, 1, 7), (0, 7, 10), (0, 10, 11), (1, 5, 9), (5, 11, 4), (11, 10, 2),
+             (10, 7, 6), (7, 1, 8), (3, 9, 4), (3, 4, 2), (3, 2, 6), (3, 6, 8), (3, 8, 9), (4, 9, 5), (2, 4, 11),
+             (6, 2, 10), (8, 6, 7), (9, 8, 1)]
+    for _ in range(subdivisions):
+        middles, split = {}, []
+
+        def middle(a, b):
+            key = (min(a, b), max(a, b))
+            if key not in middles:
+                points.append(_unit(points[a] + points[b]))
+                middles[key] = len(points) - 1
+            return middles[key]
+
+        for a, b, c in faces:
+            ab, bc, ca = middle(a, b), middle(b, c), middle(c, a)
+            split += [(a, ab, ca), (b, bc, ab), (c, ca, bc), (ab, bc, ca)]
+        faces = split
+    return np.array(points), faces
+
+
+def _rock(seed, flat, subdivisions):
+    """A lumpy stone: an icosphere split `subdivisions` times pushed in and
+    out by a few smooth lobes, squashed to `flat` of its width, one unit
+    tall above its base and reaching ROCK_SINK below it, centred on its
+    axis, flat-shaded, darker towards the bottom."""
+    rng = np.random.default_rng(seed)
+    directions, faces = _icosphere(subdivisions)
+    radius = np.ones(len(directions))
+    for _ in range(5):
+        axis = _random_unit(rng)
+        radius += rng.uniform(0.06, 0.14) * np.sin(rng.uniform(2.0, 4.0) * directions @ axis + rng.uniform(0, 6.3))
+    p = directions * radius[:, None]
+    p[:, 1] *= flat
+    low, high = p[:, 1].min(), p[:, 1].max()
+    scale = (1.0 + ROCK_SINK) / (high - low)
+    p = p * scale
+    p[:, 1] += -ROCK_SINK - low * scale
+    for axis in (0, 2):
+        p[:, axis] -= 0.5 * (p[:, axis].min() + p[:, axis].max())
+    b = _Builder()
+    for a, c, d in faces:
+        corners = p[[a, c, d]]
+        normal = _unit(np.cross(corners[1] - corners[0], corners[2] - corners[0]))
+        if np.dot(normal, corners.mean(axis=0) - (0.0, 0.5 - 0.5 * ROCK_SINK, 0.0)) < 0.0:
+            corners, normal = corners[::-1], -normal
+        k = [b.vertex(q, normal, PART_PLAIN, float(np.clip(0.65 + 0.35 * (q[1] + ROCK_SINK), 0.6, 1.0)), (0.0, 0.0))
+             for q in corners]
+        b.indices += k
+    return b
+
+
+def rock_points(name):
+    """A rock kind's distinct points, (N x 3), for its convex hull."""
+    vertices, _ = _rock(*ROCKS[name]).arrays()
+    return np.unique(np.round(vertices[:, :3], 6), axis=0)
+
+
+def rock_triangles(name):
+    """A rock kind's triangles as drawn: positions, normals and shades
+    (N x 3 each, three rows per triangle)."""
+    vertices, indices = _rock(*ROCKS[name]).arrays()
+    v = vertices[indices]
+    return v[:, 0:3], v[:, 4:7], v[:, 8:11]
+
+
 def _grass():
     b = _Builder()
     rect = vegetation_textures.card_rect("grass")
@@ -291,6 +371,8 @@ def meshes(impostor_rects=None):
             builder = _impostor(impostor_width(_tree(tree).arrays()[0]), rect)
         elif name in TREES:
             builder = _tree(name)
+        elif name in ROCKS:
+            builder = _rock(*ROCKS[name])
         else:
             builder = {"bush": _bush, "shrub": _shrub, "cactus": _cactus, "grass": _grass}[name]()
         vertices, indices = builder.arrays()

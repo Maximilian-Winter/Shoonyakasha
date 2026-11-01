@@ -3990,6 +3990,19 @@ cdef class PlanetPhysics:
             return None
         return hit.body, _physics_tuple3(hit.point), _physics_tuple3(hit.normal), hit.fraction
 
+    def watch_strikes(self, uint32_t body, bint watched=True):
+        """Whether a dynamic body striking `body` is reported by take_struck."""
+        self._ptr.watchStrikes(body, watched)
+
+    def set_strike_momentum(self, double momentum):
+        """The momentum (kg m/s) a dynamic body must strike a watched body
+        with, along the contact's normal, to be reported (300 at first)."""
+        self._ptr.setStrikeMomentum(momentum)
+
+    def take_struck(self):
+        """The watched bodies struck since the last call, each once."""
+        return list(self._ptr.takeStruck())
+
     def apply_central_gravity(self, centre, double gm):
         """For the next step, each awake dynamic body pulled towards
         `centre` with acceleration gm / r^2 (gm in m^3/s^2)."""

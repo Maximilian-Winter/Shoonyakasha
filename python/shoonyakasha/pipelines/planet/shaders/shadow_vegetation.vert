@@ -50,7 +50,7 @@ void main() {
     }
     float width = vegetationWidth(look.z);
     vec3 right, up, ahead;
-    vegetationFrame(vegetation.camera.xyz, placed.xyz, look.xy, right, up, ahead);
+    vegetationFrame(vegetationCameraFromCentre(look.w), placed.xyz, look.xy, right, up, ahead);
     vec3 offset;
     if (fragPart == VEGETATION_PART_IMPOSTOR) {
         vec3 depthAxis = vec3(viewProj[0][2], viewProj[1][2], viewProj[2][2]);

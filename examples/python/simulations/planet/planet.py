@@ -23,8 +23,11 @@ dropped when the view moves to the other body or more than Bubble.RADIUS
 above the ground. With a player on foot, the bubble follows the player
 instead, and holds it, and the ship while it is within Bubble.RADIUS (a
 kinematic hull of its contact points, moved with it). On the planet the
-trees and cacti within TRUNK_RADIUS of the camera get trunks (trunks.py,
-from shoonyakasha.planet.nearby_trees).
+trees and cacti within COLLIDER_RADIUS of the camera get trunks (trunks.py),
+and on both bodies the rocks static hulls (rocks.py), from
+shoonyakasha.planet.nearby_trees. A rock the gravity gun grabs, pulls or
+punts, or a body strikes hard enough, comes loose: it leaves the scatter
+and becomes a prop.
 
 The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
@@ -114,6 +117,7 @@ Keys:
     python planet.py --hold-check      hold a crate with the gravity gun while turning, walking, jumping and rebasing
     python planet.py --punt-check      punt crates and the ground, check the speeds, the recoil and the jump's height
     python planet.py --trunk-check     walk into the trees nearest the blocks, check the feet stop at their trunks
+    python planet.py --promotion-check   grab the rocks near the player one by one, check each is drawn once
 """
 
 import argparse
@@ -130,7 +134,7 @@ from shoonyakasha.planet import settings as planet_settings
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.collider_probes import ColliderProbes, TerrainCollider
-from shoonyakasha.planet.nearby_trees import NearbyTrees
+from shoonyakasha.planet.nearby_trees import NearbyTrees, listed_keys
 from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, local_frame, normalize, rotate, scale, sub
 from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, SettingsMenu
 from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, FLOATS_PER_VERTEX, FOV, MAX_LEVEL,
@@ -146,6 +150,7 @@ from instruments import Instruments
 from player import Controls as FootControls, Player
 from player import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from props import Props, stack_offsets, yaw_rotation
+from rocks import Rocks
 from trunks import Trunks
 from viewmodel import Viewmodel
 
@@ -195,11 +200,12 @@ MOON_HOVER_HEIGHT = 2_000.0      # Shift+8's ship waits this far above the moon'
 # The physics bubble and its crates.
 MAX_PHYSICS_STEPS_PER_FRAME = 8
 CRATE_SIZE = 0.6                 # m along each edge
-TRUNK_RADIUS = 40.0              # m from the camera the trees and cacti on the planet get trunks (trunks.py)
+COLLIDER_RADIUS = 40.0           # m from the camera the trees, cacti and rocks get colliders (trunks.py, rocks.py)
 CRATE_DENSITY = 500.0            # kg/m^3
 CRATE_AHEAD = 3.0                # m in front of the view a crate is dropped
 STACK_COUNT = 10
 JUMP_DISTANCE = 50.0             # m the viewpoint may move in a frame and still count as moving, not jumping
+STRIKE_MOMENTUM = 300.0          # kg m/s a body must strike a fixed rock with to knock it loose
 # On foot.
 EXIT_SPEED = 1.0                 # m/s relative to the ground the ship may move at for the player to get out
 BOARD_REACH = 3.0                # m from the boarding point the player gets in from
@@ -240,6 +246,8 @@ parser.add_argument("--punt-check", action="store_true",
                     help="punt crates of 5, 50 and 500 kg and the ground, check speeds, recoil and height, and exit")
 parser.add_argument("--trunk-check", action="store_true",
                     help="walk into the trees nearest the blocks, check the feet stop at their trunks, and exit")
+parser.add_argument("--promotion-check", action="store_true",
+                    help="grab the rocks near the player one by one, check each is drawn exactly once, and exit")
 args = parser.parse_args()
 
 planet_world.compile_shaders()
@@ -326,10 +334,12 @@ state = {
     "ship_poses": None,          # (position, orientation) of the ship before and after this frame's flight
 }
 physics = sk.PlanetPhysics()
+physics.set_strike_momentum(STRIKE_MOMENTUM)
 collider_probes = ColliderProbes(engine)
 nearby_trees = NearbyTrees(engine)
 trunks = Trunks()
-props = Props(engine, box())
+props = Props(engine, box(), on_remove=lambda prop: scatter_rocks.released(prop))
+scatter_rocks = Rocks(engine, world, props)
 
 
 def regenerate():
@@ -846,6 +856,7 @@ def drop_bubble():
         return
     props.clear(bubble)
     trunks.clear(bubble)
+    scatter_rocks.clear(bubble)
     remove_player()
     remove_ship_body()
     state["terrain_collider"].drop()
@@ -909,13 +920,16 @@ def step_bubble(dt):
     latency = world.probe_latency * state["frame_ms"] / 1000.0
     terrain = state["terrain_collider"]
     terrain.update(sub(here, bubble.origin), velocity, latency, world.terrain_version)
-    plants = (world.terrain_version, world.vegetation, world.vegetation_density)
+    plants = (world.terrain_version, world.vegetation, world.vegetation_density, world.rocks)
     if plants != state["trunk_plants"]:
         trunks.clear(bubble)
+        scatter_rocks.clear(bubble)
         state["trunk_plants"] = plants
     trees = nearby_trees.read()
-    if trees is not None and bubble.body is planet:
-        trunks.update(bubble, trees, state["position"], TRUNK_RADIUS)
+    if trees is not None:
+        if bubble.body is planet:
+            trunks.update(bubble, trees, state["position"], COLLIDER_RADIUS)
+        scatter_rocks.update(bubble, trees, state["position"], COLLIDER_RADIUS)
     props.update(bubble, terrain)
     state["physics_accumulator"] += dt
     count = min(int(state["physics_accumulator"] / FLIGHT_STEP), MAX_PHYSICS_STEPS_PER_FRAME)
@@ -932,6 +946,8 @@ def step_bubble(dt):
                 gun.step(state["gun_controls"], FLIGHT_STEP)
         move_ship_body(bubble, (k + 1) / count)
         bubble.step(FLIGHT_STEP)
+    for body in physics.take_struck():
+        scatter_rocks.promote(bubble, body)
     state["physics_accumulator"] -= count * FLIGHT_STEP
     if count == MAX_PHYSICS_STEPS_PER_FRAME:
         state["physics_accumulator"] = 0.0
@@ -1006,7 +1022,8 @@ def ship_landed(ship):
 def spawn_player(bubble, feet_world, heading):
     remove_player()
     state["player"] = Player(bubble, bubble.to_bubble(feet_world), heading)
-    state["gun"] = Gun(state["player"], props.grabbable)
+    state["gun"] = Gun(state["player"], lambda: props.grabbable(physics) + scatter_rocks.grabbable(),
+                       promote=lambda body: scatter_rocks.promote(state["bubble"], body))
     state["mode"] = "foot"
     state["warp"] = 0
     place_eye()
@@ -1227,7 +1244,8 @@ def frame(dt):
     ship = state["ship"]
     patch = ground_patch_request(ship) if state["mode"] == "ship" and not ship.crashed else None
     bubble = state["bubble"]
-    nearby_trees.request(camera, TRUNK_RADIUS if bubble is not None and bubble.body is planet else 0.0)
+    nearby_trees.request(camera, COLLIDER_RADIUS if bubble is not None else 0.0,
+                         [body.centre() for body in sorted(bodies, key=lambda b: b.index)])
     world.end_frame(camera, (right, up, forward), dt, warp=WARPS[state["warp"]], viewpoint=viewpoint(),
                     patch=patch)
     world.set_orbit_path(orbit_path_points())
@@ -1422,6 +1440,7 @@ def update_cards():
         ("BODIES", "%d, %d awake" % (physics.body_count, physics.active_count)),
         ("CRATES", "%d" % len(props.crates)),
         ("TRUNKS", "%d" % len(trunks.trunks)),
+        ("ROCKS", "%d fixed, %d loose" % (len(scatter_rocks.rocks), len(props.rocks))),
         ("TERRAIN MESHES", "%d built" % (state["terrain_collider"].builds if state["terrain_collider"] else 0)),
     ])
 
@@ -1605,6 +1624,8 @@ def on_init():
         engine.ecs.add_system("PlanetPuntCheck", PuntCheck(), priority=-2)
     elif args.trunk_check:
         engine.ecs.add_system("PlanetTrunkCheck", TrunkCheck(), priority=-2)
+    elif args.promotion_check:
+        engine.ecs.add_system("PlanetPromotionCheck", PromotionCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -2748,7 +2769,7 @@ class PropRestCheck:
 
     def positions(self):
         bubble = state["bubble"]
-        return [bubble.body_relative(p) for p, _ in props.transforms(bubble)]
+        return [bubble.body_relative(p) for p, _ in props.transforms(bubble, props.crates)]
 
     def settle(self):
         if self.clock < self.SETTLE_SECONDS:
@@ -2843,8 +2864,8 @@ class WalkCheck:
     LAP metres at WALK speed, then at RUN, its heading turned each frame by
     its distance along the ground over the circle's radius, and by
     STUCK_TURN more when it covered less than STUCK_DISTANCE in the last
-    second (stopped by ground too steep to climb). While it is on
-    the ground, the gap between its capsule's lower sphere and the nearest
+    second (stopped by ground too steep to climb). While it stands on
+    the terrain mesh (not on a rock), the gap between its capsule's lower sphere and the nearest
     triangle of the terrain mesh around its feet is measured. The feet must stay
     within TOLERANCE of the ground and never more than BELOW under it, and
     each lap must cover at least MIN_LAP_SHARE of its length. Every
@@ -2994,7 +3015,8 @@ class WalkCheck:
             self.second = (self.time, self.distance)
         if player.on_ground and not player.held:
             self.ground_time += dt
-            gap = self.gap()
+            on_terrain = physics.character_ground(player.character)[3] == state["terrain_collider"].mesh
+            gap = self.gap() if on_terrain else None
             if gap is not None:
                 self.low, self.high = min(self.low, gap), max(self.high, gap)
         if self.distance >= self.LAP or self.time > 4.0 * self.LAP / (RUN_SPEED if controls.run else WALK_SPEED):
@@ -3356,6 +3378,186 @@ class PuntCheck(GunCheck):
         self.next_body(ok)
 
 
+class PromotionCheck(GunCheck):
+    """--promotion-check: in the mountains (WalkCheck's place) and on the
+    moon, once the player has stood still with rocks around it, the gun
+    grabs each of the rocks within REACH of the feet in turn (up to
+    TARGETS; those too heavy are skipped): the view is turned to the rock
+    and held still for STILL_FRAMES, the grab control pressed until the
+    rock comes loose (Rocks.promote), the view held still STILL_FRAMES
+    more, and the rock dropped. Then a STRIKE_MASS kg crate is thrown down
+    at STRIKE_SPEED onto the nearest fixed rock left within REACH, which
+    must come loose within STRIKE_TIMEOUT. Each frame, by the stamps of the nearby
+    lists (nearby_trees: the scatter lists every rock it draws near the
+    camera), the cells the scatter listed and the cells of the loose
+    rocks' entities are kept: for WINDOW frames before a promotion's frame
+    its rock must be listed and have no entity, and from that frame on for
+    WINDOW frames have an entity and not be listed, so it is drawn exactly
+    once. Prints per place the rocks promoted, and exits with status 0 when
+    every place promoted at least one rock and every promotion passed, 1
+    otherwise."""
+
+    REACH = 20.0
+    TARGETS = 12
+    STILL_FRAMES = 12
+    WINDOW = 3
+    GRAB_TIMEOUT = 4.0
+
+    def __init__(self):
+        self.bodies = ["mountains", "moon"]
+        self.results = []
+        self.start_body()
+        promote = scatter_rocks.promote
+
+        def recorded(bubble, body):
+            key = scatter_rocks.bodies.get(body)
+            done = promote(bubble, body)
+            if done:
+                self.promotions.append((nearby_trees.stamp + 1, key))
+            return done
+        scatter_rocks.promote = recorded
+
+    def begin(self):
+        self.listed, self.entities, self.promotions = {}, {}, []
+        self.skipped = 0
+        self.struck = False
+        self.next_stage("find")
+
+    def count(self):
+        """This tick's cells: the loose rocks' after the last frame (its
+        nearby stamp), and the scatter's of whichever list came back."""
+        self.entities[nearby_trees.stamp] = {p.key for p in props.rocks}
+        readback = engine.get_readback("NearbyTrees")
+        if readback is not None:
+            stamp, keys = listed_keys(readback["data"])
+            self.listed[stamp] = keys
+
+    def __call__(self, dt):
+        if planet.tree is not None and self.stage in ("find", "aim", "grab", "after", "strike", "strike_after"):
+            self.count()
+        return super().__call__(dt)
+
+    def find(self, dt):
+        if not scatter_rocks.rocks or self.clock < self.STEADY:
+            if self.clock > 30.0:
+                self.finish()
+            return
+        player, bubble = state["player"], state["bubble"]
+        feet = player.feet()
+        near = sorted((length(sub(physics.get_transform(r.body)[0], feet)), r.body)
+                      for r in scatter_rocks.rocks.values())
+        self.targets = [body for d, body in near if d <= self.REACH][:self.TARGETS]
+        self.next_target()
+
+    STEADY = 1.0
+    STRIKE_MASS = 50.0
+    STRIKE_SPEED = 8.0
+    STRIKE_TIMEOUT = 2.0
+
+    def strike(self, dt):
+        """A crate of STRIKE_MASS thrown down at STRIKE_SPEED onto the
+        nearest fixed rock within REACH, in view: it must come loose."""
+        player = state["player"]
+        if self.frames == 1:
+            feet = player.feet()
+            near = sorted((length(sub(physics.get_transform(r.body)[0], feet)), r.body)
+                          for r in scatter_rocks.rocks.values())
+            near = [body for d, body in near if 2.0 < d <= self.REACH]
+            self.rock = near[0] if near else None
+            if self.rock is None:
+                self.finish()
+                return
+            self.aim_at()
+        if self.frames == self.STILL_FRAMES:
+            bubble = state["bubble"]
+            p = physics.get_transform(self.rock)[0]
+            up = bubble.up(p)
+            right, _, forward = player.basis()
+            self.strike_crate = props.spawn_crate(bubble, add(p, scale(up, 2.0)), flight.quat_from_basis(
+                right, up, cross(right, up)), 0.3, mass=self.STRIKE_MASS)
+            physics.set_velocity(self.strike_crate.body, scale(up, -self.STRIKE_SPEED))
+            self.strike_promotions = len(self.promotions)
+        if self.frames > self.STILL_FRAMES:
+            self.struck = len(self.promotions) > self.strike_promotions
+            if self.struck or self.clock > self.STRIKE_TIMEOUT + 0.5:
+                self.next_stage("strike_after")
+
+    def strike_after(self, dt):
+        if self.frames >= self.STILL_FRAMES:
+            self.finish()
+
+    def next_target(self):
+        if not self.targets:
+            self.next_stage("strike")
+            return
+        self.rock = self.targets.pop(0)
+        if not scatter_rocks.is_static_rock(self.rock):
+            self.next_target()
+            return
+        self.next_stage("aim")
+
+    def aim_at(self):
+        player = state["player"]
+        to = normalize(sub(physics.get_transform(self.rock)[0], player.eye()))
+        up = player.up()
+        player.heading = player.level(to, up)
+        player.pitch = math.asin(max(-1.0, min(1.0, dot(to, up))))
+
+    def aim(self, dt):
+        if self.frames == 1:
+            self.aim_at()
+        if self.frames < self.STILL_FRAMES:
+            return
+        gun = state["gun"]
+        if gun.status == "too_heavy" or gun.target is None or gun.target.body != self.rock:
+            self.skipped += 1
+            self.next_target()
+            return
+        self.grab_clock = 0.0
+        self.next_stage("grab")
+
+    def grab(self, dt):
+        controls = state["gun_controls"]
+        controls.grab = self.clock < 0.1 or (state["gun"].held is None and self.clock < self.GRAB_TIMEOUT)
+        if scatter_rocks.is_static_rock(self.rock) and self.clock < self.GRAB_TIMEOUT:
+            return
+        controls.grab = False
+        self.next_stage("after")
+
+    def after(self, dt):
+        if self.frames < self.STILL_FRAMES:
+            return
+        controls = state["gun_controls"]
+        controls.grab = self.frames < self.STILL_FRAMES + 6
+        if controls.grab:
+            return
+        state["gun"].drop()
+        self.next_target()
+
+    def finish(self):
+        state["gun_controls"].grab = False
+        name = self.bodies[0]
+        rows, ok = [], bool(self.promotions)
+        for p, key in self.promotions:
+            stamps = range(p - self.WINDOW, p + self.WINDOW)
+            if not all(s in self.listed and s in self.entities for s in stamps):
+                rows.append("frame %d: lists missing" % p)
+                ok = False
+                continue
+            # Per frame: (drawn by the scatter, drawn as an entity).
+            seen = [(key in self.listed[s], key in self.entities[s]) for s in stamps]
+            good = all(drawn == ((True, False) if s < p else (False, True)) for s, drawn in zip(stamps, seen))
+            ok = ok and good
+            rows.append("ok" if good else "frame %d: %s" % (p, seen))
+        ok = ok and self.struck
+        print("[planet] promotion in the %s: %d rocks promoted, %d too heavy; the thrown crate %s its rock; "
+              "drawn once around each: %s: %s"
+              % (name, len(self.promotions), self.skipped, "knocked loose" if self.struck else "did NOT loosen",
+                 ", ".join(rows) or "-", "passed" if ok else "FAILED"), flush=True)
+        self.clear()
+        self.next_body(ok)
+
+
 class TrunkCheck:
     """--trunk-check: a player put down from preset 1 (5 m above the
     blocks) waits until it has stood on the ground for SETTLE seconds with
@@ -3410,7 +3612,7 @@ class TrunkCheck:
         if not player.on_ground or not trunks.trunks:
             self.clock = 0.0
             if self.frames > 60 * self.TIMEOUT:
-                print("[planet] trunks: none came within %.0f m: FAILED" % TRUNK_RADIUS, flush=True)
+                print("[planet] trunks: none came within %.0f m: FAILED" % COLLIDER_RADIUS, flush=True)
                 os._exit(1)
             return
         if self.clock < self.SETTLE:

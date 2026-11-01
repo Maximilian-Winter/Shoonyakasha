@@ -9,20 +9,29 @@
 //     grass      x: 1 on, 0 off; y: range (m); z: cells per cube face side; w: tufts at most
 //     thinning   x: the distance (m) within which every tree kept is drawn; beyond it a tree is
 //                drawn with a chance of the square of this distance over its own
+//     nearby     x: radius (m) of the plants listed in NearbyTrees; y: stamp; z: capacity
+//     rocks      x: 1 on, 0 off; y: the small rocks' range (m); z: their grid's cells per cube
+//                face side; w: the entries in TakenRocks
+//     moon       xyz: the moon's centre less the camera's position (m)
 //
 // Kinds (one indirect draw each, their instances from kind * instances per
 // kind, as shoonyakasha.planet.vegetation.KINDS): each tree near and far
 // (its impostor) in turn, conifer a and b, broadleaf a and b, acacia (0 to
-// 9); then bush, shrub, cactus (10 to 12); and grass (13), its tufts after
-// the other kinds' instances. An instance is two vec4: (position relative to
-// the camera, height in metres) and (cosine and sine of its turn about its
-// up, tint 0 .. 1, and its foliage's colour packed by vegetationPackColour).
+// 9); then bush, shrub, cactus (10 to 12); rock and boulder (13, 14); and
+// grass (15), its tufts after the other kinds' instances. An instance is
+// two vec4: (position relative to the camera, height in metres) and (cosine
+// and sine of its turn about its up, tint 0 .. 1, and its colour packed by
+// vegetationPackColour, plus VEGETATION_ON_MOON for a rock on the moon).
+// Its up is away from the centre of the body it stands on.
 //
 // A mesh vertex's normal.w is its part (VEGETATION_PART_*), position.w and
 // colour.w its texture's (u, v), colour.rgb its shade.
 
-const int VEGETATION_KINDS = 14;
-const int VEGETATION_GRASS = 13;
+const int VEGETATION_KINDS = 16;
+const int VEGETATION_GRASS = 15;
+const int VEGETATION_ROCK = 13;
+const int VEGETATION_BOULDER = 14;
+const float VEGETATION_ON_MOON = 4194304.0;   // 2^22, above every packed colour
 const int VEGETATION_TREE_KINDS = 10;         // the trees' kinds come first, near then far each
 
 const int VEGETATION_PART_BARK = 0;
@@ -37,8 +46,20 @@ layout(set = VEGETATION_SET, binding = VEGETATION_PARAMS) uniform VegetationPara
     vec4 camera;
     vec4 grass;
     vec4 thinning;
-    vec4 nearby;           // x: radius (m) of the trees listed in NearbyTrees; y: stamp; z: capacity
+    vec4 nearby;
+    vec4 rocks;
+    vec4 moon;
 } vegetation;
+
+// Whether an instance's packed colour marks it as standing on the moon.
+bool vegetationOnMoon(float packed) {
+    return packed >= VEGETATION_ON_MOON;
+}
+
+// The camera's position from the centre of the body an instance stands on.
+vec3 vegetationCameraFromCentre(float packed) {
+    return vegetationOnMoon(packed) ? -vegetation.moon.xyz : vegetation.camera.xyz;
+}
 
 // A linear colour (each channel 0 .. 1) in one float: the square roots of
 // its channels at 7 bits each, so dark colours keep their steps small,
@@ -49,7 +70,7 @@ float vegetationPackColour(vec3 colour) {
 }
 
 vec3 vegetationUnpackColour(float packed) {
-    float v = floor(packed + 0.5);
+    float v = mod(floor(packed + 0.5), VEGETATION_ON_MOON);
     vec3 q = vec3(mod(v, 128.0), mod(floor(v / 128.0), 128.0), floor(v / 16384.0));
     vec3 root = q / 127.0;
     return root * root;

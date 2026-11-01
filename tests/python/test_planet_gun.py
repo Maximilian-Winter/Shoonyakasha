@@ -70,7 +70,7 @@ class Scene:
         flat_mesh(self.physics)
         self.player = Player(self.bubble, (0.0, 0.05, 0.0), (0.0, 0.0, -1.0))
         self.crates = []
-        self.gun = Gun(self.player, lambda: [(c, RADIUS) for c in self.crates])
+        self.gun = Gun(self.player, lambda: [(c, RADIUS, self.physics.mass(c)) for c in self.crates])
         self.controls = GunControls()
         self.run(0.5)
 

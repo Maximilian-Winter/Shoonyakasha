@@ -100,15 +100,19 @@ struct ScatterChunk {
     vec4 morph;
     float u0, v0, u1, v1;  // its face coordinates
     int face;
+    int body;              // 0 the planet, 1 the moon
+    float nearest;         // m from the camera to the chunk's nearest point, at least (less 50 m)
 };
 
 // The chunk of draw `group`, when there is one, it is the planet's (body
-// 0), at least `minLevel`, and its nearest point is within `range`.
-bool scatterChunk(uint group, float minLevel, float range, out ScatterChunk chunk) {
+// 0), or with `moon` the moon's (body 1) too, at least `minLevel`, and its
+// nearest point is within `range`.
+bool scatterChunk(uint group, float minLevel, float range, bool moon, out ScatterChunk chunk) {
     if (group >= chunkDraws.words[0]) return false;
     chunk.slot = chunkDraws.words[4u + group * 5u + 4u];
     ChunkInstance instance = chunks.instances[chunk.slot];
-    if (int(instance.morph.z) != 0 || instance.morph.y < minLevel) return false;
+    chunk.body = int(instance.morph.z);
+    if (chunk.body > (moon ? 1 : 0) || instance.morph.y < minLevel) return false;
     chunk.base = chunk.slot * uint(MORPH_VERTICES);
     chunk.origin = instance.origin.xyz;
     chunk.morph = instance.morph;
@@ -116,7 +120,8 @@ bool scatterChunk(uint group, float minLevel, float range, out ScatterChunk chun
     ChunkVertex last = gridVertex(chunk.base, MORPH_QUADS, MORPH_QUADS);
     ChunkVertex middle = gridVertex(chunk.base, MORPH_QUADS / 2, MORPH_QUADS / 2);
     float halfDiagonal = 0.5 * length(last.positionU.xyz - first.positionU.xyz) + 50.0;
-    if (length(chunk.origin + middle.positionU.xyz) - halfDiagonal > range) return false;
+    chunk.nearest = length(chunk.origin + middle.positionU.xyz) - halfDiagonal;
+    if (chunk.nearest > range) return false;
     chunk.u0 = first.positionU.w;
     chunk.v0 = first.normalV.w;
     chunk.u1 = last.positionU.w;

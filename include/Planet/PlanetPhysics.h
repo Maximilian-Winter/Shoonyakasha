@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace Shoonyakasha::Planet {
 
@@ -150,6 +151,14 @@ public:
     /// character's inner body and the bodies passing through it.
     bool castRay(const PhysicsVec3& origin, const PhysicsVec3& direction, double maxDistance,
                  PhysicsRayHit& hit, int skipCharacter = -1) const;
+
+    /// Whether a dynamic body striking `body` is reported (takeStruck).
+    void watchStrikes(uint32_t body, bool watched);
+    /// The momentum (kg m/s) a dynamic body must strike a watched body
+    /// with, along the contact's normal, for the strike to be reported.
+    void setStrikeMomentum(double momentum);
+    /// The watched bodies struck since the last call, each once.
+    std::vector<uint32_t> takeStruck();
 
     /// For the next step, each awake dynamic body pulled towards `centre`
     /// with acceleration gm / r^2 (gm in m^3/s^2).

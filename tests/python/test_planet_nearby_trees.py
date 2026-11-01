@@ -46,14 +46,15 @@ class FakeEngine:
 
 
 def readback(stamp, plants, count=None):
-    """NearbyTrees' words: (relative, size, tint, kind, face, cu, cv) per plant."""
+    """NearbyTrees' words: (relative, size, tint, kind, face, cu, cv, body, turn) per plant."""
     words = np.zeros(HEADER + CAPACITY * WORDS, dtype=np.uint32)
     words[0] = len(plants) if count is None else count
     words[1] = stamp
-    for k, (relative, size, tint, kind, face, cu, cv) in enumerate(plants):
+    for k, (relative, size, tint, kind, face, cu, cv, body, turn) in enumerate(plants):
         at = HEADER + k * WORDS
         words[at:at + 5] = np.array(list(relative) + [size, tint], dtype=np.float32).view(np.uint32)
-        words[at + 5:at + 9] = np.array([kind, face, cu, cv], dtype=np.int32).view(np.uint32)
+        words[at + 5:at + 10] = np.array([kind, face, cu, cv, body], dtype=np.int32).view(np.uint32)
+        words[at + 10:at + 12] = np.array([np.cos(turn), np.sin(turn)], dtype=np.float32).view(np.uint32)
     return {"data": words.tobytes(), "frame": 0}
 
 
@@ -73,7 +74,7 @@ class NearbyTreesTest(unittest.TestCase):
             radius, top = nearby_trees.TRUNKS[name]
             self.assertGreater(radius, 0.0)
             self.assertLessEqual(top, 1.0)
-        tree = NearbyTree((0, 1, 2), "conifer_a_far", (0.0, 0.0, 0.0), 10.0, 1.1)
+        tree = NearbyTree((0, 0, 0, 1, 2), "conifer_a_far", (0.0, 0.0, 0.0), 10.0, 1.1)
         radius, height = tree.trunk
         self.assertAlmostEqual(radius, nearby_trees.TRUNKS["conifer_a"][0] * 11.0)
         self.assertAlmostEqual(height, nearby_trees.TRUNKS["conifer_a"][1] * 10.0)
@@ -89,18 +90,31 @@ class NearbyTreesTest(unittest.TestCase):
         nearby = NearbyTrees(engine)
         self.assertIsNone(nearby.read())
         nearby.request((100.0, 0.0, 0.0), 40.0)
-        nearby.request((200.0, 0.0, 0.0), 40.0)
+        nearby.request((200.0, 0.0, 0.0), 40.0, [(0.0, 0.0, 0.0), (1000.0, 0.0, 0.0)])
         self.assertEqual(engine.custom["planet.vegetation.nearby"], (40.0, 2.0, float(CAPACITY), 0.0))
         self.assertEqual(int(engine.buffers["NearbyTrees"][0]), 0)
-        engine.readback = readback(2, [((1.0, 2.0, -3.0), 12.0, 0.25, vegetation.KINDS.index("acacia"), 4, -7, 9)])
+        engine.readback = readback(2, [((1.0, 2.0, -3.0), 12.0, 0.25, vegetation.KINDS.index("acacia"), 4, -7, 9, 0, 0.0),
+                                       ((0.5, 0.0, 0.0), 0.2, 0.5, vegetation.KINDS.index("rock"), 2, 70, 80, 1, 1.0),
+                                       ((0.0, 0.0, 5.0), 0.9, 0.5, vegetation.KINDS.index("boulder"), 3, 7, 8, 1, 2.0)])
         trees = nearby.read()
-        self.assertEqual(len(trees), 1)
-        tree = trees[0]
-        self.assertEqual(tree.key, (4, -7, 9))
+        self.assertEqual(len(trees), 3)
+        tree, rock, boulder = trees
+        self.assertEqual(tree.key, (0, 0, 4, -7, 9))
         self.assertEqual(tree.kind, "acacia")
+        self.assertFalse(tree.rock)
         self.assertEqual(tree.base, (201.0, 2.0, -3.0))
         self.assertAlmostEqual(tree.height, 12.0)
         self.assertAlmostEqual(tree.width, nearby_trees.width_factor(0.25))
+        self.assertAlmostEqual(tree.tint, 0.25)
+        # Small rocks lie on grid 1, boulders on the trees' grid 0.
+        self.assertEqual(rock.key, (1, 1, 2, 70, 80))
+        self.assertEqual(boulder.key, (1, 0, 3, 7, 8))
+        self.assertTrue(rock.rock and boulder.rock)
+        self.assertEqual(rock.body, 1)
+        # Bases from their body's centre as it was that frame.
+        self.assertEqual(rock.base, (200.5 - 1000.0, 0.0, 0.0))
+        self.assertAlmostEqual(rock.turn[0], np.cos(1.0), places=6)
+        self.assertAlmostEqual(rock.turn[1], np.sin(1.0), places=6)
         # Stamp 1 was older than 2: dropped; stamp 2 taken: a second read of it gives None.
         self.assertIsNone(nearby.read())
         engine.readback = readback(1, [])
@@ -110,13 +124,14 @@ class NearbyTreesTest(unittest.TestCase):
         engine = FakeEngine()
         nearby = NearbyTrees(engine)
         nearby.request((0.0, 0.0, 0.0), 40.0)
-        engine.readback = readback(1, [((0.0, 0.0, 0.0), 1.0, 0.0, 0, 0, 0, 0)] * CAPACITY, count=CAPACITY + 50)
+        engine.readback = readback(1, [((0.0, 0.0, 0.0), 1.0, 0.0, 0, 0, 0, 0, 0, 0.0)] * CAPACITY, count=CAPACITY + 50)
         self.assertEqual(len(nearby.read()), CAPACITY)
 
 
 class Body:
     def __init__(self, radius):
         self.radius = radius
+        self.index = 0
 
     def centre(self):
         return (0.0, 0.0, 0.0)
@@ -141,8 +156,8 @@ class TrunksTest(unittest.TestCase):
         bubble = Bubble(physics, Body(radius), 4.905 * radius ** 2, (0.0, radius, 0.0))
         trunks = self.trunks_module.Trunks()
         camera = (0.0, radius + 1.7, 0.0)
-        near = NearbyTree((4, 0, 0), "broadleaf_a", (5.0, radius, 0.0), 12.0, 1.0)
-        far = NearbyTree((4, 1, 0), "conifer_a", (0.0, radius, -30.0), 15.0, 1.0)
+        near = NearbyTree((0, 0, 4, 0, 0), "broadleaf_a", (5.0, radius, 0.0), 12.0, 1.0)
+        far = NearbyTree((0, 0, 4, 1, 0), "conifer_a", (0.0, radius, -30.0), 15.0, 1.0)
         trunks.update(bubble, [near, far], camera, 40.0)
         self.assertEqual(len(trunks.trunks), 2)
         trunk_radius, height = near.trunk

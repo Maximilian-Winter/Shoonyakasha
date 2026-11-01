@@ -199,13 +199,17 @@
         { "name": "thinning", "type": "vec4", "source": "scene.custom.planet.vegetation.thinning",
           "default": [ 2500.0, 0.0, 0.0, 0.0 ] },
         { "name": "nearby", "type": "vec4", "source": "scene.custom.planet.vegetation.nearby",
-          "default": [ 0.0, 0.0, 256.0, 0.0 ] }
+          "default": [ 0.0, 0.0, 1024.0, 0.0 ] },
+        { "name": "rocks", "type": "vec4", "source": "scene.custom.planet.vegetation.rocks",
+          "default": [ 0.0, 150.0, 65536.0, 0.0 ] },
+        { "name": "moon", "type": "vec4", "source": "scene.custom.planet.vegetation.moon",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] }
       ]
     },
     "NearbyTrees": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 3076,
+      "elementCount": 12292,
       "fields": [ { "name": "word", "type": "uint" } ],
       "target": { "name": "NearbyTrees", "readback": { "frequency": "per_frame" } }
     },
@@ -228,14 +232,20 @@
     "VegetationInstances": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 983040,
+      "elementCount": 1114112,
       "fields": [ { "name": "data", "type": "vec4" } ],
       "memory": { "location": "device_local" }
     },
     "VegetationDraws": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 72,
+      "elementCount": 82,
+      "fields": [ { "name": "word", "type": "uint" } ]
+    },
+    "TakenRocks": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 16384,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
     "GroundParams": {
@@ -472,7 +482,9 @@
         { "binding": 4, "type": "storage_buffer", "stages": [ "compute" ], "name": "VegetationDraws",
           "autoBindBuffer": "VegetationDraws" },
         { "binding": 5, "type": "storage_buffer", "stages": [ "compute" ], "name": "NearbyTrees",
-          "autoBindBuffer": "NearbyTrees" }
+          "autoBindBuffer": "NearbyTrees" },
+        { "binding": 6, "type": "storage_buffer", "stages": [ "compute" ], "name": "TakenRocks",
+          "autoBindBuffer": "TakenRocks" }
       ]
     },
     "vegetationChunkSet": {
@@ -714,7 +726,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 13, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 15, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/shadow_vegetation.vert.spv",
@@ -771,7 +783,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 14, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 16, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/vegetation.vert.spv",

@@ -1,6 +1,7 @@
 """Tests for sk.PlanetPhysics (include/Planet/PlanetPhysics.h): bodies
 falling under central gravity onto a grid mesh and coming to rest, the
-origin shifted without waking them, ray casts, a turned capsule, motion changes, batched
+origin shifted without waking them, ray casts, a turned capsule, strikes
+on watched bodies reported above a momentum, motion changes, batched
 transforms and errors; characters standing and walking on a mesh along
 any up, moved by an origin shift, riding a kinematic platform, holding
 up bodies that land on them, letting bodies set to pass through them fall
@@ -130,6 +131,32 @@ class PlanetPhysicsTest(unittest.TestCase):
         hit = w.physics.cast_ray((1.2, 5.0, 0.0), (0.0, -1.0, 0.0), 10.0)
         self.assertAlmostEqual(hit[1][1], 1.5 + math.sqrt(0.4 ** 2 - 0.2 ** 2), delta=1e-3)
         self.assertEqual(w.physics.cast_ray((1.5, 5.0, 0.0), (0.0, -1.0, 0.0), 10.0)[0], w.mesh)
+
+    def test_strikes_on_watched_bodies(self):
+        w = World()
+        w.physics.set_strike_momentum(100.0)
+        target = w.physics.create_box((0.5, 0.5, 0.5), (0.0, 0.5, 0.0), motion="static")
+        other = w.physics.create_box((0.5, 0.5, 0.5), (3.0, 0.5, 0.0), motion="static")
+        w.physics.watch_strikes(target)
+        # 10 kg dropped from 0.1 m above: about 1 m/s, 10 kg m/s, below the threshold.
+        soft = w.physics.create_box((0.2, 0.2, 0.2), (0.0, 1.3, 0.0), mass=10.0)
+        w.run(1.0)
+        self.assertEqual(w.physics.take_struck(), [])
+        w.physics.remove(soft)
+        # 50 kg thrown down at 5 m/s: 250 kg m/s, reported once; the unwatched box is not.
+        hard = w.physics.create_box((0.2, 0.2, 0.2), (0.0, 2.5, 0.0), mass=50.0)
+        w.physics.set_velocity(hard, (0.0, -5.0, 0.0))
+        thrown = w.physics.create_box((0.2, 0.2, 0.2), (3.0, 2.5, 0.0), mass=50.0)
+        w.physics.set_velocity(thrown, (0.0, -5.0, 0.0))
+        w.run(1.0)
+        self.assertEqual(w.physics.take_struck(), [target])
+        self.assertEqual(w.physics.take_struck(), [])
+        w.physics.watch_strikes(target, False)
+        w.physics.set_velocity(hard, (0.0, -5.0, 0.0))
+        w.physics.set_transform(hard, (0.0, 2.5, 0.0), (1.0, 0.0, 0.0, 0.0))
+        w.run(1.0)
+        self.assertEqual(w.physics.take_struck(), [])
+        self.assertTrue(w.physics.contains(other))
 
     def test_static_bodies_stay_and_turn_dynamic(self):
         w = World()

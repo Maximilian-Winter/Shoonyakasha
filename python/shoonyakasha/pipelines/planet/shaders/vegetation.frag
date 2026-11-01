@@ -13,7 +13,8 @@
 //     plain     the plant's colour times the shade
 //
 // Bark and plain parts are lit as diffuse surfaces (atmosphere.glsl's
-// lightSurface), a back face with its normal turned round. Foliage is lit
+// lightSurface), a back face with its normal turned round; a rock on the
+// moon by the sunlight alone, as the moon's ground. Foliage is lit
 // by the sun wrapped FOLIAGE_WRAP past its terminator, light through it
 // where the sun is behind it (FOLIAGE_THROUGH of the sunlight on its
 // back), a glow towards the sun seen through it (FOLIAGE_GLOW), all of
@@ -39,6 +40,7 @@ layout(location = 5) in float fragShade;
 layout(location = 6) flat in vec3 fragRight;
 layout(location = 7) flat in vec3 fragUp;
 layout(location = 8) flat in vec3 fragFacing;
+layout(location = 9) flat in int fragOnMoon;
 
 layout(location = 0) out vec4 outColor;
 
@@ -81,6 +83,13 @@ void main() {
     float sunShare = sunShadow(fragRelativePos, normal) * cloudShadow(p);
     if (!foliage) {
         if (!gl_FrontFacing && fragPart != PART_IMPOSTOR) normal = -normal;
+        if (fragOnMoon == 1) {
+            // No air: the sunlight alone, as on the moon's ground.
+            float sunCos = max(dot(normal, atmosphere.sun.xyz), 0.0);
+            outColor = vec4(albedo / ATMOSPHERE_PI * sunlightAt(p) * sunCos * sunShadow(fragRelativePos, normal),
+                            1.0);
+            return;
+        }
         outColor = vec4(lightSurface(albedo, p, normal, radial, sunShare), 1.0);
         return;
     }

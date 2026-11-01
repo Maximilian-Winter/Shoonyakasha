@@ -10,6 +10,7 @@
 #include <Jolt/Physics/Body/BodyFilter.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/GroupFilter.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
@@ -139,6 +140,52 @@ public:
     }
 };
 
+constexpr JPH::uint64 WATCHED = 1;     // a body's user data: strikes on it are reported
+
+/// Reports the watched bodies a dynamic body strikes with at least
+/// `momentum` along the contact's normal, from the physics' job threads.
+class Strikes final : public JPH::ContactListener {
+public:
+    void OnContactAdded(const JPH::Body& a, const JPH::Body& b, const JPH::ContactManifold& manifold,
+                        JPH::ContactSettings&) override {
+        check(a, b, manifold);
+        check(b, a, manifold);
+    }
+
+    std::vector<uint32_t> take() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        std::vector<uint32_t> struck;
+        struck.swap(m_struck);
+        std::sort(struck.begin(), struck.end());
+        struck.erase(std::unique(struck.begin(), struck.end()), struck.end());
+        return struck;
+    }
+
+    float momentum = 300.0f;
+
+private:
+    void check(const JPH::Body& watched, const JPH::Body& other, const JPH::ContactManifold& manifold) {
+        if (watched.GetUserData() != WATCHED || !other.IsDynamic() || manifold.mRelativeContactPointsOn1.empty()) {
+            return;
+        }
+        JPH::RVec3 point = manifold.GetWorldSpaceContactPointOn1(0);
+        JPH::Vec3 relative = other.GetPointVelocity(point);
+        if (!watched.IsStatic()) {
+            relative -= watched.GetPointVelocity(point);
+        }
+        float speed = std::abs(relative.Dot(manifold.mWorldSpaceNormal));
+        float inverse = other.GetMotionProperties()->GetInverseMass();
+        if (inverse <= 0.0f || speed / inverse < momentum) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_struck.push_back(watched.GetID().GetIndexAndSequenceNumber());
+    }
+
+    std::mutex m_mutex;
+    std::vector<uint32_t> m_struck;
+};
+
 /// Every body but the character's inner body and the bodies in its group.
 class SkipCharacter final : public JPH::BodyFilter {
 public:
@@ -167,6 +214,7 @@ struct PlanetPhysics::Impl {
     JPH::BodyIDVector scratch;
     std::vector<JPH::Ref<JPH::CharacterVirtual>> characters;   // by id; null once removed
     JPH::Ref<CharacterGroups> characterGroups;
+    Strikes strikes;
 
     void setGroup(JPH::BodyID body, JPH::CollisionGroup group) {
         JPH::BodyLockWrite lock(system.GetBodyLockInterface(), body);
@@ -235,6 +283,7 @@ PlanetPhysics::PlanetPhysics(uint32_t maxBodies, int threads) : m_impl(std::make
     m_impl->system.Init(maxBodies, 0, MAX_BODY_PAIRS, MAX_CONTACT_CONSTRAINTS, m_impl->broadPhaseLayers,
                         m_impl->objectVsBroadPhase, m_impl->objectPairs);
     m_impl->system.SetGravity(JPH::Vec3::sZero());
+    m_impl->system.SetContactListener(&m_impl->strikes);
 }
 
 PlanetPhysics::~PlanetPhysics() {
@@ -520,6 +569,18 @@ bool PlanetPhysics::castRay(const PhysicsVec3& origin, const PhysicsVec3& direct
     hit.normal = fromVec3(lock.GetBody().GetWorldSpaceSurfaceNormal(result.mSubShapeID2, point));
     hit.fraction = static_cast<double>(result.mFraction);
     return true;
+}
+
+void PlanetPhysics::watchStrikes(uint32_t body, bool watched) {
+    m_impl->bodies().SetUserData(m_impl->added(body), watched ? WATCHED : 0);
+}
+
+void PlanetPhysics::setStrikeMomentum(double momentum) {
+    m_impl->strikes.momentum = static_cast<float>(momentum);
+}
+
+std::vector<uint32_t> PlanetPhysics::takeStruck() {
+    return m_impl->strikes.take();
 }
 
 void PlanetPhysics::applyCentralGravity(const PhysicsVec3& centre, double gm) {

@@ -37,19 +37,21 @@ class Trunks:
         self.trunks = {}             # key: Trunk
 
     def update(self, bubble, trees, camera, radius):
-        """The trunks of `trees` (nearby_trees.NearbyTree, planet space) in
-        `bubble`; those farther than `radius` + KEEP from `camera` (planet
-        space) removed."""
+        """The trunks of `trees` (nearby_trees.NearbyTree; those on the
+        bubble's body that are not rocks) in `bubble`; those farther than
+        `radius` + KEEP from `camera` (planet space) removed."""
         physics, body = bubble.physics, bubble.body
         for tree in trees:
-            base = body.relative(tree.base)
+            if tree.rock or tree.body != body.index:
+                continue
+            base = tree.base
             trunk = self.trunks.get(tree.key)
             if trunk is not None and trunk.kind == tree.kind and length(sub(trunk.base, base)) <= MOVED:
                 continue
             if trunk is not None:
                 physics.remove(trunk.body)
             trunk_radius, height = tree.trunk
-            p = bubble.to_bubble(tree.base)
+            p = sub(base, bubble.origin)
             up = bubble.up(p)
             east, _ = local_frame(up)
             rotation = quat_from_basis(east, up, cross(east, up))

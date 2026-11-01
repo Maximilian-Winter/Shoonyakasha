@@ -42,6 +42,11 @@ ground patch the caller asks for (an object with `directions` and
 `set_heights(heights)`, up to PATCH_PROBES), and EXTRA_PROBES directions in
 `extra_probes`. Their heights come back some frames later
 (`probe_latency`): `ground`, `site_height`, `patch` and `extra_heights`.
+
+The vegetation (vegetation.py's kinds) and, with `rocks`, the rocks on
+both bodies are scattered on the GPU each frame (vegetation_scatter.comp,
+grass_scatter.comp); `taken_rocks` (rocks.TakenRocks) holds the cells
+whose rocks the scatter leaves out.
 """
 
 import math
@@ -50,6 +55,7 @@ from pathlib import Path
 import numpy as np
 
 from . import cube_sphere, ground_textures, orbits, shadows, vegetation, vegetation_impostors, vegetation_textures
+from .rocks import TakenRocks
 from .vec import add, dot, euler_from_basis, length, local_frame, normalize, scale, sub
 
 #: The planet pipeline shipped with the package.
@@ -94,6 +100,10 @@ TAA_RESET_DISTANCE = 5_000.0
 GRASS_CELLS = 131072
 GRASS_CAPACITY = 65536
 GRASS_RANGE = 150.0
+# The small rocks (vegetation_scatter.comp): candidate cells per cube face side (2.4 m on the planet,
+# 0.6 m on the moon) and their range (m). Boulders lie on the trees' grid within the bushes' range.
+ROCK_CELLS = 65536
+ROCK_RANGE = 150.0
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -407,6 +417,8 @@ class PlanetWorld:
         self.vegetation_range = VEGETATION_RANGE
         self.grass = True
         self.grass_range = GRASS_RANGE
+        self.rocks = True
+        self.taken_rocks = TakenRocks(engine)   # the cells whose rocks the scatter leaves out
         self.vegetation_draws = None       # the kinds' draws with no instances, set again each frame
         self.vegetation_scans = False      # whether the vegetation's textures came from the downloaded scans
         self.temperature_offset = 0.0      # degrees C added to the climate's temperature
@@ -609,7 +621,9 @@ class PlanetWorld:
 
     def upload_vegetation(self):
         """This frame's vegetation settings, and its draws with no instances,
-        which VegetationScatter fills."""
+        which VegetationScatter fills; the rocks' settings with the count of
+        `taken_rocks` (its table sent when it changed), and the moon's
+        centre relative to the camera."""
         engine = self.engine
         engine.set_custom_vec4("planet.vegetation.settings",
                                (1.0 if self.vegetation else 0.0, self.vegetation_range, float(VEGETATION_CELLS),
@@ -621,6 +635,12 @@ class PlanetWorld:
                                (1.0 if self.grass else 0.0, self.grass_range, float(GRASS_CELLS), float(GRASS_CAPACITY)))
         engine.set_custom_vec4("planet.vegetation.thinning",
                                (vegetation_thinning(self.vegetation_range), 0.0, 0.0, 0.0))
+        taken = self.taken_rocks.upload()
+        engine.set_custom_vec4("planet.vegetation.rocks",
+                               (1.0 if self.rocks else 0.0, ROCK_RANGE, float(ROCK_CELLS), float(taken)))
+        moon = self.moon
+        relative = sub(moon.centre(), self.position) if moon is not None else (0.0, 0.0, 0.0)
+        engine.set_custom_vec4("planet.vegetation.moon", tuple(relative) + (0.0,))
         if self.vegetation_draws is not None:
             engine.set_buffer("VegetationDraws", self.vegetation_draws)
 
@@ -744,8 +764,10 @@ class PlanetWorld:
 
     def regenerate(self):
         """Apply changed terrain parameters: every chunk is released, the
-        site's height is measured again, and the planet is built again."""
+        site's height is measured again, the planet is built again, and its
+        taken rocks are put back."""
         self.lod.drop_tree(self.planet.index)
+        self.taken_rocks.clear_body(self.planet.index)
         self.lod_version += 1
         self.site_height = None
         self.ground = None

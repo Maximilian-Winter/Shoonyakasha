@@ -1,9 +1,11 @@
 """Tests for the vegetation's meshes of shoonyakasha.planet (vegetation.py):
 the kinds' index ranges cover whole triangles of their own vertices, every
-kind is one unit tall from its base, normals are of unit length, each kind
-is made of the parts it should be (trees of bark and cards, far kinds of
-one impostor quad as wide as the tree, bushes of cards, the cactus plain,
-grass of grass cards), cards show their atlas cards and impostors the
+kind is one unit tall from its base (a rock reaching ROCK_SINK below it),
+normals are of unit length, each kind is made of the parts it should be
+(trees of bark and cards, far kinds of one impostor quad as wide as the
+tree, bushes of cards, the cactus and the rocks plain, grass of grass
+cards), the rocks are centred on their axis and closed with outward
+normals, cards show their atlas cards and impostors the
 rects given, crowns' normals point out of the crown, grass leans up and is
 darker at its base, the meshes, kinds and draws fit the pipeline's buffers
 and passes and the shaders' constants, the trees thinned with distance fit
@@ -52,7 +54,29 @@ class VegetationMeshTest(unittest.TestCase):
         for name in vegetation.KINDS:
             part = self.kind(name)
             self.assertAlmostEqual(float(part[:, 1].max()), 1.0, places=5, msg=name)
-            self.assertGreaterEqual(float(part[:, 1].min()), -0.06, name)
+            if name in vegetation.ROCKS:
+                self.assertAlmostEqual(float(part[:, 1].min()), -vegetation.ROCK_SINK, places=5, msg=name)
+            else:
+                self.assertGreaterEqual(float(part[:, 1].min()), -0.06, name)
+
+    def test_rocks_are_centred_and_closed(self):
+        for name in vegetation.ROCKS:
+            part = self.kind(name)
+            for axis in (0, 2):
+                self.assertAlmostEqual(float(part[:, axis].min() + part[:, axis].max()), 0.0, places=5)
+            positions, normals, shades = vegetation.rock_triangles(name)
+            self.assertEqual(len(positions) % 3, 0)
+            # A closed surface with outward normals: the flux of the position field is three times the volume.
+            a, b, c = positions[0::3], positions[1::3], positions[2::3]
+            volume = float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum()) / 6.0
+            self.assertGreater(volume, 0.0)
+            centres = (a + b + c) / 3.0 - (0.0, 0.5 - 0.5 * vegetation.ROCK_SINK, 0.0)
+            self.assertTrue(np.all(np.einsum("ij,ij->i", normals[0::3], centres) > 0.0))
+            self.assertTrue(np.all((shades >= 0.6) & (shades <= 1.0)))
+            points = vegetation.rock_points(name)
+            subdivisions = vegetation.ROCKS[name][2]
+            self.assertEqual(len(points), 10 * 4 ** subdivisions + 2)
+            self.assertEqual(len(positions), 3 * 20 * 4 ** subdivisions)
 
     def test_normals_are_unit(self):
         np.testing.assert_allclose(np.linalg.norm(self.vertices[:, 4:7], axis=1), 1.0, atol=1e-4)
@@ -64,6 +88,8 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertEqual(self.parts("bush"), {vegetation.PART_CARD})
         self.assertEqual(self.parts("shrub"), {vegetation.PART_CARD})
         self.assertEqual(self.parts("cactus"), {vegetation.PART_PLAIN})
+        self.assertEqual(self.parts("rock"), {vegetation.PART_PLAIN})
+        self.assertEqual(self.parts("boulder"), {vegetation.PART_PLAIN})
         self.assertEqual(self.parts("grass"), {vegetation.PART_GRASS})
 
     def test_cards_show_atlas_cards(self):
