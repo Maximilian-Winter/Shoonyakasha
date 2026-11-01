@@ -14,7 +14,8 @@
 //
 // Bark and plain parts are lit as diffuse surfaces (atmosphere.glsl's
 // lightSurface), a back face with its normal turned round; a rock on the
-// moon by the sunlight alone, as the moon's ground. Foliage is lit
+// moon by the sunlight alone, as the moon's ground. An ore rock adds its
+// glowing specks (oreSpeck), lit or not. Foliage is lit
 // by the sun wrapped FOLIAGE_WRAP past its terminator, light through it
 // where the sun is behind it (FOLIAGE_THROUGH of the sunlight on its
 // back), a glow towards the sun seen through it (FOLIAGE_GLOW), all of
@@ -41,6 +42,8 @@ layout(location = 6) flat in vec3 fragRight;
 layout(location = 7) flat in vec3 fragUp;
 layout(location = 8) flat in vec3 fragFacing;
 layout(location = 9) flat in int fragOnMoon;
+layout(location = 10) in vec3 fragLocal;
+layout(location = 11) flat in int fragOre;
 
 layout(location = 0) out vec4 outColor;
 
@@ -53,6 +56,24 @@ const float FOLIAGE_THROUGH = 0.45;
 const float FOLIAGE_GLOW = 0.6;
 const float FOLIAGE_LEAK = 0.25;    // of the sunlight: what reaches foliage in shadow through the leaves
 const float FOLIAGE_SKY = 1.6;      // the sky light on foliage, of a level surface's
+const float ORE_SPECK_CELLS = 24.0; // cells per unit of the mesh (its height) the specks are hashed in
+const float ORE_SPECK_SHARE = 0.12; // of the cells that hold a speck
+const float ORE_SPECK_RADIUS = 0.3; // of a cell
+const vec3 ORE_SPECK_COLOUR = vec3(1.0, 0.72, 0.28);
+const float ORE_SPECK_GLOW = 0.2;   // of the sun's illuminance over pi
+
+// An ore rock's glowing specks: 1 inside a speck, 0 elsewhere. A speck is a
+// sphere of ORE_SPECK_RADIUS of a cell around a hashed point of the cells
+// of the mesh's own position that ORE_SPECK_SHARE of them hold.
+float oreSpeck(vec3 local) {
+    vec3 q = local * ORE_SPECK_CELLS;
+    ivec3 cell = ivec3(floor(q));
+    uint h = terrainHash(cell + ivec3(911, 353, 727));
+    if (float(h & 0xFFFFu) / 65536.0 >= ORE_SPECK_SHARE) return 0.0;
+    vec3 centre = vec3(cell) + 0.25 + 0.5 * vec3(float((h >> 16) & 0xFu), float((h >> 20) & 0xFu),
+                                                 float((h >> 24) & 0xFu)) / 15.0;
+    return 1.0 - smoothstep(ORE_SPECK_RADIUS * 0.6, ORE_SPECK_RADIUS, length(q - centre));
+}
 
 void main() {
     vec3 p = camera.cameraFromCentre.xyz + fragRelativePos;
@@ -83,14 +104,16 @@ void main() {
     float sunShare = sunShadow(fragRelativePos, normal) * cloudShadow(p);
     if (!foliage) {
         if (!gl_FrontFacing && fragPart != PART_IMPOSTOR) normal = -normal;
+        vec3 glow = fragOre == 1 ? ORE_SPECK_COLOUR * (ORE_SPECK_GLOW * atmosphere.mie.z / ATMOSPHERE_PI
+                                                       * oreSpeck(fragLocal)) : vec3(0.0);
         if (fragOnMoon == 1) {
             // No air: the sunlight alone, as on the moon's ground.
             float sunCos = max(dot(normal, atmosphere.sun.xyz), 0.0);
-            outColor = vec4(albedo / ATMOSPHERE_PI * sunlightAt(p) * sunCos * sunShadow(fragRelativePos, normal),
-                            1.0);
+            outColor = vec4(albedo / ATMOSPHERE_PI * sunlightAt(p) * sunCos * sunShadow(fragRelativePos, normal)
+                            + glow, 1.0);
             return;
         }
-        outColor = vec4(lightSurface(albedo, p, normal, radial, sunShare), 1.0);
+        outColor = vec4(lightSurface(albedo, p, normal, radial, sunShare) + glow, 1.0);
         return;
     }
     vec3 sun = atmosphere.sun.xyz;

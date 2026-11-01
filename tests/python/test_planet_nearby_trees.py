@@ -3,7 +3,7 @@ trunks (examples/python/simulations/planet/trunks.py): the NearbyTrees
 buffer and parameter fit the pipeline, every plant with a trunk has its
 trunk's shares, the width factor matches vegetation.glsl's, a list read
 back by stamp (each plant's key, kind, base from that frame's camera,
-height and width; the count capped; older stamps dropped; an unknown stamp
+height and width, an ore rock's grade; the count capped; older stamps dropped; an unknown stamp
 giving None), and on sk.PlanetPhysics the trunks made for a list: a
 capsule per plant standing along the up, kept while the list leaves it
 out, made again when its base moves, and removed beyond the radius.
@@ -95,7 +95,10 @@ class NearbyTreesTest(unittest.TestCase):
         self.assertEqual(int(engine.buffers["NearbyTrees"][0]), 0)
         engine.readback = readback(2, [((1.0, 2.0, -3.0), 12.0, 0.25, vegetation.KINDS.index("acacia"), 4, -7, 9, 0, 0.0),
                                        ((0.5, 0.0, 0.0), 0.2, 0.5, vegetation.KINDS.index("rock"), 2, 70, 80, 1, 1.0),
-                                       ((0.0, 0.0, 5.0), 0.9, 0.5, vegetation.KINDS.index("boulder"), 3, 7, 8, 1, 2.0)])
+                                       ((0.0, 0.0, 5.0), 0.9, 0.5, vegetation.KINDS.index("boulder") | (204 << 8),
+                                        3, 7, 8, 1, 2.0)])
+        stamp, keys = nearby_trees.listed_keys(engine.readback["data"])
+        self.assertIn((1, 0, 3, 7, 8), keys)
         trees = nearby.read()
         self.assertEqual(len(trees), 3)
         tree, rock, boulder = trees
@@ -111,6 +114,10 @@ class NearbyTreesTest(unittest.TestCase):
         self.assertEqual(boulder.key, (1, 0, 3, 7, 8))
         self.assertTrue(rock.rock and boulder.rock)
         self.assertEqual(rock.body, 1)
+        # An ore boulder's grade in the kind's word from bit 8.
+        self.assertEqual(boulder.kind, "boulder")
+        self.assertAlmostEqual(boulder.grade, 204.0 / 255.0)
+        self.assertEqual((rock.grade, tree.grade), (0.0, 0.0))
         # Bases from their body's centre as it was that frame.
         self.assertEqual(rock.base, (200.5 - 1000.0, 0.0, 0.0))
         self.assertAlmostEqual(rock.turn[0], np.cos(1.0), places=6)

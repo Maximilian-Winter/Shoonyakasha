@@ -21,7 +21,8 @@
 // grass (15), its tufts after the other kinds' instances. An instance is
 // two vec4: (position relative to the camera, height in metres) and (cosine
 // and sine of its turn about its up, tint 0 .. 1, and its colour packed by
-// vegetationPackColour, plus VEGETATION_ON_MOON for a rock on the moon).
+// vegetationPackColour, plus VEGETATION_ON_MOON for a rock on the moon and
+// VEGETATION_ORE for an ore rock).
 // Its up is away from the centre of the body it stands on.
 //
 // A mesh vertex's normal.w is its part (VEGETATION_PART_*), position.w and
@@ -32,6 +33,7 @@ const int VEGETATION_GRASS = 15;
 const int VEGETATION_ROCK = 13;
 const int VEGETATION_BOULDER = 14;
 const float VEGETATION_ON_MOON = 4194304.0;   // 2^22, above every packed colour
+const float VEGETATION_ORE = 8388608.0;       // 2^23
 const int VEGETATION_TREE_KINDS = 10;         // the trees' kinds come first, near then far each
 
 const int VEGETATION_PART_BARK = 0;
@@ -53,7 +55,12 @@ layout(set = VEGETATION_SET, binding = VEGETATION_PARAMS) uniform VegetationPara
 
 // Whether an instance's packed colour marks it as standing on the moon.
 bool vegetationOnMoon(float packed) {
-    return packed >= VEGETATION_ON_MOON;
+    return mod(floor(packed + 0.5), VEGETATION_ORE) >= VEGETATION_ON_MOON;
+}
+
+// Whether an instance's packed colour marks it as an ore rock.
+bool vegetationOre(float packed) {
+    return packed >= VEGETATION_ORE;
 }
 
 // The camera's position from the centre of the body an instance stands on.

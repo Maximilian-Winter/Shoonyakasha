@@ -142,13 +142,19 @@ float terrainContinent(vec3 dir) {
     return fbm3(warp3(p * terrain.continent.x, terrain.continent.y), 5, 2.0, 0.5) + terrain.continent.z;
 }
 
+// Where the mountains rise at `dir`: 0 outside their bands, 1 within.
+float terrainMountainMask(vec3 dir) {
+    vec3 p = dir + terrain.seed.xyz;
+    return smoothstep(0.1, 0.4, fbm3(p * terrain.mountains.z, 3, 2.0, 0.5) + 0.25);
+}
+
 // The terrain without the pad.
 float terrainHeightNatural(vec3 dir) {
     vec3 p = dir + terrain.seed.xyz;
     float c = terrainContinent(dir);
     float land = smoothstep(-0.05, 0.05, c);
 
-    float mask = smoothstep(0.1, 0.4, fbm3(p * terrain.mountains.z, 3, 2.0, 0.5) + 0.25);
+    float mask = terrainMountainMask(dir);
     float mountains = ridged3(p * terrain.mountains.x, int(terrain.mountains.w), 2.1, 0.5) * mask;
     float erosion = terrain.detail.w;
     float hills = erodedFbm3(p * terrain.hills.x, int(terrain.hills.w), 2.0, 0.5, erosion);

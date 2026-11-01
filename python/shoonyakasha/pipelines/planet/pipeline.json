@@ -131,7 +131,7 @@
       "usage": "storage_buffer",
       "packing": "std430",
       "elementCount": 176,
-      "fields": [ { "name": "height", "type": "vec4" } ],
+      "fields": [ { "name": "height", "type": "vec4" }, { "name": "resources", "type": "vec4" } ],
       "target": { "name": "ProbeHeights", "readback": { "frequency": "per_frame" } }
     },
     "ColliderParams": {

@@ -13,8 +13,8 @@
 // plant's place on the planet. The fragment shader gets the part, the
 // texture's (u, v), the shade, the plant's colour (tinted from 80 % to
 // 115 %; white for bark) and the plant's frame (an impostor's facing the
-// camera). Positions are jittered for the TAA pass (camera.glsl's
-// jittered).
+// camera), the mesh's own position and whether it is an ore rock.
+// Positions are jittered for the TAA pass (camera.glsl's jittered).
 //
 
 #define CAMERA_SET 0
@@ -41,6 +41,8 @@ layout(location = 6) flat out vec3 fragRight;
 layout(location = 7) flat out vec3 fragUp;
 layout(location = 8) flat out vec3 fragFacing;
 layout(location = 9) flat out int fragOnMoon;
+layout(location = 10) out vec3 fragLocal;
+layout(location = 11) flat out int fragOre;
 
 const float SWAY = 0.015;
 const float GRASS_SWAY = 0.12;
@@ -79,5 +81,7 @@ void main() {
     fragUp = up;
     fragFacing = ahead;
     fragOnMoon = vegetationOnMoon(look.w) ? 1 : 0;
+    fragLocal = inPosition.xyz;
+    fragOre = vegetationOre(look.w) ? 1 : 0;
     gl_Position = jittered(camera.proj * camera.view * vec4(relativePos, 1.0));
 }

@@ -16,8 +16,10 @@ at most MAX_TAKEN.
 `clear_body(index)` puts back the rocks of one body.
 
 `rock_grid(kind)` is the grid of a rock kind (vegetation.KINDS' "rock" or
-"boulder"); ROCK_COLOURS the rocks' colour on each body and `tinted` a
-colour tinted by a rock's tint, as drawn; DENSITY the rocks' density.
+"boulder"); ROCK_COLOURS the rocks' colour on each body, `rock_colour` a
+rock's colour with an ore rock's tint (ORE_ROCKS, ORE_TINT,
+ORE_TINT_SHARE) and `tinted` a colour tinted by a rock's tint, as drawn;
+DENSITY the rocks' density.
 """
 
 import numpy as np
@@ -29,12 +31,27 @@ ROCK_KINDS = ("rock", "boulder")
 DENSITY = 2600.0                 # kg/m^3
 # The rocks' colour by body index (vegetation_scatter.comp's PLANET_ROCK and MOON_ROCK), before the tint.
 ROCK_COLOURS = {0: (0.39, 0.35, 0.33), 1: (0.2, 0.195, 0.185)}
+# Ore rocks (vegetation_scatter.comp's): the richness above which rocks are ore, the tint they turn
+# towards, and its share at richness 0 (twice that at 1).
+ORE_ROCKS = 0.3
+ORE_TINT = (0.46, 0.25, 0.13)
+ORE_TINT_SHARE = 0.35
 
 
 def tinted(colour, tint):
     """A colour tinted as vegetation.vert tints a plant's: 80 % to 115 %."""
     shade = 0.8 + 0.35 * tint
     return tuple(c * shade for c in colour)
+
+
+def rock_colour(body, grade=0.0):
+    """A rock's colour on body index `body` before the tint: an ore rock's
+    (`grade` above ORE_ROCKS) turned towards ORE_TINT as the scatter turns it."""
+    colour = ROCK_COLOURS[body]
+    if grade <= ORE_ROCKS:
+        return colour
+    share = ORE_TINT_SHARE * (1.0 + grade)
+    return tuple(c + (t - c) * share for c, t in zip(colour, ORE_TINT))
 
 
 def rock_grid(kind):

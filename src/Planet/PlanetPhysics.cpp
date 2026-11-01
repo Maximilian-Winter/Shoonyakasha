@@ -166,13 +166,26 @@ public:
         check(b, a, manifold);
     }
 
-    std::vector<uint32_t> take() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        std::vector<uint32_t> struck;
-        struck.swap(m_struck);
-        std::sort(struck.begin(), struck.end());
-        struck.erase(std::unique(struck.begin(), struck.end()), struck.end());
-        return struck;
+    /// The bodies struck since the last call, each once in order of their
+    /// ids, with the fastest speed and largest momentum of their strikes.
+    std::vector<PhysicsStrike> take() {
+        std::vector<PhysicsStrike> struck;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            struck.swap(m_struck);
+        }
+        std::sort(struck.begin(), struck.end(),
+                  [](const PhysicsStrike& x, const PhysicsStrike& y) { return x.body < y.body; });
+        std::vector<PhysicsStrike> merged;
+        for (const PhysicsStrike& s : struck) {
+            if (!merged.empty() && merged.back().body == s.body) {
+                merged.back().speed = std::max(merged.back().speed, s.speed);
+                merged.back().momentum = std::max(merged.back().momentum, s.momentum);
+            } else {
+                merged.push_back(s);
+            }
+        }
+        return merged;
     }
 
     float momentum = 300.0f;
@@ -193,11 +206,11 @@ private:
             return;
         }
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_struck.push_back(watched.GetID().GetIndexAndSequenceNumber());
+        m_struck.push_back({watched.GetID().GetIndexAndSequenceNumber(), speed, speed / inverse});
     }
 
     std::mutex m_mutex;
-    std::vector<uint32_t> m_struck;
+    std::vector<PhysicsStrike> m_struck;
 };
 
 /// Every body but the character's inner body and the bodies in its group.
@@ -621,6 +634,14 @@ void PlanetPhysics::setStrikeMomentum(double momentum) {
 }
 
 std::vector<uint32_t> PlanetPhysics::takeStruck() {
+    std::vector<uint32_t> bodies;
+    for (const PhysicsStrike& strike : m_impl->strikes.take()) {
+        bodies.push_back(strike.body);
+    }
+    return bodies;
+}
+
+std::vector<PhysicsStrike> PlanetPhysics::takeStrikes() {
     return m_impl->strikes.take();
 }
 

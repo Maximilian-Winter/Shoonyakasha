@@ -25,7 +25,7 @@
 // each probe's w at its direction into ProbeHeights, each with
 // probeStamp: probe 1 the planet's natural terrain (terrainHeightNatural).
 // On the planet a probe also carries the climate's temperature and
-// moisture there.
+// moisture there, and on both bodies the ore richness (resources.glsl).
 //
 
 layout(local_size_x = 64) in;
@@ -74,13 +74,19 @@ layout(std430, set = 0, binding = 3) writeonly buffer ChunkHeights {
     vec4 heights[];        // per slot: lowest, highest grid height (m), stamp
 } chunkHeights;
 
+struct ProbeResult {
+    vec4 height;           // height (m), probeStamp, temperature (degrees C), moisture
+    vec4 resources;        // x: ore richness (resources.glsl)
+};
+
 layout(std430, set = 0, binding = 4) writeonly buffer ProbeHeights {
-    vec4 probeHeights[];   // per probe: height (m), probeStamp, temperature (degrees C), moisture
+    ProbeResult results[];
 } probes;
 
 #include "terrain.glsl"
 #include "climate.glsl"
 #include "moon.glsl"
+#include "resources.glsl"
 
 const int PLANET = 0;
 const int MOON = 1;
@@ -218,7 +224,8 @@ void evaluateProbes() {
         bodyRadius = jobs.radii[body];
         float h = i == 1u ? terrainHeightNatural(dir) : bodyHeight(dir);
         vec2 climate = body == PLANET ? climateAt(dir, h).xy : vec2(0.0);
-        probes.probeHeights[i] = vec4(h, jobs.probeStamp, climate);
+        float ore = body == PLANET ? planetOre(dir, h) : moonOre(dir);
+        probes.results[i] = ProbeResult(vec4(h, jobs.probeStamp, climate), vec4(ore, 0.0, 0.0, 0.0));
     }
 }
 

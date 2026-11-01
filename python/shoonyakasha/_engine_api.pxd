@@ -852,6 +852,11 @@ cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
         LodVec3 normal
         double fraction
 
+    cdef cppclass PhysicsStrike:
+        uint32_t body
+        double speed
+        double momentum
+
     cdef cppclass CppPlanetPhysics "Shoonyakasha::Planet::PlanetPhysics":
         CppPlanetPhysics(uint32_t maxBodies, int threads) except +
         uint32_t createBox(const LodVec3& halfExtents, const LodVec3& position, const LodVec4& rotation,
@@ -902,6 +907,7 @@ cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
         void watchStrikes(uint32_t body, cbool watched) except +
         void setStrikeMomentum(double momentum)
         vector[uint32_t] takeStruck()
+        vector[PhysicsStrike] takeStrikes()
         void applyCentralGravity(const LodVec3& centre, double gm)
         void step(double dt)
         void shiftOrigin(const LodVec3& offset)

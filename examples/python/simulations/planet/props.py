@@ -13,8 +13,10 @@ three states:
   influence (orbits.reference);
 - "resting": out of the physics, lying where it came down.
 
-A crate is a box; a loose rock (rocks.py) is a rock taken out of the
-scatter, a convex hull, named by its cell (`key`). Each prop has a radius
+A crate is a box; a loose rock (rocks.py) is a convex hull: a rock taken
+out of the scatter, named by its cell (`key`), or a chunk of a broken ore
+boulder, with none. An ore rock has its grade (its ore richness) and an
+entity of glowing specks placed with its own. Each prop has a radius
 (the sphere around it, which the gravity gun holds it out by), a rest
 height (from its centre down to the ground it lies on) and its shape and
 mass, to be made again in the physics.
@@ -43,14 +45,14 @@ ground is measured it is taken as the highest its body's terrain reaches
 (HIGHEST). `Props.leave_all` takes every prop out of the physics (when
 the bubble goes). `Props.draw` places the entities relative to the
 camera, subtracted in 64-bit floats. `on_remove(prop)` is told of each
-rock removed.
+rock with a cell removed.
 
 `Props.record` gives a prop as a record, a dict of plain values for a save
 file: its kind, the name of the body it is reckoned around, its state
 (one in the physics resting when asleep, else flying), its position from
 that body's centre, rotation, velocity and spin, its size, radius, rest
-height, mass, entity scale and colour, a rock's cell and its ground as
-last measured. `Props.restore` makes a prop out of the physics from one,
+height, mass, entity scale and colour, a rock's cell, its ground as last
+measured and its ore grade. `Props.restore` makes a prop out of the physics from one,
 which comes back into the physics by the rules above.
 """
 
@@ -100,10 +102,17 @@ class Prop:
     kind: str = "crate"          # "crate", or a rock's kind (vegetation.KINDS' "rock" or "boulder")
     extent: tuple = None         # its entity's scale
     colour: tuple = CRATE_COLOUR
+    grade: float = 0.0           # an ore rock's ore richness, else 0
+    glow: int = None             # an ore rock's entity of glowing specks, placed with its entity
 
     @property
     def mass(self):
         return self.shape[2]
+
+    @property
+    def breakable(self):
+        """An ore boulder (rocks.py breaks it), whose strikes are watched in the physics."""
+        return self.kind == "boulder" and self.grade > 0.0
 
 
 class Props:
@@ -149,10 +158,11 @@ class Props:
         scene.set_render_layer_mask(entity, 1)
         return entity
 
-    def add_rock(self, body, entity, size, radius, key, shape, rest, on, kind, extent, colour):
-        """A loose rock: its body (dynamic) and entity, made by rocks.py."""
+    def add_rock(self, body, entity, size, radius, key, shape, rest, on, kind, extent, colour, grade=0.0,
+                 glow=None):
+        """A loose rock: its body (dynamic) and entities, made by rocks.py."""
         rock = Prop(body, entity, size, radius, shape, rest, on, key, kind=kind, extent=tuple(extent),
-                    colour=tuple(colour))
+                    colour=tuple(colour), grade=grade, glow=glow)
         self.rocks.append(rock)
         return rock
 
@@ -174,15 +184,16 @@ class Props:
         return {"kind": prop.kind, "on": on.name, "state": state, "position": list(position), "rotation": list(q),
                 "velocity": list(v), "spin": list(w), "size": prop.size, "radius": prop.radius, "rest": prop.rest,
                 "mass": prop.mass, "extent": list(prop.extent), "colour": list(prop.colour),
-                "key": list(prop.key) if prop.key is not None else None, "ground": prop.ground}
+                "key": list(prop.key) if prop.key is not None else None, "ground": prop.ground, "grade": prop.grade}
 
     def records(self, bubble):
         return [self.record(bubble, prop) for prop in self.all]
 
-    def restore(self, record, bodies, entity=None, points=None):
+    def restore(self, record, bodies, entity=None, points=None, glow=None):
         """A prop out of the physics from `record`; `bodies` the world
-        bodies by name. A rock needs its `entity` and its hull's `points`
-        (rocks.py's Rocks.restore); a crate's are made here."""
+        bodies by name. A rock needs its `entity` (and an ore rock's `glow`)
+        and its hull's `points` (rocks.py's Rocks.restore); a crate's are
+        made here."""
         size, mass = record["size"], record["mass"]
         if record["kind"] == "crate":
             half = 0.5 * size
@@ -194,8 +205,9 @@ class Props:
         prop = Prop(None, entity, size, record["radius"], shape, record["rest"], bodies[record["on"]], key,
                     state=record["state"], position=tuple(record["position"]), velocity=tuple(record["velocity"]),
                     rotation=tuple(record["rotation"]), spin=tuple(record["spin"]), ground=record["ground"],
-                    kind=record["kind"], extent=tuple(record["extent"]), colour=tuple(record["colour"]))
-        (self.crates if key is None else self.rocks).append(prop)
+                    kind=record["kind"], extent=tuple(record["extent"]), colour=tuple(record["colour"]),
+                    grade=record.get("grade", 0.0), glow=glow)
+        (self.crates if prop.kind == "crate" else self.rocks).append(prop)
         return prop
 
     def find(self, body):
@@ -205,12 +217,14 @@ class Props:
         if prop.body is not None and bubble is not None and bubble.physics.contains(prop.body):
             bubble.physics.remove(prop.body)
         self.engine.scene.destroy_entity(prop.entity)
-        if prop.key is not None:
-            self.rocks.remove(prop)
-            if self.on_remove is not None:
-                self.on_remove(prop)
-        else:
+        if prop.glow is not None:
+            self.engine.scene.destroy_entity(prop.glow)
+        if prop.kind == "crate":
             self.crates.remove(prop)
+        else:
+            self.rocks.remove(prop)
+            if prop.key is not None and self.on_remove is not None:
+                self.on_remove(prop)
 
     def clear(self, bubble):
         for prop in self.all:
@@ -246,7 +260,8 @@ class Props:
             prop.state, prop.velocity, prop.spin = "flying", v, w
 
     def enter(self, bubble, prop):
-        """`prop` into the physics where it is, moving as it was; a resting one asleep."""
+        """`prop` into the physics where it is, moving as it was; a resting
+        one asleep; strikes on an ore boulder watched."""
         physics = bubble.physics
         p = sub(prop.position, bubble.origin)
         kind, form, mass = prop.shape
@@ -257,6 +272,8 @@ class Props:
             body = physics.create_convex_hull(form, p, prop.rotation, motion="dynamic", mass=mass, friction=0.8,
                                               restitution=0.05)
         physics.set_velocity(body, prop.velocity, prop.spin)
+        if prop.breakable:
+            physics.watch_strikes(body)
         if prop.state == "resting":
             physics.deactivate(body)
         prop.body, prop.state, prop.far, prop.fast = body, "jolt", False, False
@@ -427,9 +444,12 @@ class Props:
         placed += [(prop, add(prop.on.centre(), prop.position), prop.rotation)
                    for prop in self.all if prop.body is None]
         for prop, world_position, q in placed:
-            scene.set_position(prop.entity, sub(world_position, camera))
             x, y, z = quat_rotate(q, (1.0, 0.0, 0.0)), quat_rotate(q, (0.0, 1.0, 0.0)), quat_rotate(q, (0.0, 0.0, 1.0))
-            scene.set_rotation(prop.entity, euler_from_basis(x, y, scale(z, -1.0)))
+            rotation = euler_from_basis(x, y, scale(z, -1.0))
+            for entity in (prop.entity, prop.glow):
+                if entity is not None:
+                    scene.set_position(entity, sub(world_position, camera))
+                    scene.set_rotation(entity, rotation)
 
     def grabbable(self, physics):
         """(body, radius, mass) of each prop in the physics."""

@@ -2,7 +2,8 @@
 world that is not set up, with a fake engine whose read-backs are given:
 the ground under the viewpoint is taken from a probe only while the
 viewpoint is over the same body and within GROUND_PROBE_REACH of where the
-probe measured it, and only for the current terrain version.
+probe measured it, and only for the current terrain version, with the
+ore richness there.
 
     python -m unittest discover -s tests/python
 """
@@ -32,11 +33,12 @@ class GroundProbeTest(unittest.TestCase):
         self.east = self.world.site_frame()[2]
         self.world._lod = _NoLod()
 
-    def answer(self, stamp, ground):
-        """ProbeHeights with `ground` under the viewpoint and the site at 400 m, for `stamp`."""
-        rows = np.zeros((planet_world.PROBES, 4), dtype=np.float32)
+    def answer(self, stamp, ground, ore=0.0):
+        """ProbeHeights with `ground` and `ore` under the viewpoint and the site at 400 m, for `stamp`."""
+        rows = np.zeros((planet_world.PROBES, 8), dtype=np.float32)
         rows[:, 1] = stamp
         rows[0, 0] = ground
+        rows[0, 4] = ore
         rows[1, 0] = 400.0
         self.engine.readbacks["ProbeHeights"] = {"data": rows.tobytes(), "frame": 0}
 
@@ -50,9 +52,10 @@ class GroundProbeTest(unittest.TestCase):
     def test_ground_taken_where_it_was_measured(self):
         self.ask(1, self.up)
         self.world.viewpoint = self.at(self.up)
-        self.answer(1, 812.0)
+        self.answer(1, 812.0, ore=0.5)
         self.world.read_back_heights()
         self.assertEqual(self.world.ground, 812.0)
+        self.assertEqual(self.world.ground_ore, 0.5)
         self.assertEqual(self.world.site_height, 400.0)
 
     def test_ground_dropped_after_a_jump(self):

@@ -41,7 +41,9 @@ directions: the ground under the viewpoint, the site, the directions of a
 ground patch the caller asks for (an object with `directions` and
 `set_heights(heights)`, up to PATCH_PROBES), and EXTRA_PROBES directions in
 `extra_probes`. Their heights come back some frames later
-(`probe_latency`): `ground`, `site_height`, `patch` and `extra_heights`.
+(`probe_latency`): `ground`, `site_height`, `patch` and `extra_heights`,
+with the ore richness (resources.glsl) under the viewpoint and at the
+extra probes (`ground_ore`, `extra_ores`).
 
 The vegetation (vegetation.py's kinds) and, with `rocks`, the rocks on
 both bodies are scattered on the GPU each frame (vegetation_scatter.comp,
@@ -439,12 +441,14 @@ class PlanetWorld:
         self.terrain_version = 0           # counts terrain changes; probe results carry the version they were made with
         self.ground = None                 # terrain height under the viewpoint on the body under it, from the probes
         self.ground_base_climate = None    # (temperature, moisture) there without the offsets, on the planet
-        self.site_height = None            # natural terrain height at the site, from the probes
+        self.ground_ore = None             # ore richness there (resources.glsl), 0 .. 1
+        self.site_height = None           # natural terrain height at the site, from the probes
         self.patch = None                  # (body, patch) whose heights came back last
         self.probe_requests = {}           # stamp: (terrain version, body under the viewpoint, patch, extra probes)
         self.extra_probes = []             # (direction, body) to measure the terrain's height at
         self.extra_heights = []            # ((direction, body), height) for the extra probes last read back
         self.extra_climates = []           # ((direction, body), (temperature, moisture) or None off the planet)
+        self.extra_ores = []               # ((direction, body), ore richness)
         self.probe_latency = 3.0           # frames from asking for probes to their heights coming back
         self.horizon_sun = None            # the sun's direction the chunks' horizons are measured towards
         self.chunks_culled = 0             # selected chunks not drawn: out of view or behind the horizon
@@ -757,6 +761,7 @@ class PlanetWorld:
         self.terrain_version += 1
         self.ground = None
         self.ground_base_climate = None
+        self.ground_ore = None
         self.patch = None
         for body in self.bodies:
             if body is self.planet or not self.lod.has_tree(body.index):
@@ -775,6 +780,7 @@ class PlanetWorld:
         self.site_height = None
         self.ground = None
         self.ground_base_climate = None
+        self.ground_ore = None
         self.patch = None
         self.terrain_version += 1
         self.upload_terrain()
@@ -851,7 +857,7 @@ class PlanetWorld:
         readback = engine.get_readback("ProbeHeights")
         if readback is None:
             return
-        probes = np.frombuffer(readback["data"], dtype=np.float32).reshape(PROBES, 4)
+        probes = np.frombuffer(readback["data"], dtype=np.float32).reshape(PROBES, 8)
         stamp = float(probes[0, 1])
         requests = self.probe_requests
         request = requests.get(stamp)
@@ -867,6 +873,7 @@ class PlanetWorld:
         self.ground = float(probes[0, 0]) if still_over else None
         on_planet = still_over and ground_body is self.planet
         self.ground_base_climate = (float(probes[0, 2]), float(probes[0, 3])) if on_planet else None
+        self.ground_ore = float(probes[0, 4]) if still_over else None
         if self.site_height is None:
             self.site_height = float(probes[1, 0])
         if patch is not None:
@@ -876,6 +883,7 @@ class PlanetWorld:
         self.extra_heights = [(d, float(h)) for d, h in zip(extra, probes[first:first + len(extra), 0])]
         self.extra_climates = [(d, (float(p[2]), float(p[3])) if d[1] is self.planet else None)
                                for d, p in zip(extra, probes[first:first + len(extra)])]
+        self.extra_ores = [(d, float(p[4])) for d, p in zip(extra, probes[first:first + len(extra)])]
 
     def in_view(self, centre, radius):
         """Whether a sphere around `centre` (planet space) is roughly in view: a

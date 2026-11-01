@@ -7,8 +7,10 @@ the rocks' colours as the shader's; and on sk.PlanetPhysics a fixed rock
 made for a listed rock (a static hull standing on its base, its mass from
 its hull at the rocks' density, strikes on it watched), rocks of the other
 body and taken ones left out, and a promotion (the body dynamic, its cell
-taken, an entity in its colour, a prop) and its release, and a loose
-rock's record made again into the same rock. Where this
+taken, an entity in its colour, a prop) and its release, a loose
+rock's record made again into the same rock, the ore rocks' colour as
+the shader's, and an ore boulder, fixed or loose, broken by a fast strike
+into 3 to 6 chunks of its mass and grade, its cell kept taken. Where this
 interpreter's shoonyakasha has no extension, the physics tests run in a
 fresh interpreter.
 
@@ -110,6 +112,18 @@ class TakenRocksTest(unittest.TestCase):
         self.assertEqual(rocks.tinted((1.0, 0.5, 0.0), 0.0), (0.8, 0.4, 0.0))
         self.assertAlmostEqual(rocks.tinted((1.0, 0.5, 0.0), 1.0)[0], 1.15)
 
+    def test_ore_colour_is_the_shaders(self):
+        shader = SHADER.read_text(encoding="utf-8")
+        self.assertIn("const float ORE_ROCKS = %s;" % rocks.ORE_ROCKS, shader)
+        self.assertIn("const float ORE_TINT_SHARE = %s;" % rocks.ORE_TINT_SHARE, shader)
+        values = re.search(r"const vec3 ORE_TINT = vec3\(([^)]*)\);", shader).group(1)
+        self.assertEqual(tuple(float(v) for v in values.split(",")), rocks.ORE_TINT)
+        self.assertEqual(rocks.rock_colour(1, 0.0), rocks.ROCK_COLOURS[1])
+        self.assertEqual(rocks.rock_colour(0, rocks.ORE_ROCKS), rocks.ROCK_COLOURS[0])
+        share = rocks.ORE_TINT_SHARE * 1.5
+        self.assertAlmostEqual(rocks.rock_colour(0, 0.5)[0],
+                               rocks.ROCK_COLOURS[0][0] + (rocks.ORE_TINT[0] - rocks.ROCK_COLOURS[0][0]) * share)
+
 
 class Body:
     name = "planet"
@@ -139,6 +153,7 @@ class ExampleRocksTest(unittest.TestCase):
         sys.path.insert(0, str(PLANET_DIR))
         import props
         import rocks as example_rocks
+        self.example = example_rocks
         radius = 100_000.0
         self.physics = sk.PlanetPhysics(max_bodies=64, threads=1)
         self.bubble = Bubble(self.physics, Body(radius), 4.905 * radius ** 2, (0.0, radius, 0.0))
@@ -148,8 +163,45 @@ class ExampleRocksTest(unittest.TestCase):
         self.rocks = example_rocks.Rocks(self.engine, self.world, self.props)
         self.radius = radius
 
-    def rock(self, key, x, height=0.5, kind="boulder"):
-        return NearbyTree(key, kind, (x, self.radius, 0.0), height, 1.0, (1.0, 0.0), 0.5)
+    def rock(self, key, x, height=0.5, kind="boulder", grade=0.0):
+        return NearbyTree(key, kind, (x, self.radius, 0.0), height, 1.0, (1.0, 0.0), 0.5, grade)
+
+    def test_ore_boulder_splits(self):
+        here = (0.0, self.radius + 1.7, 0.0)
+        plain, ore = self.rock((0, 0, 4, 1, 1), 3.0, 1.5), self.rock((0, 0, 4, 1, 2), -3.0, 1.5, grade=0.8)
+        self.rocks.update(self.bubble, [plain, ore], here, 40.0)
+        fixed = self.rocks.rocks[ore.key]
+        self.assertEqual(fixed.grade, 0.8)
+        self.assertEqual(fixed.colour, rocks.tinted(rocks.rock_colour(0, 0.8), 0.5))
+        self.assertFalse(self.rocks.breaks(fixed.body, self.example.BREAK_SPEED - 1.0))
+        self.assertTrue(self.rocks.breaks(fixed.body, self.example.BREAK_SPEED))
+        self.assertFalse(self.rocks.breaks(self.rocks.rocks[plain.key].body, 100.0))
+        chunks = self.rocks.split(self.bubble, fixed.body)
+        self.assertTrue(3 <= len(chunks) <= 6)
+        self.assertAlmostEqual(sum(self.physics.mass(c.body) for c in chunks), fixed.mass, delta=1e-3 * fixed.mass)
+        self.assertTrue(all(c.grade == 0.8 and c.kind == "rock" and c.key is None and c.glow is not None
+                            for c in chunks))
+        self.assertIn(ore.key, self.world.taken_rocks)
+        self.assertNotIn(ore.key, self.rocks.rocks)
+        self.assertFalse(self.physics.contains(fixed.body))
+        # The same cell splits into the same chunks; removing the chunks keeps the cell taken.
+        self.props.clear(self.bubble)
+        self.assertIn(ore.key, self.world.taken_rocks)
+
+    def test_loose_ore_boulder_watched_and_splits(self):
+        here = (0.0, self.radius + 1.7, 0.0)
+        ore = self.rock((0, 0, 4, 1, 2), 3.0, 1.5, grade=0.5)
+        self.rocks.update(self.bubble, [ore], here, 40.0)
+        body = self.rocks.rocks[ore.key].body
+        self.rocks.promote(self.bubble, body)
+        loose = self.props.rocks[0]
+        self.assertTrue(loose.breakable)
+        self.assertIsNotNone(loose.glow)
+        self.assertTrue(self.rocks.breaks(body, self.example.BREAK_SPEED))
+        chunks = self.rocks.split(self.bubble, body)
+        self.assertTrue(3 <= len(chunks) <= 6)
+        self.assertNotIn(loose, self.props.rocks)
+        self.assertIn(ore.key, self.world.taken_rocks)
 
     def test_fixed_rocks_and_promotion(self):
         here = (0.0, self.radius + 1.7, 0.0)

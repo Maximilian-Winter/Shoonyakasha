@@ -43,6 +43,16 @@ feet. F9 loads it: the planet is built again when its parameters differ,
 the props come back out of the physics and return to it by props.py's
 rules, and the view goes back to the free camera, the ship or the player.
 
+Ore: the probes measure the ore richness (resources.glsl), shown on the
+free camera's and the on-foot cards; where it is above 0.3 the scatter's
+rocks are ore rocks (tinted, with glowing specks), which come loose with
+their grade. An ore boulder struck at rocks.BREAK_SPEED splits into
+chunks; a strike is reported from STRIKE_REPORTED and loosens a fixed rock
+from STRIKE_MOMENTUM. In the ship, M turns the right display to SCAN,
+which scans the ground track ahead for contacts (scanner.py); below
+ORE_HUD_HEIGHT the HUD marks the nearest. The contacts are saved, and
+those on the planet go when it is built again.
+
 The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
 cockpit, and gets in with F within BOARD_REACH of it. A ship the player
@@ -85,6 +95,7 @@ Keys:
     L                      translation assist on / off
     R                      chase view / cockpit
     U                      the model's cabin / the generated cockpit
+    M                      the right display: ORBIT / SCAN (ore scanning)
     , / .                  time warp down / up (1x to 16x)
   ship, gamepad (adding to the keys):
     left stick             pitch and roll
@@ -105,7 +116,7 @@ Keys:
     Shift+9                the ship in a circular orbit 10 km above the moon
     0 / Shift+0            drop a crate / a stack of 10 crates in front of the view
     N                      new terrain seed
-    M / J                  mountains higher / lower
+    M / J                  mountains higher / lower (M in the ship: the right display's page)
     H / G                  hills higher / lower
     Z / X                  sun lower / higher, seen from the blocks
     T / Y                  atmosphere denser / thinner
@@ -138,6 +149,8 @@ Keys:
     python planet.py --promotion-check   grab the rocks near the player one by one, check each is drawn once
     python planet.py --orbit-crate-check   a crate in a low orbit of the moon comes round to where it started
     python planet.py --save-check      move rocks, throw a crate, save, build a new planet, load, check what came back
+    python planet.py --scan-check      scan for ore from orbit of the planet and the moon, check the contacts' rocks
+    python planet.py --break-check     throw a crate into an ore boulder on the planet and the moon, check it splits
 """
 
 import argparse
@@ -156,6 +169,7 @@ from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.collider_probes import ColliderProbes, TerrainCollider
 from shoonyakasha.planet.nearby_trees import NearbyTrees, listed_keys
+from shoonyakasha.planet.rocks import ORE_ROCKS
 from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, local_frame, normalize, rotate, scale, sub
 from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, SettingsMenu
 from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, EXTRA_PROBES, FLOATS_PER_VERTEX, FOV, MAX_LEVEL,
@@ -172,6 +186,7 @@ from player import Controls as FootControls, Player
 from player import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from props import Props, stack_offsets, yaw_rotation
 from rocks import Rocks
+from scanner import CONTACT, Scanner
 from trunks import Trunks
 from viewmodel import Viewmodel
 
@@ -229,7 +244,9 @@ CRATE_AHEAD = 3.0                # m in front of the view a crate is dropped
 STACK_COUNT = 10
 JUMP_DISTANCE = 50.0             # m the viewpoint may move in a frame and still count as moving, not jumping
 STRIKE_MOMENTUM = 300.0          # kg m/s a body must strike a fixed rock with to knock it loose
+STRIKE_REPORTED = 100.0          # kg m/s a strike needs to be reported: to break an ore boulder (rocks.BREAK_SPEED)
 COARSE_SPACING = 4.0             # m between the coarse terrain mesh's points (65 x 65, 256 m across)
+ORE_HUD_HEIGHT = 5_000.0         # m above the ground below which the HUD marks the nearest ore contact
 # On foot.
 EXIT_SPEED = 1.0                 # m/s relative to the ground the ship may move at for the player to get out
 BOARD_REACH = 3.0                # m from the boarding point the player gets in from
@@ -272,6 +289,10 @@ parser.add_argument("--trunk-check", action="store_true",
                     help="walk into the trees nearest the blocks, check the feet stop at their trunks, and exit")
 parser.add_argument("--orbit-crate-check", action="store_true",
                     help="put a crate in a low orbit of the moon, check it comes round to where it started, and exit")
+parser.add_argument("--scan-check", action="store_true",
+                    help="scan for ore from orbit of the planet and the moon, check the contacts and their rocks")
+parser.add_argument("--break-check", action="store_true",
+                    help="throw a crate into an ore boulder on the planet and the moon, check it splits, and exit")
 parser.add_argument("--save-check", action="store_true",
                     help="move rocks, throw a crate, save, build a new planet, load, check what came back, and exit")
 parser.add_argument("--promotion-check", action="store_true",
@@ -363,14 +384,16 @@ state = {
     "ship_body": None,           # the ship's kinematic hull in the bubble
     "ship_poses": None,          # (position, orientation) of the ship before and after this frame's flight
     "regenerations": 0,          # world.regenerations the props were last kept under
+    "page": "orbit",             # the right display's page in the ship: "orbit" or "scan" (M)
 }
 physics = sk.PlanetPhysics()
-physics.set_strike_momentum(STRIKE_MOMENTUM)
+physics.set_strike_momentum(STRIKE_REPORTED)
 collider_probes = ColliderProbes(engine)
 nearby_trees = NearbyTrees(engine)
 trunks = Trunks()
 props = Props(engine, box(), world, on_remove=lambda prop: scatter_rocks.released(prop))
 scatter_rocks = Rocks(engine, world, props)
+scanner = Scanner(world, EXTRA_PROBES)
 
 
 def regenerate():
@@ -987,8 +1010,11 @@ def step_bubble(dt):
         move_ship_body(bubble, (k + 1) / count)
         props.drag(bubble)
         bubble.step(FLIGHT_STEP)
-    for body in physics.take_struck():
-        scatter_rocks.promote(bubble, body)
+    for body, speed, momentum in physics.take_strikes():
+        if scatter_rocks.breaks(body, speed):
+            scatter_rocks.split(bubble, body)
+        elif momentum >= STRIKE_MOMENTUM:
+            scatter_rocks.promote(bubble, body)
     note_thrown()
     state["physics_accumulator"] -= count * FLIGHT_STEP
     if count == MAX_PHYSICS_STEPS_PER_FRAME:
@@ -1277,10 +1303,12 @@ def capture_mouse():
 # ── Saving and loading ─────────────────────────────────────────────────────
 
 def forget_planet_props():
-    """The props on the planet removed once it was built again (PlanetWorld.regenerate)."""
+    """The props and the ore contacts on the planet removed once it was
+    built again (PlanetWorld.regenerate)."""
     if state["regenerations"] == world.regenerations:
         return
     state["regenerations"] = world.regenerations
+    scanner.contacts = [c for c in scanner.contacts if c.body is not planet]
     bubble = state["bubble"]
     if state["gun"] is not None and bubble is not None and bubble.body is planet:
         state["gun"].drop()
@@ -1318,6 +1346,7 @@ def save_game(path=None):
                                                "heading": list(player.basis()[2])},
         "taken": [list(key) for key in sorted(world.taken_rocks.keys)],
         "props": props.records(bubble),
+        "contacts": scanner.records(),
     }
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(data, f)
@@ -1359,6 +1388,7 @@ def load_game(path=None):
     for key in data["taken"]:
         taken.add(tuple(key))
     by_name = {body.name: body for body in bodies}
+    scanner.restore(data.get("contacts", []), by_name)
     for record in data["props"]:
         if record["kind"] == "crate":
             props.restore(record, by_name)
@@ -1432,6 +1462,7 @@ def frame(dt):
     props.fly(world.time - clock, world.probe_latency * state["frame_ms"] / 1000.0)
     step_bubble(dt)
     props.probe(state["bubble"], EXTRA_PROBES)
+    scan(dt)
     if state["mode"] == "foot":
         place_eye()
     capture_mouse()
@@ -1527,6 +1558,7 @@ def update_cockpit(right, up, forward, view_rotation):
         "density": density,
         "dynamic_pressure": 0.5 * density * speed * speed,
         "glow": glow,
+        **scan_readings(),
     })
 
 
@@ -1550,6 +1582,51 @@ def contact_text(ship):
     if ship.crashed:
         return "CRASHED (8 or 9 for a new ship)"
     return "LANDED" if ship.on_ground else ""
+
+
+def scan(dt):
+    """The scanner (scanner.py) on while the right display shows SCAN in a ship that has not crashed."""
+    ship = state["ship"]
+    if state["mode"] != "ship" or state["page"] != "scan" or ship is None or ship.crashed:
+        scanner.update(dt, None, None, None, None, active=False)
+        return
+    body = world.body_under(ship.position)
+    scanner.update(dt, ship.position, ship.velocity, body, body_gm(body))
+
+
+def scan_readings():
+    """The SCAN page's readings for Instruments.update: the page, its rows
+    (the richness ahead, the contacts on the body below, the nearest and
+    the points scanned), its strip, and below ORE_HUD_HEIGHT above the
+    ground the nearest contact for the HUD (its direction from the view,
+    its richness and distance)."""
+    view = viewpoint()
+    body = world.body_under(view)
+    nearest = scanner.nearest(body, view)
+    strip = list(scanner.strip)
+    on_body = sum(1 for c in scanner.contacts if c.body is body)
+    ore_contact = None
+    if nearest is not None and world.height_above_ground(view) < ORE_HUD_HEIGHT:
+        contact, distance = nearest
+        ore_contact = (normalize(sub(contact.point(), view)),
+                       "ORE %.2f  %s" % (contact.richness, distance_text(distance).upper()))
+    return {
+        "page": state["page"],
+        "scan_rows": [
+            ("ORE AHEAD", "%.2f" % strip[-1] if strip else "-"),
+            ("CONTACTS", "%d" % on_body),
+            ("NEAREST", "%s  %.2f" % (distance_text(nearest[1]), nearest[0].richness) if nearest else "-"),
+            ("SCANNED", "%d" % scanner.scanned),
+        ],
+        "scan_strip": strip,
+        "scan_mark": CONTACT,
+        "ore_contact": ore_contact,
+    }
+
+
+def ore_rows():
+    """The card's row of the ore richness under the view, once measured."""
+    return [("ORE", "%.2f" % world.ground_ore)] if world.ground_ore is not None else []
 
 
 def update_cards():
@@ -1588,7 +1665,7 @@ def update_cards():
         stance = "held: no ground yet" if player.held else ("on the ground" if player.on_ground else "in the air")
         view_card.update("ON FOOT", [
             ("ABOVE " + world.datum_name(viewpoint()).upper(), distance_text(world.altitude(viewpoint()))),
-        ] + (biomes.card_rows(world.ground_climate) if on_planet else []) + [
+        ] + (biomes.card_rows(world.ground_climate) if on_planet else []) + ore_rows() + [
             ("SPEED", "%.1f m/s" % length(velocity)),
             ("JETPACK", "%.0f %%" % (player.jet_fuel * 100.0)),
             ("STATE", stance),
@@ -1601,7 +1678,7 @@ def update_cards():
         view_card.update("FREE CAMERA", [
             ("ABOVE GROUND", distance_text(world.height_above_ground(viewpoint()))),
             ("ABOVE " + world.datum_name(viewpoint()).upper(), distance_text(world.altitude(viewpoint()))),
-        ] + (biomes.card_rows(world.ground_climate) if on_planet else []) + [
+        ] + (biomes.card_rows(world.ground_climate) if on_planet else []) + ore_rows() + [
             ("SPEED", "%.0f m/s" % state["speed"]),
             ("SPEED FACTOR", "x%.2f" % state["speed_factor"]),
             ("TIME WARP", "x%d" % WARPS[state["warp"]]),
@@ -1716,9 +1793,10 @@ def current_hints():
                         (("pad:LT", "pad:RT"), "Throttle"), (("pad:A",), "Assist"), (("pad:B",), "Cut throttle"),
                         (("pad:X",), view), (("pad:LB", "pad:RB"), "Warp"), (("pad:Y",), "Free camera"),
                         (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
+    page = "Orbit page" if state["page"] == "scan" else "Scan page"
     return hints + [(("W", "S"), "Throttle"), (("Arrows",), "Pitch, yaw"), (("A", "D"), "Roll"),
-                    (("E", "Q"), "Up, down"), (("L",), "Assist"), (("R",), view), ((",", "."), "Warp"),
-                    (("Tab",), "Free camera"), (("F1",), "Settings"), (("F2",), "Controls")]
+                    (("E", "Q"), "Up, down"), (("L",), "Assist"), (("R",), view), (("M",), page),
+                    ((",", "."), "Warp"), (("Tab",), "Free camera"), (("F1",), "Settings"), (("F2",), "Controls")]
 
 
 # The controls sheet (F2, toolkit.overlay.HelpOverlay): columns of (heading, rows of (caps, what they do)).
@@ -1746,6 +1824,7 @@ HELP_COLUMNS = [
         (("L",), "Translation assist"),
         (("R",), "Chase view / cockpit"),
         (("U",), "Cabin / generated cockpit"),
+        (("M",), "Right display: ORBIT / SCAN"),
         ((",", "."), "Time warp down / up"),
         (("F",), "Out, once landed"),
         (("Tab",), "Free camera"),
@@ -1847,6 +1926,10 @@ def on_init():
         engine.ecs.add_system("PlanetOrbitCrateCheck", OrbitCrateCheck(), priority=-2)
     elif args.save_check:
         engine.ecs.add_system("PlanetSaveCheck", SaveCheck(), priority=-2)
+    elif args.scan_check:
+        engine.ecs.add_system("PlanetScanCheck", ScanCheck(), priority=-2)
+    elif args.break_check:
+        engine.ecs.add_system("PlanetBreakCheck", BreakCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -1949,6 +2032,8 @@ def on_key(key, from_pad=False):
         state["help"].show(not state["help"].visible)
     elif key == keys.I:
         state["debug_text"] = not state["debug_text"]
+    elif key == keys.M and state["mode"] == "ship":
+        state["page"] = "scan" if state["page"] == "orbit" else "orbit"
     elif key == keys.M:
         change_terrain("mountains", 1, 1.25)
     elif key == keys.J:
@@ -3160,21 +3245,24 @@ class WalkCheck:
     def next_stage(self, stage):
         self.stage, self.frames, self.clock = stage, 0, 0.0
 
-    def place(self, dt):
-        drop_bubble()
-        state["scripted_controls"] = True
-        body = self.body()
+    def home_direction(self):
+        """The direction from the body's centre the player is put down at."""
         _, up, east, north = world.site_frame()
         if self.bodies[0] == "planet":
-            self.home = normalize(add(up, scale(north, 3_000.0 / RADIUS)))
-        elif self.bodies[0] == "mountains":
+            return normalize(add(up, scale(north, 3_000.0 / RADIUS)))
+        if self.bodies[0] == "mountains":
             azimuth = math.radians(67.5)
             level = add(scale(east, math.cos(azimuth)), scale(north, math.sin(azimuth)))
             peak = normalize(add(up, scale(level, 60_000.0 / RADIUS)))
             peak_east, peak_north = local_frame(peak)
-            self.home = normalize(add(peak, scale(normalize(add(peak_east, peak_north)), -600.0 / RADIUS)))
-        else:
-            self.home = moon_spot()
+            return normalize(add(peak, scale(normalize(add(peak_east, peak_north)), -600.0 / RADIUS)))
+        return moon_spot()
+
+    def place(self, dt):
+        drop_bubble()
+        state["scripted_controls"] = True
+        body = self.body()
+        self.home = self.home_direction()
         state["mode"] = "camera"
         state["position"] = add(body.centre(), scale(self.home, body.radius + 5_000.0))
         state["forward"] = local_frame(self.home)[1]
@@ -3880,6 +3968,31 @@ class OrbitCrateCheck(GunCheck):
         self.next_body(ok)
 
 
+class NearbyLists:
+    """The lists of nearby trees and rocks that come back (nearby_trees.read,
+    which this wraps): `trees` the last, `count` how many came back."""
+
+    def __init__(self):
+        self.trees, self.count = None, 0
+        read = nearby_trees.read
+
+        def kept():
+            trees = read()
+            if trees is not None:
+                self.trees, self.count = trees, self.count + 1
+            return trees
+        nearby_trees.read = kept
+
+    def rocks(self, radius, around=None):
+        """The rocks of the last list on the bubble's body within `radius` of
+        `around` (relative to its centre; the player's feet when None)."""
+        bubble = state["bubble"]
+        if around is None:
+            around = bubble.body_relative(state["player"].feet())
+        return [t for t in self.trees or [] if t.rock and t.body == bubble.body.index
+                and length(sub(t.base, around)) <= radius]
+
+
 class SaveCheck(GunCheck):
     """--save-check: in the mountains (WalkCheck's place), once the player
     has stood still and a list of the nearby rocks came back, the cells of
@@ -3914,30 +4027,18 @@ class SaveCheck(GunCheck):
         self.bodies = ["mountains"]
         self.results = []
         self.start_body()
-        self.lists = 0
-        self.trees = None
-        read = nearby_trees.read
-
-        def kept():
-            trees = read()
-            if trees is not None:
-                self.trees, self.lists = trees, self.lists + 1
-            return trees
-        nearby_trees.read = kept
+        self.nearby = NearbyLists()
 
     def rock_cells(self, radius):
         """The cells of the rocks in the last list within `radius` of the feet."""
-        bubble = state["bubble"]
-        feet = bubble.body_relative(state["player"].feet())
-        return {t.key for t in self.trees if t.rock and t.body == bubble.body.index
-                and length(sub(t.base, feet)) <= radius}
+        return {t.key for t in self.nearby.rocks(radius)}
 
     def begin(self):
-        self.listed_at = self.lists
+        self.listed_at = self.nearby.count
         self.next_stage("look")
 
     def look(self, dt):
-        if self.clock < self.STEADY or not world.settled() or self.lists < self.listed_at + 2:
+        if self.clock < self.STEADY or not world.settled() or self.nearby.count < self.listed_at + 2:
             return
         self.inner, self.outer = self.rock_cells(self.INNER), self.rock_cells(self.OUTER)
         player, bubble = state["player"], state["bubble"]
@@ -3985,11 +4086,11 @@ class SaveCheck(GunCheck):
         load_game(self.PATH)
         self.taken_match = set(world.taken_rocks.keys) == self.taken
         self.records_match = props.records(state["bubble"]) == self.saved["props"]
-        self.listed_at = self.lists
+        self.listed_at = self.nearby.count
         self.next_stage("after")
 
     def after(self, dt):
-        if not world.settled() or self.clock < self.SETTLE or self.lists < self.listed_at + 2:
+        if not world.settled() or self.clock < self.SETTLE or self.nearby.count < self.listed_at + 2:
             return
         taken = world.taken_rocks.keys
         inner, outer = self.rock_cells(self.INNER), self.rock_cells(self.OUTER)
@@ -4021,6 +4122,263 @@ class SaveCheck(GunCheck):
         if os.path.exists(self.PATH):
             os.remove(self.PATH)
         self.clear()
+        self.next_body(ok)
+
+
+class ProbeRounds:
+    """Directions measured with the world's extra probes, a round of at
+    most EXTRA_PROBES at a time, for a check: `ask` while `idle`, then
+    `take` gives ((direction, body), height, ore) of each once they are
+    back (else None)."""
+
+    def __init__(self):
+        self.asked = None
+
+    @property
+    def idle(self):
+        return self.asked is None and not world.extra_probes
+
+    def ask(self, probes):
+        self.asked = list(probes[:EXTRA_PROBES])
+        world.extra_probes = self.asked
+
+    def take(self):
+        if self.asked is None or [p for p, _ in world.extra_heights] != self.asked:
+            return None
+        results = [(probe, height, ore) for (probe, height), (_, ore) in zip(world.extra_heights, world.extra_ores)]
+        world.extra_probes = []
+        self.asked = None
+        return results
+
+
+class ScanCheck(GunCheck):
+    """--scan-check: on the planet (preset 9's orbit) and on the moon
+    (Shift+9's), the ship's right display on SCAN and the time warp at
+    WARP, until the scanner (scanner.py) has CONTACTS contacts on the body
+    or TIMEOUT seconds have passed. Each contact is measured again with the
+    extra probes: its richness must come back the same (within 0.001), at
+    least scanner.CONTACT. Then a player is put down at the richest (as
+    WalkCheck does) and, once it has stood still and a list of the nearby
+    rocks came back, the rocks listed within NEAR of the contact must be
+    there and all be ore rocks (a grade above shoonyakasha.planet.rocks'
+    ORE_ROCKS). Prints per body the contacts, the grades found and exits
+    with status 0 when every body passed, 1 otherwise."""
+
+    CONTACTS = 4
+    WARP = 4                            # index into WARPS: 16x
+    TIMEOUT = 240.0                     # s
+    NEAR = 10.0                         # m
+    STEADY = 1.0                        # s
+
+    def __init__(self):
+        self.bodies = ["planet", "moon"]
+        self.results = []
+        self.nearby = NearbyLists()
+        self.start_body()
+
+    def start_body(self):
+        WalkCheck.start_body(self)
+        self.next_stage("fly")
+
+    def home_direction(self):
+        return self.best.direction
+
+    def on_body(self):
+        return [c for c in scanner.contacts if c.body is self.body()]
+
+    def fly(self, dt):
+        if self.frames == 1:
+            drop_bubble()
+            state["scripted_controls"] = True
+            teleport(9, moon=self.bodies[0] == "moon")
+            scanner.contacts = []
+            state["page"] = "scan"
+            state["warp"] = self.WARP
+            return
+        if len(self.on_body()) >= self.CONTACTS or self.clock > self.TIMEOUT:
+            state["warp"] = 0
+            state["page"] = "orbit"
+            self.contacts = self.on_body()
+            self.rounds = ProbeRounds()
+            self.queue = list(self.contacts)
+            self.again = []                 # (contact, richness measured again)
+            self.next_stage("verify")
+
+    def verify(self, dt):
+        results = self.rounds.take()
+        if results is not None:
+            self.again += list(zip(self.batch, [ore for _, _, ore in results]))
+        if not self.rounds.idle:
+            return
+        if self.queue:
+            self.batch, self.queue = self.queue[:EXTRA_PROBES], self.queue[EXTRA_PROBES:]
+            self.rounds.ask([(c.direction, c.body) for c in self.batch])
+            return
+        if not self.contacts:
+            self.finish([])
+            return
+        self.best = max(self.contacts, key=lambda c: c.richness)
+        self.next_stage("place")
+
+    def begin(self):
+        self.listed_at = self.nearby.count
+        self.next_stage("look")
+
+    def look(self, dt):
+        if self.clock < self.STEADY or not world.settled() or self.nearby.count < self.listed_at + 2:
+            return
+        best = self.best
+        self.finish(self.nearby.rocks(self.NEAR, scale(best.direction, best.body.radius + best.height)))
+
+    def finish(self, near):
+        name = self.bodies[0]
+        same = all(abs(c.richness - ore) <= 1e-3 and ore >= CONTACT for c, ore in self.again)
+        ore_rocks = [t for t in near if t.grade > ORE_ROCKS]
+        ok = (len(self.contacts) >= self.CONTACTS and len(self.again) == len(self.contacts) and same and near
+              and len(ore_rocks) == len(near))
+        grades = ", ".join("%.2f" % t.grade for t in near) or "-"
+        print("[planet] scan on the %s: %d contacts (%s) after %d points; measured again: %s; at the richest "
+              "(%.2f), %d of %d rocks within %.0f m are ore, grades %s: %s"
+              % (name, len(self.contacts), ", ".join("%.2f" % c.richness for c in self.contacts),
+                 scanner.scanned, "the same" if same else "DIFFERENT",
+                 self.best.richness if self.contacts else 0.0, len(ore_rocks), len(near), self.NEAR, grades,
+                 "passed" if ok else "FAILED"), flush=True)
+        self.next_body(ok)
+
+
+class BreakCheck(GunCheck):
+    """--break-check: in the mountains (WalkCheck's place) and on the moon
+    at the Shift+8 spot, the extra probes search a spiral (SPACING apart)
+    around the place for ore richness of at least RICH, and the player is
+    put down there. Once it has stood still and the fixed rocks are made,
+    a STRIKER_MASS kg crate of STRIKER_SIZE is thrown at STRIKE_SPEED into
+    the nearest fixed ore boulder within REACH, from STRIKE_FROM beyond its
+    surface towards the player. The boulder must split (rocks.split) within
+    TIMEOUT: into 3 to 6 chunks whose masses add up to the boulder's
+    (within 0.1 %), each with the boulder's grade, its cell taken; after
+    SETTLE more seconds every chunk must still be a prop. Prints per body
+    what it found and exits with status 0 when every body passed, 1
+    otherwise."""
+
+    SPACING = 40.0                      # m
+    SEARCH = 4_000                      # points at most
+    RICH = 0.7
+    REACH = 30.0                        # m
+    STRIKER_MASS, STRIKER_SIZE = 10.0, 0.3
+    STRIKE_SPEED = 25.0                 # m/s
+    STRIKE_FROM = 1.5                   # m
+    TIMEOUT = 2.0                       # s
+    SETTLE = 1.0                        # s
+    STEADY = 1.0                        # s
+
+    def __init__(self):
+        self.bodies = ["mountains", "moon"]
+        self.results = []
+        self.start_body()
+        split = scatter_rocks.split
+
+        def recorded(bubble, body):
+            chunks = split(bubble, body)
+            if chunks:
+                self.chunks = chunks
+            return chunks
+        scatter_rocks.split = recorded
+
+    def start_body(self):
+        WalkCheck.start_body(self)
+        self.found = None
+        self.chunks = []
+        self.next_stage("search")
+
+    def home_direction(self):
+        return self.found
+
+    def search(self, dt):
+        if self.frames == 1:
+            drop_bubble()
+            state["scripted_controls"] = True
+            self.base = WalkCheck.home_direction(self)
+            self.rounds = ProbeRounds()
+            self.k = 0
+        results = self.rounds.take()
+        for (direction, _), height, ore in results or []:
+            if ore >= self.RICH and (self.body() is not planet or height > 0.0) and self.found is None:
+                self.found = direction
+        if self.found is not None:
+            self.next_stage("place")
+            return
+        if self.k >= self.SEARCH:
+            self.finish("no ground of richness %.1f within %d points" % (self.RICH, self.k), False)
+            return
+        if not self.rounds.idle:
+            return
+        body = self.body()
+        east, north = local_frame(self.base)
+        probes = []
+        for _ in range(EXTRA_PROBES):
+            r, a = self.SPACING * math.sqrt(self.k), self.k * 2.39996323
+            offset = add(scale(east, r * math.cos(a)), scale(north, r * math.sin(a)))
+            probes.append((normalize(add(self.base, scale(offset, 1.0 / body.radius))), body))
+            self.k += 1
+        self.rounds.ask(probes)
+
+    def begin(self):
+        self.next_stage("aim")
+
+    def aim(self, dt):
+        if self.clock < self.STEADY:
+            return
+        feet = state["player"].feet()
+        ore = sorted((length(sub(physics.get_transform(r.body)[0], feet)), key)
+                     for key, r in scatter_rocks.rocks.items() if r.kind == "boulder" and r.grade > 0.0)
+        ore = [(d, key) for d, key in ore if d <= self.REACH]
+        if not ore:
+            if self.clock > 10.0:
+                self.finish("no fixed ore boulder within %.0f m" % self.REACH, False)
+            return
+        self.key = ore[0][1]
+        self.boulder = scatter_rocks.rocks[self.key]
+        bubble = state["bubble"]
+        centre = physics.get_transform(self.boulder.body)[0]
+        up = bubble.up(centre)
+        towards = sub(feet, centre)
+        towards = sub(towards, scale(up, dot(towards, up)))
+        towards = normalize(add(normalize(towards) if length(towards) > 1e-6 else local_frame(up)[0],
+                                scale(up, 0.3)))
+        start = add(centre, scale(towards, self.boulder.radius + self.STRIKE_FROM))
+        right = normalize(cross(towards, up))
+        crate = props.spawn_crate(bubble, start, flight.quat_from_basis(right, up, cross(right, up)),
+                                  self.STRIKER_SIZE, mass=self.STRIKER_MASS)
+        physics.set_velocity(crate.body, scale(towards, -self.STRIKE_SPEED))
+        self.next_stage("strike")
+
+    def strike(self, dt):
+        if self.chunks:
+            self.next_stage("settle_chunks")
+        elif self.clock > self.TIMEOUT:
+            self.finish("the %.0f kg boulder (grade %.2f) did NOT split" % (self.boulder.mass, self.boulder.grade),
+                        False)
+
+    def settle_chunks(self, dt):
+        if self.clock < self.SETTLE:
+            return
+        chunks, boulder = self.chunks, self.boulder
+        mass = sum(c.mass for c in chunks)
+        kept = all(c in props.rocks for c in chunks)
+        ok = (3 <= len(chunks) <= 6 and abs(mass - boulder.mass) <= 1e-3 * boulder.mass and kept
+              and all(c.grade == boulder.grade for c in chunks) and self.key in world.taken_rocks
+              and self.key not in scatter_rocks.rocks)
+        self.finish("a %.0f kg ore boulder (grade %.2f) split into %d chunks of %s kg (%.1f kg in all), grades %s, "
+                    "its cell %s, the chunks %s"
+                    % (boulder.mass, boulder.grade, len(chunks), ", ".join("%.0f" % c.mass for c in chunks), mass,
+                       "the same" if all(c.grade == boulder.grade for c in chunks) else "DIFFERENT",
+                       "taken" if self.key in world.taken_rocks else "NOT taken",
+                       "kept" if kept else "NOT all kept"), ok)
+
+    def finish(self, text, ok):
+        print("[planet] break on the %s: %s: %s" % (self.bodies[0], text, "passed" if ok else "FAILED"), flush=True)
+        if state["player"] is not None:
+            self.clear()
         self.next_body(ok)
 
 

@@ -2,7 +2,8 @@
 falling under central gravity onto a grid mesh and coming to rest, the
 origin shifted without waking them, ray casts, near and far bodies on the
 fine and the coarse ground, linear damping by default and none once set, a turned capsule, strikes
-on watched bodies reported above a momentum, motion changes, batched
+on watched bodies reported above a momentum (a dynamic one's with the
+strike's speed and momentum), motion changes, batched
 transforms and errors; characters standing and walking on a mesh along
 any up, moved by an origin shift, riding a kinematic platform, holding
 up bodies that land on them, letting bodies set to pass through them fall
@@ -191,6 +192,24 @@ class PlanetPhysicsTest(unittest.TestCase):
         w.run(1.0)
         self.assertEqual(w.physics.take_struck(), [])
         self.assertTrue(w.physics.contains(other))
+
+    def test_strike_speed_and_momentum(self):
+        w = World()
+        w.physics.set_strike_momentum(100.0)
+        # A dynamic watched box lying on the mesh, struck by 20 kg moving at 12 m/s along it.
+        target = w.physics.create_box((0.5, 0.5, 0.5), (0.0, 0.5, 0.0), mass=500.0)
+        w.physics.watch_strikes(target)
+        w.run(0.5)
+        self.assertEqual(w.physics.take_strikes(), [])
+        hammer = w.physics.create_box((0.2, 0.2, 0.2), (-2.0, 0.5, 0.0), mass=20.0)
+        w.physics.set_velocity(hammer, (12.0, 0.0, 0.0))
+        w.run(0.5)
+        strikes = w.physics.take_strikes()
+        self.assertEqual([s[0] for s in strikes], [target])
+        _, speed, momentum = strikes[0]
+        self.assertAlmostEqual(speed, 12.0, delta=0.5)
+        self.assertAlmostEqual(momentum, 20.0 * speed, delta=1e-3 * momentum)
+        self.assertEqual(w.physics.take_struck(), [])
 
     def test_static_bodies_stay_and_turn_dynamic(self):
         w = World()

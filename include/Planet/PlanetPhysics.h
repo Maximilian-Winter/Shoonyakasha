@@ -24,6 +24,14 @@ struct PhysicsRayHit {
     double fraction = 0.0;
 };
 
+/// A watched body struck since the last takeStrikes: the fastest speed and
+/// the largest momentum along the contact's normal it was struck with.
+struct PhysicsStrike {
+    uint32_t body = 0;
+    double speed = 0.0;        // m/s
+    double momentum = 0.0;     // kg m/s
+};
+
 /// How a character stands: on ground it can walk on, on ground too steep to
 /// climb, touching something that does not hold it up, or touching nothing.
 enum class CharacterGroundState { OnGround = 0, OnSteepGround = 1, NotSupported = 2, InAir = 3 };
@@ -167,13 +175,15 @@ public:
     bool castRay(const PhysicsVec3& origin, const PhysicsVec3& direction, double maxDistance,
                  PhysicsRayHit& hit, int skipCharacter = -1) const;
 
-    /// Whether a dynamic body striking `body` is reported (takeStruck).
+    /// Whether a dynamic body striking `body` is reported (takeStruck, takeStrikes).
     void watchStrikes(uint32_t body, bool watched);
     /// The momentum (kg m/s) a dynamic body must strike a watched body
     /// with, along the contact's normal, for the strike to be reported.
     void setStrikeMomentum(double momentum);
-    /// The watched bodies struck since the last call, each once.
+    /// The watched bodies struck since the last call (of either), each once, in order.
     std::vector<uint32_t> takeStruck();
+    /// The same, each with its fastest speed and largest momentum.
+    std::vector<PhysicsStrike> takeStrikes();
 
     /// For the next step, each awake dynamic body pulled towards `centre`
     /// with acceleration gm / r^2 (gm in m^3/s^2).

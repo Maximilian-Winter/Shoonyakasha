@@ -14,11 +14,14 @@ direction it marks, so it stays on it as the ship turns:
   - the speed boxed on the left, the throttle and the modes under it;
   - the height above the ground boxed on the right, the climb and the
     height above the datum under it;
-  - the contact state (LANDED, CRASHED) under the nose.
+  - the contact state (LANDED, CRASHED) under the nose;
+  - with an ore contact given, a diamond in amber where it lies (held at
+    the field's edge, dimmed, when outside it) over its distance.
 
 The multi-function displays: world canvases on the cabin's two displays,
-FLIGHT on the left and ORBIT on the right, each a title over rows of
-labels and values.
+FLIGHT on the left and ORBIT or SCAN on the right, each a title over rows
+of labels and values; SCAN with a strip of bars, the scanned richness,
+across its bottom.
 
 `Instruments.update(view, readings)` draws a frame of both.
 """
@@ -51,6 +54,9 @@ MFD_LABEL = (0.36, 0.7, 0.48, 1.0)
 MFD_VALUE = (0.64, 1.0, 0.7, 1.0)
 MFD_RULE = (0.36, 0.7, 0.48, 0.55)
 MFD_ROWS = 7
+MFD_RICH = (1.0, 0.72, 0.3, 1.0)       # the strip's bars at or above its mark
+STRIP_ROWS = 3                         # rows' height the strip takes, at the bottom
+STRIP_BARS = 64
 
 
 def _dot(a, b):
@@ -108,6 +114,7 @@ class HeadUpDisplay:
         self.left_lines = self._text(14, HUD, sk.TEXT_ALIGN_LEFT, sk.TEXT_ALIGN_TOP)
         self.right_lines = self._text(14, HUD, sk.TEXT_ALIGN_RIGHT, sk.TEXT_ALIGN_TOP)
         self.contact = self._text(18, WARNING)
+        self.ore_label = self._text(14, WARNING)
         self.texts = {}
 
     def _text(self, size, colour, align=sk.TEXT_ALIGN_CENTER, vertical=sk.TEXT_ALIGN_MIDDLE):
@@ -281,6 +288,19 @@ class HeadUpDisplay:
                     (height_box[2] - 55.0, cy + 30.0 + 22.0), (110, 44))
         self._place(self.contact, r["contact"] or None, (cx, box[3] - 18.0), (360, 24))
 
+        # The nearest ore contact: a diamond where it lies, held inside the field, its distance under it.
+        ore = r.get("ore_contact")
+        m = project(ore[0]) if ore is not None else None
+        if m is None:
+            self._place(self.ore_label, None, (0.0, 0.0))
+        else:
+            inside = box[0] + 12 <= m[0] <= box[2] - 12 and box[1] + 12 <= m[1] <= box[3] - 24
+            ox = min(max(m[0], box[0] + 12), box[2] - 12)
+            oy = min(max(m[1], box[1] + 12), box[3] - 24)
+            colour = WARNING if inside else (WARNING[0], WARNING[1], WARNING[2], 0.5)
+            line([(ox, oy - 9.0), (ox + 9.0, oy), (ox, oy + 9.0), (ox - 9.0, oy), (ox, oy - 9.0)], colour)
+            self._place(self.ore_label, ore[1], (ox, oy + 20.0), (140, 18))
+
         for k, pair in enumerate(self.labels):
             if k < len(labels):
                 self._place(pair, labels[k][0], labels[k][1], (40, 18))
@@ -341,6 +361,40 @@ class Display:
         self.fill = ui.create_panel(self.bar, size=(0, 6), color=MFD_VALUE)
         self.texts = {}
         self.filled = None
+        self.step = step
+        self.strip_bars = []             # the strip's panels, made when a strip is first shown
+        self.strip_shown = None          # (heights, colours) last set, or None while hidden
+
+    def _strip(self, values, mark):
+        """Bars of `values` (0 .. 1, the latest at the right) across the
+        bottom STRIP_ROWS rows; those at or above `mark` in MFD_RICH. None
+        hides them."""
+        w, h = MFD_PIXELS
+        if values is None:
+            if self.strip_shown is not None:
+                for bar in self.strip_bars:
+                    self.ui.set_visible(bar, False)
+                self.strip_shown = None
+            return
+        count = STRIP_BARS
+        if not self.strip_bars:
+            self.strip_bars = [self.ui.create_panel(self.entity, size=(1, 1), color=MFD_VALUE) for _ in range(count)]
+        values = ([0.0] * count + list(values))[-count:]
+        top, bottom = h - 30 - STRIP_ROWS * self.step, h - 30
+        width = (w - 52) / count
+        heights = tuple(round(max(min(v, 1.0), 0.0) * (bottom - top - 4), 0) for v in values)
+        colours = tuple(v >= mark for v in values)
+        old = self.strip_shown
+        for k, bar in enumerate(self.strip_bars):
+            if old is None:
+                self.ui.set_visible(bar, True)
+            if old is None or old[0][k] != heights[k]:
+                size = (max(width - 2.0, 1.0), max(heights[k], 1.0))
+                self.ui.set_rect(bar, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0),
+                                 position=(26 + k * width, bottom - size[1]), size=size)
+            if old is None or old[1][k] != colours[k]:
+                self.ui.set_color(bar, MFD_RICH if colours[k] else MFD_VALUE)
+        self.strip_shown = (heights, colours)
 
     def _text(self, size, colour, align, position, box):
         text = self.ui.create_text(self.entity, "", size=size, color=colour)
@@ -353,9 +407,12 @@ class Display:
             self.ui.set_text(element, text)
             self.texts[element] = text
 
-    def update(self, title, tag, rows, bar=None):
+    def update(self, title, tag, rows, bar=None, strip=None, mark=1.0):
         """`rows`: (label, value) pairs; `bar`: the fraction of the bar
-        along the bottom to fill, or None for no bar."""
+        along the bottom to fill, or None for no bar; `strip`: values for
+        the strip of bars across the bottom rows (Display._strip, those at
+        `mark` or above marked), or None for none."""
+        self._strip(strip, mark)
         self._set(self.title, title)
         self._set(self.tag, tag)
         for k, (label, value) in enumerate(self.rows):
@@ -403,7 +460,9 @@ class Instruments:
         datum_height (texts), datum and datum_short (its name, and that
         shortened for the HUD), heading, throttle, assist, warp,
         contact, periapsis and apoapsis (texts), circular, density,
-        dynamic_pressure, glow."""
+        dynamic_pressure, glow; and page ("orbit" or "scan"), with the
+        scan's rows (scan_rows), strip (scan_strip, 0 .. 1) and its mark
+        (scan_mark), and ore_contact for the HUD (direction, text) or None."""
         self.hud.update(view, r)
         flight, orbit = self.displays
         flight.update("FLIGHT", "", [
@@ -415,6 +474,9 @@ class Instruments:
             ("ASSIST", "ON" if r["assist"] else "OFF"),
             ("TIME WARP", "x%d" % r["warp"]),
         ], bar=r["throttle"])
+        if r.get("page") == "scan":
+            orbit.update("SCAN", r["body"].upper(), r["scan_rows"], strip=r["scan_strip"], mark=r["scan_mark"])
+            return
         orbit.update("ORBIT", r["body"].upper(), [
             ("PERIAPSIS", r["periapsis"]),
             ("APOAPSIS", r["apoapsis"]),

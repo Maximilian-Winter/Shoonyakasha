@@ -16,7 +16,9 @@ A `NearbyTree` is named by its cell (`key`: its body, grid, cube face and
 cell, as rocks' keys, the same every frame), with its kind
 (vegetation.KINDS), its base on the drawn surface, its height, its width
 factor (as vegetation.glsl's vegetationWidth, from its tint), its turn
-about its up (cosine, sine) and its tint. `rock` tells a rock. `trunk`
+about its up (cosine, sine), its tint, and an ore rock's grade (its ore
+richness, from the bits of the kind's word from 8 up, over 255; 0 for
+every other). `rock` tells a rock. `trunk`
 gives a plant's trunk as a column: (radius, height) in metres, from
 TRUNKS, the share of the plant's height each mesh's trunk has
 (vegetation.py) near its foot and up to where it thins or forks.
@@ -63,6 +65,7 @@ class NearbyTree:
     width: float                 # the width factor
     turn: tuple = (1.0, 0.0)     # cosine and sine of its turn about its up
     tint: float = 0.0            # 0 .. 1
+    grade: float = 0.0           # an ore rock's ore richness (above rocks.ORE_ROCKS), else 0
 
     @property
     def body(self):
@@ -82,7 +85,7 @@ class NearbyTree:
 
 def key_of(row):
     """The key of a listed row of WORDS words."""
-    kind = vegetation.KINDS[int(row[5])]
+    kind = vegetation.KINDS[int(row[5]) & 0xFF]
     return (int(row[9]), rock_grid(kind) if kind in ROCK_KINDS else 0, int(row[6]),
             int(row[7].view(np.int32)), int(row[8].view(np.int32)))
 
@@ -133,13 +136,15 @@ class NearbyTrees:
         known = np.array(list(centres) + [(0.0, 0.0, 0.0)], dtype=np.float64)
         base = np.asarray(camera, dtype=np.float64) + floats[:, 0:3].astype(np.float64) \
             - known[np.minimum(body, len(centres))]
-        kinds = rows[:, 5].astype(np.int64)
+        kinds = (rows[:, 5] & 0xFF).astype(np.int64)
+        grades = ((rows[:, 5] >> 8) & 0xFF).astype(np.float64) / 255.0
         grid = (kinds == ROCK_INDEX).astype(np.int64)
         t = floats[:, 4] * np.float32(7.31)
         width = 0.85 + 0.3 * (t - np.floor(t)).astype(np.float64)
         keys = np.stack([body, grid, rows[:, 6].astype(np.int64), cells[:, 7], cells[:, 8]], axis=1).tolist()
         names = [vegetation.KINDS[k] for k in kinds.tolist()]
-        return [NearbyTree(tuple(key), name, tuple(b), h, w, (c, s), tint)
-                for key, name, b, h, w, c, s, tint in zip(keys, names, base.tolist(), floats[:, 3].tolist(),
-                                                          width.tolist(), floats[:, 10].tolist(),
-                                                          floats[:, 11].tolist(), floats[:, 4].tolist())]
+        return [NearbyTree(tuple(key), name, tuple(b), h, w, (c, s), tint, grade)
+                for key, name, b, h, w, c, s, tint, grade in zip(keys, names, base.tolist(), floats[:, 3].tolist(),
+                                                                 width.tolist(), floats[:, 10].tolist(),
+                                                                 floats[:, 11].tolist(), floats[:, 4].tolist(),
+                                                                 grades.tolist())]
