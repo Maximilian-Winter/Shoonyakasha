@@ -32,7 +32,16 @@ coarse one (256 m, COARSE_SPACING apart), which only props off the fine
 one stand on. Props (props.py) leave the physics beyond the bubble's
 reach, or low over neither mesh, and fly on around their body in doubles
 or rest where they land, coming back in when the bubble reaches them; the
-time warp on foot runs while none in the physics is awake.
+time warp on foot runs while none in the physics is awake. When the planet
+is built again (a new seed, the terrain's keys, the menu's Apply), the
+props on it are removed with its taken rocks.
+
+F5 saves to SAVE_PATH, as JSON: the world's clock, the planet's terrain
+parameters, the taken rocks, every prop as a record (props.py), the ship
+(and where it is parked), the mode, the free camera and the player's
+feet. F9 loads it: the planet is built again when its parameters differ,
+the props come back out of the physics and return to it by props.py's
+rules, and the view goes back to the free camera, the ship or the player.
 
 The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
@@ -110,6 +119,7 @@ Keys:
     F2                     the controls
     I                      debug text
     P                      screenshot into planet_captures/
+    F5 / F9                save / load (planet_save.json)
 
     python planet.py --capture DIR     screenshots at the presets, then exit
     python planet.py --generated-cockpit   start with the generated cockpit instead of the model's cabin
@@ -127,9 +137,11 @@ Keys:
     python planet.py --trunk-check     walk into the trees nearest the blocks, check the feet stop at their trunks
     python planet.py --promotion-check   grab the rocks near the player one by one, check each is drawn once
     python planet.py --orbit-crate-check   a crate in a low orbit of the moon comes round to where it started
+    python planet.py --save-check      move rocks, throw a crate, save, build a new planet, load, check what came back
 """
 
 import argparse
+import json
 import math
 import os
 import random
@@ -165,6 +177,8 @@ from viewmodel import Viewmodel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CAPTURES = os.path.join(HERE, "planet_captures")
+SAVE_PATH = os.path.join(HERE, "planet_save.json")   # F5 / F9
+SAVE_VERSION = 1
 
 DAY_SUN = (SUN_ELEVATION, SUN_AZIMUTH)
 PIXEL_ANGLE = math.radians(FOV) / 900.0   # radians across a pixel at the window's 900 rows
@@ -258,6 +272,8 @@ parser.add_argument("--trunk-check", action="store_true",
                     help="walk into the trees nearest the blocks, check the feet stop at their trunks, and exit")
 parser.add_argument("--orbit-crate-check", action="store_true",
                     help="put a crate in a low orbit of the moon, check it comes round to where it started, and exit")
+parser.add_argument("--save-check", action="store_true",
+                    help="move rocks, throw a crate, save, build a new planet, load, check what came back, and exit")
 parser.add_argument("--promotion-check", action="store_true",
                     help="grab the rocks near the player one by one, check each is drawn exactly once, and exit")
 args = parser.parse_args()
@@ -346,6 +362,7 @@ state = {
     "parked": None,              # (body, position relative to it) of a ship the player left
     "ship_body": None,           # the ship's kinematic hull in the bubble
     "ship_poses": None,          # (position, orientation) of the ship before and after this frame's flight
+    "regenerations": 0,          # world.regenerations the props were last kept under
 }
 physics = sk.PlanetPhysics()
 physics.set_strike_momentum(STRIKE_MOMENTUM)
@@ -1257,6 +1274,118 @@ def capture_mouse():
         state["captured"] = wanted
 
 
+# ── Saving and loading ─────────────────────────────────────────────────────
+
+def forget_planet_props():
+    """The props on the planet removed once it was built again (PlanetWorld.regenerate)."""
+    if state["regenerations"] == world.regenerations:
+        return
+    state["regenerations"] = world.regenerations
+    bubble = state["bubble"]
+    if state["gun"] is not None and bubble is not None and bubble.body is planet:
+        state["gun"].drop()
+    for prop in props.all:
+        if prop_state(prop)[0] is planet:
+            props.remove(bubble, prop)
+
+
+def ship_record(ship):
+    if ship is None:
+        return None
+    return {"position": list(ship.position), "velocity": list(ship.velocity), "orientation": list(ship.orientation),
+            "angular_velocity": list(ship.angular_velocity), "on_ground": ship.on_ground, "resting": ship.resting,
+            "crashed": ship.crashed}
+
+
+def save_game(path=None):
+    """The world's changes written to `path` (SAVE_PATH when None) as JSON
+    (see the module's docstring); returns what was written."""
+    path = path or SAVE_PATH
+    bubble, ship, player = state["bubble"], state["ship"], state["player"]
+    parked = state["parked"]
+    data = {
+        "version": SAVE_VERSION,
+        "time": world.time,
+        "terrain": {name: list(value) for name, value in planet.terrain.items()},
+        "mode": state["mode"],
+        "position": list(state["position"]),
+        "forward": list(state["forward"]),
+        "ship": ship_record(ship),
+        "controls": {"throttle": state["controls"].throttle, "assist": state["controls"].assist},
+        "parked": [parked[0].name, list(parked[1])] if parked is not None else None,
+        "player": None if player is None else {"on": bubble.body.name,
+                                               "feet": list(bubble.body_relative(player.feet())),
+                                               "heading": list(player.basis()[2])},
+        "taken": [list(key) for key in sorted(world.taken_rocks.keys)],
+        "props": props.records(bubble),
+    }
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(path + ".tmp", path)
+    return data
+
+
+def load_game(path=None):
+    """The world put back as `path` (SAVE_PATH when None) has it: the
+    planet built again with its terrain's parameters when they differ, the
+    clock, the taken rocks, the props (out of the physics), the ship, and
+    the free camera, the ship's view or a player where they were. Returns
+    the data read, or None when there is no save to read."""
+    path = path or SAVE_PATH
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as error:
+        print("[planet] no save loaded from %s: %s" % (path, error), flush=True)
+        return None
+    if data.get("version") != SAVE_VERSION:
+        print("[planet] %s is not a save of version %d" % (path, SAVE_VERSION), flush=True)
+        return None
+    remove_player()
+    drop_bubble()
+    props.clear(None)
+    state.update(tracked=None, last_thrown=None, teleport_when_known=None, moon_landing=None, warp=0,
+                 accumulator=0.0)
+    world.time = data["time"]
+    if data["terrain"] != planet.terrain:
+        planet.terrain = {name: list(value) for name, value in data["terrain"].items()}
+        world.regenerate()
+        state["terrain_edit"].reset()
+    state["regenerations"] = world.regenerations
+    world.ground = None
+    world.patch = None
+    taken = world.taken_rocks
+    taken.clear()
+    for key in data["taken"]:
+        taken.add(tuple(key))
+    by_name = {body.name: body for body in bodies}
+    for record in data["props"]:
+        if record["kind"] == "crate":
+            props.restore(record, by_name)
+        else:
+            scatter_rocks.restore(physics, record, by_name)
+    s = data["ship"]
+    state["ship"] = None if s is None else flight.Ship(
+        position=tuple(s["position"]), velocity=tuple(s["velocity"]), orientation=tuple(s["orientation"]),
+        angular_velocity=tuple(s["angular_velocity"]), on_ground=s["on_ground"], resting=s["resting"],
+        crashed=s["crashed"])
+    state["controls"] = flight.Controls(throttle=data["controls"]["throttle"], assist=data["controls"]["assist"])
+    parked = data["parked"]
+    state["parked"] = (by_name[parked[0]], tuple(parked[1])) if parked is not None else None
+    mode = data["mode"]
+    p = data["player"]
+    if p is not None:
+        body = by_name[p["on"]]
+        feet = add(body.centre(), tuple(p["feet"]))
+        spawn_player(ensure_bubble(feet), feet, tuple(p["heading"]))
+    if (mode == "foot" and p is None) or (mode == "ship" and state["ship"] is None):
+        mode = "camera"
+    state["mode"] = mode
+    if mode != "foot":
+        state["position"], state["forward"] = tuple(data["position"]), tuple(data["forward"])
+    return data
+
+
 # ── Per frame ──────────────────────────────────────────────────────────────
 
 def frame(dt):
@@ -1298,6 +1427,7 @@ def frame(dt):
         state["ship_poses"] = (before, (ship.position, ship.orientation))
     else:
         state["ship_poses"] = None
+    forget_planet_props()
     # The flying props on to this frame's clock before the bubble takes any back.
     props.fly(world.time - clock, world.probe_latency * state["frame_ms"] / 1000.0)
     step_bubble(dt)
@@ -1655,6 +1785,7 @@ HELP_COLUMNS = [
         (("Z", "X"), "Sun lower / higher"),
         (("T", "Y"), "Air denser / thinner"),
         (("B", "V"), "Exposure up / down"),
+        (("F5", "F9"), "Save / load"),
     ]), ("View", [
         (("F1",), "Settings"),
         (("F2",), "These controls"),
@@ -1714,6 +1845,8 @@ def on_init():
         engine.ecs.add_system("PlanetPromotionCheck", PromotionCheck(), priority=-2)
     elif args.orbit_crate_check:
         engine.ecs.add_system("PlanetOrbitCrateCheck", OrbitCrateCheck(), priority=-2)
+    elif args.save_check:
+        engine.ecs.add_system("PlanetSaveCheck", SaveCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -1838,6 +1971,12 @@ def on_key(key, from_pad=False):
         world.upload_sky()
     elif key == keys.F3:
         set_wireframe(not world.wireframe)
+    elif key == keys.F5:
+        save_game()
+        print("[planet] saved", SAVE_PATH, flush=True)
+    elif key == keys.F9:
+        if load_game() is not None:
+            print("[planet] loaded", SAVE_PATH, flush=True)
     elif key == keys.C:
         set_colour_mode((world.colour_mode + 1) % len(COLOUR_MODES))
     elif key == keys.K:
@@ -3737,6 +3876,150 @@ class OrbitCrateCheck(GunCheck):
                                   "%.1f m off" % self.error if self.error is not None else "no period",
                                   "back in the physics" if back_in else "NOT back (%s)" % self.crate.state,
                                   "passed" if ok else "FAILED"), flush=True)
+        self.clear()
+        self.next_body(ok)
+
+
+class SaveCheck(GunCheck):
+    """--save-check: in the mountains (WalkCheck's place), once the player
+    has stood still and a list of the nearby rocks came back, the cells of
+    the rocks listed within INNER (and OUTER) of the feet are kept; up to
+    ROCKS fixed rocks nearest the feet within REACH come loose and are
+    thrown up and away (HOP, AWAY), and a CRATE_MASS kg crate is thrown at
+    THROW m/s 45 degrees up along the view. Once the crate is out of the
+    physics and the rocks are asleep (or after WAIT seconds), the game is
+    saved to PATH, a new seed builds the planet again (which must remove
+    its props and put its rocks back), and the save is loaded: the taken
+    rocks and the props' records must then equal the saved ones. Once the
+    planet is built again and SETTLE seconds have passed, a new list of the
+    rocks must hold every kept cell within INNER that is not taken, none
+    that is taken, and none within INNER that was not kept within OUTER; and
+    the loose rocks back in the physics must lie within MOVED of their
+    records. Prints what it found and exits with status 0 when all of
+    these held, 1 otherwise."""
+
+    ROCKS = 10
+    REACH = 20.0
+    STEADY = 1.0                        # s standing before the rocks are listed
+    INNER, OUTER = 18.0, 24.0
+    HOP, AWAY = 3.0, 2.0                # m/s
+    CRATE_MASS = 1_000.0
+    THROW = 150.0                       # m/s
+    WAIT = 40.0                         # s
+    SETTLE = 3.0                        # s
+    MOVED = 0.01                        # m
+    PATH = os.path.join(CAPTURES, "save_check.json")
+
+    def __init__(self):
+        self.bodies = ["mountains"]
+        self.results = []
+        self.start_body()
+        self.lists = 0
+        self.trees = None
+        read = nearby_trees.read
+
+        def kept():
+            trees = read()
+            if trees is not None:
+                self.trees, self.lists = trees, self.lists + 1
+            return trees
+        nearby_trees.read = kept
+
+    def rock_cells(self, radius):
+        """The cells of the rocks in the last list within `radius` of the feet."""
+        bubble = state["bubble"]
+        feet = bubble.body_relative(state["player"].feet())
+        return {t.key for t in self.trees if t.rock and t.body == bubble.body.index
+                and length(sub(t.base, feet)) <= radius}
+
+    def begin(self):
+        self.listed_at = self.lists
+        self.next_stage("look")
+
+    def look(self, dt):
+        if self.clock < self.STEADY or not world.settled() or self.lists < self.listed_at + 2:
+            return
+        self.inner, self.outer = self.rock_cells(self.INNER), self.rock_cells(self.OUTER)
+        player, bubble = state["player"], state["bubble"]
+        feet = player.feet()
+        near = sorted((length(sub(physics.get_transform(r.body)[0], feet)), r.body)
+                      for r in scatter_rocks.rocks.values())
+        self.moved = 0
+        for d, body in near[:self.ROCKS]:
+            if d > self.REACH or not scatter_rocks.promote(bubble, body):
+                continue
+            p = physics.get_transform(body)[0]
+            up = bubble.up(p)
+            away = sub(p, feet)
+            away = sub(away, scale(up, dot(away, up)))
+            away = normalize(away) if length(away) > 1e-6 else local_frame(up)[0]
+            physics.set_velocity(body, add(scale(up, self.HOP), scale(away, self.AWAY)))
+            self.moved += 1
+        right, up, forward = player.basis()
+        level = player.level(forward, up)
+        right = normalize(cross(level, up))
+        direction = normalize(add(level, up))
+        self.crate = props.spawn_crate(bubble, add(player.eye(), add(scale(level, 3.0), scale(up, 1.0))),
+                                       flight.quat_from_basis(right, up, scale(level, -1.0)), CRATE_SIZE,
+                                       mass=self.CRATE_MASS)
+        physics.set_velocity(self.crate.body, scale(direction, self.THROW))
+        self.next_stage("wait")
+
+    def wait(self, dt):
+        if (self.crate.body is not None or props.awake(state["bubble"])) and self.clock < self.WAIT:
+            return
+        os.makedirs(CAPTURES, exist_ok=True)
+        self.saved = save_game(self.PATH)
+        self.taken = set(world.taken_rocks.keys)
+        self.crate_record = props.record(state["bubble"], self.crate)
+        new_seed()
+        self.next_stage("regenerate")
+
+    def regenerate(self, dt):
+        if self.frames < 3:
+            return
+        self.cleared = (not any(prop_state(p)[0] is planet for p in props.all)
+                        and not any(key[0] == planet.index for key in world.taken_rocks.keys))
+        if self.clock < 2.0 or not world.settled():
+            return
+        load_game(self.PATH)
+        self.taken_match = set(world.taken_rocks.keys) == self.taken
+        self.records_match = props.records(state["bubble"]) == self.saved["props"]
+        self.listed_at = self.lists
+        self.next_stage("after")
+
+    def after(self, dt):
+        if not world.settled() or self.clock < self.SETTLE or self.lists < self.listed_at + 2:
+            return
+        taken = world.taken_rocks.keys
+        inner, outer = self.rock_cells(self.INNER), self.rock_cells(self.OUTER)
+        missing = {k for k in self.inner if k not in taken and k not in outer}
+        shown = outer & taken
+        extra = inner - self.outer
+        bubble = state["bubble"]
+        records = {tuple(r["key"]): r for r in self.saved["props"] if r["key"] is not None}
+        back, worst = 0, 0.0
+        for rock in props.rocks:
+            record = records.get(rock.key)
+            if rock.body is None or record is None or record["state"] != "resting":
+                continue
+            p = bubble.body_relative(physics.get_transform(rock.body)[0])
+            worst = max(worst, length(sub(p, tuple(record["position"]))))
+            back += 1
+        ok = (self.moved > 0 and self.cleared and self.taken_match and self.records_match
+              and not missing and not shown and not extra and worst <= self.MOVED)
+        print("[planet] save in the mountains: %d rocks moved, %d taken, %d props saved (the crate %s, %s away); "
+              "a new seed %s; after loading the taken rocks %s and the records %s; of %d rocks listed within "
+              "%.0f m before, %d missing, %d taken still listed, %d new; %d loose rocks back in the physics, "
+              "%.4f m from their records at most: %s"
+              % (self.moved, len(self.taken), len(self.saved["props"]), self.crate_record["state"],
+                 distance_text(length(sub(tuple(self.crate_record["position"]), bubble.origin))),
+                 "cleared the planet's props and rocks" if self.cleared else "did NOT clear them",
+                 "match" if self.taken_match else "DIFFER", "match" if self.records_match else "DIFFER",
+                 len(self.inner), self.INNER, len(missing), len(shown), len(extra), back, worst,
+                 "passed" if ok else "FAILED"), flush=True)
+        if os.path.exists(self.PATH):
+            os.remove(self.PATH)
         self.clear()
         self.next_body(ok)
 

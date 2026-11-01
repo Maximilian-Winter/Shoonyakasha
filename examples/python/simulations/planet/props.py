@@ -44,6 +44,14 @@ ground is measured it is taken as the highest its body's terrain reaches
 the bubble goes). `Props.draw` places the entities relative to the
 camera, subtracted in 64-bit floats. `on_remove(prop)` is told of each
 rock removed.
+
+`Props.record` gives a prop as a record, a dict of plain values for a save
+file: its kind, the name of the body it is reckoned around, its state
+(one in the physics resting when asleep, else flying), its position from
+that body's centre, rotation, velocity and spin, its size, radius, rest
+height, mass, entity scale and colour, a rock's cell and its ground as
+last measured. `Props.restore` makes a prop out of the physics from one,
+which comes back into the physics by the rules above.
 """
 
 import math
@@ -89,6 +97,9 @@ class Prop:
     spin: tuple = (0.0, 0.0, 0.0)  # angular velocity, rad/s
     ground: float = None         # m: the terrain's height under it as last measured
     measured: int = -1           # the probe round that measured it
+    kind: str = "crate"          # "crate", or a rock's kind (vegetation.KINDS' "rock" or "boulder")
+    extent: tuple = None         # its entity's scale
+    colour: tuple = CRATE_COLOUR
 
     @property
     def mass(self):
@@ -122,6 +133,13 @@ class Props:
         physics = bubble.physics
         body = physics.create_box((half, half, half), position, rotation, motion="dynamic", density=density,
                                   mass=mass or 0.0, friction=0.7, restitution=0.1)
+        crate = Prop(body, self.crate_entity(size, colour), size, 0.5 * math.sqrt(3.0) * size,
+                     ("box", (half, half, half), physics.mass(body)), half, bubble.body,
+                     extent=(size, size, size), colour=tuple(colour))
+        self.crates.append(crate)
+        return crate
+
+    def crate_entity(self, size, colour):
         positions, normals = self.mesh
         entity = self.engine.create_mesh(positions, normals=normals, name="Crate")
         scene = self.engine.scene
@@ -129,16 +147,56 @@ class Props:
         scene.set_material_vec4(entity, "baseColorFactor", tuple(colour) + (1.0,))
         scene.set_material_float(entity, "gridStrength", 0.0)
         scene.set_render_layer_mask(entity, 1)
-        crate = Prop(body, entity, size, 0.5 * math.sqrt(3.0) * size, ("box", (half, half, half), physics.mass(body)),
-                     half, bubble.body)
-        self.crates.append(crate)
-        return crate
+        return entity
 
-    def add_rock(self, body, entity, size, radius, key, shape, rest, on):
+    def add_rock(self, body, entity, size, radius, key, shape, rest, on, kind, extent, colour):
         """A loose rock: its body (dynamic) and entity, made by rocks.py."""
-        rock = Prop(body, entity, size, radius, shape, rest, on, key)
+        rock = Prop(body, entity, size, radius, shape, rest, on, key, kind=kind, extent=tuple(extent),
+                    colour=tuple(colour))
         self.rocks.append(rock)
         return rock
+
+    # ── Records ──
+
+    def record(self, bubble, prop):
+        """`prop` as a record (a dict of plain values, for JSON): out of the
+        physics as it is; in the physics, resting when asleep, else flying."""
+        if prop.body is not None:
+            physics = bubble.physics
+            p, q = physics.get_transform(prop.body)
+            on, position = bubble.body, bubble.body_relative(p)
+            if physics.is_active(prop.body):
+                state, (v, w) = "flying", physics.get_velocity(prop.body)
+            else:
+                state, v, w = "resting", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+        else:
+            on, position, q, state, v, w = prop.on, prop.position, prop.rotation, prop.state, prop.velocity, prop.spin
+        return {"kind": prop.kind, "on": on.name, "state": state, "position": list(position), "rotation": list(q),
+                "velocity": list(v), "spin": list(w), "size": prop.size, "radius": prop.radius, "rest": prop.rest,
+                "mass": prop.mass, "extent": list(prop.extent), "colour": list(prop.colour),
+                "key": list(prop.key) if prop.key is not None else None, "ground": prop.ground}
+
+    def records(self, bubble):
+        return [self.record(bubble, prop) for prop in self.all]
+
+    def restore(self, record, bodies, entity=None, points=None):
+        """A prop out of the physics from `record`; `bodies` the world
+        bodies by name. A rock needs its `entity` and its hull's `points`
+        (rocks.py's Rocks.restore); a crate's are made here."""
+        size, mass = record["size"], record["mass"]
+        if record["kind"] == "crate":
+            half = 0.5 * size
+            shape = ("box", (half, half, half), mass)
+            entity = self.crate_entity(size, record["colour"])
+        else:
+            shape = ("hull", points, mass)
+        key = tuple(record["key"]) if record["key"] is not None else None
+        prop = Prop(None, entity, size, record["radius"], shape, record["rest"], bodies[record["on"]], key,
+                    state=record["state"], position=tuple(record["position"]), velocity=tuple(record["velocity"]),
+                    rotation=tuple(record["rotation"]), spin=tuple(record["spin"]), ground=record["ground"],
+                    kind=record["kind"], extent=tuple(record["extent"]), colour=tuple(record["colour"]))
+        (self.crates if key is None else self.rocks).append(prop)
+        return prop
 
     def find(self, body):
         return next((p for p in self.all if p.body == body), None)

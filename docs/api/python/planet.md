@@ -68,7 +68,7 @@ Positions are Python floats in metres, with the planet's centre at the origin. T
 | `set_orbit_path(points)` | A line through up to `ORBIT_POINTS` points (planet space) over the scene, depth-tested; none when empty |
 | `upload_sky()`, `upload_clouds()`, `upload_terrain()` | Hand changed settings to the pipeline |
 | `set_ocean(on)`, `set_wireframe(on)` | Those passes on or off |
-| `regenerate()` | The planet built again with `planet.terrain`: every chunk released and the site measured again |
+| `regenerate()` | The planet built again with `planet.terrain`: every chunk released and the site measured again; counted in `regenerations` |
 | `change_terrain(name, index, factor)`, `new_seed(seed)` | One terrain parameter times `factor`, or a new noise offset (three numbers), and the planet built again |
 | `settled()` | The planet's tree made, no chunk missing, none still to build again for the sun, every built chunk's heights back |
 | `body_under(point)` | The body `point` is reckoned around: the moon within its sphere of influence, else the planet |

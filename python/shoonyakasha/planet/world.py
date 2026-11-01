@@ -373,7 +373,8 @@ class PlanetWorld:
     `frozen` (the level of detail kept as it is). `ground_climate` is (temperature, moisture) under the viewpoint
     from the probes, with the offsets, or None. `set_ocean` and
     `set_wireframe` switch those passes. The planet's terrain parameters
-    are `planet.terrain`; `regenerate` builds it again with them.
+    are `planet.terrain`; `regenerate` builds it again with them and counts
+    it in `regenerations`.
 
     `time` is the world's clock in seconds, which places the moon;
     `physics` (orbits.Planet) has the planet's and the moon's gravity and
@@ -386,6 +387,7 @@ class PlanetWorld:
         self.pad = pad
         self._lod = None
         self.lod_version = 0                # counts changes to the level of detail, for TreeView's copies
+        self.regenerations = 0              # times regenerate built the planet again
         self.physics = orbits.Planet(radius=RADIUS, scale_height=RAYLEIGH_SCALE_HEIGHT)
         terrain = terrain or TERRAIN
         self.planet = Body(0, "planet", RADIUS, {name: list(value) for name, value in terrain.items()}, self,
@@ -768,6 +770,7 @@ class PlanetWorld:
         taken rocks are put back."""
         self.lod.drop_tree(self.planet.index)
         self.taken_rocks.clear_body(self.planet.index)
+        self.regenerations += 1
         self.lod_version += 1
         self.site_height = None
         self.ground = None

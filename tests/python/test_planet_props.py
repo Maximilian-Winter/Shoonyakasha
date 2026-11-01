@@ -8,12 +8,16 @@ covers it; one beyond the bubble's radius leaves it; a flying crate keeps
 a circular orbit for a period and lands on its measured ground, resting
 at its rest height; a slow one on its measured ground rests; the ground is
 asked for with the world's extra probes and taken back only when they are
-its own; and leave_all takes every prop out. Where this interpreter's
+its own; leave_all takes every prop out; and the props' records (an
+asleep one resting, an awake one flying) go through JSON and come back
+as the same records, the resting one into the physics asleep where it
+lay. Where this interpreter's
 shoonyakasha has no extension, the tests run in a fresh interpreter.
 
     python -m unittest discover -s tests/python
 """
 
+import json
 import math
 import os
 import subprocess
@@ -194,6 +198,34 @@ class PropsTest(unittest.TestCase):
         self.assertIsNotNone(crate.body)
         self.assertFalse(self.physics.is_active(crate.body))
         self.assertLess(length(sub(self.physics.get_transform(crate.body)[0], p)), 1e-4)
+
+    def test_records(self):
+        asleep, moving = self.crate(2.0, y=0.2), self.crate(5.0, velocity=(3.0, 0.0, 0.0))
+        self.physics.deactivate(asleep.body)
+        out = self.crate(300.0, velocity=(5.0, 0.0, 0.0))
+        out.ground = 0.0
+        self.props.update(self.bubble, self.fine, self.coarse)
+        records = json.loads(json.dumps(self.props.records(self.bubble)))
+        self.assertEqual([r["state"] for r in records], ["resting", "flying", "flying"])
+        p = self.physics.get_transform(asleep.body)[0]
+        self.assertEqual(records[0]["position"], list(self.bubble.body_relative(p)))
+        self.assertEqual(records[0]["velocity"], [0.0, 0.0, 0.0])
+        self.assertAlmostEqual(records[1]["velocity"][0], 3.0, places=4)
+        self.assertEqual(records[2]["ground"], 0.0)
+        self.assertEqual((records[0]["kind"], records[0]["on"], records[0]["key"]), ("crate", "planet", None))
+        self.assertAlmostEqual(records[0]["mass"], 10.0, places=4)
+        # Made again out of the physics: the same records; the resting one back in asleep where it lay.
+        again = self.module.Props(FakeEngine(), ([], []), self.world)
+        for record in records:
+            again.restore(record, {"planet": self.world.planet})
+        self.assertEqual(again.records(self.bubble), records)
+        self.props.clear(self.bubble)
+        again.update(self.bubble, self.fine, self.coarse)
+        lying = again.crates[0]
+        self.assertIsNotNone(lying.body)
+        self.assertFalse(self.physics.is_active(lying.body))
+        self.assertLess(length(sub(self.physics.get_transform(lying.body)[0], p)), 1e-6)
+        self.assertAlmostEqual(self.physics.mass(lying.body), asleep.mass, places=4)
 
     def test_leave_all(self):
         crates = [self.crate(x) for x in (0.0, 1.0, 2.0)]

@@ -18,7 +18,9 @@ where it is, strikes on it are no longer watched, its cell goes into the
 world's taken rocks (the scatter leaves it out from this frame on), and
 it becomes a loose rock in Props, drawn by a mesh entity of its kind
 (vegetation.rock_triangles, with the same origin and scale) in its colour
-and tint. `released` puts a loose rock's cell back when Props removes it.
+and tint. `restore` makes a loose rock out of the physics from a record
+(props.py's Props.record). `released` puts a loose rock's cell back when
+Props removes it.
 `grabbable()` gives (body, radius, mass) of the static rocks for the gun:
 the mass from its hull's volume at rocks.DENSITY.
 """
@@ -142,18 +144,31 @@ class Rocks:
         physics = bubble.physics
         physics.watch_strikes(body, False)
         physics.set_motion(body, "dynamic")
-        positions, normals, shades = self.triangles[rock.kind]
+        points = (self.unit_points[rock.kind] * np.array(rock.scale)).astype(np.float32)
+        self.props.add_rock(body, self.entity(rock.kind, rock.scale, rock.colour), 2.0 * rock.radius, rock.radius,
+                            key, ("hull", points, physics.mass(body)), 0.5 * rock.scale[1], bubble.body, rock.kind,
+                            rock.scale, rock.colour)
+        return True
+
+    def entity(self, kind, extent, colour):
+        """A mesh entity of a rock of `kind`, scaled by `extent`, in `colour`."""
+        positions, normals, shades = self.triangles[kind]
         entity = self.engine.create_mesh([tuple(p) for p in positions], normals=[tuple(n) for n in normals],
                                          colors=[tuple(s) for s in shades], name="Rock")
         scene = self.engine.scene
-        scene.set_scale(entity, rock.scale)
-        scene.set_material_vec4(entity, "baseColorFactor", tuple(rock.colour) + (1.0,))
+        scene.set_scale(entity, tuple(extent))
+        scene.set_material_vec4(entity, "baseColorFactor", tuple(colour) + (1.0,))
         scene.set_material_float(entity, "gridStrength", 0.0)
         scene.set_render_layer_mask(entity, 1)
-        points = (self.unit_points[rock.kind] * np.array(rock.scale)).astype(np.float32)
-        self.props.add_rock(body, entity, 2.0 * rock.radius, rock.radius, key,
-                            ("hull", points, physics.mass(body)), 0.5 * rock.scale[1], bubble.body)
-        return True
+        return entity
+
+    def restore(self, physics, record, bodies):
+        """A loose rock out of the physics from a record (Props.record);
+        `bodies` the world bodies by name."""
+        points, _ = self.kind_data(physics, record["kind"])
+        extent = record["extent"]
+        return self.props.restore(record, bodies, self.entity(record["kind"], extent, record["colour"]),
+                                  (points * np.array(extent)).astype(np.float32))
 
     def released(self, prop):
         """A loose rock's cell put back (Props' on_remove)."""

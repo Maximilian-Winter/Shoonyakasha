@@ -7,7 +7,8 @@ the rocks' colours as the shader's; and on sk.PlanetPhysics a fixed rock
 made for a listed rock (a static hull standing on its base, its mass from
 its hull at the rocks' density, strikes on it watched), rocks of the other
 body and taken ones left out, and a promotion (the body dynamic, its cell
-taken, an entity in its colour, a prop) and its release. Where this
+taken, an entity in its colour, a prop) and its release, and a loose
+rock's record made again into the same rock. Where this
 interpreter's shoonyakasha has no extension, the physics tests run in a
 fresh interpreter.
 
@@ -111,6 +112,8 @@ class TakenRocksTest(unittest.TestCase):
 
 
 class Body:
+    name = "planet"
+
     def __init__(self, radius, index=0):
         self.radius = radius
         self.index = index
@@ -185,6 +188,28 @@ class ExampleRocksTest(unittest.TestCase):
         self.assertEqual(self.rocks.rocks, {})
         self.props.clear(self.bubble)
         self.assertNotIn(mine.key, self.world.taken_rocks)
+
+    def test_record_and_restore(self):
+        here = (0.0, self.radius + 1.7, 0.0)
+        mine = self.rock((0, 0, 4, 1, 1), 3.0)
+        self.rocks.update(self.bubble, [mine], here, 40.0)
+        self.rocks.promote(self.bubble, self.rocks.rocks[mine.key].body)
+        loose = self.props.rocks[0]
+        record = self.props.record(self.bubble, loose)
+        self.assertEqual((record["kind"], record["on"], record["key"]), ("boulder", "planet", list(mine.key)))
+        self.assertEqual(record["extent"], list(loose.extent))
+        self.assertEqual(record["colour"], list(rocks.tinted(rocks.ROCK_COLOURS[0], 0.5)))
+        points, mass = loose.shape[1], loose.mass
+        self.props.clear(self.bubble)
+        self.world.taken_rocks.add(mine.key)
+        restored = self.rocks.restore(self.physics, record, {"planet": self.bubble.body})
+        self.assertIsNone(restored.body)
+        self.assertEqual(restored.key, mine.key)
+        self.assertEqual(restored.mass, mass)
+        np.testing.assert_allclose(restored.shape[1], points, rtol=1e-6)
+        self.assertEqual(self.props.record(self.bubble, restored), record)
+        scales = [c for c in self.engine.scene.calls if c[0] == "set_scale"]
+        self.assertEqual(scales[-1][2], tuple(record["extent"]))
 
     def test_strikes_watched_and_far_rocks_removed(self):
         here = (0.0, self.radius + 1.7, 0.0)
