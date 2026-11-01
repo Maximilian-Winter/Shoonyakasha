@@ -30,6 +30,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `get_mouse_delta()` | 2-tuple | Get mouse movement since last frame as (dx, dy) tuple. |
 | `get_scroll_delta()` | 2-tuple | Get scroll wheel delta as (dx, dy) tuple. |
 | `is_mouse_captured()` | bool | Check if mouse is captured (FPS mode). |
+| `set_mouse_captured(captured)` | None | Capture the mouse (hidden, unbounded movement, as Escape toggles) or release it. |
 | `set_on_key_event(callback)` | None | Set key event callback: callback(key_code: int, pressed: bool). |
 | `set_on_mouse_move(callback)` | None | Set mouse move callback: callback(x: float, y: float). |
 | `set_on_mouse_button(callback)` | None | Set mouse button callback: callback(button: int, pressed: bool). |

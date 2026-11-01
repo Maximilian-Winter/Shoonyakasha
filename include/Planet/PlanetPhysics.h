@@ -23,6 +23,20 @@ struct PhysicsRayHit {
     double fraction = 0.0;
 };
 
+/// How a character stands: on ground it can walk on, on ground too steep to
+/// climb, touching something that does not hold it up, or touching nothing.
+enum class CharacterGroundState { OnGround = 0, OnSteepGround = 1, NotSupported = 2, InAir = 3 };
+
+/// What a character stands on: its state, the ground's unit normal and
+/// velocity there, and the body (when `hasBody`).
+struct CharacterGround {
+    CharacterGroundState state = CharacterGroundState::InAir;
+    PhysicsVec3 normal{0.0, 0.0, 0.0};
+    PhysicsVec3 velocity{0.0, 0.0, 0.0};
+    uint32_t body = 0;
+    bool hasBody = false;
+};
+
 /// Rigid bodies on Jolt Physics (single precision), with no global
 /// gravity: applyCentralGravity pulls the awake dynamic bodies towards a
 /// point each step. Positions are in the caller's frame, which shiftOrigin
@@ -32,6 +46,12 @@ struct PhysicsRayHit {
 /// bodies collide with everything. Every box and sphere can change its
 /// motion later (setMotion). Bodies are named by a 32-bit id, which stays
 /// valid until remove.
+///
+/// Characters are capsules moved by their velocity (Jolt's
+/// CharacterVirtual), each with its own up: its position is at the
+/// capsule's bottom, and it stands on what it touches below the middle of
+/// its lower cap. Each carries a kinematic inner body that moving bodies
+/// collide with. Characters are named by their own 32-bit ids.
 class PlanetPhysics {
 public:
     /// A world holding up to `maxBodies` bodies, stepped on `threads`
@@ -58,8 +78,36 @@ public:
     uint32_t createGridMesh(const float* points, uint32_t columns, uint32_t rows, const PhysicsVec3& position,
                             double friction);
 
+    /// The convex hull of `count` points (x, y, z each) relative to
+    /// `position`, turned by `rotation`; its mass as createBox's.
+    uint32_t createConvexHull(const float* points, size_t count, const PhysicsVec3& position,
+                              const PhysicsQuat& rotation, PhysicsMotion motion, double density, double mass,
+                              double friction, double restitution);
+
     void remove(uint32_t body);
     bool contains(uint32_t body) const;
+
+    /// A kinematic body moved to `position` and `rotation` over the next step of `dt` seconds.
+    void moveKinematic(uint32_t body, const PhysicsVec3& position, const PhysicsQuat& rotation, double dt);
+
+    /// A character `height` metres tall of `radius`, its feet at
+    /// `position`, standing along `up` (unit); it pushes bodies as a
+    /// `mass` kg body and walks on slopes up to `maxSlopeDegrees`.
+    uint32_t createCharacter(const PhysicsVec3& position, const PhysicsVec3& up, double radius, double height,
+                             double mass, double maxSlopeDegrees);
+    void removeCharacter(uint32_t character);
+    /// The character's up (unit), and its capsule turned along it.
+    void setCharacterUp(uint32_t character, const PhysicsVec3& up);
+    PhysicsVec3 characterPosition(uint32_t character) const;
+    void setCharacterPosition(uint32_t character, const PhysicsVec3& position);
+    PhysicsVec3 characterVelocity(uint32_t character) const;
+    void setCharacterVelocity(uint32_t character, const PhysicsVec3& velocity);
+    /// The character moved by its velocity over `dt` seconds, sliding along
+    /// what it touches, stepping up onto steps up to 0.4 m and kept on the
+    /// floor down to 0.5 m below it while it was on ground (both along its
+    /// up); `gravity` (m/s^2) is how it pushes what it stands on.
+    void updateCharacter(uint32_t character, double dt, const PhysicsVec3& gravity);
+    CharacterGround characterGround(uint32_t character) const;
 
     void getTransform(uint32_t body, PhysicsVec3& position, PhysicsQuat& rotation) const;
     void setTransform(uint32_t body, const PhysicsVec3& position, const PhysicsQuat& rotation, bool activate);
@@ -97,7 +145,7 @@ public:
     /// One step of `dt` seconds.
     void step(double dt);
 
-    /// Every body moved by -offset, without waking any.
+    /// Every body and character moved by -offset, without waking any body.
     void shiftOrigin(const PhysicsVec3& offset);
 
     uint32_t bodyCount() const;

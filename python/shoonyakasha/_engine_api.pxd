@@ -289,6 +289,7 @@ cdef extern from "Facade/InputAPI.h" namespace "Shoonyakasha::Facade":
         vec2 getMouseDelta() const
         vec2 getScrollDelta() const
         cbool isMouseCaptured() const
+        void setMouseCaptured(cbool captured)
         cbool isGamepadConnected() const
         cbool isGamepadButtonDown(int button) const
         float getGamepadAxis(int axis) const
@@ -830,6 +831,19 @@ cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
         Kinematic "Shoonyakasha::Planet::PhysicsMotion::Kinematic"
         Dynamic "Shoonyakasha::Planet::PhysicsMotion::Dynamic"
 
+    cdef enum class CharacterGroundState "Shoonyakasha::Planet::CharacterGroundState":
+        OnGround "Shoonyakasha::Planet::CharacterGroundState::OnGround"
+        OnSteepGround "Shoonyakasha::Planet::CharacterGroundState::OnSteepGround"
+        NotSupported "Shoonyakasha::Planet::CharacterGroundState::NotSupported"
+        InAir "Shoonyakasha::Planet::CharacterGroundState::InAir"
+
+    cdef cppclass CharacterGround:
+        CharacterGroundState state
+        LodVec3 normal
+        LodVec3 velocity
+        uint32_t body
+        cbool hasBody
+
     cdef cppclass PhysicsRayHit:
         uint32_t body
         LodVec3 point
@@ -845,8 +859,22 @@ cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
                               double mass, double friction, double restitution) except +
         uint32_t createGridMesh(const float* points, uint32_t columns, uint32_t rows, const LodVec3& position,
                                 double friction) except +
+        uint32_t createConvexHull(const float* points, size_t count, const LodVec3& position, const LodVec4& rotation,
+                                  PhysicsMotion motion, double density, double mass, double friction,
+                                  double restitution) except +
         void remove(uint32_t body) except +
         cbool contains(uint32_t body)
+        void moveKinematic(uint32_t body, const LodVec3& position, const LodVec4& rotation, double dt) except +
+        uint32_t createCharacter(const LodVec3& position, const LodVec3& up, double radius, double height, double mass,
+                                 double maxSlopeDegrees) except +
+        void removeCharacter(uint32_t character) except +
+        void setCharacterUp(uint32_t character, const LodVec3& up) except +
+        LodVec3 characterPosition(uint32_t character) except +
+        void setCharacterPosition(uint32_t character, const LodVec3& position) except +
+        LodVec3 characterVelocity(uint32_t character) except +
+        void setCharacterVelocity(uint32_t character, const LodVec3& velocity) except +
+        void updateCharacter(uint32_t character, double dt, const LodVec3& gravity) except +
+        CharacterGround characterGround(uint32_t character) except +
         void getTransform(uint32_t body, LodVec3& position, LodVec4& rotation) except +
         void setTransform(uint32_t body, const LodVec3& position, const LodVec4& rotation, cbool activate) except +
         void getVelocity(uint32_t body, LodVec3& linear, LodVec3& angular) except +

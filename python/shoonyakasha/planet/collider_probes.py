@@ -101,9 +101,10 @@ class ColliderPatch:
         half = 0.5 * self.size - margin
         return xy is not None and abs(xy[0]) <= half and abs(xy[1]) <= half
 
-    def normal(self, point):
-        """The unit normal of the grid triangle under `point` (relative to
-        the body's centre), or None off the grid. Needs the heights."""
+    def triangle(self, point):
+        """(a corner, unit normal) of the grid triangle under `point`
+        (relative to the body's centre), as numpy arrays, or None off the
+        grid. Needs the heights."""
         xy = self.offset(point)
         if xy is None:
             return None
@@ -119,7 +120,24 @@ class ColliderPatch:
         else:
             a, b, c = p[j, i + 1], p[j + 1, i + 1], p[j + 1, i]
         n = np.cross(b - a, c - a)
-        return tuple(float(v) for v in n / np.linalg.norm(n))
+        return a, n / np.linalg.norm(n)
+
+    def normal(self, point):
+        """The unit normal of the grid triangle under `point` (relative to
+        the body's centre), or None off the grid. Needs the heights."""
+        triangle = self.triangle(point)
+        return None if triangle is None else tuple(float(v) for v in triangle[1])
+
+    def height(self, point):
+        """Metres above the body's radius where the line from the body's
+        centre through `point` meets the grid triangle under it, or None
+        off the grid. Needs the heights."""
+        triangle = self.triangle(point)
+        if triangle is None:
+            return None
+        a, n = triangle
+        d = np.asarray(normalize(point), dtype=np.float64)
+        return float(np.dot(a, n) / np.dot(d, n)) - self.body.radius
 
 
 class ColliderProbes:

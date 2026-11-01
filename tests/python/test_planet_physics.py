@@ -1,7 +1,9 @@
 """Tests for sk.PlanetPhysics (include/Planet/PlanetPhysics.h): bodies
 falling under central gravity onto a grid mesh and coming to rest, the
 origin shifted without waking them, ray casts, motion changes, batched
-transforms and errors. Where this interpreter's shoonyakasha has no
+transforms and errors; characters standing and walking on a mesh along
+any up, moved by an origin shift, riding a kinematic platform and holding
+up bodies that land on them. Where this interpreter's shoonyakasha has no
 extension (another test put the source tree first on sys.path), the tests
 run in a fresh interpreter, which imports the installed package.
 
@@ -165,6 +167,101 @@ class PlanetPhysicsTest(unittest.TestCase):
             w.physics.create_grid_mesh(np.zeros(10, dtype=np.float32), 21, 21, (0.0, 0.0, 0.0))
         with self.assertRaises(ValueError):
             w.physics.create_box((0.1, 0.1, 0.1), (0.0, 0.0, 0.0), motion="floating")
+
+
+class CharacterTest(unittest.TestCase):
+    def setUp(self):
+        if not sk.extension_available():
+            if __name__ == "__main__":
+                self.fail("no engine extension in a fresh interpreter")
+            self.skipTest("runs in a fresh interpreter (test_in_fresh_interpreter)")
+
+    def settle(self, w, character, seconds, velocity=None, up=(0.0, 1.0, 0.0)):
+        """The character stepped with gravity towards w.centre: on the
+        ground moving with it plus `velocity`, in the air falling with
+        `velocity` along the ground."""
+        for _ in range(int(round(seconds / STEP))):
+            feet = w.physics.character_position(character)
+            r = tuple(f - c for f, c in zip(feet, w.centre))
+            d = math.sqrt(sum(x * x for x in r))
+            g = tuple(-x / d * GM / d ** 2 for x in r)
+            v = w.physics.character_velocity(character)
+            state, _, ground_v, _ = w.physics.character_ground(character)
+            along = velocity if velocity is not None else (0.0, 0.0, 0.0)
+            if state == "on_ground":
+                v = tuple(ground_v[k] + along[k] for k in range(3))
+            else:
+                down = sum(a * b for a, b in zip(v, up))
+                v = tuple(along[k] + up[k] * down + g[k] * STEP for k in range(3))
+            w.physics.character_set_velocity(character, v)
+            w.physics.character_update(character, STEP, g)
+            w.physics.apply_central_gravity(w.centre, GM)
+            w.physics.step(STEP)
+
+    def test_stands_and_walks_on_the_mesh(self):
+        w = World()
+        c = w.physics.create_character((0.0, 1.0, 0.0), (0.0, 1.0, 0.0))
+        self.settle(w, c, 1.5)
+        state, normal, ground_v, body = w.physics.character_ground(c)
+        self.assertEqual(state, "on_ground")
+        self.assertEqual(body, w.mesh)
+        self.assertAlmostEqual(normal[1], 1.0, delta=1e-4)
+        self.assertLess(abs(w.physics.character_position(c)[1]), 0.05)
+        self.settle(w, c, 2.0, velocity=(2.0, 0.0, 0.0))
+        x, y, _ = w.physics.character_position(c)
+        self.assertAlmostEqual(x, 4.0, delta=0.1)
+        self.assertLess(abs(y), 0.05)
+
+    def test_up_along_another_axis(self):
+        physics = sk.PlanetPhysics(max_bodies=64, threads=1)
+        # A wall facing +X through the origin, the centre RADIUS along -X.
+        mid = 10.0
+        points = np.zeros((21, 21, 3), dtype=np.float32)
+        for j in range(21):
+            for i in range(21):
+                points[j, i] = (0.0, i - mid, j - mid)      # cross(+Y, +Z) = +X
+        physics.create_grid_mesh(points, 21, 21, (0.0, 0.0, 0.0))
+        w = World.__new__(World)
+        w.physics, w.centre = physics, (-RADIUS, 0.0, 0.0)
+        c = physics.create_character((1.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+        self.settle(w, c, 1.5, up=(1.0, 0.0, 0.0))
+        self.assertEqual(physics.character_ground(c)[0], "on_ground")
+        self.assertLess(abs(physics.character_position(c)[0]), 0.05)
+
+    def test_shift_origin_moves_characters(self):
+        w = World()
+        c = w.physics.create_character((1.0, 0.5, 2.0), (0.0, 1.0, 0.0))
+        w.physics.shift_origin((10.0, 0.0, -5.0))
+        x, y, z = w.physics.character_position(c)
+        self.assertAlmostEqual(x, -9.0, delta=1e-4)
+        self.assertAlmostEqual(z, 7.0, delta=1e-4)
+
+    def test_rides_a_kinematic_platform(self):
+        w = World()
+        hull = np.array([(x, y, z) for x in (-2.0, 2.0) for y in (0.0, 0.5) for z in (-2.0, 2.0)], dtype=np.float32)
+        platform = w.physics.create_convex_hull(hull, (0.0, 1.0, 0.0), motion="kinematic")
+        self.assertEqual(w.physics.motion(platform), "kinematic")
+        c = w.physics.create_character((0.0, 1.6, 0.0), (0.0, 1.0, 0.0))
+        self.settle(w, c, 1.0)
+        self.assertEqual(w.physics.character_ground(c)[3], platform)
+        x0 = 0.0
+        for k in range(120):
+            x0 += 0.5 * STEP
+            w.physics.move_kinematic(platform, (x0, 1.0, 0.0), (1.0, 0.0, 0.0, 0.0), STEP)
+            self.settle(w, c, STEP)
+        ground_v = w.physics.character_ground(c)[2]
+        self.assertAlmostEqual(ground_v[0], 0.5, delta=0.05)
+        self.assertAlmostEqual(w.physics.character_position(c)[0], 0.5, delta=0.1)
+
+    def test_bodies_land_on_a_character(self):
+        w = World()
+        c = w.physics.create_character((0.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+        box = w.physics.create_box((0.2, 0.2, 0.2), (0.0, 3.0, 0.0))
+        self.settle(w, c, 2.0)
+        self.assertGreater(w.physics.get_transform(box)[0][1], 1.8)
+        w.physics.remove_character(c)
+        with self.assertRaises(ValueError):
+            w.physics.character_position(c)
 
 
 class FreshInterpreterTest(unittest.TestCase):

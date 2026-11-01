@@ -7,11 +7,16 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyFilter.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
@@ -22,6 +27,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace Shoonyakasha::Planet {
 
@@ -115,6 +121,12 @@ PhysicsMotion fromMotionType(JPH::EMotionType motion) {
 constexpr JPH::uint MAX_BODY_PAIRS = 65536;
 constexpr JPH::uint MAX_CONTACT_CONSTRAINTS = 16384;
 constexpr size_t TEMP_ALLOCATOR_BYTES = 16 * 1024 * 1024;
+constexpr float STEP_UP = 0.4f;            // m a character steps up onto
+constexpr float STICK_DOWN = 0.5f;         // m a character on ground is kept on the floor below it
+
+JPH::Quat upRotation(JPH::Vec3Arg up) {
+    return JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), up.Normalized());
+}
 
 }  // namespace
 
@@ -126,6 +138,14 @@ struct PlanetPhysics::Impl {
     std::unique_ptr<JPH::JobSystemThreadPool> jobSystem;
     JPH::PhysicsSystem system;
     JPH::BodyIDVector scratch;
+    std::vector<JPH::Ref<JPH::CharacterVirtual>> characters;   // by id; null once removed
+
+    JPH::CharacterVirtual& character(uint32_t id) const {
+        if (id >= characters.size() || characters[id] == nullptr) {
+            throw std::invalid_argument("no character " + std::to_string(id));
+        }
+        return *characters[id];
+    }
 
     JPH::BodyInterface& bodies() { return system.GetBodyInterface(); }
     const JPH::BodyInterface& bodies() const { return system.GetBodyInterface(); }
@@ -182,6 +202,7 @@ PlanetPhysics::PlanetPhysics(uint32_t maxBodies, int threads) : m_impl(std::make
 }
 
 PlanetPhysics::~PlanetPhysics() {
+    m_impl->characters.clear();
     JPH::BodyIDVector all;
     m_impl->system.GetBodies(all);
     if (!all.empty()) {
@@ -238,6 +259,19 @@ uint32_t PlanetPhysics::createGridMesh(const float* points, uint32_t columns, ui
     return m_impl->add(settings);
 }
 
+uint32_t PlanetPhysics::createConvexHull(const float* points, size_t count, const PhysicsVec3& position,
+                                         const PhysicsQuat& rotation, PhysicsMotion motion, double density,
+                                         double mass, double friction, double restitution) {
+    JPH::Array<JPH::Vec3> hull;
+    hull.reserve(count);
+    for (size_t k = 0; k < count; ++k) {
+        hull.push_back(JPH::Vec3(points[3 * k], points[3 * k + 1], points[3 * k + 2]));
+    }
+    JPH::ConvexHullShapeSettings shape(hull);
+    shape.SetDensity(static_cast<float>(density));
+    return m_impl->addSolid(shape, position, rotation, motion, mass, friction, restitution);
+}
+
 void PlanetPhysics::remove(uint32_t body) {
     JPH::BodyID id = m_impl->added(body);
     m_impl->bodies().RemoveBody(id);
@@ -246,6 +280,86 @@ void PlanetPhysics::remove(uint32_t body) {
 
 bool PlanetPhysics::contains(uint32_t body) const {
     return m_impl->bodies().IsAdded(JPH::BodyID(body));
+}
+
+void PlanetPhysics::moveKinematic(uint32_t body, const PhysicsVec3& position, const PhysicsQuat& rotation,
+                                  double dt) {
+    m_impl->bodies().MoveKinematic(m_impl->added(body), toRVec3(position), toQuat(rotation),
+                                   static_cast<float>(dt));
+}
+
+uint32_t PlanetPhysics::createCharacter(const PhysicsVec3& position, const PhysicsVec3& up, double radius,
+                                        double height, double mass, double maxSlopeDegrees) {
+    float r = static_cast<float>(radius);
+    float halfCylinder = std::max(0.5f * static_cast<float>(height) - r, 0.01f);
+    JPH::RefConst<JPH::Shape> capsule =
+        JPH::RotatedTranslatedShapeSettings(JPH::Vec3(0.0f, halfCylinder + r, 0.0f), JPH::Quat::sIdentity(),
+                                            new JPH::CapsuleShape(halfCylinder, r))
+            .Create()
+            .Get();
+    JPH::Ref<JPH::CharacterVirtualSettings> settings = new JPH::CharacterVirtualSettings();
+    settings->mShape = capsule;
+    settings->mInnerBodyShape = capsule;
+    settings->mInnerBodyLayer = Layers::MOVING;
+    settings->mMass = static_cast<float>(mass);
+    settings->mMaxSlopeAngle = JPH::DegreesToRadians(static_cast<float>(maxSlopeDegrees));
+    settings->mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -r);
+    settings->mUp = toVec3(up).Normalized();
+    JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
+        settings, toRVec3(position), upRotation(toVec3(up)), 0, &m_impl->system);
+    m_impl->characters.push_back(character);
+    return static_cast<uint32_t>(m_impl->characters.size() - 1);
+}
+
+void PlanetPhysics::removeCharacter(uint32_t character) {
+    m_impl->character(character);
+    m_impl->characters[character] = nullptr;
+}
+
+void PlanetPhysics::setCharacterUp(uint32_t character, const PhysicsVec3& up) {
+    JPH::CharacterVirtual& c = m_impl->character(character);
+    JPH::Vec3 u = toVec3(up).Normalized();
+    c.SetUp(u);
+    c.SetRotation(upRotation(u));
+}
+
+PhysicsVec3 PlanetPhysics::characterPosition(uint32_t character) const {
+    return fromVec3(m_impl->character(character).GetPosition());
+}
+
+void PlanetPhysics::setCharacterPosition(uint32_t character, const PhysicsVec3& position) {
+    m_impl->character(character).SetPosition(toRVec3(position));
+}
+
+PhysicsVec3 PlanetPhysics::characterVelocity(uint32_t character) const {
+    return fromVec3(m_impl->character(character).GetLinearVelocity());
+}
+
+void PlanetPhysics::setCharacterVelocity(uint32_t character, const PhysicsVec3& velocity) {
+    m_impl->character(character).SetLinearVelocity(toVec3(velocity));
+}
+
+void PlanetPhysics::updateCharacter(uint32_t character, double dt, const PhysicsVec3& gravity) {
+    JPH::CharacterVirtual& c = m_impl->character(character);
+    JPH::Vec3 up = c.GetUp();
+    JPH::CharacterVirtual::ExtendedUpdateSettings settings;
+    settings.mStickToFloorStepDown = -STICK_DOWN * up;
+    settings.mWalkStairsStepUp = STEP_UP * up;
+    JPH::IgnoreSingleBodyFilter self(c.GetInnerBodyID());
+    c.ExtendedUpdate(static_cast<float>(dt), toVec3(gravity), settings,
+                     m_impl->system.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
+                     m_impl->system.GetDefaultLayerFilter(Layers::MOVING), self, {}, *m_impl->tempAllocator);
+}
+
+CharacterGround PlanetPhysics::characterGround(uint32_t character) const {
+    const JPH::CharacterVirtual& c = m_impl->character(character);
+    CharacterGround ground;
+    ground.state = static_cast<CharacterGroundState>(static_cast<int>(c.GetGroundState()));
+    ground.normal = fromVec3(c.GetGroundNormal());
+    ground.velocity = fromVec3(c.GetGroundVelocity());
+    ground.hasBody = !c.GetGroundBodyID().IsInvalid();
+    ground.body = ground.hasBody ? c.GetGroundBodyID().GetIndexAndSequenceNumber() : 0;
+    return ground;
 }
 
 void PlanetPhysics::getTransform(uint32_t body, PhysicsVec3& position, PhysicsQuat& rotation) const {
@@ -386,6 +500,11 @@ void PlanetPhysics::shiftOrigin(const PhysicsVec3& offset) {
     JPH::RVec3 shift = toRVec3(offset);
     for (const JPH::BodyID& id : all) {
         bodies.SetPosition(id, bodies.GetPosition(id) - shift, JPH::EActivation::DontActivate);
+    }
+    for (const JPH::Ref<JPH::CharacterVirtual>& c : m_impl->characters) {
+        if (c != nullptr) {
+            c->SetPosition(c->GetPosition() - shift);
+        }
     }
 }
 

@@ -245,6 +245,13 @@ public:
     /// capture is not toggled.
     void setEscapeTaken(std::function<bool()> taken) { m_escapeTaken = std::move(taken); }
 
+    /// Capture the mouse (hidden, unbounded movement) or release it.
+    void setMouseCaptured(bool captured) {
+        if (m_window.isMouseCaptured() == captured) return;
+        m_window.setMouseCaptured(captured);
+        m_inputState.firstMouseCapture = true;
+    }
+
 private:
     void pollGamepad() {
         auto& pad = m_inputState.gamepad;

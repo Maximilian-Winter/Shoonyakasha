@@ -45,6 +45,9 @@ public:
     /// Check if mouse is currently captured (FPS mode).
     bool isMouseCaptured() const;
 
+    /// Capture the mouse (hidden, unbounded movement, as Escape toggles) or release it.
+    void setMouseCaptured(bool captured);
+
     /// Whether a gamepad is connected: the first joystick GLFW knows a
     /// standard mapping for, polled once per frame.
     bool isGamepadConnected() const;

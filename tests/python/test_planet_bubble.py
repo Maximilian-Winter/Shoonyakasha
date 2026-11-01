@@ -170,6 +170,16 @@ class ColliderPatchTest(unittest.TestCase):
         self.assertGreater(dot(patch.normal(scale(inside, RADIUS + 20.0)), inside), 0.999999)
         self.assertIsNone(patch.normal(scale(outside, RADIUS)))
 
+    def test_height_on_a_slope(self):
+        patch = self.patch((0, 0))
+        # Heights rising 0.5 m per metre east: the mesh's height is the same at and between grid points.
+        x = (np.arange(COLUMNS) - (COLUMNS - 1) // 2) * SPACING
+        patch.set_heights(np.tile(10.0 + 0.5 * x, (COLUMNS, 1)).ravel())
+        for east, north in ((0.0, 0.0), (3.25, -1.1), (-7.7, 6.3)):
+            d = normalize(add(scale(SURFACE, RADIUS), add(scale(self.east, east), scale(self.north, north))))
+            self.assertAlmostEqual(patch.height(scale(d, RADIUS + 50.0)), 10.0 + 0.5 * east, delta=0.01)
+        self.assertIsNone(patch.height(scale(normalize(add(scale(SURFACE, RADIUS), scale(self.east, 20.0))), RADIUS)))
+
 
 class TerrainColliderTest(unittest.TestCase):
     def setUp(self):

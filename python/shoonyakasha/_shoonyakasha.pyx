@@ -56,7 +56,7 @@ from ._engine_api cimport (
     CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
     videoRecordingAvailable, findFfmpeg, checkPipelineJson, loadPipelineDocumentText, Readback,
     CppPlanetLod, LodBody, LodView, LodNodeInfo, LodJob, LodFaceColours,
-    CppPlanetPhysics, PhysicsMotion, PhysicsRayHit, LodVec3, LodVec4,
+    CppPlanetPhysics, PhysicsMotion, PhysicsRayHit, CharacterGround, LodVec3, LodVec4,
     CppComputeContext, CppComputeBuffer, CppComputeKernel, ComputeKernelInfo, ComputeKernelBinding,
     ComputeBindingType, ComputeUint3, CppComputeImage, CppComputeBinding, ComputeBindingDim,
     ExrPixelType, saveHdr, saveExr, saveImage, CppBufferStream,
@@ -883,6 +883,10 @@ cdef class Input:
     def is_mouse_captured(self):
         """Check if mouse is captured (FPS mode)."""
         return self._ptr.isMouseCaptured()
+
+    def set_mouse_captured(self, bint captured):
+        """Capture the mouse (hidden, unbounded movement, as Escape toggles) or release it."""
+        self._ptr.setMouseCaptured(captured)
 
     def is_gamepad_connected(self):
         """Whether a gamepad is connected: the first joystick GLFW has a
@@ -3758,6 +3762,7 @@ cdef class PlanetLod:
 # ═══════════════════════════════════════════════════════════════
 
 _PHYSICS_MOTIONS = ("static", "kinematic", "dynamic")
+_GROUND_STATES = ("on_ground", "on_steep_ground", "not_supported", "in_air")
 
 
 cdef PhysicsMotion _physics_motion(str name) except *:
@@ -3833,8 +3838,66 @@ cdef class PlanetPhysics:
             raise ValueError("points: %d bytes for %d x %d float32 points" % (view.shape[0], columns, rows))
         return self._ptr.createGridMesh(<const float*>&view[0], columns, rows, _physics_vec3(position), friction)
 
+    def create_convex_hull(self, points, position, rotation=(1.0, 0.0, 0.0, 0.0), str motion="dynamic",
+                           double density=500.0, double mass=0.0, double friction=0.7, double restitution=0.1):
+        """The convex hull of `points` (float32 x, y, z each, relative to
+        `position`, in a buffer such as a NumPy array); its mass as create_box's."""
+        cdef const unsigned char[::1] view = memoryview(points).cast('B')
+        if view.shape[0] == 0 or view.shape[0] % 12 != 0:
+            raise ValueError("points: %d bytes, not whole float32 (x, y, z)" % view.shape[0])
+        return self._ptr.createConvexHull(<const float*>&view[0], view.shape[0] // 12, _physics_vec3(position),
+                                          _physics_quat(rotation), _physics_motion(motion), density, mass, friction,
+                                          restitution)
+
     def remove(self, uint32_t body):
         self._ptr.remove(body)
+
+    def move_kinematic(self, uint32_t body, position, rotation, double dt):
+        """A kinematic body moved to `position` and `rotation` over the next step of `dt` seconds."""
+        self._ptr.moveKinematic(body, _physics_vec3(position), _physics_quat(rotation), dt)
+
+    def create_character(self, position, up, double radius=0.3, double height=1.8, double mass=80.0,
+                         double max_slope_deg=50.0):
+        """A character: a capsule `height` metres tall of `radius`, its feet
+        at `position`, standing along the unit `up`; it pushes bodies as a
+        `mass` kg body and walks on slopes up to `max_slope_deg`. Returns its
+        id (characters have ids of their own)."""
+        return self._ptr.createCharacter(_physics_vec3(position), _physics_vec3(up), radius, height, mass,
+                                         max_slope_deg)
+
+    def remove_character(self, uint32_t character):
+        self._ptr.removeCharacter(character)
+
+    def character_set_up(self, uint32_t character, up):
+        """The character's up (unit), and its capsule turned along it."""
+        self._ptr.setCharacterUp(character, _physics_vec3(up))
+
+    def character_position(self, uint32_t character):
+        """Its feet."""
+        return _physics_tuple3(self._ptr.characterPosition(character))
+
+    def character_set_position(self, uint32_t character, position):
+        self._ptr.setCharacterPosition(character, _physics_vec3(position))
+
+    def character_velocity(self, uint32_t character):
+        return _physics_tuple3(self._ptr.characterVelocity(character))
+
+    def character_set_velocity(self, uint32_t character, velocity):
+        self._ptr.setCharacterVelocity(character, _physics_vec3(velocity))
+
+    def character_update(self, uint32_t character, double dt, gravity):
+        """The character moved by its velocity over `dt` seconds, sliding
+        along what it touches, stepping up onto steps up to 0.4 m and kept
+        on the floor down to 0.5 m below it while it was on ground (both
+        along its up); `gravity` is how it pushes what it stands on."""
+        self._ptr.updateCharacter(character, dt, _physics_vec3(gravity))
+
+    def character_ground(self, uint32_t character):
+        """(state, normal, ground velocity, body or None): state is
+        "on_ground", "on_steep_ground", "not_supported" or "in_air"."""
+        cdef CharacterGround g = self._ptr.characterGround(character)
+        return (_GROUND_STATES[<int>g.state], _physics_tuple3(g.normal), _physics_tuple3(g.velocity),
+                g.body if g.hasBody else None)
 
     def contains(self, uint32_t body):
         return self._ptr.contains(body)

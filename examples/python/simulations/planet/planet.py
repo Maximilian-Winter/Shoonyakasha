@@ -4,7 +4,8 @@ of detail, flown over by a ship
 
 A planet of radius 100 km and its moon, flown around from a few metres
 above the ground to thousands of kilometres away, with a free camera or a
-ship (flight.py) seen from its cockpit or a chase view. The planet, the
+ship (flight.py) seen from its cockpit or a chase view, or on foot
+(player.py). The planet, the
 moon, the terrain's chunks built on the GPU, the atmosphere, the clouds,
 the ocean and the shadows are shoonyakasha.planet's PlanetWorld, on the
 planet pipeline; the cards, the hint bar, the controls sheet and the
@@ -19,16 +20,30 @@ falling towards that body's centre onto a mesh of the terrain around the
 view (shoonyakasha.planet.collider_probes). The bubble steps at
 FLIGHT_STEP in real time, whatever the time warp; it and its crates are
 dropped when the view moves to the other body or more than Bubble.RADIUS
-above the ground.
+above the ground. With a player on foot, the bubble follows the player
+instead, and holds it, and the ship while it is within Bubble.RADIUS (a
+kinematic hull of its contact points, moved with it).
+
+The player gets out of the ship with F once the ship touches the ground
+at less than EXIT_SPEED relative to it, at the boarding point beside the
+cockpit, and gets in with F within BOARD_REACH of it. A ship the player
+left is parked: it moves with the body under it until boarded. On foot
+the time warp is 1x.
 
 Keys:
-    Tab                    free camera / ship
+    Tab                    free camera / on foot (from the ship: the free camera)
+    F                      get out of the ship (landed and slow) / into it (on foot beside it)
   free camera:
     right mouse + move     look around
     W/A/S/D                fly forward, left, back, right
     E / Q                  up / down
     Shift / Ctrl           4x faster / 4x slower
     mouse wheel            speed factor
+  on foot (player.py; the mouse is captured, Escape frees it):
+    mouse                  look around
+    W/A/S/D                walk forward, left, back, right
+    Shift / Ctrl           run / crouch
+    Space                  jump; held in the air, the jetpack
   ship (flight.py):
     W / S                  throttle up / down
     Backspace              throttle to 0
@@ -46,8 +61,8 @@ Keys:
     A                      translation assist on / off
     B                      throttle to 0
     bumpers                time warp down / up
-    Y / Start / Back       free camera or ship / settings menu / the controls
-    X                      chase view / cockpit
+    Y / Start / Back       free camera or on foot / settings menu / the controls
+    X                      chase view / cockpit; in a landed ship, out of it
   anywhere:
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
@@ -63,7 +78,7 @@ Keys:
     Z / X                  sun lower / higher, seen from the blocks
     T / Y                  atmosphere denser / thinner
     B / V                  exposure up / down
-    F                      wireframe
+    F3                     wireframe
     O                      ocean
     C                      colour: terrain, per face, per level, per biome
     K                      freeze the level of detail
@@ -83,6 +98,7 @@ Keys:
     python planet.py --crack-check     measure the gaps between levels in steep terrain against the skirts, then exit
     python planet.py --morph-check     come down from 20 km, check every swap of chunks happens fully morphed, then exit
     python planet.py --prop-rest-check   drop crates on the planet and the moon, check they come to rest and stay there
+    python planet.py --walk-check      walk 200 m circles on the planet and the moon, check the feet stay on the ground
 """
 
 import argparse
@@ -109,6 +125,8 @@ import flight
 from ground import GroundPatch, SIZE as PATCH_SIZE
 import cockpit
 from instruments import Instruments
+from player import Controls as FootControls, Player
+from player import RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from props import Props, stack_offsets, yaw_rotation
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -149,6 +167,7 @@ GAMEPAD_DEAD_ZONE = 0.12         # of a stick's travel, read as 0
 GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAMEPAD_LEFT_BUMPER: keys.COMMA,
                 keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
                 keys.GAMEPAD_X: keys.R, keys.GAMEPAD_BACK: keys.F2}
+# On foot FOOT_GAMEPAD_KEYS: X gets in, Y the free camera. In a landed ship X gets out (read_gamepad_buttons).
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
 MOON_ORBIT_HEIGHT = 10_000.0     # Shift+9's circular orbit of the moon
 MOON_HOVER_HEIGHT = 2_000.0      # Shift+8's ship waits this far above the moon's radius until its ground is known
@@ -159,6 +178,15 @@ CRATE_DENSITY = 500.0            # kg/m^3
 CRATE_AHEAD = 3.0                # m in front of the view a crate is dropped
 STACK_COUNT = 10
 JUMP_DISTANCE = 50.0             # m the viewpoint may move in a frame and still count as moving, not jumping
+# On foot.
+EXIT_SPEED = 1.0                 # m/s relative to the ground the ship may move at for the player to get out
+BOARD_REACH = 3.0                # m from the boarding point the player gets in from
+BOARD_OUT = 3.5                  # m left of the ship's centre line the boarding point is, outside the hull
+SPAWN_LIFT = 1.0                 # m above the ground a player is put down, to fall onto it
+HOLD_MARGIN = 1.0                # m inside the terrain mesh's edges the player must be to move
+SHIP_HULL_POINTS = np.array(flight.ShipParams().hull + flight.ShipParams().gear, dtype=np.float32)
+FOOT_GAMEPAD_KEYS = {keys.GAMEPAD_X: keys.F, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
+                     keys.GAMEPAD_BACK: keys.F2}
 
 parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
@@ -178,6 +206,8 @@ parser.add_argument("--landing-check", action="store_true",
                     help="land the ship on the highest spot found around the site, print how it stands and exit")
 parser.add_argument("--moon-landing-check", action="store_true",
                     help="land the ship on the highest spot found on the moon, print how it stands and exit")
+parser.add_argument("--walk-check", action="store_true",
+                    help="walk 200 m circles on the planet and the moon, check the feet stay on the ground, and exit")
 parser.add_argument("--prop-rest-check", action="store_true",
                     help="drop crates on the planet and the moon, check they come to rest and stay there, and exit")
 args = parser.parse_args()
@@ -249,7 +279,15 @@ state = {
     "bubble": None,              # the physics bubble (shoonyakasha.planet.bubble), while there is one
     "terrain_collider": None,    # its terrain mesh (collider_probes.TerrainCollider)
     "physics_accumulator": 0.0,  # seconds of the bubble's physics not yet stepped
-    "focus": None,               # the view in bubble coordinates last frame
+    "focus": None,               # the bubble's focus relative to its body last frame
+    "player": None,              # the player on foot (player.Player), while there is one
+    "foot_controls": FootControls(),
+    "foot_basis": None,          # (right, up, forward) of the player's view
+    "head_bob": True,
+    "captured": False,           # whether the frame last asked for the mouse captured
+    "parked": None,              # (body, position relative to it) of a ship the player left
+    "ship_body": None,           # the ship's kinematic hull in the bubble
+    "ship_poses": None,          # (position, orientation) of the ship before and after this frame's flight
 }
 physics = sk.PlanetPhysics()
 collider_probes = ColliderProbes(engine)
@@ -403,6 +441,8 @@ def view_basis():
     """(right, up, forward) of the view: the free camera's, the chase
     view's, in the generated cockpit the ship's, or in the model's cabin
     the ship's turned COCKPIT_LOOK_DOWN below its nose."""
+    if state["mode"] == "foot" and state["foot_basis"] is not None:
+        return state["foot_basis"]
     if state["mode"] != "ship":
         return camera_basis()
     if state["chase"]:
@@ -483,6 +523,9 @@ def teleport(preset, moon=False):
     world.ground = None
     world.patch = None
     state["moon_landing"] = None
+    if preset in (8, 9):
+        remove_player()
+        state["parked"] = None
     if preset in (8, 9) and moon:
         state["teleport_when_known"] = None
         place_ship_at_moon(preset)
@@ -517,15 +560,6 @@ def teleport(preset, moon=False):
 
 
 # ── Ship ───────────────────────────────────────────────────────────────────
-
-def board_ship():
-    """Ship mode; a ship at rest where the camera is, facing its way, if there is none yet."""
-    if state["ship"] is None:
-        right, up, forward = camera_basis()
-        state["ship"] = flight.Ship(position=state["position"],
-                                    orientation=flight.quat_from_basis(right, up, scale(forward, -1.0)))
-    state["mode"] = "ship"
-
 
 def leave_ship():
     """Camera mode, from where the ship is, facing its way with the horizon level."""
@@ -661,21 +695,26 @@ def read_ship_controls(dt):
     controls.vertical = clamp(float(down(keys.E)) - float(down(keys.Q)) - axis(keys.GAMEPAD_RIGHT_Y))
 
 
+PAD_LOOK_PIXELS = 12.0           # pixels of mouse movement a frame at full right stick, on foot
 PAD_AXES = (keys.GAMEPAD_LEFT_X, keys.GAMEPAD_LEFT_Y, keys.GAMEPAD_RIGHT_X, keys.GAMEPAD_RIGHT_Y)
 
 
 def read_gamepad_buttons():
     """Gamepad buttons on the frame they are pressed, as the keys of
-    GAMEPAD_KEYS. A button pressed, a stick moved out of its dead zone or a
+    GAMEPAD_KEYS (FOOT_GAMEPAD_KEYS on foot; X in a landed ship as F). A button pressed, a stick moved out of its dead zone or a
     trigger pulled makes the hints name the gamepad's controls."""
     held = set()
+    mapping = FOOT_GAMEPAD_KEYS if state["mode"] == "foot" else GAMEPAD_KEYS
     if engine.input.is_gamepad_connected():
-        held = {b for b in GAMEPAD_KEYS if engine.input.is_gamepad_button_down(b)}
+        held = {b for b in mapping if engine.input.is_gamepad_button_down(b)}
         if (held - state["gamepad_held"] or any(stick(engine.input.get_gamepad_axis(a)) for a in PAD_AXES)
                 or trigger(keys.GAMEPAD_LEFT_TRIGGER) > 0.2 or trigger(keys.GAMEPAD_RIGHT_TRIGGER) > 0.2):
             state["input"] = "pad"
     for button in held - state["gamepad_held"]:
-        on_key(GAMEPAD_KEYS[button], from_pad=True)
+        if state["mode"] == "ship" and button == keys.GAMEPAD_X and ship_landed(state["ship"]):
+            on_key(keys.F, from_pad=True)
+        else:
+            on_key(mapping[button], from_pad=True)
     state["gamepad_held"] = held
 
 
@@ -744,15 +783,17 @@ def body_gm(body):
     return world.physics.gm if body is planet else world.physics.moon.gm
 
 
-def ensure_bubble():
-    """The bubble on the body under the viewpoint, made around it if there
-    is none there; a bubble on the other body is dropped first."""
-    body = world.body_under(viewpoint())
+def ensure_bubble(point=None):
+    """The bubble on the body under `point` (the viewpoint when None), made
+    around it if there is none there; a bubble on the other body is
+    dropped first."""
+    point = viewpoint() if point is None else point
+    body = world.body_under(point)
     bubble = state["bubble"]
     if bubble is not None and bubble.body is body:
         return bubble
     drop_bubble()
-    bubble = Bubble(physics, body, body_gm(body), body.relative(viewpoint()))
+    bubble = Bubble(physics, body, body_gm(body), body.relative(point))
     state["bubble"] = bubble
     state["terrain_collider"] = TerrainCollider(bubble, collider_probes)
     state["physics_accumulator"] = 0.0
@@ -761,19 +802,27 @@ def ensure_bubble():
 
 
 def drop_bubble():
-    """The bubble, its crates and its terrain mesh gone."""
+    """The bubble, its crates, the player, the ship's hull and its terrain mesh gone."""
     bubble = state["bubble"]
     if bubble is None:
         return
     props.clear(bubble)
+    remove_player()
+    remove_ship_body()
     state["terrain_collider"].drop()
     state["bubble"] = state["terrain_collider"] = None
 
 
 def drop_crates(count):
     """`count` crates stacked CRATE_AHEAD in front of the view, square to
-    the body's up there and turned with the view's heading."""
-    bubble = ensure_bubble()
+    the body's up there and turned with the view's heading; with a player,
+    into the player's bubble, and none while the view is over the other body."""
+    if state["player"] is not None:
+        bubble = state["bubble"]
+        if world.body_under(state["position"]) is not bubble.body:
+            return
+    else:
+        bubble = ensure_bubble()
     _, _, forward = view_basis()
     p = bubble.to_bubble(add(state["position"], scale(forward, CRATE_AHEAD)))
     up = bubble.up(p)
@@ -786,21 +835,29 @@ def drop_crates(count):
 
 
 def step_bubble(dt):
-    """The bubble following the viewpoint: dropped when the viewpoint is
+    """The bubble following its focus, the player's feet, or without a
+    player the viewpoint: without a player, dropped when the viewpoint is
     over the other body or more than Bubble.RADIUS above the ground;
-    otherwise rebased to it once far enough from its origin, its terrain
-    mesh kept around it (ahead along its velocity by the probes' latency;
-    a move of JUMP_DISTANCE or more in a frame counts as no velocity),
-    its crates kept on that mesh, and its physics stepped by `dt` in fixed
-    steps of FLIGHT_STEP."""
+    otherwise rebased to the focus once far enough from its origin, its
+    terrain mesh kept around it (ahead along its velocity by the probes'
+    latency; a move of JUMP_DISTANCE or more in a frame counts as no
+    velocity), its crates kept on that mesh, and its physics stepped by
+    `dt` in fixed steps of FLIGHT_STEP: each step the player (with the
+    controls on foot, standing still otherwise; held where the mesh does
+    not reach), the ship's hull moved along the ship's path this frame,
+    then the bodies."""
     bubble = state["bubble"]
     if bubble is None:
         return
-    view = viewpoint()
-    if world.body_under(view) is not bubble.body or world.height_above_ground(view) > Bubble.RADIUS:
-        drop_bubble()
-        return
-    here = bubble.body.relative(view)
+    player = state["player"]
+    if player is not None:
+        here = bubble.body_relative(player.feet())
+    else:
+        view = viewpoint()
+        if world.body_under(view) is not bubble.body or world.height_above_ground(view) > Bubble.RADIUS:
+            drop_bubble()
+            return
+        here = bubble.body.relative(view)
     last = state["focus"]
     velocity = (0.0, 0.0, 0.0)
     if last is not None and dt > 0.0 and length(sub(here, last)) < JUMP_DISTANCE:
@@ -812,13 +869,206 @@ def step_bubble(dt):
     terrain.update(sub(here, bubble.origin), velocity, latency, world.terrain_version)
     props.update(bubble, terrain)
     state["physics_accumulator"] += dt
-    steps = 0
-    while state["physics_accumulator"] >= FLIGHT_STEP and steps < MAX_PHYSICS_STEPS_PER_FRAME:
+    count = min(int(state["physics_accumulator"] / FLIGHT_STEP), MAX_PHYSICS_STEPS_PER_FRAME)
+    controls = state["foot_controls"] if state["mode"] == "foot" else FootControls()
+    for k in range(count):
+        if player is not None:
+            player.bob = state["head_bob"]
+            player.step(controls, FLIGHT_STEP, terrain.covers(player.feet(), HOLD_MARGIN))
+        move_ship_body(bubble, (k + 1) / count)
         bubble.step(FLIGHT_STEP)
-        state["physics_accumulator"] -= FLIGHT_STEP
-        steps += 1
-    if steps == MAX_PHYSICS_STEPS_PER_FRAME:
+    state["physics_accumulator"] -= count * FLIGHT_STEP
+    if count == MAX_PHYSICS_STEPS_PER_FRAME:
         state["physics_accumulator"] = 0.0
+
+
+def remove_ship_body():
+    if state["ship_body"] is not None:
+        if physics.contains(state["ship_body"]):
+            physics.remove(state["ship_body"])
+        state["ship_body"] = None
+
+
+def move_ship_body(bubble, fraction):
+    """The ship's kinematic hull moved `fraction` of the way along the
+    ship's path this frame (state["ship_poses"]), made when the ship comes
+    within Bubble.RADIUS of the bubble's origin and removed when it leaves
+    or crashes; put there at once after a jump of JUMP_DISTANCE or more."""
+    ship, poses = state["ship"], state["ship_poses"]
+    if ship is None or ship.crashed or poses is None:
+        remove_ship_body()
+        return
+    (p0, q0), (p1, q1) = poses
+    if dot(q0, q1) < 0.0:
+        q1 = tuple(-c for c in q1)
+    q = flight.quat_normalize(tuple(a + (b - a) * fraction for a, b in zip(q0, q1)))
+    p = bubble.to_bubble(add(p0, scale(sub(p1, p0), fraction)))
+    if length(p) > Bubble.RADIUS:
+        remove_ship_body()
+        return
+    body = state["ship_body"]
+    if body is None:
+        state["ship_body"] = physics.create_convex_hull(SHIP_HULL_POINTS, p, q, motion="kinematic",
+                                                        friction=0.8)
+    elif length(sub(physics.get_transform(body)[0], p)) > JUMP_DISTANCE:
+        physics.set_transform(body, p, q)
+    else:
+        physics.move_kinematic(body, p, q, FLIGHT_STEP)
+
+
+def boarding_point(ship):
+    """The point beside the cockpit, BOARD_OUT left of the ship and level
+    with its gear's feet, where the player gets out and in."""
+    right, up, forward = ship.axes()
+    _, _, back = model_to_ship(PILOT_EYE)
+    return add(ship.position, add(add(scale(right, -BOARD_OUT), scale(up, -SHIP_CLEARANCE)), scale(forward, -back)))
+
+
+def ship_landed(ship):
+    """The ship parked, or not crashed, slower than EXIT_SPEED relative to
+    the body under it and touching the ground: a gear point touched it in
+    the last step, or every gear point is within flight.GEAR_TOUCH of the
+    ground patch's surface."""
+    if ship is None or ship.crashed:
+        return False
+    if state["parked"] is not None:
+        return True
+    body = world.body_under(ship.position)
+    if length(sub(ship.velocity, body.velocity())) >= EXIT_SPEED:
+        return False
+    if ship.on_ground:
+        return True
+    ground = ground_under_ship()
+    if ground is None:
+        return False
+    for gear in ship.params.gear:
+        contact = ground(add(ship.position, flight.quat_rotate(ship.orientation, gear)))
+        if contact is None or contact[0] < -flight.GEAR_TOUCH:
+            return False
+    return True
+
+
+def spawn_player(bubble, feet_world, heading):
+    remove_player()
+    state["player"] = Player(bubble, bubble.to_bubble(feet_world), heading)
+    state["mode"] = "foot"
+    state["warp"] = 0
+    place_eye()
+
+
+def remove_player():
+    if state["player"] is not None:
+        state["player"].remove()
+        state["player"] = None
+        state["foot_basis"] = None
+
+
+def go_on_foot():
+    """From the free camera: back to the player, or a player put down
+    SPAWN_LIFT above the ground under the camera, facing its way, when the
+    ground there is known and within Bubble.RADIUS below."""
+    if state["player"] is not None:
+        state["mode"] = "foot"
+        state["warp"] = 0
+        return
+    if world.ground is None or world.height_above_ground(state["position"]) > Bubble.RADIUS:
+        return
+    bubble = ensure_bubble(state["position"])
+    up = normalize(bubble.body.relative(state["position"]))
+    feet = add(bubble.body.centre(),
+               scale(up, bubble.body.radius + world.surface_height(state["position"]) + SPAWN_LIFT))
+    spawn_player(bubble, feet, state["forward"])
+
+
+def get_out():
+    """Out of the landed ship (ship_landed) at its boarding point,
+    SPAWN_LIFT up, facing the ship's way; the ship parked."""
+    ship = state["ship"]
+    if not ship_landed(ship):
+        return
+    body = world.body_under(ship.position)
+    state["parked"] = (body, body.relative(ship.position))
+    bubble = ensure_bubble(ship.position)
+    right, up, forward = ship.axes()
+    spawn_player(bubble, add(boarding_point(ship), scale(up, SPAWN_LIFT)), forward)
+
+
+def get_in():
+    """Into the ship from within BOARD_REACH of its boarding point, while it is landed."""
+    ship, player, bubble = state["ship"], state["player"], state["bubble"]
+    if player is None or not ship_landed(ship):
+        return
+    if length(sub(bubble.to_world(player.feet()), boarding_point(ship))) > BOARD_REACH:
+        return
+    remove_player()
+    if state["parked"] is not None:
+        ship.velocity = state["parked"][0].velocity()
+    state["parked"] = None
+    state["mode"] = "ship"
+
+
+def near_boarding_point():
+    ship, player, bubble = state["ship"], state["player"], state["bubble"]
+    return (player is not None and ship_landed(ship)
+            and length(sub(bubble.to_world(player.feet()), boarding_point(ship))) <= BOARD_REACH)
+
+
+def follow_parked_ship():
+    """A parked ship moved with the body it is parked on, outside ship mode."""
+    if state["parked"] is None or state["ship"] is None or state["mode"] == "ship":
+        return
+    body, relative = state["parked"]
+    state["ship"].position = add(body.centre(), relative)
+    state["ship"].velocity = body.velocity()
+
+
+def read_foot_controls():
+    """The player's controls from the keys and the gamepad (left stick to
+    walk, right stick to look, A to jump and jet); the mouse turns the view
+    while captured, or with the right button held."""
+    c = state["foot_controls"]
+    down = engine.input.is_key_down
+    forward = (1.0 if down(keys.W) else 0.0) - (1.0 if down(keys.S) else 0.0)
+    strafe = (1.0 if down(keys.D) else 0.0) - (1.0 if down(keys.A) else 0.0)
+    c.run = down(keys.LEFT_SHIFT)
+    c.crouch = down(keys.LEFT_CONTROL)
+    c.jet = down(keys.SPACE)
+    player = state["player"]
+    if engine.input.is_gamepad_connected():
+        forward -= stick(engine.input.get_gamepad_axis(keys.GAMEPAD_LEFT_Y))
+        strafe += stick(engine.input.get_gamepad_axis(keys.GAMEPAD_LEFT_X))
+        a = engine.input.is_gamepad_button_down(keys.GAMEPAD_A)
+        if a and not state.get("pad_jump"):
+            c.jump = True
+        state["pad_jump"] = a
+        c.jet = c.jet or a
+        if player is not None:
+            player.look(stick(engine.input.get_gamepad_axis(keys.GAMEPAD_RIGHT_X)) * PAD_LOOK_PIXELS,
+                        stick(engine.input.get_gamepad_axis(keys.GAMEPAD_RIGHT_Y)) * PAD_LOOK_PIXELS)
+    c.forward, c.strafe = max(-1.0, min(1.0, forward)), max(-1.0, min(1.0, strafe))
+    if player is not None and (engine.input.is_mouse_captured() or engine.input.is_mouse_button_down(keys.MOUSE_RIGHT)):
+        dx, dy = engine.input.get_mouse_delta()
+        player.look(dx, dy)
+
+
+def place_eye():
+    """The camera at the player's eye, looking its way."""
+    player, bubble = state["player"], state["bubble"]
+    if player is None:
+        return
+    state["position"] = bubble.to_world(player.eye())
+    state["foot_basis"] = player.basis()
+    state["forward"] = state["foot_basis"][2]
+
+
+def capture_mouse():
+    """The mouse captured on foot, freed off foot and while the menu or the
+    controls are open; Escape frees it until the next change."""
+    wanted = (state["mode"] == "foot" and not state["menu"].visible and not state["help"].visible
+              and not state["scripted_controls"])
+    if wanted != state["captured"]:
+        engine.input.set_mouse_captured(wanted)
+        state["captured"] = wanted
 
 
 # ── Per frame ──────────────────────────────────────────────────────────────
@@ -833,10 +1083,16 @@ def frame(dt):
         read_gamepad_buttons()
     if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
         state["input"] = "keys"
+    ship = state["ship"]
+    before = (ship.position, ship.orientation) if ship is not None else None
     if state["mode"] == "ship":
         if not state["scripted_controls"]:
             read_ship_controls(dt)
         fly_ship(dt)
+    elif state["mode"] == "foot":
+        if not state["scripted_controls"]:
+            read_foot_controls()
+        world.time += dt
     else:
         if engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
             dx, dy = engine.input.get_mouse_delta()
@@ -847,10 +1103,18 @@ def frame(dt):
         # The world's clock runs on (the moon moves) while the ship waits; the camera moves with the
         # body under it.
         body = world.body_under(state["position"])
-        before = body.centre()
+        centre = body.centre()
         world.time += dt * WARPS[state["warp"]]
-        state["position"] = add(state["position"], sub(body.centre(), before))
+        state["position"] = add(state["position"], sub(body.centre(), centre))
+    follow_parked_ship()
+    if ship is not None and ship is state["ship"]:
+        state["ship_poses"] = (before, (ship.position, ship.orientation))
+    else:
+        state["ship_poses"] = None
     step_bubble(dt)
+    if state["mode"] == "foot":
+        place_eye()
+    capture_mouse()
 
     # The world for the view: the level of detail, the probes (with the ground patch around the
     # ship), and everything placed relative to the camera, subtracted in double.
@@ -992,6 +1256,19 @@ def update_cards():
             rows.append(("STATE", contact_text(ship).split(" (")[0].lower()))
         view_card.update("CHASE VIEW", rows)
         view_card.show(True)
+    elif state["mode"] == "foot" and state["player"] is not None:
+        player = state["player"]
+        on_planet = world.body_under(viewpoint()) is world.planet
+        velocity = physics.character_velocity(player.character)
+        stance = "held: no ground yet" if player.held else ("on the ground" if player.on_ground else "in the air")
+        view_card.update("ON FOOT", [
+            ("ABOVE " + world.datum_name(viewpoint()).upper(), distance_text(world.altitude(viewpoint()))),
+        ] + (biomes.card_rows(world.ground_climate) if on_planet else []) + [
+            ("SPEED", "%.1f m/s" % length(velocity)),
+            ("JETPACK", "%.0f %%" % (player.jet_fuel * 100.0)),
+            ("STATE", stance),
+        ] + ([("SHIP", "F to get in")] if near_boarding_point() else []))
+        view_card.show(True)
     elif state["mode"] != "ship":
         on_planet = world.body_under(viewpoint()) is world.planet
         view_card.update("FREE CAMERA", [
@@ -1049,16 +1326,26 @@ def current_hints():
     if state["menu"].visible:
         return [(("pad:Start",) if pad else ("F1",), "Close settings"), (("Wheel",), "Scroll"),
                 (("pad:Back",) if pad else ("F2",), "Controls")]
+    if state["mode"] == "foot":
+        board = [(("pad:X",) if pad else ("F",), "Get in")] if near_boarding_point() else []
+        if pad:
+            return board + [(("pad:LS",), "Walk"), (("pad:RS",), "Look"), (("pad:A",), "Jump, jetpack"),
+                            (("pad:Y",), "Free camera"), (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
+        return board + [(("Mouse",), "Look"), (("W", "A", "S", "D"), "Walk"), (("Shift",), "Run"),
+                        (("Ctrl",), "Crouch"), (("Space",), "Jump, hold: jetpack"), (("0",), "Drop a crate"),
+                        (("Tab",), "Free camera"), (("F1",), "Settings"), (("F2",), "Controls")]
     if state["mode"] != "ship":
         if pad:
-            return [(("pad:Y",), "Board the ship"), (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
+            return [(("pad:Y",), "On foot"), (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
         return [(("RMB",), "Look"), (("W", "A", "S", "D"), "Fly"), (("E", "Q"), "Up, down"),
                 (("Shift", "Ctrl"), "Faster, slower"), (("Wheel",), "Speed"), (("1-9",), "Places"),
-                (("0",), "Drop a crate"), (("Tab",), "Board the ship"), (("F1",), "Settings"), (("F2",), "Controls")]
+                (("0",), "Drop a crate"), (("Tab",), "On foot"), (("F1",), "Settings"), (("F2",), "Controls")]
     view = "Cockpit" if state["chase"] else "Chase view"
     hints = []
     if state["ship"].crashed:
         hints = [(("8",), "New ship on the pad"), (("9",), "New ship in orbit")]
+    elif ship_landed(state["ship"]):
+        hints = [(("pad:X",) if pad else ("F",), "Get out")]
     if pad:
         return hints + [(("pad:LS",), "Pitch, roll"), (("pad:RS",), "Yaw, up, down"),
                         (("pad:LT", "pad:RT"), "Throttle"), (("pad:A",), "Assist"), (("pad:B",), "Cut throttle"),
@@ -1077,7 +1364,14 @@ HELP_COLUMNS = [
         (("E", "Q"), "Up / down"),
         (("Shift", "Ctrl"), "4x faster / slower"),
         (("Wheel",), "Speed factor"),
-        (("Tab",), "Board the ship"),
+        (("Tab",), "On foot"),
+    ]), ("On foot", [
+        (("Mouse",), "Look around (Escape frees the mouse)"),
+        (("W", "A", "S", "D"), "Walk"),
+        (("Shift", "Ctrl"), "Run / crouch"),
+        (("Space",), "Jump; held in the air: jetpack"),
+        (("F",), "Into the ship, beside its cockpit"),
+        (("Tab",), "Free camera"),
     ]), ("Ship", [
         (("W", "S"), "Throttle up / down"),
         (("Backspace",), "Throttle to 0"),
@@ -1088,6 +1382,8 @@ HELP_COLUMNS = [
         (("R",), "Chase view / cockpit"),
         (("U",), "Cabin / generated cockpit"),
         ((",", "."), "Time warp down / up"),
+        (("F",), "Out, once landed"),
+        (("Tab",), "Free camera"),
     ])],
     [("Ship, gamepad", [
         (("pad:LS",), "Pitch and roll"),
@@ -1095,9 +1391,9 @@ HELP_COLUMNS = [
         (("pad:LT", "pad:RT"), "Throttle down / up"),
         (("pad:A",), "Translation assist"),
         (("pad:B",), "Throttle to 0"),
-        (("pad:X",), "Chase view / cockpit"),
+        (("pad:X",), "Chase view / cockpit; landed: out"),
         (("pad:LB", "pad:RB"), "Time warp down / up"),
-        (("pad:Y",), "Free camera / ship"),
+        (("pad:Y",), "Free camera / on foot"),
         (("pad:Start",), "Settings"),
         (("pad:Back",), "These controls"),
     ]), ("Places", [
@@ -1121,7 +1417,7 @@ HELP_COLUMNS = [
         (("F1",), "Settings"),
         (("F2",), "These controls"),
         (("I",), "Debug card"),
-        (("F",), "Wireframe"),
+        (("F3",), "Wireframe"),
         (("O",), "Ocean"),
         (("C",), "Colour: terrain / face / level / biome"),
         (("K",), "Freeze the level of detail"),
@@ -1161,6 +1457,8 @@ def on_init():
         engine.ecs.add_system("PlanetLandingCheck", LandingCheck("planet"), priority=-2)
     elif args.moon_landing_check:
         engine.ecs.add_system("PlanetLandingCheck", LandingCheck("moon"), priority=-2)
+    elif args.walk_check:
+        engine.ecs.add_system("PlanetWalkCheck", WalkCheck(), priority=-2)
     elif args.prop_rest_check:
         engine.ecs.add_system("PlanetPropRestCheck", PropRestCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
@@ -1168,7 +1466,7 @@ def on_init():
 
 # Keys that change settings in the menu too, shown beside them.
 MENU_KEYS = {"Exposure": ("B", "V"), "Atmosphere density": ("T", "Y"), "Sun elevation": ("Z", "X"),
-             "Ocean": ("O",), "Wireframe": ("F",), "Split factor": ("[", "]"),
+             "Ocean": ("O",), "Wireframe": ("F3",), "Split factor": ("[", "]"),
              "Colour: terrain / face / level / biome": ("C",), "New seed": ("N",)}
 
 
@@ -1186,6 +1484,8 @@ def menu_items():
          "keys": (",", "."), "hint": "How much faster than real time the ship flies and the moon moves."},
         {"toggle": "Translation assist", "get": lambda: state["controls"].assist, "set": set_assist,
          "keys": ("L",), "hint": "The throttle asks for a speed and E / Q for a climb rate; the thrusters hold them."},
+        {"toggle": "Head bob", "get": lambda: state["head_bob"], "set": lambda on: state.update(head_bob=on),
+         "hint": "On foot, the view rises and falls a little with each step."},
     ] + planet_settings.sky_items(world, MENU_KEYS, site="the blocks") + planet_settings.cloud_items(world, MENU_KEYS) \
         + planet_settings.ground_items(world, MENU_KEYS) + planet_settings.climate_items(world, MENU_KEYS) + [
         {"heading": "Display"},
@@ -1230,8 +1530,17 @@ def on_key(key, from_pad=False):
     elif key == keys.TAB:
         if state["mode"] == "ship":
             leave_ship()
+        elif state["mode"] == "foot":
+            state["mode"] = "camera"
         else:
-            board_ship()
+            go_on_foot()
+    elif key == keys.F:
+        if state["mode"] == "foot":
+            get_in()
+        elif state["mode"] == "ship":
+            get_out()
+    elif key == keys.SPACE and state["mode"] == "foot":
+        state["foot_controls"].jump = True
     elif key == keys.R:
         state["chase"] = not state["chase"]
     elif key == keys.U:
@@ -1240,7 +1549,7 @@ def on_key(key, from_pad=False):
         state["controls"].assist = not state["controls"].assist
     elif key == keys.BACKSPACE:
         state["controls"].throttle = 0.0
-    elif key in (keys.COMMA, keys.PERIOD):
+    elif key in (keys.COMMA, keys.PERIOD) and state["mode"] != "foot":
         state["warp"] = max(0, min(len(WARPS) - 1, state["warp"] + (1 if key == keys.PERIOD else -1)))
     elif key == keys.O:
         world.set_ocean(not world.ocean)
@@ -1269,7 +1578,7 @@ def on_key(key, from_pad=False):
     elif key in (keys.B, keys.V):
         world.exposure *= 1.25 if key == keys.B else 1 / 1.25
         world.upload_sky()
-    elif key == keys.F:
+    elif key == keys.F3:
         set_wireframe(not world.wireframe)
     elif key == keys.C:
         set_colour_mode((world.colour_mode + 1) % len(COLOUR_MODES))
@@ -2327,6 +2636,173 @@ class PropRestCheck:
                              ", awake" if physics.is_active(crate.body) else ""), flush=True)
         print("[planet]   %s" % ("passed" if ok else "FAILED"), flush=True)
         self.results.append(ok)
+        self.bodies.pop(0)
+        drop_bubble()
+        if not self.bodies:
+            os._exit(0 if all(self.results) else 1)
+        self.start_body()
+
+
+def point_triangle_distance(p, a, b, c):
+    """The distance from point `p` to the triangle a, b, c (numpy arrays):
+    to the nearest point of its plane inside it, else of its edges."""
+    n = np.cross(b - a, c - a)
+    n /= np.linalg.norm(n)
+    q = p - np.dot(p - a, n) * n
+    if all(np.dot(np.cross(v1 - v0, q - v0), n) >= 0.0 for v0, v1 in ((a, b), (b, c), (c, a))):
+        return float(np.linalg.norm(p - q))
+    best = math.inf
+    for v0, v1 in ((a, b), (b, c), (c, a)):
+        e = v1 - v0
+        t = min(1.0, max(0.0, float(np.dot(p - v0, e) / np.dot(e, e))))
+        best = min(best, float(np.linalg.norm(p - (v0 + t * e))))
+    return best
+
+
+class WalkCheck:
+    """--walk-check: on the planet 3 km north of the site, then on the moon
+    at moon_spot, a player put down from the free camera walks a circle of
+    LAP metres at WALK speed, then at RUN, its heading turned each frame by
+    its distance along the ground over the circle's radius. While it is on
+    the ground, the gap between its capsule's lower sphere and the nearest
+    triangle of the terrain mesh around its feet is measured. The feet must stay
+    within TOLERANCE of the ground and never more than BELOW under it, and
+    each lap must cover at least MIN_LAP_SHARE of its length. Prints per
+    body and speed the distance, the share of the time on the ground and
+    the gaps' range, and exits with status 0 when every lap passed, 1
+    otherwise."""
+
+    LAP = 200.0
+    TOLERANCE = 0.05
+    BELOW = 0.01
+    MIN_LAP_SHARE = 0.9
+    START_HEIGHT = 2.0
+    SETTLE_SECONDS = 2.0
+    PLACE_FRAMES = 10
+
+    def __init__(self):
+        self.bodies = ["planet", "moon"]
+        self.results = []
+        self.start_body()
+
+    def start_body(self):
+        self.stage, self.frames, self.clock = "place", 0, 0.0
+        self.speeds = ["walk", "run"]
+
+    def __call__(self, dt):
+        if planet.tree is None:
+            return True
+        self.frames += 1
+        self.clock += dt
+        getattr(self, self.stage)(dt)
+        return True
+
+    def body(self):
+        return planet if self.bodies[0] == "planet" else moon_body()
+
+    def next_stage(self, stage):
+        self.stage, self.frames, self.clock = stage, 0, 0.0
+
+    def place(self, dt):
+        drop_bubble()
+        state["scripted_controls"] = True
+        body = self.body()
+        if body is planet:
+            _, up, _, north = world.site_frame()
+            self.home = normalize(add(up, scale(north, 3_000.0 / RADIUS)))
+        else:
+            self.home = moon_spot()
+        state["mode"] = "camera"
+        state["position"] = add(body.centre(), scale(self.home, body.radius + 5_000.0))
+        state["forward"] = local_frame(self.home)[1]
+        self.next_stage("lower")
+
+    def lower(self, dt):
+        if self.frames < self.PLACE_FRAMES or world.ground is None:
+            return
+        body = self.body()
+        ground = world.surface_height(state["position"])
+        state["position"] = add(body.centre(), scale(self.home, body.radius + ground + self.START_HEIGHT))
+        self.next_stage("spawn")
+
+    def spawn(self, dt):
+        if self.frames < self.PLACE_FRAMES or world.ground is None:
+            return
+        go_on_foot()
+        if state["player"] is not None:
+            self.next_stage("settle")
+
+    def settle(self, dt):
+        player = state["player"]
+        if player.held or not player.on_ground:
+            self.clock = 0.0
+        if self.clock >= self.SETTLE_SECONDS:
+            self.start_lap()
+
+    def start_lap(self):
+        self.next_stage("lap")
+        self.distance = 0.0
+        self.ground_time = self.time = 0.0
+        self.low, self.high = math.inf, -math.inf
+        self.last = state["bubble"].body_relative(state["player"].feet())
+
+    def gap(self):
+        """The gap between the capsule's lower sphere and the nearest of
+        the mesh's triangles within two grid cells of the feet (negative
+        where it sinks in), or None off the mesh."""
+        player, bubble = state["player"], state["bubble"]
+        patch = state["terrain_collider"].patch
+        feet = bubble.body_relative(player.feet())
+        xy = patch.offset(feet) if patch is not None else None
+        if xy is None:
+            return None
+        mid, last = (patch.columns - 1) // 2, patch.columns - 1
+        i, j = int(math.floor(xy[0] / patch.spacing)) + mid, int(math.floor(xy[1] / patch.spacing)) + mid
+        if not (2 <= i <= last - 3 and 2 <= j <= last - 3):
+            return None
+        centre = np.asarray(add(feet, scale(normalize(feet), PLAYER_RADIUS)), dtype=np.float64)
+        p = patch.points()
+        nearest = math.inf
+        for jj in range(j - 2, j + 3):
+            for ii in range(i - 2, i + 3):
+                a, b, c, d = p[jj, ii], p[jj, ii + 1], p[jj + 1, ii], p[jj + 1, ii + 1]
+                nearest = min(nearest, point_triangle_distance(centre, a, b, c),
+                              point_triangle_distance(centre, b, d, c))
+        return nearest - PLAYER_RADIUS
+
+    def lap(self, dt):
+        player, bubble = state["player"], state["bubble"]
+        controls = state["foot_controls"]
+        controls.forward, controls.strafe = 1.0, 0.0
+        controls.run = self.speeds[0] == "run"
+        controls.crouch = controls.jet = controls.jump = False
+        feet = bubble.body_relative(player.feet())
+        up = normalize(feet)
+        moved = sub(feet, self.last)
+        along = length(sub(moved, scale(up, dot(moved, up))))
+        self.last = feet
+        self.distance += along
+        self.time += dt
+        player.heading = rotate(player.heading, up, along / (self.LAP / (2.0 * math.pi)))
+        if player.on_ground and not player.held:
+            self.ground_time += dt
+            gap = self.gap()
+            if gap is not None:
+                self.low, self.high = min(self.low, gap), max(self.high, gap)
+        if self.distance >= self.LAP or self.time > 4.0 * self.LAP / (RUN_SPEED if controls.run else WALK_SPEED):
+            self.finish_lap()
+
+    def finish_lap(self):
+        name, speed = self.bodies[0], self.speeds.pop(0)
+        ok = (self.distance >= self.MIN_LAP_SHARE * self.LAP and self.low >= -self.BELOW
+              and self.high <= self.TOLERANCE)
+        print("[planet] walk on the %s, %s: %.1f m in %.1f s, %.0f %% on the ground, feet %+.3f to %+.3f m from it: %s"
+              % (name, speed, self.distance, self.time, 100.0 * self.ground_time / max(self.time, 1e-9),
+                 self.low, self.high, "passed" if ok else "FAILED"), flush=True)
+        self.results.append(ok)
+        if self.speeds:
+            self.start_lap()
+            return
         self.bodies.pop(0)
         drop_bubble()
         if not self.bodies:

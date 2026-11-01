@@ -70,6 +70,11 @@ bool InputAPI::isMouseCaptured() const {
     return m_impl->inputHandler->getInputState().mouseCaptured;
 }
 
+void InputAPI::setMouseCaptured(bool captured) {
+    if (!m_impl->inputHandler) return;
+    m_impl->inputHandler->setMouseCaptured(captured);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Event Callbacks
 // ═══════════════════════════════════════════════════════════════
