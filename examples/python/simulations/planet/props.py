@@ -39,11 +39,12 @@ class Props:
         self.mesh = mesh
         self.crates = []
 
-    def spawn_crate(self, bubble, position, rotation, size=0.6, density=500.0, colour=CRATE_COLOUR):
-        """A crate of `size` metres at bubble coordinates `position`, turned by `rotation`."""
+    def spawn_crate(self, bubble, position, rotation, size=0.6, density=500.0, colour=CRATE_COLOUR, mass=None):
+        """A crate of `size` metres at bubble coordinates `position`, turned
+        by `rotation`, of `mass` kg, or of `density` when None."""
         half = 0.5 * size
         body = bubble.physics.create_box((half, half, half), position, rotation, motion="dynamic",
-                                         density=density, friction=0.7, restitution=0.1)
+                                         density=density, mass=mass or 0.0, friction=0.7, restitution=0.1)
         positions, normals = self.mesh
         entity = self.engine.create_mesh(positions, normals=normals, name="Crate")
         scene = self.engine.scene
@@ -96,6 +97,10 @@ class Props:
             scene.set_position(crate.entity, sub(bubble.to_world(p), camera))
             x, y, z = quat_rotate(q, (1.0, 0.0, 0.0)), quat_rotate(q, (0.0, 1.0, 0.0)), quat_rotate(q, (0.0, 0.0, 1.0))
             scene.set_rotation(crate.entity, euler_from_basis(x, y, scale(z, -1.0)))
+
+    def grabbable(self):
+        """(body, radius) of each crate, its radius that of the sphere around it."""
+        return [(c.body, 0.5 * math.sqrt(3.0) * c.size) for c in self.crates]
 
     def awake(self, bubble):
         return sum(1 for c in self.crates if not c.frozen and bubble.physics.is_active(c.body))

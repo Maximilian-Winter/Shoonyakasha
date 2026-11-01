@@ -126,9 +126,10 @@ Characters are capsules moved by their velocity (Jolt's `CharacterVirtual`), eac
 | `get_velocity(body)`, `set_velocity(body, linear, angular=(0, 0, 0))` | (linear m/s, angular rad/s) |
 | `add_force(body, force)`, `add_impulse(body, impulse)` | A force (N) for the next step, or an impulse (N s), through the centre of mass; both wake the body |
 | `set_motion(body, motion)`, `motion(body)` | The motion, with the collisions of the new motion; turned kinematic or dynamic, the body wakes |
+| `set_pass_through(body, character=None)` | The body passes through the character's capsule and inner body, and they through it; None: through no character. A body passes through one character at a time |
 | `mass(body)`, `is_active(body)`, `activate(body)` | Mass in kg (0 when static); whether it is awake |
 | `get_transforms(bodies)` | The bodies' positions and rotations as bytes, 7 float64 each (x, y, z, w, qx, qy, qz), in their order |
-| `cast_ray(origin, direction, max_distance)` | (body, point, normal, fraction) of the nearest surface along the unit `direction`, or None |
+| `cast_ray(origin, direction, max_distance, skip_character=None)` | (body, point, normal, fraction) of the nearest surface along the unit `direction`, or None; with `skip_character`, through that character and the bodies passing through it |
 | `apply_central_gravity(centre, gm)` | For the next step, each awake dynamic body pulled towards `centre` with gm / r² |
 | `step(dt)`, `shift_origin(offset)` | One step; every body moved by −`offset` without waking any |
 | `body_count`, `active_count` | Bodies, and awake bodies |

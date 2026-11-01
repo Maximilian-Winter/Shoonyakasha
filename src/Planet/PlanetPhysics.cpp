@@ -10,6 +10,7 @@
 #include <Jolt/Physics/Body/BodyFilter.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/GroupFilter.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -128,6 +129,32 @@ JPH::Quat upRotation(JPH::Vec3Arg up) {
     return JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), up.Normalized());
 }
 
+/// Bodies in the same collision group pass through each other: a
+/// character's inner body is in the group of the character's id, and so is
+/// every body set to pass through that character.
+class CharacterGroups final : public JPH::GroupFilter {
+public:
+    bool CanCollide(const JPH::CollisionGroup& a, const JPH::CollisionGroup& b) const override {
+        return a.GetGroupID() == JPH::CollisionGroup::cInvalidGroup || a.GetGroupID() != b.GetGroupID();
+    }
+};
+
+/// Every body but the character's inner body and the bodies in its group.
+class SkipCharacter final : public JPH::BodyFilter {
+public:
+    SkipCharacter(JPH::BodyID inner, JPH::CollisionGroup::GroupID group) : m_inner(inner), m_group(group) {}
+
+    bool ShouldCollide(const JPH::BodyID& body) const override { return body != m_inner; }
+
+    bool ShouldCollideLocked(const JPH::Body& body) const override {
+        return body.GetCollisionGroup().GetGroupID() != m_group;
+    }
+
+private:
+    JPH::BodyID m_inner;
+    JPH::CollisionGroup::GroupID m_group;
+};
+
 }  // namespace
 
 struct PlanetPhysics::Impl {
@@ -139,6 +166,14 @@ struct PlanetPhysics::Impl {
     JPH::PhysicsSystem system;
     JPH::BodyIDVector scratch;
     std::vector<JPH::Ref<JPH::CharacterVirtual>> characters;   // by id; null once removed
+    JPH::Ref<CharacterGroups> characterGroups;
+
+    void setGroup(JPH::BodyID body, JPH::CollisionGroup group) {
+        JPH::BodyLockWrite lock(system.GetBodyLockInterface(), body);
+        if (lock.Succeeded()) {
+            lock.GetBody().SetCollisionGroup(group);
+        }
+    }
 
     JPH::CharacterVirtual& character(uint32_t id) const {
         if (id >= characters.size() || characters[id] == nullptr) {
@@ -189,6 +224,7 @@ struct PlanetPhysics::Impl {
 
 PlanetPhysics::PlanetPhysics(uint32_t maxBodies, int threads) : m_impl(std::make_unique<Impl>()) {
     initialiseJolt();
+    m_impl->characterGroups = new CharacterGroups();
     if (threads < 0) {
         int hardware = static_cast<int>(std::thread::hardware_concurrency());
         threads = std::clamp(hardware - 1, 1, 4);
@@ -308,7 +344,9 @@ uint32_t PlanetPhysics::createCharacter(const PhysicsVec3& position, const Physi
     JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
         settings, toRVec3(position), upRotation(toVec3(up)), 0, &m_impl->system);
     m_impl->characters.push_back(character);
-    return static_cast<uint32_t>(m_impl->characters.size() - 1);
+    uint32_t id = static_cast<uint32_t>(m_impl->characters.size() - 1);
+    m_impl->setGroup(character->GetInnerBodyID(), JPH::CollisionGroup(m_impl->characterGroups, id, 0));
+    return id;
 }
 
 void PlanetPhysics::removeCharacter(uint32_t character) {
@@ -345,7 +383,7 @@ void PlanetPhysics::updateCharacter(uint32_t character, double dt, const Physics
     JPH::CharacterVirtual::ExtendedUpdateSettings settings;
     settings.mStickToFloorStepDown = -STICK_DOWN * up;
     settings.mWalkStairsStepUp = STEP_UP * up;
-    JPH::IgnoreSingleBodyFilter self(c.GetInnerBodyID());
+    SkipCharacter self(c.GetInnerBodyID(), character);
     c.ExtendedUpdate(static_cast<float>(dt), toVec3(gravity), settings,
                      m_impl->system.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
                      m_impl->system.GetDefaultLayerFilter(Layers::MOVING), self, {}, *m_impl->tempAllocator);
@@ -406,6 +444,16 @@ void PlanetPhysics::setMotion(uint32_t body, PhysicsMotion motion) {
                          moving ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
 }
 
+void PlanetPhysics::setPassThrough(uint32_t body, int character) {
+    JPH::BodyID id = m_impl->added(body);
+    if (character < 0) {
+        m_impl->setGroup(id, JPH::CollisionGroup());
+        return;
+    }
+    m_impl->character(static_cast<uint32_t>(character));
+    m_impl->setGroup(id, JPH::CollisionGroup(m_impl->characterGroups, static_cast<uint32_t>(character), 0));
+}
+
 PhysicsMotion PlanetPhysics::motion(uint32_t body) const {
     return fromMotionType(m_impl->bodies().GetMotionType(m_impl->added(body)));
 }
@@ -439,11 +487,19 @@ void PlanetPhysics::getTransforms(const uint32_t* bodies, size_t count, double* 
 }
 
 bool PlanetPhysics::castRay(const PhysicsVec3& origin, const PhysicsVec3& direction, double maxDistance,
-                            PhysicsRayHit& hit) const {
+                            PhysicsRayHit& hit, int skipCharacter) const {
     PhysicsVec3 reach{direction[0] * maxDistance, direction[1] * maxDistance, direction[2] * maxDistance};
     JPH::RRayCast ray(toRVec3(origin), toVec3(reach));
     JPH::RayCastResult result;
-    if (!m_impl->system.GetNarrowPhaseQuery().CastRay(ray, result)) {
+    bool found = false;
+    if (skipCharacter >= 0) {
+        uint32_t id = static_cast<uint32_t>(skipCharacter);
+        SkipCharacter filter(m_impl->character(id).GetInnerBodyID(), id);
+        found = m_impl->system.GetNarrowPhaseQuery().CastRay(ray, result, {}, {}, filter);
+    } else {
+        found = m_impl->system.GetNarrowPhaseQuery().CastRay(ray, result);
+    }
+    if (!found) {
         return false;
     }
     JPH::RVec3 point = ray.GetPointOnRay(result.mFraction);

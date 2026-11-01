@@ -123,6 +123,10 @@ public:
     /// body turned kinematic or dynamic is woken.
     void setMotion(uint32_t body, PhysicsMotion motion);
     PhysicsMotion motion(uint32_t body) const;
+    /// The body passes through the character's capsule and its inner body,
+    /// and they through it; `character` -1: through no character. A body
+    /// passes through one character at a time.
+    void setPassThrough(uint32_t body, int character);
     /// kg; 0 for static bodies.
     double mass(uint32_t body) const;
     /// Whether the body is awake.
@@ -134,9 +138,11 @@ public:
     void getTransforms(const uint32_t* bodies, size_t count, double* out) const;
 
     /// The nearest surface along `direction` (unit) from `origin` within
-    /// `maxDistance` metres; false when there is none.
+    /// `maxDistance` metres; false when there is none. With `skipCharacter`
+    /// (a character's id, or -1 for none), the ray passes through that
+    /// character's inner body and the bodies passing through it.
     bool castRay(const PhysicsVec3& origin, const PhysicsVec3& direction, double maxDistance,
-                 PhysicsRayHit& hit) const;
+                 PhysicsRayHit& hit, int skipCharacter = -1) const;
 
     /// For the next step, each awake dynamic body pulled towards `centre`
     /// with acceleration gm / r^2 (gm in m^3/s^2).

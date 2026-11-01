@@ -19,7 +19,9 @@ JUMP_GRACE after a jump it counts as off the ground. Off the ground
 gravity pulls along the up. While jetting it climbs at JET_ACCEL,
 burning JET_BURN of its fuel (0 to 1) a second; on the ground the fuel
 refills at JET_REFILL a second. A character over ground the terrain mesh
-does not cover is held where it is.
+does not cover is held where it is. `Player.push` adds to its velocity
+(the gravity gun's recoil); a push upwards lifts it off the ground as a
+jump does.
 
 The eye is EYE_HEIGHT above the feet (CROUCH_EYE_HEIGHT crouched,
 reached over EYE_SMOOTHING seconds); a step up of more than STEP_JUMP in
@@ -44,6 +46,7 @@ JET_ACCEL, JET_BURN, JET_REFILL = 9.0, 0.25, 0.15   # m/s^2; fuel per second
 EYE_HEIGHT, CROUCH_EYE_HEIGHT = 1.65, 1.0  # m above the feet
 EYE_SMOOTHING = 0.1                        # s
 JUMP_GRACE = 0.2                           # s after a jump it counts as off the ground
+PUSH_LIFT = 1.0                            # m/s up a push must have to lift it off the ground
 STEP_JUMP = 0.05                           # m the feet may rise in a step without lowering the eye
 BOB_AMPLITUDE = 0.025                      # m
 BOB_STRIDE = 1.6                           # m walked per bob
@@ -174,6 +177,14 @@ class Player:
         self.bob_weight = (1.0 if self.on_ground else 0.0) + (self.bob_weight - (1.0 if self.on_ground else 0.0)) * fade
         if self.on_ground:
             self.bob_distance += length(v_along) * dt
+
+    def push(self, dv):
+        """`dv` (m/s) added to the velocity; with more than PUSH_LIFT of it
+        along the up, off the ground for JUMP_GRACE, as after a jump."""
+        c = self.character
+        self.physics.character_set_velocity(c, add(self.physics.character_velocity(c), dv))
+        if dot(dv, self.up()) > PUSH_LIFT:
+            self.jump_grace = JUMP_GRACE
 
     def eye(self):
         """Bubble coordinates of the eye."""

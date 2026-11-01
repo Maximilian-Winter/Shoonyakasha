@@ -885,11 +885,13 @@ cdef extern from "Planet/PlanetPhysics.h" namespace "Shoonyakasha::Planet":
         void addImpulse(uint32_t body, const LodVec3& impulse) except +
         void setMotion(uint32_t body, PhysicsMotion motion) except +
         PhysicsMotion motion(uint32_t body) except +
+        void setPassThrough(uint32_t body, int character) except +
         double mass(uint32_t body) except +
         cbool isActive(uint32_t body) except +
         void activate(uint32_t body) except +
         void getTransforms(const uint32_t* bodies, size_t count, double* out) except +
-        cbool castRay(const LodVec3& origin, const LodVec3& direction, double maxDistance, PhysicsRayHit& hit)
+        cbool castRay(const LodVec3& origin, const LodVec3& direction, double maxDistance, PhysicsRayHit& hit,
+                      int skipCharacter) except +
         void applyCentralGravity(const LodVec3& centre, double gm)
         void step(double dt)
         void shiftOrigin(const LodVec3& offset)

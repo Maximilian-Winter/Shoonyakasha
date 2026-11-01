@@ -2,8 +2,9 @@
 falling under central gravity onto a grid mesh and coming to rest, the
 origin shifted without waking them, ray casts, motion changes, batched
 transforms and errors; characters standing and walking on a mesh along
-any up, moved by an origin shift, riding a kinematic platform and holding
-up bodies that land on them. Where this interpreter's shoonyakasha has no
+any up, moved by an origin shift, riding a kinematic platform, holding
+up bodies that land on them, letting bodies set to pass through them fall
+through, and skipped by rays cast from inside them. Where this interpreter's shoonyakasha has no
 extension (another test put the source tree first on sys.path), the tests
 run in a fresh interpreter, which imports the installed package.
 
@@ -262,6 +263,38 @@ class CharacterTest(unittest.TestCase):
         w.physics.remove_character(c)
         with self.assertRaises(ValueError):
             w.physics.character_position(c)
+
+    def test_bodies_pass_through_a_character(self):
+        w = World()
+        c = w.physics.create_character((0.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+        box = w.physics.create_box((0.2, 0.2, 0.2), (0.0, 3.0, 0.0))
+        w.physics.set_pass_through(box, c)
+        self.settle(w, c, 2.0)
+        self.assertLess(w.physics.get_transform(box)[0][1], 0.3)
+        # Through no character again: the character stands on the box once it is under its feet.
+        w.physics.set_pass_through(box, None)
+        w.physics.set_transform(box, (0.0, 0.2, 0.0), (1.0, 0.0, 0.0, 0.0))
+        w.physics.character_set_position(c, (0.0, 0.5, 0.0))
+        self.settle(w, c, 1.0)
+        self.assertEqual(w.physics.character_ground(c)[3], box)
+        with self.assertRaises(ValueError):
+            w.physics.set_pass_through(box, c + 1)
+
+    def test_ray_skips_a_character(self):
+        w = World()
+        c = w.physics.create_character((0.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+        box = w.physics.create_box((0.2, 0.2, 0.2), (3.0, 1.5, 0.0), motion="static")
+        eye = (0.0, 1.5, 0.0)
+        # From inside the capsule the ray stops on the character's inner body at once.
+        inside = w.physics.cast_ray(eye, (1.0, 0.0, 0.0), 10.0)
+        self.assertNotEqual(inside[0], box)
+        self.assertLess(inside[3], 1e-3)
+        hit = w.physics.cast_ray(eye, (1.0, 0.0, 0.0), 10.0, skip_character=c)
+        self.assertEqual(hit[0], box)
+        self.assertAlmostEqual(hit[1][0], 2.8, delta=1e-3)
+        held = w.physics.create_box((0.2, 0.2, 0.2), (1.5, 1.5, 0.0), motion="dynamic")
+        w.physics.set_pass_through(held, c)
+        self.assertEqual(w.physics.cast_ray(eye, (1.0, 0.0, 0.0), 10.0, skip_character=c)[0], box)
 
 
 class FreshInterpreterTest(unittest.TestCase):

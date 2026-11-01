@@ -3943,6 +3943,12 @@ cdef class PlanetPhysics:
     def motion(self, uint32_t body):
         return _PHYSICS_MOTIONS[<int>self._ptr.motion(body)]
 
+    def set_pass_through(self, uint32_t body, character=None):
+        """The body passes through the character's capsule and its inner
+        body, and they through it; None: through no character. A body passes
+        through one character at a time."""
+        self._ptr.setPassThrough(body, -1 if character is None else int(character))
+
     def mass(self, uint32_t body):
         """kg; 0 for static bodies."""
         return self._ptr.mass(body)
@@ -3964,11 +3970,14 @@ cdef class PlanetPhysics:
             self._ptr.getTransforms(ids.data(), ids.size(), out.data())
         return (<const char*>out.data())[:out.size() * 8]
 
-    def cast_ray(self, origin, direction, double max_distance):
+    def cast_ray(self, origin, direction, double max_distance, skip_character=None):
         """(body, point, normal, fraction) of the nearest surface along the
-        unit `direction` from `origin` within `max_distance` metres, or None."""
+        unit `direction` from `origin` within `max_distance` metres, or None.
+        With `skip_character` (a character's id) the ray passes through that
+        character and the bodies passing through it."""
         cdef PhysicsRayHit hit
-        if not self._ptr.castRay(_physics_vec3(origin), _physics_vec3(direction), max_distance, hit):
+        cdef int skip = -1 if skip_character is None else int(skip_character)
+        if not self._ptr.castRay(_physics_vec3(origin), _physics_vec3(direction), max_distance, hit, skip):
             return None
         return hit.body, _physics_tuple3(hit.point), _physics_tuple3(hit.normal), hit.fraction
 

@@ -30,7 +30,9 @@ cockpit, and gets in with F within BOARD_REACH of it. A ship the player
 left is parked: it moves with the body under it until boarded. On foot
 the time warp is 1x, and the body under the player splits to
 FOOT_MAX_LEVEL instead of MAX_LEVEL, so the ground drawn near the player
-follows the terrain the physics stands on more closely.
+follows the terrain the physics stands on more closely. On foot the
+player carries a gravity gun (gun.py, drawn by viewmodel.py) that grabs,
+holds, turns and punts the crates.
 
 Keys:
     Tab                    free camera / on foot (from the ship: the free camera)
@@ -46,6 +48,12 @@ Keys:
     W/A/S/D                walk forward, left, back, right
     Shift / Ctrl           run / crouch
     Space                  jump; held in the air, the jetpack
+    right mouse            gravity gun (gun.py): grab, or pull from farther; again: drop
+    left mouse             punt what it holds or points at; at the ground, a jump
+    mouse wheel, , / .     hold distance
+    R + mouse              turn what it holds
+  on foot, gamepad: left stick walk, right stick look, A jump and jetpack, left / right
+    trigger grab / punt, bumpers hold distance, X get in, Y free camera
   ship (flight.py):
     W / S                  throttle up / down
     Backspace              throttle to 0
@@ -101,6 +109,8 @@ Keys:
     python planet.py --morph-check     come down from 20 km, check every swap of chunks happens fully morphed, then exit
     python planet.py --prop-rest-check   drop crates on the planet and the moon, check they come to rest and stay there
     python planet.py --walk-check      walk 200 m circles on the planet and the moon, check the feet stay on the ground
+    python planet.py --hold-check      hold a crate with the gravity gun while turning, walking, jumping and rebasing
+    python planet.py --punt-check      punt crates and the ground, check the speeds, the recoil and the jump's height
 """
 
 import argparse
@@ -126,10 +136,13 @@ from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, FLOATS_PER_
 import flight
 from ground import GroundPatch, SIZE as PATCH_SIZE
 import cockpit
+import gun as gun_module
+from gun import Gun, GunControls
 from instruments import Instruments
 from player import Controls as FootControls, Player
-from player import RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
+from player import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from props import Props, stack_offsets, yaw_rotation
+from viewmodel import Viewmodel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CAPTURES = os.path.join(HERE, "planet_captures")
@@ -169,7 +182,8 @@ GAMEPAD_DEAD_ZONE = 0.12         # of a stick's travel, read as 0
 GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAMEPAD_LEFT_BUMPER: keys.COMMA,
                 keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
                 keys.GAMEPAD_X: keys.R, keys.GAMEPAD_BACK: keys.F2}
-# On foot FOOT_GAMEPAD_KEYS: X gets in, Y the free camera. In a landed ship X gets out (read_gamepad_buttons).
+# On foot FOOT_GAMEPAD_KEYS: X gets in, Y the free camera, the bumpers the gun's hold distance. In a landed
+# ship X gets out (read_gamepad_buttons).
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
 MOON_ORBIT_HEIGHT = 10_000.0     # Shift+9's circular orbit of the moon
 MOON_HOVER_HEIGHT = 2_000.0      # Shift+8's ship waits this far above the moon's radius until its ground is known
@@ -189,7 +203,8 @@ HOLD_MARGIN = 1.0                # m inside the terrain mesh's edges the player 
 FOOT_MAX_LEVEL = 14              # the deepest level the body under the player splits to on foot (0.6 m quads)
 SHIP_HULL_POINTS = np.array(flight.ShipParams().hull + flight.ShipParams().gear, dtype=np.float32)
 FOOT_GAMEPAD_KEYS = {keys.GAMEPAD_X: keys.F, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
-                     keys.GAMEPAD_BACK: keys.F2}
+                     keys.GAMEPAD_BACK: keys.F2, keys.GAMEPAD_LEFT_BUMPER: keys.COMMA,
+                     keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD}
 
 parser = argparse.ArgumentParser(description="Planet with procedural terrain and quadtree level of detail")
 parser.add_argument("--capture", metavar="DIR", help="save screenshots at the presets and exit")
@@ -213,6 +228,10 @@ parser.add_argument("--walk-check", action="store_true",
                     help="walk 200 m circles on the planet and the moon, check the feet stay on the ground, and exit")
 parser.add_argument("--prop-rest-check", action="store_true",
                     help="drop crates on the planet and the moon, check they come to rest and stay there, and exit")
+parser.add_argument("--hold-check", action="store_true",
+                    help="hold a crate with the gravity gun while turning, walking, jumping and rebasing, and exit")
+parser.add_argument("--punt-check", action="store_true",
+                    help="punt crates of 5, 50 and 500 kg and the ground, check speeds, recoil and height, and exit")
 args = parser.parse_args()
 
 planet_world.compile_shaders()
@@ -286,6 +305,11 @@ state = {
     "player": None,              # the player on foot (player.Player), while there is one
     "foot_controls": FootControls(),
     "foot_basis": None,          # (right, up, forward) of the player's view
+    "gun": None,                 # the player's gravity gun (gun.Gun), while there is a player
+    "gun_controls": GunControls(),
+    "viewmodel": None,           # the gun's viewmodel (viewmodel.Viewmodel)
+    "look_delta": (0.0, 0.0),    # pixels the mouse turned the view this frame, on foot
+    "punt_held": False,          # the punt button or trigger held last frame
     "head_bob": True,
     "captured": False,           # whether the frame last asked for the mouse captured
     "parked": None,              # (body, position relative to it) of a ship the player left
@@ -847,7 +871,8 @@ def step_bubble(dt):
     velocity), its crates kept on that mesh, and its physics stepped by
     `dt` in fixed steps of FLIGHT_STEP: each step the player (with the
     controls on foot, standing still otherwise; held where the mesh does
-    not reach), the ship's hull moved along the ship's path this frame,
+    not reach) and on foot its gravity gun (the gun drops what it holds
+    off foot), the ship's hull moved along the ship's path this frame,
     then the bodies."""
     bubble = state["bubble"]
     if bubble is None:
@@ -873,11 +898,17 @@ def step_bubble(dt):
     props.update(bubble, terrain)
     state["physics_accumulator"] += dt
     count = min(int(state["physics_accumulator"] / FLIGHT_STEP), MAX_PHYSICS_STEPS_PER_FRAME)
-    controls = state["foot_controls"] if state["mode"] == "foot" else FootControls()
+    on_foot = state["mode"] == "foot"
+    controls = state["foot_controls"] if on_foot else FootControls()
+    gun = state["gun"]
+    if gun is not None and not on_foot:
+        gun.drop()
     for k in range(count):
         if player is not None:
             player.bob = state["head_bob"]
             player.step(controls, FLIGHT_STEP, terrain.covers(player.feet(), HOLD_MARGIN))
+            if on_foot:
+                gun.step(state["gun_controls"], FLIGHT_STEP)
         move_ship_body(bubble, (k + 1) / count)
         bubble.step(FLIGHT_STEP)
     state["physics_accumulator"] -= count * FLIGHT_STEP
@@ -954,6 +985,7 @@ def ship_landed(ship):
 def spawn_player(bubble, feet_world, heading):
     remove_player()
     state["player"] = Player(bubble, bubble.to_bubble(feet_world), heading)
+    state["gun"] = Gun(state["player"], props.grabbable)
     state["mode"] = "foot"
     state["warp"] = 0
     place_eye()
@@ -961,6 +993,8 @@ def spawn_player(bubble, feet_world, heading):
 
 def remove_player():
     if state["player"] is not None:
+        state["gun"].drop()
+        state["gun"] = None
         state["player"].remove()
         state["player"] = None
         state["foot_basis"] = None
@@ -1026,17 +1060,25 @@ def follow_parked_ship():
 
 
 def read_foot_controls():
-    """The player's controls from the keys and the gamepad (left stick to
-    walk, right stick to look, A to jump and jet); the mouse turns the view
-    while captured, or with the right button held."""
-    c = state["foot_controls"]
+    """The player's and the gravity gun's controls from the keys, the mouse
+    and the gamepad (left stick to walk, right stick to look, A to jump and
+    jet, the left trigger to grab, the right to punt). The mouse turns the
+    view while captured, or with the right button held; while it is
+    captured, the right button grabs and the left punts, and with R held
+    the mouse turns the held body instead of the view."""
+    c, gc = state["foot_controls"], state["gun_controls"]
     down = engine.input.is_key_down
     forward = (1.0 if down(keys.W) else 0.0) - (1.0 if down(keys.S) else 0.0)
     strafe = (1.0 if down(keys.D) else 0.0) - (1.0 if down(keys.A) else 0.0)
     c.run = down(keys.LEFT_SHIFT)
     c.crouch = down(keys.LEFT_CONTROL)
     c.jet = down(keys.SPACE)
-    player = state["player"]
+    player, gun = state["player"], state["gun"]
+    captured = engine.input.is_mouse_captured()
+    mouse = engine.input.is_mouse_button_down
+    grab = captured and mouse(keys.MOUSE_RIGHT)
+    punt = captured and mouse(keys.MOUSE_LEFT)
+    look = (0.0, 0.0)
     if engine.input.is_gamepad_connected():
         forward -= stick(engine.input.get_gamepad_axis(keys.GAMEPAD_LEFT_Y))
         strafe += stick(engine.input.get_gamepad_axis(keys.GAMEPAD_LEFT_X))
@@ -1045,13 +1087,24 @@ def read_foot_controls():
             c.jump = True
         state["pad_jump"] = a
         c.jet = c.jet or a
-        if player is not None:
-            player.look(stick(engine.input.get_gamepad_axis(keys.GAMEPAD_RIGHT_X)) * PAD_LOOK_PIXELS,
-                        stick(engine.input.get_gamepad_axis(keys.GAMEPAD_RIGHT_Y)) * PAD_LOOK_PIXELS)
+        grab = grab or trigger(keys.GAMEPAD_LEFT_TRIGGER) > 0.5
+        punt = punt or trigger(keys.GAMEPAD_RIGHT_TRIGGER) > 0.5
+        look = (stick(engine.input.get_gamepad_axis(keys.GAMEPAD_RIGHT_X)) * PAD_LOOK_PIXELS,
+                stick(engine.input.get_gamepad_axis(keys.GAMEPAD_RIGHT_Y)) * PAD_LOOK_PIXELS)
     c.forward, c.strafe = max(-1.0, min(1.0, forward)), max(-1.0, min(1.0, strafe))
-    if player is not None and (engine.input.is_mouse_captured() or engine.input.is_mouse_button_down(keys.MOUSE_RIGHT)):
+    gc.grab = grab
+    if punt and not state["punt_held"]:
+        gc.punt = True
+    state["punt_held"] = punt
+    if player is not None and (captured or engine.input.is_mouse_button_down(keys.MOUSE_RIGHT)):
         dx, dy = engine.input.get_mouse_delta()
-        player.look(dx, dy)
+        if captured and down(keys.R) and gun is not None and gun.held is not None:
+            gc.rotate = (gc.rotate[0] + dx, gc.rotate[1] + dy)
+        else:
+            look = (look[0] + dx, look[1] + dy)
+    if player is not None:
+        player.look(*look)
+    state["look_delta"] = look
 
 
 def place_eye():
@@ -1062,6 +1115,19 @@ def place_eye():
     state["position"] = bubble.to_world(player.eye())
     state["foot_basis"] = player.basis()
     state["forward"] = state["foot_basis"][2]
+
+
+def place_viewmodel(dt, camera):
+    """The gravity gun's viewmodel on foot, its beam to what it holds; hidden off foot."""
+    viewmodel, gun, player = state["viewmodel"], state["gun"], state["player"]
+    on_foot = state["mode"] == "foot" and player is not None
+    viewmodel.show(on_foot)
+    if not on_foot:
+        return
+    held = None
+    if gun.held is not None:
+        held = sub(state["bubble"].to_world(physics.get_transform(gun.held)[0]), camera)
+    viewmodel.update(dt, view_basis(), state["look_delta"], player, gun, held)
 
 
 def set_max_levels():
@@ -1147,6 +1213,7 @@ def frame(dt):
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
     if state["bubble"] is not None:
         props.draw(state["bubble"], camera)
+    place_viewmodel(dt, camera)
     collider_probes.end_frame()
     place_ship_model(camera)
     view_rotation = euler_from_basis(right, up, forward)
@@ -1284,6 +1351,7 @@ def update_cards():
             ("SPEED", "%.1f m/s" % length(velocity)),
             ("JETPACK", "%.0f %%" % (player.jet_fuel * 100.0)),
             ("STATE", stance),
+            ("GUN", gun_text()),
         ] + ([("SHIP", "F to get in")] if near_boarding_point() else []))
         view_card.show(True)
     elif state["mode"] != "ship":
@@ -1334,6 +1402,19 @@ def update_cards():
     ])
 
 
+def gun_text():
+    """The gravity gun's status for the card: what it holds or points at, and its mass."""
+    gun = state["gun"]
+    status = gun.status
+    if status == "holding":
+        return "holding %.0f kg, %.1f m" % (physics.mass(gun.held), gun.hold_distance)
+    if status == "too_heavy":
+        return "TOO HEAVY (%.0f kg)" % gun.target.mass
+    if status == "can_grab":
+        return "%.0f kg, %.1f m" % (gun.target.mass, gun.target.distance)
+    return "ready"
+
+
 def current_hints():
     """The hint bar's hints for what is on the screen and in control, named
     for the keyboard or the gamepad, whichever was used last."""
@@ -1345,12 +1426,22 @@ def current_hints():
                 (("pad:Back",) if pad else ("F2",), "Controls")]
     if state["mode"] == "foot":
         board = [(("pad:X",) if pad else ("F",), "Get in")] if near_boarding_point() else []
+        holding = state["gun"] is not None and state["gun"].held is not None
         if pad:
-            return board + [(("pad:LS",), "Walk"), (("pad:RS",), "Look"), (("pad:A",), "Jump, jetpack"),
-                            (("pad:Y",), "Free camera"), (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
-        return board + [(("Mouse",), "Look"), (("W", "A", "S", "D"), "Walk"), (("Shift",), "Run"),
-                        (("Ctrl",), "Crouch"), (("Space",), "Jump, hold: jetpack"), (("0",), "Drop a crate"),
-                        (("Tab",), "Free camera"), (("F1",), "Settings"), (("F2",), "Controls")]
+            gun = [(("pad:LT",), "Drop" if holding else "Grab"), (("pad:RT",), "Punt")]
+            if holding:
+                gun.append((("pad:LB", "pad:RB"), "Distance"))
+            return board + gun + [(("pad:LS",), "Walk"), (("pad:RS",), "Look"), (("pad:A",), "Jump, jetpack"),
+                                  (("pad:Y",), "Free camera"), (("pad:Start",), "Settings"),
+                                  (("pad:Back",), "Controls")]
+        rest = [(("Tab",), "Free camera"), (("F1",), "Settings"), (("F2",), "Controls")]
+        if holding:
+            return board + [(("RMB",), "Drop"), (("LMB",), "Punt"), (("Wheel",), "Distance"),
+                            (("R", "Mouse"), "Turn it"), (("W", "A", "S", "D"), "Walk"),
+                            (("Space",), "Jump, hold: jetpack")] + rest
+        return board + [(("RMB",), "Grab"), (("LMB",), "Punt"), (("Mouse",), "Look"), (("W", "A", "S", "D"), "Walk"),
+                        (("Shift",), "Run"), (("Ctrl",), "Crouch"), (("Space",), "Jump, hold: jetpack"),
+                        (("0",), "Drop a crate")] + rest
     if state["mode"] != "ship":
         if pad:
             return [(("pad:Y",), "On foot"), (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
@@ -1422,6 +1513,11 @@ HELP_COLUMNS = [
     ]), ("Physics", [
         (("0",), "Drop a crate"),
         (("Shift", "0"), "Drop a stack of 10 crates"),
+    ]), ("Gravity gun, on foot", [
+        (("RMB", "pad:LT"), "Grab / pull; again: drop"),
+        (("LMB", "pad:RT"), "Punt (at the ground: jump)"),
+        (("Wheel", "pad:LB", "pad:RB"), "Hold distance"),
+        (("R", "Mouse"), "Turn what it holds"),
     ])],
     [("World", [
         (("N",), "New terrain seed"),
@@ -1450,6 +1546,7 @@ def on_init():
     build_cards()
     build_ship_model()
     build_cockpit()
+    state["viewmodel"] = Viewmodel(engine, box())
     state["generated_cockpit"] = args.generated_cockpit
     state["cabin_screens"] = cockpit_screens()
     state["instruments"] = Instruments(engine, len(state["cabin_screens"]), FOV)
@@ -1478,6 +1575,10 @@ def on_init():
         engine.ecs.add_system("PlanetWalkCheck", WalkCheck(), priority=-2)
     elif args.prop_rest_check:
         engine.ecs.add_system("PlanetPropRestCheck", PropRestCheck(), priority=-2)
+    elif args.hold_check:
+        engine.ecs.add_system("PlanetHoldCheck", HoldCheck(), priority=-2)
+    elif args.punt_check:
+        engine.ecs.add_system("PlanetPuntCheck", PuntCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -1558,7 +1659,7 @@ def on_key(key, from_pad=False):
             get_out()
     elif key == keys.SPACE and state["mode"] == "foot":
         state["foot_controls"].jump = True
-    elif key == keys.R:
+    elif key == keys.R and state["mode"] != "foot":
         state["chase"] = not state["chase"]
     elif key == keys.U:
         state["generated_cockpit"] = not state["generated_cockpit"]
@@ -1566,7 +1667,9 @@ def on_key(key, from_pad=False):
         state["controls"].assist = not state["controls"].assist
     elif key == keys.BACKSPACE:
         state["controls"].throttle = 0.0
-    elif key in (keys.COMMA, keys.PERIOD) and state["mode"] != "foot":
+    elif key in (keys.COMMA, keys.PERIOD) and state["mode"] == "foot":
+        state["gun_controls"].distance += 1.0 if key == keys.PERIOD else -1.0
+    elif key in (keys.COMMA, keys.PERIOD):
         state["warp"] = max(0, min(len(WARPS) - 1, state["warp"] + (1 if key == keys.PERIOD else -1)))
     elif key == keys.O:
         world.set_ocean(not world.ocean)
@@ -1615,6 +1718,9 @@ def on_key(key, from_pad=False):
 def on_scroll(x_offset, y_offset):
     state["input"] = "keys"
     if state["menu"].pointer_over:
+        return
+    if state["mode"] == "foot":
+        state["gun_controls"].distance += y_offset
         return
     state["speed_factor"] = max(0.01, min(100.0, state["speed_factor"] * 1.25 ** y_offset))
 
@@ -2928,6 +3034,300 @@ class WalkCheck:
         if not self.bodies:
             os._exit(0 if all(self.results) else 1)
         self.start_body()
+
+
+class GunCheck(WalkCheck):
+    """The gravity gun's checks: WalkCheck's player put down on the planet
+    3 km north of the site, then on the moon, standing still, then the
+    stages from `begin` on each body. Exits with status 0 when every body
+    passed, 1 otherwise."""
+
+    GRAB_TIME = 0.1                     # s the grab control is held, as a click
+    GRAB_WAIT = 0.1                     # s after it a crate must be held by
+
+    def __init__(self):
+        self.bodies = ["planet", "moon"]
+        self.results = []
+        self.start_body()
+
+    def start_lap(self):
+        state["foot_controls"] = FootControls()
+        self.begin()
+
+    def crate_ahead(self, mass, distance=None):
+        """A crate of `mass` kg on the view's line, its centre `distance`
+        m from the eye (where the gun holds it when None), turned with
+        the view."""
+        player, gun = state["player"], state["gun"]
+        right, up, forward = player.basis()
+        if distance is None:
+            distance = gun.hold_distance + 0.5 * math.sqrt(3.0) * CRATE_SIZE
+        return props.spawn_crate(state["bubble"], add(player.eye(), scale(forward, distance)),
+                                 flight.quat_from_basis(right, up, scale(forward, -1.0)), CRATE_SIZE, mass=mass)
+
+    def grab(self):
+        """The grab control held for GRAB_TIME from the stage's 3rd frame;
+        True once GRAB_WAIT more has passed."""
+        controls = state["gun_controls"]
+        if self.frames == 3:
+            self.grab_clock = self.clock
+        pressed = self.clock - self.grab_clock if self.frames >= 3 else -1.0
+        controls.grab = 0.0 <= pressed < self.GRAB_TIME
+        return pressed >= self.GRAB_TIME + self.GRAB_WAIT
+
+    def off_hold_point(self):
+        player, gun = state["player"], state["gun"]
+        p = physics.get_transform(gun.held)[0]
+        return length(sub(p, gun.hold_point(player.eye(), player.basis()[2])))
+
+    def clear(self):
+        state["gun"].drop()
+        props.clear(state["bubble"])
+
+    def next_body(self, ok):
+        self.results.append(ok)
+        self.bodies.pop(0)
+        drop_bubble()
+        if not self.bodies:
+            os._exit(0 if all(self.results) else 1)
+        self.start_body()
+
+
+class HoldCheck(GunCheck):
+    """--hold-check: on each body the gun grabs a HOLD_MASS kg crate, holds
+    it for STEADY seconds, then the player turns a full circle in
+    TURN_TIME, walks WALK metres, jumps and lands, and the bubble is
+    rebased under it. The crate must stay held and within
+    GunParams.drop_distance of the hold point throughout, and move by less
+    than REBASE_JUMP relative to the eye across the rebase. Then a
+    HEAVY_MASS kg crate in front must be too heavy on the planet
+    (HEAVY_MASS x 4.905 m/s^2 is more than 0.9 hold_force) and be grabbed
+    on the moon. Prints per body how far off the hold point the crate got
+    in each stage."""
+
+    HOLD_MASS = 50.0
+    HEAVY_MASS = 2_000.0
+    STEADY = 1.0
+    TURN_TIME = 2.0
+    WALK = 30.0
+    LAND_TIME = 0.5                     # s on the ground after the jump
+    JUMP_TIMEOUT = 15.0
+    REBASE_FRAMES = 30
+    REBASE_JUMP = 0.01
+
+    def begin(self):
+        self.next_stage("pick")
+        self.off = {}                   # stage: m off the hold point at most
+        self.lost = None                # the stage the crate was dropped in
+        self.rebase_jump = None
+        self.heavy_status = None        # the gun's status aimed at the heavy crate
+        self.heavy_held = False
+
+    def pick(self, dt):
+        if self.frames == 1:
+            self.crate = self.crate_ahead(self.HOLD_MASS)
+        if not self.grab():
+            return
+        if state["gun"].held != self.crate.body:
+            self.lost = "pick"
+            self.finish()
+            return
+        self.next_stage("steady")
+
+    def measure(self):
+        """The crate's distance from the hold point in this stage, or the
+        stage noted when it was dropped; False once dropped."""
+        if state["gun"].held != self.crate.body:
+            self.lost = self.lost or self.stage
+            return False
+        self.off[self.stage] = max(self.off.get(self.stage, 0.0), self.off_hold_point())
+        return True
+
+    def steady(self, dt):
+        if not self.measure():
+            self.finish()
+        elif self.clock >= self.STEADY:
+            self.turned = 0.0
+            self.next_stage("turn")
+
+    def turn(self, dt):
+        if not self.measure():
+            self.finish()
+            return
+        player = state["player"]
+        angle = min(2.0 * math.pi - self.turned, 2.0 * math.pi * dt / self.TURN_TIME)
+        player.heading = rotate(player.heading, player.up(), angle)
+        self.turned += angle
+        if self.turned >= 2.0 * math.pi - 1e-9:
+            self.last = state["bubble"].body_relative(player.feet())
+            self.walked = 0.0
+            self.next_stage("walk")
+
+    def walk(self, dt):
+        if not self.measure():
+            self.finish()
+            return
+        controls = state["foot_controls"]
+        controls.forward = 1.0
+        feet = state["bubble"].body_relative(state["player"].feet())
+        moved = sub(feet, self.last)
+        up = normalize(feet)
+        self.walked += length(sub(moved, scale(up, dot(moved, up))))
+        self.last = feet
+        if self.walked >= self.WALK or self.clock > 4.0 * self.WALK / WALK_SPEED:
+            controls.forward = 0.0
+            self.left_ground = False
+            self.landed = 0.0
+            self.next_stage("jump")
+
+    def jump(self, dt):
+        if not self.measure():
+            self.finish()
+            return
+        player = state["player"]
+        if self.frames == 1:
+            state["foot_controls"].jump = True
+        if not player.on_ground:
+            self.left_ground = True
+            self.landed = 0.0
+        elif self.left_ground:
+            self.landed += dt
+        if self.landed >= self.LAND_TIME or self.clock > self.JUMP_TIMEOUT:
+            self.next_stage("rebase")
+
+    def rebase(self, dt):
+        if not self.measure():
+            self.finish()
+            return
+        player, bubble = state["player"], state["bubble"]
+        offset = sub(physics.get_transform(self.crate.body)[0], player.eye())
+        if self.frames == 1:
+            self.before = offset
+            bubble.rebase(player.feet())
+        elif self.frames == 2:
+            self.rebase_jump = length(sub(offset, self.before))
+        elif self.frames >= self.REBASE_FRAMES:
+            self.clear()
+            self.next_stage("heavy")
+
+    def heavy(self, dt):
+        gun = state["gun"]
+        if self.frames == 1:
+            self.heavy_crate = self.crate_ahead(self.HEAVY_MASS, distance=3.0)
+        if self.frames == 3:
+            self.heavy_status = gun.status
+        if not self.grab():
+            return
+        self.heavy_held = gun.held == self.heavy_crate.body
+        self.finish()
+
+    def finish(self):
+        name = self.bodies[0]
+        limit = state["gun"].p.drop_distance
+        heavy = self.heavy_status
+        heavy_ok = (heavy == "too_heavy" and not self.heavy_held) if name == "planet" else \
+            (heavy == "can_grab" and self.heavy_held)
+        ok = (self.lost is None and all(v <= limit for v in self.off.values())
+              and self.rebase_jump is not None and self.rebase_jump < self.REBASE_JUMP and heavy_ok)
+        stages = ", ".join("%s %.3f" % (stage, self.off.get(stage, math.nan))
+                           for stage in ("steady", "turn", "walk", "jump", "rebase"))
+        print("[planet] hold on the %s: a %.0f kg crate %s, at most m off the hold point: %s; it moved %s "
+              "relative to the eye across the rebase; a %.0f kg crate %s and %s: %s"
+              % (name, self.HOLD_MASS, "held throughout" if self.lost is None else "DROPPED in " + self.lost,
+                 stages, "%.4f m" % self.rebase_jump if self.rebase_jump is not None else "-",
+                 self.HEAVY_MASS, heavy, "grabbed" if self.heavy_held else "not grabbed",
+                 "passed" if ok else "FAILED"), flush=True)
+        self.clear()
+        self.next_body(ok)
+
+
+class PuntCheck(GunCheck):
+    """--punt-check: on each body the gun grabs crates of MASSES kg in turn,
+    holds each for STEADY seconds and punts it (Gun.punt) with the view
+    level. Right after the punt the crate's velocity along the view must
+    have grown by min(punt_speed, punt_impulse / mass) and the player's
+    velocity against it by min(MAX_RECOIL, recoil_factor x the impulse /
+    the player's mass), each within TOLERANCE. Then the player looks
+    straight down and punts the ground with the punt control: it must rise
+    within JUMP_TOLERANCE of MAX_RECOIL^2 / 2g above where it stood.
+    Prints per body the speeds, the recoils and the height."""
+
+    MASSES = (5.0, 50.0, 500.0)
+    STEADY = 1.0
+    TOLERANCE = 0.02
+    JUMP_TOLERANCE = 0.1
+    JUMP_TIMEOUT = 30.0
+
+    def begin(self):
+        self.masses = list(self.MASSES)
+        self.punts = []                 # (mass, speed, wanted speed, recoil, wanted recoil)
+        self.next_stage("pick")
+
+    def pick(self, dt):
+        if self.frames == 1:
+            self.crate = self.crate_ahead(self.masses[0])
+        if not self.grab():
+            return
+        if state["gun"].held != self.crate.body:
+            self.punts.append((self.masses[0], math.nan, 0.0, math.nan, 0.0))
+            self.after_punt()
+            return
+        self.next_stage("steady")
+
+    def steady(self, dt):
+        if self.clock < self.STEADY:
+            return
+        player, gun = state["player"], state["gun"]
+        forward = player.basis()[2]
+        body, character = self.crate.body, player.character
+        v0, p0 = physics.get_velocity(body)[0], physics.character_velocity(character)
+        gun.punt(body, forward)
+        v1, p1 = physics.get_velocity(body)[0], physics.character_velocity(character)
+        m = self.masses[0]
+        speed = min(gun.p.punt_speed, gun.p.punt_impulse / m)
+        recoil = min(gun_module.MAX_RECOIL, gun.p.recoil_factor * m * speed / PLAYER_MASS)
+        self.punts.append((m, dot(sub(v1, v0), forward), speed, -dot(sub(p1, p0), forward), recoil))
+        self.after_punt()
+
+    def after_punt(self):
+        self.clear()
+        self.masses.pop(0)
+        if self.masses:
+            self.next_stage("pick")
+        else:
+            state["player"].pitch = -math.radians(89.0)
+            self.next_stage("ground")
+
+    def ground(self, dt):
+        player, bubble = state["player"], state["bubble"]
+        height = length(bubble.body_relative(player.feet()))
+        if self.frames == 10:
+            self.start_height = height
+            self.top = height
+            self.left_ground = False
+            state["gun_controls"].punt = True
+        elif self.frames > 10:
+            self.top = max(self.top, height)
+            if not player.on_ground:
+                self.left_ground = True
+            elif self.left_ground or self.clock > self.JUMP_TIMEOUT:
+                self.finish()
+
+    def finish(self):
+        name, gun = self.bodies[0], state["gun"]
+        g = length(state["bubble"].gravity(state["player"].feet()))
+        wanted_height = gun_module.MAX_RECOIL ** 2 / (2.0 * g)
+        rise = self.top - self.start_height
+        ok = abs(rise - wanted_height) <= self.JUMP_TOLERANCE * wanted_height
+        rows = []
+        for m, speed, wanted, recoil, wanted_recoil in self.punts:
+            ok = ok and abs(speed - wanted) <= self.TOLERANCE * wanted
+            ok = ok and abs(recoil - wanted_recoil) <= self.TOLERANCE * wanted_recoil
+            rows.append("%.0f kg at %.2f m/s (%.2f), recoil %.2f m/s (%.2f)" % (m, speed, wanted, recoil, wanted_recoil))
+        print("[planet] punt on the %s: %s; punting the ground lifted the player %.2f m (%.2f): %s"
+              % (name, "; ".join(rows), rise, wanted_height, "passed" if ok else "FAILED"), flush=True)
+        self.clear()
+        self.next_body(ok)
 
 
 engine.set_on_init(on_init)

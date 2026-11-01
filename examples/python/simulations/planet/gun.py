@@ -1,0 +1,326 @@
+"""
+The gravity gun: from the player's eye (player.py) it grabs, pulls, holds,
+turns and punts the dynamic bodies of the physics bubble
+(shoonyakasha.planet.bubble), and punts off anything else.
+
+`Gun.step` runs once per physics step, after the player's. Its target is
+what the view's ray hits first within GunParams.pull_range (passing
+through the player), or, when that is not a body it can grab, the one of
+those within pull_cone_deg of the view's forward closest to it in angle
+that the ray towards it reaches.
+
+- **Grab and pull** (the grab control held): a grabbable target within
+  grab_range of the eye is grabbed; one farther away is pulled towards
+  the eye at up to 12 m/s (2 m/s per metre away), by at most pull_force.
+  While grab stays held, a body being pulled stays the target as long as
+  it is within PULL_KEEP_DEG of the view. A body whose weight is more
+  than 0.9 hold_force is too heavy for either. Pressing grab while
+  holding drops the body; a body is not grabbed again until grab is let
+  go.
+- **Hold:** a spring of hold_frequency, critically damped, pulls the
+  body towards the hold point, hold distance plus the body's radius in
+  front of the eye, and cancels its weight, by at most hold_force. The
+  hold point moves with the player's velocity plus its motion relative
+  to the eye smoothed over TURN_SMOOTHING (the view turns once a frame,
+  which can span several steps); the spring pulls towards where it was
+  at the start of the step, since the player has made the step already,
+  and damps the body's velocity relative to it. The body's angular
+  velocity is brought towards turning it to the rotation it had
+  relative to the view when grabbed (turned since by the rotate control)
+  at hold_torque_gain. It passes through the player while
+  held, and is dropped once it is more than drop_distance from the hold
+  point, after first coming within it (or after REACH_TIME). The hold
+  distance runs from MIN_HOLD to MAX_HOLD.
+- **Punt:** the held body, or a target within punt_range, gets an
+  impulse along the view of its mass times min(punt_speed,
+  punt_impulse / mass); a target that cannot move (static or kinematic)
+  takes punt_impulse. The player gets recoil_factor of that impulse
+  back, over its mass, at most MAX_RECOIL m/s: punting the ground pushes
+  the player off it.
+"""
+
+import math
+from dataclasses import dataclass
+
+from shoonyakasha.planet.vec import add, dot, length, normalize, scale, sub
+
+from flight import quat_conjugate, quat_from_basis, quat_multiply, quat_normalize
+from player import MASS as PLAYER_MASS
+
+MIN_HOLD, MAX_HOLD = 1.5, 6.0        # m, the hold distance's range
+HOLD_STEP = 0.25                     # m the hold distance changes per wheel notch
+MAX_RECOIL = 8.0                     # m/s
+REACH_TIME = 1.0                     # s a grabbed body has to come within drop_distance of the hold point
+TURN_SMOOTHING = 0.03                # s the hold point's velocity relative to the eye is smoothed over
+PULL_KEEP_DEG = 30.0                 # degrees off the view a body being pulled stays the target within
+ROTATE_RADIANS_PER_PIXEL = 0.005
+TOO_HEAVY_SHARE = 0.9                # of hold_force a body's weight may be
+
+
+@dataclass
+class GunParams:
+    grab_range: float = 4.0          # m: grab directly
+    pull_range: float = 18.0         # m: pull towards the player within the cone
+    pull_cone_deg: float = 6.0
+    pull_force: float = 6_000.0      # N, at most
+    hold_distance: float = 2.2       # m in front of the eye (+ the object's radius)
+    hold_force: float = 9_000.0      # N, at most, including holding against gravity
+    hold_frequency: float = 6.0      # Hz, the hold spring's natural frequency
+    hold_torque_gain: float = 12.0   # 1/s
+    punt_range: float = 6.0          # m: punt what is not held
+    punt_impulse: float = 1_600.0    # N s, at most
+    punt_speed: float = 30.0         # m/s, at most from a punt
+    recoil_factor: float = 0.6       # share of the punt's impulse back into the player
+    drop_distance: float = 1.2       # m: drop if the object is this far off the hold point
+
+
+@dataclass
+class GunControls:
+    grab: bool = False               # held: grab or pull; pressed while holding: drop
+    punt: bool = False               # asked to punt; taken by the next step
+    rotate: tuple = (0.0, 0.0)       # pixels of mouse movement turning the held body, taken by the next step
+    distance: float = 0.0            # wheel notches changing the hold distance, taken by the next step
+
+
+@dataclass
+class Target:
+    body: int
+    point: tuple                     # bubble coordinates
+    distance: float                  # m from the eye
+    grabbable: bool                  # one of the gun's objects, dynamic
+    mass: float                      # kg, 0 when it cannot move
+
+
+def view_rotation(right, up, forward):
+    """The quaternion of the view's basis: X right, Y up, Z back."""
+    return quat_from_basis(right, up, scale(forward, -1.0))
+
+
+def axis_rotation(axis, angle):
+    s = math.sin(0.5 * angle)
+    return (math.cos(0.5 * angle), axis[0] * s, axis[1] * s, axis[2] * s)
+
+
+class Gun:
+    def __init__(self, player, objects, params=None):
+        """The gun of `player`; `objects()` gives (body, radius) of each body it may grab."""
+        self.player = player
+        self.physics = player.physics
+        self.bubble = player.bubble
+        self.objects = objects
+        self.p = params or GunParams()
+        self.hold_distance = self.p.hold_distance
+        self.target = None
+        self.held = None
+        self.held_radius = 0.0
+        self.relative = (1.0, 0.0, 0.0, 0.0)   # the held body's rotation relative to the view
+        self.last_offset = None              # hold point minus eye, last step
+        self.turning = (0.0, 0.0, 0.0)       # m/s the hold point moves relative to the eye, smoothed
+        self.reached = False                 # the held body came within drop_distance of the hold point
+        self.held_time = 0.0
+        self.latch = False                   # grab must be let go before the next grab
+        self.pulling = None                  # the body being pulled
+        self.grab_was = False
+        self.since_punt = math.inf           # s
+        self.last_punt = None                # (body or None, speed given, recoil velocity)
+
+    @property
+    def status(self):
+        """"holding", "too_heavy", "can_grab" (a grabbable target), or "idle"."""
+        if self.held is not None:
+            return "holding"
+        t = self.target
+        if t is not None and t.grabbable:
+            return "too_heavy" if self.too_heavy(t) else "can_grab"
+        return "idle"
+
+    def too_heavy(self, target):
+        g = length(self.bubble.gravity(target.point))
+        return target.mass * g > TOO_HEAVY_SHARE * self.p.hold_force
+
+    def aim(self, eye, forward):
+        """What the view points at (see the module's docstring), or None."""
+        physics, character = self.physics, self.player.character
+        radii = {body: radius for body, radius in self.objects()}
+        hit = physics.cast_ray(eye, forward, self.p.pull_range, skip_character=character)
+        if hit is not None:
+            target = self.target_of(hit[0], hit[1], hit[3] * self.p.pull_range, radii)
+            if target.grabbable:
+                return target
+        cone = math.cos(math.radians(self.p.pull_cone_deg))
+        best, best_cos = None, cone
+        for body, radius in radii.items():
+            if physics.motion(body) != "dynamic":
+                continue
+            to = sub(physics.get_transform(body)[0], eye)
+            d = length(to)
+            if d < 1e-6 or d - radius > self.p.pull_range:
+                continue
+            c = dot(to, forward) / d
+            if c < best_cos:
+                continue
+            seen = physics.cast_ray(eye, scale(to, 1.0 / d), d + radius, skip_character=character)
+            if seen is not None and seen[0] == body:
+                best, best_cos = self.target_of(body, seen[1], seen[3] * (d + radius), radii), c
+        if best is not None:
+            return best
+        return None if hit is None else self.target_of(hit[0], hit[1], hit[3] * self.p.pull_range, radii)
+
+    def target_of(self, body, point, distance, radii):
+        dynamic = self.physics.motion(body) == "dynamic"
+        return Target(body, point, distance, dynamic and body in radii,
+                      self.physics.mass(body) if dynamic else 0.0)
+
+    def step(self, controls, dt):
+        """One physics step of `dt` seconds with `controls`."""
+        player, physics = self.player, self.physics
+        eye = player.eye()
+        right, up, forward = player.basis()
+        self.since_punt += dt
+        if self.held is not None and (not physics.contains(self.held) or physics.motion(self.held) != "dynamic"):
+            self.drop()
+        pressed = controls.grab and not self.grab_was
+        self.grab_was = controls.grab
+        if not controls.grab:
+            self.latch = False
+        self.hold_distance = max(MIN_HOLD, min(MAX_HOLD, self.hold_distance + HOLD_STEP * controls.distance))
+        controls.distance = 0.0
+
+        if self.held is not None:
+            self.target = None
+            dx, dy = controls.rotate
+            if dx or dy:
+                turn = quat_multiply(axis_rotation((0.0, 1.0, 0.0), dx * ROTATE_RADIANS_PER_PIXEL),
+                                     axis_rotation((1.0, 0.0, 0.0), dy * ROTATE_RADIANS_PER_PIXEL))
+                self.relative = quat_normalize(quat_multiply(turn, self.relative))
+            controls.rotate = (0.0, 0.0)
+            if controls.punt:
+                self.punt(self.held, forward)
+            elif pressed:
+                self.drop()
+                self.latch = True
+            else:
+                self.hold(eye, right, up, forward, dt)
+        else:
+            controls.rotate = (0.0, 0.0)
+            self.target = t = self.pulled(eye, forward) if controls.grab else None
+            if t is None:
+                self.pulling = None
+                self.target = t = self.aim(eye, forward)
+            if controls.punt:
+                if t is not None and t.distance <= self.p.punt_range:
+                    self.punt(t.body if t.mass > 0.0 else None, forward)
+            elif controls.grab and not self.latch and t is not None and t.grabbable and not self.too_heavy(t):
+                if t.distance <= self.p.grab_range:
+                    self.grab(t.body, right, up, forward)
+                else:
+                    self.pull(t.body, eye)
+                    self.pulling = t.body
+        controls.punt = False
+
+    def pulled(self, eye, forward):
+        """The body being pulled as the target, while it is dynamic, within
+        pull_range and within PULL_KEEP_DEG of `forward`; else None."""
+        body, physics = self.pulling, self.physics
+        if body is None or not physics.contains(body) or physics.motion(body) != "dynamic":
+            return None
+        p = physics.get_transform(body)[0]
+        to = sub(p, eye)
+        d = length(to)
+        radius = dict(self.objects()).get(body)
+        if radius is None or d < 1e-6 or dot(to, forward) < d * math.cos(math.radians(PULL_KEEP_DEG)):
+            return None
+        distance = max(0.0, d - radius)
+        if distance > self.p.pull_range:
+            return None
+        return Target(body, p, distance, True, physics.mass(body))
+
+    def grab(self, body, right, up, forward):
+        self.held = body
+        self.held_radius = dict(self.objects()).get(body, 0.0)
+        q = self.physics.get_transform(body)[1]
+        self.relative = quat_multiply(quat_conjugate(view_rotation(right, up, forward)), q)
+        self.last_offset = None
+        self.turning = (0.0, 0.0, 0.0)
+        self.reached = False
+        self.held_time = 0.0
+        self.latch = True
+        self.physics.set_pass_through(body, self.player.character)
+
+    def drop(self):
+        if self.held is not None and self.physics.contains(self.held):
+            self.physics.set_pass_through(self.held, None)
+        self.held = None
+        self.last_offset = None
+
+    def pull(self, body, eye):
+        physics = self.physics
+        p = physics.get_transform(body)[0]
+        to_eye = sub(eye, p)
+        d = length(to_eye)
+        v = physics.get_velocity(body)[0]
+        approach = dot(v, scale(to_eye, 1.0 / d))
+        wanted = min(12.0, d * 2.0)
+        force = scale(to_eye, physics.mass(body) * (wanted - approach) * 4.0 / d)
+        if length(force) > self.p.pull_force:
+            force = scale(normalize(force), self.p.pull_force)
+        physics.add_force(body, force)
+
+    def hold_point(self, eye, forward):
+        return add(eye, scale(forward, self.hold_distance + self.held_radius))
+
+    def hold(self, eye, right, up, forward, dt):
+        physics, body = self.physics, self.held
+        p, q = physics.get_transform(body)
+        v, w = physics.get_velocity(body)
+        m = physics.mass(body)
+        target = self.hold_point(eye, forward)
+        offset = sub(target, eye)
+        if self.last_offset is not None:
+            blend = dt / (TURN_SMOOTHING + dt)
+            turning = scale(sub(offset, self.last_offset), 1.0 / dt)
+            self.turning = add(self.turning, scale(sub(turning, self.turning), blend))
+        self.last_offset = offset
+        v_target = add(physics.character_velocity(self.player.character), self.turning)
+        omega = 2.0 * math.pi * self.p.hold_frequency
+        k, c = m * omega * omega, 2.0 * m * omega
+        # The player has made this step already: the hold point at its start, where the body is now.
+        start = sub(target, scale(v_target, dt))
+        force = add(scale(sub(start, p), k), scale(sub(v_target, v), c))
+        force = sub(force, scale(self.bubble.gravity(p), m))
+        if length(force) > self.p.hold_force:
+            force = scale(normalize(force), self.p.hold_force)
+        physics.add_force(body, force)
+
+        self.held_time += dt
+        off = length(sub(target, p))
+        if off <= self.p.drop_distance:
+            self.reached = True
+        elif self.reached or self.held_time > REACH_TIME:
+            self.drop()
+            return
+
+        q_target = quat_multiply(view_rotation(right, up, forward), self.relative)
+        error = quat_multiply(q_target, quat_conjugate(q))
+        if error[0] < 0.0:
+            error = tuple(-e for e in error)
+        w_wanted = scale(error[1:], 2.0 * self.p.hold_torque_gain)
+        blend = min(1.0, 10.0 * dt)
+        physics.set_velocity(body, v, add(w, scale(sub(w_wanted, w), blend)))
+
+    def punt(self, body, forward):
+        """`body` (None: something that cannot move) punted along `forward`, the player recoiling."""
+        if body is None:
+            impulse, speed = self.p.punt_impulse, None
+        else:
+            m = self.physics.mass(body)
+            speed = min(self.p.punt_speed, self.p.punt_impulse / m)
+            impulse = m * speed
+            if body == self.held:
+                self.drop()
+            self.physics.add_impulse(body, scale(forward, impulse))
+        recoil = min(MAX_RECOIL, self.p.recoil_factor * impulse / PLAYER_MASS)
+        back = scale(forward, -recoil)
+        self.player.push(back)
+        self.since_punt = 0.0
+        self.last_punt = (body, speed, back)
