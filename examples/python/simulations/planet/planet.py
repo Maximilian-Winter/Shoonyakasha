@@ -148,6 +148,9 @@ Keys:
 
     python planet.py --capture DIR     screenshots at the presets, then exit
     python planet.py --generated-cockpit   start with the generated cockpit instead of the model's cabin
+    python planet.py --play            play: start on foot beside the ship at Base; the places (0 - 9) and the
+                                       keys that change the world (N, M / J, H / G, Z / X, T / Y, B / V, the
+                                       menu's planet section) are off; 8 makes a new ship at Base after a crash
     python planet.py --capture DIR --shots NAME...   only the shots whose names contain one of these
     python planet.py --verify          check the GPU's chunks against cube_sphere.chunk_mesh, then exit
     python planet.py --orbit-check     fly one orbit from preset 9 at 16x, report the drift, then exit
@@ -297,6 +300,9 @@ parser.add_argument("--shots", nargs="+", metavar="NAME",
                     help="with --capture: only the shots whose names contain one of these")
 parser.add_argument("--generated-cockpit", action="store_true",
                     help="start with the generated cockpit (cockpit.py) instead of the model's cabin")
+parser.add_argument("--play", action="store_true",
+                    help="play: start on foot beside the ship at Base, without the places, the crates or the "
+                         "keys that change the world")
 parser.add_argument("--verify", action="store_true",
                     help="check the chunks the GPU built against cube_sphere.chunk_mesh, print the result and exit")
 parser.add_argument("--orbit-check", action="store_true",
@@ -433,6 +439,7 @@ state = {
     "net_posts": [],             # the cargo net's corner posts
     "was_landed": False,         # the ship was landed (ship_landed) in the last frame in ship mode
     "trade_card": None,          # the outpost's card (toolkit.overlay.Card)
+    "play_start": False,         # --play: the ship and the player still to be put at Base
 }
 physics = sk.PlanetPhysics()
 physics.set_strike_momentum(STRIKE_REPORTED)
@@ -1688,6 +1695,7 @@ def load_game(path=None):
 def frame(dt):
     started = world.begin_frame(viewpoint())
     update_outposts()
+    start_play()
     set_down_on_moon()
     if started and state["teleport_when_known"]:
         teleport(state["teleport_when_known"])
@@ -1869,7 +1877,7 @@ def ship_orbit():
 
 def contact_text(ship):
     if ship.crashed:
-        return "CRASHED (8 or 9 for a new ship)"
+        return "CRASHED (8 for a new ship)" if args.play else "CRASHED (8 or 9 for a new ship)"
     return "LANDED" if ship.on_ground else ""
 
 
@@ -2073,17 +2081,19 @@ def current_hints():
                             (("Space",), "Jump, hold: jetpack")] + rest
         return board + [(("RMB",), "Grab"), (("LMB",), "Punt"), (("Mouse",), "Look"), (("W", "A", "S", "D"), "Walk"),
                         (("Shift",), "Run"), (("Ctrl",), "Crouch"), (("Space",), "Jump, hold: jetpack"),
-                        (("0",), "Drop a crate")] + rest
+                        ] + ([] if args.play else [(("0",), "Drop a crate")]) + rest
     if state["mode"] != "ship":
         if pad:
             return [(("pad:Y",), "On foot"), (("pad:Start",), "Settings"), (("pad:Back",), "Controls")]
+        places = [] if args.play else [(("1-9",), "Places"), (("0",), "Drop a crate")]
         return [(("RMB",), "Look"), (("W", "A", "S", "D"), "Fly"), (("E", "Q"), "Up, down"),
-                (("Shift", "Ctrl"), "Faster, slower"), (("Wheel",), "Speed"), (("1-9",), "Places"),
-                (("0",), "Drop a crate"), (("Tab",), "On foot"), (("F1",), "Settings"), (("F2",), "Controls")]
+                (("Shift", "Ctrl"), "Faster, slower"), (("Wheel",), "Speed")] + places + [
+                (("Tab",), "On foot"), (("F1",), "Settings"), (("F2",), "Controls")]
     view = "Cockpit" if state["chase"] else "Chase view"
     hints = []
     if state["ship"].crashed:
-        hints = [(("8",), "New ship on the pad"), (("9",), "New ship in orbit")]
+        hints = ([(("8",), "New ship at Base")] if args.play
+                 else [(("8",), "New ship on the pad"), (("9",), "New ship in orbit")])
     elif ship_landed(state["ship"]):
         hints = [(("pad:X",) if pad else ("F",), "Get out")]
         if outpost_here() is not None:
@@ -2205,8 +2215,9 @@ def on_init():
     state["instruments"] = Instruments(engine, len(state["cabin_screens"]), FOV)
     state["terrain_edit"] = planet_settings.TerrainEdit(world)
     state["menu"] = SettingsMenu(engine, "Settings", menu_items())
-    state["help"] = HelpOverlay(engine, "CONTROLS", HELP_COLUMNS, footer="F2, or Back on a gamepad, to close")
+    state["help"] = HelpOverlay(engine, "CONTROLS", help_columns(), footer="F2, or Back on a gamepad, to close")
     teleport(1)
+    state["play_start"] = args.play
 
     # Before the transform system (priority 0), so this frame's positions are used.
     engine.ecs.add_system("PlanetFrame", frame, priority=-1)
@@ -2262,7 +2273,10 @@ MENU_KEYS = {"Exposure": ("B", "V"), "Atmosphere density": ("T", "Y"), "Sun elev
 def menu_items():
     """The settings menu (toolkit.overlay.SettingsMenu): the simulation's and the display's own
     settings, and planet.settings' sky, clouds, ground, view and planet,
-    the planet's kept in its TerrainEdit until Apply builds it again."""
+    the planet's kept in its TerrainEdit until Apply builds it again; in
+    play mode without the planet's, and without the keys it ignores shown."""
+    keys_shown = {name: caps for name, caps in MENU_KEYS.items()
+                  if not (args.play and name in ("Exposure", "Atmosphere density", "Sun elevation", "New seed"))}
     def set_assist(on):
         state["controls"].assist = on
 
@@ -2275,8 +2289,8 @@ def menu_items():
          "keys": ("L",), "hint": "The throttle asks for a speed and E / Q for a climb rate; the thrusters hold them."},
         {"toggle": "Head bob", "get": lambda: state["head_bob"], "set": lambda on: state.update(head_bob=on),
          "hint": "On foot, the view rises and falls a little with each step."},
-    ] + planet_settings.sky_items(world, MENU_KEYS, site="the blocks") + planet_settings.cloud_items(world, MENU_KEYS) \
-        + planet_settings.ground_items(world, MENU_KEYS) + planet_settings.climate_items(world, MENU_KEYS) + [
+    ] + planet_settings.sky_items(world, keys_shown, site="the blocks") + planet_settings.cloud_items(world, keys_shown) \
+        + planet_settings.ground_items(world, keys_shown) + planet_settings.climate_items(world, keys_shown) + [
         {"heading": "Display"},
         {"toggle": "Button hints", "get": lambda: state["hints"], "set": lambda on: state.update(hints=on),
          "hint": "The bar of keys or gamepad buttons along the bottom of the screen."},
@@ -2284,8 +2298,57 @@ def menu_items():
          "hint": "The path the ship would coast along, around the body it is reckoned around."},
         {"toggle": "Debug text", "get": lambda: state["debug_text"], "set": lambda on: state.update(debug_text=on),
          "keys": ("I",), "hint": "The debug card: frame time, chunks, the pool and the terrain's settings."},
-    ] + planet_settings.view_items(world, MENU_KEYS) \
-        + planet_settings.planet_items(world, state["terrain_edit"], new_seed, MENU_KEYS)
+    ] + planet_settings.view_items(world, keys_shown) \
+        + ([] if args.play else planet_settings.planet_items(world, state["terrain_edit"], new_seed, keys_shown))
+
+
+# ── Play mode (--play) ─────────────────────────────────────────────────────
+
+# The keys that change the world, which play mode ignores (but M in the ship, T on foot).
+WORLD_KEYS = (keys.N, keys.M, keys.J, keys.H, keys.G, keys.Z, keys.X, keys.T, keys.Y, keys.B, keys.V)
+
+
+def start_play():
+    """--play: once the terrain is built, a ship at rest at Base (preset 8)
+    and, once it is landed, the player out of it beside its cockpit."""
+    if not state["play_start"] or planet.tree is None:
+        return
+    if state["ship"] is None:
+        teleport(8)
+    elif ship_landed(state["ship"]):
+        get_out()
+        state["play_start"] = False
+
+
+def play_blocks(key, shift):
+    """Whether play mode ignores `key`: the places and crates (0 - 9; but 8,
+    a new ship at Base, once the ship has crashed) and WORLD_KEYS."""
+    if keys.NUM_0 <= key <= keys.NUM_9:
+        ship = state["ship"]
+        return not (key == keys.NUM_8 and not shift and ship is not None and ship.crashed)
+    if key == keys.M:
+        return state["mode"] != "ship"
+    if key == keys.T:
+        return state["mode"] != "foot"
+    return key in WORLD_KEYS
+
+
+def help_columns():
+    """HELP_COLUMNS, in play mode without the places, the crates and the
+    keys that change the world."""
+    if not args.play:
+        return HELP_COLUMNS
+    columns = []
+    for column in HELP_COLUMNS:
+        kept = []
+        for heading, rows in column:
+            if heading in ("Places", "Physics"):
+                continue
+            if heading == "World":
+                rows = [(("8",), "New ship at Base, after a crash"), (("F5", "F9"), "Save / load")]
+            kept.append((heading, rows))
+        columns.append(kept)
+    return columns
 
 
 def new_seed():
@@ -2312,6 +2375,8 @@ def on_key(key, from_pad=False):
         state["input"] = "keys"
     tree = planet.tree
     shift = engine.input.is_key_down(keys.LEFT_SHIFT) or engine.input.is_key_down(keys.RIGHT_SHIFT)
+    if args.play and play_blocks(key, shift):
+        return
     if key == keys.NUM_0:
         drop_crates(STACK_COUNT if shift else 1)
     elif keys.NUM_1 <= key <= keys.NUM_9:

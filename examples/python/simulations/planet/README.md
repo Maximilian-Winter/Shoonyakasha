@@ -11,6 +11,7 @@ python planet.py
 python planet.py --capture DIR     # screenshots at the presets, then exit
 python planet.py --capture DIR --shots NAME...   # only the shots whose names contain one of these
 python planet.py --generated-cockpit   # start with the generated cockpit instead of the model's cabin
+python planet.py --play            # play: start on foot beside the ship at Base, without the places, crates or world keys
 python planet.py --verify          # check the GPU's chunks against cube_sphere.chunk_mesh, then exit
 python planet.py --orbit-check     # fly one orbit from preset 9 at 16x, report the drift, then exit
 python planet.py --landing-check   # land the ship on a mountain near the site, report how it stands, then exit
@@ -31,6 +32,8 @@ python planet.py --fuel-check      # burn the tanks dry from orbit, check the bu
 python planet.py --cargo-check     # put ore rocks in the cargo net, board and take off, check what was loaded
 python planet.py --trade-check     # land on an outpost on the planet and on the moon, sell ore and buy fuel
 ```
+
+With `--play` the game starts on foot beside the ship, parked on the Base outpost's pad. The places and crates (**0 – 9**) and the keys that change the world (**N**, **M / J**, **H / G**, **Z / X**, **T / Y**, **B / V**) do nothing, the settings menu has no planet section, and the hint bar and the controls leave them out; **M** still turns the ship's right display and **T** still tracks on foot. Once the ship has crashed, **8** makes a new one at Base.
 
 **Tab** switches between the free camera and the player on foot, and from the ship to the free camera; **F** gets out of a landed ship and back in beside its cockpit. New ships come from **8** and **9**. A bar along the bottom shows the keys for what is on the screen, or the gamepad's buttons once the gamepad has been used; **F2** shows all the controls.
 
