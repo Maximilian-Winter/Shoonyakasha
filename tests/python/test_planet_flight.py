@@ -259,7 +259,8 @@ class ReentryGlow(unittest.TestCase):
 class ClimbToOrbit(unittest.TestCase):
     """A scripted ascent with assist off: burn at 60 degrees until the
     apoapsis is 40 km up, coast to it, burn along the velocity until the
-    periapsis is above the air, then coast five minutes."""
+    periapsis is above the air, with fuel to spare, then coast five
+    minutes."""
 
     def point(self, ship, forward):
         radial = flight.normalize(ship.position)
@@ -294,7 +295,8 @@ class ClimbToOrbit(unittest.TestCase):
 
         periapsis, apoapsis = flight.orbit(planet, ship.position, ship.velocity)
         self.assertGreaterEqual(periapsis, 30_000.0)
-        self.assertLess(apoapsis, 80_000.0)
+        self.assertLess(apoapsis, 100_000.0)
+        self.assertGreater(ship.fuel, 0.0)
         lowest = math.inf
         for _ in range(300):
             run(ship, planet, coast, 1.0)
@@ -321,7 +323,7 @@ class FallingAndAir(unittest.TestCase):
         for _ in range(int(150 / DT)):      # about six times v_t / g
             ship.step(planet, hold, DT)
             ship.position = (0.0, 0.0, planet.radius)      # keep it at height 0
-        terminal = math.sqrt(2.0 * ship.params.mass * planet.surface_gravity / (planet.air_density * ship.params.drag_area))
+        terminal = math.sqrt(2.0 * ship.mass() * planet.surface_gravity / (planet.air_density * ship.params.drag_area))
         self.assertAlmostEqual(flight.length(ship.velocity), terminal, delta=0.01 * terminal)
 
     def test_drag_slows_a_coasting_ship_as_its_square_law_says(self):
@@ -331,7 +333,7 @@ class FallingAndAir(unittest.TestCase):
         rho = planet.density(ship.position)
         run(ship, planet, flight.Controls(assist=False), 5.0)
         # dv/dt = -k v^2 with k = rho Cd A / (2 m): 1/v = 1/v0 + k t
-        k = 0.5 * rho * ship.params.drag_area / ship.params.mass
+        k = 0.5 * rho * ship.params.drag_area / ship.mass()
         expected = 1.0 / (1.0 / 200.0 + k * 5.0)
         self.assertAlmostEqual(ship.velocity[0], expected, delta=1.0)
 
@@ -602,6 +604,59 @@ class MoonGround(unittest.TestCase):
         fly_over_moon(ship, planet, flight.Controls(throttle=1.0, assist=False), 5.0)
         moved = flight.sub(flight.sub(ship.position, planet.moon.position(planet.time)), where)
         self.assertLess(flight.length(moved), 1.0)
+
+
+class Fuel(unittest.TestCase):
+    """The thrusters burn fuel at their thrust over their specific impulse
+    times g0; the speed a full tank gives follows the rocket equation;
+    with no fuel there is no thrust but the ship still turns; the cargo
+    adds to the mass and the inertia."""
+
+    def space(self):
+        return flight.Planet(surface_gravity=0.0, density_factor=0.0)
+
+    def test_the_main_engine_and_the_other_thrusters_burn_at_their_isp(self):
+        planet = self.space()
+        ship = level_ship(10_000.0, planet)
+        p = ship.params
+        run(ship, planet, flight.Controls(throttle=1.0, assist=False), 1.0)
+        self.assertAlmostEqual(p.fuel_capacity - ship.fuel, p.main_thrust / (p.isp_main * flight.G0), places=6)
+        ship = level_ship(10_000.0, planet)
+        run(ship, planet, flight.Controls(vertical=1.0, assist=False), 1.0)
+        self.assertAlmostEqual(p.fuel_capacity - ship.fuel, p.rcs_thrust / (p.isp_rcs * flight.G0), places=6)
+
+    def test_a_full_tank_gives_the_rocket_equations_speed(self):
+        planet = self.space()
+        ship = level_ship(10_000.0, planet)
+        p = ship.params
+        full = ship.mass()
+        self.assertAlmostEqual(ship.delta_v(), p.isp_main * flight.G0 * math.log(full / p.dry_mass), places=9)
+        run(ship, planet, flight.Controls(throttle=1.0, assist=False), 60.0)
+        self.assertEqual(ship.fuel, 0.0)
+        self.assertEqual(ship.delta_v(), 0.0)
+        expected = p.isp_main * flight.G0 * math.log(full / p.dry_mass)
+        self.assertAlmostEqual(flight.length(ship.velocity), expected, delta=1e-3 * expected)
+
+    def test_with_no_fuel_no_thrust_but_it_turns(self):
+        planet = self.space()
+        ship = level_ship(10_000.0, planet)
+        ship.fuel = 0.0
+        run(ship, planet, flight.Controls(throttle=1.0, vertical=1.0, pitch=1.0, assist=False), 1.0)
+        self.assertEqual(ship.velocity, (0.0, 0.0, 0.0))
+        self.assertEqual(ship.thrust, (0.0, 0.0, 0.0))
+        self.assertGreater(abs(ship.angular_velocity[0]), 0.3)
+
+    def test_cargo_adds_mass_and_inertia(self):
+        ship = level_ship(0.0, flight.Planet())
+        p = ship.params
+        ship.cargo = [{"mass": 4_000.0}, {"mass": 2_000.0}]
+        self.assertEqual(ship.cargo_mass, 6_000.0)
+        self.assertEqual(ship.mass(), p.dry_mass + p.fuel_capacity + 6_000.0)
+        share = ship.mass() / (p.dry_mass + p.fuel_capacity)
+        for got, base in zip(ship.inertia(), p.inertia):
+            self.assertAlmostEqual(got, base * share)
+        m = ship.mass()
+        self.assertAlmostEqual(ship.delta_v(), p.isp_main * flight.G0 * math.log(m / (m - ship.fuel)))
 
 
 if __name__ == "__main__":

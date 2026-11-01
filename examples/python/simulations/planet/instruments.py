@@ -11,7 +11,8 @@ direction it marks, so it stays on it as the ship turns:
   - the horizon and a pitch ladder every 5 degrees, numbered every 10,
     dashed below the horizon, turned with the ship's roll;
   - the heading tape across the top, the heading boxed above it;
-  - the speed boxed on the left, the throttle and the modes under it;
+  - the speed boxed on the left, the throttle and the modes under it
+    (and NO FUEL with the tanks empty);
   - the height above the ground boxed on the right, the climb and the
     height above the datum under it;
   - the contact state (LANDED, CRASHED) under the nose;
@@ -53,7 +54,7 @@ MFD_TITLE = (0.5, 0.92, 1.0, 1.0)
 MFD_LABEL = (0.36, 0.7, 0.48, 1.0)
 MFD_VALUE = (0.64, 1.0, 0.7, 1.0)
 MFD_RULE = (0.36, 0.7, 0.48, 0.55)
-MFD_ROWS = 7
+MFD_ROWS = 9
 MFD_RICH = (1.0, 0.72, 0.3, 1.0)       # the strip's bars at or above its mark
 STRIP_ROWS = 3                         # rows' height the strip takes, at the bottom
 STRIP_BARS = 64
@@ -278,7 +279,9 @@ class HeadUpDisplay:
         modes += "\nASSIST" if r["assist"] else "\nASSIST OFF"
         if r["warp"] > 1:
             modes += "\nWARP x%d" % r["warp"]
-        self._place(self.left_lines, modes, (speed_box[0] + 45.0, cy + 30.0 + 30.0), (90, 60))
+        if r["fuel"] <= 0.0:
+            modes += "\nNO FUEL"
+        self._place(self.left_lines, modes, (speed_box[0] + 45.0, cy + 30.0 + 30.0), (90, 80))
         # The throttle's bar under the speed box.
         bar_y = cy + 22.0
         line([(speed_box[0], bar_y), (speed_box[0] + 80.0, bar_y)], HUD_DIM)
@@ -352,8 +355,8 @@ class Display:
         top, step = 84, (h - 84 - 30) / MFD_ROWS
         for k in range(MFD_ROWS):
             y = top + k * step
-            label = self._text(27, MFD_LABEL, sk.TEXT_ALIGN_LEFT, (26, y), (w - 52, step))
-            value = self._text(36, MFD_VALUE, sk.TEXT_ALIGN_RIGHT, (26, y), (w - 52, step))
+            label = self._text(24, MFD_LABEL, sk.TEXT_ALIGN_LEFT, (26, y), (w - 52, step))
+            value = self._text(32, MFD_VALUE, sk.TEXT_ALIGN_RIGHT, (26, y), (w - 52, step))
             self.rows.append((label, value))
         self.bar = ui.create_panel(self.entity, size=(w - 52, 6), color=(MFD_RULE[0], MFD_RULE[1], MFD_RULE[2], 0.3))
         ui.set_rect(self.bar, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0), position=(26, h - 26),
@@ -460,7 +463,9 @@ class Instruments:
         datum_height (texts), datum and datum_short (its name, and that
         shortened for the HUD), heading, throttle, assist, warp,
         contact, periapsis and apoapsis (texts), circular, density,
-        dynamic_pressure, glow; and page ("orbit" or "scan"), with the
+        dynamic_pressure, glow; fuel and fuel_capacity (kg), delta_v (m/s),
+        cargo (text) and cargo_value ((the nearest outpost's name, the
+        cargo's value there as text)); and page ("orbit" or "scan"), with the
         scan's rows (scan_rows), strip (scan_strip, 0 .. 1) and its mark
         (scan_mark), and ore_contact for the HUD (direction, text) or None."""
         self.hud.update(view, r)
@@ -473,6 +478,8 @@ class Instruments:
             ("THROTTLE", "%.0f %%" % (r["throttle"] * 100.0)),
             ("ASSIST", "ON" if r["assist"] else "OFF"),
             ("TIME WARP", "x%d" % r["warp"]),
+            ("CARGO", r["cargo"]),
+            ("VALUE AT " + r["cargo_value"][0].upper(), r["cargo_value"][1]),
         ], bar=r["throttle"])
         if r.get("page") == "scan":
             orbit.update("SCAN", r["body"].upper(), r["scan_rows"], strip=r["scan_strip"], mark=r["scan_mark"])
@@ -485,4 +492,6 @@ class Instruments:
             ("AIR DENSITY", "%.4f kg/m3" % r["density"]),
             ("DYN. PRESSURE", "%.2f kPa" % (r["dynamic_pressure"] / 1000.0)),
             ("HEAT GLOW", "%.0f %%" % (r["glow"] * 100.0)),
+            ("FUEL", "%.0f / %.0f kg" % (r["fuel"], r["fuel_capacity"])),
+            ("DELTA-V", "%.0f m/s" % r["delta_v"]),
         ])

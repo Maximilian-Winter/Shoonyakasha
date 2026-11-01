@@ -13,7 +13,8 @@
 // in 32-bit, radius * (direction - centre direction) would carry about a
 // centimetre of error at a radius of 100 km. Heights are 32-bit, from the
 // body's terrain (bodyHeight): body 0, the planet, terrainHeight
-// (terrain.glsl); body 1, the moon, moonHeight (moon.glsl).
+// (terrain.glsl); body 1, the moon, moonHeight (moon.glsl); both with
+// their flat sites (sites.glsl).
 //
 // Each vertex also holds the sine of the terrain's horizon towards the
 // sun's azimuth (horizonTowardsSun), for shadows beyond the shadow map, and
@@ -68,6 +69,8 @@ layout(set = 0, binding = 2) uniform TerrainParams {
     vec4 detail;
     vec4 climate;
     vec4 biomeView;
+    vec4 sites[8];
+    vec4 siteShapes[8];
 } terrain;
 
 layout(std430, set = 0, binding = 3) writeonly buffer ChunkHeights {
@@ -87,6 +90,7 @@ layout(std430, set = 0, binding = 4) writeonly buffer ProbeHeights {
 #include "climate.glsl"
 #include "moon.glsl"
 #include "resources.glsl"
+#include "sites.glsl"
 
 const int PLANET = 0;
 const int MOON = 1;
@@ -95,16 +99,16 @@ const int MOON = 1;
 int body;
 float bodyRadius;
 
-// The terrain's height (m) at unit direction `d` from the centre of `body`.
+// The terrain's height (m) at unit direction `d` from the centre of `body`, with its flat sites.
 float bodyHeight(vec3 d) {
-    return body == MOON ? moonHeight(d, bodyRadius, 0.0) : terrainHeight(d);
+    return terrainWithSites(body == MOON ? moonHeight(d, bodyRadius, 0.0) : terrainHeight(d), d, body);
 }
 
 // bodyHeight for the normals of a chunk whose vertices are `spacing`
 // metres apart: on the moon without the craters whose radius is less than
 // two spacings, whose slopes the vertices would sample out of step.
 float bodyHeightForNormals(vec3 d, float spacing) {
-    return body == MOON ? moonHeight(d, bodyRadius, 2.0 * spacing) : terrainHeight(d);
+    return terrainWithSites(body == MOON ? moonHeight(d, bodyRadius, 2.0 * spacing) : terrainHeight(d), d, body);
 }
 
 // A height as the surface's: on the planet, below sea level is the sea's surface.

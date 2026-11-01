@@ -14,6 +14,14 @@ falls off exponentially with height; and the thrusters. `Ship.step`
 advances it by one time step with semi-implicit Euler: the velocity
 first, then the position with the new velocity.
 
+Mass: the ship's dry mass, its fuel and its cargo (`Ship.mass`); its
+inertia is ShipParams.inertia scaled by its mass over its mass full of
+fuel with no cargo. The thrusters burn fuel at their thrust over their
+specific impulse times g0: the main engine (forward thrust) at
+`isp_main`, the others at `isp_rcs`. With no fuel there is no thrust;
+the torque that turns the ship needs none. `Ship.delta_v` is the speed
+the main engine can still give, by the rocket equation.
+
 The planet, its moon and the orbits around them are
 `shoonyakasha.planet.orbits`'s (`Planet`, `Moon`, `reference`, `orbit`,
 `orbit_path`, `circular_speed`), imported here.
@@ -110,8 +118,12 @@ def quat_from_basis(right, up, back):
 
 @dataclass
 class ShipParams:
-    mass: float = 20_000.0                              # kg
-    inertia: tuple = (4e5, 5e5, 3e5)                    # kg m^2 about the body's X, Y, Z
+    dry_mass: float = 14_000.0                          # kg without fuel or cargo
+    fuel_capacity: float = 6_000.0                      # kg
+    isp_main: float = 450.0                             # s: the main engine's specific impulse
+    isp_rcs: float = 250.0                              # s: the other thrusters'
+    cargo_capacity: float = 8_000.0                     # kg
+    inertia: tuple = (4e5, 5e5, 3e5)                    # kg m^2 about the body's X, Y, Z, full of fuel, no cargo
     main_thrust: float = 6e5                            # N, forward
     rcs_thrust: float = 1.5e5                           # N, along each other direction
     max_torque: float = 2e5                             # N m about each axis
@@ -135,6 +147,7 @@ class ShipParams:
     friction: float = 0.6                               # friction impulse per normal impulse, at most
 
 
+G0 = 9.80665                    # m/s^2: specific impulse's standard gravity
 CONTACT_ITERATIONS = 8
 CONTACT_STIFFNESS = 0.2         # share of a point's depth pushed out per step
 CONTACT_SLOP = 0.01             # m of depth left alone
@@ -163,6 +176,45 @@ class Ship:
     resting: bool = False                           # thrusters and torque off until the controls move
     crashed: bool = False
     impact_speed: float = 0.0                       # m/s, the fastest a point reached the surface at in the last step
+    fuel: float = None                              # kg; full (params.fuel_capacity) when None
+    cargo: list = field(default_factory=list)       # what it carries: dicts with at least "mass" (kg)
+    fuel_used: float = 0.0                          # kg burnt in the last step
+
+    def __post_init__(self):
+        if self.fuel is None:
+            self.fuel = self.params.fuel_capacity
+        self._frozen_mass = None                    # (mass, inertia) while a step runs
+
+    @property
+    def cargo_mass(self):
+        return sum(item["mass"] for item in self.cargo)
+
+    def mass(self):
+        """Dry mass, fuel and cargo (kg)."""
+        if self._frozen_mass is not None:
+            return self._frozen_mass[0]
+        return self.params.dry_mass + self.fuel + self.cargo_mass
+
+    def inertia(self):
+        """params.inertia scaled by the mass over the mass full of fuel with no cargo."""
+        if self._frozen_mass is not None:
+            return self._frozen_mass[1]
+        p = self.params
+        share = self.mass() / (p.dry_mass + p.fuel_capacity)
+        return tuple(i * share for i in p.inertia)
+
+    def delta_v(self):
+        """The speed (m/s) the main engine can still give: isp_main g0 ln(m / (m - fuel))."""
+        m = self.mass()
+        return self.params.isp_main * G0 * math.log(m / (m - self.fuel)) if self.fuel > 0.0 else 0.0
+
+    def fuel_flow(self, thrust):
+        """kg/s the thrusters burn for `thrust` (right, up, back) in the body:
+        the main engine's (forward) at isp_main, the others' at isp_rcs."""
+        p = self.params
+        main = max(-thrust[2], 0.0)
+        rcs = abs(thrust[0]) + abs(thrust[1]) + max(thrust[2], 0.0)
+        return main / (p.isp_main * G0) + rcs / (p.isp_rcs * G0)
 
     def axes(self):
         """(right, up, forward) in the world."""
@@ -200,9 +252,10 @@ class Ship:
             if gear_height is not None:
                 climb = max(climb, -self.descent_limit(gear_height))
             wanted = add(scale(forward, controls.throttle * p.assist_max_speed), scale(up, climb))
+            mass = self.mass()
             accel = sub(scale(sub(wanted, sub(self.velocity, surface_velocity)), p.assist_gain),
-                        sub(add(gravity, scale(aero, 1.0 / p.mass)), surface_acceleration))
-            force = scale(accel, p.mass)
+                        sub(add(gravity, scale(aero, 1.0 / mass)), surface_acceleration))
+            force = scale(accel, mass)
             body = (dot(force, right), dot(force, up), -dot(force, forward))
         else:
             body = (0.0, controls.vertical * p.rcs_thrust, -controls.throttle * p.main_thrust)
@@ -222,8 +275,20 @@ class Ship:
         surface moves as planet.surface_motion gives it: the assist, the
         contacts and a crashed ship go by velocities relative to it, and
         the position moves by the velocity relative to the surface plus the
-        surface's own displacement over the step."""
+        surface's own displacement over the step. The thrusters burn fuel
+        (fuel_flow); with too little left for the step their thrust is cut
+        to what it lasts for. The mass and inertia stay as they were at the
+        step's start."""
+        self._frozen_mass = None
+        self._frozen_mass = (self.mass(), self.inertia())
+        try:
+            self._advance(planet, controls, dt, ground)
+        finally:
+            self._frozen_mass = None
+
+    def _advance(self, planet, controls, dt, ground):
         surface = planet.surface_motion(self.position, dt)
+        self.fuel_used = 0.0
         if self.crashed:
             self.velocity = surface[0]
             self.position = add(self.position, surface[2])
@@ -247,10 +312,16 @@ class Ship:
         aero = self.aerodynamic_force(planet)
         self.thrust = ((0.0, 0.0, 0.0) if resting
                        else self._thrust(planet, controls, gravity, aero, gear_height, surface))
+        used = self.fuel_flow(self.thrust) * dt
+        if used > self.fuel:
+            self.thrust = scale(self.thrust, self.fuel / used)
+            used = self.fuel
+        self.fuel -= used
+        self.fuel_used = used
         right, up, forward = self.axes()
         thrust_world = add(add(scale(right, self.thrust[0]), scale(up, self.thrust[1])),
                            scale(forward, -self.thrust[2]))
-        accel = add(gravity, scale(add(thrust_world, aero), 1.0 / p.mass))
+        accel = add(gravity, scale(add(thrust_world, aero), 1.0 / self.mass()))
         self.velocity = add(self.velocity, scale(accel, dt))
         self._spin(controls, dt, resting)
         self.on_ground = False
@@ -269,7 +340,7 @@ class Ship:
         p = self.params
         wanted = (controls.pitch * p.max_rates[0], -controls.yaw * p.max_rates[1], -controls.roll * p.max_rates[2])
         w = self.angular_velocity
-        inertia = p.inertia
+        inertia = self.inertia()
         torque = (0.0, 0.0, 0.0) if resting else tuple(
             max(-p.max_torque, min(p.max_torque, inertia[i] * (wanted[i] - w[i]) * p.rotation_gain))
             for i in range(3))
@@ -285,15 +356,15 @@ class Ship:
     def _inverse_mass_along(self, arm_body, direction_body):
         """1 / (the mass an impulse along `direction_body` at `arm_body` meets)."""
         arm_cross = cross(arm_body, direction_body)
-        inertia = self.params.inertia
-        return 1.0 / self.params.mass + sum(arm_cross[i] * arm_cross[i] / inertia[i] for i in range(3))
+        inertia = self.inertia()
+        return 1.0 / self.mass() + sum(arm_cross[i] * arm_cross[i] / inertia[i] for i in range(3))
 
     def _apply_impulse(self, arm_body, impulse_world):
         q = self.orientation
-        self.velocity = add(self.velocity, scale(impulse_world, 1.0 / self.params.mass))
+        self.velocity = add(self.velocity, scale(impulse_world, 1.0 / self.mass()))
         impulse_body = quat_rotate(quat_conjugate(q), impulse_world)
         turn = cross(arm_body, impulse_body)
-        inertia = self.params.inertia
+        inertia = self.inertia()
         self.angular_velocity = tuple(self.angular_velocity[i] + turn[i] / inertia[i] for i in range(3))
 
     def _contact(self, ground, dt, surface_velocity=(0.0, 0.0, 0.0)):

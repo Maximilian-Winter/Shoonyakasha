@@ -1,0 +1,118 @@
+"""
+Trading at the outposts (outposts.py): selling ore and buying fuel for
+credits.
+
+Cargo items are dicts: "body" (the name of the body the ore was mined
+on), "direction" (where, a unit vector from that body's centre), "mass"
+(kg) and "grade" (its ore richness, 0 to 1).
+
+An outpost pays for a kilogram of ore ORE_PRICE times its grade, times
+OTHER_BODY when the ore comes from the other body, or else 1 plus
+DISTANCE_PREMIUM for every 100 km along the ground from where it was
+mined, and divided by 1 + supply / SUPPLY_HALF, where `supply` is the
+kilograms of that body's ore the outpost has bought, falling back towards
+0 with the time constant SUPPLY_RECOVERY (seconds of the world's clock).
+Selling m kilograms from supply s pays the price integrated over the
+supply as it rises: base SUPPLY_HALF ln((1 + (s + m) / SUPPLY_HALF) /
+(1 + s / SUPPLY_HALF)), so a load sold at once fetches what its pieces
+sold one after another do.
+
+Fuel costs the outpost's `fuel_price` per kilogram. `Market` holds the
+credits, sells a ship's cargo (`sell`), fills its tanks as far as the
+credits go (`buy_fuel`), and gives and takes its state as a record for a
+save file.
+"""
+
+import math
+
+from shoonyakasha.planet.vec import dot
+
+ORE_PRICE = 2.0                  # credits per kg at grade 1
+OTHER_BODY = 1.8                 # times the price for ore from the other body
+DISTANCE_PREMIUM = 0.5           # added to 1 per 100 km along the ground from where the ore was mined
+SUPPLY_HALF = 4_000.0            # kg of a body's ore bought that halves an outpost's price for it
+SUPPLY_RECOVERY = 900.0          # s: the supply's time constant falling back to 0
+START_CREDITS = 2_000.0
+
+
+def ground_distance(radius, a, b):
+    """Metres along a sphere of `radius` between unit directions `a` and `b`."""
+    return radius * math.acos(max(-1.0, min(1.0, dot(a, b))))
+
+
+def base_price(outpost, item):
+    """Credits per kg the outpost pays for `item` with no supply."""
+    price = ORE_PRICE * item["grade"]
+    if item["body"] != outpost.body.name:
+        return price * OTHER_BODY
+    distance = ground_distance(outpost.body.radius, outpost.direction, item["direction"])
+    return price * (1.0 + DISTANCE_PREMIUM * distance / 100_000.0)
+
+
+def supply(outpost, body, time):
+    """kg of `body`'s ore (a name) the outpost has bought, at `time`."""
+    kg, since = outpost.supply.get(body, (0.0, time))
+    return kg * math.exp(-max(time - since, 0.0) / SUPPLY_RECOVERY)
+
+
+def price(outpost, item, time):
+    """Credits per kg the outpost pays now for the first kilogram of `item`."""
+    return base_price(outpost, item) / (1.0 + supply(outpost, item["body"], time) / SUPPLY_HALF)
+
+
+def sale(outpost, items, time):
+    """Credits `items` fetch sold at once, and the outpost's supply after
+    (body name: (kg, time)), without changing it."""
+    supplies = {}
+    credits = 0.0
+    for item in items:
+        body = item["body"]
+        s = supplies[body] if body in supplies else supply(outpost, body, time)
+        m = item["mass"]
+        credits += base_price(outpost, item) * SUPPLY_HALF * math.log((1.0 + (s + m) / SUPPLY_HALF)
+                                                                       / (1.0 + s / SUPPLY_HALF))
+        supplies[body] = s + m
+    return credits, {body: (kg, time) for body, kg in supplies.items()}
+
+
+class Market:
+    def __init__(self, credits=START_CREDITS):
+        self.credits = credits
+
+    def value(self, outpost, items, time):
+        """Credits `items` would fetch at the outpost now."""
+        return sale(outpost, items, time)[0]
+
+    def sell(self, ship, outpost, time):
+        """The ship's whole cargo sold at the outpost: the credits gained,
+        the outpost's supply raised. Returns (kg sold, credits)."""
+        items = list(ship.cargo)
+        if not items:
+            return 0.0, 0.0
+        credits, supplies = sale(outpost, items, time)
+        outpost.supply.update(supplies)
+        ship.cargo.clear()
+        self.credits += credits
+        return sum(item["mass"] for item in items), credits
+
+    def buy_fuel(self, ship, outpost):
+        """The ship's tanks filled at the outpost as far as the credits go.
+        Returns (kg bought, credits paid)."""
+        room = ship.params.fuel_capacity - ship.fuel
+        kg = max(min(room, self.credits / outpost.fuel_price), 0.0)
+        cost = kg * outpost.fuel_price
+        ship.fuel += kg
+        self.credits -= cost
+        return kg, cost
+
+    def record(self, outposts):
+        """The credits and each outpost's supply, as plain values."""
+        return {"credits": self.credits,
+                "supply": {o.name: {body: list(value) for body, value in o.supply.items()} for o in outposts}}
+
+    def restore(self, record, outposts):
+        self.credits = record["credits"]
+        by_name = {o.name: o for o in outposts}
+        for name, supplies in record["supply"].items():
+            if name in by_name:
+                by_name[name].supply = {body: tuple(value) for body, value in supplies.items()}

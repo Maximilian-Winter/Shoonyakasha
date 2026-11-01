@@ -3,7 +3,10 @@ world that is not set up, with a fake engine whose read-backs are given:
 the ground under the viewpoint is taken from a probe only while the
 viewpoint is over the same body and within GROUND_PROBE_REACH of where the
 probe measured it, and only for the current terrain version, with the
-ore richness there.
+ore richness there. A survey's heights come back by index, in batches
+of at most PATCH_PROBES from where the last ended, only for its own
+round, and hold the terrain back until it ends; the flat sites are
+uploaded and build again the bodies whose sites changed.
 
     python -m unittest discover -s tests/python
 """
@@ -20,9 +23,16 @@ class FakeEngine:
     def __init__(self):
         self.readbacks = {}
         self.framebuffer_size = (1600, 900)
+        self.custom = {}
 
     def get_readback(self, name):
         return self.readbacks.get(name)
+
+    def set_custom_vec4(self, name, value):
+        self.custom[name] = tuple(value)
+
+    def set_custom_vec4_array(self, name, values):
+        self.custom[name] = [tuple(v) for v in values]
 
 
 class GroundProbeTest(unittest.TestCase):
@@ -44,7 +54,8 @@ class GroundProbeTest(unittest.TestCase):
 
     def ask(self, stamp, direction):
         world = self.world
-        world.probe_requests[float(stamp)] = (world.terrain_version, world.planet, direction, None, [])
+        world.probe_requests[float(stamp)] = (world.terrain_version, world.planet, direction, None, [],
+                                              (world.survey_round, []))
 
     def at(self, direction, height=1000.0):
         return scale(direction, planet_world.RADIUS + height)
@@ -83,11 +94,106 @@ class GroundProbeTest(unittest.TestCase):
         self.assertIsNone(self.world.ground)
 
 
+class SurveyTest(unittest.TestCase):
+    def setUp(self):
+        self.engine = FakeEngine()
+        self.world = planet_world.PlanetWorld(self.engine)
+        self.world._lod = _NoLod()
+        self.up = self.world.site_frame()[1]
+        self.points = [(self.up, self.world.planet)] * (planet_world.PATCH_PROBES + 30)
+
+    def answer(self, stamp, batch, heights):
+        world = self.world
+        world.probe_requests[float(stamp)] = (world.terrain_version, world.planet, self.up, None, [], batch)
+        rows = np.zeros((planet_world.PROBES, 8), dtype=np.float32)
+        rows[:, 1] = stamp
+        rows[2:2 + len(heights), 0] = heights
+        self.engine.readbacks["ProbeHeights"] = {"data": rows.tobytes(), "frame": 0}
+        world.viewpoint = scale(self.up, planet_world.RADIUS + 10.0)
+        world.read_back_heights()
+
+    def test_batches_come_back_by_index(self):
+        world = self.world
+        world.start_survey(self.points)
+        first = world.survey_batch()
+        self.assertEqual(first, list(range(planet_world.PATCH_PROBES)))
+        second = world.survey_batch()
+        self.assertEqual(second[:30], list(range(planet_world.PATCH_PROBES, len(self.points))))
+        self.answer(1, (world.survey_round, first), [float(i) for i in first])
+        self.assertIsNone(world.surveyed())
+        self.assertEqual(world.survey_batch()[:2], [planet_world.PATCH_PROBES, planet_world.PATCH_PROBES + 1])
+        rest = list(range(planet_world.PATCH_PROBES, len(self.points)))
+        self.answer(2, (world.survey_round, rest), [float(i) for i in rest])
+        self.assertEqual(world.surveyed(), [float(i) for i in range(len(self.points))])
+
+    def test_another_rounds_heights_ignored(self):
+        world = self.world
+        world.start_survey(self.points)
+        batch = world.survey_batch()
+        old = world.survey_round
+        world.start_survey(self.points)
+        self.answer(1, (old, batch), [5.0] * len(batch))
+        self.assertEqual(world.survey_heights, {})
+
+    def test_terrain_waits_for_the_end_of_the_survey(self):
+        world = self.world
+        world.site_height = 400.0
+        world.start_survey(self.points)
+        self.assertFalse(world.begin_frame())
+        self.assertFalse(world.lod.created)
+        world.end_survey()
+        self.assertEqual(world.survey_batch(), [])
+        self.assertTrue(world.begin_frame())
+        self.assertIn(world.planet.index, world.lod.created)
+
+    def test_sites_uploaded_and_their_body_built_again(self):
+        world = self.world
+        world.lod.trees = {0}
+        site = planet_world.Site(0, (0.0, 1.0, 0.0), 300.0, 150.0, 600.0)
+        world.set_sites([site])
+        sites = self.engine.custom["planet.terrain.sites"]
+        shapes = self.engine.custom["planet.terrain.siteShapes"]
+        self.assertEqual(len(sites), planet_world.MAX_SITES)
+        self.assertEqual(sites[0], (0.0, 1.0, 0.0, 300.0))
+        self.assertEqual(shapes[0], (150.0, 600.0, 0.0, planet_world.RADIUS))
+        self.assertEqual(shapes[1], (0.0, 0.0, 0.0, 0.0))
+        self.assertEqual(world.lod.dropped, [0])
+        self.assertEqual(world.lod.created, [0])
+        world.set_sites([site])
+        self.assertEqual(world.lod.dropped, [0])
+        with self.assertRaises(ValueError):
+            world.set_sites([site] * (planet_world.MAX_SITES + 1))
+
+    def test_regenerate_drops_the_planets_sites(self):
+        world = self.world
+        planet_site = planet_world.Site(0, self.up, 300.0, 150.0, 600.0)
+        moon_site = planet_world.Site(1, (0.0, 1.0, 0.0), -40.0, 100.0, 400.0)
+        world.set_sites([planet_site, moon_site])
+        world.regenerate()
+        self.assertEqual(world.sites, [moon_site])
+
+
 class _NoLod:
-    """Stands in for sk.PlanetLod where no chunk is read back."""
+    """Stands in for sk.PlanetLod where no chunk is read back; records the trees made and dropped."""
+
+    def __init__(self):
+        self.trees = set()
+        self.created = []
+        self.dropped = []
 
     def take_heights(self, data):
         pass
+
+    def has_tree(self, index):
+        return index in self.trees
+
+    def create_tree(self, index, *args):
+        self.trees.add(index)
+        self.created.append(index)
+
+    def drop_tree(self, index):
+        self.trees.discard(index)
+        self.dropped.append(index)
 
 
 if __name__ == "__main__":

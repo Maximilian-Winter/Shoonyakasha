@@ -45,7 +45,8 @@ ground is measured it is taken as the highest its body's terrain reaches
 (HIGHEST). `Props.leave_all` takes every prop out of the physics (when
 the bubble goes). `Props.draw` places the entities relative to the
 camera, subtracted in 64-bit floats. `on_remove(prop)` is told of each
-rock with a cell removed.
+rock with a cell removed, unless `Props.remove` is asked not to release
+it (a rock loaded into the ship keeps its cell taken).
 
 `Props.record` gives a prop as a record, a dict of plain values for a save
 file: its kind, the name of the body it is reckoned around, its state
@@ -213,7 +214,9 @@ class Props:
     def find(self, body):
         return next((p for p in self.all if p.body == body), None)
 
-    def remove(self, bubble, prop):
+    def remove(self, bubble, prop, release=True):
+        """`prop` gone from the world; with `release`, `on_remove` is told
+        of a rock with a cell."""
         if prop.body is not None and bubble is not None and bubble.physics.contains(prop.body):
             bubble.physics.remove(prop.body)
         self.engine.scene.destroy_entity(prop.entity)
@@ -223,7 +226,7 @@ class Props:
             self.crates.remove(prop)
         else:
             self.rocks.remove(prop)
-            if prop.key is not None and self.on_remove is not None:
+            if release and prop.key is not None and self.on_remove is not None:
                 self.on_remove(prop)
 
     def clear(self, bubble):

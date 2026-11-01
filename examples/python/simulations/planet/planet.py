@@ -37,9 +37,10 @@ is built again (a new seed, the terrain's keys, the menu's Apply), the
 props on it are removed with its taken rocks.
 
 F5 saves to SAVE_PATH, as JSON: the world's clock, the planet's terrain
-parameters, the taken rocks, every prop as a record (props.py), the ship
-(and where it is parked), the mode, the free camera and the player's
-feet. F9 loads it: the planet is built again when its parameters differ,
+parameters, the taken rocks, every prop as a record (props.py), the ore
+contacts, the credits and the outposts' supplies, the ship (its fuel and
+cargo, and where it is parked), the mode, the free camera and the
+player's feet. F9 loads it: the planet is built again when its parameters differ,
 the props come back out of the physics and return to it by props.py's
 rules, and the view goes back to the free camera, the ship or the player.
 
@@ -52,6 +53,17 @@ from STRIKE_MOMENTUM. In the ship, M turns the right display to SCAN,
 which scans the ground track ahead for contacts (scanner.py); below
 ORE_HUD_HEIGHT the HUD marks the nearest. The contacts are saved, and
 those on the planet go when it is built again.
+
+Outposts (outposts.py): Base at the blocks, and more on flat ground of
+the planet and the moon, found by a survey of seeded candidates that the
+world measures before it builds the terrain; each is a flat site of the
+terrain (PlanetWorld.set_sites) with a pad. When the planet is built
+again its outposts are looked for again. The ship burns fuel and weighs
+its fuel and cargo (flight.py). Loose ore rocks lying in the cargo net
+beside the landed ship (NET_CENTRE, NET_HALF) are loaded into its cargo
+when the player boards or the ship takes off. Landed on an outpost's pad,
+Enter sells the cargo and Space fills the tanks as far as the credits go
+(trade.py), shown on the outpost's card.
 
 The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
@@ -96,6 +108,7 @@ Keys:
     R                      chase view / cockpit
     U                      the model's cabin / the generated cockpit
     M                      the right display: ORBIT / SCAN (ore scanning)
+    Enter / Space          landed on an outpost's pad: sell the cargo / fill the tanks
     , / .                  time warp down / up (1x to 16x)
   ship, gamepad (adding to the keys):
     left stick             pitch and roll
@@ -105,12 +118,13 @@ Keys:
     B                      throttle to 0
     bumpers                time warp down / up
     Y / Start / Back       free camera or on foot / settings menu / the controls
+    D-pad up / down        landed on an outpost's pad: sell the cargo / fill the tanks
     X                      chase view / cockpit; in a landed ship, out of it
   anywhere:
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
     7                      2 km up, 25 km north-west of the blocks, looking further north-west
-    8                      the ship at rest beside the blocks
+    8                      the ship at rest beside the blocks, on the Base outpost's pad
     9                      the ship in a circular orbit 40 km up
     Shift+8                the ship at rest on the moon, between the sun and the planet
     Shift+9                the ship in a circular orbit 10 km above the moon
@@ -151,6 +165,9 @@ Keys:
     python planet.py --save-check      move rocks, throw a crate, save, build a new planet, load, check what came back
     python planet.py --scan-check      scan for ore from orbit of the planet and the moon, check the contacts' rocks
     python planet.py --break-check     throw a crate into an ore boulder on the planet and the moon, check it splits
+    python planet.py --fuel-check      burn the tanks dry from orbit, check the burn's time and the speed gained
+    python planet.py --cargo-check     put ore rocks in the cargo net, board and take off, check what was loaded
+    python planet.py --trade-check     land on an outpost on the planet and on the moon, sell ore and buy fuel
 """
 
 import argparse
@@ -169,7 +186,7 @@ from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.collider_probes import ColliderProbes, TerrainCollider
 from shoonyakasha.planet.nearby_trees import NearbyTrees, listed_keys
-from shoonyakasha.planet.rocks import ORE_ROCKS
+from shoonyakasha.planet.rocks import ORE_ROCKS, rock_colour
 from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, local_frame, normalize, rotate, scale, sub
 from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, SettingsMenu
 from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, EXTRA_PROBES, FLOATS_PER_VERTEX, FOV, MAX_LEVEL,
@@ -182,11 +199,15 @@ import cockpit
 import gun as gun_module
 from gun import Gun, GunControls
 from instruments import Instruments
+import outposts
+from outposts import Pads, Survey, home_outpost
 from player import Controls as FootControls, Player
 from player import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from props import Props, stack_offsets, yaw_rotation
 from rocks import Rocks
 from scanner import CONTACT, Scanner
+import trade
+from trade import Market
 from trunks import Trunks
 from viewmodel import Viewmodel
 
@@ -204,6 +225,7 @@ FLIGHT_STEP = 1.0 / 120.0        # seconds per physics step
 MAX_STEPS_PER_FRAME = 64
 WARPS = (1, 2, 4, 8, 16)         # time warps
 SHIP_CLEARANCE = -flight.ShipParams().gear[0][1]   # metres from the ship's centre down to its gear
+SET_DOWN_DEPTH = 0.01            # m into the ground the presets put the ship's lowest gear, so it rests on it
 SHIP_REACH = max(math.sqrt(sum(c * c for c in arm))  # metres from the ship's centre to its farthest contact point
                  for arm in flight.ShipParams().gear + flight.ShipParams().hull)
 # The ship's model (models/f117, the F-117 by Muhamad Mirza Arrafi, CC-BY-4.0): its units per metre,
@@ -226,10 +248,12 @@ THROTTLE_RATE = 0.5              # throttle per second while W or S is held
 MOUSE_STICK = 0.04               # stick per pixel of mouse movement
 GAMEPAD_DEAD_ZONE = 0.12         # of a stick's travel, read as 0
 # Gamepad buttons and the keys they press: A assist, B throttle to 0, the bumpers time warp,
-# Y ship or free camera, X chase view, Start the menu, Back the controls sheet.
+# Y ship or free camera, X chase view, Start the menu, Back the controls sheet, the D-pad up and down
+# sell the cargo and fill the tanks at an outpost.
 GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAMEPAD_LEFT_BUMPER: keys.COMMA,
                 keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
-                keys.GAMEPAD_X: keys.R, keys.GAMEPAD_BACK: keys.F2}
+                keys.GAMEPAD_X: keys.R, keys.GAMEPAD_BACK: keys.F2, keys.GAMEPAD_DPAD_UP: keys.ENTER,
+                keys.GAMEPAD_DPAD_DOWN: keys.SPACE}
 # On foot FOOT_GAMEPAD_KEYS: X gets in, Y the free camera, the bumpers the gun's hold distance. In a landed
 # ship X gets out (read_gamepad_buttons).
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
@@ -247,6 +271,14 @@ STRIKE_MOMENTUM = 300.0          # kg m/s a body must strike a fixed rock with t
 STRIKE_REPORTED = 100.0          # kg m/s a strike needs to be reported: to break an ore boulder (rocks.BREAK_SPEED)
 COARSE_SPACING = 4.0             # m between the coarse terrain mesh's points (65 x 65, 256 m across)
 ORE_HUD_HEIGHT = 5_000.0         # m above the ground below which the HUD marks the nearest ore contact
+# The cargo net beside the landed ship: its centre in the ship's body (right, up, back; up at the
+# gear's feet), its half sizes along right and back, and how far below and above the gear's feet
+# a loose ore rock's centre may be in it.
+NET_CENTRE = (11.0, -SHIP_CLEARANCE, 1.0)
+NET_HALF = (3.0, 3.5)
+NET_BELOW, NET_ABOVE = 1.5, 4.0
+NET_POST = (0.15, 1.2, 0.15)     # m: the posts at its corners
+NET_COLOUR = (1.0, 0.72, 0.3)
 # On foot.
 EXIT_SPEED = 1.0                 # m/s relative to the ground the ship may move at for the player to get out
 BOARD_REACH = 3.0                # m from the boarding point the player gets in from
@@ -293,6 +325,12 @@ parser.add_argument("--scan-check", action="store_true",
                     help="scan for ore from orbit of the planet and the moon, check the contacts and their rocks")
 parser.add_argument("--break-check", action="store_true",
                     help="throw a crate into an ore boulder on the planet and the moon, check it splits, and exit")
+parser.add_argument("--fuel-check", action="store_true",
+                    help="burn the tanks dry from orbit, check the fuel's time and the speed gained, and exit")
+parser.add_argument("--cargo-check", action="store_true",
+                    help="put ore rocks in the cargo net, board and take off, check what was loaded, and exit")
+parser.add_argument("--trade-check", action="store_true",
+                    help="land on an outpost on the planet and on the moon, sell ore and buy fuel, and exit")
 parser.add_argument("--save-check", action="store_true",
                     help="move rocks, throw a crate, save, build a new planet, load, check what came back, and exit")
 parser.add_argument("--promotion-check", action="store_true",
@@ -385,6 +423,16 @@ state = {
     "ship_poses": None,          # (position, orientation) of the ship before and after this frame's flight
     "regenerations": 0,          # world.regenerations the props were last kept under
     "page": "orbit",             # the right display's page in the ship: "orbit" or "scan" (M)
+    "home": None,                # the outpost at the blocks (outposts.home_outpost)
+    "outposts": [],              # every outpost, the home one first
+    "survey": None,              # the outposts' survey (outposts.Survey) while the world measures it
+    "outpost_regenerations": 0,  # world.regenerations the planet's outposts were found under
+    "supply_pending": {},        # outpost name: supply from a save, for outposts not found yet
+    "market": Market(),          # credits (trade.py)
+    "trade_note": "",            # the last sale, purchase or load, for the cards
+    "net_posts": [],             # the cargo net's corner posts
+    "was_landed": False,         # the ship was landed (ship_landed) in the last frame in ship mode
+    "trade_card": None,          # the outpost's card (toolkit.overlay.Card)
 }
 physics = sk.PlanetPhysics()
 physics.set_strike_momentum(STRIKE_REPORTED)
@@ -394,6 +442,7 @@ trunks = Trunks()
 props = Props(engine, box(), world, on_remove=lambda prop: scatter_rocks.released(prop))
 scatter_rocks = Rocks(engine, world, props)
 scanner = Scanner(world, EXTRA_PROBES)
+pads = Pads(engine, box())
 
 
 def regenerate():
@@ -573,7 +622,8 @@ def build_cards():
     """The view's card at the top left, the debug card at the bottom left
     and the hint bar along the bottom (toolkit.overlay)."""
     canvas = engine.ui.create_canvas(reference_size=(1600, 900))
-    state["cards"] = (Card(engine.ui, canvas, (0, 0), 12), Card(engine.ui, canvas, (0, 1), 16, margin=(24, 76)))
+    state["cards"] = (Card(engine.ui, canvas, (0, 0), 14), Card(engine.ui, canvas, (0, 1), 16, margin=(24, 76)))
+    state["trade_card"] = Card(engine.ui, canvas, (1, 0), 12, width=400)
     state["hint_bar"] = HintBar(engine.ui, canvas)
 
 
@@ -674,13 +724,13 @@ def leave_ship():
 
 
 def place_ship(preset):
-    """8: at rest 16 m south of the blocks, facing north,
+    """8: at rest 16 m south of the blocks (its gear SET_DOWN_DEPTH into the ground), facing north,
     translation assist on. 9: in a circular orbit ORBIT_HEIGHT above the
     blocks, moving east with the nose 40 degrees down, where the planet is,
     assist off."""
     _, up, east, north = world.site_frame()
     if preset == 8:
-        position = add(world.site_ground(), add(scale(up, SHIP_CLEARANCE), scale(north, -16.0)))
+        position = add(world.site_ground(), add(scale(up, SHIP_CLEARANCE - SET_DOWN_DEPTH), scale(north, -16.0)))
         forward, velocity, assist = north, (0.0, 0.0, 0.0), True
     else:
         position, assist = scale(up, RADIUS + ORBIT_HEIGHT), False
@@ -743,9 +793,9 @@ def place_ship_at_moon(preset):
 
 def set_down_on_moon():
     """Once the probes for Shift+8 are back: the ship at rest over its
-    spot, moving with the moon, its centre SHIP_CLEARANCE above the highest
-    of the ground under it and under its gear points, so that no point
-    starts below the ground."""
+    spot, moving with the moon, its centre SHIP_CLEARANCE less
+    SET_DOWN_DEPTH above the highest of the ground under it and under its
+    gear points, so that it starts touching the ground and rests on it."""
     spot = state["moon_landing"]
     if spot is None or state["mode"] != "ship":
         return
@@ -755,7 +805,7 @@ def set_down_on_moon():
         return
     body = asked[0][1]
     ground = max(height for _, height in heights)
-    new_ship(add(body.centre(), scale(spot, body.radius + ground + SHIP_CLEARANCE)), body.velocity(),
+    new_ship(add(body.centre(), scale(spot, body.radius + ground + SHIP_CLEARANCE - SET_DOWN_DEPTH)), body.velocity(),
              local_frame(spot)[1], spot, True)
     state["moon_landing"] = None
     world.extra_probes = []
@@ -1137,17 +1187,20 @@ def get_out():
 
 
 def get_in():
-    """Into the ship from within BOARD_REACH of its boarding point, while it is landed."""
+    """Into the ship from within BOARD_REACH of its boarding point, while it
+    is landed, loading the ore in its cargo net (load_cargo)."""
     ship, player, bubble = state["ship"], state["player"], state["bubble"]
     if player is None or not ship_landed(ship):
         return
     if length(sub(bubble.to_world(player.feet()), boarding_point(ship))) > BOARD_REACH:
         return
+    load_cargo()
     remove_player()
     if state["parked"] is not None:
         ship.velocity = state["parked"][0].velocity()
     state["parked"] = None
     state["mode"] = "ship"
+    state["was_landed"] = True
 
 
 def near_boarding_point():
@@ -1300,6 +1353,202 @@ def capture_mouse():
         state["captured"] = wanted
 
 
+# ── Outposts, cargo and trade ──────────────────────────────────────────────
+
+def begin_survey(survey_bodies):
+    """The outposts on `survey_bodies` looked for again (outposts.Survey):
+    the world measures the candidates before it builds the terrain."""
+    survey = Survey(survey_bodies, tuple(planet.terrain["seed"]))
+    state["survey"] = survey
+    world.start_survey(survey.points)
+
+
+def update_outposts():
+    """The home outpost at the site's height; the planet's outposts looked
+    for again after it was built again; and once a survey's heights are
+    back, its outposts chosen, their sites flattened and their pads drawn."""
+    home = state["home"]
+    home.height = world.site_height or 0.0
+    if state["outpost_regenerations"] != world.regenerations:
+        state["outpost_regenerations"] = world.regenerations
+        state["outposts"] = [o for o in state["outposts"] if o.body is not planet]
+        begin_survey([planet])
+    survey = state["survey"]
+    heights = world.surveyed() if survey is not None else None
+    if heights is None:
+        return
+    surveyed = {body for body, _ in survey.candidates}
+    kept = [o for o in state["outposts"] if o is not home and o.body not in surveyed]
+    found = survey.choose(heights, taken=kept, home=home)
+    for outpost in found:
+        outpost.supply = state["supply_pending"].pop(outpost.name, {})
+    state["outposts"] = [home] + sorted(kept + found, key=lambda o: (o.body.index, o.name))
+    world.set_sites([o.site() for o in state["outposts"] if o.flat_radius > 0.0])
+    world.end_survey()
+    state["survey"] = None
+    pads.build(state["outposts"])
+    print("[planet] outposts: %s" % ", ".join(
+        "%s on the %s (%.0f m)" % (o.name, o.body.name, o.height) for o in state["outposts"][1:]), flush=True)
+
+
+def outpost_here():
+    """The outpost whose pad the landed ship is on, in ship mode, or None."""
+    ship = state["ship"]
+    if state["mode"] != "ship" or not ship_landed(ship):
+        return None
+    return next((o for o in state["outposts"] if o.at(ship.position)), None)
+
+
+def sell_cargo():
+    outpost = outpost_here()
+    if outpost is None:
+        return
+    kg, credits = state["market"].sell(state["ship"], outpost, world.time)
+    state["trade_note"] = ("sold %s of ore for %s" % (mass_text(kg), credits_text(credits)) if kg > 0.0
+                           else "no cargo to sell")
+
+
+def buy_fuel():
+    outpost = outpost_here()
+    if outpost is None:
+        return
+    kg, cost = state["market"].buy_fuel(state["ship"], outpost)
+    state["trade_note"] = ("bought %.0f kg of fuel for %s" % (kg, credits_text(cost)) if kg > 0.5
+                           else "the tanks are full" if state["ship"].fuel >= state["ship"].params.fuel_capacity - 0.5
+                           else "no credits for fuel")
+
+
+def mass_text(kg):
+    return "%.0f kg" % kg if kg < 1_000.0 else "%.1f t" % (kg / 1_000.0)
+
+
+def credits_text(credits):
+    return "{:,.0f} cr".format(credits)
+
+
+def net_frame(ship):
+    """The cargo net's centre and (right, up, back) in the world."""
+    right, up, forward = ship.axes()
+    back = scale(forward, -1.0)
+    r, u, b = NET_CENTRE
+    centre = add(ship.position, add(add(scale(right, r), scale(up, u)), scale(back, b)))
+    return centre, right, up, back
+
+
+def in_net(ship, point):
+    """Whether a point (from the planet's centre) lies in the cargo net beside the ship."""
+    centre, right, up, back = net_frame(ship)
+    d = sub(point, centre)
+    return (abs(dot(d, right)) <= NET_HALF[0] and abs(dot(d, back)) <= NET_HALF[1]
+            and -NET_BELOW <= dot(d, up) <= NET_ABOVE)
+
+
+def load_cargo():
+    """The loose ore rocks lying in the cargo net beside the ship (in_net_now;
+    on boarding, or as it takes off) taken out of the world into its
+    cargo, as far as its capacity goes; a rock's cell stays taken."""
+    ship, bubble = state["ship"], state["bubble"]
+    loaded = []
+    for prop, point in in_net_now():
+        if ship.cargo_mass + prop.mass > ship.params.cargo_capacity:
+            continue
+        body = prop.on
+        ship.cargo.append({"body": body.name, "direction": normalize(body.relative(point)), "mass": prop.mass,
+                           "grade": prop.grade})
+        if state["gun"] is not None and prop.body is not None and state["gun"].held == prop.body:
+            state["gun"].drop()
+        props.remove(bubble, prop, release=False)
+        loaded.append(prop.mass)
+    if loaded:
+        state["trade_note"] = "loaded %d piece%s of ore, %s" % (len(loaded), "" if len(loaded) == 1 else "s",
+                                                                 mass_text(sum(loaded)))
+
+
+def in_net_now():
+    """(prop, its position from the planet's centre) of each loose ore rock
+    in the physics or resting out of it that lies in the cargo net beside
+    the ship."""
+    ship, bubble = state["ship"], state["bubble"]
+    if ship is None or ship.crashed:
+        return []
+    ore = [p for p in props.rocks if p.grade > 0.0]
+    placed = [(p, add(p.on.centre(), p.position)) for p in ore if p.state == "resting"]
+    moving = [p for p in ore if p.state == "jolt"]
+    if bubble is not None and moving:
+        placed += [(p, bubble.to_world(t[0])) for p, t in zip(moving, props.transforms(bubble, moving))]
+    return [(prop, point) for prop, point in placed if in_net(ship, point)]
+
+
+def net_rows():
+    """The card's row of the ore in the cargo net beside the landed ship, which boarding loads."""
+    pieces = [prop for prop, _ in in_net_now()] if ship_landed(state["ship"]) else []
+    if not pieces:
+        return []
+    return [("CARGO NET", "%d piece%s, %s" % (len(pieces), "" if len(pieces) == 1 else "s",
+                                              mass_text(sum(p.mass for p in pieces))))]
+
+
+def build_net():
+    positions, normals = box()
+    for _ in range(4):
+        entity = engine.create_mesh(positions, normals=normals, name="CargoNet")
+        engine.scene.set_scale(entity, NET_POST)
+        engine.scene.set_material_vec4(entity, "baseColorFactor", NET_COLOUR + (1.0,))
+        engine.scene.set_material_float(entity, "gridStrength", 0.0)
+        engine.scene.set_render_layer_mask(entity, 1)
+        engine.scene.set_visible(entity, False)
+        state["net_posts"].append(entity)
+
+
+def draw_net(camera):
+    """The cargo net's corner posts beside the landed ship, outside ship mode."""
+    ship = state["ship"]
+    shown = state["mode"] != "ship" and ship_landed(ship)
+    if shown:
+        centre, right, up, back = net_frame(ship)
+        rotation = euler_from_basis(right, up, scale(back, -1.0))
+    for k, entity in enumerate(state["net_posts"]):
+        engine.scene.set_visible(entity, shown)
+        if not shown:
+            continue
+        corner = add(scale(right, NET_HALF[0] * (1 if k & 1 else -1)), scale(back, NET_HALF[1] * (1 if k & 2 else -1)))
+        engine.scene.set_position(entity, sub(add(add(centre, corner), scale(up, 0.5 * NET_POST[1])), camera))
+        engine.scene.set_rotation(entity, rotation)
+
+
+def cargo_value():
+    """(the nearest outpost to the ship, what its cargo would fetch there), or (None, 0)."""
+    ship = state["ship"]
+    outpost = outposts.nearest(state["outposts"], ship.position)
+    if outpost is None or not ship.cargo:
+        return outpost, 0.0
+    return outpost, state["market"].value(outpost, ship.cargo, world.time)
+
+
+def trade_rows(outpost):
+    """The outpost's card: credits, cargo, fuel, its prices and the last trade."""
+    ship, market = state["ship"], state["market"]
+    pad = state["input"] == "pad"
+    sample = lambda body: {"body": body.name, "direction": outpost.direction, "mass": 1.0, "grade": 1.0}
+    value = market.value(outpost, ship.cargo, world.time) if ship.cargo else 0.0
+    room = ship.params.fuel_capacity - ship.fuel
+    rows = [
+        ("CREDITS", credits_text(market.credits)),
+        ("CARGO", "%s, %d piece%s" % (mass_text(ship.cargo_mass), len(ship.cargo), "" if len(ship.cargo) == 1 else "s")),
+        ("FUEL", "%.0f / %.0f kg" % (ship.fuel, ship.params.fuel_capacity)),
+        ("PRICES",),
+    ] + [("%s ORE, GRADE 1" % body.name.upper(), "%.2f cr/kg" % trade.price(outpost, sample(body), world.time))
+         for body in bodies] + [
+        ("FUEL", "%.2f cr/kg" % outpost.fuel_price),
+        ("TRADE",),
+        ("SELL THE CARGO (%s)" % ("D-PAD UP" if pad else "ENTER"), credits_text(value)),
+        ("FILL THE TANKS (%s)" % ("D-PAD DOWN" if pad else "SPACE"), credits_text(room * outpost.fuel_price)),
+    ]
+    if state["trade_note"]:
+        rows.append(("LAST", state["trade_note"]))
+    return rows
+
+
 # ── Saving and loading ─────────────────────────────────────────────────────
 
 def forget_planet_props():
@@ -1322,7 +1571,8 @@ def ship_record(ship):
         return None
     return {"position": list(ship.position), "velocity": list(ship.velocity), "orientation": list(ship.orientation),
             "angular_velocity": list(ship.angular_velocity), "on_ground": ship.on_ground, "resting": ship.resting,
-            "crashed": ship.crashed}
+            "crashed": ship.crashed, "fuel": ship.fuel,
+            "cargo": [dict(item, direction=list(item["direction"])) for item in ship.cargo]}
 
 
 def save_game(path=None):
@@ -1347,11 +1597,26 @@ def save_game(path=None):
         "taken": [list(key) for key in sorted(world.taken_rocks.keys)],
         "props": props.records(bubble),
         "contacts": scanner.records(),
+        "market": state["market"].record(state["outposts"]),
     }
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(data, f)
     os.replace(path + ".tmp", path)
     return data
+
+
+def restore_market(record):
+    """The credits and the outposts' supplies from a save's record; the
+    supplies of outposts not found yet, or about to be looked for again
+    on a planet built again, wait in supply_pending."""
+    if record is None:
+        state["market"] = Market()
+        return
+    rebuilt = state["outpost_regenerations"] != world.regenerations
+    found = {o.name for o in state["outposts"] if not (rebuilt and o.body is planet)}
+    state["market"].restore(record, [o for o in state["outposts"] if o.name in found])
+    state["supply_pending"] = {name: {body: tuple(value) for body, value in supplies.items()}
+                               for name, supplies in record["supply"].items() if name not in found}
 
 
 def load_game(path=None):
@@ -1398,7 +1663,9 @@ def load_game(path=None):
     state["ship"] = None if s is None else flight.Ship(
         position=tuple(s["position"]), velocity=tuple(s["velocity"]), orientation=tuple(s["orientation"]),
         angular_velocity=tuple(s["angular_velocity"]), on_ground=s["on_ground"], resting=s["resting"],
-        crashed=s["crashed"])
+        crashed=s["crashed"], fuel=s.get("fuel"),
+        cargo=[dict(item, direction=tuple(item["direction"])) for item in s.get("cargo", [])])
+    restore_market(data.get("market"))
     state["controls"] = flight.Controls(throttle=data["controls"]["throttle"], assist=data["controls"]["assist"])
     parked = data["parked"]
     state["parked"] = (by_name[parked[0]], tuple(parked[1])) if parked is not None else None
@@ -1420,6 +1687,7 @@ def load_game(path=None):
 
 def frame(dt):
     started = world.begin_frame(viewpoint())
+    update_outposts()
     set_down_on_moon()
     if started and state["teleport_when_known"]:
         teleport(state["teleport_when_known"])
@@ -1435,6 +1703,10 @@ def frame(dt):
         if not state["scripted_controls"]:
             read_ship_controls(dt)
         fly_ship(dt)
+        landed = ship_landed(state["ship"])
+        if state["was_landed"] and not landed:
+            load_cargo()
+        state["was_landed"] = landed
     elif state["mode"] == "foot":
         if not state["scripted_controls"]:
             read_foot_controls()
@@ -1484,6 +1756,8 @@ def frame(dt):
     ground = world.site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
+    pads.draw(camera)
+    draw_net(camera)
     props.draw(state["bubble"], camera)
     place_viewmodel(dt, camera)
     collider_probes.end_frame()
@@ -1558,8 +1832,23 @@ def update_cockpit(right, up, forward, view_rotation):
         "density": density,
         "dynamic_pressure": 0.5 * density * speed * speed,
         "glow": glow,
+        **ship_readings(),
         **scan_readings(),
     })
+
+
+def ship_readings():
+    """The ship's fuel, the speed it can still gain (Ship.delta_v), and its
+    cargo and what that would fetch at the nearest outpost, for the displays."""
+    ship = state["ship"]
+    outpost, value = cargo_value()
+    return {
+        "fuel": ship.fuel,
+        "fuel_capacity": ship.params.fuel_capacity,
+        "delta_v": ship.delta_v(),
+        "cargo": mass_text(ship.cargo_mass) if ship.cargo else "empty",
+        "cargo_value": (outpost.name if outpost is not None else "-", credits_text(value)),
+    }
 
 
 def ship_velocity():
@@ -1634,6 +1923,12 @@ def update_cards():
     debug text is on, the debug card; neither while the controls sheet is
     open."""
     view_card, debug_card = state["cards"]
+    trade_card = state["trade_card"]
+    outpost = outpost_here()
+    if outpost is not None and not state["help"].visible:
+        trade_card.update("OUTPOST %s, THE %s" % (outpost.name.upper(), outpost.body.name.upper()),
+                          trade_rows(outpost))
+    trade_card.show(outpost is not None and not state["help"].visible)
     if state["help"].visible:
         view_card.show(False)
         debug_card.show(False)
@@ -1650,6 +1945,8 @@ def update_cards():
             ("THROTTLE", "%.0f %%" % (controls.throttle * 100.0)),
             ("ASSIST", "on" if controls.assist else "off"),
             ("TIME WARP", "x%d" % WARPS[state["warp"]]),
+            ("FUEL, DELTA-V", "%.0f kg, %.0f m/s" % (ship.fuel, ship.delta_v())),
+            ("CARGO", mass_text(ship.cargo_mass) if ship.cargo else "empty"),
             ("ORBIT AROUND THE " + body.upper(),),
             ("PERIAPSIS", "below ground" if periapsis < 0.0 else distance_text(periapsis)),
             ("APOAPSIS", "escape" if apoapsis == math.inf else distance_text(apoapsis)),
@@ -1670,8 +1967,9 @@ def update_cards():
             ("JETPACK", "%.0f %%" % (player.jet_fuel * 100.0)),
             ("STATE", stance),
             ("GUN", gun_text()),
+            ("CREDITS", credits_text(state["market"].credits)),
         ] + (tracked_rows() if state["tracked"] in props.all else [])
-          + ([("SHIP", "F to get in")] if near_boarding_point() else []))
+          + ([("SHIP", "F to get in")] if near_boarding_point() else []) + net_rows())
         view_card.show(True)
     elif state["mode"] != "ship":
         on_planet = world.body_under(viewpoint()) is world.planet
@@ -1788,6 +2086,16 @@ def current_hints():
         hints = [(("8",), "New ship on the pad"), (("9",), "New ship in orbit")]
     elif ship_landed(state["ship"]):
         hints = [(("pad:X",) if pad else ("F",), "Get out")]
+        if outpost_here() is not None:
+            # On a pad: trading, and the controls to take off with.
+            hints += [(("pad:D-pad up",) if pad else ("Enter",), "Sell the cargo"),
+                      (("pad:D-pad down",) if pad else ("Space",), "Fill the tanks")]
+            if pad:
+                return hints + [(("pad:LT", "pad:RT"), "Throttle"), (("pad:RS",), "Yaw, up, down"),
+                                (("pad:A",), "Assist"), (("pad:Y",), "Free camera"), (("pad:Start",), "Settings"),
+                                (("pad:Back",), "Controls")]
+            return hints + [(("W", "S"), "Throttle"), (("E", "Q"), "Up, down"), (("L",), "Assist"),
+                            (("R",), view), (("Tab",), "Free camera"), (("F1",), "Settings"), (("F2",), "Controls")]
     if pad:
         return hints + [(("pad:LS",), "Pitch, roll"), (("pad:RS",), "Yaw, up, down"),
                         (("pad:LT", "pad:RT"), "Throttle"), (("pad:A",), "Assist"), (("pad:B",), "Cut throttle"),
@@ -1827,6 +2135,7 @@ HELP_COLUMNS = [
         (("M",), "Right display: ORBIT / SCAN"),
         ((",", "."), "Time warp down / up"),
         (("F",), "Out, once landed"),
+        (("Enter", "Space"), "At an outpost: sell the cargo / fill the tanks"),
         (("Tab",), "Free camera"),
     ])],
     [("Ship, gamepad", [
@@ -1882,6 +2191,11 @@ HELP_COLUMNS = [
 def on_init():
     world.setup()
     build_site()
+    state["home"] = home_outpost(world)
+    state["outposts"] = [state["home"]]
+    state["outpost_regenerations"] = world.regenerations
+    begin_survey(bodies)
+    build_net()
     build_cards()
     build_ship_model()
     build_cockpit()
@@ -1930,6 +2244,12 @@ def on_init():
         engine.ecs.add_system("PlanetScanCheck", ScanCheck(), priority=-2)
     elif args.break_check:
         engine.ecs.add_system("PlanetBreakCheck", BreakCheck(), priority=-2)
+    elif args.fuel_check:
+        engine.ecs.add_system("PlanetFuelCheck", FuelCheck(), priority=-2)
+    elif args.cargo_check:
+        engine.ecs.add_system("PlanetCargoCheck", CargoCheck(), priority=-2)
+    elif args.trade_check:
+        engine.ecs.add_system("PlanetTradeCheck", TradeCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -2010,6 +2330,10 @@ def on_key(key, from_pad=False):
             get_out()
     elif key == keys.SPACE and state["mode"] == "foot":
         state["foot_controls"].jump = True
+    elif key == keys.SPACE and state["mode"] == "ship":
+        buy_fuel()
+    elif key in (keys.ENTER, keys.KP_ENTER) and state["mode"] == "ship":
+        sell_cargo()
     elif key == keys.R and state["mode"] != "foot":
         state["chase"] = not state["chase"]
     elif key == keys.U:
@@ -4380,6 +4704,385 @@ class BreakCheck(GunCheck):
         if state["player"] is not None:
             self.clear()
         self.next_body(ok)
+
+
+class FuelCheck:
+    """--fuel-check: the ship in preset 9's circular orbit, translation
+    assist off, burns its main engine at full throttle along its velocity
+    until its tanks are empty, then coasts DRY_TIME with the throttle still
+    full, then pitches up for TURN_TIME. Each flight step is measured: its
+    velocity's change less gravity's over the step, the speed the thrust
+    (and the thin air) gave it. The time the engine burnt must match the
+    tanks over the main engine's flow (main_thrust / (isp_main g0)) within
+    a step; the speed gained must match the rocket equation for the
+    ship's full and dry masses, isp_main g0 ln(m0 / m1), within
+    DV_TOLERANCE; with the tanks empty the speed gained must stay below
+    DRY_TOLERANCE, and the ship must still turn (its pitch rate above
+    TURN_RATE). Prints the figures and exits with status 0 when all hold,
+    1 otherwise."""
+
+    DV_TOLERANCE = 0.005                # of the rocket equation's
+    DRY_TIME = 2.0                      # s
+    DRY_TOLERANCE = 0.01                # m/s
+    TURN_TIME = 1.0                     # s
+    TURN_RATE = 0.3                     # rad/s
+
+    def __init__(self):
+        self.stage = "start"
+        self.gained = 0.0                # m/s from the thrust while there was fuel
+        self.dry_gained = 0.0            # m/s after
+        self.burn_time = 0.0
+        self.clock = 0.0
+
+    def __call__(self, dt):
+        if planet.tree is None:
+            return True
+        if self.stage == "start":
+            teleport(9)
+            state["scripted_controls"] = True
+            state["controls"] = flight.Controls(throttle=1.0, assist=False)
+            ship = state["ship"]
+            self.full, self.dry = ship.mass(), ship.params.dry_mass
+            original = ship.step
+
+            def measured(physics_planet, controls, step, ground=None):
+                gravity = physics_planet.gravity(ship.position)
+                velocity, fuel = ship.velocity, ship.fuel
+                original(physics_planet, controls, step, ground)
+                gained = length(sub(sub(ship.velocity, velocity), scale(gravity, step)))
+                if fuel > 0.0:
+                    self.gained += gained
+                    self.burn_time += step * min(ship.fuel_used / (ship.fuel_flow((0.0, 0.0, -ship.params.main_thrust))
+                                                                   * step), 1.0)
+                else:
+                    self.dry_gained += gained
+            ship.step = measured
+            self.stage = "burn"
+            return True
+        ship = state["ship"]
+        self.clock += dt
+        if self.stage == "burn":
+            ship.orientation = self.along(ship, ship_velocity())
+            ship.angular_velocity = (0.0, 0.0, 0.0)
+            if ship.fuel <= 0.0:
+                self.stage, self.clock = "dry", 0.0
+        elif self.stage == "dry" and self.clock >= self.DRY_TIME:
+            state["controls"] = flight.Controls(pitch=1.0, assist=False)
+            self.stage, self.clock = "turn", 0.0
+        elif self.stage == "turn" and self.clock >= self.TURN_TIME:
+            self.finish(ship)
+        return True
+
+    @staticmethod
+    def along(ship, velocity):
+        """The ship's orientation with its nose along `velocity`, its up as near its own as square to it allows."""
+        forward = normalize(velocity)
+        up = ship.axes()[1]
+        up = normalize(sub(up, scale(forward, dot(up, forward))))
+        right = cross(forward, up)
+        return flight.quat_from_basis(right, up, scale(forward, -1.0))
+
+    def finish(self, ship):
+        p = ship.params
+        flow = p.main_thrust / (p.isp_main * flight.G0)
+        expected_time = p.fuel_capacity / flow
+        expected_dv = p.isp_main * flight.G0 * math.log(self.full / self.dry)
+        rate = abs(ship.angular_velocity[0])
+        time_ok = abs(self.burn_time - expected_time) <= FLIGHT_STEP
+        dv_ok = abs(self.gained - expected_dv) <= self.DV_TOLERANCE * expected_dv
+        dry_ok = self.dry_gained <= self.DRY_TOLERANCE
+        turn_ok = rate >= self.TURN_RATE
+        print("[planet] fuel: burnt for %.3f s (the tanks over the main engine's flow: %.3f s): %s"
+              % (self.burn_time, expected_time, "ok" if time_ok else "FAILED"), flush=True)
+        print("[planet]   speed gained %.1f m/s (the rocket equation from %.0f to %.0f kg: %.1f m/s): %s"
+              % (self.gained, self.full, self.dry, expected_dv, "ok" if dv_ok else "FAILED"), flush=True)
+        print("[planet]   with the tanks empty: %.4f m/s gained in %.0f s at full throttle: %s"
+              % (self.dry_gained, self.DRY_TIME, "ok" if dry_ok else "FAILED"), flush=True)
+        print("[planet]   pitching up with no fuel: %.2f rad/s after %.0f s: %s"
+              % (rate, self.TURN_TIME, "ok" if turn_ok else "FAILED"), flush=True)
+        ok = time_ok and dv_ok and dry_ok and turn_ok
+        print("[planet]   %s" % ("passed" if ok else "FAILED"), flush=True)
+        os._exit(0 if ok else 1)
+
+
+def ore_rock(bubble, point, extent, grade):
+    """A loose ore rock (rocks.py's "rock" kind scaled by `extent`, of
+    `grade`) at `point` (in the bubble), level with the ground; its prop."""
+    up = bubble.up(point)
+    east, _ = local_frame(up)
+    points, _ = scatter_rocks.kind_data(physics, "rock")
+    hull = (points * np.array(extent)).astype(np.float32)
+    body = physics.create_convex_hull(hull, point, flight.quat_from_basis(east, up, cross(east, up)),
+                                      motion="dynamic", density=2_600.0, friction=0.8, restitution=0.05)
+    colour = rock_colour(bubble.body.index, grade)
+    entity, glow = scatter_rocks.entity("rock", extent, colour, grade)
+    radius = float(np.linalg.norm(hull, axis=1).max())
+    return props.add_rock(body, entity, 2.0 * radius, radius, None, ("hull", hull, physics.mass(body)),
+                          0.5 * extent[1], bubble.body, "rock", tuple(extent), colour, grade, glow)
+
+
+class CargoCheck:
+    """--cargo-check: the ship at rest beside the blocks (preset 8) with
+    PRELOAD kg of ore already in its cargo, and the player out of it at its
+    boarding point. Loose ore rocks of GRADE are put LIFT above the ground:
+    one of each EXTENTS in the cargo net, one OUTSIDE metres beyond the
+    net's edge, and a crate in the net. Once they have rested SETTLE
+    seconds the player gets in (F). The rocks loaded must be gone from the
+    props and in the cargo with their masses and grade, never past its
+    capacity; a rock in the net left out must have been too heavy for what
+    was left; the rock outside and the crate must still be props; and the
+    ship's mass must have risen by what was loaded and its delta-v be
+    isp_main g0 ln(m / (m - fuel)) for its new mass. Then one more ore rock
+    is put in the net and the ship climbs with translation assist: once it
+    is no longer landed that rock must be in the cargo. Prints what was
+    loaded and exits with status 0 when all hold, 1 otherwise."""
+
+    PRELOAD = 7_000.0                   # kg
+    GRADE = 0.7
+    EXTENTS = ((0.35, 0.25, 0.35), (0.45, 0.3, 0.45), (0.6, 0.45, 0.6))   # m: about 250, 500 and 1,300 kg
+    LIFT = 1.0                          # m
+    OUTSIDE = 3.0                       # m
+    SETTLE = 3.0                        # s
+    TIMEOUT = 20.0                      # s
+
+    def __init__(self):
+        self.stage, self.frames, self.clock = "start", 0, 0.0
+        self.lines, self.ok = [], True
+
+    def __call__(self, dt):
+        if planet.tree is None or state["survey"] is not None:
+            return True
+        self.frames += 1
+        self.clock += dt
+        getattr(self, self.stage)()
+        return True
+
+    def next_stage(self, stage):
+        self.stage, self.frames, self.clock = stage, 0, 0.0
+
+    def start(self):
+        teleport(8)
+        state["scripted_controls"] = True
+        self.next_stage("get_out")
+
+    def get_out(self):
+        if not ship_landed(state["ship"]) or self.clock < 1.0:
+            return
+        get_out()
+        if state["player"] is not None:
+            self.next_stage("place")
+        elif self.clock > self.TIMEOUT:
+            self.finish("the player could not get out", False)
+
+    def net_point(self, right=0.0, back=0.0):
+        """A point LIFT above the gear's feet in the net, `right` and `back` metres from its centre, in the bubble."""
+        centre, r, u, b = net_frame(state["ship"])
+        return state["bubble"].to_bubble(add(centre, add(add(scale(r, right), scale(b, back)), scale(u, self.LIFT))))
+
+    def place(self):
+        if self.clock < 1.0:
+            return
+        ship, bubble = state["ship"], state["bubble"]
+        ship.cargo = [{"body": "planet", "direction": world.site_frame()[1], "mass": self.PRELOAD, "grade": 0.5}]
+        self.inside = [ore_rock(bubble, self.net_point(-1.8 + 1.8 * k, -1.5 + 1.5 * k), extent, self.GRADE)
+                       for k, extent in enumerate(self.EXTENTS)]
+        self.outside = ore_rock(bubble, self.net_point(NET_HALF[0] + self.OUTSIDE, 0.0), self.EXTENTS[0], self.GRADE)
+        right, up, forward = ship.axes()
+        self.crate = props.spawn_crate(bubble, self.net_point(0.0, 2.5),
+                                       flight.quat_from_basis(right, up, scale(forward, -1.0)), CRATE_SIZE)
+        self.next_stage("board")
+
+    def board(self):
+        if self.clock < self.SETTLE:
+            return
+        ship = state["ship"]
+        self.mass_before, self.cargo_before = ship.mass(), ship.cargo_mass
+        in_net = [prop for prop, _ in in_net_now()]
+        get_in()
+        if state["mode"] != "ship":
+            self.finish("the player could not get in", False)
+            return
+        loaded = [p for p in self.inside if p not in props.rocks]
+        left = [p for p in self.inside if p in props.rocks]
+        cargo = ship.cargo[1:]
+        masses_ok = sorted(round(c["mass"], 3) for c in cargo) == sorted(round(p.mass, 3) for p in loaded)
+        grades_ok = all(c["grade"] == self.GRADE for c in cargo)
+        capacity = ship.params.cargo_capacity
+        fits = ship.cargo_mass <= capacity + 1e-6
+        left_ok = all(p in in_net and ship.cargo_mass + p.mass > capacity for p in left)
+        kept = self.outside in props.rocks and self.crate in props.crates
+        m = ship.mass()
+        risen = abs(m - self.mass_before - sum(p.mass for p in loaded)) <= 1e-6
+        dv_ok = abs(ship.delta_v() - ship.params.isp_main * flight.G0 * math.log(m / (m - ship.fuel))) <= 1e-6
+        self.ok = loaded and masses_ok and grades_ok and fits and left_ok and kept and risen and dv_ok
+        self.lines.append("boarding loaded %d of %d rocks in the net (%s kg) onto %.0f kg: %s; %s; the cargo %.0f of "
+                          "%.0f kg; the rock outside and the crate %s; the ship's mass %s, its delta-v %.0f m/s %s"
+                          % (len(loaded), len(self.inside), ", ".join("%.0f" % p.mass for p in loaded),
+                             self.PRELOAD, "masses and grades match" if masses_ok and grades_ok else "MISMATCH",
+                             ("left out %s kg, too heavy" % ", ".join("%.0f" % p.mass for p in left)) if left and left_ok
+                             else ("NOT ALL LOADED" if left else "none left out"), ship.cargo_mass, capacity,
+                             "kept" if kept else "NOT kept", "risen by it" if risen else "WRONG", ship.delta_v(),
+                             "as the rocket equation" if dv_ok else "WRONG"))
+        ship.cargo = ship.cargo[:1]
+        self.next_stage("place_more")
+
+    def place_more(self):
+        if self.clock < 0.5:
+            return
+        bubble = state["bubble"]
+        if bubble is None:
+            self.finish("no bubble around the landed ship", False)
+            return
+        self.last = ore_rock(bubble, self.net_point(0.0, 0.0), self.EXTENTS[0], self.GRADE)
+        self.next_stage("lift")
+
+    def lift(self):
+        if self.clock < self.SETTLE:
+            return
+        state["controls"] = flight.Controls(vertical=1.0, assist=True)
+        self.next_stage("climb")
+
+    def climb(self):
+        ship = state["ship"]
+        if ship_landed(ship) and self.clock < self.TIMEOUT:
+            return
+        loaded = self.last not in props.rocks and any(abs(c["mass"] - self.last.mass) < 1e-3 for c in ship.cargo[1:])
+        self.lines.append("taking off loaded the rock put in the net: %s" % ("yes" if loaded else "NO"))
+        self.finish(None, self.ok and loaded)
+
+    def finish(self, text, ok):
+        if text is not None:
+            self.lines.append(text)
+        for k, line in enumerate(self.lines):
+            print("[planet] %s%s" % ("cargo: " if k == 0 else "  ", line), flush=True)
+        print("[planet]   %s" % ("passed" if ok else "FAILED"), flush=True)
+        os._exit(0 if ok else 1)
+
+
+class TradeCheck:
+    """--trade-check: once the outposts are found, for the first outpost
+    on the planet and then the first on the moon: the terrain is measured
+    at RING points FLAT_SHARE of its flat radius around it, which must lie
+    within FLAT_TOLERANCE of its height; the ship is put down at rest on
+    its pad (its gear SET_DOWN_DEPTH into the ground) and, once it rests,
+    must count as there (outpost_here) with the trade card shown. Its
+    cargo is set to CARGO kg of each body's ore and its fuel to FUEL kg,
+    then the cargo is sold (Enter) and the tanks filled (Space). The
+    credits must rise by trade.sale's sum for the cargo, the outpost's
+    price for each body's ore must have fallen by 1 + kg sold /
+    SUPPLY_HALF, and the fuel must have risen by as much as the credits
+    buy, up to full, the credits falling by its price. Prints per outpost
+    the figures and exits with status 0 when both passed, 1 otherwise."""
+
+    RING = 8
+    FLAT_SHARE = 0.8
+    FLAT_TOLERANCE = 0.05               # m
+    CARGO = 1_500.0                     # kg of each body's ore
+    FUEL = 2_000.0                      # kg
+    TIMEOUT = 30.0                      # s
+
+    def __init__(self):
+        self.bodies = ["planet", "moon"]
+        self.results = []
+        self.stage, self.frames, self.clock = "measure", 0, 0.0
+
+    def __call__(self, dt):
+        if planet.tree is None or state["survey"] is not None:
+            return True
+        self.frames += 1
+        self.clock += dt
+        getattr(self, self.stage)()
+        return True
+
+    def next_stage(self, stage):
+        self.stage, self.frames, self.clock = stage, 0, 0.0
+
+    def outpost(self):
+        return next(o for o in state["outposts"][1:] if o.body.name == self.bodies[0])
+
+    def measure(self):
+        if self.frames == 1:
+            state["scripted_controls"] = True
+            o = self.outpost()
+            self.ring = [(d, o.body) for d in outposts.ring(o.direction, o.body.radius,
+                                                            self.FLAT_SHARE * o.flat_radius, self.RING)]
+            self.heights = []
+            self.rounds = ProbeRounds()
+        results = self.rounds.take()
+        if results:
+            self.heights += [height for _, height, _ in results]
+        if len(self.heights) >= self.RING:
+            self.next_stage("land")
+        elif self.rounds.idle:
+            self.rounds.ask(self.ring[len(self.heights):])
+
+    def land(self):
+        if self.frames == 1:
+            o = self.outpost()
+            up = o.direction
+            new_ship(add(o.point(), scale(up, SHIP_CLEARANCE - SET_DOWN_DEPTH)), o.body.velocity(),
+                     local_frame(up)[1], up, True)
+            state["controls"] = flight.Controls(assist=True)
+            return
+        ship = state["ship"]
+        if (ship.resting and outpost_here() is not None) or self.clock > self.TIMEOUT:
+            self.next_stage("trade")
+
+    def trade(self):
+        if self.frames < 3:
+            return                       # the cards updated with the ship there
+        o, ship, market = self.outpost(), state["ship"], state["market"]
+        lines = []
+        flat = max(abs(h - o.height) for h in self.heights)
+        flat_ok = flat <= self.FLAT_TOLERANCE
+        lines.append("the ground %.0f m around it within %.3f m of its height: %s"
+                     % (self.FLAT_SHARE * o.flat_radius, flat, "ok" if flat_ok else "FAILED"))
+        here = outpost_here()
+        there = here is o and ship.resting and state["trade_card"].visible
+        lines.append("the ship %s on its pad%s" % ("rests" if ship.resting else "does NOT rest",
+                                                   ", the trade card shown" if there else ": NOT counted as there"))
+        if not there:
+            self.finish(o, lines, False)
+            return
+        far = normalize(add(o.direction, scale(local_frame(o.direction)[0], 0.3)))
+        ship.cargo = [{"body": b.name, "direction": far if b is o.body else local_frame(o.direction)[1],
+                       "mass": self.CARGO, "grade": 0.8} for b in bodies]
+        ship.fuel = self.FUEL
+        samples = [{"body": b.name, "direction": o.direction, "mass": 1.0, "grade": 1.0} for b in bodies]
+        before = [trade.price(o, s, world.time) for s in samples]
+        credits0 = market.credits
+        expected = trade.sale(o, ship.cargo, world.time)[0]
+        on_key(keys.ENTER)
+        gained = market.credits - credits0
+        after = [trade.price(o, s, world.time) for s in samples]
+        dropped = [a * (1.0 + self.CARGO / trade.SUPPLY_HALF) / b for a, b in zip(after, before)]
+        sold_ok = not ship.cargo and abs(gained - expected) <= 1e-6 * expected
+        drop_ok = all(abs(d - 1.0) <= 1e-3 for d in dropped)
+        lines.append("sold %.0f kg of each body's ore for %s (expected %s): %s; the prices fell %s: %s"
+                     % (self.CARGO, credits_text(gained), credits_text(expected), "ok" if sold_ok else "FAILED",
+                        " and ".join("%.3f to %.3f cr/kg" % ba for ba in zip(before, after)),
+                        "ok" if drop_ok else "FAILED"))
+        credits1 = market.credits
+        on_key(keys.SPACE)
+        bought = ship.fuel - self.FUEL
+        wanted = min(ship.params.fuel_capacity - self.FUEL, credits1 / o.fuel_price)
+        paid = credits1 - market.credits
+        fuel_ok = abs(bought - wanted) <= 1e-6 and abs(paid - bought * o.fuel_price) <= 1e-6
+        lines.append("filled %.0f kg of fuel at %.2f cr/kg for %s, %.0f kg in the tanks, %s left: %s"
+                     % (bought, o.fuel_price, credits_text(paid), ship.fuel, credits_text(market.credits),
+                        "ok" if fuel_ok else "FAILED"))
+        self.finish(o, lines, flat_ok and sold_ok and drop_ok and fuel_ok)
+
+    def finish(self, outpost, lines, ok):
+        print("[planet] trade at %s on the %s:" % (outpost.name, outpost.body.name), flush=True)
+        for line in lines:
+            print("[planet]   %s" % line, flush=True)
+        print("[planet]   %s" % ("passed" if ok else "FAILED"), flush=True)
+        self.results.append(ok)
+        self.bodies.pop(0)
+        if not self.bodies:
+            os._exit(0 if all(self.results) else 1)
+        self.next_stage("measure")
 
 
 class TrunkCheck:

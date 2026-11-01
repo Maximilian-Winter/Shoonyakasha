@@ -34,7 +34,10 @@ quadtree.py does them in Python; `Body.tree` (TreeView) and `pool`
 A site on the +Z face anchors the sun's direction (by its elevation and
 azimuth seen from the site), the moon's orbit and, with `pad`, a flat pad
 in the terrain at the site's natural height, which a probe measures before
-the planet is built.
+the planet is built. Up to MAX_SITES more flat sites on either body
+(`Site`, `set_sites`) flatten the ground the same way (sites.glsl), and
+the scatter leaves their flat radius bare; `regenerate` drops the
+planet's.
 
 Probes: each frame BuildChunks also evaluates the terrain at PROBES
 directions: the ground under the viewpoint, the site, the directions of a
@@ -43,7 +46,10 @@ ground patch the caller asks for (an object with `directions` and
 `extra_probes`. Their heights come back some frames later
 (`probe_latency`): `ground`, `site_height`, `patch` and `extra_heights`,
 with the ore richness (resources.glsl) under the viewpoint and at the
-extra probes (`ground_ore`, `extra_ores`).
+extra probes (`ground_ore`, `extra_ores`). A survey (`start_survey`)
+measures a list of (direction, Body) pairs before the planet is built, in
+batches in the patch's slots; the planet waits for `end_survey`, and
+`surveyed()` gives the heights once all are back.
 
 The vegetation (vegetation.py's kinds) and, with `rocks`, the rocks on
 both bodies are scattered on the GPU each frame (vegetation_scatter.comp,
@@ -52,6 +58,7 @@ whose rocks the scatter leaves out.
 """
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -133,6 +140,7 @@ SITE_FACE = 4                    # +Z
 SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a vertex of every chunk from level 3 down
 SITE_FLAT_RADIUS = 150.0         # metres of flat pad around the site
 SITE_BLEND_RADIUS = 600.0        # metres from the site where the terrain is its own again
+MAX_SITES = 8                    # flat sites (Site) besides the site's pad; matches TerrainParams' sites
 TERRAIN_COLOUR = (-1.0, 0.0, 0.0)  # tells terrain.frag to colour the ground by its biomes, height and slope
 FACE_COLOURS = ((0.62, 0.30, 0.25), (0.25, 0.50, 0.55), (0.55, 0.55, 0.30),
                 (0.40, 0.30, 0.60), (0.30, 0.55, 0.30), (0.60, 0.42, 0.25))
@@ -260,6 +268,19 @@ class PoolView:
     @property
     def pending(self):
         return self.lod.pending
+
+
+@dataclass(frozen=True)
+class Site:
+    """A flat site on the body with index `body` (sites.glsl): within
+    `flat_radius` metres of the unit `direction` from the body's centre its
+    ground lies at `height` (m above its radius), easing into the body's
+    own terrain by `blend_radius`; the scatter leaves its flat radius bare."""
+    body: int
+    direction: tuple
+    height: float
+    flat_radius: float
+    blend_radius: float
 
 
 class Body:
@@ -443,6 +464,11 @@ class PlanetWorld:
         self.ground_base_climate = None    # (temperature, moisture) there without the offsets, on the planet
         self.ground_ore = None             # ore richness there (resources.glsl), 0 .. 1
         self.site_height = None           # natural terrain height at the site, from the probes
+        self.sites = []                    # flat sites (Site), set by set_sites
+        self.survey = []                   # (direction, Body) the probes measure before the terrain starts
+        self.survey_heights = {}           # index into survey: its height (m), as they come back
+        self.survey_cursor = 0             # the survey's index the next batch starts from
+        self.survey_round = 0              # counts surveys started and ended; batches carry it
         self.patch = None                  # (body, patch) whose heights came back last
         self.probe_requests = {}           # stamp: (terrain version, body under the viewpoint, patch, extra probes)
         self.extra_probes = []             # (direction, body) to measure the terrain's height at
@@ -651,7 +677,8 @@ class PlanetWorld:
             engine.set_buffer("VegetationDraws", self.vegetation_draws)
 
     def upload_terrain(self):
-        """The terrain's parameters, and the pad around the site once its height is known."""
+        """The terrain's parameters, the pad around the site once its height
+        is known, and the flat sites."""
         engine = self.engine
         for name, value in self.planet.terrain.items():
             engine.set_custom_vec4("planet.terrain." + name, tuple(value))
@@ -660,6 +687,15 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.terrain.site", up + (self.site_height if known else 0.0,))
         engine.set_custom_vec4("planet.terrain.siteShape",
                                (SITE_FLAT_RADIUS, SITE_BLEND_RADIUS, RADIUS, 1.0 if known and self.pad else 0.0))
+        radii = {0: RADIUS, 1: MOON_RADIUS}
+        radii.update((body.index, body.radius) for body in self.bodies)
+        unused = MAX_SITES - len(self.sites)
+        engine.set_custom_vec4_array("planet.terrain.sites",
+                                     [tuple(s.direction) + (s.height,) for s in self.sites]
+                                     + [(0.0, 0.0, 1.0, 0.0)] * unused)
+        engine.set_custom_vec4_array("planet.terrain.siteShapes",
+                                     [(s.flat_radius, s.blend_radius, float(s.body), radii[s.body]) for s in self.sites]
+                                     + [(0.0, 0.0, 0.0, 0.0)] * unused)
 
     def upload_taa(self, position):
         """Temporal anti-aliasing for the camera at `position`: this frame's
@@ -754,9 +790,9 @@ class PlanetWorld:
     # ── The terrain ───────────────────────────────────────────────────────
 
     def start_terrain(self):
-        """Once the site's natural height is known: the pad at that height, a
-        tree to build the planet with it, and a tree for each other body that
-        has none yet."""
+        """Once the site's natural height is known and no survey is under
+        way: the pad at that height, a tree to build the planet with it,
+        and a tree for each other body that has none yet."""
         self.upload_terrain()
         self.terrain_version += 1
         self.ground = None
@@ -765,19 +801,80 @@ class PlanetWorld:
         self.patch = None
         for body in self.bodies:
             if body is self.planet or not self.lod.has_tree(body.index):
-                self.lod.create_tree(body.index, body.radius, body.heights[0], body.heights[1], MAX_LEVEL,
-                                     SPLIT_FACTOR, HEIGHT_PAD)
+                self.create_tree(body)
+
+    def create_tree(self, body):
+        self.lod.create_tree(body.index, body.radius, body.heights[0], body.heights[1], MAX_LEVEL,
+                             SPLIT_FACTOR, HEIGHT_PAD)
         self.lod_version += 1
+
+    def set_sites(self, sites):
+        """The flat sites (Site, at most MAX_SITES). Each body whose sites
+        change and whose tree is made is built again."""
+        sites = list(sites)
+        if len(sites) > MAX_SITES:
+            raise ValueError("at most %d sites, not %d" % (MAX_SITES, len(sites)))
+        changed = {site.body for site in set(sites) ^ set(self.sites)}
+        self.sites = sites
+        self.upload_terrain()
+        rebuilt = [body for body in self.bodies if body.index in changed and self.lod.has_tree(body.index)]
+        if not rebuilt:
+            return
+        self.terrain_version += 1
+        self.ground = None
+        self.patch = None
+        for body in rebuilt:
+            self.lod.drop_tree(body.index)
+            self.create_tree(body)
+
+    def start_survey(self, points):
+        """Measure the terrain at `points`, (direction, Body) pairs: while
+        the planet's tree is not made the probes the ground patch would
+        use take them in turns, and the terrain does not start until
+        end_survey. Their heights come back into `survey_heights` by index."""
+        self.survey = list(points)
+        self.survey_heights = {}
+        self.survey_cursor = 0
+        self.survey_round += 1
+
+    def surveyed(self):
+        """The survey's heights in its order once every one is back, else None."""
+        if not self.survey or len(self.survey_heights) < len(self.survey):
+            return None
+        return [self.survey_heights[i] for i in range(len(self.survey))]
+
+    def end_survey(self):
+        self.survey = []
+        self.survey_heights = {}
+        self.survey_round += 1
+
+    def survey_batch(self):
+        """This frame's survey indices: up to PATCH_PROBES of those not yet
+        back, from where the last batch ended, round to the start."""
+        if not self.survey or self.lod.has_tree(self.planet.index):
+            return []
+        pending = [i for i in range(len(self.survey)) if i not in self.survey_heights]
+        if not pending:
+            return []
+        start = next((k for k, i in enumerate(pending) if i >= self.survey_cursor), 0)
+        batch = (pending[start:] + pending[:start])[:PATCH_PROBES]
+        self.survey_cursor = batch[-1] + 1
+        return batch
 
     def regenerate(self):
         """Apply changed terrain parameters: every chunk is released, the
-        site's height is measured again, the planet is built again, and its
-        taken rocks are put back."""
+        site's height is measured again, the planet's flat sites are
+        dropped, the planet is built again, and its taken rocks are put
+        back. A survey under way starts again."""
         self.lod.drop_tree(self.planet.index)
         self.taken_rocks.clear_body(self.planet.index)
         self.regenerations += 1
         self.lod_version += 1
         self.site_height = None
+        self.sites = [site for site in self.sites if site.body != self.planet.index]
+        self.survey_heights = {}
+        self.survey_cursor = 0
+        self.survey_round += 1
         self.ground = None
         self.ground_base_climate = None
         self.ground_ore = None
@@ -808,12 +905,12 @@ class PlanetWorld:
     def begin_frame(self, viewpoint=None):
         """Read back the chunks' and the probes' heights, the ground's for
         `viewpoint` (where end_frame last had it without one), and start the
-        terrain once the site's height is known. Returns True in the frame
-        it starts."""
+        terrain once the site's height is known and no survey is under way.
+        Returns True in the frame it starts."""
         if viewpoint is not None:
             self.viewpoint = viewpoint
         self.read_back_heights()
-        if not self.lod.has_tree(self.planet.index) and self.site_height is not None:
+        if not self.lod.has_tree(self.planet.index) and self.site_height is not None and not self.survey:
             self.start_terrain()
             return True
         return False
@@ -866,7 +963,7 @@ class PlanetWorld:
         if request is None or request[0] != self.terrain_version:
             return
         self.probe_latency = self.frame + 1 - stamp
-        _, ground_body, ground_direction, patch, extra = request
+        _, ground_body, ground_direction, patch, extra, surveyed = request
         here = ground_body.relative(self.viewpoint)
         moved = length(sub(scale(normalize(here), ground_body.radius), scale(ground_direction, ground_body.radius)))
         still_over = ground_body is self.body_under(self.viewpoint) and moved < GROUND_PROBE_REACH
@@ -879,6 +976,10 @@ class PlanetWorld:
         if patch is not None:
             patch[1].set_heights(probes[2:2 + len(patch[1].directions), 0])
             self.patch = patch
+        survey_round, batch = surveyed
+        if survey_round == self.survey_round:
+            for k, index in enumerate(batch):
+                self.survey_heights[index] = float(probes[2 + k, 0])
         first = PROBES - EXTRA_PROBES
         self.extra_heights = [(d, float(h)) for d, h in zip(extra, probes[first:first + len(extra), 0])]
         self.extra_climates = [(d, (float(p[2]), float(p[3])) if d[1] is self.planet else None)
@@ -937,13 +1038,18 @@ class PlanetWorld:
         _, site_up, _, _ = self.site_frame()
         ground_body = self.body_under(self.viewpoint)
         probes = [(normalize(ground_body.relative(self.viewpoint)), ground_body), (site_up, self.planet)]
+        batch = self.survey_batch()
+        if batch:
+            patch = None
+            probes += [self.survey[index] for index in batch]
+        surveyed = (self.survey_round, batch)
         probes += [(d, patch[0]) for d in patch[1].directions[:PATCH_PROBES]] if patch is not None else []
         extra = list(self.extra_probes[:EXTRA_PROBES])
         unused = ((0.0, 1.0, 0.0), self.planet)
         probes += [unused] * (PROBES - EXTRA_PROBES - len(probes))
         probes += extra + [unused] * (EXTRA_PROBES - len(extra))
         stamp = float(self.frame)
-        self.probe_requests[stamp] = (self.terrain_version, ground_body, probes[0][0], patch, extra)
+        self.probe_requests[stamp] = (self.terrain_version, ground_body, probes[0][0], patch, extra, surveyed)
         self.submit_jobs([tuple(d) + (float(body.index),) for d, body in probes], stamp)
 
     def submit_jobs(self, probes, stamp):

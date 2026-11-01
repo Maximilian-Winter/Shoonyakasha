@@ -2,8 +2,8 @@
 // (vegetation_scatter.comp, grass_scatter.comp): the sets and buffers, the
 // chunk a workgroup places plants on (one per draw of ChunkDraws), the cells
 // of a cube face's grid that chunk holds, a cell's candidate (a point
-// jittered within the cell by a hash of it, kept when it lies in the chunk
-// and within range), the ground and climate under it from the chunk's grid
+// jittered within the cell by a hash of it, kept when it lies in the chunk,
+// within range and off the flat sites), the ground and climate under it from the chunk's grid
 // unmorphed, its place on the surface as drawn (morphed), and claiming an
 // instance.
 
@@ -19,6 +19,8 @@ layout(set = 0, binding = 0) uniform TerrainParams {
     vec4 detail;
     vec4 climate;
     vec4 biomeView;
+    vec4 sites[8];
+    vec4 siteShapes[8];
 } terrain;
 
 #define VEGETATION_SET 0
@@ -50,6 +52,7 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
 #include "terrain.glsl"
 #include "biome.glsl"
 #include "morph.glsl"
+#include "sites.glsl"
 
 // The cube face whose normal is nearest the unit direction `d` (cube_sphere.FACES' order).
 int faceOf(vec3 d) {
@@ -153,7 +156,8 @@ struct Candidate {
 };
 
 // The candidate of cell k (of scatterCells' count); false when it lies in
-// another chunk or beyond `range`. `salt` tells grids apart in the hash.
+// another chunk, beyond `range` or within a flat site's flat radius
+// (sites.glsl). `salt` tells grids apart in the hash.
 bool scatterCandidate(ScatterChunk chunk, float cells, int cu0, int cv0, uint across, uint k, int salt,
                       float range, out Candidate x) {
     int cu = cu0 + int(k % across), cv = cv0 + int(k / across);
@@ -169,7 +173,9 @@ bool scatterCandidate(ScatterChunk chunk, float cells, int cu0, int cv0, uint ac
     ChunkVertex vc = gridVertex(chunk.base, x.c.x, x.c.y);
     x.position = x.w.x * va.positionU.xyz + x.w.y * vb.positionU.xyz + x.w.z * vc.positionU.xyz;
     x.distance = length(chunk.origin + x.position);
-    return x.distance <= range;
+    if (x.distance > range) return false;
+    vec3 radial = x.w.x * va.radialHeight.xyz + x.w.y * vb.radialHeight.xyz + x.w.z * vc.radialHeight.xyz;
+    return !terrainOnSite(normalize(radial), chunk.body);
 }
 
 // The ground under a candidate on the unmorphed grid: its direction from
