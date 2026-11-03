@@ -403,7 +403,8 @@ class MapView:
                 self.full_centre = at
                 self.ui.set_rect(self.full_image, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0),
                                  position=(left, top), size=(FULL_MAP, FULL_MAP))
-                self.ui.set_texture_data(self.full_image, render(grid, at, metres, FULL_PIXELS, unexplored=UNEXPLORED_FULL))
+                self.ui.set_texture_data(self.full_image,
+                                         render(grid, at, metres, FULL_PIXELS, unexplored=UNEXPLORED_FULL))
             centre = self.full_centre or at
             for name, where, colour in markers:
                 px, py = to_pixel(where, centre, metres, FULL_MAP)
