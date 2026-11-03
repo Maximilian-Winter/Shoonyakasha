@@ -271,8 +271,9 @@ class Hud:
                             ACCENT if labels[k][0] == "N" else TEXT)
             else:
                 self._place(pair, None, (0.0, 0.0))
-        self._line(mesh, (cx - 6.0, COMPASS_TOP + COMPASS_HEIGHT + 10.0), (cx, COMPASS_TOP + COMPASS_HEIGHT + 4.0), TEXT)
-        self._line(mesh, (cx + 6.0, COMPASS_TOP + COMPASS_HEIGHT + 10.0), (cx, COMPASS_TOP + COMPASS_HEIGHT + 4.0), TEXT)
+        bottom = COMPASS_TOP + COMPASS_HEIGHT
+        self._line(mesh, (cx - 6.0, bottom + 10.0), (cx, bottom + 4.0), TEXT)
+        self._line(mesh, (cx + 6.0, bottom + 10.0), (cx, bottom + 4.0), TEXT)
         self._place(self.heading_text, "%03d" % round(heading % 360.0), (cx, COMPASS_TOP + COMPASS_HEIGHT + 22.0),
                     (60, 20))
         shown = markers(sub(eye, centre), up, heading,

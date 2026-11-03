@@ -7,6 +7,13 @@ the blocks as a landmark, a static hull in the physics. The outposts on
 the planet and the moon are found by the same survey as in planet.py and
 drawn as pads.
 
+The HUD (hud.py) shows the gun's crosshair and prompts, a compass with the
+outposts, the ship and the waypoint, the jet fuel and a readout. The
+ground around the player is measured as it explores (explored_map.py) and
+shown on a minimap at the top right; M opens the full map, which frees
+the mouse and stops the player while open, and on which a left click sets
+the waypoint (cleared within WAYPOINT_REACH of it, or by a right click).
+
 The player is put down SPAWN_LIFT above the ground EAST_OF_SHIP east of
 the ship, facing north, once the terrain is built and the ground there is
 measured. Until then the camera waits 2 m above that spot.
@@ -18,14 +25,15 @@ Keys:
   right mouse            gravity gun: grab, or pull from farther; again: drop
   left mouse             punt what is held or in front; hold while holding to charge
   R + mouse              turn the held body
-  mouse wheel            the hold distance
+  mouse wheel            the hold distance; on the full map, the zoom
+  M                      the full map (Escape closes it); left click a waypoint, right click clears it
   F1                     the controls
 
 Gamepad: left stick walk, right stick look, A jump and jet, left trigger
 grab, right trigger punt, the bumpers the hold distance.
 
     python walker.py
-    python walker.py --check    put the player down, walk 10 s north, grab a crate, report and exit
+    python walker.py --check [--shot FILE]   walk 10 s north, grab a crate, open the map, report and exit
 """
 
 import argparse
@@ -47,7 +55,8 @@ from shoonyakasha.toolkit.overlay import HelpOverlay
 import flight
 from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
-from hud import Hud
+from explored_map import ExploredMap, MapView
+from hud import Hud, bearing
 from viewmodel import Viewmodel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -66,6 +75,10 @@ CHECK_CRATE = 20.0               # kg
 CHECK_AHEAD = 2.5                # m ahead of the feet the crate is dropped
 GRAB_SECONDS = 1.5               # s the check holds the grab
 OUTPOST_MARKER = (0.55, 1.0, 0.62, 1.0)
+WAYPOINT_MARKER = (1.0, 0.45, 0.85, 1.0)
+WAYPOINT_REACH = 15.0           # m along the ground from the waypoint it counts as reached
+MAP_SECONDS = 2.0               # s --check keeps the full map open
+MAP_CELLS = 200                 # cells --check wants explored by then
 SHIP_MARKER = (0.55, 0.8, 1.0, 1.0)
 
 HELP_COLUMNS = [
@@ -74,6 +87,7 @@ HELP_COLUMNS = [
         (("W", "A", "S", "D"), "Walk"),
         (("Shift", "Ctrl"), "Run / crouch"),
         (("Space",), "Jump; held in the air: jetpack"),
+        (("M",), "Map: wheel to zoom, left click a waypoint, right click to clear"),
         (("F1",), "These controls"),
     ])],
     [("Gravity gun", [
@@ -86,7 +100,7 @@ HELP_COLUMNS = [
 
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
-                    help="put the player down, walk 10 s north, grab a crate, report and exit")
+                    help="put the player down, walk 10 s north, grab a crate, open the map, report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 
@@ -126,6 +140,9 @@ state = {
     "ship_body": None,            # the ship's static hull in the bubble
     "viewmodel": None,
     "hud": None,                  # the head-up display (hud.Hud)
+    "map": None,                  # the explored ground (explored_map.ExploredMap)
+    "map_view": None,             # the minimap and the full map (explored_map.MapView)
+    "waypoint": None,             # (body, unit direction from its centre) set on the full map
     "help": None,
     "captured": False,            # whether the mouse was last asked to be captured
     "bumpers": set(),             # the gamepad bumpers held last frame
@@ -291,7 +308,7 @@ def view_basis():
 def capture_mouse():
     """The mouse captured on foot, freed while the controls show; after
     Escape freed it, captured again by a click."""
-    wanted = foot.player is not None and not state["help"].visible
+    wanted = foot.player is not None and not state["help"].visible and not state["map_view"].open
     if wanted != state["captured"]:
         engine.input.set_mouse_captured(wanted)
         state["captured"] = wanted
@@ -329,18 +346,28 @@ def place_viewmodel(dt, camera):
     viewmodel.update(dt, view_basis(), foot.look_delta, player, gun, held)
 
 
+def markers(body):
+    """(name, position from the planet's centre, colour) of the outposts
+    on `body`, the ship on the planet and the waypoint on `body`."""
+    found = [(o.name, o.point(), OUTPOST_MARKER) for o in state["outposts"] if o.body is body]
+    if state["ship"] is not None and body is planet:
+        found.append(("Ship", state["ship"][0], SHIP_MARKER))
+    waypoint = state["waypoint"]
+    if waypoint is not None and waypoint[0] is body:
+        found.append(("Waypoint", add(body.centre(), scale(waypoint[1], body.radius)), WAYPOINT_MARKER))
+    return found
+
+
 def update_hud():
-    """The HUD on foot while the controls are hidden: the ship and the
-    outposts on the body under the player as compass markers."""
+    """The HUD on foot while the controls and the full map are hidden, with
+    `markers` on the compass."""
     hud, player = state["hud"], foot.player
-    shown = player is not None and not state["help"].visible
+    shown = player is not None and not state["help"].visible and not state["map_view"].open
     hud.show(shown)
     if not shown:
         return
     body = foot.bubble.body
-    targets = [(o.name, o.point(), OUTPOST_MARKER) for o in state["outposts"] if o.body is body]
-    if state["ship"] is not None and body is planet:
-        targets.append(("Ship", state["ship"][0], SHIP_MARKER))
+    targets = markers(body)
     up = foot.bubble.up(player.feet())
     v = foot.physics.character_velocity(player.character)
     speed = length(sub(v, scale(up, dot(v, up))))
@@ -351,10 +378,13 @@ def update_hud():
 def run_check(dt):
     """--check, once on foot: walk north for CHECK_SECONDS; then a crate of
     CHECK_CRATE kg dropped CHECK_AHEAD ahead, and once it lies still the
-    view turned to it and the grab held for GRAB_SECONDS. Passes when the
-    player covered 80 % of walking speed's distance and stands on the
-    ground, and the gun holds the crate. With --shot, screenshots while
-    walking (SHOT_SECONDS in) and while holding (FILE with _hold added)."""
+    view turned to it and the grab held for GRAB_SECONDS; then the full
+    map open for MAP_SECONDS and a waypoint set on it by a click, and the
+    map shown half a second more. Passes when the player covered 80 % of
+    walking speed's distance and stands on the ground, the gun holds the
+    crate, at least MAP_CELLS cells are explored and the waypoint is
+    set. With --shot, screenshots while walking (SHOT_SECONDS in), while
+    holding (FILE with _hold added) and of the map (with _map added)."""
     player = foot.player
     if player is None:
         return
@@ -397,7 +427,75 @@ def run_check(dt):
                 screenshot(base + "_hold" + ext)
             print("[walker] grabbed the %.0f kg crate %.1f m ahead: %s" % (CHECK_CRATE, CHECK_AHEAD,
                   "passed" if held else "FAILED"), flush=True)
-            os._exit(0 if check["walk_ok"] and held else 1)
+            check["held_ok"] = held
+            foot.gun_controls.grab = False
+            state["map_view"].set_open(True)
+            check["stage"], check["time"] = "map", 0.0
+    elif stage == "map":
+        if t >= MAP_SECONDS:
+            view = state["map_view"]
+            width, height = view.ui.get_canvas_size(view.canvas)
+            set_waypoint((0.5 * width + 120.0, 0.5 * height - 160.0))
+            body = foot.bubble.body
+            cells = state["map"].grids[body.name].measured
+            waypoint = state["waypoint"]
+            map_ok = cells >= MAP_CELLS and waypoint is not None and waypoint[0] is body
+            check["stage"], check["time"] = "map shown", 0.0
+            check["map_ok"] = map_ok
+            print("[walker] %d cells explored, a waypoint set on the map: %s"
+                  % (cells, "passed" if map_ok else "FAILED"), flush=True)
+    elif stage == "map shown":
+        if t >= 0.5:
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_map" + ext)
+            os._exit(0 if check["walk_ok"] and check["held_ok"] and check["map_ok"] else 1)
+
+
+def update_map(dt):
+    """The ground around the player measured, the waypoint cleared once
+    reached, and the minimap and full map drawn on foot while the
+    controls are hidden."""
+    view, player = state["map_view"], foot.player
+    shown = player is not None and not state["help"].visible
+    view.show(shown)
+    if player is None:
+        return
+    body = foot.bubble.body
+    feet = foot.bubble.body_relative(player.feet())
+    explored = state["map"]
+    explored.probe(body, feet, EXTRA_PROBES, yield_to=bool(foot.props.needs_ground(foot.bubble)))
+    up = normalize(feet)
+    waypoint = state["waypoint"]
+    if waypoint is not None and waypoint[0] is body and body.radius * math.acos(
+            max(-1.0, min(1.0, dot(up, waypoint[1])))) <= WAYPOINT_REACH:
+        state["waypoint"] = None
+        print("[walker] waypoint reached", flush=True)
+    if not shown:
+        return
+    grid = explored.grid(body, up)
+    at = grid.index(up)
+    heading = bearing(up, view_basis()[2]) or 0.0
+    cells = []
+    for name, position, colour in markers(body):
+        where = grid.index(normalize(sub(position, body.centre())))
+        if where is not None:
+            cells.append((name, where, colour))
+    view.update(dt, grid, at, heading, cells)
+
+
+def set_waypoint(canvas_point):
+    """The waypoint at the cell under a point of the open full map's canvas."""
+    view = state["map_view"]
+    if foot.player is None or not view.open:
+        return False
+    where = view.click(canvas_point)
+    if where is None:
+        return False
+    body = foot.bubble.body
+    grid = state["map"].grid(body, normalize(foot.bubble.body_relative(foot.player.feet())))
+    state["waypoint"] = (body, grid.direction(where[0], where[1]))
+    return True
 
 
 def screenshot(path):
@@ -414,13 +512,14 @@ def frame(dt):
     if foot.player is not None:
         if args.check:
             run_check(dt)
-        else:
+        elif not state["map_view"].open:
             foot.read_controls(engine.input)
             read_bumpers()
     world.time += dt
     latency = world.probe_latency * state["frame_ms"] / 1000.0
     foot.props.fly(world.time - clock, latency)
-    foot.step(dt, state["position"], state["position"], latency, active=foot.player is not None)
+    active = foot.player is not None and not state["map_view"].open
+    foot.step(dt, state["position"], state["position"], latency, active=active)
     foot.props.probe(foot.bubble, EXTRA_PROBES)
     place_eye()
     capture_mouse()
@@ -438,6 +537,7 @@ def frame(dt):
     place_ship(camera)
     place_viewmodel(dt, camera)
     update_hud()
+    update_map(dt)
     foot.end_frame()
     state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * dt * 1000.0
     return True
@@ -453,6 +553,9 @@ def on_init():
     state["viewmodel"] = Viewmodel(engine, box())
     state["hud"] = Hud(engine)
     state["hud"].show(False)
+    state["map"] = ExploredMap(world)
+    state["map_view"] = MapView(engine)
+    state["map_view"].show(False)
     state["help"] = HelpOverlay(engine, "CONTROLS", HELP_COLUMNS, footer="F1 to close")
     state["help"].show(False)
     _, up, _, north = world.site_frame()
@@ -462,18 +565,41 @@ def on_init():
 
 
 def on_key(key):
+    view = state["map_view"]
     if key == keys.F1:
         state["help"].show(not state["help"].visible)
     elif key == keys.ESCAPE and state["help"].visible:
         state["help"].show(False)
+    elif key == keys.M and foot.player is not None:
+        view.set_open(not view.open)
+    elif key == keys.ESCAPE and view.open:
+        view.set_open(False)
+
+
+def on_mouse_button(button, pressed):
+    """On the open full map: a left click sets the waypoint, a right click clears it."""
+    view = state["map_view"]
+    if not pressed or not view.open:
+        return
+    if button == keys.MOUSE_RIGHT:
+        state["waypoint"] = None
+    elif button == keys.MOUSE_LEFT:
+        x, y = engine.input.get_mouse_position()
+        width, height = view.ui.get_canvas_size(view.canvas)
+        fb = engine.framebuffer_size
+        if fb[0] > 0 and fb[1] > 0:
+            set_waypoint((x * width / fb[0], y * height / fb[1]))
 
 
 def on_scroll(x_offset, y_offset):
-    if foot.player is not None:
+    if state["map_view"].open:
+        state["map_view"].zoom_by(y_offset)
+    elif foot.player is not None:
         foot.gun_controls.distance += y_offset
 
 
 engine.set_on_init(on_init)
 engine.set_on_key_pressed(on_key)
 engine.input.set_on_mouse_scroll(on_scroll)
+engine.input.set_on_mouse_button(on_mouse_button)
 engine.run()

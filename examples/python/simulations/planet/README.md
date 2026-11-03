@@ -35,11 +35,11 @@ python planet.py --trade-check     # land on an outpost on the planet and on the
 
 The capture tour and the checks are in [`checks.py`](checks.py).
 
-[`walker.py`](walker.py) is the planet on foot, as a game: the player starts beside the parked ship at Base with the gravity gun (`shoonyakasha.planet.on_foot`), on the same planet, with the outposts found by the same survey.
+[`walker.py`](walker.py) is the planet on foot, as a game: the player starts beside the parked ship at Base with the gravity gun (`shoonyakasha.planet.on_foot`), on the same planet, with the outposts found by the same survey. Its HUD ([`hud.py`](hud.py)) shows the gun's crosshair and prompts, a compass with the outposts, the ship and a waypoint, the jet fuel and a readout; the ground the player explores is measured with the extra probes ([`explored_map.py`](explored_map.py)) and drawn on a minimap and, with **M**, a full map where a click sets the waypoint.
 
 ```
 python walker.py
-python walker.py --check [--shot FILE]   # put the player down, walk 10 s north, report and exit
+python walker.py --check [--shot FILE]   # walk 10 s north, grab a crate, open the map, report and exit
 ```
 
 With `--play` the game starts on foot beside the ship, parked on the Base outpost's pad. The places and crates (**0 – 9**) and the keys that change the world (**N**, **M / J**, **H / G**, **Z / X**, **T / Y**, **B / V**) do nothing, the settings menu has no planet section, and the hint bar and the controls leave them out; **M** still turns the ship's right display and **T** still tracks on foot. Once the ship has crashed, **8** makes a new one at Base.
