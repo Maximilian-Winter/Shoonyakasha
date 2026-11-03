@@ -12,7 +12,8 @@ layout(set = CAMERA_SET, binding = 0) uniform CameraUBO {
     mat4 prevViewProj;     // the frame before's projection times view (the camera turns about its origin)
     vec4 taa;              // xy: this frame's jitter in clip units; z: 1 with temporal anti-aliasing;
                            // w: 1 when the history is to be dropped
-    vec4 taaMotion;        // xyz: the camera's position now less the frame before's (m)
+    vec4 taaMotion;        // xyz: the camera's position now less the frame before's, from the centre of the
+                           // body under it (m)
 } camera;
 
 // A clip position moved by this frame's jitter (none without temporal

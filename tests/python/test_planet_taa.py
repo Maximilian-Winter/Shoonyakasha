@@ -3,7 +3,8 @@ upload_taa, the planet pipeline's TAA passes): the Halton sequence, the
 jitter's cycle of distinct points within half a pixel whose mean is near
 the pixel's centre; the values handed over each frame with a fake engine
 (the history dropped on the first frame, after the camera jumps and after
-turning it back on, the camera's motion since the frame before, nothing
+turning it back on, the camera's motion since the frame before relative
+to the body under it, nothing
 jittered while it is off); and the pipeline: TAA after every pass that
 draws into hdrColor and before Atmosphere, its history persistent and
 copied after it, the atmosphere reading its result, and the passes whose
@@ -67,6 +68,29 @@ class UploadTest(unittest.TestCase):
     def test_a_jump_drops_the_history(self):
         self.world.upload_taa(self.start)
         self.world.upload_taa((planet_world.TAA_RESET_DISTANCE * 1.5, 0.0, planet_world.RADIUS))
+        self.assertEqual(self.taa()[0][3], 1.0)
+
+    def test_motion_is_relative_to_the_body_under_the_camera(self):
+        class Orbit:
+            influence = 50_000.0
+
+            def position(self, time):
+                return (2_000_000.0 + 1_000.0 * time, 0.0, 0.0)
+
+            def velocity(self, time):
+                return (1_000.0, 0.0, 0.0)
+
+        world = self.world
+        moon = planet_world.Body(1, "moon", 25_000.0, None, world, orbit=Orbit(), floor=-2_000.0,
+                                 heights=(-2_000.0, 1_500.0))
+        world.bodies.append(moon)
+        world.upload_taa(planet_world.add(moon.centre(), (0.0, 0.0, 25_002.0)))
+        world.physics.time += 1.0 / 60.0
+        world.upload_taa(planet_world.add(moon.centre(), (0.5, 0.0, 25_002.0)))
+        (_, _, on, reset), motion = self.taa()
+        self.assertEqual((on, reset), (1.0, 0.0))
+        np.testing.assert_allclose(motion, (0.5, 0.0, 0.0, 0.0), atol=1e-6)
+        world.upload_taa(self.start)
         self.assertEqual(self.taa()[0][3], 1.0)
 
     def test_off_jitters_nothing_and_turning_on_drops_the_history(self):

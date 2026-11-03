@@ -8,7 +8,8 @@
 //
 // A pixel's point is rebuilt from its depth (reverse-Z: 0 is the sky, taken
 // as a direction) with this frame's jitter taken out, moved by how far the
-// camera moved since the frame before (camera.taaMotion), and projected
+// camera moved since the frame before relative to the body under it
+// (camera.taaMotion; points on that body keep their place), and projected
 // with the frame before's projection and view (camera.prevViewProj) to find
 // where it was then. The history there (historyCatmullRom) is clamped to
 // the colours of the pixel's 3 x 3 neighbourhood in YCoCg (stale colours

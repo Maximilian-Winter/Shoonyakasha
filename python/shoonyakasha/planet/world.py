@@ -453,7 +453,7 @@ class PlanetWorld:
         self.ocean = True
         self.taa = True                    # temporal anti-aliasing
         self.taa_frame = 0                 # frames drawn with it, for the jitter
-        self.taa_previous = None           # the camera's position the frame before, while it is on
+        self.taa_previous = None           # (body, the camera's position from its centre) the frame before, while it is on
         self.wireframe = False
         self.colour_mode = 0
         self.frozen = False
@@ -700,22 +700,27 @@ class PlanetWorld:
     def upload_taa(self, position):
         """Temporal anti-aliasing for the camera at `position`: this frame's
         jitter, whether it is on, whether the history is dropped (the first
-        frame, after turning it on, or after the camera jumped more than
-        TAA_RESET_DISTANCE), and how far the camera moved since the frame
-        before, subtracted in double."""
+        frame, after turning it on, when the body under the camera changes,
+        or after the camera jumped more than TAA_RESET_DISTANCE), and how
+        far the camera moved since the frame before relative to the body
+        under it (body_under), subtracted in double, so that the ground
+        under the camera keeps its history while that body moves."""
         engine = self.engine
         if not self.taa:
             self.taa_previous = None
             engine.set_custom_vec4("planet.taa", (0.0, 0.0, 0.0, 1.0))
             engine.set_custom_vec4("planet.taaMotion", (0.0, 0.0, 0.0, 0.0))
             return
+        body = self.body_under(position)
+        here = body.relative(position)
         previous = self.taa_previous
-        motion = sub(position, previous) if previous is not None else (0.0, 0.0, 0.0)
-        reset = previous is None or length(motion) > TAA_RESET_DISTANCE
+        same_body = previous is not None and previous[0] is body
+        motion = sub(here, previous[1]) if same_body else (0.0, 0.0, 0.0)
+        reset = not same_body or length(motion) > TAA_RESET_DISTANCE
         jitter = taa_jitter(self.taa_frame, self.engine.framebuffer_size)
         engine.set_custom_vec4("planet.taa", (jitter[0], jitter[1], 1.0, 1.0 if reset else 0.0))
         engine.set_custom_vec4("planet.taaMotion", tuple(motion) + (0.0,))
-        self.taa_previous = position
+        self.taa_previous = (body, here)
         self.taa_frame += 1
 
     def upload_climate(self):
