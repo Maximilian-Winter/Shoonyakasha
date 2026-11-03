@@ -19,6 +19,7 @@ from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.character import Controls as FootControls
 from shoonyakasha.planet.character import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from shoonyakasha.planet.nearby_trees import listed_keys
+from shoonyakasha.planet.on_foot import COLLIDER_RADIUS
 from shoonyakasha.planet.props import yaw_rotation
 from shoonyakasha.planet.rocks import ORE_ROCKS, rock_colour
 from shoonyakasha.planet.vec import (add, cross, dot, length, local_frame, normalize, quat_from_basis, quat_rotate,
@@ -32,9 +33,9 @@ from scanner import CONTACT
 import trade
 
 from __main__ import (
-    CAPTURES, COLLIDER_RADIUS, CRATE_DENSITY, CRATE_SIZE, DAY_SUN, FLIGHT_STEP, NET_HALF, ORBIT_HEIGHT, PIXEL_ANGLE,
+    CAPTURES, CRATE_DENSITY, CRATE_SIZE, DAY_SUN, FLIGHT_STEP, NET_HALF, ORBIT_HEIGHT, PIXEL_ANGLE,
     SET_DOWN_DEPTH, SHIP_CLEARANCE, SHIP_REACH, WARPS, bodies, change_terrain, contact_text, credits_text,
-    distance_text, drop_bubble, engine, ensure_bubble, get_in, get_out, go_on_foot, in_net_now, load_game,
+    distance_text, drop_bubble, engine, ensure_bubble, foot, get_in, get_out, go_on_foot, in_net_now, load_game,
     moon_body, moon_spot, nearby_trees, net_frame, new_seed, new_ship, on_key, outpost_here, physics, planet,
     prop_state, props, save_game, scanner, scatter_rocks, set_colour_mode, set_wireframe, ship_landed,
     ship_velocity, state, teleport, trunks, viewpoint, world)
@@ -997,7 +998,7 @@ class PropRestCheck:
         if self.frames < self.PLACE_FRAMES:
             return
         bubble = ensure_bubble()
-        terrain = state["terrain_collider"]
+        terrain = foot.fine
         if terrain.patch is None or not terrain.covers(bubble.to_bubble(state["position"]), self.GRID_REACH + 2.0):
             return
         self.drop(bubble, terrain.patch)
@@ -1057,7 +1058,7 @@ class PropRestCheck:
         if self.clock < self.HOLD_SECONDS:
             return
         self.held_move = self.largest_move()
-        bubble = state["bubble"]
+        bubble = foot.bubble
         bubble.listeners.append(self.count_rebase)
         self.next_stage("move")
 
@@ -1092,9 +1093,9 @@ class PropRestCheck:
               % (self.SETTLE_SECONDS, self.asleep, self.frozen), flush=True)
         print("[planet]   largest move over the next %.0f s: %.4f m" % (self.HOLD_SECONDS, self.held_move), flush=True)
         print("[planet]   after %d rebases (%d terrain meshes built): largest move %.4f m"
-              % (self.rebases, state["terrain_collider"].builds, moved), flush=True)
+              % (self.rebases, foot.fine.builds, moved), flush=True)
         if not ok:
-            patch = state["terrain_collider"].patch
+            patch = foot.fine.patch
             for k, (crate, now, rested) in enumerate(zip(props.crates, self.positions(), self.rested)):
                 active = crate.body is not None and physics.is_active(crate.body)
                 if length(sub(now, rested)) > self.TOLERANCE or active:
@@ -1104,7 +1105,7 @@ class PropRestCheck:
                     where = ", awake" if active else ""
                     where += ", on the coarse mesh" if crate.body is not None and crate.far else ""
                     where += ", " + crate.state if crate.body is None else ""
-                    rocks_near = [length(sub(add(state["bubble"].origin, physics.get_transform(r.body)[0]), rested))
+                    rocks_near = [length(sub(add(foot.bubble.origin, physics.get_transform(r.body)[0]), rested))
                                   - r.radius for r in scatter_rocks.rocks.values()]
                     if rocks_near:
                         where += ", %.2f m from a fixed rock where it rested" % max(min(rocks_near), 0.0)
@@ -1229,11 +1230,11 @@ class WalkCheck:
         if self.frames < self.PLACE_FRAMES or world.ground is None:
             return
         go_on_foot()
-        if state["player"] is not None:
+        if foot.player is not None:
             self.next_stage("settle")
 
     def settle(self, dt):
-        player = state["player"]
+        player = foot.player
         if player.held or not player.on_ground:
             self.clock = 0.0
         if self.clock >= self.SETTLE_SECONDS:
@@ -1244,7 +1245,7 @@ class WalkCheck:
         self.distance = 0.0
         self.ground_time = self.time = 0.0
         self.low, self.high = math.inf, -math.inf
-        self.last = state["bubble"].body_relative(state["player"].feet())
+        self.last = foot.bubble.body_relative(foot.player.feet())
         self.next_sample = self.SAMPLE_EVERY
         self.mesh_above = self.mesh_below = 0.0     # m the mesh was above / below the drawn surface at most
         self.turns = 0
@@ -1255,8 +1256,8 @@ class WalkCheck:
         """The gap between the capsule's lower sphere and the nearest of
         the mesh's triangles within two grid cells of the feet (negative
         where it sinks in), or None off the mesh."""
-        player, bubble = state["player"], state["bubble"]
-        patch = state["terrain_collider"].patch
+        player, bubble = foot.player, foot.bubble
+        patch = foot.fine.patch
         feet = bubble.body_relative(player.feet())
         xy = patch.offset(feet) if patch is not None else None
         if xy is None:
@@ -1276,8 +1277,8 @@ class WalkCheck:
         return nearest - PLAYER_RADIUS
 
     def lap(self, dt):
-        player, bubble = state["player"], state["bubble"]
-        controls = state["foot_controls"]
+        player, bubble = foot.player, foot.bubble
+        controls = foot.controls
         controls.forward, controls.strafe = 1.0, 0.0
         controls.run = self.speeds[0] == "run"
         controls.crouch = controls.jet = controls.jump = False
@@ -1296,7 +1297,7 @@ class WalkCheck:
             self.second = (self.time, self.distance)
         if player.on_ground and not player.held:
             self.ground_time += dt
-            on_terrain = physics.character_ground(player.character)[3] == state["terrain_collider"].mesh
+            on_terrain = physics.character_ground(player.character)[3] == foot.fine.mesh
             gap = self.gap() if on_terrain else None
             if gap is not None:
                 self.low, self.high = min(self.low, gap), max(self.high, gap)
@@ -1309,7 +1310,7 @@ class WalkCheck:
     def sample(self, dt):
         """Standing still with the level of detail frozen: the mesh against
         the drawn surface around the feet, once ChunkPool comes back."""
-        controls = state["foot_controls"]
+        controls = foot.controls
         controls.forward = 0.0
         if self.frames == 1:
             self.waited = 0.0
@@ -1327,8 +1328,8 @@ class WalkCheck:
             return
         gpu = np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, VERTICES_PER_CHUNK,
                                                                         FLOATS_PER_VERTEX)
-        bubble, patch = state["bubble"], state["terrain_collider"].patch
-        feet = bubble.body_relative(state["player"].feet())
+        bubble, patch = foot.bubble, foot.fine.patch
+        feet = bubble.body_relative(foot.player.feet())
         east, north = local_frame(normalize(feet))
         points = [feet] + [add(feet, add(scale(east, self.SAMPLE_RING * math.cos(a)),
                                          scale(north, self.SAMPLE_RING * math.sin(a))))
@@ -1380,24 +1381,24 @@ class GunCheck(WalkCheck):
         self.start_body()
 
     def start_lap(self):
-        state["foot_controls"] = FootControls()
+        foot.controls = FootControls()
         self.begin()
 
     def crate_ahead(self, mass, distance=None):
         """A crate of `mass` kg on the view's line, its centre `distance`
         m from the eye (where the gun holds it when None), turned with
         the view."""
-        player, gun = state["player"], state["gun"]
+        player, gun = foot.player, foot.gun
         right, up, forward = player.basis()
         if distance is None:
             distance = gun.hold_distance + 0.5 * math.sqrt(3.0) * CRATE_SIZE
-        return props.spawn_crate(state["bubble"], add(player.eye(), scale(forward, distance)),
+        return props.spawn_crate(foot.bubble, add(player.eye(), scale(forward, distance)),
                                  quat_from_basis(right, up, scale(forward, -1.0)), CRATE_SIZE, mass=mass)
 
     def grab(self):
         """The grab control held for GRAB_TIME from the stage's 3rd frame;
         True once GRAB_WAIT more has passed."""
-        controls = state["gun_controls"]
+        controls = foot.gun_controls
         if self.frames == 3:
             self.grab_clock = self.clock
         pressed = self.clock - self.grab_clock if self.frames >= 3 else -1.0
@@ -1405,13 +1406,13 @@ class GunCheck(WalkCheck):
         return pressed >= self.GRAB_TIME + self.GRAB_WAIT
 
     def off_hold_point(self):
-        player, gun = state["player"], state["gun"]
+        player, gun = foot.player, foot.gun
         p = physics.get_transform(gun.held)[0]
         return length(sub(p, gun.hold_point(player.eye(), player.basis()[2])))
 
     def clear(self):
-        state["gun"].drop()
-        props.clear(state["bubble"])
+        foot.gun.drop()
+        props.clear(foot.bubble)
 
     def next_body(self, ok):
         self.results.append(ok)
@@ -1457,7 +1458,7 @@ class HoldCheck(GunCheck):
             self.crate = self.crate_ahead(self.HOLD_MASS)
         if not self.grab():
             return
-        if state["gun"].held != self.crate.body:
+        if foot.gun.held != self.crate.body:
             self.lost = "pick"
             self.finish()
             return
@@ -1466,7 +1467,7 @@ class HoldCheck(GunCheck):
     def measure(self):
         """The crate's distance from the hold point in this stage, or the
         stage noted when it was dropped; False once dropped."""
-        if state["gun"].held != self.crate.body:
+        if foot.gun.held != self.crate.body:
             self.lost = self.lost or self.stage
             return False
         self.off[self.stage] = max(self.off.get(self.stage, 0.0), self.off_hold_point())
@@ -1483,12 +1484,12 @@ class HoldCheck(GunCheck):
         if not self.measure():
             self.finish()
             return
-        player = state["player"]
+        player = foot.player
         angle = min(2.0 * math.pi - self.turned, 2.0 * math.pi * dt / self.TURN_TIME)
         player.heading = rotate(player.heading, player.up(), angle)
         self.turned += angle
         if self.turned >= 2.0 * math.pi - 1e-9:
-            self.last = state["bubble"].body_relative(player.feet())
+            self.last = foot.bubble.body_relative(player.feet())
             self.walked = 0.0
             self.next_stage("walk")
 
@@ -1496,9 +1497,9 @@ class HoldCheck(GunCheck):
         if not self.measure():
             self.finish()
             return
-        controls = state["foot_controls"]
+        controls = foot.controls
         controls.forward = 1.0
-        feet = state["bubble"].body_relative(state["player"].feet())
+        feet = foot.bubble.body_relative(foot.player.feet())
         moved = sub(feet, self.last)
         up = normalize(feet)
         self.walked += length(sub(moved, scale(up, dot(moved, up))))
@@ -1513,9 +1514,9 @@ class HoldCheck(GunCheck):
         if not self.measure():
             self.finish()
             return
-        player = state["player"]
+        player = foot.player
         if self.frames == 1:
-            state["foot_controls"].jump = True
+            foot.controls.jump = True
         if not player.on_ground:
             self.left_ground = True
             self.landed = 0.0
@@ -1528,7 +1529,7 @@ class HoldCheck(GunCheck):
         if not self.measure():
             self.finish()
             return
-        player, bubble = state["player"], state["bubble"]
+        player, bubble = foot.player, foot.bubble
         offset = sub(physics.get_transform(self.crate.body)[0], player.eye())
         if self.frames == 1:
             self.before = offset
@@ -1540,7 +1541,7 @@ class HoldCheck(GunCheck):
             self.next_stage("heavy")
 
     def heavy(self, dt):
-        gun = state["gun"]
+        gun = foot.gun
         if self.frames == 1:
             self.heavy_crate = self.crate_ahead(self.HEAVY_MASS, distance=3.0)
         if self.frames == 3:
@@ -1552,7 +1553,7 @@ class HoldCheck(GunCheck):
 
     def finish(self):
         name = self.bodies[0]
-        limit = state["gun"].p.drop_distance
+        limit = foot.gun.p.drop_distance
         heavy = self.heavy_status
         heavy_ok = (heavy == "too_heavy" and not self.heavy_held) if name == "planet" else \
             (heavy == "can_grab" and self.heavy_held)
@@ -1597,7 +1598,7 @@ class PuntCheck(GunCheck):
             self.crate = self.crate_ahead(self.masses[0])
         if not self.grab():
             return
-        if state["gun"].held != self.crate.body:
+        if foot.gun.held != self.crate.body:
             self.punts.append((self.masses[0], math.nan, 0.0, math.nan, 0.0))
             self.after_punt()
             return
@@ -1606,7 +1607,7 @@ class PuntCheck(GunCheck):
     def steady(self, dt):
         if self.clock < self.STEADY:
             return
-        player, gun = state["player"], state["gun"]
+        player, gun = foot.player, foot.gun
         forward = player.basis()[2]
         body, character = self.crate.body, player.character
         v0, p0 = physics.get_velocity(body)[0], physics.character_velocity(character)
@@ -1624,17 +1625,17 @@ class PuntCheck(GunCheck):
         if self.masses:
             self.next_stage("pick")
         else:
-            state["player"].pitch = -math.radians(89.0)
+            foot.player.pitch = -math.radians(89.0)
             self.next_stage("ground")
 
     def ground(self, dt):
-        player, bubble = state["player"], state["bubble"]
+        player, bubble = foot.player, foot.bubble
         height = length(bubble.body_relative(player.feet()))
         if self.frames == 10:
             self.start_height = height
             self.top = height
             self.left_ground = False
-            state["gun_controls"].punt = True
+            foot.gun_controls.punt = True
         elif self.frames > 10:
             self.top = max(self.top, height)
             if not player.on_ground:
@@ -1643,8 +1644,8 @@ class PuntCheck(GunCheck):
                 self.finish()
 
     def finish(self):
-        name, gun = self.bodies[0], state["gun"]
-        g = length(state["bubble"].gravity(state["player"].feet()))
+        name, gun = self.bodies[0], foot.gun
+        g = length(foot.bubble.gravity(foot.player.feet()))
         wanted_height = gun_module.MAX_RECOIL ** 2 / (2.0 * g)
         rise = self.top - self.start_height
         ok = abs(rise - wanted_height) <= self.JUMP_TOLERANCE * wanted_height
@@ -1723,7 +1724,7 @@ class PromotionCheck(GunCheck):
             if self.clock > 30.0:
                 self.finish()
             return
-        player, bubble = state["player"], state["bubble"]
+        player, bubble = foot.player, foot.bubble
         feet = player.feet()
         near = sorted((length(sub(physics.get_transform(r.body)[0], feet)), r.body)
                       for r in scatter_rocks.rocks.values())
@@ -1738,7 +1739,7 @@ class PromotionCheck(GunCheck):
     def strike(self, dt):
         """A crate of STRIKE_MASS thrown down at STRIKE_SPEED onto the
         nearest fixed rock within REACH, in view: it must come loose."""
-        player = state["player"]
+        player = foot.player
         if self.frames == 1:
             feet = player.feet()
             near = sorted((length(sub(physics.get_transform(r.body)[0], feet)), r.body)
@@ -1750,7 +1751,7 @@ class PromotionCheck(GunCheck):
                 return
             self.aim_at()
         if self.frames == self.STILL_FRAMES:
-            bubble = state["bubble"]
+            bubble = foot.bubble
             p = physics.get_transform(self.rock)[0]
             up = bubble.up(p)
             right, _, forward = player.basis()
@@ -1778,7 +1779,7 @@ class PromotionCheck(GunCheck):
         self.next_stage("aim")
 
     def aim_at(self):
-        player = state["player"]
+        player = foot.player
         to = normalize(sub(physics.get_transform(self.rock)[0], player.eye()))
         up = player.up()
         player.heading = player.level(to, up)
@@ -1789,7 +1790,7 @@ class PromotionCheck(GunCheck):
             self.aim_at()
         if self.frames < self.STILL_FRAMES:
             return
-        gun = state["gun"]
+        gun = foot.gun
         if gun.status == "too_heavy" or gun.target is None or gun.target.body != self.rock:
             self.skipped += 1
             self.next_target()
@@ -1798,8 +1799,8 @@ class PromotionCheck(GunCheck):
         self.next_stage("grab")
 
     def grab(self, dt):
-        controls = state["gun_controls"]
-        controls.grab = self.clock < 0.1 or (state["gun"].held is None and self.clock < self.GRAB_TIMEOUT)
+        controls = foot.gun_controls
+        controls.grab = self.clock < 0.1 or (foot.gun.held is None and self.clock < self.GRAB_TIMEOUT)
         if scatter_rocks.is_static_rock(self.rock) and self.clock < self.GRAB_TIMEOUT:
             return
         controls.grab = False
@@ -1808,15 +1809,15 @@ class PromotionCheck(GunCheck):
     def after(self, dt):
         if self.frames < self.STILL_FRAMES:
             return
-        controls = state["gun_controls"]
+        controls = foot.gun_controls
         controls.grab = self.frames < self.STILL_FRAMES + 6
         if controls.grab:
             return
-        state["gun"].drop()
+        foot.gun.drop()
         self.next_target()
 
     def finish(self):
-        state["gun_controls"].grab = False
+        foot.gun_controls.grab = False
         name = self.bodies[0]
         rows, ok = [], bool(self.promotions)
         for p, key in self.promotions:
@@ -1866,7 +1867,7 @@ class OrbitCrateCheck(GunCheck):
         self.start_body()
 
     def begin(self):
-        player, bubble = state["player"], state["bubble"]
+        player, bubble = foot.player, foot.bubble
         feet = bubble.body_relative(player.feet())
         up = normalize(feet)
         r = max(length(feet) + self.HEIGHT, bubble.body.radius + self.CLEAR)
@@ -1891,7 +1892,7 @@ class OrbitCrateCheck(GunCheck):
         self.next_stage("orbit")
 
     def orbit(self, dt):
-        crate, bubble = self.crate, state["bubble"]
+        crate, bubble = self.crate, foot.bubble
         body, position, velocity = prop_state(crate)
         self.farthest = max(self.farthest, length(sub(position, bubble.origin)))
         if crate.state == "flying":
@@ -1935,9 +1936,9 @@ class NearbyLists:
     def rocks(self, radius, around=None):
         """The rocks of the last list on the bubble's body within `radius` of
         `around` (relative to its centre; the player's feet when None)."""
-        bubble = state["bubble"]
+        bubble = foot.bubble
         if around is None:
-            around = bubble.body_relative(state["player"].feet())
+            around = bubble.body_relative(foot.player.feet())
         return [t for t in self.trees or [] if t.rock and t.body == bubble.body.index
                 and length(sub(t.base, around)) <= radius]
 
@@ -1990,7 +1991,7 @@ class SaveCheck(GunCheck):
         if self.clock < self.STEADY or not world.settled() or self.nearby.count < self.listed_at + 2:
             return
         self.inner, self.outer = self.rock_cells(self.INNER), self.rock_cells(self.OUTER)
-        player, bubble = state["player"], state["bubble"]
+        player, bubble = foot.player, foot.bubble
         feet = player.feet()
         near = sorted((length(sub(physics.get_transform(r.body)[0], feet)), r.body)
                       for r in scatter_rocks.rocks.values())
@@ -2016,12 +2017,12 @@ class SaveCheck(GunCheck):
         self.next_stage("wait")
 
     def wait(self, dt):
-        if (self.crate.body is not None or props.awake(state["bubble"])) and self.clock < self.WAIT:
+        if (self.crate.body is not None or props.awake(foot.bubble)) and self.clock < self.WAIT:
             return
         os.makedirs(CAPTURES, exist_ok=True)
         self.saved = save_game(self.PATH)
         self.taken = set(world.taken_rocks.keys)
-        self.crate_record = props.record(state["bubble"], self.crate)
+        self.crate_record = props.record(foot.bubble, self.crate)
         new_seed()
         self.next_stage("regenerate")
 
@@ -2034,7 +2035,7 @@ class SaveCheck(GunCheck):
             return
         load_game(self.PATH)
         self.taken_match = set(world.taken_rocks.keys) == self.taken
-        self.records_match = props.records(state["bubble"]) == self.saved["props"]
+        self.records_match = props.records(foot.bubble) == self.saved["props"]
         self.listed_at = self.nearby.count
         self.next_stage("after")
 
@@ -2046,7 +2047,7 @@ class SaveCheck(GunCheck):
         missing = {k for k in self.inner if k not in taken and k not in outer}
         shown = outer & taken
         extra = inner - self.outer
-        bubble = state["bubble"]
+        bubble = foot.bubble
         records = {tuple(r["key"]): r for r in self.saved["props"] if r["key"] is not None}
         back, worst = 0, 0.0
         for rock in props.rocks:
@@ -2277,7 +2278,7 @@ class BreakCheck(GunCheck):
     def aim(self, dt):
         if self.clock < self.STEADY:
             return
-        feet = state["player"].feet()
+        feet = foot.player.feet()
         ore = sorted((length(sub(physics.get_transform(r.body)[0], feet)), key)
                      for key, r in scatter_rocks.rocks.items() if r.kind == "boulder" and r.grade > 0.0)
         ore = [(d, key) for d, key in ore if d <= self.REACH]
@@ -2287,7 +2288,7 @@ class BreakCheck(GunCheck):
             return
         self.key = ore[0][1]
         self.boulder = scatter_rocks.rocks[self.key]
-        bubble = state["bubble"]
+        bubble = foot.bubble
         centre = physics.get_transform(self.boulder.body)[0]
         up = bubble.up(centre)
         towards = sub(feet, centre)
@@ -2326,7 +2327,7 @@ class BreakCheck(GunCheck):
 
     def finish(self, text, ok):
         print("[planet] break on the %s: %s: %s" % (self.bodies[0], text, "passed" if ok else "FAILED"), flush=True)
-        if state["player"] is not None:
+        if foot.player is not None:
             self.clear()
         self.next_body(ok)
 
@@ -2494,7 +2495,7 @@ class CargoCheck:
         if not ship_landed(state["ship"]) or self.clock < 1.0:
             return
         get_out()
-        if state["player"] is not None:
+        if foot.player is not None:
             self.next_stage("place")
         elif self.clock > self.TIMEOUT:
             self.finish("the player could not get out", False)
@@ -2502,12 +2503,12 @@ class CargoCheck:
     def net_point(self, right=0.0, back=0.0):
         """A point LIFT above the gear's feet in the net, `right` and `back` metres from its centre, in the bubble."""
         centre, r, u, b = net_frame(state["ship"])
-        return state["bubble"].to_bubble(add(centre, add(add(scale(r, right), scale(b, back)), scale(u, self.LIFT))))
+        return foot.bubble.to_bubble(add(centre, add(add(scale(r, right), scale(b, back)), scale(u, self.LIFT))))
 
     def place(self):
         if self.clock < 1.0:
             return
-        ship, bubble = state["ship"], state["bubble"]
+        ship, bubble = state["ship"], foot.bubble
         ship.cargo = [{"body": "planet", "direction": world.site_frame()[1], "mass": self.PRELOAD, "grade": 0.5}]
         self.inside = [ore_rock(bubble, self.net_point(-1.8 + 1.8 * k, -1.5 + 1.5 * k), extent, self.GRADE)
                        for k, extent in enumerate(self.EXTENTS)]
@@ -2554,7 +2555,7 @@ class CargoCheck:
     def place_more(self):
         if self.clock < 0.5:
             return
-        bubble = state["bubble"]
+        bubble = foot.bubble
         if bubble is None:
             self.finish("no bubble around the landed ship", False)
             return
@@ -2756,11 +2757,11 @@ class TrunkCheck:
         if self.frames < 10 or not settled():
             return
         go_on_foot()
-        if state["player"] is not None:
+        if foot.player is not None:
             self.next_stage("wait")
 
     def wait(self, dt):
-        player = state["player"]
+        player = foot.player
         if not player.on_ground or not trunks.trunks:
             self.clock = 0.0
             if self.frames > 60 * self.TIMEOUT:
@@ -2769,7 +2770,7 @@ class TrunkCheck:
             return
         if self.clock < self.SETTLE:
             return
-        bubble = state["bubble"]
+        bubble = foot.bubble
         feet = player.feet()
         near = []
         for key, trunk in trunks.trunks.items():
@@ -2784,7 +2785,7 @@ class TrunkCheck:
 
     @staticmethod
     def base(trunk):
-        bubble = state["bubble"]
+        bubble = foot.bubble
         return bubble.to_bubble(add(bubble.body.centre(), trunk.base))
 
     @staticmethod
@@ -2802,7 +2803,7 @@ class TrunkCheck:
             self.results.append(False)
             self.next_target()
             return
-        player, bubble = state["player"], state["bubble"]
+        player, bubble = foot.player, foot.bubble
         base = self.base(trunk)
         up = bubble.up(base)
         away = sub(player.feet(), base)
@@ -2812,13 +2813,13 @@ class TrunkCheck:
         physics.character_set_velocity(player.character, (0.0, 0.0, 0.0))
         player.heading = player.level(scale(away, -1.0), up)
         player.pitch = 0.0
-        state["foot_controls"] = FootControls()
+        foot.controls = FootControls()
         self.closest = math.inf
         self.next_stage("approach")
 
     def approach(self, dt):
         trunk = trunks.trunks.get(self.key)
-        player, bubble = state["player"], state["bubble"]
+        player, bubble = foot.player, foot.bubble
         if trunk is None:
             print("[planet]   a trunk left the bubble during its walk: FAILED", flush=True)
             self.results.append(False)
@@ -2826,12 +2827,12 @@ class TrunkCheck:
             return
         if self.clock < self.SETTLE:
             return
-        state["foot_controls"].forward = 1.0
+        foot.controls.forward = 1.0
         base = self.base(trunk)
         self.closest = min(self.closest, self.across(sub(player.feet(), base), bubble.up(base)))
         if self.clock < self.SETTLE + self.WALK:
             return
-        state["foot_controls"].forward = 0.0
+        foot.controls.forward = 0.0
         radius = trunk.radius
         wanted = radius + PLAYER_RADIUS
         ok = abs(self.closest - wanted) <= self.TOLERANCE
