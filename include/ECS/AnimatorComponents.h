@@ -17,6 +17,7 @@
 
 #include "Resources/AnimationData.h"
 #include "Animation/AnimationController.h"
+#include "Animation/Humanoid.h"
 #include "Animation/Pose.h"
 
 #include <entt/entt.hpp>
@@ -109,13 +110,18 @@ struct AnimatorComponent {
     // When set, the controller produces the pose and play() is not used
     std::shared_ptr<ControllerRuntime> controller;
 
-    // Root motion: with rootMotion set, the X and Z translation of joint
-    // rootMotionJoint (in its parent's space) is held at each clip's first
-    // frame in the pose, and its movement is collected instead.
-    // rootMotionDelta is the movement of the last evaluation, in the joint's
-    // parent space; rootMotionWorld sums it in world space until taken.
+    // The skeleton's humanoid mapping, for retargeting; nullptr when none
+    std::shared_ptr<HumanoidAvatar> humanoid;
+
+    // Root motion: with rootMotion set, the horizontal translation of joint
+    // rootMotionJoint (perpendicular to rootMotionUp, in the joint's parent
+    // space) is held at each clip's first frame in the pose, and its movement
+    // is collected instead. rootMotionUp is world up in that space, set each
+    // update. rootMotionDelta is the movement of the last evaluation, in the
+    // joint's parent space; rootMotionWorld sums it in world space until taken.
     bool rootMotion = false;
     int rootMotionJoint = -1;
+    glm::vec3 rootMotionUp{0.0f, 1.0f, 0.0f};
     glm::vec3 rootMotionDelta{0.0f};
     glm::vec3 rootMotionWorld{0.0f};
 

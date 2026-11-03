@@ -57,6 +57,7 @@ def python_inventory(source, name, native_source=None):
                         "CameraType": "int", "LightType": "int", "UIAnchor": "int",
                         "std::vector<EntityHandle>": "list[int]",
                         "std::vector<std::string>": "list[str]",
+                        "BoneMapping": "dict[str, str]",
                         "std::shared_ptr<void>": "object or None"}
         result_type = result_types.get(native_type, "See contract")
         if not re.search(r"\breturn\b", body):

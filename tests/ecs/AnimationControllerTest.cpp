@@ -389,3 +389,23 @@ TEST(RootMotion, UpdateCollectsWorldMovement) {
     TestHelpers::ExpectVec3Near(registry.get<AnimatorComponent>(root).rootMotionWorld,
                                 glm::vec3(0.5f, 0.0f, 0.0f), 1e-5f);
 }
+
+TEST(RootMotion, HorizontalFollowsWorldUpInZUpSkeletonSpace) {
+    // The model turned +90 degrees about X: skeleton -Z is world up.
+    entt::registry registry;
+    entt::entity root = registry.create();
+    registry.emplace<ECS::TransformComponent>(root).worldMatrix =
+        glm::rotate(glm::mat4(1.0f), glm::half_pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
+    auto& animator = registry.emplace<AnimatorComponent>(root, makeAnimator());
+    // Hips move 2 along skeleton X (horizontal) and 0.5 along skeleton -Z (up).
+    animator.clips.push_back(slide("stride", 0, glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(2.0f, 1.0f, -0.5f), 1.0f));
+    AnimatorEvaluator::setRootMotion(animator, true);
+    animator.play(animator.findClip("stride"));
+
+    AnimatorEvaluator::update(registry, 0.5f);
+    const auto& after = registry.get<AnimatorComponent>(root);
+    TestHelpers::ExpectVec3Near(after.rootMotionUp, glm::vec3(0.0f, 0.0f, -1.0f), 1e-5f);
+    TestHelpers::ExpectVec3Near(after.rootMotionWorld, glm::vec3(1.0f, 0.0f, 0.0f), 1e-5f);
+    // The pose keeps the vertical movement only.
+    TestHelpers::ExpectVec3Near(after.pose.translations[0], glm::vec3(0.0f, 1.0f, -0.25f), 1e-5f);
+}

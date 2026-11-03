@@ -1058,6 +1058,18 @@ cdef list _decode_names(vector[string] names):
     return [n.decode('utf-8', errors='replace') for n in names]
 
 
+cdef dict _pairs_to_dict(vector[pair[string, string]] pairs):
+    return {p.first.decode('utf-8', errors='replace'): p.second.decode('utf-8', errors='replace') for p in pairs}
+
+
+cdef vector[pair[string, string]] _dict_to_pairs(object mapping) except *:
+    cdef vector[pair[string, string]] pairs
+    if mapping:
+        for bone, joint in mapping.items():
+            pairs.push_back(pair[string, string](str(bone).encode('utf-8'), str(joint or "").encode('utf-8')))
+    return pairs
+
+
 cdef class Animation:
     """Per-model animators: clip playback with cross-fades, and entities
     attached to joints.
@@ -1256,10 +1268,11 @@ cdef class Animation:
     # ── Root motion ───────────────────────────────────────────
 
     def set_root_motion(self, uint32_t animator, bint enabled, str joint=""):
-        """Turn root motion on or off. While on, the X and Z translation of
-        ``joint`` (the skeleton's root joint when empty) stays at each clip's
-        first frame, and its movement is collected in world space; collect it
-        with ``take_root_motion``. Raises RuntimeError for an unknown joint."""
+        """Turn root motion on or off. While on, the horizontal translation
+        (perpendicular to world up) of ``joint`` (the skeleton's root joint
+        when empty) stays at each clip's first frame, and its movement is
+        collected in world space; collect it with ``take_root_motion``. Raises
+        RuntimeError for an unknown joint."""
         self._ptr.setRootMotion(animator, enabled, joint.encode('utf-8'))
 
     def is_root_motion(self, uint32_t animator):
@@ -1269,6 +1282,45 @@ cdef class Animation:
         """World-space movement (x, y, z) collected since the last call, and
         clear it."""
         return _vec3_to_tuple(self._ptr.takeRootMotion(animator))
+
+    # ── Humanoid ──────────────────────────────────────────────
+
+    def make_humanoid(self, uint32_t animator, mapping=None):
+        """Map the animator's skeleton onto the standard humanoid bones
+        ("Hips", "LeftUpperArm", ...): by joint name (Mixamo, Unreal
+        mannequin, VRM and Rigify names, then name parts), with ``mapping``
+        ({humanoid bone: joint name}) on top; an empty joint name unmaps a
+        bone. Returns the mapping made as a dict.
+
+        Raises RuntimeError for an unknown bone or joint, or naming the
+        required bones left unmapped."""
+        return _pairs_to_dict(self._ptr.makeHumanoid(animator, _dict_to_pairs(mapping)))
+
+    def is_humanoid(self, uint32_t animator):
+        return self._ptr.isHumanoid(animator)
+
+    def humanoid_mapping(self, uint32_t animator):
+        """{humanoid bone: joint name}; empty when the animator is not a humanoid."""
+        return _pairs_to_dict(self._ptr.getHumanoidMapping(animator))
+
+    def retarget_clips(self, uint32_t target, uint32_t source, clips=None, str name=""):
+        """Retarget clips of humanoid animator ``source`` (all when ``clips``
+        is None) onto humanoid animator ``target`` and add them, named as
+        ``load_clips`` names. Returns the names added."""
+        cdef vector[string] names
+        for clip in clips or ():
+            names.push_back(clip.encode('utf-8'))
+        return _decode_names(self._ptr.retargetClips(target, source, names, name.encode('utf-8')))
+
+    def load_humanoid_clips(self, uint32_t target, path, str name="", mapping=None):
+        """Read a glTF / GLB file with a skin and animations (a Mixamo
+        download exported with its skin, for example), map its skeleton as
+        ``make_humanoid`` does (``mapping`` on top), and retarget its clips
+        onto humanoid animator ``target``, named as ``load_clips`` names.
+        Returns the names added."""
+        cdef string cpp_path = str(path).encode('utf-8')
+        return _decode_names(self._ptr.loadHumanoidClips(target, cpp_path, name.encode('utf-8'),
+                                                         _dict_to_pairs(mapping)))
 
 
 # ═══════════════════════════════════════════════════════════════

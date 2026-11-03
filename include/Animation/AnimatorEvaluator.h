@@ -31,10 +31,12 @@ public:
     /// globalTransforms and boneMatrices.
     static void evaluate(AnimatorComponent& animator);
 
-    /// For every AnimatorComponent: advance(), evaluate(), add rootMotionDelta
-    /// to rootMotionWorld (through the root motion joint's parent and the
-    /// world matrix of the animator's first skinned mesh, or of its own entity
-    /// when it has none), and copy its boneMatrices into the
+    /// For every AnimatorComponent: with root motion on, set rootMotionUp to
+    /// world +Y in the root motion joint's parent space (through the world
+    /// matrix of the animator's first skinned mesh, or of its own entity when
+    /// it has none, and the parent's last global transform); advance(),
+    /// evaluate(), add rootMotionDelta to rootMotionWorld through the same
+    /// transforms, and copy its boneMatrices into the
     /// SkeletonComponent of each of its skinned meshes that holds the same
     /// skeleton, marking it dirty. Then place every entity with a
     /// JointAttachmentComponent and a transform (see placeAttachments).
@@ -57,15 +59,16 @@ public:
     static AnimatorComponent* createAnimator(entt::registry& registry, entt::entity root);
 
     /// PoseOps::sample of the clip at `time`; with the animator's root motion
-    /// on, the root motion joint's X and Z translation are then set to the
-    /// clip's at time 0.
+    /// on, the root motion joint's translation then has its movement since
+    /// time 0 perpendicular to animator.rootMotionUp taken out.
     static void sampleClip(const AnimatorComponent& animator, const AnimationClip& clip, float time, Pose& out);
 
-    /// The X and Z movement of joint `joint` from time t0 to t1 of the clip,
-    /// passing its end `wraps` times (negative: its start, playing backwards).
-    /// Y is 0.
+    /// The movement of joint `joint` perpendicular to `up` (unit length) from
+    /// time t0 to t1 of the clip, passing its end `wraps` times (negative: its
+    /// start, playing backwards).
     static glm::vec3 rootDisplacement(const AnimationClip& clip, const Skeleton& skeleton, int joint,
-                                      float t0, float t1, int wraps);
+                                      float t0, float t1, int wraps,
+                                      const glm::vec3& up = glm::vec3(0.0f, 1.0f, 0.0f));
 
     /// Turn root motion on or off. `joint` < 0 picks the skeleton's root joint.
     /// Clears the collected movement.

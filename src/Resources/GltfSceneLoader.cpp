@@ -2358,82 +2358,11 @@ std::shared_ptr<Shoonyakasha::Skeleton> GltfSceneLoader::loadSkin(
     cgltf_data* /*data*/,
     const cgltf_skin* skin)
 {
-    if (!skin || skin->joints_count == 0) return nullptr;
-
-    auto skeleton = std::make_shared<Shoonyakasha::Skeleton>();
-    skeleton->name = skin->name ? skin->name : "skeleton";
-
-    auto nodeToJoint = buildNodeToJointMap(skin);
-
-    // Read inverse bind matrices
-    std::vector<glm::mat4> inverseBindMatrices(skin->joints_count, glm::mat4(1.0f));
-    if (skin->inverse_bind_matrices) {
-        const cgltf_accessor* ibmAccessor = skin->inverse_bind_matrices;
-        for (cgltf_size i = 0; i < ibmAccessor->count && i < skin->joints_count; ++i) {
-            cgltf_float mat[16];
-            cgltf_accessor_read_float(ibmAccessor, i, mat, 16);
-            inverseBindMatrices[i] = glm::make_mat4(mat);
-        }
+    auto skeleton = readGltfSkeleton(skin);
+    if (skeleton) {
+        std::cout << "[GltfSceneLoader] Loaded skin '" << skeleton->name
+                  << "' with " << skeleton->jointCount() << " joints" << std::endl;
     }
-
-    // Build joints
-    skeleton->joints.resize(skin->joints_count);
-    for (cgltf_size i = 0; i < skin->joints_count; ++i) {
-        const cgltf_node* jointNode = skin->joints[i];
-        Shoonyakasha::Joint& joint = skeleton->joints[i];
-
-        joint.name = jointNode->name ? jointNode->name : ("joint_" + std::to_string(i));
-        joint.inverseBindMatrix = inverseBindMatrices[i];
-
-        // Get default local transform from node
-        if (jointNode->has_translation) {
-            joint.defaultTranslation = glm::vec3(
-                jointNode->translation[0],
-                jointNode->translation[1],
-                jointNode->translation[2]
-            );
-        }
-        if (jointNode->has_rotation) {
-            // cgltf stores quaternion as [x, y, z, w]
-            joint.defaultRotation = glm::quat(
-                jointNode->rotation[3],  // w
-                jointNode->rotation[0],  // x
-                jointNode->rotation[1],  // y
-                jointNode->rotation[2]   // z
-            );
-        }
-        if (jointNode->has_scale) {
-            joint.defaultScale = glm::vec3(
-                jointNode->scale[0],
-                jointNode->scale[1],
-                jointNode->scale[2]
-            );
-        }
-
-        // Find parent index
-        joint.parentIndex = -1;
-        if (jointNode->parent) {
-            auto parentIt = nodeToJoint.find(jointNode->parent);
-            if (parentIt != nodeToJoint.end()) {
-                joint.parentIndex = parentIt->second;
-            }
-        }
-    }
-
-    // Find root joint
-    for (int i = 0; i < static_cast<int>(skeleton->joints.size()); ++i) {
-        if (skeleton->joints[i].parentIndex == -1) {
-            skeleton->rootJointIndex = i;
-            break;
-        }
-    }
-
-    skeleton->buildNameLookup();
-    skeleton->buildEvaluationOrder();
-
-    std::cout << "[GltfSceneLoader] Loaded skin '" << skeleton->name
-              << "' with " << skeleton->jointCount() << " joints" << std::endl;
-
     return skeleton;
 }
 

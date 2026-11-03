@@ -9,6 +9,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [getting_started/ui_canvas_demo](../../examples/python/getting_started/ui_canvas_demo) | `python ui_canvas_demo.py` | Canvas UI on the default pipeline: a HUD with a toggle, slider and button, and a clickable screen in the world |
 | [animation/skinned_fox_demo](../../examples/python/animation/skinned_fox_demo) | `python skinned_fox_demo.py` | Skeletal animation |
 | [animation/character_animator](../../examples/python/animation/character_animator) | `python character_animator.py` | Per-model animators on the default pipeline: a state machine, root motion and a joint attachment |
+| [animation/humanoid_retarget](../../examples/python/animation/humanoid_retarget) | `python humanoid_retarget.py` | Humanoid characters with different skeletons sharing their clips by retargeting |
 | [rendering/japanese_shrine](../../examples/python/rendering/japanese_shrine) | `python shrine.py`, `python shrine_default.py` | Deferred PBR of a downloaded glTF model with IBL, sun shadows, sky and fog; the second on the default pipeline |
 | [rendering/alley](../../examples/python/rendering/alley) | `python alley.py` | A tech demo on the default pipeline, built from Poly Haven models: dusk to night, ray-traced and local-light shadows, lit windows, a walking fox |
 | [rendering/showroom](../../examples/python/rendering/showroom) | `python showroom.py` | Cars and starships on a turntable: a virtual shadow map, ray-traced soft light shadows and reflections, studio, hard-light, night and neon lighting, stills and video for posting |
@@ -69,6 +70,10 @@ Bundled `Fox.glb` during playback of the first animation clip, driven through th
 ### Character animator (`character_animator`)
 
 A Mixamo dancer and the Fox, each played by one animator on its model's root entity (`engine.animation`). The Fox runs a controller that fades from Survey to a blend of Walk and Run by its speed (keys 1, 2, 3 and the arrows). M turns the dancer's root motion on or off, R puts it in its rest pose or back to dancing, and a glowing cube is attached to its right hand.
+
+### Humanoid retargeting (`humanoid_retarget`)
+
+A Mixamo dancer, Y Bot, a capoeira character and, with the glTF sample models beside the repository, CesiumMan, each loaded with `shoonyakasha.character.load_humanoid`. Every character's clip is retargeted onto every character; keys 1 to 4 switch all of them to one clip, and M turns root motion on.
 
 ### Alley (`alley`)
 

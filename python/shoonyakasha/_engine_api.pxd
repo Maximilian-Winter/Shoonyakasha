@@ -392,6 +392,16 @@ cdef extern from "Facade/AnimationAPI.h" namespace "Shoonyakasha::Facade":
         cbool isRootMotion(EntityHandle animator) const
         vec3 takeRootMotion(EntityHandle animator)
 
+        # Humanoid
+        vector[pair[string, string]] makeHumanoid(EntityHandle animator,
+                                                  const vector[pair[string, string]]& mapping) except +
+        cbool isHumanoid(EntityHandle animator) const
+        vector[pair[string, string]] getHumanoidMapping(EntityHandle animator) const
+        vector[string] retargetClips(EntityHandle target, EntityHandle source, const vector[string]& clips,
+                                     const string& name) except +
+        vector[string] loadHumanoidClips(EntityHandle target, const string& path, const string& name,
+                                         const vector[pair[string, string]]& mapping) except +
+
 
 # ═══════════════════════════════════════════════════════════════
 # EcsAPI — full declaration

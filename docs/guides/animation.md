@@ -111,7 +111,7 @@ The JSON form is documented at the top of `include/Animation/AnimationController
 
 ## Root motion
 
-`set_root_motion(animator, True)` holds the X and Z translation of the skeleton's root joint at each clip's first frame. Pass `joint="..."` for another joint. The joint's movement is collected in world space instead, and blended like the pose. `take_root_motion` returns it and clears it. Apply it to the model's root entity, or to a character body, in the update callback:
+`set_root_motion(animator, True)` holds the horizontal translation (perpendicular to world up) of the skeleton's root joint at each clip's first frame. Pass `joint="..."` for another joint. The joint's movement is collected in world space instead, and blended like the pose. `take_root_motion` returns it and clears it. Apply it to the model's root entity, or to a character body, in the update callback:
 
 ```python
 dx, dy, dz = anim.take_root_motion(dancer)
@@ -120,6 +120,44 @@ engine.scene.set_position(dancer, (x + dx, y + dy, z + dz))
 ```
 
 The movement taken in the update callback comes from the previous frame's evaluation, so the model trails it by one frame. With controllers, root motion comes from the first layer.
+
+## Humanoids and retargeting
+
+`make_humanoid(animator)` maps the animator's skeleton onto 55 standard humanoid bones: Hips, Spine, Chest, UpperChest, Neck, Head, Jaw, the eyes, shoulders, arms, hands, legs, feet, toes, and three segments of each finger.
+- Joints are matched by name, first against Mixamo (`mixamorig:` or `mixamorig_`), Unreal mannequin, VRM and Rigify names.
+- Bones still missing are then matched on name parts (side, body part, finger) whose joint lies below the bone's parent.
+- A `mapping` of `{bone: joint}` overrides or adds bones. The required bones are Hips, Spine, Head and both arms, hands, legs and feet; when one is missing the error names it.
+
+A humanoid can take the clips of another humanoid, with a different skeleton, proportions or axes:
+
+```python
+anim.make_humanoid(dancer)
+anim.make_humanoid(cesium, mapping=CESIUM_MAPPING)   # {"Hips": "Skeleton_torso_joint_1", ...}
+anim.retarget_clips(dancer, cesium, ["animation_0"], "walk")        # from another humanoid animator
+anim.load_humanoid_clips(dancer, "anims/Walking.gltf", name="walk")  # from a file with its own skin
+anim.play(dancer, "walk", fade=0.3)
+```
+
+Retargeting bakes a new clip for the target skeleton, sampled at the source clip's keyframe times:
+- Each avatar's body frame (up from hips to head, sideways between the upper legs, measured in the rest pose) cancels differences in axes, facing and scale.
+- Each mapped bone takes the source bone's rotation away from its rest pose. That rotation is applied to the target bone's rest rotation, after turning the target bone so its rest direction matches the source's, so an A-pose source drives a T-pose target.
+- The hips' movement is scaled by the ratio of the hip heights.
+- Joints not mapped in both avatars keep their rest transform.
+
+`shoonyakasha.character.load_humanoid` loads a model, makes it a humanoid, retargets animation files onto it and sets a controller:
+
+```python
+from shoonyakasha.character import load_humanoid
+
+hero = load_humanoid(engine, "models/hero.gltf",
+                     animations=[("anims/Idle.gltf", "idle"), ("anims/Walking.gltf", "walk")],
+                     controller="locomotion.json", root_motion=True)
+hero.attach(sword, "RightHand", offset_position=(0, 8, 0))   # humanoid bone names work as joints
+hero.set_float("speed", 1.2)
+hero.apply_root_motion()                                      # in the update callback
+```
+
+Run `examples/python/animation/humanoid_retarget/humanoid_retarget.py` from the repository root to see four characters sharing their clips.
 
 ## Rendering requirements
 

@@ -116,7 +116,7 @@ void statePose(ControllerRuntime& runtime, AnimatorComponent& animator, int laye
         if (displacement) {
             *displacement += weight * weights[i] * AnimatorEvaluator::rootDisplacement(
                 *clip, *animator.skeleton, animator.rootMotionJoint,
-                playback.previousPhase * clip->duration, time, playback.wraps);
+                playback.previousPhase * clip->duration, time, playback.wraps, animator.rootMotionUp);
         }
     }
     if (total == 0.0f) out.setRest(*animator.skeleton);

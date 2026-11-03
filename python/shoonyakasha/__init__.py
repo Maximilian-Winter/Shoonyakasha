@@ -13,7 +13,7 @@
 # The utility modules are pure Python and deliberately imported first: compiling
 # shaders or validating a pipeline should work before the extension is built, in
 # CI, or on an interpreter the current .pyd was not built for.
-from . import animation_controller, assets, cookies, ies, keys, mathutil, pipeline, shaders, streams
+from . import animation_controller, assets, character, cookies, ies, keys, mathutil, pipeline, shaders, streams
 from .animation_controller import AnimationController
 
 # The compiled extension may legitimately be absent or built for a different
@@ -192,6 +192,6 @@ __all__ = [
     "SIZE_FIT_UNCONSTRAINED", "SIZE_FIT_MIN", "SIZE_FIT_PREFERRED",
     "video_recording_available", "find_ffmpeg",
     # Pure-Python utilities
-    "animation_controller", "AnimationController",
+    "animation_controller", "AnimationController", "character",
     "assets", "cookies", "ies", "keys", "mathutil", "pipeline", "shaders", "streams", "extension_available",
 ]

@@ -52,7 +52,7 @@ glm::vec3 stateDisplacement(const AnimatorComponent& animator, const AnimatorCli
     const AnimationClip* clip = animator.clipAt(state.clip);
     if (!clip || !animator.skeleton) return glm::vec3(0.0f);
     return AnimatorEvaluator::rootDisplacement(*clip, *animator.skeleton, animator.rootMotionJoint,
-                                               state.previousTime, state.time, state.wraps);
+                                               state.previousTime, state.time, state.wraps, animator.rootMotionUp);
 }
 
 } // namespace
@@ -63,13 +63,14 @@ void AnimatorEvaluator::sampleClip(const AnimatorComponent& animator, const Anim
     const int joint = animator.rootMotionJoint;
     if (animator.rootMotion && joint >= 0 && joint < static_cast<int>(out.jointCount())) {
         const glm::vec3 start = AnimationEvaluator::sampleJointTranslation(clip, joint, 0.0f, *animator.skeleton);
-        out.translations[joint].x = start.x;
-        out.translations[joint].z = start.z;
+        const glm::vec3 moved = out.translations[joint] - start;
+        const glm::vec3& up = animator.rootMotionUp;
+        out.translations[joint] -= moved - glm::dot(moved, up) * up;
     }
 }
 
 glm::vec3 AnimatorEvaluator::rootDisplacement(const AnimationClip& clip, const Skeleton& skeleton, int joint,
-                                              float t0, float t1, int wraps) {
+                                              float t0, float t1, int wraps, const glm::vec3& up) {
     if (joint < 0) return glm::vec3(0.0f);
     auto at = [&](float t) { return AnimationEvaluator::sampleJointTranslation(clip, joint, t, skeleton); };
     const float end = clip.duration;
@@ -83,8 +84,7 @@ glm::vec3 AnimatorEvaluator::rootDisplacement(const AnimationClip& clip, const S
         const glm::vec3 cycle = at(0.0f) - at(end);
         d = (at(0.0f) - at(t0)) + static_cast<float>(-wraps - 1) * cycle + (at(t1) - at(end));
     }
-    d.y = 0.0f;
-    return d;
+    return d - glm::dot(d, up) * up;
 }
 
 void AnimatorEvaluator::setRootMotion(AnimatorComponent& animator, bool enabled, int joint) {
@@ -151,25 +151,30 @@ void AnimatorEvaluator::update(entt::registry& registry, float deltaTime) {
     for (auto entity : animators) {
         auto& animator = animators.get<AnimatorComponent>(entity);
         if (!animator.skeleton) continue;
-        advance(animator, deltaTime);
-        evaluate(animator);
+
+        // The root motion joint's parent space to world, linear part.
+        glm::mat3 toWorld(1.0f);
         if (animator.rootMotion) {
-            glm::vec3 delta = animator.rootMotionDelta;
-            const int joint = animator.rootMotionJoint;
-            if (joint >= 0 && joint < static_cast<int>(animator.skeleton->jointCount())) {
-                const int parent = animator.skeleton->joints[joint].parentIndex;
-                if (parent >= 0 && parent < static_cast<int>(animator.globalTransforms.size())) {
-                    delta = glm::mat3(animator.globalTransforms[parent]) * delta;
-                }
-            }
             const ECS::TransformComponent* space = nullptr;
             for (entt::entity mesh : animator.skinnedMeshes) {
                 if (registry.valid(mesh) && (space = registry.try_get<ECS::TransformComponent>(mesh))) break;
             }
             if (!space) space = registry.try_get<ECS::TransformComponent>(entity);
-            if (space) delta = glm::mat3(space->worldMatrix) * delta;
-            animator.rootMotionWorld += delta;
+            if (space) toWorld = glm::mat3(space->worldMatrix);
+            const int joint = animator.rootMotionJoint;
+            if (joint >= 0 && joint < static_cast<int>(animator.skeleton->jointCount())) {
+                const int parent = animator.skeleton->joints[joint].parentIndex;
+                if (parent >= 0 && parent < static_cast<int>(animator.globalTransforms.size())) {
+                    toWorld = toWorld * glm::mat3(animator.globalTransforms[parent]);
+                }
+            }
+            const glm::vec3 up = glm::inverse(toWorld) * glm::vec3(0.0f, 1.0f, 0.0f);
+            if (glm::dot(up, up) > 1e-20f) animator.rootMotionUp = glm::normalize(up);
         }
+
+        advance(animator, deltaTime);
+        evaluate(animator);
+        if (animator.rootMotion) animator.rootMotionWorld += toWorld * animator.rootMotionDelta;
         for (entt::entity mesh : animator.skinnedMeshes) {
             if (!registry.valid(mesh)) continue;
             auto* skeleton = registry.try_get<SkeletonComponent>(mesh);

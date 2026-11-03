@@ -7,6 +7,8 @@
 #include "Animation/AnimationController.h"
 #include "Animation/AnimatorEvaluator.h"
 #include "Animation/ControllerEvaluator.h"
+#include "Animation/Humanoid.h"
+#include "Animation/Retarget.h"
 #include "ECS/Core.h"
 #include "Resources/AnimationClipLoader.h"
 
@@ -314,6 +316,63 @@ glm::vec3 AnimationAPI::takeRootMotion(EntityHandle animator) {
     AnimatorComponent* component = animatorOf(m_impl->registry, animator);
     if (!component) return glm::vec3(0.0f);
     return std::exchange(component->rootMotionWorld, glm::vec3(0.0f));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Humanoid
+// ═══════════════════════════════════════════════════════════════
+
+AnimationAPI::BoneMapping AnimationAPI::makeHumanoid(EntityHandle animator, const BoneMapping& mapping) {
+    AnimatorComponent& component = requireAnimator(m_impl->registry, animator);
+    component.humanoid = makeHumanoidAvatar(component.skeleton, mapping);
+    return humanoidMapping(*component.humanoid);
+}
+
+bool AnimationAPI::isHumanoid(EntityHandle animator) const {
+    const AnimatorComponent* component = animatorOf(m_impl->registry, animator);
+    return component && component->humanoid;
+}
+
+AnimationAPI::BoneMapping AnimationAPI::getHumanoidMapping(EntityHandle animator) const {
+    const AnimatorComponent* component = animatorOf(m_impl->registry, animator);
+    if (!component || !component->humanoid) return {};
+    return humanoidMapping(*component->humanoid);
+}
+
+std::vector<std::string> AnimationAPI::retargetClips(EntityHandle target, EntityHandle source,
+                                                     const std::vector<std::string>& clips,
+                                                     const std::string& name) {
+    AnimatorComponent& to = requireAnimator(m_impl->registry, target);
+    AnimatorComponent& from = requireAnimator(m_impl->registry, source);
+    if (!to.humanoid) throw std::runtime_error("the target animator is not a humanoid");
+    if (!from.humanoid) throw std::runtime_error("the source animator is not a humanoid");
+
+    std::vector<std::shared_ptr<AnimationClip>> selected;
+    if (clips.empty()) {
+        selected = from.clips;
+    } else {
+        for (const std::string& clip : clips) {
+            const int index = from.findClip(clip);
+            if (index < 0) throw std::runtime_error("no clip '" + clip + "'");
+            selected.push_back(from.clips[index]);
+        }
+    }
+    std::vector<std::shared_ptr<AnimationClip>> retargeted;
+    for (const auto& clip : selected) {
+        if (clip) retargeted.push_back(retargetClip(*clip, *from.humanoid, *to.humanoid));
+    }
+    return AnimatorEvaluator::addClips(to, retargeted, name);
+}
+
+std::vector<std::string> AnimationAPI::loadHumanoidClips(EntityHandle target, const std::string& path,
+                                                         const std::string& name, const BoneMapping& mapping) {
+    AnimatorComponent& to = requireAnimator(m_impl->registry, target);
+    if (!to.humanoid) throw std::runtime_error("the target animator is not a humanoid");
+    AnimationFile file = loadAnimationFile(path);
+    auto source = makeHumanoidAvatar(file.skeleton, mapping);
+    std::vector<std::shared_ptr<AnimationClip>> retargeted;
+    for (const auto& clip : file.clips) retargeted.push_back(retargetClip(*clip, *source, *to.humanoid));
+    return AnimatorEvaluator::addClips(to, retargeted, name);
 }
 
 } // namespace Facade
