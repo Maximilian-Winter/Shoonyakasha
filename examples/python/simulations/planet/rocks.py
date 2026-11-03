@@ -9,7 +9,7 @@ height, up by its height) and turned by its turn about the body's up; the
 body's origin is half its height above its base. It keeps the rock's ore
 grade (0 for a plain rock) and colour (rocks.rock_colour, tinted). Strikes
 on it are watched (sk.PlanetPhysics.watch_strikes). As with the trunks
-(trunks.py), a list adds rocks and does not remove them; a rock more than
+(shoonyakasha.planet.trunks), a list adds rocks and does not remove them; a rock more than
 KEEP beyond the list's radius from the camera is removed, and one listed
 again with another base or kind is made again.
 

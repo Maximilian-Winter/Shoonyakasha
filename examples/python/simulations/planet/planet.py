@@ -23,7 +23,7 @@ dropped when the view moves to the other body or more than Bubble.RADIUS
 above the ground. With a player on foot, the bubble follows the player
 instead, and holds it, and the ship while it is within Bubble.RADIUS (a
 kinematic hull of its contact points, moved with it). On the planet the
-trees and cacti within COLLIDER_RADIUS of the camera get trunks (trunks.py),
+trees and cacti within COLLIDER_RADIUS of the camera get trunks (shoonyakasha.planet.trunks),
 and on both bodies the rocks static hulls (rocks.py), from
 shoonyakasha.planet.nearby_trees. A rock the gravity gun grabs, pulls or
 punts, or a body strikes hard enough, comes loose: it leaves the scatter
@@ -190,8 +190,10 @@ from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.character import Controls as FootControls, Player
 from shoonyakasha.planet.character import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from shoonyakasha.planet.collider_probes import ColliderProbes, TerrainCollider
+from shoonyakasha.planet.ground_patch import GroundPatch, SIZE as PATCH_SIZE
 from shoonyakasha.planet.nearby_trees import NearbyTrees, listed_keys
 from shoonyakasha.planet.rocks import ORE_ROCKS, rock_colour
+from shoonyakasha.planet.trunks import Trunks
 from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, local_frame, normalize, quat_from_basis,
                                      quat_normalize, quat_rotate, rotate, scale, sub)
 from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, SettingsMenu
@@ -200,7 +202,6 @@ from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, EXTRA_PROBE
                                        SUN_AZIMUTH, SUN_ELEVATION, VERTICES_PER_CHUNK)
 
 import flight
-from ground import GroundPatch, SIZE as PATCH_SIZE
 import cockpit
 import gun as gun_module
 from gun import Gun, GunControls
@@ -212,7 +213,6 @@ from rocks import Rocks
 from scanner import CONTACT, Scanner
 import trade
 from trade import Market
-from trunks import Trunks
 from viewmodel import Viewmodel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -266,7 +266,7 @@ MOON_HOVER_HEIGHT = 2_000.0      # Shift+8's ship waits this far above the moon'
 # The physics bubble and its crates.
 MAX_PHYSICS_STEPS_PER_FRAME = 8
 CRATE_SIZE = 0.6                 # m along each edge
-COLLIDER_RADIUS = 40.0           # m from the camera the trees, cacti and rocks get colliders (trunks.py, rocks.py)
+COLLIDER_RADIUS = 40.0           # m from the camera the trees, cacti and rocks get colliders (shoonyakasha.planet.trunks, rocks.py)
 CRATE_DENSITY = 500.0            # kg/m^3
 CRATE_AHEAD = 3.0                # m in front of the view a crate is dropped
 STACK_COUNT = 10

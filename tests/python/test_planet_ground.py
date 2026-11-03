@@ -1,19 +1,12 @@
-"""Tests for the planet example's ground patch
-(examples/python/simulations/planet/ground.py), loaded from its file.
+"""Tests for the ground patch (shoonyakasha.planet.ground_patch).
 
     python -m unittest discover -s tests/python
 """
 
-import importlib.util
 import math
 import unittest
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-_SPEC = importlib.util.spec_from_file_location(
-    "planet_ground", REPO / "examples" / "python" / "simulations" / "planet" / "ground.py")
-ground = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(ground)
+from shoonyakasha.planet import ground_patch as ground
 
 RADIUS = 100_000.0
 CENTRE = (0.36, 0.48, 0.8)          # a unit direction

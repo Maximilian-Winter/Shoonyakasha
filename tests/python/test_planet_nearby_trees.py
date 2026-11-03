@@ -1,5 +1,5 @@
 """Tests for shoonyakasha.planet.nearby_trees and the planet example's
-trunks (examples/python/simulations/planet/trunks.py): the NearbyTrees
+trunks (shoonyakasha.planet.trunks): the NearbyTrees
 buffer and parameter fit the pipeline, every plant with a trunk has its
 trunk's shares, the width factor matches vegetation.glsl's, a list read
 back by stamp (each plant's key, kind, base from that frame's camera,
@@ -17,7 +17,6 @@ import os
 import subprocess
 import sys
 import unittest
-from pathlib import Path
 
 import numpy as np
 
@@ -26,7 +25,6 @@ from shoonyakasha.planet import nearby_trees, vegetation, world
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.nearby_trees import CAPACITY, HEADER, WORDS, NearbyTree, NearbyTrees
 
-PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simulations" / "planet"
 
 
 class FakeEngine:
@@ -153,8 +151,7 @@ class TrunksTest(unittest.TestCase):
             if __name__ == "__main__":
                 self.fail("no engine extension in a fresh interpreter")
             self.skipTest("runs in a fresh interpreter (test_in_fresh_interpreter)")
-        sys.path.insert(0, str(PLANET_DIR))
-        import trunks
+        from shoonyakasha.planet import trunks
         self.trunks_module = trunks
 
     def test_capsules_kept_moved_and_removed(self):
