@@ -513,9 +513,11 @@ void PlanetLod::update(const LodView& view, const std::vector<LodBody>& bodies, 
 }
 
 void PlanetLod::writeDraws(const LodView& view, const std::vector<LodBody>& bodies, int colourMode,
-                           double shadowReach, uint32_t indexCount) {
+                           double shadowReach, uint32_t indexCount, const LodScatter& scatter) {
     std::fill(m_instances.begin(), m_instances.end(), 0.0f);
-    std::vector<int> drawn, casters, wet;
+    std::vector<int> drawn, casters, wet, scattered;
+    const Vec3 half{scatter.shadowOffset[0] * 0.5, scatter.shadowOffset[1] * 0.5, scatter.shadowOffset[2] * 0.5};
+    const double swept = scatter.plantPad + length(half);
     uint32_t culled = 0;
     for (const LodBody& body : bodies) {
         const Tree* t = tree(body.index);
@@ -539,9 +541,20 @@ void PlanetLod::writeDraws(const LodView& view, const std::vector<LodBody>& bodi
             instance[8] = static_cast<float>(parentSplit);
             instance[9] = static_cast<float>(node.level);
             instance[10] = static_cast<float>(body.index);
-            if (length(sub(node.boundCentre, eye)) - node.boundRadius < shadowReach) casters.push_back(slot);
+            const double gap = length(sub(node.boundCentre, eye)) - node.boundRadius;
+            if (gap < shadowReach) casters.push_back(slot);
             const bool visible = inView(view, add(body.centre, node.boundCentre), node.boundRadius) &&
                                  !hiddenByHorizon(node.boundCentre, node.boundRadius, eye, body.occluder);
+            if (visible || gap < scatter.nearRadius) {
+                scattered.push_back(slot);
+            } else {
+                const Vec3 centre = add(node.boundCentre, half);
+                const double radius = node.boundRadius + swept;
+                if (inView(view, add(body.centre, centre), radius) &&
+                    !hiddenByHorizon(centre, radius, eye, body.occluder)) {
+                    scattered.push_back(slot);
+                }
+            }
             if (!visible) {
                 ++culled;
                 continue;
@@ -567,6 +580,7 @@ void PlanetLod::writeDraws(const LodView& view, const std::vector<LodBody>& bodi
     fill(m_chunkDraws, drawn);
     fill(m_oceanDraws, wet);
     fill(m_shadowDraws, casters);
+    fill(m_scatterDraws, scattered);
 }
 
 void PlanetLod::setFaceColours(const std::array<std::array<float, 3>, 6>& colours) { m_faceColours = colours; }

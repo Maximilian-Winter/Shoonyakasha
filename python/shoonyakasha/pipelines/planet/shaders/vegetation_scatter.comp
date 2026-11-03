@@ -1,8 +1,9 @@
 #version 450
 //
 // Places the vegetation and the rocks for this frame: one workgroup per
-// chunk ChunkDraws draws (its count first, then five words per draw, the
-// slot last), of the planet (body 0) or the moon (body 1), at least the
+// chunk of ScatterDraws (sk.PlanetLod's scatter draws: the drawn chunks
+// and those near the camera or whose plants or their shadows reach into
+// view; its count first, then five words per chunk, the slot last), of the planet (body 0) or the moon (body 1), at least the
 // coarsest level vegetation.lod.w, within the range of the camera.
 //
 // Each cube face is divided into vegetation.settings.z x settings.z cells

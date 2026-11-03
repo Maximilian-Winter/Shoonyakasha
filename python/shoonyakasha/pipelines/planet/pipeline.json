@@ -304,6 +304,12 @@
       "elementCount": 10244,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
+    "ScatterDraws": {
+      "usage": "storage_buffer",
+      "packing": "std430",
+      "elementCount": 10244,
+      "fields": [ { "name": "word", "type": "uint" } ]
+    },
     "OrbitPoints": {
       "usage": "storage_buffer",
       "packing": "std430",
@@ -478,8 +484,8 @@
           "autoBindBuffer": "TerrainParams" },
         { "binding": 1, "type": "uniform_buffer", "stages": [ "compute" ], "name": "VegetationParams",
           "autoBindBuffer": "VegetationParams" },
-        { "binding": 2, "type": "storage_buffer", "stages": [ "compute" ], "name": "ChunkDraws",
-          "autoBindBuffer": "ChunkDraws" },
+        { "binding": 2, "type": "storage_buffer", "stages": [ "compute" ], "name": "ScatterDraws",
+          "autoBindBuffer": "ScatterDraws" },
         { "binding": 3, "type": "storage_buffer", "stages": [ "compute" ], "name": "VegetationInstances",
           "autoBindBuffer": "VegetationInstances" },
         { "binding": 4, "type": "storage_buffer", "stages": [ "compute" ], "name": "VegetationDraws",

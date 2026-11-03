@@ -1,8 +1,8 @@
 #version 450
 //
 // Places the grass for this frame, as vegetation_scatter.comp places the
-// trees and bushes, on a finer grid: one workgroup per chunk ChunkDraws
-// draws of the planet, at least level GRASS_MIN_LEVEL, within the grass's
+// trees and bushes, on a finer grid: one workgroup per chunk of ScatterDraws
+// on the planet, at least level GRASS_MIN_LEVEL, within the grass's
 // range (vegetation.grass.y), each cube face divided into
 // vegetation.grass.z x grass.z cells (about 1.2 m at 131,072). A candidate
 // is kept by a draw from its cell's hash against the biomes' grass chance

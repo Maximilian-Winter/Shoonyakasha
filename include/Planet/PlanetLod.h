@@ -29,6 +29,17 @@ struct LodView {
     double aspect = 16.0 / 9.0;
 };
 
+/// Which chunks the scatter passes place plants and rocks on besides the
+/// drawn ones (PlanetLod::scatterDraws): every chunk whose bounding sphere
+/// comes within `nearRadius` of the camera, and every chunk whose bounding
+/// sphere, grown by `plantPad` and swept along `shadowOffset`, is in view
+/// and not behind its body's horizon.
+struct LodScatter {
+    double nearRadius = 0.0;          ///< m
+    double plantPad = 0.0;            ///< m: the tallest plant's reach above and around its chunk
+    Vec3 shadowOffset{0.0, 0.0, 0.0}; ///< planet space: from a plant to the far end of its shadow
+};
+
 /// A copy of a node's state.
 struct LodNodeInfo {
     int face = 0;
@@ -68,7 +79,8 @@ struct LodJob {
 ///    new chunks leave over, a slot that has a job this frame getting none;
 ///  - the draw lists: every selected chunk in view and not behind its
 ///    body's horizon, those of them reaching below sea level on a body with
-///    an ocean, and every selected chunk within the shadows' reach, with
+///    an ocean, every selected chunk within the shadows' reach, and the
+///    chunks to scatter on (the drawn ones and those LodScatter adds), with
 ///    each slot's centre relative to the camera, colour and morph values.
 class PlanetLod {
 public:
@@ -97,9 +109,10 @@ public:
     /// Heights read back: `count` rows of (lowest, highest, stamp, unused),
     /// one per slot. Each chunk waiting for its job's stamp takes its range.
     void takeHeights(const float* rows, size_t count);
-    /// The draw lists and the instances for the view.
+    /// The draw lists and the instances for the view; `scatter` adds to the
+    /// scatter draws (with its defaults they are the chunk draws).
     void writeDraws(const LodView& view, const std::vector<LodBody>& bodies, int colourMode, double shadowReach,
-                    uint32_t indexCount);
+                    uint32_t indexCount, const LodScatter& scatter = LodScatter{});
 
     /// The colours of the cube's faces for colour mode 1 (0 is the terrain's
     /// own colours, 2 one colour per level).
@@ -116,6 +129,7 @@ public:
     const std::vector<uint32_t>& chunkDraws() const { return m_chunkDraws; }
     const std::vector<uint32_t>& oceanDraws() const { return m_oceanDraws; }
     const std::vector<uint32_t>& shadowDraws() const { return m_shadowDraws; }
+    const std::vector<uint32_t>& scatterDraws() const { return m_scatterDraws; }
     uint32_t culled() const { return m_culled; }
 
     int slots() const { return m_slots; }
@@ -223,6 +237,7 @@ private:
     std::vector<uint32_t> m_chunkDraws;
     std::vector<uint32_t> m_oceanDraws;
     std::vector<uint32_t> m_shadowDraws;
+    std::vector<uint32_t> m_scatterDraws;
     uint32_t m_culled = 0;
 };
 

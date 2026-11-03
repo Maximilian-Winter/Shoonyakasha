@@ -100,6 +100,12 @@ VEGETATION_RANGE = 2_500.0
 VEGETATION_NEAR = 250.0
 VEGETATION_BUSH_RANGE = 700.0
 VEGETATION_BUDGET = 0.85
+# The chunks the scatter passes place plants and rocks on besides the drawn ones (sk.PlanetLod's
+# scatter draws): those within SCATTER_NEAR (m) of the camera, and those from which a plant up to
+# TALLEST_PLANT high (m), or its shadow up to SCATTER_SHADOW long (m), reaches into view.
+SCATTER_NEAR = 60.0
+TALLEST_PLANT = 22.0
+SCATTER_SHADOW = 100.0
 # Temporal anti-aliasing (taa.frag): the jitter's cycle in frames, and how far (m) the camera may move in
 # one frame before the history is dropped (a jump, not a flight).
 TAA_JITTER_FRAMES = 8
@@ -1077,13 +1083,32 @@ class PlanetWorld:
         centre relative to the camera (its body's centre plus its own, less the
         camera, in double), colour, and its parent's split distance and the
         levels above it, for morph.glsl. The shadow cascades draw every
-        selected chunk within their reach, in view or not (sk.PlanetLod)."""
+        selected chunk within their reach, in view or not, and the scatter
+        passes place on the drawn chunks and those `scatter_reach` adds
+        (sk.PlanetLod)."""
         lod = self.lod
         lod.write_draws(self.lod_view(), self.lod_bodies(), self.colour_mode, SHADOW_SPLITS[-1] + SHADOW_REACH,
-                        self.index_count)
+                        self.index_count, self.scatter_reach())
         lod.upload(self.engine)
         self.chunks_culled = lod.culled
         self.ocean_chunks = int(np.frombuffer(lod.draws("ocean"), dtype=np.uint32, count=1)[0])
+
+    def scatter_reach(self):
+        """(near radius, plant pad, shadow offset) for sk.PlanetLod's scatter
+        draws: SCATTER_NEAR, TALLEST_PLANT, and from a plant away from the sun
+        along the ground at the camera, the tallest plant's shadow's length
+        (at most SCATTER_SHADOW); no offset while the shadows are off or the
+        sun is below the horizon there."""
+        up = normalize(self.body_under(self.position).relative(self.position))
+        sun = self.sun_direction()
+        s = dot(sun, up)
+        offset = (0.0, 0.0, 0.0)
+        if self.shadows and s > 0.0:
+            along = sub(sun, scale(up, s))
+            if length(along) > 1e-6:
+                reach = min(TALLEST_PLANT * math.sqrt(max(0.0, 1.0 - s * s)) / s, SCATTER_SHADOW)
+                offset = scale(normalize(along), -reach)
+        return SCATTER_NEAR, TALLEST_PLANT, offset
 
     def upload_shadow_cascades(self, forward):
         """The sun's shadow cascades (shadows.py) for the view along `forward`,

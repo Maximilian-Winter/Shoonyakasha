@@ -772,6 +772,11 @@ cdef extern from "Planet/PlanetLod.h" namespace "Shoonyakasha::Planet":
         double fovDegrees
         double aspect
 
+    cdef cppclass LodScatter:
+        double nearRadius
+        double plantPad
+        LodVec3 shadowOffset
+
     cdef cppclass LodNodeInfo:
         int face
         int level
@@ -804,7 +809,7 @@ cdef extern from "Planet/PlanetLod.h" namespace "Shoonyakasha::Planet":
         void update(const LodView& view, const vector[LodBody]& bodies, int64_t frame, cbool frozen, cbool requeue)
         void takeHeights(const float* rows, size_t count)
         void writeDraws(const LodView& view, const vector[LodBody]& bodies, int colourMode, double shadowReach,
-                        uint32_t indexCount)
+                        uint32_t indexCount, const LodScatter& scatter)
         void setFaceColours(const LodFaceColours& colours)
         const vector[LodJob]& jobs()
         void clearJobs()
@@ -812,6 +817,7 @@ cdef extern from "Planet/PlanetLod.h" namespace "Shoonyakasha::Planet":
         const vector[uint32_t]& chunkDraws()
         const vector[uint32_t]& oceanDraws()
         const vector[uint32_t]& shadowDraws()
+        const vector[uint32_t]& scatterDraws()
         uint32_t culled()
         int slots()
         int used()

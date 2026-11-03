@@ -16,6 +16,7 @@
 
 #include "Planet/PlanetLod.h"
 
+#include <algorithm>
 #include <cmath>
 #include <set>
 
@@ -179,6 +180,51 @@ TEST(PlanetLod, DrawListsHoldACountThenFiveWordsPerChunk) {
     // The terrain's own colours: red below 0.
     const float* instance = &lod.instances()[static_cast<size_t>(draws[4 + 4]) * 12];
     EXPECT_EQ(instance[4], -1.0f);
+}
+
+TEST(PlanetLod, ScatterDrawsAddNearChunksAndThoseWhosePlantsReachIntoView) {
+    PlanetLod lod(1024, 64, VERTICES, 0.05);
+    lod.createTree(0, RADIUS, 0.0, 10.0, 12, 1.25, 0.05);
+    std::vector<float> rows(1024 * 4, 0.0f);
+    const Vec3 up = cubeSphereDirection(4, 0.01, 0.01);
+    const Vec3 eye{up[0] * (RADIUS + 2.0), up[1] * (RADIUS + 2.0), up[2] * (RADIUS + 2.0)};
+    const Vec3 along{up[2], 0.0, -up[0]};   // level with the ground, square to up's x and z
+    const double n = std::sqrt(along[0] * along[0] + along[2] * along[2]);
+    const LodView view = viewAt(eye, {along[0] / n, 0.0, along[2] / n});
+    for (int frame = 1; frame < 40; ++frame) {
+        answerJobs(lod, rows);
+        lod.update(view, {planetBody()}, frame, false, false);
+    }
+    const auto slots = [](const std::vector<uint32_t>& draws) {
+        std::vector<uint32_t> out;
+        for (uint32_t k = 0; k < draws[0]; ++k) out.push_back(draws[4 + k * 5 + 4]);
+        std::sort(out.begin(), out.end());
+        return out;
+    };
+    lod.writeDraws(view, {planetBody()}, 0, 25000.0, 2304);
+    const std::vector<uint32_t> drawn = slots(lod.chunkDraws());
+    EXPECT_EQ(lod.scatterDraws(), lod.chunkDraws());           // no scatter: the drawn chunks
+    LodScatter near;
+    near.nearRadius = 60.0;
+    lod.writeDraws(view, {planetBody()}, 0, 25000.0, 2304, near);
+    const std::vector<uint32_t> nearSlots = slots(lod.scatterDraws());
+    EXPECT_TRUE(std::includes(nearSlots.begin(), nearSlots.end(), drawn.begin(), drawn.end()));
+    EXPECT_GT(nearSlots.size(), drawn.size());                 // the chunks beside and behind the camera
+    for (const LodNodeInfo& node : lod.selected(0)) {
+        if (node.slot < 0 || std::binary_search(drawn.begin(), drawn.end(), static_cast<uint32_t>(node.slot))) {
+            continue;
+        }
+        const bool scattered = std::binary_search(nearSlots.begin(), nearSlots.end(),
+                                                  static_cast<uint32_t>(node.slot));
+        const double gap = std::sqrt(std::pow(node.boundCentre[0] - eye[0], 2.0) +
+                                     std::pow(node.boundCentre[1] - eye[1], 2.0) +
+                                     std::pow(node.boundCentre[2] - eye[2], 2.0)) - node.boundRadius;
+        EXPECT_EQ(scattered, gap < 60.0) << "a chunk not drawn is scattered on just within the near radius";
+    }
+    LodScatter shadow;
+    shadow.shadowOffset = {view.forward[0] * 400.0, 0.0, view.forward[2] * 400.0};   // shadows falling ahead
+    lod.writeDraws(view, {planetBody()}, 0, 25000.0, 2304, shadow);
+    EXPECT_GT(slots(lod.scatterDraws()).size(), drawn.size());  // chunks behind whose shadows reach into view
 }
 
 TEST(PlanetLod, HorizonCullsWhatTheSphereHides) {

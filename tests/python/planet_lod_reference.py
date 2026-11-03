@@ -139,12 +139,17 @@ class ReferenceLod:
             return level_colour(node.level) + (1.0,)
         return (-1.0, 0.0, 0.0, 0.0)
 
-    def write_draws(self, view, bodies, colour_mode, shadow_reach, index_count):
-        """(instances, chunk draws, ocean draws, shadow draws, culled) as numpy arrays."""
+    def write_draws(self, view, bodies, colour_mode, shadow_reach, index_count, scatter=None):
+        """(instances, chunk draws, ocean draws, shadow draws, scatter draws,
+        culled) as numpy arrays; `scatter` (near radius, plant pad, shadow
+        offset) as sk.PlanetLod.write_draws takes it."""
         position = view[0]
         slots = self.pool.slots
         instances = np.zeros((slots, 3, 4), dtype=np.float32)
-        selected, casters, wet = [], [], []
+        selected, casters, wet, scattered = [], [], [], []
+        near, pad, offset = scatter if scatter is not None else (0.0, 0.0, (0.0, 0.0, 0.0))
+        half = (offset[0] * 0.5, offset[1] * 0.5, offset[2] * 0.5)
+        swept = pad + length(half)
         culled = 0
         for index, centre, occluder, ocean in bodies:
             tree = self.trees.get(index)
@@ -157,10 +162,17 @@ class ReferenceLod:
                 instances[slot, 1] = self.chunk_colour(node, colour_mode)
                 parent_split = tree.split_factor * 2.0 * node.edge if node.level > 0 else 0.0
                 instances[slot, 2, :3] = (parent_split, node.level, index)
-                if length(sub(node.bound_centre, eye)) - node.bound_radius < shadow_reach:
+                gap = length(sub(node.bound_centre, eye)) - node.bound_radius
+                if gap < shadow_reach:
                     casters.append(node)
                 visible = (self.in_view(view, add(centre, node.bound_centre), node.bound_radius)
                            and not hidden_by_horizon(node.bound_centre, node.bound_radius, eye, occluder))
+                swept_centre = add(node.bound_centre, half)
+                swept_radius = node.bound_radius + swept
+                if visible or gap < near or (
+                        self.in_view(view, add(centre, swept_centre), swept_radius)
+                        and not hidden_by_horizon(swept_centre, swept_radius, eye, occluder)):
+                    scattered.append(node)
                 if not visible:
                     culled += 1
                     continue
@@ -175,4 +187,4 @@ class ReferenceLod:
                 out[4 + 5 * k:9 + 5 * k] = (index_count, 1, 0, node.chunk * self.vertices_per_chunk, node.chunk)
             return out
 
-        return instances, draws(selected), draws(wet), draws(casters), culled
+        return instances, draws(selected), draws(wet), draws(casters), draws(scattered), culled

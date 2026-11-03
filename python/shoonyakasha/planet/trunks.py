@@ -3,8 +3,8 @@ Tree trunks in the physics bubble (shoonyakasha.planet.bubble): a static
 capsule for each tree and cactus near the camera that
 shoonyakasha.planet.nearby_trees lists.
 
-The scatter lists only the plants on chunks drawn that frame, so a list
-adds trunks and does not remove them: `Trunks.update` gives each listed
+The scatter lists only the plants on that frame's scatter draws
+(sk.PlanetLod), so a list adds trunks and does not remove them: `Trunks.update` gives each listed
 plant not yet in the bubble, or whose base or kind changed (by more than
 MOVED), a capsule of its trunk's radius standing along the body's up from
 SINK below its base to its trunk's height, and removes the trunks more

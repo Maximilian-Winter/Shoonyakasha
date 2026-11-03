@@ -1,6 +1,6 @@
 // The declarations and steps the vegetation's scatter passes share
 // (vegetation_scatter.comp, grass_scatter.comp): the sets and buffers, the
-// chunk a workgroup places plants on (one per draw of ChunkDraws), the cells
+// chunk a workgroup places plants on (one per draw of ScatterDraws), the cells
 // of a cube face's grid that chunk holds, a cell's candidate (a point
 // jittered within the cell by a hash of it, kept when it lies in the chunk,
 // within range and off the flat sites), the ground and climate under it from the chunk's grid
@@ -27,9 +27,9 @@ layout(set = 0, binding = 0) uniform TerrainParams {
 #define VEGETATION_PARAMS 1
 #include "vegetation.glsl"
 
-layout(std430, set = 0, binding = 2) readonly buffer ChunkDraws {
+layout(std430, set = 0, binding = 2) readonly buffer ScatterDraws {
     uint words[];
-} chunkDraws;
+} scatterDraws;
 
 layout(std430, set = 0, binding = 3) writeonly buffer VegetationInstances {
     vec4 data[];
@@ -95,7 +95,7 @@ void gridTriangle(float fi, float fj, out ivec2 a, out ivec2 b, out ivec2 c, out
     }
 }
 
-// A chunk ChunkDraws draws, as the scatter passes need it.
+// A chunk of ScatterDraws, as the scatter passes need it.
 struct ScatterChunk {
     uint slot;
     uint base;             // its first vertex in ChunkPool
@@ -111,8 +111,8 @@ struct ScatterChunk {
 // 0), or with `moon` the moon's (body 1) too, at least `minLevel`, and its
 // nearest point is within `range`.
 bool scatterChunk(uint group, float minLevel, float range, bool moon, out ScatterChunk chunk) {
-    if (group >= chunkDraws.words[0]) return false;
-    chunk.slot = chunkDraws.words[4u + group * 5u + 4u];
+    if (group >= scatterDraws.words[0]) return false;
+    chunk.slot = scatterDraws.words[4u + group * 5u + 4u];
     ChunkInstance instance = chunks.instances[chunk.slot];
     chunk.body = int(instance.morph.z);
     if (chunk.body > (moon ? 1 : 0) || instance.morph.y < minLevel) return false;

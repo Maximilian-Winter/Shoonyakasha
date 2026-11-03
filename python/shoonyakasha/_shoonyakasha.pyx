@@ -55,7 +55,7 @@ from ._engine_api cimport (
     wrap_py_object, unwrap_py_object, make_system_update_callback,
     CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
     videoRecordingAvailable, findFfmpeg, checkPipelineJson, loadPipelineDocumentText, Readback,
-    CppPlanetLod, LodBody, LodView, LodNodeInfo, LodJob, LodFaceColours,
+    CppPlanetLod, LodBody, LodView, LodScatter, LodNodeInfo, LodJob, LodFaceColours,
     CppPlanetPhysics, PhysicsMotion, PhysicsRayHit, CharacterGround, LodVec3, LodVec4,
     CppComputeContext, CppComputeBuffer, CppComputeKernel, ComputeKernelInfo, ComputeKernelBinding,
     ComputeBindingType, ComputeUint3, CppComputeImage, CppComputeBinding, ComputeBindingDim,
@@ -3671,21 +3671,41 @@ cdef class PlanetLod:
             return
         self._ptr.takeHeights(<const float*>&view[0], view.shape[0] // 16)
 
-    def write_draws(self, view, bodies, int colour_mode, double shadow_reach, uint32_t index_count):
-        """The draw lists and the instances for the view."""
-        self._ptr.writeDraws(_lod_view(view), _lod_bodies(bodies), colour_mode, shadow_reach, index_count)
+    def write_draws(self, view, bodies, int colour_mode, double shadow_reach, uint32_t index_count,
+                    scatter=None):
+        """The draw lists and the instances for the view. `scatter`: (near
+        radius, plant pad, shadow offset) for the scatter draws, which
+        without it are the chunk draws."""
+        cdef LodScatter s
+        s.nearRadius = 0.0
+        s.plantPad = 0.0
+        for k in range(3):
+            s.shadowOffset[k] = 0.0
+        if scatter is not None:
+            near, pad, offset = scatter
+            s.nearRadius = near
+            s.plantPad = pad
+            for k in range(3):
+                s.shadowOffset[k] = offset[k]
+        self._ptr.writeDraws(_lod_view(view), _lod_bodies(bodies), colour_mode, shadow_reach, index_count, s)
 
     def upload(self, Engine engine):
-        """ChunkInstances, ChunkDraws, OceanDraws and ShadowDraws handed to the engine."""
+        """ChunkInstances, ChunkDraws, OceanDraws, ShadowDraws and ScatterDraws handed to the engine."""
         cdef const vector[float]* instances = &self._ptr.instances()
         cdef const vector[uint32_t]* draws
         cdef string error
         error = engine._ptr.setBuffer(b"ChunkInstances", instances.data(), instances.size() * 4, 0)
         if not error.empty():
             raise ValueError(error.decode("utf-8"))
-        for name, which in ((b"ChunkDraws", 0), (b"OceanDraws", 1), (b"ShadowDraws", 2)):
-            draws = &self._ptr.chunkDraws() if which == 0 else (
-                &self._ptr.oceanDraws() if which == 1 else &self._ptr.shadowDraws())
+        for name, which in ((b"ChunkDraws", 0), (b"OceanDraws", 1), (b"ShadowDraws", 2), (b"ScatterDraws", 3)):
+            if which == 0:
+                draws = &self._ptr.chunkDraws()
+            elif which == 1:
+                draws = &self._ptr.oceanDraws()
+            elif which == 2:
+                draws = &self._ptr.shadowDraws()
+            else:
+                draws = &self._ptr.scatterDraws()
             error = engine._ptr.setBuffer(name, draws.data(), draws.size() * 4, 0)
             if not error.empty():
                 raise ValueError(error.decode("utf-8"))
@@ -3708,7 +3728,8 @@ cdef class PlanetLod:
         return (<const char*>values.data())[:values.size() * 4]
 
     def draws(self, str which):
-        """"chunk", "ocean" or "shadow" draws as bytes: a uint32 count, padding to 16 bytes, five uint32 per draw."""
+        """"chunk", "ocean", "shadow" or "scatter" draws as bytes: a uint32 count, padding to 16 bytes, five
+        uint32 per draw."""
         cdef const vector[uint32_t]* values
         if which == "chunk":
             values = &self._ptr.chunkDraws()
@@ -3716,8 +3737,10 @@ cdef class PlanetLod:
             values = &self._ptr.oceanDraws()
         elif which == "shadow":
             values = &self._ptr.shadowDraws()
+        elif which == "scatter":
+            values = &self._ptr.scatterDraws()
         else:
-            raise ValueError("chunk, ocean or shadow")
+            raise ValueError("chunk, ocean, shadow or scatter")
         return (<const char*>values.data())[:values.size() * 4]
 
     @property

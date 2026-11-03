@@ -6,7 +6,10 @@ detail frozen for a while, the sun's rebuilds asked for, every colour mode,
 and the planet's tree dropped and made again. Heights come back two frames
 after their jobs, as the GPU's do. Every frame the jobs, the selected nodes
 and their slots, the missing nodes and their distances, the instances and
-the four draw lists must be the same, to the bit. Where this interpreter's
+the five draw lists must be the same, to the bit, the scatter draws (near
+60 m, a 22 m plant pad and a shadow offset turning with the frames, and
+none every seventh frame) holding every chunk draw, and with none, only
+those. Where this interpreter's
 shoonyakasha has no extension (another test put the source tree first on
 sys.path), the comparison runs in a fresh interpreter, which imports the
 installed package.
@@ -65,6 +68,14 @@ def view_at(frame):
     return (position, forward, 70.0, 16.0 / 9.0)
 
 
+def scatter_at(frame):
+    """The scatter's reach along the path: none every seventh frame."""
+    if frame % 7 == 0:
+        return None
+    a = frame * 0.02
+    return (60.0, 22.0, (80.0 * math.cos(a), 30.0 * math.sin(frame * 0.013), 80.0 * math.sin(a)))
+
+
 def bodies_at(frame):
     angle = 0.6 + frame * 0.003
     moon = (MOON_DISTANCE * math.cos(angle), MOON_DISTANCE * math.sin(angle) * 0.3, MOON_DISTANCE * math.sin(angle))
@@ -90,7 +101,7 @@ class NativeLodMatchesPython(unittest.TestCase):
             lod.create_tree(1, MOON_RADIUS, -2000.0, 1500.0, 12, 1.25, 0.05)
         gpu = np.zeros((SLOTS, 4), dtype=np.float32)
         history = []
-        compared = {"selected": 0, "jobs": 0}
+        compared = {"selected": 0, "jobs": 0, "scatter extra": 0}
 
         def native_jobs():
             return native.jobs()
@@ -141,13 +152,21 @@ class NativeLodMatchesPython(unittest.TestCase):
             self.assertEqual(native.pending, len(python.pool.pending))
             self.assertEqual(native.rebuild_queued, len(python.rebuild))
             colour = (frame // 50) % 3
-            native.write_draws(view, bodies, colour, SHADOW_REACH, INDEX_COUNT)
-            instances, chunk, ocean, shadow, culled = python.write_draws(view, bodies, colour, SHADOW_REACH,
-                                                                          INDEX_COUNT)
+            scatter = scatter_at(frame)
+            native.write_draws(view, bodies, colour, SHADOW_REACH, INDEX_COUNT, scatter)
+            instances, chunk, ocean, shadow, scattered, culled = python.write_draws(
+                view, bodies, colour, SHADOW_REACH, INDEX_COUNT, scatter)
             self.assertEqual(native.instances(), instances.tobytes(), "instances at frame %d" % frame)
             self.assertEqual(native.draws("chunk"), chunk.tobytes(), "chunk draws at frame %d" % frame)
             self.assertEqual(native.draws("ocean"), ocean.tobytes(), "ocean draws at frame %d" % frame)
             self.assertEqual(native.draws("shadow"), shadow.tobytes(), "shadow draws at frame %d" % frame)
+            self.assertEqual(native.draws("scatter"), scattered.tobytes(), "scatter draws at frame %d" % frame)
+            drawn_slots = set(chunk[4 + 4::5][:chunk[0]].tolist())
+            scatter_slots = set(scattered[4 + 4::5][:scattered[0]].tolist())
+            self.assertLessEqual(drawn_slots, scatter_slots, "scatter draws hold the chunk draws")
+            if scatter is None:
+                self.assertEqual(scattered.tobytes(), chunk.tobytes(), "no scatter: the chunk draws")
+            compared["scatter extra"] += len(scatter_slots) - len(drawn_slots)
             self.assertEqual(native.culled, culled)
             run_jobs()
         # The path has to have exercised the trees: deep levels, many chunks, rebuilds.
@@ -155,6 +174,7 @@ class NativeLodMatchesPython(unittest.TestCase):
         self.assertGreaterEqual(deepest, 10)
         self.assertGreater(compared["selected"], 50_000)
         self.assertGreater(compared["jobs"], 1_000)
+        self.assertGreater(compared["scatter extra"], 1_000)     # chunks scattered on beyond the drawn ones
 
 
 class NativeLodMaxLevel(unittest.TestCase):
