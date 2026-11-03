@@ -1,5 +1,4 @@
-"""Tests for the planet example's player on foot
-(examples/python/simulations/planet/player.py), loaded from its file, on
+"""Tests for the character on foot (shoonyakasha.planet.character), on
 sk.PlanetPhysics in a Bubble over a flat mesh at the top of a sphere: the
 jump's height on the planet and the moon, walking and running speeds,
 turning the view, the jetpack and its fuel, being held off the terrain
@@ -10,25 +9,17 @@ interpreter.
     python -m unittest discover -s tests/python
 """
 
-import importlib.util
 import math
 import os
 import subprocess
 import sys
 import unittest
-from pathlib import Path
 
 import numpy as np
 
 import shoonyakasha as sk
 from shoonyakasha.planet.bubble import Bubble
-
-REPO = Path(__file__).resolve().parents[2]
-_SPEC = importlib.util.spec_from_file_location(
-    "planet_player", REPO / "examples" / "python" / "simulations" / "planet" / "player.py")
-player_module = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(player_module)
-Player, Controls = player_module.Player, player_module.Controls
+from shoonyakasha.planet.character import Controls, Player
 
 STEP = 1.0 / 120.0
 PLANET = (100_000.0, 4.905)         # radius (m), surface gravity (m/s^2)

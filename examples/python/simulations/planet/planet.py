@@ -5,7 +5,7 @@ of detail, flown over by a ship
 A planet of radius 100 km and its moon, flown around from a few metres
 above the ground to thousands of kilometres away, with a free camera or a
 ship (flight.py) seen from its cockpit or a chase view, or on foot
-(player.py). The planet, the
+(shoonyakasha.planet.character). The planet, the
 moon, the terrain's chunks built on the GPU, the atmosphere, the clouds,
 the ocean and the shadows are shoonyakasha.planet's PlanetWorld, on the
 planet pipeline; the cards, the hint bar, the controls sheet and the
@@ -85,7 +85,7 @@ Keys:
     E / Q                  up / down
     Shift / Ctrl           4x faster / 4x slower
     mouse wheel            speed factor
-  on foot (player.py; the mouse is captured, Escape frees it):
+  on foot (shoonyakasha.planet.character; the mouse is captured, Escape frees it):
     mouse                  look around
     W/A/S/D                walk forward, left, back, right
     Shift / Ctrl           run / crouch
@@ -187,6 +187,8 @@ from shoonyakasha.planet import biomes, cube_sphere
 from shoonyakasha.planet import settings as planet_settings
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
+from shoonyakasha.planet.character import Controls as FootControls, Player
+from shoonyakasha.planet.character import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from shoonyakasha.planet.collider_probes import ColliderProbes, TerrainCollider
 from shoonyakasha.planet.nearby_trees import NearbyTrees, listed_keys
 from shoonyakasha.planet.rocks import ORE_ROCKS, rock_colour
@@ -205,8 +207,6 @@ from gun import Gun, GunControls
 from instruments import Instruments
 import outposts
 from outposts import Pads, Survey, home_outpost
-from player import Controls as FootControls, Player
-from player import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from props import Props, stack_offsets, yaw_rotation
 from rocks import Rocks
 from scanner import CONTACT, Scanner

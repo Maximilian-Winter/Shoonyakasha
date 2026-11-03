@@ -9,7 +9,7 @@ moved by:
 - **sway:** the view's turning, low-passed over SWAY_SMOOTHING seconds,
   SWAY_PER_PIXEL metres per pixel of mouse movement a frame, at most
   SWAY_MAX each way, so the gun lags behind the turn;
-- **bob:** the player's head bob (player.py), BOB_SHARE of its height,
+- **bob:** the player's head bob (shoonyakasha.planet.character), BOB_SHARE of its height,
   BOB_PHASE radians behind it, and swaying sideways once a stride;
 - **recoil:** after a punt, back by RECOIL_BACK and turned up by
   RECOIL_PITCH, both easing back to rest over RECOIL_TIME.
@@ -29,10 +29,10 @@ import struct
 import tempfile
 import zlib
 
+from shoonyakasha.planet.character import BOB_AMPLITUDE, BOB_STRIDE
 from shoonyakasha.planet.vec import add, cross, euler_from_basis, length, normalize, scale, sub
 
 from cockpit import beam, oriented_box
-from player import BOB_AMPLITUDE, BOB_STRIDE
 
 BASE = (0.22, -0.2, -0.45)
 SWAY_SMOOTHING = 0.08                # s

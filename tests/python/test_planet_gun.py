@@ -23,15 +23,14 @@ import numpy as np
 
 import shoonyakasha as sk
 from shoonyakasha.planet.bubble import Bubble
+from shoonyakasha.planet.character import Controls, Player
 
 PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simulations" / "planet"
 sys.path.insert(0, str(PLANET_DIR))
 import gun as gun_module        # noqa: E402
-import player as player_module  # noqa: E402
 from shoonyakasha.planet.vec import quat_rotate  # noqa: E402
 
 Gun, GunControls = gun_module.Gun, gun_module.GunControls
-Player, Controls = player_module.Player, player_module.Controls
 
 STEP = 1.0 / 120.0
 PLANET = (100_000.0, 4.905)         # radius (m), surface gravity (m/s^2)

@@ -1,5 +1,5 @@
 """
-The player on foot: a character in the physics bubble
+A first-person character on foot: a character in the physics bubble
 (shoonyakasha.planet.bubble, sk.PlanetPhysics' characters) walking on the
 planet or the moon, seen from its eye.
 
@@ -19,9 +19,8 @@ JUMP_GRACE after a jump it counts as off the ground. Off the ground
 gravity pulls along the up. While jetting it climbs at JET_ACCEL,
 burning JET_BURN of its fuel (0 to 1) a second; on the ground the fuel
 refills at JET_REFILL a second. A character over ground the terrain mesh
-does not cover is held where it is. `Player.push` adds to its velocity
-(the gravity gun's recoil); a push upwards lifts it off the ground as a
-jump does.
+does not cover is held where it is. `Player.push` adds to its velocity;
+a push upwards lifts it off the ground as a jump does.
 
 The eye is EYE_HEIGHT above the feet (CROUCH_EYE_HEIGHT crouched,
 reached over EYE_SMOOTHING seconds); a step up of more than STEP_JUMP in

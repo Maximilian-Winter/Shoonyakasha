@@ -1,5 +1,5 @@
 """
-The gravity gun: from the player's eye (player.py) it grabs, pulls, holds,
+The gravity gun: from the player's eye (shoonyakasha.planet.character) it grabs, pulls, holds,
 turns and punts the dynamic bodies of the physics bubble
 (shoonyakasha.planet.bubble), and punts off anything else.
 
@@ -56,10 +56,10 @@ towards it reaches.
 import math
 from dataclasses import dataclass
 
+from shoonyakasha.planet.character import MASS as PLAYER_MASS
 from shoonyakasha.planet.vec import (add, dot, length, normalize, quat_conjugate, quat_from_basis, quat_multiply,
                                      quat_normalize, scale, sub)
 
-from player import MASS as PLAYER_MASS
 
 MIN_HOLD, MAX_HOLD = 1.5, 6.0        # m, the hold distance's range
 HOLD_STEP = 0.25                     # m the hold distance changes per wheel notch
