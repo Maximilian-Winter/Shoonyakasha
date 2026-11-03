@@ -1,5 +1,7 @@
 #include "Planet/PlanetPhysics.h"
 
+#include "../Physics/JoltRuntime.h"
+
 // Jolt.h comes first: it sets up the macros every other Jolt header uses.
 #include <Jolt/Jolt.h>
 
@@ -83,15 +85,6 @@ public:
                  (a == Layers::FAR && b == Layers::GROUND) || (b == Layers::FAR && a == Layers::GROUND));
     }
 };
-
-void initialiseJolt() {
-    static std::once_flag once;
-    std::call_once(once, [] {
-        JPH::RegisterDefaultAllocator();
-        JPH::Factory::sInstance = new JPH::Factory();
-        JPH::RegisterTypes();
-    });
-}
 
 JPH::Vec3 toVec3(const PhysicsVec3& v) {
     return JPH::Vec3(static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2]));
@@ -298,7 +291,7 @@ struct PlanetPhysics::Impl {
 };
 
 PlanetPhysics::PlanetPhysics(uint32_t maxBodies, int threads) : m_impl(std::make_unique<Impl>()) {
-    initialiseJolt();
+    Physics::initialiseJolt();
     m_impl->characterGroups = new CharacterGroups();
     if (threads < 0) {
         int hardware = static_cast<int>(std::thread::hardware_concurrency());

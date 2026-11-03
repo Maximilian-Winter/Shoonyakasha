@@ -20,7 +20,7 @@ int main() {
 #endif
 
     std::cout << "=========================================================\n";
-    std::cout << "  Physics Test - Bullet3 Integration Demo\n";
+    std::cout << "  Physics Test - Jolt Integration Demo\n";
     std::cout << "=========================================================\n";
     std::cout << "\n";
     std::cout << "  Controls:\n";
@@ -40,7 +40,7 @@ int main() {
 
     try {
         ApplicationConfig config;
-        config.title = "Physics Test - Bullet3 Integration";
+        config.title = "Physics Test - Jolt Integration";
         config.logFile = "physics_test.log";
         config.hdrEnvironmentPath = "env/kloofendal_misty_1k.hdr";
         config.pipelineJsonPath = "pipeline.json";

@@ -5,7 +5,7 @@
 //
 // Demonstrates all major engine features together:
 // - Procedural PBR meshes (boxes, spheres, ground plane)
-// - Bullet3 physics simulation
+// - Jolt physics simulation
 // - GPU compute particle system (75K particles)
 // - Deferred rendering with IBL
 // - Bloom post-processing

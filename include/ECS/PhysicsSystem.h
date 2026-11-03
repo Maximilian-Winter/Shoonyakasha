@@ -1,10 +1,10 @@
 //
-// ECS/PhysicsSystem.h - Bullet3 Physics Integration
+// ECS/PhysicsSystem.h - Jolt Physics Integration
 //
 // 重力之道 — The Way of Gravity
 //
-// Integrates Bullet3 rigid body dynamics with the ECS.
-// All Bullet types are isolated in the .cpp via PIMPL — this header is Bullet-free.
+// Integrates Jolt Physics rigid body dynamics with the ECS.
+// All Jolt types are isolated in the .cpp via PIMPL — this header is Jolt-free.
 //
 // Priority: 5 (after TransformSystem=0, before CameraSystem=10)
 //
@@ -20,7 +20,7 @@ namespace Shoonyakasha {
 namespace ECS {
 
 // ═══════════════════════════════════════════════════════════════
-// PhysicsSystem - Bullet3 Dynamics Integrated with ECS
+// PhysicsSystem - Jolt Dynamics Integrated with ECS
 // ═══════════════════════════════════════════════════════════════
 //
 // Uses EnTT on_construct/on_destroy signals to automatically
@@ -28,8 +28,8 @@ namespace ECS {
 // is added to or removed from entities.
 //
 // Sync model:
-//   ECS → Bullet: Kinematic bodies (before simulation step)
-//   Bullet → ECS: Dynamic bodies (after simulation step)
+//   ECS → Jolt: Kinematic bodies (before the frame's first step)
+//   Jolt → ECS: Dynamic bodies (after the frame's steps)
 //
 
 class PhysicsSystem : public ISystem {
@@ -37,7 +37,7 @@ public:
     PhysicsSystem();
     ~PhysicsSystem() override;
 
-    // Non-copyable, non-movable (owns Bullet world)
+    // Non-copyable, non-movable (owns the Jolt world)
     PhysicsSystem(const PhysicsSystem&) = delete;
     PhysicsSystem& operator=(const PhysicsSystem&) = delete;
 
@@ -115,7 +115,7 @@ public:
     void rebuildBody(entt::registry& registry, entt::entity entity);
 
 private:
-    // ─── PIMPL — All Bullet types hidden ──────────────────────
+    // ─── PIMPL — All Jolt types hidden ────────────────────────
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 };

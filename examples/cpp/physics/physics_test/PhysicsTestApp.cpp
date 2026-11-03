@@ -402,7 +402,7 @@ void PhysicsTestApp::spawnRandomObject() {
 void PhysicsTestApp::resetScene() {
     auto& registry = getRegistry();
 
-    // Destroy all physics entities (EnTT on_destroy signal cleans up Bullet bodies)
+    // Destroy all physics entities (EnTT on_destroy signal cleans up the physics bodies)
     for (auto entity : m_physicsEntities) {
         if (registry.valid(entity)) {
             registry.destroy(entity);

@@ -7,7 +7,7 @@ Most native components live in [Core.h](../../../include/ECS/Core.h), [RenderCom
 | Identity/lifetime | Name, Tag, Active, Lifetime |
 | Spatial | Transform (local/cached world), Hierarchy (parent/children) |
 | View/lighting | Camera, Light, controller/input state |
-| Physics | RigidBody and Collider, connected to Bullet by PhysicsSystem |
+| Physics | RigidBody and Collider, connected to Jolt Physics by PhysicsSystem |
 | Rendering | MeshComponent, MaterialComponentV5, RenderableTagComponent |
 | 2D | Sprite/UI/text data, consumed by layout and glyph systems |
 | Animation | Skeleton and playback data, including GPU bone buffers |

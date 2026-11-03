@@ -4,7 +4,7 @@ Access: `engine.physics`. [Other language reference](../cpp/physics-api.md).
 
 [Binding implementation](../../../python/shoonyakasha/_shoonyakasha.pyx). Import the package as `import shoonyakasha as sk`.
 
-Controls the Bullet-backed ECS physics system. Obtain it through the engine and configure it in init or later. The facade exists before initialization, but setters do not buffer pending configuration.
+Controls the Jolt-backed ECS physics system. Obtain it through the engine and configure it in init or later. The facade exists before initialization, but setters do not buffer pending configuration.
 
 ## World and body contract
 

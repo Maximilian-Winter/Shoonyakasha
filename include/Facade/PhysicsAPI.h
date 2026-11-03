@@ -1,7 +1,7 @@
 //
 // Facade/PhysicsAPI.h - Python-friendly physics control
 //
-// No Bullet, no EnTT in this header.
+// No Jolt, no EnTT in this header.
 //
 
 #pragma once

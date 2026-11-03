@@ -61,7 +61,7 @@ Start with the [pipeline walkthrough](docs/guides/json-render-pipeline.md), [JSO
 | Assets and instancing | glTF/GLB meshes, materials, textures, node hierarchies, shared geometry for repeated mesh nodes, skins, and animation clips | [Loading scenes](docs/guides/loading-scenes.md), [instancing](docs/guides/instancing.md) |
 | Animation | Skeletal clip playback, time/speed/loop control, and GPU bone buffers | [Animation](docs/guides/animation.md) |
 | 2D and UI | Canvas UI on the screen and on surfaces in the world: anchored layout, Unicode SDF text, clipping, buttons, toggles and sliders. Also world sprites, anchored screen panels and glyph-atlas text | [Canvas UI](docs/guides/canvas-ui.md), [sprites, UI, and text](docs/guides/sprites-ui-text.md) |
-| Physics | Bullet rigid bodies; box, sphere, capsule, and plane shapes; gravity, forces, impulses, velocity, and fixed-step settings | [Physics](docs/guides/physics.md) |
+| Physics | Jolt Physics rigid bodies; box, sphere, capsule, and plane shapes; gravity, forces, impulses, velocity, and fixed-step settings | [Physics](docs/guides/physics.md) |
 | Python | Cython facade bindings, lifecycle/input callbacks, arbitrary Python ECS components, and per-frame script systems | [Python quickstart](docs/getting-started/python-quickstart.md), [script ECS](docs/guides/script-ecs.md) |
 | Developer tools | Project scaffolding, incremental shader compilation, pipeline diagnostics, asset lookup/fetch, frame-graph analysis/export, and Vulkan validation | [Python utilities](docs/api/python/utilities.md), [frame graph](docs/api/cpp/frame-graph.md) |
 | Capture | Screenshots of the presented frame and video recording through an external ffmpeg executable | [Frame capture](docs/guides/frame-capture.md) |

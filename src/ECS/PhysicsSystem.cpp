@@ -1,55 +1,126 @@
 //
-// PhysicsSystem.cpp - Bullet3 Physics Integration
+// PhysicsSystem.cpp - Jolt Physics Integration
 //
 // 重力之道 — The Way of Gravity
 //
-// All Bullet types live here and nowhere else.
-// The PIMPL pattern keeps Bullet headers from leaking into the engine's public API.
+// All Jolt types for the ECS live here; the header hides them behind PIMPL.
+//
+// Bodies: a RigidBodyComponent's type is Jolt's motion type (a dynamic body
+// of mass 0 or less is static); its mass, drag and angular drag are the
+// body's mass and damping, useGravity its gravity factor (1 or 0) and
+// freezeRotation leaves it only its translations. A ColliderComponent's
+// shape is a box (size: full extents), a sphere (size.x: radius), a capsule
+// along Y (size.x: radius, size.y: its cylinder's length) or an infinite
+// plane facing +Y through the origin; a mesh collider is a unit box. Without
+// a collider the body is a unit box with friction 0.5 and restitution 0.
+// A trigger is a sensor. Two bodies' friction and restitution combine by
+// multiplying.
+//
+// Stepping: the frame's time accrues, and whole fixed steps are taken, at
+// most maxSubSteps a frame; time beyond that is dropped and less than a
+// step carries over (maxSubSteps 0: one step of the frame's time). Before
+// the first step a kinematic body is moved to its transform over that step;
+// each step applies the forces given since the frame began. After the steps
+// a dynamic body's transform is its position and rotation carried on by its
+// velocities over the time carried over, and its component's velocities are
+// copied from the body.
 //
 
 #include "ECS/PhysicsSystem.h"
 
-// Bullet includes — ONLY here in the entire engine
-#include "bullet/LinearMath/btVector3.h"
-#include "bullet/LinearMath/btQuaternion.h"
-#include "bullet/btBulletCollisionCommon.h"
-#include "bullet/btBulletDynamicsCommon.h"
+#include "../Physics/JoltRuntime.h"
+
+// Jolt.h comes first: it sets up the macros every other Jolt header uses.
+#include <Jolt/Jolt.h>
+
+#include <Jolt/Core/JobSystemThreadPool.h>
+#include <Jolt/Core/TempAllocator.h>
+#include <Jolt/Physics/Body/Body.h>
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/PlaneShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/PhysicsSystem.h>
 
 #include <glm/gtc/quaternion.hpp>
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <thread>
 #include <unordered_map>
 #include <vector>
-#include <cstdio>
 
 namespace Shoonyakasha {
 namespace ECS {
 
-// ═══════════════════════════════════════════════════════════════
-// GLM ↔ Bullet Conversions
-// ═══════════════════════════════════════════════════════════════
+namespace {
 
-static btVector3 toBt(const glm::vec3& v) {
-    return btVector3(v.x, v.y, v.z);
+constexpr JPH::uint MAX_BODIES = 65536;
+constexpr JPH::uint MAX_BODY_PAIRS = 65536;
+constexpr JPH::uint MAX_CONTACT_CONSTRAINTS = 16384;
+constexpr size_t TEMP_ALLOCATOR_BYTES = 16 * 1024 * 1024;
+constexpr float PLANE_HALF_EXTENT = 10000.0f;   // m: the plane's bounds for the broad phase
+
+// Object layers: what does not move, and what does; one broad phase layer each.
+namespace Layers {
+constexpr JPH::ObjectLayer NON_MOVING = 0;
+constexpr JPH::ObjectLayer MOVING = 1;
+} // namespace Layers
+
+class BroadPhaseLayers final : public JPH::BroadPhaseLayerInterface {
+public:
+    JPH::uint GetNumBroadPhaseLayers() const override { return 2; }
+    JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override {
+        return JPH::BroadPhaseLayer(layer == Layers::MOVING ? 1 : 0);
+    }
+#if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
+    const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer layer) const override {
+        return layer == JPH::BroadPhaseLayer(1) ? "MOVING" : "NON_MOVING";
+    }
+#endif
+};
+
+class ObjectVsBroadPhase final : public JPH::ObjectVsBroadPhaseLayerFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer layer, JPH::BroadPhaseLayer broadPhase) const override {
+        return layer == Layers::MOVING || broadPhase == JPH::BroadPhaseLayer(1);
+    }
+};
+
+class ObjectPairs final : public JPH::ObjectLayerPairFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override {
+        return a == Layers::MOVING || b == Layers::MOVING;
+    }
+};
+
+float multiplyFriction(const JPH::Body& a, const JPH::SubShapeID&, const JPH::Body& b, const JPH::SubShapeID&) {
+    return a.GetFriction() * b.GetFriction();
 }
 
-static glm::vec3 toGlm(const btVector3& v) {
-    return glm::vec3(v.x(), v.y(), v.z());
+float multiplyRestitution(const JPH::Body& a, const JPH::SubShapeID&, const JPH::Body& b, const JPH::SubShapeID&) {
+    return a.GetRestitution() * b.GetRestitution();
 }
 
-// Convert TransformComponent euler angles (Y→X→Z order) to btQuaternion.
-// Matches the rotation order in TransformComponent::getLocalMatrix():
-//   R = Ry(yaw) * Rx(pitch) * Rz(roll)
-//   where rotation.x = pitch, rotation.y = yaw, rotation.z = roll
-static btQuaternion toBtQuat(const glm::vec3& eulerRadians) {
+JPH::Vec3 toJolt(const glm::vec3& v) { return JPH::Vec3(v.x, v.y, v.z); }
+
+glm::vec3 toGlm(JPH::Vec3Arg v) { return glm::vec3(v.GetX(), v.GetY(), v.GetZ()); }
+
+// TransformComponent's Euler angles (Y→X→Z order) as a quaternion, matching
+// TransformComponent::getLocalMatrix(): R = Ry(yaw) * Rx(pitch) * Rz(roll),
+// where rotation.x = pitch, rotation.y = yaw, rotation.z = roll.
+JPH::Quat toJoltQuat(const glm::vec3& eulerRadians) {
     glm::quat qY = glm::angleAxis(eulerRadians.y, glm::vec3(0, 1, 0));  // Yaw
     glm::quat qX = glm::angleAxis(eulerRadians.x, glm::vec3(1, 0, 0));  // Pitch
     glm::quat qZ = glm::angleAxis(eulerRadians.z, glm::vec3(0, 0, 1));  // Roll
     glm::quat q = qY * qX * qZ;
-    return btQuaternion(q.x, q.y, q.z, q.w);
+    return JPH::Quat(q.x, q.y, q.z, q.w).Normalized();
 }
 
-// Convert btQuaternion to euler angles matching TransformComponent's Y→X→Z convention.
-static glm::vec3 toEuler(const btQuaternion& btq) {
-    glm::quat q(btq.w(), btq.x(), btq.y(), btq.z());
+// A quaternion as Euler angles in TransformComponent's Y→X→Z convention.
+glm::vec3 toEuler(JPH::QuatArg jq) {
+    glm::quat q(jq.GetW(), jq.GetX(), jq.GetY(), jq.GetZ());
     glm::mat3 rotMat = glm::mat3_cast(q);
 
     // Decompose Y→X→Z rotation matrix:
@@ -64,28 +135,30 @@ static glm::vec3 toEuler(const btQuaternion& btq) {
     return glm::vec3(pitch, yaw, roll);
 }
 
+} // namespace
+
 // ═══════════════════════════════════════════════════════════════
-// Per-Entity Physics Data — RAII tracking of all Bullet allocations
+// Per-Entity Physics Data
 // ═══════════════════════════════════════════════════════════════
 
 struct PhysicsBodyData {
-    btRigidBody*          rigidBody    = nullptr;
-    btCollisionShape*     shape        = nullptr;
-    btDefaultMotionState* motionState  = nullptr;
-    entt::entity          entity       = entt::null;
+    JPH::BodyID body;
+    RigidBodyComponent::Type type = RigidBodyComponent::Dynamic;
+    glm::vec3 force{0.0f};                       // the frame's central forces, N
+    std::vector<std::pair<glm::vec3, glm::vec3>> pointForces;   // (force, world point), this frame
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PhysicsSystem::Impl — The hidden Bullet world
+// PhysicsSystem::Impl — The hidden Jolt world
 // ═══════════════════════════════════════════════════════════════
 
 struct PhysicsSystem::Impl {
-    // ─── Bullet World ─────────────────────────────────────────
-    std::unique_ptr<btDefaultCollisionConfiguration>       collisionConfig;
-    std::unique_ptr<btCollisionDispatcher>                  dispatcher;
-    std::unique_ptr<btDbvtBroadphase>                       broadphase;
-    std::unique_ptr<btSequentialImpulseConstraintSolver>    solver;
-    std::unique_ptr<btDiscreteDynamicsWorld>                 dynamicsWorld;
+    BroadPhaseLayers broadPhaseLayers;
+    ObjectVsBroadPhase objectVsBroadPhase;
+    ObjectPairs objectPairs;
+    std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
+    std::unique_ptr<JPH::JobSystemThreadPool> jobSystem;
+    JPH::PhysicsSystem system;
 
     // ─── Per-Entity Tracking ──────────────────────────────────
     std::unordered_map<entt::entity, PhysicsBodyData> bodies;
@@ -97,18 +170,21 @@ struct PhysicsSystem::Impl {
     // ─── Simulation Parameters ────────────────────────────────
     float fixedTimeStep = 1.0f / 60.0f;
     int   maxSubSteps   = 10;
+    float carried       = 0.0f;   // s of the frames' time not yet stepped
 
-    // ─── Registry Pointer (set during initialize) ─────────────
     entt::registry* registry = nullptr;
 
-    // ─── Internal Methods ─────────────────────────────────────
+    JPH::BodyInterface& bodyInterface() { return system.GetBodyInterface(); }
 
     void createBodyInternal(entt::registry& reg, entt::entity entity);
     void removeBodyInternal(entt::entity entity);
-    btCollisionShape* createCollisionShape(const ColliderComponent& collider);
     void cleanupAllBodies();
+    void step(float dt, bool first, entt::registry& reg);
 
-    // ─── Signal Callbacks ─────────────────────────────────────
+    PhysicsBodyData* find(entt::entity entity) {
+        auto it = bodies.find(entity);
+        return it == bodies.end() ? nullptr : &it->second;
+    }
 
     void onRigidBodyAdded(entt::registry& reg, entt::entity entity) {
         if (reg.all_of<TransformComponent>(entity)) {
@@ -128,27 +204,23 @@ struct PhysicsSystem::Impl {
 PhysicsSystem::PhysicsSystem() : m_impl(std::make_unique<Impl>()) {
     priority = 5;  // After TransformSystem(0), before CameraSystem(10)
 
-    // Create the Bullet dynamics world
-    m_impl->collisionConfig = std::make_unique<btDefaultCollisionConfiguration>();
-    m_impl->dispatcher = std::make_unique<btCollisionDispatcher>(
-        m_impl->collisionConfig.get());
-    m_impl->broadphase = std::make_unique<btDbvtBroadphase>();
-    m_impl->solver = std::make_unique<btSequentialImpulseConstraintSolver>();
+    Physics::initialiseJolt();
+    const int hardware = static_cast<int>(std::thread::hardware_concurrency());
+    const int threads = std::clamp(hardware - 1, 1, 4);
+    m_impl->tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(TEMP_ALLOCATOR_BYTES);
+    m_impl->jobSystem = std::make_unique<JPH::JobSystemThreadPool>(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers,
+                                                                   threads);
+    m_impl->system.Init(MAX_BODIES, 0, MAX_BODY_PAIRS, MAX_CONTACT_CONSTRAINTS, m_impl->broadPhaseLayers,
+                        m_impl->objectVsBroadPhase, m_impl->objectPairs);
+    m_impl->system.SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
+    m_impl->system.SetCombineFriction(multiplyFriction);
+    m_impl->system.SetCombineRestitution(multiplyRestitution);
 
-    m_impl->dynamicsWorld = std::make_unique<btDiscreteDynamicsWorld>(
-        m_impl->dispatcher.get(),
-        m_impl->broadphase.get(),
-        m_impl->solver.get(),
-        m_impl->collisionConfig.get());
-
-    m_impl->dynamicsWorld->setGravity(btVector3(0, -9.81f, 0));
-
-    printf("[PhysicsSystem] Bullet dynamics world created (gravity: 0, -9.81, 0)\n");
+    printf("[PhysicsSystem] Jolt physics world created (gravity: 0, -9.81, 0)\n");
 }
 
 PhysicsSystem::~PhysicsSystem() {
-    // Safety: if cleanup() wasn't called, tear down bodies now
-    if (m_impl && m_impl->dynamicsWorld && !m_impl->bodies.empty()) {
+    if (m_impl && !m_impl->bodies.empty()) {
         m_impl->cleanupAllBodies();
     }
 }
@@ -160,14 +232,13 @@ PhysicsSystem::~PhysicsSystem() {
 void PhysicsSystem::initialize(entt::registry& registry) {
     m_impl->registry = &registry;
 
-    // Connect EnTT signals for automatic body lifecycle
     m_impl->onRigidBodyConstruct = registry.on_construct<RigidBodyComponent>()
         .connect<&Impl::onRigidBodyAdded>(*m_impl);
 
     m_impl->onRigidBodyDestroy = registry.on_destroy<RigidBodyComponent>()
         .connect<&Impl::onRigidBodyRemoved>(*m_impl);
 
-    // Create bodies for entities that already exist before initialization
+    // Bodies for entities that already exist before initialization
     auto view = registry.view<RigidBodyComponent, TransformComponent>();
     uint32_t preExisting = 0;
     for (auto entity : view) {
@@ -182,64 +253,74 @@ void PhysicsSystem::initialize(entt::registry& registry) {
     printf("[PhysicsSystem] Initialized with EnTT signals connected\n");
 }
 
-void PhysicsSystem::update(entt::registry& registry, float deltaTime) {
-    if (!enabled) return;
-
-    // ─── ECS → Bullet: Sync kinematic bodies ─────────────────
-    for (auto& [entity, bodyData] : m_impl->bodies) {
-        if (!registry.valid(entity) || !bodyData.rigidBody) continue;
-
-        auto* rbComp = registry.try_get<RigidBodyComponent>(entity);
-        auto* transform = registry.try_get<TransformComponent>(entity);
-        if (!rbComp || !transform) continue;
-
-        if (rbComp->type == RigidBodyComponent::Kinematic) {
-            btTransform btTrans;
-            btTrans.setOrigin(toBt(transform->position));
-            btTrans.setRotation(toBtQuat(transform->rotation));
-            bodyData.motionState->setWorldTransform(btTrans);
+void PhysicsSystem::Impl::step(float dt, bool first, entt::registry& reg) {
+    JPH::BodyInterface& bi = bodyInterface();
+    for (auto& [entity, data] : bodies) {
+        if (data.type == RigidBodyComponent::Kinematic && first) {
+            if (auto* transform = reg.try_get<TransformComponent>(entity)) {
+                bi.MoveKinematic(data.body, JPH::RVec3(toJolt(transform->position)), toJoltQuat(transform->rotation),
+                                 dt);
+            }
+        }
+        if (data.type != RigidBodyComponent::Dynamic) continue;
+        if (data.force != glm::vec3(0.0f)) bi.AddForce(data.body, toJolt(data.force));
+        for (const auto& [force, point] : data.pointForces) {
+            bi.AddForce(data.body, toJolt(force), JPH::RVec3(toJolt(point)));
         }
     }
+    system.Update(dt, 1, tempAllocator.get(), jobSystem.get());
+}
 
-    // ─── Step Simulation ──────────────────────────────────────
-    m_impl->dynamicsWorld->stepSimulation(
-        deltaTime,
-        m_impl->maxSubSteps,
-        m_impl->fixedTimeStep);
+void PhysicsSystem::update(entt::registry& registry, float deltaTime) {
+    if (!enabled) return;
+    Impl& impl = *m_impl;
 
-    // ─── Bullet → ECS: Sync dynamic bodies ───────────────────
-    for (auto& [entity, bodyData] : m_impl->bodies) {
-        if (!registry.valid(entity) || !bodyData.rigidBody) continue;
+    // ─── Fixed steps ──────────────────────────────────────────
+    float extra = 0.0f;   // s the dynamic bodies' transforms are carried on past the last step
+    if (impl.maxSubSteps <= 0) {
+        if (deltaTime > 0.0f) impl.step(deltaTime, true, registry);
+    } else {
+        impl.carried += deltaTime;
+        int steps = static_cast<int>(impl.carried / impl.fixedTimeStep);
+        impl.carried -= static_cast<float>(steps) * impl.fixedTimeStep;
+        steps = std::min(steps, impl.maxSubSteps);
+        for (int k = 0; k < steps; ++k) impl.step(impl.fixedTimeStep, k == 0, registry);
+        extra = impl.carried;
+    }
+    for (auto& [entity, data] : impl.bodies) {
+        data.force = glm::vec3(0.0f);
+        data.pointForces.clear();
+    }
 
+    // ─── Jolt → ECS: dynamic bodies ───────────────────────────
+    JPH::BodyInterface& bi = impl.bodyInterface();
+    for (auto& [entity, data] : impl.bodies) {
+        if (data.type != RigidBodyComponent::Dynamic || !registry.valid(entity)) continue;
         auto* rbComp = registry.try_get<RigidBodyComponent>(entity);
         auto* transform = registry.try_get<TransformComponent>(entity);
         if (!rbComp || !transform) continue;
 
-        if (rbComp->type == RigidBodyComponent::Dynamic) {
-            btTransform bulletTransform;
-            bodyData.motionState->getWorldTransform(bulletTransform);
-
-            // Position sync
-            transform->position = toGlm(bulletTransform.getOrigin());
-
-            // Rotation sync (quaternion → euler, matching Y→X→Z order)
-            transform->rotation = toEuler(bulletTransform.getRotation());
-
-            // Velocity sync back to component (for inspection/serialization)
-            rbComp->velocity = toGlm(bodyData.rigidBody->getLinearVelocity());
-            rbComp->angularVelocity = toGlm(bodyData.rigidBody->getAngularVelocity());
-
-            transform->isDirty = true;
+        JPH::RVec3 position;
+        JPH::Quat rotation;
+        bi.GetPositionAndRotation(data.body, position, rotation);
+        const JPH::Vec3 v = bi.GetLinearVelocity(data.body);
+        const JPH::Vec3 w = bi.GetAngularVelocity(data.body);
+        if (extra > 0.0f && bi.IsActive(data.body)) {
+            position += v * extra;
+            const float angle = w.Length() * extra;
+            if (angle > 1e-9f) rotation = (JPH::Quat::sRotation(w.Normalized(), angle) * rotation).Normalized();
         }
+        transform->position = toGlm(JPH::Vec3(position));
+        transform->rotation = toEuler(rotation);
+        rbComp->velocity = toGlm(v);
+        rbComp->angularVelocity = toGlm(w);
+        transform->isDirty = true;
     }
 }
 
 void PhysicsSystem::cleanup(entt::registry& /*registry*/) {
-    // Disconnect signals
     m_impl->onRigidBodyConstruct.release();
     m_impl->onRigidBodyDestroy.release();
-
-    // Remove all tracked bodies
     m_impl->cleanupAllBodies();
     m_impl->registry = nullptr;
 
@@ -247,55 +328,46 @@ void PhysicsSystem::cleanup(entt::registry& /*registry*/) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Force / Impulse API
+// Force / Impulse API (dynamic bodies only; others are left alone)
 // ═══════════════════════════════════════════════════════════════
 
-void PhysicsSystem::addForce(entt::registry& /*registry*/, entt::entity entity,
-                             const glm::vec3& force) {
-    auto it = m_impl->bodies.find(entity);
-    if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
-    it->second.rigidBody->activate(true);
-    it->second.rigidBody->applyCentralForce(toBt(force));
+void PhysicsSystem::addForce(entt::registry& /*registry*/, entt::entity entity, const glm::vec3& force) {
+    PhysicsBodyData* data = m_impl->find(entity);
+    if (!data || data->type != RigidBodyComponent::Dynamic) return;
+    data->force += force;
+    m_impl->bodyInterface().ActivateBody(data->body);
 }
 
-void PhysicsSystem::addForceAtPoint(entt::registry& /*registry*/, entt::entity entity,
-                                     const glm::vec3& force, const glm::vec3& point) {
-    auto it = m_impl->bodies.find(entity);
-    if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
-    it->second.rigidBody->activate(true);
-    it->second.rigidBody->applyForce(toBt(force), toBt(point));
+void PhysicsSystem::addForceAtPoint(entt::registry& /*registry*/, entt::entity entity, const glm::vec3& force,
+                                    const glm::vec3& point) {
+    PhysicsBodyData* data = m_impl->find(entity);
+    if (!data || data->type != RigidBodyComponent::Dynamic) return;
+    data->pointForces.emplace_back(force, point);
+    m_impl->bodyInterface().ActivateBody(data->body);
 }
 
-void PhysicsSystem::addImpulse(entt::registry& /*registry*/, entt::entity entity,
-                               const glm::vec3& impulse) {
-    auto it = m_impl->bodies.find(entity);
-    if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
-    it->second.rigidBody->activate(true);
-    it->second.rigidBody->applyCentralImpulse(toBt(impulse));
+void PhysicsSystem::addImpulse(entt::registry& /*registry*/, entt::entity entity, const glm::vec3& impulse) {
+    PhysicsBodyData* data = m_impl->find(entity);
+    if (!data || data->type != RigidBodyComponent::Dynamic) return;
+    m_impl->bodyInterface().AddImpulse(data->body, toJolt(impulse));
 }
 
-void PhysicsSystem::addTorqueImpulse(entt::registry& /*registry*/, entt::entity entity,
-                                      const glm::vec3& torque) {
-    auto it = m_impl->bodies.find(entity);
-    if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
-    it->second.rigidBody->activate(true);
-    it->second.rigidBody->applyTorqueImpulse(toBt(torque));
+void PhysicsSystem::addTorqueImpulse(entt::registry& /*registry*/, entt::entity entity, const glm::vec3& torque) {
+    PhysicsBodyData* data = m_impl->find(entity);
+    if (!data || data->type != RigidBodyComponent::Dynamic) return;
+    m_impl->bodyInterface().AddAngularImpulse(data->body, toJolt(torque));
 }
 
-void PhysicsSystem::setLinearVelocity(entt::registry& /*registry*/, entt::entity entity,
-                                       const glm::vec3& velocity) {
-    auto it = m_impl->bodies.find(entity);
-    if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
-    it->second.rigidBody->activate(true);
-    it->second.rigidBody->setLinearVelocity(toBt(velocity));
+void PhysicsSystem::setLinearVelocity(entt::registry& /*registry*/, entt::entity entity, const glm::vec3& velocity) {
+    PhysicsBodyData* data = m_impl->find(entity);
+    if (!data || data->type == RigidBodyComponent::Static) return;
+    m_impl->bodyInterface().SetLinearVelocity(data->body, toJolt(velocity));
 }
 
-void PhysicsSystem::setAngularVelocity(entt::registry& /*registry*/, entt::entity entity,
-                                        const glm::vec3& velocity) {
-    auto it = m_impl->bodies.find(entity);
-    if (it == m_impl->bodies.end() || !it->second.rigidBody) return;
-    it->second.rigidBody->activate(true);
-    it->second.rigidBody->setAngularVelocity(toBt(velocity));
+void PhysicsSystem::setAngularVelocity(entt::registry& /*registry*/, entt::entity entity, const glm::vec3& velocity) {
+    PhysicsBodyData* data = m_impl->find(entity);
+    if (!data || data->type == RigidBodyComponent::Static) return;
+    m_impl->bodyInterface().SetAngularVelocity(data->body, toJolt(velocity));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -303,11 +375,11 @@ void PhysicsSystem::setAngularVelocity(entt::registry& /*registry*/, entt::entit
 // ═══════════════════════════════════════════════════════════════
 
 void PhysicsSystem::setGravity(const glm::vec3& gravity) {
-    m_impl->dynamicsWorld->setGravity(toBt(gravity));
+    m_impl->system.SetGravity(toJolt(gravity));
 }
 
 glm::vec3 PhysicsSystem::getGravity() const {
-    return toGlm(m_impl->dynamicsWorld->getGravity());
+    return toGlm(m_impl->system.GetGravity());
 }
 
 void PhysicsSystem::setFixedTimeStep(float timeStep) {
@@ -330,18 +402,16 @@ int PhysicsSystem::getMaxSubSteps() const {
 // Query API
 // ═══════════════════════════════════════════════════════════════
 
-glm::vec3 PhysicsSystem::getLinearVelocity(entt::registry& /*registry*/,
-                                            entt::entity entity) const {
-    auto it = m_impl->bodies.find(entity);
-    if (it == m_impl->bodies.end() || !it->second.rigidBody) return glm::vec3(0.0f);
-    return toGlm(it->second.rigidBody->getLinearVelocity());
+glm::vec3 PhysicsSystem::getLinearVelocity(entt::registry& /*registry*/, entt::entity entity) const {
+    PhysicsBodyData* data = m_impl->find(entity);
+    if (!data || data->type == RigidBodyComponent::Static) return glm::vec3(0.0f);
+    return toGlm(m_impl->bodyInterface().GetLinearVelocity(data->body));
 }
 
-glm::vec3 PhysicsSystem::getAngularVelocity(entt::registry& /*registry*/,
-                                              entt::entity entity) const {
-    auto it = m_impl->bodies.find(entity);
-    if (it == m_impl->bodies.end() || !it->second.rigidBody) return glm::vec3(0.0f);
-    return toGlm(it->second.rigidBody->getAngularVelocity());
+glm::vec3 PhysicsSystem::getAngularVelocity(entt::registry& /*registry*/, entt::entity entity) const {
+    PhysicsBodyData* data = m_impl->find(entity);
+    if (!data || data->type == RigidBodyComponent::Static) return glm::vec3(0.0f);
+    return toGlm(m_impl->bodyInterface().GetAngularVelocity(data->body));
 }
 
 uint32_t PhysicsSystem::getBodyCount() const {
@@ -366,184 +436,112 @@ void PhysicsSystem::rebuildBody(entt::registry& registry, entt::entity entity) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Impl: createBodyInternal — The heart of body creation
+// Impl: createBodyInternal
 // ═══════════════════════════════════════════════════════════════
 
+namespace {
+
+JPH::ShapeRefC unitBox() {
+    return new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
+}
+
+JPH::ShapeRefC createShape(const ColliderComponent& collider) {
+    switch (collider.shape) {
+        case ColliderComponent::Box: {
+            // ColliderComponent::size = full extents, Jolt wants half-extents
+            const JPH::Vec3 half = toJolt(collider.size * 0.5f);
+            const float radius = std::min(JPH::cDefaultConvexRadius, 0.5f * half.ReduceMin());
+            return new JPH::BoxShape(half, radius);
+        }
+        case ColliderComponent::Sphere:
+            return new JPH::SphereShape(collider.size.x);
+        case ColliderComponent::Capsule:
+            // size.x = radius, size.y = the cylinder's length
+            return new JPH::CapsuleShape(0.5f * collider.size.y, collider.size.x);
+        case ColliderComponent::Plane:
+            return new JPH::PlaneShape(JPH::Plane(JPH::Vec3(0.0f, 1.0f, 0.0f), 0.0f), nullptr, PLANE_HALF_EXTENT);
+        case ColliderComponent::Mesh:
+            printf("[PhysicsSystem] Warning: Mesh collider not yet implemented, using box fallback\n");
+            return unitBox();
+        default:
+            return unitBox();
+    }
+}
+
+} // namespace
+
 void PhysicsSystem::Impl::createBodyInternal(entt::registry& reg, entt::entity entity) {
-    // Skip if body already exists
     if (bodies.find(entity) != bodies.end()) return;
 
     auto* rbComp = reg.try_get<RigidBodyComponent>(entity);
     auto* transform = reg.try_get<TransformComponent>(entity);
     if (!rbComp || !transform) return;
 
-    PhysicsBodyData bodyData;
-    bodyData.entity = entity;
-
-    // ─── Create Collision Shape ───────────────────────────────
     auto* collider = reg.try_get<ColliderComponent>(entity);
-    if (collider) {
-        bodyData.shape = createCollisionShape(*collider);
-        collider->bulletShape = bodyData.shape;
-    } else {
-        // Default: unit box (half-extents 0.5)
-        bodyData.shape = new btBoxShape(btVector3(0.5f, 0.5f, 0.5f));
+    JPH::ShapeRefC shape = collider ? createShape(*collider) : unitBox();
+
+    RigidBodyComponent::Type type = rbComp->type;
+    if (type == RigidBodyComponent::Dynamic && rbComp->mass <= 0.0f) type = RigidBodyComponent::Static;
+    if (collider && collider->shape == ColliderComponent::Plane) type = RigidBodyComponent::Static;
+    const JPH::EMotionType motion = type == RigidBodyComponent::Static ? JPH::EMotionType::Static
+        : type == RigidBodyComponent::Kinematic ? JPH::EMotionType::Kinematic : JPH::EMotionType::Dynamic;
+    const JPH::ObjectLayer layer = type == RigidBodyComponent::Static ? Layers::NON_MOVING : Layers::MOVING;
+
+    JPH::BodyCreationSettings settings(shape, JPH::RVec3(toJolt(transform->position)),
+                                       toJoltQuat(transform->rotation), motion, layer);
+    settings.mFriction = collider ? collider->friction : 0.5f;
+    settings.mRestitution = collider ? collider->restitution : 0.0f;
+    settings.mLinearDamping = rbComp->drag;
+    settings.mAngularDamping = rbComp->angularDrag;
+    settings.mGravityFactor = rbComp->useGravity ? 1.0f : 0.0f;
+    settings.mIsSensor = collider && collider->isTrigger;
+    if (type == RigidBodyComponent::Dynamic) {
+        settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+        settings.mMassPropertiesOverride.mMass = rbComp->mass;
+        if (rbComp->freezeRotation) settings.mAllowedDOFs = JPH::EAllowedDOFs::TranslationX |
+            JPH::EAllowedDOFs::TranslationY | JPH::EAllowedDOFs::TranslationZ;
+        settings.mLinearVelocity = toJolt(rbComp->velocity);
+        settings.mAngularVelocity = rbComp->freezeRotation ? JPH::Vec3::sZero() : toJolt(rbComp->angularVelocity);
     }
+    settings.mUserData = static_cast<JPH::uint64>(static_cast<uint32_t>(entity));
 
-    // ─── Create Motion State (with full position + rotation) ──
-    btTransform startTransform;
-    startTransform.setIdentity();
-    startTransform.setOrigin(toBt(transform->position));
-    startTransform.setRotation(toBtQuat(transform->rotation));
-
-    bodyData.motionState = new btDefaultMotionState(startTransform);
-
-    // ─── Calculate Mass and Inertia ───────────────────────────
-    btScalar mass = 0.0f;
-    btVector3 localInertia(0, 0, 0);
-
-    if (rbComp->type == RigidBodyComponent::Dynamic) {
-        mass = rbComp->mass;
-        if (mass > 0.0f) {
-            bodyData.shape->calculateLocalInertia(mass, localInertia);
-        }
+    JPH::BodyInterface& bi = bodyInterface();
+    const JPH::BodyID id = bi.CreateAndAddBody(settings, type == RigidBodyComponent::Static
+                                                             ? JPH::EActivation::DontActivate
+                                                             : JPH::EActivation::Activate);
+    if (id.IsInvalid()) {
+        printf("[PhysicsSystem] Warning: no room for another body (%u at most)\n", MAX_BODIES);
+        return;
     }
-    // Static and Kinematic bodies have mass = 0
-
-    // ─── Create Rigid Body ────────────────────────────────────
-    btRigidBody::btRigidBodyConstructionInfo rbInfo(
-        mass, bodyData.motionState, bodyData.shape, localInertia);
-
-    // Physics material properties
-    rbInfo.m_friction = collider ? collider->friction : 0.5f;
-    rbInfo.m_restitution = collider ? collider->restitution : 0.0f;
-    rbInfo.m_linearDamping = rbComp->drag;
-    rbInfo.m_angularDamping = rbComp->angularDrag;
-
-    bodyData.rigidBody = new btRigidBody(rbInfo);
-
-    // ─── Configure Body Flags ─────────────────────────────────
-    if (rbComp->type == RigidBodyComponent::Static) {
-        bodyData.rigidBody->setCollisionFlags(
-            bodyData.rigidBody->getCollisionFlags() |
-            btCollisionObject::CF_STATIC_OBJECT);
-    }
-
-    if (rbComp->type == RigidBodyComponent::Kinematic) {
-        bodyData.rigidBody->setCollisionFlags(
-            bodyData.rigidBody->getCollisionFlags() |
-            btCollisionObject::CF_KINEMATIC_OBJECT);
-        bodyData.rigidBody->setActivationState(DISABLE_DEACTIVATION);
-    }
-
-    if (rbComp->freezeRotation) {
-        bodyData.rigidBody->setAngularFactor(btVector3(0, 0, 0));
-    }
-
-    if (!rbComp->useGravity) {
-        bodyData.rigidBody->setGravity(btVector3(0, 0, 0));
-    }
-
-    // Set initial velocities
-    if (rbComp->type == RigidBodyComponent::Dynamic) {
-        bodyData.rigidBody->setLinearVelocity(toBt(rbComp->velocity));
-        bodyData.rigidBody->setAngularVelocity(toBt(rbComp->angularVelocity));
-    }
-
-    // Handle triggers
-    if (collider && collider->isTrigger) {
-        bodyData.rigidBody->setCollisionFlags(
-            bodyData.rigidBody->getCollisionFlags() |
-            btCollisionObject::CF_NO_CONTACT_RESPONSE);
-    }
-
-    // Store entity in user pointer for future collision callback use
-    bodyData.rigidBody->setUserIndex(static_cast<int>(
-        static_cast<uint32_t>(entity)));
-
-    // ─── Add to World ─────────────────────────────────────────
-    dynamicsWorld->addRigidBody(bodyData.rigidBody);
-    rbComp->bulletRigidBody = bodyData.rigidBody;
-
-    bodies[entity] = bodyData;
+    PhysicsBodyData data;
+    data.body = id;
+    data.type = type;
+    bodies[entity] = std::move(data);
+    rbComp->physicsBody = id.GetIndexAndSequenceNumber();
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Impl: removeBodyInternal — Clean RAII teardown
+// Impl: removeBodyInternal
 // ═══════════════════════════════════════════════════════════════
 
 void PhysicsSystem::Impl::removeBodyInternal(entt::entity entity) {
     auto it = bodies.find(entity);
     if (it == bodies.end()) return;
 
-    auto& bodyData = it->second;
+    JPH::BodyInterface& bi = bodyInterface();
+    bi.RemoveBody(it->second.body);
+    bi.DestroyBody(it->second.body);
 
-    // Remove from dynamics world first
-    if (bodyData.rigidBody && dynamicsWorld) {
-        dynamicsWorld->removeRigidBody(bodyData.rigidBody);
-    }
-
-    // Delete in reverse creation order
-    delete bodyData.rigidBody;
-    delete bodyData.motionState;
-    delete bodyData.shape;
-
-    // Clear component pointers if entity is still valid
     if (registry && registry->valid(entity)) {
         if (auto* rb = registry->try_get<RigidBodyComponent>(entity)) {
-            rb->bulletRigidBody = nullptr;
-        }
-        if (auto* col = registry->try_get<ColliderComponent>(entity)) {
-            col->bulletShape = nullptr;
+            rb->physicsBody = RigidBodyComponent::NO_BODY;
         }
     }
 
     bodies.erase(it);
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Impl: createCollisionShape
-// ═══════════════════════════════════════════════════════════════
-
-btCollisionShape* PhysicsSystem::Impl::createCollisionShape(
-    const ColliderComponent& collider)
-{
-    switch (collider.shape) {
-        case ColliderComponent::Box:
-            // ColliderComponent::size = full extents, Bullet wants half-extents
-            return new btBoxShape(btVector3(
-                collider.size.x * 0.5f,
-                collider.size.y * 0.5f,
-                collider.size.z * 0.5f));
-
-        case ColliderComponent::Sphere:
-            // size.x = radius
-            return new btSphereShape(collider.size.x);
-
-        case ColliderComponent::Capsule:
-            // size.x = radius, size.y = height
-            return new btCapsuleShape(collider.size.x, collider.size.y);
-
-        case ColliderComponent::Plane:
-            // Infinite static plane (normal = up, offset = 0)
-            return new btStaticPlaneShape(btVector3(0, 1, 0), 0);
-
-        case ColliderComponent::Mesh:
-            // TODO: Triangle mesh collider from MeshComponent
-            printf("[PhysicsSystem] Warning: Mesh collider not yet implemented, using box fallback\n");
-            return new btBoxShape(btVector3(0.5f, 0.5f, 0.5f));
-
-        default:
-            return new btBoxShape(btVector3(0.5f, 0.5f, 0.5f));
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Impl: cleanupAllBodies
-// ═══════════════════════════════════════════════════════════════
-
 void PhysicsSystem::Impl::cleanupAllBodies() {
-    // Collect keys first (removeBodyInternal modifies the map)
     std::vector<entt::entity> toRemove;
     toRemove.reserve(bodies.size());
     for (auto& [entity, _] : bodies) {

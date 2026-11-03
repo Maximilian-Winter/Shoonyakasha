@@ -35,7 +35,6 @@ option(SHOONYAKASHA_INSTALL "Generate install and export rules for the C++ libra
 find_package(Vulkan REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
-find_package(Bullet CONFIG REQUIRED)
 find_package(Jolt CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
@@ -108,11 +107,6 @@ add_library(ShoonyakashaMeshOptimizer OBJECT
 set_target_properties(ShoonyakashaMeshOptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_sources(Shoonyakasha PRIVATE $<TARGET_OBJECTS:ShoonyakashaMeshOptimizer>)
 
-# BULLET_LIBRARIES expands to vcpkg's imported target names (BulletDynamics,
-# BulletCollision, LinearMath, ...), not to file paths — so it is safe to
-# export. Those targets already carry include/bullet; the separate
-# target_include_directories() call that used to add it by hand is gone, and
-# with it the "path is prefixed in the build directory" error.
 target_link_libraries(Shoonyakasha
         PUBLIC
         Vulkan::Vulkan
@@ -120,7 +114,6 @@ target_link_libraries(Shoonyakasha
         glm::glm
         nlohmann_json::nlohmann_json
         EnTT::EnTT
-        ${BULLET_LIBRARIES}
         PRIVATE
         # Only ShaderInterfaceValidator.cpp uses it; the headers stay internal.
         unofficial::spirv-reflect
@@ -134,7 +127,7 @@ target_link_libraries(Shoonyakasha
         draco::draco
         # KTX2 and Basis Universal textures (Resources/GltfSceneLoader.cpp).
         KTX::ktx
-        # Rigid bodies for the planet example (Planet/PlanetPhysics.cpp).
+        # Rigid bodies (ECS/PhysicsSystem.cpp, Planet/PlanetPhysics.cpp).
         Jolt::Jolt
 )
 

@@ -7,7 +7,7 @@
   "license": "MIT",
   "$comment-baseline": [
     "builtin-baseline below pins every dependency to one vcpkg commit, so two",
-    "machines resolve the same EnTT and Bullet. To move it forward, run from",
+    "machines resolve the same EnTT and Jolt. To move it forward, run from",
     "the repo root:",
     "    vcpkg x-update-baseline"
   ],
@@ -15,7 +15,6 @@
     "vulkan",
     "nlohmann-json",
     "entt",
-    "bullet3",
     "joltphysics",
     "glfw3",
     "glm",

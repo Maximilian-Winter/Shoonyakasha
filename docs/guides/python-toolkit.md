@@ -174,7 +174,7 @@ repeatable state assignments, not file writes or other external effects.
 `Chapter(title, duration, timeline=None, caption="")` instances. Tracks use local
 chapter time and hold between authored chapters. `next`, `previous`, and
 `navigate(playback, index)` pause and reset/replay to chapter starts.
-Only registered models and bindings participate: Bullet, autonomous GPU state and
+Only registered models and bindings participate: the ECS physics, autonomous GPU state and
 engine-time shaders require application adapters. Fixed stepping does not promise
 bitwise reproducibility across hardware. Branching, audio and visual editing are deferred.
 

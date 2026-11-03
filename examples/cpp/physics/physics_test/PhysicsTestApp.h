@@ -3,7 +3,7 @@
 //
 // 重力之道 — The Way of Gravity
 //
-// Demonstrates Bullet3 physics integration:
+// Demonstrates the Jolt physics integration:
 // - Ground plane with static body
 // - Falling boxes and spheres with dynamic bodies
 // - Spawn objects with Space key

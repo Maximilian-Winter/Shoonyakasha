@@ -105,7 +105,7 @@ cmake -S . -B build -G Ninja `
 cmake --build build
 ```
 
-The first configure takes several minutes — vcpkg builds Bullet, GLFW, and the
+The first configure takes several minutes — vcpkg builds Jolt Physics, GLFW, and the
 Vulkan loader from source. Subsequent configures restore from the binary cache in
 seconds.
 
@@ -196,8 +196,8 @@ target_link_libraries(myapp PRIVATE Shoonyakasha::Shoonyakasha)
 
 with `CMAKE_PREFIX_PATH` pointing at the install prefix. The consuming project
 needs the same dependencies findable — `ShoonyakashaConfig.cmake` calls
-`find_dependency()` for Vulkan, GLFW, Bullet, EnTT, glm, and nlohmann_json,
-because they are linked `PUBLIC`, and for SPIRV-Reflect
+`find_dependency()` for Vulkan, GLFW, EnTT, glm, and nlohmann_json,
+because they are linked `PUBLIC`, and for Jolt Physics, SPIRV-Reflect
 (`unofficial-spirv-reflect`) and HarfBuzz (`harfbuzz`, which in turn finds
 FreeType), which are linked privately but, since the libraries are static,
 are still needed when the consumer links.
@@ -285,8 +285,8 @@ importable from the venv itself. Re-run the install command after changing `.pyx
 registry commit defines the recipe for *every* port, that single line fixes the
 exact version **and port revision** of all dependencies, including transitive ones
 you never named (`vulkan-headers`, `vulkan-loader`, `vcpkg-cmake`). Port revisions
-matter: `bullet3 3.25#3` and `3.25#5` share upstream source but differ in applied
-patches and CMake config.
+matter: two port revisions of one upstream version (`#3` and `#5`, say) share
+upstream source but differ in applied patches and CMake config.
 
 To move everything forward in one reviewable step:
 
@@ -322,7 +322,7 @@ When a newer port breaks the build and the fix has to wait:
 ```json
 {
   "overrides": [
-    { "name": "bullet3", "version": "3.25", "port-version": 3 }
+    { "name": "joltphysics", "version": "5.4.0" }
   ]
 }
 ```

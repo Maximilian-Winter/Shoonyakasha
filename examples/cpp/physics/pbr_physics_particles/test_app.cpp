@@ -25,7 +25,7 @@ int main() {
     std::cout << "\n";
     std::cout << "  Features:\n";
     std::cout << "    - Procedural PBR meshes (boxes, spheres, ground)\n";
-    std::cout << "    - Bullet3 physics simulation\n";
+    std::cout << "    - Jolt physics simulation\n";
     std::cout << "    - 75K GPU compute particles (impact-reactive mist)\n";
     std::cout << "    - Deferred rendering with IBL\n";
     std::cout << "    - Bloom post-processing\n";

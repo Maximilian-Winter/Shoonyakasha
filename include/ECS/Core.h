@@ -220,8 +220,9 @@ struct RigidBodyComponent {
     bool isKinematic = false;
     bool freezeRotation = false;
 
-    // Bullet3 specific (opaque pointer)
-    void* bulletRigidBody = nullptr;
+    // The physics engine's body (PhysicsSystem), NO_BODY while there is none
+    static constexpr uint32_t NO_BODY = 0xFFFFFFFFu;
+    uint32_t physicsBody = NO_BODY;
 };
 
 struct ColliderComponent {
@@ -234,9 +235,6 @@ struct ColliderComponent {
     bool isTrigger = false;
     float friction = 0.5f;
     float restitution = 0.0f;
-
-    // Bullet3 specific
-    void* bulletShape = nullptr;
 };
 
 // Utility Components - Supporting the greater whole

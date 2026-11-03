@@ -4,7 +4,7 @@ Access: `engine.getPhysics()`. [Other language reference](../python/physics.md).
 
 Include `Facade/PhysicsAPI.h`; namespace `Shoonyakasha::Facade`. [Source declaration](../../../include/Facade/PhysicsAPI.h).
 
-Controls the Bullet-backed ECS physics system. Obtain it through the engine and configure it in init or later. The facade exists before initialization, but setters do not buffer pending configuration.
+Controls the Jolt-backed ECS physics system. Obtain it through the engine and configure it in init or later. The facade exists before initialization, but setters do not buffer pending configuration.
 
 ## World and body contract
 

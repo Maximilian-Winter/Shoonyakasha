@@ -170,7 +170,7 @@ public:
 };
 
 // PhysicsSystem is now in its own file: ECS/PhysicsSystem.h
-// (Bullet headers are isolated in PhysicsSystem.cpp via PIMPL)
+// (Jolt headers are isolated in PhysicsSystem.cpp via PIMPL)
 
 // SkeletalAnimationSystem is in ECS/SkeletalAnimationSystem.h
 // (Replaces the legacy placeholder AnimationSystem)
