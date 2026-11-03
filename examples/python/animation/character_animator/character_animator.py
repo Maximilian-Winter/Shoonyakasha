@@ -19,8 +19,17 @@ Keys:
     R              dancer: rest pose, or dance again
     SPACE          pause or resume both
     = / -          faster / slower
+    P              screenshot into character_animator_captures/
     W/A/S/D/Q/E    move the camera; right mouse looks around
+
+Stills of the dance, the Fox's survey, walk and run, root motion and the rest
+pose, then quit:
+    python character_animator.py --screenshots shots/
 """
+
+import argparse
+import os
+import time
 
 import shoonyakasha as sk
 from shoonyakasha import keys
@@ -30,9 +39,66 @@ FOX = "models/Fox.glb"
 FADE = 0.4
 FOX_SPEEDS = {keys.NUM_1: 0.0, keys.NUM_2: 1.0, keys.NUM_3: 3.0}
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0],
+                                     formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
+    parser.add_argument("--screenshots", metavar="DIR", help="save a still of each step into DIR and quit")
+    parser.add_argument("--width", type=int, default=1600)
+    parser.add_argument("--height", type=int, default=900)
+    return parser.parse_args()
+
+
+args = parse_args()
+
+
+def save_screenshot():
+    """P: the frame on screen into character_animator_captures/ in the working directory."""
+    directory = os.path.join(os.getcwd(), "character_animator_captures")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, time.strftime("character_animator_%Y%m%d_%H%M%S.png"))
+    print("[character_animator] screenshot ->", path if engine.capture_screenshot(path) else "failed")
+
+
+class Stills:
+    """--screenshots: for each (name, action) step, run the action, wait
+    SETTLE seconds for fades and IK to settle, and save <name>.png; quit after
+    the last."""
+
+    SETTLE = 1.5
+
+    def __init__(self, directory, steps):
+        self.directory = directory
+        self.steps = steps
+        self.index = 0
+        self.wait = None
+        os.makedirs(directory, exist_ok=True)
+
+    def update(self, dt):
+        if self.index >= len(self.steps):
+            return
+        name, action = self.steps[self.index]
+        if self.wait is None:
+            action()
+            self.wait = self.SETTLE
+            return
+        self.wait -= dt
+        if self.wait > 0.0:
+            return
+        path = os.path.join(self.directory, name + ".png")
+        print("[character_animator] still ->", path if engine.capture_screenshot(path) else "failed")
+        self.index += 1
+        self.wait = None
+        if self.index == len(self.steps):
+            print("[character_animator] %d stills in %s" % (len(self.steps), self.directory))
+            engine.request_quit()
+
+
+stills = None
+
 engine = sk.Engine(
     title="Shoonyakasha - Character animator",
-    width=1600, height=900,
+    width=args.width, height=args.height,
     hdr_environment_path="env/charolettenbrunn_park_1k.hdr",
 )
 
@@ -102,13 +168,26 @@ def on_init():
 
     print("Dancer clips:", anim.clip_names(dancer))
     print("Fox clips:   ", anim.clip_names(fox))
-    print(__doc__[__doc__.index("Keys:"):])
+    print(__doc__[__doc__.index("Keys:"):__doc__.index("Stills")].rstrip())
+
+    global stills
+    if args.screenshots:
+        press = on_key_pressed
+        stills = Stills(args.screenshots, [
+            ("dance_fox_survey", lambda: None),
+            ("fox_walk", lambda: press(keys.NUM_2)),
+            ("fox_run", lambda: press(keys.NUM_3)),
+            ("dancer_root_motion", lambda: press(ord("M"))),
+            ("dancer_rest_pose", lambda: press(ord("R"))),
+        ])
 
 
 def on_update(dt):
     anim, dancer, fox = engine.animation, state["dancer"], state["fox"]
     if dancer is None:
         return
+    if stills:
+        stills.update(dt)
     # Root motion collected by the last evaluation moves the dancer's root.
     dx, dy, dz = anim.take_root_motion(dancer)
     if dx or dz:
@@ -166,6 +245,8 @@ def on_key_pressed(key):
         set_speed(min(state["speed"] * 1.5, 8.0))
     elif key == keys.MINUS:
         set_speed(max(state["speed"] / 1.5, 0.1))
+    elif key == keys.P:
+        save_screenshot()
 
 
 engine.set_on_init(on_init)

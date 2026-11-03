@@ -72,13 +72,19 @@ Bundled `Fox.glb` during playback of the first animation clip, driven through th
 
 A Mixamo dancer and the Fox, each played by one animator on its model's root entity (`engine.animation`). The Fox runs a controller that fades from Survey to a blend of Walk and Run by its speed (keys 1, 2, 3 and the arrows). M turns the dancer's root motion on or off, R puts it in its rest pose or back to dancing, and a glowing cube is attached to its right hand.
 
+- **Capture:** P saves the screen into `character_animator_captures/` in the working directory. `--screenshots DIR` saves stills of the dance, the Fox's survey, walk and run, root motion and the rest pose, then quits.
+
 ### Humanoid retargeting (`humanoid_retarget`)
 
 A Mixamo dancer, Y Bot, a capoeira character and, with the glTF sample models beside the repository, CesiumMan, each loaded with `shoonyakasha.character.load_humanoid`. Every character's clip is retargeted onto every character; keys 1 to 4 switch all of them to one clip, and M turns root motion on.
 
+- **Capture:** P saves the screen into `humanoid_retarget_captures/` in the working directory. `--screenshots DIR` saves a still of every clip and of the capoeira with root motion, then quits.
+
 ### Two-bone IK (`foot_ik`)
 
 The Mixamo dancer dances across a step and Y Bot on a slope, both with `Humanoid.place_feet` keeping their feet on the ground and their soles tilted to it; Y Bot's right hand follows a glowing ball. I turns foot placement off and on, H the hand reach.
+
+- **Capture:** P saves the screen into `foot_ik_captures/` in the working directory. `--screenshots DIR` saves stills with IK on and off, then quits.
 
 ### Alley (`alley`)
 

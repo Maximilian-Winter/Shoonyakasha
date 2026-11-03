@@ -17,9 +17,16 @@ Keys:
     1 .. 4         every character: cross-fade to clip 1 .. 4 (printed at start)
     M              root motion on or off (the characters travel, or dance in place)
     SPACE          pause or resume
+    P              screenshot into humanoid_retarget_captures/
     W/A/S/D/Q/E    move the camera; right mouse looks around
+
+Stills of every clip, then of the capoeira with root motion, then quit:
+    python humanoid_retarget.py --screenshots shots/
 """
 
+import argparse
+import os
+import time
 from pathlib import Path
 
 import shoonyakasha as sk
@@ -50,9 +57,66 @@ CESIUM_MAPPING = {
 
 FADE = 0.4
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0],
+                                     formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
+    parser.add_argument("--screenshots", metavar="DIR", help="save a still of each step into DIR and quit")
+    parser.add_argument("--width", type=int, default=1600)
+    parser.add_argument("--height", type=int, default=900)
+    return parser.parse_args()
+
+
+args = parse_args()
+
+
+def save_screenshot():
+    """P: the frame on screen into humanoid_retarget_captures/ in the working directory."""
+    directory = os.path.join(os.getcwd(), "humanoid_retarget_captures")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, time.strftime("humanoid_retarget_%Y%m%d_%H%M%S.png"))
+    print("[humanoid_retarget] screenshot ->", path if engine.capture_screenshot(path) else "failed")
+
+
+class Stills:
+    """--screenshots: for each (name, action) step, run the action, wait
+    SETTLE seconds for fades and IK to settle, and save <name>.png; quit after
+    the last."""
+
+    SETTLE = 1.5
+
+    def __init__(self, directory, steps):
+        self.directory = directory
+        self.steps = steps
+        self.index = 0
+        self.wait = None
+        os.makedirs(directory, exist_ok=True)
+
+    def update(self, dt):
+        if self.index >= len(self.steps):
+            return
+        name, action = self.steps[self.index]
+        if self.wait is None:
+            action()
+            self.wait = self.SETTLE
+            return
+        self.wait -= dt
+        if self.wait > 0.0:
+            return
+        path = os.path.join(self.directory, name + ".png")
+        print("[humanoid_retarget] still ->", path if engine.capture_screenshot(path) else "failed")
+        self.index += 1
+        self.wait = None
+        if self.index == len(self.steps):
+            print("[humanoid_retarget] %d stills in %s" % (len(self.steps), self.directory))
+            engine.request_quit()
+
+
+stills = None
+
 engine = sk.Engine(
     title="Shoonyakasha - Humanoid retargeting",
-    width=1600, height=900,
+    width=args.width, height=args.height,
     hdr_environment_path="env/charolettenbrunn_park_1k.hdr",
 )
 
@@ -86,7 +150,17 @@ def on_init():
     for label, hero in heroes.items():
         print(f"{label}: {len(hero.mapping)} humanoid bones, clips {hero.clips}")
     print("Clips by key:", {i + 1: clip for i, clip in enumerate(state["clips"])})
-    print(__doc__[__doc__.index("Keys:"):])
+    print(__doc__[__doc__.index("Keys:"):__doc__.index("Stills")].rstrip())
+
+    global stills
+    if args.screenshots:
+        steps = [("clip_" + clip, (lambda i=i: on_key_pressed(keys.NUM_1 + i)))
+                 for i, clip in enumerate(state["clips"])]
+        if "capoeira" in state["clips"]:
+            capoeira = state["clips"].index("capoeira")
+            steps.append(("capoeira_root_motion",
+                          lambda: (on_key_pressed(keys.NUM_1 + capoeira), on_key_pressed(ord("M")))))
+        stills = Stills(args.screenshots, steps)
 
 
 def play(index):
@@ -97,6 +171,8 @@ def play(index):
 
 
 def on_update(dt):
+    if stills:
+        stills.update(dt)
     if state["root_motion"]:
         for hero in state["heroes"].values():
             hero.apply_root_motion()
@@ -117,6 +193,8 @@ def on_key_pressed(key):
         state["paused"] = not state["paused"]
         for hero in state["heroes"].values():
             engine.animation.set_speed(hero.root, 0.0 if state["paused"] else 1.0)
+    elif key == keys.P:
+        save_screenshot()
 
 
 engine.set_on_init(on_init)

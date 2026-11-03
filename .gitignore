@@ -103,6 +103,12 @@ examples/python/rendering/showroom/tour.mp4
 examples/python/rendering/showroom/reel.mp4
 /examples/python/rendering/showroom/showroom_captures
 /examples/python/rendering/stage/stage_captures
+/examples/python/animation/character_animator/character_animator_captures
+/examples/python/animation/humanoid_retarget/humanoid_retarget_captures
+/examples/python/animation/foot_ik/foot_ik_captures
+/character_animator_captures
+/humanoid_retarget_captures
+/foot_ik_captures
 /old_dx12_engine_code/
 /cool-gfx-repos/
 /examples/python/rendering/irradiance_cache/irradiance_cache_captures

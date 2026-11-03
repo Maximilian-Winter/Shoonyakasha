@@ -14,10 +14,17 @@ Keys:
     I              foot placement on or off
     H              hand reach on or off
     SPACE          pause or resume
+    P              screenshot into foot_ik_captures/
     W/A/S/D/Q/E    move the camera; right mouse looks around
+
+Stills with IK on and off, then quit:
+    python foot_ik.py --screenshots shots/
 """
 
+import argparse
 import math
+import os
+import time
 
 import shoonyakasha as sk
 from shoonyakasha import keys
@@ -30,6 +37,63 @@ STEP_X = -1.0            # the step edge, under the dancer
 STEP = 0.18              # its height
 SLOPE = math.radians(15.0)
 SLOPE_START = 0.4        # the slope rises toward +X from here
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0],
+                                     formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
+    parser.add_argument("--screenshots", metavar="DIR", help="save a still of each step into DIR and quit")
+    parser.add_argument("--width", type=int, default=1600)
+    parser.add_argument("--height", type=int, default=900)
+    return parser.parse_args()
+
+
+args = parse_args()
+
+
+def save_screenshot():
+    """P: the frame on screen into foot_ik_captures/ in the working directory."""
+    directory = os.path.join(os.getcwd(), "foot_ik_captures")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, time.strftime("foot_ik_%Y%m%d_%H%M%S.png"))
+    print("[foot_ik] screenshot ->", path if engine.capture_screenshot(path) else "failed")
+
+
+class Stills:
+    """--screenshots: for each (name, action) step, run the action, wait
+    SETTLE seconds for fades and IK to settle, and save <name>.png; quit after
+    the last."""
+
+    SETTLE = 1.5
+
+    def __init__(self, directory, steps):
+        self.directory = directory
+        self.steps = steps
+        self.index = 0
+        self.wait = None
+        os.makedirs(directory, exist_ok=True)
+
+    def update(self, dt):
+        if self.index >= len(self.steps):
+            return
+        name, action = self.steps[self.index]
+        if self.wait is None:
+            action()
+            self.wait = self.SETTLE
+            return
+        self.wait -= dt
+        if self.wait > 0.0:
+            return
+        path = os.path.join(self.directory, name + ".png")
+        print("[foot_ik] still ->", path if engine.capture_screenshot(path) else "failed")
+        self.index += 1
+        self.wait = None
+        if self.index == len(self.steps):
+            print("[foot_ik] %d stills in %s" % (len(self.steps), self.directory))
+            engine.request_quit()
+
+
+stills = None
 
 
 def ground(x, z):
@@ -73,7 +137,7 @@ def cube(half):
 
 engine = sk.Engine(
     title="Shoonyakasha - Two-bone IK",
-    width=1600, height=900,
+    width=args.width, height=args.height,
     hdr_environment_path="env/charolettenbrunn_park_1k.hdr",
 )
 
@@ -103,12 +167,21 @@ def on_init():
     positions, indices = cube(0.05)
     state["ball"] = engine.create_mesh(positions, indices, name="ball")
     engine.scene.set_material_vec4(state["ball"], "emissiveFactor", (0.3, 2.5, 4.0, 0.0))
-    print(__doc__[__doc__.index("Keys:"):])
+    print(__doc__[__doc__.index("Keys:"):__doc__.index("Stills")].rstrip())
+
+    global stills
+    if args.screenshots:
+        def ik_off():
+            on_key_pressed(ord("I"))
+            on_key_pressed(ord("H"))
+        stills = Stills(args.screenshots, [("ik_on", lambda: None), ("ik_off", ik_off)])
 
 
 def on_update(dt):
     if state["dancer"] is None:
         return
+    if stills:
+        stills.update(dt)
     state["t"] += 0.0 if state["paused"] else dt
     if state["feet"]:
         for hero in (state["dancer"], state["ybot"]):
@@ -137,6 +210,8 @@ def on_key_pressed(key):
         state["paused"] = not state["paused"]
         for hero in (state["dancer"], state["ybot"]):
             engine.animation.set_speed(hero.root, 0.0 if state["paused"] else 1.0)
+    elif key == keys.P:
+        save_screenshot()
 
 
 engine.set_on_init(on_init)
