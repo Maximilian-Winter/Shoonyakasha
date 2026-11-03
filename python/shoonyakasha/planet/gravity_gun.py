@@ -1,5 +1,5 @@
 """
-The gravity gun: from the player's eye (shoonyakasha.planet.character) it grabs, pulls, holds,
+A gravity gun: from a character's eye (shoonyakasha.planet.character) it grabs, pulls, holds,
 turns and punts the dynamic bodies of the physics bubble
 (shoonyakasha.planet.bubble), and punts off anything else.
 

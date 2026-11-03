@@ -13,7 +13,7 @@ three states:
   influence (orbits.reference);
 - "resting": out of the physics, lying where it came down.
 
-A crate is a box; a loose rock (rocks.py) is a convex hull: a rock taken
+A crate is a box; a loose rock (`add_rock`) is a convex hull: a rock taken
 out of the scatter, named by its cell (`key`), or a chunk of a broken ore
 boulder, with none. An ore rock has its grade (its ore richness) and an
 entity of glowing specks placed with its own. Each prop has a radius
@@ -42,7 +42,7 @@ the probes' latency, is below its rest height lands there and rests.
 physics over neither mesh with the world's extra probes, the longest
 unmeasured first, while nothing else uses those probes; until a prop's
 ground is measured it is taken as the highest its body's terrain reaches
-(HIGHEST). `Props.leave_all` takes every prop out of the physics (when
+(the top of its `heights`). `Props.leave_all` takes every prop out of the physics (when
 the bubble goes). `Props.draw` places the entities relative to the
 camera, subtracted in 64-bit floats. `on_remove(prop)` is told of each
 rock with a cell removed, unless `Props.remove` is asked not to release
@@ -77,7 +77,6 @@ DRAG = 1.0                       # drag coefficient
 DRAG_SPEED = 5.0                 # m/s: slower props in the physics feel no drag
 FAST_SPEED = 5.0                 # m/s: faster props in the physics are not damped
 DAMPING = 0.05                   # the physics' linear damping (Jolt's default) of slower ones
-HIGHEST = {"planet": 6_000.0, "moon": 1_500.0}   # m above its radius a body's terrain reaches at most
 
 
 @dataclass
@@ -111,7 +110,7 @@ class Prop:
 
     @property
     def breakable(self):
-        """An ore boulder (rocks.py breaks it), whose strikes are watched in the physics."""
+        """An ore boulder (a strike can break it), whose strikes are watched in the physics."""
         return self.kind == "boulder" and self.grade > 0.0
 
 
@@ -160,7 +159,7 @@ class Props:
 
     def add_rock(self, body, entity, size, radius, key, shape, rest, on, kind, extent, colour, grade=0.0,
                  glow=None):
-        """A loose rock: its body (dynamic) and entities, made by rocks.py."""
+        """A loose rock: its body (dynamic) and entities, made by the caller."""
         rock = Prop(body, entity, size, radius, shape, rest, on, key, kind=kind, extent=tuple(extent),
                     colour=tuple(colour), grade=grade, glow=glow)
         self.rocks.append(rock)
@@ -192,8 +191,7 @@ class Props:
     def restore(self, record, bodies, entity=None, points=None, glow=None):
         """A prop out of the physics from `record`; `bodies` the world
         bodies by name. A rock needs its `entity` (and an ore rock's `glow`)
-        and its hull's `points` (rocks.py's Rocks.restore); a crate's are
-        made here."""
+        and its hull's `points`; a crate's are made here."""
         size, mass = record["size"], record["mass"]
         if record["kind"] == "crate":
             half = 0.5 * size
@@ -286,7 +284,7 @@ class Props:
 
     def height(self, prop, position):
         """m above the ground under `position` (from the prop's body's centre)."""
-        ground = prop.ground if prop.ground is not None else HIGHEST.get(prop.on.name, 6_000.0)
+        ground = prop.ground if prop.ground is not None else prop.on.heights[1]
         return length(position) - prop.on.radius - ground
 
     def update(self, bubble, fine, coarse):

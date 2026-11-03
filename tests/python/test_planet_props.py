@@ -1,4 +1,4 @@
-"""Tests for the planet example's props (examples/python/simulations/planet/props.py)
+"""Tests for the props (shoonyakasha.planet.props)
 on sk.PlanetPhysics in a Bubble at the top of a planet with stand-in
 terrain colliders and world: a crate over the fine mesh is near and over
 only the coarse one far; one asleep off the fine mesh rests where it lies
@@ -23,14 +23,12 @@ import os
 import subprocess
 import sys
 import unittest
-from pathlib import Path
 
 import shoonyakasha as sk
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.orbits import Planet
 from shoonyakasha.planet.vec import length, normalize, sub
 
-PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simulations" / "planet"
 RADIUS = 100_000.0
 G = 4.905
 
@@ -39,6 +37,7 @@ class Body:
     name = "planet"
     index = 0
     radius = RADIUS
+    heights = (-2_000.0, 6_000.0)
 
     def centre(self):
         return (0.0, 0.0, 0.0)
@@ -88,8 +87,7 @@ class PropsTest(unittest.TestCase):
             if __name__ == "__main__":
                 self.fail("no engine extension in a fresh interpreter")
             self.skipTest("runs in a fresh interpreter (test_in_fresh_interpreter)")
-        sys.path.insert(0, str(PLANET_DIR))
-        import props as props_module
+        from shoonyakasha.planet import props as props_module
         self.module = props_module
         self.physics = sk.PlanetPhysics(max_bodies=64, threads=1)
         self.world = World()

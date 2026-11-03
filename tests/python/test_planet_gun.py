@@ -1,7 +1,6 @@
-"""Tests for the planet example's gravity gun
-(examples/python/simulations/planet/gun.py), loaded from its file with the
-example's directory on sys.path, on sk.PlanetPhysics in a Bubble over a
-flat mesh at the top of a sphere, held by the example's Player: grabbing,
+"""Tests for the gravity gun (shoonyakasha.planet.gravity_gun), on
+sk.PlanetPhysics in a Bubble over a flat mesh at the top of a sphere,
+held by a character (shoonyakasha.planet.character): grabbing,
 holding and dropping a crate, pulling a far one in until it is grabbed, a
 crate too heavy on the planet but not on the moon, the punt's speeds and
 recoil, the charged punt (full speed for a light crate, a plain punt after
@@ -17,7 +16,6 @@ import os
 import subprocess
 import sys
 import unittest
-from pathlib import Path
 
 import numpy as np
 
@@ -25,10 +23,8 @@ import shoonyakasha as sk
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.character import Controls, Player
 
-PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simulations" / "planet"
-sys.path.insert(0, str(PLANET_DIR))
-import gun as gun_module        # noqa: E402
-from shoonyakasha.planet.vec import quat_rotate  # noqa: E402
+from shoonyakasha.planet import gravity_gun as gun_module
+from shoonyakasha.planet.vec import quat_rotate
 
 Gun, GunControls = gun_module.Gun, gun_module.GunControls
 

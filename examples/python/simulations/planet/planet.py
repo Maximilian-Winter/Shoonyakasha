@@ -14,7 +14,7 @@ floats (64-bit) with the planet's centre at the origin; the engine's camera
 stays at its own origin and only turns. A cluster of blocks stands on the
 +Z face, on a pad 5 cm above the ground.
 
-Crates (props.py) are rigid bodies in a physics bubble around the view
+Crates (shoonyakasha.planet.props) are rigid bodies in a physics bubble around the view
 (shoonyakasha.planet.bubble, on sk.PlanetPhysics), on the body under it,
 falling towards that body's centre onto a mesh of the terrain around the
 view (shoonyakasha.planet.collider_probes). The bubble steps at
@@ -29,7 +29,7 @@ shoonyakasha.planet.nearby_trees. A rock the gravity gun grabs, pulls or
 punts, or a body strikes hard enough, comes loose: it leaves the scatter
 and becomes a prop. Besides the fine terrain mesh (32 m) the bubble keeps a
 coarse one (256 m, COARSE_SPACING apart), which only props off the fine
-one stand on. Props (props.py) leave the physics beyond the bubble's
+one stand on. Props (shoonyakasha.planet.props) leave the physics beyond the bubble's
 reach, or low over neither mesh, and fly on around their body in doubles
 or rest where they land, coming back in when the bubble reaches them; the
 time warp on foot runs while none in the physics is awake. When the planet
@@ -37,11 +37,11 @@ is built again (a new seed, the terrain's keys, the menu's Apply), the
 props on it are removed with its taken rocks.
 
 F5 saves to SAVE_PATH, as JSON: the world's clock, the planet's terrain
-parameters, the taken rocks, every prop as a record (props.py), the ore
+parameters, the taken rocks, every prop as a record (shoonyakasha.planet.props), the ore
 contacts, the credits and the outposts' supplies, the ship (its fuel and
 cargo, and where it is parked), the mode, the free camera and the
 player's feet. F9 loads it: the planet is built again when its parameters differ,
-the props come back out of the physics and return to it by props.py's
+the props come back out of the physics and return to it by shoonyakasha.planet.props'
 rules, and the view goes back to the free camera, the ship or the player.
 
 Ore: the probes measure the ore richness (resources.glsl), shown on the
@@ -73,7 +73,7 @@ the time warp (from the menu) runs only while no prop in the physics is
 awake, and the body under the player splits to
 FOOT_MAX_LEVEL instead of MAX_LEVEL, so the ground drawn near the player
 follows the terrain the physics stands on more closely. On foot the
-player carries a gravity gun (gun.py, drawn by viewmodel.py) that grabs,
+player carries a gravity gun (shoonyakasha.planet.gravity_gun, drawn by viewmodel.py) that grabs,
 holds, turns and punts the crates.
 
 Keys:
@@ -90,7 +90,7 @@ Keys:
     W/A/S/D                walk forward, left, back, right
     Shift / Ctrl           run / crouch
     Space                  jump; held in the air, the jetpack
-    right mouse            gravity gun (gun.py): grab, or pull from farther; again: drop
+    right mouse            gravity gun (gravity_gun): grab, or pull from farther; again: drop
     left mouse             punt what it holds or points at; at the ground, a jump;
                            held while holding, a charged punt (let go to fire)
     T                      track the prop thrown last: its path and a card row
@@ -190,8 +190,11 @@ from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.character import Controls as FootControls, Player
 from shoonyakasha.planet.character import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
 from shoonyakasha.planet.collider_probes import ColliderProbes, TerrainCollider
+from shoonyakasha.planet import gravity_gun as gun_module
+from shoonyakasha.planet.gravity_gun import Gun, GunControls
 from shoonyakasha.planet.ground_patch import GroundPatch, SIZE as PATCH_SIZE
 from shoonyakasha.planet.nearby_trees import NearbyTrees, listed_keys
+from shoonyakasha.planet.props import Props, stack_offsets, yaw_rotation
 from shoonyakasha.planet.rocks import ORE_ROCKS, rock_colour
 from shoonyakasha.planet.trunks import Trunks
 from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, local_frame, normalize, quat_from_basis,
@@ -203,12 +206,9 @@ from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, EXTRA_PROBE
 
 import flight
 import cockpit
-import gun as gun_module
-from gun import Gun, GunControls
 from instruments import Instruments
 import outposts
 from outposts import Pads, Survey, home_outpost
-from props import Props, stack_offsets, yaw_rotation
 from rocks import Rocks
 from scanner import CONTACT, Scanner
 import trade

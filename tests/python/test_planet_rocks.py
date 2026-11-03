@@ -151,7 +151,7 @@ class ExampleRocksTest(unittest.TestCase):
                 self.fail("no engine extension in a fresh interpreter")
             self.skipTest("runs in a fresh interpreter (test_in_fresh_interpreter)")
         sys.path.insert(0, str(PLANET_DIR))
-        import props
+        from shoonyakasha.planet import props
         import rocks as example_rocks
         self.example = example_rocks
         radius = 100_000.0
