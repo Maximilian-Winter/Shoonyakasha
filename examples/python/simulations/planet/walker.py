@@ -25,10 +25,11 @@ Gamepad: left stick walk, right stick look, A jump and jet, left trigger
 grab, right trigger punt, the bumpers the hold distance.
 
     python walker.py
-    python walker.py --check    put the player down, walk 10 s north, report and exit
+    python walker.py --check    put the player down, walk 10 s north, grab a crate, report and exit
 """
 
 import argparse
+import math
 import os
 
 import numpy as np
@@ -38,14 +39,15 @@ from shoonyakasha import keys
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.on_foot import OnFoot
-from shoonyakasha.planet.vec import (add, cross, euler_from_basis, length, normalize, quat_from_basis, scale,
-                                     sub)
+from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis,
+                                     scale, sub)
 from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL
 from shoonyakasha.toolkit.overlay import HelpOverlay
 
 import flight
 from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
+from hud import Hud
 from viewmodel import Viewmodel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -60,6 +62,11 @@ SHIP_MODEL_UNITS = 6.592
 SHIP_MODEL_CENTRE = (0.0, 12.7, 9.9)
 CHECK_SECONDS = 10.0
 SHOT_SECONDS = 1.0               # s of walking before --shot's screenshot
+CHECK_CRATE = 20.0               # kg
+CHECK_AHEAD = 2.5                # m ahead of the feet the crate is dropped
+GRAB_SECONDS = 1.5               # s the check holds the grab
+OUTPOST_MARKER = (0.55, 1.0, 0.62, 1.0)
+SHIP_MARKER = (0.55, 0.8, 1.0, 1.0)
 
 HELP_COLUMNS = [
     [("On foot", [
@@ -79,7 +86,7 @@ HELP_COLUMNS = [
 
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
-                    help="put the player down, walk 10 s north, report how far it got and exit")
+                    help="put the player down, walk 10 s north, grab a crate, report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 
@@ -118,10 +125,11 @@ state = {
     "ship_model": None,           # (root entity, mesh entities)
     "ship_body": None,            # the ship's static hull in the bubble
     "viewmodel": None,
+    "hud": None,                  # the head-up display (hud.Hud)
     "help": None,
     "captured": False,            # whether the mouse was last asked to be captured
     "bumpers": set(),             # the gamepad bumpers held last frame
-    "check": None,                # --check: (feet when it started walking, seconds walked)
+    "check": None,                # --check: its stage, time in it, and what it measured
     "shot": False,                # --shot's screenshot taken
 }
 
@@ -321,26 +329,79 @@ def place_viewmodel(dt, camera):
     viewmodel.update(dt, view_basis(), foot.look_delta, player, gun, held)
 
 
-def run_check(dt):
-    """--check: walk north for CHECK_SECONDS once on foot, then report and exit."""
-    if foot.player is None:
+def update_hud():
+    """The HUD on foot while the controls are hidden: the ship and the
+    outposts on the body under the player as compass markers."""
+    hud, player = state["hud"], foot.player
+    shown = player is not None and not state["help"].visible
+    hud.show(shown)
+    if not shown:
         return
-    if state["check"] is None:
-        state["check"] = (foot.bubble.to_world(foot.player.feet()), 0.0)
-    start, walked = state["check"]
-    walked += dt
-    state["check"] = (start, walked)
-    foot.controls.forward = 1.0
-    if args.shot and walked >= SHOT_SECONDS and not state["shot"]:
-        state["shot"] = True
-        print("[walker] screenshot: %s" % (args.shot if engine.capture_screenshot(args.shot) else "failed"),
-              flush=True)
-    if walked >= CHECK_SECONDS:
-        moved = length(sub(foot.bubble.to_world(foot.player.feet()), start))
-        ok = moved > 0.8 * CHECK_SECONDS * 4.0 and foot.player.on_ground
-        print("[walker] walked %.1f m in %.0f s, on the ground: %s: %s"
-              % (moved, walked, foot.player.on_ground, "passed" if ok else "FAILED"), flush=True)
-        os._exit(0 if ok else 1)
+    body = foot.bubble.body
+    targets = [(o.name, o.point(), OUTPOST_MARKER) for o in state["outposts"] if o.body is body]
+    if state["ship"] is not None and body is planet:
+        targets.append(("Ship", state["ship"][0], SHIP_MARKER))
+    up = foot.bubble.up(player.feet())
+    v = foot.physics.character_velocity(player.character)
+    speed = length(sub(v, scale(up, dot(v, up))))
+    hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed,
+               pad=engine.input.is_gamepad_connected())
+
+
+def run_check(dt):
+    """--check, once on foot: walk north for CHECK_SECONDS; then a crate of
+    CHECK_CRATE kg dropped CHECK_AHEAD ahead, and once it lies still the
+    view turned to it and the grab held for GRAB_SECONDS. Passes when the
+    player covered 80 % of walking speed's distance and stands on the
+    ground, and the gun holds the crate. With --shot, screenshots while
+    walking (SHOT_SECONDS in) and while holding (FILE with _hold added)."""
+    player = foot.player
+    if player is None:
+        return
+    check = state["check"]
+    if check is None:
+        check = state["check"] = {"stage": "walk", "start": foot.bubble.to_world(player.feet()), "time": 0.0}
+    check["time"] += dt
+    stage, t = check["stage"], check["time"]
+    if stage == "walk":
+        foot.controls.forward = 1.0
+        if args.shot and t >= SHOT_SECONDS and not state["shot"]:
+            state["shot"] = True
+            screenshot(args.shot)
+        if t >= CHECK_SECONDS:
+            foot.controls.forward = 0.0
+            moved = length(sub(foot.bubble.to_world(player.feet()), check["start"]))
+            check["walk_ok"] = moved > 0.8 * CHECK_SECONDS * 4.0 and player.on_ground
+            print("[walker] walked %.1f m in %.0f s, on the ground: %s: %s"
+                  % (moved, t, player.on_ground, "passed" if check["walk_ok"] else "FAILED"), flush=True)
+            right, up, forward = player.basis()
+            level = normalize(sub(forward, scale(up, dot(forward, up))))
+            spot = add(player.feet(), add(scale(level, CHECK_AHEAD), scale(up, 1.0)))
+            check["crate"] = foot.props.spawn_crate(foot.bubble, spot, quat_from_basis(right, up, scale(level, -1.0)),
+                                                    mass=CHECK_CRATE)
+            check["stage"], check["time"] = "settle", 0.0
+    elif stage == "settle":
+        crate = check["crate"]
+        if (crate.body is not None and not foot.physics.is_active(crate.body)) or t > 5.0:
+            check["stage"], check["time"] = "grab", 0.0
+    elif stage == "grab":
+        crate = check["crate"]
+        to = sub(foot.physics.get_transform(crate.body)[0], player.eye())
+        up = player.up()
+        player.pitch = math.asin(max(-1.0, min(1.0, dot(normalize(to), up))))
+        foot.gun_controls.grab = True
+        if t >= GRAB_SECONDS:
+            held = foot.gun.held == crate.body
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_hold" + ext)
+            print("[walker] grabbed the %.0f kg crate %.1f m ahead: %s" % (CHECK_CRATE, CHECK_AHEAD,
+                  "passed" if held else "FAILED"), flush=True)
+            os._exit(0 if check["walk_ok"] and held else 1)
+
+
+def screenshot(path):
+    print("[walker] screenshot: %s" % (path if engine.capture_screenshot(path) else "failed"), flush=True)
 
 
 # ── The frame ──────────────────────────────────────────────────────────────
@@ -376,6 +437,7 @@ def frame(dt):
     foot.props.draw(foot.bubble, camera)
     place_ship(camera)
     place_viewmodel(dt, camera)
+    update_hud()
     foot.end_frame()
     state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * dt * 1000.0
     return True
@@ -389,6 +451,8 @@ def on_init():
     begin_survey()
     build_ship_model()
     state["viewmodel"] = Viewmodel(engine, box())
+    state["hud"] = Hud(engine)
+    state["hud"].show(False)
     state["help"] = HelpOverlay(engine, "CONTROLS", HELP_COLUMNS, footer="F1 to close")
     state["help"].show(False)
     _, up, _, north = world.site_frame()
