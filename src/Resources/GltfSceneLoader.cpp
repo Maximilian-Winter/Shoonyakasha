@@ -12,6 +12,8 @@
 #include "ECS/TransformMath.h"
 #include "ECS/SkeletonComponents.h"
 #include "ECS/SkeletalAnimationSystem.h"
+#include "Animation/ClipBinding.h"
+#include "Resources/AnimationClipLoader.h"
 #include "Resources/MeshTangents.h"
 #include "Resources/MeshLods.h"
 #include "Resources/TextureProcessing.h"
@@ -1122,10 +1124,17 @@ GltfLoadResult GltfSceneLoader::load(
 
     // Load animations if requested: each skeleton's joint channels, and the
     // morph weight channels once, with the first skeleton's or on their own.
+    // m_skinClips holds each skin's own clips for its skinned entities.
+    m_skinClips.clear();
     if (m_options.loadAnimations) {
         for (size_t s = 0; s < std::max<size_t>(result.skeletons.size(), 1); ++s) {
             const Skeleton* skeleton = s < result.skeletons.size() ? result.skeletons[s].get() : nullptr;
             for (auto& clip : loadAnimations(data, skeleton, s == 0)) {
+                if (skeleton) {
+                    for (const auto& [skin, cached] : m_skinCache) {
+                        if (cached.get() == skeleton) m_skinClips[skin].push_back(clip);
+                    }
+                }
                 result.animationClips.push_back(std::move(clip));
             }
         }
@@ -1311,10 +1320,11 @@ void GltfSceneLoader::processNode(
 
             if (makeEntities) {
                 const entt::entity parent = flatten ? entt::null : nodeEntity;
+                const auto skin = isSkinned ? m_skinCache.find(node->skin) : m_skinCache.end();
                 const entt::entity entity =
-                    (isSkinned && !result.skeletons.empty())
-                        ? createSkinnedEntity(scene, instance, result.skeletons[0],
-                                              result.animationClips, parent)
+                    (skin != m_skinCache.end())
+                        ? createSkinnedEntity(scene, instance, skin->second,
+                                              m_skinClips[node->skin], parent)
                         : createEntity(scene, instance, parent);
                 if (instance.morphTargets) {
                     addMorphTargets(scene, entity, instance, data, node, result.animationClips);
@@ -2419,6 +2429,7 @@ std::shared_ptr<Shoonyakasha::Skeleton> GltfSceneLoader::loadSkin(
     }
 
     skeleton->buildNameLookup();
+    skeleton->buildEvaluationOrder();
 
     std::cout << "[GltfSceneLoader] Loaded skin '" << skeleton->name
               << "' with " << skeleton->jointCount() << " joints" << std::endl;
@@ -2438,97 +2449,17 @@ std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> GltfSceneLoader::loadA
 {
     std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>> clips;
 
-    auto interpolationOf = [](const cgltf_animation_sampler& sampler) {
-        switch (sampler.interpolation) {
-            case cgltf_interpolation_type_step:         return Shoonyakasha::AnimationInterpolation::Step;
-            case cgltf_interpolation_type_cubic_spline: return Shoonyakasha::AnimationInterpolation::CubicSpline;
-            default:                                    return Shoonyakasha::AnimationInterpolation::Linear;
+    for (const auto& unbound : readGltfAnimations(data, withWeights)) {
+        std::shared_ptr<Shoonyakasha::AnimationClip> clip;
+        if (skeleton) {
+            clip = bindClip(*unbound, *skeleton);
+        } else {
+            clip = std::make_shared<Shoonyakasha::AnimationClip>();
+            clip->name = unbound->name;
         }
-    };
-
-    for (cgltf_size animIdx = 0; animIdx < data->animations_count; ++animIdx) {
-        const cgltf_animation& anim = data->animations[animIdx];
-
-        auto clip = std::make_shared<Shoonyakasha::AnimationClip>();
-        clip->name = anim.name ? anim.name : ("animation_" + std::to_string(animIdx));
-        clip->duration = 0.0f;
-
-        for (cgltf_size chanIdx = 0; chanIdx < anim.channels_count; ++chanIdx) {
-            const cgltf_animation_channel& channel = anim.channels[chanIdx];
-            const cgltf_animation_sampler& sampler = *channel.sampler;
-
-            if (!channel.target_node) continue;
-
-            // Morph target weights of a mesh node.
-            if (channel.target_path == cgltf_animation_path_type_weights) {
-                const cgltf_mesh* mesh = channel.target_node->mesh;
-                if (!withWeights || !mesh || mesh->primitives_count == 0) continue;
-                Shoonyakasha::MorphWeightChannel weights;
-                weights.targetNode = static_cast<int>(cgltf_node_index(data, channel.target_node));
-                weights.interpolation = interpolationOf(sampler);
-                weights.weightCount = static_cast<uint32_t>(mesh->primitives[0].targets_count);
-                weights.timestamps.resize(sampler.input->count);
-                for (cgltf_size t = 0; t < sampler.input->count; ++t) {
-                    cgltf_accessor_read_float(sampler.input, t, &weights.timestamps[t], 1);
-                    clip->duration = std::max(clip->duration, weights.timestamps[t]);
-                }
-                weights.values.resize(sampler.output->count);
-                for (cgltf_size v = 0; v < sampler.output->count; ++v) {
-                    cgltf_accessor_read_float(sampler.output, v, &weights.values[v], 1);
-                }
-                if (weights.weightCount > 0) clip->weightChannels.push_back(std::move(weights));
-                continue;
-            }
-            if (!skeleton) continue;
-
-            // Find joint index for target node
-            int jointIdx = skeleton->findJoint(
-                channel.target_node->name ? channel.target_node->name : ""
-            );
-            if (jointIdx < 0) continue;  // Target not in skeleton
-
-            Shoonyakasha::AnimationChannel animChannel;
-            animChannel.targetJointIndex = jointIdx;
-
-            // Map target path
-            switch (channel.target_path) {
-                case cgltf_animation_path_type_translation:
-                    animChannel.property = Shoonyakasha::AnimationChannel::Property::Translation;
-                    break;
-                case cgltf_animation_path_type_rotation:
-                    animChannel.property = Shoonyakasha::AnimationChannel::Property::Rotation;
-                    break;
-                case cgltf_animation_path_type_scale:
-                    animChannel.property = Shoonyakasha::AnimationChannel::Property::Scale;
-                    break;
-                default:
-                    continue;  // Skip weights/unknown
-            }
-
-            animChannel.interpolation = interpolationOf(sampler);
-
-            // Read timestamps
-            const cgltf_accessor* inputAccessor = sampler.input;
-            animChannel.timestamps.resize(inputAccessor->count);
-            for (cgltf_size t = 0; t < inputAccessor->count; ++t) {
-                cgltf_float val;
-                cgltf_accessor_read_float(inputAccessor, t, &val, 1);
-                animChannel.timestamps[t] = val;
-                clip->duration = std::max(clip->duration, val);
-            }
-
-            // Read values
-            const cgltf_accessor* outputAccessor = sampler.output;
-            uint32_t numComponents = (animChannel.property == Shoonyakasha::AnimationChannel::Property::Rotation) ? 4 : 3;
-            animChannel.values.resize(outputAccessor->count);
-            for (cgltf_size v = 0; v < outputAccessor->count; ++v) {
-                cgltf_float components[4] = {0, 0, 0, 0};
-                cgltf_accessor_read_float(outputAccessor, v, components, numComponents);
-                animChannel.values[v] = glm::vec4(components[0], components[1], components[2],
-                                                    numComponents == 4 ? components[3] : 0.0f);
-            }
-
-            clip->channels.push_back(std::move(animChannel));
+        clip->weightChannels = unbound->weightChannels;
+        for (const auto& weights : clip->weightChannels) {
+            for (float t : weights.timestamps) clip->duration = std::max(clip->duration, t);
         }
 
         if (!clip->channels.empty() || !clip->weightChannels.empty()) {

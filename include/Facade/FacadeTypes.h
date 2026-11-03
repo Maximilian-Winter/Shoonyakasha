@@ -274,6 +274,7 @@ struct GltfResult {
     bool success = false;
     std::string error;
     std::vector<EntityHandle> entities;
+    std::vector<EntityHandle> rootEntities;  // entities of the scene's top-level nodes
     std::vector<EntityHandle> lights;  // with loadLights: the KHR_lights_punctual lights
     std::vector<std::string> variants; // KHR_materials_variants names, by index
     size_t totalVertices  = 0;

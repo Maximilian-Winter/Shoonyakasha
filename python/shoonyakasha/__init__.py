@@ -29,6 +29,7 @@ try:
         Scene,
         Input,
         Physics,
+        Animation,
         Ecs,
         UI,
         GltfResult,
@@ -123,7 +124,7 @@ except ImportError as exc:                       # pragma: no cover - environmen
 
 
 _ENGINE_SYMBOLS = frozenset({
-    "Engine", "Scene", "Input", "Physics", "Ecs", "UI", "GltfResult", "PlanetLod", "PlanetPhysics", "NULL_ENTITY",
+    "Engine", "Scene", "Input", "Physics", "Animation", "Ecs", "UI", "GltfResult", "PlanetLod", "PlanetPhysics", "NULL_ENTITY",
     "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage", "GpuImageLevel", "save_hdr", "save_exr", "BufferStream",
     "CAMERA_PERSPECTIVE", "CAMERA_ORTHOGRAPHIC",
     "LIGHT_DIRECTIONAL", "LIGHT_POINT", "LIGHT_SPOT",
@@ -168,7 +169,7 @@ def extension_available():
 
 __version__ = "1.0.0"
 __all__ = [
-    "Engine", "Scene", "Input", "Physics", "Ecs", "UI", "GltfResult", "PlanetLod", "PlanetPhysics",
+    "Engine", "Scene", "Input", "Physics", "Animation", "Ecs", "UI", "GltfResult", "PlanetLod", "PlanetPhysics",
     "ComputeContext", "ComputeKernel", "GpuBuffer", "GpuImage", "GpuImageLevel", "save_hdr", "save_exr", "BufferStream",
     "NULL_ENTITY",
     "CAMERA_PERSPECTIVE", "CAMERA_ORTHOGRAPHIC",

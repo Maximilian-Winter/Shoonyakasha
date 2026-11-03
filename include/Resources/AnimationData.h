@@ -18,6 +18,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <algorithm>
 #include <cstdint>
 
 namespace Shoonyakasha {
@@ -67,6 +68,33 @@ struct Skeleton {
         auto it = jointNameToIndex.find(jointName);
         return it != jointNameToIndex.end() ? it->second : -1;
     }
+
+    // Joint indices ordered so that every parent comes before its children.
+    // Filled by buildEvaluationOrder(); empty until then.
+    std::vector<int> evaluationOrder;
+
+    // Joint indices sorted by depth in the hierarchy, joints of equal depth in
+    // index order. A joint whose parent chain leaves the joint range or loops
+    // has depth 0.
+    std::vector<int> computeEvaluationOrder() const {
+        const int count = static_cast<int>(joints.size());
+        std::vector<int> depth(count, 0);
+        for (int i = 0; i < count; ++i) {
+            int steps = 0;
+            for (int p = joints[i].parentIndex; p >= 0 && p < count && steps <= count;
+                 p = joints[p].parentIndex) {
+                ++steps;
+            }
+            depth[i] = steps > count ? 0 : steps;
+        }
+        std::vector<int> order(count);
+        for (int i = 0; i < count; ++i) order[i] = i;
+        std::stable_sort(order.begin(), order.end(),
+                         [&](int a, int b) { return depth[a] < depth[b]; });
+        return order;
+    }
+
+    void buildEvaluationOrder() { evaluationOrder = computeEvaluationOrder(); }
 };
 
 // ============================================================================
@@ -85,6 +113,10 @@ enum class AnimationInterpolation {
 
 struct AnimationChannel {
     int targetJointIndex = -1;
+
+    // Name of the node the channel animates. Binding a clip to a skeleton
+    // (bindClip) maps it to targetJointIndex.
+    std::string targetJointName;
 
     enum class Property {
         Translation,

@@ -24,6 +24,7 @@
 #include "Facade/UIAPI.h"
 #include "InputAPIImpl.h"
 #include "PhysicsAPIImpl.h"
+#include "AnimationAPIImpl.h"
 #include "FacadeInternal.h"
 
 #include "App/ApplicationBase.h"
@@ -61,6 +62,7 @@ struct EngineAPI::Impl {
     std::unique_ptr<SceneAPI>   sceneAPI;
     std::unique_ptr<InputAPI>   inputAPI;
     std::unique_ptr<PhysicsAPI> physicsAPI;
+    std::unique_ptr<AnimationAPI> animationAPI;
     std::unique_ptr<EcsAPI>     ecsAPI;
     std::unique_ptr<UIAPI>      uiAPI;
 
@@ -120,6 +122,8 @@ protected:
         PhysicsAPI::Impl::wire(*m_owner->physicsAPI,
                                m_physicsSystem,
                                &getRegistry());
+
+        AnimationAPI::Impl::wire(*m_owner->animationAPI, &getRegistry());
 
         if (m_owner->pendingStats) {
             const auto [enabled, gpuTiming] = *std::exchange(m_owner->pendingStats, std::nullopt);
@@ -322,6 +326,9 @@ static GltfResult toGltfResult(const GltfLoadResult& lr) {
     for (auto e : lr.entities) {
         fr.entities.push_back(toHandle(e));
     }
+    for (auto e : lr.rootEntities) {
+        fr.rootEntities.push_back(toHandle(e));
+    }
     for (auto e : lr.lights) {
         fr.lights.push_back(toHandle(e));
     }
@@ -353,6 +360,7 @@ EngineAPI::EngineAPI(const EngineConfig& config)
     // run() is the natural thing to do, and it used to dereference null.
     m_impl->inputAPI   = std::make_unique<InputAPI>();
     m_impl->physicsAPI = std::make_unique<PhysicsAPI>();
+    m_impl->animationAPI = std::make_unique<AnimationAPI>();
 }
 
 EngineAPI::~EngineAPI() {
@@ -409,6 +417,10 @@ InputAPI& EngineAPI::getInput() {
 
 PhysicsAPI& EngineAPI::getPhysics() {
     return *m_impl->physicsAPI;
+}
+
+AnimationAPI& EngineAPI::getAnimation() {
+    return *m_impl->animationAPI;
 }
 
 EcsAPI& EngineAPI::getEcs() {

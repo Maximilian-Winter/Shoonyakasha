@@ -14,6 +14,7 @@
 #include "GPU/GPUTypes.h"
 #include "GPU/GpuDeleteQueue.h"
 
+#include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
@@ -49,6 +50,10 @@ struct SkeletonComponent {
 
     // Whether boneMatrices have been updated and need re-upload to GPU
     bool dirty = true;
+
+    // The entity whose AnimatorComponent writes boneMatrices; entt::null when
+    // the entity's own AnimationPlaybackComponent (or the default pose) does.
+    entt::entity animator = entt::null;
 
     // Pre-allocate matrices for the skeleton
     void allocate() {

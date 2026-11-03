@@ -566,6 +566,8 @@ private:
 
     // Cached skeleton per skin (avoids reloading same skin for multiple meshes)
     std::unordered_map<const cgltf_skin*, std::shared_ptr<Shoonyakasha::Skeleton>> m_skinCache;
+    // Each skin's animation clips, bound to its skeleton, for the current load
+    std::unordered_map<const cgltf_skin*, std::vector<std::shared_ptr<Shoonyakasha::AnimationClip>>> m_skinClips;
 
 };
 

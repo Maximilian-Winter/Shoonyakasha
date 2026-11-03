@@ -4,6 +4,7 @@
 
 #include "ECS/SkeletalAnimationSystem.h"
 #include "ECS/MorphComponents.h"
+#include "Animation/AnimatorEvaluator.h"
 #include "Vulkan/VulkanDevice.h"
 #include "GPU/GPUResourceFactory.h"
 
@@ -26,14 +27,39 @@ SkeletalAnimationSystem::SkeletalAnimationSystem(VulkanDevice& device)
 // Per-Frame Update
 // ============================================================================
 
+namespace {
+
+// Whether an AnimatorComponent writes this skeleton's bone matrices. A link to
+// an entity that no longer has one is cleared.
+bool drivenByAnimator(entt::registry& registry, SkeletonComponent& skeleton) {
+    if (skeleton.animator == entt::null) return false;
+    if (registry.valid(skeleton.animator) && registry.all_of<AnimatorComponent>(skeleton.animator)) {
+        return true;
+    }
+    skeleton.animator = entt::null;
+    skeleton.dirty = true;
+    return false;
+}
+
+} // namespace
+
 void SkeletalAnimationSystem::update(float deltaTime, entt::registry& registry) {
+    // Animators: one evaluation per skeleton, shared by its skinned meshes.
+    AnimatorEvaluator::update(registry, deltaTime);
+    for (auto [entity, skeleton] : registry.view<SkeletonComponent>().each()) {
+        if (skeleton.animator == entt::null || !drivenByAnimator(registry, skeleton)) continue;
+        if (skeleton.dirty && skeleton.boneSSBO && skeleton.boneSSBO->isValid()) {
+            uploadBoneMatrices(skeleton);
+        }
+    }
+
     auto view = registry.view<AnimationPlaybackComponent, SkeletonComponent>();
 
     for (auto entity : view) {
         auto& playback = view.get<AnimationPlaybackComponent>(entity);
         auto& skeleton = view.get<SkeletonComponent>(entity);
 
-        if (!skeleton.skeleton) continue;
+        if (!skeleton.skeleton || drivenByAnimator(registry, skeleton)) continue;
 
         // Advance playback
         if (playback.playing) {
@@ -56,7 +82,7 @@ void SkeletalAnimationSystem::update(float deltaTime, entt::registry& registry) 
     std::vector<glm::quat> rotations;
     for (auto entity : stills) {
         auto& skeleton = stills.get<SkeletonComponent>(entity);
-        if (!skeleton.skeleton || !skeleton.dirty) continue;
+        if (!skeleton.skeleton || drivenByAnimator(registry, skeleton) || !skeleton.dirty) continue;
         const uint32_t joints = skeleton.skeleton->jointCount();
         translations.assign(joints, glm::vec3(0.0f));
         rotations.assign(joints, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));

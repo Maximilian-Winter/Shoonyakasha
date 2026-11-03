@@ -177,6 +177,7 @@ cdef extern from "Facade/FacadeTypes.h" namespace "Shoonyakasha::Facade":
         cbool success
         string error
         vector[EntityHandle] entities
+        vector[EntityHandle] rootEntities
         vector[EntityHandle] lights
         vector[string] variants
         size_t totalVertices

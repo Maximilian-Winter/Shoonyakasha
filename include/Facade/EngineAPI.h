@@ -24,6 +24,7 @@ namespace Facade {
 class SceneAPI;
 class InputAPI;
 class PhysicsAPI;
+class AnimationAPI;
 class EcsAPI;
 class UIAPI;
 
@@ -218,6 +219,10 @@ public:
     /// @return Borrowed facade owned by this engine, valid immediately.
     /// @note Native setters are no-ops before initialization.
     PhysicsAPI& getPhysics();
+    /// Access per-model animators; use it from setOnInit() onward.
+    /// @return Borrowed facade owned by this engine, valid immediately.
+    /// @note Calls before initialization find no animators.
+    AnimationAPI& getAnimation();
     /// Access the initialized script/component facade.
     /// @return Borrowed facade owned by this engine.
     /// @throws std::logic_error Before scene initialization; call from setOnInit().

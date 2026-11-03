@@ -53,7 +53,7 @@ from ._engine_api cimport (
     make_resize_callback, make_key_event_callback,
     make_float2_callback, make_int_bool_callback,
     wrap_py_object, unwrap_py_object, make_system_update_callback,
-    CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppEcsAPI, CppUIAPI,
+    CppEngineAPI, CppSceneAPI, CppInputAPI, CppPhysicsAPI, CppAnimationAPI, CppEcsAPI, CppUIAPI,
     videoRecordingAvailable, findFfmpeg, checkPipelineJson, loadPipelineDocumentText, Readback,
     CppPlanetLod, LodBody, LodView, LodScatter, LodNodeInfo, LodJob, LodFaceColours,
     CppPlanetPhysics, PhysicsMotion, PhysicsRayHit, CharacterGround, LodVec3, LodVec4,
@@ -196,7 +196,7 @@ cdef inline vec2 _tuple_to_vec2(object t):
 
 class GltfResult:
     """Result of loading a glTF scene."""
-    __slots__ = ('success', 'error', 'entities', 'lights', 'variants',
+    __slots__ = ('success', 'error', 'entities', 'root_entities', 'lights', 'variants',
                  'total_vertices', 'total_indices',
                  'total_textures', 'total_materials',
                  'animation_clips', 'skeleton_count')
@@ -205,6 +205,7 @@ class GltfResult:
         self.success = False
         self.error = ""
         self.entities = []
+        self.root_entities = []     # entities of the scene's top-level nodes
         self.lights = []            # with load_lights=True: the file's light entities
         self.variants = []          # KHR_materials_variants names, by index
         self.total_vertices = 0
@@ -231,6 +232,8 @@ cdef object _wrap_gltf_result(CppGltfResult& cpp_result):
     r.error = cpp_result.error.decode('utf-8', errors='replace')
     r.entities = [<uint32_t>cpp_result.entities[i]
                   for i in range(cpp_result.entities.size())]
+    r.root_entities = [<uint32_t>cpp_result.rootEntities[i]
+                       for i in range(cpp_result.rootEntities.size())]
     r.lights = [<uint32_t>cpp_result.lights[i] for i in range(cpp_result.lights.size())]
     r.variants = [cpp_result.variants[i].decode('utf-8', errors='replace')
                   for i in range(cpp_result.variants.size())]
@@ -1045,6 +1048,134 @@ cdef class Physics:
     def body_count(self):
         """Total tracked physics body count."""
         return self._ptr.getBodyCount()
+
+
+# ═══════════════════════════════════════════════════════════════
+# Animation — Python wrapper for AnimationAPI
+# ═══════════════════════════════════════════════════════════════
+
+cdef list _decode_names(vector[string] names):
+    return [n.decode('utf-8', errors='replace') for n in names]
+
+
+cdef class Animation:
+    """Per-model animators: clip playback with cross-fades, and entities
+    attached to joints.
+
+    An animator lives on an entity above a model's skinned meshes (one of
+    ``result.root_entities`` of ``engine.load_gltf_scene``) and drives every
+    skinned mesh of one skeleton below it. Clips are addressed by name.
+
+    Obtained via engine.animation — do not construct directly.
+    """
+
+    cdef CppAnimationAPI* _ptr
+    # Strong reference back to the owning Engine, which owns *_ptr.
+    cdef object _owner
+
+    def __cinit__(self):
+        self._ptr = NULL
+        self._owner = None
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError(
+            "Animation cannot be constructed directly; obtain it from engine.animation")
+
+    # ── Animators ─────────────────────────────────────────────
+
+    def create_animator(self, uint32_t root):
+        """Add an animator to ``root``, driving the skinned meshes of the
+        first skeleton in root's subtree. It takes over the clips and playback
+        state of the first such mesh. Returns False when the subtree has no
+        skinned mesh; True when root already has an animator."""
+        return self._ptr.createAnimator(root)
+
+    def has_animator(self, uint32_t entity):
+        return self._ptr.hasAnimator(entity)
+
+    # ── Clips ─────────────────────────────────────────────────
+
+    def load_clips(self, uint32_t animator, path, str name=""):
+        """Read the animations of a glTF / GLB file and add those that animate
+        joints of the animator's skeleton, matched by joint name. With
+        ``name``, a single added clip is called ``name`` and several are
+        called ``"<name>:<clip name>"``. Returns the names added.
+
+        Raises RuntimeError when the file cannot be read or the entity has no
+        animator."""
+        cdef string cpp_path = str(path).encode('utf-8')
+        cdef string cpp_name = name.encode('utf-8')
+        return _decode_names(self._ptr.loadClips(animator, cpp_path, cpp_name))
+
+    def clip_names(self, uint32_t animator):
+        """Names of the animator's clips, in the order they were added."""
+        return _decode_names(self._ptr.getClipNames(animator))
+
+    def clip_duration(self, uint32_t animator, str clip):
+        """Duration in seconds of the clip; 0.0 if there is none."""
+        return self._ptr.getClipDuration(animator, clip.encode('utf-8'))
+
+    # ── Playback ──────────────────────────────────────────────
+
+    def play(self, uint32_t animator, str clip, float fade=0.0, bint loop=True):
+        """Play a clip from its start, blending from the clip playing before
+        over ``fade`` seconds. Returns False when there is no such clip."""
+        return self._ptr.play(animator, clip.encode('utf-8'), fade, loop)
+
+    def stop(self, uint32_t animator):
+        """Stop playback; the skeleton returns to its rest pose."""
+        self._ptr.stop(animator)
+
+    def is_playing(self, uint32_t animator):
+        """Whether the current clip is advancing. A clip played with
+        ``loop=False`` stops at its end and holds its last frame."""
+        return self._ptr.isPlaying(animator)
+
+    def current_clip(self, uint32_t animator):
+        """Name of the current clip; '' when there is none."""
+        return self._ptr.getCurrentClip(animator).decode('utf-8', errors='replace')
+
+    def is_fading(self, uint32_t animator):
+        """Whether the animator is blending from a previous clip."""
+        return self._ptr.isFading(animator)
+
+    def get_time(self, uint32_t animator):
+        """Playback time of the current clip, in seconds."""
+        return self._ptr.getTime(animator)
+
+    def set_time(self, uint32_t animator, float seconds):
+        self._ptr.setTime(animator, seconds)
+
+    def get_speed(self, uint32_t animator):
+        """Multiplier on the advance of every clip; 0 pauses."""
+        return self._ptr.getSpeed(animator)
+
+    def set_speed(self, uint32_t animator, float speed):
+        self._ptr.setSpeed(animator, speed)
+
+    # ── Joints ────────────────────────────────────────────────
+
+    def joint_names(self, uint32_t animator):
+        """Names of the skeleton's joints, in joint index order."""
+        return _decode_names(self._ptr.getJointNames(animator))
+
+    def joint_world_position(self, uint32_t animator, str joint):
+        """World position (x, y, z) of a joint as of the last evaluation.
+        Raises RuntimeError for an unknown animator or joint."""
+        return _vec3_to_tuple(self._ptr.getJointWorldPosition(animator, joint.encode('utf-8')))
+
+    def attach(self, uint32_t entity, uint32_t animator, str joint,
+               offset_position=(0.0, 0.0, 0.0), offset_rotation=(0.0, 0.0, 0.0)):
+        """Place ``entity`` on a joint every frame, offset in the joint's
+        space by a translation and an Euler rotation in radians (applied as
+        the transform component applies rotations). Returns False for an
+        unknown animator or joint, or an entity without a transform."""
+        return self._ptr.attach(entity, animator, joint.encode('utf-8'),
+                                _tuple_to_vec3(offset_position), _tuple_to_vec3(offset_rotation))
+
+    def detach(self, uint32_t entity):
+        """Stop placing ``entity`` on a joint."""
+        self._ptr.detach(entity)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2555,6 +2686,7 @@ cdef class Engine:
     cdef Scene _scene_wrapper
     cdef Input _input_wrapper
     cdef Physics _physics_wrapper
+    cdef Animation _animation_wrapper
     cdef Ecs _ecs_wrapper
     cdef UI _ui_wrapper
 
@@ -2735,6 +2867,16 @@ cdef class Engine:
             self._physics_wrapper._owned = False
             self._physics_wrapper._owner = self
         return self._physics_wrapper
+
+    @property
+    def animation(self):
+        """Access per-model animators (clip playback, cross-fades, joint
+        attachments)."""
+        if self._animation_wrapper is None:
+            self._animation_wrapper = Animation.__new__(Animation)
+            self._animation_wrapper._ptr = &self._ptr.getAnimation()
+            self._animation_wrapper._owner = self
+        return self._animation_wrapper
 
     @property
     def ecs(self):

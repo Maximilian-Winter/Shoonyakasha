@@ -121,6 +121,7 @@ nav:
           - SceneAPI: api/cpp/scene-api.md
           - InputAPI: api/cpp/input-api.md
           - PhysicsAPI: api/cpp/physics-api.md
+          - AnimationAPI: api/cpp/animation-api.md
           - EcsAPI: api/cpp/ecs-api.md
           - UIAPI: api/cpp/ui-api.md
       - C++ internals:
@@ -135,6 +136,7 @@ nav:
           - Scene: api/python/scene.md
           - Input: api/python/input.md
           - Physics: api/python/physics.md
+          - Animation: api/python/animation.md
           - Ecs: api/python/ecs.md
           - UI: api/python/ui.md
           - glTF results: api/python/gltf-result.md

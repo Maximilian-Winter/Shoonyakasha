@@ -85,22 +85,31 @@ void AnimationEvaluator::computeBoneMatrices(
     outBoneMatrices.resize(count);
 
     // Temporary array for global transforms
-    std::vector<glm::mat4> globalTransforms(count);
+    std::vector<glm::mat4> globalTransforms(count, glm::mat4(1.0f));
+    std::vector<char> visited(count, 0);
 
-    for (uint32_t i = 0; i < count; ++i) {
+    std::vector<int> computedOrder;
+    const std::vector<int>* order = &skeleton.evaluationOrder;
+    if (order->size() != count) {
+        computedOrder = skeleton.computeEvaluationOrder();
+        order = &computedOrder;
+    }
+
+    for (int i : *order) {
         // Compose local transform: T * R * S
         glm::mat4 T = glm::translate(glm::mat4(1.0f), translations[i]);
         glm::mat4 R = glm::toMat4(rotations[i]);
         glm::mat4 S = glm::scale(glm::mat4(1.0f), scales[i]);
         glm::mat4 localMatrix = T * R * S;
 
-        // Compute global transform
+        // Compute global transform; a parent not yet visited counts as none
         int parentIdx = skeleton.joints[i].parentIndex;
-        if (parentIdx >= 0 && parentIdx < static_cast<int>(i)) {
+        if (parentIdx >= 0 && parentIdx < static_cast<int>(count) && visited[parentIdx]) {
             globalTransforms[i] = globalTransforms[parentIdx] * localMatrix;
         } else {
             globalTransforms[i] = localMatrix;
         }
+        visited[i] = 1;
 
         // Final bone matrix = global * inverseBindMatrix
         outBoneMatrices[i] = globalTransforms[i] * skeleton.joints[i].inverseBindMatrix;

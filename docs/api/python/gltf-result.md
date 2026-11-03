@@ -7,6 +7,7 @@
 | `success` | `success` | bool |
 | `error` | `error` | Error string |
 | `entities` | `entities` | Renderable entity handles |
+| `root_entities` | `rootEntities` | Entities of the scene's top-level nodes; empty with `flatten_hierarchy=True` |
 | `lights` | `lights` | With `load_lights=True`, the light entity handles (`KHR_lights_punctual`) |
 | `variants` | `variants` | The file's `KHR_materials_variants` names, by index, for `scene.set_material_variant` |
 | `total_vertices` | `totalVertices` | Vertex count |
@@ -16,7 +17,7 @@
 | `animation_clips` | `animationClips` | Python list of `(name, duration_seconds)` tuples; C++ `ClipInfo` structs |
 | `skeleton_count` | `skeletonCount` | Skeleton count |
 
-Native `GltfLoadResult` also exposes primitive, root/node, skeleton, and clip objects. Those native collections are not included in the facade result.
+Native `GltfLoadResult` also exposes primitive, node, skeleton, and clip objects. Those native collections are not included in the facade result.
 
 ## Options
 

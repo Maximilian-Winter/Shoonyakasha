@@ -338,6 +338,41 @@ cdef extern from "Facade/PhysicsAPI.h" namespace "Shoonyakasha::Facade":
 
 
 # ═══════════════════════════════════════════════════════════════
+# AnimationAPI — full declaration
+# ═══════════════════════════════════════════════════════════════
+
+cdef extern from "Facade/AnimationAPI.h" namespace "Shoonyakasha::Facade":
+    cdef cppclass CppAnimationAPI "Shoonyakasha::Facade::AnimationAPI":
+
+        # Animators
+        cbool createAnimator(EntityHandle root)
+        cbool hasAnimator(EntityHandle entity) const
+
+        # Clips
+        vector[string] loadClips(EntityHandle animator, const string& path, const string& name) except +
+        vector[string] getClipNames(EntityHandle animator) const
+        float getClipDuration(EntityHandle animator, const string& clip) const
+
+        # Playback
+        cbool play(EntityHandle animator, const string& clip, float fadeSeconds, cbool loop)
+        void stop(EntityHandle animator)
+        cbool isPlaying(EntityHandle animator) const
+        string getCurrentClip(EntityHandle animator) const
+        cbool isFading(EntityHandle animator) const
+        float getTime(EntityHandle animator) const
+        void setTime(EntityHandle animator, float seconds)
+        float getSpeed(EntityHandle animator) const
+        void setSpeed(EntityHandle animator, float speed)
+
+        # Joints
+        vector[string] getJointNames(EntityHandle animator) const
+        vec3 getJointWorldPosition(EntityHandle animator, const string& joint) except +
+        cbool attach(EntityHandle entity, EntityHandle animator, const string& joint,
+                     const vec3& offsetPosition, const vec3& offsetRotation)
+        void detach(EntityHandle entity)
+
+
+# ═══════════════════════════════════════════════════════════════
 # EcsAPI — full declaration
 # ═══════════════════════════════════════════════════════════════
 
@@ -642,6 +677,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         CppSceneAPI& getScene()
         CppInputAPI& getInput()
         CppPhysicsAPI& getPhysics()
+        CppAnimationAPI& getAnimation()
         CppEcsAPI& getEcs()
         CppUIAPI& getUI() except +
 

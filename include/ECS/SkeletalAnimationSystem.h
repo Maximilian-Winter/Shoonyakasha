@@ -2,14 +2,16 @@
 // SkeletalAnimationSystem.h - ECS system for skeletal animation
 //
 // Runs each frame to:
-//   1. Advance animation playback time
-//   2. Evaluate keyframes via AnimationEvaluator
-//   3. Compute final bone matrices
-//   4. Upload bone matrices to per-entity SSBOs
+//   1. Update AnimatorComponents (AnimatorEvaluator::update), which write the
+//      bone matrices of the skinned meshes they drive and place joint
+//      attachments
+//   2. Advance AnimationPlaybackComponents of skinned meshes not driven by an
+//      animator, and compute their bone matrices
+//   3. Upload changed bone matrices to per-entity SSBOs
 //
-// Skeletons without an AnimationPlaybackComponent get their default pose's
-// bone matrices once. Morph target weights follow the current clip's weight
-// channels (MorphComponent).
+// Skeletons with neither get their default pose's bone matrices once. Morph
+// target weights follow the current clip of the entity's
+// AnimationPlaybackComponent (MorphComponent).
 //
 // Priority: 35 (after physics at 30, before rendering)
 //

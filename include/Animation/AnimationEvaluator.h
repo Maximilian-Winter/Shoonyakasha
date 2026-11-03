@@ -48,8 +48,8 @@ public:
 
     /// Compute final bone matrices from local TRS values.
     /// Result: boneMatrices[i] = globalTransform[i] * inverseBindMatrix[i]
-    /// Assumes joints are ordered such that parent indices < child indices
-    /// (guaranteed by glTF skin joint ordering).
+    /// Joints are visited parents-first, in skeleton.evaluationOrder or, when
+    /// that is empty, in an order computed here.
     static void computeBoneMatrices(
         const Skeleton& skeleton,
         const std::vector<glm::vec3>& translations,
