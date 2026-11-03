@@ -22,6 +22,9 @@ REFERENCE_SIZE.
   they keep LABEL_GAP from the labels of nearer markers (`label_rows`).
 - **Jet fuel** at the bottom left: a bar of the player's jet fuel, in
   WARNING below LOW_FUEL.
+- **Toasts** under the compass: the last MAX_TOASTS messages handed to
+  `toast`, newest on top, each shown for TOAST_SECONDS and fading out
+  over its last TOAST_FADE.
 - **Readout** at the bottom right: the speed along the ground, the
   height above the body's radius, and the body's name.
 """
@@ -57,6 +60,11 @@ LABEL_ROWS = 2
 FUEL_BAR = (36.0, 60.0, 220.0, 8.0)   # left, distance up from the bottom, width, height
 LOW_FUEL = 0.25
 LINE = 1.6
+MAX_TOASTS = 3
+TOAST_SECONDS = 5.0
+TOAST_FADE = 1.0
+TOAST_TOP = 168.0               # canvas units from the top the newest toast is centred
+TOAST_ROW = 26.0
 
 
 def bearing(up, direction):
@@ -168,6 +176,8 @@ class Hud:
         self.speed_text = self._text(20, TEXT, sk.TEXT_ALIGN_RIGHT)
         self.height_text = self._text(14, TEXT, sk.TEXT_ALIGN_RIGHT)
         self.body_text = self._text(12, DIM, sk.TEXT_ALIGN_RIGHT)
+        self.toast_texts = [self._text(17, TEXT) for _ in range(MAX_TOASTS)]
+        self.toasts = []              # [text, colour, seconds left], newest last
 
     def _text(self, size, colour, align=sk.TEXT_ALIGN_CENTER):
         """A text and its shadow (a dark copy behind it, a unit down and right)."""
@@ -218,12 +228,31 @@ class Hud:
         mesh.segment(a, b, LINE_SHADOW, width + 2.0)
         mesh.segment(a, b, colour, width)
 
-    def update(self, view, eye, body, player, gun, targets, speed, pad=False):
+    def toast(self, text, colour=ACCENT):
+        self.toasts.append([text, colour, TOAST_SECONDS])
+        del self.toasts[:-MAX_TOASTS]
+
+    def update_toasts(self, dt, width):
+        for toast in self.toasts:
+            toast[2] -= dt
+        self.toasts = [t for t in self.toasts if t[2] > 0.0]
+        shown = list(reversed(self.toasts))
+        for k, pair in enumerate(self.toast_texts):
+            if k < len(shown):
+                text, colour, left = shown[k]
+                alpha = colour[3] * min(1.0, left / TOAST_FADE)
+                self._place(pair, text, (0.5 * width, TOAST_TOP + TOAST_ROW * k), (900, 24),
+                            (colour[0], colour[1], colour[2], round(alpha, 2)))
+            else:
+                self._place(pair, None, (0.0, 0.0))
+
+    def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0):
         """One frame: `view` (right, up, forward) of the camera, `eye` from
         the planet's centre, `body` the world body under it, `player` the
         character, `gun` its gravity gun, `targets` the compass markers
         (name, position from the planet's centre, colour), `speed` along
-        the ground in m/s, `pad` whether to name the gamepad's controls."""
+        the ground in m/s, `pad` whether to name the gamepad's controls,
+        `dt` the seconds since the last update, for the toasts."""
         width, height = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height <= 0:
             return
@@ -311,4 +340,5 @@ class Hud:
                     (200, 20))
         self._place(self.body_text, body.name.upper(), (rx - 100.0, height - 40.0), (200, 16))
 
+        self.update_toasts(dt, width)
         self.ui.set_geometry(self.shapes, mesh.positions, mesh.indices, mesh.colors)

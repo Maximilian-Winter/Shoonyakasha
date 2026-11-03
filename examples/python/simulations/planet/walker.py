@@ -14,6 +14,16 @@ shown on a minimap at the top right; M opens the full map, which frees
 the mouse and stops the player while open, and on which a left click sets
 the waypoint (cleared within WAYPOINT_REACH of it, or by a right click).
 
+Ore: a loose ore rock (a small one from the scatter, or a chunk of an ore
+boulder broken by a strike at rocks.BREAK_SPEED) that comes to rest on an
+outpost's pad, not held, sells there (objectives.sale_items, trade.sale),
+priced from the body and place it was first seen at. CRATE_STACKS of
+CRATE_MASS kg crates stand west of the blocks to throw. The objectives
+(objectives.GOALS) are shown on a card at the top left with the credits
+and the ore sold; meeting one, a sale and a reached waypoint show as
+toasts. Escape or P pauses: the world's clock and the player stand still
+behind the pause menu (Resume, Controls, Head bob, Quit).
+
 The player is put down SPAWN_LIFT above the ground EAST_OF_SHIP east of
 the ship, facing north, once the terrain is built and the ground there is
 measured. Until then the camera waits 2 m above that spot.
@@ -21,7 +31,8 @@ measured. Until then the camera waits 2 m above that spot.
 Keys:
   W A S D                walk; left Shift run; left Ctrl crouch
   Space                  jump on the ground, jet in the air
-  mouse                  look (captured; Escape frees it, a click captures it again)
+  mouse                  look (captured while playing)
+  Escape, P              pause: the world stands still; Resume, Controls, Head bob, Quit
   right mouse            gravity gun: grab, or pull from farther; again: drop
   left mouse             punt what is held or in front; hold while holding to charge
   R + mouse              turn the held body
@@ -33,7 +44,7 @@ Gamepad: left stick walk, right stick look, A jump and jet, left trigger
 grab, right trigger punt, the bumpers the hold distance.
 
     python walker.py
-    python walker.py --check [--shot FILE]   walk 10 s north, grab a crate, open the map, report and exit
+    python walker.py --check [--shot FILE]   walk, grab a crate, set a waypoint, sell ore, pause; report and exit
 """
 
 import argparse
@@ -50,13 +61,17 @@ from shoonyakasha.planet.on_foot import OnFoot
 from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis,
                                      scale, sub)
 from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL
-from shoonyakasha.toolkit.overlay import HelpOverlay
+from shoonyakasha.planet.props import stack_offsets
+from shoonyakasha.planet.rocks import rock_colour
+from shoonyakasha.toolkit.overlay import Card, HelpOverlay, SettingsMenu
 
 import flight
 from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
+from trade import Market, sale
 from explored_map import ExploredMap, MapView
 from hud import Hud, bearing
+from objectives import Objectives, progress_text, sale_items
 from viewmodel import Viewmodel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -79,15 +94,25 @@ WAYPOINT_MARKER = (1.0, 0.45, 0.85, 1.0)
 WAYPOINT_REACH = 15.0           # m along the ground from the waypoint it counts as reached
 MAP_SECONDS = 2.0               # s --check keeps the full map open
 MAP_CELLS = 200                 # cells --check wants explored by then
+CRATE_SIZE = 0.6                # m
+CRATE_MASS = 40.0               # kg: a plain punt throws one at 30 m/s, hard enough to break ore
+CRATE_STACKS = ((-9.0, -6.0, 3), (-10.5, -4.0, 3))   # (east, north of the site, crates)
+ORE_SEEN_RANGE = 8.0            # m from the feet an ore rock counts as found
+GOOD_TOAST = (0.55, 1.0, 0.62, 1.0)
+SELL_SECONDS = 6.0              # s --check waits for the ore it drops on the pad to sell
+CHECK_ORE_EXTENT = (0.4, 0.3, 0.4)   # m: the ore rock --check drops on the pad
+CHECK_ORE_GRADE = 0.6
+PAUSE_SECONDS = 1.0             # s --check keeps the pause menu open
 SHIP_MARKER = (0.55, 0.8, 1.0, 1.0)
 
 HELP_COLUMNS = [
     [("On foot", [
-        (("Mouse",), "Look around (Escape frees the mouse, a click takes it back)"),
+        (("Mouse",), "Look around"),
         (("W", "A", "S", "D"), "Walk"),
         (("Shift", "Ctrl"), "Run / crouch"),
         (("Space",), "Jump; held in the air: jetpack"),
         (("M",), "Map: wheel to zoom, left click a waypoint, right click to clear"),
+        (("Esc", "P"), "Pause"),
         (("F1",), "These controls"),
     ])],
     [("Gravity gun", [
@@ -100,7 +125,8 @@ HELP_COLUMNS = [
 
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
-                    help="put the player down, walk 10 s north, grab a crate, open the map, report and exit")
+                    help="walk 10 s north, grab a crate, set a waypoint on the map, sell ore at Base, pause; "
+                         "report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 
@@ -143,6 +169,16 @@ state = {
     "map": None,                  # the explored ground (explored_map.ExploredMap)
     "map_view": None,             # the minimap and the full map (explored_map.MapView)
     "waypoint": None,             # (body, unit direction from its centre) set on the full map
+    "market": Market(),           # the credits (trade.py)
+    "seen": {},                   # id of a loose ore rock: (body name, unit direction) where first seen
+    "sold_kg": 0.0,
+    "earned": 0.0,                # credits from sales
+    "ore_chunks": 0,              # chunks of broken ore boulders seen
+    "ore_seen": 0,                # 1 once an ore rock was within ORE_SEEN_RANGE
+    "waypoints": 0,               # waypoints reached
+    "objectives": Objectives(),
+    "objective_card": None,       # toolkit.overlay.Card
+    "pause": None,                # the pause menu (toolkit.overlay.SettingsMenu)
     "help": None,
     "captured": False,            # whether the mouse was last asked to be captured
     "bumpers": set(),             # the gamepad bumpers held last frame
@@ -286,6 +322,9 @@ def maybe_spawn():
                scale(up, bubble.body.radius + world.surface_height(state["position"]) + SPAWN_LIFT))
     foot.spawn(feet, state["forward"])
     place_eye()
+    place_crates()
+    goal = state["objectives"].current()
+    state["hud"].toast("%s. %s" % (goal.title, goal.hint))
     print("[walker] on foot at Base", flush=True)
 
 
@@ -306,9 +345,9 @@ def view_basis():
 
 
 def capture_mouse():
-    """The mouse captured on foot, freed while the controls show; after
-    Escape freed it, captured again by a click."""
-    wanted = foot.player is not None and not state["help"].visible and not state["map_view"].open
+    """The mouse captured while `hud_shown`, free otherwise; captured again
+    by a click when it was freed while it should be captured."""
+    wanted = hud_shown()
     if wanted != state["captured"]:
         engine.input.set_mouse_captured(wanted)
         state["captured"] = wanted
@@ -358,11 +397,16 @@ def markers(body):
     return found
 
 
-def update_hud():
-    """The HUD on foot while the controls and the full map are hidden, with
-    `markers` on the compass."""
+def hud_shown():
+    """On foot, with the controls, the full map and the pause menu hidden."""
+    return (foot.player is not None and not state["help"].visible and not state["map_view"].open
+            and not state["pause"].visible)
+
+
+def update_hud(dt):
+    """The HUD while `hud_shown`, with `markers` on the compass."""
     hud, player = state["hud"], foot.player
-    shown = player is not None and not state["help"].visible and not state["map_view"].open
+    shown = hud_shown()
     hud.show(shown)
     if not shown:
         return
@@ -372,7 +416,7 @@ def update_hud():
     v = foot.physics.character_velocity(player.character)
     speed = length(sub(v, scale(up, dot(v, up))))
     hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed,
-               pad=engine.input.is_gamepad_connected())
+               pad=engine.input.is_gamepad_connected(), dt=dt)
 
 
 def run_check(dt):
@@ -380,11 +424,17 @@ def run_check(dt):
     CHECK_CRATE kg dropped CHECK_AHEAD ahead, and once it lies still the
     view turned to it and the grab held for GRAB_SECONDS; then the full
     map open for MAP_SECONDS and a waypoint set on it by a click, and the
-    map shown half a second more. Passes when the player covered 80 % of
-    walking speed's distance and stands on the ground, the gun holds the
-    crate, at least MAP_CELLS cells are explored and the waypoint is
-    set. With --shot, screenshots while walking (SHOT_SECONDS in), while
-    holding (FILE with _hold added) and of the map (with _map added)."""
+    map shown half a second more; then the map closed and an ore rock
+    (CHECK_ORE_EXTENT, CHECK_ORE_GRADE) dropped 1 m above the Base pad,
+    waiting up to SELL_SECONDS for it to sell and a second more; then the
+    pause menu shown for PAUSE_SECONDS. Passes when the player
+    covered 80 % of walking speed's distance and stands on the ground, the
+    gun holds the crate, at least MAP_CELLS cells are explored, the
+    waypoint is set, the ore sold for credits and the world's clock stood
+    still while paused. With --shot, screenshots
+    while walking (SHOT_SECONDS in), while holding (FILE with _hold added),
+    of the map (with _map added), after the sale (with _sell added) and
+    of the pause menu (with _pause added)."""
     player = foot.player
     if player is None:
         return
@@ -449,15 +499,46 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_map" + ext)
-            os._exit(0 if check["walk_ok"] and check["held_ok"] and check["map_ok"] else 1)
+            state["map_view"].set_open(False)
+            _, up, _, _ = world.site_frame()
+            check["credits"] = state["market"].credits
+            check["ore"] = ore_rock(add(world.site_ground(), scale(up, 1.0)), CHECK_ORE_EXTENT, CHECK_ORE_GRADE)
+            check["stage"], check["time"] = "sell", 0.0
+    elif stage == "sell":
+        sold = not any(prop is check["ore"] for prop in foot.props.rocks)
+        if sold and "sold_at" not in check:
+            check["sold_at"] = t
+        if t >= check.get("sold_at", SELL_SECONDS) + 1.0 or t >= SELL_SECONDS + 1.0:   # the toast drawn first
+            gained = state["market"].credits - check["credits"]
+            sell_ok = sold and gained > 0.0 and state["sold_kg"] > 0.0
+            print("[walker] ore dropped on the Base pad sold: %.0f kg for %.0f cr: %s"
+                  % (state["sold_kg"], gained, "passed" if sell_ok else "FAILED"), flush=True)
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_sell" + ext)
+            check["sell_ok"] = sell_ok
+            set_paused(True)
+            check["stage"], check["time"] = "pause", 0.0
+    elif stage == "pause":
+        if "clock" not in check:
+            check["clock"] = world.time      # this frame is the first that stands still
+        if t >= PAUSE_SECONDS:
+            pause_ok = world.time == check["clock"] and not hud_shown()
+            print("[walker] paused for %.0f s, the world's clock still: %s"
+                  % (PAUSE_SECONDS, "passed" if pause_ok else "FAILED"), flush=True)
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_pause" + ext)
+            ok = check["walk_ok"] and check["held_ok"] and check["map_ok"] and check["sell_ok"] and pause_ok
+            os._exit(0 if ok else 1)
 
 
 def update_map(dt):
     """The ground around the player measured, the waypoint cleared once
     reached, and the minimap and full map drawn on foot while the
-    controls are hidden."""
+    controls and the pause menu are hidden."""
     view, player = state["map_view"], foot.player
-    shown = player is not None and not state["help"].visible
+    shown = player is not None and not state["help"].visible and not state["pause"].visible
     view.show(shown)
     if player is None:
         return
@@ -470,7 +551,8 @@ def update_map(dt):
     if waypoint is not None and waypoint[0] is body and body.radius * math.acos(
             max(-1.0, min(1.0, dot(up, waypoint[1])))) <= WAYPOINT_REACH:
         state["waypoint"] = None
-        print("[walker] waypoint reached", flush=True)
+        state["waypoints"] += 1
+        state["hud"].toast("Waypoint reached")
     if not shown:
         return
     grid = explored.grid(body, up)
@@ -498,6 +580,131 @@ def set_waypoint(canvas_point):
     return True
 
 
+def place_crates():
+    """CRATE_STACKS stacks of crates beside the blocks, once."""
+    _, up, east, north = world.site_frame()
+    ground = world.site_ground()
+    bubble = foot.bubble
+    right, back = east, scale(north, -1.0)
+    for e, n, count in CRATE_STACKS:
+        for height in stack_offsets(count, CRATE_SIZE):
+            spot = add(ground, add(scale(east, e), add(scale(north, n), scale(up, height + 0.1))))
+            foot.props.spawn_crate(bubble, bubble.to_bubble(spot), quat_from_basis(right, up, back), CRATE_SIZE,
+                                   mass=CRATE_MASS)
+
+
+def ore_rocks():
+    """(prop, body, position from the body's centre, speed, first seen) of
+    each loose ore rock; each first seen now noted with its body's name and
+    its direction."""
+    seen, found = state["seen"], []
+    for prop in foot.props.rocks:
+        if prop.grade <= 0.0:
+            continue
+        body, position, velocity = foot.prop_state(prop)
+        if id(prop) not in seen:
+            seen[id(prop)] = (body.name, normalize(position))
+            if prop.key is None:
+                state["ore_chunks"] += 1
+        found.append((prop, body, position, length(velocity), seen[id(prop)]))
+    present = {id(p) for p in foot.props.rocks}
+    for key in [k for k in seen if k not in present]:
+        del seen[key]
+    return found
+
+
+def ore_seen_near(feet):
+    """Whether a fixed ore boulder or a loose ore rock lies within ORE_SEEN_RANGE of `feet` (from the body's centre)."""
+    body = foot.bubble.body
+    for rock in foot.rocks.rocks.values():
+        if rock.grade > 0.0 and rock.body == body.index and length(sub(rock.base, feet)) <= ORE_SEEN_RANGE:
+            return True
+    return False
+
+
+def update_game():
+    """Ore sold where it rests on a pad, the objectives moved on, the objective card shown."""
+    hud, player = state["hud"], foot.player
+    if player is None:
+        return
+    feet = foot.bubble.body_relative(player.feet())
+    ore = ore_rocks()
+    if not state["ore_seen"] and (ore_seen_near(feet) or any(length(sub(p[2], feet)) <= ORE_SEEN_RANGE
+                                                               for p in ore)):
+        state["ore_seen"] = 1
+    held = foot.props.find(foot.gun.held) if foot.gun is not None and foot.gun.held is not None else None
+    for outpost, prop, item in sale_items(ore, state["outposts"], held):
+        credits, supplies = sale(outpost, [item], world.time)
+        outpost.supply.update(supplies)
+        state["market"].credits += credits
+        state["earned"] += credits
+        state["sold_kg"] += item["mass"]
+        foot.props.remove(foot.bubble, prop, release=False)
+        hud.toast("Sold %.0f kg of ore (grade %.2f) at %s: +%s cr"
+                  % (item["mass"], item["grade"], outpost.name, format(int(round(credits)), ",")), GOOD_TOAST)
+    snapshot = game_numbers()
+    objectives = state["objectives"]
+    for goal in objectives.update(snapshot):
+        hud.toast("Objective complete: %s" % goal.title, GOOD_TOAST)
+        upcoming = objectives.current()
+        if upcoming is not None:
+            hud.toast("Next: %s. %s" % (upcoming.title, upcoming.hint))
+        else:
+            hud.toast("Every objective done. The planet is yours to explore.")
+    card = state["objective_card"]
+    card.show(hud_shown())
+    goal = objectives.current()
+    rows = []
+    if goal is not None:
+        shown, target = objectives.progress(snapshot)
+        rows += [(goal.title,), ("Progress", progress_text(goal, shown, target))]
+    else:
+        rows += [("All objectives done",)]
+    rows += [("Credits", "%s cr" % format(int(round(state["market"].credits)), ",")),
+             ("Ore sold", "%s kg" % format(int(round(state["sold_kg"])), ","))]
+    card.update("OBJECTIVE  %d / %d" % (min(objectives.index + 1, len(objectives.goals)), len(objectives.goals)),
+                rows)
+
+
+def game_numbers():
+    return {"cells": sum(grid.measured for grid in state["map"].grids.values()),
+            "waypoints": state["waypoints"], "ore_seen": state["ore_seen"], "ore_chunks": state["ore_chunks"],
+            "sold_kg": state["sold_kg"], "earned": state["earned"]}
+
+
+def set_paused(on):
+    """The pause menu shown or hidden; the world stands still while it shows."""
+    state["pause"].show(on)
+
+
+def pause_items():
+    return [
+        {"button": "Resume", "do": lambda: set_paused(False)},
+        {"button": "Controls", "do": lambda: (set_paused(False), state["help"].show(True))},
+        {"toggle": "Head bob", "get": lambda: foot.head_bob, "set": lambda on: setattr(foot, "head_bob", on),
+         "hint": "The view rises and falls a little with each step."},
+        {"button": "Quit", "do": lambda: os._exit(0)},
+    ]
+
+
+def ore_rock(spot, extent, grade):
+    """A loose ore rock of the scatter's "rock" kind scaled by `extent`, of
+    `grade`, at `spot` (planet space), level with the ground; its prop."""
+    bubble = foot.bubble
+    point = bubble.to_bubble(spot)
+    up = bubble.up(point)
+    east = normalize(cross((0.0, 1.0, 0.0), up)) if abs(up[1]) < 0.99 else (1.0, 0.0, 0.0)
+    points, _ = foot.rocks.kind_data(foot.physics, "rock")
+    hull = (points * np.array(extent)).astype(np.float32)
+    body = foot.physics.create_convex_hull(hull, point, quat_from_basis(east, up, cross(east, up)),
+                                           motion="dynamic", density=2_600.0, friction=0.8, restitution=0.05)
+    colour = rock_colour(bubble.body.index, grade)
+    entity, glow = foot.rocks.entity("rock", extent, colour, grade)
+    radius = float(np.linalg.norm(hull, axis=1).max())
+    return foot.props.add_rock(body, entity, 2.0 * radius, radius, None, ("hull", hull, foot.physics.mass(body)),
+                               0.5 * extent[1], bubble.body, "rock", tuple(extent), colour, grade, glow)
+
+
 def screenshot(path):
     print("[walker] screenshot: %s" % (path if engine.capture_screenshot(path) else "failed"), flush=True)
 
@@ -509,16 +716,21 @@ def frame(dt):
     world.begin_frame(state["position"])
     update_outposts()
     maybe_spawn()
+    paused = state["pause"].visible
+    state["pause"].update()
+    elapsed = dt                 # the frame's real time; the world's stands still while paused
     if foot.player is not None:
         if args.check:
-            run_check(dt)
-        elif not state["map_view"].open:
+            run_check(elapsed)
+        elif not paused and not state["map_view"].open:
             foot.read_controls(engine.input)
             read_bumpers()
+    if paused:
+        dt = 0.0
     world.time += dt
     latency = world.probe_latency * state["frame_ms"] / 1000.0
     foot.props.fly(world.time - clock, latency)
-    active = foot.player is not None and not state["map_view"].open
+    active = foot.player is not None and not state["map_view"].open and not paused
     foot.step(dt, state["position"], state["position"], latency, active=active)
     foot.props.probe(foot.bubble, EXTRA_PROBES)
     place_eye()
@@ -536,10 +748,11 @@ def frame(dt):
     foot.props.draw(foot.bubble, camera)
     place_ship(camera)
     place_viewmodel(dt, camera)
-    update_hud()
+    update_hud(dt)
     update_map(dt)
+    update_game()
     foot.end_frame()
-    state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * dt * 1000.0
+    state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * elapsed * 1000.0
     return True
 
 
@@ -556,6 +769,9 @@ def on_init():
     state["map"] = ExploredMap(world)
     state["map_view"] = MapView(engine)
     state["map_view"].show(False)
+    state["objective_card"] = Card(engine.ui, state["hud"].canvas, (0, 0), 6, margin=(24, 110))
+    state["pause"] = SettingsMenu(engine, "Paused", pause_items(), close_keys=("Esc",))
+    state["pause"].show(False)
     state["help"] = HelpOverlay(engine, "CONTROLS", HELP_COLUMNS, footer="F1 to close")
     state["help"].show(False)
     _, up, _, north = world.site_frame()
@@ -570,10 +786,12 @@ def on_key(key):
         state["help"].show(not state["help"].visible)
     elif key == keys.ESCAPE and state["help"].visible:
         state["help"].show(False)
-    elif key == keys.M and foot.player is not None:
+    elif key == keys.M and foot.player is not None and not state["pause"].visible:
         view.set_open(not view.open)
     elif key == keys.ESCAPE and view.open:
         view.set_open(False)
+    elif key in (keys.ESCAPE, keys.P) and foot.player is not None:
+        set_paused(not state["pause"].visible)
 
 
 def on_mouse_button(button, pressed):
