@@ -9,6 +9,8 @@ import math
 import unittest
 from pathlib import Path
 
+from shoonyakasha.planet.vec import quat_from_basis, quat_multiply, quat_rotate
+
 REPO = Path(__file__).resolve().parents[2]
 _SPEC = importlib.util.spec_from_file_location(
     "planet_flight", REPO / "examples" / "python" / "simulations" / "planet" / "flight.py")
@@ -29,15 +31,15 @@ def level_ship(height, planet, speed=0.0):
     position = (0.0, 0.0, planet.radius + height)
     right, up, back = (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0)   # right x up == back
     return flight.Ship(position=position, velocity=(speed, 0.0, 0.0),
-                       orientation=flight.quat_from_basis(right, up, back))
+                       orientation=quat_from_basis(right, up, back))
 
 
 class Quaternions(unittest.TestCase):
     def test_a_basis_turns_into_a_quaternion_that_turns_the_axes_back_onto_it(self):
         right, up, back = (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0, 0.0)
-        q = flight.quat_from_basis(right, up, back)
+        q = quat_from_basis(right, up, back)
         for axis, expected in (((1, 0, 0), right), ((0, 1, 0), up), ((0, 0, 1), back)):
-            for got, want in zip(flight.quat_rotate(q, axis), expected):
+            for got, want in zip(quat_rotate(q, axis), expected):
                 self.assertAlmostEqual(got, want, places=12)
 
     def test_the_ships_axes_follow_its_orientation(self):
@@ -266,7 +268,7 @@ class ClimbToOrbit(unittest.TestCase):
         radial = flight.normalize(ship.position)
         right = flight.normalize(flight.cross(forward, radial))
         up = flight.cross(right, forward)
-        ship.orientation = flight.quat_from_basis(right, up, flight.scale(forward, -1.0))
+        ship.orientation = quat_from_basis(right, up, flight.scale(forward, -1.0))
         ship.angular_velocity = (0.0, 0.0, 0.0)
 
     def test_a_ship_can_climb_from_the_ground_to_orbit(self):
@@ -488,7 +490,7 @@ class Ground(unittest.TestCase):
     def test_the_hull_crashes_at_a_lower_speed_than_the_gear(self):
         planet = flight.Planet()
         ship = level_ship(1.9 + 2.0, planet)            # upside down: the roof 1.9 m above the centre, 2 m up
-        ship.orientation = flight.quat_multiply(ship.orientation, (0.0, 0.0, 0.0, 1.0))   # rolled 180 degrees
+        ship.orientation = quat_multiply(ship.orientation, (0.0, 0.0, 0.0, 1.0))   # rolled 180 degrees
         fly_over(ship, planet, flight.Controls(assist=False), 2.0, level_ground(planet))
         self.assertTrue(ship.crashed)
         self.assertLess(ship.impact_speed, ship.params.gear_crash_speed)
@@ -520,7 +522,7 @@ def ship_on_moon(planet, height):
     position = flight.add(moon.position(planet.time), (0.0, 0.0, moon.radius + height))
     right, up, back = (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0)
     return flight.Ship(position=position, velocity=moon.velocity(planet.time),
-                       orientation=flight.quat_from_basis(right, up, back))
+                       orientation=quat_from_basis(right, up, back))
 
 
 def fly_over_moon(ship, planet, controls, seconds):

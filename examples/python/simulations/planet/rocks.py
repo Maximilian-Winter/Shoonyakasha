@@ -44,9 +44,8 @@ import numpy as np
 
 from shoonyakasha.planet import vegetation
 from shoonyakasha.planet.rocks import DENSITY, rock_colour, tinted
-from shoonyakasha.planet.vec import add, cross, length, normalize, scale, sub
+from shoonyakasha.planet.vec import add, cross, length, normalize, quat_from_basis, quat_rotate, scale, sub
 
-from flight import quat_from_basis, quat_rotate
 from viewmodel import white_texture
 
 KEEP = 10.0                      # m beyond the list's radius a rock is kept

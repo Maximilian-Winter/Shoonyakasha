@@ -56,9 +56,9 @@ towards it reaches.
 import math
 from dataclasses import dataclass
 
-from shoonyakasha.planet.vec import add, dot, length, normalize, scale, sub
+from shoonyakasha.planet.vec import (add, dot, length, normalize, quat_conjugate, quat_from_basis, quat_multiply,
+                                     quat_normalize, scale, sub)
 
-from flight import quat_conjugate, quat_from_basis, quat_multiply, quat_normalize
 from player import MASS as PLAYER_MASS
 
 MIN_HOLD, MAX_HOLD = 1.5, 6.0        # m, the hold distance's range

@@ -63,9 +63,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from shoonyakasha.planet.orbits import reference
-from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, normalize, scale, sub
-
-from flight import quat_from_basis, quat_multiply, quat_normalize, quat_rotate
+from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis,
+                                     quat_multiply, quat_normalize, quat_rotate, scale, sub)
 
 MARGIN = 0.5                     # m inside a terrain mesh's edges (plus its size) a prop counts as over it
 CRATE_COLOUR = (0.62, 0.45, 0.25)

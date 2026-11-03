@@ -28,7 +28,7 @@ PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simu
 sys.path.insert(0, str(PLANET_DIR))
 import gun as gun_module        # noqa: E402
 import player as player_module  # noqa: E402
-from flight import quat_rotate  # noqa: E402
+from shoonyakasha.planet.vec import quat_rotate  # noqa: E402
 
 Gun, GunControls = gun_module.Gun, gun_module.GunControls
 Player, Controls = player_module.Player, player_module.Controls

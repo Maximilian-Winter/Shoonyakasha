@@ -15,9 +15,7 @@ planet's, so the bubble must be on the planet. `clear` removes them all
 
 from dataclasses import dataclass
 
-from shoonyakasha.planet.vec import add, cross, length, local_frame, scale, sub
-
-from flight import quat_from_basis
+from shoonyakasha.planet.vec import add, cross, length, local_frame, quat_from_basis, scale, sub
 
 SINK = 0.5                       # m a trunk reaches below its base, into the ground
 MOVED = 0.05                     # m a base may move and still be the same trunk

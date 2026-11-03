@@ -190,7 +190,8 @@ from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.collider_probes import ColliderProbes, TerrainCollider
 from shoonyakasha.planet.nearby_trees import NearbyTrees, listed_keys
 from shoonyakasha.planet.rocks import ORE_ROCKS, rock_colour
-from shoonyakasha.planet.vec import add, cross, dot, euler_from_basis, length, local_frame, normalize, rotate, scale, sub
+from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, local_frame, normalize, quat_from_basis,
+                                     quat_normalize, quat_rotate, rotate, scale, sub)
 from shoonyakasha.toolkit.overlay import Card, HelpOverlay, HintBar, SettingsMenu
 from shoonyakasha.planet.world import (CLOUD_COVERAGE, COLOUR_MODES, EXTRA_PROBES, FLOATS_PER_VERTEX, FOV, MAX_LEVEL,
                                        MORPH_LEVELS, MORPH_START, ORBIT_POINTS, QUADS, RADIUS, SKIRT_FRACTION, SLOTS,
@@ -753,7 +754,7 @@ def new_ship(position, velocity, forward, up, assist):
     up = normalize(sub(up, scale(forward, dot(up, forward))))
     right = cross(forward, up)
     state["ship"] = flight.Ship(position=position, velocity=velocity,
-                                orientation=flight.quat_from_basis(right, up, scale(forward, -1.0)))
+                                orientation=quat_from_basis(right, up, scale(forward, -1.0)))
     state["controls"] = flight.Controls(assist=assist)
     state["mode"] = "ship"
     state["position"] = position
@@ -784,7 +785,7 @@ def place_ship_at_moon(preset):
         new_ship(position, moon.velocity(), local_frame(up)[1], up, True)
         # The ground under the centre and under each gear point, were the ship standing there.
         q = state["ship"].orientation
-        feet = [normalize(add(scale(up, moon.radius), flight.quat_rotate(q, arm)))
+        feet = [normalize(add(scale(up, moon.radius), quat_rotate(q, arm)))
                 for arm in state["ship"].params.gear]
         state["moon_landing"] = up
         world.extra_probes = [(up, moon)] + [(d, moon) for d in feet]
@@ -997,7 +998,7 @@ def drop_crates(count):
     heading = sub(forward, scale(up, dot(forward, up)))
     heading = normalize(heading) if length(heading) > 1e-6 else local_frame(up)[1]
     right = normalize(cross(heading, up))
-    rotation = flight.quat_from_basis(right, up, scale(heading, -1.0))
+    rotation = quat_from_basis(right, up, scale(heading, -1.0))
     for height in stack_offsets(count, CRATE_SIZE):
         props.spawn_crate(bubble, add(p, scale(up, height)), rotation, CRATE_SIZE, CRATE_DENSITY)
 
@@ -1097,7 +1098,7 @@ def move_ship_body(bubble, fraction):
     (p0, q0), (p1, q1) = poses
     if dot(q0, q1) < 0.0:
         q1 = tuple(-c for c in q1)
-    q = flight.quat_normalize(tuple(a + (b - a) * fraction for a, b in zip(q0, q1)))
+    q = quat_normalize(tuple(a + (b - a) * fraction for a, b in zip(q0, q1)))
     p = bubble.to_bubble(add(p0, scale(sub(p1, p0), fraction)))
     if length(p) > Bubble.RADIUS:
         remove_ship_body()
@@ -1138,7 +1139,7 @@ def ship_landed(ship):
     if ground is None:
         return False
     for gear in ship.params.gear:
-        contact = ground(add(ship.position, flight.quat_rotate(ship.orientation, gear)))
+        contact = ground(add(ship.position, quat_rotate(ship.orientation, gear)))
         if contact is None or contact[0] < -flight.GEAR_TOUCH:
             return False
     return True
@@ -2521,7 +2522,7 @@ def mid_reentry():
     ship_up = normalize(sub(up, scale(forward, dot(up, forward))))
     position = scale(up, RADIUS + 17_000.0)
     state["ship"] = flight.Ship(position=position, velocity=scale(forward, 640.0),
-                                orientation=flight.quat_from_basis(cross(forward, ship_up), ship_up,
+                                orientation=quat_from_basis(cross(forward, ship_up), ship_up,
                                                                    scale(forward, -1.0)))
     state["controls"] = flight.Controls(assist=False)
     state["mode"] = "ship"
@@ -3177,7 +3178,7 @@ class LandingCheck:
             height, up = self.best
             east, north = local_frame(up)
             state["ship"] = flight.Ship(position=self.at(up, height + 500.0), velocity=self.body.velocity(),
-                                        orientation=flight.quat_from_basis(east, up, scale(north, -1.0)))
+                                        orientation=quat_from_basis(east, up, scale(north, -1.0)))
             state["controls"] = flight.Controls(vertical=-1.0, assist=True)
             state["scripted_controls"] = True
             state["mode"] = "ship"
@@ -3225,7 +3226,7 @@ class LandingCheck:
             state["controls"] = flight.Controls(assist=True)
         if self.touched is not None:
             q = ship.orientation
-            world.extra_probes = [(normalize(self.body.relative(add(ship.position, flight.quat_rotate(q, arm)))),
+            world.extra_probes = [(normalize(self.body.relative(add(ship.position, quat_rotate(q, arm)))),
                                       self.body) for arm in ship.params.gear]
         if self.touched is not None and now - self.touched >= self.REST_SECONDS[self.body.name] or now - self.start > self.TIMEOUT_SECONDS:
             self.report(ship)
@@ -3241,7 +3242,7 @@ class LandingCheck:
             slope = math.degrees(math.acos(max(-1.0, min(1.0, dot(normal, radial)))))
             patch_height = length(centre) - self.body.radius + depth / dot(radial, normal)
             q = ship.orientation
-            gear = [patch.query(add(centre, flight.quat_rotate(q, arm)))[0] for arm in ship.params.gear]
+            gear = [patch.query(add(centre, quat_rotate(q, arm)))[0] for arm in ship.params.gear]
             print("[planet] touched down at %.1f m/s on a %.1f degree slope at %.0f m:"
                   % (self.touchdown_speed, slope, patch_height), flush=True)
             print("[planet]   gear points below the surface: %s m" % ", ".join("%+.3f" % d for d in gear),
@@ -3250,7 +3251,7 @@ class LandingCheck:
                   % (patch_height - (world.ground or 0.0)), flush=True)
             # Each gear point's height above the terrain itself, measured at its direction.
             surface = (lambda h: max(h, 0.0)) if self.body.ocean else (lambda h: h)
-            terrain = [length(add(centre, flight.quat_rotate(q, arm))) - self.body.radius - surface(h)
+            terrain = [length(add(centre, quat_rotate(q, arm))) - self.body.radius - surface(h)
                        for arm, (_, h) in zip(ship.params.gear, world.extra_heights)]
             print("[planet]   gear points above the terrain at their directions: %s m"
                   % ", ".join("%+.3f" % d for d in terrain), flush=True)
@@ -3279,7 +3280,7 @@ class LandingCheck:
         state["ship"] = flight.Ship(position=position,
                                     velocity=add(self.body.velocity(),
                                                  scale(normalize(sub(target, position)), self.DIVE_SPEED)),
-                                    orientation=flight.quat_from_basis(east, up, scale(north, -1.0)))
+                                    orientation=quat_from_basis(east, up, scale(north, -1.0)))
         state["controls"] = flight.Controls(assist=False)
         state["warp"] = len(WARPS) - 1
         world.patch = None
@@ -3832,7 +3833,7 @@ class GunCheck(WalkCheck):
         if distance is None:
             distance = gun.hold_distance + 0.5 * math.sqrt(3.0) * CRATE_SIZE
         return props.spawn_crate(state["bubble"], add(player.eye(), scale(forward, distance)),
-                                 flight.quat_from_basis(right, up, scale(forward, -1.0)), CRATE_SIZE, mass=mass)
+                                 quat_from_basis(right, up, scale(forward, -1.0)), CRATE_SIZE, mass=mass)
 
     def grab(self):
         """The grab control held for GRAB_TIME from the stage's 3rd frame;
@@ -4194,7 +4195,7 @@ class PromotionCheck(GunCheck):
             p = physics.get_transform(self.rock)[0]
             up = bubble.up(p)
             right, _, forward = player.basis()
-            self.strike_crate = props.spawn_crate(bubble, add(p, scale(up, 2.0)), flight.quat_from_basis(
+            self.strike_crate = props.spawn_crate(bubble, add(p, scale(up, 2.0)), quat_from_basis(
                 right, up, cross(right, up)), 0.3, mass=self.STRIKE_MASS)
             physics.set_velocity(self.strike_crate.body, scale(up, -self.STRIKE_SPEED))
             self.strike_promotions = len(self.promotions)
@@ -4317,7 +4318,7 @@ class OrbitCrateCheck(GunCheck):
         self.period = 2.0 * math.pi * math.sqrt(r ** 3 / gm)
         right = normalize(cross(heading, up))
         crate = props.spawn_crate(bubble, sub(self.start, bubble.origin),
-                                  flight.quat_from_basis(right, up, scale(heading, -1.0)), self.SIZE, mass=self.MASS)
+                                  quat_from_basis(right, up, scale(heading, -1.0)), self.SIZE, mass=self.MASS)
         physics.set_velocity(crate.body, scale(heading, speed))
         self.crate = crate
         state["tracked"] = crate
@@ -4450,7 +4451,7 @@ class SaveCheck(GunCheck):
         right = normalize(cross(level, up))
         direction = normalize(add(level, up))
         self.crate = props.spawn_crate(bubble, add(player.eye(), add(scale(level, 3.0), scale(up, 1.0))),
-                                       flight.quat_from_basis(right, up, scale(level, -1.0)), CRATE_SIZE,
+                                       quat_from_basis(right, up, scale(level, -1.0)), CRATE_SIZE,
                                        mass=self.CRATE_MASS)
         physics.set_velocity(self.crate.body, scale(direction, self.THROW))
         self.next_stage("wait")
@@ -4736,7 +4737,7 @@ class BreakCheck(GunCheck):
                                 scale(up, 0.3)))
         start = add(centre, scale(towards, self.boulder.radius + self.STRIKE_FROM))
         right = normalize(cross(towards, up))
-        crate = props.spawn_crate(bubble, start, flight.quat_from_basis(right, up, cross(right, up)),
+        crate = props.spawn_crate(bubble, start, quat_from_basis(right, up, cross(right, up)),
                                   self.STRIKER_SIZE, mass=self.STRIKER_MASS)
         physics.set_velocity(crate.body, scale(towards, -self.STRIKE_SPEED))
         self.next_stage("strike")
@@ -4845,7 +4846,7 @@ class FuelCheck:
         up = ship.axes()[1]
         up = normalize(sub(up, scale(forward, dot(up, forward))))
         right = cross(forward, up)
-        return flight.quat_from_basis(right, up, scale(forward, -1.0))
+        return quat_from_basis(right, up, scale(forward, -1.0))
 
     def finish(self, ship):
         p = ship.params
@@ -4877,7 +4878,7 @@ def ore_rock(bubble, point, extent, grade):
     east, _ = local_frame(up)
     points, _ = scatter_rocks.kind_data(physics, "rock")
     hull = (points * np.array(extent)).astype(np.float32)
-    body = physics.create_convex_hull(hull, point, flight.quat_from_basis(east, up, cross(east, up)),
+    body = physics.create_convex_hull(hull, point, quat_from_basis(east, up, cross(east, up)),
                                       motion="dynamic", density=2_600.0, friction=0.8, restitution=0.05)
     colour = rock_colour(bubble.body.index, grade)
     entity, glow = scatter_rocks.entity("rock", extent, colour, grade)
@@ -4954,7 +4955,7 @@ class CargoCheck:
         self.outside = ore_rock(bubble, self.net_point(NET_HALF[0] + self.OUTSIDE, 0.0), self.EXTENTS[0], self.GRADE)
         right, up, forward = ship.axes()
         self.crate = props.spawn_crate(bubble, self.net_point(0.0, 2.5),
-                                       flight.quat_from_basis(right, up, scale(forward, -1.0)), CRATE_SIZE)
+                                       quat_from_basis(right, up, scale(forward, -1.0)), CRATE_SIZE)
         self.next_stage("board")
 
     def board(self):
