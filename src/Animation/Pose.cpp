@@ -89,6 +89,18 @@ void applyAdditive(const Pose& base, const Pose& delta, float weight, Pose& out)
     }
 }
 
+void applyAdditivePerJoint(const Pose& base, const Pose& delta, const std::vector<float>& weights, Pose& out) {
+    const size_t count = std::min(base.rotations.size(), delta.rotations.size());
+    resizeLike(base, out);
+    const glm::quat identity(1.0f, 0.0f, 0.0f, 0.0f);
+    for (size_t i = 0; i < count; ++i) {
+        const float w = i < weights.size() ? weights[i] : 0.0f;
+        out.translations[i] = base.translations[i] + w * delta.translations[i];
+        out.rotations[i] = glm::normalize(base.rotations[i] * slerpShortest(identity, delta.rotations[i], w));
+        out.scales[i] = base.scales[i] * glm::mix(glm::vec3(1.0f), delta.scales[i], w);
+    }
+}
+
 void globalTransforms(const Skeleton& skeleton, const Pose& pose, std::vector<glm::mat4>& out) {
     const int count = static_cast<int>(std::min<size_t>(skeleton.joints.size(), pose.rotations.size()));
     out.assign(count, glm::mat4(1.0f));

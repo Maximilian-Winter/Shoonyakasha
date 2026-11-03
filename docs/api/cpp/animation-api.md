@@ -9,11 +9,14 @@ Controls per-model animators. `createAnimator(root)` adds an `AnimatorComponent`
 - Clips are addressed by name.
 - `loadClips` reads a glTF / GLB file and adds the clips whose channels match the skeleton's joint names. It throws `std::runtime_error` when the file cannot be read or the entity has no animator.
 - `getJointWorldPosition` throws for an unknown animator or joint.
+- `setController` throws `std::runtime_error` naming the place in the definition that is wrong. The parameter, layer and state calls throw for an unknown name, a parameter of another type, or an animator without a controller.
 
 Playback, cross-fades and attachments follow the [Python reference](../python/animation.md#clips-and-playback). The same engine types are available without the facade:
 
 - `AnimatorComponent` and `JointAttachmentComponent` in `ECS/AnimatorComponents.h`
 - `AnimatorEvaluator` in `Animation/AnimatorEvaluator.h`
+- `ControllerDefinition` and `parseAnimationController` (with the JSON form) in `Animation/AnimationController.h`
+- `ControllerEvaluator` in `Animation/ControllerEvaluator.h`
 - `Pose` and `PoseOps` in `Animation/Pose.h`
 - `bindClip` in `Animation/ClipBinding.h`
 - `loadAnimationClips` in `Resources/AnimationClipLoader.h`
@@ -45,6 +48,23 @@ std::vector<std::string> getJointNames(EntityHandle animator) const;
 glm::vec3 getJointWorldPosition(EntityHandle animator, const std::string& joint) const;
 bool attach(EntityHandle entity, EntityHandle animator, const std::string& joint, const glm::vec3& offsetPosition = glm::vec3(0.0f), const glm::vec3& offsetRotation = glm::vec3(0.0f));
 void detach(EntityHandle entity);
+void setController(EntityHandle animator, const std::string& json);
+void clearController(EntityHandle animator);
+bool hasController(EntityHandle animator) const;
+void setFloat(EntityHandle animator, const std::string& parameter, float value);
+void setInt(EntityHandle animator, const std::string& parameter, int value);
+void setBool(EntityHandle animator, const std::string& parameter, bool value);
+void setTrigger(EntityHandle animator, const std::string& parameter);
+void resetTrigger(EntityHandle animator, const std::string& parameter);
+float getParameter(EntityHandle animator, const std::string& parameter) const;
+std::string getCurrentState(EntityHandle animator, const std::string& layer) const;
+bool isInTransition(EntityHandle animator, const std::string& layer) const;
+void setLayerWeight(EntityHandle animator, const std::string& layer, float weight);
+float getLayerWeight(EntityHandle animator, const std::string& layer) const;
+std::vector<std::string> takeEvents(EntityHandle animator);
+void setRootMotion(EntityHandle animator, bool enabled, const std::string& joint = "");
+bool isRootMotion(EntityHandle animator) const;
+glm::vec3 takeRootMotion(EntityHandle animator);
 ```
 
 <!-- END SOURCE API -->

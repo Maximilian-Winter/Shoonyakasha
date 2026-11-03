@@ -4,11 +4,14 @@
 
 #include "AnimationAPIImpl.h"
 #include "FacadeInternal.h"
+#include "Animation/AnimationController.h"
 #include "Animation/AnimatorEvaluator.h"
+#include "Animation/ControllerEvaluator.h"
 #include "ECS/Core.h"
 #include "Resources/AnimationClipLoader.h"
 
 #include <stdexcept>
+#include <utility>
 
 using namespace Shoonyakasha::Facade::Internal;
 
@@ -77,7 +80,7 @@ float AnimationAPI::getClipDuration(EntityHandle animator, const std::string& cl
 
 bool AnimationAPI::play(EntityHandle animator, const std::string& clip, float fadeSeconds, bool loop) {
     AnimatorComponent* component = animatorOf(m_impl->registry, animator);
-    return component && component->play(component->findClip(clip), fadeSeconds, loop);
+    return component && !component->controller && component->play(component->findClip(clip), fadeSeconds, loop);
 }
 
 void AnimationAPI::stop(EntityHandle animator) {
@@ -174,6 +177,143 @@ void AnimationAPI::detach(EntityHandle entity) {
     if (!m_impl->registry) return;
     const entt::entity target = toEntt(entity);
     if (m_impl->registry->valid(target)) m_impl->registry->remove<JointAttachmentComponent>(target);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Controller
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+AnimatorComponent& requireAnimator(entt::registry* registry, EntityHandle handle) {
+    AnimatorComponent* component = animatorOf(registry, handle);
+    if (!component) throw std::runtime_error("entity has no animator");
+    return *component;
+}
+
+ControllerRuntime& requireController(entt::registry* registry, EntityHandle handle) {
+    AnimatorComponent& component = requireAnimator(registry, handle);
+    if (!component.controller) throw std::runtime_error("the animator has no controller");
+    return *component.controller;
+}
+
+int requireParameter(const ControllerRuntime& runtime, const std::string& name) {
+    const int index = runtime.definition->findParameter(name);
+    if (index < 0) throw std::runtime_error("no parameter '" + name + "'");
+    return index;
+}
+
+int requireTyped(const ControllerRuntime& runtime, const std::string& name, ControllerParameterType type,
+                 const char* typeName) {
+    const int index = requireParameter(runtime, name);
+    if (runtime.definition->parameters[index].type != type) {
+        throw std::runtime_error("parameter '" + name + "' is not a " + typeName);
+    }
+    return index;
+}
+
+ControllerLayerRuntime& requireLayer(ControllerRuntime& runtime, const std::string& name) {
+    const int index = runtime.definition->findLayer(name);
+    if (index < 0) throw std::runtime_error("no layer '" + name + "'");
+    return runtime.layers[index];
+}
+
+} // namespace
+
+void AnimationAPI::setController(EntityHandle animator, const std::string& json) {
+    AnimatorComponent& component = requireAnimator(m_impl->registry, animator);
+    component.controller = ControllerEvaluator::bind(parseAnimationController(json), component);
+}
+
+void AnimationAPI::clearController(EntityHandle animator) {
+    if (AnimatorComponent* component = animatorOf(m_impl->registry, animator)) component->controller.reset();
+}
+
+bool AnimationAPI::hasController(EntityHandle animator) const {
+    const AnimatorComponent* component = animatorOf(m_impl->registry, animator);
+    return component && component->controller;
+}
+
+void AnimationAPI::setFloat(EntityHandle animator, const std::string& parameter, float value) {
+    ControllerRuntime& runtime = requireController(m_impl->registry, animator);
+    runtime.parameters[requireTyped(runtime, parameter, ControllerParameterType::Float, "float")] = value;
+}
+
+void AnimationAPI::setInt(EntityHandle animator, const std::string& parameter, int value) {
+    ControllerRuntime& runtime = requireController(m_impl->registry, animator);
+    runtime.parameters[requireTyped(runtime, parameter, ControllerParameterType::Int, "int")] =
+        static_cast<float>(value);
+}
+
+void AnimationAPI::setBool(EntityHandle animator, const std::string& parameter, bool value) {
+    ControllerRuntime& runtime = requireController(m_impl->registry, animator);
+    runtime.parameters[requireTyped(runtime, parameter, ControllerParameterType::Bool, "bool")] = value ? 1.0f : 0.0f;
+}
+
+void AnimationAPI::setTrigger(EntityHandle animator, const std::string& parameter) {
+    ControllerRuntime& runtime = requireController(m_impl->registry, animator);
+    runtime.parameters[requireTyped(runtime, parameter, ControllerParameterType::Trigger, "trigger")] = 1.0f;
+}
+
+void AnimationAPI::resetTrigger(EntityHandle animator, const std::string& parameter) {
+    ControllerRuntime& runtime = requireController(m_impl->registry, animator);
+    runtime.parameters[requireTyped(runtime, parameter, ControllerParameterType::Trigger, "trigger")] = 0.0f;
+}
+
+float AnimationAPI::getParameter(EntityHandle animator, const std::string& parameter) const {
+    const ControllerRuntime& runtime = requireController(m_impl->registry, animator);
+    return runtime.parameters[requireParameter(runtime, parameter)];
+}
+
+std::string AnimationAPI::getCurrentState(EntityHandle animator, const std::string& layer) const {
+    ControllerRuntime& runtime = requireController(m_impl->registry, animator);
+    const ControllerLayerRuntime& lr = requireLayer(runtime, layer);
+    const ControllerLayer& definition = runtime.definition->layers[runtime.definition->findLayer(layer)];
+    return lr.current.state >= 0 ? definition.states[lr.current.state].name : "";
+}
+
+bool AnimationAPI::isInTransition(EntityHandle animator, const std::string& layer) const {
+    ControllerRuntime& runtime = requireController(m_impl->registry, animator);
+    return requireLayer(runtime, layer).isFading();
+}
+
+void AnimationAPI::setLayerWeight(EntityHandle animator, const std::string& layer, float weight) {
+    requireLayer(requireController(m_impl->registry, animator), layer).weight = weight;
+}
+
+float AnimationAPI::getLayerWeight(EntityHandle animator, const std::string& layer) const {
+    return requireLayer(requireController(m_impl->registry, animator), layer).weight;
+}
+
+std::vector<std::string> AnimationAPI::takeEvents(EntityHandle animator) {
+    AnimatorComponent* component = animatorOf(m_impl->registry, animator);
+    if (!component || !component->controller) return {};
+    return std::exchange(component->controller->events, {});
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Root motion
+// ═══════════════════════════════════════════════════════════════
+
+void AnimationAPI::setRootMotion(EntityHandle animator, bool enabled, const std::string& joint) {
+    AnimatorComponent& component = requireAnimator(m_impl->registry, animator);
+    int index = -1;
+    if (!joint.empty()) {
+        index = component.skeleton ? component.skeleton->findJoint(joint) : -1;
+        if (index < 0) throw std::runtime_error("unknown joint: " + joint);
+    }
+    AnimatorEvaluator::setRootMotion(component, enabled, index);
+}
+
+bool AnimationAPI::isRootMotion(EntityHandle animator) const {
+    const AnimatorComponent* component = animatorOf(m_impl->registry, animator);
+    return component && component->rootMotion;
+}
+
+glm::vec3 AnimationAPI::takeRootMotion(EntityHandle animator) {
+    AnimatorComponent* component = animatorOf(m_impl->registry, animator);
+    if (!component) return glm::vec3(0.0f);
+    return std::exchange(component->rootMotionWorld, glm::vec3(0.0f));
 }
 
 } // namespace Facade

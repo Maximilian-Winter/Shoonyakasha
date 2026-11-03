@@ -3,7 +3,9 @@
 //
 
 #include "Animation/AnimatorEvaluator.h"
+#include "Animation/AnimationEvaluator.h"
 #include "Animation/ClipBinding.h"
+#include "Animation/ControllerEvaluator.h"
 #include "ECS/Core.h"
 #include "ECS/SkeletonComponents.h"
 
@@ -15,11 +17,16 @@ namespace Shoonyakasha {
 namespace {
 
 void step(AnimatorClipState& state, const AnimationClip* clip, float deltaTime) {
+    state.previousTime = state.time;
+    state.wraps = 0;
     if (!state.playing || !clip || clip->duration <= 0.0f) return;
     state.time += deltaTime * state.speed;
     if (state.loop) {
-        state.time = std::fmod(state.time, clip->duration);
-        if (state.time < 0.0f) state.time += clip->duration;
+        const float cycles = std::floor(state.time / clip->duration);
+        state.wraps = static_cast<int>(cycles);
+        state.time -= cycles * clip->duration;
+        if (state.time < 0.0f) state.time = 0.0f;
+        if (state.time >= clip->duration) state.time = 0.0f;
     } else if (state.time >= clip->duration) {
         state.time = clip->duration;
         state.playing = false;
@@ -40,9 +47,58 @@ void updateDescendants(entt::registry& registry, entt::entity entity, const glm:
     }
 }
 
+// The root motion joint's movement over the state's last advance.
+glm::vec3 stateDisplacement(const AnimatorComponent& animator, const AnimatorClipState& state) {
+    const AnimationClip* clip = animator.clipAt(state.clip);
+    if (!clip || !animator.skeleton) return glm::vec3(0.0f);
+    return AnimatorEvaluator::rootDisplacement(*clip, *animator.skeleton, animator.rootMotionJoint,
+                                               state.previousTime, state.time, state.wraps);
+}
+
 } // namespace
 
+void AnimatorEvaluator::sampleClip(const AnimatorComponent& animator, const AnimationClip& clip, float time,
+                                   Pose& out) {
+    PoseOps::sample(clip, time, *animator.skeleton, out);
+    const int joint = animator.rootMotionJoint;
+    if (animator.rootMotion && joint >= 0 && joint < static_cast<int>(out.jointCount())) {
+        const glm::vec3 start = AnimationEvaluator::sampleJointTranslation(clip, joint, 0.0f, *animator.skeleton);
+        out.translations[joint].x = start.x;
+        out.translations[joint].z = start.z;
+    }
+}
+
+glm::vec3 AnimatorEvaluator::rootDisplacement(const AnimationClip& clip, const Skeleton& skeleton, int joint,
+                                              float t0, float t1, int wraps) {
+    if (joint < 0) return glm::vec3(0.0f);
+    auto at = [&](float t) { return AnimationEvaluator::sampleJointTranslation(clip, joint, t, skeleton); };
+    const float end = clip.duration;
+    glm::vec3 d(0.0f);
+    if (wraps == 0) {
+        d = at(t1) - at(t0);
+    } else if (wraps > 0) {
+        const glm::vec3 cycle = at(end) - at(0.0f);
+        d = (at(end) - at(t0)) + static_cast<float>(wraps - 1) * cycle + (at(t1) - at(0.0f));
+    } else {
+        const glm::vec3 cycle = at(0.0f) - at(end);
+        d = (at(0.0f) - at(t0)) + static_cast<float>(-wraps - 1) * cycle + (at(t1) - at(end));
+    }
+    d.y = 0.0f;
+    return d;
+}
+
+void AnimatorEvaluator::setRootMotion(AnimatorComponent& animator, bool enabled, int joint) {
+    animator.rootMotion = enabled;
+    animator.rootMotionJoint = joint >= 0 ? joint : (animator.skeleton ? animator.skeleton->rootJointIndex : -1);
+    animator.rootMotionDelta = glm::vec3(0.0f);
+    animator.rootMotionWorld = glm::vec3(0.0f);
+}
+
 void AnimatorEvaluator::advance(AnimatorComponent& animator, float deltaTime) {
+    if (animator.controller) {
+        ControllerEvaluator::advance(animator, deltaTime);
+        return;
+    }
     const float scaled = deltaTime * animator.speed;
     step(animator.current, animator.clipAt(animator.current.clip), scaled);
     if (animator.previous.clip >= 0) {
@@ -60,18 +116,29 @@ void AnimatorEvaluator::evaluate(AnimatorComponent& animator) {
     if (!animator.skeleton) return;
     const Skeleton& skeleton = *animator.skeleton;
 
-    if (const AnimationClip* clip = animator.clipAt(animator.current.clip)) {
-        PoseOps::sample(*clip, animator.current.time, skeleton, animator.pose);
+    if (animator.controller) {
+        ControllerEvaluator::evaluate(animator);
     } else {
-        animator.pose.setRest(skeleton);
-    }
+        animator.rootMotionDelta = glm::vec3(0.0f);
+        const bool motion = animator.rootMotion;
+        if (const AnimationClip* clip = animator.clipAt(animator.current.clip)) {
+            sampleClip(animator, *clip, animator.current.time, animator.pose);
+            if (motion) animator.rootMotionDelta = stateDisplacement(animator, animator.current);
+        } else {
+            animator.pose.setRest(skeleton);
+        }
 
-    if (animator.isFading()) {
-        if (const AnimationClip* from = animator.clipAt(animator.previous.clip)) {
-            PoseOps::sample(*from, animator.previous.time, skeleton, animator.fadePose);
-            const float weight = animator.fadeDuration > 0.0f
-                                     ? animator.fadeElapsed / animator.fadeDuration : 1.0f;
-            PoseOps::blend(animator.fadePose, animator.pose, weight, animator.pose);
+        if (animator.isFading()) {
+            if (const AnimationClip* from = animator.clipAt(animator.previous.clip)) {
+                sampleClip(animator, *from, animator.previous.time, animator.fadePose);
+                const float weight = animator.fadeDuration > 0.0f
+                                         ? animator.fadeElapsed / animator.fadeDuration : 1.0f;
+                PoseOps::blend(animator.fadePose, animator.pose, weight, animator.pose);
+                if (motion) {
+                    animator.rootMotionDelta = weight * animator.rootMotionDelta
+                                             + (1.0f - weight) * stateDisplacement(animator, animator.previous);
+                }
+            }
         }
     }
 
@@ -86,6 +153,23 @@ void AnimatorEvaluator::update(entt::registry& registry, float deltaTime) {
         if (!animator.skeleton) continue;
         advance(animator, deltaTime);
         evaluate(animator);
+        if (animator.rootMotion) {
+            glm::vec3 delta = animator.rootMotionDelta;
+            const int joint = animator.rootMotionJoint;
+            if (joint >= 0 && joint < static_cast<int>(animator.skeleton->jointCount())) {
+                const int parent = animator.skeleton->joints[joint].parentIndex;
+                if (parent >= 0 && parent < static_cast<int>(animator.globalTransforms.size())) {
+                    delta = glm::mat3(animator.globalTransforms[parent]) * delta;
+                }
+            }
+            const ECS::TransformComponent* space = nullptr;
+            for (entt::entity mesh : animator.skinnedMeshes) {
+                if (registry.valid(mesh) && (space = registry.try_get<ECS::TransformComponent>(mesh))) break;
+            }
+            if (!space) space = registry.try_get<ECS::TransformComponent>(entity);
+            if (space) delta = glm::mat3(space->worldMatrix) * delta;
+            animator.rootMotionWorld += delta;
+        }
         for (entt::entity mesh : animator.skinnedMeshes) {
             if (!registry.valid(mesh)) continue;
             auto* skeleton = registry.try_get<SkeletonComponent>(mesh);

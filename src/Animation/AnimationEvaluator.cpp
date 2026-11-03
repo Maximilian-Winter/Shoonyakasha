@@ -70,6 +70,24 @@ void AnimationEvaluator::sampleClip(
     }
 }
 
+glm::vec3 AnimationEvaluator::sampleJointTranslation(
+    const AnimationClip& clip,
+    int jointIndex,
+    float time,
+    const Skeleton& skeleton)
+{
+    for (const auto& channel : clip.channels) {
+        if (channel.targetJointIndex == jointIndex &&
+            channel.property == AnimationChannel::Property::Translation) {
+            return glm::vec3(sampleChannel(channel, time));
+        }
+    }
+    if (jointIndex >= 0 && jointIndex < static_cast<int>(skeleton.jointCount())) {
+        return skeleton.joints[jointIndex].defaultTranslation;
+    }
+    return glm::vec3(0.0f);
+}
+
 // ============================================================================
 // Bone Matrix Computation
 // ============================================================================

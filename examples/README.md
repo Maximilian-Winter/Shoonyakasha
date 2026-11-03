@@ -94,7 +94,7 @@ and they compile their own shaders at startup via `sk.shaders.compile_dir`.
 | | |
 |---|---|
 | [`skinned_fox_demo`](python/animation/skinned_fox_demo) | Loading and playing a skinned glTF animation from Python. |
-| [`character_animator`](python/animation/character_animator) | Per-model animators: a Mixamo dancer, the Fox cross-fading between clips, and a cube attached to a hand joint. |
+| [`character_animator`](python/animation/character_animator) | Per-model animators: a Mixamo dancer with root motion and a cube attached to a hand joint, and the Fox run by an animation state machine. |
 
 ### rendering
 

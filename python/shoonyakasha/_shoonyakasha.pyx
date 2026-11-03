@@ -1119,7 +1119,8 @@ cdef class Animation:
 
     def play(self, uint32_t animator, str clip, float fade=0.0, bint loop=True):
         """Play a clip from its start, blending from the clip playing before
-        over ``fade`` seconds. Returns False when there is no such clip."""
+        over ``fade`` seconds. Returns False when there is no such clip, or
+        while a controller is set."""
         return self._ptr.play(animator, clip.encode('utf-8'), fade, loop)
 
     def stop(self, uint32_t animator):
@@ -1176,6 +1177,98 @@ cdef class Animation:
     def detach(self, uint32_t entity):
         """Stop placing ``entity`` on a joint."""
         self._ptr.detach(entity)
+
+    # ── Controller ────────────────────────────────────────────
+
+    def set_controller(self, uint32_t animator, controller):
+        """Play an animation state machine on the animator. ``controller`` is
+        an ``AnimationController`` (shoonyakasha.animation_controller), a dict
+        of its JSON form, or the path of a JSON file. Its clip and joint names
+        must be the animator's. While a controller is set, ``play`` returns
+        False.
+
+        Raises RuntimeError naming the place in the definition that is wrong,
+        or when the entity has no animator."""
+        import json
+        import os
+        if hasattr(controller, "to_json"):
+            text = controller.to_json()
+        elif isinstance(controller, dict):
+            text = json.dumps(controller)
+        else:
+            with open(os.fspath(controller), encoding="utf-8") as f:
+                text = f.read()
+        self._ptr.setController(animator, text.encode('utf-8'))
+
+    def clear_controller(self, uint32_t animator):
+        """Remove the controller; the animator plays clips again."""
+        self._ptr.clearController(animator)
+
+    def has_controller(self, uint32_t animator):
+        return self._ptr.hasController(animator)
+
+    def set_float(self, uint32_t animator, str parameter, float value):
+        """Set a float parameter. Raises RuntimeError without a controller,
+        for an unknown parameter or one of another type (as do the other
+        parameter setters)."""
+        self._ptr.setFloat(animator, parameter.encode('utf-8'), value)
+
+    def set_int(self, uint32_t animator, str parameter, int value):
+        """Set an int parameter."""
+        self._ptr.setInt(animator, parameter.encode('utf-8'), value)
+
+    def set_bool(self, uint32_t animator, str parameter, bint value):
+        """Set a bool parameter."""
+        self._ptr.setBool(animator, parameter.encode('utf-8'), value)
+
+    def set_trigger(self, uint32_t animator, str parameter):
+        """Set a trigger; the transition that uses it clears it."""
+        self._ptr.setTrigger(animator, parameter.encode('utf-8'))
+
+    def reset_trigger(self, uint32_t animator, str parameter):
+        """Clear a trigger."""
+        self._ptr.resetTrigger(animator, parameter.encode('utf-8'))
+
+    def get_parameter(self, uint32_t animator, str parameter):
+        """Value of a parameter as a float; bools and triggers are 0.0 or 1.0."""
+        return self._ptr.getParameter(animator, parameter.encode('utf-8'))
+
+    def current_state(self, uint32_t animator, str layer):
+        """Name of the layer's current state."""
+        return self._ptr.getCurrentState(animator, layer.encode('utf-8')).decode('utf-8', errors='replace')
+
+    def is_in_transition(self, uint32_t animator, str layer):
+        """Whether the layer is fading from its previous state."""
+        return self._ptr.isInTransition(animator, layer.encode('utf-8'))
+
+    def set_layer_weight(self, uint32_t animator, str layer, float weight):
+        """Weight of a layer; starts at the definition's."""
+        self._ptr.setLayerWeight(animator, layer.encode('utf-8'), weight)
+
+    def get_layer_weight(self, uint32_t animator, str layer):
+        return self._ptr.getLayerWeight(animator, layer.encode('utf-8'))
+
+    def take_events(self, uint32_t animator):
+        """Names of the controller's events fired since the last call, oldest
+        first, and clear them. At most the last 256 are kept."""
+        return _decode_names(self._ptr.takeEvents(animator))
+
+    # ── Root motion ───────────────────────────────────────────
+
+    def set_root_motion(self, uint32_t animator, bint enabled, str joint=""):
+        """Turn root motion on or off. While on, the X and Z translation of
+        ``joint`` (the skeleton's root joint when empty) stays at each clip's
+        first frame, and its movement is collected in world space; collect it
+        with ``take_root_motion``. Raises RuntimeError for an unknown joint."""
+        self._ptr.setRootMotion(animator, enabled, joint.encode('utf-8'))
+
+    def is_root_motion(self, uint32_t animator):
+        return self._ptr.isRootMotion(animator)
+
+    def take_root_motion(self, uint32_t animator):
+        """World-space movement (x, y, z) collected since the last call, and
+        clear it."""
+        return _vec3_to_tuple(self._ptr.takeRootMotion(animator))
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -371,6 +371,27 @@ cdef extern from "Facade/AnimationAPI.h" namespace "Shoonyakasha::Facade":
                      const vec3& offsetPosition, const vec3& offsetRotation)
         void detach(EntityHandle entity)
 
+        # Controller
+        void setController(EntityHandle animator, const string& json) except +
+        void clearController(EntityHandle animator)
+        cbool hasController(EntityHandle animator) const
+        void setFloat(EntityHandle animator, const string& parameter, float value) except +
+        void setInt(EntityHandle animator, const string& parameter, int value) except +
+        void setBool(EntityHandle animator, const string& parameter, cbool value) except +
+        void setTrigger(EntityHandle animator, const string& parameter) except +
+        void resetTrigger(EntityHandle animator, const string& parameter) except +
+        float getParameter(EntityHandle animator, const string& parameter) except +
+        string getCurrentState(EntityHandle animator, const string& layer) except +
+        cbool isInTransition(EntityHandle animator, const string& layer) except +
+        void setLayerWeight(EntityHandle animator, const string& layer, float weight) except +
+        float getLayerWeight(EntityHandle animator, const string& layer) except +
+        vector[string] takeEvents(EntityHandle animator)
+
+        # Root motion
+        void setRootMotion(EntityHandle animator, cbool enabled, const string& joint) except +
+        cbool isRootMotion(EntityHandle animator) const
+        vec3 takeRootMotion(EntityHandle animator)
+
 
 # ═══════════════════════════════════════════════════════════════
 # EcsAPI — full declaration

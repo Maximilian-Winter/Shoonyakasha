@@ -25,7 +25,23 @@ Times are in seconds.
 - The engine evaluates animators after the frame's update callbacks, so in an update callback an attached entity's world matrix is the previous frame's placement.
 - `detach` returns the entity to its own transform.
 
-Meshes driven by an animator ignore the per-entity `scene.play_animation` controls. See the [animation guide](../../guides/animation.md).
+## Controllers
+
+`set_controller(animator, controller)` plays a state machine on the animator.
+- `controller` is an `AnimationController` (`shoonyakasha.animation_controller`), a dict of its JSON form, or the path of a JSON file.
+- Clip and joint names are checked against the animator. A `RuntimeError` names the place in the definition that is wrong.
+- While a controller is set, `play` returns False.
+- Parameter setters raise `RuntimeError` for an unknown parameter or one of another type.
+- `take_events` returns event names in the order they fired. The animator keeps the last 256 until they are taken.
+
+## Root motion
+
+- `set_root_motion(animator, True, joint="")` holds the joint's X and Z translation (by default the skeleton's root joint) at each clip's first frame, and collects its movement in world space.
+- `take_root_motion` returns that movement and clears it. With a controller, the movement comes from the first layer.
+
+See the [animation guide](../../guides/animation.md#animation-controllers) for states, blends, transitions and layers.
+
+Meshes driven by an animator ignore the per-entity `scene.play_animation` controls.
 
 <!-- BEGIN SOURCE API -->
 
@@ -40,7 +56,7 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `load_clips(animator, path, name="")` | list[str] | Read the animations of a glTF / GLB file and add those that animate joints of the animator's skeleton, matched by joint name. With ``name``, a single added clip is called ``name`` and several are called ``"<name>:<clip name>"``. Returns the names added. |
 | `clip_names(animator)` | list[str] | Names of the animator's clips, in the order they were added. |
 | `clip_duration(animator, clip)` | float | Duration in seconds of the clip; 0.0 if there is none. |
-| `play(animator, clip, fade=0.0, loop=True)` | bool | Play a clip from its start, blending from the clip playing before over ``fade`` seconds. Returns False when there is no such clip. |
+| `play(animator, clip, fade=0.0, loop=True)` | bool | Play a clip from its start, blending from the clip playing before over ``fade`` seconds. Returns False when there is no such clip, or while a controller is set. |
 | `stop(animator)` | None | Stop playback; the skeleton returns to its rest pose. |
 | `is_playing(animator)` | bool | Whether the current clip is advancing. A clip played with ``loop=False`` stops at its end and holds its last frame. |
 | `current_clip(animator)` | str | Name of the current clip; '' when there is none. |
@@ -53,5 +69,22 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `joint_world_position(animator, joint)` | 3-tuple | World position (x, y, z) of a joint as of the last evaluation. Raises RuntimeError for an unknown animator or joint. |
 | `attach(entity, animator, joint, offset_position=(0.0, 0.0, 0.0), offset_rotation=(0.0, 0.0, 0.0))` | bool | Place ``entity`` on a joint every frame, offset in the joint's space by a translation and an Euler rotation in radians (applied as the transform component applies rotations). Returns False for an unknown animator or joint, or an entity without a transform. |
 | `detach(entity)` | None | Stop placing ``entity`` on a joint. |
+| `set_controller(animator, controller)` | None | Play an animation state machine on the animator. ``controller`` is an ``AnimationController`` (shoonyakasha.animation_controller), a dict of its JSON form, or the path of a JSON file. Its clip and joint names must be the animator's. While a controller is set, ``play`` returns False. |
+| `clear_controller(animator)` | None | Remove the controller; the animator plays clips again. |
+| `has_controller(animator)` | bool | Calls native `hasController`; see the class contract above. |
+| `set_float(animator, parameter, value)` | None | Set a float parameter. Raises RuntimeError without a controller, for an unknown parameter or one of another type (as do the other parameter setters). |
+| `set_int(animator, parameter, value)` | None | Set an int parameter. |
+| `set_bool(animator, parameter, value)` | None | Set a bool parameter. |
+| `set_trigger(animator, parameter)` | None | Set a trigger; the transition that uses it clears it. |
+| `reset_trigger(animator, parameter)` | None | Clear a trigger. |
+| `get_parameter(animator, parameter)` | float | Value of a parameter as a float; bools and triggers are 0.0 or 1.0. |
+| `current_state(animator, layer)` | str | Name of the layer's current state. |
+| `is_in_transition(animator, layer)` | bool | Whether the layer is fading from its previous state. |
+| `set_layer_weight(animator, layer, weight)` | None | Weight of a layer; starts at the definition's. |
+| `get_layer_weight(animator, layer)` | float | Calls native `getLayerWeight`; see the class contract above. |
+| `take_events(animator)` | list[str] | Names of the controller's events fired since the last call, oldest first, and clear them. At most the last 256 are kept. |
+| `set_root_motion(animator, enabled, joint="")` | None | Turn root motion on or off. While on, the X and Z translation of ``joint`` (the skeleton's root joint when empty) stays at each clip's first frame, and its movement is collected in world space; collect it with ``take_root_motion``. Raises RuntimeError for an unknown joint. |
+| `is_root_motion(animator)` | bool | Calls native `isRootMotion`; see the class contract above. |
+| `take_root_motion(animator)` | 3-tuple | World-space movement (x, y, z) collected since the last call, and clear it. |
 
 <!-- END SOURCE API -->

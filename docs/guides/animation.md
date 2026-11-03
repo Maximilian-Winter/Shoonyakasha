@@ -48,9 +48,78 @@ anim.attach(sword, dancer, "mixamorig_RightHand", offset_position=(0, 8, 0))
 - `load_clips` adds the animations of another glTF / GLB file whose node names match the skeleton's joint names. Mixamo downloads of one character share joint names. A file with one animation can be renamed with `name`.
 - An attached entity's offset is in the joint's space, including the model's scale. In a model with centimetre joints under a 0.01-scaled root, the offsets above are centimetres.
 
-Meshes driven by an animator ignore the per-entity `scene.play_animation` controls. Run `examples/python/animation/character_animator/character_animator.py` from the repository root to see a Mixamo dancer, the Fox cross-fading between its clips, and a cube attached to the dancer's hand.
+Meshes driven by an animator ignore the per-entity `scene.play_animation` controls. Run `examples/python/animation/character_animator/character_animator.py` from the repository root to see a Mixamo dancer with a cube attached to its hand and root motion on the M key, and the Fox run by a controller.
 
 C++ code uses `engine.getAnimation()` ([AnimationAPI](../api/cpp/animation-api.md)), or adds `AnimatorComponent`s with `AnimatorEvaluator::createAnimator` directly. `Pose` and `PoseOps` (`Animation/Pose.h`) sample clips into local joint transforms and blend them: per pose, per joint, or additively.
+
+## Animation controllers
+
+A controller is a state machine that plays on an animator in place of `play`. It is built in Python with `sk.AnimationController`, or written as JSON, and set with `set_controller`. Gameplay code then only sets its parameters.
+
+```python
+import shoonyakasha as sk
+
+c = sk.AnimationController()
+c.float("speed")
+c.trigger("jump")
+base = c.layer("base")
+base.clip("idle", "Survey")
+base.blend1d("move", "speed", [("Walk", 1.0), ("Run", 3.0)], events=[(0.0, "step"), (0.5, "step")])
+base.clip("jump", "Jump", loop=False)
+base.transition("idle", "move", duration=0.3, when=[("speed", ">", 0.1)])
+base.transition("move", "idle", duration=0.4, when=[("speed", "<", 0.1)])
+base.transition("any", "jump", duration=0.1, when=[("jump",)])
+base.transition("jump", "idle", duration=0.2, exit_time=0.9)
+
+anim = engine.animation
+anim.set_controller(hero, c)           # or a dict, or the path of a JSON file
+anim.set_float(hero, "speed", 2.0)
+anim.set_trigger(hero, "jump")
+anim.current_state(hero, "base")       # "move", "jump", ...
+for event in anim.take_events(hero):   # in the update callback
+    ...
+```
+
+**Parameters** are float, int, bool or trigger. A trigger stays set until a transition whose conditions test it is taken.
+
+**States** play one of three motions:
+
+- A clip.
+- A 1D blend of clips by thresholds on one parameter.
+- A 2D blend of clips placed at points on a plane, weighted by gradient band interpolation of two parameters (`blend2d("strafe", ("vx", "vz"), [("idle", 0, 0), ("forward", 0, 1), ...])`).
+
+The clips of a blend share one normalized phase. The phase advances over the weighted average of their durations, so blended walk and run cycles stay in step. Each state also has:
+
+- a speed, optionally multiplied by a parameter (`speed_parameter`);
+- looping;
+- events: names fired when the phase passes their normalized time.
+
+**Transitions** leave a named state, or `"any"` state other than their target. A transition is taken when:
+
+- all its conditions hold: `(bool or trigger,)`, or `(parameter, op, value)` with `>`, `<`, `==` or `!=`;
+- and the phase passes its exit time, when it has one. In a state that does not loop, the transition is also taken once the phase is past the exit time.
+
+When several transitions qualify, the first in list order is taken. A layer takes no transition while it is still fading from the last one.
+
+**Layers** apply in order over the rest pose, each weighted by its weight (`set_layer_weight`):
+
+- An **override** layer blends toward its pose.
+- An **additive** layer adds its pose's difference from the rest pose.
+- A `mask` limits a layer to the named joints and their descendants.
+
+The JSON form is documented at the top of `include/Animation/AnimationController.h`; `AnimationController.to_json()` writes it. Errors name the place in the definition, for example `layers[0].states.jump: no clip 'Jump'`.
+
+## Root motion
+
+`set_root_motion(animator, True)` holds the X and Z translation of the skeleton's root joint at each clip's first frame. Pass `joint="..."` for another joint. The joint's movement is collected in world space instead, and blended like the pose. `take_root_motion` returns it and clears it. Apply it to the model's root entity, or to a character body, in the update callback:
+
+```python
+dx, dy, dz = anim.take_root_motion(dancer)
+x, y, z = engine.scene.get_position(dancer)
+engine.scene.set_position(dancer, (x + dx, y + dy, z + dz))
+```
+
+The movement taken in the update callback comes from the previous frame's evaluation, so the model trails it by one frame. With controllers, root motion comes from the first layer.
 
 ## Rendering requirements
 

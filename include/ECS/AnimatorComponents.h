@@ -6,6 +6,8 @@
 //   - AnimatorComponent: plays clips on one skeleton and drives every skinned
 //     mesh entity of that skeleton listed in skinnedMeshes
 //   - JointAttachmentComponent: places an entity on a joint of an animator
+//   - ControllerRuntime: the state of an animation state machine playing on
+//     an animator
 //
 // AnimatorEvaluator (Animation/AnimatorEvaluator.h) advances and evaluates
 // these components.
@@ -14,6 +16,7 @@
 #pragma once
 
 #include "Resources/AnimationData.h"
+#include "Animation/AnimationController.h"
 #include "Animation/Pose.h"
 
 #include <entt/entt.hpp>
@@ -30,6 +33,50 @@ struct AnimatorClipState {
     float speed = 1.0f;
     bool loop = true;
     bool playing = false;
+
+    // Time before the last advance, and how many times that advance wrapped
+    // past the clip's end (negative: past its start)
+    float previousTime = 0.0f;
+    int wraps = 0;
+};
+
+// One state of a controller layer being played. Phase is normalized time.
+struct ControllerStatePlayback {
+    int state = -1;               // index into the layer's states; -1 = none
+    float phase = 0.0f;
+    float previousPhase = 0.0f;
+    int wraps = 0;                // as AnimatorClipState::wraps
+    bool entered = false;         // set until the state's first advance
+};
+
+struct ControllerLayerRuntime {
+    ControllerStatePlayback current;
+    ControllerStatePlayback previous;   // the state faded out of
+    float fadeDuration = 0.0f;
+    float fadeElapsed = 0.0f;
+    float weight = 1.0f;
+    std::vector<float> mask;            // per joint, 0 or 1; empty = every joint
+
+    bool isFading() const { return previous.state >= 0 && fadeElapsed < fadeDuration; }
+};
+
+struct ControllerRuntime {
+    std::shared_ptr<const ControllerDefinition> definition;
+    std::vector<float> parameters;                 // by definition parameter index
+    std::vector<ControllerLayerRuntime> layers;    // by definition layer index
+
+    // Animator clip index of each motion child: [layer][state][child]
+    std::vector<std::vector<std::vector<int>>> stateClips;
+
+    // Names of the events fired, oldest first; at most kMaxEvents are kept
+    static constexpr size_t kMaxEvents = 256;
+    std::vector<std::string> events;
+
+    // Scratch poses
+    Pose childPose;
+    Pose statePose;
+    Pose fadePose;
+    Pose additiveDelta;
 };
 
 struct AnimatorComponent {
@@ -58,6 +105,19 @@ struct AnimatorComponent {
 
     // Scratch pose for the clip fading out
     Pose fadePose;
+
+    // When set, the controller produces the pose and play() is not used
+    std::shared_ptr<ControllerRuntime> controller;
+
+    // Root motion: with rootMotion set, the X and Z translation of joint
+    // rootMotionJoint (in its parent's space) is held at each clip's first
+    // frame in the pose, and its movement is collected instead.
+    // rootMotionDelta is the movement of the last evaluation, in the joint's
+    // parent space; rootMotionWorld sums it in world space until taken.
+    bool rootMotion = false;
+    int rootMotionJoint = -1;
+    glm::vec3 rootMotionDelta{0.0f};
+    glm::vec3 rootMotionWorld{0.0f};
 
     /// Index of the first clip called `name`; -1 if there is none.
     int findClip(const std::string& name) const {

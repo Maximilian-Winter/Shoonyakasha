@@ -8,7 +8,7 @@ Install the native package using [BUILDING.md](../../BUILDING.md#python-bindings
 | [getting_started/ecs_bindings_demo](../../examples/python/getting_started/ecs_bindings_demo) | `python ecs_bindings_demo.py` | Custom Python components and systems |
 | [getting_started/ui_canvas_demo](../../examples/python/getting_started/ui_canvas_demo) | `python ui_canvas_demo.py` | Canvas UI on the default pipeline: a HUD with a toggle, slider and button, and a clickable screen in the world |
 | [animation/skinned_fox_demo](../../examples/python/animation/skinned_fox_demo) | `python skinned_fox_demo.py` | Skeletal animation |
-| [animation/character_animator](../../examples/python/animation/character_animator) | `python character_animator.py` | Per-model animators on the default pipeline: cross-fades and a joint attachment |
+| [animation/character_animator](../../examples/python/animation/character_animator) | `python character_animator.py` | Per-model animators on the default pipeline: a state machine, root motion and a joint attachment |
 | [rendering/japanese_shrine](../../examples/python/rendering/japanese_shrine) | `python shrine.py`, `python shrine_default.py` | Deferred PBR of a downloaded glTF model with IBL, sun shadows, sky and fog; the second on the default pipeline |
 | [rendering/alley](../../examples/python/rendering/alley) | `python alley.py` | A tech demo on the default pipeline, built from Poly Haven models: dusk to night, ray-traced and local-light shadows, lit windows, a walking fox |
 | [rendering/showroom](../../examples/python/rendering/showroom) | `python showroom.py` | Cars and starships on a turntable: a virtual shadow map, ray-traced soft light shadows and reflections, studio, hard-light, night and neon lighting, stills and video for posting |
@@ -68,7 +68,7 @@ Bundled `Fox.glb` during playback of the first animation clip, driven through th
 
 ### Character animator (`character_animator`)
 
-A Mixamo dancer and the Fox, each played by one animator on its model's root entity (`engine.animation`). Keys 1, 2 and 3 cross-fade the Fox between Survey, Walk and Run; R puts the dancer in its rest pose or back to dancing; a glowing cube is attached to the dancer's right hand.
+A Mixamo dancer and the Fox, each played by one animator on its model's root entity (`engine.animation`). The Fox runs a controller that fades from Survey to a blend of Walk and Run by its speed (keys 1, 2, 3 and the arrows). M turns the dancer's root motion on or off, R puts it in its rest pose or back to dancing, and a glowing cube is attached to its right hand.
 
 ### Alley (`alley`)
 

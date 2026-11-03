@@ -35,6 +35,16 @@ public:
         std::vector<glm::vec3>& outScales
     );
 
+    /// Translation of joint `jointIndex` at `time`: the clip's translation
+    /// channel for that joint, or the joint's default translation when the
+    /// clip has none.
+    static glm::vec3 sampleJointTranslation(
+        const AnimationClip& clip,
+        int jointIndex,
+        float time,
+        const Skeleton& skeleton
+    );
+
     /// Sample a morph weight channel at the given time into `outWeights`,
     /// resized to the channel's weightCount. Before the first keyframe it
     /// holds the first one's weights, after the last the last one's.

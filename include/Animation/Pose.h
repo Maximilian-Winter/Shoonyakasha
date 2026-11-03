@@ -54,6 +54,10 @@ void makeAdditive(const Pose& pose, const Pose& reference, Pose& outDelta);
 /// `out` may be `base`.
 void applyAdditive(const Pose& base, const Pose& delta, float weight, Pose& out);
 
+/// applyAdditive() with a weight per joint. Joints past the end of `weights`
+/// take weight 0.
+void applyAdditivePerJoint(const Pose& base, const Pose& delta, const std::vector<float>& weights, Pose& out);
+
 /// Each joint's transform in skeleton space: the product of its local
 /// transforms from the root down. Joints are visited in the skeleton's
 /// evaluationOrder, or in a parents-first order computed here when that is

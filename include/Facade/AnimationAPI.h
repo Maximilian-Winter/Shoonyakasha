@@ -61,7 +61,7 @@ public:
 
     /// Play the first clip called `clip` from its start, blending from the
     /// clip playing before over `fadeSeconds`. Returns false when there is no
-    /// such clip.
+    /// such clip, or while a controller is set.
     bool play(EntityHandle animator, const std::string& clip, float fadeSeconds = 0.0f,
               bool loop = true);
 
@@ -105,6 +105,71 @@ public:
 
     /// Stop placing `entity` on a joint.
     void detach(EntityHandle entity);
+
+    // ═══════════════════════════════════════════════════════════
+    // Controller (state machine)
+    // ═══════════════════════════════════════════════════════════
+
+    /// Play an animation state machine on the animator, from its JSON form
+    /// (Animation/AnimationController.h). Its clip and joint names must be
+    /// the animator's. While a controller is set, play() returns false.
+    /// @throws std::runtime_error "<path>: <message>" for an invalid
+    ///         definition, or when the entity has no animator.
+    void setController(EntityHandle animator, const std::string& json);
+
+    /// Remove the controller; the animator plays clips again.
+    void clearController(EntityHandle animator);
+
+    bool hasController(EntityHandle animator) const;
+
+    /// Set a parameter of the animator's controller. setFloat sets float
+    /// parameters, setInt int ones, setBool bool ones; setTrigger sets a
+    /// trigger until a transition uses it.
+    /// @throws std::runtime_error without a controller, for an unknown
+    ///         parameter, or for a parameter of another type.
+    void setFloat(EntityHandle animator, const std::string& parameter, float value);
+    void setInt(EntityHandle animator, const std::string& parameter, int value);
+    void setBool(EntityHandle animator, const std::string& parameter, bool value);
+    void setTrigger(EntityHandle animator, const std::string& parameter);
+    void resetTrigger(EntityHandle animator, const std::string& parameter);
+
+    /// Value of a parameter of any type (bools and triggers as 0 or 1).
+    /// @throws std::runtime_error without a controller or for an unknown parameter.
+    float getParameter(EntityHandle animator, const std::string& parameter) const;
+
+    /// Name of the layer's current state.
+    /// @throws std::runtime_error without a controller or for an unknown layer.
+    std::string getCurrentState(EntityHandle animator, const std::string& layer) const;
+
+    /// Whether the layer is fading from its previous state.
+    /// @throws std::runtime_error without a controller or for an unknown layer.
+    bool isInTransition(EntityHandle animator, const std::string& layer) const;
+
+    /// Weight of a layer, 0..1 as a rule; starts at the definition's.
+    /// @throws std::runtime_error without a controller or for an unknown layer.
+    void setLayerWeight(EntityHandle animator, const std::string& layer, float weight);
+    float getLayerWeight(EntityHandle animator, const std::string& layer) const;
+
+    /// Names of the controller's events fired since the last call, oldest
+    /// first, and clear them. At most the last 256 are kept.
+    std::vector<std::string> takeEvents(EntityHandle animator);
+
+    // ═══════════════════════════════════════════════════════════
+    // Root motion
+    // ═══════════════════════════════════════════════════════════
+
+    /// Turn root motion on or off. While on, the X and Z translation of
+    /// `joint` (the skeleton's root joint when empty) stays at each clip's
+    /// first frame, and its movement is collected in world space instead.
+    /// Clears the collected movement.
+    /// @throws std::runtime_error when the entity has no animator or the
+    ///         skeleton has no such joint.
+    void setRootMotion(EntityHandle animator, bool enabled, const std::string& joint = "");
+
+    bool isRootMotion(EntityHandle animator) const;
+
+    /// The world-space movement collected since the last call, and clear it.
+    glm::vec3 takeRootMotion(EntityHandle animator);
 
     // Impl is forward-declared (opaque) — public so EngineAPI can wire internals
     struct Impl;
