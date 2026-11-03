@@ -31,7 +31,7 @@ public:
     /// globalTransforms and boneMatrices.
     static void evaluate(AnimatorComponent& animator);
 
-    /// For every AnimatorComponent: with root motion on, set rootMotionUp to
+    /// For every AnimatorComponent (applyIK after evaluate): with root motion on, set rootMotionUp to
     /// world +Y in the root motion joint's parent space (through the world
     /// matrix of the animator's first skinned mesh, or of its own entity when
     /// it has none, and the parent's last global transform); advance(),
@@ -69,6 +69,24 @@ public:
     static glm::vec3 rootDisplacement(const AnimationClip& clip, const Skeleton& skeleton, int joint,
                                       float t0, float t1, int wraps,
                                       const glm::vec3& up = glm::vec3(0.0f, 1.0f, 0.0f));
+
+    /// Copy globalTransforms into animatedGlobals; then move the hips by
+    /// hipsOffset (world space, through `spaceWorld`, the world matrix the
+    /// skeleton is drawn with), solve each goal's chain by two-bone IK with
+    /// its target, pole (or the chain's default pole) and end rotation
+    /// brought into skeleton space, and recompute globalTransforms and
+    /// boneMatrices. Goals naming no chain are skipped.
+    static void applyIK(AnimatorComponent& animator, const glm::mat4& spaceWorld);
+
+    /// The chain called `name`. On a humanoid, "LeftFoot" and "RightFoot"
+    /// (upper leg, lower leg, foot; knee bending forward) and "LeftHand" and
+    /// "RightHand" (upper arm, lower arm, hand; elbow bending back) are added
+    /// on first use. nullptr when there is no such chain.
+    static const IKChain* chainFor(AnimatorComponent& animator, const std::string& name);
+
+    /// Add or replace a chain of joints `upper`, `middle`, `end`. Returns
+    /// false when middle is not below upper or end not below middle.
+    static bool setChain(AnimatorComponent& animator, const std::string& name, int upper, int middle, int end);
 
     /// Turn root motion on or off. `joint` < 0 picks the skeleton's root joint.
     /// Clears the collected movement.

@@ -1322,6 +1322,49 @@ cdef class Animation:
         return _decode_names(self._ptr.loadHumanoidClips(target, cpp_path, name.encode('utf-8'),
                                                          _dict_to_pairs(mapping)))
 
+    # ── IK ────────────────────────────────────────────────────
+
+    def set_ik_chain(self, uint32_t animator, str name, str upper, str middle, str end):
+        """Define (or replace) a two-bone IK chain of three joints, each below
+        the one before. Humanoids have "LeftFoot", "RightFoot", "LeftHand"
+        and "RightHand" without this."""
+        self._ptr.setIKChain(animator, name.encode('utf-8'), upper.encode('utf-8'), middle.encode('utf-8'),
+                             end.encode('utf-8'))
+
+    def set_ik_goal(self, uint32_t animator, str chain, position, float weight=1.0, pole=None, rotation=None,
+                    normal=None):
+        """Reach world ``position`` with the end of ``chain`` each frame, blended
+        by ``weight``. ``pole``: world direction the middle joint bends toward
+        (default: knees forward, elbows back, or the current bend).
+        ``rotation``: world Euler rotation (radians) for the end joint;
+        ``normal``: keep the end's animated rotation, tilted from world up to
+        this direction. Replaces the chain's goal. Raises RuntimeError for an
+        unknown chain."""
+        self._ptr.setIKGoal(animator, chain.encode('utf-8'), _tuple_to_vec3(position), weight,
+                            pole is not None, _tuple_to_vec3(pole or (0.0, 0.0, 0.0)),
+                            rotation is not None, _tuple_to_vec3(rotation or (0.0, 0.0, 0.0)),
+                            normal is not None, _tuple_to_vec3(normal or (0.0, 1.0, 0.0)))
+
+    def clear_ik_goal(self, uint32_t animator, str chain):
+        """Remove the chain's goal; the limb follows the animation again."""
+        self._ptr.clearIKGoal(animator, chain.encode('utf-8'))
+
+    def clear_ik_goals(self, uint32_t animator):
+        self._ptr.clearIKGoals(animator)
+
+    def set_hips_offset(self, uint32_t animator, offset):
+        """World offset (x, y, z) added to the hips after the animation and
+        before IK."""
+        self._ptr.setHipsOffset(animator, _tuple_to_vec3(offset))
+
+    def get_hips_offset(self, uint32_t animator):
+        return _vec3_to_tuple(self._ptr.getHipsOffset(animator))
+
+    def animated_joint_world_position(self, uint32_t animator, str joint):
+        """World position of a joint as the animation left it in the last
+        evaluation, before the hips offset and IK."""
+        return _vec3_to_tuple(self._ptr.getAnimatedJointWorldPosition(animator, joint.encode('utf-8')))
+
 
 # ═══════════════════════════════════════════════════════════════
 # Ecs — Python wrapper for EcsAPI (low-level ECS: custom components/systems)

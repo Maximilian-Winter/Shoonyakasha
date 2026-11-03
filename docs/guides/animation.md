@@ -159,6 +159,41 @@ hero.apply_root_motion()                                      # in the update ca
 
 Run `examples/python/animation/humanoid_retarget/humanoid_retarget.py` from the repository root to see four characters sharing their clips.
 
+## Inverse kinematics
+
+Two-bone IK moves a limb so its end reaches a point: an upper joint, a middle joint that bends, and an end joint. It runs after the animation (clip or controller) and before joint attachments, each frame a goal is set.
+
+```python
+anim.set_ik_goal(hero, "RightHand", ball_position)                 # humanoid limbs need no setup
+anim.set_ik_goal(hero, "LeftFoot", foothold, normal=ground_normal)  # sole tilted to the ground
+anim.set_ik_chain(robot, "arm", "shoulder", "elbow", "wrist")      # any skeleton
+anim.set_ik_goal(robot, "arm", (1.0, 1.2, 0.5), weight=0.5, pole=(0, -1, 0))
+anim.clear_ik_goal(hero, "RightHand")
+```
+
+- Humanoids have the chains "LeftFoot", "RightFoot", "LeftHand" and "RightHand". Their knees bend forward and their elbows back, relative to the hips and shoulders as they move.
+- `pole` is the world direction the middle joint bends toward. Without one, a chain bends toward its default, or keeps the plane it is bending in.
+- A target beyond the limb's reach straightens the limb toward it. Bone lengths do not change.
+- `weight` blends the solved joints with the animated ones.
+- `rotation` (world Euler angles) sets the end joint's rotation. `normal` keeps the end's animated rotation tilted from world up to the normal. Without either, the end keeps its rotation relative to the middle joint.
+- `set_hips_offset` moves the hips in world space before IK runs, so legs can reach lower ground.
+- `animated_joint_world_position` reads a joint as the animation left it, before the hips offset and IK.
+
+`Humanoid.place_feet(ground)` keeps a humanoid's feet on uneven ground. Call it in the update callback, with `ground(x, z)` returning a height or `(height, normal)`:
+- Each foot is placed at its animated height above the model's floor (the root entity's height), measured from the ground under it, so steps still lift.
+- Each sole is tilted to the ground's normal.
+- The hips move down toward the lowest ground below the floor.
+
+`Humanoid.reach(limb, position)` and `release(limb)` set and clear single goals. Goals use the previous frame's animated positions, so a target that moves fast trails by one frame.
+
+```python
+def on_update(dt):
+    hero.place_feet(terrain_height)
+    hero.reach("RightHand", door_handle_position)
+```
+
+Run `examples/python/animation/foot_ik/foot_ik.py` from the repository root to see feet on a step and a slope and a hand following a moving target.
+
 ## Rendering requirements
 
 Use skinned vertex attributes, a skeleton descriptor binding, matching shaders, and `skinned_geometry` / `skinned_transparent` execution. The example's [pipeline](../../examples/python/animation/skinned_fox_demo/skinned_pipeline.json) shows the complete configuration. A static geometry shader cannot animate merely because clips were loaded.

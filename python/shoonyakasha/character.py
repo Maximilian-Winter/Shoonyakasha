@@ -90,6 +90,48 @@ class Humanoid:
         """World position of humanoid bone (or joint) ``bone``."""
         return self.animation.joint_world_position(self.root, self.joint(bone))
 
+    def reach(self, limb, position, weight=1.0, pole=None, rotation=None, normal=None):
+        """Reach world ``position`` with "LeftHand", "RightHand", "LeftFoot",
+        "RightFoot" or a chain set with ``set_ik_chain``, as ``set_ik_goal``
+        does."""
+        self.animation.set_ik_goal(self.root, limb, position, weight, pole, rotation, normal)
+
+    def release(self, limb):
+        """Let ``limb`` follow the animation again."""
+        self.animation.clear_ik_goal(self.root, limb)
+
+    def place_feet(self, ground, hips_smoothing=0.25, max_drop=0.5):
+        """Keep both feet on the ground, for one frame; call it from the update
+        callback.
+
+        ``ground(x, z)`` returns the ground height there, or (height, normal).
+        Each foot is set at its animated height above the model's floor (the
+        root entity's height) above the ground under its animated position,
+        tilted to the normal when there is one, so steps still lift. The hips
+        move down toward the lowest ground below the floor (at most
+        ``max_drop``), by ``hips_smoothing`` of the remaining distance per call.
+        Returns the hips' vertical offset."""
+        anim = self.animation
+        floor = self.engine.scene.get_position(self.root)[1]
+        lowest = 0.0
+        for limb in ("LeftFoot", "RightFoot"):
+            x, y, z = anim.animated_joint_world_position(self.root, self.joint(limb))
+            found = ground(x, z)
+            height, normal = (found, None) if isinstance(found, (int, float)) else found
+            anim.set_ik_goal(self.root, limb, (x, height + (y - floor), z), 1.0, None, None, normal)
+            lowest = min(lowest, height - floor)
+        target = max(lowest, -max_drop)
+        current = anim.get_hips_offset(self.root)[1]
+        offset = current + (target - current) * hips_smoothing
+        anim.set_hips_offset(self.root, (0.0, offset, 0.0))
+        return offset
+
+    def release_feet(self):
+        """Stop placing the feet: clear their goals and the hips offset."""
+        for limb in ("LeftFoot", "RightFoot"):
+            self.animation.clear_ik_goal(self.root, limb)
+        self.animation.set_hips_offset(self.root, (0.0, 0.0, 0.0))
+
     def set_root_motion(self, enabled=True, bone="Hips"):
         self.animation.set_root_motion(self.root, enabled, self.joint(bone))
 

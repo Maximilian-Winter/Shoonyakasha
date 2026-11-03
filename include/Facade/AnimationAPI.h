@@ -211,6 +211,49 @@ public:
     std::vector<std::string> loadHumanoidClips(EntityHandle target, const std::string& path,
                                                const std::string& name = "", const BoneMapping& mapping = {});
 
+    // ═══════════════════════════════════════════════════════════
+    // IK
+    // ═══════════════════════════════════════════════════════════
+
+    /// Define (or replace) a two-bone IK chain of three joints, each below
+    /// the one before. Humanoids have "LeftFoot", "RightFoot", "LeftHand" and
+    /// "RightHand" without this.
+    /// @throws std::runtime_error for an unknown animator or joint, or joints
+    ///         that are not a chain.
+    void setIKChain(EntityHandle animator, const std::string& name, const std::string& upper,
+                    const std::string& middle, const std::string& end);
+
+    /// Reach `position` (world space) with the end of chain `chain` each frame,
+    /// after the animation and before attachments, blended by `weight`.
+    /// With `hasPole`, the middle joint bends toward world direction `pole`;
+    /// without, toward the chain's default (knees forward, elbows back) or its
+    /// current bend. With `hasRotation`, the end joint takes world rotation
+    /// `rotation` (Euler radians, applied as the transform component applies
+    /// them); otherwise with `hasNormal`, it keeps its animated rotation tilted
+    /// from world up to `normal`; otherwise its rotation relative to the
+    /// middle joint. Replaces the chain's goal.
+    /// @throws std::runtime_error for an unknown animator or chain.
+    void setIKGoal(EntityHandle animator, const std::string& chain, const glm::vec3& position, float weight = 1.0f,
+                   bool hasPole = false, const glm::vec3& pole = glm::vec3(0.0f),
+                   bool hasRotation = false, const glm::vec3& rotation = glm::vec3(0.0f),
+                   bool hasNormal = false, const glm::vec3& normal = glm::vec3(0.0f, 1.0f, 0.0f));
+
+    /// Remove the chain's goal; the limb follows the animation again.
+    void clearIKGoal(EntityHandle animator, const std::string& chain);
+
+    /// Remove every goal.
+    void clearIKGoals(EntityHandle animator);
+
+    /// World offset added to the hips (the humanoid Hips, or the skeleton's
+    /// root joint) after the animation and before IK; (0, 0, 0) for none.
+    void setHipsOffset(EntityHandle animator, const glm::vec3& offset);
+    glm::vec3 getHipsOffset(EntityHandle animator) const;
+
+    /// World position of a joint as the animation left it in the last
+    /// evaluation, before the hips offset and IK.
+    /// @throws std::runtime_error for an unknown animator or joint.
+    glm::vec3 getAnimatedJointWorldPosition(EntityHandle animator, const std::string& joint) const;
+
     // Impl is forward-declared (opaque) — public so EngineAPI can wire internals
     struct Impl;
 

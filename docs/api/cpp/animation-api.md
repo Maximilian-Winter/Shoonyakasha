@@ -10,6 +10,7 @@ Controls per-model animators. `createAnimator(root)` adds an `AnimatorComponent`
 - `loadClips` reads a glTF / GLB file and adds the clips whose channels match the skeleton's joint names. It throws `std::runtime_error` when the file cannot be read or the entity has no animator.
 - `getJointWorldPosition` throws for an unknown animator or joint.
 - `makeHumanoid`, `retargetClips` and `loadHumanoidClips` throw `std::runtime_error` for unknown bones, joints or clips, missing required bones, or animators that are not humanoids.
+- `setIKChain`, `setIKGoal` and `getAnimatedJointWorldPosition` throw `std::runtime_error` for unknown animators, joints or chains.
 - `setController` throws `std::runtime_error` naming the place in the definition that is wrong. The parameter, layer and state calls throw for an unknown name, a parameter of another type, or an animator without a controller.
 
 Playback, cross-fades and attachments follow the [Python reference](../python/animation.md#clips-and-playback). The same engine types are available without the facade:
@@ -20,6 +21,7 @@ Playback, cross-fades and attachments follow the [Python reference](../python/an
 - `ControllerEvaluator` in `Animation/ControllerEvaluator.h`
 - `HumanoidBone`, `HumanoidAvatar`, `autoMapHumanoid` and `makeHumanoidAvatar` in `Animation/Humanoid.h`
 - `retargetClip` in `Animation/Retarget.h`
+- `TwoBoneIKGoal` and `solveTwoBoneIK` in `Animation/IK.h`; `IKChain` and `IKGoalState` in `ECS/AnimatorComponents.h`
 - `loadAnimationFile` and `readGltfSkeleton` in `Resources/AnimationClipLoader.h`
 - `Pose` and `PoseOps` in `Animation/Pose.h`
 - `bindClip` in `Animation/ClipBinding.h`
@@ -75,6 +77,13 @@ bool isHumanoid(EntityHandle animator) const;
 BoneMapping getHumanoidMapping(EntityHandle animator) const;
 std::vector<std::string> retargetClips(EntityHandle target, EntityHandle source, const std::vector<std::string>& clips = {}, const std::string& name = "");
 std::vector<std::string> loadHumanoidClips(EntityHandle target, const std::string& path, const std::string& name = "", const BoneMapping& mapping = {});
+void setIKChain(EntityHandle animator, const std::string& name, const std::string& upper, const std::string& middle, const std::string& end);
+void setIKGoal(EntityHandle animator, const std::string& chain, const glm::vec3& position, float weight = 1.0f, bool hasPole = false, const glm::vec3& pole = glm::vec3(0.0f), bool hasRotation = false, const glm::vec3& rotation = glm::vec3(0.0f), bool hasNormal = false, const glm::vec3& normal = glm::vec3(0.0f, 1.0f, 0.0f));
+void clearIKGoal(EntityHandle animator, const std::string& chain);
+void clearIKGoals(EntityHandle animator);
+void setHipsOffset(EntityHandle animator, const glm::vec3& offset);
+glm::vec3 getHipsOffset(EntityHandle animator) const;
+glm::vec3 getAnimatedJointWorldPosition(EntityHandle animator, const std::string& joint) const;
 ```
 
 <!-- END SOURCE API -->

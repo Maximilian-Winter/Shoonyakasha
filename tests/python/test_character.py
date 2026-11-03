@@ -20,6 +20,8 @@ class Animation:
     def __init__(self):
         self.calls = []
         self.motion = (0.5, 0.0, -0.25)
+        self.feet = {"mixamorig_LeftFoot": (0.1, 0.08, 0.0), "mixamorig_RightFoot": (-0.1, 0.3, 0.2)}
+        self.hips_offset = (0.0, 0.0, 0.0)
 
     def __getattr__(self, name):
         def record(*args):
@@ -27,7 +29,14 @@ class Animation:
             if name == "create_animator":
                 return args[0] == 9
             if name == "humanoid_mapping":
-                return {"Hips": "mixamorig_Hips", "RightHand": "mixamorig_RightHand"}
+                return {"Hips": "mixamorig_Hips", "RightHand": "mixamorig_RightHand",
+                        "LeftFoot": "mixamorig_LeftFoot", "RightFoot": "mixamorig_RightFoot"}
+            if name == "animated_joint_world_position":
+                return self.feet[args[1]]
+            if name == "get_hips_offset":
+                return self.hips_offset
+            if name == "set_hips_offset":
+                self.hips_offset = args[1]
             if name == "load_humanoid_clips":
                 return [args[2] or "clip"]
             if name == "take_root_motion":
@@ -89,6 +98,24 @@ class LoadHumanoidTest(unittest.TestCase):
         hero = load_humanoid(engine, "hero.gltf", position=(1.0, 0.0, 1.0))
         self.assertEqual(hero.apply_root_motion(), (0.5, 0.0, -0.25))
         self.assertEqual(engine.scene.positions[9], (1.5, 0.0, 0.75))
+
+    def test_place_feet_follows_ground_and_lowers_hips(self):
+        engine = Engine()
+        hero = load_humanoid(engine, "hero.gltf", position=(0.0, 1.0, 0.0))
+        # Ground 0.9 under the left foot (below the floor at 1.0), 1.2 under the right.
+        def ground(x, z):
+            return 0.9 if x > 0 else (1.2, (0.0, 1.0, 0.0))
+        engine.animation.feet = {"mixamorig_LeftFoot": (0.1, 1.08, 0.0), "mixamorig_RightFoot": (-0.1, 1.3, 0.2)}
+        offset = hero.place_feet(ground, hips_smoothing=1.0)
+        goals = {c[2]: c for c in engine.animation.calls if c[0] == "set_ik_goal"}
+        # Each foot keeps its animated height above the floor, over its ground.
+        self.assertAlmostEqual(goals["LeftFoot"][3][1], 0.98)
+        self.assertAlmostEqual(goals["RightFoot"][3][1], 1.5)
+        self.assertIsNone(goals["LeftFoot"][7])
+        self.assertEqual(goals["RightFoot"][7], (0.0, 1.0, 0.0))
+        self.assertAlmostEqual(offset, -0.1)
+        hero.release_feet()
+        self.assertEqual(engine.animation.hips_offset, (0.0, 0.0, 0.0))
 
     def test_no_skinned_mesh_raises(self):
         engine = Engine()

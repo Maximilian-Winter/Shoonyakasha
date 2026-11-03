@@ -80,6 +80,31 @@ struct ControllerRuntime {
     Pose additiveDelta;
 };
 
+// Three joints solved together by two-bone IK (Animation/IK.h).
+struct IKChain {
+    std::string name;
+    int upper = -1;
+    int middle = -1;
+    int end = -1;
+
+    // Bend direction in the rest frame of the upper joint's parent; used
+    // when a goal has no pole of its own
+    bool hasDefaultPole = false;
+    glm::vec3 defaultPole{0.0f, 0.0f, 1.0f};
+};
+
+// A world-space IK target for a chain.
+struct IKGoalState {
+    std::string chain;
+    glm::vec3 position{0.0f};
+    float weight = 1.0f;
+    bool hasPole = false;
+    glm::vec3 pole{0.0f};               // world direction
+    enum class Rotation { Keep, World, Normal } rotation = Rotation::Keep;
+    glm::quat worldRotation{1.0f, 0.0f, 0.0f, 0.0f};   // Rotation::World: the end joint's
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};                // Rotation::Normal: the animated end, tilted from up to this
+};
+
 struct AnimatorComponent {
     std::shared_ptr<Skeleton> skeleton;
 
@@ -112,6 +137,22 @@ struct AnimatorComponent {
 
     // The skeleton's humanoid mapping, for retargeting; nullptr when none
     std::shared_ptr<HumanoidAvatar> humanoid;
+
+    // IK applied after each evaluation, and a world-space offset of the hips
+    // (the humanoid Hips, or the skeleton's root joint) applied before it
+    std::vector<IKChain> ikChains;
+    std::vector<IKGoalState> ikGoals;
+    glm::vec3 hipsOffset{0.0f};
+
+    // Global transforms of the last evaluation before the hips offset and IK
+    std::vector<glm::mat4> animatedGlobals;
+
+    const IKChain* findChain(const std::string& name) const {
+        for (const IKChain& chain : ikChains) {
+            if (chain.name == name) return &chain;
+        }
+        return nullptr;
+    }
 
     // Root motion: with rootMotion set, the horizontal translation of joint
     // rootMotionJoint (perpendicular to rootMotionUp, in the joint's parent

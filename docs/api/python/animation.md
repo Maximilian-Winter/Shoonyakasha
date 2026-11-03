@@ -50,6 +50,15 @@ See the [animation guide](../../guides/animation.md#animation-controllers) for s
 
 See the [animation guide](../../guides/animation.md#humanoids-and-retargeting) for bone names, presets and what retargeting does, and `shoonyakasha.character` for a one-call loader.
 
+## IK
+
+`set_ik_goal(animator, chain, position, weight, pole, rotation, normal)` reaches a world position with a two-bone chain each frame, after the animation and before attachments.
+- Humanoids have "LeftFoot", "RightFoot", "LeftHand" and "RightHand"; other chains come from `set_ik_chain`.
+- `set_hips_offset` moves the hips before IK runs.
+- `animated_joint_world_position` reads joints before the hips offset and IK.
+
+See the [animation guide](../../guides/animation.md#inverse-kinematics), and `Humanoid.place_feet` in `shoonyakasha.character`.
+
 Meshes driven by an animator ignore the per-entity `scene.play_animation` controls.
 
 <!-- BEGIN SOURCE API -->
@@ -100,5 +109,12 @@ Signatures and short descriptions below are extracted from the Cython wrapper; r
 | `humanoid_mapping(animator)` | dict[str, str] | {humanoid bone: joint name}; empty when the animator is not a humanoid. |
 | `retarget_clips(target, source, clips=None, name="")` | list[str] | Retarget clips of humanoid animator ``source`` (all when ``clips`` is None) onto humanoid animator ``target`` and add them, named as ``load_clips`` names. Returns the names added. |
 | `load_humanoid_clips(target, path, name="", mapping=None)` | list[str] | Read a glTF / GLB file with a skin and animations (a Mixamo download exported with its skin, for example), map its skeleton as ``make_humanoid`` does (``mapping`` on top), and retarget its clips onto humanoid animator ``target``, named as ``load_clips`` names. Returns the names added. |
+| `set_ik_chain(animator, name, upper, middle, end)` | None | Define (or replace) a two-bone IK chain of three joints, each below the one before. Humanoids have "LeftFoot", "RightFoot", "LeftHand" and "RightHand" without this. |
+| `set_ik_goal(animator, chain, position, weight=1.0, pole=None, rotation=None, normal=None)` | None | Reach world ``position`` with the end of ``chain`` each frame, blended by ``weight``. ``pole``: world direction the middle joint bends toward (default: knees forward, elbows back, or the current bend). ``rotation``: world Euler rotation (radians) for the end joint; ``normal``: keep the end's animated rotation, tilted from world up to this direction. Replaces the chain's goal. Raises RuntimeError for an unknown chain. |
+| `clear_ik_goal(animator, chain)` | None | Remove the chain's goal; the limb follows the animation again. |
+| `clear_ik_goals(animator)` | None | Calls native `clearIKGoals`; see the class contract above. |
+| `set_hips_offset(animator, offset)` | None | World offset (x, y, z) added to the hips after the animation and before IK. |
+| `get_hips_offset(animator)` | 3-tuple | Calls native `getHipsOffset`; see the class contract above. |
+| `animated_joint_world_position(animator, joint)` | 3-tuple | World position of a joint as the animation left it in the last evaluation, before the hips offset and IK. |
 
 <!-- END SOURCE API -->

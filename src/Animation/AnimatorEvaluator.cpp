@@ -6,9 +6,12 @@
 #include "Animation/AnimationEvaluator.h"
 #include "Animation/ClipBinding.h"
 #include "Animation/ControllerEvaluator.h"
+#include "Animation/IK.h"
 #include "ECS/Core.h"
 #include "ECS/SkeletonComponents.h"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/quaternion.hpp>
 #include <cmath>
 #include <functional>
 
@@ -34,6 +37,35 @@ void step(AnimatorClipState& state, const AnimationClip* clip, float deltaTime) 
         state.time = 0.0f;
         state.playing = false;
     }
+}
+
+glm::quat rotationOf(const glm::mat4& m) {
+    glm::mat3 r(m);
+    for (int c = 0; c < 3; ++c) {
+        const float length = glm::length(r[c]);
+        if (length > 0.0f) r[c] /= length;
+    }
+    return glm::normalize(glm::quat_cast(r));
+}
+
+glm::quat tiltBetween(glm::vec3 a, glm::vec3 b) {
+    a = glm::normalize(a);
+    b = glm::normalize(b);
+    const float d = glm::dot(a, b);
+    if (d > 0.999999f) return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    if (d < -0.999999f) return glm::angleAxis(3.14159265f, glm::vec3(1.0f, 0.0f, 0.0f));
+    const glm::vec3 axis = glm::cross(a, b);
+    return glm::normalize(glm::quat(1.0f + d, axis.x, axis.y, axis.z));
+}
+
+bool isBelow(const Skeleton& skeleton, int joint, int ancestor) {
+    const int count = static_cast<int>(skeleton.joints.size());
+    int steps = 0;
+    for (int p = joint >= 0 && joint < count ? skeleton.joints[joint].parentIndex : -1;
+         p >= 0 && p < count && steps <= count; p = skeleton.joints[p].parentIndex, ++steps) {
+        if (p == ancestor) return true;
+    }
+    return false;
 }
 
 void updateDescendants(entt::registry& registry, entt::entity entity, const glm::mat4& world) {
@@ -85,6 +117,108 @@ glm::vec3 AnimatorEvaluator::rootDisplacement(const AnimationClip& clip, const S
         d = (at(0.0f) - at(t0)) + static_cast<float>(-wraps - 1) * cycle + (at(t1) - at(end));
     }
     return d - glm::dot(d, up) * up;
+}
+
+bool AnimatorEvaluator::setChain(AnimatorComponent& animator, const std::string& name, int upper, int middle,
+                                 int end) {
+    if (!animator.skeleton || !isBelow(*animator.skeleton, middle, upper) || !isBelow(*animator.skeleton, end, middle)) {
+        return false;
+    }
+    IKChain chain;
+    chain.name = name;
+    chain.upper = upper;
+    chain.middle = middle;
+    chain.end = end;
+    for (IKChain& existing : animator.ikChains) {
+        if (existing.name == name) {
+            existing = chain;
+            return true;
+        }
+    }
+    animator.ikChains.push_back(chain);
+    return true;
+}
+
+const IKChain* AnimatorEvaluator::chainFor(AnimatorComponent& animator, const std::string& name) {
+    if (const IKChain* chain = animator.findChain(name)) return chain;
+    if (!animator.humanoid) return nullptr;
+    const HumanoidAvatar& avatar = *animator.humanoid;
+    using B = HumanoidBone;
+    struct Limb { const char* name; B upper, middle, end; float forward; };
+    static const Limb limbs[] = {
+        {"LeftFoot", B::LeftUpperLeg, B::LeftLowerLeg, B::LeftFoot, 1.0f},
+        {"RightFoot", B::RightUpperLeg, B::RightLowerLeg, B::RightFoot, 1.0f},
+        {"LeftHand", B::LeftUpperArm, B::LeftLowerArm, B::LeftHand, -1.0f},
+        {"RightHand", B::RightUpperArm, B::RightLowerArm, B::RightHand, -1.0f},
+    };
+    for (const Limb& limb : limbs) {
+        if (name != limb.name) continue;
+        if (!setChain(animator, name, avatar.joint(limb.upper), avatar.joint(limb.middle), avatar.joint(limb.end))) {
+            return nullptr;
+        }
+        IKChain& chain = animator.ikChains.back();
+        const glm::vec3 pole = glm::inverse(avatar.bodyFrame) * glm::vec3(0.0f, 0.0f, limb.forward);
+        const int parent = animator.skeleton->joints[chain.upper].parentIndex;
+        const glm::quat parentRest = parent >= 0 && parent < static_cast<int>(avatar.restGlobals.size())
+                                         ? rotationOf(avatar.restGlobals[parent]) : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        chain.hasDefaultPole = true;
+        chain.defaultPole = glm::inverse(parentRest) * pole;
+        return &chain;
+    }
+    return nullptr;
+}
+
+void AnimatorEvaluator::applyIK(AnimatorComponent& animator, const glm::mat4& spaceWorld) {
+    animator.animatedGlobals = animator.globalTransforms;
+    if (!animator.skeleton || (animator.ikGoals.empty() && animator.hipsOffset == glm::vec3(0.0f))) return;
+    const Skeleton& skeleton = *animator.skeleton;
+    const glm::mat4 toSkeleton = glm::inverse(spaceWorld);
+    const glm::quat spaceRotation = rotationOf(spaceWorld);
+
+    if (animator.hipsOffset != glm::vec3(0.0f)) {
+        const int hips = animator.humanoid ? animator.humanoid->joint(HumanoidBone::Hips) : skeleton.rootJointIndex;
+        if (hips >= 0 && hips < static_cast<int>(animator.pose.jointCount())) {
+            const int parent = skeleton.joints[hips].parentIndex;
+            glm::mat3 toWorld(spaceWorld);
+            if (parent >= 0 && parent < static_cast<int>(animator.globalTransforms.size())) {
+                toWorld = toWorld * glm::mat3(animator.globalTransforms[parent]);
+            }
+            animator.pose.translations[hips] += glm::inverse(toWorld) * animator.hipsOffset;
+            PoseOps::globalTransforms(skeleton, animator.pose, animator.globalTransforms);
+        }
+    }
+
+    for (const IKGoalState& goalState : animator.ikGoals) {
+        const IKChain* chain = chainFor(animator, goalState.chain);
+        if (!chain) continue;
+        TwoBoneIKGoal goal;
+        goal.upper = chain->upper;
+        goal.middle = chain->middle;
+        goal.end = chain->end;
+        goal.weight = goalState.weight;
+        goal.target = glm::vec3(toSkeleton * glm::vec4(goalState.position, 1.0f));
+        if (goalState.hasPole) {
+            goal.hasPole = true;
+            goal.pole = glm::mat3(toSkeleton) * goalState.pole;
+        } else if (chain->hasDefaultPole) {
+            const int parent = skeleton.joints[chain->upper].parentIndex;
+            const glm::quat parentNow = parent >= 0 ? rotationOf(animator.globalTransforms[parent])
+                                                    : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            goal.hasPole = true;
+            goal.pole = parentNow * chain->defaultPole;
+        }
+        if (goalState.rotation == IKGoalState::Rotation::World) {
+            goal.hasEndRotation = true;
+            goal.endRotation = glm::normalize(glm::inverse(spaceRotation) * goalState.worldRotation);
+        } else if (goalState.rotation == IKGoalState::Rotation::Normal) {
+            const glm::quat animatedWorld = spaceRotation * rotationOf(animator.animatedGlobals[chain->end]);
+            const glm::quat tilted = tiltBetween(glm::vec3(0.0f, 1.0f, 0.0f), goalState.normal) * animatedWorld;
+            goal.hasEndRotation = true;
+            goal.endRotation = glm::normalize(glm::inverse(spaceRotation) * tilted);
+        }
+        solveTwoBoneIK(skeleton, animator.pose, animator.globalTransforms, goal);
+    }
+    PoseOps::boneMatrices(skeleton, animator.globalTransforms, animator.boneMatrices);
 }
 
 void AnimatorEvaluator::setRootMotion(AnimatorComponent& animator, bool enabled, int joint) {
@@ -175,6 +309,13 @@ void AnimatorEvaluator::update(entt::registry& registry, float deltaTime) {
         advance(animator, deltaTime);
         evaluate(animator);
         if (animator.rootMotion) animator.rootMotionWorld += toWorld * animator.rootMotionDelta;
+
+        const ECS::TransformComponent* drawn = nullptr;
+        for (entt::entity mesh : animator.skinnedMeshes) {
+            if (registry.valid(mesh) && (drawn = registry.try_get<ECS::TransformComponent>(mesh))) break;
+        }
+        if (!drawn) drawn = registry.try_get<ECS::TransformComponent>(entity);
+        applyIK(animator, drawn ? drawn->worldMatrix : glm::mat4(1.0f));
         for (entt::entity mesh : animator.skinnedMeshes) {
             if (!registry.valid(mesh)) continue;
             auto* skeleton = registry.try_get<SkeletonComponent>(mesh);

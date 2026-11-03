@@ -402,6 +402,18 @@ cdef extern from "Facade/AnimationAPI.h" namespace "Shoonyakasha::Facade":
         vector[string] loadHumanoidClips(EntityHandle target, const string& path, const string& name,
                                          const vector[pair[string, string]]& mapping) except +
 
+        # IK
+        void setIKChain(EntityHandle animator, const string& name, const string& upper, const string& middle,
+                        const string& end) except +
+        void setIKGoal(EntityHandle animator, const string& chain, const vec3& position, float weight,
+                       cbool hasPole, const vec3& pole, cbool hasRotation, const vec3& rotation,
+                       cbool hasNormal, const vec3& normal) except +
+        void clearIKGoal(EntityHandle animator, const string& chain)
+        void clearIKGoals(EntityHandle animator)
+        void setHipsOffset(EntityHandle animator, const vec3& offset)
+        vec3 getHipsOffset(EntityHandle animator) const
+        vec3 getAnimatedJointWorldPosition(EntityHandle animator, const string& joint) except +
+
 
 # ═══════════════════════════════════════════════════════════════
 # EcsAPI — full declaration

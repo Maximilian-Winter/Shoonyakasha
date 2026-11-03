@@ -12,6 +12,7 @@
 #include "ECS/Core.h"
 #include "Resources/AnimationClipLoader.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -373,6 +374,96 @@ std::vector<std::string> AnimationAPI::loadHumanoidClips(EntityHandle target, co
     std::vector<std::shared_ptr<AnimationClip>> retargeted;
     for (const auto& clip : file.clips) retargeted.push_back(retargetClip(*clip, *source, *to.humanoid));
     return AnimatorEvaluator::addClips(to, retargeted, name);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IK
+// ═══════════════════════════════════════════════════════════════
+
+namespace {
+
+int requireJoint(const AnimatorComponent& component, const std::string& name) {
+    const int joint = component.skeleton ? component.skeleton->findJoint(name) : -1;
+    if (joint < 0) throw std::runtime_error("unknown joint: " + name);
+    return joint;
+}
+
+glm::mat4 drawnWorld(entt::registry& registry, const AnimatorComponent& component, entt::entity animator) {
+    for (entt::entity mesh : component.skinnedMeshes) {
+        if (!registry.valid(mesh)) continue;
+        if (const auto* transform = registry.try_get<ECS::TransformComponent>(mesh)) return transform->worldMatrix;
+    }
+    if (const auto* transform = registry.try_get<ECS::TransformComponent>(animator)) return transform->worldMatrix;
+    return glm::mat4(1.0f);
+}
+
+} // namespace
+
+void AnimationAPI::setIKChain(EntityHandle animator, const std::string& name, const std::string& upper,
+                              const std::string& middle, const std::string& end) {
+    AnimatorComponent& component = requireAnimator(m_impl->registry, animator);
+    if (!AnimatorEvaluator::setChain(component, name, requireJoint(component, upper), requireJoint(component, middle),
+                                     requireJoint(component, end))) {
+        throw std::runtime_error("joints " + upper + ", " + middle + ", " + end + " are not a chain");
+    }
+}
+
+void AnimationAPI::setIKGoal(EntityHandle animator, const std::string& chain, const glm::vec3& position, float weight,
+                             bool hasPole, const glm::vec3& pole, bool hasRotation, const glm::vec3& rotation,
+                             bool hasNormal, const glm::vec3& normal) {
+    AnimatorComponent& component = requireAnimator(m_impl->registry, animator);
+    if (!AnimatorEvaluator::chainFor(component, chain)) throw std::runtime_error("no IK chain '" + chain + "'");
+    IKGoalState goal;
+    goal.chain = chain;
+    goal.position = position;
+    goal.weight = weight;
+    goal.hasPole = hasPole;
+    goal.pole = pole;
+    if (hasRotation) {
+        goal.rotation = IKGoalState::Rotation::World;
+        const glm::mat3 m(ECS::TransformComponent(glm::vec3(0.0f), rotation, glm::vec3(1.0f)).getLocalMatrix());
+        goal.worldRotation = glm::normalize(glm::quat_cast(m));
+    } else if (hasNormal && glm::dot(normal, normal) > 0.0f) {
+        goal.rotation = IKGoalState::Rotation::Normal;
+        goal.normal = glm::normalize(normal);
+    }
+    for (IKGoalState& existing : component.ikGoals) {
+        if (existing.chain == chain) {
+            existing = goal;
+            return;
+        }
+    }
+    component.ikGoals.push_back(goal);
+}
+
+void AnimationAPI::clearIKGoal(EntityHandle animator, const std::string& chain) {
+    AnimatorComponent* component = animatorOf(m_impl->registry, animator);
+    if (!component) return;
+    auto& goals = component->ikGoals;
+    goals.erase(std::remove_if(goals.begin(), goals.end(), [&](const IKGoalState& g) { return g.chain == chain; }),
+                goals.end());
+}
+
+void AnimationAPI::clearIKGoals(EntityHandle animator) {
+    if (AnimatorComponent* component = animatorOf(m_impl->registry, animator)) component->ikGoals.clear();
+}
+
+void AnimationAPI::setHipsOffset(EntityHandle animator, const glm::vec3& offset) {
+    if (AnimatorComponent* component = animatorOf(m_impl->registry, animator)) component->hipsOffset = offset;
+}
+
+glm::vec3 AnimationAPI::getHipsOffset(EntityHandle animator) const {
+    const AnimatorComponent* component = animatorOf(m_impl->registry, animator);
+    return component ? component->hipsOffset : glm::vec3(0.0f);
+}
+
+glm::vec3 AnimationAPI::getAnimatedJointWorldPosition(EntityHandle animator, const std::string& joint) const {
+    const AnimatorComponent& component = requireAnimator(m_impl->registry, animator);
+    const int index = requireJoint(component, joint);
+    const auto& globals = component.animatedGlobals.empty() ? component.globalTransforms : component.animatedGlobals;
+    if (index >= static_cast<int>(globals.size())) throw std::runtime_error("unknown joint: " + joint);
+    const glm::mat4 world = drawnWorld(*m_impl->registry, component, toEntt(animator)) * globals[index];
+    return glm::vec3(world[3]);
 }
 
 } // namespace Facade
