@@ -5,22 +5,25 @@ first, measuring them with the extra probes as the props do (only while
 the probes are free, letting them go when asked), the image's pixels and
 cells both ways, and the rendered image (unexplored cells, the land and sea
 ramps, ore, north up or turned with the heading, the minimap's circle),
-the full map's labels kept apart and merged when close, and its scale
-bar.
+contour lines and darkened rows, the full map's labels kept apart and
+merged when close, its scale bar, its size on small canvases, and the
+contacts' distances and bearings.
 
     python -m unittest discover -s tests/python
 """
 
 import importlib.util
 import math
+import sys
 import unittest
 from pathlib import Path
 
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
-_SPEC = importlib.util.spec_from_file_location(
-    "planet_explored_map", REPO / "examples" / "python" / "simulations" / "planet" / "explored_map.py")
+PLANET_DIR = REPO / "examples" / "python" / "simulations" / "planet"
+sys.path.insert(0, str(PLANET_DIR))
+_SPEC = importlib.util.spec_from_file_location("planet_explored_map", PLANET_DIR / "explored_map.py")
 em = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(em)
 
@@ -155,6 +158,20 @@ class ImageTest(unittest.TestCase):
         moon = em.render(small_grid(Body("moon", ocean=False)), (32.0, 32.0), 200.0, 8)
         self.assertEqual(moon.shape, (8, 8, 4))
 
+    def test_contours_and_scan_rows(self):
+        grid = small_grid()
+        mid = int(grid.half)
+        grid.heights[:] = 100.0
+        grid.heights[:, mid:] = 160.0                  # a step of 60 m east of the middle
+        plain = em.render(grid, (grid.half, grid.half), 200.0, 40).astype(int)
+        lined = em.render(grid, (grid.half, grid.half), 200.0, 40, contour=50.0).astype(int)
+        self.assertGreater(lined[20, 17][1], plain[20, 17][1])   # the cell west of the step, 25 m west
+        np.testing.assert_array_equal(lined[20, 10], plain[20, 10])   # away from it
+        np.testing.assert_array_equal(lined[20, 19], plain[20, 19])   # the cell east of the step
+        scanned = em.render(grid, (grid.half, grid.half), 200.0, 40, scan=True).astype(int)
+        np.testing.assert_array_equal(scanned[20], plain[20])
+        self.assertLess(scanned[21, 10][1], plain[21, 10][1])
+
     def test_labels_kept_apart(self):
         labels = em.separate([("Base", (400.0, 300.0), None), ("Ship", (405.0, 302.0), None),
                               ("Far", (600.0, 300.0), None)])
@@ -173,6 +190,21 @@ class ImageTest(unittest.TestCase):
         step, length = em.scale_bar(8_000.0, 720.0)
         self.assertEqual(step, 2_500.0)
         self.assertLessEqual(length, 0.25 * 720.0)
+
+
+    def test_full_size_fits_the_canvas(self):
+        self.assertEqual(em.full_size(1600, 900), em.FULL_MAP)
+        small = em.full_size(1280, 720)
+        self.assertLess(small, em.FULL_MAP)
+        self.assertLessEqual(small + 2 * em.FULL_PAD + em.FULL_HEADER + em.FULL_FOOTER, 720)
+
+    def test_contacts_nearest_first_with_bearings(self):
+        found = em.contacts([("Far", (10.0, 0.0), "a"), ("East", (2.0, 0.0), "b"), ("South", (0.0, -1.0), "c")],
+                            (0.0, 0.0), cell=25.0)
+        self.assertEqual([c[0] for c in found], ["South", "East", "Far"])
+        self.assertAlmostEqual(found[0][1], 25.0)
+        self.assertAlmostEqual(found[0][2], 180.0)
+        self.assertAlmostEqual(found[1][2], 90.0)
 
 
 if __name__ == "__main__":

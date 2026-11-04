@@ -10,12 +10,14 @@ status under the crosshair.
 
 import importlib.util
 import math
+import sys
 import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-_SPEC = importlib.util.spec_from_file_location(
-    "planet_hud", REPO / "examples" / "python" / "simulations" / "planet" / "hud.py")
+PLANET_DIR = REPO / "examples" / "python" / "simulations" / "planet"
+sys.path.insert(0, str(PLANET_DIR))
+_SPEC = importlib.util.spec_from_file_location("planet_hud", PLANET_DIR / "hud.py")
 hud = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(hud)
 
@@ -106,9 +108,9 @@ class TextTest(unittest.TestCase):
 
     def test_status(self):
         self.assertEqual(hud.status_text("idle", False, 0.0), (None, None))
-        self.assertEqual(hud.status_text("too_heavy", False, 0.0), ("Too heavy", hud.WARNING))
-        self.assertEqual(hud.status_text("holding", True, 0.5, 3.0), ("50 %", hud.ACCENT))
-        self.assertEqual(hud.status_text("holding", True, 0.0, 3.0), ("Hold 3.0 m", hud.TEXT))
+        self.assertEqual(hud.status_text("too_heavy", False, 0.0), ("TOO HEAVY", hud.WARNING))
+        self.assertEqual(hud.status_text("holding", True, 0.5, 3.0), ("CHARGE 50 %", hud.ACCENT))
+        self.assertEqual(hud.status_text("holding", True, 0.0, 3.0), ("HOLD 3.0 M", hud.TEXT))
         self.assertEqual(hud.status_text("holding", True, 0.0), (None, None))
 
 

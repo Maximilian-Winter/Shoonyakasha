@@ -103,6 +103,7 @@ class OnFoot:
         self.look_delta = (0.0, 0.0)  # pixels `read_controls` turned the view by this frame
         self.head_bob = True
         self.mouse_sensitivity = 1.0  # the mouse's turning of the view, times
+        self.invert_y = False        # moving the mouse or the right stick up looks down
         self.on_drop = None          # called by drop_bubble after the player is removed
         self._accumulator = 0.0      # seconds of physics not yet stepped
         self._focus = None           # the focus relative to the bubble's body last frame
@@ -198,7 +199,9 @@ class OnFoot:
         mouse and the gamepad (left stick to walk, right stick to look, A
         to jump and jet, the left trigger to grab, the right to punt). The
         mouse turns the view, by `mouse_sensitivity` times its movement,
-        while captured, or with the right button held;
+        while captured, or with the right button held; with `invert_y`,
+        the mouse's and the right stick's movement up and down turns it the
+        other way;
         while it is captured, the right button grabs and the left punts,
         and with R held the mouse turns the held body instead of the view.
         Keys: W S A D to walk, left Shift to run, left Ctrl to crouch,
@@ -241,6 +244,8 @@ class OnFoot:
             else:
                 s = self.mouse_sensitivity
                 look = (look[0] + dx * s, look[1] + dy * s)
+        if self.invert_y:
+            look = (look[0], -look[1])
         if player is not None:
             player.look(*look)
         self.look_delta = look

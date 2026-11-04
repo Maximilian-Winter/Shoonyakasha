@@ -1,89 +1,103 @@
 """
-The walker's head-up display (walker.py), on a screen canvas: lines and
-filled shapes in one element (shoonyakasha.toolkit.drawing.Mesh), texts
-with a dark shadow behind each, and a bar of key hints
-(shoonyakasha.toolkit.overlay.HintBar). Positions are canvas units, x to
-the right and y down from the top left; the canvas is laid out for
-REFERENCE_SIZE.
+The walker's head-up display (walker.py), on a screen canvas in the
+interface style of scifi.py: one scifi.Layer of shapes and texts drawn
+afresh each frame. Positions are canvas units, x to the right and y down
+from the top left; the canvas is laid out for REFERENCE_SIZE divided by
+the HUD's scale (`set_scale`).
 
 - **Crosshair** at the centre: four short ticks around a dot, coloured by
-  the gravity gun's status (gravity_gun.Gun.status) as CROSSHAIR gives;
-  while holding, a ring around it, and while a punt charges, the ring's
-  arc filled clockwise from the top with the charge.
-- **Status** under the crosshair: "Too heavy" when the target is, the
-  charge while a punt charges, or for HOLD_SECONDS after the hold
-  distance changes, the distance (`status_text`).
-- **Hints** along the bottom: what the gun's controls do now, as key caps
-  (`hints`); hidden when there are none.
+  the gravity gun's status (gravity_gun.Gun.status) as CROSSHAIR gives,
+  with corner brackets around it while something can be grabbed; while
+  holding, a ring of RING_SEGMENTS segments around it, those of the
+  charge lit while a punt charges.
+- **Status** on a small panel under the crosshair: "TOO HEAVY" when
+  the target is, the charge while a punt charges, or for HOLD_SECONDS
+  after the hold distance changes, the distance (`status_text`).
+- **Hints** along the bottom: what the gun's controls do now, as key
+  hints (`hints`, scifi.caps) on a panel; hidden when there are none.
 - **Compass** across the top: a strip COMPASS_WIDTH canvas units wide
   showing COMPASS_SPAN degrees either side of the view's heading, a tick
   every 5 degrees, longer every 15, the eight directions named every 45
-  degrees inside it (N in ACCENT, the four between dimmer); the heading in
-  degrees in an outlined box under its middle. Markers (name, position, colour)
-  stand under it at their bearing from the eye, along the ground
-  (`bearing`), the MAX_MARKERS nearest; one beyond the span is held at the
-  strip's end, dimmed and without a label. The others show their name and
-  distance along the ground below the heading, in the first of LABEL_ROWS
-  rows where they keep LABEL_GAP from the labels of nearer markers
-  (`label_rows`).
-- **Toasts** below the markers' labels: the last MAX_TOASTS messages handed
-  to `toast`, newest on top, each on a dark pill, shown for TOAST_SECONDS
-  and fading out over its last TOAST_FADE.
-- **Jet fuel** at the bottom left: a bar of the player's jet fuel, in
-  WARNING below LOW_FUEL, shown while the fuel is not full and for
-  FUEL_LINGER seconds after it fills, fading over the last FUEL_FADE.
-- **Readout** at the bottom right: the speed along the ground, the body's
-  name and, off the ground, the height of the feet above it.
+  degrees above it (N in ACCENT, the four between dimmer), bracketed at
+  both ends; the heading in degrees on a panel under its middle. Markers
+  (name, position, colour) stand on it at their bearing from the eye,
+  along the ground (`bearing`), the MAX_MARKERS nearest; one beyond the
+  span is held at the strip's end, dimmed and without a label. The others
+  show their name and distance along the ground on a small panel below
+  the heading, in the first of LABEL_ROWS rows where they keep LABEL_GAP
+  from the labels of nearer markers (`label_rows`).
+- **Objective** at the top left: a panel with the header, the goal's
+  title, its hint wrapped to the panel, a segmented bar of its progress
+  with the progress's text, and rows of (label, value) under a rule, as
+  last handed to `objective`.
+- **Toasts** below the markers' labels: the last MAX_TOASTS messages
+  handed to `toast`, newest on top, each on a panel with a bar of its
+  colour at its left; each slides in from the left over TOAST_IN, shows
+  for TOAST_SECONDS and fades out over its last TOAST_FADE.
+- **Jet fuel** at the bottom left: a panel with the jet fuel's share and
+  a segmented bar of it, in WARNING below LOW_FUEL, shown while the fuel
+  is not full and for FUEL_LINGER seconds after it fills, fading over the
+  last FUEL_FADE.
+- **Readout** at the bottom right: a panel with the speed along the
+  ground, the body's name and, off the ground, the height of the feet
+  above it.
 """
 
 import math
 
 import shoonyakasha as sk
 from shoonyakasha.planet.vec import dot, length, local_frame, normalize, scale, sub
-from shoonyakasha.toolkit.drawing import Mesh
-from shoonyakasha.toolkit.overlay import HintBar, measure
+
+import scifi
+from scifi import measure, with_alpha
 
 REFERENCE_SIZE = (1600, 900)
-TEXT = (0.92, 0.96, 1.0, 0.95)
-DIM = (0.92, 0.96, 1.0, 0.55)
-SHADOW = (0.0, 0.0, 0.0, 0.6)
-LINE_SHADOW = (0.0, 0.0, 0.0, 0.35)
-ACCENT = (1.0, 0.72, 0.3, 1.0)
-WARNING = (1.0, 0.32, 0.25, 1.0)
-GOOD = (0.55, 1.0, 0.62, 1.0)
-PANEL = (0.02, 0.03, 0.05, 0.5)
-PILL = (0.02, 0.03, 0.05, 0.62)
-CROSSHAIR = {"idle": TEXT, "can_grab": GOOD, "too_heavy": WARNING, "holding": ACCENT}
+TEXT = scifi.WHITE
+DIM = scifi.MUTED
+ACCENT = scifi.AMBER
+WARNING = scifi.RED
+GOOD = scifi.GREEN
+CROSSHAIR = {"idle": scifi.CYAN, "can_grab": GOOD, "too_heavy": WARNING, "holding": ACCENT}
 CROSSHAIR_GAP, CROSSHAIR_TICK = 5.0, 7.0
-RING_RADIUS = 16.0
-STATUS_BELOW = 34.0              # canvas units under the centre the status is centred
+GRAB_BRACKETS = 15.0             # canvas units from the centre to the brackets' corners while can_grab
+RING_RADIUS = 20.0
+RING_SEGMENTS = 24
+STATUS_BELOW = 38.0              # canvas units under the centre the status is centred
 HOLD_SECONDS = 1.2
-COMPASS_TOP = 14.0
+MARGIN = 24.0                    # canvas units from the screen's edges to the panels
+COMPASS_TOP = 30.0               # canvas units from the top to the strip's line
 COMPASS_WIDTH = 640.0
 COMPASS_SPAN = 60.0              # degrees either side of the heading
-COMPASS_HEIGHT = 28.0
 LABELS = {0: "N", 45: "NE", 90: "E", 135: "SE", 180: "S", 225: "SW", 270: "W", 315: "NW"}
 TICK_LENGTH = 12.0               # canvas units of the longest tick
-HEADING_BOX = (48.0, 22.0)       # width, height, under the strip's middle
-HEADING_GAP = 8.0                # between the strip and the heading's box
+HEADING_BOX = (56.0, 22.0)       # width, height, under the strip's middle
+HEADING_GAP = 9.0                # between the strip and the heading's box
 MAX_MARKERS = 8
-MARKER_LABEL_TOP = 46.0          # canvas units below the strip the first row of labels is centred
+MARKER_LABEL_TOP = 50.0          # canvas units below the strip the first row of labels is centred
 MARKER_ROW = 18.0                # between rows of labels
 LABEL_GAP = 120.0                # canvas units between labels in a row, at least
 LABEL_ROWS = 2
-LABEL_SIZE = 13
-FUEL_BAR = (64.0, 40.0, 180.0, 6.0)   # left, distance up from the bottom, width, height
+LABEL_SIZE = 16
+CARD_WIDTH = 290
+CARD_PAD = 14
+HINT_SIZE = 16
+BAR_SEGMENTS = 20
+FUEL_PANEL = (230.0, 52.0)
+FUEL_SEGMENTS = 24
 LOW_FUEL = 0.25
 FUEL_LINGER, FUEL_FADE = 1.5, 0.5     # s
-LINE = 1.6
+READOUT_PANEL = (250.0, 66.0)
 MAX_TOASTS = 3
 TOAST_SECONDS = 5.0
 TOAST_FADE = 1.0
-TOAST_TOP = 150.0               # canvas units from the top the newest toast is centred
-TOAST_ROW = 34.0
-TOAST_SIZE = 16
-TOAST_PAD = (14.0, 26.0)        # the pill's width beyond the text, its height
-AIRBORNE = 0.5                  # m the feet must be above the ground for the readout to give the height
+TOAST_IN = 0.25                  # s a toast takes to slide in
+TOAST_SLIDE = 40.0               # canvas units it slides
+TOAST_TOP = 160.0                # canvas units from the top the newest toast is centred
+TOAST_ROW = 36.0
+TOAST_SIZE = 17
+TOAST_HEIGHT = 28.0
+HINT_BAR_HEIGHT = 36.0
+AIRBORNE = 0.5                   # m the feet must be above the ground for the readout to give the height
 
 
 def bearing(up, direction):
@@ -163,7 +177,7 @@ def distance_text(metres):
 
 
 def hints(status, held, charge, pad=False):
-    """The key hints (caps, label) for what the gun's controls do now, for
+    """The key hints (keys, label) for what the gun's controls do now, for
     the gun's `status`; the gamepad's with `pad`."""
     grab, punt = ("pad:LT",), ("pad:RT",)
     if not pad:
@@ -181,14 +195,14 @@ def hints(status, held, charge, pad=False):
 
 
 def status_text(status, held, charge, hold_distance=None):
-    """(text, colour) under the crosshair, or (None, None): "Too heavy",
+    """(text, colour) under the crosshair, or (None, None): "TOO HEAVY",
     the charge, or `hold_distance` when given."""
     if status == "too_heavy":
-        return "Too heavy", WARNING
+        return "TOO HEAVY", WARNING
     if held and charge > 0.0:
-        return "%d %%" % round(100.0 * charge), ACCENT
+        return "CHARGE %d %%" % round(100.0 * charge), ACCENT
     if held and hold_distance is not None:
-        return "Hold %.1f m" % hold_distance, TEXT
+        return "HOLD %.1f M" % hold_distance, TEXT
     return None, None
 
 
@@ -197,98 +211,188 @@ class Hud:
         ui = engine.ui
         self.ui = ui
         self.canvas = ui.create_canvas(reference_size=REFERENCE_SIZE)
-        self.shapes = ui.create_element(self.canvas)
-        ui.set_rect(self.shapes, anchor_min=(0, 0), anchor_max=(1, 1), pivot=(0, 0), position=(0, 0), size=(0, 0))
-        ui.set_raycast_target(self.shapes, False)
-        self.texts = {}
-        self.status_text = self._text(14, TEXT)
-        self.heading_text = self._text(14, TEXT)
-        self.tick_labels = [self._text(14, TEXT) for _ in range(6)]
-        self.marker_labels = [self._text(LABEL_SIZE, TEXT) for _ in range(MAX_MARKERS)]
-        self.fuel_text = self._text(12, DIM, sk.TEXT_ALIGN_LEFT)
-        self.speed_text = self._text(26, TEXT, sk.TEXT_ALIGN_RIGHT)
-        self.unit_text = self._text(13, DIM, sk.TEXT_ALIGN_LEFT)
-        self.place_text = self._text(13, DIM, sk.TEXT_ALIGN_RIGHT)
-        self.toast_texts = [self._text(TOAST_SIZE, TEXT) for _ in range(MAX_TOASTS)]
-        self.toasts = []              # [text, colour, seconds left], newest last
-        self.bar = HintBar(ui, self.canvas)
-        self.bar.show(False)
+        self.layer = scifi.Layer(ui, self.canvas)
+        self.toasts = []              # [text, colour, seconds left, seconds shown], newest last
         self.hold_distance = None     # the gun's hold distance last frame
         self.hold_shown = 0.0         # s the hold distance stays shown
         self.fuel_shown = 0.0         # s the jet fuel stays shown
-
-    def _text(self, size, colour, align=sk.TEXT_ALIGN_CENTER):
-        """A text and its shadow (a dark copy behind it, a unit down and right)."""
-        pair = []
-        for c, offset in ((SHADOW, (1.0, 1.2)), (colour, (0.0, 0.0))):
-            text = self.ui.create_text(self.canvas, "", size=size, color=c)
-            self.ui.set_text_align(text, align, sk.TEXT_ALIGN_MIDDLE)
-            self.ui.set_raycast_target(text, False)
-            pair.append((text, offset))
-        return pair
-
-    def _place(self, pair, text, centre, size=(160, 22), colour=None):
-        """`text` in a box of `size` centred at `centre`; None or "" hides
-        it. `colour` sets the text's colour, and the shadow's alpha with it."""
-        text = text or None
-        for k, (element, offset) in enumerate(pair):
-            old = self.texts.get(element)
-            shade = colour if k == 1 else (None if colour is None else SHADOW[:3] + (SHADOW[3] * colour[3],))
-            new = (text, round(centre[0] + offset[0], 1), round(centre[1] + offset[1], 1), size, shade)
-            if new == old:
-                continue
-            if text is None:
-                if old is None or old[0] is not None:
-                    self.ui.set_visible(element, False)
-                self.texts[element] = (None, None, None, None, None)     # placed again when next shown
-                continue
-            else:
-                if old is None or old[0] is None:
-                    self.ui.set_visible(element, True)
-                if old is None or old[0] != text:
-                    self.ui.set_text(element, text)
-                if old is None or old[1:4] != new[1:4]:
-                    self.ui.set_rect(element, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0.5, 0.5),
-                                     position=new[1:3], size=size)
-                if shade is not None and (old is None or old[4] != shade):
-                    self.ui.set_color(element, shade)
-            self.texts[element] = new
+        self.card = None              # (header, title, hint, fraction or None, progress, rows)
 
     def show(self, on):
         self.ui.set_visible(self.canvas, on)
 
-    @staticmethod
-    def _rect(mesh, left, top, width, height, colour):
-        mesh.face([(left, top), (left + width, top), (left + width, top + height), (left, top + height)],
-                  [colour] * 4)
-
-    @staticmethod
-    def _line(mesh, a, b, colour, width=LINE):
-        mesh.segment(a, b, LINE_SHADOW, width + 2.0)
-        mesh.segment(a, b, colour, width)
+    def set_scale(self, s):
+        """The HUD drawn `s` times its size: the canvas laid out for REFERENCE_SIZE / s."""
+        self.ui.set_canvas_scaling(self.canvas, sk.CANVAS_SCALE_WITH_SCREEN,
+                                   reference_size=(REFERENCE_SIZE[0] / s, REFERENCE_SIZE[1] / s))
 
     def toast(self, text, colour=ACCENT):
-        self.toasts.append([text, colour, TOAST_SECONDS])
+        self.toasts.append([text, colour, TOAST_SECONDS, 0.0])
         del self.toasts[:-MAX_TOASTS]
 
-    def update_toasts(self, mesh, dt, width):
+    def objective(self, header, title, hint, fraction, progress, rows):
+        """The objective panel: `header`, the goal's `title` and `hint`
+        (None for none), its progress as a `fraction` (None for no bar) and
+        a text, and rows of (label, value)."""
+        self.card = (header, title, hint, fraction, progress, rows)
+
+    # ── Parts ──
+
+    def draw_crosshair(self, cx, cy, status, held, charge):
+        mesh = self.layer.mesh
+        colour = CROSSHAIR[status]
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            scifi.line(mesh, (cx + dx * CROSSHAIR_GAP, cy + dy * CROSSHAIR_GAP),
+                       (cx + dx * (CROSSHAIR_GAP + CROSSHAIR_TICK), cy + dy * (CROSSHAIR_GAP + CROSSHAIR_TICK)),
+                       colour, 1.5)
+        mesh.face([(cx - 1.0, cy - 1.0), (cx + 1.0, cy - 1.0), (cx + 1.0, cy + 1.0), (cx - 1.0, cy + 1.0)],
+                  [colour] * 4)
+        if status == "can_grab" and not held:
+            g = GRAB_BRACKETS
+            scifi.brackets(mesh, cx - g, cy - g, 2.0 * g, 2.0 * g, 6.0, colour, 1.4)
+        if held:
+            step = 2.0 * math.pi / RING_SEGMENTS
+            lit = int(round(charge * RING_SEGMENTS))
+            for k in range(RING_SEGMENTS):
+                on = k < lit
+                scifi.arc(mesh, cx, cy, RING_RADIUS, ACCENT if on else with_alpha(colour, 0.45),
+                          2.6 if on else 1.4, k * step + 0.03, (k + 1) * step - 0.03, steps=RING_SEGMENTS * 2)
+
+    def draw_compass(self, cx, heading, shown):
+        layer, mesh = self.layer, self.layer.mesh
+        left, base = cx - 0.5 * COMPASS_WIDTH, COMPASS_TOP
+        scifi.panel(mesh, left - 14.0, base - 26.0, COMPASS_WIDTH + 28.0, 32.0, 8.0, scifi.GLASS, None,
+                    ("tl", "tr"), scan=False)
+        scifi.line(mesh, (left, base), (left + COMPASS_WIDTH, base), scifi.CYAN_SOFT, 1.0)
+        for x in (left - 8.0, left + COMPASS_WIDTH + 8.0):
+            scifi.line(mesh, (x, base - 20.0), (x, base + 4.0), scifi.CYAN, 1.6)
+            s = 1.0 if x > cx else -1.0
+            scifi.line(mesh, (x, base - 20.0), (x - s * 5.0, base - 20.0), scifi.CYAN, 1.6)
+            scifi.line(mesh, (x, base + 4.0), (x - s * 5.0, base + 4.0), scifi.CYAN, 1.6)
+        for rel, size, label in compass_ticks(heading):
+            x, _ = compass_x(rel, cx)
+            fade = 1.0 - (abs(rel) / COMPASS_SPAN) ** 3
+            if label:
+                c = ACCENT if label == "N" else (TEXT if len(label) == 1 else DIM)
+                layer.text(label, (x, base - 13.0), 17 if len(label) == 1 else 14, with_alpha(c, fade), "title",
+                           "center")
+                mesh.segment((x, base), (x, base - 4.0), with_alpha(c, fade), 1.6)
+            else:
+                mesh.segment((x, base), (x, base - TICK_LENGTH * size),
+                             with_alpha(scifi.CYAN if size > 0.5 else scifi.CYAN_SOFT, fade), 1.1)
+        box_w, box_h = HEADING_BOX
+        box_top = base + HEADING_GAP
+        scifi.panel(mesh, cx - 0.5 * box_w, box_top, box_w, box_h, 6.0, scifi.GLASS_DEEP, scifi.CYAN,
+                    ("bl", "br"), scan=False)
+        mesh.face([(cx - 5.0, box_top), (cx, box_top - 6.0), (cx + 5.0, box_top)], [scifi.CYAN] * 3)
+        layer.text("%03d" % round(heading % 360.0), (cx, box_top + 0.5 * box_h), 16, TEXT, "mono", "center")
+        rows = label_rows([m[0] if m[1] else None for m in shown])
+        for k, (x, inside, name, metres, c) in enumerate(shown):
+            x = x - REFERENCE_SIZE[0] * 0.5 + cx
+            c = c if inside else with_alpha(c, 0.45)
+            scifi.diamond(mesh, x, base, 5.0, c)
+            if rows[k] is not None:
+                y = base + MARKER_LABEL_TOP + MARKER_ROW * rows[k]
+                text = "%s  %s" % (name.upper(), distance_text(metres))
+                w = measure.width(text, LABEL_SIZE) + 16.0
+                scifi.panel(mesh, x - 0.5 * w, y - 9.0, w, 18.0, 5.0, scifi.GLASS, None, ("tl", "br"), scan=False)
+                layer.text(text, (x, y), LABEL_SIZE, c, "body", "center", shadow=False)
+
+    def draw_card(self):
+        if self.card is None:
+            return
+        header, title, hint, fraction, progress, rows = self.card
+        layer, mesh = self.layer, self.layer.mesh
+        x, y, w = MARGIN, MARGIN, CARD_WIDTH
+        inner = w - 2 * CARD_PAD
+        hint_lines = scifi.wrap(hint, HINT_SIZE, inner) if hint else []
+        height = 34 + 26 + 20 * len(hint_lines) + (26 if progress else 0) + 12 + 22 * len(rows) + 10
+        scifi.panel(mesh, x, y, w, height, 12.0, scifi.GLASS, scifi.CYAN_SOFT, ("tr", "bl"))
+        tab = measure.width(header, 14, "title") + 2 * CARD_PAD
+        mesh.polygon([(x, y), (x + tab + 12, y), (x + tab, y + 24), (x, y + 24)], with_alpha(scifi.CYAN, 0.2))
+        mesh.segment((x, y + 24), (x + tab, y + 24), scifi.CYAN, 1.2)
+        layer.text(header, (x + CARD_PAD, y + 12), 14, scifi.CYAN, "title")
+        cy = y + 34 + 12
+        layer.text(title, (x + CARD_PAD, cy), 20, TEXT, "title")
+        cy += 24
+        for text in hint_lines:
+            layer.text(text, (x + CARD_PAD, cy), HINT_SIZE, DIM)
+            cy += 20
+        if progress:
+            cy += 6
+            text_w = layer.text(progress, (x + w - CARD_PAD, cy), 14, TEXT, "mono", "right")
+            if fraction is not None:
+                scifi.segments(mesh, x + CARD_PAD, cy - 4, inner - text_w - 12, 8, BAR_SEGMENTS, fraction,
+                               scifi.CYAN, scifi.CYAN_FAINT)
+            cy += 20
+        cy += 4
+        scifi.line(mesh, (x + CARD_PAD, cy), (x + w - CARD_PAD, cy), scifi.CYAN_FAINT, 1.0)
+        cy += 16
+        for label, value in rows:
+            layer.text(label.upper(), (x + CARD_PAD, cy), 15, DIM, "title")
+            layer.text(value, (x + w - CARD_PAD, cy), 15, ACCENT, "mono", "right")
+            cy += 22
+
+    def draw_toasts(self, dt, width):
+        layer, mesh = self.layer, self.layer.mesh
         for toast in self.toasts:
             toast[2] -= dt
+            toast[3] += dt
         self.toasts = [t for t in self.toasts if t[2] > 0.0]
-        shown = list(reversed(self.toasts))
-        for k, pair in enumerate(self.toast_texts):
-            if k < len(shown):
-                text, colour, left = shown[k]
-                fade = min(1.0, left / TOAST_FADE)
-                y = TOAST_TOP + TOAST_ROW * k
-                w = measure.width(text, TOAST_SIZE) + 2.0 * TOAST_PAD[0]
-                self._rect(mesh, 0.5 * (width - w), y - 0.5 * TOAST_PAD[1], w, TOAST_PAD[1],
-                           PILL[:3] + (PILL[3] * fade,))
-                self._rect(mesh, 0.5 * (width - w), y - 0.5 * TOAST_PAD[1], 3.0, TOAST_PAD[1],
-                           colour[:3] + (colour[3] * fade,))
-                self._place(pair, text, (0.5 * width, y), (w, 24), (colour[0], colour[1], colour[2], round(fade, 2)))
-            else:
-                self._place(pair, None, (0.0, 0.0))
+        for k, (text, colour, left, age) in enumerate(reversed(self.toasts)):
+            fade = min(1.0, left / TOAST_FADE, age / TOAST_IN)
+            slide = (1.0 - min(1.0, age / TOAST_IN)) ** 2 * TOAST_SLIDE
+            y = TOAST_TOP + TOAST_ROW * k
+            w = measure.width(text, TOAST_SIZE) + 44.0
+            x = 0.5 * (width - w) - slide
+            scifi.panel(mesh, x, y - 0.5 * TOAST_HEIGHT, w, TOAST_HEIGHT, 7.0, with_alpha(scifi.GLASS, fade),
+                        with_alpha(scifi.CYAN_SOFT, fade), ("tl", "br"), scan=False)
+            mesh.face([(x + 6.0, y - 8.0), (x + 9.0, y - 8.0), (x + 9.0, y + 8.0), (x + 6.0, y + 8.0)],
+                      [with_alpha(colour, fade)] * 4)
+            layer.text(text, (x + 22.0, y), TOAST_SIZE, with_alpha(colour, fade))
+
+    def draw_fuel(self, fuel, dt, height):
+        if fuel < 0.999:
+            self.fuel_shown = FUEL_LINGER
+        else:
+            self.fuel_shown = max(0.0, self.fuel_shown - dt)
+        alpha = min(1.0, self.fuel_shown / FUEL_FADE)
+        if alpha <= 0.0:
+            return
+        layer, mesh = self.layer, self.layer.mesh
+        w, h = FUEL_PANEL
+        x, y = MARGIN, height - MARGIN - h
+        scifi.panel(mesh, x, y, w, h, 8.0, with_alpha(scifi.GLASS, alpha), with_alpha(scifi.CYAN_SOFT, alpha),
+                    ("tr", "bl"), scan=False)
+        fill = WARNING if fuel < LOW_FUEL else scifi.CYAN
+        layer.text("JET", (x + 12.0, y + 16.0), 14, with_alpha(DIM, alpha), "title")
+        layer.text("%d %%" % round(100.0 * fuel), (x + w - 12.0, y + 16.0), 14, with_alpha(fill, alpha), "mono",
+                   "right")
+        scifi.segments(mesh, x + 12.0, y + 30.0, w - 24.0, 10.0, FUEL_SEGMENTS, fuel, with_alpha(fill, alpha),
+                       with_alpha(scifi.CYAN_FAINT, alpha))
+
+    def draw_readout(self, speed, body, above, width, height):
+        layer, mesh = self.layer, self.layer.mesh
+        w, h = READOUT_PANEL
+        x, y = width - MARGIN - w, height - MARGIN - h
+        scifi.panel(mesh, x, y, w, h, 10.0, scifi.GLASS, scifi.CYAN_SOFT, ("tl", "br"), scan=False)
+        scifi.brackets(mesh, x - 4.0, y - 4.0, w + 8.0, h + 8.0, 8.0, scifi.CYAN, 1.2)
+        layer.text("M/S", (x + w - 12.0, y + 23.0), 14, DIM, "title", "right")
+        layer.text("%.1f" % speed, (x + w - 46.0, y + 22.0), 28, TEXT, "mono", "right")
+        layer.text("SPD", (x + 12.0, y + 23.0), 14, DIM, "title")
+        place = body.name.upper()
+        layer.text(place, (x + 12.0, y + h - 16.0), 15, scifi.CYAN, "title")
+        if above is not None and above > AIRBORNE:
+            layer.text("ALT " + distance_text(above), (x + w - 12.0, y + h - 16.0), 14, TEXT, "mono", "right")
+
+    def draw_hints(self, shown, width, height):
+        if not shown:
+            return
+        mesh = self.layer.mesh
+        w = scifi.hints_width(shown) + 32.0
+        x, y = 0.5 * (width - w), height - MARGIN - HINT_BAR_HEIGHT
+        scifi.panel(mesh, x, y, w, HINT_BAR_HEIGHT, 8.0, scifi.GLASS, scifi.CYAN_SOFT, ("tl", "br"), scan=False)
+        scifi.caps(self.layer, shown, x + 16.0, y + 0.5 * HINT_BAR_HEIGHT)
 
     def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0, height=None):
         """One frame: `view` (right, up, forward) of the camera, `eye` from
@@ -301,116 +405,36 @@ class Hud:
         width, height_px = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height_px <= 0:
             return
-        mesh = Mesh()
+        self.layer.begin()
         cx, cy = 0.5 * width, 0.5 * height_px
         right, up_view, forward = view
         centre = body.centre()
         up = normalize(sub(eye, centre))
 
-        # Crosshair, ring, status and hints.
         status = gun.status if gun is not None else "idle"
         held = gun is not None and gun.held is not None
-        colour = CROSSHAIR[status]
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            self._line(mesh, (cx + dx * CROSSHAIR_GAP, cy + dy * CROSSHAIR_GAP),
-                       (cx + dx * (CROSSHAIR_GAP + CROSSHAIR_TICK), cy + dy * (CROSSHAIR_GAP + CROSSHAIR_TICK)), colour)
-        self._rect(mesh, cx - 1.0, cy - 1.0, 2.0, 2.0, colour)
         charge = gun.charge if held else 0.0
-        if held:
-            steps = 40
-            for k in range(steps):
-                a0, a1 = 2.0 * math.pi * k / steps, 2.0 * math.pi * (k + 1) / steps
-                lit = (k + 1) / steps <= charge
-                self._line(mesh, (cx + RING_RADIUS * math.sin(a0), cy - RING_RADIUS * math.cos(a0)),
-                           (cx + RING_RADIUS * math.sin(a1), cy - RING_RADIUS * math.cos(a1)),
-                           WARNING if lit else colour, 2.4 if lit else LINE)
+        self.draw_crosshair(cx, cy, status, held, charge)
         distance = gun.hold_distance if held else None
         if distance is not None and self.hold_distance is not None and abs(distance - self.hold_distance) > 1e-6:
             self.hold_shown = HOLD_SECONDS
         self.hold_distance = distance
         self.hold_shown = max(0.0, self.hold_shown - dt)
         text, text_colour = status_text(status, held, charge, distance if self.hold_shown > 0.0 else None)
-        self._place(self.status_text, text, (cx, cy + STATUS_BELOW), (200, 20), text_colour)
-        shown_hints = hints(status, held, charge, pad)
-        self.bar.show(bool(shown_hints))
-        if shown_hints:
-            self.bar.update(shown_hints)
+        if text:
+            w = measure.width(text, 15, "mono") + 18.0
+            scifi.panel(self.layer.mesh, cx - 0.5 * w, cy + STATUS_BELOW - 10.0, w, 20.0, 5.0, scifi.GLASS, None,
+                        ("tl", "br"), scan=False)
+            self.layer.text(text, (cx, cy + STATUS_BELOW), 15, text_colour, "mono", "center", shadow=False)
+        self.draw_hints(hints(status, held, charge, pad), width, height_px)
 
-        # Compass.
         heading = bearing(up, forward)
         if heading is None:
             heading = bearing(up, up_view)
-        left = cx - 0.5 * COMPASS_WIDTH
-        top, bottom = COMPASS_TOP, COMPASS_TOP + COMPASS_HEIGHT
-        self._rect(mesh, left - 8.0, top, COMPASS_WIDTH + 16.0, COMPASS_HEIGHT, PANEL)
-        labels = []
-        for rel, size, label in compass_ticks(heading):
-            x, _ = compass_x(rel, cx)
-            if label:
-                labels.append((label, x))
-            else:
-                self._line(mesh, (x, bottom - 3.0), (x, bottom - 3.0 - TICK_LENGTH * size), TEXT if size > 0.5 else DIM,
-                           1.2)
-        for k, pair in enumerate(self.tick_labels):
-            if k < len(labels):
-                name, x = labels[k]
-                c = ACCENT if name == "N" else (TEXT if len(name) == 1 else DIM)
-                self._place(pair, name, (x, top + 0.5 * COMPASS_HEIGHT), (40, 18), c)
-            else:
-                self._place(pair, None, (0.0, 0.0))
-        box_w, box_h = HEADING_BOX
-        box_top = bottom + HEADING_GAP
-        self._rect(mesh, cx - 0.5 * box_w, box_top, box_w, box_h, PILL)
-        corners = [(cx - 0.5 * box_w, box_top), (cx + 0.5 * box_w, box_top), (cx + 0.5 * box_w, box_top + box_h),
-                   (cx - 0.5 * box_w, box_top + box_h)]
-        for a, b in zip(corners, corners[1:] + corners[:1]):
-            mesh.segment(a, b, DIM, 1.0)
-        self._line(mesh, (cx - 5.0, box_top - 1.0), (cx, box_top - 6.0), TEXT, 1.4)
-        self._line(mesh, (cx + 5.0, box_top - 1.0), (cx, box_top - 6.0), TEXT, 1.4)
-        self._place(self.heading_text, "%03d" % round(heading % 360.0), (cx, box_top + 0.5 * box_h), (box_w, box_h))
-        shown = markers(sub(eye, centre), up, heading,
-                        body.radius, [(n, sub(p, centre), c) for n, p, c in targets])
-        rows = label_rows([m[0] if m[1] else None for m in shown])
-        for k in range(MAX_MARKERS):
-            labelled = k < len(shown) and rows[k] is not None
-            if k < len(shown):
-                x, inside, name, metres, c = shown[k]
-                x = x - REFERENCE_SIZE[0] * 0.5 + cx
-                c = c if inside else (c[0], c[1], c[2], 0.5)
-                mesh.face([(x, bottom - 7.0), (x + 5.0, bottom), (x, bottom + 7.0), (x - 5.0, bottom)], [c] * 4)
-            if labelled:
-                y = bottom + MARKER_LABEL_TOP + MARKER_ROW * rows[k]
-                self._place(self.marker_labels[k], "%s  %s" % (name, distance_text(metres)), (x, y),
-                            (LABEL_GAP + 40, 16), c)
-            else:
-                self._place(self.marker_labels[k], None, (0.0, 0.0))
-
-        # Jet fuel, while not full and a moment after.
-        fuel = player.jet_fuel if player is not None else 1.0
-        if fuel < 0.999:
-            self.fuel_shown = FUEL_LINGER
-        else:
-            self.fuel_shown = max(0.0, self.fuel_shown - dt)
-        alpha = min(1.0, self.fuel_shown / FUEL_FADE)
-        bx, up_from_bottom, bw, bh = FUEL_BAR
-        by = height_px - up_from_bottom
-        if alpha > 0.0:
-            fill = WARNING if fuel < LOW_FUEL else ACCENT
-            self._rect(mesh, bx - 44.0, by - 9.0, bw + 52.0, bh + 18.0, PANEL[:3] + (PANEL[3] * alpha,))
-            self._rect(mesh, bx, by, bw, bh, (1.0, 1.0, 1.0, 0.12 * alpha))
-            self._rect(mesh, bx, by, bw * fuel, bh, fill[:3] + (alpha,))
-            self._place(self.fuel_text, "JET", (bx - 22.0, by + 0.5 * bh), (40, 16), DIM[:3] + (DIM[3] * alpha,))
-        else:
-            self._place(self.fuel_text, None, (0.0, 0.0))
-
-        # Readout.
-        rx = width - 36.0
-        self._place(self.speed_text, "%.1f" % speed, (rx - 118.0, height_px - 64.0), (160, 34))
-        self._place(self.unit_text, "m/s", (rx - 12.0, height_px - 60.0), (40, 18))
-        place = body.name.upper()
-        if height is not None and height > AIRBORNE:
-            place = "%s  ·  %s above the ground" % (place, distance_text(height))
-        self._place(self.place_text, place, (rx - 150.0, height_px - 36.0), (300, 18))
-
-        self.update_toasts(mesh, dt, width)
-        self.ui.set_geometry(self.shapes, mesh.positions, mesh.indices, mesh.colors)
+        shown = markers(sub(eye, centre), up, heading, body.radius, [(n, sub(p, centre), c) for n, p, c in targets])
+        self.draw_compass(cx, heading, shown)
+        self.draw_card()
+        self.draw_fuel(player.jet_fuel if player is not None else 1.0, dt, height_px)
+        self.draw_readout(speed, body, height, width, height_px)
+        self.draw_toasts(dt, width)
+        self.layer.end()

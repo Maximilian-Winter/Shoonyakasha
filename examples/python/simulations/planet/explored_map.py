@@ -18,24 +18,36 @@ the props do (props.Props.probe): only while nothing else uses the probes,
 and it lets them go while `yield_to` is true (a prop needs its ground).
 
 `render` draws a grid around a cell into an RGBA image: heights coloured
-by the body's ramp (LAND, SEA, MOON), shaded by their slope lit from the
-north-west, ore richer than ORE_SHOWN turned towards ORE_COLOUR, and
-cells not measured (or outside the grid) `unexplored`. With a heading, the
+by the body's ramp (LAND, SEA, MOON, shades of cyan), shaded by their
+slope lit from the north-west, brightened along a contour line every
+`contour` metres when given, ore richer than ORE_SHOWN turned towards
+ORE_COLOUR, every other row darkened by SCAN_DARK with `scan`, and cells
+not measured (or outside the grid) `unexplored`. With a heading, the
 image turns so that the heading is up; `circle` leaves the corners
 outside the inscribed circle transparent. `to_pixel` and `from_pixel`
 convert between cells and the image's pixels the same way.
 
-`MapView` shows the minimap at the top right of a screen canvas and, while
-open, the full map in the middle, with markers (name, direction from the
-body's centre, colour) and the player's arrow drawn over them; a marker
-beyond the minimap's edge is held on its rim. The full map stands on a
-panel with its title, the cells explored and the distance to its edge
-above it and the keys that work on it (MAP_HINTS) below; faint lines cross
-it every scale bar's length (`scale_bar`) east and north of the grid's
-middle, and the scale bar is at its bottom left. On it the markers are
-named to their right, starting LABEL_OFFSET from them, the names of
-markers within MERGE_REACH of an earlier one joined to its name (`merge`),
-each name moved down while it would cover one before it (`separate`).
+`MapView` draws in the interface style of scifi.py, on a screen canvas
+laid out for its reference size divided by the HUD's scale
+(`set_scale`). The minimap at the top right is a round scope that turns
+with the view: the image in a ring, range rings, bearing ticks every 30
+degrees with N in amber, a sweep turning once every SWEEP_SECONDS, the
+markers (name, cell coordinates, colour; one beyond the rim held on it)
+and the player's arrow, and its range under it. While open, the full map
+stands in the middle, north up, over a backdrop that dims the view: a
+panel with a title tab naming the body, the map with faint lines every
+scale bar's length (`scale_bar`) east and north of the grid's middle,
+range rings around the player at that length, corner brackets, the scale
+bar at its bottom left and the zoom's segments at its bottom right, and
+the keys that work on it (MAP_HINTS) below. On it the markers are named to
+their right, starting LABEL_OFFSET from them, the names of markers within
+MERGE_REACH of an earlier one joined to its name (`merge`), each name
+moved down while it would cover one before it (`separate`). A column at
+its left gives the body, the player's place east and north of the grid's
+middle, the heading, the cells explored and their area, and the range; a
+column at its right the markers, nearest first, with their distances and
+bearings (`contacts`). The map is FULL_MAP across, less where the canvas
+is too small for it and its columns.
 """
 
 import math
@@ -45,32 +57,42 @@ import numpy as np
 import shoonyakasha as sk
 from shoonyakasha.planet.rocks import ORE_ROCKS
 from shoonyakasha.planet.vec import add, dot, local_frame, normalize, scale, sub
-from shoonyakasha.toolkit.drawing import Mesh
-from shoonyakasha.toolkit.overlay import CAP_HEIGHT, GOLD, KeyCaps, measure
+
+import scifi
+from scifi import measure, with_alpha
 
 CELL = 25.0                      # m between cells
 SIZE = 1024                      # cells along each side
 REVEAL = 250.0                   # m around the player the probes measure
 ORE_SHOWN = ORE_ROCKS
 ORE_COLOUR = np.array([1.0, 0.62, 0.15], dtype=np.float32)
-UNEXPLORED = np.array([0.04, 0.05, 0.07, 0.82], dtype=np.float32)   # on the minimap
-UNEXPLORED_FULL = np.array([0.04, 0.05, 0.07, 1.0], dtype=np.float32)   # on the full map
+UNEXPLORED = np.array([0.01, 0.035, 0.055, 0.82], dtype=np.float32)   # on the minimap
+UNEXPLORED_FULL = np.array([0.008, 0.026, 0.042, 0.97], dtype=np.float32)   # on the full map
 # (height in m, colour) stops, linear between them.
-LAND = [(0.0, (0.30, 0.47, 0.24)), (300.0, (0.42, 0.55, 0.28)), (1_200.0, (0.56, 0.50, 0.34)),
-        (2_500.0, (0.55, 0.53, 0.50)), (4_000.0, (0.93, 0.94, 0.96))]
-SEA = [(-2_000.0, (0.05, 0.12, 0.30)), (-200.0, (0.12, 0.30, 0.52)), (0.0, (0.25, 0.48, 0.66))]
-MOON = [(-2_000.0, (0.22, 0.22, 0.24)), (0.0, (0.48, 0.48, 0.50)), (1_500.0, (0.78, 0.78, 0.80))]
+LAND = [(0.0, (0.07, 0.30, 0.28)), (300.0, (0.12, 0.42, 0.40)), (1_200.0, (0.22, 0.56, 0.55)),
+        (2_500.0, (0.42, 0.72, 0.74)), (4_000.0, (0.86, 0.97, 1.0))]
+SEA = [(-2_000.0, (0.01, 0.04, 0.12)), (-200.0, (0.03, 0.11, 0.25)), (0.0, (0.06, 0.2, 0.38))]
+MOON = [(-2_000.0, (0.12, 0.16, 0.2)), (0.0, (0.3, 0.38, 0.44)), (1_500.0, (0.66, 0.76, 0.82))]
 LIGHT = normalize((-1.0, 1.0, 1.4))  # east, north, up: from the north-west, above
 SHADE_RELIEF = 3.0               # the slopes exaggerated this much for the shading
+CONTOUR_LIGHT = np.array([0.1, 0.22, 0.24], dtype=np.float32)   # added along a contour line
+SCAN_DARK = 0.88                 # the darkened rows' share of their colour
 MINIMAP = 220                    # canvas units across
 MINIMAP_PIXELS = 110             # the minimap image's pixels across, stretched to MINIMAP
 MINIMAP_RANGE = 400.0            # m from the centre to the minimap's rim
-MINIMAP_MARGIN = 24.0
+MINIMAP_TOP = 40.0               # canvas units from the top
+MINIMAP_MARGIN = 24.0            # canvas units from the right
+MINIMAP_CONTOUR = 50.0           # m between the minimap's contour lines
 MINIMAP_INTERVAL = 0.1           # s between the minimap's redraws
-FULL_MAP = 720                   # canvas units across
-FULL_PIXELS = 360                # the full map image's pixels across, stretched to FULL_MAP
-FULL_PAD = 12                    # canvas units of panel around the full map
-FULL_HEADER, FULL_FOOTER = 34, 40   # the panel's bands above and below it
+SWEEP_SECONDS = 4.0
+SWEEP_WIDTH = 0.8                # radians the sweep's trail covers
+FULL_MAP = 720                   # canvas units across, at most
+FULL_PIXELS = 360                # the full map image's pixels across, stretched to its size
+FULL_CONTOURS = {500.0: 25.0, 1_000.0: 50.0, 2_000.0: 100.0, 4_000.0: 200.0, 8_000.0: 400.0}   # m, by range
+FULL_PAD = 14                    # canvas units of panel around the full map
+FULL_HEADER, FULL_FOOTER = 40, 46   # the panel's bands above and below it
+COLUMN = 250                     # canvas units across each column beside it
+COLUMN_GAP = 18
 MAP_HINTS = [(("Wheel",), "Zoom"), (("LMB",), "Set the waypoint"), (("RMB",), "Clear it"),
              (("M", "Esc"), "Close")]
 SCALE_STEPS = (25.0, 50.0, 100.0, 200.0, 250.0, 500.0, 1_000.0, 2_000.0, 2_500.0, 5_000.0)   # m
@@ -78,16 +100,14 @@ MERGE_REACH = 14.0               # canvas units within which the full map's mark
 LABEL_OFFSET = 12.0              # canvas units from a marker on the full map to the left of its label
 FULL_RANGES = (500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0)   # m from the centre to the edge, by zoom
 FULL_INTERVAL = 0.2              # s between the full map's redraws
-MAX_LABELS = 12
-LABEL_WIDTH, LABEL_HEIGHT = 70.0, 15.0   # canvas units a label keeps clear of earlier ones
-TEXT = (0.92, 0.96, 1.0, 0.95)
-SHADOW = (0.0, 0.0, 0.0, 0.6)
-PANEL = (0.02, 0.024, 0.03, 0.92)
-HAIRLINE = (0.95, 0.85, 0.55, 0.75)
-MUTED = (0.6, 0.63, 0.68, 1.0)
-RIM = (0.95, 0.85, 0.55, 0.7)     # the minimap's edge
-GRID_LINE = (1.0, 1.0, 1.0, 0.07)
-PLAYER = (1.0, 1.0, 1.0, 1.0)
+MAX_CONTACTS = 9
+LABEL_SIZE = 15
+LABEL_WIDTH, LABEL_HEIGHT = 70.0, 16.0   # canvas units a label keeps clear of earlier ones
+TEXT = scifi.WHITE
+MUTED = scifi.MUTED
+GRID_LINE = (0.38, 0.88, 1.0, 0.1)
+RING_LINE = (0.38, 0.88, 1.0, 0.22)
+PLAYER = (0.9, 1.0, 1.0, 1.0)
 
 
 def ramp(stops, heights):
@@ -233,7 +253,8 @@ def from_pixel(pixel, centre, metres, pixels, heading=None, cell=CELL):
     return (centre[0] + e / cell, centre[1] + n / cell)
 
 
-def render(grid, centre, metres, pixels, heading=None, circle=False, unexplored=UNEXPLORED):
+def render(grid, centre, metres, pixels, heading=None, circle=False, unexplored=UNEXPLORED, contour=None,
+           scan=False):
     """An RGBA uint8 image (pixels x pixels x 4) of `grid` around cell
     coordinates `centre` (see the module's docstring)."""
     k = (np.arange(pixels, dtype=np.float32) + 0.5 - 0.5 * pixels) * (metres / (0.5 * pixels))
@@ -261,11 +282,19 @@ def render(grid, centre, metres, pixels, heading=None, circle=False, unexplored=
     norm = np.sqrt(nx * nx + ny * ny + nz * nz)
     light = (nx * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2]) / norm
     rgb = rgb * np.clip(0.45 + 0.75 * light, 0.3, 1.25)[..., None]
+    if contour:
+        band = np.floor(ground / contour)
+        crossed = np.zeros(band.shape, dtype=bool)
+        for d in (de, dn):
+            crossed |= np.floor((ground + d) / contour) != band
+        rgb = rgb + CONTOUR_LIGHT * crossed[..., None]
     ore = np.where(known, grid.ores[cj, ci], 0.0)
     t = np.clip((ore - ORE_SHOWN) / ORE_SHOWN, 0.0, 1.0)[..., None] * (ore >= ORE_SHOWN)[..., None]
     rgb = rgb * (1.0 - 0.7 * t) + ORE_COLOUR * (0.7 * t)
     rgba = np.concatenate([np.clip(rgb, 0.0, 1.0), np.ones(rgb.shape[:2] + (1,), dtype=np.float32)], axis=-1)
     rgba = np.where(known[..., None], rgba, unexplored)
+    if scan:
+        rgba[1::2, :, :3] *= SCAN_DARK
     if circle:
         rgba[..., 3] = np.where(x * x + y * y <= metres * metres, rgba[..., 3], 0.0)
     return np.ascontiguousarray((rgba * 255.0 + 0.5).astype(np.uint8))
@@ -306,80 +335,56 @@ def scale_bar(metres, pixels):
     return step, step * per
 
 
+def contacts(markers, at, cell=CELL):
+    """(name, metres, bearing in degrees, colour) of `markers` (name, cell
+    coordinates, colour) from the cell coordinates `at`, nearest first."""
+    found = []
+    for name, where, colour in markers:
+        e, n = (where[0] - at[0]) * cell, (where[1] - at[1]) * cell
+        found.append((name, math.hypot(e, n), math.degrees(math.atan2(e, n)) % 360.0, colour))
+    found.sort(key=lambda c: c[1])
+    return found
+
+
+def full_size(width, height):
+    """The full map's size in canvas units on a canvas `width` x `height`."""
+    room_h = height - 2 * FULL_PAD - FULL_HEADER - FULL_FOOTER - 24
+    room_w = width - 2 * (COLUMN + COLUMN_GAP) - 2 * FULL_PAD - 24
+    return max(200.0, min(float(FULL_MAP), room_h, room_w))
+
+
 class MapView:
     def __init__(self, engine, reference_size=(1600, 900)):
         ui = engine.ui
         self.ui = ui
+        self.reference_size = reference_size
         self.canvas = ui.create_canvas(reference_size=reference_size, sort_order=1)
-        width, height = FULL_MAP + 2 * FULL_PAD, FULL_MAP + 2 * FULL_PAD + FULL_HEADER + FULL_FOOTER
-        self.full_panel = ui.create_panel(self.canvas, size=(width, height), color=PANEL)
-        hairline = ui.create_panel(self.full_panel, size=(2, height), color=HAIRLINE)
-        ui.set_rect(hairline, anchor_min=(0, 0), anchor_max=(0, 1), pivot=(0, 0), position=(0, 0), size=(2, 0))
-        heading = ui.create_text(self.full_panel, "MAP", size=18, color=GOLD)
-        self.info = ui.create_text(self.full_panel, "", size=14, color=MUTED)
-        for element, align in ((heading, sk.TEXT_ALIGN_LEFT), (self.info, sk.TEXT_ALIGN_RIGHT)):
-            ui.set_rect(element, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0), position=(FULL_PAD, 6),
-                        size=(FULL_MAP, FULL_HEADER))
-            ui.set_text_align(element, align, sk.TEXT_ALIGN_MIDDLE)
-        KeyCaps(ui, self.full_panel).show(MAP_HINTS, FULL_PAD,
-                                          height - FULL_FOOTER + 0.5 * (FULL_FOOTER - CAP_HEIGHT) - 4, MUTED)
-        self.info_text = None
+        self.back = scifi.Layer(ui, self.canvas)
         self.full_image = ui.create_image(self.canvas, size=(FULL_MAP, FULL_MAP))
         self.mini_image = ui.create_image(self.canvas, size=(MINIMAP, MINIMAP))
-        self.overlay = ui.create_element(self.canvas)
-        ui.set_rect(self.overlay, anchor_min=(0, 0), anchor_max=(1, 1), pivot=(0, 0), position=(0, 0), size=(0, 0))
-        for element in (self.full_panel, self.full_image, self.mini_image, self.overlay):
+        for element in (self.full_image, self.mini_image):
             ui.set_raycast_target(element, False)
-        self.labels = [self._text(13) for _ in range(MAX_LABELS)]
-        self.scale_text = self._text(12)
-        self.texts = {}
+        self.front = scifi.Layer(ui, self.canvas)
         self.open = False
         self.zoom = 0                 # index into FULL_RANGES
         self.since = {"mini": 1e9, "full": 1e9}
-        self.full_rect = (0.0, 0.0)   # the full map's top left, canvas units
+        self.clock = 0.0
+        self.full_rect = (0.0, 0.0, float(FULL_MAP))   # the full map's left, top and size, canvas units
         self.full_centre = None       # the cell coordinates at its middle, last drawn
         self.set_open(False)
-
-    def _text(self, size):
-        pair = []
-        for c, offset in ((SHADOW, (1.0, 1.2)), (TEXT, (0.0, 0.0))):
-            text = self.ui.create_text(self.canvas, "", size=size, color=c)
-            self.ui.set_text_align(text, sk.TEXT_ALIGN_CENTER, sk.TEXT_ALIGN_MIDDLE)
-            self.ui.set_raycast_target(text, False)
-            pair.append((text, offset))
-        return pair
-
-    def _place(self, pair, text, centre, size=(200, 18), colour=None):
-        """`text` centred at `centre`; None hides it."""
-        for k, (element, offset) in enumerate(pair):
-            old = self.texts.get(element)
-            if text is None:
-                if old is None or old[0] is not None:
-                    self.ui.set_visible(element, False)
-                self.texts[element] = (None, None, None)
-                continue
-            new = (text, (round(centre[0] + offset[0], 1), round(centre[1] + offset[1], 1)),
-                   colour if k == 1 else None)
-            if new == old:
-                continue
-            if old is None or old[0] is None:
-                self.ui.set_visible(element, True)
-            if old is None or old[0] != text:
-                self.ui.set_text(element, text)
-            if old is None or old[1] != new[1]:
-                self.ui.set_rect(element, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0.5, 0.5),
-                                 position=new[1], size=size)
-            if k == 1 and colour is not None and (old is None or old[2] != colour):
-                self.ui.set_color(element, colour)
-            self.texts[element] = new
 
     def show(self, on):
         self.ui.set_visible(self.canvas, on)
 
+    def set_scale(self, s):
+        """Drawn `s` times its size: the canvas laid out for its reference size / s."""
+        self.ui.set_canvas_scaling(self.canvas, sk.CANVAS_SCALE_WITH_SCREEN,
+                                   reference_size=(self.reference_size[0] / s, self.reference_size[1] / s))
+
     def set_open(self, open_):
         self.open = open_
-        self.ui.set_visible(self.full_panel, open_)
         self.ui.set_visible(self.full_image, open_)
+        self.ui.set_visible(self.mini_image, not open_)
         self.since["full"] = 1e9
 
     def zoom_by(self, steps):
@@ -390,10 +395,11 @@ class MapView:
         """The cell coordinates under a point of the canvas on the open full map, or None."""
         if not self.open or self.full_centre is None:
             return None
-        x, y = canvas_point[0] - self.full_rect[0], canvas_point[1] - self.full_rect[1]
-        if not (0.0 <= x <= FULL_MAP and 0.0 <= y <= FULL_MAP):
+        left, top, size = self.full_rect
+        x, y = canvas_point[0] - left, canvas_point[1] - top
+        if not (0.0 <= x <= size and 0.0 <= y <= size):
             return None
-        return from_pixel((x, y), self.full_centre, FULL_RANGES[self.zoom], FULL_MAP)
+        return from_pixel((x, y), self.full_centre, FULL_RANGES[self.zoom], size)
 
     @staticmethod
     def _arrow(mesh, x, y, angle, size, colour):
@@ -404,30 +410,195 @@ class MapView:
             ax, ay = ax * (1.0 + grow), ay * (1.0 + grow)
             return (x + ax * c - ay * s, y + ax * s + ay * c)
         shape = ((0.0, -size), (0.6 * size, 0.7 * size), (0.0, 0.35 * size), (-0.6 * size, 0.7 * size))
-        mesh.face([p(ax, ay, 0.3) for ax, ay in shape], [SHADOW] * 4)
+        mesh.face([p(ax, ay, 0.35) for ax, ay in shape], [with_alpha(scifi.CYAN, 0.35)] * 4)
         mesh.face([p(ax, ay) for ax, ay in shape], [colour] * 4)
 
-    @staticmethod
-    def _diamond(mesh, x, y, size, colour):
-        r = size + 1.5
-        mesh.face([(x - r, y), (x, y - r), (x + r, y), (x, y + r)], [SHADOW] * 4)
-        mesh.face([(x - size, y), (x, y - size), (x + size, y), (x, y + size)], [colour] * 4)
+    # ── The minimap ──
 
-    def _grid_lines(self, mesh, grid, centre, metres, step, left, top):
+    def draw_minimap(self, dt, grid, at, heading, markers, width):
+        back, front = self.back.mesh, self.front.mesh
+        left, top = width - MINIMAP_MARGIN - MINIMAP, MINIMAP_TOP
+        self.since["mini"] += dt
+        if self.since["mini"] >= MINIMAP_INTERVAL:
+            self.since["mini"] = 0.0
+            self.ui.set_rect(self.mini_image, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0),
+                             position=(left, top), size=(MINIMAP, MINIMAP))
+            self.ui.set_texture_data(self.mini_image, render(grid, at, MINIMAP_RANGE, MINIMAP_PIXELS, heading,
+                                                             circle=True, contour=MINIMAP_CONTOUR))
+        r = 0.5 * MINIMAP
+        cx, cy = left + r, top + r
+        disc = [(cx + (r + 8.0) * math.sin(a), cy - (r + 8.0) * math.cos(a))
+                for a in np.linspace(0.0, 2.0 * math.pi, 64, endpoint=False)]
+        back.polygon(disc, scifi.GLASS_DEEP)
+        scifi.arc(front, cx, cy, r, scifi.CYAN, 1.6)
+        scifi.arc(front, cx, cy, r + 8.0, scifi.CYAN_SOFT, 1.0)
+        scifi.arc(front, cx, cy, 0.5 * r, RING_LINE, 1.0)
+        front.segment((cx - r, cy), (cx + r, cy), GRID_LINE, 1.0)
+        front.segment((cx, cy - r), (cx, cy + r), GRID_LINE, 1.0)
+        # The sweep: a fan behind its leading edge, fading to nothing.
+        lead = 2.0 * math.pi * (self.clock / SWEEP_SECONDS % 1.0)
+        steps = 16
+        for k in range(steps):
+            a0, a1 = lead - SWEEP_WIDTH * (k + 1) / steps, lead - SWEEP_WIDTH * k / steps
+            c0, c1 = with_alpha(scifi.CYAN, 0.16 * (1.0 - (k + 1) / steps)), with_alpha(scifi.CYAN, 0.16 * (1.0 - k / steps))
+            front.face([(cx, cy), (cx + r * math.sin(a0), cy - r * math.cos(a0)),
+                        (cx + r * math.sin(a1), cy - r * math.cos(a1))], [c1, c0, c1])
+        front.segment((cx, cy), (cx + r * math.sin(lead), cy - r * math.cos(lead)), with_alpha(scifi.CYAN, 0.5), 1.2)
+        for b in range(0, 360, 30):
+            a = math.radians(b - heading)
+            inner, outer = r + 2.0, r + (8.0 if b % 90 == 0 else 5.0)
+            front.segment((cx + inner * math.sin(a), cy - inner * math.cos(a)),
+                          (cx + outer * math.sin(a), cy - outer * math.cos(a)), scifi.CYAN, 1.4)
+        a = math.radians(-heading)
+        self.front.text("N", (cx + (r + 18.0) * math.sin(a), cy - (r + 18.0) * math.cos(a)), 16, scifi.AMBER,
+                        "title", "center")
+        for name, where, colour in markers:
+            px, py = to_pixel(where, at, MINIMAP_RANGE, MINIMAP, heading)
+            dx, dy = px - r, py - r
+            d = math.hypot(dx, dy)
+            if d > r - 6.0:
+                dx, dy = dx * (r - 6.0) / d, dy * (r - 6.0) / d
+            scifi.diamond(front, cx + dx, cy + dy, 4.0, colour)
+        self._arrow(front, cx, cy, 0.0, 8.0, PLAYER)
+        tab_w = 120.0
+        scifi.panel(back, cx - 0.5 * tab_w, top + MINIMAP + 14.0, tab_w, 20.0, 6.0, scifi.GLASS, scifi.CYAN_SOFT,
+                    ("bl", "br"), scan=False)
+        self.front.text("RANGE  " + distance_label(MINIMAP_RANGE).upper(), (cx, top + MINIMAP + 24.0), 13, MUTED,
+                        "mono", "center")
+
+    # ── The full map ──
+
+    def draw_full(self, dt, grid, at, heading, markers, width, height):
+        back, front, text = self.back.mesh, self.front.mesh, self.front.text
+        size = full_size(width, height)
+        metres = FULL_RANGES[self.zoom]
+        left = 0.5 * (width - size)
+        top = 0.5 * (height - size - FULL_HEADER - FULL_FOOTER) + FULL_HEADER
+        self.full_rect = (left, top, size)
+        back.face([(0, 0), (width, 0), (width, height), (0, height)], [scifi.BACKDROP] * 4)
+        scifi.scanlines(back, 0.0, 0.0, width, height, with_alpha(scifi.SCAN, 0.6), 4.0)
+        pl, pt = left - FULL_PAD, top - FULL_PAD - FULL_HEADER
+        pw, ph = size + 2 * FULL_PAD, size + 2 * FULL_PAD + FULL_HEADER + FULL_FOOTER
+        scifi.panel(back, pl, pt, pw, ph, 16.0, scifi.GLASS_DEEP, scifi.CYAN_SOFT, ("tr", "bl"))
+        title = "SURVEY MAP  //  %s" % grid.body.name.upper()
+        tab = measure.width(title, 17, "title") + 36.0
+        back.polygon([(pl, pt), (pl + tab + 18.0, pt), (pl + tab, pt + 28.0), (pl, pt + 28.0)],
+                     with_alpha(scifi.CYAN, 0.18))
+        front.segment((pl, pt + 28.0), (pl + tab, pt + 28.0), scifi.CYAN, 1.2)
+        text(title, (pl + 16.0, pt + 14.0), 17, scifi.CYAN, "title")
+        text("NORTH UP", (pl + pw - 22.0, pt + 14.0), 14, MUTED, "title", "right")
+
+        self.since["full"] += dt
+        if self.since["full"] >= FULL_INTERVAL:
+            self.since["full"] = 0.0
+            self.full_centre = at
+            self.ui.set_rect(self.full_image, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0),
+                             position=(left, top), size=(size, size))
+            self.ui.set_texture_data(self.full_image, render(grid, at, metres, FULL_PIXELS, unexplored=UNEXPLORED_FULL,
+                                                             contour=FULL_CONTOURS.get(metres), scan=True))
+        centre = self.full_centre or at
+        step, bar = scale_bar(metres, size)
+        self._grid_lines(front, grid, centre, metres, step, left, top, size)
+        px, py = to_pixel(at, centre, metres, size)
+        player = (left + px, top + py)
+        per = size / (2.0 * metres)
+        for k in range(1, int(metres / step) + 1):
+            ring = k * step * per
+            if ring < 0.5 * size - 2.0:
+                scifi.arc(front, player[0], player[1], ring, RING_LINE, 1.0, steps=72)
+        scifi.brackets(front, left - 4.0, top - 4.0, size + 8.0, size + 8.0, 22.0, scifi.CYAN, 1.8)
+        found = []
+        for name, where, colour in markers:
+            mx, my = to_pixel(where, centre, metres, size)
+            if 0.0 <= mx <= size and 0.0 <= my <= size:
+                x, y = left + mx, top + my
+                scifi.diamond(front, x, y, 6.0, colour)
+                found.append((name, (x, y), colour))
+        labels = [(t.upper(), (x + LABEL_OFFSET, y), c) for t, (x, y), c in merge(found)]
+        for t, (x, y), c in separate(labels):
+            text(t, (x, y), LABEL_SIZE, c, "title")
+        self._arrow(front, player[0], player[1], math.radians(heading), 10.0, PLAYER)
+
+        bx, by = left + 18.0, top + size - 20.0
+        self._scale_bar(front, bx, by, bar)
+        text(distance_label(step).upper(), (bx + 0.5 * bar, by - 12.0), 13, TEXT, "mono", "center")
+        zx, zy = left + size - 18.0 - 110.0, top + size - 24.0
+        text("ZOOM", (zx - 8.0, zy + 4.0), 13, MUTED, "title", "right")
+        scifi.segments(front, zx, zy, 110.0, 8.0, len(FULL_RANGES), (len(FULL_RANGES) - self.zoom) / len(FULL_RANGES),
+                       scifi.CYAN, scifi.CYAN_FAINT, 3.0)
+        hints_w = scifi.hints_width(MAP_HINTS)
+        scifi.caps(self.front, MAP_HINTS, 0.5 * (width - hints_w), top + size + FULL_PAD + 0.5 * FULL_FOOTER, MUTED)
+
+        # The columns.
+        column_top = pt
+        lx = pl - COLUMN_GAP - COLUMN
+        rows = [("BODY", grid.body.name.upper()),
+                ("EAST", distance_label((at[0] - grid.half) * grid.cell)),
+                ("NORTH", distance_label((at[1] - grid.half) * grid.cell)),
+                ("HEADING", "%03d" % round(heading % 360.0)),
+                ("EXPLORED", format(grid.measured, ",")),
+                ("AREA", "%.2f km2" % (grid.measured * grid.cell * grid.cell / 1e6)),
+                ("RANGE", distance_label(metres))]
+        self._column(lx, column_top, "TELEMETRY", [(label, value, TEXT) for label, value in rows])
+        rx = pl + pw + COLUMN_GAP
+        listed = contacts(markers, at, grid.cell)[:MAX_CONTACTS]
+        self._contacts(rx, column_top, listed)
+
+    def _column(self, x, y, title, rows):
+        back, text = self.back.mesh, self.front.text
+        height = 44.0 + 26.0 * len(rows) + 10.0
+        scifi.panel(back, x, y, COLUMN, height, 10.0, scifi.GLASS_DEEP, scifi.CYAN_SOFT, ("tl", "br"))
+        text(title, (x + 14.0, y + 18.0), 15, scifi.CYAN, "title")
+        self.front.mesh.segment((x + 14.0, y + 32.0), (x + COLUMN - 14.0, y + 32.0), scifi.CYAN_FAINT, 1.0)
+        cy = y + 50.0
+        for label, value, colour in rows:
+            text(label, (x + 14.0, cy), 13, MUTED, "title")
+            text(value, (x + COLUMN - 14.0, cy), 14, colour, "mono", "right")
+            cy += 26.0
+
+    def _contacts(self, x, y, listed):
+        back, front, text = self.back.mesh, self.front.mesh, self.front.text
+        height = 44.0 + 40.0 * max(1, len(listed)) + 10.0
+        scifi.panel(back, x, y, COLUMN, height, 10.0, scifi.GLASS_DEEP, scifi.CYAN_SOFT, ("tl", "br"))
+        text("CONTACTS", (x + 14.0, y + 18.0), 15, scifi.CYAN, "title")
+        front.segment((x + 14.0, y + 32.0), (x + COLUMN - 14.0, y + 32.0), scifi.CYAN_FAINT, 1.0)
+        cy = y + 52.0
+        if not listed:
+            text("None in range", (x + 14.0, cy), 14, MUTED)
+        for name, metres, angle, colour in listed:
+            scifi.diamond(front, x + 19.0, cy, 4.0, colour)
+            text(name.upper(), (x + 30.0, cy), 15, colour, "title")
+            text(distance_label_short(metres), (x + COLUMN - 14.0, cy), 14, TEXT, "mono", "right")
+            text("BRG %03d" % round(angle), (x + 30.0, cy + 17.0), 12, MUTED, "mono")
+            cy += 40.0
+
+    def _grid_lines(self, mesh, grid, centre, metres, step, left, top, size):
         """Faint lines every `step` metres east and north of the grid's
         middle across the full map."""
-        per = FULL_MAP / (2.0 * metres)
+        per = size / (2.0 * metres)
         for axis in (0, 1):
             offset = (centre[axis] - grid.half) * grid.cell        # m east (north) of the grid's middle
             first = math.ceil((offset - metres) / step)
             for k in range(first, int(math.floor((offset + metres) / step)) + 1):
                 d = (k * step - offset) * per
                 if axis == 0:
-                    x = left + 0.5 * FULL_MAP + d
-                    mesh.segment((x, top), (x, top + FULL_MAP), GRID_LINE, 1.0)
+                    x = left + 0.5 * size + d
+                    mesh.segment((x, top), (x, top + size), GRID_LINE, 1.0)
+                    mesh.segment((x, top), (x, top + 6.0), scifi.CYAN_SOFT, 1.0)
+                    mesh.segment((x, top + size - 6.0), (x, top + size), scifi.CYAN_SOFT, 1.0)
                 else:
-                    y = top + 0.5 * FULL_MAP - d
-                    mesh.segment((left, y), (left + FULL_MAP, y), GRID_LINE, 1.0)
+                    y = top + 0.5 * size - d
+                    mesh.segment((left, y), (left + size, y), GRID_LINE, 1.0)
+                    mesh.segment((left, y), (left + 6.0, y), scifi.CYAN_SOFT, 1.0)
+                    mesh.segment((left + size - 6.0, y), (left + size, y), scifi.CYAN_SOFT, 1.0)
+
+    @staticmethod
+    def _scale_bar(mesh, x, y, length_):
+        """The scale bar: a line `length_` long from (x, y) with a tick at each end."""
+        for colour, w in ((scifi.SHADOW, 4.0), (TEXT, 2.0)):
+            mesh.segment((x, y), (x + length_, y), colour, w)
+            mesh.segment((x, y - 5.0), (x, y + 1.0), colour, w)
+            mesh.segment((x + length_, y - 5.0), (x + length_, y + 1.0), colour, w)
 
     def update(self, dt, grid, at, heading, markers):
         """One frame: `grid` the body's, `at` the player's cell coordinates,
@@ -436,98 +607,20 @@ class MapView:
         width, height = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height <= 0 or grid is None or at is None:
             return
-        mesh = Mesh()
-        labels = []
-        # The minimap, turning with the view.
-        left, top = width - MINIMAP_MARGIN - MINIMAP, MINIMAP_MARGIN + 40.0
-        self.since["mini"] += dt
-        if self.since["mini"] >= MINIMAP_INTERVAL:
-            self.since["mini"] = 0.0
-            self.ui.set_rect(self.mini_image, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0),
-                             position=(left, top), size=(MINIMAP, MINIMAP))
-            self.ui.set_texture_data(self.mini_image,
-                                     render(grid, at, MINIMAP_RANGE, MINIMAP_PIXELS, heading, circle=True))
-        r = 0.5 * MINIMAP
-        cx, cy = left + r, top + r
-        steps = 64
-        for k in range(steps):
-            a0, a1 = 2.0 * math.pi * k / steps, 2.0 * math.pi * (k + 1) / steps
-            p0 = (math.sin(a0), -math.cos(a0))
-            p1 = (math.sin(a1), -math.cos(a1))
-            mesh.segment((cx + (r + 1.5) * p0[0], cy + (r + 1.5) * p0[1]),
-                         (cx + (r + 1.5) * p1[0], cy + (r + 1.5) * p1[1]), SHADOW, 4.0)
-            mesh.segment((cx + r * p0[0], cy + r * p0[1]), (cx + r * p1[0], cy + r * p1[1]), RIM, 1.5)
-        for name, where, colour in markers:
-            px, py = to_pixel(where, at, MINIMAP_RANGE, MINIMAP, heading)
-            dx, dy = px - r, py - r
-            d = math.hypot(dx, dy)
-            if d > r - 6.0:
-                dx, dy = dx * (r - 6.0) / d, dy * (r - 6.0) / d
-            self._diamond(mesh, cx + dx, cy + dy, 4.0, colour)
-        nx, ny = to_pixel((at[0], at[1] + 1.0), at, 1.0, 2.0, heading, cell=1.0)
-        n_angle = math.atan2(nx - 1.0, -(ny - 1.0))
-        north = (cx + (r + 11.0) * math.sin(n_angle), cy - (r + 11.0) * math.cos(n_angle))
-        mesh.face([(north[0] - 8.0, north[1]), (north[0], north[1] - 8.0), (north[0] + 8.0, north[1]),
-                   (north[0], north[1] + 8.0)], [PANEL] * 4)
-        labels.append(("N", north, GOLD))
-        self._arrow(mesh, cx, cy, 0.0, 8.0, PLAYER)
-
-        # The full map, north up.
+        self.clock += dt
+        self.back.begin()
+        self.front.begin()
         if self.open:
-            metres = FULL_RANGES[self.zoom]
-            left = 0.5 * (width - FULL_MAP)
-            top = 0.5 * (height - FULL_MAP - FULL_HEADER - FULL_FOOTER) + FULL_HEADER
-            self.full_rect = (left, top)
-            self.ui.set_rect(self.full_panel, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0),
-                             position=(left - FULL_PAD, top - FULL_PAD - FULL_HEADER),
-                             size=(FULL_MAP + 2 * FULL_PAD, FULL_MAP + 2 * FULL_PAD + FULL_HEADER + FULL_FOOTER))
-            self.since["full"] += dt
-            if self.since["full"] >= FULL_INTERVAL:
-                self.since["full"] = 0.0
-                self.full_centre = at
-                self.ui.set_rect(self.full_image, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0),
-                                 position=(left, top), size=(FULL_MAP, FULL_MAP))
-                self.ui.set_texture_data(self.full_image,
-                                         render(grid, at, metres, FULL_PIXELS, unexplored=UNEXPLORED_FULL))
-            centre = self.full_centre or at
-            step, bar = scale_bar(metres, FULL_MAP)
-            self._grid_lines(mesh, grid, centre, metres, step, left, top)
-            found = []
-            for name, where, colour in markers:
-                px, py = to_pixel(where, centre, metres, FULL_MAP)
-                if 0.0 <= px <= FULL_MAP and 0.0 <= py <= FULL_MAP:
-                    x, y = left + px, top + py
-                    self._diamond(mesh, x, y, 6.0, colour)
-                    found.append((name, (x, y), colour))
-            for text, (x, y), colour in merge(found):
-                labels.append((text, (x + LABEL_OFFSET + 0.5 * measure.width(text, 13), y), colour))
-            px, py = to_pixel(at, centre, metres, FULL_MAP)
-            self._arrow(mesh, left + px, top + py, math.radians(heading), 10.0, PLAYER)
-            bx, by = left + 16.0, top + FULL_MAP - 18.0
-            self._scale_bar(mesh, bx, by, bar)
-            self._place(self.scale_text, distance_label(step), (bx + 0.5 * bar, by - 12.0), (120, 16))
-            info = "%s cells explored     %s to the edge" % (format(grid.measured, ","), distance_label(metres))
-            if info != self.info_text:
-                self.ui.set_text(self.info, info)
-                self.info_text = info
+            self.draw_full(dt, grid, at, heading, markers, width, height)
         else:
-            self._place(self.scale_text, None, (0.0, 0.0))
-        labels = separate(labels)
-        for k, pair in enumerate(self.labels):
-            if k < len(labels):
-                self._place(pair, labels[k][0], labels[k][1], colour=labels[k][2])
-            else:
-                self._place(pair, None, (0.0, 0.0))
-        self.ui.set_geometry(self.overlay, mesh.positions, mesh.indices, mesh.colors)
-
-    @staticmethod
-    def _scale_bar(mesh, x, y, length_):
-        """The scale bar: a line `length_` long from (x, y) with a tick at each end."""
-        for colour, w in ((SHADOW, 4.0), (TEXT, 2.0)):
-            mesh.segment((x, y), (x + length_, y), colour, w)
-            mesh.segment((x, y - 5.0), (x, y + 1.0), colour, w)
-            mesh.segment((x + length_, y - 5.0), (x + length_, y + 1.0), colour, w)
+            self.draw_minimap(dt, grid, at, heading, markers, width)
+        self.back.end()
+        self.front.end()
 
 
 def distance_label(metres):
-    return "%.0f m" % metres if metres < 1_000.0 else "%g km" % (metres / 1_000.0)
+    return "%.0f m" % metres if abs(metres) < 1_000.0 else "%g km" % round(metres / 1_000.0, 2)
+
+
+def distance_label_short(metres):
+    return "%.0f m" % metres if metres < 1_000.0 else "%.1f km" % (metres / 1_000.0)
