@@ -1,0 +1,65 @@
+#version 450
+//
+// The HeightGrid pass: the planet's terrain (terrain.glsl) with its lakes'
+// water as its surface (lakes.glsl: the ground under a lake's water counts
+// as the water level) and its flat sites (sites.glsl), at each point of a
+// square grid in the plane tangent to the planet at params.centre
+// (shoonyakasha.planet.rivers.GridFrame): params.grid.x points along each
+// side, params.grid.y metres apart along params.east and params.north,
+// row by row along east, each point's direction from the planet's centre
+// through it. The heights go to HeightGrid from its fifth value on, and
+// params.grid.z, the stamp of the frame that asked for them, to its first.
+//
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 0) uniform HeightGridParams {
+    vec4 centre;           // xyz: unit direction of the grid's centre
+    vec4 east;             // xyz: unit east there
+    vec4 north;            // xyz: unit north there
+    vec4 grid;             // points along each side, metres between them, stamp
+} params;
+
+layout(set = 0, binding = 1) uniform TerrainParams {
+    vec4 continent;
+    vec4 mountains;
+    vec4 hills;
+    vec4 seed;
+    vec4 site;
+    vec4 siteShape;
+    vec4 detail;
+    vec4 climate;
+    vec4 biomeView;
+    vec4 sites[8];
+    vec4 siteShapes[8];
+    vec4 lakes[32];
+    vec4 lakeShapes[32];
+    vec4 riverFrame[4];
+    vec4 riverOrigin;
+} terrain;
+
+layout(std430, set = 0, binding = 2) writeonly buffer HeightGrid {
+    float values[];
+} heights;
+
+#include "terrain.glsl"
+#include "sites.glsl"
+#include "lakes.glsl"
+
+const int HEADER = 4;        // values before the first height
+
+void main() {
+    uint k = gl_GlobalInvocationID.x;
+    if (k == 0u) heights.values[0] = params.grid.z;
+    uint n = uint(params.grid.x);
+    if (k >= n * n) return;
+    float middle = 0.5 * float(n - 1u);
+    float x = (float(k % n) - middle) * params.grid.y;
+    float y = (float(k / n) - middle) * params.grid.y;
+    float radius = terrain.siteShape.z;
+    vec3 dir = normalize(params.centre.xyz * radius + x * params.east.xyz + y * params.north.xyz);
+    float h = terrainWithLakes(terrainHeight(dir), dir);
+    float depth;
+    if (lakeAt(dir, depth) >= 0) h += depth;
+    heights.values[uint(HEADER) + k] = terrainWithSites(h, dir, 0);
+}

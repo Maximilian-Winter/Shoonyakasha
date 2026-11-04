@@ -6,7 +6,9 @@
 // centre relative to the camera, its colour and what morphing needs.
 // Vertices are morphed towards their ancestors' surfaces by distance
 // (morph.glsl), reading the ancestors' vertices from ChunkPool. The
-// vertices' climate (horizon.yzw) goes on to the fragment shader.
+// vertices' climate (horizon.yzw) goes on to the fragment shader, and on
+// the planet whether a lake's or a river's water comes within WATER_NEAR of
+// the vertex (lakes.glsl's lakeNear, rivers.glsl's riverNear: 1, else 0).
 // Positions are jittered for the TAA pass (camera.glsl's jittered).
 //
 
@@ -24,6 +26,9 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
 } chunks;
 
 #include "morph.glsl"
+#include "terrain.glsl"
+#include "lakes.glsl"
+#include "rivers.glsl"
 
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec4 fragColour;
@@ -33,6 +38,9 @@ layout(location = 4) out vec3 fragRelativePos;
 layout(location = 5) out float fragHorizon;
 layout(location = 6) flat out int fragBody;
 layout(location = 7) out vec3 fragClimate;
+layout(location = 8) out float fragWaterNear;
+
+const float WATER_NEAR = 60.0;   // m
 
 void main() {
     ChunkInstance chunk = chunks.instances[gl_InstanceIndex];
@@ -46,5 +54,7 @@ void main() {
     fragHorizon = v.horizon.x;
     fragBody = int(chunk.morph.z);
     fragClimate = v.horizon.yzw;
+    vec3 dir = normalize(v.radialHeight.xyz);
+    fragWaterNear = fragBody == 0 && (lakeNear(dir, WATER_NEAR) >= 0 || riverNear(dir, WATER_NEAR)) ? 1.0 : 0.0;
     gl_Position = jittered(camera.proj * camera.view * vec4(relativePos, 1.0));
 }

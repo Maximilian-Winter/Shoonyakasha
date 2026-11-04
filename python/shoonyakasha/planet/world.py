@@ -41,7 +41,12 @@ planet's. Up to MAX_LAKES lakes on the planet (`Lake`, `set_lakes`;
 lakes.py finds them by a survey) carve their bowls and banks into its
 terrain, the Lakes pass draws their water (lakes.glsl, lake.vert,
 lake.frag), the scatter places nothing under it, and `regenerate` drops
-them. Up to MAX_CLEARINGS clearings (`Clearing`, `set_clearings`),
+them. Rivers (`River`, `set_rivers`; rivers.py traces them over a grid
+of heights the HeightGrid pass measures, `request_height_grid` and
+`height_grid`) carve their channels and banks into the planet's terrain
+before the lakes, the Rivers pass draws their water's mesh
+(rivers.glsl, river.vert, river.frag), the scatter places nothing in
+their water, and `regenerate` drops them. Up to MAX_CLEARINGS clearings (`Clearing`, `set_clearings`),
 circles and rectangles on either body, leave out the plants, the grass or
 the rocks the scatter would place in them, without changing the ground
 (clearings.glsl).
@@ -71,6 +76,7 @@ from pathlib import Path
 import numpy as np
 
 from . import cube_sphere, ground_textures, orbits, shadows, vegetation, vegetation_impostors, vegetation_textures
+from . import rivers as river_tools
 from .rocks import TakenRocks
 from .vec import add, dot, euler_from_basis, length, local_frame, normalize, scale, sub
 
@@ -155,6 +161,8 @@ SITE_FLAT_RADIUS = 150.0         # metres of flat pad around the site
 SITE_BLEND_RADIUS = 600.0        # metres from the site where the terrain is its own again
 MAX_SITES = 8                    # flat sites (Site) besides the site's pad; matches TerrainParams' sites
 MAX_LAKES = 32                   # lakes (Lake); matches TerrainParams' lakes
+HEIGHT_GRID_POINTS = 512 * 512  # points the HeightGrid pass measures at most; matches its dispatch
+HEIGHT_GRID_HEADER = 4          # values before the first height in HeightGrid
 LAKE_WOBBLE_REACH = 1.2          # a lake's shore lies within its radius times 1 +- this times its wobble; lakes.glsl
 MAX_CLEARINGS = 32               # clearings (Clearing); matches VegetationParams' clearings
 CLEAR_PLANTS, CLEAR_GRASS, CLEAR_ROCKS = 1, 2, 4   # what a clearing clears; matches clearings.glsl
@@ -316,6 +324,18 @@ class Lake:
     depth: float
     bank: float
     wobble: float = 0.25
+
+
+@dataclass(frozen=True)
+class River:
+    """A river on the planet (rivers.glsl, rivers.py): its centre line
+    through `points`, unit directions from the planet's centre, with the
+    water's `levels` (m above the planet's radius, never rising along it),
+    the river's `widths` and its `depths` at the centre line (m) at each."""
+    points: tuple
+    levels: tuple
+    widths: tuple
+    depths: tuple
 
 
 @dataclass(frozen=True)
@@ -527,6 +547,11 @@ class PlanetWorld:
         self.sites = []                    # flat sites (Site), set by set_sites
         self.clearings = []                # clearings (Clearing), set by set_clearings
         self.lakes = []                    # the planet's lakes (Lake), set by set_lakes
+        self.rivers = []                   # the planet's rivers (River), set by set_rivers
+        self.river_frame = None            # the rivers.GridFrame they lie over
+        self.river_lookup = None           # rivers.RiverLookup of their water
+        self.height_grid_stamp = 0.0       # counts request_height_grid's requests
+        self.height_grid_request = None    # (stamp, rivers.GridFrame) asked for and not back yet
         self.survey = []                   # (direction, Body) the probes measure before the terrain starts
         self.survey_heights = {}           # index into survey: its height (m), as they come back
         self.survey_cursor = 0             # the survey's index the next batch starts from
@@ -839,10 +864,11 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.clouds.wind", self.cloud_wind + (0.0,))
 
     def set_ocean(self, on):
-        """The sea's and the lakes' surfaces drawn or not."""
+        """The sea's, the lakes' and the rivers' surfaces drawn or not."""
         self.ocean = on
         self.engine.set_pass_enabled("Ocean", on)
         self.engine.set_pass_enabled("Lakes", on)
+        self.engine.set_pass_enabled("Rivers", on)
 
     def set_wireframe(self, on):
         self.wireframe = on
@@ -910,6 +936,97 @@ class PlanetWorld:
             reach = lake.radius * (1.0 + LAKE_WOBBLE_REACH * lake.wobble)
             if length(sub(direction, normalize(lake.direction))) * RADIUS < reach:
                 return lake.level
+        return None
+
+    def water_level(self, direction):
+        """The water level (m) over the unit `direction` on the planet: a
+        lake's (lake_level) or a river's where its water covers it, or None."""
+        level = self.lake_level(direction)
+        if level is None and self.river_lookup is not None:
+            level = self.river_lookup.level(direction)
+        return level
+
+    def set_rivers(self, rivers, frame=None):
+        """The planet's rivers (River) over `frame` (the rivers.GridFrame
+        they were traced over; None without rivers): their data
+        (rivers.pack) and their water's mesh (rivers.ribbon) go to the
+        pipeline. When they change and the planet's tree is made, the
+        planet is built again."""
+        rivers = list(rivers)
+        if rivers and frame is None:
+            raise ValueError("rivers need the frame they were traced over")
+        engine = self.engine
+        if rivers:
+            data, params = river_tools.pack(rivers, frame, RADIUS)
+            vertices, indices = river_tools.ribbon(rivers, frame, RADIUS)
+        else:
+            data = np.zeros((river_tools.MAX_DATA, 4), dtype=np.float32)
+            params = [(0.0, 0.0, 0.0, 0.0)] * 4
+            vertices, indices = np.zeros((0, 8), dtype=np.float32), np.zeros(0, dtype=np.uint32)
+        engine.set_buffer("RiverData", data)
+        engine.set_custom_vec4_array("planet.terrain.riverFrame", params)
+        if len(indices):
+            engine.set_buffer("RiverVertices", vertices)
+            engine.set_buffer("RiverIndices", indices)
+            # count, padding, then indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
+            engine.set_buffer("RiverDraws", np.uint32([1, 0, 0, 0, len(indices), 1, 0, 0, 0]))
+        else:
+            engine.set_buffer("RiverDraws", np.uint32([0]))
+        changed = rivers != self.rivers
+        self.rivers = rivers
+        self.river_frame = frame if rivers else None
+        self.river_lookup = river_tools.RiverLookup(rivers, frame, RADIUS) if rivers else None
+        self.upload_river_origin()
+        if not changed or not self.lod.has_tree(self.planet.index):
+            return
+        self.terrain_version += 1
+        self.ground = None
+        self.patch = None
+        self.lod.drop_tree(self.planet.index)
+        self.create_tree(self.planet)
+
+    def upload_river_origin(self):
+        """The rivers' frame's centre point less the camera's position (the
+        rivers' water is placed relative to it)."""
+        frame = self.river_frame
+        origin = sub(scale(tuple(frame.centre), RADIUS), self.position) if frame is not None else (0.0, 0.0, 0.0)
+        self.engine.set_custom_vec4("planet.terrain.riverOrigin", tuple(origin) + (0.0,))
+
+    def request_height_grid(self, frame):
+        """Measure the planet's terrain, with its lakes' water as its
+        surface and its flat sites (height_grid.comp), at the directions of
+        `frame` (a rivers.GridFrame of at most HEIGHT_GRID_POINTS) on the
+        GPU; height_grid() gives them once they are back."""
+        if frame.size * frame.size > HEIGHT_GRID_POINTS:
+            raise ValueError("at most %d points, not %d" % (HEIGHT_GRID_POINTS, frame.size * frame.size))
+        engine = self.engine
+        self.height_grid_stamp += 1.0
+        engine.set_custom_vec4("planet.heightGrid.centre", tuple(frame.centre) + (0.0,))
+        engine.set_custom_vec4("planet.heightGrid.east", tuple(frame.east) + (0.0,))
+        engine.set_custom_vec4("planet.heightGrid.north", tuple(frame.north) + (0.0,))
+        engine.set_custom_vec4("planet.heightGrid.grid", (float(frame.size), frame.spacing, self.height_grid_stamp, 0.0))
+        engine.set_pass_enabled("HeightGrid", True)
+        engine.request_readback("HeightGrid")
+        self.height_grid_request = (self.height_grid_stamp, frame)
+
+    def height_grid(self):
+        """The heights request_height_grid asked for, a (size, size) array
+        row by row along east, once they are back (the HeightGrid pass is
+        then switched off); else None, asking for the readback again."""
+        if self.height_grid_request is None:
+            return None
+        stamp, frame = self.height_grid_request
+        engine = self.engine
+        back = engine.get_readback("HeightGrid")
+        if back is not None:
+            values = np.frombuffer(back["data"], dtype=np.float32)
+            if values[0] == stamp:
+                n = frame.size
+                heights = values[HEIGHT_GRID_HEADER:HEIGHT_GRID_HEADER + n * n].astype(np.float64).reshape(n, n)
+                engine.set_pass_enabled("HeightGrid", False)
+                self.height_grid_request = None
+                return heights
+        engine.request_readback("HeightGrid")
         return None
 
     def set_lakes(self, lakes):
@@ -1003,9 +1120,9 @@ class PlanetWorld:
 
     def regenerate(self):
         """Apply changed terrain parameters: every chunk is released, the
-        site's height is measured again, the planet's flat sites and its
-        lakes are dropped, the planet is built again, and its taken rocks
-        are put back. A survey under way starts again."""
+        site's height is measured again, the planet's flat sites, its lakes
+        and its rivers are dropped, the planet is built again, and its taken
+        rocks are put back. A survey under way starts again."""
         self.lod.drop_tree(self.planet.index)
         self.taken_rocks.clear_body(self.planet.index)
         self.regenerations += 1
@@ -1013,6 +1130,8 @@ class PlanetWorld:
         self.site_height = None
         self.sites = [site for site in self.sites if site.body != self.planet.index]
         self.lakes = []
+        if self.rivers:
+            self.set_rivers([])
         self.survey_heights = {}
         self.survey_cursor = 0
         self.survey_round += 1
@@ -1067,6 +1186,8 @@ class PlanetWorld:
         right, up, forward = basis
         self.position = position
         self.forward = forward
+        if self.river_frame is not None:
+            self.upload_river_origin()
         self.viewpoint = viewpoint if viewpoint is not None else position
         self.update_level_of_detail(patch)
         self.engine.set_custom_vec4("planet.cameraFromCentre", position + (0.0,))

@@ -7,7 +7,10 @@ ore richness there. A survey's heights come back by index, in batches
 of at most PATCH_PROBES from where the last ended, only for its own
 round, and hold the terrain back until it ends; the flat sites are
 uploaded and build again the bodies whose sites changed; the clearings
-are checked and uploaded without building anything again.
+are checked and uploaded without building anything again; the rivers
+are uploaded with their water's mesh and build the planet again when
+they change, their water and the lakes' make water_level, and the height
+grid is asked for and taken back by its stamp.
 
     python -m unittest discover -s tests/python
 """
@@ -16,6 +19,7 @@ import unittest
 
 import numpy as np
 
+from shoonyakasha.planet import rivers
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.vec import add, normalize, scale
 
@@ -25,6 +29,19 @@ class FakeEngine:
         self.readbacks = {}
         self.framebuffer_size = (1600, 900)
         self.custom = {}
+        self.buffers = {}
+        self.passes = {}
+        self.readback_requests = []
+
+    def set_buffer(self, name, data):
+        self.buffers[name] = np.asarray(data)
+
+    def set_pass_enabled(self, name, on):
+        self.passes[name] = on
+
+    def request_readback(self, name):
+        self.readback_requests.append(name)
+        return True
 
     def get_readback(self, name):
         return self.readbacks.get(name)
@@ -222,6 +239,83 @@ class SurveyTest(unittest.TestCase):
         world.regenerate()
         self.assertEqual(world.lakes, [])
         self.assertEqual(self.engine.custom["planet.terrain.lakeShapes"][0], (0.0, 0.0, 0.0, 0.0))
+
+    def river_and_frame(self):
+        frame = rivers.GridFrame(self.up, planet_world.RADIUS, size=32, spacing=200.0)
+        xs = np.linspace(-1_000.0, 1_000.0, 5)
+        points = tuple(tuple(d) for d in frame.from_plane(xs, np.zeros_like(xs)))
+        return planet_world.River(points, (90.0, 89.0, 88.0, 87.0, 86.0), (12.0,) * 5, (2.0,) * 5), frame
+
+    def test_rivers_uploaded_and_the_planet_built_again(self):
+        world = self.world
+        world.lod.trees = {0, 1}
+        river, frame = self.river_and_frame()
+        world.set_rivers([river], frame)
+        engine = self.engine
+        self.assertEqual(engine.buffers["RiverData"].shape, (rivers.MAX_DATA, 4))
+        self.assertEqual(engine.custom["planet.terrain.riverFrame"][0][3], 4.0)
+        self.assertEqual(engine.buffers["RiverVertices"].shape, (10, 8))
+        self.assertEqual(list(engine.buffers["RiverDraws"]), [1, 0, 0, 0, 24, 1, 0, 0, 0])
+        self.assertEqual(world.lod.dropped, [0])
+        self.assertEqual(world.lod.created, [0])
+        world.set_rivers([river], frame)
+        self.assertEqual(world.lod.dropped, [0])
+        world.set_rivers([])
+        self.assertEqual(world.lod.dropped, [0, 0])
+        self.assertEqual(list(engine.buffers["RiverDraws"]), [0])
+        self.assertEqual(engine.custom["planet.terrain.riverFrame"][0], (0.0, 0.0, 0.0, 0.0))
+        with self.assertRaises(ValueError):
+            world.set_rivers([river])
+
+    def test_the_rivers_origin_follows_the_camera(self):
+        world = self.world
+        river, frame = self.river_and_frame()
+        world.set_rivers([river], frame)
+        world.position = add(scale(self.up, planet_world.RADIUS + 50.0), scale(self.world.site_frame()[2], 300.0))
+        world.upload_river_origin()
+        origin = self.engine.custom["planet.terrain.riverOrigin"]
+        np.testing.assert_allclose(origin[:3], np.subtract(scale(tuple(frame.centre), planet_world.RADIUS),
+                                                           world.position), atol=1e-9)
+
+    def test_water_level_of_the_lakes_and_the_rivers(self):
+        world = self.world
+        river, frame = self.river_and_frame()
+        world.set_rivers([river], frame)
+        lake_centre = tuple(frame.from_plane(np.array(0.0), np.array(2_000.0)))
+        world.set_lakes([planet_world.Lake(lake_centre, 120.0, 300.0, 15.0, 180.0, 0.2)])
+        self.assertEqual(world.water_level(tuple(frame.from_plane(np.array(0.0), np.array(2_000.0)))), 120.0)
+        self.assertAlmostEqual(world.water_level(tuple(frame.from_plane(np.array(0.0), np.array(3.0)))), 88.0)
+        self.assertIsNone(world.water_level(tuple(frame.from_plane(np.array(0.0), np.array(700.0)))))
+
+    def test_the_height_grid_by_its_stamp(self):
+        world, engine = self.world, self.engine
+        frame = rivers.GridFrame(self.up, planet_world.RADIUS, size=4, spacing=100.0)
+        world.request_height_grid(frame)
+        self.assertTrue(engine.passes["HeightGrid"])
+        stamp = engine.custom["planet.heightGrid.grid"][2]
+        self.assertEqual(engine.custom["planet.heightGrid.grid"][:2], (4.0, 100.0))
+        values = np.zeros(planet_world.HEIGHT_GRID_HEADER + 16, dtype=np.float32)
+        values[planet_world.HEIGHT_GRID_HEADER:] = np.arange(16)
+        values[0] = stamp - 1.0
+        engine.readbacks["HeightGrid"] = {"data": values.tobytes(), "frame": 0}
+        self.assertIsNone(world.height_grid())
+        self.assertTrue(engine.passes["HeightGrid"])
+        values[0] = stamp
+        engine.readbacks["HeightGrid"] = {"data": values.tobytes(), "frame": 1}
+        heights = world.height_grid()
+        np.testing.assert_array_equal(heights, np.arange(16).reshape(4, 4))
+        self.assertFalse(engine.passes["HeightGrid"])
+        self.assertIsNone(world.height_grid())
+        with self.assertRaises(ValueError):
+            world.request_height_grid(rivers.GridFrame(self.up, planet_world.RADIUS, size=513))
+
+    def test_regenerate_drops_the_rivers(self):
+        world = self.world
+        river, frame = self.river_and_frame()
+        world.set_rivers([river], frame)
+        world.regenerate()
+        self.assertEqual(world.rivers, [])
+        self.assertEqual(list(self.engine.buffers["RiverDraws"]), [0])
 
     def test_clearings_uploaded_without_building_again(self):
         world = self.world

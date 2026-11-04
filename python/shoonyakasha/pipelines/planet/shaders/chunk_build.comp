@@ -13,7 +13,8 @@
 // in 32-bit, radius * (direction - centre direction) would carry about a
 // centimetre of error at a radius of 100 km. Heights are 32-bit, from the
 // body's terrain (bodyHeight): body 0, the planet, terrainHeight
-// (terrain.glsl) with its lakes (lakes.glsl); body 1, the moon, moonHeight
+// (terrain.glsl) with its rivers (rivers.glsl) and lakes (lakes.glsl); body
+// 1, the moon, moonHeight
 // (moon.glsl); both with their flat sites (sites.glsl).
 //
 // Each vertex also holds the sine of the terrain's horizon towards the
@@ -73,7 +74,13 @@ layout(set = 0, binding = 2) uniform TerrainParams {
     vec4 siteShapes[8];
     vec4 lakes[32];
     vec4 lakeShapes[32];
+    vec4 riverFrame[4];
+    vec4 riverOrigin;
 } terrain;
+
+layout(std430, set = 0, binding = 5) readonly buffer RiverData {
+    vec4 data[];
+} riverData;
 
 layout(std430, set = 0, binding = 3) writeonly buffer ChunkHeights {
     vec4 heights[];        // per slot: lowest, highest grid height (m), stamp
@@ -94,6 +101,7 @@ layout(std430, set = 0, binding = 4) writeonly buffer ProbeHeights {
 #include "resources.glsl"
 #include "sites.glsl"
 #include "lakes.glsl"
+#include "rivers.glsl"
 
 const int PLANET = 0;
 const int MOON = 1;
@@ -103,9 +111,10 @@ int body;
 float bodyRadius;
 
 // The terrain's height (m) at unit direction `d` from the centre of `body`,
-// on the planet with its lakes, and with the body's flat sites.
+// on the planet with its rivers and its lakes, and with the body's flat sites.
 float bodyHeight(vec3 d) {
-    float h = body == MOON ? moonHeight(d, bodyRadius, 0.0) : terrainWithLakes(terrainHeight(d), d);
+    float h = body == MOON ? moonHeight(d, bodyRadius, 0.0)
+                           : terrainWithLakes(terrainWithRivers(terrainHeight(d), d), d);
     return terrainWithSites(h, d, body);
 }
 
@@ -113,7 +122,8 @@ float bodyHeight(vec3 d) {
 // metres apart: on the moon without the craters whose radius is less than
 // two spacings, whose slopes the vertices would sample out of step.
 float bodyHeightForNormals(vec3 d, float spacing) {
-    float h = body == MOON ? moonHeight(d, bodyRadius, 2.0 * spacing) : terrainWithLakes(terrainHeight(d), d);
+    float h = body == MOON ? moonHeight(d, bodyRadius, 2.0 * spacing)
+                           : terrainWithLakes(terrainWithRivers(terrainHeight(d), d), d);
     return terrainWithSites(h, d, body);
 }
 

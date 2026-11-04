@@ -1,9 +1,11 @@
 // The declarations and steps the vegetation's scatter passes share
 // (vegetation_scatter.comp, grass_scatter.comp): the sets and buffers, the
-// chunk a workgroup places plants on (one per draw of ScatterDraws), the cells
+// chunk a workgroup places plants on (one per draw of ScatterDraws) and
+// whether water comes near it, the cells
 // of a cube face's grid that chunk holds, a cell's candidate (a point
 // jittered within the cell by a hash of it, kept when it lies in the chunk,
-// within range, off the flat sites and out of the lakes), whether the clearings leave it out
+// within range and off the flat sites), whether it lies under a lake's or
+// a river's water (candidateWet), whether the clearings leave it out
 // (clearings.glsl), the ground and climate under it from the chunk's grid
 // unmorphed, its place on the surface as drawn (morphed), and claiming an
 // instance.
@@ -24,7 +26,13 @@ layout(set = 0, binding = 0) uniform TerrainParams {
     vec4 siteShapes[8];
     vec4 lakes[32];
     vec4 lakeShapes[32];
+    vec4 riverFrame[4];
+    vec4 riverOrigin;
 } terrain;
+
+layout(std430, set = 0, binding = 7) readonly buffer RiverData {
+    vec4 data[];
+} riverData;
 
 #define VEGETATION_SET 0
 #define VEGETATION_PARAMS 1
@@ -57,6 +65,7 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
 #include "morph.glsl"
 #include "sites.glsl"
 #include "lakes.glsl"
+#include "rivers.glsl"
 #include "clearings.glsl"
 
 const int CLEARING_SALT = 1024;   // the hash of a cell's draw in a clearing's edge, apart from its grid's
@@ -112,6 +121,7 @@ struct ScatterChunk {
     int face;
     int body;              // 0 the planet, 1 the moon
     float nearest;         // m from the camera to the chunk's nearest point, at least (less 50 m)
+    bool wet;              // a lake's or a river's water comes near it (on the planet)
 };
 
 // The chunk of draw `group`, when there is one, it is the planet's (body
@@ -137,6 +147,8 @@ bool scatterChunk(uint group, float minLevel, float range, bool moon, out Scatte
     chunk.u1 = last.positionU.w;
     chunk.v1 = last.normalV.w;
     chunk.face = faceOf(middle.radialHeight.xyz);
+    vec3 middleDir = normalize(middle.radialHeight.xyz);
+    chunk.wet = chunk.body == 0 && (lakeNear(middleDir, halfDiagonal) >= 0 || riverNear(middleDir, halfDiagonal));
     return true;
 }
 
@@ -163,9 +175,8 @@ struct Candidate {
 };
 
 // The candidate of cell k (of scatterCells' count); false when it lies in
-// another chunk, beyond `range`, within a flat site's flat radius
-// (sites.glsl) or, on the planet, under a lake's water (lakes.glsl). `salt`
-// tells grids apart in the hash.
+// another chunk, beyond `range` or within a flat site's flat radius
+// (sites.glsl). `salt` tells grids apart in the hash.
 bool scatterCandidate(ScatterChunk chunk, float cells, int cu0, int cv0, uint across, uint k, int salt,
                       float range, out Candidate x) {
     int cu = cu0 + int(k % across), cv = cv0 + int(k / across);
@@ -183,9 +194,16 @@ bool scatterCandidate(ScatterChunk chunk, float cells, int cu0, int cv0, uint ac
     x.distance = length(chunk.origin + x.position);
     if (x.distance > range) return false;
     vec3 radial = x.w.x * va.radialHeight.xyz + x.w.y * vb.radialHeight.xyz + x.w.z * vc.radialHeight.xyz;
-    vec3 dir = normalize(radial);
+    return !terrainOnSite(normalize(radial), chunk.body);
+}
+
+// Whether a candidate at unit direction `radial` lies under a lake's or a
+// river's water (lakes.glsl, rivers.glsl), tested only in chunks such water
+// comes near (chunk.wet).
+bool candidateWet(ScatterChunk chunk, vec3 radial) {
+    if (!chunk.wet) return false;
     float depth;
-    return !terrainOnSite(dir, chunk.body) && (chunk.body != 0 || lakeAt(dir, depth) < 0);
+    return lakeAt(radial, depth) >= 0 || riverAt(radial, depth);
 }
 
 // Whether a candidate of `kinds` (CLEAR_* bits) at unit direction `radial`

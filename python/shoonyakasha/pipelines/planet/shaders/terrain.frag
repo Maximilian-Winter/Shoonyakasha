@@ -2,8 +2,10 @@
 //
 // The terrain's fragment shader. With a chunk colour whose red is below 0,
 // the planet's ground is coloured by its biomes, height and slope from the
-// vertices' climate (biome.glsl's groundLayers), under a lake's water as the
-// sea floor at the water's depth (lakes.glsl's lakeAt), and the moon's grey
+// vertices' climate (biome.glsl's groundLayers), under a lake's or a river's
+// water as the sea floor at the water's depth (lakes.glsl's lakeAt,
+// rivers.glsl's riverAt, tested where a vertex of its triangle has water
+// near, terrain.vert), and the moon's grey
 // (moonColour), both detailed by the ground's textures (ground.glsl); with
 // the biome view on (terrain.biomeView.x), the planet's ground takes its
 // biomes' flat colours (biomeViewColour) instead. Otherwise it takes the
@@ -15,12 +17,13 @@
 #define CAMERA_SET 0
 #include "camera.glsl"
 #include "terrain.glsl"
-#include "lakes.glsl"
 #include "atmosphere.glsl"
 #include "shading.glsl"
 #include "shadow.glsl"
 #include "clouds.glsl"
 #include "biome.glsl"
+#include "lakes.glsl"
+#include "rivers.glsl"
 #define GROUND_SET 2
 #include "ground.glsl"
 
@@ -32,6 +35,7 @@ layout(location = 4) in vec3 fragRelativePos;
 layout(location = 5) in float fragHorizon;
 layout(location = 6) flat in int fragBody;
 layout(location = 7) in vec3 fragClimate;
+layout(location = 8) in float fragWaterNear;
 
 layout(location = 0) out vec4 outColor;
 
@@ -70,8 +74,8 @@ void main() {
         colours[GROUND_MOON] = moonColour(radial, normal);
         groundTextured(weights, colours, fragRelativePos, fragBody, normal, albedo, shaded);
     } else {
-        float depth;
-        float height = lakeAt(radial, depth) >= 0 ? -depth : fragRadialHeight.w;
+        float height = fragRadialHeight.w, depth;
+        if (fragWaterNear > 0.0 && (lakeAt(radial, depth) >= 0 || riverAt(radial, depth))) height = -depth;
         if (terrain.biomeView.x > 0.5) {
             albedo = biomeViewColour(radial, height, normal, fragClimate);
         } else {
