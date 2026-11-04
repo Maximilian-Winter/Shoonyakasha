@@ -2,10 +2,10 @@
 Walker: the planet on foot, as a game. The player starts beside the parked
 ship at Base, on the planet of the planet example (planet.py), and walks,
 runs, jumps and jets with the gravity gun in hand
-(shoonyakasha.planet.on_foot). The ship stands on its gear 16 m south of
-the blocks as a landmark, a static hull in the physics. The outposts on
-the planet and the moon are found by the same survey as in planet.py and
-drawn as pads.
+(shoonyakasha.planet.on_foot). The ship, a hover car, floats
+HOVER_HEIGHT above the ground 16 m south of the blocks as a landmark, a
+static box in the physics. The outposts on the planet and the moon are
+found by the same survey as in planet.py and drawn as pads.
 
 The interface is in the style of scifi.py. The HUD (hud.py) shows the
 gun's crosshair and key hints, a compass with the outposts, the ship and
@@ -88,7 +88,6 @@ from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL
 from shoonyakasha.planet.props import stack_offsets
 from shoonyakasha.planet.rocks import rock_colour
 import config
-import flight
 import save
 from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
@@ -111,15 +110,19 @@ LOAD_LIFT = 0.3                  # m above the ground a loaded player is put dow
 LOAD_SECONDS = 15.0              # s --check waits for the loaded player
 CAPTURE_TOAST_FRAMES = 3         # frames after a screenshot before its toast
 SPAWN_LIFT = 1.0                 # m above the ground the player is put down
-EAST_OF_SHIP = 6.0               # m east of the ship's centre the player starts
+EAST_OF_SHIP = 4.5               # m east of the ship's centre the player starts
 SHIP_SOUTH = 16.0                # m south of the blocks the ship stands
-SET_DOWN_DEPTH = 0.01            # m into the ground the ship's lowest gear reaches
-SHIP_CLEARANCE = -flight.ShipParams().gear[0][1]   # m from the ship's centre down to its gear
-SHIP_HULL = flight.ShipParams().hull + flight.ShipParams().gear
-SHIP_MODEL = os.path.join(HERE, "models", "f117", "scene.gltf")
-SHIP_MODEL_UNITS = 6.592
-SHIP_MODEL_CENTRE = (0.0, 12.7, 9.9)
+# The ship is a hover car (models/cyber_vehicle, "Cyber Vehicle" by Alt, CC-BY-4.0), its model in
+# metres with its nose along +Z and up +Y: its centre, and its half sizes (right, up, back) about it.
+SHIP_MODEL = os.path.join(HERE, "models", "cyber_vehicle", "scene.gltf")
+SHIP_MODEL_CENTRE = (0.0, 0.586, -1.402)
+SHIP_HALF = (1.452, 0.756, 3.097)
+HOVER_HEIGHT = 0.45              # m between the ground and the hull's underside
+HOVER_BOB, HOVER_PERIOD = 0.04, 3.2   # m up and down, s
+SHIP_CLEARANCE = SHIP_HALF[1] + HOVER_HEIGHT   # m from the ship's centre down to the ground
+SHIP_HULL = [(x * SHIP_HALF[0], y * SHIP_HALF[1], z * SHIP_HALF[2]) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
 CHECK_SECONDS = 10.0
+SHIP_SHOT_WALK = 2.0             # s --shot walks away from the ship before its screenshot of it
 SHOT_SECONDS = 1.0               # s of walking before --shot's screenshot
 CHECK_CRATE = 20.0               # kg
 CHECK_AHEAD = 2.5                # m ahead of the feet the crate is dropped
@@ -288,10 +291,10 @@ def update_outposts():
 
 
 def ship_pose():
-    """The parked ship: SHIP_SOUTH south of the blocks, its gear
-    SET_DOWN_DEPTH into the ground, facing north."""
+    """The parked ship: SHIP_SOUTH south of the blocks, hovering
+    HOVER_HEIGHT above the ground, facing north."""
     _, up, east, north = world.site_frame()
-    position = add(world.site_ground(), add(scale(up, SHIP_CLEARANCE - SET_DOWN_DEPTH), scale(north, -SHIP_SOUTH)))
+    position = add(world.site_ground(), add(scale(up, SHIP_CLEARANCE), scale(north, -SHIP_SOUTH)))
     return position, east, up, north
 
 
@@ -303,15 +306,14 @@ def spawn_point():
 
 
 def build_ship_model():
-    """The ship's model, its meshes parented to one entity scaled from the
-    model's units to metres, its centre (SHIP_MODEL_CENTRE) at the
-    entity's origin; hidden until the ship's pose is known."""
+    """The ship's model, its meshes parented to one entity, its centre
+    (SHIP_MODEL_CENTRE) at the entity's origin; hidden until the ship's
+    pose is known."""
     result = engine.load_gltf_scene(SHIP_MODEL, flatten_hierarchy=True)
     if not result.success:
         print("[walker] the ship's model did not load:", result.error, flush=True)
         return
     root = engine.scene.create_entity("ShipModel")
-    engine.scene.set_scale(root, (1.0 / SHIP_MODEL_UNITS,) * 3)
     for entity in result.entities:
         engine.scene.set_parent(entity, root)
         engine.scene.set_position(entity, scale(SHIP_MODEL_CENTRE, -1.0))
@@ -322,8 +324,10 @@ def build_ship_model():
 
 
 def place_ship(camera):
-    """The ship's model relative to `camera`, and its hull in the bubble
-    while the bubble is on the planet and the ship within its reach."""
+    """The ship's model relative to `camera`, rising and falling
+    HOVER_BOB once every HOVER_PERIOD, and its hull (a box of SHIP_HALF)
+    in the bubble while the bubble is on the planet and the ship within
+    its reach."""
     ship = state["ship"]
     if ship is None:
         return
@@ -332,7 +336,8 @@ def place_ship(camera):
         root, meshes = state["ship_model"]
         for entity in meshes:
             engine.scene.set_visible(entity, True)
-        engine.scene.set_position(root, sub(position, camera))
+        bob = HOVER_BOB * math.sin(2.0 * math.pi * world.time / HOVER_PERIOD)
+        engine.scene.set_position(root, sub(add(position, scale(up, bob)), camera))
         engine.scene.set_rotation(root, euler_from_basis(scale(right, -1.0), up, scale(forward, -1.0)))
     bubble = foot.bubble
     if bubble is None or bubble.body is not planet or state["ship_body"] is not None:
@@ -503,7 +508,10 @@ def update_hud(dt):
 
 
 def run_check(dt):
-    """--check, once on foot: walk north for CHECK_SECONDS, half way taking
+    """--check, once on foot (with --shot, first walking away from the ship
+    for SHIP_SHOT_WALK, turned to it and a second later a screenshot of it,
+    FILE with _ship added, then turned north): walk north for
+    CHECK_SECONDS, half way taking
     a screenshot into CHECK_CAPTURES as P does; then a crate of
     CHECK_CRATE kg dropped CHECK_AHEAD ahead, and once it lies still the
     view turned to it and the grab held for GRAB_SECONDS; then a punt of
@@ -532,10 +540,27 @@ def run_check(dt):
     if player is None and (check is None or check["stage"] != "reload"):
         return
     if check is None:
-        check = state["check"] = {"stage": "walk", "start": foot.bubble.to_world(player.feet()), "time": 0.0}
+        check = state["check"] = {"stage": "ship" if args.shot else "walk", "time": 0.0,
+                                  "start": foot.bubble.to_world(player.feet())}
     check["time"] += dt
     stage, t = check["stage"], check["time"]
-    if stage == "walk":
+    if stage == "ship":
+        to_ship = sub(foot.bubble.to_bubble(state["ship"][0]), player.feet())
+        if t < SHIP_SHOT_WALK:
+            player.heading = player.level(scale(to_ship, -1.0), player.up())
+            foot.controls.forward = 1.0
+        else:
+            foot.controls.forward = 0.0
+            player.heading = player.level(to_ship, player.up())
+            player.pitch = -0.08
+        if t >= SHIP_SHOT_WALK + 1.0:
+            base, ext = os.path.splitext(args.shot)
+            screenshot(base + "_ship" + ext)
+            player.heading = state["ship"][3]
+            player.pitch = 0.0
+            check["stage"], check["time"] = "walk", 0.0
+            check["start"] = foot.bubble.to_world(player.feet())
+    elif stage == "walk":
         foot.controls.forward = 1.0
         if args.shot and t >= SHOT_SECONDS and not state["shot"]:
             state["shot"] = True
@@ -687,9 +712,9 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_load" + ext)
-            ok = (check["walk_ok"] and check["capture_ok"] and check["held_ok"] and check["punt_ok"] and check["map_ok"]
-                  and check["sell_ok"] and check["pause_ok"] and load_ok)
-            os._exit(0 if ok else 1)
+            check["ok"] = (check["walk_ok"] and check["capture_ok"] and check["held_ok"] and check["punt_ok"]
+                           and check["map_ok"] and check["sell_ok"] and check["pause_ok"] and load_ok)
+            os._exit(0 if check["ok"] else 1)
 
 
 def update_map(dt):

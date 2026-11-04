@@ -1,8 +1,10 @@
 """
-The gravity gun's viewmodel: a gun built from boxes (cockpit.py's
-oriented_box and beam) in the camera's space, drawn at the lower right of
-the view, with glowing light strips and tip, and its effects drawn as
-glowing quads.
+The gravity gun's viewmodel: the gun's model (models/scifi_weapon, "Scifi
+Weapon NO.2" by No.cccccc, CC-BY-4.0) in the camera's space, drawn at the
+lower right of the view, with a glowing tip at its muzzle, and its effects
+drawn as glowing quads. The model is scaled to GUN_LENGTH metres; MUZZLE
+is its muzzle in the model's units (its barrel along +Z, up +Y), and the
+gun's space puts the muzzle at TIP.
 
 The gun sits at BASE (metres, camera space: forward -Z, up +Y, right +X),
 moved by:
@@ -14,12 +16,12 @@ moved by:
 - **recoil:** after a punt, back by RECOIL_BACK and turned up by
   RECOIL_PITCH, both easing back to rest over RECOIL_TIME.
 
-The tip and the light strips are drawn unlit (the Screens pass, render
-layer 2, which shows a white emissive texture, white_texture, times the
-material's emissiveFactor) with GLOW's strength for the gun's status
-(gun.Gun.status), the strips at STRIP_SHARE of the tip's, pulsing at
-PULSE_HZ while holding, and while a punt charges brighter (up to
-1 + CHARGE_GLOW times) and whiter with the charge.
+The tip is drawn unlit (the Screens pass, render layer 2, which shows a
+white emissive texture, white_texture, times the material's
+emissiveFactor) with GLOW's strength for the gun's status
+(gun.Gun.status), pulsing at PULSE_HZ while holding, and while a punt
+charges brighter (up to 1 + CHARGE_GLOW times) and whiter with the
+charge.
 
 The effects are `Glows`: camera-facing quads added to the image after the
 atmosphere (the Glow pass, render layer 4, glow.frag), each a disc or a
@@ -53,8 +55,11 @@ import zlib
 from shoonyakasha.planet.character import BOB_AMPLITUDE, BOB_STRIDE
 from shoonyakasha.planet.vec import add, cross, euler_from_basis, length, normalize, scale, sub
 
-from cockpit import beam, oriented_box
-
+GUN_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "scifi_weapon", "scene.gltf")
+MODEL_LENGTH = 77.39                 # the model's units from its stock to its muzzle
+MUZZLE = (-11.2, 150.6, 90.97)       # the muzzle's centre in the model's units
+GUN_LENGTH = 0.5                     # m
+GUN_SCALE = GUN_LENGTH / MODEL_LENGTH
 BASE = (0.22, -0.2, -0.45)
 SWAY_SMOOTHING = 0.08                # s
 SWAY_PER_PIXEL = 0.0006              # m
@@ -63,19 +68,14 @@ BOB_SHARE, BOB_PHASE = 0.6, 0.6
 RECOIL_BACK = 0.06                   # m
 RECOIL_PITCH = math.radians(3.0)
 RECOIL_TIME = 0.25                   # s
-TIP = (0.0, 0.004, -0.215)           # the tip's centre in the gun's space
+TIP = (0.0, 0.0, -0.25)              # the tip's centre in the gun's space (the muzzle)
 TIP_SIZE = 0.018                     # m
 TIP_COLOUR = (1.0, 0.55, 0.18)       # HDR, times GLOW
 HEAVY_COLOUR = (1.0, 0.16, 0.1)
 GLOW = {"idle": 1.0, "can_grab": 1.8, "too_heavy": 1.5, "holding": 2.8}
-STRIP_SHARE = 0.8
 PULSE_HZ = 2.0
 CHARGE_GLOW = 3.0                    # the tip's glow at full charge, times more
 WHITE_PNG = "shoonyakasha_planet_white.png"
-
-BODY = (0.045, 0.047, 0.052)
-TRIM = (0.09, 0.094, 0.1)
-CLAW = (0.32, 0.19, 0.07)
 
 GLOW_LAYER = 4
 GLOW_COLOUR = (1.0, 0.52, 0.16)      # LDR, added to the image
@@ -120,40 +120,6 @@ def white_texture():
             f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
                     + chunk(b"IDAT", zlib.compress(b"\x00\xff\xff\xff")) + chunk(b"IEND", b""))
     return path
-
-
-def gun_mesh():
-    """Triangles (positions, normals, colours) of the gun, its barrel along -Z."""
-    out = ([], [], [])
-    x, y = (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)
-    oriented_box((0.0, 0.0, 0.06), x, y, (0.075, 0.085, 0.24), BODY, out)          # body
-    oriented_box((0.0, 0.05, 0.08), x, y, (0.05, 0.02, 0.16), TRIM, out)           # top rail
-    oriented_box((0.0, -0.035, 0.0), x, y, (0.065, 0.03, 0.1), TRIM, out)          # under the body
-    grip_up = normalize((0.0, 1.0, 0.35))
-    oriented_box((0.0, -0.085, 0.13), x, grip_up, (0.04, 0.11, 0.05), BODY, out)   # grip
-    oriented_box((0.0, 0.004, -0.11), x, y, (0.052, 0.052, 0.1), TRIM, out)        # barrel
-    oriented_box((0.0, 0.004, -0.155), x, y, (0.064, 0.064, 0.016), BODY, out)     # barrel's collar
-    for k in range(3):
-        a = math.radians(90.0 + 120.0 * k)
-        c, s = math.cos(a), math.sin(a)
-        start = (0.026 * c, 0.004 + 0.026 * s, -0.15)
-        bend = (0.045 * c, 0.004 + 0.045 * s, -0.2)
-        end = (0.03 * c, 0.004 + 0.03 * s, -0.25)
-        beam(start, bend, 0.012, CLAW, out)
-        beam(bend, end, 0.01, CLAW, out)
-    return out
-
-
-def strips_mesh():
-    """Triangles (positions, normals, colours) of the gun's light strips:
-    a slit along each side of the body and a band round the barrel."""
-    out = ([], [], [])
-    x, y = (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)
-    white = (1.0, 1.0, 1.0)
-    for side in (-1.0, 1.0):
-        oriented_box((side * 0.0385, 0.012, 0.05), x, y, (0.003, 0.012, 0.15), white, out)
-    oriented_box((0.0, 0.004, -0.135), x, y, (0.056, 0.056, 0.006), white, out)
-    return out
 
 
 def quad(along):
@@ -255,13 +221,20 @@ class Viewmodel:
         """`cube`: (positions, normals) of a unit cube centred on the origin."""
         self.engine = engine
         scene = engine.scene
-        positions, normals, colours = gun_mesh()
-        self.gun = engine.create_mesh(positions, normals=normals, colors=colours, name="GravityGun")
-        scene.set_material_vec4(self.gun, "baseColorFactor", (1.0, 1.0, 1.0, 1.0))
-        scene.set_material_float(self.gun, "gridStrength", 0.0)
-        scene.set_render_layer_mask(self.gun, 1)
-        positions, normals, _ = strips_mesh()
-        self.strips = self.glowing(positions, normals, "GravityGunStrips")
+        self.gun = scene.create_entity("GravityGun")
+        scene.set_scale(self.gun, (GUN_SCALE,) * 3)
+        self.meshes = []
+        result = engine.load_gltf_scene(GUN_MODEL, flatten_hierarchy=True)
+        if result.success:
+            anchor = (MUZZLE[0] + TIP[0] / GUN_SCALE, MUZZLE[1] - TIP[1] / GUN_SCALE, MUZZLE[2] + TIP[2] / GUN_SCALE)
+            for entity in result.entities:
+                scene.set_parent(entity, self.gun)
+                scene.set_position(entity, scale(anchor, -1.0))
+                scene.set_material_float(entity, "gridStrength", 0.0)
+                scene.set_render_layer_mask(entity, 1)
+                self.meshes.append(entity)
+        else:
+            print("[viewmodel] the gun's model did not load:", result.error, flush=True)
         self.tip = self.glowing(*cube, "GravityGunTip")
         scene.set_scale(self.tip, (TIP_SIZE, TIP_SIZE, TIP_SIZE))
         self.glows = Glows(engine, DISCS, STREAKS)
@@ -284,7 +257,7 @@ class Viewmodel:
         if visible == self.visible:
             return
         self.visible = visible
-        for entity in (self.gun, self.strips, self.tip):
+        for entity in self.meshes + [self.tip]:
             self.engine.scene.set_visible(entity, visible)
         if not visible:
             self.sparks = []
@@ -319,13 +292,11 @@ class Viewmodel:
             return add(origin, add(add(scale(right, p[0]), scale(g_up, p[1])), scale(g_forward, -p[2])))
 
         origin = add(add(scale(right, x), scale(up, y)), scale(forward, -z))
-        rotation = euler_from_basis(right, g_up, g_forward)
-        for entity in (self.gun, self.strips):
-            scene.set_position(entity, origin)
-            scene.set_rotation(entity, rotation)
+        scene.set_position(self.gun, origin)
+        scene.set_rotation(self.gun, euler_from_basis(scale(right, -1.0), g_up, scale(g_forward, -1.0)))
         tip = to_view(origin, TIP)
         scene.set_position(self.tip, tip)
-        scene.set_rotation(self.tip, rotation)
+        scene.set_rotation(self.tip, euler_from_basis(right, g_up, g_forward))
 
         status = gun.status
         strength = GLOW[status]
@@ -337,7 +308,6 @@ class Viewmodel:
             strength *= 1.0 + CHARGE_GLOW * charge
             colour = whiten(colour, charge)
         scene.set_material_vec4(self.tip, "emissiveFactor", shade(colour, strength) + (0.0,))
-        scene.set_material_vec4(self.strips, "emissiveFactor", shade(colour, STRIP_SHARE * strength) + (0.0,))
 
         punted = gun.since_punt < self.since_punt
         self.since_punt = gun.since_punt
