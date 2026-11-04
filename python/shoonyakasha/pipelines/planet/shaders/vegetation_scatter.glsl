@@ -3,7 +3,8 @@
 // chunk a workgroup places plants on (one per draw of ScatterDraws), the cells
 // of a cube face's grid that chunk holds, a cell's candidate (a point
 // jittered within the cell by a hash of it, kept when it lies in the chunk,
-// within range and off the flat sites), the ground and climate under it from the chunk's grid
+// within range and off the flat sites), whether the clearings leave it out
+// (clearings.glsl), the ground and climate under it from the chunk's grid
 // unmorphed, its place on the surface as drawn (morphed), and claiming an
 // instance.
 
@@ -53,6 +54,9 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
 #include "biome.glsl"
 #include "morph.glsl"
 #include "sites.glsl"
+#include "clearings.glsl"
+
+const int CLEARING_SALT = 1024;   // the hash of a cell's draw in a clearing's edge, apart from its grid's
 
 // The cube face whose normal is nearest the unit direction `d` (cube_sphere.FACES' order).
 int faceOf(vec3 d) {
@@ -176,6 +180,18 @@ bool scatterCandidate(ScatterChunk chunk, float cells, int cu0, int cv0, uint ac
     if (x.distance > range) return false;
     vec3 radial = x.w.x * va.radialHeight.xyz + x.w.y * vb.radialHeight.xyz + x.w.z * vc.radialHeight.xyz;
     return !terrainOnSite(normalize(radial), chunk.body);
+}
+
+// Whether a candidate of `kinds` (CLEAR_* bits) at unit direction `radial`
+// is left out by the clearings (clearings.glsl): within one, or in its edge
+// unless a draw from its cell's own hash (apart from the draws of its grid
+// `salt`) falls below the share kept there.
+bool candidateCleared(ScatterChunk chunk, Candidate x, vec3 radial, uint kinds, int salt) {
+    float keep = clearingKeep(radial, chunk.body, kinds);
+    if (keep >= 1.0) return false;
+    if (keep <= 0.0) return true;
+    uint h = terrainHash(ivec3(x.cell, chunk.face + salt + CLEARING_SALT));
+    return nextRandom(h) >= keep;
 }
 
 // The ground under a candidate on the unmorphed grid: its direction from

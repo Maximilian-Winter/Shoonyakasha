@@ -206,7 +206,13 @@
         { "name": "rocks", "type": "vec4", "source": "scene.custom.planet.vegetation.rocks",
           "default": [ 0.0, 150.0, 65536.0, 0.0 ] },
         { "name": "moon", "type": "vec4", "source": "scene.custom.planet.vegetation.moon",
-          "default": [ 0.0, 0.0, 0.0, 0.0 ] }
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "clearings", "type": "vec4", "arrayCount": 32,
+          "source": "scene.custom.planet.vegetation.clearings[i]" },
+        { "name": "clearingShapes", "type": "vec4", "arrayCount": 32,
+          "source": "scene.custom.planet.vegetation.clearingShapes[i]" },
+        { "name": "clearingAxes", "type": "vec4", "arrayCount": 32,
+          "source": "scene.custom.planet.vegetation.clearingAxes[i]" }
       ]
     },
     "NearbyTrees": {

@@ -37,7 +37,10 @@ in the terrain at the site's natural height, which a probe measures before
 the planet is built. Up to MAX_SITES more flat sites on either body
 (`Site`, `set_sites`) flatten the ground the same way (sites.glsl), and
 the scatter leaves their flat radius bare; `regenerate` drops the
-planet's.
+planet's. Up to MAX_CLEARINGS clearings (`Clearing`, `set_clearings`),
+circles and rectangles on either body, leave out the plants, the grass or
+the rocks the scatter would place in them, without changing the ground
+(clearings.glsl).
 
 Probes: each frame BuildChunks also evaluates the terrain at PROBES
 directions: the ground under the viewpoint, the site, the directions of a
@@ -147,6 +150,9 @@ SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a verte
 SITE_FLAT_RADIUS = 150.0         # metres of flat pad around the site
 SITE_BLEND_RADIUS = 600.0        # metres from the site where the terrain is its own again
 MAX_SITES = 8                    # flat sites (Site) besides the site's pad; matches TerrainParams' sites
+MAX_CLEARINGS = 32               # clearings (Clearing); matches VegetationParams' clearings
+CLEAR_PLANTS, CLEAR_GRASS, CLEAR_ROCKS = 1, 2, 4   # what a clearing clears; matches clearings.glsl
+CLEAR_ALL = CLEAR_PLANTS | CLEAR_GRASS | CLEAR_ROCKS
 TERRAIN_COLOUR = (-1.0, 0.0, 0.0)  # tells terrain.frag to colour the ground by its biomes, height and slope
 FACE_COLOURS = ((0.62, 0.30, 0.25), (0.25, 0.50, 0.55), (0.55, 0.55, 0.30),
                 (0.40, 0.30, 0.60), (0.30, 0.55, 0.30), (0.60, 0.42, 0.25))
@@ -287,6 +293,31 @@ class Site:
     height: float
     flat_radius: float
     blend_radius: float
+
+
+@dataclass(frozen=True)
+class Clearing:
+    """An area on the body with index `body` where the scatter leaves out
+    the kinds `clears` names (CLEAR_PLANTS, CLEAR_GRASS, CLEAR_ROCKS,
+    together CLEAR_ALL), the terrain left as it is (clearings.glsl): a
+    circle of `radius` metres around the unit `direction` from the body's
+    centre, or with `size` a rectangle (length, width) in metres centred
+    there, its length along the bearing `heading` (radians from north
+    towards east, vec.local_frame's). Over `edge` metres outside its border
+    the kinds thin in to their full density."""
+    body: int
+    direction: tuple
+    radius: float = 0.0
+    size: tuple = None
+    heading: float = 0.0
+    edge: float = 0.0
+    clears: int = CLEAR_ALL
+
+    def axis(self):
+        """The unit direction of a rectangle's length at its centre."""
+        east, north = local_frame(normalize(self.direction))
+        c, s = math.cos(self.heading), math.sin(self.heading)
+        return normalize(add(scale(north, c), scale(east, s)))
 
 
 class Body:
@@ -471,6 +502,7 @@ class PlanetWorld:
         self.ground_ore = None             # ore richness there (resources.glsl), 0 .. 1
         self.site_height = None           # natural terrain height at the site, from the probes
         self.sites = []                    # flat sites (Site), set by set_sites
+        self.clearings = []                # clearings (Clearing), set by set_clearings
         self.survey = []                   # (direction, Body) the probes measure before the terrain starts
         self.survey_heights = {}           # index into survey: its height (m), as they come back
         self.survey_cursor = 0             # the survey's index the next batch starts from
@@ -693,8 +725,7 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.terrain.site", up + (self.site_height if known else 0.0,))
         engine.set_custom_vec4("planet.terrain.siteShape",
                                (SITE_FLAT_RADIUS, SITE_BLEND_RADIUS, RADIUS, 1.0 if known and self.pad else 0.0))
-        radii = {0: RADIUS, 1: MOON_RADIUS}
-        radii.update((body.index, body.radius) for body in self.bodies)
+        radii = self.body_radii()
         unused = MAX_SITES - len(self.sites)
         engine.set_custom_vec4_array("planet.terrain.sites",
                                      [tuple(s.direction) + (s.height,) for s in self.sites]
@@ -837,6 +868,40 @@ class PlanetWorld:
         for body in rebuilt:
             self.lod.drop_tree(body.index)
             self.create_tree(body)
+
+    def body_radii(self):
+        """Each body's radius (m) by its index."""
+        radii = {0: RADIUS, 1: MOON_RADIUS}
+        radii.update((body.index, body.radius) for body in self.bodies)
+        return radii
+
+    def set_clearings(self, clearings):
+        """The clearings (Clearing, at most MAX_CLEARINGS), sent to the
+        scatter at once; the terrain is not built again."""
+        clearings = list(clearings)
+        if len(clearings) > MAX_CLEARINGS:
+            raise ValueError("at most %d clearings, not %d" % (MAX_CLEARINGS, len(clearings)))
+        for c in clearings:
+            if (c.size is None) == (c.radius <= 0.0) or (c.size is not None and min(c.size) <= 0.0):
+                raise ValueError("a clearing needs a radius above 0 or a size above 0, not both: %r" % (c,))
+            if not 0 < c.clears <= CLEAR_ALL:
+                raise ValueError("a clearing's clears are CLEAR_* bits, not %r" % (c.clears,))
+        self.clearings = clearings
+        radii = self.body_radii()
+        centres, shapes, axes = [], [], []
+        for c in clearings:
+            centres.append(tuple(normalize(c.direction)) + (float(c.body),))
+            if c.size is None:
+                shapes.append((float(c.radius), 0.0, float(c.edge), float(c.clears)))
+                axes.append((0.0, 0.0, 0.0, radii[c.body]))
+            else:
+                shapes.append((0.5 * c.size[0], 0.5 * c.size[1], float(c.edge), float(c.clears)))
+                axes.append(tuple(c.axis()) + (radii[c.body],))
+        unused = [(0.0, 0.0, 0.0, 0.0)] * (MAX_CLEARINGS - len(clearings))
+        engine = self.engine
+        engine.set_custom_vec4_array("planet.vegetation.clearings", centres + unused)
+        engine.set_custom_vec4_array("planet.vegetation.clearingShapes", shapes + unused)
+        engine.set_custom_vec4_array("planet.vegetation.clearingAxes", axes + unused)
 
     def start_survey(self, points):
         """Measure the terrain at `points`, (direction, Body) pairs: while

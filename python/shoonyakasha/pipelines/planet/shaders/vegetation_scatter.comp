@@ -44,6 +44,10 @@
 // its range; on the moon its colour carries VEGETATION_ON_MOON. A rock
 // whose cell is in TakenRocks (rockTaken) is left out.
 //
+// The clearings (clearings.glsl, candidateCleared) leave out the plants and
+// the rocks of the kinds they clear: within a clearing all of them, in its
+// edge those whose own draw falls below the share kept there.
+//
 // Each kept plant or rock takes the next instance of its kind (an atomic
 // add on its draw's instance count in VegetationDraws, which the CPU sets
 // to zero each frame); one past the kind's capacity is given back.
@@ -295,6 +299,7 @@ void main() {
                 boulder += ORE_BOULDERS * smoothstep(ORE_ROCKS, ORE_FULL, ore);
                 if (pick >= treeChance + bushChance + density * boulder) continue;
                 if (rockTaken(chunk.body, chunk.face, 0, x.cell)) continue;
+                if (candidateCleared(chunk, x, radial, CLEAR_ROCKS, moon ? MOON_SALT : 0)) continue;
                 kind = KIND_BOULDER;
                 colour = packedRockColour(chunk.body, ore);
                 float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow)
@@ -304,6 +309,7 @@ void main() {
             }
             float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow) * smoothstep(range, range * FADE_START, x.distance);
             if (size < 0.05) continue;
+            if (candidateCleared(chunk, x, radial, CLEAR_PLANTS, 0)) continue;
             place(chunk, x, kind, size, turn, tint, colour, 0u);
         }
     }
@@ -336,6 +342,7 @@ void main() {
         float size = mix(HEIGHTS[KIND_ROCK].x, HEIGHTS[KIND_ROCK].y, grow)
                      * smoothstep(rockRange, rockRange * FADE_START, x.distance);
         if (size < 0.02) continue;
+        if (candidateCleared(chunk, x, radial, CLEAR_ROCKS, ROCK_SALT + 8 * chunk.body)) continue;
         place(chunk, x, KIND_ROCK, size, turn, tint, packedRockColour(chunk.body, ore), oreGrade(ore));
     }
 }

@@ -8,8 +8,9 @@
 // is kept by a draw from its cell's hash against the biomes' grass chance
 // there (biome.glsl's biomePlants), times vegetation.settings.w, none on
 // beaches, rock, snow or the sea floor. A tuft's mesh is scaled by 0.3 to
-// 0.7, shrinking to nothing over the last 30 % of the range, turned and
-// tinted by the hash, and coloured as its biomes' grass (the ground's plants,
+// 0.7, shrinking to nothing over the last 30 % of the range, left out by
+// the clearings that clear grass (candidateCleared), turned and tinted by
+// the hash, and coloured as its biomes' grass (the ground's plants,
 // towards straw where the biomes' grass is dry). It takes the next instance of draw
 // VEGETATION_GRASS, its instances after the other kinds' (VEGETATION_GRASS times
 // vegetation.lod.z), at most vegetation.grass.w of them.
@@ -49,6 +50,7 @@ void main() {
         if (pick >= density * plants.w) continue;
         float size = mix(0.3, 0.7, nextRandom(x.hash)) * smoothstep(range, range * GRASS_FADE_START, x.distance);
         if (size < 0.03) continue;
+        if (candidateCleared(chunk, x, radial, CLEAR_GRASS, GRASS_SALT)) continue;
         float turn = 6.2831853 * nextRandom(x.hash);
         float tint = nextRandom(x.hash);
         vec3 drawn = candidateDrawn(chunk, x);

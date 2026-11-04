@@ -129,6 +129,29 @@ def over_ground(distance, azimuth, height, down):
     state["forward"] = normalize(add(ahead, scale(spot, -math.tan(math.radians(down)))))
 
 
+def clearings_ahead():
+    """Two clearings on the ground in the free camera's view, each thinning
+    in over 10 m: a circle of 30 m radius 110 m ahead and 35 m to the left,
+    clearing everything, and a rectangle 90 by 24 m 170 m ahead and 45 m
+    to the right, turned 45 degrees from the view, clearing the plants and
+    the rocks but not the grass."""
+    up = normalize(state["position"])
+    forward = state["forward"]
+    ahead = normalize(sub(forward, scale(up, dot(forward, up))))
+    right = cross(ahead, up)
+
+    def at(along, across):
+        return normalize(add(up, scale(add(scale(ahead, along), scale(right, across)), 1.0 / RADIUS)))
+
+    east, north = local_frame(up)
+    bearing = math.atan2(dot(ahead, east), dot(ahead, north))
+    world.set_clearings([
+        planet_world.Clearing(0, at(110.0, -35.0), radius=30.0, edge=10.0),
+        planet_world.Clearing(0, at(170.0, 45.0), size=(90.0, 24.0), heading=bearing + math.radians(45.0),
+                              edge=10.0, clears=planet_world.CLEAR_PLANTS | planet_world.CLEAR_ROCKS),
+    ])
+
+
 def near_mountain(sun_elevation, sun_azimuth, top=False):
     """The free camera 2.7 km above the sphere, 600 m south-west of a peak
     60 km from the site at 67.5 degrees from east (2,460 m high with the
@@ -196,6 +219,10 @@ class CaptureTour:
         ("vegetation_mixed_wood", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 260.0, 10.0)),
         ("grass_meadow", 1, False, 0, None, DAY_SUN, lambda: over_ground(3_000.0, 180.0, 2.5, 6.0)),
         ("grass_wood_edge", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 3.0, 4.0)),
+        ("vegetation_wood_low", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 0.0, 0.0),
+         lambda: lift_camera(700.0), lambda: look_up(-20.0)),
+        ("vegetation_clearings", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 0.0, 0.0),
+         lambda: lift_camera(700.0), lambda: look_up(-20.0), clearings_ahead),
         ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
         ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
         ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),
@@ -247,6 +274,7 @@ class CaptureTour:
             state["menu"].show(False)
             state["help"].show(False)
             state["input"] = "keys"
+            world.set_clearings([])
             for action in setup:
                 action()
         elif self.captured is None:

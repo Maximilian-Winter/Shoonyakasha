@@ -13,6 +13,7 @@
 //     rocks      x: 1 on, 0 off; y: the small rocks' range (m); z: their grid's cells per cube
 //                face side; w: the entries in TakenRocks
 //     moon       xyz: the moon's centre less the camera's position (m)
+//     clearings, clearingShapes, clearingAxes   the clearings (clearings.glsl)
 //
 // Kinds (one indirect draw each, their instances from kind * instances per
 // kind, as shoonyakasha.planet.vegetation.KINDS): each tree near and far
@@ -51,6 +52,9 @@ layout(set = VEGETATION_SET, binding = VEGETATION_PARAMS) uniform VegetationPara
     vec4 nearby;
     vec4 rocks;
     vec4 moon;
+    vec4 clearings[32];
+    vec4 clearingShapes[32];
+    vec4 clearingAxes[32];
 } vegetation;
 
 // Whether an instance's packed colour marks it as standing on the moon.

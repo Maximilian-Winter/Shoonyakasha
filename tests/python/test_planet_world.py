@@ -6,7 +6,8 @@ probe measured it, and only for the current terrain version, with the
 ore richness there. A survey's heights come back by index, in batches
 of at most PATCH_PROBES from where the last ended, only for its own
 round, and hold the terrain back until it ends; the flat sites are
-uploaded and build again the bodies whose sites changed.
+uploaded and build again the bodies whose sites changed; the clearings
+are checked and uploaded without building anything again.
 
     python -m unittest discover -s tests/python
 """
@@ -163,6 +164,42 @@ class SurveyTest(unittest.TestCase):
         self.assertEqual(world.lod.dropped, [0])
         with self.assertRaises(ValueError):
             world.set_sites([site] * (planet_world.MAX_SITES + 1))
+
+    def test_clearings_uploaded_without_building_again(self):
+        world = self.world
+        world.lod.trees = {0, 1}
+        circle = planet_world.Clearing(0, (0.0, 2.0, 0.0), radius=40.0, edge=5.0, clears=planet_world.CLEAR_PLANTS)
+        rectangle = planet_world.Clearing(1, (0.0, 0.0, 1.0), size=(30.0, 10.0), heading=0.5 * np.pi)
+        world.set_clearings([circle, rectangle])
+        centres = self.engine.custom["planet.vegetation.clearings"]
+        shapes = self.engine.custom["planet.vegetation.clearingShapes"]
+        axes = self.engine.custom["planet.vegetation.clearingAxes"]
+        for values in (centres, shapes, axes):
+            self.assertEqual(len(values), planet_world.MAX_CLEARINGS)
+            self.assertEqual(values[2], (0.0, 0.0, 0.0, 0.0))
+        self.assertEqual(centres[0], (0.0, 1.0, 0.0, 0.0))
+        self.assertEqual(shapes[0], (40.0, 0.0, 5.0, float(planet_world.CLEAR_PLANTS)))
+        self.assertEqual(axes[0][3], planet_world.RADIUS)
+        self.assertEqual(centres[1], (0.0, 0.0, 1.0, 1.0))
+        self.assertEqual(shapes[1], (15.0, 5.0, 0.0, float(planet_world.CLEAR_ALL)))
+        np.testing.assert_allclose(axes[1], (1.0, 0.0, 0.0, planet_world.MOON_RADIUS), atol=1e-12)
+        self.assertEqual(world.clearings, [circle, rectangle])
+        self.assertEqual(world.lod.dropped, [])
+        self.assertEqual(world.terrain_version, 0)
+
+    def test_clearings_checked(self):
+        world = self.world
+        good = planet_world.Clearing(0, (0.0, 1.0, 0.0), radius=10.0)
+        for bad in (planet_world.Clearing(0, (0.0, 1.0, 0.0)),
+                    planet_world.Clearing(0, (0.0, 1.0, 0.0), radius=10.0, size=(5.0, 5.0)),
+                    planet_world.Clearing(0, (0.0, 1.0, 0.0), size=(5.0, 0.0)),
+                    planet_world.Clearing(0, (0.0, 1.0, 0.0), radius=10.0, clears=0),
+                    planet_world.Clearing(0, (0.0, 1.0, 0.0), radius=10.0, clears=8)):
+            with self.assertRaises(ValueError):
+                world.set_clearings([bad])
+        with self.assertRaises(ValueError):
+            world.set_clearings([good] * (planet_world.MAX_CLEARINGS + 1))
+        self.assertEqual(world.clearings, [])
 
     def test_regenerate_drops_the_planets_sites(self):
         world = self.world
