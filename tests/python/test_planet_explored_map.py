@@ -5,7 +5,8 @@ first, measuring them with the extra probes as the props do (only while
 the probes are free, letting them go when asked), the image's pixels and
 cells both ways, and the rendered image (unexplored cells, the land and sea
 ramps, ore, north up or turned with the heading, the minimap's circle),
-and the full map's labels kept apart.
+the full map's labels kept apart and merged when close, and its scale
+bar.
 
     python -m unittest discover -s tests/python
 """
@@ -160,6 +161,18 @@ class ImageTest(unittest.TestCase):
         self.assertEqual(labels[0][1], (400.0, 300.0))
         self.assertEqual(labels[1][1], (405.0, 302.0 + em.LABEL_HEIGHT))
         self.assertEqual(labels[2][1], (600.0, 300.0))
+
+    def test_close_labels_merged(self):
+        reach = em.MERGE_REACH
+        merged = em.merge([("Base", (400.0, 300.0), "a"), ("Ship", (400.0, 300.0 + 0.5 * reach), "b"),
+                           ("Far", (400.0 + 2.0 * reach, 300.0), "c")])
+        self.assertEqual(merged, [("Base, Ship", (400.0, 300.0), "a"), ("Far", (400.0 + 2.0 * reach, 300.0), "c")])
+
+    def test_scale_bar_fits_a_quarter(self):
+        self.assertEqual(em.scale_bar(500.0, 720.0), (250.0, 180.0))
+        step, length = em.scale_bar(8_000.0, 720.0)
+        self.assertEqual(step, 2_500.0)
+        self.assertLessEqual(length, 0.25 * 720.0)
 
 
 if __name__ == "__main__":

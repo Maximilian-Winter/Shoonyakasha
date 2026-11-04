@@ -40,8 +40,10 @@ everything, built once and shown or hidden as a whole.
 
 The settings menu: down the right side of the screen, a gold title with
 the keys that close it, the settings in a scroll view grouped under gold
-headings, and a footer that describes the setting under the pointer. Each
-item is a dict:
+headings, and a footer that describes the setting under the pointer. With
+`centred=True` it stands in the middle of the screen instead, as tall as
+its rows (at most the screen's height less 32), over a backdrop that dims
+everything behind it by MENU_BACKDROP. Each item is a dict:
     {"heading": "Simulation"}
     {"slider": "Exposure", "min": 0.05, "max": 2.0, "get": f, "set": g, "format": "%.2f"}
         (or "show": a function from the value to the text shown, in place of "format")
@@ -539,17 +541,29 @@ MENU_FILL = (0.85, 0.74, 0.45, 1.0)
 MENU_HANDLE = (0.96, 0.95, 0.92, 1.0)
 MENU_SURFACE = (0.12, 0.13, 0.16, 1.0)
 MENU_IDLE_FOOTER = "Point at a setting to see what it does."
+MENU_BACKDROP = (0.0, 0.0, 0.0, 0.45)
+MENU_ROWS = {"heading": 40, "slider": 52, "toggle": 36, "button": 44}   # canvas units of each kind of row
 
 
 class SettingsMenu:
-    def __init__(self, engine, title, items, close_keys=("F1",), reference_size=(1600, 900)):
+    def __init__(self, engine, title, items, close_keys=("F1",), reference_size=(1600, 900), centred=False):
         self.engine = engine
         ui = engine.ui
         self.ui = ui
         self.canvas = ui.create_canvas(reference_size=reference_size)
         ui.set_canvas_sort_order(self.canvas, 10)
+        if centred:
+            backdrop = ui.create_panel(self.canvas, size=(100, 100), color=MENU_BACKDROP)
+            ui.set_rect(backdrop, anchor_min=(0, 0), anchor_max=(1, 1), pivot=(0, 0), position=(0, 0), size=(0, 0))
         panel = ui.create_panel(self.canvas, size=(MENU_WIDTH, 100), color=MENU_PANEL)
-        ui.set_rect(panel, anchor_min=(1, 0), anchor_max=(1, 1), pivot=(1, 0), position=(-16, 16), size=(MENU_WIDTH, -32))
+        if centred:
+            rows = sum(MENU_ROWS[kind] for item in items for kind in MENU_ROWS if kind in item)
+            height = min(MENU_TOP + rows + MENU_FOOTER + 8, reference_size[1] - 32)
+            ui.set_rect(panel, anchor_min=(0.5, 0.5), anchor_max=(0.5, 0.5), pivot=(0.5, 0.5), position=(0, 0),
+                        size=(MENU_WIDTH, height))
+        else:
+            ui.set_rect(panel, anchor_min=(1, 0), anchor_max=(1, 1), pivot=(1, 0), position=(-16, 16),
+                        size=(MENU_WIDTH, -32))
         hairline = ui.create_panel(panel, size=(2, 100), color=MENU_HAIRLINE)
         ui.set_rect(hairline, anchor_min=(0, 0), anchor_max=(0, 1), pivot=(0, 0), position=(0, 0), size=(2, 0))
 
@@ -583,14 +597,14 @@ class SettingsMenu:
         for item in items:
             entry = dict(item)
             if "heading" in item:
-                row = self._row(content, width, 40)
+                row = self._row(content, width, MENU_ROWS["heading"])
                 text = ui.create_text(row, item["heading"].upper(), size=14, color=GOLD)
                 self._place(text, 0, 12, width, 22)
                 ui.set_text_align(text, sk.TEXT_ALIGN_LEFT, sk.TEXT_ALIGN_MIDDLE)
                 line = ui.create_panel(row, size=(width, 1), color=MENU_RULE)
                 self._place(line, 0, 36, width, 1)
             elif "slider" in item:
-                row = self._row(content, width, 52)
+                row = self._row(content, width, MENU_ROWS["slider"])
                 entry["label"] = ui.create_text(row, item["slider"], size=15, color=MENU_TEXT)
                 self._place(entry["label"], 0, 2, width, 22)
                 ui.set_text_align(entry["label"], sk.TEXT_ALIGN_LEFT, sk.TEXT_ALIGN_MIDDLE)
@@ -607,7 +621,7 @@ class SettingsMenu:
             elif "toggle" in item:
                 # The toggle spans the row so all of it takes the pointer; its label is the row's own
                 # text, in the sliders' size.
-                row = self._row(content, width, 36)
+                row = self._row(content, width, MENU_ROWS["toggle"])
                 caps = self._caps_width(item)
                 entry["widget"] = ui.create_toggle(row, "", is_on=item["get"](), size=(width - caps, 28))
                 self._place(entry["widget"], 0, 4, width - caps, 28)
@@ -617,7 +631,7 @@ class SettingsMenu:
                 ui.set_text_align(label, sk.TEXT_ALIGN_LEFT, sk.TEXT_ALIGN_MIDDLE)
                 self._caps(row, item, width - caps + 8, 4 + (28 - CAP_HEIGHT) / 2)
             elif "button" in item:
-                row = self._row(content, width, 44)
+                row = self._row(content, width, MENU_ROWS["button"])
                 caps = self._caps_width(item)
                 entry["widget"] = ui.create_button(row, item["button"], size=(width - caps, 34))
                 self._place(entry["widget"], 0, 5, width - caps, 34)

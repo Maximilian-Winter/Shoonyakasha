@@ -102,6 +102,7 @@ class OnFoot:
         self.view = None             # (right, up, forward) of the player's view, from `place_eye`
         self.look_delta = (0.0, 0.0)  # pixels `read_controls` turned the view by this frame
         self.head_bob = True
+        self.mouse_sensitivity = 1.0  # the mouse's turning of the view, times
         self.on_drop = None          # called by drop_bubble after the player is removed
         self._accumulator = 0.0      # seconds of physics not yet stepped
         self._focus = None           # the focus relative to the bubble's body last frame
@@ -196,7 +197,8 @@ class OnFoot:
         """The player's and the gravity gun's controls from the keys, the
         mouse and the gamepad (left stick to walk, right stick to look, A
         to jump and jet, the left trigger to grab, the right to punt). The
-        mouse turns the view while captured, or with the right button held;
+        mouse turns the view, by `mouse_sensitivity` times its movement,
+        while captured, or with the right button held;
         while it is captured, the right button grabs and the left punts,
         and with R held the mouse turns the held body instead of the view.
         Keys: W S A D to walk, left Shift to run, left Ctrl to crouch,
@@ -237,7 +239,8 @@ class OnFoot:
             if captured and down(keys.R) and gun is not None and gun.held is not None:
                 gc.rotate = (gc.rotate[0] + dx, gc.rotate[1] + dy)
             else:
-                look = (look[0] + dx, look[1] + dy)
+                s = self.mouse_sensitivity
+                look = (look[0] + dx * s, look[1] + dy * s)
         if player is not None:
             player.look(*look)
         self.look_delta = look

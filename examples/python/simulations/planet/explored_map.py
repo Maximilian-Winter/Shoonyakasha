@@ -28,9 +28,14 @@ convert between cells and the image's pixels the same way.
 `MapView` shows the minimap at the top right of a screen canvas and, while
 open, the full map in the middle, with markers (name, direction from the
 body's centre, colour) and the player's arrow drawn over them; a marker
-beyond the minimap's edge is held on its rim. On the full map the markers
-are named, each name moved down while it would cover one before it
-(`separate`).
+beyond the minimap's edge is held on its rim. The full map stands on a
+panel with its title, the cells explored and the distance to its edge
+above it and the keys that work on it (MAP_HINTS) below; faint lines cross
+it every scale bar's length (`scale_bar`) east and north of the grid's
+middle, and the scale bar is at its bottom left. On it the markers are
+named to their right, starting LABEL_OFFSET from them, the names of
+markers within MERGE_REACH of an earlier one joined to its name (`merge`),
+each name moved down while it would cover one before it (`separate`).
 """
 
 import math
@@ -41,6 +46,7 @@ import shoonyakasha as sk
 from shoonyakasha.planet.rocks import ORE_ROCKS
 from shoonyakasha.planet.vec import add, dot, local_frame, normalize, scale, sub
 from shoonyakasha.toolkit.drawing import Mesh
+from shoonyakasha.toolkit.overlay import CAP_HEIGHT, GOLD, KeyCaps, measure
 
 CELL = 25.0                      # m between cells
 SIZE = 1024                      # cells along each side
@@ -61,15 +67,26 @@ MINIMAP_PIXELS = 110             # the minimap image's pixels across, stretched 
 MINIMAP_RANGE = 400.0            # m from the centre to the minimap's rim
 MINIMAP_MARGIN = 24.0
 MINIMAP_INTERVAL = 0.1           # s between the minimap's redraws
-FULL_MAP = 760                   # canvas units across
-FULL_PIXELS = 380                # the full map image's pixels across, stretched to FULL_MAP
+FULL_MAP = 720                   # canvas units across
+FULL_PIXELS = 360                # the full map image's pixels across, stretched to FULL_MAP
+FULL_PAD = 12                    # canvas units of panel around the full map
+FULL_HEADER, FULL_FOOTER = 34, 40   # the panel's bands above and below it
+MAP_HINTS = [(("Wheel",), "Zoom"), (("LMB",), "Set the waypoint"), (("RMB",), "Clear it"),
+             (("M", "Esc"), "Close")]
+SCALE_STEPS = (25.0, 50.0, 100.0, 200.0, 250.0, 500.0, 1_000.0, 2_000.0, 2_500.0, 5_000.0)   # m
+MERGE_REACH = 14.0               # canvas units within which the full map's markers share a label
+LABEL_OFFSET = 12.0              # canvas units from a marker on the full map to the left of its label
 FULL_RANGES = (500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0)   # m from the centre to the edge, by zoom
 FULL_INTERVAL = 0.2              # s between the full map's redraws
 MAX_LABELS = 12
 LABEL_WIDTH, LABEL_HEIGHT = 70.0, 15.0   # canvas units a label keeps clear of earlier ones
 TEXT = (0.92, 0.96, 1.0, 0.95)
 SHADOW = (0.0, 0.0, 0.0, 0.6)
-PANEL = (0.02, 0.03, 0.05, 0.92)
+PANEL = (0.02, 0.024, 0.03, 0.92)
+HAIRLINE = (0.95, 0.85, 0.55, 0.75)
+MUTED = (0.6, 0.63, 0.68, 1.0)
+RIM = (0.95, 0.85, 0.55, 0.7)     # the minimap's edge
+GRID_LINE = (1.0, 1.0, 1.0, 0.07)
 PLAYER = (1.0, 1.0, 1.0, 1.0)
 
 
@@ -265,12 +282,48 @@ def separate(labels, width=LABEL_WIDTH, height=LABEL_HEIGHT):
     return placed
 
 
+def merge(labels, reach=MERGE_REACH):
+    """(text, (x, y), colour) labels with those within `reach` canvas units
+    of an earlier one folded into it: their texts joined by ", " at the
+    earlier one's place, in its colour."""
+    merged = []
+    for text, (x, y), colour in labels:
+        near = next((m for m in merged if math.hypot(x - m[1][0], y - m[1][1]) <= reach), None)
+        if near is None:
+            merged.append([text, (x, y), colour])
+        else:
+            near[0] += ", " + text
+    return [tuple(m) for m in merged]
+
+
+def scale_bar(metres, pixels):
+    """(metres, pixels) of the scale bar for a map `pixels` across showing
+    `metres` from its middle to its edge: the longest of SCALE_STEPS no
+    longer than a quarter of the map's width."""
+    per = pixels / (2.0 * metres)
+    fitting = [s for s in SCALE_STEPS if s * per <= 0.25 * pixels]
+    step = fitting[-1] if fitting else SCALE_STEPS[0]
+    return step, step * per
+
+
 class MapView:
     def __init__(self, engine, reference_size=(1600, 900)):
         ui = engine.ui
         self.ui = ui
         self.canvas = ui.create_canvas(reference_size=reference_size, sort_order=1)
-        self.full_panel = ui.create_panel(self.canvas, size=(FULL_MAP + 24, FULL_MAP + 24), color=PANEL)
+        width, height = FULL_MAP + 2 * FULL_PAD, FULL_MAP + 2 * FULL_PAD + FULL_HEADER + FULL_FOOTER
+        self.full_panel = ui.create_panel(self.canvas, size=(width, height), color=PANEL)
+        hairline = ui.create_panel(self.full_panel, size=(2, height), color=HAIRLINE)
+        ui.set_rect(hairline, anchor_min=(0, 0), anchor_max=(0, 1), pivot=(0, 0), position=(0, 0), size=(2, 0))
+        heading = ui.create_text(self.full_panel, "MAP", size=18, color=GOLD)
+        self.info = ui.create_text(self.full_panel, "", size=14, color=MUTED)
+        for element, align in ((heading, sk.TEXT_ALIGN_LEFT), (self.info, sk.TEXT_ALIGN_RIGHT)):
+            ui.set_rect(element, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0), position=(FULL_PAD, 6),
+                        size=(FULL_MAP, FULL_HEADER))
+            ui.set_text_align(element, align, sk.TEXT_ALIGN_MIDDLE)
+        KeyCaps(ui, self.full_panel).show(MAP_HINTS, FULL_PAD,
+                                          height - FULL_FOOTER + 0.5 * (FULL_FOOTER - CAP_HEIGHT) - 4, MUTED)
+        self.info_text = None
         self.full_image = ui.create_image(self.canvas, size=(FULL_MAP, FULL_MAP))
         self.mini_image = ui.create_image(self.canvas, size=(MINIMAP, MINIMAP))
         self.overlay = ui.create_element(self.canvas)
@@ -278,7 +331,7 @@ class MapView:
         for element in (self.full_panel, self.full_image, self.mini_image, self.overlay):
             ui.set_raycast_target(element, False)
         self.labels = [self._text(13) for _ in range(MAX_LABELS)]
-        self.title = self._text(15)
+        self.scale_text = self._text(12)
         self.texts = {}
         self.open = False
         self.zoom = 0                 # index into FULL_RANGES
@@ -296,7 +349,7 @@ class MapView:
             pair.append((text, offset))
         return pair
 
-    def _place(self, pair, text, centre, size=(160, 18), colour=None):
+    def _place(self, pair, text, centre, size=(200, 18), colour=None):
         """`text` centred at `centre`; None hides it."""
         for k, (element, offset) in enumerate(pair):
             old = self.texts.get(element)
@@ -344,13 +397,37 @@ class MapView:
 
     @staticmethod
     def _arrow(mesh, x, y, angle, size, colour):
-        """A triangle pointing `angle` radians clockwise from up, at (x, y)."""
+        """A triangle pointing `angle` radians clockwise from up, at (x, y), with a dark outline."""
         s, c = math.sin(angle), math.cos(angle)
 
-        def p(ax, ay):
+        def p(ax, ay, grow=0.0):
+            ax, ay = ax * (1.0 + grow), ay * (1.0 + grow)
             return (x + ax * c - ay * s, y + ax * s + ay * c)
-        mesh.face([p(0.0, -size), p(0.6 * size, 0.7 * size), p(0.0, 0.35 * size), p(-0.6 * size, 0.7 * size)],
-                  [colour] * 4)
+        shape = ((0.0, -size), (0.6 * size, 0.7 * size), (0.0, 0.35 * size), (-0.6 * size, 0.7 * size))
+        mesh.face([p(ax, ay, 0.3) for ax, ay in shape], [SHADOW] * 4)
+        mesh.face([p(ax, ay) for ax, ay in shape], [colour] * 4)
+
+    @staticmethod
+    def _diamond(mesh, x, y, size, colour):
+        r = size + 1.5
+        mesh.face([(x - r, y), (x, y - r), (x + r, y), (x, y + r)], [SHADOW] * 4)
+        mesh.face([(x - size, y), (x, y - size), (x + size, y), (x, y + size)], [colour] * 4)
+
+    def _grid_lines(self, mesh, grid, centre, metres, step, left, top):
+        """Faint lines every `step` metres east and north of the grid's
+        middle across the full map."""
+        per = FULL_MAP / (2.0 * metres)
+        for axis in (0, 1):
+            offset = (centre[axis] - grid.half) * grid.cell        # m east (north) of the grid's middle
+            first = math.ceil((offset - metres) / step)
+            for k in range(first, int(math.floor((offset + metres) / step)) + 1):
+                d = (k * step - offset) * per
+                if axis == 0:
+                    x = left + 0.5 * FULL_MAP + d
+                    mesh.segment((x, top), (x, top + FULL_MAP), GRID_LINE, 1.0)
+                else:
+                    y = top + 0.5 * FULL_MAP - d
+                    mesh.segment((left, y), (left + FULL_MAP, y), GRID_LINE, 1.0)
 
     def update(self, dt, grid, at, heading, markers):
         """One frame: `grid` the body's, `at` the player's cell coordinates,
@@ -372,31 +449,38 @@ class MapView:
                                      render(grid, at, MINIMAP_RANGE, MINIMAP_PIXELS, heading, circle=True))
         r = 0.5 * MINIMAP
         cx, cy = left + r, top + r
-        steps = 48
+        steps = 64
         for k in range(steps):
             a0, a1 = 2.0 * math.pi * k / steps, 2.0 * math.pi * (k + 1) / steps
-            mesh.segment((cx + r * math.sin(a0), cy - r * math.cos(a0)),
-                         (cx + r * math.sin(a1), cy - r * math.cos(a1)), (0.0, 0.0, 0.0, 0.6), 3.0)
+            p0 = (math.sin(a0), -math.cos(a0))
+            p1 = (math.sin(a1), -math.cos(a1))
+            mesh.segment((cx + (r + 1.5) * p0[0], cy + (r + 1.5) * p0[1]),
+                         (cx + (r + 1.5) * p1[0], cy + (r + 1.5) * p1[1]), SHADOW, 4.0)
+            mesh.segment((cx + r * p0[0], cy + r * p0[1]), (cx + r * p1[0], cy + r * p1[1]), RIM, 1.5)
         for name, where, colour in markers:
             px, py = to_pixel(where, at, MINIMAP_RANGE, MINIMAP, heading)
             dx, dy = px - r, py - r
             d = math.hypot(dx, dy)
             if d > r - 6.0:
                 dx, dy = dx * (r - 6.0) / d, dy * (r - 6.0) / d
-            mesh.face([(cx + dx - 4.0, cy + dy), (cx + dx, cy + dy - 4.0), (cx + dx + 4.0, cy + dy),
-                       (cx + dx, cy + dy + 4.0)], [colour] * 4)
+            self._diamond(mesh, cx + dx, cy + dy, 4.0, colour)
         nx, ny = to_pixel((at[0], at[1] + 1.0), at, 1.0, 2.0, heading, cell=1.0)
         n_angle = math.atan2(nx - 1.0, -(ny - 1.0))
-        labels.append(("N", (cx + (r + 9.0) * math.sin(n_angle), cy - (r + 9.0) * math.cos(n_angle)), TEXT))
+        north = (cx + (r + 11.0) * math.sin(n_angle), cy - (r + 11.0) * math.cos(n_angle))
+        mesh.face([(north[0] - 8.0, north[1]), (north[0], north[1] - 8.0), (north[0] + 8.0, north[1]),
+                   (north[0], north[1] + 8.0)], [PANEL] * 4)
+        labels.append(("N", north, GOLD))
         self._arrow(mesh, cx, cy, 0.0, 8.0, PLAYER)
 
         # The full map, north up.
         if self.open:
             metres = FULL_RANGES[self.zoom]
-            left, top = 0.5 * (width - FULL_MAP), 0.5 * (height - FULL_MAP)
+            left = 0.5 * (width - FULL_MAP)
+            top = 0.5 * (height - FULL_MAP - FULL_HEADER - FULL_FOOTER) + FULL_HEADER
             self.full_rect = (left, top)
             self.ui.set_rect(self.full_panel, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0, 0),
-                             position=(left - 12.0, top - 12.0), size=(FULL_MAP + 24, FULL_MAP + 24))
+                             position=(left - FULL_PAD, top - FULL_PAD - FULL_HEADER),
+                             size=(FULL_MAP + 2 * FULL_PAD, FULL_MAP + 2 * FULL_PAD + FULL_HEADER + FULL_FOOTER))
             self.since["full"] += dt
             if self.since["full"] >= FULL_INTERVAL:
                 self.since["full"] = 0.0
@@ -406,19 +490,28 @@ class MapView:
                 self.ui.set_texture_data(self.full_image,
                                          render(grid, at, metres, FULL_PIXELS, unexplored=UNEXPLORED_FULL))
             centre = self.full_centre or at
+            step, bar = scale_bar(metres, FULL_MAP)
+            self._grid_lines(mesh, grid, centre, metres, step, left, top)
+            found = []
             for name, where, colour in markers:
                 px, py = to_pixel(where, centre, metres, FULL_MAP)
                 if 0.0 <= px <= FULL_MAP and 0.0 <= py <= FULL_MAP:
                     x, y = left + px, top + py
-                    mesh.face([(x - 6.0, y), (x, y - 6.0), (x + 6.0, y), (x, y + 6.0)], [colour] * 4)
-                    labels.append((name, (x, y - 14.0), colour))
+                    self._diamond(mesh, x, y, 6.0, colour)
+                    found.append((name, (x, y), colour))
+            for text, (x, y), colour in merge(found):
+                labels.append((text, (x + LABEL_OFFSET + 0.5 * measure.width(text, 13), y), colour))
             px, py = to_pixel(at, centre, metres, FULL_MAP)
             self._arrow(mesh, left + px, top + py, math.radians(heading), 10.0, PLAYER)
-            scale_text = "%.0f m to the edge   wheel: zoom   left click: waypoint   right click: clear" % metres
-            self._place(self.title, "MAP   %s   %d cells explored" % (scale_text, grid.measured),
-                        (0.5 * width, top - 26.0), (FULL_MAP + 200, 20))
+            bx, by = left + 16.0, top + FULL_MAP - 18.0
+            self._scale_bar(mesh, bx, by, bar)
+            self._place(self.scale_text, distance_label(step), (bx + 0.5 * bar, by - 12.0), (120, 16))
+            info = "%s cells explored     %s to the edge" % (format(grid.measured, ","), distance_label(metres))
+            if info != self.info_text:
+                self.ui.set_text(self.info, info)
+                self.info_text = info
         else:
-            self._place(self.title, None, (0.0, 0.0))
+            self._place(self.scale_text, None, (0.0, 0.0))
         labels = separate(labels)
         for k, pair in enumerate(self.labels):
             if k < len(labels):
@@ -426,3 +519,15 @@ class MapView:
             else:
                 self._place(pair, None, (0.0, 0.0))
         self.ui.set_geometry(self.overlay, mesh.positions, mesh.indices, mesh.colors)
+
+    @staticmethod
+    def _scale_bar(mesh, x, y, length_):
+        """The scale bar: a line `length_` long from (x, y) with a tick at each end."""
+        for colour, w in ((SHADOW, 4.0), (TEXT, 2.0)):
+            mesh.segment((x, y), (x + length_, y), colour, w)
+            mesh.segment((x, y - 5.0), (x, y + 1.0), colour, w)
+            mesh.segment((x + length_, y - 5.0), (x + length_, y + 1.0), colour, w)
+
+
+def distance_label(metres):
+    return "%.0f m" % metres if metres < 1_000.0 else "%g km" % (metres / 1_000.0)

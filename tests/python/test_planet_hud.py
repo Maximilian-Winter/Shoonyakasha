@@ -2,7 +2,8 @@
 (examples/python/simulations/planet/hud.py), loaded from its file: bearings
 along the ground, wrapping, the compass strip's positions and ticks, the
 markers (nearest first, at most MAX_MARKERS, beyond the span held at the
-end), their label rows, the distances' text and the gun's prompts.
+end), their label rows, the distances' text, the gun's key hints and the
+status under the crosshair.
 
     python -m unittest discover -s tests/python
 """
@@ -92,14 +93,23 @@ class TextTest(unittest.TestCase):
         self.assertEqual(hud.distance_text(15.4), "15 m")
         self.assertEqual(hud.distance_text(72_940.0), "72.9 km")
 
-    def test_prompts(self):
-        self.assertEqual(hud.prompt("idle", False, 0.0), "")
-        self.assertEqual(hud.prompt("can_grab", False, 0.0), "RMB  grab")
-        self.assertEqual(hud.prompt("can_grab", False, 0.0, pad=True), "LT  grab")
-        self.assertEqual(hud.prompt("too_heavy", False, 0.0), "too heavy")
-        self.assertIn("R + mouse  turn", hud.prompt("holding", True, 0.0))
-        self.assertNotIn("turn", hud.prompt("holding", True, 0.0, pad=True))
-        self.assertEqual(hud.prompt("holding", True, 0.5), "LMB  release to throw  50 %")
+    def test_hints(self):
+        self.assertEqual(hud.hints("idle", False, 0.0), [])
+        self.assertEqual(hud.hints("too_heavy", False, 0.0), [])
+        self.assertEqual(hud.hints("can_grab", False, 0.0), [(("RMB",), "Grab")])
+        self.assertEqual(hud.hints("can_grab", False, 0.0, pad=True), [(("pad:LT",), "Grab")])
+        held = hud.hints("holding", True, 0.0)
+        self.assertEqual([h[0] for h in held], [("RMB",), ("LMB",), ("R",), ("Wheel",)])
+        pad = hud.hints("holding", True, 0.0, pad=True)
+        self.assertEqual([h[0] for h in pad], [("pad:LT",), ("pad:RT",), ("pad:LB", "pad:RB")])
+        self.assertEqual(hud.hints("holding", True, 0.5), [(("LMB",), "Release to throw")])
+
+    def test_status(self):
+        self.assertEqual(hud.status_text("idle", False, 0.0), (None, None))
+        self.assertEqual(hud.status_text("too_heavy", False, 0.0), ("Too heavy", hud.WARNING))
+        self.assertEqual(hud.status_text("holding", True, 0.5, 3.0), ("50 %", hud.ACCENT))
+        self.assertEqual(hud.status_text("holding", True, 0.0, 3.0), ("Hold 3.0 m", hud.TEXT))
+        self.assertEqual(hud.status_text("holding", True, 0.0), (None, None))
 
 
 if __name__ == "__main__":

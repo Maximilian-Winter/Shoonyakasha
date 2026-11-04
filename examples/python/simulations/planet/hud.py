@@ -1,32 +1,39 @@
 """
 The walker's head-up display (walker.py), on a screen canvas: lines and
-filled shapes in one element (shoonyakasha.toolkit.drawing.Mesh) and
-texts with a dark shadow behind each. Positions are canvas units, x to the
-right and y down from the top left; the canvas is laid out for
+filled shapes in one element (shoonyakasha.toolkit.drawing.Mesh), texts
+with a dark shadow behind each, and a bar of key hints
+(shoonyakasha.toolkit.overlay.HintBar). Positions are canvas units, x to
+the right and y down from the top left; the canvas is laid out for
 REFERENCE_SIZE.
 
 - **Crosshair** at the centre: four short ticks around a dot, coloured by
   the gravity gun's status (gravity_gun.Gun.status) as CROSSHAIR gives;
-  while holding, a ring around it, and while a punt
-  charges, the ring's arc filled clockwise from the top with the charge.
-- **Prompt** under the crosshair: what the gun's controls do now
-  (`prompt`).
-- **Compass** across the top: COMPASS_WIDTH canvas units showing
-  COMPASS_SPAN degrees either side of the view's heading, a tick every 5
-  degrees, longer every 15, labelled every 45 (N, NE, E, ...); the heading
-  in degrees under its middle. Markers (name, position, colour) stand on
-  it at their bearing from the eye, along the ground (`bearing`), the
-  MAX_MARKERS nearest; one beyond the span is held at the strip's end,
-  dimmed and without a label. The others show their name and distance
-  along the ground below the strip, in the first of LABEL_ROWS rows where
-  they keep LABEL_GAP from the labels of nearer markers (`label_rows`).
+  while holding, a ring around it, and while a punt charges, the ring's
+  arc filled clockwise from the top with the charge.
+- **Status** under the crosshair: "Too heavy" when the target is, the
+  charge while a punt charges, or for HOLD_SECONDS after the hold
+  distance changes, the distance (`status_text`).
+- **Hints** along the bottom: what the gun's controls do now, as key caps
+  (`hints`); hidden when there are none.
+- **Compass** across the top: a strip COMPASS_WIDTH canvas units wide
+  showing COMPASS_SPAN degrees either side of the view's heading, a tick
+  every 5 degrees, longer every 15, the eight directions named every 45
+  degrees inside it (N in ACCENT, the four between dimmer); the heading in
+  degrees in an outlined box under its middle. Markers (name, position, colour)
+  stand under it at their bearing from the eye, along the ground
+  (`bearing`), the MAX_MARKERS nearest; one beyond the span is held at the
+  strip's end, dimmed and without a label. The others show their name and
+  distance along the ground below the heading, in the first of LABEL_ROWS
+  rows where they keep LABEL_GAP from the labels of nearer markers
+  (`label_rows`).
+- **Toasts** below the markers' labels: the last MAX_TOASTS messages handed
+  to `toast`, newest on top, each on a dark pill, shown for TOAST_SECONDS
+  and fading out over its last TOAST_FADE.
 - **Jet fuel** at the bottom left: a bar of the player's jet fuel, in
-  WARNING below LOW_FUEL.
-- **Toasts** under the compass: the last MAX_TOASTS messages handed to
-  `toast`, newest on top, each shown for TOAST_SECONDS and fading out
-  over its last TOAST_FADE.
-- **Readout** at the bottom right: the speed along the ground, the
-  height above the body's radius, and the body's name.
+  WARNING below LOW_FUEL, shown while the fuel is not full and for
+  FUEL_LINGER seconds after it fills, fading over the last FUEL_FADE.
+- **Readout** at the bottom right: the speed along the ground, the body's
+  name and, off the ground, the height of the feet above it.
 """
 
 import math
@@ -34,37 +41,49 @@ import math
 import shoonyakasha as sk
 from shoonyakasha.planet.vec import dot, length, local_frame, normalize, scale, sub
 from shoonyakasha.toolkit.drawing import Mesh
+from shoonyakasha.toolkit.overlay import HintBar, measure
 
 REFERENCE_SIZE = (1600, 900)
 TEXT = (0.92, 0.96, 1.0, 0.95)
-DIM = (0.92, 0.96, 1.0, 0.45)
-SHADOW = (0.0, 0.0, 0.0, 0.55)
+DIM = (0.92, 0.96, 1.0, 0.55)
+SHADOW = (0.0, 0.0, 0.0, 0.6)
 LINE_SHADOW = (0.0, 0.0, 0.0, 0.35)
 ACCENT = (1.0, 0.72, 0.3, 1.0)
 WARNING = (1.0, 0.32, 0.25, 1.0)
 GOOD = (0.55, 1.0, 0.62, 1.0)
-PANEL = (0.02, 0.03, 0.05, 0.45)
+PANEL = (0.02, 0.03, 0.05, 0.5)
+PILL = (0.02, 0.03, 0.05, 0.62)
 CROSSHAIR = {"idle": TEXT, "can_grab": GOOD, "too_heavy": WARNING, "holding": ACCENT}
 CROSSHAIR_GAP, CROSSHAIR_TICK = 5.0, 7.0
 RING_RADIUS = 16.0
-COMPASS_TOP = 22.0
+STATUS_BELOW = 34.0              # canvas units under the centre the status is centred
+HOLD_SECONDS = 1.2
+COMPASS_TOP = 14.0
 COMPASS_WIDTH = 640.0
 COMPASS_SPAN = 60.0              # degrees either side of the heading
-COMPASS_HEIGHT = 18.0
+COMPASS_HEIGHT = 28.0
 LABELS = {0: "N", 45: "NE", 90: "E", 135: "SE", 180: "S", 225: "SW", 270: "W", 315: "NW"}
+TICK_LENGTH = 12.0               # canvas units of the longest tick
+HEADING_BOX = (48.0, 22.0)       # width, height, under the strip's middle
+HEADING_GAP = 8.0                # between the strip and the heading's box
 MAX_MARKERS = 8
-MARKER_LABEL_TOP = 40.0          # canvas units below the strip the first row of labels is centred
-MARKER_ROW = 30.0                # between rows of labels
-LABEL_GAP = 90.0                 # canvas units between labels in a row, at least
+MARKER_LABEL_TOP = 46.0          # canvas units below the strip the first row of labels is centred
+MARKER_ROW = 18.0                # between rows of labels
+LABEL_GAP = 120.0                # canvas units between labels in a row, at least
 LABEL_ROWS = 2
-FUEL_BAR = (36.0, 60.0, 220.0, 8.0)   # left, distance up from the bottom, width, height
+LABEL_SIZE = 13
+FUEL_BAR = (64.0, 40.0, 180.0, 6.0)   # left, distance up from the bottom, width, height
 LOW_FUEL = 0.25
+FUEL_LINGER, FUEL_FADE = 1.5, 0.5     # s
 LINE = 1.6
 MAX_TOASTS = 3
 TOAST_SECONDS = 5.0
 TOAST_FADE = 1.0
-TOAST_TOP = 168.0               # canvas units from the top the newest toast is centred
-TOAST_ROW = 26.0
+TOAST_TOP = 150.0               # canvas units from the top the newest toast is centred
+TOAST_ROW = 34.0
+TOAST_SIZE = 16
+TOAST_PAD = (14.0, 26.0)        # the pill's width beyond the text, its height
+AIRBORNE = 0.5                  # m the feet must be above the ground for the readout to give the height
 
 
 def bearing(up, direction):
@@ -143,19 +162,34 @@ def distance_text(metres):
     return "%.0f m" % metres if metres < 1_000.0 else "%.1f km" % (metres / 1_000.0)
 
 
-def prompt(status, held, charge, pad=False):
-    """What the gun's controls do now, for the gun's `status`."""
-    grab, punt = ("LT", "RT") if pad else ("RMB", "LMB")
+def hints(status, held, charge, pad=False):
+    """The key hints (caps, label) for what the gun's controls do now, for
+    the gun's `status`; the gamepad's with `pad`."""
+    grab, punt = ("pad:LT",), ("pad:RT",)
+    if not pad:
+        grab, punt = ("RMB",), ("LMB",)
     if held:
         if charge > 0.0:
-            return "%s  release to throw  %d %%" % (punt, round(100.0 * charge))
-        text = "%s  drop     %s  throw (hold to charge)" % (grab, punt)
-        return text if pad else text + "     R + mouse  turn"
+            return [(punt, "Release to throw")]
+        found = [(grab, "Drop"), (punt, "Throw, hold to charge")]
+        if pad:
+            return found + [(("pad:LB", "pad:RB"), "Distance")]
+        return found + [(("R",), "Turn with the mouse"), (("Wheel",), "Distance")]
     if status == "can_grab":
-        return "%s  grab" % grab
+        return [(grab, "Grab")]
+    return []
+
+
+def status_text(status, held, charge, hold_distance=None):
+    """(text, colour) under the crosshair, or (None, None): "Too heavy",
+    the charge, or `hold_distance` when given."""
     if status == "too_heavy":
-        return "too heavy"
-    return ""
+        return "Too heavy", WARNING
+    if held and charge > 0.0:
+        return "%d %%" % round(100.0 * charge), ACCENT
+    if held and hold_distance is not None:
+        return "Hold %.1f m" % hold_distance, TEXT
+    return None, None
 
 
 class Hud:
@@ -167,17 +201,21 @@ class Hud:
         ui.set_rect(self.shapes, anchor_min=(0, 0), anchor_max=(1, 1), pivot=(0, 0), position=(0, 0), size=(0, 0))
         ui.set_raycast_target(self.shapes, False)
         self.texts = {}
-        self.prompt_text = self._text(15, TEXT)
-        self.heading_text = self._text(15, TEXT)
-        self.tick_labels = [self._text(13, TEXT) for _ in range(6)]
-        self.marker_names = [self._text(12, TEXT) for _ in range(MAX_MARKERS)]
-        self.marker_distances = [self._text(11, DIM) for _ in range(MAX_MARKERS)]
-        self.fuel_text = self._text(12, TEXT, sk.TEXT_ALIGN_LEFT)
-        self.speed_text = self._text(20, TEXT, sk.TEXT_ALIGN_RIGHT)
-        self.height_text = self._text(14, TEXT, sk.TEXT_ALIGN_RIGHT)
-        self.body_text = self._text(12, DIM, sk.TEXT_ALIGN_RIGHT)
-        self.toast_texts = [self._text(17, TEXT) for _ in range(MAX_TOASTS)]
+        self.status_text = self._text(14, TEXT)
+        self.heading_text = self._text(14, TEXT)
+        self.tick_labels = [self._text(14, TEXT) for _ in range(6)]
+        self.marker_labels = [self._text(LABEL_SIZE, TEXT) for _ in range(MAX_MARKERS)]
+        self.fuel_text = self._text(12, DIM, sk.TEXT_ALIGN_LEFT)
+        self.speed_text = self._text(26, TEXT, sk.TEXT_ALIGN_RIGHT)
+        self.unit_text = self._text(13, DIM, sk.TEXT_ALIGN_LEFT)
+        self.place_text = self._text(13, DIM, sk.TEXT_ALIGN_RIGHT)
+        self.toast_texts = [self._text(TOAST_SIZE, TEXT) for _ in range(MAX_TOASTS)]
         self.toasts = []              # [text, colour, seconds left], newest last
+        self.bar = HintBar(ui, self.canvas)
+        self.bar.show(False)
+        self.hold_distance = None     # the gun's hold distance last frame
+        self.hold_shown = 0.0         # s the hold distance stays shown
+        self.fuel_shown = 0.0         # s the jet fuel stays shown
 
     def _text(self, size, colour, align=sk.TEXT_ALIGN_CENTER):
         """A text and its shadow (a dark copy behind it, a unit down and right)."""
@@ -190,12 +228,13 @@ class Hud:
         return pair
 
     def _place(self, pair, text, centre, size=(160, 22), colour=None):
-        """`text` in a box of `size` centred at `centre`; None or "" hides it."""
+        """`text` in a box of `size` centred at `centre`; None or "" hides
+        it. `colour` sets the text's colour, and the shadow's alpha with it."""
         text = text or None
         for k, (element, offset) in enumerate(pair):
             old = self.texts.get(element)
-            new = (text, round(centre[0] + offset[0], 1), round(centre[1] + offset[1], 1), size,
-                   colour if k == 1 else None)
+            shade = colour if k == 1 else (None if colour is None else SHADOW[:3] + (SHADOW[3] * colour[3],))
+            new = (text, round(centre[0] + offset[0], 1), round(centre[1] + offset[1], 1), size, shade)
             if new == old:
                 continue
             if text is None:
@@ -211,8 +250,8 @@ class Hud:
                 if old is None or old[1:4] != new[1:4]:
                     self.ui.set_rect(element, anchor_min=(0, 0), anchor_max=(0, 0), pivot=(0.5, 0.5),
                                      position=new[1:3], size=size)
-                if k == 1 and colour is not None and (old is None or old[4] != colour):
-                    self.ui.set_color(element, colour)
+                if shade is not None and (old is None or old[4] != shade):
+                    self.ui.set_color(element, shade)
             self.texts[element] = new
 
     def show(self, on):
@@ -232,7 +271,7 @@ class Hud:
         self.toasts.append([text, colour, TOAST_SECONDS])
         del self.toasts[:-MAX_TOASTS]
 
-    def update_toasts(self, dt, width):
+    def update_toasts(self, mesh, dt, width):
         for toast in self.toasts:
             toast[2] -= dt
         self.toasts = [t for t in self.toasts if t[2] > 0.0]
@@ -240,37 +279,44 @@ class Hud:
         for k, pair in enumerate(self.toast_texts):
             if k < len(shown):
                 text, colour, left = shown[k]
-                alpha = colour[3] * min(1.0, left / TOAST_FADE)
-                self._place(pair, text, (0.5 * width, TOAST_TOP + TOAST_ROW * k), (900, 24),
-                            (colour[0], colour[1], colour[2], round(alpha, 2)))
+                fade = min(1.0, left / TOAST_FADE)
+                y = TOAST_TOP + TOAST_ROW * k
+                w = measure.width(text, TOAST_SIZE) + 2.0 * TOAST_PAD[0]
+                self._rect(mesh, 0.5 * (width - w), y - 0.5 * TOAST_PAD[1], w, TOAST_PAD[1],
+                           PILL[:3] + (PILL[3] * fade,))
+                self._rect(mesh, 0.5 * (width - w), y - 0.5 * TOAST_PAD[1], 3.0, TOAST_PAD[1],
+                           colour[:3] + (colour[3] * fade,))
+                self._place(pair, text, (0.5 * width, y), (w, 24), (colour[0], colour[1], colour[2], round(fade, 2)))
             else:
                 self._place(pair, None, (0.0, 0.0))
 
-    def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0):
+    def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0, height=None):
         """One frame: `view` (right, up, forward) of the camera, `eye` from
         the planet's centre, `body` the world body under it, `player` the
         character, `gun` its gravity gun, `targets` the compass markers
         (name, position from the planet's centre, colour), `speed` along
         the ground in m/s, `pad` whether to name the gamepad's controls,
-        `dt` the seconds since the last update, for the toasts."""
-        width, height = self.ui.get_canvas_size(self.canvas)
-        if width <= 0 or height <= 0:
+        `dt` the seconds since the last update, `height` the feet's height
+        above the ground in metres, or None."""
+        width, height_px = self.ui.get_canvas_size(self.canvas)
+        if width <= 0 or height_px <= 0:
             return
         mesh = Mesh()
-        cx, cy = 0.5 * width, 0.5 * height
+        cx, cy = 0.5 * width, 0.5 * height_px
         right, up_view, forward = view
         centre = body.centre()
         up = normalize(sub(eye, centre))
 
-        # Crosshair, ring and prompt.
+        # Crosshair, ring, status and hints.
         status = gun.status if gun is not None else "idle"
+        held = gun is not None and gun.held is not None
         colour = CROSSHAIR[status]
         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             self._line(mesh, (cx + dx * CROSSHAIR_GAP, cy + dy * CROSSHAIR_GAP),
                        (cx + dx * (CROSSHAIR_GAP + CROSSHAIR_TICK), cy + dy * (CROSSHAIR_GAP + CROSSHAIR_TICK)), colour)
         self._rect(mesh, cx - 1.0, cy - 1.0, 2.0, 2.0, colour)
-        charge = gun.charge if gun is not None and gun.held is not None else 0.0
-        if gun is not None and gun.held is not None:
+        charge = gun.charge if held else 0.0
+        if held:
             steps = 40
             for k in range(steps):
                 a0, a1 = 2.0 * math.pi * k / steps, 2.0 * math.pi * (k + 1) / steps
@@ -278,67 +324,93 @@ class Hud:
                 self._line(mesh, (cx + RING_RADIUS * math.sin(a0), cy - RING_RADIUS * math.cos(a0)),
                            (cx + RING_RADIUS * math.sin(a1), cy - RING_RADIUS * math.cos(a1)),
                            WARNING if lit else colour, 2.4 if lit else LINE)
-        self._place(self.prompt_text, prompt(status, gun is not None and gun.held is not None, charge, pad),
-                    (cx, cy + 48.0), (600, 22), WARNING if status == "too_heavy" else TEXT)
+        distance = gun.hold_distance if held else None
+        if distance is not None and self.hold_distance is not None and abs(distance - self.hold_distance) > 1e-6:
+            self.hold_shown = HOLD_SECONDS
+        self.hold_distance = distance
+        self.hold_shown = max(0.0, self.hold_shown - dt)
+        text, text_colour = status_text(status, held, charge, distance if self.hold_shown > 0.0 else None)
+        self._place(self.status_text, text, (cx, cy + STATUS_BELOW), (200, 20), text_colour)
+        shown_hints = hints(status, held, charge, pad)
+        self.bar.show(bool(shown_hints))
+        if shown_hints:
+            self.bar.update(shown_hints)
 
         # Compass.
         heading = bearing(up, forward)
         if heading is None:
             heading = bearing(up, up_view)
         left = cx - 0.5 * COMPASS_WIDTH
-        self._rect(mesh, left - 8.0, COMPASS_TOP - 6.0, COMPASS_WIDTH + 16.0, COMPASS_HEIGHT + 12.0, PANEL)
+        top, bottom = COMPASS_TOP, COMPASS_TOP + COMPASS_HEIGHT
+        self._rect(mesh, left - 8.0, top, COMPASS_WIDTH + 16.0, COMPASS_HEIGHT, PANEL)
         labels = []
         for rel, size, label in compass_ticks(heading):
             x, _ = compass_x(rel, cx)
-            bottom = COMPASS_TOP + COMPASS_HEIGHT
-            self._line(mesh, (x, bottom), (x, bottom - COMPASS_HEIGHT * size), TEXT if label else DIM, 1.2)
             if label:
                 labels.append((label, x))
+            else:
+                self._line(mesh, (x, bottom - 3.0), (x, bottom - 3.0 - TICK_LENGTH * size), TEXT if size > 0.5 else DIM,
+                           1.2)
         for k, pair in enumerate(self.tick_labels):
             if k < len(labels):
-                self._place(pair, labels[k][0], (labels[k][1], COMPASS_TOP - 14.0), (40, 18),
-                            ACCENT if labels[k][0] == "N" else TEXT)
+                name, x = labels[k]
+                c = ACCENT if name == "N" else (TEXT if len(name) == 1 else DIM)
+                self._place(pair, name, (x, top + 0.5 * COMPASS_HEIGHT), (40, 18), c)
             else:
                 self._place(pair, None, (0.0, 0.0))
-        bottom = COMPASS_TOP + COMPASS_HEIGHT
-        self._line(mesh, (cx - 6.0, bottom + 10.0), (cx, bottom + 4.0), TEXT)
-        self._line(mesh, (cx + 6.0, bottom + 10.0), (cx, bottom + 4.0), TEXT)
-        self._place(self.heading_text, "%03d" % round(heading % 360.0), (cx, COMPASS_TOP + COMPASS_HEIGHT + 22.0),
-                    (60, 20))
+        box_w, box_h = HEADING_BOX
+        box_top = bottom + HEADING_GAP
+        self._rect(mesh, cx - 0.5 * box_w, box_top, box_w, box_h, PILL)
+        corners = [(cx - 0.5 * box_w, box_top), (cx + 0.5 * box_w, box_top), (cx + 0.5 * box_w, box_top + box_h),
+                   (cx - 0.5 * box_w, box_top + box_h)]
+        for a, b in zip(corners, corners[1:] + corners[:1]):
+            mesh.segment(a, b, DIM, 1.0)
+        self._line(mesh, (cx - 5.0, box_top - 1.0), (cx, box_top - 6.0), TEXT, 1.4)
+        self._line(mesh, (cx + 5.0, box_top - 1.0), (cx, box_top - 6.0), TEXT, 1.4)
+        self._place(self.heading_text, "%03d" % round(heading % 360.0), (cx, box_top + 0.5 * box_h), (box_w, box_h))
         shown = markers(sub(eye, centre), up, heading,
                         body.radius, [(n, sub(p, centre), c) for n, p, c in targets])
         rows = label_rows([m[0] if m[1] else None for m in shown])
         for k in range(MAX_MARKERS):
             labelled = k < len(shown) and rows[k] is not None
             if k < len(shown):
-                x, inside, name, distance, c = shown[k]
+                x, inside, name, metres, c = shown[k]
                 x = x - REFERENCE_SIZE[0] * 0.5 + cx
                 c = c if inside else (c[0], c[1], c[2], 0.5)
-                y = COMPASS_TOP + COMPASS_HEIGHT
-                mesh.face([(x, y), (x - 6.0, y + 9.0), (x + 6.0, y + 9.0)], [c] * 3)
+                mesh.face([(x, bottom - 7.0), (x + 5.0, bottom), (x, bottom + 7.0), (x - 5.0, bottom)], [c] * 4)
             if labelled:
-                y = COMPASS_TOP + COMPASS_HEIGHT + MARKER_LABEL_TOP + MARKER_ROW * rows[k]
-                self._place(self.marker_names[k], name, (x, y), (140, 16), c)
-                self._place(self.marker_distances[k], distance_text(distance), (x, y + 13.0), (140, 14))
+                y = bottom + MARKER_LABEL_TOP + MARKER_ROW * rows[k]
+                self._place(self.marker_labels[k], "%s  %s" % (name, distance_text(metres)), (x, y),
+                            (LABEL_GAP + 40, 16), c)
             else:
-                self._place(self.marker_names[k], None, (0.0, 0.0))
-                self._place(self.marker_distances[k], None, (0.0, 0.0))
+                self._place(self.marker_labels[k], None, (0.0, 0.0))
 
-        # Jet fuel.
-        fuel = player.jet_fuel if player is not None else 0.0
+        # Jet fuel, while not full and a moment after.
+        fuel = player.jet_fuel if player is not None else 1.0
+        if fuel < 0.999:
+            self.fuel_shown = FUEL_LINGER
+        else:
+            self.fuel_shown = max(0.0, self.fuel_shown - dt)
+        alpha = min(1.0, self.fuel_shown / FUEL_FADE)
         bx, up_from_bottom, bw, bh = FUEL_BAR
-        by = height - up_from_bottom
-        self._rect(mesh, bx - 4.0, by - 4.0, bw + 8.0, bh + 8.0, PANEL)
-        self._rect(mesh, bx, by, bw * fuel, bh, WARNING if fuel < LOW_FUEL else ACCENT)
-        self._place(self.fuel_text, "JET  %d %%" % round(100.0 * fuel), (bx + 0.5 * 160.0, by - 14.0), (160, 18))
+        by = height_px - up_from_bottom
+        if alpha > 0.0:
+            fill = WARNING if fuel < LOW_FUEL else ACCENT
+            self._rect(mesh, bx - 44.0, by - 9.0, bw + 52.0, bh + 18.0, PANEL[:3] + (PANEL[3] * alpha,))
+            self._rect(mesh, bx, by, bw, bh, (1.0, 1.0, 1.0, 0.12 * alpha))
+            self._rect(mesh, bx, by, bw * fuel, bh, fill[:3] + (alpha,))
+            self._place(self.fuel_text, "JET", (bx - 22.0, by + 0.5 * bh), (40, 16), DIM[:3] + (DIM[3] * alpha,))
+        else:
+            self._place(self.fuel_text, None, (0.0, 0.0))
 
         # Readout.
-        altitude = length(sub(eye, centre)) - body.radius
         rx = width - 36.0
-        self._place(self.speed_text, "%.1f m/s" % speed, (rx - 80.0, height - 84.0), (160, 26))
-        self._place(self.height_text, "%s above datum" % distance_text(altitude), (rx - 100.0, height - 60.0),
-                    (200, 20))
-        self._place(self.body_text, body.name.upper(), (rx - 100.0, height - 40.0), (200, 16))
+        self._place(self.speed_text, "%.1f" % speed, (rx - 118.0, height_px - 64.0), (160, 34))
+        self._place(self.unit_text, "m/s", (rx - 12.0, height_px - 60.0), (40, 18))
+        place = body.name.upper()
+        if height is not None and height > AIRBORNE:
+            place = "%s  ·  %s above the ground" % (place, distance_text(height))
+        self._place(self.place_text, place, (rx - 150.0, height_px - 36.0), (300, 18))
 
-        self.update_toasts(dt, width)
+        self.update_toasts(mesh, dt, width)
         self.ui.set_geometry(self.shapes, mesh.positions, mesh.indices, mesh.colors)

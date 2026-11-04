@@ -221,8 +221,10 @@ menu = overlay.SettingsMenu(engine, "Settings", [
   default font, or estimated without it.
 - `HelpOverlay(engine, title, columns, footer="")`: columns of (heading, rows), each
   row (caps, text), centred over everything; `show(on)`, `visible`.
-- `SettingsMenu(engine, title, items, close_keys=("F1",))`: headings, sliders, toggles
-  and buttons in a scroll view down the right side, with key caps beside an item that
+- `SettingsMenu(engine, title, items, close_keys=("F1",), centred=False)`: headings,
+  sliders, toggles and buttons in a scroll view down the right side (with `centred`, in
+  the middle of the screen, as tall as its rows, over a backdrop that dims what is
+  behind it), with key caps beside an item that
   has `keys` and a footer showing the `hint` of the item under the pointer. Call
   `update()` each frame: it hands the pointer's changes to the setters and moves the
   widgets to what the getters say. Its widgets stay out of keyboard navigation;

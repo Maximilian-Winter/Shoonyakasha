@@ -44,7 +44,8 @@ Gamepad: left stick walk, right stick look, A jump and jet, left trigger
 grab, right trigger punt, the bumpers the hold distance.
 
     python walker.py
-    python walker.py --check [--shot FILE]   walk, grab a crate, set a waypoint, sell ore, pause; report and exit
+    python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, sell ore,
+                                             pause; report and exit
 """
 
 import argparse
@@ -89,6 +90,8 @@ SHOT_SECONDS = 1.0               # s of walking before --shot's screenshot
 CHECK_CRATE = 20.0               # kg
 CHECK_AHEAD = 2.5                # m ahead of the feet the crate is dropped
 GRAB_SECONDS = 1.5               # s the check holds the grab
+CHARGE_SECONDS = 1.0             # s --check charges a punt of the held crate
+PUNT_SHOT_SECONDS = 0.05         # s after the punt --shot's screenshot of it
 OUTPOST_MARKER = (0.55, 1.0, 0.62, 1.0)
 WAYPOINT_MARKER = (1.0, 0.45, 0.85, 1.0)
 WAYPOINT_REACH = 15.0           # m along the ground from the waypoint it counts as reached
@@ -104,6 +107,8 @@ CHECK_ORE_EXTENT = (0.4, 0.3, 0.4)   # m: the ore rock --check drops on the pad
 CHECK_ORE_GRADE = 0.6
 PAUSE_SECONDS = 1.0             # s --check keeps the pause menu open
 SHIP_MARKER = (0.55, 0.8, 1.0, 1.0)
+CARD_WIDTH = 270                # canvas units across the objective card
+MOUSE_SENSITIVITY = (0.25, 3.0)  # the pause menu's range for it
 
 HELP_COLUMNS = [
     [("On foot", [
@@ -125,8 +130,8 @@ HELP_COLUMNS = [
 
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
-                    help="walk 10 s north, grab a crate, set a waypoint on the map, sell ore at Base, pause; "
-                         "report and exit")
+                    help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, sell ore at Base, "
+                         "pause; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 
@@ -181,6 +186,7 @@ state = {
     "pause": None,                # the pause menu (toolkit.overlay.SettingsMenu)
     "help": None,
     "captured": False,            # whether the mouse was last asked to be captured
+    "ignore_buttons": False,      # the mouse buttons held when it was captured ignored until let go
     "bumpers": set(),             # the gamepad bumpers held last frame
     "check": None,                # --check: its stage, time in it, and what it measured
     "shot": False,                # --shot's screenshot taken
@@ -324,6 +330,7 @@ def maybe_spawn():
     place_eye()
     place_crates()
     goal = state["objectives"].current()
+    state["hud"].toast("F1 shows the controls")
     state["hud"].toast("%s. %s" % (goal.title, goal.hint))
     print("[walker] on foot at Base", flush=True)
 
@@ -346,13 +353,30 @@ def view_basis():
 
 def capture_mouse():
     """The mouse captured while `hud_shown`, free otherwise; captured again
-    by a click when it was freed while it should be captured."""
+    by a click when it was freed while it should be captured. Each time it
+    is captured, the mouse buttons held then are ignored until let go
+    (`ignore_held_buttons`)."""
     wanted = hud_shown()
     if wanted != state["captured"]:
         engine.input.set_mouse_captured(wanted)
         state["captured"] = wanted
+        state["ignore_buttons"] = wanted
     elif wanted and not engine.input.is_mouse_captured() and engine.input.is_mouse_button_down(keys.MOUSE_LEFT):
         engine.input.set_mouse_captured(True)
+        state["ignore_buttons"] = True
+
+
+def ignore_held_buttons():
+    """While the mouse buttons held when the mouse was captured are still
+    held, the gun's controls they give cleared: the click that closed a
+    menu or captured the mouse does not grab or punt."""
+    if not state["ignore_buttons"]:
+        return
+    if engine.input.is_mouse_button_down(keys.MOUSE_LEFT) or engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
+        controls = foot.gun_controls
+        controls.grab = controls.punt = controls.punt_held = False
+    else:
+        state["ignore_buttons"] = False
 
 
 def read_bumpers():
@@ -382,7 +406,7 @@ def place_viewmodel(dt, camera):
     held = None
     if gun.held is not None:
         held = sub(foot.bubble.to_world(foot.physics.get_transform(gun.held)[0]), camera)
-    viewmodel.update(dt, view_basis(), foot.look_delta, player, gun, held)
+    viewmodel.update(dt, view_basis(), foot.look_delta, player, gun, held, camera)
 
 
 def markers(body):
@@ -415,26 +439,29 @@ def update_hud(dt):
     up = foot.bubble.up(player.feet())
     v = foot.physics.character_velocity(player.character)
     speed = length(sub(v, scale(up, dot(v, up))))
+    height = world.height_above_ground(state["position"]) - player.eye_height
     hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed,
-               pad=engine.input.is_gamepad_connected(), dt=dt)
+               pad=engine.input.is_gamepad_connected(), dt=dt, height=height)
 
 
 def run_check(dt):
     """--check, once on foot: walk north for CHECK_SECONDS; then a crate of
     CHECK_CRATE kg dropped CHECK_AHEAD ahead, and once it lies still the
-    view turned to it and the grab held for GRAB_SECONDS; then the full
-    map open for MAP_SECONDS and a waypoint set on it by a click, and the
-    map shown half a second more; then the map closed and an ore rock
+    view turned to it and the grab held for GRAB_SECONDS; then a punt of
+    it charged for CHARGE_SECONDS and let go; PUNT_SHOT_SECONDS later the
+    full map open for MAP_SECONDS and a waypoint set on it by a click, and
+    the map shown half a second more; then the map closed and an ore rock
     (CHECK_ORE_EXTENT, CHECK_ORE_GRADE) dropped 1 m above the Base pad,
     waiting up to SELL_SECONDS for it to sell and a second more; then the
     pause menu shown for PAUSE_SECONDS. Passes when the player
     covered 80 % of walking speed's distance and stands on the ground, the
-    gun holds the crate, at least MAP_CELLS cells are explored, the
-    waypoint is set, the ore sold for credits and the world's clock stood
-    still while paused. With --shot, screenshots
+    gun holds the crate, the punt charged and threw it, at least MAP_CELLS
+    cells are explored, the waypoint is set, the ore sold for credits and
+    the world's clock stood still while paused. With --shot, screenshots
     while walking (SHOT_SECONDS in), while holding (FILE with _hold added),
-    of the map (with _map added), after the sale (with _sell added) and
-    of the pause menu (with _pause added)."""
+    while charging (with _charge added), just after the punt (with _punt
+    added), of the map (with _map added), after the sale (with _sell added)
+    and of the pause menu (with _pause added)."""
     player = foot.player
     if player is None:
         return
@@ -479,6 +506,28 @@ def run_check(dt):
                   "passed" if held else "FAILED"), flush=True)
             check["held_ok"] = held
             foot.gun_controls.grab = False
+            foot.gun_controls.punt = foot.gun_controls.punt_held = True
+            check["stage"], check["time"] = "charge", 0.0
+    elif stage == "charge":
+        if t >= CHARGE_SECONDS:
+            check["charge"] = foot.gun.charge
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_charge" + ext)
+            foot.gun_controls.punt_held = False
+            check["stage"], check["time"] = "punt", 0.0
+    elif stage == "punt":
+        if t >= PUNT_SHOT_SECONDS:
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_punt" + ext)
+            last = foot.gun.last_punt
+            punt_ok = (check["charge"] > 0.0 and foot.gun.held is None and last is not None
+                       and last[0] == check["crate"].body)
+            print("[walker] charged to %.0f %% and threw the crate at %.0f m/s: %s"
+                  % (100.0 * check["charge"], last[1] if last is not None and last[1] else 0.0,
+                     "passed" if punt_ok else "FAILED"), flush=True)
+            check["punt_ok"] = punt_ok
             state["map_view"].set_open(True)
             check["stage"], check["time"] = "map", 0.0
     elif stage == "map":
@@ -529,7 +578,8 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_pause" + ext)
-            ok = check["walk_ok"] and check["held_ok"] and check["map_ok"] and check["sell_ok"] and pause_ok
+            ok = (check["walk_ok"] and check["held_ok"] and check["punt_ok"] and check["map_ok"]
+                  and check["sell_ok"] and pause_ok)
             os._exit(0 if ok else 1)
 
 
@@ -681,6 +731,9 @@ def pause_items():
     return [
         {"button": "Resume", "do": lambda: set_paused(False)},
         {"button": "Controls", "do": lambda: (set_paused(False), state["help"].show(True))},
+        {"slider": "Mouse sensitivity", "min": MOUSE_SENSITIVITY[0], "max": MOUSE_SENSITIVITY[1],
+         "get": lambda: foot.mouse_sensitivity, "set": lambda v: setattr(foot, "mouse_sensitivity", v),
+         "show": lambda v: "%.2f x" % v, "hint": "How far the view turns for the mouse's movement."},
         {"toggle": "Head bob", "get": lambda: foot.head_bob, "set": lambda on: setattr(foot, "head_bob", on),
          "hint": "The view rises and falls a little with each step."},
         {"button": "Quit", "do": lambda: os._exit(0)},
@@ -724,6 +777,7 @@ def frame(dt):
             run_check(elapsed)
         elif not paused and not state["map_view"].open:
             foot.read_controls(engine.input)
+            ignore_held_buttons()
             read_bumpers()
     if paused:
         dt = 0.0
@@ -769,8 +823,8 @@ def on_init():
     state["map"] = ExploredMap(world)
     state["map_view"] = MapView(engine)
     state["map_view"].show(False)
-    state["objective_card"] = Card(engine.ui, state["hud"].canvas, (0, 0), 6, margin=(24, 110))
-    state["pause"] = SettingsMenu(engine, "Paused", pause_items(), close_keys=("Esc",))
+    state["objective_card"] = Card(engine.ui, state["hud"].canvas, (0, 0), 6, margin=(24, 24), width=CARD_WIDTH)
+    state["pause"] = SettingsMenu(engine, "Paused", pause_items(), close_keys=("Esc",), centred=True)
     state["pause"].show(False)
     state["help"] = HelpOverlay(engine, "CONTROLS", HELP_COLUMNS, footer="F1 to close")
     state["help"].show(False)
