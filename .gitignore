@@ -119,6 +119,7 @@ examples/python/rendering/showroom/reel.mp4
 /examples/python/rendering/optics/brewster_captures
 /examples/python/rendering/optics/gold_captures
 /examples/python/simulations/planet/planet_captures
+/examples/python/simulations/planet/walker_captures
 /examples/python/simulations/planet/planet_save.json
 /examples/python/simulations/planet/walker_save.json
 /examples/python/simulations/planet/walker_save.npz

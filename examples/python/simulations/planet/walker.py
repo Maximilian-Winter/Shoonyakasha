@@ -24,7 +24,7 @@ CRATE_MASS kg crates stand west of the blocks to throw. Meeting an
 objective (objectives.GOALS), a sale and a reached waypoint show as
 toasts.
 
-The menu (terminal.py): Escape or P opens it, and F1 opens it on the
+The menu (terminal.py): Escape opens it, and F1 opens it on the
 controls; the world's clock and the player stand still behind it. Its
 System tab has Resume, Save game, Load game and Quit beside how the game
 stands; its Settings tab the settings (config.py), kept in
@@ -51,7 +51,8 @@ Keys:
   W A S D                walk; left Shift run; left Ctrl crouch
   Space                  jump on the ground, jet in the air
   mouse                  look (captured while playing)
-  Escape, P              the menu: the world stands still
+  Escape                 the menu: the world stands still
+  P                      screenshot into walker_captures/
   right mouse            gravity gun: grab, or pull from farther; again: drop
   left mouse             punt what is held or in front; hold while holding to charge
   R + mouse              turn the held body
@@ -72,6 +73,7 @@ import argparse
 import math
 import os
 import tempfile
+import time
 
 import numpy as np
 
@@ -100,11 +102,14 @@ from viewmodel import Viewmodel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "walker_config.json")
+CAPTURES = os.path.join(HERE, "walker_captures")      # P
 SAVE_BASE = os.path.join(HERE, "walker_save")          # walker_save.json and walker_save.npz
 CHECK_SAVE_BASE = os.path.join(tempfile.gettempdir(), "walker_check_save")
+CHECK_CAPTURES = os.path.join(tempfile.gettempdir(), "walker_check_captures")
 AUTOSAVE_SECONDS = 120.0         # s of play between autosaves
 LOAD_LIFT = 0.3                  # m above the ground a loaded player is put down
 LOAD_SECONDS = 15.0              # s --check waits for the loaded player
+CAPTURE_TOAST_FRAMES = 3         # frames after a screenshot before its toast
 SPAWN_LIFT = 1.0                 # m above the ground the player is put down
 EAST_OF_SHIP = 6.0               # m east of the ship's centre the player starts
 SHIP_SOUTH = 16.0                # m south of the blocks the ship stands
@@ -145,7 +150,8 @@ HELP_COLUMNS = [
         (("Space",), "Jump; held in the air: jetpack"),
         (("M",), "Map: wheel to zoom, left click a waypoint, right click to clear"),
     ]), ("Game", [
-        (("Esc", "P"), "Pause"),
+        (("Esc",), "Pause"),
+        (("P",), "Screenshot into walker_captures"),
         (("F5", "F9"), "Save / load"),
         (("F1",), "These controls"),
     ])],
@@ -224,6 +230,7 @@ state = {
     "market_record": None,        # a save's credits and supplies waiting for the outposts' survey
     "autosave_in": AUTOSAVE_SECONDS,
     "last_save": None,            # the data of the save last written or read
+    "capture_toast": None,        # [file name, frames to wait] of the toast for a screenshot taken
     "captured": False,            # whether the mouse was last asked to be captured
     "ignore_buttons": False,      # the mouse buttons held when it was captured ignored until let go
     "bumpers": set(),             # the gamepad bumpers held last frame
@@ -496,7 +503,8 @@ def update_hud(dt):
 
 
 def run_check(dt):
-    """--check, once on foot: walk north for CHECK_SECONDS; then a crate of
+    """--check, once on foot: walk north for CHECK_SECONDS, half way taking
+    a screenshot into CHECK_CAPTURES as P does; then a crate of
     CHECK_CRATE kg dropped CHECK_AHEAD ahead, and once it lies still the
     view turned to it and the grab held for GRAB_SECONDS; then a punt of
     it charged for CHARGE_SECONDS and let go; PUNT_SHOT_SECONDS later the
@@ -508,9 +516,9 @@ def run_check(dt):
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
     second more. Passes when the player covered 80 % of walking speed's
-    distance and stands on the ground, the gun holds the crate, the punt
-    charged and threw it, at least MAP_CELLS cells are explored, the
-    waypoint is set, the ore sold for credits, the world's clock stood
+    distance and stands on the ground, the screenshot was written and its
+    toast shown, the gun holds the crate, the punt charged and threw it,
+    at least MAP_CELLS cells are explored, the waypoint is set, the ore sold for credits, the world's clock stood
     still while paused, and the load brought back the credits, the ore
     sold, the cells, the props and the player within 2 m of where it was
     saved. The settings are the defaults and are not written. With --shot,
@@ -532,12 +540,19 @@ def run_check(dt):
         if args.shot and t >= SHOT_SECONDS and not state["shot"]:
             state["shot"] = True
             screenshot(args.shot)
+        if t >= 0.5 * CHECK_SECONDS and "capture" not in check:
+            check["capture"] = take_capture(CHECK_CAPTURES)
         if t >= CHECK_SECONDS:
             foot.controls.forward = 0.0
             moved = length(sub(foot.bubble.to_world(player.feet()), check["start"]))
             check["walk_ok"] = moved > 0.8 * CHECK_SECONDS * 4.0 and player.on_ground
             print("[walker] walked %.1f m in %.0f s, on the ground: %s: %s"
                   % (moved, t, player.on_ground, "passed" if check["walk_ok"] else "FAILED"), flush=True)
+            capture = check["capture"]
+            check["capture_ok"] = (capture is not None and os.path.exists(capture) and state["capture_toast"] is None
+                                   and any(toast[0].startswith("Screenshot saved") for toast in state["hud"].toasts))
+            print("[walker] a screenshot taken as P takes one, and its toast shown: %s"
+                  % ("passed" if check["capture_ok"] else "FAILED"), flush=True)
             right, up, forward = player.basis()
             level = normalize(sub(forward, scale(up, dot(forward, up))))
             spot = add(player.feet(), add(scale(level, CHECK_AHEAD), scale(up, 1.0)))
@@ -672,7 +687,7 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_load" + ext)
-            ok = (check["walk_ok"] and check["held_ok"] and check["punt_ok"] and check["map_ok"]
+            ok = (check["walk_ok"] and check["capture_ok"] and check["held_ok"] and check["punt_ok"] and check["map_ok"]
                   and check["sell_ok"] and check["pause_ok"] and load_ok)
             os._exit(0 if ok else 1)
 
@@ -1095,6 +1110,29 @@ def ore_rock(spot, extent, grade):
                                0.5 * extent[1], bubble.body, "rock", tuple(extent), colour, grade, glow)
 
 
+def take_capture(directory=CAPTURES):
+    """A screenshot of the window as it is into `directory`, named by the time; a toast names it
+    CAPTURE_TOAST_FRAMES later, so that it is not in the picture. Returns its path, or None."""
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, time.strftime("walker_%Y%m%d_%H%M%S.png"))
+    if not engine.capture_screenshot(path):
+        state["hud"].toast("The screenshot failed", hud_module.WARNING)
+        return None
+    print("[walker] screenshot: %s" % path, flush=True)
+    state["capture_toast"] = [os.path.basename(path), CAPTURE_TOAST_FRAMES]
+    return path
+
+
+def capture_toast():
+    pending = state["capture_toast"]
+    if pending is None:
+        return
+    pending[1] -= 1
+    if pending[1] <= 0:
+        state["hud"].toast("Screenshot saved: %s" % pending[0], GOOD_TOAST)
+        state["capture_toast"] = None
+
+
 def screenshot(path):
     print("[walker] screenshot: %s" % (path if engine.capture_screenshot(path) else "failed"), flush=True)
 
@@ -1142,6 +1180,7 @@ def frame(dt):
     update_map(dt)
     update_game()
     autosave(elapsed)
+    capture_toast()
     foot.end_frame()
     state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * elapsed * 1000.0
     return True
@@ -1180,8 +1219,8 @@ def on_init():
 
 
 def on_key(key):
-    """F1 the menu on the controls, M the map, Escape and P the menu, F5 a save, F9 a load; the start's menu
-    waits for its buttons."""
+    """F1 the menu on the controls, M the map, Escape the menu, P a screenshot, F5 a save, F9 a load; the
+    start's menu waits for its buttons."""
     view, menu = state["map_view"], state["menu"]
     if state["starting"]:
         return
@@ -1192,7 +1231,9 @@ def on_key(key):
         view.set_open(not view.open)
     elif key == keys.ESCAPE and view.open:
         view.set_open(False)
-    elif key in (keys.ESCAPE, keys.P) and foot.player is not None:
+    elif key == keys.P:
+        take_capture()
+    elif key == keys.ESCAPE and foot.player is not None:
         set_paused(not menu.visible)
     elif key == keys.F5:
         save_game()
