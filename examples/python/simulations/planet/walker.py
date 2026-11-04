@@ -7,6 +7,18 @@ HOVER_HEIGHT above the ground 16 m south of the blocks as a landmark, a
 static box in the physics. The outposts on the planet and the moon are
 found by the same survey as in planet.py and drawn as pads.
 
+The flying car: the ship is a hover car (hovercar.py, carview.py). F
+within ENTER_REACH of it gets in; the camera then chases it, and W S A
+D drive and steer it, Space and left Ctrl move the height it keeps above
+the ground (from skimming to hovercar.MAX_HEIGHT), left Shift boosts and
+the mouse looks around it. F gets out at its left side once it is slow
+and low (hovercar.Car.can_leave); left, it settles on its cushion. Its
+ground is a patch of terrain heights measured around it each frame
+(shoonyakasha.planet.ground_patch), ahead along its velocity; in the
+physics bubble it is a kinematic box that pushes the props, and a ray
+ahead of it bumps it off trunks and fixed rocks (bump_car). The bubble
+follows it while it is driven.
+
 The interface is in the style of scifi.py. The HUD (hud.py) shows the
 gun's crosshair and key hints, a compass with the outposts, the ship and
 the waypoint, the objective with the credits and the ore sold, the jet
@@ -36,8 +48,8 @@ Controls tab the controls.
 Saving (save.py): F5 or Save game writes the game to walker_save.json
 and walker_save.npz: the clock, the player, the crates and loose rocks,
 the rocks taken from the scatter, the credits and the outposts' supplies,
-the objectives and the game's numbers, the waypoint and the explored
-map. F9 or Load game puts it back; the player comes back LOAD_LIFT above
+the objectives and the game's numbers, the waypoint, the car (and whether
+it is driven) and the explored map. F9 or Load game puts it back; the player comes back LOAD_LIFT above
 the ground where it stood once that ground is measured. With autosave on,
 the game is saved every AUTOSAVE_SECONDS of play, on Quit and as the
 window closes. When a save exists, the walker starts on a menu with
@@ -58,6 +70,7 @@ Keys:
   R + mouse              turn the held body
   mouse wheel            the hold distance; on the full map, the zoom
   M                      the full map (Escape closes it); left click a waypoint, right click clears it
+  F                      into the car near it; out of it when slow and low
   F5, F9                 save, load
   F1                     the menu on the controls
 
@@ -66,7 +79,8 @@ grab, right trigger punt, the bumpers the hold distance.
 
     python walker.py
     python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, sell ore,
-                                             pause, save, change the game and load it; report and exit
+                                             pause, save, change the game and load it, drive and fly
+                                             the car; report and exit
 """
 
 import argparse
@@ -81,13 +95,16 @@ import shoonyakasha as sk
 from shoonyakasha import keys
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
-from shoonyakasha.planet.on_foot import OnFoot
-from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis,
+from shoonyakasha.planet.ground_patch import GroundPatch, SIZE as PATCH_SIZE
+from shoonyakasha.planet.on_foot import JUMP_DISTANCE, STEP, OnFoot
+from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis, quat_normalize,
                                      scale, sub)
 from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL
 from shoonyakasha.planet.props import stack_offsets
 from shoonyakasha.planet.rocks import rock_colour
+import carview
 import config
+import hovercar
 import save
 from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
@@ -117,12 +134,19 @@ SHIP_SOUTH = 16.0                # m south of the blocks the ship stands
 SHIP_MODEL = os.path.join(HERE, "models", "cyber_vehicle", "scene.gltf")
 SHIP_MODEL_CENTRE = (0.0, 0.586, -1.402)
 SHIP_HALF = (1.452, 0.756, 3.097)
-HOVER_HEIGHT = 0.45              # m between the ground and the hull's underside
-HOVER_BOB, HOVER_PERIOD = 0.04, 3.2   # m up and down, s
-SHIP_CLEARANCE = SHIP_HALF[1] + HOVER_HEIGHT   # m from the ship's centre down to the ground
+HOVER_BOB, HOVER_PERIOD = 0.04, 3.2   # m up and down, s, while slow
+SHIP_CLEARANCE = SHIP_HALF[1] + hovercar.HOVER_MIN   # m from the ship's centre down to the ground, parked
+ENTER_REACH = 4.5                # m from the car's centre to the feet it can be got into from
+EXIT_OUT = 1.0                   # m beyond the car's left side the player gets out
+CAR_PATCH_MARGIN = 8.0           # m the car's ground patch reaches beyond its centre and its look-ahead
+BUMP_REACH = 0.5                 # m beyond a step's travel the car looks for trunks and rocks
+BUMP_BOUNCE, BUMP_KEEP = 0.3, 0.6
 SHIP_HULL = [(x * SHIP_HALF[0], y * SHIP_HALF[1], z * SHIP_HALF[2]) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
 CHECK_SECONDS = 10.0
 SHIP_SHOT_WALK = 2.0             # s --shot walks away from the ship before its screenshot of it
+DRIVE_SECONDS = 5.0              # s --check drives the car flat out, turning a little
+CLIMB_SECONDS = 3.0              # s it climbs at full climb
+LAND_SECONDS = 25.0              # s it waits at most for the car to come down and slow
 SHOT_SECONDS = 1.0               # s of walking before --shot's screenshot
 CHECK_CRATE = 20.0               # kg
 CHECK_AHEAD = 2.5                # m ahead of the feet the crate is dropped
@@ -165,16 +189,25 @@ HELP_COLUMNS = [
         (("Wheel",), "Hold distance"),
     ]), ("Gamepad", [
         (("pad:LS", "pad:RS"), "Walk / look"),
-        (("pad:A",), "Jump and jet"),
-        (("pad:LT", "pad:RT"), "Grab / punt"),
+        (("pad:A",), "Jump and jet; in the car, boost"),
+        (("pad:LT", "pad:RT"), "Grab / punt; in the car, down / up"),
         (("pad:LB", "pad:RB"), "Hold distance"),
+        (("pad:X",), "Into the car and out"),
+    ])],
+    [("Flying car", [
+        (("F",), "Get in; get out when slow and low"),
+        (("W", "S"), "Drive / brake and reverse"),
+        (("A", "D"), "Steer"),
+        (("Space", "Ctrl"), "Up / down"),
+        (("Shift",), "Boost"),
+        (("Mouse",), "Look around the car"),
     ])],
 ]
 
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
                     help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, sell ore at Base, "
-                         "pause, save, change the game and load it; report and exit")
+                         "pause, save, change the game and load it, drive and fly the car; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 
@@ -213,7 +246,15 @@ state = {
     "survey": None,               # the outposts' survey while the world measures it
     "ship": None,                 # (position, right, up, forward) of the parked ship, planet space
     "ship_model": None,           # (root entity, mesh entities)
-    "ship_body": None,            # the ship's static hull in the bubble
+    "ship_body": None,            # the car's kinematic box in the bubble
+    "car": None,                  # the flying car (hovercar.Car), once the ship's pose is known
+    "car_controls": hovercar.CarControls(),
+    "car_poses": None,            # its ((position, rotation) before, after) this frame, planet space
+    "car_glows": None,            # its engines' glow (carview.EngineGlows)
+    "chase": carview.ChaseCamera(),
+    "chase_basis": None,          # the chase camera's (right, up, forward) this frame
+    "driving": False,
+    "pad_x": False,               # the gamepad's X held last frame
     "viewmodel": None,
     "hud": None,                  # the head-up display (hud.Hud)
     "map": None,                  # the explored ground (explored_map.ExploredMap)
@@ -324,29 +365,26 @@ def build_ship_model():
 
 
 def place_ship(camera):
-    """The ship's model relative to `camera`, rising and falling
-    HOVER_BOB once every HOVER_PERIOD, and its hull (a box of SHIP_HALF)
-    in the bubble while the bubble is on the planet and the ship within
-    its reach."""
-    ship = state["ship"]
-    if ship is None:
+    """The ship's model relative to `camera`: the car's pose, banked and
+    pitched (hovercar.Car.attitude), rising and falling HOVER_BOB once
+    every HOVER_PERIOD while slow; and the engines' glow."""
+    car = state["car"]
+    if car is None:
         return
-    position, right, up, forward = ship
+    centre = car_position()
+    right, up, forward = car.attitude()
     if state["ship_model"] is not None:
         root, meshes = state["ship_model"]
         for entity in meshes:
             engine.scene.set_visible(entity, True)
-        bob = HOVER_BOB * math.sin(2.0 * math.pi * world.time / HOVER_PERIOD)
-        engine.scene.set_position(root, sub(add(position, scale(up, bob)), camera))
+        still = max(0.0, 1.0 - car.speed() / 10.0)
+        bob = still * HOVER_BOB * math.sin(2.0 * math.pi * world.time / HOVER_PERIOD)
+        engine.scene.set_position(root, sub(add(centre, scale(up, bob)), camera))
         engine.scene.set_rotation(root, euler_from_basis(scale(right, -1.0), up, scale(forward, -1.0)))
-    bubble = foot.bubble
-    if bubble is None or bubble.body is not planet or state["ship_body"] is not None:
-        return
-    p = bubble.to_bubble(position)
-    if length(p) < Bubble.RADIUS:
-        hull = np.array(SHIP_HULL, dtype=np.float32)
-        rotation = quat_from_basis(right, up, scale(forward, -1.0))
-        state["ship_body"] = foot.physics.create_convex_hull(hull, p, rotation, motion="static", friction=0.8)
+    controls = state["car_controls"]
+    state["car_glows"].update(view_basis(), sub(centre, camera), (right, up, forward),
+                              controls.throttle if state["driving"] else 0.0,
+                              controls.boost and state["driving"], car.speed())
 
 
 def remove_ship_body():
@@ -359,17 +397,226 @@ def remove_ship_body():
 foot.on_drop = remove_ship_body
 
 
+# ── The car ────────────────────────────────────────────────────────────────
+
+def car_position():
+    """The car's centre in planet space."""
+    return add(planet.centre(), state["car"].position)
+
+
+def make_car(position, heading, target=hovercar.HOVER_MIN):
+    """The car at `position` (planet space), its nose along `heading`."""
+    state["car"] = hovercar.Car(planet.relative(position), heading, target)
+    update_ship()
+
+
+def update_ship():
+    """`ship` (position, right, up, forward) from the car's pose, level."""
+    car = state["car"]
+    up = car.up()
+    state["ship"] = (car_position(), car.right(), up, car.heading)
+
+
+def car_ground(point):
+    """The height of the car's underside above the ground with its centre
+    at `point` (relative to the planet's centre), from the ground patch;
+    None where it is not known."""
+    patch = world.patch
+    if patch is None or patch[0] is not planet:
+        return None
+    answer = patch[1].query(point)
+    if answer is None:
+        return None
+    return -answer[0] - SHIP_HALF[1]
+
+
+def camera_ground(point):
+    """The height above the ground of `point` (planet space), from the ground patch, or None."""
+    h = car_ground(planet.relative(point))
+    return None if h is None else h + SHIP_HALF[1]
+
+
+def car_patch_request():
+    """(planet, patch): the ground patch to measure around where the car
+    will be when its heights come back, ahead along its velocity by the
+    probes' latency, reaching CAR_PATCH_MARGIN and its look-ahead beyond."""
+    car = state["car"]
+    up = car.up()
+    v = car.velocity
+    along = sub(v, scale(up, dot(v, up)))
+    ahead = world.probe_latency * state["frame_ms"] / 1000.0
+    half = CAR_PATCH_MARGIN + length(along) * (ahead + hovercar.LOOK_AHEAD)
+    centre = add(car.position, scale(along, ahead))
+    return planet, GroundPatch(planet.radius, centre, 2.0 * half / (PATCH_SIZE - 1), sea=planet.ocean)
+
+
+def near_car():
+    """Whether the player's feet are within ENTER_REACH of the car's centre."""
+    player, car = foot.player, state["car"]
+    if player is None or car is None:
+        return False
+    return length(sub(foot.bubble.to_world(player.feet()), car_position())) <= ENTER_REACH
+
+
+def enter_car(anywhere=False):
+    """Into the car from within ENTER_REACH of it (from anywhere with
+    `anywhere`): the player gone, the chase camera behind the car."""
+    if state["driving"] or state["car"] is None or (not anywhere and not near_car()):
+        return False
+    foot.remove_player()
+    state["driving"] = True
+    state["chase"].reset()
+    state["hud"].toast("F gets out once slow and low", hud_module.DIM)
+    print("[walker] in the car", flush=True)
+    return True
+
+
+def leave_car():
+    """Out of the car, once it is slow and low enough (hovercar.Car.can_leave),
+    at its left side, EXIT_OUT beyond it, facing its way; the car parks."""
+    car = state["car"]
+    if not state["driving"]:
+        return False
+    if not car.can_leave():
+        state["hud"].toast("Slow down and come down first", hud_module.WARNING)
+        return False
+    right, up, forward = car.right(), car.up(), car.heading
+    side = add(car.position, scale(right, -(SHIP_HALF[0] + EXIT_OUT)))
+    h = car_ground(side)
+    if h is None:
+        return False
+    feet = add(planet.centre(), add(side, scale(up, -(h + SHIP_HALF[1]) + SPAWN_LIFT)))
+    bubble = foot.ensure_bubble(feet)
+    foot.spawn(feet, forward)
+    place_eye()
+    state["driving"] = False
+    set_fov(settings["fov"])
+    car.target = hovercar.HOVER_MIN
+    state["car_controls"] = hovercar.CarControls()
+    print("[walker] out of the car", flush=True)
+    return bubble is not None
+
+
+def read_car_controls():
+    """The car's controls, and the mouse orbiting the chase camera."""
+    state["car_controls"] = carview.read_controls(engine.input)
+    if engine.input.is_mouse_captured():
+        dx, dy = engine.input.get_mouse_delta()
+        s = foot.mouse_sensitivity
+        state["chase"].orbit(dx * s, (-dy if foot.invert_y else dy) * s)
+    if engine.input.is_gamepad_connected():
+        x = engine.input.is_gamepad_button_down(keys.GAMEPAD_X)
+        if x and not state["pad_x"]:
+            leave_car()
+        state["pad_x"] = x
+
+
+def step_car(dt):
+    """The car moved by `dt` (driven, or parked with no controls), stopped by
+    trunks and fixed rocks ahead (bump_car); its poses before and after kept
+    for its body in the bubble."""
+    car = state["car"]
+    if car is None:
+        return
+    before = (car_position(), car_rotation())
+    controls = state["car_controls"] if state["driving"] else hovercar.CarControls()
+    car.step(dt, controls, car_ground)
+    bump_car(dt)
+    update_ship()
+    state["car_poses"] = (before, (car_position(), car_rotation()))
+
+
+def car_rotation():
+    right, up, forward = state["car"].attitude()
+    return quat_from_basis(right, up, scale(forward, -1.0))
+
+
+def bump_car(dt):
+    """A ray from the car's nose along its motion over the ground: a trunk
+    or a fixed rock within this step's travel (and BUMP_REACH more) turns
+    the car's motion into it back by BUMP_BOUNCE times, and it keeps
+    BUMP_KEEP of its speed. Props, the ground and the car's own body are
+    passed over."""
+    car, bubble = state["car"], foot.bubble
+    if bubble is None or bubble.body is not planet:
+        return
+    up = car.up()
+    flat = sub(car.velocity, scale(up, dot(car.velocity, up)))
+    speed = length(flat)
+    if speed < 0.5:
+        return
+    direction = scale(flat, 1.0 / speed)
+    reach = SHIP_HALF[2] if abs(dot(direction, car.heading)) > 0.7 else SHIP_HALF[0]
+    nose = add(car_position(), scale(direction, reach + 0.15))
+    hit = foot.physics.cast_ray(bubble.to_bubble(nose), direction, speed * dt + BUMP_REACH)
+    if hit is None:
+        return
+    body, _, normal, _ = hit
+    if body == state["ship_body"] or foot.props.find(body) is not None or dot(normal, bubble.up(hit[1])) > 0.7:
+        return
+    n = normalize(sub(normal, scale(bubble.up(hit[1]), dot(normal, bubble.up(hit[1])))))
+    into = dot(car.velocity, n)
+    if into >= 0.0:
+        return
+    car.velocity = scale(sub(car.velocity, scale(n, (1.0 + BUMP_BOUNCE) * into)), BUMP_KEEP)
+
+
+def move_car_body(bubble, fraction):
+    """The car's kinematic body in the bubble moved `fraction` of the way
+    along this frame's poses (OnFoot.step's before_step), made when the car
+    comes within the bubble's reach and removed beyond it."""
+    poses = state["car_poses"]
+    if poses is None or bubble.body is not planet:
+        remove_ship_body()
+        return
+    (p0, q0), (p1, q1) = poses
+    if dot(q0, q1) < 0.0:
+        q1 = tuple(-c for c in q1)
+    q = quat_normalize(tuple(a + (b - a) * fraction for a, b in zip(q0, q1)))
+    p = bubble.to_bubble(add(p0, scale(sub(p1, p0), fraction)))
+    if length(p) > Bubble.RADIUS:
+        remove_ship_body()
+        return
+    physics = foot.physics
+    body = state["ship_body"]
+    if body is None:
+        hull = np.array(SHIP_HULL, dtype=np.float32)
+        state["ship_body"] = physics.create_convex_hull(hull, p, q, motion="kinematic", friction=0.8)
+    elif length(sub(physics.get_transform(body)[0], p)) > JUMP_DISTANCE:
+        physics.set_transform(body, p, q)
+    else:
+        physics.move_kinematic(body, p, q, STEP)
+
+
+def place_chase(dt):
+    """The camera behind the car while driving; the field of view widening with its speed."""
+    car = state["car"]
+    eye, basis = state["chase"].update(dt, car_position(), car.heading, car.up(), car.speed(), camera_ground)
+    state["position"], state["forward"] = eye, basis[2]
+    state["chase_basis"] = basis
+    set_fov(carview.fov(settings["fov"], car.speed()))
+
+
+def set_fov(value):
+    if world.fov != value:
+        world.fov = value
+        if world.camera is not None:
+            engine.scene.set_camera_fov(world.camera, value)
+
+
 # ── The player ─────────────────────────────────────────────────────────────
 
 def maybe_spawn():
     """The player put down once the terrain is built, the site's height and
     the ground under the camera are known: at the start beside the ship,
     or LOAD_LIFT above the ground where a loaded save had it; not while the
-    start's menu is up."""
-    if foot.player is not None or planet.tree is None or world.site_height is None or state["starting"]:
+    start's menu is up or in the car."""
+    if (foot.player is not None or planet.tree is None or world.site_height is None or state["starting"]
+            or state["driving"]):
         return
     if state["ship"] is None:
-        state["ship"] = ship_pose()
+        position, _, _, north = ship_pose()
+        make_car(position, north)
         if state["loading"] is None:
             state["position"] = add(spawn_point(), scale(state["ship"][2], 2.0))
             state["forward"] = state["ship"][3]
@@ -407,6 +654,8 @@ def place_eye():
 
 
 def view_basis():
+    if state["driving"] and state["chase_basis"] is not None:
+        return state["chase_basis"]
     if foot.view is not None:
         return foot.view
     forward = normalize(state["forward"])
@@ -441,6 +690,16 @@ def ignore_held_buttons():
         controls.grab = controls.punt = controls.punt_held = False
     else:
         state["ignore_buttons"] = False
+
+
+def read_pad_enter():
+    """The gamepad's X gets into the car when near it."""
+    if not engine.input.is_gamepad_connected():
+        return
+    x = engine.input.is_gamepad_button_down(keys.GAMEPAD_X)
+    if x and not state["pad_x"]:
+        enter_car()
+    state["pad_x"] = x
 
 
 def read_bumpers():
@@ -486,8 +745,9 @@ def markers(body):
 
 
 def hud_shown():
-    """On foot, with the full map and the menu hidden."""
-    return foot.player is not None and not state["map_view"].open and not state["menu"].visible
+    """On foot or in the car, with the full map and the menu hidden."""
+    return ((foot.player is not None or state["driving"]) and not state["map_view"].open
+            and not state["menu"].visible)
 
 
 def update_hud(dt):
@@ -497,14 +757,23 @@ def update_hud(dt):
     hud.show(shown)
     if not shown:
         return
+    pad = engine.input.is_gamepad_connected()
+    if state["driving"]:
+        car = state["car"]
+        up = car.up()
+        speed = length(sub(car.velocity, scale(up, dot(car.velocity, up))))
+        hud.update(view_basis(), state["position"], planet, None, None, markers(planet), speed, pad=pad, dt=dt,
+                   height=car.height, drive=car.can_leave())
+        return
     body = foot.bubble.body
     targets = markers(body)
     up = foot.bubble.up(player.feet())
     v = foot.physics.character_velocity(player.character)
     speed = length(sub(v, scale(up, dot(v, up))))
     height = world.height_above_ground(state["position"]) - player.eye_height
-    hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed,
-               pad=engine.input.is_gamepad_connected(), dt=dt, height=height)
+    extra = [((("pad:X",) if pad else ("F",)), "Get in")] if near_car() else []
+    hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed, pad=pad, dt=dt,
+               height=height, extra_hints=extra)
 
 
 def run_check(dt):
@@ -529,15 +798,25 @@ def run_check(dt):
     at least MAP_CELLS cells are explored, the waypoint is set, the ore sold for credits, the world's clock stood
     still while paused, and the load brought back the credits, the ore
     sold, the cells, the props and the player within 2 m of where it was
-    saved. The settings are the defaults and are not written. With --shot,
+    saved; then into the car, driven flat out turning a little for
+    DRIVE_SECONDS, climbing for CLIMB_SECONDS and flying on 2 s more,
+    saved and loaded there, braking and coming down until it can be left
+    (at most LAND_SECONDS), and out of it, a second later passing when the
+    load put the car back where it was and still driven, it went faster
+    than 30 m/s and higher than 80 % of the climb and the player stands
+    beside it. The
+    settings are the defaults and are not written. With --shot,
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
     (with _punt added), of the map (with _map added), after the sale (with
     _sell added), of the menu (with _pause added), of its Settings tab
-    (with _settings added) and after the load (with _load added)."""
+    (with _settings added), of its Controls tab (with _controls added),
+    after the load (with _load added), a second
+    before the end of the drive (with _drive added), after the climb (with
+    _fly added) and out of the car (with _out added)."""
     player = foot.player
     check = state["check"]
-    if player is None and (check is None or check["stage"] != "reload"):
+    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out")):
         return
     if check is None:
         check = state["check"] = {"stage": "ship" if args.shot else "walk", "time": 0.0,
@@ -683,6 +962,15 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_settings" + ext)
+                state["menu"].show(True, state["menu"].tab_named("Controls"))
+                check["stage"], check["time"] = "controls", 0.0
+                return
+            check["stage"] = "controls"
+    elif stage == "controls":
+        if t >= 0.5 or not args.shot:
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_controls" + ext)
             set_paused(False)
             saved = save_game(CHECK_SAVE_BASE)
             check["saved"] = {"credits": state["market"].credits, "cells": game_numbers()["cells"],
@@ -714,22 +1002,73 @@ def run_check(dt):
                 screenshot(base + "_load" + ext)
             check["ok"] = (check["walk_ok"] and check["capture_ok"] and check["held_ok"] and check["punt_ok"]
                            and check["map_ok"] and check["sell_ok"] and check["pause_ok"] and load_ok)
-            os._exit(0 if check["ok"] else 1)
+            check["in_car"] = enter_car(anywhere=True)
+            check["top_speed"], check["top_height"] = 0.0, 0.0
+            check["stage"], check["time"] = "drive", 0.0
+    elif stage in ("drive", "fly", "land"):
+        car = state["car"]
+        check["top_speed"] = max(check["top_speed"], car.speed())
+        check["top_height"] = max(check["top_height"], car.height or 0.0)
+        if stage == "drive":
+            state["car_controls"] = hovercar.CarControls(throttle=1.0, steer=0.25)
+            if args.shot and t >= DRIVE_SECONDS - 1.0 and "drive_shot" not in check:
+                check["drive_shot"] = True
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_drive" + ext)
+            if t >= DRIVE_SECONDS:
+                check["stage"], check["time"] = "fly", 0.0
+        elif stage == "fly":
+            state["car_controls"] = hovercar.CarControls(throttle=0.6, climb=1.0 if t < CLIMB_SECONDS else 0.0)
+            if t >= CLIMB_SECONDS + 2.0:
+                if args.shot:
+                    base, ext = os.path.splitext(args.shot)
+                    screenshot(base + "_fly" + ext)
+                save_game(CHECK_SAVE_BASE, quiet=True)
+                saved_at = car_position()
+                state["car"].target = hovercar.HOVER_MIN
+                loaded = load_game(CHECK_SAVE_BASE)
+                moved = length(sub(car_position(), saved_at))
+                check["flight_load_ok"] = loaded and state["driving"] and moved < 0.01 and state["car"].target > 10.0
+                print("[walker] saved and loaded in flight: driving %s, the car %.3f m from where it was saved: %s"
+                      % (state["driving"], moved, "passed" if check["flight_load_ok"] else "FAILED"), flush=True)
+                check["stage"], check["time"] = "land", 0.0
+        else:
+            moving = car.speed() > 1.0
+            state["car_controls"] = hovercar.CarControls(throttle=-1.0 if moving and dot(car.velocity, car.heading) > 0.0
+                                                         else 0.0, climb=-1.0)
+            if car.can_leave() or t >= LAND_SECONDS:
+                left = leave_car()
+                check["stage"], check["time"], check["left"] = "out", 0.0, left
+    elif stage == "out":
+        if t >= 1.0:
+            drive_ok = (check["in_car"] and check["flight_load_ok"] and check["top_speed"] > 30.0
+                        and check["top_height"] > 0.8 * CLIMB_SECONDS * hovercar.CLIMB_RATE
+                        and check["left"] and player is not None and not state["driving"])
+            print("[walker] drove the car to %.0f km/h, flew it %.0f m up, came down and got out: %s"
+                  % (3.6 * check["top_speed"], check["top_height"], "passed" if drive_ok else "FAILED"), flush=True)
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_out" + ext)
+            os._exit(0 if check["ok"] and drive_ok else 1)
 
 
 def update_map(dt):
-    """The ground around the player measured, the waypoint cleared once
-    reached, and the minimap and full map drawn on foot while the menu
-    is hidden."""
+    """The ground around the player (or the car) measured, the waypoint
+    cleared once reached, and the minimap and full map drawn on foot or in
+    the car while the menu is hidden."""
     view, player = state["map_view"], foot.player
-    shown = player is not None and not state["menu"].visible
+    shown = (player is not None or state["driving"]) and not state["menu"].visible
     view.show(shown)
-    if player is None:
+    if player is None and not state["driving"]:
         return
-    body = foot.bubble.body
-    feet = foot.bubble.body_relative(player.feet())
+    if state["driving"]:
+        body, feet = planet, state["car"].position
+    else:
+        body = foot.bubble.body
+        feet = foot.bubble.body_relative(player.feet())
     explored = state["map"]
-    explored.probe(body, feet, EXTRA_PROBES, yield_to=bool(foot.props.needs_ground(foot.bubble)))
+    explored.probe(body, feet, EXTRA_PROBES,
+                   yield_to=foot.bubble is not None and bool(foot.props.needs_ground(foot.bubble)))
     up = normalize(feet)
     waypoint = state["waypoint"]
     if waypoint is not None and waypoint[0] is body and body.radius * math.acos(
@@ -1012,23 +1351,27 @@ def quit_game():
 
 def save_game(base=None, quiet=False):
     """The game written to `base` (save_base when None): the clock, the
-    player, the props and the taken rocks, the market, the game's numbers,
-    the waypoint and the explored map. Returns the data, or None without a
-    player."""
+    player (None while driving), the car, the props and the taken rocks,
+    the market, the game's numbers, the waypoint and the explored map.
+    Returns the data, or None without a player or the car driven."""
     player = foot.player
-    if player is None:
+    if player is None and not state["driving"]:
         if not quiet:
             state["hud"].toast("Nothing to save until you are on foot", hud_module.WARNING)
         return None
     bubble = foot.bubble
     waypoint = state["waypoint"]
+    car = state["car"]
     data = {
         "terrain": planet.terrain,
         "time": world.time,
-        "player": {"on": bubble.body.name, "feet": list(bubble.body_relative(player.feet())),
-                   "heading": list(player.basis()[2]), "pitch": player.pitch},
+        "player": None if player is None else {
+            "on": bubble.body.name, "feet": list(bubble.body_relative(player.feet())),
+            "heading": list(player.basis()[2]), "pitch": player.pitch},
+        "car": {"position": list(car.position), "heading": list(car.heading), "target": car.target,
+                "driving": state["driving"]},
         "taken": [list(key) for key in sorted(world.taken_rocks.keys)],
-        "props": foot.props.records(bubble),
+        "props": foot.props.records(bubble) if bubble is not None else [],
         "seen": [state["seen"].get(id(p)) for p in foot.props.all],
         "market": state["market"].record(state["outposts"]),
         "game": {"sold_kg": state["sold_kg"], "earned": state["earned"], "ore_chunks": state["ore_chunks"],
@@ -1047,8 +1390,10 @@ def save_game(base=None, quiet=False):
 
 def load_game(base=None):
     """The game put back as the save at `base` (save_base when None) has
-    it (see save_game); the player comes back once the ground under it is
-    known (maybe_spawn). Returns whether there was a save to load."""
+    it (see save_game): driving the car when it was, else the player comes
+    back once the ground under it is known (maybe_spawn); a save without
+    the car has it parked beside Base. Returns whether there was a save
+    to load."""
     try:
         data, arrays = save.read(base or save_base)
     except save.SaveError as error:
@@ -1060,6 +1405,8 @@ def load_game(base=None):
         return False
     by_name = {body.name: body for body in bodies}
     set_paused(False)
+    state["driving"] = False
+    set_fov(settings["fov"])
     foot.drop_bubble()
     foot.props.clear(None)
     world.extra_probes = []
@@ -1085,12 +1432,26 @@ def load_game(base=None):
     state["waypoint"] = None if waypoint is None else (by_name[waypoint[0]], tuple(waypoint[1]))
     state["market_record"] = data["market"]
     restore_market()
+    record = data.get("car")
+    if record is not None:
+        state["car"] = hovercar.Car(tuple(record["position"]), tuple(record["heading"]), record["target"])
+        update_ship()
+    else:
+        position, _, _, north = ship_pose()
+        make_car(position, north)
+    state["car_poses"] = None
     p = data["player"]
-    body = by_name[p["on"]]
-    feet = add(body.centre(), tuple(p["feet"]))
-    state["loading"] = p
-    state["position"] = add(feet, scale(normalize(p["feet"]), 2.0))
-    state["forward"] = tuple(p["heading"])
+    if p is None or (record is not None and record["driving"]):
+        state["loading"] = None
+        state["driving"] = True
+        state["chase"].reset()
+        place_chase(0.0)
+    else:
+        body = by_name[p["on"]]
+        feet = add(body.centre(), tuple(p["feet"]))
+        state["loading"] = p
+        state["position"] = add(feet, scale(normalize(p["feet"]), 2.0))
+        state["forward"] = tuple(p["heading"])
     world.ground = None
     state["last_save"] = data
     state["autosave_in"] = AUTOSAVE_SECONDS
@@ -1174,26 +1535,40 @@ def frame(dt):
     elapsed = dt                 # the frame's real time; the world's stands still while paused
     if args.check:
         run_check(elapsed)
+    elif state["driving"] and not paused and not state["map_view"].open:
+        read_car_controls()
     elif foot.player is not None and not paused and not state["map_view"].open:
         foot.read_controls(engine.input)
         ignore_held_buttons()
         read_bumpers()
+        read_pad_enter()
+    if state["driving"] and (paused or state["map_view"].open):
+        state["car_controls"] = hovercar.CarControls()
     if paused:
         dt = 0.0
     world.time += dt
     latency = world.probe_latency * state["frame_ms"] / 1000.0
     foot.props.fly(world.time - clock, latency)
     active = foot.player is not None and not state["map_view"].open and not paused
-    foot.step(dt, state["position"], state["position"], latency, active=active)
+    step_car(dt)
+    viewpoint = state["position"]
+    if state["driving"]:
+        viewpoint = car_position()
+        if foot.bubble is None and (state["car"].height or 0.0) < 0.5 * Bubble.RADIUS:
+            foot.ensure_bubble(viewpoint)
+    foot.step(dt, viewpoint, state["position"], latency, active=active, before_step=move_car_body)
     foot.props.probe(foot.bubble, EXTRA_PROBES)
     place_eye()
+    if state["driving"]:
+        place_chase(elapsed)
     capture_mouse()
     set_max_levels()
 
     camera = state["position"]
     basis = view_basis()
     foot.request_nearby(camera, bodies)
-    world.end_frame(camera, basis, dt, viewpoint=camera)
+    world.end_frame(camera, basis, dt, viewpoint=camera,
+                    patch=car_patch_request() if state["car"] is not None else None)
     ground = world.site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
@@ -1219,6 +1594,7 @@ def on_init():
     begin_survey()
     build_ship_model()
     state["viewmodel"] = Viewmodel(engine, box())
+    state["car_glows"] = carview.EngineGlows(engine)
     state["hud"] = Hud(engine)
     state["hud"].show(False)
     state["map"] = ExploredMap(world)
@@ -1244,21 +1620,26 @@ def on_init():
 
 
 def on_key(key):
-    """F1 the menu on the controls, M the map, Escape the menu, P a screenshot, F5 a save, F9 a load; the
-    start's menu waits for its buttons."""
+    """F1 the menu on the controls, M the map, Escape the menu, P a screenshot, F the car (in or out),
+    F5 a save, F9 a load; the start's menu waits for its buttons."""
     view, menu = state["map_view"], state["menu"]
     if state["starting"]:
         return
-    if key == keys.F1 and foot.player is not None:
+    if key == keys.F1 and (foot.player is not None or state["driving"]):
         controls = menu.tab_named("Controls")
         set_paused(not (menu.visible and menu.tab == controls), "Controls")
-    elif key == keys.M and foot.player is not None and not menu.visible:
+    elif key == keys.M and (foot.player is not None or state["driving"]) and not menu.visible:
         view.set_open(not view.open)
     elif key == keys.ESCAPE and view.open:
         view.set_open(False)
     elif key == keys.P:
         take_capture()
-    elif key == keys.ESCAPE and foot.player is not None:
+    elif key == keys.F and not menu.visible and not view.open:
+        if state["driving"]:
+            leave_car()
+        else:
+            enter_car()
+    elif key == keys.ESCAPE and (foot.player is not None or state["driving"]):
         set_paused(not menu.visible)
     elif key == keys.F5:
         save_game()
@@ -1284,7 +1665,7 @@ def on_mouse_button(button, pressed):
 def on_scroll(x_offset, y_offset):
     if state["map_view"].open:
         state["map_view"].zoom_by(y_offset)
-    elif foot.player is not None:
+    elif foot.player is not None and not state["driving"]:
         foot.gun_controls.distance += y_offset
 
 

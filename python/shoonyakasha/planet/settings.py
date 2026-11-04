@@ -87,7 +87,7 @@ def ground_items(world, keys=None):
         {"toggle": "Ocean", "get": lambda: world.ocean, "set": world.set_ocean,
          "hint": "The sea's surface; off, the sea floor shows."},
         {"toggle": "Shadows", "get": lambda: world.shadows, "set": lambda on: setattr(world, "shadows", on),
-         "hint": "The sun's shadow cascades, out to 20 km."},
+         "hint": "The sun's shadow cascades, out to 3 km."},
         {"toggle": "Vegetation", "get": lambda: world.vegetation, "set": lambda on: setattr(world, "vegetation", on),
          "hint": "Trees and bushes where the ground is forest, grass or dry, within the vegetation's range."},
         {"slider": "Vegetation density", "min": 0.0, "max": 1.0, "get": lambda: world.vegetation_density,

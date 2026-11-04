@@ -41,6 +41,11 @@ the HUD's scale (`set_scale`).
 - **Readout** at the bottom right: a panel with the speed along the
   ground, the body's name and, off the ground, the height of the feet
   above it.
+
+While driving the car (`update`'s `drive`) the crosshair, its status and
+the jet fuel are not drawn, the hints are the car's (`drive_hints`), and
+the readout gives the speed in km/h and always the height above the
+ground.
 """
 
 import math
@@ -192,6 +197,18 @@ def hints(status, held, charge, pad=False):
     if status == "can_grab":
         return [(grab, "Grab")]
     return []
+
+
+def drive_hints(pad=False, can_leave=False):
+    """The key hints while driving the car; getting out while it `can_leave`."""
+    if pad:
+        found = [(("pad:LS",), "Drive and steer"), (("pad:RT", "pad:LT"), "Up / down"), (("pad:A",), "Boost")]
+        leave = (("pad:X",), "Get out")
+    else:
+        found = [(("W", "S"), "Drive"), (("A", "D"), "Steer"), (("Space", "Ctrl"), "Up / down"),
+                 (("Shift",), "Boost")]
+        leave = (("F",), "Get out")
+    return found + [leave] if can_leave else found
 
 
 def status_text(status, held, charge, hold_distance=None):
@@ -371,19 +388,24 @@ class Hud:
         scifi.segments(mesh, x + 12.0, y + 30.0, w - 24.0, 10.0, FUEL_SEGMENTS, fuel, with_alpha(fill, alpha),
                        with_alpha(scifi.CYAN_FAINT, alpha))
 
-    def draw_readout(self, speed, body, above, width, height):
+    def draw_readout(self, speed, body, above, width, height, driving=False):
         layer, mesh = self.layer, self.layer.mesh
         w, h = READOUT_PANEL
         x, y = width - MARGIN - w, height - MARGIN - h
         scifi.panel(mesh, x, y, w, h, 10.0, scifi.GLASS, scifi.CYAN_SOFT, ("tl", "br"), scan=False)
         scifi.brackets(mesh, x - 4.0, y - 4.0, w + 8.0, h + 8.0, 8.0, scifi.CYAN, 1.2)
-        layer.text("M/S", (x + w - 12.0, y + 23.0), 14, DIM, "title", "right")
-        layer.text("%.1f" % speed, (x + w - 46.0, y + 22.0), 28, TEXT, "mono", "right")
+        if driving:
+            layer.text("KM/H", (x + w - 12.0, y + 23.0), 14, DIM, "title", "right")
+            layer.text("%.0f" % (3.6 * speed), (x + w - 58.0, y + 22.0), 28, TEXT, "mono", "right")
+        else:
+            layer.text("M/S", (x + w - 12.0, y + 23.0), 14, DIM, "title", "right")
+            layer.text("%.1f" % speed, (x + w - 46.0, y + 22.0), 28, TEXT, "mono", "right")
         layer.text("SPD", (x + 12.0, y + 23.0), 14, DIM, "title")
         place = body.name.upper()
         layer.text(place, (x + 12.0, y + h - 16.0), 15, scifi.CYAN, "title")
-        if above is not None and above > AIRBORNE:
-            layer.text("ALT " + distance_text(above), (x + w - 12.0, y + h - 16.0), 14, TEXT, "mono", "right")
+        if above is not None and (driving or above > AIRBORNE):
+            text = "%.1f m" % above if above < 10.0 else distance_text(above)
+            layer.text("ALT " + text, (x + w - 12.0, y + h - 16.0), 14, TEXT, "mono", "right")
 
     def draw_hints(self, shown, width, height):
         if not shown:
@@ -394,14 +416,19 @@ class Hud:
         scifi.panel(mesh, x, y, w, HINT_BAR_HEIGHT, 8.0, scifi.GLASS, scifi.CYAN_SOFT, ("tl", "br"), scan=False)
         scifi.caps(self.layer, shown, x + 16.0, y + 0.5 * HINT_BAR_HEIGHT)
 
-    def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0, height=None):
+    def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0, height=None, extra_hints=(),
+               drive=None):
         """One frame: `view` (right, up, forward) of the camera, `eye` from
         the planet's centre, `body` the world body under it, `player` the
         character, `gun` its gravity gun, `targets` the compass markers
         (name, position from the planet's centre, colour), `speed` along
         the ground in m/s, `pad` whether to name the gamepad's controls,
         `dt` the seconds since the last update, `height` the feet's height
-        above the ground in metres, or None."""
+        above the ground in metres, or None, `extra_hints` key hints shown
+        before the gun's. With `drive` (whether the car can be left, True
+        or False), the HUD is the car's: no crosshair, status or jet fuel,
+        the driving hints (`drive_hints`), and the readout in km/h with the
+        height always."""
         width, height_px = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height_px <= 0:
             return
@@ -411,22 +438,25 @@ class Hud:
         centre = body.centre()
         up = normalize(sub(eye, centre))
 
-        status = gun.status if gun is not None else "idle"
-        held = gun is not None and gun.held is not None
-        charge = gun.charge if held else 0.0
-        self.draw_crosshair(cx, cy, status, held, charge)
-        distance = gun.hold_distance if held else None
-        if distance is not None and self.hold_distance is not None and abs(distance - self.hold_distance) > 1e-6:
-            self.hold_shown = HOLD_SECONDS
-        self.hold_distance = distance
-        self.hold_shown = max(0.0, self.hold_shown - dt)
-        text, text_colour = status_text(status, held, charge, distance if self.hold_shown > 0.0 else None)
-        if text:
-            w = measure.width(text, 15, "mono") + 18.0
-            scifi.panel(self.layer.mesh, cx - 0.5 * w, cy + STATUS_BELOW - 10.0, w, 20.0, 5.0, scifi.GLASS, None,
-                        ("tl", "br"), scan=False)
-            self.layer.text(text, (cx, cy + STATUS_BELOW), 15, text_colour, "mono", "center", shadow=False)
-        self.draw_hints(hints(status, held, charge, pad), width, height_px)
+        if drive is None:
+            status = gun.status if gun is not None else "idle"
+            held = gun is not None and gun.held is not None
+            charge = gun.charge if held else 0.0
+            self.draw_crosshair(cx, cy, status, held, charge)
+            distance = gun.hold_distance if held else None
+            if distance is not None and self.hold_distance is not None and abs(distance - self.hold_distance) > 1e-6:
+                self.hold_shown = HOLD_SECONDS
+            self.hold_distance = distance
+            self.hold_shown = max(0.0, self.hold_shown - dt)
+            text, text_colour = status_text(status, held, charge, distance if self.hold_shown > 0.0 else None)
+            if text:
+                w = measure.width(text, 15, "mono") + 18.0
+                scifi.panel(self.layer.mesh, cx - 0.5 * w, cy + STATUS_BELOW - 10.0, w, 20.0, 5.0, scifi.GLASS,
+                            None, ("tl", "br"), scan=False)
+                self.layer.text(text, (cx, cy + STATUS_BELOW), 15, text_colour, "mono", "center", shadow=False)
+            self.draw_hints(list(extra_hints) + hints(status, held, charge, pad), width, height_px)
+        else:
+            self.draw_hints(drive_hints(pad, drive), width, height_px)
 
         heading = bearing(up, forward)
         if heading is None:
@@ -434,7 +464,8 @@ class Hud:
         shown = markers(sub(eye, centre), up, heading, body.radius, [(n, sub(p, centre), c) for n, p, c in targets])
         self.draw_compass(cx, heading, shown)
         self.draw_card()
-        self.draw_fuel(player.jet_fuel if player is not None else 1.0, dt, height_px)
-        self.draw_readout(speed, body, height, width, height_px)
+        if drive is None:
+            self.draw_fuel(player.jet_fuel if player is not None else 1.0, dt, height_px)
+        self.draw_readout(speed, body, height, width, height_px, driving=drive is not None)
         self.draw_toasts(dt, width)
         self.layer.end()

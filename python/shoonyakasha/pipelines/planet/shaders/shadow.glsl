@@ -17,18 +17,21 @@ float horizonShadow(float sinHorizon, vec3 radial, float distance) {
 // the point's distance along the view. The point is pushed along its
 // normal by two of that cascade's texels, so a surface does not shadow
 // itself, and compared with the map at nine places a texel apart (each a
-// filtered comparison of four texels). Over the last tenth of the last
-// cascade the shadow fades out; beyond it everything is lit.
+// filtered comparison of four texels). Over the last SHADOW_BLEND of a
+// cascade's far distance the shadow blends towards the next cascade's
+// (where the point is within that cascade's map). Over the last tenth of
+// the last cascade the shadow fades out; beyond it everything is lit.
 
-float sunShadow(vec3 relativePos, vec3 normal) {
-    if (shadow.settings.x == 0.0) return 1.0;
-    float depth = -(camera.view * vec4(relativePos, 1.0)).z;
-    if (depth >= shadow.splits.w) return 1.0;
-    int c = depth < shadow.splits.x ? 0 : depth < shadow.splits.y ? 1 : depth < shadow.splits.z ? 2 : 3;
+const float SHADOW_BLEND = 0.2;
+
+// The shadow of cascade `c` at the point, 1 lit; `inside` false (and 1
+// returned) where the point is outside the cascade's map.
+float cascadeShadow(int c, vec3 relativePos, vec3 normal, out bool inside) {
     vec3 p = relativePos + normal * (2.0 * shadow.texel[c]);
     vec4 clip = shadow.viewProj[c] * vec4(p, 1.0);
     vec2 uv = clip.xy * 0.5 + 0.5;
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 1.0;
+    inside = all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)));
+    if (!inside) return 1.0;
     float step = 1.0 / shadow.settings.y;
     float lit = 0.0;
     for (int y = -1; y <= 1; ++y) {
@@ -36,6 +39,25 @@ float sunShadow(vec3 relativePos, vec3 normal) {
             lit += texture(sunShadowMap, vec4(uv + vec2(x, y) * step, float(c), clip.z));
         }
     }
-    lit /= 9.0;
+    return lit / 9.0;
+}
+
+float sunShadow(vec3 relativePos, vec3 normal) {
+    if (shadow.settings.x == 0.0) return 1.0;
+    float depth = -(camera.view * vec4(relativePos, 1.0)).z;
+    if (depth >= shadow.splits.w) return 1.0;
+    int c = depth < shadow.splits.x ? 0 : depth < shadow.splits.y ? 1 : depth < shadow.splits.z ? 2 : 3;
+    bool inside;
+    float lit = cascadeShadow(c, relativePos, normal, inside);
+    if (!inside) return 1.0;
+    float far = shadow.splits[c];
+    if (c < 3) {
+        float blend = smoothstep((1.0 - SHADOW_BLEND) * far, far, depth);
+        if (blend > 0.0) {
+            bool nextInside;
+            float next = cascadeShadow(c + 1, relativePos, normal, nextInside);
+            if (nextInside) lit = mix(lit, next, blend);
+        }
+    }
     return mix(lit, 1.0, smoothstep(0.9 * shadow.splits.w, shadow.splits.w, depth));
 }

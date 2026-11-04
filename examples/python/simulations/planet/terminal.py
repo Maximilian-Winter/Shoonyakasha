@@ -54,6 +54,7 @@ CONTROL_SHARE = 0.56             # of the row's width, at most
 COLUMN_GAP = 34.0                # between the columns of a tab
 BUTTON_WIDTH = 360.0
 LABEL_SIZE = 17
+CONTROLS_HEADING, CONTROLS_ROW, CONTROLS_LINE, CONTROLS_GAP = 38.0, 27.0, 17.0, 8.0   # the controls sheet's spacing
 HOVER = (0.38, 0.88, 1.0, 0.12)
 ACTIVE_TAB = (0.38, 0.88, 1.0, 0.22)
 
@@ -253,21 +254,26 @@ class Terminal:
         return h
 
     def draw_controls(self, columns, x, y, w):
+        """Each column's sections: a heading, then each row's keys with its
+        text beside them, the texts starting past the column's widest keys
+        and wrapped to the column."""
         layer = self.layer
         col_w = w / len(columns)
         for c, sections in enumerate(columns):
             cx, cy = x + c * col_w, y
+            keys_w = max(scifi.hints_width([(keys, None)]) for _, rows in sections for keys, _ in rows)
+            text_x = cx + keys_w + 12.0
             for heading, rows in sections:
                 layer.text(heading.upper(), (cx, cy + 12.0), 15, scifi.CYAN, "title")
                 layer.mesh.segment((cx, cy + 26.0), (cx + col_w - 24.0, cy + 26.0), scifi.CYAN_FAINT, 1.0)
-                cy += 42.0
+                cy += CONTROLS_HEADING
                 for keys, text in rows:
-                    width = scifi.caps(layer, [(keys, None)], cx, cy)
-                    lines = scifi.wrap(text, 16, col_w - 24.0 - max(width, 120.0) - 12.0)
+                    scifi.caps(layer, [(keys, None)], cx, cy)
+                    lines = scifi.wrap(text, 16, cx + col_w - 24.0 - text_x)
                     for k, line in enumerate(lines):
-                        layer.text(line, (cx + max(width, 120.0) + 12.0, cy + 18.0 * k), 16, scifi.WHITE)
-                    cy += 30.0 + 18.0 * max(0, len(lines) - 1)
-                cy += 10.0
+                        layer.text(line, (text_x, cy + CONTROLS_LINE * k), 16, scifi.WHITE)
+                    cy += CONTROLS_ROW + CONTROLS_LINE * max(0, len(lines) - 1)
+                cy += CONTROLS_GAP
 
     def update(self, input):
         """One frame while shown: the pointer's work, then the menu drawn."""
