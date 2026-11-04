@@ -1,8 +1,8 @@
 #version 450
 //
 // The lakes' surface (water.glsl's waterSurface), blended over the ground
-// already drawn: a pixel is drawn where the lake its chunk took (lake.vert)
-// is the one whose water covers it (lakes.glsl's lakeAt), with that water's
+// already drawn: a pixel is drawn where the water of the lake its chunk
+// took (lake.vert) covers it (lakes.glsl's lakeCovers), with that water's
 // depth there.
 //
 
@@ -25,6 +25,6 @@ layout(location = 0) out vec4 outColor;
 void main() {
     vec3 radial = normalize(fragRadial);
     float depth;
-    if (lakeAt(radial, depth) != fragLake) discard;
+    if (!lakeCovers(fragLake, radial, depth)) discard;
     outColor = waterSurface(fragRelativePos, radial, fragHorizon, depth);
 }

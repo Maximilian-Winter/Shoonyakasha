@@ -52,24 +52,29 @@ float terrainWithLakes(float height, vec3 dir) {
     return height;
 }
 
+// Whether lake `i`'s shore holds unit direction `dir`, with the water's depth there (m).
+bool lakeCovers(int i, vec3 dir, out float depth) {
+    depth = 0.0;
+    vec4 shape = terrain.lakeShapes[i];
+    vec3 offset = lakeOffset(i, dir);
+    float outer = shape.x * (1.0 + LAKE_WOBBLE_REACH * shape.w);
+    float d2 = dot(offset, offset);
+    if (d2 >= outer * outer) return false;
+    float r = sqrt(d2);
+    float shore = lakeShore(i, offset);
+    if (r >= shore) return false;
+    float t = r / shore;
+    depth = shape.y * (1.0 - t * t);
+    return true;
+}
+
 // The lake whose water covers unit direction `dir`, the first whose shore
 // holds it: its index, or -1, and the water's depth there (m).
 int lakeAt(vec3 dir, out float depth) {
     depth = 0.0;
     for (int i = 0; i < TERRAIN_LAKES; ++i) {
-        vec4 shape = terrain.lakeShapes[i];
-        if (shape.x <= 0.0) break;
-        vec3 offset = lakeOffset(i, dir);
-        float outer = shape.x * (1.0 + LAKE_WOBBLE_REACH * shape.w);
-        float d2 = dot(offset, offset);
-        if (d2 >= outer * outer) continue;
-        float r = sqrt(d2);
-        float shore = lakeShore(i, offset);
-        if (r < shore) {
-            float t = r / shore;
-            depth = shape.y * (1.0 - t * t);
-            return i;
-        }
+        if (terrain.lakeShapes[i].x <= 0.0) break;
+        if (lakeCovers(i, dir, depth)) return i;
     }
     return -1;
 }
