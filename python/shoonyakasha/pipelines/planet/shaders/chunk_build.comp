@@ -13,8 +13,8 @@
 // in 32-bit, radius * (direction - centre direction) would carry about a
 // centimetre of error at a radius of 100 km. Heights are 32-bit, from the
 // body's terrain (bodyHeight): body 0, the planet, terrainHeight
-// (terrain.glsl); body 1, the moon, moonHeight (moon.glsl); both with
-// their flat sites (sites.glsl).
+// (terrain.glsl) with its lakes (lakes.glsl); body 1, the moon, moonHeight
+// (moon.glsl); both with their flat sites (sites.glsl).
 //
 // Each vertex also holds the sine of the terrain's horizon towards the
 // sun's azimuth (horizonTowardsSun), for shadows beyond the shadow map, and
@@ -71,6 +71,8 @@ layout(set = 0, binding = 2) uniform TerrainParams {
     vec4 biomeView;
     vec4 sites[8];
     vec4 siteShapes[8];
+    vec4 lakes[32];
+    vec4 lakeShapes[32];
 } terrain;
 
 layout(std430, set = 0, binding = 3) writeonly buffer ChunkHeights {
@@ -91,6 +93,7 @@ layout(std430, set = 0, binding = 4) writeonly buffer ProbeHeights {
 #include "moon.glsl"
 #include "resources.glsl"
 #include "sites.glsl"
+#include "lakes.glsl"
 
 const int PLANET = 0;
 const int MOON = 1;
@@ -99,16 +102,19 @@ const int MOON = 1;
 int body;
 float bodyRadius;
 
-// The terrain's height (m) at unit direction `d` from the centre of `body`, with its flat sites.
+// The terrain's height (m) at unit direction `d` from the centre of `body`,
+// on the planet with its lakes, and with the body's flat sites.
 float bodyHeight(vec3 d) {
-    return terrainWithSites(body == MOON ? moonHeight(d, bodyRadius, 0.0) : terrainHeight(d), d, body);
+    float h = body == MOON ? moonHeight(d, bodyRadius, 0.0) : terrainWithLakes(terrainHeight(d), d);
+    return terrainWithSites(h, d, body);
 }
 
 // bodyHeight for the normals of a chunk whose vertices are `spacing`
 // metres apart: on the moon without the craters whose radius is less than
 // two spacings, whose slopes the vertices would sample out of step.
 float bodyHeightForNormals(vec3 d, float spacing) {
-    return terrainWithSites(body == MOON ? moonHeight(d, bodyRadius, 2.0 * spacing) : terrainHeight(d), d, body);
+    float h = body == MOON ? moonHeight(d, bodyRadius, 2.0 * spacing) : terrainWithLakes(terrainHeight(d), d);
+    return terrainWithSites(h, d, body);
 }
 
 // A height as the surface's: on the planet, below sea level is the sea's surface.
@@ -199,7 +205,8 @@ float horizonTowardsSun(vec3 d, float h, float radius, float near) {
 
 // Writes vertex `k` of `slot`, at grid coordinates `ij`, `below` metres
 // under the terrain; returns the terrain's height there. Its horizon is
-// measured from two of the chunk's vertex spacings out (at least
+// measured from the water's surface where a lake covers it (lakeAt), and
+// from two of the chunk's vertex spacings out (at least
 // HORIZON_NEAR): finer features cannot be drawn by the chunk's triangles,
 // and would make neighbouring vertices' horizons differ by more than they
 // can show.
@@ -217,7 +224,9 @@ float writeVertex(uint slot, int k, ivec2 ij, int face, int x, int y, double cel
     float spacing = float(radius * 2.0LF / cells);        // metres between vertices, near enough
     float near = min(max(HORIZON_NEAR, 2.0 * spacing), 0.2 * float(radius));
     vec3 climate = body == PLANET ? climateAt(vec3(d), h) : vec3(0.0);
-    pool.vertices[index].horizon = vec4(horizonTowardsSun(vec3(d), h, float(radius), near), climate);
+    float depth;
+    float surface = body == PLANET && lakeAt(vec3(d), depth) >= 0 ? h + depth : h;
+    pool.vertices[index].horizon = vec4(horizonTowardsSun(vec3(d), surface, float(radius), near), climate);
     return h;
 }
 

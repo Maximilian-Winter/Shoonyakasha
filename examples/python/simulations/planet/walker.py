@@ -5,7 +5,10 @@ runs, jumps and jets with the gravity gun in hand
 (shoonyakasha.planet.on_foot). The ship, a hover car, floats
 HOVER_HEIGHT above the ground 16 m south of the blocks as a landmark, a
 static box in the physics. The outposts on the planet and the moon are
-found by the same survey as in planet.py and drawn as pads.
+found by the same survey as in planet.py and drawn as pads. Lakes on the
+planet within 40 km of the site (shoonyakasha.planet.lakes) are surveyed
+with them and kept clear of the outposts' sites and the site's pad; the
+car's ground patch takes their water as a floor, as it does the sea's.
 
 The flying car: the ship is a hover car (hovercar.py, carview.py). F
 within ENTER_REACH of it gets in; the camera then chases it, and W S A
@@ -80,7 +83,7 @@ grab, right trigger punt, the bumpers the hold distance.
     python walker.py
     python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, sell ore,
                                              pause, save, change the game and load it, drive and fly
-                                             the car; report and exit
+                                             the car, hover it on a lake; report and exit
 """
 
 import argparse
@@ -99,7 +102,8 @@ from shoonyakasha.planet.ground_patch import GroundPatch, SIZE as PATCH_SIZE
 from shoonyakasha.planet.on_foot import JUMP_DISTANCE, STEP, OnFoot
 from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis, quat_normalize,
                                      scale, sub)
-from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL
+from shoonyakasha.planet.lakes import LakeSurvey
+from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL, SITE_BLEND_RADIUS
 from shoonyakasha.planet.props import stack_offsets
 from shoonyakasha.planet.rocks import rock_colour
 import carview
@@ -147,6 +151,9 @@ SHIP_SHOT_WALK = 2.0             # s --shot walks away from the ship before its 
 DRIVE_SECONDS = 5.0              # s --check drives the car flat out, turning a little
 CLIMB_SECONDS = 3.0              # s it climbs at full climb
 LAND_SECONDS = 25.0              # s it waits at most for the car to come down and slow
+LAKE_SECONDS = 6.0               # s --check hovers the car over a lake
+LAKE_CHECK_DROP = 2.0            # m above the lake's water --check puts the car
+LAKE_CLIMB_SECONDS = 8.0         # s --check --shot climbs the car over the lake
 SHOT_SECONDS = 1.0               # s of walking before --shot's screenshot
 CHECK_CRATE = 20.0               # kg
 CHECK_AHEAD = 2.5                # m ahead of the feet the crate is dropped
@@ -207,7 +214,8 @@ HELP_COLUMNS = [
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
                     help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, sell ore at Base, "
-                         "pause, save, change the game and load it, drive and fly the car; report and exit")
+                         "pause, save, change the game and load it, drive and fly the car, hover it on a lake; "
+                         "report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 
@@ -243,7 +251,7 @@ state = {
     "frame_ms": 16.0,             # frame time, smoothed
     "home": None,                 # the outpost at the blocks
     "outposts": [],               # every outpost, the home one first
-    "survey": None,               # the outposts' survey while the world measures it
+    "survey": None,               # the outposts' and the lakes' surveys while the world measures them
     "ship": None,                 # (position, right, up, forward) of the parked ship, planet space
     "ship_model": None,           # (root entity, mesh entities)
     "ship_body": None,            # the car's kinematic box in the bubble
@@ -308,23 +316,39 @@ def build_site():
 
 
 def begin_survey():
-    survey = Survey(bodies, tuple(planet.terrain["seed"]))
-    state["survey"] = survey
-    world.start_survey(survey.points)
+    """The outposts' survey and the lakes' around the site, measured together."""
+    seed = tuple(planet.terrain["seed"])
+    survey = Survey(bodies, seed)
+    lake_survey = LakeSurvey(planet, world.site_frame()[1], seed)
+    state["survey"] = (survey, lake_survey)
+    world.start_survey(survey.points + lake_survey.points)
 
 
 def update_outposts():
     """The home outpost at the site's height; once the survey's heights are
-    back, the outposts chosen, their sites flattened and their pads drawn."""
+    back, the outposts chosen, their sites flattened and their pads drawn,
+    and the lakes chosen clear of the outposts' sites and the site's pad."""
     home = state["home"]
     home.height = world.site_height or 0.0
-    survey = state["survey"]
-    heights = world.surveyed() if survey is not None else None
+    surveys = state["survey"]
+    heights = world.surveyed() if surveys is not None else None
     if heights is None:
         return
-    found = survey.choose(heights, taken=[], home=home)
+    survey, lake_survey = surveys
+    count = len(survey.points)
+    found = survey.choose(heights[:count], taken=[], home=home)
     state["outposts"] = [home] + sorted(found, key=lambda o: (o.body.index, o.name))
     world.set_sites([o.site() for o in state["outposts"] if o.flat_radius > 0.0])
+    avoid = [(home.direction, SITE_BLEND_RADIUS)] + [(o.direction, o.blend_radius) for o in found
+                                                     if o.body is planet]
+    lakes = lake_survey.choose(heights[count:], avoid=avoid)
+    world.set_lakes(lakes)
+    if lakes:
+        nearest = min(planet.radius * math.acos(max(-1.0, min(1.0, dot(home.direction, normalize(k.direction)))))
+                      for k in lakes)
+        print("[walker] lakes: %d, %.0f to %.0f m across, the nearest %.1f km from Base"
+              % (len(lakes), 2.0 * min(k.radius for k in lakes), 2.0 * max(k.radius for k in lakes),
+                 nearest / 1000.0), flush=True)
     world.end_survey()
     state["survey"] = None
     pads.build(state["outposts"])
@@ -447,7 +471,8 @@ def car_patch_request():
     ahead = world.probe_latency * state["frame_ms"] / 1000.0
     half = CAR_PATCH_MARGIN + length(along) * (ahead + hovercar.LOOK_AHEAD)
     centre = add(car.position, scale(along, ahead))
-    return planet, GroundPatch(planet.radius, centre, 2.0 * half / (PATCH_SIZE - 1), sea=planet.ocean)
+    return planet, GroundPatch(planet.radius, centre, 2.0 * half / (PATCH_SIZE - 1), sea=planet.ocean,
+                               water=world.lake_level)
 
 
 def near_car():
@@ -804,7 +829,10 @@ def run_check(dt):
     (at most LAND_SECONDS), and out of it, a second later passing when the
     load put the car back where it was and still driven, it went faster
     than 30 m/s and higher than 80 % of the climb and the player stands
-    beside it. The
+    beside it; then into the car again, put LAKE_CHECK_DROP above the
+    water of the lake nearest it at its centre and left for LAKE_SECONDS,
+    passing when it hovers HOVER_MIN (within 25 cm) above the water and
+    the ground under the camera lies at least 50 cm under the water. The
     settings are the defaults and are not written. With --shot,
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
@@ -813,10 +841,12 @@ def run_check(dt):
     (with _settings added), of its Controls tab (with _controls added),
     after the load (with _load added), a second
     before the end of the drive (with _drive added), after the climb (with
-    _fly added) and out of the car (with _out added)."""
+    _fly added), out of the car (with _out added), over the lake (with
+    _lake added) and, after climbing for LAKE_CLIMB_SECONDS and 2 s more,
+    above it (with _lake_above added)."""
     player = foot.player
     check = state["check"]
-    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out")):
+    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above")):
         return
     if check is None:
         check = state["check"] = {"stage": "ship" if args.shot else "walk", "time": 0.0,
@@ -1049,7 +1079,42 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_out" + ext)
-            os._exit(0 if check["ok"] and drive_ok else 1)
+            check["ok"] = check["ok"] and drive_ok
+            if not world.lakes:
+                print("[walker] no lakes were found: FAILED", flush=True)
+                os._exit(1)
+            check["in_car"] = enter_car(anywhere=True)
+            lake = min(world.lakes, key=lambda k: -dot(normalize(k.direction), normalize(state["car"].position)))
+            car = state["car"]
+            car.position = scale(normalize(lake.direction), planet.radius + lake.level + LAKE_CHECK_DROP)
+            car.velocity = (0.0, 0.0, 0.0)
+            car.heading = car._level(car.heading)
+            car.target = hovercar.HOVER_MIN
+            check["lake"] = lake
+            check["stage"], check["time"] = "lake", 0.0
+    elif stage == "lake":
+        state["car_controls"] = hovercar.CarControls()
+        if t >= LAKE_SECONDS:
+            car, lake = state["car"], check["lake"]
+            above_water = length(car.position) - planet.radius - lake.level - SHIP_HALF[1]
+            bed = world.ground
+            lake_ok = (check["in_car"] and car.height is not None and abs(car.height - hovercar.HOVER_MIN) < 0.25
+                       and abs(above_water - car.height) < 0.25 and bed is not None and bed < lake.level - 0.5)
+            print("[walker] the car over a lake %.0f m across: %.2f m above its water, the ground %s m under it: %s"
+                  % (2.0 * lake.radius, above_water, "?" if bed is None else "%.1f" % (lake.level - bed),
+                     "passed" if lake_ok else "FAILED"), flush=True)
+            check["ok"] = check["ok"] and lake_ok
+            if not args.shot:
+                os._exit(0 if check["ok"] else 1)
+            base, ext = os.path.splitext(args.shot)
+            screenshot(base + "_lake" + ext)
+            check["stage"], check["time"] = "lake_above", 0.0
+    elif stage == "lake_above":
+        state["car_controls"] = hovercar.CarControls(climb=1.0 if t < LAKE_CLIMB_SECONDS else 0.0)
+        if t >= LAKE_CLIMB_SECONDS + 2.0:
+            base, ext = os.path.splitext(args.shot)
+            screenshot(base + "_lake_above" + ext)
+            os._exit(0 if check["ok"] else 1)
 
 
 def update_map(dt):

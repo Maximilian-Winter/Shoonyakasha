@@ -33,6 +33,10 @@ layout(set = CAMERA_SET, binding = 1) uniform TerrainParams {
     vec4 detail;
     vec4 climate;
     vec4 biomeView;
+    vec4 sites[8];
+    vec4 siteShapes[8];
+    vec4 lakes[32];
+    vec4 lakeShapes[32];
 } terrain;
 
 layout(set = CAMERA_SET, binding = 2) uniform AtmosphereParams {

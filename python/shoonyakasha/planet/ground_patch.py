@@ -6,7 +6,8 @@ The grid lies in the plane tangent to the sphere at the patch's centre
 direction, SIZE x SIZE points `spacing` metres apart along its east and
 north axes; each point's direction is from the body's centre through it.
 On a body with a sea, heights below sea level count as sea level, so the
-sea is a floor.
+sea is a floor; with `water`, heights below the water level it gives for a
+point's direction count as that level, so lakes are floors too.
 
 `GroundPatch.query` answers for a point relative to the body's centre: the
 surface under it, interpolated bilinearly between the four grid heights
@@ -37,10 +38,12 @@ def tangent_axes(centre):
 
 
 class GroundPatch:
-    def __init__(self, radius, centre, spacing, sea=True):
+    def __init__(self, radius, centre, spacing, sea=True, water=None):
         """A grid around the unit direction `centre` of a sphere of `radius`
         metres, its points `spacing` metres apart; heights come with
-        `set_heights`. `sea`: heights below 0 count as 0."""
+        `set_heights`. `sea`: heights below 0 count as 0. `water`: a
+        function of a unit direction giving the water level (m) over it, or
+        None where there is none; heights below it count as it."""
         self.radius = radius
         self.sea = sea
         self.centre = normalize(centre)
@@ -53,12 +56,14 @@ class GroundPatch:
             normalize(add(origin, add(scale(self.east, (i - mid) * spacing),
                                          scale(self.north, (j - mid) * spacing))))
             for j in range(SIZE) for i in range(SIZE)]
+        self.floors = [water(d) if water is not None else None for d in self.directions]
         self.heights = None
         self.points = None
 
     def set_heights(self, heights):
         """Terrain heights (m) at `directions`, in their order."""
-        self.heights = [max(float(h), 0.0) if self.sea else float(h) for h in heights]
+        heights = [max(float(h), 0.0) if self.sea else float(h) for h in heights]
+        self.heights = [h if floor is None else max(h, floor) for h, floor in zip(heights, self.floors)]
         self.points = [scale(d, self.radius + h) for d, h in zip(self.directions, self.heights)]
 
     def grid_coordinates(self, point):

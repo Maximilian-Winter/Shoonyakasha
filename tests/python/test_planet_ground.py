@@ -97,6 +97,21 @@ class Query(unittest.TestCase):
         depth, _ = patch.query(point_at(patch, 0.0, 0.0, -296.0))
         self.assertAlmostEqual(depth, -4.0, delta=1e-3)
 
+    def test_water_is_a_floor_where_it_lies(self):
+        def water(direction):
+            return 80.0 if dot(direction, patch_east) > 0.0 else None
+        patch_east = ground.tangent_axes(CENTRE)[0]
+        patch = ground.GroundPatch(RADIUS, CENTRE, 5.0, water=water)
+        patch.set_heights([50.0] * (ground.SIZE * ground.SIZE))
+        half = (ground.SIZE - 1) * 0.5 * 5.0
+        depth, _ = patch.query(point_at(patch, half, 0.0, 84.0))
+        self.assertAlmostEqual(depth, -4.0, delta=1e-3)
+        depth, _ = patch.query(point_at(patch, -half, 0.0, 54.0))
+        self.assertAlmostEqual(depth, -4.0, delta=1e-3)
+        patch.set_heights([95.0] * (ground.SIZE * ground.SIZE))
+        depth, _ = patch.query(point_at(patch, half, 0.0, 99.0))
+        self.assertAlmostEqual(depth, -4.0, delta=1e-3)
+
     def test_points_just_outside_take_the_edge_and_far_ones_have_no_answer(self):
         patch = ground.GroundPatch(RADIUS, CENTRE, 5.0)
         patch.set_heights([10.0] * (ground.SIZE * ground.SIZE))

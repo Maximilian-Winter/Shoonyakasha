@@ -165,6 +165,64 @@ class SurveyTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             world.set_sites([site] * (planet_world.MAX_SITES + 1))
 
+    def test_lakes_uploaded_and_the_planet_built_again(self):
+        world = self.world
+        world.lod.trees = {0, 1}
+        lake = planet_world.Lake((0.0, 2.0, 0.0), 120.0, 300.0, 15.0, 180.0, 0.2)
+        world.set_lakes([lake])
+        centres = self.engine.custom["planet.terrain.lakes"]
+        shapes = self.engine.custom["planet.terrain.lakeShapes"]
+        self.assertEqual(len(centres), planet_world.MAX_LAKES)
+        self.assertEqual(len(shapes), planet_world.MAX_LAKES)
+        self.assertEqual(centres[0], (0.0, 1.0, 0.0, 120.0))
+        self.assertEqual(shapes[0], (300.0, 15.0, 180.0, 0.2))
+        self.assertEqual(shapes[1], (0.0, 0.0, 0.0, 0.0))
+        self.assertEqual(world.lod.dropped, [0])
+        self.assertEqual(world.lod.created, [0])
+        self.assertEqual(world.terrain_version, 1)
+        world.set_lakes([lake])
+        self.assertEqual(world.lod.dropped, [0])
+        world.set_lakes([])
+        self.assertEqual(world.lod.dropped, [0, 0])
+        self.assertEqual(self.engine.custom["planet.terrain.lakeShapes"][0], (0.0, 0.0, 0.0, 0.0))
+
+    def test_lakes_set_before_the_planet_is_made_build_nothing(self):
+        world = self.world
+        world.lod.trees = set()
+        world.set_lakes([planet_world.Lake((0.0, 1.0, 0.0), 120.0, 300.0, 15.0, 180.0)])
+        self.assertEqual(world.lod.created, [])
+        self.assertEqual(world.terrain_version, 0)
+
+    def test_lakes_checked(self):
+        world = self.world
+        good = planet_world.Lake((0.0, 1.0, 0.0), 120.0, 300.0, 15.0, 180.0)
+        for bad in (planet_world.Lake((0.0, 1.0, 0.0), 120.0, 0.0, 15.0, 180.0),
+                    planet_world.Lake((0.0, 1.0, 0.0), 120.0, 300.0, 0.0, 180.0),
+                    planet_world.Lake((0.0, 1.0, 0.0), 120.0, 300.0, 15.0, -1.0),
+                    planet_world.Lake((0.0, 1.0, 0.0), 120.0, 300.0, 15.0, 180.0, 0.8)):
+            with self.assertRaises(ValueError):
+                world.set_lakes([bad])
+        with self.assertRaises(ValueError):
+            world.set_lakes([good] * (planet_world.MAX_LAKES + 1))
+        self.assertEqual(world.lakes, [])
+
+    def test_lake_level(self):
+        world = self.world
+        world.set_lakes([planet_world.Lake((0.0, 1.0, 0.0), 120.0, 300.0, 15.0, 180.0, 0.25)])
+        reach = 300.0 * (1.0 + planet_world.LAKE_WOBBLE_REACH * 0.25)
+        east = (1.0, 0.0, 0.0)
+        at = lambda metres: normalize(add((0.0, 1.0, 0.0), scale(east, metres / planet_world.RADIUS)))
+        self.assertEqual(world.lake_level((0.0, 1.0, 0.0)), 120.0)
+        self.assertEqual(world.lake_level(at(reach - 1.0)), 120.0)
+        self.assertIsNone(world.lake_level(at(reach + 1.0)))
+
+    def test_regenerate_drops_the_lakes(self):
+        world = self.world
+        world.set_lakes([planet_world.Lake((0.0, 1.0, 0.0), 120.0, 300.0, 15.0, 180.0)])
+        world.regenerate()
+        self.assertEqual(world.lakes, [])
+        self.assertEqual(self.engine.custom["planet.terrain.lakeShapes"][0], (0.0, 0.0, 0.0, 0.0))
+
     def test_clearings_uploaded_without_building_again(self):
         world = self.world
         world.lod.trees = {0, 1}

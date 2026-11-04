@@ -37,7 +37,11 @@ in the terrain at the site's natural height, which a probe measures before
 the planet is built. Up to MAX_SITES more flat sites on either body
 (`Site`, `set_sites`) flatten the ground the same way (sites.glsl), and
 the scatter leaves their flat radius bare; `regenerate` drops the
-planet's. Up to MAX_CLEARINGS clearings (`Clearing`, `set_clearings`),
+planet's. Up to MAX_LAKES lakes on the planet (`Lake`, `set_lakes`;
+lakes.py finds them by a survey) carve their bowls and banks into its
+terrain, the Lakes pass draws their water (lakes.glsl, lake.vert,
+lake.frag), the scatter places nothing under it, and `regenerate` drops
+them. Up to MAX_CLEARINGS clearings (`Clearing`, `set_clearings`),
 circles and rectangles on either body, leave out the plants, the grass or
 the rocks the scatter would place in them, without changing the ground
 (clearings.glsl).
@@ -150,6 +154,8 @@ SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a verte
 SITE_FLAT_RADIUS = 150.0         # metres of flat pad around the site
 SITE_BLEND_RADIUS = 600.0        # metres from the site where the terrain is its own again
 MAX_SITES = 8                    # flat sites (Site) besides the site's pad; matches TerrainParams' sites
+MAX_LAKES = 32                   # lakes (Lake); matches TerrainParams' lakes
+LAKE_WOBBLE_REACH = 1.2          # a lake's shore lies within its radius times 1 +- this times its wobble; lakes.glsl
 MAX_CLEARINGS = 32               # clearings (Clearing); matches VegetationParams' clearings
 CLEAR_PLANTS, CLEAR_GRASS, CLEAR_ROCKS = 1, 2, 4   # what a clearing clears; matches clearings.glsl
 CLEAR_ALL = CLEAR_PLANTS | CLEAR_GRASS | CLEAR_ROCKS
@@ -293,6 +299,23 @@ class Site:
     height: float
     flat_radius: float
     blend_radius: float
+
+
+@dataclass(frozen=True)
+class Lake:
+    """A lake on the planet (lakes.glsl): its water at `level` metres above
+    the planet's radius around the unit `direction` from its centre, out to
+    a shore `radius` metres from there, moved in and out by up to about
+    `wobble` times that. Within the shore the ground is a bowl `depth`
+    metres deep at the centre and level with the water at the shore; over
+    `bank` metres beyond the shore it eases from the water level into the
+    planet's own terrain. The scatter places nothing under the water."""
+    direction: tuple
+    level: float
+    radius: float
+    depth: float
+    bank: float
+    wobble: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -503,6 +526,7 @@ class PlanetWorld:
         self.site_height = None           # natural terrain height at the site, from the probes
         self.sites = []                    # flat sites (Site), set by set_sites
         self.clearings = []                # clearings (Clearing), set by set_clearings
+        self.lakes = []                    # the planet's lakes (Lake), set by set_lakes
         self.survey = []                   # (direction, Body) the probes measure before the terrain starts
         self.survey_heights = {}           # index into survey: its height (m), as they come back
         self.survey_cursor = 0             # the survey's index the next batch starts from
@@ -716,7 +740,7 @@ class PlanetWorld:
 
     def upload_terrain(self):
         """The terrain's parameters, the pad around the site once its height
-        is known, and the flat sites."""
+        is known, the flat sites and the lakes."""
         engine = self.engine
         for name, value in self.planet.terrain.items():
             engine.set_custom_vec4("planet.terrain." + name, tuple(value))
@@ -733,6 +757,13 @@ class PlanetWorld:
         engine.set_custom_vec4_array("planet.terrain.siteShapes",
                                      [(s.flat_radius, s.blend_radius, float(s.body), radii[s.body]) for s in self.sites]
                                      + [(0.0, 0.0, 0.0, 0.0)] * unused)
+        unused = [(0.0, 0.0, 0.0, 0.0)] * (MAX_LAKES - len(self.lakes))
+        engine.set_custom_vec4_array("planet.terrain.lakes",
+                                     [tuple(normalize(lake.direction)) + (float(lake.level),) for lake in self.lakes]
+                                     + unused)
+        engine.set_custom_vec4_array("planet.terrain.lakeShapes",
+                                     [(float(lake.radius), float(lake.depth), float(lake.bank), float(lake.wobble))
+                                      for lake in self.lakes] + unused)
 
     def upload_taa(self, position):
         """Temporal anti-aliasing for the camera at `position`: this frame's
@@ -808,8 +839,10 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.clouds.wind", self.cloud_wind + (0.0,))
 
     def set_ocean(self, on):
+        """The sea's and the lakes' surfaces drawn or not."""
         self.ocean = on
         self.engine.set_pass_enabled("Ocean", on)
+        self.engine.set_pass_enabled("Lakes", on)
 
     def set_wireframe(self, on):
         self.wireframe = on
@@ -868,6 +901,37 @@ class PlanetWorld:
         for body in rebuilt:
             self.lod.drop_tree(body.index)
             self.create_tree(body)
+
+    def lake_level(self, direction):
+        """The water level (m) of the first lake whose water can reach the
+        unit `direction` on the planet (within its radius times 1 +
+        LAKE_WOBBLE_REACH times its wobble), or None."""
+        for lake in self.lakes:
+            reach = lake.radius * (1.0 + LAKE_WOBBLE_REACH * lake.wobble)
+            if length(sub(direction, normalize(lake.direction))) * RADIUS < reach:
+                return lake.level
+        return None
+
+    def set_lakes(self, lakes):
+        """The planet's lakes (Lake, at most MAX_LAKES). When they change
+        and the planet's tree is made, the planet is built again."""
+        lakes = list(lakes)
+        if len(lakes) > MAX_LAKES:
+            raise ValueError("at most %d lakes, not %d" % (MAX_LAKES, len(lakes)))
+        for lake in lakes:
+            if lake.radius <= 0.0 or lake.depth <= 0.0 or lake.bank < 0.0 or not 0.0 <= lake.wobble < 0.8:
+                raise ValueError("a lake needs a radius and a depth above 0, a bank of at least 0 and a "
+                                 "wobble from 0 to below 0.8: %r" % (lake,))
+        changed = lakes != self.lakes
+        self.lakes = lakes
+        self.upload_terrain()
+        if not changed or not self.lod.has_tree(self.planet.index):
+            return
+        self.terrain_version += 1
+        self.ground = None
+        self.patch = None
+        self.lod.drop_tree(self.planet.index)
+        self.create_tree(self.planet)
 
     def body_radii(self):
         """Each body's radius (m) by its index."""
@@ -939,15 +1003,16 @@ class PlanetWorld:
 
     def regenerate(self):
         """Apply changed terrain parameters: every chunk is released, the
-        site's height is measured again, the planet's flat sites are
-        dropped, the planet is built again, and its taken rocks are put
-        back. A survey under way starts again."""
+        site's height is measured again, the planet's flat sites and its
+        lakes are dropped, the planet is built again, and its taken rocks
+        are put back. A survey under way starts again."""
         self.lod.drop_tree(self.planet.index)
         self.taken_rocks.clear_body(self.planet.index)
         self.regenerations += 1
         self.lod_version += 1
         self.site_height = None
         self.sites = [site for site in self.sites if site.body != self.planet.index]
+        self.lakes = []
         self.survey_heights = {}
         self.survey_cursor = 0
         self.survey_round += 1
