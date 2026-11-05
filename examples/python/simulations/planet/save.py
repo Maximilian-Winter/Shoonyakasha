@@ -8,7 +8,8 @@ grids first.
 VERSION and the time, and stores of each grid (explored_map.Grid) only
 its measured cells: their flat indices, heights and ore. `read(base)`
 returns (data, arrays) or raises SaveError naming what is wrong: no save,
-a file that cannot be read, or another version. `restore_grids(explored,
+a file that cannot be read, or another version; a save of version 1 is
+migrated to VERSION first (`migrate`). `restore_grids(explored,
 arrays, bodies)` puts the grids back into an explored_map.ExploredMap
 (`bodies` the world bodies by name; grids of bodies not among them are
 left out) with nothing pending. `describe(data)` is a line about the save
@@ -21,7 +22,9 @@ import time
 
 import numpy as np
 
-VERSION = 1
+from shoonyakasha.planet.resources import FERRITE, NONE
+
+VERSION = 2
 
 
 class SaveError(Exception):
@@ -90,9 +93,27 @@ def read(base):
             arrays = {key: npz[key] for key in npz.files}
     except (OSError, ValueError) as error:
         raise SaveError("the save could not be read: %s" % error)
+    if isinstance(data, dict) and data.get("version") == 1:
+        migrate(data)
     if not isinstance(data, dict) or data.get("version") != VERSION:
         raise SaveError("the save is not of version %d" % VERSION)
     return data, arrays
+
+
+def migrate(data):
+    """A save's data of version 1 made version 2, in place: the car with a
+    full tank (fuel None) and an empty hold, each prop's record without a
+    resource ferrite for an ore rock (grade above 0) and 0 for the rest, no
+    upgrades owned, and the day at the new game's hour (day_offset None)."""
+    car = data.get("car")
+    if car is not None:
+        car.setdefault("fuel", None)
+        car.setdefault("cargo", [])
+    for record in data.get("props", []):
+        record.setdefault("resource", FERRITE if record.get("grade", 0.0) > 0.0 else NONE)
+    data.setdefault("upgrades", [])
+    data.setdefault("day_offset", None)
+    data["version"] = 2
 
 
 def describe(data):

@@ -54,11 +54,13 @@ Controls tab the controls.
 Saving (save.py): F5 or Save game writes the game to walker_save.json
 and walker_save.npz: the clock, the player, the crates and loose rocks,
 the rocks taken from the scatter, the credits and the outposts' supplies,
-the objectives and the game's numbers, the waypoint, the car (and whether
-it is driven) and the explored map. F9 or Load game puts it back; the player comes back LOAD_LIFT above
+the objectives and the game's numbers, the waypoint, the car (whether it
+is driven, its fuel and its cargo), the upgrades owned, the day's offset
+and the explored map. F9 or Load game puts it back; the player comes back LOAD_LIFT above
 the ground where it stood once that ground is measured. With autosave on,
-the game is saved every AUTOSAVE_SECONDS of play, on Quit and as the
-window closes. When a save exists, the walker starts on a menu with
+the game is saved every AUTOSAVE_SECONDS of play, on getting out of the
+car parked on an outpost's pad, on Quit and as the window closes. The
+save is of save.VERSION; one of version 1 is migrated as it is read. When a save exists, the walker starts on a menu with
 Continue (the save loaded) and New game.
 
 The car's fuel (hovercar.py's CarParams and fuel): the HUD shows its tank
@@ -704,7 +706,8 @@ def enter_car(anywhere=False):
 
 def leave_car():
     """Out of the car, once it is slow and low enough (hovercar.Car.can_leave),
-    at its left side, EXIT_OUT beyond it, facing its way; the car parks."""
+    at its left side, EXIT_OUT beyond it, facing its way; the car parks.
+    Parked on an outpost's pad, with autosave on, the game is saved."""
     car = state["car"]
     if not state["driving"]:
         return False
@@ -725,6 +728,10 @@ def leave_car():
     car.target = hovercar.HOVER_MIN
     state["car_controls"] = hovercar.CarControls()
     print("[walker] out of the car", flush=True)
+    outpost = car_outpost()
+    if outpost is not None and settings["autosave"] and not args.check:
+        if save_game(quiet=True) is not None:
+            state["hud"].toast("Game saved at %s" % outpost.name, GOOD_TOAST)
     return bubble is not None
 
 

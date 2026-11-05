@@ -332,13 +332,14 @@ Both programs already save:
   - the scanner's contacts
   - the market (credits and the outposts' supplies)
   - the upgrades owned
-- **`walker.py`** (`save.py`, `VERSION` 1, `walker_save.json` and `walker_save.npz`, each written through a temporary file, the grids first) stores:
+- **`walker.py`** (`save.py`, `VERSION` 2, `walker_save.json` and `walker_save.npz`, each written through a temporary file, the grids first) stores:
   - the clock, the player, the crates and loose rocks, the taken rocks
   - the credits and supplies, the objectives and the game's numbers
-  - the waypoint and the car
+  - the waypoint and the car (its fuel and cargo)
+  - the upgrades owned and the day's offset
   - the explored map's measured cells
 
-  It autosaves every `AUTOSAVE_SECONDS` (120 s), on Quit and as the window closes. `--save-check` exists.
+  It autosaves every `AUTOSAVE_SECONDS` (120 s), on getting out of the car parked on an outpost's pad, on Quit and as the window closes. `--check` saves and loads, on foot and driving.
 
 Later phases add to the records as they add the state, each with a new version and its migration:
 
@@ -368,7 +369,10 @@ Any other version is refused. The supply stays keyed by body name. Keying it by 
 
 With `--play`, `autosave_on_landing` saves to `planet_save.json` each time the ship lands on an outpost's pad after flying. It doesn't save in the sandbox, where the places and checks put the ship on pads. `--save-check` ends by loading its save as one of version 1.
 
-`walker.py`'s save (`save.py`, `VERSION` 1) is unchanged. Its loose rocks' records carry `"resource"` through `Props.record`, and records without one load as ferrite.
+`walker.py`'s save (`save.py`) is of version 2 too. `save.read` migrates a version-1 save (`save.migrate`):
+- the car gets a full tank (`fuel` None) and an empty hold;
+- prop records without a resource become ferrite for ore, else 0;
+- `"upgrades"` starts empty, and the day starts at the new game's hour (`day_offset` None).
 
 ---
 
