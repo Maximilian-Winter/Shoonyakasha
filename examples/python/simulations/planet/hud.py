@@ -39,8 +39,8 @@ the HUD's scale (`set_scale`).
   is not full and for FUEL_LINGER seconds after it fills, fading over the
   last FUEL_FADE.
 - **Readout** at the bottom right: a panel with the speed along the
-  ground, the body's name and, off the ground, the height of the feet
-  above it.
+  ground, the body's name and the hour when given, and, off the ground,
+  the height of the feet above it.
 
 While driving the car (`update`'s `drive`) the crosshair, its status and
 the jet fuel are not drawn, the hints are the car's (`drive_hints`), and
@@ -388,7 +388,7 @@ class Hud:
         scifi.segments(mesh, x + 12.0, y + 30.0, w - 24.0, 10.0, FUEL_SEGMENTS, fuel, with_alpha(fill, alpha),
                        with_alpha(scifi.CYAN_FAINT, alpha))
 
-    def draw_readout(self, speed, body, above, width, height, driving=False):
+    def draw_readout(self, speed, body, above, width, height, driving=False, hour=None):
         layer, mesh = self.layer, self.layer.mesh
         w, h = READOUT_PANEL
         x, y = width - MARGIN - w, height - MARGIN - h
@@ -401,7 +401,7 @@ class Hud:
             layer.text("M/S", (x + w - 12.0, y + 23.0), 14, DIM, "title", "right")
             layer.text("%.1f" % speed, (x + w - 46.0, y + 22.0), 28, TEXT, "mono", "right")
         layer.text("SPD", (x + 12.0, y + 23.0), 14, DIM, "title")
-        place = body.name.upper()
+        place = body.name.upper() + ("  " + hour if hour else "")
         layer.text(place, (x + 12.0, y + h - 16.0), 15, scifi.CYAN, "title")
         if above is not None and (driving or above > AIRBORNE):
             text = "%.1f m" % above if above < 10.0 else distance_text(above)
@@ -417,7 +417,7 @@ class Hud:
         scifi.caps(self.layer, shown, x + 16.0, y + 0.5 * HINT_BAR_HEIGHT)
 
     def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0, height=None, extra_hints=(),
-               drive=None):
+               drive=None, hour=None):
         """One frame: `view` (right, up, forward) of the camera, `eye` from
         the planet's centre, `body` the world body under it, `player` the
         character, `gun` its gravity gun, `targets` the compass markers
@@ -428,7 +428,8 @@ class Hud:
         before the gun's. With `drive` (whether the car can be left, True
         or False), the HUD is the car's: no crosshair, status or jet fuel,
         the driving hints (`drive_hints`), and the readout in km/h with the
-        height always."""
+        height always. `hour`, a text, shows after the body's name on the
+        readout."""
         width, height_px = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height_px <= 0:
             return
@@ -466,6 +467,6 @@ class Hud:
         self.draw_card()
         if drive is None:
             self.draw_fuel(player.jet_fuel if player is not None else 1.0, dt, height_px)
-        self.draw_readout(speed, body, height, width, height_px, driving=drive is not None)
+        self.draw_readout(speed, body, height, width, height_px, driving=drive is not None, hour=hour)
         self.draw_toasts(dt, width)
         self.layer.end()

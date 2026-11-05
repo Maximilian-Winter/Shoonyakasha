@@ -61,6 +61,14 @@ the game is saved every AUTOSAVE_SECONDS of play, on Quit and as the
 window closes. When a save exists, the walker starts on a menu with
 Continue (the save loaded) and New game.
 
+The day (clock.py): the sun goes round with the world's clock plus the
+day's offset (`day_time`; START_HOUR in a new game, kept in the save),
+the exposure scaled for its elevation seen from the camera
+(clock.set_sun); the readout shows the hour at Base. With the sun below
+lamps.LIGHTS_ON_ELEVATION the lights come on (`update_lights`): over each
+outpost's pad, the car's headlights (CAR_HEADLIGHTS, CAR_HEADLIGHT_DIP
+down) and on foot the suit lamp.
+
 The player is put down SPAWN_LIFT above the ground EAST_OF_SHIP east of
 the ship, facing north, once the terrain is built and the ground there is
 measured. Until then the camera waits 2 m above that spot.
@@ -86,7 +94,8 @@ grab, right trigger punt, the bumpers the hold distance.
     python walker.py
     python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, sell ore,
                                              pause, save, change the game and load it, drive and fly
-                                             the car, hover it on a lake and a river; report and exit
+                                             the car, hover it on a lake and a river, then night;
+                                             report and exit
 """
 
 import argparse
@@ -111,8 +120,10 @@ from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL, SITE_BLEND_R
 from shoonyakasha.planet.props import stack_offsets
 from shoonyakasha.planet.rocks import rock_colour
 import carview
+import clock
 import config
 import hovercar
+import lamps
 import save
 from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
@@ -181,6 +192,11 @@ CHECK_ORE_EXTENT = (0.4, 0.3, 0.4)   # m: the ore rock --check drops on the pad
 CHECK_ORE_GRADE = 0.6
 PAUSE_SECONDS = 1.0             # s --check keeps the pause menu open
 SHIP_MARKER = (0.55, 0.8, 1.0, 1.0)
+START_HOUR = 9.0                # the site's hour (clock.py) when a new game starts
+NIGHT_CHECK_HOUR = 0.5          # the hour --check sets at its end
+NIGHT_SECONDS = 1.0             # s --check waits at night
+CAR_HEADLIGHTS = ((-0.95, 0.0, -3.0), (0.95, 0.0, -3.0))   # m from the car's centre (right, up, back)
+CAR_HEADLIGHT_DIP = 4.0         # degrees below its nose
 
 HELP_COLUMNS = [
     [("On foot", [
@@ -220,8 +236,8 @@ HELP_COLUMNS = [
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
                     help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, sell ore at Base, "
-                         "pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river; "
-                         "report and exit")
+                         "pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
+                         "then night; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 
@@ -294,6 +310,7 @@ state = {
     "bumpers": set(),             # the gamepad bumpers held last frame
     "check": None,                # --check: its stage, time in it, and what it measured
     "shot": False,                # --shot's screenshot taken
+    "day_offset": None,           # s added to the world's clock for the day (clock.py); None: START_HOUR at the start
 }
 
 
@@ -839,7 +856,7 @@ def update_hud(dt):
         up = car.up()
         speed = length(sub(car.velocity, scale(up, dot(car.velocity, up))))
         hud.update(view_basis(), state["position"], planet, None, None, markers(planet), speed, pad=pad, dt=dt,
-                   height=car.height, drive=car.can_leave())
+                   height=car.height, drive=car.can_leave(), hour=hour_text())
         return
     body = foot.bubble.body
     targets = markers(body)
@@ -849,7 +866,7 @@ def update_hud(dt):
     height = world.height_above_ground(state["position"]) - player.eye_height
     extra = [((("pad:X",) if pad else ("F",)), "Get in")] if near_car() else []
     hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed, pad=pad, dt=dt,
-               height=height, extra_hints=extra)
+               height=height, extra_hints=extra, hour=hour_text())
 
 
 def run_check(dt):
@@ -887,8 +904,10 @@ def run_check(dt):
     put LAKE_CHECK_DROP above the water of the point nearest the site of a
     river at least RIVER_CHECK_WIDTH wide there, facing down it, and left
     for LAKE_SECONDS, passing when it hovers HOVER_MIN (within 25 cm)
-    above the water there. The settings are the defaults and are not
-    written. With --shot,
+    above the water there; then the day's hour set to NIGHT_CHECK_HOUR and
+    NIGHT_SECONDS later passing with the night's exposure
+    (clock.NIGHT_SCALE) and at least the car's two headlights drawn. The
+    settings are the defaults and are not written. With --shot,
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
     (with _punt added), of the map (with _map added), after the sale (with
@@ -900,10 +919,10 @@ def run_check(dt):
     _lake added), after climbing for LAKE_CLIMB_SECONDS and 2 s more,
     above it (with _lake_above added), over the river (with _river added)
     and, after climbing for RIVER_CLIMB_SECONDS and 2 s more, above it
-    (with _river_above added)."""
+    (with _river_above added), and at night (with _night added)."""
     player = foot.player
     check = state["check"]
-    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above")):
+    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "night")):
         return
     if check is None:
         check = state["check"] = {"stage": "ship" if args.shot else "walk", "time": 0.0,
@@ -1197,7 +1216,8 @@ def run_check(dt):
                      "passed" if river_ok else "FAILED"), flush=True)
             check["ok"] = check["ok"] and river_ok
             if not args.shot:
-                os._exit(0 if check["ok"] else 1)
+                check["stage"], check["time"] = "night", 0.0
+                return
             base, ext = os.path.splitext(args.shot)
             screenshot(base + "_river" + ext)
             check["stage"], check["time"] = "river_above", 0.0
@@ -1206,6 +1226,22 @@ def run_check(dt):
         if t >= RIVER_CLIMB_SECONDS + 2.0:
             base, ext = os.path.splitext(args.shot)
             screenshot(base + "_river_above" + ext)
+            check["stage"], check["time"] = "night", 0.0
+    elif stage == "night":
+        state["car_controls"] = hovercar.CarControls()
+        if "hour" not in check:
+            check["hour"] = clock.hour(day_time())
+            state["day_offset"] = clock.time_of(NIGHT_CHECK_HOUR, day_time()) - world.time
+        if t >= NIGHT_SECONDS:
+            night_ok = (abs(world.exposure_scale - clock.NIGHT_SCALE) < 1e-6 and world.lights_drawn >= 2
+                        and abs(clock.hour(day_time()) - NIGHT_CHECK_HOUR) < 0.1)
+            print("[walker] the day's hour %s, then night at %s: the exposure x%.1f, %d lights drawn: %s"
+                  % ("%05.2f" % check["hour"], hour_text(), world.exposure_scale, world.lights_drawn,
+                     "passed" if night_ok else "FAILED"), flush=True)
+            check["ok"] = check["ok"] and night_ok
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_night" + ext)
             os._exit(0 if check["ok"] else 1)
 
 
@@ -1510,8 +1546,9 @@ def quit_game():
 def save_game(base=None, quiet=False):
     """The game written to `base` (save_base when None): the clock, the
     player (None while driving), the car, the props and the taken rocks,
-    the market, the game's numbers, the waypoint and the explored map.
-    Returns the data, or None without a player or the car driven."""
+    the market, the game's numbers, the waypoint, the day's offset
+    (clock.py) and the explored map. Returns the data, or None without a
+    player or the car driven."""
     player = foot.player
     if player is None and not state["driving"]:
         if not quiet:
@@ -1536,6 +1573,7 @@ def save_game(base=None, quiet=False):
                  "ore_seen": state["ore_seen"], "waypoints": state["waypoints"],
                  "objective": state["objectives"].index},
         "waypoint": None if waypoint is None else [waypoint[0].name, list(waypoint[1])],
+        "day_offset": day_time() - world.time,
     }
     data = save.write(base or save_base, data, state["map"].grids)
     state["last_save"] = data
@@ -1569,6 +1607,7 @@ def load_game(base=None):
     foot.props.clear(None)
     world.extra_probes = []
     world.time = data["time"]
+    state["day_offset"] = data.get("day_offset")
     taken = world.taken_rocks
     taken.clear()
     for key in data["taken"]:
@@ -1724,6 +1763,7 @@ def frame(dt):
 
     camera = state["position"]
     basis = view_basis()
+    update_lights(camera)
     foot.request_nearby(camera, bodies)
     world.end_frame(camera, basis, dt, viewpoint=camera,
                     patch=car_patch_request() if state["car"] is not None else None)
@@ -1742,6 +1782,36 @@ def frame(dt):
     foot.end_frame()
     state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * elapsed * 1000.0
     return True
+
+
+def day_time():
+    """The day's time (clock.py): the world's clock plus the day's offset,
+    set for START_HOUR the first time it is asked for."""
+    if state["day_offset"] is None:
+        state["day_offset"] = clock.time_of(START_HOUR, world.time) - world.time
+    return world.time + state["day_offset"]
+
+
+def hour_text():
+    hour = clock.hour(day_time())
+    return "%02d:%02d" % (int(hour) % 24, int(hour * 60.0) % 60)
+
+
+def update_lights(camera):
+    """The sun where clock.py has it at the day's time, the exposure for
+    it seen from `camera` (clock.set_sun), and while lamps.lights_on the
+    local lights: each outpost's, the car's headlights (CAR_HEADLIGHTS,
+    CAR_HEADLIGHT_DIP down) and on foot the suit lamp."""
+    clock.set_sun(world, day_time(), camera)
+    lights = []
+    if lamps.lights_on(world, camera):
+        lights += lamps.outpost_lights(state["outposts"])
+        if state["car"] is not None:
+            right, up, forward = state["car"].attitude()
+            lights += lamps.headlights(car_position(), right, up, forward, CAR_HEADLIGHTS, CAR_HEADLIGHT_DIP)
+        if not state["driving"] and foot.player is not None:
+            lights.append(lamps.suit_lamp(camera, *view_basis()))
+    world.lights = lights
 
 
 def on_init():

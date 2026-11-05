@@ -16,7 +16,8 @@ nearest `now` at which the site has that hour.
 `exposure_scale(elevation)` is the exposure's factor with the sun at
 `elevation` (degrees) seen from the camera: 1 at DAY_ELEVATION and above,
 NIGHT_SCALE at NIGHT_ELEVATION and below, eased in between in its
-logarithm.
+logarithm. `set_sun(world, time, camera)` puts a PlanetWorld's sun and
+exposure there; `unset_sun(world)` leaves its exposure unscaled.
 """
 
 import math
@@ -56,3 +57,22 @@ def time_of(hour_wanted, now):
 def exposure_scale(elevation):
     x = max(0.0, min(1.0, (DAY_ELEVATION - elevation) / (DAY_ELEVATION - NIGHT_ELEVATION)))
     return math.exp(math.log(NIGHT_SCALE) * x * x * (3.0 - 2.0 * x))
+
+
+def set_sun(world, time, camera):
+    """A PlanetWorld's sun (sun_elevation and sun_azimuth, seen from its
+    site) where sun_direction has it at `time`, and its exposure_scale for
+    the sun's elevation seen from `camera` (planet space); uploaded."""
+    _, up, east, north = world.site_frame()
+    sun = sun_direction(time, up, east, north)
+    world.sun_elevation, world.sun_azimuth = site_angles(sun, up, east, north)
+    radial = normalize(world.body_under(camera).relative(camera))
+    world.exposure_scale = exposure_scale(math.degrees(math.asin(max(-1.0, min(1.0, dot(sun, radial))))))
+    world.upload_sky()
+
+
+def unset_sun(world):
+    """A PlanetWorld's exposure unscaled, uploaded when it was not."""
+    if world.exposure_scale != 1.0:
+        world.exposure_scale = 1.0
+        world.upload_sky()
