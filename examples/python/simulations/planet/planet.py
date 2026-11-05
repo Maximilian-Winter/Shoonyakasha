@@ -319,6 +319,7 @@ PLAY_HOUR = 9.0                  # the site's hour when the day starts without a
 # The ship's headlights (update_lights, lamps.py): in its body (right, up, back), and degrees below its nose.
 HEADLIGHTS = ((-1.2, -0.9, -8.0), (1.2, -0.9, -8.0))
 HEADLIGHT_DIP = 6.0
+SHIP_UPGRADES = upgrades.for_groups(("ship", "gun"))   # the upgrades the outposts here offer (upgrades.py)
 # The cargo net beside the landed ship: its centre in the ship's body (right, up, back; up at the
 # gear's feet), its half sizes along right and back, and how far below and above the gear's feet
 # a loose ore rock's centre may be in it.
@@ -480,7 +481,7 @@ state = {
     "fuel_call": None,           # the fuel on its way (call_fuel), or None
     "owned": set(),              # the keys of the upgrades bought (upgrades.py)
     "params": upgrades.effective({"ship": flight.ShipParams(), "gun": GunParams()}, set()),
-    "outpost_page": 0,           # the outpost card's page: 0 trade, k the k-th of upgrades.UPGRADES
+    "outpost_page": 0,           # the outpost card's page: 0 trade, k the k-th of SHIP_UPGRADES
     "play_start": False,         # --play: the ship and the player still to be put at Base
 }
 foot = OnFoot(engine, world, box(), make_rocks=lambda props: Rocks(engine, world, props))
@@ -1335,7 +1336,7 @@ def buy_upgrade(upgrade):
 def turn_page(step):
     """The outpost card's page `step` on (wrapping): trade, then each upgrade."""
     if outpost_here() is not None:
-        state["outpost_page"] = (state["outpost_page"] + step) % (len(upgrades.UPGRADES) + 1)
+        state["outpost_page"] = (state["outpost_page"] + step) % (len(SHIP_UPGRADES) + 1)
 
 
 def upgrade_rows(upgrade):
@@ -1363,7 +1364,7 @@ def upgrade_rows(upgrade):
     rows += [("UPGRADE",),
              ("BUY (%s)" % ("D-PAD UP" if pad else "ENTER"), reason if reason is not None else "available"),
              ("PAGES (%s)" % ("D-PAD LEFT / RIGHT" if pad else "PG UP / PG DN"),
-              "%d of %d" % (state["outpost_page"] + 1, len(upgrades.UPGRADES) + 1))]
+              "%d of %d" % (state["outpost_page"] + 1, len(SHIP_UPGRADES) + 1))]
     if state["trade_note"]:
         rows.append(("LAST", state["trade_note"]))
     return rows
@@ -1621,7 +1622,7 @@ def trade_rows(outpost):
         ("SELL THE CARGO (%s)" % ("D-PAD UP" if pad else "ENTER"), credits_text(value)),
         ("FILL THE TANKS (%s)" % ("D-PAD DOWN" if pad else "SPACE"), credits_text(room * outpost.fuel_price)),
         ("UPGRADES (%s)" % ("D-PAD RIGHT" if pad else "PG DN"),
-         "%d of %d owned" % (len(state["owned"]), len(upgrades.UPGRADES))),
+         "%d of %d owned" % (len(state["owned"]), len(SHIP_UPGRADES))),
     ]
     if state["trade_note"]:
         rows.append(("LAST", state["trade_note"]))
@@ -2102,7 +2103,7 @@ def update_cards():
             trade_card.update("OUTPOST %s, THE %s" % (outpost.name.upper(), outpost.body.name.upper()),
                               trade_rows(outpost))
         else:
-            upgrade = upgrades.UPGRADES[page - 1]
+            upgrade = SHIP_UPGRADES[page - 1]
             trade_card.update("%s: %s" % (outpost.name.upper(), upgrade.name.upper()), upgrade_rows(upgrade))
     elif call is not None and not state["help"].visible:
         trade_card.update(*call)
@@ -2593,7 +2594,7 @@ def on_key(key, from_pad=False):
             call_fuel()
     elif key in (keys.ENTER, keys.KP_ENTER) and state["mode"] == "ship":
         if state["outpost_page"] > 0 and outpost_here() is not None:
-            buy_upgrade(upgrades.UPGRADES[state["outpost_page"] - 1])
+            buy_upgrade(SHIP_UPGRADES[state["outpost_page"] - 1])
         else:
             sell_cargo()
     elif key in (keys.PAGE_UP, keys.PAGE_DOWN) and state["mode"] == "ship":

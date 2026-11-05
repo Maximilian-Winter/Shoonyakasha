@@ -57,6 +57,7 @@ def restore_grids(explored, arrays, bodies, make_grid):
     origin, cell, size)`, for the bodies by name in `bodies`."""
     explored.grids = {}
     explored.asked, explored.asking = None, []
+    explored.revealing, explored.from_reveal = [], set()
     names = {key.split("/")[0] for key in arrays}
     for name in sorted(names):
         if name not in bodies:

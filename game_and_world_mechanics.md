@@ -285,28 +285,42 @@ class Upgrade:
     name: str
     cost: float                                    # credits
     requires: tuple = ()                           # keys of the upgrades needed first
-    effects: dict = field(default_factory=dict)    # "group.attribute": factor
+    effects: dict = field(default_factory=dict)    # "group.attribute": factor, or ("add", amount)
+    parts: dict = field(default_factory=dict)      # part (pois.PARTS): count, spent when bought
 
 UPGRADES = [
     Upgrade("gun_force_1", "Field emitter I", 1_500.0, (), {"gun.hold_force": 1.5, "gun.pull_range": 1.3}),
-    Upgrade("gun_charge_1", "Capacitor bank", 2_500.0, ("gun_force_1",), {"gun.charged_speed": 1.4}),
+    Upgrade("gun_charge_1", "Capacitor bank", 2_500.0, ("gun_force_1",), {"gun.charged_speed": 1.4},
+            {"coil": 1}),
     Upgrade("hold_1", "Cargo racks", 2_000.0, (), {"ship.cargo_capacity": 1.5, "ship.hold_m3": 1.5,
                                                    "car.cargo_capacity": 1.5, "car.hold_m3": 1.5}),
     Upgrade("tank_1", "Auxiliary tank", 3_000.0, (), {"ship.fuel_capacity": 1.5, "ship.dry_mass": 1.05,
                                                       "car.fuel_capacity": 1.5}),
     Upgrade("engine_1", "Main engine tuning", 6_000.0, ("tank_1",), {"ship.isp_main": 1.15,
-                                                                      "car.drive_burn": 1.0 / 1.15}),
+                                                                      "car.drive_burn": 1.0 / 1.15},
+            {"injector": 2}),
+    Upgrade("suit_1", "Thermal liner", 1_000.0, (), {"suit.cold_limit": ("add", -10.0), "suit.reserve": 1.5}),
+    Upgrade("suit_2", "Heat exchanger", 3_500.0, ("suit_1",), {"suit.hot_limit": ("add", 10.0),
+                                                               "suit.reserve": 1.5}, {"coil": 1}),
 ]
 ```
 
-The groups are `ship` (`flight.ShipParams`, `planet.py`), `car` (`hovercar.CarParams`, `walker.py`) and `gun` (`gravity_gun.GunParams`, both). Each game applies only the effects on the groups it has (`effective`, `effects_for`). `EFFECTS` gives each changed parameter's name on the card and how its value is shown. `refusal(upgrade, owned, credits)` returns "owned", "needs …", "not enough credits", or None when the upgrade can be bought.
+**Groups:**
+- `ship`: `flight.ShipParams`, `planet.py`;
+- `car`: `hovercar.CarParams`, `walker.py`;
+- `gun`: `gravity_gun.GunParams`, both games;
+- `suit`: `suit.SuitParams`, `walker.py`.
+
+**Functions:**
+- `effective` and `effects_for`: each game applies only the effects on the groups it has.
+- `for_groups`: each game offers only the upgrades with an effect on its groups. `planet.py`'s `SHIP_UPGRADES` and the walker's `WALKER_UPGRADES` come from it.
+- `EFFECTS`: each changed parameter's name on the card, and how its value is shown.
+- `refusal(upgrade, owned, credits, parts=None)`: returns "owned", "needs …" (upgrades, or parts in a game that has them), "not enough credits", or None when the upgrade can be bought.
 
 Planned upgrades not in the table:
 - **Scanner:** a Wide-band scanner (1,200 cr), with `scanner.range` ×2. It needs a scanner parameter object first; `scanner.py` sets its reach with the module constants `AHEAD`, `STEP` and `STRIP`.
-- **Suit (§8.2):** a Thermal liner (1,000 cr), with the cold limit −10 °C and the reserve ×1.5. A Heat exchanger (3,500 cr, needs the liner), with the hot limit +10 °C and the reserve ×1.5. These need `SuitParams` and additive effects.
 - **Jetpack:** Jetpack bottles (900 cr), with the jet's burn ×0.5. They need a jet parameter object first; `character.py` drains `Character.jet_fuel` with the module constant `JET_BURN`.
-- **Long-range package (§12):** 15,000 cr, needs the tank and engine upgrades, fuel capacity ×1.6.
-- **Parts (§9):** parts from wrecks, as an extra cost.
+- **Long-range package (§12):** 15,000 cr, needs the tank and engine upgrades, fuel capacity ×1.6, and 2 injectors and a nav core.
 
 ### 5.2 Applying and buying
 
@@ -477,48 +491,50 @@ def step_suit(state, params, temperature, sheltered, at_outpost, dt):
   - the card shows SUIT, with the health once it is below full.
 - **Zero health** (`wake_at_outpost`): the player comes to on the pad of the nearest outpost on its body (`outposts.nearest`), charged `RECOVERY_FEE` (250 cr, as far as the credits go). What the gun held stays where the player fell, and the suit is full again.
 - **Saving:** the save keeps the reserve and the health.
+- **Upgrades:** the Thermal liner and the Heat exchanger (§5) change `SuitParams` additively.
 - **Not built:**
   - a deployable heater (a buyable prop the gun can carry) as shelter;
   - breathing sounds;
-  - the suit's upgrades (Thermal liner, Heat exchanger), which need additive effects in `upgrades.py`;
   - getting to the moon, which the walker has no way to do yet.
 
 ## 9. Points of interest
 
 ### 9.1 Placement from the hash
 
-POIs use a coarse grid per cube face, with one candidate per cell and the same deterministic hash approach as the vegetation. At 64 × 64 cells per face, a cell is ~2.5 km on the planet (radius 100 km) and ~0.6 km on the moon (radius 25 km).
+The points of interest are the walker's (`walker.py`), on the planet; their rules are plain Python in `pois.py`.
 
-```python
-def poi_candidate(body, face, cx, cy, seed):
-    h = hash4(body, face, cx, cy, seed)
-    u = (cx + 0.15 + 0.7 * frac(h * 0.123)) / 64 * 2 - 1
-    v = (cy + 0.15 + 0.7 * frac(h * 0.457)) / 64 * 2 - 1
-    roll = frac(h * 0.789)
-    return direction_from_face(face, u, v), roll, h
-```
+**The grid:** each cube face is cut into `CELLS` × `CELLS` (64 × 64) cells, about 2.5 km across on the planet. Each cell has one candidate (`candidate`):
+- a direction hashed (`zlib.crc32`) from the body, face, cell and the planet's seed, kept 15 % away from the cell's edges;
+- and a roll, 0 to 1.
 
-The candidate's kind is decided from `roll` against the chances of its biome, which is known once a probe returns the climate there. Validity (slope below a limit, not in the sea, not in a lake) is checked with probes when the player comes within scanner range. Invalid candidates are dropped.
+**Measuring:** `Pois.want` queues the candidates within `POI_REACH` (3 km) of the player, again once the player has moved 500 m. `walker.probe_pois` measures them with the extra probes: height, climate, ore, resource, and the water level there. The explored map yields the probes while candidates wait. A candidate is valid above 2 m and out of the water. Slope isn't checked.
 
 ### 9.2 Kinds
 
-| Kind | Chance (by biome) | What it is | Interaction | Reward |
-|---|---|---|---|---|
-| Cargo pod | everywhere, 6 % | a crashed crate with a beacon | carry it to an outpost or into the cargo (gun) | contract target, or goods to sell |
-| Survey beacon | 4 % | an old mast | activate (F) | reveals the map within 1.5 km, survey data |
-| Wreck | 3 %, more in mountains | a broken ship hull (a few boxes and beams) | salvage (F at marked spots, 3 s each) | upgrade parts: coil, injector, nav core |
-| Abandoned rig | 2 %, near ore veins | a small flattened site with a frame and crates | open crates | ore, parts |
-| Geode field | 3 % in tundra/desert | a cluster of high-grade small rocks | mine | rich rocks of the local resource |
-| Arch / spire | 2 % in desert/mountains | a rock formation (a few large convex rocks) | scan | survey data (scenic) |
+`kind_for(roll, height, climate, ore)` adds up the chances of the kinds whose `where` holds, in table order, and returns the first whose sum passes the roll:
 
-- **Flattened sites:** rigs and wrecks are flat sites like the outposts' (`world.Site`, `sites.glsl`, at most `TERRAIN_SITES` = 8). They go in the modifier list (§11.2). Small kinds (pods, beacons, geodes) sit on the terrain as props or static meshes.
-- **Discovery:** a POI shows on the compass once it's within scanner range (600 m base). It also shows once seen: in view and within 1.5 km, with line of sight checked by a few probes. Undiscovered POIs within 3 km show as a faint "signal" bracket without a name.
-- **State:** `discovered` and `looted`, per POI id = (body, face, cx, cy), in the save. Looted POIs stay visible but greyed.
+| Kind | Chance, where | What it is | Use | Reward |
+|---|---|---|---|---|
+| Cargo pod | 6 %, everywhere | an orange 1.2 m crate (300 kg prop) by a beacon pole | carry it with the gun onto an outpost's pad | 600 cr once settled there |
+| Survey beacon | 4 %, everywhere | a mast | E within 5 m | reveals the map within 1.5 km (`ExploredMap.reveal`), survey data 50–200 cr |
+| Wreck | 3 %, 6 % above 1,200 m | a hull of boxes | E held 3 s at each of 3 spots | a part each: coil, injector or nav core (by a hash) |
+| Abandoned rig | 2 %, where the ore is above 0.3 | a frame and two crates | E at each crate | a part and 2 ore rocks of the local resource at grade 0.75 |
+| Geode field | 3 %, below 2 °C or moisture below 0.3 | 6 loose ore rocks of the local resource at grade 0.95, made within 120 m | — | the rocks |
+| Rock arch | 2 %, moisture below 0.3 or above 1,200 m | two pillars and a span | E within 25 m | survey data 50–200 cr |
+
+- **No flattened sites:** everything stands on the terrain, sunk 0.3 m. The terrain's flat sites (at most 8) are the outposts'.
+- **Drawing:** within 2 km a POI is drawn from boxes (`LAYOUTS`) in a clearing of the plants and rocks (`CLEAR_RADIUS`, `PlanetWorld.set_clearings`). The boxes have no collision.
+- **Discovery:** a POI is discovered within `SCAN_RANGE` (600 m), or within 1.5 km inside the view's cone; line of sight isn't checked. It then shows on the compass and the map by name, greyed once looted. Undiscovered ones within 3 km show as "Signal".
+- **Using:** E acts on the nearest unused spot in reach (`SPOTS`), with a hint on the HUD.
+- **Saving:** the save keeps each POI's `discovered`, `looted` and `done` (the spots used) by key (body, face, cx, cy), and which crates are pods.
+- **Selling only when settled:** ore rocks and pods sell on a pad only once they've settled, asleep in the physics or resting.
 
 ### 9.3 Survey data
 
-- Every newly explored map cell (`explored_map.Grid`) earns 0.5 cr of survey data, and every scanned POI 50–200 cr. Survey data is a cargo item of zero mass.
-- It sells at outposts with the `"cartography"` service, with the same supply curve as ore (§3.2).
+- **Earning:** every map cell explored around the player (`ExploredMap.walked`; revealed cells don't count) is 0.5 cr of survey data, and a beacon or an arch gives 50–200 cr.
+- **Selling:** it's held as a value and sold from the Outpost tab at any outpost (`trade.survey_sale`, `Market.sell_survey`). Its price falls with the outpost's supply of it as ore's does: `SURVEY_HALF` is 2,000 cr, under the supply key `"survey"`.
+- **Parts:** they're part of the upgrades' price (`Upgrade.parts`, §5): the Capacitor bank takes a coil and Main engine tuning two injectors.
+- **Suit upgrades:** Thermal liner (cold limit −10 °C, reserve ×1.5) and Heat exchanger (a coil; hot limit +10 °C, reserve ×1.5) use additive effects (`("add", value)`). `planet.py` has no parts, so its upgrades need none.
 
 ## 10. Contracts
 
@@ -780,7 +796,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 6. **Day and night.** Moving sun, azimuth-only horizon rebuild, exposure by the sun's elevation, stars. `--day-check`.
    6b. **Lights.** Headlights, a suit lamp and outpost lights, with a forward light loop in `terrain.frag`, `vegetation.frag` and `scene.frag`. Capture shots `lights_*`.
 7. **Suit and temperature** (`walker.py`). Local temperature, reserve, shelter, effects, recovery at an outpost. Milestones 1–6b's features came to `walker.py` first: day and night and the lights, the car's fuel and fuel call, its hold and cargo net with an Outpost tab, the upgrades, and save version 2.
-8. **Points of interest.** Hash placement, kinds, discovery, salvage parts, survey data.
+8. **Points of interest** (`walker.py`). Hash placement, kinds, discovery, salvage parts, survey data; parts in the upgrades' prices and the suit's upgrades.
 9. **Contracts.** Generation, states, objective card integration, fragile crates, reputation.
 10. **Meteor showers.** Modifier list, crater invalidation, meteor visuals, meteorites. `--crater-check`.
 11. **Wind and storms.** Wind field, ship, car and prop drag, storms. `--wind-check`.

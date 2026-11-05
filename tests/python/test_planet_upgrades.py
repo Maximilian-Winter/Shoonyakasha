@@ -32,6 +32,8 @@ flight = load("flight")
 upgrades = load("upgrades")
 sys.path.insert(0, str(EXAMPLE))
 hovercar = load("hovercar")
+suit = load("suit")
+pois = load("pois")
 
 
 def base():
@@ -39,7 +41,7 @@ def base():
 
 
 def everything():
-    return {"ship": flight.ShipParams(), "car": hovercar.CarParams(), "gun": GunParams()}
+    return {"ship": flight.ShipParams(), "car": hovercar.CarParams(), "gun": GunParams(), "suit": suit.SuitParams()}
 
 
 class Table(unittest.TestCase):
@@ -53,8 +55,17 @@ class Table(unittest.TestCase):
                 self.assertIn(path, upgrades.EFFECTS)
             for key in upgrade.requires:
                 self.assertIn(key, seen, upgrade.key)
+            for part in upgrade.parts:
+                self.assertIn(part, pois.PARTS)
             seen.add(upgrade.key)
         self.assertEqual(set(upgrades.BY_KEY), seen)
+
+    def test_each_game_offers_those_with_its_effects(self):
+        ship = [u.key for u in upgrades.for_groups(("ship", "gun"))]
+        walker = [u.key for u in upgrades.for_groups(("car", "gun", "suit"))]
+        self.assertNotIn("suit_1", ship)
+        self.assertIn("suit_1", walker)
+        self.assertIn("engine_1", ship)
 
 
 class Effective(unittest.TestCase):
@@ -81,7 +92,24 @@ class Effective(unittest.TestCase):
                          {"car.cargo_capacity", "car.hold_m3"})
 
 
+class Additive(unittest.TestCase):
+    def test_limits_added_and_reserve_multiplied(self):
+        s = suit.SuitParams()
+        out = upgrades.effective({"suit": s}, {"suit_1", "suit_2"})["suit"]
+        self.assertAlmostEqual(out.cold_limit, s.cold_limit - 10.0)
+        self.assertAlmostEqual(out.hot_limit, s.hot_limit + 10.0)
+        self.assertAlmostEqual(out.reserve, s.reserve * 1.5 * 1.5)
+
+
 class Refusal(unittest.TestCase):
+    def test_parts_only_where_a_game_has_them(self):
+        bank = upgrades.BY_KEY["gun_charge_1"]
+        self.assertIsNone(upgrades.refusal(bank, {"gun_force_1"}, 1e6))
+        self.assertEqual(upgrades.refusal(bank, {"gun_force_1"}, 1e6, {}), "needs 1 coil")
+        self.assertIsNone(upgrades.refusal(bank, {"gun_force_1"}, 1e6, {"coil": 1}))
+        engine = upgrades.BY_KEY["engine_1"]
+        self.assertEqual(upgrades.refusal(engine, {"tank_1"}, 1e6, {"injector": 1}), "needs 2 injectors")
+
     def test_owned_needs_and_credits(self):
         engine = upgrades.BY_KEY["engine_1"]
         self.assertEqual(upgrades.refusal(engine, set(), 1e6), "needs Auxiliary tank")

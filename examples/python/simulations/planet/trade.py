@@ -26,7 +26,9 @@ of CALL_FEE plus CALL_FEE_PER_KM per km along the ground, arriving
 CALL_DELAY plus the distance at CALL_SPEED later. `Market` holds the
 credits, sells a ship's cargo (`sell`), fills its tanks as far as the
 credits go (`buy_fuel`, and `call_fuel` for called fuel with its fee),
-and gives and takes its state as a record for a save file.
+sells survey data (`sell_survey`, priced by `survey_sale` as ore is,
+falling with the outpost's supply of it under SURVEY), and gives and takes
+its state as a record for a save file.
 """
 
 import math
@@ -51,6 +53,8 @@ CALL_FEE = 200.0                 # credits
 CALL_FEE_PER_KM = 2.0            # credits
 CALL_DELAY = 20.0                # s
 CALL_SPEED = 400.0               # m/s
+SURVEY = "survey"                # an outpost's supply key for survey data
+SURVEY_HALF = 2_000.0            # credits of survey data bought that halve an outpost's price for it
 
 
 def ground_distance(radius, a, b):
@@ -93,6 +97,16 @@ def sale(outpost, items, time):
     return credits, {body: (kg, time) for body, kg in supplies.items()}
 
 
+def survey_sale(outpost, value, time):
+    """Credits survey data worth `value` (credits with no supply) fetches at
+    the outpost, its price divided by 1 + supply / SURVEY_HALF as ore's,
+    the supply the data it bought (under SURVEY, falling back as ore's), and
+    the outpost's supply after, without changing it."""
+    s = supply(outpost, SURVEY, time)
+    credits = SURVEY_HALF * math.log((1.0 + (s + value) / SURVEY_HALF) / (1.0 + s / SURVEY_HALF))
+    return credits, {SURVEY: (s + value, time)}
+
+
 def fuel_call(outpost, distance, in_orbit):
     """A fuel call from `outpost` `distance` metres along the ground away,
     to a ship in orbit or not: (credits per kg, the fee, seconds until it
@@ -131,6 +145,16 @@ class Market:
         ship.fuel += kg
         self.credits -= cost
         return kg, cost
+
+    def sell_survey(self, outpost, value, time):
+        """Survey data worth `value` sold at the outpost (survey_sale): the
+        credits gained, the supply raised. Returns the credits."""
+        if value <= 0.0:
+            return 0.0
+        credits, supplies = survey_sale(outpost, value, time)
+        outpost.supply.update(supplies)
+        self.credits += credits
+        return credits
 
     def call_fuel(self, ship, price, fee):
         """Called fuel delivered: the ship's tanks filled at `price` per kg as

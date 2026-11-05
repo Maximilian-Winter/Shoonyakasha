@@ -12,8 +12,11 @@ is where the line from the body's centre through that point of the plane
 meets the sphere. A cell holds its terrain height (NaN until measured) and
 its ore richness.
 
-`ExploredMap.probe` measures the cells nearest the player within REVEAL
-metres that are not measured yet, the extra probes' number at a time, as
+`ExploredMap.probe` measures first the cells `reveal` queued (those
+within a radius of a place, as a survey beacon reveals them), then the
+cells nearest the player within REVEAL metres that are not measured yet,
+the extra probes' number at a time (`walked` counts those measured around
+the player, not revealed), as
 the props do (props.Props.probe): only while nothing else uses the probes,
 and it lets them go while `yield_to` is true (a prop needs its ground).
 
@@ -178,6 +181,9 @@ class ExploredMap:
         self.offsets = reveal_offsets(reveal, cell)
         self.asked = None         # the probes asked for: [(direction, body)]
         self.asking = []          # their (grid, i, j)
+        self.revealing = []       # (grid, i, j) queued by `reveal`, measured before the cells around the player
+        self.from_reveal = set()  # (grid, i, j) of the asked cells that `reveal` queued
+        self.walked = 0           # cells measured around the player (not revealed)
 
     def grid(self, body, direction):
         """`body`'s grid, made around the site's up on the planet, else around `direction`."""
@@ -186,6 +192,27 @@ class ExploredMap:
             origin = self.world.site_frame()[1] if body is self.world.planet else direction
             grid = self.grids[body.name] = Grid(body, origin, self.cell, self.size)
         return grid
+
+    def reveal(self, body, direction, radius):
+        """The cells of `body`'s grid within `radius` metres of `direction`
+        not measured yet queued, nearest first, to be measured before those
+        around the player. Returns how many."""
+        grid = self.grid(body, direction)
+        at = grid.index(direction)
+        if at is None:
+            return 0
+        ci, cj = int(round(at[0])), int(round(at[1]))
+        n = int(radius / self.cell)
+        cells = [(di * di + dj * dj, ci + di, cj + dj) for di in range(-n, n + 1) for dj in range(-n, n + 1)
+                 if di * di + dj * dj <= n * n]
+        queued = set((g, i, j) for g, i, j in self.revealing)
+        added = 0
+        for _, i, j in sorted(cells):
+            if (grid.inside(i, j) and not grid.is_measured(i, j) and (i, j) not in grid.pending
+                    and (grid, i, j) not in queued):
+                self.revealing.append((grid, i, j))
+                added += 1
+        return added
 
     def probe(self, body, position, probes, yield_to=False):
         """The cells around `position` (from `body`'s centre) measured, with
@@ -199,6 +226,9 @@ class ExploredMap:
                 return
             for (grid, i, j), (_, height), (_, ore) in zip(self.asking, world.extra_heights, world.extra_ores):
                 grid.pending.discard((i, j))
+                if not grid.is_measured(i, j) and (grid, i, j) not in self.from_reveal:
+                    self.walked += 1
+                self.from_reveal.discard((grid, i, j))
                 grid.set(i, j, height, ore)
             self.asked, self.asking = None, []
         if yield_to:
@@ -208,11 +238,17 @@ class ExploredMap:
         grid = self.grid(body, direction)
         at = grid.index(direction)
         wanted = []
-        if at is not None:
+        while self.revealing and len(wanted) < probes:
+            g, i, j = self.revealing.pop(0)
+            if g.body is body and (i, j) not in g.pending and not g.is_measured(i, j):
+                wanted.append((g, i, j))
+                self.from_reveal.add((g, i, j))
+        if at is not None and len(wanted) < probes:
             ci, cj = int(round(at[0])), int(round(at[1]))
             for di, dj in self.offsets:
                 i, j = ci + di, cj + dj
-                if grid.inside(i, j) and (i, j) not in grid.pending and not grid.is_measured(i, j):
+                if (grid.inside(i, j) and (i, j) not in grid.pending and not grid.is_measured(i, j)
+                        and (grid, i, j) not in wanted):
                     wanted.append((grid, i, j))
                     if len(wanted) == probes:
                         break

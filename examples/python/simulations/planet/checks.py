@@ -39,7 +39,8 @@ from __main__ import (
     SET_DOWN_DEPTH, SHIP_CLEARANCE, SHIP_REACH, WARPS, bodies, change_terrain, contact_text, credits_text,
     distance_text, drop_bubble, engine, ensure_bubble, foot, get_in, get_out, go_on_foot, in_net_now, load_game,
     moon_body, moon_spot, nearby_trees, net_frame, new_seed, new_ship, on_key, outpost_here, physics, planet,
-    prop_state, props, save_game, scanner, scatter_rocks, set_colour_mode, set_hour, set_wireframe, ship_landed,
+    SHIP_UPGRADES, prop_state, props, save_game, scanner, scatter_rocks, set_colour_mode, set_hour, set_wireframe,
+    ship_landed,
     ship_velocity, state, teleport, trunks, viewpoint, world)
 
 
@@ -2892,8 +2893,8 @@ class UpgradeCheck:
         base = flight.ShipParams()
         for key in self.BUY:
             upgrade = upgrades.BY_KEY[key]
-            page = upgrades.UPGRADES.index(upgrade) + 1
-            for _ in range(len(upgrades.UPGRADES) + 1):
+            page = SHIP_UPGRADES.index(upgrade) + 1
+            for _ in range(len(SHIP_UPGRADES) + 1):
                 if state["outpost_page"] == page:
                     break
                 on_key(keys.PAGE_DOWN)

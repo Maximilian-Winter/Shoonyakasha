@@ -161,6 +161,17 @@ class MarketTest(unittest.TestCase):
         self.assertEqual(market.call_fuel(ship, price, fee), (500.0, fee + 500.0 * price))
         self.assertEqual(ship.fuel, 6_000.0)
 
+    def test_survey_data_sells_as_ore_with_its_own_supply(self):
+        outpost = Outpost(PLANET)
+        market = trade.Market(credits=0.0)
+        first = market.sell_survey(outpost, 500.0, 0.0)
+        self.assertAlmostEqual(first, trade.SURVEY_HALF * math.log(1.0 + 500.0 / trade.SURVEY_HALF))
+        self.assertLess(first, 500.0)
+        self.assertEqual(outpost.supply, {trade.SURVEY: (500.0, 0.0)})
+        self.assertLess(market.sell_survey(outpost, 500.0, 0.0), first)
+        self.assertEqual(market.sell_survey(outpost, 0.0, 0.0), 0.0)
+        self.assertAlmostEqual(trade.supply(outpost, "planet", 0.0), 0.0)     # ore's supply untouched
+
     def test_record_restores(self):
         a, b = Outpost(PLANET), Outpost(MOON)
         b.name = "Other"

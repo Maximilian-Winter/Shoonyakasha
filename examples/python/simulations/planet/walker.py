@@ -90,6 +90,27 @@ upgrades owned give the effective car and gun parameters
 car made and every gun spawned after (OnFoot.gun_params); the save keeps
 them.
 
+Points of interest (pois.py), on the planet: `update_pois` looks for the
+candidates within POI_REACH (again once the player has moved
+POI_WANT_MOVE) and `probe_pois` measures them with the extra probes (the
+explored map yields while any wait), which gives each its kind or none.
+A found one is discovered within SCAN_RANGE, or within SEEN_RANGE in the
+view's cone, shown on the compass and the map by its name (greyed once
+looted); one not discovered within POI_REACH as a signal. Within
+DRAW_RANGE it is drawn from boxes (pois.LAYOUTS) in a clearing of the
+plants and rocks (pois.CLEAR_RADIUS); within PROP_RANGE a pod's crate and
+a geode field's rocks are made. E (held for a wreck's spot) uses the spot
+in reach (`usable_spot`, `use_spot`): a beacon reveals the map around it
+(ExploredMap.reveal) and gives survey data, a wreck's spots and a rig's
+crates give parts (a rig's ore rocks too), an arch gives survey data. A
+pod's crate settled on an outpost's pad sells (`sell_pods`). Each map
+cell walked (not revealed) is CELL_SURVEY of survey data; the Outpost
+tab sells it (`sell_survey`, trade.survey_sale). Parts pay for upgrades
+with the credits (the Upgrades tab offers WALKER_UPGRADES: the car's,
+the gun's and the suit's). The save keeps the points' states, the
+parts, the survey data and which crates are pods. Loose ore rocks and
+pods sell only once settled (`settled`).
+
 The suit (suit.py): `here_temperature` is the air's temperature where the
 camera is (on the planet the climate under it, with its height, swinging
 with the local hour and chilled by the wind; on the moon by the sun or
@@ -135,6 +156,7 @@ grab, right trigger punt, the bumpers the hold distance.
     python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, run the suit
                                              out in the cold, sell ore,
                                              load the car's net and sell its cargo, buy upgrades,
+                                             use a point of interest of each kind, sell survey data,
                                              pause, save, change the game and load it, drive and fly
                                              the car, hover it on a lake and a river, run it dry and
                                              call fuel, then night; report and exit
@@ -161,12 +183,13 @@ from shoonyakasha.planet import resources, rivers
 from shoonyakasha.planet.lakes import LakeSurvey
 from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL, SITE_BLEND_RADIUS
 from shoonyakasha.planet.props import stack_offsets
-from shoonyakasha.planet.rocks import rock_colour
+from shoonyakasha.planet.rocks import density as rock_density, rock_colour
 import carview
 import clock
 import config
 import hovercar
 import lamps
+import pois
 import save
 import suit
 import outposts
@@ -177,8 +200,8 @@ from rocks import Rocks
 from trade import Market, sale
 from explored_map import ExploredMap, Grid, MapView
 import hud as hud_module
-from hud import Hud, bearing
-from objectives import Objectives, progress_text, sale_items
+from hud import Hud, bearing, distance_text
+from objectives import REST_SPEED, Objectives, progress_text, sale_items
 from terminal import Terminal
 from viewmodel import Viewmodel
 
@@ -255,6 +278,9 @@ SUIT_CHECK_TEMPERATURE = -60.0  # degrees C --check stands in for the air's whil
 SUIT_CHECK_RESERVE = 0.25       # the reserve --check leaves the suit with
 SUIT_CHECK_HEALTH = 0.3         # and the health
 SUIT_SECONDS = 30.0             # s --check waits at most for the suit to give out
+POI_MEASURE_SECONDS = 20.0      # s --check waits at most for the candidates near Base to be measured
+USE_CHECK_SECONDS = 2.0         # s past a spot's hold --check waits for it to be used
+POD_CHECK_SECONDS = 10.0        # s --check waits at most for the pod to sell
 UPGRADE_CREDITS = 10_000.0      # credits --check is given to buy UPGRADE_BUYS
 UPGRADE_BUYS = ("tank_1", "hold_1", "gun_force_1")
 CHECK_NET_EXTENTS = ((0.35, 0.25, 0.35), (0.45, 0.3, 0.45))   # m: the ore rocks --check drops into the net
@@ -265,6 +291,19 @@ NIGHT_SECONDS = 1.0             # s --check waits at night
 CAR_HEADLIGHTS = ((-0.95, 0.0, -3.0), (0.95, 0.0, -3.0))   # m from the car's centre (right, up, back)
 CAR_HEADLIGHT_DIP = 4.0         # degrees below its nose
 RECOVERY_FEE = 250.0            # credits the outpost charges when the suit gave out (wake_at_outpost)
+# Points of interest (pois.py), on the planet: candidates within POI_REACH measured (again once the player
+# has moved POI_WANT_MOVE); discovered within SCAN_RANGE, or within SEEN_RANGE in the view's cone
+# (SEEN_COS); undiscovered ones within POI_REACH shown as signals; drawn within DRAW_RANGE; a pod's and a
+# geode field's props made within PROP_RANGE; their spots looked for within USE_LOOK.
+POI_REACH = 3_000.0             # m
+POI_WANT_MOVE = 500.0           # m
+SCAN_RANGE, SEEN_RANGE, SEEN_COS = 600.0, 1_500.0, 0.85
+DRAW_RANGE = 2_000.0            # m
+PROP_RANGE = 120.0              # m
+USE_LOOK = 60.0                 # m
+CELL_SURVEY = 0.5               # credits of survey data per map cell explored
+POI_MARKER, LOOTED_MARKER, SIGNAL_MARKER = (1.0, 0.85, 0.35, 1.0), (0.55, 0.58, 0.62, 1.0), (0.6, 0.75, 0.85, 0.6)
+WALKER_UPGRADES = upgrades.for_groups(("car", "gun", "suit"))   # the upgrades the outposts here offer
 
 HELP_COLUMNS = [
     [("On foot", [
@@ -273,6 +312,7 @@ HELP_COLUMNS = [
         (("Shift", "Ctrl"), "Run / crouch"),
         (("Space",), "Jump; held in the air: jetpack"),
         (("M",), "Map: wheel to zoom, left click a waypoint, right click to clear"),
+        (("E",), "Use what is here: activate, salvage (hold), open, scan"),
     ]), ("Game", [
         (("Esc",), "Pause"),
         (("P",), "Screenshot into walker_captures"),
@@ -305,7 +345,8 @@ parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
                     help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, run the suit out in the cold, "
                          "sell ore at Base, "
-                         "load the car's net and sell its cargo, buy upgrades, pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
+                         "load the car's net and sell its cargo, buy upgrades, use a point of interest of each kind "
+                         "and sell survey data, pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
                          "run it dry and call fuel, then night; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
@@ -386,12 +427,28 @@ state = {
     "net_posts": [],              # the car's cargo net's corner posts
     "trade_note": "",             # the last sale of the car's cargo, for the Outpost tab
     "owned": set(),               # the keys of the upgrades bought (upgrades.py)
-    "params": upgrades.effective({"car": hovercar.CarParams(), "gun": GunParams()}, set()),
+    "params": upgrades.effective({"car": hovercar.CarParams(), "gun": GunParams(), "suit": suit.SuitParams()},
+                                 set()),
     "upgrade_note": "",           # the last upgrade bought or refused, for the Upgrades tab
     "suit": suit.SuitState(),     # the suit's reserve and the player's health (suit.py)
     "suit_params": suit.SuitParams(),
     "temperature": None,          # degrees C where the camera is, once known (here_temperature)
     "woken": 0,                   # times the player woke at an outpost
+    "pois": pois.Pois(),          # the points of interest known (pois.py)
+    "poi_want_at": None,          # the direction the candidates were last looked for around
+    "poi_asked": None,            # the extra probes asked for the candidates, and their Pois
+    "poi_asking": [],
+    "poi_scenes": {},             # key: [(entity, point in planet space)] of the points drawn
+    "poi_cleared": [],            # the keys of the points the world's clearings are around
+    "pods": {},                   # id of a cargo pod's crate: its point of interest's key
+    "pods_sold": 0,
+    "parts": {},                  # part (pois.PARTS): count
+    "survey_data": 0.0,           # credits' worth of survey data held
+    "walked_counted": None,       # the explored map's walked cells already paid as survey data
+    "use_spot": None,             # (poi, spot, distance) the use key acts on now
+    "use_progress": 0.0,          # s the use key has been held on it
+    "use_latch": False,           # the use key must be let go before the next use
+    "check_use": False,           # --check: the use key held
 }
 
 
@@ -995,14 +1052,15 @@ def place_viewmodel(dt, camera):
 
 def markers(body):
     """(name, position from the planet's centre, colour) of the outposts
-    on `body`, the ship on the planet and the waypoint on `body`."""
+    on `body`, the ship on the planet, the waypoint on `body` and the
+    points of interest (poi_markers)."""
     found = [(o.name, o.point(), OUTPOST_MARKER) for o in state["outposts"] if o.body is body]
     if state["ship"] is not None and body is planet:
         found.append(("Ship", state["ship"][0], SHIP_MARKER))
     waypoint = state["waypoint"]
     if waypoint is not None and waypoint[0] is body:
         found.append(("Waypoint", add(body.centre(), scale(waypoint[1], body.radius)), WAYPOINT_MARKER))
-    return found
+    return found + poi_markers(body)
 
 
 def hud_shown():
@@ -1034,6 +1092,14 @@ def update_hud(dt):
     speed = length(sub(v, scale(up, dot(v, up))))
     height = world.height_above_ground(state["position"]) - player.eye_height
     extra = [((("pad:X",) if pad else ("F",)), "Get in")] if near_car() else []
+    spot = state["use_spot"]
+    if spot is not None:
+        poi, k, _ = spot
+        hold = pois.SPOTS[poi.kind][k][2]
+        word = "%s %s" % (pois.USE_WORDS[poi.kind], poi.name.lower())
+        if hold > 0.0:
+            word += " (hold, %.1f / %.0f s)" % (state["use_progress"], hold)
+        extra.append((("E",), word))
     hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed, pad=pad, dt=dt,
                height=height, extra_hints=extra, hour=hour_text(), tint=suit_effects()[0])
 
@@ -1066,7 +1132,16 @@ def run_check(dt):
     the car; then, given UPGRADE_CREDITS, Main engine tuning tried first
     (refused for want of the Auxiliary tank) and UPGRADE_BUYS bought, the
     credits falling by their costs and the car's tank and hold and the
-    gun's force 1.5 times their own; then the
+    gun's force 1.5 times their own; then the points of interest
+    (run_poi_check): the candidates within POI_REACH measured (at most
+    POI_MEASURE_SECONDS); a beacon, a wreck, a rig and an arch put by the
+    player (check_poi) and used with the use key held (the beacon's survey
+    data and map cells queued, a part from the wreck after its hold and
+    from the rig with its ore rocks, the arch's survey data); a geode
+    field's six rocks of quartz at its grade made; a pod made on Base's pad
+    and sold once settled; the survey data sold for trade.survey_sale's
+    credits; and Capacitor bank bought if a coil was found (else refused)
+    and the Thermal liner lowering the suit's cold limit; then the
     menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
@@ -1356,6 +1431,10 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_upgrades" + ext)
+                set_paused(False)
+            check["stage"], check["time"] = "pois", 0.0
+    elif stage == "pois":
+        if run_poi_check(check, t):
             set_paused(True)
             check["stage"], check["time"] = "pause", 0.0
     elif stage == "pause":
@@ -1606,6 +1685,134 @@ def run_check(dt):
             os._exit(0 if check["ok"] else 1)
 
 
+def check_poi(kind, n, from_feet=None):
+    """--check: a point of interest of `kind` put beside the player (its
+    first spot at the feet, or `from_feet` (east, north) metres from them),
+    measured, of quartz; its key off the faces (face -1, `n`)."""
+    feet = foot.bubble.to_world(foot.player.feet())
+    up = normalize(planet.relative(feet))
+    east, north = local_frame(up)
+    offset = from_feet if from_feet is not None else (
+        (-pois.SPOTS[kind][0][0][0], -pois.SPOTS[kind][0][0][2]) if kind in pois.SPOTS else (0.0, 0.0))
+    point = add(feet, add(scale(east, offset[0]), scale(north, offset[1])))
+    relative = planet.relative(point)
+    key = (planet.index, -1, n, 0)
+    poi = pois.Poi(key, normalize(relative), 0.0, measured=True, height=length(relative) - planet.radius,
+                   climate=(10.0, 0.5), ore=0.5, resource=resources.QUARTZ, kind=kind, valid=True)
+    state["pois"].pois[key] = poi
+    return poi
+
+
+def run_poi_check(check, t):
+    """--check's points of interest, on Base's pad, a step at a time (see
+    run_check); True once done."""
+    steps = ["natural", "beacon", "wreck", "rig", "arch", "geode", "pod", "survey", "buy"]
+    c = check.setdefault("poi", {"step": 0, "t0": t, "lines": [], "ok": True,
+                                 "props": {id(p) for p in foot.props.all}})
+    if c["step"] >= len(steps):
+        # The test's points (off the faces) and the props they made taken away again.
+        for key in [k for k in state["pois"].pois if k[1] < 0]:
+            del state["pois"].pois[key]
+            for entity, _ in state["poi_scenes"].pop(key, []):
+                engine.scene.destroy_entity(entity)
+        for prop in [p for p in foot.props.all if id(p) not in c["props"]]:
+            foot.props.remove(foot.bubble, prop)
+        state["poi_cleared"] = None
+        print("[walker] points of interest:\n" + "\n".join("[walker]   " + line for line in c["lines"])
+              + "\n[walker]   %s" % ("passed" if c["ok"] else "FAILED"), flush=True)
+        check["sell_ok"] = check["sell_ok"] and c["ok"]
+        return True
+    step, since = steps[c["step"]], t - c["t0"]
+
+    def done(ok, line):
+        c["ok"] = c["ok"] and ok
+        c["lines"].append("%s: %s" % (line, "ok" if ok else "FAILED"))
+        c["step"] += 1
+        c["t0"] = t
+        c.pop("poi", None)
+        state["check_use"] = False
+
+    p = state["pois"]
+    if step == "natural":
+        near = [q for q in p.pois.values() if q.key[1] >= 0]
+        if p.queue and since < POI_MEASURE_SECONDS:
+            return False
+        found = sorted(q.name for q in p.found() if q.key[1] >= 0)
+        done(near and not p.queue, "%d candidates within %s measured, found %s"
+             % (len(near), distance_text(POI_REACH), ", ".join(found) or "none"))
+    elif step in ("beacon", "wreck", "rig", "arch"):
+        if "poi" not in c:
+            c["poi"] = check_poi(step, c["step"])
+            c["before"] = (state["survey_data"], dict(state["parts"]), len(foot.props.rocks), len(state["map"].revealing))
+            return False
+        poi = c["poi"]
+        state["check_use"] = True
+        hold = pois.SPOTS[step][0][2]
+        if 0 not in poi.done and since < hold + USE_CHECK_SECONDS:
+            return False
+        survey, parts, rocks, revealing = c["before"]
+        gained = state["survey_data"] - survey
+        new_parts = {k: v - parts.get(k, 0) for k, v in state["parts"].items() if v != parts.get(k, 0)}
+        ok = 0 in poi.done and poi.discovered
+        if step in ("beacon", "arch"):
+            ok = ok and abs(gained - pois.survey_value(poi)) < 1e-6
+            if step == "beacon":
+                ok = ok and len(state["map"].revealing) > revealing
+        else:
+            ok = ok and sum(new_parts.values()) == 1 and since >= hold
+            if step == "rig":
+                ok = ok and len(foot.props.rocks) == rocks + pois.RIG_ROCKS
+        extra = ""
+        if step == "beacon":
+            extra = ", %d map cells queued" % (len(state["map"].revealing) - revealing)
+        elif step == "rig":
+            extra = ", %d ore rocks more" % (len(foot.props.rocks) - rocks)
+        done(ok, "%s used after %.1f s: survey data +%.0f cr, parts %s%s"
+             % (poi.name, since, gained, upgrades.parts_text(new_parts) or "none", extra))
+    elif step == "geode":
+        if "poi" not in c:
+            c["poi"] = check_poi("geode", c["step"], from_feet=(60.0, 0.0))
+            c["before"] = len(foot.props.rocks)
+            return False
+        poi = c["poi"]
+        if not poi.done and since < USE_CHECK_SECONDS:
+            return False
+        rocks = [r for r in foot.props.rocks[c["before"]:]]
+        ok = (poi.looted and len(rocks) == pois.GEODE_ROCKS
+              and all(r.grade == pois.GEODE_GRADE and r.resource == resources.QUARTZ for r in rocks))
+        done(ok, "geode field: %d rocks of quartz at grade %.2f" % (len(rocks), rocks[0].grade if rocks else 0.0))
+    elif step == "pod":
+        if "poi" not in c:
+            c["poi"] = check_poi("pod", c["step"], from_feet=(6.0, 0.0))
+            c["sold"] = state["pods_sold"]
+            return False
+        poi = c["poi"]
+        if not poi.looted and since < POD_CHECK_SECONDS:
+            return False
+        done(poi.looted and state["pods_sold"] == c["sold"] + 1,
+             "cargo pod made on Base's pad, at rest sold for %.0f cr after %.1f s" % (pois.POD_VALUE, since))
+    elif step == "survey":
+        held, credits = state["survey_data"], state["market"].credits
+        outpost = at_outpost()
+        expected = trade.survey_sale(outpost, held, world.time)[0] if outpost is not None else 0.0
+        sell_survey()
+        gained = state["market"].credits - credits
+        done(outpost is not None and held > 0.0 and state["survey_data"] == 0.0 and abs(gained - expected) < 1e-6,
+             "survey data worth %.0f cr sold at %s for %.0f cr" % (held, outpost.name if outpost else "-", gained))
+    elif step == "buy":
+        bank, liner = upgrades.BY_KEY["gun_charge_1"], upgrades.BY_KEY["suit_1"]
+        coils = state["parts"].get("coil", 0)
+        cold = state["suit_params"].cold_limit
+        buy_upgrade(bank)
+        bank_ok = ("gun_charge_1" in state["owned"]) == (coils >= 1)
+        buy_upgrade(liner)
+        liner_ok = "suit_1" in state["owned"] and abs(state["suit_params"].cold_limit - (cold - 10.0)) < 1e-9
+        done(bank_ok and liner_ok, "Capacitor bank with %d coil%s: %s; Thermal liner: the suit's cold limit %.0f C"
+             % (coils, "" if coils == 1 else "s", "bought" if "gun_charge_1" in state["owned"] else "refused",
+                state["suit_params"].cold_limit))
+    return False
+
+
 def update_map(dt):
     """The ground around the player (or the car) measured, the waypoint
     cleared once reached, and the minimap and full map drawn on foot or in
@@ -1622,7 +1829,9 @@ def update_map(dt):
         feet = foot.bubble.body_relative(player.feet())
     explored = state["map"]
     explored.probe(body, feet, EXTRA_PROBES,
-                   yield_to=foot.bubble is not None and bool(foot.props.needs_ground(foot.bubble)))
+                   yield_to=(foot.bubble is not None and bool(foot.props.needs_ground(foot.bubble)))
+                   or bool(state["pois"].queue))
+    probe_pois()
     up = normalize(feet)
     waypoint = state["waypoint"]
     if waypoint is not None and waypoint[0] is body and body.radius * math.acos(
@@ -1670,10 +1879,16 @@ def place_crates():
                                    mass=CRATE_MASS)
 
 
+def settled(prop):
+    """Whether a prop has come to rest: resting out of the physics, or asleep in it."""
+    return prop.state == "resting" or (prop.body is not None and not foot.physics.is_active(prop.body))
+
+
 def ore_rocks():
     """(prop, body, position from the body's centre, speed, first seen) of
-    each loose ore rock; each first seen now noted with its body's name and
-    its direction."""
+    each loose ore rock, its speed infinite until it has settled (so it
+    does not sell in the air); each first seen now noted with its body's
+    name and its direction."""
     seen, found = state["seen"], []
     for prop in foot.props.rocks:
         if prop.grade <= 0.0:
@@ -1683,7 +1898,7 @@ def ore_rocks():
             seen[id(prop)] = (body.name, normalize(position))
             if prop.key is None:
                 state["ore_chunks"] += 1
-        found.append((prop, body, position, length(velocity), seen[id(prop)]))
+        found.append((prop, body, position, length(velocity) if settled(prop) else math.inf, seen[id(prop)]))
     present = {id(p) for p in foot.props.rocks}
     for key in [k for k in seen if k not in present]:
         del seen[key]
@@ -1720,6 +1935,7 @@ def update_game():
         hud.toast("Sold %.0f kg of %s (grade %.2f) at %s: +%s cr"
                   % (item["mass"], resources.name(item["resource"]).lower(), item["grade"], outpost.name,
                      format(int(round(credits)), ",")), GOOD_TOAST)
+    sell_pods(held)
     snapshot = game_numbers()
     objectives = state["objectives"]
     for goal in objectives.update(snapshot):
@@ -1868,6 +2084,281 @@ def start_items():
         {"button": "Quit", "do": lambda: os._exit(0)},
         {"note": save_note},
     ]
+
+
+# ── Points of interest ─────────────────────────────────────────────────────
+
+def poi_seed():
+    return tuple(planet.terrain["seed"])
+
+
+def poi_point(poi):
+    """A point of interest's point on the ground, planet space."""
+    return add(planet.centre(), scale(poi.direction, planet.radius + poi.height))
+
+
+def poi_at(poi, offset):
+    """A point `offset` (east, up, north, metres) from a point of interest's point, planet space."""
+    up = poi.direction
+    east, north = local_frame(up)
+    return add(poi_point(poi), add(add(scale(east, offset[0]), scale(up, offset[1])), scale(north, offset[2])))
+
+
+def player_here():
+    """The player's feet (or the car), planet space, on the planet; None elsewhere or without either."""
+    if state["driving"]:
+        return car_position()
+    if foot.player is None or foot.bubble.body is not planet:
+        return None
+    return foot.bubble.to_world(foot.player.feet())
+
+
+def poi_distance(poi, here):
+    """Metres along the ground from `here` (planet space) to a point of interest."""
+    return planet.radius * math.acos(max(-1.0, min(1.0, dot(poi.direction, normalize(planet.relative(here))))))
+
+
+def probe_pois():
+    """The candidates waiting to be measured (pois.Pois.to_measure) measured
+    with the world's extra probes, as the explored map does: only while
+    nothing else uses them; each with its water (PlanetWorld.water_level)."""
+    p, asked = state["pois"], state["poi_asked"]
+    if world.extra_probes and world.extra_probes != asked:
+        return
+    if asked is not None:
+        if [probe for probe, _ in world.extra_heights] != asked:
+            return
+        for poi, (_, h), (_, climate), (_, ore), (_, resource) in zip(state["poi_asking"], world.extra_heights,
+                                                                       world.extra_climates, world.extra_ores,
+                                                                       world.extra_resources):
+            p.measured(poi.key, h, climate, ore, resource, world.water_level(poi.direction))
+        state["poi_asked"], state["poi_asking"] = None, []
+        world.extra_probes = []
+    batch = p.to_measure(EXTRA_PROBES)
+    if batch:
+        asked = [(poi.direction, planet) for poi in batch]
+        world.extra_probes = asked
+        state["poi_asked"], state["poi_asking"] = asked, batch
+
+
+def update_pois(dt):
+    """The candidates within POI_REACH looked for once the player has moved
+    POI_WANT_MOVE; the found ones discovered within SCAN_RANGE, or within
+    SEEN_RANGE in the view's cone; their scenes and props; the use key; and
+    the explored map's newly walked cells paid as survey data."""
+    explored = state["map"]
+    if state["walked_counted"] is None:
+        state["walked_counted"] = explored.walked
+    if explored.walked > state["walked_counted"]:
+        state["survey_data"] += CELL_SURVEY * (explored.walked - state["walked_counted"])
+        state["walked_counted"] = explored.walked
+    here = player_here()
+    if here is None:
+        update_poi_scenes(None)
+        state["use_spot"] = None
+        return
+    p = state["pois"]
+    direction = normalize(planet.relative(here))
+    last = state["poi_want_at"]
+    if last is None or planet.radius * math.acos(max(-1.0, min(1.0, dot(last, direction)))) > POI_WANT_MOVE:
+        p.want(planet.index, direction, POI_REACH, planet.radius, poi_seed())
+        state["poi_want_at"] = direction
+    view = view_basis()[2]
+    for poi in p.found():
+        if poi.discovered:
+            continue
+        d = poi_distance(poi, here)
+        towards = normalize(sub(poi_point(poi), state["position"]))
+        if d <= SCAN_RANGE or (d <= SEEN_RANGE and dot(towards, view) >= SEEN_COS):
+            poi.discovered = True
+            state["hud"].toast("Found: %s, %s" % (poi.name, distance_text(d)), POI_MARKER)
+    update_poi_scenes(here)
+    make_poi_props(here)
+    update_use(dt)
+
+
+def update_poi_scenes(here):
+    """The boxes of the found points within DRAW_RANGE of `here` made
+    (pois.LAYOUTS), those beyond removed; the plants and rocks cleared
+    around each (pois.CLEAR_RADIUS, PlanetWorld.set_clearings) as the set
+    changes."""
+    scenes = state["poi_scenes"]
+    near = [] if here is None else [poi for poi in state["pois"].found() if poi_distance(poi, here) <= DRAW_RANGE]
+    keys = sorted(poi.key for poi in near)
+    if keys != state["poi_cleared"]:
+        state["poi_cleared"] = keys
+        nearest = sorted(near, key=lambda poi: poi_distance(poi, here))[:planet_world.MAX_CLEARINGS]
+        world.set_clearings([planet_world.Clearing(planet.index, poi.direction, radius=pois.CLEAR_RADIUS[poi.kind],
+                                                   edge=pois.CLEAR_EDGE,
+                                                   clears=planet_world.CLEAR_PLANTS | planet_world.CLEAR_ROCKS)
+                             for poi in nearest])
+    wanted = {poi.key: poi for poi in near if pois.LAYOUTS.get(poi.kind)}
+    for key in [k for k in scenes if k not in wanted]:
+        for entity, _ in scenes.pop(key):
+            engine.scene.destroy_entity(entity)
+    positions, normals = box()
+    for key, poi in wanted.items():
+        if key in scenes:
+            continue
+        up = poi.direction
+        east, north = local_frame(up)
+        rotation = euler_from_basis(east, up, scale(north, -1.0))
+        pieces = []
+        for offset, size, colour in pois.LAYOUTS[poi.kind]:
+            entity = engine.create_mesh(positions, normals=normals, name="Poi")
+            engine.scene.set_rotation(entity, rotation)
+            engine.scene.set_scale(entity, size)
+            engine.scene.set_material_vec4(entity, "baseColorFactor", colour + (1.0,))
+            engine.scene.set_material_float(entity, "gridStrength", 0.0)
+            engine.scene.set_render_layer_mask(entity, 1)
+            pieces.append((entity, poi_at(poi, (offset[0], offset[1] - pois.SINK, offset[2]))))
+        scenes[key] = pieces
+
+
+def draw_poi_scenes(camera):
+    for pieces in state["poi_scenes"].values():
+        for entity, point in pieces:
+            engine.scene.set_position(entity, sub(point, camera))
+
+
+def make_poi_props(here):
+    """A pod's crate, and a geode field's rocks, made once the player's
+    bubble is within PROP_RANGE of their point (each once: `done`)."""
+    bubble = foot.bubble
+    if bubble is None or bubble.body is not planet:
+        return
+    for poi in state["pois"].found():
+        if poi.kind not in ("pod", "geode") or poi.done or poi.looted or poi_distance(poi, here) > PROP_RANGE:
+            continue
+        up = poi.direction
+        east, north = local_frame(up)
+        if poi.kind == "pod":
+            spot = bubble.to_bubble(poi_at(poi, (0.0, 0.5 * pois.POD_SIZE + 0.3, 0.0)))
+            crate = foot.props.spawn_crate(bubble, spot, quat_from_basis(east, up, scale(north, -1.0)),
+                                           pois.POD_SIZE, colour=pois.POD_COLOUR, mass=pois.POD_MASS)
+            state["pods"][id(crate)] = poi.key
+        else:
+            resource = poi.resource or resources.FERRITE
+            for k in range(pois.GEODE_ROCKS):
+                angle = 2.0 * math.pi * k / pois.GEODE_ROCKS
+                r = pois.GEODE_SPREAD * (0.4 + 0.6 * ((k * 7) % 5) / 4.0)
+                rock = ore_rock(poi_at(poi, (r * math.cos(angle), 0.6, r * math.sin(angle))),
+                                CHECK_ORE_EXTENT, pois.GEODE_GRADE, resource)
+                state["seen"][id(rock)] = (planet.name, poi.direction)
+            poi.looted = True
+        poi.done = [0]
+
+
+def usable_spot():
+    """(poi, spot index, distance) of the nearest spot (pois.SPOTS) not used
+    yet within its reach of the player's feet, on foot; or None."""
+    if foot.player is None or foot.bubble.body is not planet:
+        return None
+    feet = foot.bubble.to_world(foot.player.feet())
+    best = None
+    for poi in state["pois"].found():
+        if poi.looted or poi.kind not in pois.SPOTS or poi_distance(poi, feet) > USE_LOOK:
+            continue
+        for k, (offset, reach, _) in enumerate(pois.SPOTS[poi.kind]):
+            if k in poi.done:
+                continue
+            d = length(sub(poi_at(poi, offset), feet))
+            if d <= reach and (best is None or d < best[2]):
+                best = (poi, k, d)
+    return best
+
+
+def update_use(dt):
+    """The use key (E, or --check's) held on the usable spot for its time
+    (pois.SPOTS) uses it (use_spot); let go between uses."""
+    spot = state["use_spot"] = usable_spot()
+    held = engine.input.is_key_down(keys.E) or state["check_use"]
+    if not held:
+        state["use_latch"] = False
+    if spot is None or not held or state["use_latch"]:
+        state["use_progress"] = 0.0
+        return
+    poi, k, _ = spot
+    state["use_progress"] += dt
+    if state["use_progress"] >= pois.SPOTS[poi.kind][k][2]:
+        state["use_progress"] = 0.0
+        state["use_latch"] = True
+        use_spot(poi, k)
+
+
+def use_spot(poi, k):
+    """Spot `k` of `poi` used: a beacon reveals the map around it
+    (ExploredMap.reveal) and gives survey data; a wreck's spot a part; a
+    rig's crate RIG_ROCKS ore rocks and a part; an arch survey data. The
+    point is looted once every spot is used."""
+    poi.done.append(k)
+    poi.discovered = True
+    hud = state["hud"]
+    if poi.kind in ("beacon", "arch"):
+        value = pois.survey_value(poi)
+        state["survey_data"] += value
+        if poi.kind == "beacon":
+            cells = state["map"].reveal(planet, poi.direction, pois.REVEAL)
+            hud.toast("Beacon activated: the map within %s revealed (%d cells), survey data worth %.0f cr"
+                      % (distance_text(pois.REVEAL), cells, value), GOOD_TOAST)
+        else:
+            hud.toast("Arch scanned: survey data worth %.0f cr" % value, GOOD_TOAST)
+    else:
+        part = pois.parts_for(poi, k)
+        state["parts"][part] = state["parts"].get(part, 0) + 1
+        text = "%s: a %s" % (poi.name, pois.PART_NAMES[part].lower())
+        if poi.kind == "rig":
+            offset = pois.SPOTS["rig"][k][0]
+            for n in range(pois.RIG_ROCKS):
+                rock = ore_rock(poi_at(poi, (offset[0] + 0.6 * n, 1.6, offset[2])), CHECK_ORE_EXTENT,
+                                pois.RIG_GRADE, poi.resource or resources.FERRITE)
+                state["seen"][id(rock)] = (planet.name, poi.direction)
+            text += " and %d ore rocks" % pois.RIG_ROCKS
+        hud.toast(text, GOOD_TOAST)
+    if len(poi.done) == len(pois.SPOTS[poi.kind]):
+        poi.looted = True
+
+
+def sell_pods(held):
+    """Each cargo pod's crate settled (and slower than
+    objectives.REST_SPEED) on an outpost's pad, not `held`, sold for
+    pois.POD_VALUE; its point looted."""
+    for crate in list(foot.props.crates):
+        key = state["pods"].get(id(crate))
+        if key is None or crate is held:
+            continue
+        body, position, velocity = foot.prop_state(crate)
+        if not settled(crate) or length(velocity) >= REST_SPEED:
+            continue
+        outpost = next((o for o in state["outposts"] if o.body is body and o.at(add(body.centre(), position))), None)
+        if outpost is None:
+            continue
+        state["market"].credits += pois.POD_VALUE
+        state["earned"] += pois.POD_VALUE
+        state["pods_sold"] += 1
+        del state["pods"][id(crate)]
+        foot.props.remove(foot.bubble, crate, release=False)
+        poi = state["pois"].pois.get(key)
+        if poi is not None:
+            poi.looted = True
+        state["hud"].toast("Cargo pod delivered to %s: +%s cr" % (outpost.name, format(int(pois.POD_VALUE), ",")),
+                           GOOD_TOAST)
+
+
+def poi_markers(body):
+    """The compass's and the map's markers of the points of interest on
+    `body` (the planet): each discovered by its name (greyed once looted),
+    each found but not discovered within POI_REACH as a signal."""
+    here = player_here()
+    if body is not planet or here is None:
+        return []
+    found = []
+    for poi in state["pois"].found():
+        if poi.discovered:
+            found.append((poi.name, poi_point(poi), LOOTED_MARKER if poi.looted else POI_MARKER))
+        elif poi_distance(poi, here) <= POI_REACH:
+            found.append(("Signal", poi_point(poi), SIGNAL_MARKER))
+    return found
 
 
 def car_outpost():
@@ -2062,16 +2553,44 @@ def outpost_items():
          {"button": "Sell the car's cargo", "do": sell_car_cargo,
           "hint": "With the car on an outpost's pad: all the ore in its hold sold there."},
          {"note": lambda: state["trade_note"]}],
-        [{"heading": "Prices"}] + prices,
+        [{"heading": "Prices"}] + prices + [
+         {"heading": "Survey data"},
+         {"stat": "Held", "get": lambda: "worth %s cr" % format(int(round(state["survey_data"])), ",")},
+         {"button": "Sell survey data", "do": sell_survey,
+          "hint": "With the car or you on an outpost's pad: the survey data sold there, its price falling with "
+                  "the data the outpost has bought."}],
     ])
+
+
+def sell_survey():
+    """The survey data held sold at the outpost whose pad the car or the player is on (trade.Market.sell_survey)."""
+    outpost = at_outpost()
+    if outpost is None:
+        state["trade_note"] = "not on an outpost's pad"
+        return
+    value = state["survey_data"]
+    credits = state["market"].sell_survey(outpost, value, world.time)
+    if value <= 0.0:
+        state["trade_note"] = "no survey data to sell"
+        return
+    state["survey_data"] = 0.0
+    state["earned"] += credits
+    state["trade_note"] = "sold survey data at %s for %s cr" % (outpost.name, format(int(round(credits)), ","))
+    state["hud"].toast(state["trade_note"][0].upper() + state["trade_note"][1:], GOOD_TOAST)
+
+
+def base_params():
+    return {"car": hovercar.CarParams(), "gun": GunParams(), "suit": suit.SuitParams()}
 
 
 def apply_upgrades(owned):
     """The upgrades `owned` (keys) and their effective parameters
-    (upgrades.effective, the car's and the gun's): the car's and the gun's
-    now, and those of every car made and every gun spawned after."""
+    (upgrades.effective, the car's, the gun's and the suit's): the car's,
+    the gun's and the suit's now, and those of every car made and every
+    gun spawned after."""
     state["owned"] = set(owned)
-    state["params"] = upgrades.effective({"car": hovercar.CarParams(), "gun": GunParams()}, state["owned"])
+    state["params"] = upgrades.effective(base_params(), state["owned"])
+    state["suit_params"] = state["params"]["suit"]
     foot.gun_params = state["params"]["gun"]
     if foot.gun is not None:
         foot.gun.p = state["params"]["gun"]
@@ -2092,12 +2611,14 @@ def buy_upgrade(upgrade):
     """`upgrade` bought at an outpost (at_outpost) with the credits, when upgrades.refusal allows it."""
     market = state["market"]
     reason = "not at an outpost" if at_outpost() is None else upgrades.refusal(upgrade, state["owned"],
-                                                                              market.credits)
+                                                                              market.credits, state["parts"])
     if reason is not None:
         state["upgrade_note"] = "%s: %s" % (upgrade.name, reason)
         state["hud"].toast(state["upgrade_note"], hud_module.WARNING)
         return
     market.credits -= upgrade.cost
+    for part, n in upgrade.parts.items():
+        state["parts"][part] -= n
     apply_upgrades(state["owned"] | {upgrade.key})
     state["upgrade_note"] = "bought %s for %s cr" % (upgrade.name, format(int(round(upgrade.cost)), ","))
     state["hud"].toast(state["upgrade_note"][0].upper() + state["upgrade_note"][1:], GOOD_TOAST)
@@ -2107,8 +2628,7 @@ def upgrade_text(upgrade):
     """A line on `upgrade`: its cost or state, and each effect from now to after."""
     now = state["params"]
     owned = upgrade.key in state["owned"]
-    after = now if owned else upgrades.effective({"car": hovercar.CarParams(), "gun": GunParams()},
-                                                 state["owned"] | {upgrade.key})
+    after = now if owned else upgrades.effective(base_params(), state["owned"] | {upgrade.key})
     changes = []
     for path in upgrades.effects_for(upgrade, now):
         group, attribute = path.split(".")
@@ -2117,28 +2637,42 @@ def upgrade_text(upgrade):
         changes.append("%s %s" % (name.lower(), value if owned else "%s to %s" % (value,
                                                                                 shown(getattr(after[group],
                                                                                               attribute)))))
-    reason = upgrades.refusal(upgrade, state["owned"], state["market"].credits)
-    head = "owned" if owned else "%s cr%s" % (format(int(round(upgrade.cost)), ","),
-                                              "" if reason is None else ", " + reason)
+    reason = upgrades.refusal(upgrade, state["owned"], state["market"].credits, state["parts"])
+    cost = format(int(round(upgrade.cost)), ",") + " cr" + (", " + upgrades.parts_text(upgrade.parts)
+                                                            if upgrade.parts else "")
+    head = "owned" if owned else cost + ("" if reason is None else " (" + reason + ")")
     return "%s; %s" % (head, "; ".join(changes))
 
 
+def parts_held():
+    held = {p: n for p, n in state["parts"].items() if n > 0}
+    return upgrades.parts_text(held) if held else "none"
+
+
 def upgrade_items():
-    """The Upgrades tab: where, the credits, and for each upgrade a button
-    to buy it and a line of what it costs and changes."""
+    """The Upgrades tab: where, the credits and the parts held, and for
+    each upgrade the walker offers (WALKER_UPGRADES) a button to buy it and
+    a line of what it costs and changes, the gun's and the suit's in one
+    column and the car's in another."""
     left = [{"heading": "At an outpost"},
             {"stat": "Where", "get": lambda: at_outpost().name if at_outpost() is not None else "not on a pad"},
             {"stat": "Credits", "get": lambda: "%s cr" % format(int(round(state["market"].credits)), ",")},
-            {"note": lambda: "" if at_outpost() is not None else "Bring the car or yourself onto an outpost's pad."},
+            {"stat": "Parts", "get": parts_held},
+            {"note": lambda: "" if at_outpost() is not None else "Bring the car or yourself onto a pad."},
             {"note": lambda: state["upgrade_note"]}]
-    right = [{"heading": "Upgrades"}]
-    for upgrade in upgrades.UPGRADES:
-        right += [{"button": upgrade.name, "do": lambda u=upgrade: buy_upgrade(u),
-                   "hint": "Buy %s at the outpost whose pad the car or you are on%s." % (
-                       upgrade.name, "" if not upgrade.requires else
-                       "; it needs " + ", ".join(upgrades.BY_KEY[k].name for k in upgrade.requires))},
-                  {"note": lambda u=upgrade: upgrade_text(u)}]
-    return ("columns", [left, right])
+
+    def column(heading, groups):
+        items = [{"heading": heading}]
+        for upgrade in WALKER_UPGRADES:
+            if not upgrades.effects_for(upgrade, groups):
+                continue
+            items += [{"button": upgrade.name, "do": lambda u=upgrade: buy_upgrade(u),
+                       "hint": "Buy %s at the outpost whose pad the car or you are on%s." % (
+                           upgrade.name, "" if not upgrade.requires else
+                           "; it needs " + ", ".join(upgrades.BY_KEY[k].name for k in upgrade.requires))},
+                      {"note": lambda u=upgrade: upgrade_text(u)}]
+        return items
+    return ("columns", [left, column("Gun and suit", ("gun", "suit")), column("Car", ("car",))])
 
 
 def menu_tabs():
@@ -2202,6 +2736,7 @@ def save_game(base=None, quiet=False):
         "taken": [list(key) for key in sorted(world.taken_rocks.keys)],
         "props": foot.props.records(bubble) if bubble is not None else [],
         "seen": [state["seen"].get(id(p)) for p in foot.props.all],
+        "pods": [list(state["pods"][id(p)]) if id(p) in state["pods"] else None for p in foot.props.all],
         "market": state["market"].record(state["outposts"]),
         "game": {"sold_kg": state["sold_kg"], "earned": state["earned"], "ore_chunks": state["ore_chunks"],
                  "ore_seen": state["ore_seen"], "waypoints": state["waypoints"],
@@ -2210,6 +2745,9 @@ def save_game(base=None, quiet=False):
         "day_offset": day_time() - world.time,
         "upgrades": sorted(state["owned"]),
         "suit": {"reserve": state["suit"].reserve, "health": state["suit"].health},
+        "pois": state["pois"].record(),
+        "parts": dict(state["parts"]),
+        "survey_data": state["survey_data"],
     }
     data = save.write(base or save_base, data, state["map"].grids)
     state["last_save"] = data
@@ -2252,14 +2790,22 @@ def load_game(base=None):
     for key in data["taken"]:
         taken.add(tuple(key))
     state["seen"] = {}
-    for record, seen in zip(data["props"], data["seen"]):
+    state["pods"] = {}
+    for record, seen, pod in zip(data["props"], data["seen"], data.get("pods") or [None] * len(data["props"])):
         if record["kind"] == "crate":
             prop = foot.props.restore(record, by_name)
         else:
             prop = foot.rocks.restore(foot.physics, record, by_name)
         if seen is not None:
             state["seen"][id(prop)] = (seen[0], tuple(seen[1]))
+        if pod is not None:
+            state["pods"][id(prop)] = tuple(pod)
+    state["pois"].restore(data.get("pois", []), poi_seed())
+    state["poi_want_at"], state["poi_asked"], state["poi_asking"] = None, None, []
+    state["parts"] = dict(data.get("parts", {}))
+    state["survey_data"] = data.get("survey_data", 0.0)
     save.restore_grids(state["map"], arrays, by_name, Grid)
+    state["walked_counted"] = None
     game = data["game"]
     for name in ("sold_kg", "earned", "ore_chunks", "ore_seen", "waypoints"):
         state[name] = game[name]
@@ -2318,22 +2864,25 @@ def autosave(dt):
         state["hud"].toast("Autosaved", hud_module.DIM)
 
 
-def ore_rock(spot, extent, grade):
+def ore_rock(spot, extent, grade, resource=None):
     """A loose ore rock of the scatter's "rock" kind scaled by `extent`, of
-    `grade`, at `spot` (planet space), level with the ground; its prop."""
+    `grade` and `resource` (ferrite when None), at `spot` (planet space),
+    level with the ground; its prop."""
     bubble = foot.bubble
     point = bubble.to_bubble(spot)
     up = bubble.up(point)
     east = normalize(cross((0.0, 1.0, 0.0), up)) if abs(up[1]) < 0.99 else (1.0, 0.0, 0.0)
     points, _ = foot.rocks.kind_data(foot.physics, "rock")
     hull = (points * np.array(extent)).astype(np.float32)
+    resource = resources.FERRITE if resource is None else resource
     body = foot.physics.create_convex_hull(hull, point, quat_from_basis(east, up, cross(east, up)),
-                                           motion="dynamic", density=2_600.0, friction=0.8, restitution=0.05)
-    colour = rock_colour(bubble.body.index, grade)
-    entity, glow = foot.rocks.entity("rock", extent, colour, grade)
+                                           motion="dynamic", density=rock_density(resource), friction=0.8,
+                                           restitution=0.05)
+    colour = rock_colour(bubble.body.index, grade, resource)
+    entity, glow = foot.rocks.entity("rock", extent, colour, grade, resource)
     radius = float(np.linalg.norm(hull, axis=1).max())
     return foot.props.add_rock(body, entity, 2.0 * radius, radius, None, ("hull", hull, foot.physics.mass(body)),
-                               0.5 * extent[1], bubble.body, "rock", tuple(extent), colour, grade, glow)
+                               0.5 * extent[1], bubble.body, "rock", tuple(extent), colour, grade, glow, resource)
 
 
 def take_capture(directory=CAPTURES):
@@ -2416,11 +2965,13 @@ def frame(dt):
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
     pads.draw(camera)
     draw_net(camera)
+    draw_poi_scenes(camera)
     foot.props.draw(foot.bubble, camera)
     place_ship(camera)
     place_viewmodel(dt, camera)
     update_fuel_call()
     update_suit(dt)
+    update_pois(dt)
     update_hud(dt)
     update_map(dt)
     update_game()
@@ -2498,7 +3049,7 @@ def wake_at_outpost():
                         "toast": "You came to at %s; the outpost's medics charged %s cr"
                                  % (outpost.name, format(int(round(fee)), ","))}
     world.ground = None
-    state["suit"] = suit.SuitState()
+    state["suit"] = suit.SuitState(reserve=state["suit_params"].reserve)
     state["woken"] += 1
     print("[walker] the suit gave out; woke at %s for %.0f cr" % (outpost.name, fee), flush=True)
 
