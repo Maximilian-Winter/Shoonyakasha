@@ -375,50 +375,49 @@ With `--play`, `autosave_on_landing` saves to `planet_save.json` each time the s
 
 ### 7.1 Sun motion
 
-The planet stays non-rotating, so the physics, orbits and bubble stay inertial. The sun moves instead, around a fixed tilted axis.
+The planet stays non-rotating, so the physics, orbits and bubble stay inertial. The sun moves instead, around a fixed tilted axis (`clock.py` in the example):
 
 ```python
-# clock.py
-DAY_LENGTH = 40 * 60.0               # s of game time per day
+DAY_LENGTH = 40 * 60.0               # s of the world's clock
 AXIS_TILT = math.radians(18.0)
 
-def sun_direction(t, site_up, site_east, site_north):
-    """Sun direction in planet space. The site sees noon at t = 0 (mod day)."""
-    axis = normalize(add(scale(site_north, math.cos(AXIS_TILT)), scale(site_up, math.sin(AXIS_TILT))))
-    noon = normalize(sub(site_up, scale(axis, dot(site_up, axis))))
-    angle = 2.0 * math.pi * (t / DAY_LENGTH)
-    return rotate(noon, axis, -angle)
-
-def local_hour(direction, sun):
-    """0..24: the local solar time at a direction on the body."""
-    ...
+def sun_direction(time, up, east, north):
+    axis = normalize(add(scale(north, math.cos(AXIS_TILT)), scale(up, math.sin(AXIS_TILT))))
+    noon = normalize(sub(up, scale(axis, dot(up, axis))))
+    return rotate(noon, axis, -2.0 * math.pi * time / DAY_LENGTH)
 ```
 
-- The tilt gives variety in sun angles, and long days and long nights at high latitudes.
-- **Seasons** (optional): precess the tilt slowly over many days.
-- The moon is lit by the same sun direction.
+- **Shape of the day:** the site sees noon at time 0, with the sun 72° up in the south. The sun rises in the east at 06:00 and sets in the west at 18:00, and reaches 72° below at midnight. `hour(time)` and `time_of(hour, now)` convert between the two.
+- **Where it's set:** `planet.py` keeps the day's offset from the world's clock (`day_time`). With the day cycle on (a menu toggle, on with `--play`), `update_day` sets `PlanetWorld.sun_elevation` / `sun_azimuth` from `sun_direction` each frame.
+- **Moving the hour:** Z / X move an hour, and so does the menu's Time of day. The save keeps the cycle and the offset.
+- **Moon:** it is lit by the same sun direction.
+- **Seasons** (not built): precess the tilt slowly over many days.
 
 ### 7.2 Horizon shadows under a moving sun
 
-`PlanetWorld` measures the chunks' horizons again whenever the sun moves more than `HORIZON_SUN_STEP` (0.5°, `world.py`) from `horizon_sun`. With a 40-minute day the sun moves 0.15° per second, so that is a full rebuild every ~3.3 s.
+The stored horizon is the elevation of the terrain *along the sun's azimuth*, and `horizonShadow` (`shadow.glsl`) compares it with the sun's own elevation. So only the azimuth needs new horizons.
 
-1. **Only azimuth matters.** The stored horizon is the elevation of the terrain *along the sun's azimuth*. `horizonShadow` (`shadow.glsl`) compares it against the sun's elevation at runtime, so elevation changes need no rebuild.
-   - Track, per chunk, the *local* azimuth it was built for. Rebuild only when the sun's local azimuth at the chunk's centre has moved more than a tolerance.
-   - `horizonShadow` softens over about 1° near the camera and about 4° beyond 60 km, so tolerances of ~2° near and ~8° far are invisible.
-   - Near noon at high sun, the azimuth moves fast while the shadows are short, so raise the tolerance with sun elevation.
-2. **Several azimuths per vertex** (if 1 isn't enough). Store the horizon for 8 azimuths (8 × uint8 sines packed in two `uint`s), interpolate by the sun's azimuth at runtime, and never rebuild for the sun. This costs 8× the horizon samples in `chunk_build.comp` and changes the vertex layout.
+`PlanetWorld.sun_moved` measures them again in three cases:
+- none were measured yet;
+- the sun has moved `HORIZON_SUN_MAX` (5°) in all;
+- with the sun above `HORIZON_AZIMUTH_FLOOR` (−6°) at the viewpoint, its azimuth there has turned by more than `horizon_tolerance(elevation)`. That tolerance is 2°, easing to 8° as the sun climbs from 30° to 70°, where shadows are short.
+
+The rule is global, decided at the viewpoint, not per chunk. Over a day at 16× warp, `--day-check` counts 76 rebuilds. A 0.5° step would have made 707. The 5° cap accounts for most of the 76.
+
+If the stale azimuths ever show far from the viewpoint, store the horizon for several azimuths per vertex instead: 8 × uint8 sines packed in two `uint`s, interpolated by the sun's azimuth at runtime, so the sun never forces a rebuild. That costs 8× the horizon samples in `chunk_build.comp` and changes the vertex layout.
 
 ### 7.3 Night
 
-- **Exposure:** auto-exposure (average log luminance via a downsampled pass, adapting over ~2 s). The minimum is to ramp exposure with the sun's elevation at the camera.
-- **Starfield:** in the sky pass where the atmosphere's transmittance is high (procedural points from a hash on directions, fixed in planet space).
-- **Lights:**
+- **Exposure** (`clock.exposure_scale`): `PlanetWorld.exposure_scale` multiplies the menu's exposure. With the day cycle on it follows the sun's elevation at the camera: 1 down to 0°, rising in its logarithm to `NIGHT_SCALE` (6) at −10° and below. An auto-exposure pass (average log luminance, adapting over ~2 s) would also respond to what is on screen.
+- **Stars** (`atmosphere.frag`): on a grid of cells over a cube's faces in planet space, with `STAR_SHARE` of the cells holding a star of hashed place, brightness and colour, a spot about a pixel across. They fade out as the sky's own light along the ray rises past a few thousandths of the sun's illuminance (`STAR_SKY_FADE`), so they show at night and in late twilight, and from space.
+- **The ground at night:** dark. There is no moonlight or light from the planet.
+- **Lights** (not built; milestone 6b):
   - ship headlights (spotlights from the ship's front, which also light the terrain)
   - a **suit lamp** (a spot attached to the camera)
   - outpost lights (point lights at the pad)
 
   The lighting is sun + sky, so this needs a small forward light loop in `terrain.frag`, `vegetation.frag` and `scene.frag`: up to 8 lights in a uniform buffer, culled per frame on the CPU.
-- **Ore specks** glow with `SPECK_GLOW` on the Screens pass. Raising their emissive strength as the sun sets lets ore fields read from the ship at low altitude.
+- **Ore specks:** both the scattered ore rocks' specks (`vegetation.frag`) and the loose rocks' (`SPECK_GLOW`, the Screens pass) are emissive light in the HDR image. The atmosphere pass then applies the exposure, so the night exposure brightens them with everything else and ore fields read in the dark.
 
 ## 8. Temperature and the suit
 
@@ -761,7 +760,8 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 3. **Hold limits.** `cargo_capacity` / `hold_m3`, the cargo net refusing what doesn't fit, running dry (the fuel call). `--cargo-check`, `--fuel-check`.
 4. **Upgrades.** Table, effective parameters, buying at outposts. `--upgrade-check`.
 5. **Save version 2.** New fields, the migration from version 1, autosave on landing. `--save-check`.
-6. **Day and night.** Moving sun, azimuth-only horizon rebuild, auto-exposure, stars, lights. `--day-check`.
+6. **Day and night.** Moving sun, azimuth-only horizon rebuild, exposure by the sun's elevation, stars. `--day-check`.
+   6b. **Lights.** Headlights, a suit lamp and outpost lights, with a forward light loop in `terrain.frag`, `vegetation.frag` and `scene.frag`.
 7. **Suit and temperature.** Local temperature, reserve, shelter, effects, recovery at an outpost.
 8. **Points of interest.** Hash placement, kinds, discovery, salvage parts, survey data.
 9. **Contracts.** Generation, states, objective card integration, fragile crates, reputation.

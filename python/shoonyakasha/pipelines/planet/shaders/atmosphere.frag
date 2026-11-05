@@ -4,8 +4,8 @@
 // pixel: the view ray from the camera, the distance to what the depth
 // buffer holds there (reverse-Z: 0 is the sky), the scene seen through the
 // atmosphere plus the light it scatters towards the camera
-// (atmosphere.glsl), and the sun's disk where the ray reaches the sky; then
-// the clouds over it.
+// (atmosphere.glsl), and the sun's disk and the stars where the ray
+// reaches the sky; then the clouds over it.
 //
 
 #define CAMERA_SET 0
@@ -69,6 +69,60 @@ const float SUN_COS_INNER = 0.99996;   // a disk about 1 degree across
 const float SUN_COS_OUTER = 0.99990;
 const float SUN_DISK = 40.0;           // the disk's brightness, times the sun's illuminance
 
+// The stars, fixed in planet space: the view direction on a cube's face
+// (its largest coordinate's), that face's coordinates cut into STAR_CELLS
+// cells across; STAR_SHARE of the cells hold a star at a hashed place away
+// from their edges; a second hash of the cell gives its brightness, up to
+// STAR_BRIGHTNESS (times the sun's illuminance), as a number 0 to 1 to the
+// STAR_FALLOFF power, and its colour between blue-white and warm white.
+// A star is a spot about a
+// pixel across (the view direction's change across a pixel). The stars
+// fade out as the sky's own light along the ray (its luminance over the
+// sun's illuminance) rises from STAR_SKY_FADE.x to .y, so they show in
+// the night and the late twilight only.
+const vec2 STAR_SKY_FADE = vec2(0.0005, 0.005);
+const float STAR_CELLS = 400.0;
+const float STAR_SHARE = 0.08;
+const float STAR_BRIGHTNESS = 0.01;
+const float STAR_FALLOFF = 6.0;
+
+uint starHash(ivec3 c) {
+    uint h = uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u;
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    h *= 0x846ca68bu;
+    h ^= h >> 16;
+    return h;
+}
+
+vec3 stars(vec3 rd, float pixel) {
+    vec3 a = abs(rd);
+    int face;
+    vec2 uv;
+    if (a.x >= a.y && a.x >= a.z) {
+        face = rd.x > 0.0 ? 0 : 1;
+        uv = rd.yz / a.x;
+    } else if (a.y >= a.z) {
+        face = rd.y > 0.0 ? 2 : 3;
+        uv = rd.xz / a.y;
+    } else {
+        face = rd.z > 0.0 ? 4 : 5;
+        uv = rd.xy / a.z;
+    }
+    vec2 q = (uv * 0.5 + 0.5) * STAR_CELLS;
+    vec2 cell = floor(q);
+    uint h = starHash(ivec3(ivec2(cell), face));
+    if (float(h & 0xFFFFu) / 65536.0 >= STAR_SHARE) return vec3(0.0);
+    vec2 centre = cell + 0.2 + 0.6 * vec2(float((h >> 16) & 0xFFu), float((h >> 24) & 0xFFu)) / 255.0;
+    float d = 2.0 * length(q - centre) / STAR_CELLS;           // about radians, near the face's centre
+    float spot = exp(-d * d / max(pixel * pixel, 1e-10));
+    uint g = starHash(ivec3(ivec2(cell), face + 6));
+    float brightness = pow(float(g & 0xFFFFu) / 65535.0, STAR_FALLOFF);
+    vec3 tint = mix(vec3(0.75, 0.85, 1.0), vec3(1.0, 0.88, 0.75), float((g >> 16) & 0xFFu) / 255.0);
+    return tint * (STAR_BRIGHTNESS * brightness * spot);
+}
+
 void main() {
     vec2 ndc = fragTexCoord * 2.0 - 1.0;
     float depth = texture(sceneDepth, fragTexCoord).r;
@@ -86,9 +140,13 @@ void main() {
     atmosphereAlong(ro, rd, sceneDistance, inscatter, transmittance);
 
     vec3 colour = texture(hdrColor, fragTexCoord).rgb;
+    float pixel = length(fwidth(rd));
     if (depth == 0.0) {
         float mu = dot(rd, atmosphere.sun.xyz);
-        colour = atmosphere.mie.z * SUN_DISK * smoothstep(SUN_COS_OUTER, SUN_COS_INNER, mu) * vec3(1.0);
+        float skyLight = dot(inscatter, vec3(0.2126, 0.7152, 0.0722)) / atmosphere.mie.z;
+        float starsSeen = 1.0 - smoothstep(STAR_SKY_FADE.x, STAR_SKY_FADE.y, skyLight);
+        colour = atmosphere.mie.z * (SUN_DISK * smoothstep(SUN_COS_OUTER, SUN_COS_INNER, mu) * vec3(1.0)
+                                     + stars(rd, pixel) * starsSeen);
     }
     colour = colour * transmittance + inscatter;
 

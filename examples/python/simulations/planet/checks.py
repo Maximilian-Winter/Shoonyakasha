@@ -39,7 +39,7 @@ from __main__ import (
     SET_DOWN_DEPTH, SHIP_CLEARANCE, SHIP_REACH, WARPS, bodies, change_terrain, contact_text, credits_text,
     distance_text, drop_bubble, engine, ensure_bubble, foot, get_in, get_out, go_on_foot, in_net_now, load_game,
     moon_body, moon_spot, nearby_trees, net_frame, new_seed, new_ship, on_key, outpost_here, physics, planet,
-    prop_state, props, save_game, scanner, scatter_rocks, set_colour_mode, set_wireframe, ship_landed,
+    prop_state, props, save_game, scanner, scatter_rocks, set_colour_mode, set_hour, set_wireframe, ship_landed,
     ship_velocity, state, teleport, trunks, viewpoint, world)
 
 
@@ -56,6 +56,12 @@ def look_up(degrees):
     level = normalize(sub(state["forward"], scale(radial, dot(state["forward"], radial))))
     up = math.radians(degrees)
     state["forward"] = normalize(add(scale(level, math.cos(up)), scale(radial, math.sin(up))))
+
+
+def day_at(hour):
+    """The day cycle on (clock.py), at the site's `hour`."""
+    state["day_cycle"] = True
+    set_hour(hour)
 
 
 def overcast():
@@ -235,6 +241,11 @@ class CaptureTour:
         ("moon_from_afar", 1, False, 0, None, DAY_SUN, lambda: near_moon(40_000.0, 30.0, down=45.0)),
         ("moon_surface", 1, False, 0, None, DAY_SUN, lambda: near_moon(300.0, 15.0, down=12.0)),
         ("moon_low_sun", 1, False, 0, None, DAY_SUN, lambda: near_moon(1_000.0, 5.0, down=25.0)),
+        ("day_morning", 2, False, 0, None, DAY_SUN, lambda: day_at(7.5)),
+        ("day_dusk", 2, False, 0, None, DAY_SUN, lambda: day_at(18.3)),
+        ("day_twilight", 2, False, 0, None, DAY_SUN, lambda: day_at(19.0)),
+        ("day_night_stars", 1, False, 0, None, DAY_SUN, lambda: day_at(0.0), lambda: look_up(35.0)),
+        ("day_night_from_orbit", 4, False, 0, None, DAY_SUN, lambda: day_at(21.0)),
         ("ship_on_the_moon", 1, False, 0, None, DAY_SUN, lambda: teleport(8, moon=True)),
         ("ship_around_the_moon", 1, False, 0, None, DAY_SUN, lambda: teleport(9, moon=True)),
         ("generated_cockpit_on_the_pad", 8, False, 0, None, DAY_SUN,
@@ -268,6 +279,7 @@ class CaptureTour:
             world.cloud_coverage, world.cloud_wind = CLOUD_COVERAGE, (0.0, 0.0, 0.0)
             world.upload_clouds()
             state["chase"] = False
+            state["day_cycle"] = False
             state["generated_cockpit"] = False
             state["debug_text"] = False
             teleport(preset)
@@ -2939,6 +2951,109 @@ class UpgradeCheck:
             print("[planet] %s%s" % ("upgrades: " if k == 0 else "  ", line), flush=True)
         print("[planet]   %s" % ("passed" if self.ok else "FAILED"), flush=True)
         os._exit(0 if self.ok else 1)
+
+
+class DayCheck:
+    """--day-check: the free camera 5 m above the blocks (preset 1), the
+    day cycle on from START_HOUR with the time warp at WARP, for one day of
+    the world's clock (clock.DAY_LENGTH). Each frame the sun's elevation
+    seen from the site, the exposure's factor, the frame time and whether
+    the chunks' horizons were measured again (PlanetWorld.sun_moved) are
+    kept, and so is how often a sun moving by OLD_STEP would have had them
+    measured again. The sun's highest and lowest elevations must be within
+    ELEVATION_TOLERANCE of 90 - clock.AXIS_TILT degrees up and down, the
+    exposure's factor 1 at noon and clock.NIGHT_SCALE at midnight, and the
+    horizons measured again at most MAX_SHARE as often as by OLD_STEP.
+    Prints the figures and exits with status 0 when all hold, 1 otherwise."""
+
+    START_HOUR = 6.0
+    WARP = 4                            # index into WARPS: 16x
+    OLD_STEP = math.radians(0.5)
+    ELEVATION_TOLERANCE = 1.0           # degrees
+    MAX_SHARE = 0.25
+    SETTLE = 2.0                        # s before the day starts
+
+    def __init__(self):
+        import clock
+        self.clock_module = clock
+        self.stage, self.clock = "start", 0.0
+        self.rebuilds = self.old_rebuilds = 0
+        self.old_sun = None
+        self.highest, self.lowest = -90.0, 90.0
+        self.noon_scale = self.midnight_scale = None
+        self.frame_ms = []
+        moved = world.sun_moved
+
+        def counted():
+            result = moved()
+            if result and self.stage == "day":
+                self.rebuilds += 1
+            return result
+        world.sun_moved = counted
+
+    def __call__(self, dt):
+        if planet.tree is None or world.site_height is None:
+            return True
+        self.clock += dt
+        if self.stage == "start":
+            teleport(1)
+            state["day_cycle"] = True
+            set_hour(self.START_HOUR)
+            self.stage, self.clock = "settle", 0.0
+        elif self.stage == "settle" and self.clock >= self.SETTLE:
+            from __main__ import day_time
+            self.day_time = day_time
+            self.start = day_time()
+            state["warp"] = self.WARP
+            self.stage = "day"
+        elif self.stage == "day":
+            self.measure(dt)
+        return True
+
+    def measure(self, dt):
+        c = self.clock_module
+        now = self.day_time()
+        self.highest = max(self.highest, world.sun_elevation)
+        self.lowest = min(self.lowest, world.sun_elevation)
+        hour = c.hour(now)
+        if abs(hour - 12.0) < 0.05:
+            self.noon_scale = world.exposure_scale
+        if hour < 0.05 or hour > 23.95:
+            self.midnight_scale = world.exposure_scale
+        sun = world.sun_direction()
+        if self.old_sun is None or dot(sun, self.old_sun) < math.cos(self.OLD_STEP):
+            self.old_sun = sun
+            self.old_rebuilds += 1
+        self.frame_ms.append(dt * 1000.0)
+        if now - self.start >= c.DAY_LENGTH:
+            state["warp"] = 0
+            self.finish()
+
+    def finish(self):
+        c = self.clock_module
+        top = 90.0 - math.degrees(c.AXIS_TILT)
+        elevations_ok = (abs(self.highest - top) <= self.ELEVATION_TOLERANCE
+                         and abs(self.lowest + top) <= self.ELEVATION_TOLERANCE)
+        exposure_ok = (self.noon_scale is not None and abs(self.noon_scale - 1.0) < 1e-6
+                       and self.midnight_scale is not None and abs(self.midnight_scale - c.NIGHT_SCALE) < 1e-6)
+        share = self.rebuilds / max(self.old_rebuilds, 1)
+        rebuilds_ok = 0 < self.rebuilds and share <= self.MAX_SHARE
+        frames = sorted(self.frame_ms)
+        print("[planet] day: the sun from %.1f to %.1f degrees at the site (expected +-%.1f): %s"
+              % (self.lowest, self.highest, top, "ok" if elevations_ok else "FAILED"), flush=True)
+        print("[planet]   the exposure's factor %s at noon and %s at midnight: %s"
+              % ("-" if self.noon_scale is None else "%.2f" % self.noon_scale,
+                 "-" if self.midnight_scale is None else "%.2f" % self.midnight_scale,
+                 "ok" if exposure_ok else "FAILED"), flush=True)
+        print("[planet]   the horizons measured again %d times in the day, %d by a %.1f degree step (%.0f %%): %s"
+              % (self.rebuilds, self.old_rebuilds, math.degrees(self.OLD_STEP), 100.0 * share,
+                 "ok" if rebuilds_ok else "FAILED"), flush=True)
+        print("[planet]   %d frames at x%d, frame time median %.1f ms, 95th percentile %.1f ms"
+              % (len(frames), WARPS[self.WARP], frames[len(frames) // 2], frames[int(0.95 * len(frames))]),
+              flush=True)
+        ok = elevations_ok and exposure_ok and rebuilds_ok
+        print("[planet]   %s" % ("passed" if ok else "FAILED"), flush=True)
+        os._exit(0 if ok else 1)
 
 
 class TrunkCheck:

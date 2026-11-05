@@ -145,7 +145,14 @@ EXTRA_PROBES = 4                 # the last probes, for directions a caller asks
 PATCH_PROBES = PROBES - EXTRA_PROBES - 2   # after the ground under the viewpoint and the site
 VERTICES_PER_CHUNK = (QUADS + 1) ** 2 + 4 * (QUADS + 1)
 FLOATS_PER_VERTEX = 16           # position and u, normal and v, direction and height, horizon and padding
-HORIZON_SUN_STEP = math.radians(0.5)   # the sun's move after which the chunks' horizons are measured again
+# The chunks' horizons are measured again (sun_moved) when the sun's azimuth seen from the viewpoint has
+# turned by HORIZON_AZIMUTH_STEP (HORIZON_AZIMUTH_HIGH with the sun HORIZON_HIGH_SUN up, eased in between)
+# while the sun is above HORIZON_AZIMUTH_FLOOR there, or when the sun has moved by HORIZON_SUN_MAX.
+HORIZON_AZIMUTH_STEP = math.radians(2.0)
+HORIZON_AZIMUTH_HIGH = math.radians(8.0)
+HORIZON_HIGH_SUN = (math.radians(30.0), math.radians(70.0))
+HORIZON_AZIMUTH_FLOOR = math.radians(-6.0)
+HORIZON_SUN_MAX = math.radians(5.0)
 GROUND_PROBE_REACH = 1_000.0     # metres the viewpoint may have moved from where the ground under it was probed
 DRAWS_OFFSET = 16                # bytes before the draw commands in ChunkDraws: the count, then padding
 ORBIT_POINTS = 256               # points of the drawn orbit path; matches OrbitPoints in pipeline.json
@@ -452,6 +459,25 @@ def vegetation_thinning(vegetation_range):
     return min(full, vegetation_range)
 
 
+def azimuth_turn(a, b, radial):
+    """Radians between the azimuths of unit directions `a` and `b` about
+    the unit `radial` (the local up): 0 when either points along it."""
+    ta, tb = sub(a, scale(radial, dot(a, radial))), sub(b, scale(radial, dot(b, radial)))
+    la, lb = length(ta), length(tb)
+    if la < 1e-6 or lb < 1e-6:
+        return 0.0
+    return math.acos(max(-1.0, min(1.0, dot(ta, tb) / (la * lb))))
+
+
+def horizon_tolerance(elevation):
+    """The azimuth turn (radians) the horizons tolerate with the sun at
+    `elevation` (radians): HORIZON_AZIMUTH_STEP, easing to
+    HORIZON_AZIMUTH_HIGH over HORIZON_HIGH_SUN, where shadows are short."""
+    low, high = HORIZON_HIGH_SUN
+    x = max(0.0, min(1.0, (elevation - low) / (high - low)))
+    return HORIZON_AZIMUTH_STEP + (HORIZON_AZIMUTH_HIGH - HORIZON_AZIMUTH_STEP) * x * x * (3.0 - 2.0 * x)
+
+
 def terrain_floor(body):
     """Metres above `body`'s radius that no terrain goes below: its
     `floor`, or from its terrain parameters the seabed's depth, or on land
@@ -468,7 +494,8 @@ class PlanetWorld:
 
     Settings, read when uploaded: `sun_elevation`, `sun_azimuth` (degrees,
     seen from the site), `density` (times the atmosphere's coefficients),
-    `ozone`, `multiple_scattering`, `exposure` (upload_sky); `clouds`,
+    `ozone`, `multiple_scattering`, `exposure` and `exposure_scale` (the
+    exposure used is their product) (upload_sky); `clouds`,
     `cloud_coverage`, `cloud_density` (upload_clouds); `wind_speed` (m/s, the
     clouds' drift); `shadows`; `texture_strength`, `texture_relief` (the
     ground's textures); `temperature_offset` (degrees C), `moisture_offset`,
@@ -510,6 +537,7 @@ class PlanetWorld:
         self.ozone = True
         self.multiple_scattering = True
         self.exposure = EXPOSURE
+        self.exposure_scale = 1.0
         self.shadows = True
         self.clouds = True
         self.cloud_coverage = CLOUD_COVERAGE
@@ -853,7 +881,7 @@ class PlanetWorld:
                                (RADIUS, RADIUS + ATMOSPHERE_TOP, RAYLEIGH_SCALE_HEIGHT, MIE_SCALE_HEIGHT))
         engine.set_custom_vec4("planet.atmosphere.rayleigh", scale(RAYLEIGH, density) + (MIE_G,))
         engine.set_custom_vec4("planet.atmosphere.mie", (MIE_SCATTERING * density, MIE_ABSORPTION * density,
-                                                         SUN_ILLUMINANCE, self.exposure))
+                                                         SUN_ILLUMINANCE, self.exposure * self.exposure_scale))
         ozone = density if self.ozone else 0.0
         engine.set_custom_vec4("planet.atmosphere.ozone", scale(OZONE_ABSORPTION, ozone) + (OZONE_PEAK,))
         engine.set_custom_vec4("planet.atmosphere.settings",
@@ -1280,16 +1308,27 @@ class PlanetWorld:
         return [(body.index, body.centre(), body.radius + terrain_floor(body), body.ocean) for body in self.bodies]
 
     def sun_moved(self):
-        """Whether the sun has moved more than HORIZON_SUN_STEP from the
-        direction the chunks' horizons were measured towards
-        (chunk_build.comp); if so the new direction is handed over to measure
-        towards."""
+        """Whether the chunks' horizons (chunk_build.comp, the terrain's
+        elevation along the sun's azimuth) must be measured again for the
+        sun: when none were (horizon_sun None), when the sun has moved by
+        HORIZON_SUN_MAX from the direction they were measured towards, or
+        when, seen from the viewpoint with the sun above
+        HORIZON_AZIMUTH_FLOOR, its azimuth has turned by more than
+        horizon_tolerance (horizonShadow compares the sun's own elevation,
+        so a change of elevation alone needs none); if so the new direction
+        is handed over to measure towards."""
         sun = self.sun_direction()
-        if self.horizon_sun is None or dot(sun, self.horizon_sun) < math.cos(HORIZON_SUN_STEP):
+        old = self.horizon_sun
+        moved = old is None or dot(sun, old) < math.cos(HORIZON_SUN_MAX)
+        if not moved:
+            radial = normalize(self.body_under(self.viewpoint).relative(self.viewpoint))
+            elevation = math.asin(max(-1.0, min(1.0, dot(sun, radial))))
+            if elevation > HORIZON_AZIMUTH_FLOOR:
+                moved = azimuth_turn(old, sun, radial) > horizon_tolerance(elevation)
+        if moved:
             self.horizon_sun = sun
             self.engine.set_custom_vec4("planet.horizonSun", sun + (0.0,))
-            return True
-        return False
+        return moved
 
     def update_level_of_detail(self, patch=None):
         """Each body's tree updated for the camera, its missing chunks built,

@@ -81,6 +81,15 @@ it. The upgrades owned give the effective ship and gun parameters
 (upgrades.effective, `apply_upgrades`), which the ship and the gun take
 at once, as do every ship and gun made after.
 
+The day (clock.py): with the day cycle on (the menu; on with --play)
+the sun goes round with the world's clock plus the day's offset
+(`day_time`; PLAY_HOUR at the start, Z / X an hour earlier / later, the
+menu's Time of day), PlanetWorld.sun_elevation and sun_azimuth set from
+it each frame (`update_day`), and the exposure scaled
+(PlanetWorld.exposure_scale) by clock.exposure_scale for the sun's
+elevation seen from the camera. The cards show the site's hour. The
+save keeps the day cycle and its offset.
+
 The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
 cockpit, and gets in with F within BOARD_REACH of it. A ship the player
@@ -153,7 +162,7 @@ Keys:
     N                      new terrain seed
     M / J                  mountains higher / lower (M in the ship: the right display's page)
     H / G                  hills higher / lower
-    Z / X                  sun lower / higher, seen from the blocks
+    Z / X                  sun lower / higher, seen from the blocks; with the day cycle on, an hour earlier / later
     T / Y                  atmosphere denser / thinner
     B / V                  exposure up / down
     F3                     wireframe
@@ -195,6 +204,7 @@ Keys:
     python planet.py --cargo-check     put ore rocks in the cargo net, board and take off, check what was loaded
     python planet.py --trade-check     land on an outpost on the planet and on the moon, sell ore and buy fuel
     python planet.py --upgrade-check   buy upgrades at Base, check the ship's and the gun's parameters through a save
+    python planet.py --day-check       run one day at x16, check the sun, the exposure and the horizons' rebuilds
 """
 
 import argparse
@@ -229,6 +239,7 @@ import outposts
 from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
 from scanner import CONTACT, Scanner
+import clock
 import trade
 import upgrades
 from trade import Market
@@ -296,6 +307,7 @@ ORE_HUD_HEIGHT = 5_000.0         # m above the ground below which the HUD marks 
 CALL_SHOWN = 0.25
 CALL_ORBIT_FLOOR = {"planet": 25_000.0, "moon": 5_000.0}    # m
 CALL_REACH = 50.0                # m
+PLAY_HOUR = 9.0                  # the site's hour when the day starts without a save
 # The cargo net beside the landed ship: its centre in the ship's body (right, up, back; up at the
 # gear's feet), its half sizes along right and back, and how far below and above the gear's feet
 # a loose ore rock's centre may be in it.
@@ -358,6 +370,9 @@ parser.add_argument("--cargo-check", action="store_true",
                     help="put ore rocks in the cargo net, board and take off, check what was loaded, and exit")
 parser.add_argument("--trade-check", action="store_true",
                     help="land on an outpost on the planet and on the moon, sell ore and buy fuel, and exit")
+parser.add_argument("--day-check", action="store_true",
+                    help="run one day at x16, check the sun, the exposure and how often the horizons are measured "
+                         "again, and exit")
 parser.add_argument("--upgrade-check", action="store_true",
                     help="buy upgrades at Base, check the ship's and the gun's parameters through a save, and exit")
 parser.add_argument("--save-check", action="store_true",
@@ -448,6 +463,8 @@ state = {
     "net_posts": [],             # the cargo net's corner posts
     "was_landed": False,         # the ship was landed (ship_landed) in the last frame in ship mode
     "airborne": False,           # the ship has flown since it last landed on an outpost's pad
+    "day_cycle": args.play,      # the sun goes round with the world's clock (clock.py)
+    "day_offset": None,          # s added to the world's clock for the day (clock.py); None: PLAY_HOUR at the start
     "trade_card": None,          # the outpost's card, or the fuel call's (toolkit.overlay.Card)
     "fuel_call": None,           # the fuel on its way (call_fuel), or None
     "owned": set(),              # the keys of the upgrades bought (upgrades.py)
@@ -640,7 +657,7 @@ def build_cards():
     """The view's card at the top left, the debug card at the bottom left
     and the hint bar along the bottom (toolkit.overlay)."""
     canvas = engine.ui.create_canvas(reference_size=(1600, 900))
-    state["cards"] = (Card(engine.ui, canvas, (0, 0), 14), Card(engine.ui, canvas, (0, 1), 16, margin=(24, 76)))
+    state["cards"] = (Card(engine.ui, canvas, (0, 0), 16), Card(engine.ui, canvas, (0, 1), 16, margin=(24, 76)))
     state["trade_card"] = Card(engine.ui, canvas, (1, 0), 17, width=400)
     state["hint_bar"] = HintBar(engine.ui, canvas)
 
@@ -1645,6 +1662,7 @@ def save_game(path=None):
         "contacts": scanner.records(),
         "market": state["market"].record(state["outposts"]),
         "upgrades": sorted(state["owned"]),
+        "day": {"cycle": state["day_cycle"], "offset": day_time() - world.time},
     }
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(data, f)
@@ -1664,6 +1682,46 @@ def restore_market(record):
     state["market"].restore(record, [o for o in state["outposts"] if o.name in found])
     state["supply_pending"] = {name: {body: tuple(value) for body, value in supplies.items()}
                                for name, supplies in record["supply"].items() if name not in found}
+
+
+def day_time():
+    """The day's time (clock.py) now: the world's clock plus the day's
+    offset, which is set for PLAY_HOUR the first time it is asked for."""
+    if state["day_offset"] is None:
+        state["day_offset"] = clock.time_of(PLAY_HOUR, world.time) - world.time
+    return world.time + state["day_offset"]
+
+
+def set_hour(hour):
+    """The day's offset set so the site's hour is `hour` now."""
+    state["day_offset"] = clock.time_of(hour, day_time()) - world.time
+
+
+def time_rows():
+    """The cards' row of the site's hour, with the day cycle on."""
+    if not state["day_cycle"]:
+        return []
+    hour = clock.hour(day_time())
+    return [("TIME AT BASE", "%02d:%02d" % (int(hour) % 24, int(hour * 60.0) % 60))]
+
+
+def update_day():
+    """With the day cycle on, the sun where clock.py has it at the day's
+    time (seen from the site, world.sun_elevation and sun_azimuth) and the
+    exposure scaled for the sun's elevation seen from the camera
+    (clock.exposure_scale); with it off, the exposure unscaled."""
+    if not state["day_cycle"]:
+        if world.exposure_scale != 1.0:
+            world.exposure_scale = 1.0
+            world.upload_sky()
+        return
+    _, up, east, north = world.site_frame()
+    sun = clock.sun_direction(day_time(), up, east, north)
+    world.sun_elevation, world.sun_azimuth = clock.site_angles(sun, up, east, north)
+    body = world.body_under(state["position"])
+    seen = math.degrees(math.asin(max(-1.0, min(1.0, dot(sun, normalize(body.relative(state["position"])))))))
+    world.exposure_scale = clock.exposure_scale(seen)
+    world.upload_sky()
 
 
 def autosave_on_landing(landed):
@@ -1719,6 +1777,9 @@ def load_game(path=None):
     state.update(tracked=None, last_thrown=None, teleport_when_known=None, moon_landing=None, warp=0,
                  accumulator=0.0, fuel_call=None)
     world.time = data["time"]
+    day = data.get("day")
+    if day is not None:
+        state["day_cycle"], state["day_offset"] = day["cycle"], day["offset"]
     if data["terrain"] != planet.terrain:
         planet.terrain = {name: list(value) for name, value in data["terrain"].items()}
         world.regenerate()
@@ -1808,6 +1869,7 @@ def frame(dt):
         state["position"] = add(state["position"], sub(body.centre(), centre))
     follow_parked_ship()
     update_fuel_call()
+    update_day()
     if ship is not None and ship is state["ship"]:
         state["ship_poses"] = (before, (ship.position, ship.orientation))
     else:
@@ -2040,6 +2102,7 @@ def update_cards():
             ("THROTTLE", "%.0f %%" % (controls.throttle * 100.0)),
             ("ASSIST", "on" if controls.assist else "off"),
             ("TIME WARP", "x%d" % WARPS[state["warp"]]),
+        ] + time_rows() + [
             ("FUEL, DELTA-V", "%.0f kg, %.0f m/s" % (ship.fuel, ship.delta_v())),
             ("CARGO", mass_text(ship.cargo_mass) if ship.cargo else "empty"),
             ("ORBIT AROUND THE " + body.upper(),),
@@ -2057,7 +2120,7 @@ def update_cards():
         stance = "held: no ground yet" if player.held else ("on the ground" if player.on_ground else "in the air")
         view_card.update("ON FOOT", [
             ("ABOVE " + world.datum_name(viewpoint()).upper(), distance_text(world.altitude(viewpoint()))),
-        ] + (biomes.card_rows(world.ground_climate) if on_planet else []) + ore_rows() + [
+        ] + time_rows() + (biomes.card_rows(world.ground_climate) if on_planet else []) + ore_rows() + [
             ("SPEED", "%.1f m/s" % length(velocity)),
             ("JETPACK", "%.0f %%" % (player.jet_fuel * 100.0)),
             ("STATE", stance),
@@ -2071,7 +2134,7 @@ def update_cards():
         view_card.update("FREE CAMERA", [
             ("ABOVE GROUND", distance_text(world.height_above_ground(viewpoint()))),
             ("ABOVE " + world.datum_name(viewpoint()).upper(), distance_text(world.altitude(viewpoint()))),
-        ] + (biomes.card_rows(world.ground_climate) if on_planet else []) + ore_rows() + [
+        ] + time_rows() + (biomes.card_rows(world.ground_climate) if on_planet else []) + ore_rows() + [
             ("SPEED", "%.0f m/s" % state["speed"]),
             ("SPEED FACTOR", "x%.2f" % state["speed_factor"]),
             ("TIME WARP", "x%d" % WARPS[state["warp"]]),
@@ -2359,6 +2422,8 @@ def on_init():
         engine.ecs.add_system("PlanetTradeCheck", checks.TradeCheck(), priority=-2)
     elif args.upgrade_check:
         engine.ecs.add_system("PlanetUpgradeCheck", checks.UpgradeCheck(), priority=-2)
+    elif args.day_check:
+        engine.ecs.add_system("PlanetDayCheck", checks.DayCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -2387,6 +2452,13 @@ def menu_items():
          "keys": ("L",), "hint": "The throttle asks for a speed and E / Q for a climb rate; the thrusters hold them."},
         {"toggle": "Head bob", "get": lambda: foot.head_bob, "set": lambda on: setattr(foot, "head_bob", on),
          "hint": "On foot, the view rises and falls a little with each step."},
+        {"toggle": "Day cycle", "get": lambda: state["day_cycle"], "set": lambda on: state.update(day_cycle=on),
+         "hint": "The sun goes round once every %d minutes of the world's clock; the sky's sun settings follow it."
+                 % round(clock.DAY_LENGTH / 60.0)},
+        {"slider": "Time of day", "min": 0.0, "max": 24.0, "get": lambda: clock.hour(day_time()), "set": set_hour,
+         "show": lambda v: "%02d:%02d" % (int(v) % 24, int(v * 60.0) % 60),
+         "hint": "The site's hour, with the day cycle on (noon is 12:00).",
+         **({} if args.play else {"keys": ("Z", "X")})},
     ] + planet_settings.sky_items(world, keys_shown, site="the blocks") + planet_settings.cloud_items(world, keys_shown) \
         + planet_settings.ground_items(world, keys_shown) + planet_settings.climate_items(world, keys_shown) + [
         {"heading": "Display"},
@@ -2537,6 +2609,8 @@ def on_key(key, from_pad=False):
         change_terrain("hills", 1, 1.25)
     elif key == keys.G:
         change_terrain("hills", 1, 1 / 1.25)
+    elif key in (keys.Z, keys.X) and state["day_cycle"]:
+        set_hour((clock.hour(day_time()) + (1.0 if key == keys.X else -1.0)) % 24.0)
     elif key in (keys.Z, keys.X):
         world.sun_elevation = max(-90.0, min(90.0, world.sun_elevation + (3.0 if key == keys.X else -3.0)))
         world.upload_sky()
