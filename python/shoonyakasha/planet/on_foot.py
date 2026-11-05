@@ -97,6 +97,7 @@ class OnFoot:
         self.coarse = None           # its coarse terrain mesh, for far bodies
         self.player = None           # the character (character.Player), while there is one
         self.gun = None              # its gravity gun (gravity_gun.Gun), while there is a player
+        self.gun_params = None       # the GunParams each gun spawn makes takes (its defaults when None)
         self.controls = Controls()
         self.gun_controls = GunControls()
         self.view = None             # (right, up, forward) of the player's view, from `place_eye`
@@ -160,14 +161,15 @@ class OnFoot:
 
     def spawn(self, feet, heading):
         """A player with its feet at `feet` (planet space) in the bubble,
-        facing `heading`, with its gravity gun; any player before removed."""
+        facing `heading`, with its gravity gun (of `gun_params`); any player
+        before removed."""
         self.remove_player()
         bubble = self.bubble
         self.player = Player(bubble, bubble.to_bubble(feet), heading)
         promote = None
         if self.rocks is not None:
             promote = lambda body: self.rocks.promote(self.bubble, body)  # noqa: E731
-        self.gun = Gun(self.player, self.grabbable, promote=promote)
+        self.gun = Gun(self.player, self.grabbable, promote=promote, params=self.gun_params)
         return self.player
 
     def remove_player(self):

@@ -290,13 +290,16 @@ class Upgrade:
 UPGRADES = [
     Upgrade("gun_force_1", "Field emitter I", 1_500.0, (), {"gun.hold_force": 1.5, "gun.pull_range": 1.3}),
     Upgrade("gun_charge_1", "Capacitor bank", 2_500.0, ("gun_force_1",), {"gun.charged_speed": 1.4}),
-    Upgrade("hold_1", "Cargo racks", 2_000.0, (), {"ship.cargo_capacity": 1.5, "ship.hold_m3": 1.5}),
-    Upgrade("tank_1", "Auxiliary tank", 3_000.0, (), {"ship.fuel_capacity": 1.5, "ship.dry_mass": 1.05}),
-    Upgrade("engine_1", "Main engine tuning", 6_000.0, ("tank_1",), {"ship.isp_main": 1.15}),
+    Upgrade("hold_1", "Cargo racks", 2_000.0, (), {"ship.cargo_capacity": 1.5, "ship.hold_m3": 1.5,
+                                                   "car.cargo_capacity": 1.5, "car.hold_m3": 1.5}),
+    Upgrade("tank_1", "Auxiliary tank", 3_000.0, (), {"ship.fuel_capacity": 1.5, "ship.dry_mass": 1.05,
+                                                      "car.fuel_capacity": 1.5}),
+    Upgrade("engine_1", "Main engine tuning", 6_000.0, ("tank_1",), {"ship.isp_main": 1.15,
+                                                                      "car.drive_burn": 1.0 / 1.15}),
 ]
 ```
 
-The groups are `ship`, `flight.ShipParams`, and `gun`, `gravity_gun.GunParams`. `EFFECTS` gives each changed parameter's name on the card and how its value is shown. `refusal(upgrade, owned, credits)` returns "owned", "needs …", "not enough credits", or None when the upgrade can be bought.
+The groups are `ship` (`flight.ShipParams`, `planet.py`), `car` (`hovercar.CarParams`, `walker.py`) and `gun` (`gravity_gun.GunParams`, both). Each game applies only the effects on the groups it has (`effective`, `effects_for`). `EFFECTS` gives each changed parameter's name on the card and how its value is shown. `refusal(upgrade, owned, credits)` returns "owned", "needs …", "not enough credits", or None when the upgrade can be bought.
 
 Planned upgrades not in the table:
 - **Scanner:** a Wide-band scanner (1,200 cr), with `scanner.range` ×2. It needs a scanner parameter object first; `scanner.py` sets its reach with the module constants `AHEAD`, `STEP` and `STRIP`.

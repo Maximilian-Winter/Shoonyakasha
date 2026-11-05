@@ -79,6 +79,15 @@ on, its price for each resource at grade 1, the car's cargo and what it
 would fetch, and sells it (`sell_car_cargo`, trade.Market.sell). The save
 keeps the cargo.
 
+Upgrades (upgrades.py, the "car" and "gun" groups): the menu's Upgrades
+tab has a button for each, bought with the car or the player's feet on
+an outpost's pad (`at_outpost`, `buy_upgrade`), and a line of its cost or
+why it cannot be bought and what it changes, from now to after. The
+upgrades owned give the effective car and gun parameters
+(`apply_upgrades`), which the car and the gun take at once, as do every
+car made and every gun spawned after (OnFoot.gun_params); the save keeps
+them.
+
 The day (clock.py): the sun goes round with the world's clock plus the
 day's offset (`day_time`; START_HOUR in a new game, kept in the save),
 the exposure scaled for its elevation seen from the camera
@@ -111,7 +120,7 @@ grab, right trigger punt, the bumpers the hold distance.
 
     python walker.py
     python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, sell ore,
-                                             load the car's net and sell its cargo,
+                                             load the car's net and sell its cargo, buy upgrades,
                                              pause, save, change the game and load it, drive and fly
                                              the car, hover it on a lake and a river, run it dry and
                                              call fuel, then night; report and exit
@@ -129,6 +138,7 @@ import shoonyakasha as sk
 from shoonyakasha import keys
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
+from shoonyakasha.planet.gravity_gun import GunParams
 from shoonyakasha.planet.ground_patch import GroundPatch, SIZE as PATCH_SIZE
 from shoonyakasha.planet.on_foot import JUMP_DISTANCE, STEP, OnFoot
 from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis, quat_normalize,
@@ -146,6 +156,7 @@ import lamps
 import save
 import outposts
 import trade
+import upgrades
 from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
 from trade import Market, sale
@@ -225,6 +236,8 @@ NET_POST = (0.12, 1.0, 0.12)    # m
 NET_COLOUR = (1.0, 0.72, 0.3)
 NET_SETTLE = 3.0                # s --check lets the ore it drops into the net settle
 NET_CHECK_AWAY = 60.0           # m along its nose --check moves the car off Base's pad for the net
+UPGRADE_CREDITS = 10_000.0      # credits --check is given to buy UPGRADE_BUYS
+UPGRADE_BUYS = ("tank_1", "hold_1", "gun_force_1")
 CHECK_NET_EXTENTS = ((0.35, 0.25, 0.35), (0.45, 0.3, 0.45))   # m: the ore rocks --check drops into the net
 DRY_SECONDS = 1.0               # s --check drives the dry car at full throttle
 FUEL_WAIT = 2.0                 # s past the call's delay --check waits for the fuel at most
@@ -271,7 +284,7 @@ HELP_COLUMNS = [
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
                     help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, sell ore at Base, "
-                         "load the car's net and sell its cargo, pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
+                         "load the car's net and sell its cargo, buy upgrades, pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
                          "run it dry and call fuel, then night; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
@@ -351,6 +364,9 @@ state = {
     "was_dry": False,             # the car's tank was empty last frame
     "net_posts": [],              # the car's cargo net's corner posts
     "trade_note": "",             # the last sale of the car's cargo, for the Outpost tab
+    "owned": set(),               # the keys of the upgrades bought (upgrades.py)
+    "params": upgrades.effective({"car": hovercar.CarParams(), "gun": GunParams()}, set()),
+    "upgrade_note": "",           # the last upgrade bought or refused, for the Upgrades tab
 }
 
 
@@ -537,8 +553,8 @@ def car_position():
 
 
 def make_car(position, heading, target=hovercar.HOVER_MIN):
-    """The car at `position` (planet space), its nose along `heading`."""
-    state["car"] = hovercar.Car(planet.relative(position), heading, target)
+    """The car at `position` (planet space), its nose along `heading`, with the upgrades' parameters."""
+    state["car"] = hovercar.Car(planet.relative(position), heading, target, params=state["params"]["car"])
     update_ship()
 
 
@@ -1010,7 +1026,10 @@ def run_check(dt):
     1 m over its net and NET_SETTLE later the car got into, the rocks gone
     from the props into its cargo with their masses, the car put back on
     the pad and its cargo sold there for trade.sale's credits, and out of
-    the car; then the
+    the car; then, given UPGRADE_CREDITS, Main engine tuning tried first
+    (refused for want of the Auxiliary tank) and UPGRADE_BUYS bought, the
+    credits falling by their costs and the car's tank and hold and the
+    gun's force 1.5 times their own; then the
     menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
@@ -1046,7 +1065,7 @@ def run_check(dt):
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
     (with _punt added), of the map (with _map added), after the sale (with
-    _sell added), of the menu (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Settings tab
+    _sell added), of the Upgrades tab after buying (with _upgrades added), of the menu (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Settings tab
     (with _settings added), of its Controls tab (with _controls added),
     after the load (with _load added), a second
     before the end of the drive (with _drive added), after the climb (with
@@ -1223,8 +1242,41 @@ def run_check(dt):
                 print("[walker] could not get out of the car back on Base's pad: FAILED", flush=True)
                 os._exit(1)
             return
-        set_paused(True)
-        check["stage"], check["time"] = "pause", 0.0
+        check["stage"], check["time"] = "upgrades", 0.0
+    elif stage == "upgrades":
+        if "bought" not in check:
+            state["market"].credits += UPGRADE_CREDITS
+            credits = state["market"].credits
+            engine = upgrades.BY_KEY["engine_1"]
+            buy_upgrade(engine)
+            refused = "engine_1" not in state["owned"] and state["market"].credits == credits
+            for key in UPGRADE_BUYS:
+                buy_upgrade(upgrades.BY_KEY[key])
+            spent = credits - state["market"].credits
+            base_car, base_gun = hovercar.CarParams(), GunParams()
+            car, gun = state["car"].params, foot.gun.p
+            check["bought"] = (refused and state["owned"] == set(UPGRADE_BUYS)
+                               and abs(spent - sum(upgrades.BY_KEY[k].cost for k in UPGRADE_BUYS)) < 1e-6
+                               and abs(car.fuel_capacity - 1.5 * base_car.fuel_capacity) < 1e-9
+                               and abs(car.cargo_capacity - 1.5 * base_car.cargo_capacity) < 1e-9
+                               and abs(gun.hold_force - 1.5 * base_gun.hold_force) < 1e-9
+                               and foot.gun_params is state["params"]["gun"])
+            print("[walker] at %s: Main engine tuning refused first (%s); bought %s for %.0f cr: the car's tank "
+                  "%.0f kg and hold %.2f t, the gun %.1f kN: %s"
+                  % (at_outpost().name if at_outpost() is not None else "no outpost",
+                     "yes" if refused else "NO", ", ".join(upgrades.BY_KEY[k].name for k in UPGRADE_BUYS), spent,
+                     car.fuel_capacity, car.cargo_capacity / 1000.0, gun.hold_force / 1000.0,
+                     "passed" if check["bought"] else "FAILED"), flush=True)
+            check["sell_ok"] = check["sell_ok"] and check["bought"]
+            if args.shot:
+                state["menu"].show(True, state["menu"].tab_named("Upgrades"))
+            return
+        if t >= 0.5 or not args.shot:
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_upgrades" + ext)
+            set_paused(True)
+            check["stage"], check["time"] = "pause", 0.0
     elif stage == "pause":
         if "clock" not in check:
             check["clock"] = world.time      # this frame is the first that stands still
@@ -1932,9 +1984,84 @@ def outpost_items():
     ])
 
 
+def apply_upgrades(owned):
+    """The upgrades `owned` (keys) and their effective parameters
+    (upgrades.effective, the car's and the gun's): the car's and the gun's
+    now, and those of every car made and every gun spawned after."""
+    state["owned"] = set(owned)
+    state["params"] = upgrades.effective({"car": hovercar.CarParams(), "gun": GunParams()}, state["owned"])
+    foot.gun_params = state["params"]["gun"]
+    if foot.gun is not None:
+        foot.gun.p = state["params"]["gun"]
+    if state["car"] is not None:
+        state["car"].params = state["params"]["car"]
+
+
+def at_outpost():
+    """The outpost whose pad the car or the player's feet are on, or None."""
+    outpost = car_outpost()
+    if outpost is None and foot.player is not None:
+        feet = foot.bubble.to_world(foot.player.feet())
+        outpost = next((o for o in state["outposts"] if o.at(feet)), None)
+    return outpost
+
+
+def buy_upgrade(upgrade):
+    """`upgrade` bought at an outpost (at_outpost) with the credits, when upgrades.refusal allows it."""
+    market = state["market"]
+    reason = "not at an outpost" if at_outpost() is None else upgrades.refusal(upgrade, state["owned"],
+                                                                              market.credits)
+    if reason is not None:
+        state["upgrade_note"] = "%s: %s" % (upgrade.name, reason)
+        state["hud"].toast(state["upgrade_note"], hud_module.WARNING)
+        return
+    market.credits -= upgrade.cost
+    apply_upgrades(state["owned"] | {upgrade.key})
+    state["upgrade_note"] = "bought %s for %s cr" % (upgrade.name, format(int(round(upgrade.cost)), ","))
+    state["hud"].toast(state["upgrade_note"][0].upper() + state["upgrade_note"][1:], GOOD_TOAST)
+
+
+def upgrade_text(upgrade):
+    """A line on `upgrade`: its cost or state, and each effect from now to after."""
+    now = state["params"]
+    owned = upgrade.key in state["owned"]
+    after = now if owned else upgrades.effective({"car": hovercar.CarParams(), "gun": GunParams()},
+                                                 state["owned"] | {upgrade.key})
+    changes = []
+    for path in upgrades.effects_for(upgrade, now):
+        group, attribute = path.split(".")
+        name, shown = upgrades.EFFECTS[path]
+        value = shown(getattr(now[group], attribute))
+        changes.append("%s %s" % (name.lower(), value if owned else "%s to %s" % (value,
+                                                                                shown(getattr(after[group],
+                                                                                              attribute)))))
+    reason = upgrades.refusal(upgrade, state["owned"], state["market"].credits)
+    head = "owned" if owned else "%s cr%s" % (format(int(round(upgrade.cost)), ","),
+                                              "" if reason is None else ", " + reason)
+    return "%s; %s" % (head, "; ".join(changes))
+
+
+def upgrade_items():
+    """The Upgrades tab: where, the credits, and for each upgrade a button
+    to buy it and a line of what it costs and changes."""
+    left = [{"heading": "At an outpost"},
+            {"stat": "Where", "get": lambda: at_outpost().name if at_outpost() is not None else "not on a pad"},
+            {"stat": "Credits", "get": lambda: "%s cr" % format(int(round(state["market"].credits)), ",")},
+            {"note": lambda: "" if at_outpost() is not None else "Bring the car or yourself onto an outpost's pad."},
+            {"note": lambda: state["upgrade_note"]}]
+    right = [{"heading": "Upgrades"}]
+    for upgrade in upgrades.UPGRADES:
+        right += [{"button": upgrade.name, "do": lambda u=upgrade: buy_upgrade(u),
+                   "hint": "Buy %s at the outpost whose pad the car or you are on%s." % (
+                       upgrade.name, "" if not upgrade.requires else
+                       "; it needs " + ", ".join(upgrades.BY_KEY[k].name for k in upgrade.requires))},
+                  {"note": lambda u=upgrade: upgrade_text(u)}]
+    return ("columns", [left, right])
+
+
 def menu_tabs():
     return [("System", system_items()), ("Car", car_items()), ("Outpost", outpost_items()),
-            ("Settings", settings_items()), ("Controls", ("controls", HELP_COLUMNS))]
+            ("Upgrades", upgrade_items()), ("Settings", settings_items()), ("Controls", ("controls", HELP_COLUMNS))]
 
 
 def menu_subtitle():
@@ -1999,6 +2126,7 @@ def save_game(base=None, quiet=False):
                  "objective": state["objectives"].index},
         "waypoint": None if waypoint is None else [waypoint[0].name, list(waypoint[1])],
         "day_offset": day_time() - world.time,
+        "upgrades": sorted(state["owned"]),
     }
     data = save.write(base or save_base, data, state["map"].grids)
     state["last_save"] = data
@@ -2055,10 +2183,12 @@ def load_game(base=None):
     state["waypoint"] = None if waypoint is None else (by_name[waypoint[0]], tuple(waypoint[1]))
     state["market_record"] = data["market"]
     restore_market()
+    state["car"] = None
+    apply_upgrades(k for k in data.get("upgrades", []) if k in upgrades.BY_KEY)
     record = data.get("car")
     if record is not None:
         state["car"] = hovercar.Car(tuple(record["position"]), tuple(record["heading"]), record["target"],
-                                    fuel=record.get("fuel"))
+                                    params=state["params"]["car"], fuel=record.get("fuel"))
         state["car"].cargo = [dict(item, direction=tuple(item["direction"])) for item in record.get("cargo", [])]
         update_ship()
     else:

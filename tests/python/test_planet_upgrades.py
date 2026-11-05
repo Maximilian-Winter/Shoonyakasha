@@ -1,15 +1,17 @@
 """Tests for the planet example's upgrades
 (examples/python/simulations/planet/upgrades.py), loaded from its file:
-every effect names a parameter of flight.ShipParams or GunParams and is
-shown on the cards, every upgrade it needs is in the table before it;
-the effective parameters multiply in the owned upgrades' effects and
-leave the base as it was; and an upgrade is refused when owned, when it
+every effect names a parameter of flight.ShipParams, hovercar.CarParams
+or GunParams and is shown on the cards, every upgrade it needs is in the
+table before it; the effective parameters multiply in the owned
+upgrades' effects on the groups given (a game's) and leave the base as
+it was; and an upgrade is refused when owned, when it
 needs one not owned, or without the credits.
 
     python -m unittest discover -s tests/python
 """
 
 import importlib.util
+import sys
 import unittest
 from pathlib import Path
 
@@ -28,15 +30,21 @@ def load(name):
 
 flight = load("flight")
 upgrades = load("upgrades")
+sys.path.insert(0, str(EXAMPLE))
+hovercar = load("hovercar")
 
 
 def base():
     return {"ship": flight.ShipParams(), "gun": GunParams()}
 
 
+def everything():
+    return {"ship": flight.ShipParams(), "car": hovercar.CarParams(), "gun": GunParams()}
+
+
 class Table(unittest.TestCase):
     def test_effects_name_parameters_and_needs_come_first(self):
-        params = base()
+        params = everything()
         seen = set()
         for upgrade in upgrades.UPGRADES:
             for path in upgrade.effects:
@@ -61,6 +69,16 @@ class Effective(unittest.TestCase):
         self.assertAlmostEqual(out["gun"].hold_force, 1.5 * b["gun"].hold_force)
         self.assertEqual(out["gun"].charged_speed, b["gun"].charged_speed)
         self.assertEqual(upgrades.effective(b, set())["ship"], b["ship"])
+
+    def test_a_game_applies_the_groups_it_has(self):
+        car = hovercar.CarParams()
+        out = upgrades.effective({"car": car, "gun": GunParams()}, {"hold_1", "tank_1", "engine_1"})
+        self.assertEqual(set(out), {"car", "gun"})
+        self.assertAlmostEqual(out["car"].cargo_capacity, 1.5 * car.cargo_capacity)
+        self.assertAlmostEqual(out["car"].fuel_capacity, 1.5 * car.fuel_capacity)
+        self.assertAlmostEqual(out["car"].drive_burn, car.drive_burn / 1.15)
+        self.assertEqual(set(upgrades.effects_for(upgrades.BY_KEY["hold_1"], {"car"})),
+                         {"car.cargo_capacity", "car.hold_m3"})
 
 
 class Refusal(unittest.TestCase):

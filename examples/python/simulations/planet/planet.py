@@ -1348,7 +1348,7 @@ def upgrade_rows(upgrade):
                                                  state["owned"] | {upgrade.key})
     rows = [("CREDITS", credits_text(state["market"].credits)), ("COST", credits_text(upgrade.cost)),
             ("CHANGES",)]
-    for path in upgrade.effects:
+    for path in upgrades.effects_for(upgrade, now):
         group, attribute = path.split(".")
         name, shown = upgrades.EFFECTS[path]
         if owned:

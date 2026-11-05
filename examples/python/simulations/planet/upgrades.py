@@ -1,15 +1,18 @@
 """
-Upgrades bought at the outposts (planet.py): UPGRADES, each with a cost
-in credits, the upgrades it needs first and its effects, each a
-parameter (a group, "ship" for flight.ShipParams or "gun" for
-shoonyakasha.planet.gravity_gun.GunParams, and its attribute, as
-"group.attribute") and the factor it is multiplied by.
+Upgrades bought at the outposts (planet.py, walker.py): UPGRADES, each
+with a cost in credits, the upgrades it needs first and its effects, each
+a parameter (a group, "ship" for flight.ShipParams, "car" for
+hovercar.CarParams or "gun" for shoonyakasha.planet.gravity_gun.GunParams,
+and its attribute, as "group.attribute") and the factor it is multiplied
+by. An upgrade has effects for each game's vehicle; a game applies those
+of the groups it has.
 
 `effective(base, owned)` gives copies of the base parameters (group:
-parameters) with the effects of every owned upgrade applied, the base
-left as it was. `refusal(upgrade, owned, credits)` says why an upgrade
-cannot be bought, or None when it can. `EFFECTS` names each parameter an
-effect changes and how its value is shown.
+parameters) with the effects of every owned upgrade on those groups
+applied, the base left as it was. `effects_for(upgrade, groups)` are the
+upgrade's effects on `groups`. `refusal(upgrade, owned, credits)` says
+why an upgrade cannot be bought, or None when it can. `EFFECTS` names
+each parameter an effect changes and how its value is shown.
 """
 
 import copy
@@ -28,9 +31,12 @@ class Upgrade:
 UPGRADES = [
     Upgrade("gun_force_1", "Field emitter I", 1_500.0, (), {"gun.hold_force": 1.5, "gun.pull_range": 1.3}),
     Upgrade("gun_charge_1", "Capacitor bank", 2_500.0, ("gun_force_1",), {"gun.charged_speed": 1.4}),
-    Upgrade("hold_1", "Cargo racks", 2_000.0, (), {"ship.cargo_capacity": 1.5, "ship.hold_m3": 1.5}),
-    Upgrade("tank_1", "Auxiliary tank", 3_000.0, (), {"ship.fuel_capacity": 1.5, "ship.dry_mass": 1.05}),
-    Upgrade("engine_1", "Main engine tuning", 6_000.0, ("tank_1",), {"ship.isp_main": 1.15}),
+    Upgrade("hold_1", "Cargo racks", 2_000.0, (), {"ship.cargo_capacity": 1.5, "ship.hold_m3": 1.5,
+                                                   "car.cargo_capacity": 1.5, "car.hold_m3": 1.5}),
+    Upgrade("tank_1", "Auxiliary tank", 3_000.0, (), {"ship.fuel_capacity": 1.5, "ship.dry_mass": 1.05,
+                                                      "car.fuel_capacity": 1.5}),
+    Upgrade("engine_1", "Main engine tuning", 6_000.0, ("tank_1",), {"ship.isp_main": 1.15,
+                                                                      "car.drive_burn": 1.0 / 1.15}),
 ]
 BY_KEY = {u.key: u for u in UPGRADES}
 
@@ -44,17 +50,25 @@ EFFECTS = {
     "ship.fuel_capacity": ("FUEL TANKS", lambda v: "%.0f kg" % v),
     "ship.dry_mass": ("DRY MASS", lambda v: "%.1f t" % (v / 1_000.0)),
     "ship.isp_main": ("MAIN ENGINE ISP", lambda v: "%.0f s" % v),
+    "car.cargo_capacity": ("HOLD MASS", lambda v: "%.2f t" % (v / 1_000.0)),
+    "car.hold_m3": ("HOLD VOLUME", lambda v: "%.1f m3" % v),
+    "car.fuel_capacity": ("FUEL TANK", lambda v: "%.0f kg" % v),
+    "car.drive_burn": ("FUEL AT FULL THROTTLE", lambda v: "%.3f kg/s" % v),
 }
+
+
+def effects_for(upgrade, groups):
+    return {path: factor for path, factor in upgrade.effects.items() if path.split(".")[0] in groups}
 
 
 def effective(base, owned):
     """Copies of `base` (group: parameters) with the effects of the owned
-    upgrades (their keys) multiplied in, in UPGRADES' order."""
+    upgrades (their keys) on its groups multiplied in, in UPGRADES' order."""
     out = {group: copy.deepcopy(params) for group, params in base.items()}
     for upgrade in UPGRADES:
         if upgrade.key not in owned:
             continue
-        for path, factor in upgrade.effects.items():
+        for path, factor in effects_for(upgrade, out).items():
             group, attribute = path.split(".")
             setattr(out[group], attribute, getattr(out[group], attribute) * factor)
     return out
