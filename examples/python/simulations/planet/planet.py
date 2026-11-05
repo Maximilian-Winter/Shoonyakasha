@@ -38,7 +38,7 @@ props on it are removed with its taken rocks.
 
 F5 saves to SAVE_PATH, as JSON: the world's clock, the planet's terrain
 parameters, the taken rocks, every prop as a record (shoonyakasha.planet.props), the ore
-contacts, the credits and the outposts' supplies, the ship (its fuel and
+contacts, the credits and the outposts' supplies, the upgrades owned, the ship (its fuel and
 cargo, and where it is parked), the mode, the free camera and the
 player's feet. F9 loads it: the planet is built again when its parameters differ,
 the props come back out of the physics and return to it by shoonyakasha.planet.props'
@@ -70,6 +70,13 @@ from the nearest outpost on the body (trade.fuel_call), paid and put in
 the tanks when it arrives if the ship is still in orbit or within
 CALL_REACH of where it called from; its card shows below CALL_SHOWN of
 the tanks and while the fuel is on its way.
+
+Upgrades (upgrades.py): on an outpost's pad Page Up / Page Down turn the
+outpost's card from its trade page through a page per upgrade (what it
+changes, from now to after, its cost and what it needs), where Enter buys
+it. The upgrades owned give the effective ship and gun parameters
+(upgrades.effective, `apply_upgrades`), which the ship and the gun take
+at once, as do every ship and gun made after.
 
 The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
@@ -116,6 +123,8 @@ Keys:
     M                      the right display: ORBIT / SCAN (ore scanning)
     Enter / Space          landed on an outpost's pad: sell the cargo / fill the tanks
     Space                  landed elsewhere or in orbit: call for fuel
+    Page Up / Page Down    landed on an outpost's pad: the card's pages, trade and the upgrades
+    Enter                  on an upgrade's page: buy it
     , / .                  time warp down / up (1x to 16x)
   ship, gamepad (adding to the keys):
     left stick             pitch and roll
@@ -127,7 +136,8 @@ Keys:
     Y / Start / Back       free camera or on foot / settings menu / the controls
     D-pad up / down        landed on an outpost's pad: sell the cargo / fill the tanks
     D-pad down             landed elsewhere or in orbit: call for fuel
-    X                    chase view / cockpit; in a landed ship, out of it
+    D-pad left / right     landed on an outpost's pad: the card's pages (D-pad up buys an upgrade)
+    X                  chase view / cockpit; in a landed ship, out of it
   anywhere:
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
@@ -180,6 +190,7 @@ Keys:
                                        then call for fuel in orbit
     python planet.py --cargo-check     put ore rocks in the cargo net, board and take off, check what was loaded
     python planet.py --trade-check     land on an outpost on the planet and on the moon, sell ore and buy fuel
+    python planet.py --upgrade-check   buy upgrades at Base, check the ship's and the gun's parameters through a save
 """
 
 import argparse
@@ -197,6 +208,7 @@ from shoonyakasha.planet import resources
 from shoonyakasha.planet import settings as planet_settings
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
+from shoonyakasha.planet.gravity_gun import GunParams
 from shoonyakasha.planet.ground_patch import GroundPatch, SIZE as PATCH_SIZE
 from shoonyakasha.planet.on_foot import STEP as FOOT_STEP, OnFoot, stick
 from shoonyakasha.planet.props import stack_offsets
@@ -214,6 +226,7 @@ from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
 from scanner import CONTACT, Scanner
 import trade
+import upgrades
 from trade import Market
 from viewmodel import Viewmodel
 
@@ -254,11 +267,13 @@ THROTTLE_RATE = 0.5              # throttle per second while W or S is held
 MOUSE_STICK = 0.04               # stick per pixel of mouse movement
 # Gamepad buttons and the keys they press: A assist, B throttle to 0, the bumpers time warp,
 # Y ship or free camera, X chase view, Start the menu, Back the controls sheet, the D-pad up and down
-# sell the cargo and fill the tanks at an outpost (down calls for fuel elsewhere).
+# sell the cargo and fill the tanks at an outpost (down calls for fuel elsewhere), left and right turn
+# the outpost card's pages (up buys the upgrade shown).
 GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAMEPAD_LEFT_BUMPER: keys.COMMA,
                 keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
                 keys.GAMEPAD_X: keys.R, keys.GAMEPAD_BACK: keys.F2, keys.GAMEPAD_DPAD_UP: keys.ENTER,
-                keys.GAMEPAD_DPAD_DOWN: keys.SPACE}
+                keys.GAMEPAD_DPAD_DOWN: keys.SPACE, keys.GAMEPAD_DPAD_LEFT: keys.PAGE_UP,
+                keys.GAMEPAD_DPAD_RIGHT: keys.PAGE_DOWN}
 # On foot FOOT_GAMEPAD_KEYS: X gets in, Y the free camera, the bumpers the gun's hold distance. In a landed
 # ship X gets out (read_gamepad_buttons).
 ORBIT_HEIGHT = 40_000.0          # preset 9's circular orbit
@@ -339,6 +354,8 @@ parser.add_argument("--cargo-check", action="store_true",
                     help="put ore rocks in the cargo net, board and take off, check what was loaded, and exit")
 parser.add_argument("--trade-check", action="store_true",
                     help="land on an outpost on the planet and on the moon, sell ore and buy fuel, and exit")
+parser.add_argument("--upgrade-check", action="store_true",
+                    help="buy upgrades at Base, check the ship's and the gun's parameters through a save, and exit")
 parser.add_argument("--save-check", action="store_true",
                     help="move rocks, throw a crate, save, build a new planet, load, check what came back, and exit")
 parser.add_argument("--promotion-check", action="store_true",
@@ -428,6 +445,9 @@ state = {
     "was_landed": False,         # the ship was landed (ship_landed) in the last frame in ship mode
     "trade_card": None,          # the outpost's card, or the fuel call's (toolkit.overlay.Card)
     "fuel_call": None,           # the fuel on its way (call_fuel), or None
+    "owned": set(),              # the keys of the upgrades bought (upgrades.py)
+    "params": upgrades.effective({"ship": flight.ShipParams(), "gun": GunParams()}, set()),
+    "outpost_page": 0,           # the outpost card's page: 0 trade, k the k-th of upgrades.UPGRADES
     "play_start": False,         # --play: the ship and the player still to be put at Base
 }
 foot = OnFoot(engine, world, box(), make_rocks=lambda props: Rocks(engine, world, props))
@@ -739,7 +759,8 @@ def new_ship(position, velocity, forward, up, assist):
     up = normalize(sub(up, scale(forward, dot(up, forward))))
     right = cross(forward, up)
     state["ship"] = flight.Ship(position=position, velocity=velocity,
-                                orientation=quat_from_basis(right, up, scale(forward, -1.0)))
+                                orientation=quat_from_basis(right, up, scale(forward, -1.0)),
+                                params=state["params"]["ship"])
     state["controls"] = flight.Controls(assist=assist)
     state["mode"] = "ship"
     state["position"] = position
@@ -1031,6 +1052,8 @@ def ship_landed(ship):
 
 def spawn_player(bubble, feet_world, heading):
     foot.spawn(feet_world, heading)
+    if foot.gun is not None:
+        foot.gun.p = state["params"]["gun"]
     state["mode"] = "foot"
     state["warp"] = 0
     place_eye()
@@ -1250,6 +1273,67 @@ def buy_fuel():
     state["trade_note"] = ("bought %.0f kg of fuel for %s" % (kg, credits_text(cost)) if kg > 0.5
                            else "the tanks are full" if state["ship"].fuel >= state["ship"].params.fuel_capacity - 0.5
                            else "no credits for fuel")
+
+
+def apply_upgrades(owned):
+    """The upgrades `owned` (keys) and their effective parameters
+    (upgrades.effective): the ship's and the gun's now, and those of any
+    ship or gun made from here on."""
+    state["owned"] = set(owned)
+    state["params"] = upgrades.effective({"ship": flight.ShipParams(), "gun": GunParams()}, state["owned"])
+    if state["ship"] is not None:
+        state["ship"].params = state["params"]["ship"]
+    if foot.gun is not None:
+        foot.gun.p = state["params"]["gun"]
+
+
+def buy_upgrade(upgrade):
+    """`upgrade` bought with the credits, when upgrades.refusal allows it; the note says what happened."""
+    market = state["market"]
+    reason = upgrades.refusal(upgrade, state["owned"], market.credits)
+    if reason is not None:
+        state["trade_note"] = "%s: %s" % (upgrade.name, reason)
+        return
+    market.credits -= upgrade.cost
+    apply_upgrades(state["owned"] | {upgrade.key})
+    state["trade_note"] = "bought %s for %s" % (upgrade.name, credits_text(upgrade.cost))
+
+
+def turn_page(step):
+    """The outpost card's page `step` on (wrapping): trade, then each upgrade."""
+    if outpost_here() is not None:
+        state["outpost_page"] = (state["outpost_page"] + step) % (len(upgrades.UPGRADES) + 1)
+
+
+def upgrade_rows(upgrade):
+    """The outpost card's page of `upgrade`: credits, its cost, each effect
+    from now to after, what it needs, whether it can be bought, the keys."""
+    pad = state["input"] == "pad"
+    owned = upgrade.key in state["owned"]
+    now = state["params"]
+    after = now if owned else upgrades.effective({"ship": flight.ShipParams(), "gun": GunParams()},
+                                                 state["owned"] | {upgrade.key})
+    rows = [("CREDITS", credits_text(state["market"].credits)), ("COST", credits_text(upgrade.cost)),
+            ("CHANGES",)]
+    for path in upgrade.effects:
+        group, attribute = path.split(".")
+        name, shown = upgrades.EFFECTS[path]
+        if owned:
+            base = getattr({"ship": flight.ShipParams(), "gun": GunParams()}[group], attribute)
+            rows.append((name, "%s, was %s" % (shown(getattr(now[group], attribute)), shown(base))))
+        else:
+            rows.append((name, "%s to %s" % (shown(getattr(now[group], attribute)),
+                                             shown(getattr(after[group], attribute)))))
+    if upgrade.requires:
+        rows.append(("NEEDS", ", ".join(upgrades.BY_KEY[k].name for k in upgrade.requires)))
+    reason = upgrades.refusal(upgrade, state["owned"], state["market"].credits)
+    rows += [("UPGRADE",),
+             ("BUY (%s)" % ("D-PAD UP" if pad else "ENTER"), reason if reason is not None else "available"),
+             ("PAGES (%s)" % ("D-PAD LEFT / RIGHT" if pad else "PG UP / PG DN"),
+              "%d of %d" % (state["outpost_page"] + 1, len(upgrades.UPGRADES) + 1))]
+    if state["trade_note"]:
+        rows.append(("LAST", state["trade_note"]))
+    return rows
 
 
 def call_place(ship):
@@ -1480,7 +1564,8 @@ def cargo_value():
 
 
 def trade_rows(outpost):
-    """The outpost's card: credits, cargo, fuel, its prices and the last trade."""
+    """The outpost card's trade page: credits, cargo, fuel, its prices, the
+    trades, the upgrades owned and the last trade."""
     ship, market = state["ship"], state["market"]
     pad = state["input"] == "pad"
     sample = lambda body, resource: {"body": body.name, "direction": outpost.direction, "mass": 1.0, "grade": 1.0,
@@ -1502,6 +1587,8 @@ def trade_rows(outpost):
         ("TRADE",),
         ("SELL THE CARGO (%s)" % ("D-PAD UP" if pad else "ENTER"), credits_text(value)),
         ("FILL THE TANKS (%s)" % ("D-PAD DOWN" if pad else "SPACE"), credits_text(room * outpost.fuel_price)),
+        ("UPGRADES (%s)" % ("D-PAD RIGHT" if pad else "PG DN"),
+         "%d of %d owned" % (len(state["owned"]), len(upgrades.UPGRADES))),
     ]
     if state["trade_note"]:
         rows.append(("LAST", state["trade_note"]))
@@ -1552,6 +1639,7 @@ def save_game(path=None):
         "props": props.records(bubble),
         "contacts": scanner.records(),
         "market": state["market"].record(state["outposts"]),
+        "upgrades": sorted(state["owned"]),
     }
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(data, f)
@@ -1613,11 +1701,13 @@ def load_game(path=None):
             props.restore(record, by_name)
         else:
             scatter_rocks.restore(physics, record, by_name)
+    state["ship"] = None
+    apply_upgrades(k for k in data.get("upgrades", []) if k in upgrades.BY_KEY)
     s = data["ship"]
     state["ship"] = None if s is None else flight.Ship(
         position=tuple(s["position"]), velocity=tuple(s["velocity"]), orientation=tuple(s["orientation"]),
         angular_velocity=tuple(s["angular_velocity"]), on_ground=s["on_ground"], resting=s["resting"],
-        crashed=s["crashed"], fuel=s.get("fuel"),
+        crashed=s["crashed"], fuel=s.get("fuel"), params=state["params"]["ship"],
         cargo=[dict(item, direction=tuple(item["direction"])) for item in s.get("cargo", [])])
     restore_market(data.get("market"))
     state["controls"] = flight.Controls(throttle=data["controls"]["throttle"], assist=data["controls"]["assist"])
@@ -1884,9 +1974,16 @@ def update_cards():
     trade_card = state["trade_card"]
     outpost = outpost_here()
     call = fuel_call_rows() if outpost is None else None
+    if outpost is None:
+        state["outpost_page"] = 0
     if outpost is not None and not state["help"].visible:
-        trade_card.update("OUTPOST %s, THE %s" % (outpost.name.upper(), outpost.body.name.upper()),
-                          trade_rows(outpost))
+        page = state["outpost_page"]
+        if page == 0:
+            trade_card.update("OUTPOST %s, THE %s" % (outpost.name.upper(), outpost.body.name.upper()),
+                              trade_rows(outpost))
+        else:
+            upgrade = upgrades.UPGRADES[page - 1]
+            trade_card.update("%s: %s" % (outpost.name.upper(), upgrade.name.upper()), upgrade_rows(upgrade))
     elif call is not None and not state["help"].visible:
         trade_card.update(*call)
     trade_card.show((outpost is not None or call is not None) and not state["help"].visible)
@@ -2053,8 +2150,12 @@ def current_hints():
             hints.append((("pad:D-pad down",) if pad else ("Space",), "Call for fuel"))
         if outpost_here() is not None:
             # On a pad: trading, and the controls to take off with.
-            hints += [(("pad:D-pad up",) if pad else ("Enter",), "Sell the cargo"),
-                      (("pad:D-pad down",) if pad else ("Space",), "Fill the tanks")]
+            if state["outpost_page"] > 0:
+                hints += [(("pad:D-pad up",) if pad else ("Enter",), "Buy")]
+            else:
+                hints += [(("pad:D-pad up",) if pad else ("Enter",), "Sell the cargo"),
+                          (("pad:D-pad down",) if pad else ("Space",), "Fill the tanks")]
+            hints += [(("pad:D-pad left", "pad:D-pad right") if pad else ("PgUp", "PgDn"), "Upgrades")]
             if pad:
                 return hints + [(("pad:LT", "pad:RT"), "Throttle"), (("pad:RS",), "Yaw, up, down"),
                                 (("pad:A",), "Assist"), (("pad:Y",), "Free camera"), (("pad:Start",), "Settings"),
@@ -2102,6 +2203,7 @@ HELP_COLUMNS = [
         (("F",), "Out, once landed"),
         (("Enter", "Space"), "At an outpost: sell the cargo / fill the tanks"),
         (("Space",), "Elsewhere or in orbit: call for fuel"),
+        (("PgUp", "PgDn"), "At an outpost: upgrades (Enter buys)"),
         (("Tab",), "Free camera"),
     ])],
     [("Ship, gamepad", [
@@ -2218,6 +2320,8 @@ def on_init():
         engine.ecs.add_system("PlanetCargoCheck", checks.CargoCheck(), priority=-2)
     elif args.trade_check:
         engine.ecs.add_system("PlanetTradeCheck", checks.TradeCheck(), priority=-2)
+    elif args.upgrade_check:
+        engine.ecs.add_system("PlanetUpgradeCheck", checks.UpgradeCheck(), priority=-2)
     print(__doc__.split("Keys:")[1].rstrip(), flush=True)
 
 
@@ -2358,7 +2462,12 @@ def on_key(key, from_pad=False):
         else:
             call_fuel()
     elif key in (keys.ENTER, keys.KP_ENTER) and state["mode"] == "ship":
-        sell_cargo()
+        if state["outpost_page"] > 0 and outpost_here() is not None:
+            buy_upgrade(upgrades.UPGRADES[state["outpost_page"] - 1])
+        else:
+            sell_cargo()
+    elif key in (keys.PAGE_UP, keys.PAGE_DOWN) and state["mode"] == "ship":
+        turn_page(1 if key == keys.PAGE_DOWN else -1)
     elif key == keys.R and state["mode"] != "foot":
         state["chase"] = not state["chase"]
     elif key == keys.U:

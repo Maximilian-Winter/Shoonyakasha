@@ -2788,6 +2788,123 @@ class TradeCheck:
         self.next_stage("measure")
 
 
+class UpgradeCheck:
+    """--upgrade-check: the ship on Base's pad (preset 8) with CREDITS and
+    no upgrades. Through the outpost card's pages (Page Down) and Enter it
+    tries Main engine tuning first, which must be refused for want of the
+    Auxiliary tank, the credits unchanged; then buys the Auxiliary tank,
+    Main engine tuning, Cargo racks and Field emitter I. After each the
+    credits must have fallen by its cost and the ship's parameters be the
+    base ones times the effects bought. The player then gets out and the
+    gun must hold the Field emitter's force and range. The game is saved to
+    PATH, the upgrades cleared and the save loaded: the upgrades owned, the
+    ship's and the gun's parameters and the credits must come back. Prints
+    each step and exits with status 0 when all hold, 1 otherwise."""
+
+    CREDITS = 20_000.0
+    BUY = ("engine_1", "tank_1", "engine_1", "hold_1", "gun_force_1")
+    PATH = os.path.join(CAPTURES, "upgrade_check.json")
+    TIMEOUT = 30.0                      # s
+
+    def __init__(self):
+        self.stage, self.frames, self.clock = "start", 0, 0.0
+        self.lines, self.ok = [], True
+
+    def __call__(self, dt):
+        if planet.tree is None or state["survey"] is not None:
+            return True
+        self.frames += 1
+        self.clock += dt
+        getattr(self, self.stage)()
+        return True
+
+    def next_stage(self, stage):
+        self.stage, self.frames, self.clock = stage, 0, 0.0
+
+    def note(self, ok, text):
+        self.ok = self.ok and ok
+        self.lines.append("%s: %s" % (text, "ok" if ok else "FAILED"))
+
+    def start(self):
+        teleport(8)
+        state["scripted_controls"] = True
+        self.next_stage("buy")
+
+    def buy(self):
+        if outpost_here() is None or self.clock < 1.0:
+            if self.clock > self.TIMEOUT:
+                self.finish("the ship never rested on Base's pad")
+            return
+        from __main__ import apply_upgrades
+        import upgrades
+        apply_upgrades(set())
+        state["market"].credits = self.CREDITS
+        base = flight.ShipParams()
+        for key in self.BUY:
+            upgrade = upgrades.BY_KEY[key]
+            page = upgrades.UPGRADES.index(upgrade) + 1
+            for _ in range(len(upgrades.UPGRADES) + 1):
+                if state["outpost_page"] == page:
+                    break
+                on_key(keys.PAGE_DOWN)
+            credits, owned = state["market"].credits, set(state["owned"])
+            on_key(keys.ENTER)
+            refused = upgrades.refusal(upgrade, owned, credits)
+            if refused is not None:
+                self.note(state["owned"] == owned and state["market"].credits == credits,
+                          "%s refused (%s), nothing bought" % (upgrade.name, refused))
+                continue
+            expected = upgrades.effective({"ship": base, "gun": gun_module.GunParams()}, owned | {key})
+            p = state["ship"].params
+            self.note(key in state["owned"] and abs(state["market"].credits - (credits - upgrade.cost)) < 1e-6
+                      and p == expected["ship"],
+                      "%s bought for %.0f cr: %s left, hold %.1f t / %.1f m3, tanks %.0f kg, dry %.1f t, isp %.1f s"
+                      % (upgrade.name, upgrade.cost, credits_text(state["market"].credits),
+                         p.cargo_capacity / 1_000.0, p.hold_m3, p.fuel_capacity, p.dry_mass / 1_000.0, p.isp_main))
+        self.expected = expected
+        get_out()
+        self.next_stage("gun")
+
+    def gun(self):
+        if foot.gun is None:
+            if self.clock > self.TIMEOUT:
+                self.finish("the player could not get out")
+            return
+        p = foot.gun.p
+        self.note(p == self.expected["gun"], "out of the ship, the gun holds %.1f kN and pulls from %.1f m"
+                  % (p.hold_force / 1_000.0, p.pull_range))
+        self.credits, self.owned = state["market"].credits, set(state["owned"])
+        os.makedirs(CAPTURES, exist_ok=True)
+        save_game(self.PATH)
+        from __main__ import apply_upgrades
+        apply_upgrades(set())
+        state["market"].credits = 0.0
+        load_game(self.PATH)
+        self.next_stage("loaded")
+
+    def loaded(self):
+        if foot.gun is None:
+            if self.clock > self.TIMEOUT:
+                self.finish("no player after loading")
+            return
+        ok = (state["owned"] == self.owned and state["market"].credits == self.credits
+              and state["ship"].params == self.expected["ship"] and foot.gun.p == self.expected["gun"])
+        self.note(ok, "saved, cleared and loaded: %s owned, %s, the ship's and the gun's parameters back"
+                  % (", ".join(sorted(state["owned"])), credits_text(state["market"].credits)))
+        self.finish(None)
+
+    def finish(self, text):
+        if text is not None:
+            self.lines.append(text)
+            self.ok = False
+        if os.path.exists(self.PATH):
+            os.remove(self.PATH)
+        for k, line in enumerate(self.lines):
+            print("[planet] %s%s" % ("upgrades: " if k == 0 else "  ", line), flush=True)
+        print("[planet]   %s" % ("passed" if self.ok else "FAILED"), flush=True)
+        os._exit(0 if self.ok else 1)
+
+
 class TrunkCheck:
     """--trunk-check: a player put down from preset 1 (5 m above the
     blocks) waits until it has stood on the ground for SETTLE seconds with

@@ -274,74 +274,49 @@ Remaining:
 
 ## 5. Upgrades
 
-### 5.1 Data-driven
+### 5.1 The table
+
+`upgrades.py` in the example:
 
 ```python
 @dataclass(frozen=True)
 class Upgrade:
     key: str
     name: str
-    tier: int
-    cost: int                     # credits
-    parts: dict                   # component name -> count (from wrecks, §9)
-    requires: tuple = ()          # upgrade keys
-    effects: dict = field(default_factory=dict)   # dotted path -> multiplier, or ("add" | "set", value)
+    cost: float                                    # credits
+    requires: tuple = ()                           # keys of the upgrades needed first
+    effects: dict = field(default_factory=dict)    # "group.attribute": factor
 
 UPGRADES = [
-    Upgrade("gun_force_1", "Field emitter I", 1, 1_500, {}, (),
-            {"gun.hold_force": 1.5, "gun.pull_range": 1.3}),
-    Upgrade("gun_charge_1", "Capacitor bank", 1, 2_500, {"coil": 1}, ("gun_force_1",),
-            {"gun.charged_speed": 1.4}),
-    Upgrade("hold_1", "Cargo racks", 1, 2_000, {}, (),
-            {"ship.cargo_capacity": 1.5, "ship.hold_m3": 1.5}),
-    Upgrade("tank_1", "Auxiliary tank", 1, 3_000, {}, (),
-            {"ship.fuel_capacity": 1.5, "ship.dry_mass": 1.05}),
-    Upgrade("engine_1", "Main engine tuning", 2, 6_000, {"injector": 2}, ("tank_1",),
-            {"ship.isp_main": 1.15}),
-    Upgrade("scanner_1", "Wide-band scanner", 1, 1_200, {}, (),
-            {"scanner.range": 2.0}),
-    Upgrade("suit_1", "Thermal liner", 1, 1_000, {}, (),
-            {"suit.cold_limit": ("add", -10.0), "suit.reserve": 1.5}),
-    Upgrade("suit_2", "Heat exchanger", 2, 3_500, {"coil": 1}, ("suit_1",),
-            {"suit.hot_limit": ("add", 10.0), "suit.reserve": 1.5}),
-    Upgrade("jet_1", "Jetpack bottles", 1, 900, {}, (),
-            {"jet.burn": 0.5}),
-    Upgrade("longrange", "Long-range package", 3, 15_000, {"injector": 2, "nav_core": 1},
-            ("tank_1", "engine_1"), {"ship.fuel_capacity": 1.6}),
+    Upgrade("gun_force_1", "Field emitter I", 1_500.0, (), {"gun.hold_force": 1.5, "gun.pull_range": 1.3}),
+    Upgrade("gun_charge_1", "Capacitor bank", 2_500.0, ("gun_force_1",), {"gun.charged_speed": 1.4}),
+    Upgrade("hold_1", "Cargo racks", 2_000.0, (), {"ship.cargo_capacity": 1.5, "ship.hold_m3": 1.5}),
+    Upgrade("tank_1", "Auxiliary tank", 3_000.0, (), {"ship.fuel_capacity": 1.5, "ship.dry_mass": 1.05}),
+    Upgrade("engine_1", "Main engine tuning", 6_000.0, ("tank_1",), {"ship.isp_main": 1.15}),
 ]
 ```
 
-The groups map onto existing parameters as follows:
-- `gun`: `gravity_gun.GunParams` (`hold_force`, `pull_range`, `charged_speed`).
-- `ship`: `flight.ShipParams`, with `cargo_capacity` and `hold_m3` from §2.1.
-- `suit`: `SuitParams` (§8.2).
-- `scanner`: needs a parameter object. The scanner's reach is set by the module constants `AHEAD`, `STEP` and `STRIP` in `scanner.py` today.
-- `jet`: needs a parameter object. Jet fuel is `Character.jet_fuel` (0 to 1), drained by the module constant `JET_BURN` in `character.py`.
+The groups are `ship`, `flight.ShipParams`, and `gun`, `gravity_gun.GunParams`. `EFFECTS` gives each changed parameter's name on the card and how its value is shown. `refusal(upgrade, owned, credits)` returns "owned", "needs …", "not enough credits", or None when the upgrade can be bought.
 
-### 5.2 Applying
+Planned upgrades not in the table:
+- **Scanner:** a Wide-band scanner (1,200 cr), with `scanner.range` ×2. It needs a scanner parameter object first; `scanner.py` sets its reach with the module constants `AHEAD`, `STEP` and `STRIP`.
+- **Suit (§8.2):** a Thermal liner (1,000 cr), with the cold limit −10 °C and the reserve ×1.5. A Heat exchanger (3,500 cr, needs the liner), with the hot limit +10 °C and the reserve ×1.5. These need `SuitParams` and additive effects.
+- **Jetpack:** Jetpack bottles (900 cr), with the jet's burn ×0.5. They need a jet parameter object first; `character.py` drains `Character.jet_fuel` with the module constant `JET_BURN`.
+- **Long-range package (§12):** 15,000 cr, needs the tank and engine upgrades, fuel capacity ×1.6.
+- **Parts (§9):** parts from wrecks, as an extra cost.
 
-The base parameters stay untouched. The effective parameters are recomputed whenever the owned set changes:
+### 5.2 Applying and buying
 
-```python
-def effective(base: dict, owned: set) -> dict:
-    out = copy.deepcopy(base)          # {"gun": GunParams, "ship": ShipParams, ...}
-    for u in UPGRADES:
-        if u.key not in owned:
-            continue
-        for path, effect in u.effects.items():
-            group, attr = path.split(".")
-            obj = out[group]
-            value = getattr(obj, attr)
-            if isinstance(effect, tuple):
-                op, x = effect
-                value = x if op == "set" else value + x
-            else:
-                value *= effect
-            setattr(obj, attr, value)
-    return out
-```
+`effective(base, owned)` deep-copies the base parameters (group: parameters) and multiplies in the effects of each owned upgrade, in table order. `planet.py` keeps the owned keys in `state["owned"]` and the effective parameters in `state["params"]`. `apply_upgrades(owned)` recomputes them and hands them to the current ship (`Ship.params`) and gun (`Gun.p`). `new_ship`, `load_game` and `spawn_player` give every later ship and gun the same parameters.
 
-A save stores only the owned keys.
+On an outpost's pad, Page Up / Page Down (D-pad left / right) turn the outpost's card through its pages: trade first, then one page per upgrade. An upgrade's page shows:
+- the credits and the upgrade's cost;
+- each parameter it changes, from now to after (or, once owned, the value and what it was);
+- what it needs first, and whether it can be bought.
+
+Enter (D-pad up) on an upgrade's page buys it (`buy_upgrade`). The trade page counts the upgrades owned.
+
+A save stores the owned keys (`"upgrades"`), and loading applies them before it makes the ship. `--upgrade-check` buys four upgrades at Base, tries one before the upgrade it needs, and checks the ship's and the gun's parameters through a save and load.
 
 ## 6. Save and load
 
@@ -773,7 +748,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 1. **Resources.** Resource id in `resources.glsl`, a probe column, scatter rocks by resource with tints and specks, the value and density by resource. `--resource-check`.
 2. **Prices by resource.** `trade.py` supply by resource and demand, outposts' demand from their surroundings, the trade card per resource. `--trade-check`.
 3. **Hold limits.** `cargo_capacity` / `hold_m3`, the cargo net refusing what doesn't fit, running dry (the fuel call). `--cargo-check`, `--fuel-check`.
-4. **Upgrades.** Table, effective parameters, buying at outposts.
+4. **Upgrades.** Table, effective parameters, buying at outposts. `--upgrade-check`.
 5. **Save version 2.** New fields, the migration from version 1, autosave on landing. `--save-check`.
 6. **Day and night.** Moving sun, azimuth-only horizon rebuild, auto-exposure, stars, lights. `--day-check`.
 7. **Suit and temperature.** Local temperature, reserve, shelter, effects, recovery at an outpost.
