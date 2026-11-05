@@ -55,8 +55,8 @@ Saving (save.py): F5 or Save game writes the game to walker_save.json
 and walker_save.npz: the clock, the player, the crates and loose rocks,
 the rocks taken from the scatter, the credits and the outposts' supplies,
 the objectives and the game's numbers, the waypoint, the car (whether it
-is driven, its fuel and its cargo), the upgrades owned, the day's offset
-and the explored map. F9 or Load game puts it back; the player comes back LOAD_LIFT above
+is driven, its fuel and its cargo), the upgrades owned, the day's offset,
+the suit's reserve and health, and the explored map. F9 or Load game puts it back; the player comes back LOAD_LIFT above
 the ground where it stood once that ground is measured. With autosave on,
 the game is saved every AUTOSAVE_SECONDS of play, on getting out of the
 car parked on an outpost's pad, on Quit and as the window closes. The
@@ -90,6 +90,17 @@ upgrades owned give the effective car and gun parameters
 car made and every gun spawned after (OnFoot.gun_params); the save keeps
 them.
 
+The suit (suit.py): `here_temperature` is the air's temperature where the
+camera is (on the planet the climate under it, with its height, swinging
+with the local hour and chilled by the wind; on the moon by the sun or
+the shade). Each frame `update_suit` steps the suit's reserve and the
+player's health, sheltered in the car or on an outpost's pad (where the
+health also recovers). Low, the screen is tinted frost-blue or
+heat-orange and the walk slowed (`suit_effects`, `slow_down`); the card
+shows SUIT and TEMP. With the health gone the player comes to on the
+pad of the nearest outpost, charged RECOVERY_FEE, what the gun held
+dropped where it fell (`wake_at_outpost`). The save keeps the suit.
+
 The day (clock.py): the sun goes round with the world's clock plus the
 day's offset (`day_time`; START_HOUR in a new game, kept in the save),
 the exposure scaled for its elevation seen from the camera
@@ -121,7 +132,8 @@ Gamepad: left stick walk, right stick look, A jump and jet, left trigger
 grab, right trigger punt, the bumpers the hold distance.
 
     python walker.py
-    python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, sell ore,
+    python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, run the suit
+                                             out in the cold, sell ore,
                                              load the car's net and sell its cargo, buy upgrades,
                                              pause, save, change the game and load it, drive and fly
                                              the car, hover it on a lake and a river, run it dry and
@@ -143,8 +155,8 @@ from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.gravity_gun import GunParams
 from shoonyakasha.planet.ground_patch import GroundPatch, SIZE as PATCH_SIZE
 from shoonyakasha.planet.on_foot import JUMP_DISTANCE, STEP, OnFoot
-from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis, quat_normalize,
-                                     scale, sub)
+from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, local_frame, normalize, quat_from_basis,
+                                     quat_normalize, scale, sub)
 from shoonyakasha.planet import resources, rivers
 from shoonyakasha.planet.lakes import LakeSurvey
 from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL, SITE_BLEND_RADIUS
@@ -156,6 +168,7 @@ import config
 import hovercar
 import lamps
 import save
+import suit
 import outposts
 import trade
 import upgrades
@@ -238,6 +251,10 @@ NET_POST = (0.12, 1.0, 0.12)    # m
 NET_COLOUR = (1.0, 0.72, 0.3)
 NET_SETTLE = 3.0                # s --check lets the ore it drops into the net settle
 NET_CHECK_AWAY = 60.0           # m along its nose --check moves the car off Base's pad for the net
+SUIT_CHECK_TEMPERATURE = -60.0  # degrees C --check stands in for the air's while the suit drains
+SUIT_CHECK_RESERVE = 0.25       # the reserve --check leaves the suit with
+SUIT_CHECK_HEALTH = 0.3         # and the health
+SUIT_SECONDS = 30.0             # s --check waits at most for the suit to give out
 UPGRADE_CREDITS = 10_000.0      # credits --check is given to buy UPGRADE_BUYS
 UPGRADE_BUYS = ("tank_1", "hold_1", "gun_force_1")
 CHECK_NET_EXTENTS = ((0.35, 0.25, 0.35), (0.45, 0.3, 0.45))   # m: the ore rocks --check drops into the net
@@ -247,6 +264,7 @@ NIGHT_CHECK_HOUR = 0.5          # the hour --check sets at its end
 NIGHT_SECONDS = 1.0             # s --check waits at night
 CAR_HEADLIGHTS = ((-0.95, 0.0, -3.0), (0.95, 0.0, -3.0))   # m from the car's centre (right, up, back)
 CAR_HEADLIGHT_DIP = 4.0         # degrees below its nose
+RECOVERY_FEE = 250.0            # credits the outpost charges when the suit gave out (wake_at_outpost)
 
 HELP_COLUMNS = [
     [("On foot", [
@@ -285,7 +303,8 @@ HELP_COLUMNS = [
 
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
-                    help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, sell ore at Base, "
+                    help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, run the suit out in the cold, "
+                         "sell ore at Base, "
                          "load the car's net and sell its cargo, buy upgrades, pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
                          "run it dry and call fuel, then night; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
@@ -369,6 +388,10 @@ state = {
     "owned": set(),               # the keys of the upgrades bought (upgrades.py)
     "params": upgrades.effective({"car": hovercar.CarParams(), "gun": GunParams()}, set()),
     "upgrade_note": "",           # the last upgrade bought or refused, for the Upgrades tab
+    "suit": suit.SuitState(),     # the suit's reserve and the player's health (suit.py)
+    "suit_params": suit.SuitParams(),
+    "temperature": None,          # degrees C where the camera is, once known (here_temperature)
+    "woken": 0,                   # times the player woke at an outpost
 }
 
 
@@ -880,7 +903,7 @@ def maybe_spawn():
     else:
         foot.player.pitch = loading["pitch"]
         state["loading"] = None
-        state["hud"].toast("Game loaded", GOOD_TOAST)
+        state["hud"].toast(loading.get("toast", "Game loaded"), GOOD_TOAST)
         print("[walker] on foot where the save had the player", flush=True)
 
 
@@ -1012,7 +1035,7 @@ def update_hud(dt):
     height = world.height_above_ground(state["position"]) - player.eye_height
     extra = [((("pad:X",) if pad else ("F",)), "Get in")] if near_car() else []
     hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed, pad=pad, dt=dt,
-               height=height, extra_hints=extra, hour=hour_text())
+               height=height, extra_hints=extra, hour=hour_text(), tint=suit_effects()[0])
 
 
 def run_check(dt):
@@ -1025,7 +1048,14 @@ def run_check(dt):
     view turned to it and the grab held for GRAB_SECONDS; then a punt of
     it charged for CHARGE_SECONDS and let go; PUNT_SHOT_SECONDS later the
     full map open for MAP_SECONDS and a waypoint set on it by a click, and
-    the map shown half a second more; then the map closed and an ore rock
+    the map shown half a second more; then the map closed, the
+    temperature here taken, and with SUIT_CHECK_TEMPERATURE standing in for
+    it and no outpost counted, the suit left SUIT_CHECK_RESERVE and the
+    health SUIT_CHECK_HEALTH, waiting up to SUIT_SECONDS for the suit to
+    give out: passing when the temperature had been here_temperature's,
+    the card had its SUIT and TEMP rows, the suit ran low with the walk
+    slowed and a tint, and the player came to at Base charged
+    RECOVERY_FEE with the suit full; then an ore rock
     (CHECK_ORE_EXTENT, CHECK_ORE_GRADE) dropped 1 m above the Base pad,
     waiting up to SELL_SECONDS for it to sell and a second more; then the
     car moved NET_CHECK_AWAY along its nose off Base's pad (where ore at
@@ -1071,7 +1101,7 @@ def run_check(dt):
     settings are the defaults and are not written. With --shot,
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
-    (with _punt added), of the map (with _map added), after the sale (with
+    (with _punt added), of the map (with _map added), with the suit low (with _suit added), after the sale (with
     _sell added), of the Upgrades tab after buying (with _upgrades added), of the menu (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Settings tab
     (with _settings added), of its Controls tab (with _controls added),
     after the load (with _load added), a second
@@ -1192,10 +1222,54 @@ def run_check(dt):
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_map" + ext)
             state["map_view"].set_open(False)
-            _, up, _, _ = world.site_frame()
-            check["credits"] = state["market"].credits
-            check["ore"] = ore_rock(add(world.site_ground(), scale(up, 1.0)), CHECK_ORE_EXTENT, CHECK_ORE_GRADE)
-            check["stage"], check["time"] = "sell", 0.0
+            check["stage"], check["time"] = "suit", 0.0
+    elif stage == "suit":
+        if "suit" not in check:
+            here = here_temperature()
+            check["suit"] = {"temperature": state["temperature"], "here": here, "rows": [r[0] for r in suit_rows()],
+                             "credits": state["market"].credits, "woken": state["woken"],
+                             "functions": (here_temperature, at_outpost)}
+            globals()["here_temperature"] = lambda: SUIT_CHECK_TEMPERATURE
+            globals()["at_outpost"] = lambda: None
+            state["suit"].reserve, state["suit"].health = SUIT_CHECK_RESERVE, SUIT_CHECK_HEALTH
+            return
+        s = check["suit"]
+        if state["woken"] == s["woken"]:
+            if t > SUIT_SECONDS:
+                print("[walker] the suit did not give out in %.0f s at %.0f C: FAILED" % (t, SUIT_CHECK_TEMPERATURE),
+                      flush=True)
+                os._exit(1)
+            if "slow" not in s and state["suit"].reserve < suit.SLOW_BELOW and state["suit"].reserve > 0.0:
+                s["slow"] = suit_effects()
+            if args.shot and "shot" not in s and 0.0 < state["suit"].reserve < 0.1:
+                s["shot"] = True
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_suit" + ext)
+            return
+        globals()["here_temperature"], globals()["at_outpost"] = s["functions"]
+        if foot.player is None:
+            if t > SUIT_SECONDS + LOAD_SECONDS:
+                print("[walker] the player did not come to at an outpost: FAILED", flush=True)
+                os._exit(1)
+            return
+        outpost = at_outpost()
+        fee = s["credits"] - state["market"].credits
+        tint, factor = s.get("slow", (None, 1.0))
+        suit_ok = (s["temperature"] is not None and abs(s["temperature"] - s["here"]) < 1e-6
+                   and s["rows"] == ["Suit", "Temp"] and outpost is state["home"]
+                   and abs(fee - min(RECOVERY_FEE, s["credits"])) < 1e-6
+                   and state["suit"].reserve == state["suit_params"].reserve and state["suit"].health == 1.0
+                   and factor == suit.SLOW_FACTOR and tint is not None and tint[1] > 0.0)
+        print("[walker] %.1f C here; at %.0f C the suit ran low (the walk x%.1f, a tint of %.2f), gave out, and the "
+              "player came to at %s for %.0f cr, the suit full: %s"
+              % (s["here"] if s["here"] is not None else float("nan"), SUIT_CHECK_TEMPERATURE, factor,
+                 tint[1] if tint else 0.0, outpost.name if outpost is not None else "no outpost", fee,
+                 "passed" if suit_ok else "FAILED"), flush=True)
+        check["suit_ok"] = suit_ok
+        _, up, _, _ = world.site_frame()
+        check["credits"] = state["market"].credits
+        check["ore"] = ore_rock(add(world.site_ground(), scale(up, 1.0)), CHECK_ORE_EXTENT, CHECK_ORE_GRADE)
+        check["stage"], check["time"] = "sell", 0.0
     elif stage == "sell":
         sold = not any(prop is check["ore"] for prop in foot.props.rocks)
         if sold and "sold_at" not in check:
@@ -1355,7 +1429,8 @@ def run_check(dt):
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_load" + ext)
             check["ok"] = (check["walk_ok"] and check["capture_ok"] and check["held_ok"] and check["punt_ok"]
-                           and check["map_ok"] and check["sell_ok"] and check["pause_ok"] and load_ok)
+                           and check["map_ok"] and check["suit_ok"] and check["sell_ok"] and check["pause_ok"]
+                           and load_ok)
             check["in_car"] = enter_car(anywhere=True)
             check["top_speed"], check["top_height"] = 0.0, 0.0
             check["stage"], check["time"] = "drive", 0.0
@@ -1657,7 +1732,7 @@ def update_game():
     goal = objectives.current()
     header = "OBJECTIVE  %d / %d" % (min(objectives.index + 1, len(objectives.goals)), len(objectives.goals))
     rows = [("Credits", "%s cr" % format(int(round(state["market"].credits)), ",")),
-            ("Ore sold", "%s kg" % format(int(round(state["sold_kg"])), ","))]
+            ("Ore sold", "%s kg" % format(int(round(state["sold_kg"])), ","))] + suit_rows()
     if goal is not None:
         shown, target = objectives.progress(snapshot)
         fraction = None if target == 1 else shown / target
@@ -2134,6 +2209,7 @@ def save_game(base=None, quiet=False):
         "waypoint": None if waypoint is None else [waypoint[0].name, list(waypoint[1])],
         "day_offset": day_time() - world.time,
         "upgrades": sorted(state["owned"]),
+        "suit": {"reserve": state["suit"].reserve, "health": state["suit"].health},
     }
     data = save.write(base or save_base, data, state["map"].grids)
     state["last_save"] = data
@@ -2169,6 +2245,8 @@ def load_game(base=None):
     world.time = data["time"]
     state["day_offset"] = data.get("day_offset")
     state["fuel_call"] = None
+    record = data.get("suit") or {}
+    state["suit"] = suit.SuitState(record.get("reserve", 1.0), record.get("health", 1.0))
     taken = world.taken_rocks
     taken.clear()
     for key in data["taken"]:
@@ -2301,6 +2379,7 @@ def frame(dt):
         read_car_controls()
     elif foot.player is not None and not paused and not state["map_view"].open:
         foot.read_controls(engine.input)
+        slow_down()
         ignore_held_buttons()
         read_bumpers()
         read_pad_enter()
@@ -2341,6 +2420,7 @@ def frame(dt):
     place_ship(camera)
     place_viewmodel(dt, camera)
     update_fuel_call()
+    update_suit(dt)
     update_hud(dt)
     update_map(dt)
     update_game()
@@ -2362,6 +2442,92 @@ def day_time():
 def hour_text():
     hour = clock.hour(day_time())
     return "%02d:%02d" % (int(hour) % 24, int(hour * 60.0) % 60)
+
+
+def here_temperature():
+    """The air's temperature (degrees C) where the camera is: on the planet
+    suit.local_temperature of the climate under it (with its height) at
+    the local hour and the clouds' wind; on the moon suit.moon_temperature
+    of the sun's elevation there; None while the ground is not known."""
+    camera = state["position"]
+    body = world.body_under(camera)
+    radial = normalize(body.relative(camera))
+    if body is not planet:
+        return suit.moon_temperature(dot(world.sun_direction(), radial))
+    climate = world.ground_climate
+    if climate is None:
+        return None
+    _, up, east, north = world.site_frame()
+    hour = clock.local_hour(radial, day_time(), up, east, north)
+    return suit.local_temperature(climate[0], climate[1], hour, world.wind_speed)
+
+
+def update_suit(dt):
+    """The suit stepped by `dt` seconds (suit.step_suit) at the temperature
+    here, sheltered in the car or on an outpost's pad; with its health
+    out, the player wakes at the nearest outpost (`wake_at_outpost`)."""
+    if foot.player is None and not state["driving"]:
+        return
+    temperature = here_temperature()
+    state["temperature"] = temperature
+    if temperature is None:
+        return
+    outpost = None if state["driving"] else at_outpost()
+    sheltered = state["driving"] or outpost is not None
+    if suit.step_suit(state["suit"], state["suit_params"], temperature, sheltered, outpost is not None, dt):
+        wake_at_outpost()
+
+
+def wake_at_outpost():
+    """The player, its health gone, woken on the pad of the outpost
+    nearest it on its body for RECOVERY_FEE (as far as the credits go):
+    what the gun held dropped where it fell, the suit full again; it comes
+    back once the ground there is known (maybe_spawn)."""
+    feet = foot.bubble.to_world(foot.player.feet())
+    body = foot.bubble.body
+    outpost = outposts.nearest([o for o in state["outposts"] if o.body is body], feet)
+    if outpost is None:
+        return
+    fee = min(RECOVERY_FEE, state["market"].credits)
+    state["market"].credits -= fee
+    foot.drop_bubble()
+    up = normalize(sub(outpost.point(), body.centre()))
+    state["position"] = add(outpost.point(), scale(up, 2.0))
+    state["forward"] = local_frame(up)[1]
+    state["loading"] = {"on": body.name, "pitch": 0.0,
+                        "toast": "You came to at %s; the outpost's medics charged %s cr"
+                                 % (outpost.name, format(int(round(fee)), ","))}
+    world.ground = None
+    state["suit"] = suit.SuitState()
+    state["woken"] += 1
+    print("[walker] the suit gave out; woke at %s for %.0f cr" % (outpost.name, fee), flush=True)
+
+
+def suit_effects():
+    """suit.effects at the temperature here: (the tint, the movement's factor); none while it is not known."""
+    if state["temperature"] is None:
+        return None, 1.0
+    return suit.effects(state["suit"], state["suit_params"], state["temperature"])
+
+
+def slow_down():
+    """The walk scaled by the suit's movement factor, no running below it."""
+    factor = suit_effects()[1]
+    if factor < 1.0:
+        controls = foot.controls
+        controls.forward *= factor
+        controls.strafe *= factor
+        controls.run = False
+
+
+def suit_rows():
+    """The objective card's rows of the suit and the temperature here."""
+    s, temperature = state["suit"], state["temperature"]
+    rows = [("Suit", "%d %%" % round(100.0 * s.reserve / state["suit_params"].reserve)
+             + ("" if s.health >= 0.995 else ", health %d %%" % round(100.0 * s.health)))]
+    if temperature is not None:
+        rows.append(("Temp", "%.0f C" % temperature))
+    return rows
 
 
 def update_lights(camera):

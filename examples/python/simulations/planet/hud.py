@@ -38,6 +38,9 @@ the HUD's scale (`set_scale`).
   a segmented bar of it, in WARNING below LOW_FUEL, shown while the fuel
   is not full and for FUEL_LINGER seconds after it fills, fading over the
   last FUEL_FADE.
+- **Tint** under everything else, when given: a colour over the whole
+  screen at TINT_CENTRE of its alpha and bands TINT_EDGE of the height
+  along the edges at its full alpha, fading inwards (the walker's suit).
 - **Readout** at the bottom right: a panel with the speed along the
   ground, the body's name and the hour when given, and, off the ground,
   the height of the feet above it.
@@ -91,6 +94,7 @@ BAR_SEGMENTS = 20
 FUEL_PANEL = (230.0, 52.0)
 FUEL_SEGMENTS = 24
 LOW_FUEL = 0.25
+TINT_CENTRE, TINT_EDGE = 0.35, 0.22   # the suit's tint: its share of alpha all over, its edge bands' width
 FUEL_LINGER, FUEL_FADE = 1.5, 0.5     # s
 READOUT_PANEL = (250.0, 66.0)
 MAX_TOASTS = 3
@@ -369,6 +373,23 @@ class Hud:
                       [with_alpha(colour, fade)] * 4)
             layer.text(text, (x + 22.0, y), TOAST_SIZE, with_alpha(colour, fade))
 
+    def draw_tint(self, tint, width, height):
+        """`tint` ((r, g, b), alpha) over the screen: TINT_CENTRE of the
+        alpha all over and the full alpha in bands TINT_EDGE of the height
+        along the edges, fading inwards."""
+        if tint is None or tint[1] <= 0.0:
+            return
+        colour, alpha = tint
+        mesh = self.layer.mesh
+        mesh.polygon([(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)], colour + (alpha * TINT_CENTRE,))
+        e = TINT_EDGE * height
+        outer, inner = colour + (alpha,), colour + (0.0,)
+        for a, b, c, d in (((0.0, 0.0), (width, 0.0), (width - e, e), (e, e)),
+                           ((width, 0.0), (width, height), (width - e, height - e), (width - e, e)),
+                           ((width, height), (0.0, height), (e, height - e), (width - e, height - e)),
+                           ((0.0, height), (0.0, 0.0), (e, e), (e, height - e))):
+            mesh.face([a, b, c, d], [outer, outer, inner, inner])
+
     def draw_fuel(self, fuel, dt, height, label="JET", always=False):
         if fuel < 0.999 or always:
             self.fuel_shown = FUEL_LINGER
@@ -418,7 +439,7 @@ class Hud:
         scifi.caps(self.layer, shown, x + 16.0, y + 0.5 * HINT_BAR_HEIGHT)
 
     def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0, height=None, extra_hints=(),
-               drive=None, hour=None, car_fuel=None):
+               drive=None, hour=None, car_fuel=None, tint=None):
         """One frame: `view` (right, up, forward) of the camera, `eye` from
         the planet's centre, `body` the world body under it, `player` the
         character, `gun` its gravity gun, `targets` the compass markers
@@ -431,11 +452,13 @@ class Hud:
         the driving hints (`drive_hints`), and the readout in km/h with the
         height always. `hour`, a text, shows after the body's name on the
         readout; `car_fuel` (its tank's share) while driving, in the jet
-        fuel's place, labelled FUEL and always shown."""
+        fuel's place, labelled FUEL and always shown; `tint` ((r, g, b),
+        alpha) over the screen, under the rest (`draw_tint`)."""
         width, height_px = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height_px <= 0:
             return
         self.layer.begin()
+        self.draw_tint(tint, width, height_px)
         cx, cy = 0.5 * width, 0.5 * height_px
         right, up_view, forward = view
         centre = body.centre()

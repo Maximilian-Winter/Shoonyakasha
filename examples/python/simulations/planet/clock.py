@@ -10,8 +10,9 @@ sun in planet space, for the site's frame: noon at the site at time 0
 west, at most 90 - AXIS_TILT degrees up at the site. `site_angles` gives a
 direction's elevation and azimuth seen from the site, as
 PlanetWorld.sun_elevation and sun_azimuth take them. `hour(time)` is the
-site's hour (0 to 24, noon at 12) and `time_of(hour, now)` the time
-nearest `now` at which the site has that hour.
+site's hour (0 to 24, noon at 12), `local_hour(direction, time, ...)` the
+hour anywhere on the planet, and `time_of(hour, now)` the time nearest
+`now` at which the site has that hour.
 
 `exposure_scale(elevation)` is the exposure's factor with the sun at
 `elevation` (degrees) seen from the camera: 1 at DAY_ELEVATION and above,
@@ -22,7 +23,7 @@ exposure there; `unset_sun(world)` leaves its exposure unscaled.
 
 import math
 
-from shoonyakasha.planet.vec import add, dot, normalize, rotate, scale, sub
+from shoonyakasha.planet.vec import add, cross, dot, length, normalize, rotate, scale, sub
 
 DAY_LENGTH = 40 * 60.0           # s of the world's clock
 AXIS_TILT = math.radians(18.0)
@@ -46,6 +47,20 @@ def site_angles(direction, up, east, north):
 
 def hour(time):
     return (12.0 + 24.0 * time / DAY_LENGTH) % 24.0
+
+
+def local_hour(direction, time, up, east, north):
+    """The hour (0 to 24, noon at 12) at the unit `direction` from the
+    planet's centre at `time`, for the site's frame: how far the sun has
+    turned about the axis past that place's noon."""
+    axis = normalize(add(scale(north, math.cos(AXIS_TILT)), scale(up, math.sin(AXIS_TILT))))
+    sun = sun_direction(time, up, east, north)
+    a = sub(direction, scale(axis, dot(direction, axis)))
+    s = sub(sun, scale(axis, dot(sun, axis)))
+    if length(a) < 1e-9 or length(s) < 1e-9:
+        return hour(time)
+    angle = math.atan2(dot(cross(a, s), axis), dot(a, s))
+    return (12.0 - 24.0 * angle / (2.0 * math.pi)) % 24.0
 
 
 def time_of(hour_wanted, now):

@@ -56,6 +56,14 @@ class Sun(unittest.TestCase):
         self.assertAlmostEqual(clock.hour(later), 20.0)
         self.assertLessEqual(abs(later - now), DAY / 2.0)
 
+    def test_local_hours(self):
+        for time in (0.0, 0.1 * DAY, -0.3 * DAY, 0.45 * DAY):
+            self.assertAlmostEqual(clock.local_hour(UP, time, UP, EAST, NORTH), clock.hour(time), places=6)
+        # A quarter turn east about the axis is six hours later.
+        axis = (0.0, math.cos(clock.AXIS_TILT), math.sin(clock.AXIS_TILT))
+        east_of_site = clock.rotate(UP, axis, math.pi / 2.0)
+        self.assertAlmostEqual(clock.local_hour(east_of_site, 0.0, UP, EAST, NORTH), 18.0, places=6)
+
     def test_exposure_from_day_to_night(self):
         self.assertEqual(clock.exposure_scale(30.0), 1.0)
         self.assertAlmostEqual(clock.exposure_scale(clock.NIGHT_ELEVATION - 5.0), clock.NIGHT_SCALE)

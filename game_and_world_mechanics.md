@@ -430,48 +430,58 @@ If the stale azimuths ever show far from the viewpoint, store the horizon for se
 
 ### 8.1 Local temperature
 
+The suit is the walker's (`walker.py`); its rules are plain Python in `suit.py`.
+
 ```python
-def local_temperature(climate_T, moisture, hour, wind_speed):
-    # Daily swing: large in dry places, small in wet ones
-    swing = 4.0 + 14.0 * (1.0 - clamp(moisture, 0.0, 1.0))
-    diurnal = swing * math.cos(2.0 * math.pi * (hour - 15.0) / 24.0)   # warmest mid-afternoon
-    chill = 0.0 if climate_T > 10.0 else 0.4 * wind_speed               # wind chill when cold
-    return climate_T + diurnal - chill
+def local_temperature(temperature, moisture, hour, wind_speed):
+    dry = 1.0 - max(0.0, min(1.0, moisture))
+    swing = SWING_WET + SWING_DRY * dry                                   # 4 + 14 x dryness
+    diurnal = swing * math.cos(2.0 * math.pi * (hour - WARMEST_HOUR) / 24.0)   # warmest at 15:00
+    chill = WIND_CHILL * wind_speed if temperature < CHILL_BELOW else 0.0     # 0.4 per m/s below 10 C
+    return temperature + diurnal - chill
 ```
 
-`climate_T` and `moisture` come from the probe under the player (`PlanetWorld.ground_climate()`). It includes the lapse rate with height. The walker HUD shows the result next to speed: `TEMP −14 °C`.
+- **Inputs:** `walker.here_temperature` feeds it the climate under the camera (`PlanetWorld.ground_climate`, with the lapse rate for height), the local hour where the camera is (`clock.local_hour`) and the clouds' wind (`PlanetWorld.wind_speed`).
+- **The moon** (`moon_temperature`): no air, so −150 °C in the shade, rising to +90 °C as the sun's sine of elevation rises to 0.2.
+- **Display:** the objective card shows TEMP.
 
 ### 8.2 Suit reserve
 
 ```python
 @dataclass
 class SuitParams:
-    cold_limit: float = -5.0       # °C: below, the suit spends reserve
+    cold_limit: float = -5.0             # degrees C: below, the suit spends its reserve
     hot_limit: float = 38.0
-    reserve: float = 1.0           # capacity (upgrades multiply)
-    drain_per_degree: float = 0.0008   # reserve per second per degree beyond the limit
-    recharge: float = 0.05         # per second when sheltered
+    reserve: float = 1.0                 # its capacity
+    drain: float = 0.0008                # reserve a second per degree beyond the limits
+    recharge: float = 0.05               # reserve a second, sheltered
+    heal: float = 0.02                   # health a second at an outpost
 
-@dataclass
-class SuitState:
-    reserve: float = 1.0
-    health: float = 1.0
-
-def step_suit(state, params, temperature, sheltered, dt):
+def step_suit(state, params, temperature, sheltered, at_outpost, dt):
     if sheltered:
         state.reserve = min(params.reserve, state.reserve + params.recharge * dt)
-        return
-    beyond = max(0.0, params.cold_limit - temperature, temperature - params.hot_limit)
-    state.reserve -= beyond * params.drain_per_degree * dt
+        if at_outpost:
+            state.health = min(1.0, state.health + params.heal * dt)
+        return False
+    state.reserve -= beyond(params, temperature) * params.drain * dt
     if state.reserve < 0.0:
-        state.health -= -state.reserve * 0.5     # health drains from the deficit
+        state.health = max(0.0, state.health + HEALTH_DRAIN * state.reserve)   # half the deficit
         state.reserve = 0.0
+    return state.health <= 0.0
 ```
 
-- **Sheltered** means inside the ship or the car, within an outpost's pad reach, or near a deployable heater (a buyable prop the gun can carry).
-- **Effects** as reserve runs out: a frost or heat-haze vignette, breathing sound, and slower movement below 20 %.
-- **Zero health:** you wake up at the nearest outpost (`outposts.nearest`) and pay a credit fee. Loose cargo carried by the gun is dropped where you fell.
-- **The moon:** no air, so the temperature is sun-or-shade (e.g. +90 °C in sun, −150 °C in shade). Until the suit is upgraded, its limits keep moon walks short.
+- **Sheltered:** in the car, or on an outpost's pad (`walker.at_outpost`). Health recovers only on a pad.
+- **Effects** (`suit.effects`, the walker's HUD tint):
+  - below half the reserve, a frost-blue (or heat-orange) tint grows from the screen's edges, up to 0.35 alpha;
+  - below a fifth, the walk slows to 0.6 and there is no running;
+  - the card shows SUIT, with the health once it is below full.
+- **Zero health** (`wake_at_outpost`): the player comes to on the pad of the nearest outpost on its body (`outposts.nearest`), charged `RECOVERY_FEE` (250 cr, as far as the credits go). What the gun held stays where the player fell, and the suit is full again.
+- **Saving:** the save keeps the reserve and the health.
+- **Not built:**
+  - a deployable heater (a buyable prop the gun can carry) as shelter;
+  - breathing sounds;
+  - the suit's upgrades (Thermal liner, Heat exchanger), which need additive effects in `upgrades.py`;
+  - getting to the moon, which the walker has no way to do yet.
 
 ## 9. Points of interest
 
@@ -769,7 +779,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 5. **Save version 2.** New fields, the migration from version 1, autosave on landing. `--save-check`.
 6. **Day and night.** Moving sun, azimuth-only horizon rebuild, exposure by the sun's elevation, stars. `--day-check`.
    6b. **Lights.** Headlights, a suit lamp and outpost lights, with a forward light loop in `terrain.frag`, `vegetation.frag` and `scene.frag`. Capture shots `lights_*`.
-7. **Suit and temperature.** Local temperature, reserve, shelter, effects, recovery at an outpost.
+7. **Suit and temperature** (`walker.py`). Local temperature, reserve, shelter, effects, recovery at an outpost. Milestones 1–6b's features came to `walker.py` first: day and night and the lights, the car's fuel and fuel call, its hold and cargo net with an Outpost tab, the upgrades, and save version 2.
 8. **Points of interest.** Hash placement, kinds, discovery, salvage parts, survey data.
 9. **Contracts.** Generation, states, objective card integration, fragile crates, reputation.
 10. **Meteor showers.** Modifier list, crater invalidation, meteor visuals, meteorites. `--crater-check`.
