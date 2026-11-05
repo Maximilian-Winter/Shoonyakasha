@@ -64,16 +64,18 @@ Everything time-based (prices recovering, contracts expiring, day and night, eve
 | id | Resource | Where (planet) | Where (moon) | Rock tint | Speck colour | Base value (cr/kg at grade 1) |
 |---|---|---|---|---|---|---|
 | 0 | none | | | | | |
-| 1 | Ferrite | mountain bands | | rust brown | orange | 6 |
-| 2 | Cuprite | steppe, savanna, dry hills | | grey-green | green | 9 |
-| 3 | Quartz | tundra, snow line, high cold rock | | pale grey | white-blue | 14 |
-| 4 | Amber | tropical and deciduous forest floor | | dark brown | gold | 18 |
-| 5 | Evaporite (salts) | dry ground near sea level | | off-white | pink | 5 |
-| 6 | Ice | | ore craters towards the poles | blue-grey | pale blue | 4 (fuel feedstock) |
-| 7 | Ilmenite | | ore craters elsewhere | near black | silver | 30 |
+| 1 | Ferrite | the mountains, where no other resource wins | | rust brown | orange | 6 |
+| 2 | Cuprite | dry, temperate ground (about 3 to 24 °C) | | grey-green | green | 9 |
+| 3 | Quartz | cold ground (below about 2 °C) | | pale grey | white-blue | 14 |
+| 4 | Amber | warm, wet ground (above about 10 °C, moisture above 0.5) | | dark brown | gold | 18 |
+| 5 | Evaporite (salts) | warm, dry ground (above about 12 °C, moisture below 0.4) | | off-white | pink | 5 |
+| 6 | Ice | | ore craters whose centre lies towards the poles | blue-grey | pale blue | 4 (fuel feedstock) |
+| 7 | Ilmenite | | the other ore craters | near black | silver | 30 |
 | 8 | Iridium | meteorites only (§11) | meteorites only | black, glassy | violet | 120 |
 
-Ids stay below 16 so they pack into 4 bits of the scatter instance and of `NearbyTree`.
+§1.2 gives the exact rules for where each resource lies. Ids 0 to 7 are in `resources.glsl` and `python/shoonyakasha/planet/resources.py`. The scatter stores a rock's id in bits 16 and up of its `NearbyTrees` entry and in the whole-number part of its instance tint.
+
+The rock tints and speck colours of ids 0 to 7 are in `ore_colours.glsl` (`ORE_TINTS`, `ORE_SPECKS`), and in `rocks.ORE_TINTS` and `rocks.SPECK_COLOURS` in `python/shoonyakasha/planet/rocks.py`. An ore rock's colour is turned from the body's rock colour towards its tint by `ORE_TINT_SHARE` (0.35) times 1 + its grade. Id 0's entries are the colours an ore rock without a resource gets.
 
 Today one ore price applies to every rock: `trade.ORE_PRICE` (2 cr/kg at grade 1) times the grade. The values above replace it.
 
@@ -83,73 +85,82 @@ Today one ore price applies to every rock: `trade.ORE_PRICE` (2 cr/kg at grade 1
 class Resource:
     id: int
     name: str
-    tint: tuple            # multiplies rock_colour
-    speck: tuple           # emissive colour
+    tint: tuple            # rocks.ORE_TINTS[id]
+    speck: tuple           # rocks.SPECK_COLOURS[id]
     value: float           # credits per kg at grade 1
     density: float         # kg/m^3 of the rock
 
 RESOURCES = {r.id: r for r in [
-    Resource(1, "Ferrite",    (0.75, 0.48, 0.34), (1.00, 0.55, 0.20),   6.0, 3_400.0),
-    Resource(2, "Cuprite",    (0.62, 0.70, 0.60), (0.35, 1.00, 0.55),   9.0, 3_000.0),
-    Resource(3, "Quartz",     (0.86, 0.88, 0.92), (0.65, 0.85, 1.00),  14.0, 2_650.0),
-    Resource(4, "Amber",      (0.45, 0.30, 0.18), (1.00, 0.75, 0.25),  18.0, 1_100.0),
-    Resource(5, "Evaporite",  (0.92, 0.88, 0.84), (1.00, 0.60, 0.75),   5.0, 2_200.0),
-    Resource(6, "Ice",        (0.70, 0.78, 0.86), (0.70, 0.90, 1.00),   4.0,   920.0),
-    Resource(7, "Ilmenite",   (0.22, 0.22, 0.24), (0.80, 0.85, 0.90),  30.0, 4_700.0),
+    Resource(1, "Ferrite",    (0.46, 0.25, 0.13), (1.00, 0.50, 0.20),   6.0, 3_400.0),
+    Resource(2, "Cuprite",    (0.30, 0.42, 0.33), (0.35, 1.00, 0.55),   9.0, 3_000.0),
+    Resource(3, "Quartz",     (0.78, 0.80, 0.84), (0.65, 0.85, 1.00),  14.0, 2_650.0),
+    Resource(4, "Amber",      (0.36, 0.22, 0.10), (1.00, 0.78, 0.28),  18.0, 1_100.0),
+    Resource(5, "Evaporite",  (0.85, 0.80, 0.76), (1.00, 0.60, 0.75),   5.0, 2_200.0),
+    Resource(6, "Ice",        (0.62, 0.72, 0.82), (0.70, 0.90, 1.00),   4.0,   920.0),
+    Resource(7, "Ilmenite",   (0.07, 0.07, 0.08), (0.80, 0.85, 0.90),  30.0, 4_700.0),
     Resource(8, "Iridium",    (0.10, 0.09, 0.12), (0.70, 0.40, 1.00), 120.0, 8_000.0),
 ]}
 ```
+
+Iridium's tint and speck colour are not yet in `ore_colours.glsl` or `rocks.py`. Both lookups clamp the id to the last entry, so id 8 would get ilmenite's colours until §11 adds it.
 
 `python/shoonyakasha/planet/rocks.py` has one `DENSITY` for every rock today. With `density` per resource, `Rocks.grabbable` and the loose rocks' masses take the resource's.
 
 ### 1.2 The resource field on the GPU
 
-`resources.glsl` today gives one richness, 0 to 1:
+`resources.glsl` gives one richness, 0 to 1, which is the grade:
 - `planetOre(dir, height)`: veins (ridged noise, about 450 m across) times patches (fBm, about 1.7 km across) times `0.4 + 0.6 · terrainMountainMask(dir)`, and 0 below sea level.
-- `moonOre(dir)`: the largest `MOON_ORE_OCTAVES` crater sizes. Each crater has a hashed mineral value, and craters above `MOON_ORE_LOW` hold ore over their floor and rim.
+- `moonOre(dir)`: the largest `MOON_ORE_OCTAVES` crater sizes. Each crater has a hashed mineral value, and craters above `MOON_ORE_LOW` hold ore over their floor and rim. `moonOreCrater(dir, out crater)` gives the same richness and the unit direction of the richest crater's centre (`dir` where there is none).
 
-The richness stays the grade. A second function picks the resource id from climate and terrain inputs that `climate.glsl` and `terrain.glsl` already provide.
+Where the richness is above 0, a resource id goes with it. The ids and constants are in `resources.glsl`, and `python/shoonyakasha/planet/resources.py` has the same ones.
 
-GLSL's `smoothstep` is undefined when `edge0 >= edge1`, so every falling edge below is written as `1 − smoothstep(low, high, x)`.
+On the planet, `planetResource(dir, temperature, moisture)` takes the base climate (`climateAt`, without the settings' offsets) and `terrainMountainMask(dir)`. Each of the five planet resources gets a weight. GLSL's `smoothstep` is undefined when `edge0 >= edge1`, so falling edges use `resourceFalling(low, high, x) = 1 − smoothstep(low, high, x)`.
 
 ```glsl
-// resources.glsl (addition)
-float falling(float low, float high, float x) { return 1.0 - smoothstep(low, high, x); }
+// resources.glsl
+const int PLANET_RESOURCES = 5;              // ferrite to evaporite
+const float RESOURCE_WAVELENGTH = 0.11;      // of a unit of direction: about 11 km on the planet
+const float RESOURCE_NOISE = 0.6;
 
-uint planetResource(vec3 dir, float height, float temperature, float moisture) {
-    float mountains = terrainMountainMask(dir);
-    float w[6];
-    w[0] = 0.0;
-    w[1] = smoothstep(0.4, 0.8, mountains);                                       // ferrite
-    w[2] = falling(0.25, 0.55, moisture) * smoothstep(5.0, 15.0, temperature)
-         * falling(0.3, 0.6, mountains);                                          // cuprite
-    w[3] = falling(-4.0, 2.0, temperature);                                       // quartz
-    w[4] = smoothstep(0.55, 0.8, moisture) * smoothstep(12.0, 22.0, temperature); // amber
-    w[5] = falling(0.1, 0.25, moisture) * falling(50.0, 400.0, height);           // evaporite
+void planetResourceWeights(float temperature, float moisture, float mountains, out float w[PLANET_RESOURCES]) {
+    w[0] = 0.55 * smoothstep(0.3, 0.9, mountains);                                        // ferrite
+    w[1] = resourceFalling(0.3, 0.5, moisture) * smoothstep(3.0, 12.0, temperature)
+         * resourceFalling(16.0, 24.0, temperature);                                      // cuprite
+    w[2] = resourceFalling(-4.0, 2.0, temperature);                                       // quartz
+    w[3] = smoothstep(0.5, 0.75, moisture) * smoothstep(10.0, 20.0, temperature);         // amber
+    w[4] = resourceFalling(0.25, 0.4, moisture) * smoothstep(12.0, 20.0, temperature);    // evaporite
+}
 
-    // A low-frequency noise per resource breaks up uniform regions
-    vec3 p = dir + terrain.seed.xyz;
-    uint best = 0u; float bestW = 0.15;
-    for (uint k = 1u; k <= 5u; ++k) {
-        float wk = w[k] * (0.6 + 0.8 * fbm3(p * 9.0 + vec3(float(k) * 17.3), 3, 2.0, 0.5));
-        if (wk > bestW) { bestW = wk; best = k; }
+float planetResourceNoise(vec3 dir, int k) {
+    vec3 p = (dir + terrain.seed.xyz) / RESOURCE_WAVELENGTH + vec3(float(k) * 17.3, float(k) * 5.9, 2.7);
+    return fbm3(p, 3, 2.0, 0.5);
+}
+
+// The resource of the highest weight times 1 + RESOURCE_NOISE times its noise; ferrite where they tie.
+uint planetResourcePick(float w[PLANET_RESOURCES], float noise[PLANET_RESOURCES]) {
+    uint best = RESOURCE_FERRITE;
+    float bestWeight = w[0] * (1.0 + RESOURCE_NOISE * noise[0]);
+    for (int k = 1; k < PLANET_RESOURCES; ++k) {
+        float weight = w[k] * (1.0 + RESOURCE_NOISE * noise[k]);
+        if (weight > bestWeight) {
+            bestWeight = weight;
+            best = RESOURCE_FERRITE + uint(k);
+        }
     }
     return best;
 }
-
-// The moon: an ore crater's resource from a further hash of the crater, ice
-// above ICE_LATITUDE (sine of latitude), ilmenite elsewhere.
-const float ICE_LATITUDE = 0.55;
 ```
 
-On the moon, the loop in `moonOre` that finds the richest crater also returns that crater's hash. The resource is ice (6) where `abs(dot(dir, moonPole)) > ICE_LATITUDE`, otherwise ilmenite (7). `moon.glsl` has no maria, so latitude is what separates the two.
+So ferrite is the default in the mountains. Quartz is the cold ore, amber the warm and wet, evaporite the warm and dry, and cuprite the dry and temperate. Ore lies mostly in the mountains, and with the default terrain the planet's ore is about 42 % ferrite, 20 % quartz, 17 % cuprite, 15 % amber and 6 % evaporite.
+
+On the moon, `moonResource(dir)` is ice (6) where the richest crater's centre has `abs(crater.y) > MOON_ICE_LATITUDE` (0.55), otherwise ilmenite (7). The whole crater has one resource. With the default moon the ore is about 48 % ice and 52 % ilmenite.
 
 Plumbing:
-- **Probes:** the world's probe results carry the richness in column 4 (`PlanetWorld.ground_ore`, `extra_ores`). The resource id needs one more column.
-- **Scatter:** `vegetation_scatter.comp` makes rocks ore above `ORE_ROCKS` (0.3) and colours them towards `ORE_TINT`. It also stores the resource id, and the tint becomes the resource's `tint`.
-- **`NearbyTree` / `StaticRock`:** both have `grade`; add `resource: int` beside it. `rock_colour(body, grade=0.0)` in `python/shoonyakasha/planet/rocks.py` becomes `rock_colour(body, resource, grade)`. The example `rocks.py` has one `SPECK_COLOUR`; it becomes the resource's `speck`, as an emissive colour per entity on one speck mesh per kind.
-- **Breaking:** only ore boulders split (`Rocks.breaks`, `Rocks.split`). The chunks take the boulder's `resource` as they take its grade.
-- **Test:** `tests/python/test_planet_resources.py` checks the richness on the GPU over 50,000 random directions. Extend it to compare the resource ids against the NumPy mirror in `resources.py` over a grid of climate inputs.
+- **Probes:** `chunk_build.comp` writes each probe's resources as (richness, resource id, 0, 0). `PlanetWorld` has the richness in `ground_ore` / `extra_ores` and the id in `ground_resource` / `extra_resources`.
+- **Scatter:** `vegetation_scatter.comp` makes rocks ore above `ORE_ROCKS` (0.3). `rockResource` gives an ore rock its resource from the candidate's base climate, as the probes do. `packedRockColour` turns its colour towards the resource's tint in `ore_colours.glsl` (`oreTint`). The resource id is in bits 16 and up of word 5 of the rock's `NearbyTrees` entry, and in the whole-number part of the instance's tint (`vegetationPackTint`, read back with `vegetationTint` and `vegetationResource`). `vegetation.frag` draws an ore rock's specks in `oreSpeckColour` of its resource.
+- **Python:** `NearbyTree.resource`, `StaticRock.resource` and `Prop.resource` hold the id. `rocks.ORE_TINTS` and `rocks.SPECK_COLOURS` are the tables of `ore_colours.glsl`. `rock_colour(body, grade=0.0, resource=FERRITE)` gives a rock's colour, and `speck_colour(resource)` its specks'. The example `rocks.py` makes each ore rock's specks an emissive entity in `speck_colour(resource)` times `SPECK_GLOW`. A prop's saved record keeps its `resource`, and a record without one loads as ferrite when its grade is above 0.
+- **Breaking:** only ore boulders split (`Rocks.breaks`, `Rocks.split`). The chunks take the boulder's resource along with its grade.
+- **Test:** `tests/python/test_planet_resources.py` runs the shader over 50,000 random directions, and the GPU's planet resources must agree with `resources.planet_pick` on more than 99.9 % of the ore points. Each of ferrite to evaporite must be more than 5 % of the ore, with ferrite the most common, quartz colder than amber, amber wetter than the ore's mean and evaporite drier. The moon's resources must be `resources.moon_resource` of their crater's latitude, with ice and ilmenite each more than 5 %. The ids and constants must match the shader's.
 
 ### 1.3 What a rock is worth
 
