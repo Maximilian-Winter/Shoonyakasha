@@ -61,9 +61,15 @@ terrain (PlanetWorld.set_sites) with a pad. When the planet is built
 again its outposts are looked for again. The ship burns fuel and weighs
 its fuel and cargo (flight.py). Loose ore rocks lying in the cargo net
 beside the landed ship (NET_CENTRE, NET_HALF) are loaded into its cargo
-when the player boards or the ship takes off. Landed on an outpost's pad,
-Enter sells the cargo and Space fills the tanks as far as the credits go
-(trade.py), shown on the outpost's card.
+when the player boards or the ship takes off, each that fits in the hold
+(flight.Ship.can_take); the rest stay in the net. Landed on an outpost's
+pad, Enter sells the cargo and Space fills the tanks as far as the
+credits go (trade.py), shown on the outpost's card. Landed elsewhere, or
+on a closed orbit with the periapsis above CALL_ORBIT_FLOOR, Space calls for fuel
+from the nearest outpost on the body (trade.fuel_call), paid and put in
+the tanks when it arrives if the ship is still in orbit or within
+CALL_REACH of where it called from; its card shows below CALL_SHOWN of
+the tanks and while the fuel is on its way.
 
 The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
@@ -109,6 +115,7 @@ Keys:
     U                      the model's cabin / the generated cockpit
     M                      the right display: ORBIT / SCAN (ore scanning)
     Enter / Space          landed on an outpost's pad: sell the cargo / fill the tanks
+    Space                  landed elsewhere or in orbit: call for fuel
     , / .                  time warp down / up (1x to 16x)
   ship, gamepad (adding to the keys):
     left stick             pitch and roll
@@ -119,7 +126,8 @@ Keys:
     bumpers                time warp down / up
     Y / Start / Back       free camera or on foot / settings menu / the controls
     D-pad up / down        landed on an outpost's pad: sell the cargo / fill the tanks
-    X                      chase view / cockpit; in a landed ship, out of it
+    D-pad down             landed elsewhere or in orbit: call for fuel
+    X                    chase view / cockpit; in a landed ship, out of it
   anywhere:
     1 - 5                  5 m above the blocks, 1 km, 50 km, 1,000 km, 5,000 km
     6                      above the corner where the +X, +Y and +Z faces meet
@@ -168,7 +176,8 @@ Keys:
     python planet.py --save-check      move rocks, throw a crate, save, build a new planet, load, check what came back
     python planet.py --scan-check      scan for ore from orbit of the planet and the moon, check the contacts' rocks
     python planet.py --break-check     throw a crate into an ore boulder on the planet and the moon, check it splits
-    python planet.py --fuel-check      burn the tanks dry from orbit, check the burn's time and the speed gained
+    python planet.py --fuel-check      burn the tanks dry from orbit, check the burn's time and the speed gained,
+                                       then call for fuel in orbit
     python planet.py --cargo-check     put ore rocks in the cargo net, board and take off, check what was loaded
     python planet.py --trade-check     land on an outpost on the planet and on the moon, sell ore and buy fuel
 """
@@ -245,7 +254,7 @@ THROTTLE_RATE = 0.5              # throttle per second while W or S is held
 MOUSE_STICK = 0.04               # stick per pixel of mouse movement
 # Gamepad buttons and the keys they press: A assist, B throttle to 0, the bumpers time warp,
 # Y ship or free camera, X chase view, Start the menu, Back the controls sheet, the D-pad up and down
-# sell the cargo and fill the tanks at an outpost.
+# sell the cargo and fill the tanks at an outpost (down calls for fuel elsewhere).
 GAMEPAD_KEYS = {keys.GAMEPAD_A: keys.L, keys.GAMEPAD_B: keys.BACKSPACE, keys.GAMEPAD_LEFT_BUMPER: keys.COMMA,
                 keys.GAMEPAD_RIGHT_BUMPER: keys.PERIOD, keys.GAMEPAD_Y: keys.TAB, keys.GAMEPAD_START: keys.F1,
                 keys.GAMEPAD_X: keys.R, keys.GAMEPAD_BACK: keys.F2, keys.GAMEPAD_DPAD_UP: keys.ENTER,
@@ -262,6 +271,12 @@ CRATE_AHEAD = 3.0                # m in front of the view a crate is dropped
 STACK_COUNT = 10
 JUMP_DISTANCE = 50.0             # m the viewpoint may move in a frame and still count as moving, not jumping
 ORE_HUD_HEIGHT = 5_000.0         # m above the ground below which the HUD marks the nearest ore contact
+# Calling for fuel (trade.fuel_call): offered on the card below CALL_SHOWN of the tanks, in orbit where
+# the periapsis is above CALL_ORBIT_FLOOR of the body; a landed ship must stay within CALL_REACH of
+# where it called from.
+CALL_SHOWN = 0.25
+CALL_ORBIT_FLOOR = {"planet": 25_000.0, "moon": 5_000.0}    # m
+CALL_REACH = 50.0                # m
 # The cargo net beside the landed ship: its centre in the ship's body (right, up, back; up at the
 # gear's feet), its half sizes along right and back, and how far below and above the gear's feet
 # a loose ore rock's centre may be in it.
@@ -318,7 +333,8 @@ parser.add_argument("--scan-check", action="store_true",
 parser.add_argument("--break-check", action="store_true",
                     help="throw a crate into an ore boulder on the planet and the moon, check it splits, and exit")
 parser.add_argument("--fuel-check", action="store_true",
-                    help="burn the tanks dry from orbit, check the fuel's time and the speed gained, and exit")
+                    help="burn the tanks dry from orbit, check the fuel's time and the speed gained, call for fuel "
+                         "in orbit, and exit")
 parser.add_argument("--cargo-check", action="store_true",
                     help="put ore rocks in the cargo net, board and take off, check what was loaded, and exit")
 parser.add_argument("--trade-check", action="store_true",
@@ -410,7 +426,8 @@ state = {
     "trade_note": "",            # the last sale, purchase or load, for the cards
     "net_posts": [],             # the cargo net's corner posts
     "was_landed": False,         # the ship was landed (ship_landed) in the last frame in ship mode
-    "trade_card": None,          # the outpost's card (toolkit.overlay.Card)
+    "trade_card": None,          # the outpost's card, or the fuel call's (toolkit.overlay.Card)
+    "fuel_call": None,           # the fuel on its way (call_fuel), or None
     "play_start": False,         # --play: the ship and the player still to be put at Base
 }
 foot = OnFoot(engine, world, box(), make_rocks=lambda props: Rocks(engine, world, props))
@@ -1235,6 +1252,110 @@ def buy_fuel():
                            else "no credits for fuel")
 
 
+def call_place(ship):
+    """(the body, whether in orbit) of a ship fuel can be called to: landed
+    off every outpost's pad, or on a closed orbit with its periapsis above
+    CALL_ORBIT_FLOOR; else None."""
+    if ship is None or ship.crashed:
+        return None
+    if ship_landed(ship):
+        if any(o.at(ship.position) for o in state["outposts"]):
+            return None
+        return world.body_under(ship.position), False
+    name, periapsis, apoapsis, _ = ship_orbit()
+    if periapsis < CALL_ORBIT_FLOOR[name] or math.isinf(apoapsis):
+        return None
+    return (planet if name == "planet" else moon_body()), True
+
+
+def fuel_call_offer():
+    """(the nearest outpost on the ship's body, metres along the ground to
+    it, whether in orbit) for a fuel call in ship mode (call_place), or None."""
+    ship = state["ship"]
+    place = call_place(ship) if state["mode"] == "ship" else None
+    if place is None:
+        return None
+    body, in_orbit = place
+    here = normalize(body.relative(ship.position))
+    found = [(o, outposts.ground_distance(body.radius, o.direction, here)) for o in state["outposts"] if o.body is body]
+    if not found:
+        return None
+    outpost, distance = min(found, key=lambda f: f[1])
+    return outpost, distance, in_orbit
+
+
+def call_fuel():
+    """Fuel called from the nearest outpost (fuel_call_offer,
+    trade.fuel_call), arriving after its delay; paid on arrival."""
+    ship = state["ship"]
+    if state["fuel_call"] is not None:
+        state["trade_note"] = "fuel is on its way"
+        return
+    offer = fuel_call_offer()
+    if offer is None:
+        return
+    if ship.fuel >= ship.params.fuel_capacity - 0.5:
+        state["trade_note"] = "the tanks are full"
+        return
+    outpost, distance, in_orbit = offer
+    price, fee, delay = trade.fuel_call(outpost, distance, in_orbit)
+    if state["market"].credits <= fee:
+        state["trade_note"] = "no credits for a fuel call"
+        return
+    body = outpost.body
+    state["fuel_call"] = {"ship": ship, "outpost": outpost, "price": price, "fee": fee, "due": world.time + delay,
+                          "in_orbit": in_orbit, "body": body, "spot": body.relative(ship.position)}
+    state["trade_note"] = "fuel called from %s, arriving in %.0f s" % (outpost.name, delay)
+
+
+def update_fuel_call():
+    """The called fuel delivered once it is due, if the ship is still in
+    orbit, or still landed within CALL_REACH of where it called from;
+    otherwise the call is off, unpaid."""
+    call = state["fuel_call"]
+    if call is None or world.time < call["due"]:
+        return
+    state["fuel_call"] = None
+    ship = call["ship"]
+    place = call_place(ship) if ship is state["ship"] else None
+    there = place is not None and place[1] == call["in_orbit"] and (
+        call["in_orbit"] or length(sub(call["body"].relative(ship.position), call["spot"])) <= CALL_REACH)
+    if not there:
+        state["trade_note"] = "the fuel call missed the ship"
+        return
+    kg, cost = state["market"].call_fuel(ship, call["price"], call["fee"])
+    state["trade_note"] = ("fuel delivered: %.0f kg for %s" % (kg, credits_text(cost)) if kg > 0.0
+                           else "no credits for the called fuel")
+
+
+def fuel_call_rows():
+    """The fuel call's card (title, rows): while fuel is on its way, or
+    where fuel can be called (fuel_call_offer) and the tanks are below
+    CALL_SHOWN of their capacity; else None."""
+    ship, market, call = state["ship"], state["market"], state["fuel_call"]
+    if ship is None:
+        return None
+    fuel = ("FUEL", "%.0f / %.0f kg" % (ship.fuel, ship.params.fuel_capacity))
+    if call is not None:
+        rows = [("CREDITS", credits_text(market.credits)), fuel,
+                ("ARRIVES IN", "%.0f s" % max(call["due"] - world.time, 0.0))]
+        return "FUEL CALL FROM %s" % call["outpost"].name.upper(), rows
+    offer = fuel_call_offer()
+    if offer is None or ship.fuel >= CALL_SHOWN * ship.params.fuel_capacity:
+        return None
+    outpost, distance, in_orbit = offer
+    price, fee, delay = trade.fuel_call(outpost, distance, in_orbit)
+    kg = max(min(ship.params.fuel_capacity - ship.fuel, (market.credits - fee) / price), 0.0)
+    rows = [("CREDITS", credits_text(market.credits)), fuel,
+            ("FROM", "%s, %s" % (outpost.name, distance_text(distance))),
+            ("PRICE", "%.2f cr/kg" % price), ("FEE", credits_text(fee)), ("ARRIVES IN", "%.0f s" % delay),
+            ("CALL FOR FUEL (%s)" % ("D-PAD DOWN" if state["input"] == "pad" else "SPACE"),
+             "%.0f kg, %s" % (kg, credits_text(fee + kg * price)) if kg > 0.0 else "no credits")]
+    if state["trade_note"]:
+        rows.append(("LAST", state["trade_note"]))
+    return "FUEL CALL", rows
+
+
 def mass_text(kg):
     return "%.0f kg" % kg if kg < 1_000.0 else "%.1f t" % (kg / 1_000.0)
 
@@ -1263,11 +1384,13 @@ def in_net(ship, point):
 def load_cargo():
     """The loose ore rocks lying in the cargo net beside the ship (in_net_now;
     on boarding, or as it takes off) taken out of the world into its
-    cargo, as far as its capacity goes; a rock's cell stays taken."""
+    cargo, each that fits in the hold (flight.Ship.can_take); a rock's cell
+    stays taken. Those that do not stay in the net."""
     ship, bubble = state["ship"], foot.bubble
-    loaded = []
+    loaded, left = [], 0
     for prop, point in in_net_now():
-        if ship.cargo_mass + prop.mass > ship.params.cargo_capacity:
+        if not ship.can_take(prop.mass, prop.resource):
+            left += 1
             continue
         body = prop.on
         ship.cargo.append({"body": body.name, "direction": normalize(body.relative(point)), "mass": prop.mass,
@@ -1276,9 +1399,10 @@ def load_cargo():
             foot.gun.drop()
         props.remove(bubble, prop, release=False)
         loaded.append(prop.mass)
-    if loaded:
-        state["trade_note"] = "loaded %d piece%s of ore, %s" % (len(loaded), "" if len(loaded) == 1 else "s",
-                                                                 mass_text(sum(loaded)))
+    if loaded or left:
+        state["trade_note"] = ("loaded %d piece%s of ore, %s" % (len(loaded), "" if len(loaded) == 1 else "s",
+                                                                  mass_text(sum(loaded)))
+                               + ("; %d left in the net, the hold is full" % left if left else ""))
 
 
 def in_net_now():
@@ -1297,12 +1421,25 @@ def in_net_now():
 
 
 def net_rows():
-    """The card's row of the ore in the cargo net beside the landed ship, which boarding loads."""
-    pieces = [prop for prop, _ in in_net_now()] if ship_landed(state["ship"]) else []
+    """The card's rows of the ore in the cargo net beside the landed ship,
+    which boarding loads, and of how many pieces of it will not fit in the
+    hold (taken in the order load_cargo takes them)."""
+    ship = state["ship"]
+    pieces = [prop for prop, _ in in_net_now()] if ship_landed(ship) else []
     if not pieces:
         return []
-    return [("CARGO NET", "%d piece%s, %s" % (len(pieces), "" if len(pieces) == 1 else "s",
+    rows = [("CARGO NET", "%d piece%s, %s" % (len(pieces), "" if len(pieces) == 1 else "s",
                                               mass_text(sum(p.mass for p in pieces))))]
+    trial = flight.Ship(ship.position, params=ship.params, cargo=list(ship.cargo))
+    left = 0
+    for p in pieces:
+        if trial.can_take(p.mass, p.resource):
+            trial.cargo.append({"mass": p.mass, "resource": p.resource})
+        else:
+            left += 1
+    if left:
+        rows.append(("WILL NOT FIT", "%d piece%s" % (left, "" if left == 1 else "s")))
+    return rows
 
 
 def build_net():
@@ -1354,7 +1491,9 @@ def trade_rows(outpost):
     room = ship.params.fuel_capacity - ship.fuel
     rows = [
         ("CREDITS", credits_text(market.credits)),
-        ("CARGO", "%s, %d piece%s" % (mass_text(ship.cargo_mass), len(ship.cargo), "" if len(ship.cargo) == 1 else "s")),
+        ("CARGO", "%s, %.1f / %.1f m3, %d piece%s" % (mass_text(ship.cargo_mass), ship.cargo_volume,
+                                                       ship.params.hold_m3, len(ship.cargo),
+                                                       "" if len(ship.cargo) == 1 else "s")),
         ("FUEL", "%.0f / %.0f kg" % (ship.fuel, ship.params.fuel_capacity)),
         ("PRICES",),
     ] + [("%s, GRADE 1" % resources.name(r).upper(), "%.2f cr/kg" % trade.price(outpost, sample(body, r), world.time))
@@ -1454,7 +1593,7 @@ def load_game(path=None):
     drop_bubble()
     props.clear(None)
     state.update(tracked=None, last_thrown=None, teleport_when_known=None, moon_landing=None, warp=0,
-                 accumulator=0.0)
+                 accumulator=0.0, fuel_call=None)
     world.time = data["time"]
     if data["terrain"] != planet.terrain:
         planet.terrain = {name: list(value) for name, value in data["terrain"].items()}
@@ -1541,6 +1680,7 @@ def frame(dt):
         world.time += dt * WARPS[state["warp"]]
         state["position"] = add(state["position"], sub(body.centre(), centre))
     follow_parked_ship()
+    update_fuel_call()
     if ship is not None and ship is state["ship"]:
         state["ship_poses"] = (before, (ship.position, ship.orientation))
     else:
@@ -1660,7 +1800,7 @@ def ship_readings():
         "fuel": ship.fuel,
         "fuel_capacity": ship.params.fuel_capacity,
         "delta_v": ship.delta_v(),
-        "cargo": mass_text(ship.cargo_mass) if ship.cargo else "empty",
+        "cargo": "%s, %.1f m3" % (mass_text(ship.cargo_mass), ship.cargo_volume) if ship.cargo else "empty",
         "cargo_value": (outpost.name if outpost is not None else "-", credits_text(value)),
     }
 
@@ -1743,10 +1883,13 @@ def update_cards():
     view_card, debug_card = state["cards"]
     trade_card = state["trade_card"]
     outpost = outpost_here()
+    call = fuel_call_rows() if outpost is None else None
     if outpost is not None and not state["help"].visible:
         trade_card.update("OUTPOST %s, THE %s" % (outpost.name.upper(), outpost.body.name.upper()),
                           trade_rows(outpost))
-    trade_card.show(outpost is not None and not state["help"].visible)
+    elif call is not None and not state["help"].visible:
+        trade_card.update(*call)
+    trade_card.show((outpost is not None or call is not None) and not state["help"].visible)
     if state["help"].visible:
         view_card.show(False)
         debug_card.show(False)
@@ -1906,6 +2049,8 @@ def current_hints():
                  else [(("8",), "New ship on the pad"), (("9",), "New ship in orbit")])
     elif ship_landed(state["ship"]):
         hints = [(("pad:X",) if pad else ("F",), "Get out")]
+        if outpost_here() is None and fuel_call_rows() is not None and state["fuel_call"] is None:
+            hints.append((("pad:D-pad down",) if pad else ("Space",), "Call for fuel"))
         if outpost_here() is not None:
             # On a pad: trading, and the controls to take off with.
             hints += [(("pad:D-pad up",) if pad else ("Enter",), "Sell the cargo"),
@@ -1956,6 +2101,7 @@ HELP_COLUMNS = [
         ((",", "."), "Time warp down / up"),
         (("F",), "Out, once landed"),
         (("Enter", "Space"), "At an outpost: sell the cargo / fill the tanks"),
+        (("Space",), "Elsewhere or in orbit: call for fuel"),
         (("Tab",), "Free camera"),
     ])],
     [("Ship, gamepad", [
@@ -2207,7 +2353,10 @@ def on_key(key, from_pad=False):
     elif key == keys.SPACE and state["mode"] == "foot":
         foot.controls.jump = True
     elif key == keys.SPACE and state["mode"] == "ship":
-        buy_fuel()
+        if outpost_here() is not None:
+            buy_fuel()
+        else:
+            call_fuel()
     elif key in (keys.ENTER, keys.KP_ENTER) and state["mode"] == "ship":
         sell_cargo()
     elif key == keys.R and state["mode"] != "foot":

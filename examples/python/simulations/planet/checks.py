@@ -21,6 +21,7 @@ from shoonyakasha.planet.character import MASS as PLAYER_MASS, RADIUS as PLAYER_
 from shoonyakasha.planet.nearby_trees import listed_keys
 from shoonyakasha.planet.on_foot import COLLIDER_RADIUS
 from shoonyakasha.planet.props import yaw_rotation
+from shoonyakasha.planet.resources import ICE
 from shoonyakasha.planet.rocks import ORE_ROCKS, rock_colour
 from shoonyakasha.planet.vec import (add, cross, dot, length, local_frame, normalize, quat_from_basis, quat_rotate,
                                      rotate, scale, sub)
@@ -2372,14 +2373,22 @@ class FuelCheck:
     ship's full and dry masses, isp_main g0 ln(m0 / m1), within
     DV_TOLERANCE; with the tanks empty the speed gained must stay below
     DRY_TOLERANCE, and the ship must still turn (its pitch rate above
-    TURN_RATE). Prints the figures and exits with status 0 when all hold,
-    1 otherwise."""
+    TURN_RATE). Then a new ship in preset 9's orbit with empty tanks and
+    CALL_CREDITS calls for fuel (Space), and
+    the time warp goes to WARP: within CALL_TIMEOUT the fuel must arrive,
+    the tanks holding what the credits left after the call's fee buy at
+    its price (at most their capacity) and the credits less that and the
+    fee. Prints the figures and exits with status 0 when all hold, 1
+    otherwise."""
 
     DV_TOLERANCE = 0.005                # of the rocket equation's
     DRY_TIME = 2.0                      # s
     DRY_TOLERANCE = 0.01                # m/s
     TURN_TIME = 1.0                     # s
     TURN_RATE = 0.3                     # rad/s
+    CALL_CREDITS = 10_000.0
+    WARP = 4                            # index into WARPS: 16x
+    CALL_TIMEOUT = 120.0                # s
 
     def __init__(self):
         self.stage = "start"
@@ -2424,6 +2433,21 @@ class FuelCheck:
             state["controls"] = flight.Controls(pitch=1.0, assist=False)
             self.stage, self.clock = "turn", 0.0
         elif self.stage == "turn" and self.clock >= self.TURN_TIME:
+            self.measure(ship)
+            teleport(9)
+            ship = state["ship"]
+            ship.fuel = 0.0
+            state["controls"] = flight.Controls(assist=False)
+            state["market"].credits = self.CALL_CREDITS
+            on_key(keys.SPACE)
+            self.call = state["fuel_call"]
+            if self.call is None:
+                self.finish(None)
+            else:
+                state["warp"] = self.WARP
+                self.stage, self.clock = "call", 0.0
+        elif self.stage == "call" and (state["fuel_call"] is None or self.clock >= self.CALL_TIMEOUT):
+            state["warp"] = 0
             self.finish(ship)
         return True
 
@@ -2436,7 +2460,8 @@ class FuelCheck:
         right = cross(forward, up)
         return quat_from_basis(right, up, scale(forward, -1.0))
 
-    def finish(self, ship):
+    def measure(self, ship):
+        """The burn's, the dry coast's and the turn's figures, printed; whether they hold."""
         p = ship.params
         flow = p.main_thrust / (p.isp_main * flight.G0)
         expected_time = p.fuel_capacity / flow
@@ -2454,7 +2479,28 @@ class FuelCheck:
               % (self.dry_gained, self.DRY_TIME, "ok" if dry_ok else "FAILED"), flush=True)
         print("[planet]   pitching up with no fuel: %.2f rad/s after %.0f s: %s"
               % (rate, self.TURN_TIME, "ok" if turn_ok else "FAILED"), flush=True)
-        ok = time_ok and dv_ok and dry_ok and turn_ok
+        self.flight_ok = time_ok and dv_ok and dry_ok and turn_ok
+
+    def finish(self, ship):
+        """The fuel call's figures printed (`ship` None when it could not be
+        called), and the check's result."""
+        call_ok = False
+        if ship is None:
+            print("[planet]   calling for fuel in orbit: NO CALL (%s)" % state["trade_note"], flush=True)
+        else:
+            call = self.call
+            kg = min(ship.params.fuel_capacity, (self.CALL_CREDITS - call["fee"]) / call["price"])
+            cost = call["fee"] + kg * call["price"]
+            delivered = state["fuel_call"] is None
+            call_ok = (delivered and abs(ship.fuel - kg) <= 1e-6
+                       and abs(state["market"].credits - (self.CALL_CREDITS - cost)) <= 1e-6)
+            print("[planet]   calling for fuel in orbit from %s: %.2f cr/kg and a %s fee, %s; %.0f kg in the tanks "
+                  "(expected %.0f), %s left (expected %s): %s"
+                  % (call["outpost"].name, call["price"], credits_text(call["fee"]),
+                     "delivered" if delivered else "NOT DELIVERED", ship.fuel, kg,
+                     credits_text(state["market"].credits), credits_text(self.CALL_CREDITS - cost),
+                     "ok" if call_ok else "FAILED"), flush=True)
+        ok = self.flight_ok and call_ok
         print("[planet]   %s" % ("passed" if ok else "FAILED"), flush=True)
         os._exit(0 if ok else 1)
 
@@ -2477,21 +2523,21 @@ def ore_rock(bubble, point, extent, grade):
 
 class CargoCheck:
     """--cargo-check: the ship at rest beside the blocks (preset 8) with
-    PRELOAD kg of ore already in its cargo, and the player out of it at its
-    boarding point. Loose ore rocks of GRADE are put LIFT above the ground:
-    one of each EXTENTS in the cargo net, one OUTSIDE metres beyond the
-    net's edge, and a crate in the net. Once they have rested SETTLE
-    seconds the player gets in (F). The rocks loaded must be gone from the
-    props and in the cargo with their masses and grade, never past its
-    capacity; a rock in the net left out must have been too heavy for what
-    was left; the rock outside and the crate must still be props; and the
+    PRELOAD kg of ice already in its cargo (most of the hold's volume), and
+    the player out of it at its boarding point. Loose ore rocks of GRADE
+    are put LIFT above the ground: one of each EXTENTS in the cargo net, one
+    OUTSIDE metres beyond the net's edge, and a crate in the net. Once they
+    have rested SETTLE seconds the player gets in (F). The rocks loaded
+    must be gone from the props and in the cargo with their masses and
+    grade, never past the hold's mass or volume; a rock in the net left
+    out must not fit in what was left (flight.Ship.can_take); the rock outside and the crate must still be props; and the
     ship's mass must have risen by what was loaded and its delta-v be
     isp_main g0 ln(m / (m - fuel)) for its new mass. Then one more ore rock
     is put in the net and the ship climbs with translation assist: once it
     is no longer landed that rock must be in the cargo. Prints what was
     loaded and exits with status 0 when all hold, 1 otherwise."""
 
-    PRELOAD = 7_000.0                   # kg
+    PRELOAD = 2_000.0                   # kg of ice
     GRADE = 0.7
     EXTENTS = ((0.35, 0.25, 0.35), (0.45, 0.3, 0.45), (0.6, 0.45, 0.6))   # m: about 250, 500 and 1,300 kg
     LIFT = 1.0                          # m
@@ -2537,7 +2583,8 @@ class CargoCheck:
         if self.clock < 1.0:
             return
         ship, bubble = state["ship"], foot.bubble
-        ship.cargo = [{"body": "planet", "direction": world.site_frame()[1], "mass": self.PRELOAD, "grade": 0.5}]
+        ship.cargo = [{"body": "planet", "direction": world.site_frame()[1], "mass": self.PRELOAD, "grade": 0.5,
+                       "resource": ICE}]
         self.inside = [ore_rock(bubble, self.net_point(-1.8 + 1.8 * k, -1.5 + 1.5 * k), extent, self.GRADE)
                        for k, extent in enumerate(self.EXTENTS)]
         self.outside = ore_rock(bubble, self.net_point(NET_HALF[0] + self.OUTSIDE, 0.0), self.EXTENTS[0], self.GRADE)
@@ -2561,20 +2608,22 @@ class CargoCheck:
         cargo = ship.cargo[1:]
         masses_ok = sorted(round(c["mass"], 3) for c in cargo) == sorted(round(p.mass, 3) for p in loaded)
         grades_ok = all(c["grade"] == self.GRADE for c in cargo)
-        capacity = ship.params.cargo_capacity
-        fits = ship.cargo_mass <= capacity + 1e-6
-        left_ok = all(p in in_net and ship.cargo_mass + p.mass > capacity for p in left)
+        capacity, volume = ship.params.cargo_capacity, ship.params.hold_m3
+        fits = ship.cargo_mass <= capacity + 1e-6 and ship.cargo_volume <= volume + 1e-9
+        left_ok = all(p in in_net and not ship.can_take(p.mass, p.resource) for p in left)
         kept = self.outside in props.rocks and self.crate in props.crates
         m = ship.mass()
         risen = abs(m - self.mass_before - sum(p.mass for p in loaded)) <= 1e-6
         dv_ok = abs(ship.delta_v() - ship.params.isp_main * flight.G0 * math.log(m / (m - ship.fuel))) <= 1e-6
         self.ok = loaded and masses_ok and grades_ok and fits and left_ok and kept and risen and dv_ok
-        self.lines.append("boarding loaded %d of %d rocks in the net (%s kg) onto %.0f kg: %s; %s; the cargo %.0f of "
-                          "%.0f kg; the rock outside and the crate %s; the ship's mass %s, its delta-v %.0f m/s %s"
+        self.lines.append("boarding loaded %d of %d rocks in the net (%s kg) onto %.0f kg of ice: %s; %s; the cargo "
+                          "%.0f of %.0f kg, %.2f of %.2f m3; the rock outside and the crate %s; the ship's mass %s, "
+                          "its delta-v %.0f m/s %s"
                           % (len(loaded), len(self.inside), ", ".join("%.0f" % p.mass for p in loaded),
                              self.PRELOAD, "masses and grades match" if masses_ok and grades_ok else "MISMATCH",
-                             ("left out %s kg, too heavy" % ", ".join("%.0f" % p.mass for p in left)) if left and left_ok
-                             else ("NOT ALL LOADED" if left else "none left out"), ship.cargo_mass, capacity,
+                             ("left out %s kg, not fitting" % ", ".join("%.0f" % p.mass for p in left))
+                             if left and left_ok else ("NOT ALL LOADED" if left else "none left out"),
+                             ship.cargo_mass, capacity, ship.cargo_volume, volume,
                              "kept" if kept else "NOT kept", "risen by it" if risen else "WRONG", ship.delta_v(),
                              "as the rocket equation" if dv_ok else "WRONG"))
         ship.cargo = ship.cargo[:1]

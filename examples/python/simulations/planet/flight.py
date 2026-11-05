@@ -14,6 +14,12 @@ falls off exponentially with height; and the thrusters. `Ship.step`
 advances it by one time step with semi-implicit Euler: the velocity
 first, then the position with the new velocity.
 
+The hold: `Ship.can_take` whether a rock fits, within
+ShipParams.cargo_capacity kilograms and hold_m3 of volume, each item
+filling its mass over its resource's density times PACKING
+(`load_volume`, `Ship.cargo_volume`; an item without a resource is
+ferrite).
+
 Mass: the ship's dry mass, its fuel and its cargo (`Ship.mass`); its
 inertia is ShipParams.inertia scaled by its mass over its mass full of
 fuel with no cargo. The thrusters burn fuel at their thrust over their
@@ -59,6 +65,8 @@ import math
 from dataclasses import dataclass, field
 
 from shoonyakasha.planet.orbits import Moon, Planet, circular_speed, orbit, orbit_path, reference  # noqa: F401
+from shoonyakasha.planet.resources import FERRITE
+from shoonyakasha.planet.rocks import density
 from shoonyakasha.planet.vec import (add, cross, dot, length, normalize, quat_conjugate, quat_multiply, quat_normalize,
                                      quat_rotate, scale, sub)
 
@@ -72,6 +80,7 @@ class ShipParams:
     isp_main: float = 450.0                             # s: the main engine's specific impulse
     isp_rcs: float = 250.0                              # s: the other thrusters'
     cargo_capacity: float = 8_000.0                     # kg
+    hold_m3: float = 4.0                                # m^3 of loose rock the hold takes
     inertia: tuple = (4e5, 5e5, 3e5)                    # kg m^2 about the body's X, Y, Z, full of fuel, no cargo
     main_thrust: float = 6e5                            # N, forward
     rcs_thrust: float = 1.5e5                           # N, along each other direction
@@ -97,6 +106,13 @@ class ShipParams:
 
 
 G0 = 9.80665                    # m/s^2: specific impulse's standard gravity
+PACKING = 1.6                   # a load of loose rock's volume over the rocks' own
+
+
+def load_volume(mass, resource):
+    """m^3 of the hold `mass` kg of rock of `resource` fills: its own volume
+    at its density (shoonyakasha.planet.rocks.density) times PACKING."""
+    return mass / density(resource) * PACKING
 CONTACT_ITERATIONS = 8
 CONTACT_STIFFNESS = 0.2         # share of a point's depth pushed out per step
 CONTACT_SLOP = 0.01             # m of depth left alone
@@ -137,6 +153,18 @@ class Ship:
     @property
     def cargo_mass(self):
         return sum(item["mass"] for item in self.cargo)
+
+    @property
+    def cargo_volume(self):
+        """m^3 of the hold the cargo fills (load_volume)."""
+        return sum(load_volume(item["mass"], item.get("resource", FERRITE)) for item in self.cargo)
+
+    def can_take(self, mass, resource):
+        """Whether a rock of `mass` kg and `resource` fits in the hold: within
+        params.cargo_capacity and params.hold_m3."""
+        p = self.params
+        return (self.cargo_mass + mass <= p.cargo_capacity
+                and self.cargo_volume + load_volume(mass, resource) <= p.hold_m3)
 
     def mass(self):
         """Dry mass, fuel and cargo (kg)."""

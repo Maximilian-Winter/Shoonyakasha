@@ -6,7 +6,9 @@ the other body; its
 supply lowers its price and falls back with time; a load sold at once
 fetches what its pieces sold one after another do; a sale and a purchase
 of fuel move the credits, the cargo, the fuel and the supply as they
-should; and the market's record restores it.
+should; a fuel call is priced by its factor, fee and delay and pays its
+fee only with fuel, as far as the credits go; and the market's record
+restores it.
 
     python -m unittest discover -s tests/python
 """
@@ -134,6 +136,30 @@ class MarketTest(unittest.TestCase):
         kg, cost = market.buy_fuel(ship, outpost)
         self.assertEqual((kg, cost, ship.fuel), (4_000.0, 12_000.0, 6_000.0))
         self.assertEqual(market.buy_fuel(ship, outpost), (0.0, 0.0))
+
+    def test_a_fuel_call_costs_more_and_pays_its_fee_only_with_fuel(self):
+        outpost = Outpost(PLANET, fuel_price=1.0)
+        price, fee, delay = trade.fuel_call(outpost, 30_000.0, False)
+        self.assertEqual(price, trade.CALL_FACTOR)
+        self.assertAlmostEqual(fee, trade.CALL_FEE + 30.0 * trade.CALL_FEE_PER_KM)
+        self.assertAlmostEqual(delay, trade.CALL_DELAY + 30_000.0 / trade.CALL_SPEED)
+        self.assertEqual(trade.fuel_call(outpost, 30_000.0, True)[0], trade.CALL_ORBIT_FACTOR)
+        # As far as the credits go after the fee.
+        market = trade.Market(credits=1_000.0)
+        ship = Ship(fuel=0.0)
+        kg, cost = market.call_fuel(ship, price, fee)
+        self.assertAlmostEqual(kg, (1_000.0 - fee) / price)
+        self.assertAlmostEqual((cost, market.credits), (1_000.0, 0.0))
+        self.assertAlmostEqual(ship.fuel, kg)
+        # No fuel when the credits do not cover the fee, and then no fee.
+        market.credits = fee - 1.0
+        self.assertEqual(market.call_fuel(ship, price, fee), (0.0, 0.0))
+        self.assertEqual(market.credits, fee - 1.0)
+        # At most what fills the tanks.
+        market.credits = 1e6
+        ship.fuel = 5_500.0
+        self.assertEqual(market.call_fuel(ship, price, fee), (500.0, fee + 500.0 * price))
+        self.assertEqual(ship.fuel, 6_000.0)
 
     def test_record_restores(self):
         a, b = Outpost(PLANET), Outpost(MOON)

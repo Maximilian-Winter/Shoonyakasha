@@ -1,5 +1,6 @@
 """Tests for the planet example's flight model
-(examples/python/simulations/planet/flight.py), loaded from its file.
+(examples/python/simulations/planet/flight.py), loaded from its file,
+and its hold's limits by mass and volume.
 
     python -m unittest discover -s tests/python
 """
@@ -9,6 +10,8 @@ import math
 import unittest
 from pathlib import Path
 
+from shoonyakasha.planet import rocks
+from shoonyakasha.planet.resources import AMBER, FERRITE, ICE
 from shoonyakasha.planet.vec import quat_from_basis, quat_multiply, quat_rotate
 
 REPO = Path(__file__).resolve().parents[2]
@@ -659,6 +662,23 @@ class Fuel(unittest.TestCase):
             self.assertAlmostEqual(got, base * share)
         m = ship.mass()
         self.assertAlmostEqual(ship.delta_v(), p.isp_main * flight.G0 * math.log(m / (m - ship.fuel)))
+
+    def test_the_hold_takes_rocks_within_its_mass_and_volume(self):
+        ship = level_ship(0.0, flight.Planet())
+        p = ship.params
+        # Its volume: the mass over the resource's density times PACKING; an item without one is ferrite.
+        self.assertAlmostEqual(flight.load_volume(1_000.0, ICE), 1_000.0 / rocks.density(ICE) * flight.PACKING)
+        ship.cargo = [{"mass": 1_000.0, "resource": AMBER}, {"mass": 3_400.0}]
+        self.assertAlmostEqual(ship.cargo_volume, flight.load_volume(1_000.0, AMBER) + flight.load_volume(3_400.0, FERRITE))
+        # Ferrite fills the hold by its mass, ice by its volume.
+        ship.cargo = [{"mass": p.cargo_capacity - 100.0, "resource": FERRITE}]
+        self.assertTrue(ship.can_take(100.0, FERRITE))
+        self.assertFalse(ship.can_take(101.0, FERRITE))
+        ship.cargo = []
+        ice = p.hold_m3 / flight.PACKING * rocks.density(ICE)
+        self.assertLess(ice, p.cargo_capacity)
+        self.assertTrue(ship.can_take(ice - 1.0, ICE))
+        self.assertFalse(ship.can_take(ice + 1.0, ICE))
 
 
 if __name__ == "__main__":

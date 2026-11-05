@@ -19,10 +19,14 @@ supply as it rises: base SUPPLY_HALF ln((1 + (s + m) / SUPPLY_HALF) /
 (1 + s / SUPPLY_HALF)), so a load sold at once fetches what its pieces
 sold one after another do.
 
-Fuel costs the outpost's `fuel_price` per kilogram. `Market` holds the
+Fuel costs the outpost's `fuel_price` per kilogram. Away from an
+outpost fuel can be called from the nearest (`fuel_call`): at its price
+times CALL_FACTOR on the ground or CALL_ORBIT_FACTOR in orbit, for a fee
+of CALL_FEE plus CALL_FEE_PER_KM per km along the ground, arriving
+CALL_DELAY plus the distance at CALL_SPEED later. `Market` holds the
 credits, sells a ship's cargo (`sell`), fills its tanks as far as the
-credits go (`buy_fuel`), and gives and takes its state as a record for a
-save file.
+credits go (`buy_fuel`, and `call_fuel` for called fuel with its fee),
+and gives and takes its state as a record for a save file.
 """
 
 import math
@@ -38,6 +42,15 @@ DISTANCE_PREMIUM = 0.5           # added to 1 per 100 km along the ground from w
 SUPPLY_HALF = 4_000.0            # kg of a body's ore bought that halves an outpost's price for it
 SUPPLY_RECOVERY = 900.0          # s: the supply's time constant falling back to 0
 START_CREDITS = 2_000.0
+# Fuel called away from an outpost: the nearest outpost's fuel price times CALL_FACTOR on the ground
+# (CALL_ORBIT_FACTOR in orbit), a fee of CALL_FEE plus CALL_FEE_PER_KM per km along the ground from it,
+# and arriving CALL_DELAY plus the distance at CALL_SPEED later.
+CALL_FACTOR = 3.0
+CALL_ORBIT_FACTOR = 6.0
+CALL_FEE = 200.0                 # credits
+CALL_FEE_PER_KM = 2.0            # credits
+CALL_DELAY = 20.0                # s
+CALL_SPEED = 400.0               # m/s
 
 
 def ground_distance(radius, a, b):
@@ -80,6 +93,15 @@ def sale(outpost, items, time):
     return credits, {body: (kg, time) for body, kg in supplies.items()}
 
 
+def fuel_call(outpost, distance, in_orbit):
+    """A fuel call from `outpost` `distance` metres along the ground away,
+    to a ship in orbit or not: (credits per kg, the fee, seconds until it
+    arrives)."""
+    factor = CALL_ORBIT_FACTOR if in_orbit else CALL_FACTOR
+    return (outpost.fuel_price * factor, CALL_FEE + CALL_FEE_PER_KM * distance / 1_000.0,
+            CALL_DELAY + distance / CALL_SPEED)
+
+
 class Market:
     def __init__(self, credits=START_CREDITS):
         self.credits = credits
@@ -106,6 +128,19 @@ class Market:
         room = ship.params.fuel_capacity - ship.fuel
         kg = max(min(room, self.credits / outpost.fuel_price), 0.0)
         cost = kg * outpost.fuel_price
+        ship.fuel += kg
+        self.credits -= cost
+        return kg, cost
+
+    def call_fuel(self, ship, price, fee):
+        """Called fuel delivered: the ship's tanks filled at `price` per kg as
+        far as the credits left after `fee` go, the fee paid only when some
+        fuel comes. Returns (kg delivered, credits paid)."""
+        room = ship.params.fuel_capacity - ship.fuel
+        kg = max(min(room, (self.credits - fee) / price), 0.0)
+        if kg <= 0.0:
+            return 0.0, 0.0
+        cost = fee + kg * price
         ship.fuel += kg
         self.credits -= cost
         return kg, cost

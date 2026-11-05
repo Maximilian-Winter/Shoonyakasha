@@ -170,32 +170,33 @@ So high grades pay more than linearly: grade 0.5 pays 35 % of grade 1. An item w
 
 ### 2.1 Items and the hold
 
-`Ship.cargo` (`flight.py`) is a list of dicts with `"body"`, `"direction"` (where the ore was mined), `"mass"` and `"grade"`. `Ship.cargo_mass` sums them, and `Ship.mass()` adds the cargo to the dry mass and fuel. The walker's items for `trade.sale` have the same keys (`objectives.sale_items`).
+`Ship.cargo` (`flight.py`) is a list of dicts with `"body"`, `"direction"` (where the ore was mined), `"mass"`, `"grade"` and `"resource"`. `Ship.cargo_mass` sums the masses, and `Ship.mass()` adds the cargo to the dry mass and fuel. The walker's items for `trade.sale` have the same keys (`objectives.sale_items`). Items are one per rock, and each knows the body and place it was mined at, which `trade.base_price` uses.
 
-Additions:
-- Add `"resource"` to each item. `trade.sale` reads it (§3.2).
-- Give the hold limits. Today the cargo has none:
+The hold has two limits: `ShipParams.cargo_capacity` (8,000 kg) and `ShipParams.hold_m3` (4 m³):
 
 ```python
-# ShipParams additions
-hold_kg: float = 4_000.0
-hold_m3: float = 3.0
-PACKING = 1.6                       # volume of loose rock over its solid volume
+# flight.py
+PACKING = 1.6                   # a load of loose rock's volume over the rocks' own
 
-def hold_volume(cargo):
-    return sum(item["mass"] / RESOURCES[item["resource"]].density * PACKING for item in cargo)
+def load_volume(mass, resource):
+    return mass / density(resource) * PACKING           # shoonyakasha.planet.rocks.density
 
-def can_take(ship, mass, resource):
-    p = ship.params
-    return (ship.cargo_mass + mass <= p.hold_kg and
-            hold_volume(ship.cargo) + mass / RESOURCES[resource].density * PACKING <= p.hold_m3)
+class Ship:
+    @property
+    def cargo_volume(self):
+        return sum(load_volume(item["mass"], item.get("resource", FERRITE)) for item in self.cargo)
+
+    def can_take(self, mass, resource):
+        p = self.params
+        return (self.cargo_mass + mass <= p.cargo_capacity
+                and self.cargo_volume + load_volume(mass, resource) <= p.hold_m3)
 ```
 
-Items stay one per rock, as they are today. Each still knows the body and place it was mined at, which `trade.base_price` uses.
+Ferrite, cuprite and ilmenite fill the hold by their mass. Quartz (about 6.6 t), evaporite (5.5 t), amber (2.75 t) and ice (2.3 t) fill it by their volume.
 
 ### 2.2 Loading
 
-- **`planet.py`:** loose ore rocks in the cargo net beside the landed ship (`NET_CENTRE`, `NET_HALF`, with corner posts) are loaded when the player boards or the ship takes off. `--cargo-check` covers it. With limits, rocks that `can_take` refuses stay in the net and show a toast. Plain rocks (grade 0) are never loaded.
+- **`planet.py`:** loose ore rocks in the cargo net beside the landed ship (`NET_CENTRE`, `NET_HALF`, with corner posts) are loaded when the player boards or the ship takes off. Rocks that `Ship.can_take` refuses stay in the net. The card's LAST note then says how many were left, and on foot a WILL NOT FIT row counts them before boarding. Plain rocks (grade 0) are never loaded. The trade card shows the cargo's mass, its volume out of the hold's and its pieces, and the left display its mass and volume. `--cargo-check` preloads 2 t of ice, so its largest rock is left out by volume.
 - **`walker.py`:** there is no hold. Ore is sold where it comes to rest on a pad (`objectives.sale_items`, `REST_SPEED` 0.5 m/s). The hover car gets a hold only if the walker should carry ore between outposts.
 
 ## 3. Outposts and prices
@@ -260,8 +261,15 @@ Extend it to list the cargo by resource, with the price of the first kg (`trade.
 
 With the defaults, Δv is ≈ 1,570 m/s with an empty hold and ≈ 1,270 m/s with 4 t of ore. Orbit at 40 km takes ~600 m/s plus losses. The transfer to the moon takes 162 m/s (`test_planet_flight.py`), and the moon landing ≈ 200 m/s.
 
+**Running dry** (`trade.fuel_call`, `Market.call_fuel`, `call_fuel` in `planet.py`): landed off every pad, or on a closed orbit with the periapsis above `CALL_ORBIT_FLOOR` (25 km on the planet, 5 km on the moon), Space (D-pad down) calls for fuel from the nearest outpost on the body.
+- **Price:** its fuel price times `CALL_FACTOR` (3) on the ground or `CALL_ORBIT_FACTOR` (6) in orbit, plus a fee of `CALL_FEE` (200 cr) and `CALL_FEE_PER_KM` (2 cr) per km along the ground.
+- **Arrival:** after `CALL_DELAY` (20 s) plus the distance at `CALL_SPEED` (400 m/s), on the world's clock.
+- **Delivery:** it fills the tanks as far as the credits left after the fee go, and the fee is paid only if some fuel comes. A ship that has left orbit, or moved more than `CALL_REACH` (50 m) from where it called, misses it and pays nothing.
+- **Card:** a card offers the call below `CALL_SHOWN` (a quarter) of the tanks, and counts down while the fuel is on its way.
+- **No visuals:** nothing flies in.
+- **Check:** `--fuel-check` ends with a call in orbit.
+
 Remaining:
-- **Running dry:** a "call for fuel" option at a steep price on the ground (a fuel drone flies in from the nearest outpost and lands next to the ship), and steeper in orbit.
 - **The walker's hover car:** `hovercar.Car` has no fuel or mass. Fuel for it would be an `isp`-like burn on its `THRUST` and lift.
 
 ## 5. Upgrades
@@ -285,7 +293,7 @@ UPGRADES = [
     Upgrade("gun_charge_1", "Capacitor bank", 1, 2_500, {"coil": 1}, ("gun_force_1",),
             {"gun.charged_speed": 1.4}),
     Upgrade("hold_1", "Cargo racks", 1, 2_000, {}, (),
-            {"ship.hold_kg": 1.5, "ship.hold_m3": 1.5}),
+            {"ship.cargo_capacity": 1.5, "ship.hold_m3": 1.5}),
     Upgrade("tank_1", "Auxiliary tank", 1, 3_000, {}, (),
             {"ship.fuel_capacity": 1.5, "ship.dry_mass": 1.05}),
     Upgrade("engine_1", "Main engine tuning", 2, 6_000, {"injector": 2}, ("tank_1",),
@@ -305,7 +313,7 @@ UPGRADES = [
 
 The groups map onto existing parameters as follows:
 - `gun`: `gravity_gun.GunParams` (`hold_force`, `pull_range`, `charged_speed`).
-- `ship`: `flight.ShipParams`, with `hold_kg` and `hold_m3` from §2.1.
+- `ship`: `flight.ShipParams`, with `cargo_capacity` and `hold_m3` from §2.1.
 - `suit`: `SuitParams` (§8.2).
 - `scanner`: needs a parameter object. The scanner's reach is set by the module constants `AHEAD`, `STEP` and `STRIP` in `scanner.py` today.
 - `jet`: needs a parameter object. Jet fuel is `Character.jet_fuel` (0 to 1), drained by the module constant `JET_BURN` in `character.py`.
@@ -764,7 +772,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 
 1. **Resources.** Resource id in `resources.glsl`, a probe column, scatter rocks by resource with tints and specks, the value and density by resource. `--resource-check`.
 2. **Prices by resource.** `trade.py` supply by resource and demand, outposts' demand from their surroundings, the trade card per resource. `--trade-check`.
-3. **Hold limits.** `hold_kg` / `hold_m3`, the cargo net refusing what doesn't fit, running dry. `--cargo-check`, `--fuel-check`.
+3. **Hold limits.** `cargo_capacity` / `hold_m3`, the cargo net refusing what doesn't fit, running dry (the fuel call). `--cargo-check`, `--fuel-check`.
 4. **Upgrades.** Table, effective parameters, buying at outposts.
 5. **Save version 2.** New fields, the migration from version 1, autosave on landing. `--save-check`.
 6. **Day and night.** Moving sun, azimuth-only horizon rebuild, auto-exposure, stars, lights. `--day-check`.
