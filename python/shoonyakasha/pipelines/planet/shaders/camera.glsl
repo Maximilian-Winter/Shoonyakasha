@@ -52,6 +52,10 @@ layout(set = CAMERA_SET, binding = 2) uniform AtmosphereParams {
     vec4 sun;
     vec4 ozone;
     vec4 settings;
+    vec4 lightCount;            // x: the local lights in use (lights.glsl)
+    vec4 lightPosition[8];      // xyz: relative to the camera (m); w: range (m)
+    vec4 lightDirection[8];     // xyz: a spot's unit direction, 0 for a point light; w: its cone's outer cosine
+    vec4 lightColour[8];        // rgb: illuminance at 1 m, times the sun's units; w: the cone's inner cosine
 } atmosphere;
 
 // The atmosphere's lookup tables (atmosphere.glsl), built each frame by the

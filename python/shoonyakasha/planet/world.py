@@ -170,6 +170,8 @@ SITE_FLAT_RADIUS = 150.0         # metres of flat pad around the site
 SITE_BLEND_RADIUS = 600.0        # metres from the site where the terrain is its own again
 MAX_SITES = 8                    # flat sites (Site) besides the site's pad; matches TerrainParams' sites
 MAX_LAKES = 32                   # lakes (Lake); matches TerrainParams' lakes
+MAX_LIGHTS = 8                   # local lights drawn (Light); matches lights.glsl and AtmosphereParams
+LIGHT_VIEW_REACH = 2_000.0       # m beyond its range from the camera a light is still drawn
 HEIGHT_GRID_POINTS = 512 * 512  # points the HeightGrid pass measures at most; matches its dispatch
 HEIGHT_GRID_HEADER = 4          # values before the first height in HeightGrid
 LAKE_WOBBLE_REACH = 1.2          # a lake's shore lies within its radius times 1 +- this times its wobble; lakes.glsl
@@ -316,6 +318,22 @@ class Site:
     height: float
     flat_radius: float
     blend_radius: float
+
+
+@dataclass(frozen=True)
+class Light:
+    """A local light (lights.glsl) at `position` (planet space), lighting
+    with `colour` (rgb, the illuminance at 1 m in the sun's units, so
+    SUN_ILLUMINANCE is the sun's) over the distance squared, out to
+    `range` metres. With a unit `direction` it is a spot: full within
+    `inner` radians of it, fading to nothing at `outer`; without one it
+    lights all round."""
+    position: tuple
+    colour: tuple
+    range: float
+    direction: tuple = None
+    inner: float = 0.0
+    outer: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -495,7 +513,9 @@ class PlanetWorld:
     Settings, read when uploaded: `sun_elevation`, `sun_azimuth` (degrees,
     seen from the site), `density` (times the atmosphere's coefficients),
     `ozone`, `multiple_scattering`, `exposure` and `exposure_scale` (the
-    exposure used is their product) (upload_sky); `clouds`,
+    exposure used is their product) (upload_sky); `lights` (Light; the
+    MAX_LIGHTS nearest the camera within their range plus LIGHT_VIEW_REACH
+    drawn, each frame); `clouds`,
     `cloud_coverage`, `cloud_density` (upload_clouds); `wind_speed` (m/s, the
     clouds' drift); `shadows`; `texture_strength`, `texture_relief` (the
     ground's textures); `temperature_offset` (degrees C), `moisture_offset`,
@@ -538,6 +558,8 @@ class PlanetWorld:
         self.multiple_scattering = True
         self.exposure = EXPOSURE
         self.exposure_scale = 1.0
+        self.lights = []                   # the local lights (Light), drawn each frame (upload_lights)
+        self.lights_drawn = 0
         self.shadows = True
         self.clouds = True
         self.cloud_coverage = CLOUD_COVERAGE
@@ -888,6 +910,32 @@ class PlanetWorld:
                                (OZONE_HALF_WIDTH, 1.0 if self.multiple_scattering else 0.0, 0.0, 0.0))
         self.physics.density_factor = density
 
+    def upload_lights(self, camera):
+        """Of `lights` (Light), the MAX_LIGHTS nearest `camera` that reach
+        within their range of it, positions relative to it."""
+        near = []
+        for light in self.lights:
+            distance = length(sub(light.position, camera))
+            if distance <= light.range + LIGHT_VIEW_REACH:
+                near.append((distance, light))
+        near = [light for _, light in sorted(near, key=lambda n: n[0])[:MAX_LIGHTS]]
+        positions, directions, colours = [], [], []
+        for light in near:
+            positions.append(sub(light.position, camera) + (light.range,))
+            if light.direction is not None:
+                directions.append(tuple(light.direction) + (math.cos(light.outer),))
+                colours.append(tuple(light.colour) + (math.cos(light.inner),))
+            else:
+                directions.append((0.0, 0.0, 0.0, -1.0))
+                colours.append(tuple(light.colour) + (1.0,))
+        unused = [(0.0, 0.0, 0.0, 0.0)] * (MAX_LIGHTS - len(near))
+        engine = self.engine
+        engine.set_custom_vec4("planet.lights.count", (float(len(near)), 0.0, 0.0, 0.0))
+        engine.set_custom_vec4_array("planet.lights.position", positions + unused)
+        engine.set_custom_vec4_array("planet.lights.direction", directions + unused)
+        engine.set_custom_vec4_array("planet.lights.colour", colours + unused)
+        self.lights_drawn = len(near)
+
     def upload_clouds(self):
         """The cloud layer's parameters (CloudParams, clouds.glsl)."""
         engine = self.engine
@@ -1225,6 +1273,7 @@ class PlanetWorld:
         self.viewpoint = viewpoint if viewpoint is not None else position
         self.update_level_of_detail(patch)
         self.engine.set_custom_vec4("planet.cameraFromCentre", position + (0.0,))
+        self.upload_lights(position)
         self.upload_drawn_chunks()
         self.upload_vegetation()
         self.upload_climate()

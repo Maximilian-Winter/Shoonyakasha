@@ -90,6 +90,13 @@ it each frame (`update_day`), and the exposure scaled
 elevation seen from the camera. The cards show the site's hour. The
 save keeps the day cycle and its offset.
 
+Lights (`update_lights`, PlanetWorld.lights): with the sun below
+LIGHTS_ON_ELEVATION seen from the camera, a light OUTPOST_LIGHT_HEIGHT
+over each outpost's pad, the ship's two headlights (HEADLIGHTS, dipped
+HEADLIGHT_DIP below its nose) unless it has crashed, and on foot the suit
+lamp beside the eye along the view; the world draws the MAX_LIGHTS
+nearest.
+
 The player gets out of the ship with F once the ship touches the ground
 at less than EXIT_SPEED relative to it, at the boarding point beside the
 cockpit, and gets in with F within BOARD_REACH of it. A ship the player
@@ -308,6 +315,17 @@ CALL_SHOWN = 0.25
 CALL_ORBIT_FLOOR = {"planet": 25_000.0, "moon": 5_000.0}    # m
 CALL_REACH = 50.0                # m
 PLAY_HOUR = 9.0                  # the site's hour when the day starts without a save
+# The lights (update_lights), on with the sun below LIGHTS_ON_ELEVATION (degrees) at the camera; colours
+# are the illuminance at 1 m in the sun's units (planet_world.SUN_ILLUMINANCE), ranges in metres, cones the
+# inner and outer half angles in degrees.
+LIGHTS_ON_ELEVATION = -2.0
+OUTPOST_LIGHT_HEIGHT = 10.0      # m above the pad
+OUTPOST_LIGHT_COLOUR, OUTPOST_LIGHT_RANGE = (150.0, 135.0, 115.0), 60.0
+HEADLIGHTS = ((-1.2, -0.9, -8.0), (1.2, -0.9, -8.0))    # in the ship's body (right, up, back)
+HEADLIGHT_DIP = 6.0              # degrees below the nose
+HEADLIGHT_COLOUR, HEADLIGHT_RANGE, HEADLIGHT_CONE = (800.0, 800.0, 750.0), 200.0, (10.0, 20.0)
+SUIT_LAMP = (-0.12, 0.08, 0.0)   # m from the eye along the view's right, up and forward (the gun is outside its cone)
+SUIT_LAMP_COLOUR, SUIT_LAMP_RANGE, SUIT_LAMP_CONE = (80.0, 78.0, 72.0), 45.0, (14.0, 26.0)
 # The cargo net beside the landed ship: its centre in the ship's body (right, up, back; up at the
 # gear's feet), its half sizes along right and back, and how far below and above the gear's feet
 # a loose ore rock's centre may be in it.
@@ -1724,6 +1742,44 @@ def update_day():
     world.upload_sky()
 
 
+def lights_on():
+    """Whether the lights are on: the sun below LIGHTS_ON_ELEVATION seen
+    from the camera."""
+    body = world.body_under(state["position"])
+    radial = normalize(body.relative(state["position"]))
+    return dot(world.sun_direction(), radial) < math.sin(math.radians(LIGHTS_ON_ELEVATION))
+
+
+def update_lights():
+    """The world's local lights (PlanetWorld.lights) while lights_on: a
+    light HIGH above each outpost's pad; the ship's two headlights
+    (HEADLIGHTS, in its body) along its nose, HEADLIGHT_DIP down, unless it
+    has crashed; and on foot the suit lamp, SUIT_LAMP from the eye in the
+    view's frame, along the view."""
+    lights = []
+    if lights_on():
+        for o in state["outposts"]:
+            point = o.point()
+            up = normalize(sub(point, o.body.centre()))
+            lights.append(planet_world.Light(add(point, scale(up, OUTPOST_LIGHT_HEIGHT)), OUTPOST_LIGHT_COLOUR,
+                                             OUTPOST_LIGHT_RANGE))
+        ship = state["ship"]
+        if ship is not None and not ship.crashed:
+            dip = math.radians(HEADLIGHT_DIP)
+            beam = normalize(quat_rotate(ship.orientation, (0.0, -math.sin(dip), -math.cos(dip))))
+            for offset in HEADLIGHTS:
+                lights.append(planet_world.Light(add(ship.position, quat_rotate(ship.orientation, offset)),
+                                                 HEADLIGHT_COLOUR, HEADLIGHT_RANGE, beam,
+                                                 math.radians(HEADLIGHT_CONE[0]), math.radians(HEADLIGHT_CONE[1])))
+        if state["mode"] == "foot" and foot.player is not None:
+            right, up, forward = view_basis()
+            eye = state["position"]
+            at = add(eye, add(add(scale(right, SUIT_LAMP[0]), scale(up, SUIT_LAMP[1])), scale(forward, SUIT_LAMP[2])))
+            lights.append(planet_world.Light(at, SUIT_LAMP_COLOUR, SUIT_LAMP_RANGE, forward,
+                                             math.radians(SUIT_LAMP_CONE[0]), math.radians(SUIT_LAMP_CONE[1])))
+    world.lights = lights
+
+
 def autosave_on_landing(landed):
     """With --play, the game saved to SAVE_PATH when the ship, having flown
     since the last such save, is landed on an outpost's pad."""
@@ -1888,6 +1944,7 @@ def frame(dt):
 
     # The world for the view: the level of detail, the probes (with the ground patch around the
     # ship), and everything placed relative to the camera, subtracted in double.
+    update_lights()
     camera = state["position"]
     right, up, forward = view_basis()
     ship = state["ship"]

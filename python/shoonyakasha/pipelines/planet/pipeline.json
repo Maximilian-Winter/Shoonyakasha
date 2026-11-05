@@ -71,7 +71,13 @@
         { "name": "ozone", "type": "vec4", "source": "scene.custom.planet.atmosphere.ozone",
           "default": [ 2.08e-6, 6.02e-6, 2.72e-7, 7800.0 ] },
         { "name": "settings", "type": "vec4", "source": "scene.custom.planet.atmosphere.settings",
-          "default": [ 4700.0, 1.0, 0.0, 0.0 ] }
+          "default": [ 4700.0, 1.0, 0.0, 0.0 ] },
+        { "name": "lightCount", "type": "vec4", "source": "scene.custom.planet.lights.count",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "lightPosition", "type": "vec4", "arrayCount": 8, "source": "scene.custom.planet.lights.position[i]" },
+        { "name": "lightDirection", "type": "vec4", "arrayCount": 8,
+          "source": "scene.custom.planet.lights.direction[i]" },
+        { "name": "lightColour", "type": "vec4", "arrayCount": 8, "source": "scene.custom.planet.lights.colour[i]" }
       ]
     },
     "TerrainParams": {

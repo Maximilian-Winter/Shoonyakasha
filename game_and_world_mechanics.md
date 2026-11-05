@@ -410,13 +410,13 @@ If the stale azimuths ever show far from the viewpoint, store the horizon for se
 
 - **Exposure** (`clock.exposure_scale`): `PlanetWorld.exposure_scale` multiplies the menu's exposure. With the day cycle on it follows the sun's elevation at the camera: 1 down to 0°, rising in its logarithm to `NIGHT_SCALE` (6) at −10° and below. An auto-exposure pass (average log luminance, adapting over ~2 s) would also respond to what is on screen.
 - **Stars** (`atmosphere.frag`): on a grid of cells over a cube's faces in planet space, with `STAR_SHARE` of the cells holding a star of hashed place, brightness and colour, a spot about a pixel across. They fade out as the sky's own light along the ray rises past a few thousandths of the sun's illuminance (`STAR_SKY_FADE`), so they show at night and in late twilight, and from space.
-- **The ground at night:** dark. There is no moonlight or light from the planet.
-- **Lights** (not built; milestone 6b):
-  - ship headlights (spotlights from the ship's front, which also light the terrain)
-  - a **suit lamp** (a spot attached to the camera)
-  - outpost lights (point lights at the pad)
-
-  The lighting is sun + sky, so this needs a small forward light loop in `terrain.frag`, `vegetation.frag` and `scene.frag`: up to 8 lights in a uniform buffer, culled per frame on the CPU.
+- **The ground at night:** dark but for the local lights. There is no moonlight or light from the planet.
+- **Lights** (`lights.glsl`, `PlanetWorld.lights`): the local lights go on the end of `AtmosphereParams` (`lightCount`, then `lightPosition`, `lightDirection` and `lightColour`, 8 each). That block is already bound wherever the surfaces are lit.
+  - **Culling:** each frame `upload_lights` sends the 8 nearest the camera, of those within their range plus 2 km, as positions relative to the camera.
+  - **Shading:** `localLights(albedo, relativePos, normal, twoSided)` sums each light's colour over the distance squared, faded to 0 at its range, and within a spot's cone. `terrain.frag` (both bodies), `vegetation.frag` (foliage two-sided) and `scene.frag` add it to the sun and sky. There are no light shadows.
+  - **Which lights** (`update_lights` in `planet.py`, on with the sun 2° below the horizon at the camera): one 10 m over each outpost's pad; the ship's two headlights, dipped 6° below its nose; and on foot a suit lamp beside the eye along the view, mounted so the gun's viewmodel stays outside its beam.
+  - **Brightness:** the intensities were chosen against the night exposure (6×).
+  - **Cost:** about 0.1 ms per frame in `--day-check`.
 - **Ore specks:** both the scattered ore rocks' specks (`vegetation.frag`) and the loose rocks' (`SPECK_GLOW`, the Screens pass) are emissive light in the HDR image. The atmosphere pass then applies the exposure, so the night exposure brightens them with everything else and ore fields read in the dark.
 
 ## 8. Temperature and the suit
@@ -761,7 +761,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 4. **Upgrades.** Table, effective parameters, buying at outposts. `--upgrade-check`.
 5. **Save version 2.** New fields, the migration from version 1, autosave on landing. `--save-check`.
 6. **Day and night.** Moving sun, azimuth-only horizon rebuild, exposure by the sun's elevation, stars. `--day-check`.
-   6b. **Lights.** Headlights, a suit lamp and outpost lights, with a forward light loop in `terrain.frag`, `vegetation.frag` and `scene.frag`.
+   6b. **Lights.** Headlights, a suit lamp and outpost lights, with a forward light loop in `terrain.frag`, `vegetation.frag` and `scene.frag`. Capture shots `lights_*`.
 7. **Suit and temperature.** Local temperature, reserve, shelter, effects, recovery at an outpost.
 8. **Points of interest.** Hash placement, kinds, discovery, salvage parts, survey data.
 9. **Contracts.** Generation, states, objective card integration, fragile crates, reputation.

@@ -21,13 +21,15 @@
 // where the sun is behind it (FOLIAGE_THROUGH of the sunlight on its
 // back), a glow towards the sun seen through it (FOLIAGE_GLOW), all of
 // which still reach it in shadow by FOLIAGE_LEAK, and the sky light times
-// FOLIAGE_SKY, darkened by the shade.
+// FOLIAGE_SKY, darkened by the shade. Every part also takes the local
+// lights (lights.glsl), foliage from either side.
 //
 
 #define CAMERA_SET 0
 #include "camera.glsl"
 #include "terrain.glsl"
 #include "atmosphere.glsl"
+#include "lights.glsl"
 #include "shadow.glsl"
 #include "clouds.glsl"
 #define FOLIAGE_SET 2
@@ -113,10 +115,11 @@ void main() {
             // No air: the sunlight alone, as on the moon's ground.
             float sunCos = max(dot(normal, atmosphere.sun.xyz), 0.0);
             outColor = vec4(albedo / ATMOSPHERE_PI * sunlightAt(p) * sunCos * sunShadow(fragRelativePos, normal)
-                            + glow, 1.0);
+                            + localLights(albedo, fragRelativePos, normal, false) + glow, 1.0);
             return;
         }
-        outColor = vec4(lightSurface(albedo, p, normal, radial, sunShare) + glow, 1.0);
+        outColor = vec4(lightSurface(albedo, p, normal, radial, sunShare)
+                        + localLights(albedo, fragRelativePos, normal, false) + glow, 1.0);
         return;
     }
     vec3 sun = atmosphere.sun.xyz;
@@ -127,5 +130,5 @@ void main() {
     float skyCos = FOLIAGE_SKY * (0.6 + 0.4 * dot(normal, radial)) * fragShade;
     float sunReach = mix(FOLIAGE_LEAK, 1.0, sunShare);
     vec3 light = sunlightAt(p) * sunReach * (lit + through + glow) + skylightAt(p, radial) * skyCos;
-    outColor = vec4(albedo / ATMOSPHERE_PI * light, 1.0);
+    outColor = vec4(albedo / ATMOSPHERE_PI * light + localLights(albedo, fragRelativePos, normal, true), 1.0);
 }

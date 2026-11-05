@@ -4,7 +4,7 @@
 // colour times the vertex colour times the material's albedo texture (white
 // where it has none), with face lines where the gridStrength material
 // parameter asks for them (shading.glsl), lit through the atmosphere
-// (atmosphere.glsl), in HDR. Both sides of each face are drawn, a back face
+// (atmosphere.glsl) and by the local lights (lights.glsl), in HDR. Both sides of each face are drawn, a back face
 // lit with its normal turned towards the camera.
 //
 
@@ -12,6 +12,7 @@
 #include "camera.glsl"
 #include "terrain.glsl"
 #include "atmosphere.glsl"
+#include "lights.glsl"
 #include "shading.glsl"
 #include "shadow.glsl"
 #include "clouds.glsl"
@@ -37,5 +38,6 @@ void main() {
     vec3 p = camera.cameraFromCentre.xyz + fragRelativePos;
     vec3 normal = normalize(gl_FrontFacing ? fragNormal : -fragNormal);
     float sunShare = sunShadow(fragRelativePos, normal) * cloudShadow(p);
-    outColor = vec4(lightSurface(albedo, p, normal, normalize(p), sunShare), 1.0);
+    outColor = vec4(lightSurface(albedo, p, normal, normalize(p), sunShare)
+                    + localLights(albedo, fragRelativePos, normal, false), 1.0);
 }

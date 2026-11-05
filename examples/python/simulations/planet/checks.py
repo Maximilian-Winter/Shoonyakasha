@@ -246,6 +246,8 @@ class CaptureTour:
         ("day_twilight", 2, False, 0, None, DAY_SUN, lambda: day_at(19.0)),
         ("day_night_stars", 1, False, 0, None, DAY_SUN, lambda: day_at(0.0), lambda: look_up(35.0)),
         ("day_night_from_orbit", 4, False, 0, None, DAY_SUN, lambda: day_at(21.0)),
+        ("lights_ship_at_base", 8, False, 0, None, DAY_SUN, lambda: day_at(23.0), lambda: state.update(chase=True)),
+        ("lights_on_foot", 1, False, 0, None, DAY_SUN, lambda: day_at(23.0), go_on_foot),
         ("ship_on_the_moon", 1, False, 0, None, DAY_SUN, lambda: teleport(8, moon=True)),
         ("ship_around_the_moon", 1, False, 0, None, DAY_SUN, lambda: teleport(9, moon=True)),
         ("generated_cockpit_on_the_pad", 8, False, 0, None, DAY_SUN,

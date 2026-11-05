@@ -11,13 +11,15 @@
 // biomes' flat colours (biomeViewColour) instead. Otherwise it takes the
 // chunk's colour, with face lines (shading.glsl). The planet is lit by the
 // sunlight that comes through the atmosphere and a sky light
-// (atmosphere.glsl), the moon by the sunlight alone, in HDR.
+// (atmosphere.glsl), the moon by the sunlight alone, both also by the
+// local lights (lights.glsl), in HDR.
 //
 
 #define CAMERA_SET 0
 #include "camera.glsl"
 #include "terrain.glsl"
 #include "atmosphere.glsl"
+#include "lights.glsl"
 #include "shading.glsl"
 #include "shadow.glsl"
 #include "clouds.glsl"
@@ -86,8 +88,10 @@ void main() {
     if (fragBody == MOON) {
         // No air: the sunlight alone (sunlightAt is 0 in the planet's shadow), no sky light, no clouds.
         float sunCos = max(dot(shaded, atmosphere.sun.xyz), 0.0);
-        outColor = vec4(albedo / ATMOSPHERE_PI * sunlightAt(p) * sunCos * terrainShadow, 1.0);
+        outColor = vec4(albedo / ATMOSPHERE_PI * sunlightAt(p) * sunCos * terrainShadow
+                        + localLights(albedo, fragRelativePos, shaded, false), 1.0);
         return;
     }
-    outColor = vec4(lightSurface(albedo, p, shaded, radial, terrainShadow * cloudShadow(p)), 1.0);
+    outColor = vec4(lightSurface(albedo, p, shaded, radial, terrainShadow * cloudShadow(p))
+                    + localLights(albedo, fragRelativePos, shaded, false), 1.0);
 }
