@@ -70,6 +70,15 @@ pads, on its cushion, from the nearest outpost on the planet
 (`call_fuel`, trade.fuel_call), put in the tank when it is due if the car
 is still within CALL_REACH (`update_fuel_call`); the save keeps the fuel.
 
+The car's hold (hovercar.Car.cargo): getting in loads the loose ore
+rocks lying in the cargo net behind the parked car (CAR_NET_CENTRE,
+CAR_NET_HALF, shown by four posts; `ore_in_net`, `load_cargo`), each that
+fits (hovercar.Car.can_take), with where it was first seen; the rest stay
+in the net. The menu's Outpost tab shows the outpost whose pad the car is
+on, its price for each resource at grade 1, the car's cargo and what it
+would fetch, and sells it (`sell_car_cargo`, trade.Market.sell). The save
+keeps the cargo.
+
 The day (clock.py): the sun goes round with the world's clock plus the
 day's offset (`day_time`; START_HOUR in a new game, kept in the save),
 the exposure scaled for its elevation seen from the camera
@@ -102,6 +111,7 @@ grab, right trigger punt, the bumpers the hold distance.
 
     python walker.py
     python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, sell ore,
+                                             load the car's net and sell its cargo,
                                              pause, save, change the game and load it, drive and fly
                                              the car, hover it on a lake and a river, run it dry and
                                              call fuel, then night; report and exit
@@ -205,6 +215,17 @@ PAUSE_SECONDS = 1.0             # s --check keeps the pause menu open
 SHIP_MARKER = (0.55, 0.8, 1.0, 1.0)
 START_HOUR = 9.0                # the site's hour (clock.py) when a new game starts
 CALL_REACH = 50.0               # m the car may move from where fuel was called to and still get it
+# The cargo net behind the parked car: its centre from the car's (right, up, back; up at the ground),
+# its half sizes along right and back, how far below and above the ground an ore rock's centre may be in
+# it, and its corner posts.
+CAR_NET_CENTRE = (0.0, -SHIP_CLEARANCE, 6.5)
+CAR_NET_HALF = (2.0, 2.5)
+CAR_NET_BELOW, CAR_NET_ABOVE = 1.0, 3.0
+NET_POST = (0.12, 1.0, 0.12)    # m
+NET_COLOUR = (1.0, 0.72, 0.3)
+NET_SETTLE = 3.0                # s --check lets the ore it drops into the net settle
+NET_CHECK_AWAY = 60.0           # m along its nose --check moves the car off Base's pad for the net
+CHECK_NET_EXTENTS = ((0.35, 0.25, 0.35), (0.45, 0.3, 0.45))   # m: the ore rocks --check drops into the net
 DRY_SECONDS = 1.0               # s --check drives the dry car at full throttle
 FUEL_WAIT = 2.0                 # s past the call's delay --check waits for the fuel at most
 NIGHT_CHECK_HOUR = 0.5          # the hour --check sets at its end
@@ -250,7 +271,7 @@ HELP_COLUMNS = [
 parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
                     help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, sell ore at Base, "
-                         "pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
+                         "load the car's net and sell its cargo, pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
                          "run it dry and call fuel, then night; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
@@ -328,6 +349,8 @@ state = {
     "fuel_call": None,            # the fuel on its way to the car (call_fuel), or None
     "car_note": "",               # the last fuel bought, called or delivered, for the Car tab
     "was_dry": False,             # the car's tank was empty last frame
+    "net_posts": [],              # the car's cargo net's corner posts
+    "trade_note": "",             # the last sale of the car's cargo, for the Outpost tab
 }
 
 
@@ -568,11 +591,93 @@ def near_car():
     return length(sub(foot.bubble.to_world(player.feet()), car_position())) <= ENTER_REACH
 
 
+def net_frame():
+    """The car's cargo net: its centre and (right, up, back) in planet space."""
+    car = state["car"]
+    right, up = car.right(), car.up()
+    back = scale(car.heading, -1.0)
+    r, u, b = CAR_NET_CENTRE
+    return add(car_position(), add(add(scale(right, r), scale(up, u)), scale(back, b))), right, up, back
+
+
+def ore_in_net():
+    """(prop, its position in planet space) of each loose ore rock, in the
+    physics or resting out of it, that lies in the car's net."""
+    bubble = foot.bubble
+    if state["car"] is None or bubble is None:
+        return []
+    ore = [p for p in foot.props.rocks if p.grade > 0.0]
+    placed = [(p, add(p.on.centre(), p.position)) for p in ore if p.state == "resting"]
+    moving = [p for p in ore if p.state == "jolt"]
+    if moving:
+        placed += [(p, bubble.to_world(t[0])) for p, t in zip(moving, foot.props.transforms(bubble, moving))]
+    centre, right, up, back = net_frame()
+
+    def inside(point):
+        d = sub(point, centre)
+        return (abs(dot(d, right)) <= CAR_NET_HALF[0] and abs(dot(d, back)) <= CAR_NET_HALF[1]
+                and -CAR_NET_BELOW <= dot(d, up) <= CAR_NET_ABOVE)
+    return [(prop, point) for prop, point in placed if inside(point)]
+
+
+def load_cargo():
+    """The loose ore rocks in the car's net (ore_in_net) taken into its
+    hold, each that fits (hovercar.Car.can_take), with where it was first
+    seen (or where it lies); the rest stay in the net. A toast says what."""
+    car, bubble = state["car"], foot.bubble
+    loaded, left = [], 0
+    for prop, point in ore_in_net():
+        if not car.can_take(prop.mass, prop.resource):
+            left += 1
+            continue
+        seen = state["seen"].pop(id(prop), None) or (prop.on.name, normalize(prop.on.relative(point)))
+        car.cargo.append({"body": seen[0], "direction": tuple(seen[1]), "mass": prop.mass, "grade": prop.grade,
+                          "resource": prop.resource})
+        if foot.gun is not None and prop.body is not None and foot.gun.held == prop.body:
+            foot.gun.drop()
+        foot.props.remove(bubble, prop, release=False)
+        loaded.append(prop.mass)
+    if loaded or left:
+        text = ("Loaded %d piece%s of ore, %.0f kg" % (len(loaded), "" if len(loaded) == 1 else "s", sum(loaded))
+                + ("; %d left in the net, the hold is full" % left if left else ""))
+        state["hud"].toast(text, GOOD_TOAST if not left else hud_module.WARNING)
+
+
+def build_net():
+    positions, normals = box()
+    for _ in range(4):
+        entity = engine.create_mesh(positions, normals=normals, name="CargoNet")
+        engine.scene.set_scale(entity, NET_POST)
+        engine.scene.set_material_vec4(entity, "baseColorFactor", NET_COLOUR + (1.0,))
+        engine.scene.set_material_float(entity, "gridStrength", 0.0)
+        engine.scene.set_render_layer_mask(entity, 1)
+        engine.scene.set_visible(entity, False)
+        state["net_posts"].append(entity)
+
+
+def draw_net(camera):
+    """The net's corner posts behind the car while it is parked (not driven)."""
+    shown = state["car"] is not None and not state["driving"]
+    if shown:
+        centre, right, up, back = net_frame()
+        rotation = euler_from_basis(right, up, scale(back, -1.0))
+    for k, entity in enumerate(state["net_posts"]):
+        engine.scene.set_visible(entity, shown)
+        if not shown:
+            continue
+        corner = add(scale(right, CAR_NET_HALF[0] * (1 if k & 1 else -1)),
+                     scale(back, CAR_NET_HALF[1] * (1 if k & 2 else -1)))
+        engine.scene.set_position(entity, sub(add(add(centre, corner), scale(up, 0.5 * NET_POST[1])), camera))
+        engine.scene.set_rotation(entity, rotation)
+
+
 def enter_car(anywhere=False):
     """Into the car from within ENTER_REACH of it (from anywhere with
-    `anywhere`): the player gone, the chase camera behind the car."""
+    `anywhere`): the ore in its net loaded (load_cargo), the player gone,
+    the chase camera behind the car."""
     if state["driving"] or state["car"] is None or (not anywhere and not near_car()):
         return False
+    load_cargo()
     foot.remove_player()
     state["driving"] = True
     state["chase"].reset()
@@ -900,13 +1005,20 @@ def run_check(dt):
     the map shown half a second more; then the map closed and an ore rock
     (CHECK_ORE_EXTENT, CHECK_ORE_GRADE) dropped 1 m above the Base pad,
     waiting up to SELL_SECONDS for it to sell and a second more; then the
+    car moved NET_CHECK_AWAY along its nose off Base's pad (where ore at
+    rest sells by itself), an ore rock of each CHECK_NET_EXTENTS dropped
+    1 m over its net and NET_SETTLE later the car got into, the rocks gone
+    from the props into its cargo with their masses, the car put back on
+    the pad and its cargo sold there for trade.sale's credits, and out of
+    the car; then the
     menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
     second more. Passes when the player covered 80 % of walking speed's
     distance and stands on the ground, the screenshot was written and its
     toast shown, the gun holds the crate, the punt charged and threw it,
-    at least MAP_CELLS cells are explored, the waypoint is set, the ore sold for credits, the world's clock stood
+    at least MAP_CELLS cells are explored, the waypoint is set, the ore sold for credits, the car's cargo
+    loaded and sold, the world's clock stood
     still while paused, and the load brought back the credits, the ore
     sold, the cells, the props and the player within 2 m of where it was
     saved; then into the car, driven flat out turning a little for
@@ -934,7 +1046,7 @@ def run_check(dt):
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
     (with _punt added), of the map (with _map added), after the sale (with
-    _sell added), of the menu (with _pause added), of its Car tab (with _car added), of its Settings tab
+    _sell added), of the menu (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Settings tab
     (with _settings added), of its Controls tab (with _controls added),
     after the load (with _load added), a second
     before the end of the drive (with _drive added), after the climb (with
@@ -945,7 +1057,7 @@ def run_check(dt):
     (with _river_above added), and at night (with _night added)."""
     player = foot.player
     check = state["check"]
-    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "night")):
+    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "night", "net_out")):
         return
     if check is None:
         check = state["check"] = {"stage": "ship" if args.shot else "walk", "time": 0.0,
@@ -1071,8 +1183,48 @@ def run_check(dt):
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_sell" + ext)
             check["sell_ok"] = sell_ok
-            set_paused(True)
-            check["stage"], check["time"] = "pause", 0.0
+            check["stage"], check["time"] = "net", 0.0
+    elif stage == "net":
+        if "net_rocks" not in check:
+            car = state["car"]
+            check["parked_at"] = car.position          # on Base's pad, where ore resting sells by itself
+            car.position = add(car.position, scale(car.heading, NET_CHECK_AWAY))
+            update_ship()
+            centre, right, up, back = net_frame()
+            check["net_rocks"] = [ore_rock(add(add(centre, scale(right, side)), scale(up, 1.0)), extent,
+                                           CHECK_ORE_GRADE)
+                                  for side, extent in zip((-0.8, 0.8), CHECK_NET_EXTENTS)]
+            return
+        if t >= NET_SETTLE:
+            rocks = check["net_rocks"]
+            masses = sorted(round(r.mass, 3) for r in rocks)
+            credits = state["market"].credits
+            enter_car(anywhere=True)
+            car = state["car"]
+            car.position = check["parked_at"]
+            update_ship()
+            outpost = car_outpost()
+            loaded = (not any(r in foot.props.rocks for r in rocks)
+                      and sorted(round(c["mass"], 3) for c in car.cargo) == masses)
+            expected = trade.sale(outpost, car.cargo, world.time)[0] if outpost is not None and car.cargo else 0.0
+            sell_car_cargo()
+            gained = state["market"].credits - credits
+            net_ok = loaded and outpost is not None and not car.cargo and expected > 0.0 and abs(gained - expected) < 1e-6
+            print("[walker] %d ore rocks in the car's net loaded on getting in (%s kg) and sold at %s for %.0f cr "
+                  "(expected %.0f): %s" % (len(rocks), ", ".join("%.0f" % m for m in masses),
+                                           outpost.name if outpost is not None else "no pad", gained, expected,
+                                           "passed" if net_ok else "FAILED"), flush=True)
+            check["sell_ok"] = check["sell_ok"] and net_ok
+            check["stage"], check["time"] = "net_out", 0.0
+    elif stage == "net_out":
+        state["car_controls"] = hovercar.CarControls()
+        if foot.player is None and not leave_car():
+            if t > LAND_SECONDS:
+                print("[walker] could not get out of the car back on Base's pad: FAILED", flush=True)
+                os._exit(1)
+            return
+        set_paused(True)
+        check["stage"], check["time"] = "pause", 0.0
     elif stage == "pause":
         if "clock" not in check:
             check["clock"] = world.time      # this frame is the first that stands still
@@ -1091,6 +1243,13 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_car" + ext)
+                state["menu"].show(True, state["menu"].tab_named("Outpost"))
+            check["stage"], check["time"] = "outpost_tab", 0.0
+    elif stage == "outpost_tab":
+        if t >= 0.5 or not args.shot:
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_outpost" + ext)
                 state["menu"].show(True, state["menu"].tab_named("Settings"))
             check["stage"], check["time"] = "settings", 0.0
     elif stage == "settings":
@@ -1692,6 +1851,7 @@ def car_items():
     return [
         {"heading": "Car"},
         {"stat": "Fuel", "get": fuel},
+        {"stat": "Cargo", "get": cargo_text},
         {"stat": "Where", "get": where},
         {"stat": "Credits", "get": lambda: "%s cr" % format(int(round(state["market"].credits)), ",")},
         {"button": "Fill the tank", "do": fill_tank,
@@ -1704,9 +1864,77 @@ def car_items():
     ]
 
 
+def cargo_text():
+    car = state["car"]
+    if car is None or not car.cargo:
+        return "empty"
+    n = len(car.cargo)
+    return "%.0f kg, %.2f / %.1f m3, %d piece%s" % (car.cargo_mass, car.cargo_volume, car.params.hold_m3, n,
+                                                     "" if n == 1 else "s")
+
+
+def sell_car_cargo():
+    """The car's cargo sold at the outpost whose pad it is on (trade.Market.sell)."""
+    outpost, car = car_outpost(), state["car"]
+    if outpost is None:
+        state["trade_note"] = "the car is not on an outpost's pad"
+        state["hud"].toast("The car is not on an outpost's pad", hud_module.WARNING)
+        return
+    kg, credits = state["market"].sell(car, outpost, world.time)
+    if kg <= 0.0:
+        state["trade_note"] = "no cargo to sell"
+        return
+    state["sold_kg"] += kg
+    state["earned"] += credits
+    state["trade_note"] = "sold %.0f kg of ore at %s for %s cr" % (kg, outpost.name, format(int(round(credits)), ","))
+    state["hud"].toast(state["trade_note"][0].upper() + state["trade_note"][1:], GOOD_TOAST)
+
+
+def outpost_items():
+    """The Outpost tab: the outpost whose pad the car is on, its price for
+    each resource at grade 1, the car's cargo, what it would fetch, and
+    selling it."""
+    def here():
+        outpost = car_outpost()
+        return "%s, the %s" % (outpost.name, outpost.body.name) if outpost is not None else "the car is not on a pad"
+
+    def price(body, resource):
+        def text():
+            outpost = car_outpost()
+            if outpost is None:
+                return "-"
+            item = {"body": body.name, "direction": outpost.direction, "mass": 1.0, "grade": 1.0,
+                    "resource": resource}
+            return "%.2f cr/kg" % trade.price(outpost, item, world.time)
+        return text
+
+    def value():
+        outpost, car = car_outpost(), state["car"]
+        if outpost is None or car is None or not car.cargo:
+            return "-"
+        return "%s cr" % format(int(round(state["market"].value(outpost, car.cargo, world.time))), ",")
+
+    planet_resources = range(resources.FERRITE, resources.EVAPORITE + 1)
+    moon = next(b for b in bodies if b is not planet)
+    prices = ([{"stat": resources.name(r) + ", grade 1", "get": price(planet, r)} for r in planet_resources]
+              + [{"stat": resources.name(r) + " (moon), grade 1", "get": price(moon, r)}
+                 for r in (resources.ICE, resources.ILMENITE)])
+    return ("columns", [
+        [{"heading": "Outpost"},
+         {"stat": "Here", "get": here},
+         {"stat": "Credits", "get": lambda: "%s cr" % format(int(round(state["market"].credits)), ",")},
+         {"stat": "Car's cargo", "get": cargo_text},
+         {"stat": "It would fetch", "get": value},
+         {"button": "Sell the car's cargo", "do": sell_car_cargo,
+          "hint": "With the car on an outpost's pad: all the ore in its hold sold there."},
+         {"note": lambda: state["trade_note"]}],
+        [{"heading": "Prices"}] + prices,
+    ])
+
+
 def menu_tabs():
-    return [("System", system_items()), ("Car", car_items()), ("Settings", settings_items()),
-            ("Controls", ("controls", HELP_COLUMNS))]
+    return [("System", system_items()), ("Car", car_items()), ("Outpost", outpost_items()),
+            ("Settings", settings_items()), ("Controls", ("controls", HELP_COLUMNS))]
 
 
 def menu_subtitle():
@@ -1760,7 +1988,8 @@ def save_game(base=None, quiet=False):
             "on": bubble.body.name, "feet": list(bubble.body_relative(player.feet())),
             "heading": list(player.basis()[2]), "pitch": player.pitch},
         "car": {"position": list(car.position), "heading": list(car.heading), "target": car.target,
-                "driving": state["driving"], "fuel": car.fuel},
+                "driving": state["driving"], "fuel": car.fuel,
+                "cargo": [dict(item, direction=list(item["direction"])) for item in car.cargo]},
         "taken": [list(key) for key in sorted(world.taken_rocks.keys)],
         "props": foot.props.records(bubble) if bubble is not None else [],
         "seen": [state["seen"].get(id(p)) for p in foot.props.all],
@@ -1830,6 +2059,7 @@ def load_game(base=None):
     if record is not None:
         state["car"] = hovercar.Car(tuple(record["position"]), tuple(record["heading"]), record["target"],
                                     fuel=record.get("fuel"))
+        state["car"].cargo = [dict(item, direction=tuple(item["direction"])) for item in record.get("cargo", [])]
         update_ship()
     else:
         position, _, _, north = ship_pose()
@@ -1969,6 +2199,7 @@ def frame(dt):
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
     pads.draw(camera)
+    draw_net(camera)
     foot.props.draw(foot.bubble, camera)
     place_ship(camera)
     place_viewmodel(dt, camera)
@@ -2020,6 +2251,7 @@ def on_init():
     state["outposts"] = [state["home"]]
     begin_survey()
     build_ship_model()
+    build_net()
     state["viewmodel"] = Viewmodel(engine, box())
     state["car_glows"] = carview.EngineGlows(engine)
     state["hud"] = Hud(engine)

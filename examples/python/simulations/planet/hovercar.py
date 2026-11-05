@@ -42,12 +42,19 @@ enough (LEAVE_HEIGHT) to get out of.
   the cushion. With the tank empty (`dry()`) it drives and climbs no
   more, its target height drops to HOVER_MIN so it settles onto its
   cushion, and it still steers.
+- **Hold:** `cargo`, a list of items as trade.py's, within
+  params.cargo_capacity kilograms and hold_m3 of volume, each item filling
+  flight.load_volume (`cargo_mass`, `cargo_volume`, `can_take`). The
+  cargo does not change how the car flies.
 """
 
 import math
 from dataclasses import dataclass
 
+from shoonyakasha.planet.resources import FERRITE
 from shoonyakasha.planet.vec import add, cross, dot, length, normalize, rotate, scale, sub
+
+from flight import load_volume
 
 STEP = 1.0 / 120.0               # s
 HOVER_MIN = 0.45                 # m above the ground, the cushion
@@ -87,6 +94,8 @@ class CarParams:
     drive_burn: float = 0.05             # kg/s at full throttle
     boost_burn: float = 2.5              # times drive_burn with boost
     air_burn: float = 0.03               # kg/s holding height from AIR_HEIGHT up (less below, none on the cushion)
+    cargo_capacity: float = 1_500.0      # kg the hold takes
+    hold_m3: float = 1.0                 # m^3 of loose rock the hold takes (flight.load_volume)
 
 
 @dataclass
@@ -110,6 +119,7 @@ class Car:
         self.params = params or CarParams()
         self.fuel = self.params.fuel_capacity if fuel is None else fuel
         self.fuel_used = 0.0     # kg burnt in the last step
+        self.cargo = []          # what the hold carries: dicts as trade.py's items
         self.position = tuple(position)
         self.velocity = (0.0, 0.0, 0.0)
         self.heading = self._level(heading)
@@ -141,6 +151,21 @@ class Car:
 
     def dry(self):
         return self.fuel <= 0.0
+
+    @property
+    def cargo_mass(self):
+        return sum(item["mass"] for item in self.cargo)
+
+    @property
+    def cargo_volume(self):
+        return sum(load_volume(item["mass"], item.get("resource", FERRITE)) for item in self.cargo)
+
+    def can_take(self, mass, resource):
+        """Whether a rock of `mass` kg and `resource` fits in the hold:
+        within params.cargo_capacity and params.hold_m3."""
+        p = self.params
+        return (self.cargo_mass + mass <= p.cargo_capacity
+                and self.cargo_volume + load_volume(mass, resource) <= p.hold_m3)
 
     def burn_rate(self, controls):
         """kg/s the car burns with `controls`: drive_burn at full throttle

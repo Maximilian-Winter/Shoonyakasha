@@ -7,7 +7,8 @@ with boost and backward, braking, turning (slower when still), grip on
 the ground and drift in the air, banking into a turn, when it can be
 left, and its fuel: none burnt on the cushion, the throttle's and the
 boost's and holding height's burn, and dry, settling onto the cushion
-without driving but steering. Plain Python: no engine needed.
+without driving but steering; and the hold, taking rocks within its
+mass and its volume. Plain Python: no engine needed.
 
     python -m unittest discover -s tests/python
 """
@@ -21,6 +22,7 @@ PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simu
 sys.path.insert(0, str(PLANET_DIR))
 
 import hovercar as hc  # noqa: E402
+from shoonyakasha.planet.resources import ICE  # noqa: E402
 from shoonyakasha.planet.vec import dot, length, normalize, sub  # noqa: E402
 
 RADIUS = 100_000.0
@@ -166,6 +168,19 @@ class DriveTest(unittest.TestCase):
         self.assertAlmostEqual(dry.height, hc.HOVER_MIN, delta=0.1)
         turned = run(hc.Car(cushion, NORTH, fuel=0.0), hc.CarControls(steer=1.0), 1.0)
         self.assertGreater(turned.heading[0], 0.0)                       # towards east
+
+    def test_the_hold_takes_rocks_within_its_mass_and_volume(self):
+        car = hc.Car(START, NORTH)
+        p = car.params
+        car.cargo = [{"mass": p.cargo_capacity - 100.0, "resource": hc.FERRITE}]
+        self.assertTrue(car.can_take(100.0, hc.FERRITE))
+        self.assertFalse(car.can_take(100.5, hc.FERRITE))
+        self.assertAlmostEqual(car.cargo_volume, hc.load_volume(p.cargo_capacity - 100.0, hc.FERRITE))
+        car.cargo = []
+        ice = p.hold_m3 / hc.load_volume(1.0, ICE)                     # kg of ice that fill the hold
+        self.assertLess(ice, p.cargo_capacity)
+        self.assertTrue(car.can_take(ice - 1.0, ICE))
+        self.assertFalse(car.can_take(ice + 1.0, ICE))
 
     def test_attitude_is_orthonormal(self):
         car = hc.Car(START, NORTH)
