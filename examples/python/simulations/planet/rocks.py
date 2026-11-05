@@ -25,7 +25,7 @@ colour (rocks.speck_colour) times SPECK_GLOW. `restore` makes
 a loose rock out of the physics from a record (props.py's Props.record).
 `released` puts a loose rock's cell back when Props removes it.
 `grabbable()` gives (body, radius, mass) of the static rocks for the gun:
-the mass from its hull's volume at rocks.DENSITY.
+the mass from its hull's volume at its resource's density (rocks.density).
 
 An ore boulder, fixed or loose, struck at BREAK_SPEED or faster
 (`breaks`) splits (`split`) into 3 to 6 chunks, their number and shares of
@@ -46,7 +46,7 @@ import numpy as np
 
 from shoonyakasha.planet import vegetation
 from shoonyakasha.planet.resources import FERRITE
-from shoonyakasha.planet.rocks import DENSITY, rock_colour, speck_colour, tinted
+from shoonyakasha.planet.rocks import density, rock_colour, speck_colour, tinted
 from shoonyakasha.planet.vec import add, cross, length, normalize, quat_from_basis, quat_rotate, scale, sub
 
 from viewmodel import white_texture
@@ -156,12 +156,13 @@ class Rocks:
             p = sub(base, bubble.origin)
             right, up, ahead = rock_frame(bubble.up(p), tree.turn)
             centre = add(p, scale(up, 0.5 * tree.height))
+            kg_per_m3 = density(tree.resource)
             hull = physics.create_convex_hull((points * sizes).astype(np.float32), centre,
-                                              quat_from_basis(right, up, ahead), motion="static", density=DENSITY,
+                                              quat_from_basis(right, up, ahead), motion="static", density=kg_per_m3,
                                               friction=0.8, restitution=0.05)
             physics.watch_strikes(hull)
             rock = StaticRock(hull, tree.kind, base, tuple(sizes), float(np.linalg.norm(points * sizes, axis=1).max()),
-                              DENSITY * volume * across * across * tree.height,
+                              kg_per_m3 * volume * across * across * tree.height,
                               tinted(rock_colour(body.index, tree.grade, tree.resource), tree.tint), tree.grade,
                               tree.resource)
             self.rocks[tree.key] = rock

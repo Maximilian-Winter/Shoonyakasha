@@ -5,7 +5,7 @@ vegetation_scatter.comp's rockTaken finds it, the hash and constants the
 shader's), its upload only when changed, its limit and clearing one body;
 the rocks' colours as the shader's; and on sk.PlanetPhysics a fixed rock
 made for a listed rock (a static hull standing on its base, its mass from
-its hull at the rocks' density, strikes on it watched), rocks of the other
+its hull at its resource's density, strikes on it watched), rocks of the other
 body and taken ones left out, and a promotion (the body dynamic, its cell
 taken, an entity in its colour, a prop) and its release, a loose
 rock's record made again into the same rock, the ore rocks' colour as
@@ -136,6 +136,12 @@ class TakenRocksTest(unittest.TestCase):
         self.assertEqual(rocks.rock_colour(0, 0.5), rocks.rock_colour(0, 0.5, resources.FERRITE))
         self.assertEqual(rocks.speck_colour(resources.CUPRITE), rocks.SPECK_COLOURS[resources.CUPRITE])
 
+    def test_density_by_resource(self):
+        self.assertEqual(len(rocks.DENSITIES), len(resources.RESOURCES))
+        self.assertEqual(rocks.density(resources.NONE), rocks.DENSITY)
+        self.assertEqual(rocks.density(resources.ILMENITE), rocks.DENSITIES[resources.ILMENITE])
+        self.assertLess(rocks.density(resources.ICE), rocks.density(resources.FERRITE))
+
 
 class Body:
     name = "planet"
@@ -189,6 +195,9 @@ class ExampleRocksTest(unittest.TestCase):
         fixed = self.rocks.rocks[ore.key]
         self.assertEqual((fixed.grade, fixed.resource), (0.8, resources.QUARTZ))
         self.assertEqual(self.rocks.rocks[plain.key].resource, 0)
+        # Of the same size, their masses as their densities.
+        self.assertAlmostEqual(fixed.mass / self.rocks.rocks[plain.key].mass,
+                               rocks.density(resources.QUARTZ) / rocks.DENSITY)
         self.assertEqual(fixed.colour, rocks.tinted(rocks.rock_colour(0, 0.8, resources.QUARTZ), 0.5))
         self.assertFalse(self.rocks.breaks(fixed.body, self.example.BREAK_SPEED - 1.0))
         self.assertTrue(self.rocks.breaks(fixed.body, self.example.BREAK_SPEED))

@@ -599,7 +599,7 @@ def build_cards():
     and the hint bar along the bottom (toolkit.overlay)."""
     canvas = engine.ui.create_canvas(reference_size=(1600, 900))
     state["cards"] = (Card(engine.ui, canvas, (0, 0), 14), Card(engine.ui, canvas, (0, 1), 16, margin=(24, 76)))
-    state["trade_card"] = Card(engine.ui, canvas, (1, 0), 12, width=400)
+    state["trade_card"] = Card(engine.ui, canvas, (1, 0), 17, width=400)
     state["hint_bar"] = HintBar(engine.ui, canvas)
 
 
@@ -1271,7 +1271,7 @@ def load_cargo():
             continue
         body = prop.on
         ship.cargo.append({"body": body.name, "direction": normalize(body.relative(point)), "mass": prop.mass,
-                           "grade": prop.grade})
+                           "grade": prop.grade, "resource": prop.resource})
         if foot.gun is not None and prop.body is not None and foot.gun.held == prop.body:
             foot.gun.drop()
         props.remove(bubble, prop, release=False)
@@ -1346,7 +1346,10 @@ def trade_rows(outpost):
     """The outpost's card: credits, cargo, fuel, its prices and the last trade."""
     ship, market = state["ship"], state["market"]
     pad = state["input"] == "pad"
-    sample = lambda body: {"body": body.name, "direction": outpost.direction, "mass": 1.0, "grade": 1.0}
+    sample = lambda body, resource: {"body": body.name, "direction": outpost.direction, "mass": 1.0, "grade": 1.0,
+                                     "resource": resource}
+    found = lambda body: (range(resources.FERRITE, resources.EVAPORITE + 1) if body is planet
+                          else (resources.ICE, resources.ILMENITE))
     value = market.value(outpost, ship.cargo, world.time) if ship.cargo else 0.0
     room = ship.params.fuel_capacity - ship.fuel
     rows = [
@@ -1354,8 +1357,8 @@ def trade_rows(outpost):
         ("CARGO", "%s, %d piece%s" % (mass_text(ship.cargo_mass), len(ship.cargo), "" if len(ship.cargo) == 1 else "s")),
         ("FUEL", "%.0f / %.0f kg" % (ship.fuel, ship.params.fuel_capacity)),
         ("PRICES",),
-    ] + [("%s ORE, GRADE 1" % body.name.upper(), "%.2f cr/kg" % trade.price(outpost, sample(body), world.time))
-         for body in bodies] + [
+    ] + [("%s, GRADE 1" % resources.name(r).upper(), "%.2f cr/kg" % trade.price(outpost, sample(body, r), world.time))
+         for body in bodies for r in found(body)] + [
         ("FUEL", "%.2f cr/kg" % outpost.fuel_price),
         ("TRADE",),
         ("SELL THE CARGO (%s)" % ("D-PAD UP" if pad else "ENTER"), credits_text(value)),

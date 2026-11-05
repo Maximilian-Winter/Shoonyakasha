@@ -105,7 +105,7 @@ from shoonyakasha.planet.ground_patch import GroundPatch, SIZE as PATCH_SIZE
 from shoonyakasha.planet.on_foot import JUMP_DISTANCE, STEP, OnFoot
 from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis, quat_normalize,
                                      scale, sub)
-from shoonyakasha.planet import rivers
+from shoonyakasha.planet import resources, rivers
 from shoonyakasha.planet.lakes import LakeSurvey
 from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL, SITE_BLEND_RADIUS
 from shoonyakasha.planet.props import stack_offsets
@@ -1320,8 +1320,9 @@ def update_game():
         state["earned"] += credits
         state["sold_kg"] += item["mass"]
         foot.props.remove(foot.bubble, prop, release=False)
-        hud.toast("Sold %.0f kg of ore (grade %.2f) at %s: +%s cr"
-                  % (item["mass"], item["grade"], outpost.name, format(int(round(credits)), ",")), GOOD_TOAST)
+        hud.toast("Sold %.0f kg of %s (grade %.2f) at %s: +%s cr"
+                  % (item["mass"], resources.name(item["resource"]).lower(), item["grade"], outpost.name,
+                     format(int(round(credits)), ",")), GOOD_TOAST)
     snapshot = game_numbers()
     objectives = state["objectives"]
     for goal in objectives.update(snapshot):

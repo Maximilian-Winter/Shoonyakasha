@@ -9,7 +9,7 @@ all are met, and `progress(snapshot)` how far it has got (shown, target).
 
 Ore is sold where it comes to rest on an outpost's pad (`sale_items`):
 each loose ore rock lying still there, not held, is an item for
-trade.sale with the body and the place it was first seen on.
+trade.sale with its resource and the body and place it was first seen on.
 """
 
 from dataclasses import dataclass
@@ -80,7 +80,7 @@ def sale_items(ore, outposts, held):
         for outpost in outposts:
             if outpost.body is body and outpost.at(_add(body.centre(), position)):
                 found.append((outpost, prop, {"body": seen[0], "direction": seen[1], "mass": prop.mass,
-                                              "grade": prop.grade}))
+                                              "grade": prop.grade, "resource": prop.resource}))
                 break
     return found
 

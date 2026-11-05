@@ -64,47 +64,37 @@ Everything time-based (prices recovering, contracts expiring, day and night, eve
 | id | Resource | Where (planet) | Where (moon) | Rock tint | Speck colour | Base value (cr/kg at grade 1) |
 |---|---|---|---|---|---|---|
 | 0 | none | | | | | |
-| 1 | Ferrite | the mountains, where no other resource wins | | rust brown | orange | 6 |
-| 2 | Cuprite | dry, temperate ground (about 3 to 24 °C) | | grey-green | green | 9 |
-| 3 | Quartz | cold ground (below about 2 °C) | | pale grey | white-blue | 14 |
-| 4 | Amber | warm, wet ground (above about 10 °C, moisture above 0.5) | | dark brown | gold | 18 |
-| 5 | Evaporite (salts) | warm, dry ground (above about 12 °C, moisture below 0.4) | | off-white | pink | 5 |
-| 6 | Ice | | ore craters whose centre lies towards the poles | blue-grey | pale blue | 4 (fuel feedstock) |
-| 7 | Ilmenite | | the other ore craters | near black | silver | 30 |
-| 8 | Iridium | meteorites only (§11) | meteorites only | black, glassy | violet | 120 |
+| 1 | Ferrite | the mountains, where no other resource wins | | rust brown | orange | 2 |
+| 2 | Cuprite | dry, temperate ground (about 3 to 24 °C) | | grey-green | green | 3 |
+| 3 | Quartz | cold ground (below about 2 °C) | | pale grey | white-blue | 4.67 |
+| 4 | Amber | warm, wet ground (above about 10 °C, moisture above 0.5) | | dark brown | gold | 6 |
+| 5 | Evaporite (salts) | warm, dry ground (above about 12 °C, moisture below 0.4) | | off-white | pink | 1.67 |
+| 6 | Ice | | ore craters whose centre lies towards the poles | blue-grey | pale blue | 1.33 (fuel feedstock) |
+| 7 | Ilmenite | | the other ore craters | near black | silver | 10 |
+| 8 | Iridium | meteorites only (§11) | meteorites only | black, glassy | violet | 40 |
 
 §1.2 gives the exact rules for where each resource lies. Ids 0 to 7 are in `resources.glsl` and `python/shoonyakasha/planet/resources.py`. The scatter stores a rock's id in bits 16 and up of its `NearbyTrees` entry and in the whole-number part of its instance tint.
 
 The rock tints and speck colours of ids 0 to 7 are in `ore_colours.glsl` (`ORE_TINTS`, `ORE_SPECKS`), and in `rocks.ORE_TINTS` and `rocks.SPECK_COLOURS` in `python/shoonyakasha/planet/rocks.py`. An ore rock's colour is turned from the body's rock colour towards its tint by `ORE_TINT_SHARE` (0.35) times 1 + its grade. Id 0's entries are the colours an ore rock without a resource gets.
 
-Today one ore price applies to every rock: `trade.ORE_PRICE` (2 cr/kg at grade 1) times the grade. The values above replace it.
+The values of ids 1 to 7 are `trade.VALUES` in the example's `trade.py` (§1.3).
 
-```python
-# game_data.py
-@dataclass(frozen=True)
-class Resource:
-    id: int
-    name: str
-    tint: tuple            # rocks.ORE_TINTS[id]
-    speck: tuple           # rocks.SPECK_COLOURS[id]
-    value: float           # credits per kg at grade 1
-    density: float         # kg/m^3 of the rock
+Each rock weighs by its resource's density: `rocks.DENSITIES`, indexed by id, and `rocks.density(resource)` in `python/shoonyakasha/planet/rocks.py`. A plain rock (id 0) has `rocks.DENSITY`, 2,600 kg/m³.
 
-RESOURCES = {r.id: r for r in [
-    Resource(1, "Ferrite",    (0.46, 0.25, 0.13), (1.00, 0.50, 0.20),   6.0, 3_400.0),
-    Resource(2, "Cuprite",    (0.30, 0.42, 0.33), (0.35, 1.00, 0.55),   9.0, 3_000.0),
-    Resource(3, "Quartz",     (0.78, 0.80, 0.84), (0.65, 0.85, 1.00),  14.0, 2_650.0),
-    Resource(4, "Amber",      (0.36, 0.22, 0.10), (1.00, 0.78, 0.28),  18.0, 1_100.0),
-    Resource(5, "Evaporite",  (0.85, 0.80, 0.76), (1.00, 0.60, 0.75),   5.0, 2_200.0),
-    Resource(6, "Ice",        (0.62, 0.72, 0.82), (0.70, 0.90, 1.00),   4.0,   920.0),
-    Resource(7, "Ilmenite",   (0.07, 0.07, 0.08), (0.80, 0.85, 0.90),  30.0, 4_700.0),
-    Resource(8, "Iridium",    (0.10, 0.09, 0.12), (0.70, 0.40, 1.00), 120.0, 8_000.0),
-]}
-```
+| id | Resource | Density (kg/m³) |
+|---|---|---|
+| 1 | Ferrite | 3,400 |
+| 2 | Cuprite | 3,000 |
+| 3 | Quartz | 2,650 |
+| 4 | Amber | 1,100 |
+| 5 | Evaporite | 2,200 |
+| 6 | Ice | 920 |
+| 7 | Ilmenite | 4,700 |
+| 8 | Iridium | 8,000 |
 
-Iridium's tint and speck colour are not yet in `ore_colours.glsl` or `rocks.py`. Both lookups clamp the id to the last entry, so id 8 would get ilmenite's colours until §11 adds it.
+The example's fixed rocks get their static hull and their mass at that density. `Rocks.grabbable`, a promoted rock's mass, a boulder's chunks and the cargo all follow from it. Ilmenite boulders are about 1.8 times as heavy as plain ones of the same size, and amber and ice rocks less than half.
 
-`python/shoonyakasha/planet/rocks.py` has one `DENSITY` for every rock today. With `density` per resource, `Rocks.grabbable` and the loose rocks' masses take the resource's.
+Iridium (id 8) is not in the code. The tables above and in §1.1 give the values to use when §11 adds it: entries in `resources.glsl` and `resources.py`, in `ore_colours.glsl` and `rocks.ORE_TINTS` / `SPECK_COLOURS` (black, glassy; violet specks), in `rocks.DENSITIES` and in `trade.VALUES`. Until then the colour and density lookups clamp id 8 to ilmenite's entries.
 
 ### 1.2 The resource field on the GPU
 
@@ -164,13 +154,17 @@ Plumbing:
 
 ### 1.3 What a rock is worth
 
+Cargo items carry `"resource"` next to `"grade"`. The cargo net (`load_cargo` in `planet.py`) and the walker's pads (`objectives.sale_items`) take it from the loose rock. `trade.base_price` starts from:
+
 ```python
-def rock_value(resource_id, grade, mass):
-    r = RESOURCES[resource_id]
-    return r.value * mass * grade ** 1.5
+# trade.py
+VALUES = {FERRITE: 2.0, CUPRITE: 3.0, QUARTZ: 4.67, AMBER: 6.0, EVAPORITE: 1.67, ICE: 1.33, ILMENITE: 10.0}
+GRADE_POWER = 1.5
+
+price = VALUES.get(item.get("resource", FERRITE), 0.0) * item["grade"] ** GRADE_POWER
 ```
 
-`trade.base_price` is linear in the grade today; `grade ** 1.5` pays high grades more than linearly.
+So high grades pay more than linearly: grade 0.5 pays 35 % of grade 1. An item without a resource, from a save made before resources, sells as ferrite. The other-body and distance factors and the supply (still per body) apply on top, as in §3.2. The trade card lists each resource's price at grade 1, and the walker's sale toast names the resource.
 
 ## 2. Cargo
 
@@ -224,7 +218,7 @@ Demand comes from the outpost's surroundings: it pays little for what is mined n
 ### 3.2 Price model
 
 `trade.py` today:
-- An outpost pays `ORE_PRICE · grade` per kg. That is multiplied by `OTHER_BODY` (1.8) for ore from the other body, or else by `1 + DISTANCE_PREMIUM` (0.5) per 100 km from where the ore was mined.
+- An outpost pays `VALUES[resource] · grade ** GRADE_POWER` per kg (§1.3). That is multiplied by `OTHER_BODY` (1.8) for ore from the other body, or else by `1 + DISTANCE_PREMIUM` (0.5) per 100 km from where the ore was mined.
 - The price is divided by `1 + s / SUPPLY_HALF`, where `s` is the kg of that body's ore the outpost has bought. `SUPPLY_HALF` is 4,000 kg.
 - `s` decays towards 0 with `SUPPLY_RECOVERY` (900 s), computed lazily from the time stored with it.
 - A sale integrates the price over the rising supply, `base · SUPPLY_HALF · ln((1 + (s + m)/H) / (1 + s/H))`. Splitting a sale therefore pays no more.
@@ -233,8 +227,9 @@ Changes for resources: key `supply` by resource id instead of body name, and mul
 
 ```python
 def base_price(outpost, item):
-    r = RESOURCES[item["resource"]]
-    price = r.value * item["grade"] ** 1.5 * outpost.demand.get(item["resource"], 1.0)
+    resource = item.get("resource", FERRITE)
+    price = (VALUES.get(resource, 0.0) * item["grade"] ** GRADE_POWER
+             * outpost.demand.get(resource, 1.0))
     if item["body"] != outpost.body.name:
         return price * OTHER_BODY
     distance = ground_distance(outpost.body.radius, outpost.direction, item["direction"])
@@ -767,7 +762,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 
 ## 15. Milestones
 
-1. **Resources.** Resource id in `resources.glsl`, a probe column, scatter rocks by resource with tints and specks, `rock_value`. `--resource-check`.
+1. **Resources.** Resource id in `resources.glsl`, a probe column, scatter rocks by resource with tints and specks, the value and density by resource. `--resource-check`.
 2. **Prices by resource.** `trade.py` supply by resource and demand, outposts' demand from their surroundings, the trade card per resource. `--trade-check`.
 3. **Hold limits.** `hold_kg` / `hold_m3`, the cargo net refusing what doesn't fit, running dry. `--cargo-check`, `--fuel-check`.
 4. **Upgrades.** Table, effective parameters, buying at outposts.

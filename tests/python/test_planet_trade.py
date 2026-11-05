@@ -1,6 +1,8 @@
 """Tests for the planet example's trading (examples/python/simulations/
-planet/trade.py), loaded from its file: an outpost pays more for ore of a
-higher grade, from farther along the ground or from the other body; its
+planet/trade.py), loaded from its file: an outpost pays its resource's
+value times the grade to GRADE_POWER (ferrite for an item without a
+resource, nothing for none), more from farther along the ground or from
+the other body; its
 supply lowers its price and falls back with time; a load sold at once
 fetches what its pieces sold one after another do; a sale and a purchase
 of fuel move the credits, the cargo, the fuel and the supply as they
@@ -13,6 +15,8 @@ import importlib.util
 import math
 import unittest
 from pathlib import Path
+
+from shoonyakasha.planet.resources import AMBER, FERRITE, ICE, ILMENITE, NONE
 
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO / "examples" / "python" / "simulations" / "planet"
@@ -47,8 +51,8 @@ class Ship:
 PLANET, MOON = Body("planet", 100_000.0), Body("moon", 25_000.0)
 
 
-def ore(body, mass, grade=1.0, direction=(0.0, 0.0, 1.0)):
-    return {"body": body, "direction": direction, "mass": mass, "grade": grade}
+def ore(body, mass, grade=1.0, direction=(0.0, 0.0, 1.0), resource=FERRITE):
+    return {"body": body, "direction": direction, "mass": mass, "grade": grade, "resource": resource}
 
 
 def towards(angle):
@@ -60,11 +64,24 @@ class Prices(unittest.TestCase):
     def test_grade_distance_and_the_other_body(self):
         outpost = Outpost(PLANET)
         here = trade.base_price(outpost, ore("planet", 1.0, 0.5))
-        self.assertAlmostEqual(here, trade.ORE_PRICE * 0.5)
+        self.assertAlmostEqual(here, trade.VALUES[FERRITE] * 0.5 ** trade.GRADE_POWER)
         far = trade.base_price(outpost, ore("planet", 1.0, 0.5, towards(0.5)))      # 50 km along the ground
         self.assertAlmostEqual(far, here * (1.0 + 0.5 * trade.DISTANCE_PREMIUM))
         other = trade.base_price(outpost, ore("moon", 1.0, 0.5, towards(2.0)))
         self.assertAlmostEqual(other, here * trade.OTHER_BODY)
+
+    def test_value_by_resource(self):
+        outpost = Outpost(PLANET)
+        for resource in (FERRITE, AMBER, ILMENITE):
+            self.assertAlmostEqual(trade.base_price(outpost, ore("planet", 1.0, 0.64, resource=resource)),
+                                   trade.VALUES[resource] * 0.512)
+        self.assertGreater(trade.VALUES[ILMENITE], trade.VALUES[AMBER])
+        self.assertLess(trade.VALUES[ICE], trade.VALUES[FERRITE])
+        # An item without a resource is ferrite; one of no resource fetches nothing.
+        legacy = ore("planet", 1.0, 0.64)
+        del legacy["resource"]
+        self.assertEqual(trade.base_price(outpost, legacy), trade.base_price(outpost, ore("planet", 1.0, 0.64)))
+        self.assertEqual(trade.base_price(outpost, ore("planet", 1.0, 0.64, resource=NONE)), 0.0)
 
     def test_supply_lowers_the_price_and_falls_back(self):
         outpost = Outpost(PLANET)
@@ -90,7 +107,8 @@ class Prices(unittest.TestCase):
         self.assertAlmostEqual(one_by_one, whole, places=6)
         self.assertAlmostEqual(supplies["planet"][0], 4_000.0)
         # The integral: base H ln((1 + m / H) / 1).
-        self.assertAlmostEqual(whole, trade.ORE_PRICE * 0.7 * trade.SUPPLY_HALF * math.log(2.0), places=6)
+        self.assertAlmostEqual(whole, trade.VALUES[FERRITE] * 0.7 ** trade.GRADE_POWER * trade.SUPPLY_HALF
+                               * math.log(2.0), places=6)
 
 
 class MarketTest(unittest.TestCase):

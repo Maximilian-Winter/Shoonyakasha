@@ -20,7 +20,8 @@ at most MAX_TAKEN.
 rock's colour with an ore rock's tint (ORE_ROCKS, its resource's
 ORE_TINTS, ORE_TINT_SHARE) and `tinted` a colour tinted by a rock's tint,
 as drawn; SPECK_COLOURS an ore rock's specks' colour by resource; DENSITY
-the rocks' density.
+a plain rock's density and `density(resource)` a rock's by its resource
+(DENSITIES).
 """
 
 import numpy as np
@@ -32,6 +33,9 @@ EMPTY = 0xFFFFFFFF
 MAX_TAKEN = SLOTS // 2           # rocks taken at most, so probes stay short
 ROCK_KINDS = ("rock", "boulder")
 DENSITY = 2600.0                 # kg/m^3
+# kg/m^3 by resource id (shoonyakasha.planet.resources): none, ferrite, cuprite, quartz, amber, evaporite, ice,
+# ilmenite.
+DENSITIES = (DENSITY, 3400.0, 3000.0, 2650.0, 1100.0, 2200.0, 920.0, 4700.0)
 # The rocks' colour by body index (vegetation_scatter.comp's PLANET_ROCK and MOON_ROCK), before the tint.
 ROCK_COLOURS = {0: (0.39, 0.35, 0.33), 1: (0.2, 0.195, 0.185)}
 # Ore rocks (vegetation_scatter.comp's and ore_colours.glsl's): the richness above which rocks are ore,
@@ -43,6 +47,10 @@ ORE_TINTS = ((0.46, 0.25, 0.13), (0.46, 0.25, 0.13), (0.30, 0.42, 0.33), (0.78, 
 SPECK_COLOURS = ((1.00, 0.72, 0.28), (1.00, 0.50, 0.20), (0.35, 1.00, 0.55), (0.65, 0.85, 1.00),
                  (1.00, 0.78, 0.28), (1.00, 0.60, 0.75), (0.70, 0.90, 1.00), (0.80, 0.85, 0.90))
 ORE_TINT_SHARE = 0.35
+
+
+def density(resource):
+    return DENSITIES[min(int(resource), len(DENSITIES) - 1)]
 
 
 def speck_colour(resource):

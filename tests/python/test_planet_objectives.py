@@ -41,8 +41,8 @@ class Pad:
 
 
 class Prop:
-    def __init__(self, mass, grade):
-        self.mass, self.grade = mass, grade
+    def __init__(self, mass, grade, resource=3):
+        self.mass, self.grade, self.resource = mass, grade, resource
 
 
 class ObjectivesTest(unittest.TestCase):
@@ -85,7 +85,8 @@ class SaleTest(unittest.TestCase):
         pad, prop, item = sold[0]
         self.assertIs(pad, pads[0])
         self.assertIs(prop, resting)
-        self.assertEqual(item, {"body": "planet", "direction": (0.0, 0.0, 1.0), "mass": 100.0, "grade": 0.5})
+        self.assertEqual(item, {"body": "planet", "direction": (0.0, 0.0, 1.0), "mass": 100.0, "grade": 0.5,
+                                "resource": 3})
 
 
 if __name__ == "__main__":
