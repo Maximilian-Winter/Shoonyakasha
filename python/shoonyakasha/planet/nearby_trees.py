@@ -16,9 +16,10 @@ A `NearbyTree` is named by its cell (`key`: its body, grid, cube face and
 cell, as rocks' keys, the same every frame), with its kind
 (vegetation.KINDS), its base on the drawn surface, its height, its width
 factor (as vegetation.glsl's vegetationWidth, from its tint), its turn
-about its up (cosine, sine), its tint, and an ore rock's grade (its ore
-richness, from the bits of the kind's word from 8 up, over 255; 0 for
-every other). `rock` tells a rock. `trunk`
+about its up (cosine, sine), its tint, an ore rock's grade (its ore
+richness, from bits 8 to 15 of the kind's word, over 255; 0 for every
+other) and its resource (resources.py's ids, from the bits from 16 up; 0
+for every other). `rock` tells a rock. `trunk`
 gives a plant's trunk as a column: (radius, height) in metres, from
 TRUNKS, the share of the plant's height each mesh's trunk has
 (vegetation.py) near its foot and up to where it thins or forks.
@@ -66,6 +67,7 @@ class NearbyTree:
     turn: tuple = (1.0, 0.0)     # cosine and sine of its turn about its up
     tint: float = 0.0            # 0 .. 1
     grade: float = 0.0           # an ore rock's ore richness (above rocks.ORE_ROCKS), else 0
+    resource: int = 0            # an ore rock's resource (resources.py), else 0
 
     @property
     def body(self):
@@ -138,13 +140,16 @@ class NearbyTrees:
             - known[np.minimum(body, len(centres))]
         kinds = (rows[:, 5] & 0xFF).astype(np.int64)
         grades = ((rows[:, 5] >> 8) & 0xFF).astype(np.float64) / 255.0
+        resources = (rows[:, 5] >> 16).astype(np.int64)
         grid = (kinds == ROCK_INDEX).astype(np.int64)
         t = floats[:, 4] * np.float32(7.31)
         width = 0.85 + 0.3 * (t - np.floor(t)).astype(np.float64)
         keys = np.stack([body, grid, rows[:, 6].astype(np.int64), cells[:, 7], cells[:, 8]], axis=1).tolist()
         names = [vegetation.KINDS[k] for k in kinds.tolist()]
-        return [NearbyTree(tuple(key), name, tuple(b), h, w, (c, s), tint, grade)
-                for key, name, b, h, w, c, s, tint, grade in zip(keys, names, base.tolist(), floats[:, 3].tolist(),
-                                                                 width.tolist(), floats[:, 10].tolist(),
-                                                                 floats[:, 11].tolist(), floats[:, 4].tolist(),
-                                                                 grades.tolist())]
+        return [NearbyTree(tuple(key), name, tuple(b), h, w, (c, s), tint, grade, resource)
+                for key, name, b, h, w, c, s, tint, grade, resource in zip(keys, names, base.tolist(),
+                                                                           floats[:, 3].tolist(), width.tolist(),
+                                                                           floats[:, 10].tolist(),
+                                                                           floats[:, 11].tolist(),
+                                                                           floats[:, 4].tolist(), grades.tolist(),
+                                                                           resources.tolist())]

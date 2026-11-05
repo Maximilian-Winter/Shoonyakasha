@@ -9,8 +9,11 @@ its hull at the rocks' density, strikes on it watched), rocks of the other
 body and taken ones left out, and a promotion (the body dynamic, its cell
 taken, an entity in its colour, a prop) and its release, a loose
 rock's record made again into the same rock, the ore rocks' colour as
-the shader's, and an ore boulder, fixed or loose, broken by a fast strike
-into 3 to 6 chunks of its mass and grade, its cell kept taken. Where this
+the shader's (ore_colours.glsl's tints and specks by resource), an ore
+rock's resource kept through promotion and its record (one without a
+resource ferrite), and an ore boulder, fixed or loose, broken by a fast
+strike into 3 to 6 chunks of its mass, grade and resource, their specks in
+its resource's colour, its cell kept taken. Where this
 interpreter's shoonyakasha has no extension, the physics tests run in a
 fresh interpreter.
 
@@ -28,12 +31,13 @@ from pathlib import Path
 import numpy as np
 
 import shoonyakasha as sk
-from shoonyakasha.planet import rocks, world
+from shoonyakasha.planet import resources, rocks, world
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.nearby_trees import NearbyTree
 
 PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simulations" / "planet"
 SHADER = world.PIPELINE.parent / "shaders" / "vegetation_scatter.comp"
+ORE_COLOURS = world.PIPELINE.parent / "shaders" / "ore_colours.glsl"
 
 
 class FakeScene:
@@ -116,13 +120,21 @@ class TakenRocksTest(unittest.TestCase):
         shader = SHADER.read_text(encoding="utf-8")
         self.assertIn("const float ORE_ROCKS = %s;" % rocks.ORE_ROCKS, shader)
         self.assertIn("const float ORE_TINT_SHARE = %s;" % rocks.ORE_TINT_SHARE, shader)
-        values = re.search(r"const vec3 ORE_TINT = vec3\(([^)]*)\);", shader).group(1)
-        self.assertEqual(tuple(float(v) for v in values.split(",")), rocks.ORE_TINT)
+        colours = ORE_COLOURS.read_text(encoding="utf-8")
+        for name, table in (("ORE_TINTS", rocks.ORE_TINTS), ("ORE_SPECKS", rocks.SPECK_COLOURS)):
+            body = re.search(r"const vec3 %s\[ORE_COLOURS\] = vec3\[ORE_COLOURS\]\((.*?)\);" % name, colours,
+                             re.S).group(1)
+            values = [tuple(float(v) for v in m.split(",")) for m in re.findall(r"vec3\(([^)]*)\)", body)]
+            self.assertEqual(tuple(values), table, name)
         self.assertEqual(rocks.rock_colour(1, 0.0), rocks.ROCK_COLOURS[1])
         self.assertEqual(rocks.rock_colour(0, rocks.ORE_ROCKS), rocks.ROCK_COLOURS[0])
         share = rocks.ORE_TINT_SHARE * 1.5
-        self.assertAlmostEqual(rocks.rock_colour(0, 0.5)[0],
-                               rocks.ROCK_COLOURS[0][0] + (rocks.ORE_TINT[0] - rocks.ROCK_COLOURS[0][0]) * share)
+        for resource in (resources.FERRITE, resources.QUARTZ, resources.ILMENITE):
+            tint = rocks.ORE_TINTS[resource]
+            self.assertAlmostEqual(rocks.rock_colour(0, 0.5, resource)[0],
+                                   rocks.ROCK_COLOURS[0][0] + (tint[0] - rocks.ROCK_COLOURS[0][0]) * share)
+        self.assertEqual(rocks.rock_colour(0, 0.5), rocks.rock_colour(0, 0.5, resources.FERRITE))
+        self.assertEqual(rocks.speck_colour(resources.CUPRITE), rocks.SPECK_COLOURS[resources.CUPRITE])
 
 
 class Body:
@@ -163,24 +175,31 @@ class ExampleRocksTest(unittest.TestCase):
         self.rocks = example_rocks.Rocks(self.engine, self.world, self.props)
         self.radius = radius
 
-    def rock(self, key, x, height=0.5, kind="boulder", grade=0.0):
-        return NearbyTree(key, kind, (x, self.radius, 0.0), height, 1.0, (1.0, 0.0), 0.5, grade)
+    def rock(self, key, x, height=0.5, kind="boulder", grade=0.0, resource=0):
+        return NearbyTree(key, kind, (x, self.radius, 0.0), height, 1.0, (1.0, 0.0), 0.5, grade, resource)
+
+    def speck_glows(self):
+        return [c[3][:3] for c in self.engine.scene.calls if c[0] == "set_material_vec4" and c[2] == "emissiveFactor"]
 
     def test_ore_boulder_splits(self):
         here = (0.0, self.radius + 1.7, 0.0)
-        plain, ore = self.rock((0, 0, 4, 1, 1), 3.0, 1.5), self.rock((0, 0, 4, 1, 2), -3.0, 1.5, grade=0.8)
+        plain = self.rock((0, 0, 4, 1, 1), 3.0, 1.5)
+        ore = self.rock((0, 0, 4, 1, 2), -3.0, 1.5, grade=0.8, resource=resources.QUARTZ)
         self.rocks.update(self.bubble, [plain, ore], here, 40.0)
         fixed = self.rocks.rocks[ore.key]
-        self.assertEqual(fixed.grade, 0.8)
-        self.assertEqual(fixed.colour, rocks.tinted(rocks.rock_colour(0, 0.8), 0.5))
+        self.assertEqual((fixed.grade, fixed.resource), (0.8, resources.QUARTZ))
+        self.assertEqual(self.rocks.rocks[plain.key].resource, 0)
+        self.assertEqual(fixed.colour, rocks.tinted(rocks.rock_colour(0, 0.8, resources.QUARTZ), 0.5))
         self.assertFalse(self.rocks.breaks(fixed.body, self.example.BREAK_SPEED - 1.0))
         self.assertTrue(self.rocks.breaks(fixed.body, self.example.BREAK_SPEED))
         self.assertFalse(self.rocks.breaks(self.rocks.rocks[plain.key].body, 100.0))
         chunks = self.rocks.split(self.bubble, fixed.body)
         self.assertTrue(3 <= len(chunks) <= 6)
         self.assertAlmostEqual(sum(self.physics.mass(c.body) for c in chunks), fixed.mass, delta=1e-3 * fixed.mass)
-        self.assertTrue(all(c.grade == 0.8 and c.kind == "rock" and c.key is None and c.glow is not None
-                            for c in chunks))
+        self.assertTrue(all(c.grade == 0.8 and c.resource == resources.QUARTZ and c.kind == "rock"
+                            and c.key is None and c.glow is not None for c in chunks))
+        quartz = tuple(v * self.example.SPECK_GLOW for v in rocks.SPECK_COLOURS[resources.QUARTZ])
+        self.assertEqual(self.speck_glows()[-len(chunks):], [quartz] * len(chunks))
         self.assertIn(ore.key, self.world.taken_rocks)
         self.assertNotIn(ore.key, self.rocks.rocks)
         self.assertFalse(self.physics.contains(fixed.body))
@@ -262,6 +281,25 @@ class ExampleRocksTest(unittest.TestCase):
         self.assertEqual(self.props.record(self.bubble, restored), record)
         scales = [c for c in self.engine.scene.calls if c[0] == "set_scale"]
         self.assertEqual(scales[-1][2], tuple(record["extent"]))
+
+    def test_ore_record_keeps_its_resource(self):
+        here = (0.0, self.radius + 1.7, 0.0)
+        ore = self.rock((0, 0, 4, 1, 2), 3.0, grade=0.6, resource=resources.AMBER)
+        self.rocks.update(self.bubble, [ore], here, 40.0)
+        self.rocks.promote(self.bubble, self.rocks.rocks[ore.key].body)
+        record = self.props.record(self.bubble, self.props.rocks[0])
+        self.assertEqual((record["grade"], record["resource"]), (0.6, resources.AMBER))
+        self.props.clear(self.bubble)
+        restored = self.rocks.restore(self.physics, record, {"planet": self.bubble.body})
+        self.assertEqual(restored.resource, resources.AMBER)
+        amber = tuple(v * self.example.SPECK_GLOW for v in rocks.SPECK_COLOURS[resources.AMBER])
+        self.assertEqual(self.speck_glows()[-1], amber)
+        # A record without a resource: an ore rock is ferrite, a plain one none.
+        older = {k: v for k, v in record.items() if k != "resource"}
+        self.assertEqual(self.rocks.restore(self.physics, older, {"planet": self.bubble.body}).resource,
+                         resources.FERRITE)
+        plain = dict(older, grade=0.0)
+        self.assertEqual(self.rocks.restore(self.physics, plain, {"planet": self.bubble.body}).resource, 0)
 
     def test_strikes_watched_and_far_rocks_removed(self):
         here = (0.0, self.radius + 1.7, 0.0)

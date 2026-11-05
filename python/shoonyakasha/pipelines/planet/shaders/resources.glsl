@@ -13,6 +13,19 @@
 // there to 1 at 1, over its floor and its rim, fading out between
 // MOON_ORE_FADE and the rim's outer edge. Where craters overlap the richest
 // counts.
+//
+// Resources (the RESOURCE_ ids, which shoonyakasha.planet.resources
+// mirrors), for where the richness is above 0:
+//
+// planetResource(dir, temperature, moisture): of ferrite, cuprite, quartz,
+// amber and evaporite, the one whose weight (planetResourceWeights, from
+// the base climate and the mountains' mask) times
+// 1 + RESOURCE_NOISE times its own fBm about RESOURCE_WAVELENGTH across
+// (planetResourceNoise) is the highest; ferrite where they tie.
+//
+// moonResource(dir): ice where the richest ore crater's centre lies beyond
+// MOON_ICE_LATITUDE (the sine of its latitude, about the Y axis), ilmenite
+// elsewhere.
 
 const float ORE_VEIN_WAVELENGTH = 0.0045;    // of a unit of direction: about 450 m on the planet
 const float ORE_PATCH_WAVELENGTH = 0.0167;   // about 1.7 km
@@ -36,7 +49,9 @@ float planetOre(vec3 dir, float height) {
     return clamp(veins * patches * (0.4 + 0.6 * terrainMountainMask(dir)), 0.0, 1.0);
 }
 
-float moonOre(vec3 dir) {
+// The moon's richness at `dir`, and the unit direction of the crater it comes from (dir where there is none).
+float moonOreCrater(vec3 dir, out vec3 crater) {
+    crater = dir;
     float richness = 0.0;
     float cells = MOON_CRATER_CELLS;
     for (int octave = 0; octave < MOON_ORE_OCTAVES; ++octave) {
@@ -57,9 +72,81 @@ float moonOre(vec3 dir) {
             float size = mix(MOON_CRATER_SIZE.x, MOON_CRATER_SIZE.y, moonUnit(terrainHash(ivec3(int(h), 4, 0))));
             float x = length(p - centre) / size;
             float weight = 1.0 - smoothstep(MOON_ORE_FADE, 1.0 + MOON_RIM_WIDTH, x);
-            richness = max(richness, (mineral - MOON_ORE_LOW) / (1.0 - MOON_ORE_LOW) * weight);
+            float grade = (mineral - MOON_ORE_LOW) / (1.0 - MOON_ORE_LOW) * weight;
+            if (grade > richness) {
+                richness = grade;
+                crater = centre / cells;
+            }
         }
         cells *= MOON_CRATER_LACUNARITY;
     }
     return richness;
+}
+
+float moonOre(vec3 dir) {
+    vec3 crater;
+    return moonOreCrater(dir, crater);
+}
+
+const uint RESOURCE_NONE = 0u;
+const uint RESOURCE_FERRITE = 1u;
+const uint RESOURCE_CUPRITE = 2u;
+const uint RESOURCE_QUARTZ = 3u;
+const uint RESOURCE_AMBER = 4u;
+const uint RESOURCE_EVAPORITE = 5u;
+const uint RESOURCE_ICE = 6u;
+const uint RESOURCE_ILMENITE = 7u;
+const int PLANET_RESOURCES = 5;              // ferrite to evaporite
+const float RESOURCE_WAVELENGTH = 0.11;      // of a unit of direction: about 11 km on the planet
+const float RESOURCE_NOISE = 0.6;
+const float MOON_ICE_LATITUDE = 0.55;
+
+// 1 below `low`, falling to 0 at `high`.
+float resourceFalling(float low, float high, float x) {
+    return 1.0 - smoothstep(low, high, x);
+}
+
+// The planet's resources' weights, ferrite first, from the base temperature
+// (degrees C), the moisture and the mountains' mask.
+void planetResourceWeights(float temperature, float moisture, float mountains, out float w[PLANET_RESOURCES]) {
+    w[0] = 0.55 * smoothstep(0.3, 0.9, mountains);                                        // ferrite
+    w[1] = resourceFalling(0.3, 0.5, moisture) * smoothstep(3.0, 12.0, temperature)
+         * resourceFalling(16.0, 24.0, temperature);                                      // cuprite
+    w[2] = resourceFalling(-4.0, 2.0, temperature);                                       // quartz
+    w[3] = smoothstep(0.5, 0.75, moisture) * smoothstep(10.0, 20.0, temperature);         // amber
+    w[4] = resourceFalling(0.25, 0.4, moisture) * smoothstep(12.0, 20.0, temperature);    // evaporite
+}
+
+// The fBm that varies resource `k` (0 ferrite .. 4 evaporite) over the planet.
+float planetResourceNoise(vec3 dir, int k) {
+    vec3 p = (dir + terrain.seed.xyz) / RESOURCE_WAVELENGTH + vec3(float(k) * 17.3, float(k) * 5.9, 2.7);
+    return fbm3(p, 3, 2.0, 0.5);
+}
+
+// The resource of the highest weight times 1 + RESOURCE_NOISE times its noise; ferrite where they tie.
+uint planetResourcePick(float w[PLANET_RESOURCES], float noise[PLANET_RESOURCES]) {
+    uint best = RESOURCE_FERRITE;
+    float bestWeight = w[0] * (1.0 + RESOURCE_NOISE * noise[0]);
+    for (int k = 1; k < PLANET_RESOURCES; ++k) {
+        float weight = w[k] * (1.0 + RESOURCE_NOISE * noise[k]);
+        if (weight > bestWeight) {
+            bestWeight = weight;
+            best = RESOURCE_FERRITE + uint(k);
+        }
+    }
+    return best;
+}
+
+uint planetResource(vec3 dir, float temperature, float moisture) {
+    float w[PLANET_RESOURCES];
+    planetResourceWeights(temperature, moisture, terrainMountainMask(dir), w);
+    float noise[PLANET_RESOURCES];
+    for (int k = 0; k < PLANET_RESOURCES; ++k) noise[k] = planetResourceNoise(dir, k);
+    return planetResourcePick(w, noise);
+}
+
+uint moonResource(vec3 dir) {
+    vec3 crater;
+    moonOreCrater(dir, crater);
+    return abs(crater.y) > MOON_ICE_LATITUDE ? RESOURCE_ICE : RESOURCE_ILMENITE;
 }

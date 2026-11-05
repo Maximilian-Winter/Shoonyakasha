@@ -17,12 +17,15 @@ at most MAX_TAKEN.
 
 `rock_grid(kind)` is the grid of a rock kind (vegetation.KINDS' "rock" or
 "boulder"); ROCK_COLOURS the rocks' colour on each body, `rock_colour` a
-rock's colour with an ore rock's tint (ORE_ROCKS, ORE_TINT,
-ORE_TINT_SHARE) and `tinted` a colour tinted by a rock's tint, as drawn;
-DENSITY the rocks' density.
+rock's colour with an ore rock's tint (ORE_ROCKS, its resource's
+ORE_TINTS, ORE_TINT_SHARE) and `tinted` a colour tinted by a rock's tint,
+as drawn; SPECK_COLOURS an ore rock's specks' colour by resource; DENSITY
+the rocks' density.
 """
 
 import numpy as np
+
+from shoonyakasha.planet.resources import FERRITE
 
 SLOTS = 8192                     # entries in TakenRocks (two words each)
 EMPTY = 0xFFFFFFFF
@@ -31,11 +34,19 @@ ROCK_KINDS = ("rock", "boulder")
 DENSITY = 2600.0                 # kg/m^3
 # The rocks' colour by body index (vegetation_scatter.comp's PLANET_ROCK and MOON_ROCK), before the tint.
 ROCK_COLOURS = {0: (0.39, 0.35, 0.33), 1: (0.2, 0.195, 0.185)}
-# Ore rocks (vegetation_scatter.comp's): the richness above which rocks are ore, the tint they turn
-# towards, and its share at richness 0 (twice that at 1).
+# Ore rocks (vegetation_scatter.comp's and ore_colours.glsl's): the richness above which rocks are ore,
+# the tint they turn towards and their specks' colour by resource id, and the tint's share at richness 0
+# (twice that at 1).
 ORE_ROCKS = 0.3
-ORE_TINT = (0.46, 0.25, 0.13)
+ORE_TINTS = ((0.46, 0.25, 0.13), (0.46, 0.25, 0.13), (0.30, 0.42, 0.33), (0.78, 0.80, 0.84),
+             (0.36, 0.22, 0.10), (0.85, 0.80, 0.76), (0.62, 0.72, 0.82), (0.07, 0.07, 0.08))
+SPECK_COLOURS = ((1.00, 0.72, 0.28), (1.00, 0.50, 0.20), (0.35, 1.00, 0.55), (0.65, 0.85, 1.00),
+                 (1.00, 0.78, 0.28), (1.00, 0.60, 0.75), (0.70, 0.90, 1.00), (0.80, 0.85, 0.90))
 ORE_TINT_SHARE = 0.35
+
+
+def speck_colour(resource):
+    return SPECK_COLOURS[min(int(resource), len(SPECK_COLOURS) - 1)]
 
 
 def tinted(colour, tint):
@@ -44,14 +55,16 @@ def tinted(colour, tint):
     return tuple(c * shade for c in colour)
 
 
-def rock_colour(body, grade=0.0):
+def rock_colour(body, grade=0.0, resource=FERRITE):
     """A rock's colour on body index `body` before the tint: an ore rock's
-    (`grade` above ORE_ROCKS) turned towards ORE_TINT as the scatter turns it."""
+    (`grade` above ORE_ROCKS) turned towards its resource's ORE_TINTS as the
+    scatter turns it."""
     colour = ROCK_COLOURS[body]
     if grade <= ORE_ROCKS:
         return colour
     share = ORE_TINT_SHARE * (1.0 + grade)
-    return tuple(c + (t - c) * share for c, t in zip(colour, ORE_TINT))
+    tint = ORE_TINTS[min(int(resource), len(ORE_TINTS) - 1)]
+    return tuple(c + (t - c) * share for c, t in zip(colour, tint))
 
 
 def rock_grid(kind):

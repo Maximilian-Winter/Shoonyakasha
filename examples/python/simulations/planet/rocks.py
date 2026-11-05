@@ -7,7 +7,8 @@ kind's points (vegetation.rock_points) below its base raised to the base,
 scaled as the scatter draws it (across by its width factor times its
 height, up by its height) and turned by its turn about the body's up; the
 body's origin is half its height above its base. It keeps the rock's ore
-grade (0 for a plain rock) and colour (rocks.rock_colour, tinted). Strikes
+grade (0 for a plain rock), its resource (0 for a plain rock) and colour
+(rocks.rock_colour, tinted). Strikes
 on it are watched (sk.PlanetPhysics.watch_strikes). As with the trunks
 (shoonyakasha.planet.trunks), a list adds rocks and does not remove them; a rock more than
 KEEP beyond the list's radius from the camera is removed, and one listed
@@ -19,7 +20,8 @@ where it is, strikes on it stay watched only for an ore boulder, its cell
 goes into the world's taken rocks (the scatter leaves it out from this
 frame on), and it becomes a loose rock in Props, drawn by a mesh entity of
 its kind (vegetation.rock_triangles, with the same origin and scale) in
-its colour, with an ore rock's glowing specks (`specks`). `restore` makes
+its colour, with an ore rock's glowing specks (`specks`) in its resource's
+colour (rocks.speck_colour) times SPECK_GLOW. `restore` makes
 a loose rock out of the physics from a record (props.py's Props.record).
 `released` puts a loose rock's cell back when Props removes it.
 `grabbable()` gives (body, radius, mass) of the static rocks for the gun:
@@ -28,7 +30,7 @@ the mass from its hull's volume at rocks.DENSITY.
 An ore boulder, fixed or loose, struck at BREAK_SPEED or faster
 (`breaks`) splits (`split`) into 3 to 6 chunks, their number and shares of
 its mass drawn from its cell: each a loose rock of the small rocks' kind,
-of its share of the boulder's mass and grade, its size the boulder's
+of its share of the boulder's mass, with its grade and resource, its size the boulder's
 times the cube root of its share and SHRINK (across, also times the ratio
 of the two kinds' widths), placed around the boulder's centre OFFSET of
 its size out, at the boulder's velocity plus BURST outwards. Its cell stays
@@ -43,7 +45,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from shoonyakasha.planet import vegetation
-from shoonyakasha.planet.rocks import DENSITY, rock_colour, tinted
+from shoonyakasha.planet.resources import FERRITE
+from shoonyakasha.planet.rocks import DENSITY, rock_colour, speck_colour, tinted
 from shoonyakasha.planet.vec import add, cross, length, normalize, quat_from_basis, quat_rotate, scale, sub
 
 from viewmodel import white_texture
@@ -56,7 +59,6 @@ OFFSET = 0.28
 BURST = 1.5                      # m/s
 SPECK_SHARE = 0.12               # of a rock mesh's triangles that hold a speck
 SPECK_SIZE = 0.03                # a speck's radius, in units of the mesh (its height)
-SPECK_COLOUR = (1.0, 0.72, 0.28)
 SPECK_GLOW = 1.5                 # the specks' emissive strength (the Screens pass)
 
 
@@ -70,6 +72,7 @@ class StaticRock:
     mass: float                  # kg
     colour: tuple
     grade: float = 0.0           # ore richness, 0 for a plain rock
+    resource: int = 0            # an ore rock's resource (shoonyakasha.planet.resources), else 0
 
 
 def rock_frame(up, turn):
@@ -159,7 +162,8 @@ class Rocks:
             physics.watch_strikes(hull)
             rock = StaticRock(hull, tree.kind, base, tuple(sizes), float(np.linalg.norm(points * sizes, axis=1).max()),
                               DENSITY * volume * across * across * tree.height,
-                              tinted(rock_colour(body.index, tree.grade), tree.tint), tree.grade)
+                              tinted(rock_colour(body.index, tree.grade, tree.resource), tree.tint), tree.grade,
+                              tree.resource)
             self.rocks[tree.key] = rock
             self.bodies[hull] = tree.key
         here = body.relative(camera)
@@ -194,15 +198,17 @@ class Rocks:
         physics.watch_strikes(body, rock.kind == "boulder" and rock.grade > 0.0)
         physics.set_motion(body, "dynamic")
         points = (self.unit_points[rock.kind] * np.array(rock.scale)).astype(np.float32)
-        entity, glow = self.entity(rock.kind, rock.scale, rock.colour, rock.grade)
+        entity, glow = self.entity(rock.kind, rock.scale, rock.colour, rock.grade, rock.resource)
         self.props.add_rock(body, entity, 2.0 * rock.radius, rock.radius, key, ("hull", points, physics.mass(body)),
-                            0.5 * rock.scale[1], bubble.body, rock.kind, rock.scale, rock.colour, rock.grade, glow)
+                            0.5 * rock.scale[1], bubble.body, rock.kind, rock.scale, rock.colour, rock.grade, glow,
+                            rock.resource)
         return True
 
-    def entity(self, kind, extent, colour, grade=0.0):
+    def entity(self, kind, extent, colour, grade=0.0, resource=FERRITE):
         """A mesh entity of a rock of `kind`, scaled by `extent`, in
         `colour`, and for an ore rock (`grade` above 0) an entity of its
-        glowing specks, drawn unlit (the Screens pass); else None."""
+        glowing specks in its `resource`'s colour, drawn unlit (the Screens
+        pass); else None."""
         positions, normals, shades = self.triangles[kind]
         entity = self.engine.create_mesh([tuple(p) for p in positions], normals=[tuple(n) for n in normals],
                                          colors=[tuple(s) for s in shades], name="Rock")
@@ -218,15 +224,19 @@ class Rocks:
         scene.set_scale(glow, tuple(extent))
         scene.set_render_layer_mask(glow, 2)
         scene.set_material_texture(glow, "emissiveMap", white_texture())
-        scene.set_material_vec4(glow, "emissiveFactor", tuple(c * SPECK_GLOW for c in SPECK_COLOUR) + (0.0,))
+        glowing = tuple(c * SPECK_GLOW for c in speck_colour(resource))
+        scene.set_material_vec4(glow, "emissiveFactor", glowing + (0.0,))
         return entity, glow
 
     def restore(self, physics, record, bodies):
         """A loose rock out of the physics from a record (Props.record);
-        `bodies` the world bodies by name."""
+        `bodies` the world bodies by name; an ore rock's record without a
+        resource is ferrite."""
         points, _ = self.kind_data(physics, record["kind"])
         extent = record["extent"]
-        entity, glow = self.entity(record["kind"], extent, record["colour"], record.get("grade", 0.0))
+        grade = record.get("grade", 0.0)
+        resource = record.get("resource", FERRITE if grade > 0.0 else 0)
+        entity, glow = self.entity(record["kind"], extent, record["colour"], grade, resource)
         return self.props.restore(record, bodies, entity, (points * np.array(extent)).astype(np.float32), glow)
 
     def released(self, prop):
@@ -258,13 +268,14 @@ class Rocks:
             if not (rock.kind == "boulder" and rock.grade > 0.0) or not self.world.taken_rocks.add(key):
                 return []
             self.remove(physics, key)
-            extent, mass, colour, grade = rock.scale, rock.mass, rock.colour, rock.grade
+            extent, mass, colour, grade, resource = rock.scale, rock.mass, rock.colour, rock.grade, rock.resource
             v, w = (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
         else:
             prop = self.props.find(body)
             if prop is None or not prop.breakable:
                 return []
             key, extent, mass, colour, grade = prop.key, prop.extent, prop.mass, prop.colour, prop.grade
+            resource = prop.resource
             v, w = physics.get_velocity(body)
             prop.key = None                  # its cell stays taken
             self.props.remove(bubble, prop)
@@ -290,8 +301,8 @@ class Rocks:
                                                mass=mass * share, friction=0.8, restitution=0.05)
             physics.set_velocity(chunk, add(v, scale(normalize(out), BURST)), w)
             radius = float(np.linalg.norm(hull, axis=1).max())
-            entity, glow = self.entity("rock", size, colour, grade)
+            entity, glow = self.entity("rock", size, colour, grade, resource)
             chunks.append(self.props.add_rock(chunk, entity, 2.0 * radius, radius, None,
                                               ("hull", hull, physics.mass(chunk)), 0.5 * size[1], bubble.body,
-                                              "rock", size, colour, grade, glow))
+                                              "rock", size, colour, grade, glow, resource))
         return chunks

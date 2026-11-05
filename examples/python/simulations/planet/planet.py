@@ -44,10 +44,10 @@ player's feet. F9 loads it: the planet is built again when its parameters differ
 the props come back out of the physics and return to it by shoonyakasha.planet.props'
 rules, and the view goes back to the free camera, the ship or the player.
 
-Ore: the probes measure the ore richness (resources.glsl), shown on the
-free camera's and the on-foot cards; where it is above 0.3 the scatter's
-rocks are ore rocks (tinted, with glowing specks), which come loose with
-their grade. An ore boulder struck at rocks.BREAK_SPEED splits into
+Ore: the probes measure the ore richness and its resource (resources.glsl),
+shown on the free camera's and the on-foot cards; where it is above 0.3
+the scatter's rocks are ore rocks (tinted and with glowing specks in their
+resource's colours), which come loose with their grade and resource. An ore boulder struck at rocks.BREAK_SPEED splits into
 chunks; a strike is reported from on_foot.STRIKE_REPORTED and loosens a fixed rock
 from on_foot.STRIKE_MOMENTUM. In the ship, M turns the right display to SCAN,
 which scans the ground track ahead for contacts (scanner.py); below
@@ -184,6 +184,7 @@ import numpy as np
 import shoonyakasha as sk
 from shoonyakasha import keys
 from shoonyakasha.planet import biomes
+from shoonyakasha.planet import resources
 from shoonyakasha.planet import settings as planet_settings
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.bubble import Bubble
@@ -1724,8 +1725,12 @@ def scan_readings():
 
 
 def ore_rows():
-    """The card's row of the ore richness under the view, once measured."""
-    return [("ORE", "%.2f" % world.ground_ore)] if world.ground_ore is not None else []
+    """The card's row of the ore richness under the view and its resource, once measured."""
+    if world.ground_ore is None:
+        return []
+    if not world.ground_resource:
+        return [("ORE", "%.2f" % world.ground_ore)]
+    return [("ORE", "%.2f %s" % (world.ground_ore, resources.name(world.ground_resource).upper()))]
 
 
 def update_cards():

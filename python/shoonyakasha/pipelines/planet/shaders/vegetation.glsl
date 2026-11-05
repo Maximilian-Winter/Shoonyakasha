@@ -21,7 +21,8 @@
 // 9); then bush, shrub, cactus (10 to 12); rock and boulder (13, 14); and
 // grass (15), its tufts after the other kinds' instances. An instance is
 // two vec4: (position relative to the camera, height in metres) and (cosine
-// and sine of its turn about its up, tint 0 .. 1, and its colour packed by
+// and sine of its turn about its up, its tint 0 .. 1 plus an ore rock's
+// resource id (resources.glsl) as its whole part, and its colour packed by
 // vegetationPackColour, plus VEGETATION_ON_MOON for a rock on the moon and
 // VEGETATION_ORE for an ore rock).
 // Its up is away from the centre of the body it stands on.
@@ -85,6 +86,20 @@ vec3 vegetationUnpackColour(float packed) {
     vec3 q = vec3(mod(v, 128.0), mod(floor(v / 128.0), 128.0), floor(v / 16384.0));
     vec3 root = q / 127.0;
     return root * root;
+}
+
+// An instance's tint and resource in one float: the resource id as its
+// whole part, the tint (held below 1) as its fraction.
+float vegetationPackTint(float tint, uint resourceId) {
+    return float(resourceId) + min(tint, 0.999);
+}
+
+float vegetationTint(float packed) {
+    return fract(packed);
+}
+
+uint vegetationResource(float packed) {
+    return uint(floor(packed));
 }
 
 // How much wider than its mesh a plant is drawn, from its tint (0 .. 1):

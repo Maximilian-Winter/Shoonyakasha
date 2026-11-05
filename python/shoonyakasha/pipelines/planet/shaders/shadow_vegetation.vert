@@ -48,7 +48,7 @@ void main() {
         gl_Position = vec4(2.0, 2.0, 0.5, 1.0);
         return;
     }
-    float width = vegetationWidth(look.z);
+    float width = vegetationWidth(vegetationTint(look.z));
     vec3 right, up, ahead;
     vegetationFrame(vegetationCameraFromCentre(look.w), placed.xyz, look.xy, right, up, ahead);
     vec3 offset;

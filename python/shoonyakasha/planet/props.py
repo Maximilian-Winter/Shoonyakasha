@@ -15,8 +15,9 @@ three states:
 
 A crate is a box; a loose rock (`add_rock`) is a convex hull: a rock taken
 out of the scatter, named by its cell (`key`), or a chunk of a broken ore
-boulder, with none. An ore rock has its grade (its ore richness) and an
-entity of glowing specks placed with its own. Each prop has a radius
+boulder, with none. An ore rock has its grade (its ore richness), its
+resource (shoonyakasha.planet.resources) and an entity of glowing specks
+placed with its own. Each prop has a radius
 (the sphere around it, which the gravity gun holds it out by), a rest
 height (from its centre down to the ground it lies on) and its shape and
 mass, to be made again in the physics.
@@ -53,8 +54,9 @@ file: its kind, the name of the body it is reckoned around, its state
 (one in the physics resting when asleep, else flying), its position from
 that body's centre, rotation, velocity and spin, its size, radius, rest
 height, mass, entity scale and colour, a rock's cell, its ground as last
-measured and its ore grade. `Props.restore` makes a prop out of the physics from one,
-which comes back into the physics by the rules above.
+measured, its ore grade and its resource. `Props.restore` makes a prop out of the physics from one,
+which comes back into the physics by the rules above; an ore rock's record
+without a resource is ferrite.
 """
 
 import math
@@ -63,6 +65,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from shoonyakasha.planet.orbits import reference
+from shoonyakasha.planet.resources import FERRITE
 from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, normalize, quat_from_basis,
                                      quat_multiply, quat_normalize, quat_rotate, scale, sub)
 
@@ -102,6 +105,7 @@ class Prop:
     extent: tuple = None         # its entity's scale
     colour: tuple = CRATE_COLOUR
     grade: float = 0.0           # an ore rock's ore richness, else 0
+    resource: int = 0            # an ore rock's resource (shoonyakasha.planet.resources), else 0
     glow: int = None             # an ore rock's entity of glowing specks, placed with its entity
 
     @property
@@ -158,10 +162,13 @@ class Props:
         return entity
 
     def add_rock(self, body, entity, size, radius, key, shape, rest, on, kind, extent, colour, grade=0.0,
-                 glow=None):
-        """A loose rock: its body (dynamic) and entities, made by the caller."""
+                 glow=None, resource=None):
+        """A loose rock: its body (dynamic) and entities, made by the caller;
+        an ore rock with no `resource` is ferrite."""
+        if resource is None:
+            resource = FERRITE if grade > 0.0 else 0
         rock = Prop(body, entity, size, radius, shape, rest, on, key, kind=kind, extent=tuple(extent),
-                    colour=tuple(colour), grade=grade, glow=glow)
+                    colour=tuple(colour), grade=grade, resource=resource, glow=glow)
         self.rocks.append(rock)
         return rock
 
@@ -183,7 +190,8 @@ class Props:
         return {"kind": prop.kind, "on": on.name, "state": state, "position": list(position), "rotation": list(q),
                 "velocity": list(v), "spin": list(w), "size": prop.size, "radius": prop.radius, "rest": prop.rest,
                 "mass": prop.mass, "extent": list(prop.extent), "colour": list(prop.colour),
-                "key": list(prop.key) if prop.key is not None else None, "ground": prop.ground, "grade": prop.grade}
+                "key": list(prop.key) if prop.key is not None else None, "ground": prop.ground, "grade": prop.grade,
+                "resource": prop.resource}
 
     def records(self, bubble):
         return [self.record(bubble, prop) for prop in self.all]
@@ -200,11 +208,13 @@ class Props:
         else:
             shape = ("hull", points, mass)
         key = tuple(record["key"]) if record["key"] is not None else None
+        grade = record.get("grade", 0.0)
+        resource = record.get("resource", FERRITE if grade > 0.0 else 0)
         prop = Prop(None, entity, size, record["radius"], shape, record["rest"], bodies[record["on"]], key,
                     state=record["state"], position=tuple(record["position"]), velocity=tuple(record["velocity"]),
                     rotation=tuple(record["rotation"]), spin=tuple(record["spin"]), ground=record["ground"],
                     kind=record["kind"], extent=tuple(record["extent"]), colour=tuple(record["colour"]),
-                    grade=record.get("grade", 0.0), glow=glow)
+                    grade=grade, resource=resource, glow=glow)
         (self.crates if prop.kind == "crate" else self.rocks).append(prop)
         return prop
 

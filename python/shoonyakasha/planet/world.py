@@ -58,7 +58,9 @@ ground patch the caller asks for (an object with `directions` and
 `extra_probes`. Their heights come back some frames later
 (`probe_latency`): `ground`, `site_height`, `patch` and `extra_heights`,
 with the ore richness (resources.glsl) under the viewpoint and at the
-extra probes (`ground_ore`, `extra_ores`). A survey (`start_survey`)
+extra probes (`ground_ore`, `extra_ores`) and its resource there
+(`ground_resource`, `extra_resources`, resources.py's ids, 0 where the
+richness is 0). A survey (`start_survey`)
 measures a list of (direction, Body) pairs before the planet is built, in
 batches in the patch's slots; the planet waits for `end_survey`, and
 `surveyed()` gives the heights once all are back.
@@ -543,6 +545,7 @@ class PlanetWorld:
         self.ground = None                 # terrain height under the viewpoint on the body under it, from the probes
         self.ground_base_climate = None    # (temperature, moisture) there without the offsets, on the planet
         self.ground_ore = None             # ore richness there (resources.glsl), 0 .. 1
+        self.ground_resource = None        # its resource (shoonyakasha.planet.resources), 0 where there is none
         self.site_height = None           # natural terrain height at the site, from the probes
         self.sites = []                    # flat sites (Site), set by set_sites
         self.clearings = []                # clearings (Clearing), set by set_clearings
@@ -562,6 +565,7 @@ class PlanetWorld:
         self.extra_heights = []            # ((direction, body), height) for the extra probes last read back
         self.extra_climates = []           # ((direction, body), (temperature, moisture) or None off the planet)
         self.extra_ores = []               # ((direction, body), ore richness)
+        self.extra_resources = []          # ((direction, body), resource)
         self.probe_latency = 3.0           # frames from asking for probes to their heights coming back
         self.horizon_sun = None            # the sun's direction the chunks' horizons are measured towards
         self.chunks_culled = 0             # selected chunks not drawn: out of view or behind the horizon
@@ -899,6 +903,7 @@ class PlanetWorld:
         self.ground = None
         self.ground_base_climate = None
         self.ground_ore = None
+        self.ground_resource = None
         self.patch = None
         for body in self.bodies:
             if body is self.planet or not self.lod.has_tree(body.index):
@@ -1138,6 +1143,7 @@ class PlanetWorld:
         self.ground = None
         self.ground_base_climate = None
         self.ground_ore = None
+        self.ground_resource = None
         self.patch = None
         self.terrain_version += 1
         self.upload_terrain()
@@ -1233,6 +1239,7 @@ class PlanetWorld:
         on_planet = still_over and ground_body is self.planet
         self.ground_base_climate = (float(probes[0, 2]), float(probes[0, 3])) if on_planet else None
         self.ground_ore = float(probes[0, 4]) if still_over else None
+        self.ground_resource = int(probes[0, 5]) if still_over else None
         if self.site_height is None:
             self.site_height = float(probes[1, 0])
         if patch is not None:
@@ -1247,6 +1254,7 @@ class PlanetWorld:
         self.extra_climates = [(d, (float(p[2]), float(p[3])) if d[1] is self.planet else None)
                                for d, p in zip(extra, probes[first:first + len(extra)])]
         self.extra_ores = [(d, float(p[4])) for d, p in zip(extra, probes[first:first + len(extra)])]
+        self.extra_resources = [(d, int(p[5])) for d, p in zip(extra, probes[first:first + len(extra)])]
 
     def in_view(self, centre, radius):
         """Whether a sphere around `centre` (planet space) is roughly in view: a

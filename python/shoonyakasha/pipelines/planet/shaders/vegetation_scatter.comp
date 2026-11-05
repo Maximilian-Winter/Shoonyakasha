@@ -39,8 +39,10 @@
 // at least ROCK_MIN_LEVEL within vegetation.rocks.y, by the small rocks'
 // chance. Where the ore richness (resources.glsl) is above ORE_ROCKS, the
 // rocks are ore: their chances rise by up to ORE_SMALL and ORE_BOULDERS,
-// reached at ORE_FULL, and their colour turns towards ORE_TINT and carries
-// VEGETATION_ORE. A rock's size shrinks to nothing over the last 15 % of
+// reached at ORE_FULL; each has a resource (resources.glsl, from the
+// candidate's base climate on the planet), its colour turns towards its
+// resource's tint (ore_colours.glsl) and carries VEGETATION_ORE, and its
+// instance's tint carries the resource (vegetationPackTint). A rock's size shrinks to nothing over the last 15 % of
 // its range; on the moon its colour carries VEGETATION_ON_MOON. A rock
 // whose cell is in TakenRocks (rockTaken) is left out.
 //
@@ -63,6 +65,7 @@ layout(local_size_x = 64) in;
 #include "vegetation_scatter.glsl"
 #include "moon.glsl"
 #include "resources.glsl"
+#include "ore_colours.glsl"
 
 // The kinds (vegetation.glsl): each tree's near kind, its far kind the next.
 const int KIND_CONIFER_A = 0;
@@ -96,7 +99,6 @@ const float ORE_ROCKS = 0.3;        // richness above which rocks are ore
 const float ORE_FULL = 0.6;         // richness at which the extra ore rocks are all there
 const float ORE_SMALL = 0.5;        // the small rocks' chance added at ORE_FULL
 const float ORE_BOULDERS = 0.15;    // the boulders' chance added at ORE_FULL
-const vec3 ORE_TINT = vec3(0.46, 0.25, 0.13);
 const float ORE_TINT_SHARE = 0.35;  // of the ore tint in an ore rock's colour at richness 0, rising to twice at 1
 
 layout(std430, set = 0, binding = 5) buffer NearbyTrees {
@@ -115,10 +117,11 @@ const uint TAKEN_EMPTY = 0xFFFFFFFFu;
 // A plant with a trunk (a tree or a cactus) or a rock within
 // vegetation.nearby.x of the camera, appended to NearbyTrees: its base
 // relative to the camera and its height, its tint, kind (an ore rock's
-// grade, 1 to 255, in the bits from 8 up), cube face, cell, body and the
-// cosine and sine of its turn. Those past the capacity are dropped.
-void listNearby(vec3 drawn, float size, float tint, int kind, uint grade, int face, ivec2 cell, int body,
-                float turn) {
+// grade, 1 to 255, in bits 8 to 15 and its resource in the bits from 16 up),
+// cube face, cell, body and the cosine and sine of its turn. Those past the
+// capacity are dropped.
+void listNearby(vec3 drawn, float size, float tint, int kind, uint grade, uint resourceId, int face, ivec2 cell,
+                int body, float turn) {
     uint index = atomicAdd(nearby.words[0], 1u);
     if (index >= uint(vegetation.nearby.z)) return;
     uint at = NEARBY_HEADER + index * NEARBY_WORDS;
@@ -127,7 +130,7 @@ void listNearby(vec3 drawn, float size, float tint, int kind, uint grade, int fa
     nearby.words[at + 2u] = floatBitsToUint(drawn.z);
     nearby.words[at + 3u] = floatBitsToUint(size);
     nearby.words[at + 4u] = floatBitsToUint(tint);
-    nearby.words[at + 5u] = uint(kind) | (grade << 8);
+    nearby.words[at + 5u] = uint(kind) | (grade << 8) | (resourceId << 16);
     nearby.words[at + 6u] = uint(face);
     nearby.words[at + 7u] = uint(cell.x);
     nearby.words[at + 8u] = uint(cell.y);
@@ -200,31 +203,39 @@ uint oreGrade(float ore) {
     return ore > ORE_ROCKS ? uint(clamp(floor(ore * 255.0 + 0.5), 1.0, 255.0)) : 0u;
 }
 
-// A rock's colour: the body's rock colour, an ore rock's mixed towards
-// ORE_TINT by ORE_TINT_SHARE times 1 + its richness, and VEGETATION_ORE.
-float packedRockColour(int body, float ore) {
+// An ore rock's resource (resources.glsl), from the candidate's base climate
+// (temperature, moisture) on the planet; RESOURCE_NONE for a plain rock.
+uint rockResource(int body, vec3 radial, vec3 climate, float ore) {
+    if (ore <= ORE_ROCKS) return RESOURCE_NONE;
+    return body == 1 ? moonResource(radial) : planetResource(radial, climate.x, climate.y);
+}
+
+// A rock's colour: the body's rock colour, an ore rock's mixed towards its
+// resource's tint by ORE_TINT_SHARE times 1 + its richness, and VEGETATION_ORE.
+float packedRockColour(int body, float ore, uint resourceId) {
     vec3 colour = rockColour(body);
     float flags = body == 1 ? VEGETATION_ON_MOON : 0.0;
     if (ore > ORE_ROCKS) {
-        colour = mix(colour, ORE_TINT, ORE_TINT_SHARE * (1.0 + ore));
+        colour = mix(colour, oreTint(resourceId), ORE_TINT_SHARE * (1.0 + ore));
         flags += VEGETATION_ORE;
     }
     return vegetationPackColour(colour) + flags;
 }
 
 // A kept plant or rock: listed when near, and given the next instance of its kind.
-void place(ScatterChunk chunk, Candidate x, int kind, float size, float turn, float tint, float colour, uint grade) {
+void place(ScatterChunk chunk, Candidate x, int kind, float size, float turn, float tint, float colour, uint grade,
+           uint resourceId) {
     vec3 drawn = candidateDrawn(chunk, x);
     bool trunk = kind < VEGETATION_TREE_KINDS || kind == KIND_CACTUS;
     bool rock = kind == KIND_ROCK || kind == KIND_BOULDER;
     if ((trunk || rock) && x.distance <= vegetation.nearby.x) {
-        listNearby(drawn, size, tint, kind, grade, chunk.face, x.cell, chunk.body, turn);
+        listNearby(drawn, size, tint, kind, grade, resourceId, chunk.face, x.cell, chunk.body, turn);
     }
     uint capacity = uint(vegetation.lod.z);
     uint at;
     if (!claimInstance(uint(kind), uint(kind) * capacity, capacity, at)) return;
     instances.data[at] = vec4(drawn, size);
-    instances.data[at + 1u] = vec4(cos(turn), sin(turn), tint, colour);
+    instances.data[at + 1u] = vec4(cos(turn), sin(turn), vegetationPackTint(tint, resourceId), colour);
 }
 
 void main() {
@@ -304,16 +315,18 @@ void main() {
                     continue;
                 }
                 kind = KIND_BOULDER;
-                colour = packedRockColour(chunk.body, ore);
                 float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow)
                              * smoothstep(bushRange, bushRange * FADE_START, x.distance);
-                if (size >= 0.05) place(chunk, x, kind, size, turn, tint, colour, oreGrade(ore));
+                if (size < 0.05) continue;
+                uint resourceId = rockResource(chunk.body, radial, climate, ore);
+                colour = packedRockColour(chunk.body, ore, resourceId);
+                place(chunk, x, kind, size, turn, tint, colour, oreGrade(ore), resourceId);
                 continue;
             }
             float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow) * smoothstep(range, range * FADE_START, x.distance);
             if (size < 0.05) continue;
             if (candidateWet(chunk, radial) || candidateCleared(chunk, x, radial, CLEAR_PLANTS, 0)) continue;
-            place(chunk, x, kind, size, turn, tint, colour, 0u);
+            place(chunk, x, kind, size, turn, tint, colour, 0u, RESOURCE_NONE);
         }
     }
 
@@ -348,6 +361,8 @@ void main() {
         if (candidateWet(chunk, radial) || candidateCleared(chunk, x, radial, CLEAR_ROCKS, ROCK_SALT + 8 * chunk.body)) {
             continue;
         }
-        place(chunk, x, KIND_ROCK, size, turn, tint, packedRockColour(chunk.body, ore), oreGrade(ore));
+        uint resourceId = rockResource(chunk.body, radial, climate, ore);
+        place(chunk, x, KIND_ROCK, size, turn, tint, packedRockColour(chunk.body, ore, resourceId), oreGrade(ore),
+              resourceId);
     }
 }

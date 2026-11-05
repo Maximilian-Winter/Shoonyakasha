@@ -13,7 +13,7 @@
 // plant's place on the planet. The fragment shader gets the part, the
 // texture's (u, v), the shade, the plant's colour (tinted from 80 % to
 // 115 %; white for bark) and the plant's frame (an impostor's facing the
-// camera), the mesh's own position and whether it is an ore rock.
+// camera), the mesh's own position and an ore rock's resource.
 // Positions are jittered for the TAA pass (camera.glsl's jittered).
 //
 
@@ -42,7 +42,7 @@ layout(location = 7) flat out vec3 fragUp;
 layout(location = 8) flat out vec3 fragFacing;
 layout(location = 9) flat out int fragOnMoon;
 layout(location = 10) out vec3 fragLocal;
-layout(location = 11) flat out int fragOre;
+layout(location = 11) flat out int fragResource;   // an ore rock's resource id, 0 for anything else
 
 const float SWAY = 0.015;
 const float GRASS_SWAY = 0.12;
@@ -51,7 +51,8 @@ void main() {
     vec4 placed = instances.data[gl_InstanceIndex * 2];
     vec4 look = instances.data[gl_InstanceIndex * 2 + 1];
     int part = int(inNormal.w + 0.5);
-    float width = vegetationWidth(look.z);
+    float tint = vegetationTint(look.z);
+    float width = vegetationWidth(tint);
     vec3 right, up, ahead;
     vegetationFrame(vegetationCameraFromCentre(look.w), placed.xyz, look.xy, right, up, ahead);
     vec3 offset, normal;
@@ -71,7 +72,7 @@ void main() {
     }
     vec3 relativePos = placed.xyz + offset;
     fragNormal = normal;
-    vec3 colour = vegetationUnpackColour(look.w) * mix(0.8, 1.15, look.z);
+    vec3 colour = vegetationUnpackColour(look.w) * mix(0.8, 1.15, tint);
     fragColour = part == VEGETATION_PART_BARK ? vec3(1.0) : colour;
     fragRelativePos = relativePos;
     fragPart = part;
@@ -82,6 +83,6 @@ void main() {
     fragFacing = ahead;
     fragOnMoon = vegetationOnMoon(look.w) ? 1 : 0;
     fragLocal = inPosition.xyz;
-    fragOre = vegetationOre(look.w) ? 1 : 0;
+    fragResource = vegetationOre(look.w) ? int(vegetationResource(look.z)) : 0;
     gl_Position = jittered(camera.proj * camera.view * vec4(relativePos, 1.0));
 }

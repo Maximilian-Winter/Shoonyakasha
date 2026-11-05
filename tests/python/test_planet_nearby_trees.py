@@ -3,7 +3,7 @@ trunks (shoonyakasha.planet.trunks): the NearbyTrees
 buffer and parameter fit the pipeline, every plant with a trunk has its
 trunk's shares, the width factor matches vegetation.glsl's, a list read
 back by stamp (each plant's key, kind, base from that frame's camera,
-height and width, an ore rock's grade; the count capped; older stamps dropped; an unknown stamp
+height and width, an ore rock's grade and resource; the count capped; older stamps dropped; an unknown stamp
 giving None), and on sk.PlanetPhysics the trunks made for a list: a
 capsule per plant standing along the up, kept while the list leaves it
 out, made again when its base moves, and removed beyond the radius.
@@ -21,7 +21,7 @@ import unittest
 import numpy as np
 
 import shoonyakasha as sk
-from shoonyakasha.planet import nearby_trees, vegetation, world
+from shoonyakasha.planet import nearby_trees, resources, vegetation, world
 from shoonyakasha.planet.bubble import Bubble
 from shoonyakasha.planet.nearby_trees import CAPACITY, HEADER, WORDS, NearbyTree, NearbyTrees
 
@@ -66,6 +66,7 @@ class NearbyTreesTest(unittest.TestCase):
         shader = (world.PIPELINE.parent / "shaders" / "vegetation_scatter.comp").read_text()
         self.assertIn("NEARBY_HEADER = %du" % HEADER, shader)
         self.assertIn("NEARBY_WORDS = %du" % WORDS, shader)
+        self.assertIn("uint(kind) | (grade << 8) | (resourceId << 16)", shader)
 
     def test_every_trunk_has_its_shares(self):
         for name in vegetation.TREES + ("cactus",):
@@ -93,7 +94,8 @@ class NearbyTreesTest(unittest.TestCase):
         self.assertEqual(int(engine.buffers["NearbyTrees"][0]), 0)
         engine.readback = readback(2, [((1.0, 2.0, -3.0), 12.0, 0.25, vegetation.KINDS.index("acacia"), 4, -7, 9, 0, 0.0),
                                        ((0.5, 0.0, 0.0), 0.2, 0.5, vegetation.KINDS.index("rock"), 2, 70, 80, 1, 1.0),
-                                       ((0.0, 0.0, 5.0), 0.9, 0.5, vegetation.KINDS.index("boulder") | (204 << 8),
+                                       ((0.0, 0.0, 5.0), 0.9, 0.5,
+                                        vegetation.KINDS.index("boulder") | (204 << 8) | (resources.ILMENITE << 16),
                                         3, 7, 8, 1, 2.0)])
         stamp, keys = nearby_trees.listed_keys(engine.readback["data"])
         self.assertIn((1, 0, 3, 7, 8), keys)
@@ -112,10 +114,12 @@ class NearbyTreesTest(unittest.TestCase):
         self.assertEqual(boulder.key, (1, 0, 3, 7, 8))
         self.assertTrue(rock.rock and boulder.rock)
         self.assertEqual(rock.body, 1)
-        # An ore boulder's grade in the kind's word from bit 8.
+        # An ore boulder's grade in the kind's word from bit 8, its resource from bit 16.
         self.assertEqual(boulder.kind, "boulder")
         self.assertAlmostEqual(boulder.grade, 204.0 / 255.0)
+        self.assertEqual(boulder.resource, resources.ILMENITE)
         self.assertEqual((rock.grade, tree.grade), (0.0, 0.0))
+        self.assertEqual((rock.resource, tree.resource), (0, 0))
         # Bases from their body's centre as it was that frame.
         self.assertEqual(rock.base, (200.5 - 1000.0, 0.0, 0.0))
         self.assertAlmostEqual(rock.turn[0], np.cos(1.0), places=6)
