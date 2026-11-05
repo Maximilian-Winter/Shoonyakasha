@@ -34,6 +34,14 @@ pitched by its acceleration along the nose (PITCH_GAIN) and its climb
 (CLIMB_PITCH), at most MAX_PITCH, each easing over ATTITUDE_EASE.
 `can_leave()` says whether it is slow enough (LEAVE_SPEED) and low
 enough (LEAVE_HEIGHT) to get out of.
+
+- **Fuel:** the car has `params` (CarParams) and `fuel` kg in its tank
+  (full at the start). Each step burns `burn_rate(controls)`: the
+  throttle's share of drive_burn (boost_burn times that with boost), and
+  holding height, air_burn from AIR_HEIGHT up, less below it, none on
+  the cushion. With the tank empty (`dry()`) it drives and climbs no
+  more, its target height drops to HOVER_MIN so it settles onto its
+  cushion, and it still steers.
 """
 
 import math
@@ -74,6 +82,14 @@ LEAVE_HEIGHT = 3.0               # m above the ground
 
 
 @dataclass
+class CarParams:
+    fuel_capacity: float = 100.0         # kg
+    drive_burn: float = 0.05             # kg/s at full throttle
+    boost_burn: float = 2.5              # times drive_burn with boost
+    air_burn: float = 0.03               # kg/s holding height from AIR_HEIGHT up (less below, none on the cushion)
+
+
+@dataclass
 class CarControls:
     throttle: float = 0.0        # -1 (back) to 1 (forward)
     steer: float = 0.0           # -1 (left) to 1 (right)
@@ -87,9 +103,13 @@ def ease(value, wanted, dt, time):
 
 
 class Car:
-    def __init__(self, position, heading, target=HOVER_MIN):
+    def __init__(self, position, heading, target=HOVER_MIN, params=None, fuel=None):
         """At `position` (from the body's centre), its nose along `heading`
-        (made level), keeping `target` metres above the ground."""
+        (made level), keeping `target` metres above the ground, with
+        `params` (CarParams) and `fuel` kg (full when None)."""
+        self.params = params or CarParams()
+        self.fuel = self.params.fuel_capacity if fuel is None else fuel
+        self.fuel_used = 0.0     # kg burnt in the last step
         self.position = tuple(position)
         self.velocity = (0.0, 0.0, 0.0)
         self.heading = self._level(heading)
@@ -119,10 +139,34 @@ class Car:
     def can_leave(self):
         return self.speed() < LEAVE_SPEED and self.height is not None and self.height < LEAVE_HEIGHT
 
+    def dry(self):
+        return self.fuel <= 0.0
+
+    def burn_rate(self, controls):
+        """kg/s the car burns with `controls`: drive_burn at full throttle
+        (boost_burn times that with boost), and air_burn from AIR_HEIGHT up,
+        less below it, none on the cushion."""
+        p = self.params
+        drive = abs(controls.throttle) * p.drive_burn * (p.boost_burn if controls.boost else 1.0)
+        height = self.height if self.height is not None else 0.0
+        air = min(1.0, max(0.0, (height - HOVER_MIN) / (AIR_HEIGHT - HOVER_MIN)))
+        return drive + p.air_burn * air
+
     def step(self, dt, controls, ground):
+        """Moved by `dt` seconds; fuel burnt at burn_rate. Dry, it drives and
+        climbs no more and settles onto its cushion; it still steers."""
+        self.fuel_used = 0.0
         while dt > 1e-9:
             h = min(dt, STEP)
-            self._step(h, controls, ground)
+            c = controls
+            if self.dry():
+                c = CarControls(steer=controls.steer)
+                self.target = HOVER_MIN
+            else:
+                burnt = min(self.fuel, self.burn_rate(c) * h)
+                self.fuel -= burnt
+                self.fuel_used += burnt
+            self._step(h, c, ground)
             dt -= h
 
     def _step(self, dt, c, ground):

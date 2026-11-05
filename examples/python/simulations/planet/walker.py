@@ -61,6 +61,15 @@ the game is saved every AUTOSAVE_SECONDS of play, on Quit and as the
 window closes. When a save exists, the walker starts on a menu with
 Continue (the save loaded) and New game.
 
+The car's fuel (hovercar.py's CarParams and fuel): the HUD shows its tank
+(FUEL) while driving; dry, it settles onto its cushion and only steers,
+and a toast says so. The menu's Car tab shows the fuel, where the car is
+and the credits, and fills the tank at the outpost whose pad the car is
+on (`fill_tank`, trade.Market.buy_fuel) or calls fuel to it off the
+pads, on its cushion, from the nearest outpost on the planet
+(`call_fuel`, trade.fuel_call), put in the tank when it is due if the car
+is still within CALL_REACH (`update_fuel_call`); the save keeps the fuel.
+
 The day (clock.py): the sun goes round with the world's clock plus the
 day's offset (`day_time`; START_HOUR in a new game, kept in the save),
 the exposure scaled for its elevation seen from the camera
@@ -94,8 +103,8 @@ grab, right trigger punt, the bumpers the hold distance.
     python walker.py
     python walker.py --check [--shot FILE]   walk, grab and throw a crate, set a waypoint, sell ore,
                                              pause, save, change the game and load it, drive and fly
-                                             the car, hover it on a lake and a river, then night;
-                                             report and exit
+                                             the car, hover it on a lake and a river, run it dry and
+                                             call fuel, then night; report and exit
 """
 
 import argparse
@@ -125,6 +134,8 @@ import config
 import hovercar
 import lamps
 import save
+import outposts
+import trade
 from outposts import Pads, Survey, home_outpost
 from rocks import Rocks
 from trade import Market, sale
@@ -193,6 +204,9 @@ CHECK_ORE_GRADE = 0.6
 PAUSE_SECONDS = 1.0             # s --check keeps the pause menu open
 SHIP_MARKER = (0.55, 0.8, 1.0, 1.0)
 START_HOUR = 9.0                # the site's hour (clock.py) when a new game starts
+CALL_REACH = 50.0               # m the car may move from where fuel was called to and still get it
+DRY_SECONDS = 1.0               # s --check drives the dry car at full throttle
+FUEL_WAIT = 2.0                 # s past the call's delay --check waits for the fuel at most
 NIGHT_CHECK_HOUR = 0.5          # the hour --check sets at its end
 NIGHT_SECONDS = 1.0             # s --check waits at night
 CAR_HEADLIGHTS = ((-0.95, 0.0, -3.0), (0.95, 0.0, -3.0))   # m from the car's centre (right, up, back)
@@ -237,7 +251,7 @@ parser = argparse.ArgumentParser(description="The planet on foot")
 parser.add_argument("--check", action="store_true",
                     help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, sell ore at Base, "
                          "pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
-                         "then night; report and exit")
+                         "run it dry and call fuel, then night; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 
@@ -311,6 +325,9 @@ state = {
     "check": None,                # --check: its stage, time in it, and what it measured
     "shot": False,                # --shot's screenshot taken
     "day_offset": None,           # s added to the world's clock for the day (clock.py); None: START_HOUR at the start
+    "fuel_call": None,            # the fuel on its way to the car (call_fuel), or None
+    "car_note": "",               # the last fuel bought, called or delivered, for the Car tab
+    "was_dry": False,             # the car's tank was empty last frame
 }
 
 
@@ -856,7 +873,8 @@ def update_hud(dt):
         up = car.up()
         speed = length(sub(car.velocity, scale(up, dot(car.velocity, up))))
         hud.update(view_basis(), state["position"], planet, None, None, markers(planet), speed, pad=pad, dt=dt,
-                   height=car.height, drive=car.can_leave(), hour=hour_text())
+                   height=car.height, drive=car.can_leave(), hour=hour_text(),
+                   car_fuel=car.fuel / car.params.fuel_capacity)
         return
     body = foot.bubble.body
     targets = markers(body)
@@ -904,14 +922,19 @@ def run_check(dt):
     put LAKE_CHECK_DROP above the water of the point nearest the site of a
     river at least RIVER_CHECK_WIDTH wide there, facing down it, and left
     for LAKE_SECONDS, passing when it hovers HOVER_MIN (within 25 cm)
-    above the water there; then the day's hour set to NIGHT_CHECK_HOUR and
+    above the water there; then, the car down on its cushion and slower
+    than 0.3 m/s (at most LAND_SECONDS), its tank emptied
+    and DRY_SECONDS at full throttle, passing when it moved less than 1 m,
+    fuel called (call_fuel) and, by FUEL_WAIT after it is due, delivered:
+    the tank holding what the credits less the fee buy at its price (at
+    most full) and the credits less that; then the day's hour set to NIGHT_CHECK_HOUR and
     NIGHT_SECONDS later passing with the night's exposure
     (clock.NIGHT_SCALE) and at least the car's two headlights drawn. The
     settings are the defaults and are not written. With --shot,
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
     (with _punt added), of the map (with _map added), after the sale (with
-    _sell added), of the menu (with _pause added), of its Settings tab
+    _sell added), of the menu (with _pause added), of its Car tab (with _car added), of its Settings tab
     (with _settings added), of its Controls tab (with _controls added),
     after the load (with _load added), a second
     before the end of the drive (with _drive added), after the climb (with
@@ -922,7 +945,7 @@ def run_check(dt):
     (with _river_above added), and at night (with _night added)."""
     player = foot.player
     check = state["check"]
-    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "night")):
+    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "night")):
         return
     if check is None:
         check = state["check"] = {"stage": "ship" if args.shot else "walk", "time": 0.0,
@@ -1060,8 +1083,15 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_pause" + ext)
-                state["menu"].show(True, state["menu"].tab_named("Settings"))
+                state["menu"].show(True, state["menu"].tab_named("Car"))
             check["pause_ok"] = pause_ok
+            check["stage"], check["time"] = "car_tab", 0.0
+    elif stage == "car_tab":
+        if t >= 0.5 or not args.shot:
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_car" + ext)
+                state["menu"].show(True, state["menu"].tab_named("Settings"))
             check["stage"], check["time"] = "settings", 0.0
     elif stage == "settings":
         if t >= 0.5 or not args.shot:
@@ -1216,7 +1246,7 @@ def run_check(dt):
                      "passed" if river_ok else "FAILED"), flush=True)
             check["ok"] = check["ok"] and river_ok
             if not args.shot:
-                check["stage"], check["time"] = "night", 0.0
+                check["stage"], check["time"] = "fuel", 0.0
                 return
             base, ext = os.path.splitext(args.shot)
             screenshot(base + "_river" + ext)
@@ -1226,6 +1256,44 @@ def run_check(dt):
         if t >= RIVER_CLIMB_SECONDS + 2.0:
             base, ext = os.path.splitext(args.shot)
             screenshot(base + "_river_above" + ext)
+            check["stage"], check["time"] = "fuel", 0.0
+    elif stage == "fuel":
+        car = state["car"]
+        if "dry_from" not in check:
+            state["car_controls"] = hovercar.CarControls(climb=-1.0)
+            if car.height is None or car.height > hovercar.LEAVE_HEIGHT or car.speed() > 0.3:
+                if t > LAND_SECONDS:
+                    print("[walker] the car did not come down to call fuel: FAILED", flush=True)
+                    os._exit(1)
+                return
+            car.fuel = 0.0
+            check["dry_from"] = car.position
+            check["time"] = 0.0
+            return
+        if "call" not in check:
+            state["car_controls"] = hovercar.CarControls(throttle=1.0)        # dry: it must not drive
+            if t >= DRY_SECONDS:
+                state["car_controls"] = hovercar.CarControls()
+                check["dry_moved"] = length(sub(car.position, check["dry_from"]))
+                check["credits_before"] = state["market"].credits
+                call_fuel()
+                check["call"] = state["fuel_call"]
+                if check["call"] is None:
+                    print("[walker] no fuel call could be made (%s): FAILED" % state["car_note"], flush=True)
+                    os._exit(1)
+            return
+        state["car_controls"] = hovercar.CarControls()
+        call = check["call"]
+        if state["fuel_call"] is None or world.time > call["due"] + FUEL_WAIT:
+            kg = min(car.params.fuel_capacity, (check["credits_before"] - call["fee"]) / call["price"])
+            spent = check["credits_before"] - state["market"].credits
+            fuel_ok = (check["dry_moved"] < 1.0 and state["fuel_call"] is None and abs(car.fuel - kg) < 1e-6
+                       and abs(spent - (call["fee"] + kg * call["price"])) < 1e-6)
+            print("[walker] the car dry moved %.2f m at full throttle; fuel called from %s (%.2f cr/kg, a %.0f cr "
+                  "fee) came: %.1f kg for %.0f cr: %s"
+                  % (check["dry_moved"], call["outpost"].name, call["price"], call["fee"], car.fuel, spent,
+                     "passed" if fuel_ok else "FAILED"), flush=True)
+            check["ok"] = check["ok"] and fuel_ok
             check["stage"], check["time"] = "night", 0.0
     elif stage == "night":
         state["car_controls"] = hovercar.CarControls()
@@ -1509,8 +1577,136 @@ def start_items():
     ]
 
 
+def car_outpost():
+    """The outpost whose pad the car is on, or None."""
+    car = state["car"]
+    if car is None:
+        return None
+    return next((o for o in state["outposts"] if o.at(car_position())), None)
+
+
+def fuel_offer():
+    """(the nearest outpost on the planet, metres along the ground to it)
+    for a fuel call to the car, off every pad and on its cushion
+    (hovercar.LEAVE_HEIGHT), or None."""
+    car = state["car"]
+    if car is None or car_outpost() is not None or car.height is None or car.height > hovercar.LEAVE_HEIGHT:
+        return None
+    here = normalize(car.position)
+    found = [(o, outposts.ground_distance(planet.radius, o.direction, here))
+             for o in state["outposts"] if o.body is planet]
+    return min(found, key=lambda f: f[1]) if found else None
+
+
+def car_note(text, colour=GOOD_TOAST):
+    state["car_note"] = text
+    state["hud"].toast(text[0].upper() + text[1:], colour)
+
+
+def fill_tank():
+    """The car's tank filled at the outpost whose pad it is on, as far as the credits go."""
+    outpost, car = car_outpost(), state["car"]
+    if outpost is None:
+        car_note("the car is not on an outpost's pad", hud_module.WARNING)
+        return
+    kg, cost = state["market"].buy_fuel(car, outpost)
+    if kg > 0.5:
+        car_note("bought %.0f kg of fuel at %s for %s cr" % (kg, outpost.name, format(int(round(cost)), ",")))
+    elif car.fuel >= car.params.fuel_capacity - 0.5:
+        car_note("the tank is full")
+    else:
+        car_note("no credits for fuel", hud_module.WARNING)
+
+
+def call_fuel():
+    """Fuel called to the car from the nearest outpost (fuel_offer,
+    trade.fuel_call), arriving after its delay and paid then."""
+    car = state["car"]
+    if state["fuel_call"] is not None:
+        car_note("fuel is on its way")
+        return
+    offer = fuel_offer()
+    if offer is None:
+        car_note("fuel can be called to the car off the pads, on its cushion", hud_module.WARNING)
+        return
+    if car.fuel >= car.params.fuel_capacity - 0.5:
+        car_note("the tank is full")
+        return
+    outpost, distance = offer
+    price, fee, delay = trade.fuel_call(outpost, distance, False)
+    if state["market"].credits <= fee:
+        car_note("no credits for a fuel call", hud_module.WARNING)
+        return
+    state["fuel_call"] = {"outpost": outpost, "price": price, "fee": fee, "due": world.time + delay,
+                          "spot": car.position}
+    car_note("fuel called from %s, arriving in %.0f s" % (outpost.name, delay))
+
+
+def update_fuel_call():
+    """The called fuel put in the car once it is due, if the car is still
+    within CALL_REACH of where it was called to; otherwise the call is off,
+    unpaid. A toast when the car runs dry."""
+    car = state["car"]
+    if car is not None:
+        if car.dry() and not state["was_dry"]:
+            state["hud"].toast("The car is out of fuel: call fuel from the menu (Escape, Car)", hud_module.WARNING)
+        state["was_dry"] = car.dry()
+    call = state["fuel_call"]
+    if call is None or world.time < call["due"]:
+        return
+    state["fuel_call"] = None
+    if car is None or length(sub(car.position, call["spot"])) > CALL_REACH:
+        car_note("the fuel call missed the car", hud_module.WARNING)
+        return
+    kg, cost = state["market"].call_fuel(car, call["price"], call["fee"])
+    if kg > 0.0:
+        car_note("fuel delivered from %s: %.0f kg for %s cr" % (call["outpost"].name, kg,
+                                                              format(int(round(cost)), ",")))
+    else:
+        car_note("no credits for the called fuel", hud_module.WARNING)
+
+
+def car_items():
+    """The Car tab: its fuel, where it is, filling the tank on a pad and calling fuel off them."""
+    def fuel():
+        car = state["car"]
+        return "-" if car is None else "%.0f / %.0f kg" % (car.fuel, car.params.fuel_capacity)
+
+    def where():
+        outpost = car_outpost()
+        if outpost is not None:
+            return "on %s's pad" % outpost.name
+        offer = fuel_offer()
+        return "%.1f km from %s" % (offer[1] / 1000.0, offer[0].name) if offer is not None else "in the air"
+
+    def quote():
+        call = state["fuel_call"]
+        if call is not None:
+            return "Fuel from %s arrives in %.0f s." % (call["outpost"].name, max(0.0, call["due"] - world.time))
+        offer = fuel_offer()
+        if offer is None:
+            return ""
+        price, fee, delay = trade.fuel_call(offer[0], offer[1], False)
+        return "A call costs %.2f cr/kg and a %s cr fee, and takes %.0f s." % (price, format(int(round(fee)), ","),
+                                                                              delay)
+    return [
+        {"heading": "Car"},
+        {"stat": "Fuel", "get": fuel},
+        {"stat": "Where", "get": where},
+        {"stat": "Credits", "get": lambda: "%s cr" % format(int(round(state["market"].credits)), ",")},
+        {"button": "Fill the tank", "do": fill_tank,
+         "hint": "With the car on an outpost's pad: its tank filled at the outpost's fuel price."},
+        {"button": "Call fuel", "do": call_fuel,
+         "hint": "With the car off the pads, on its cushion: fuel flown in from the nearest outpost, at %d times "
+                 "its price and a fee by the distance, paid when it arrives." % round(trade.CALL_FACTOR)},
+        {"note": quote},
+        {"note": lambda: state["car_note"]},
+    ]
+
+
 def menu_tabs():
-    return [("System", system_items()), ("Settings", settings_items()), ("Controls", ("controls", HELP_COLUMNS))]
+    return [("System", system_items()), ("Car", car_items()), ("Settings", settings_items()),
+            ("Controls", ("controls", HELP_COLUMNS))]
 
 
 def menu_subtitle():
@@ -1564,7 +1760,7 @@ def save_game(base=None, quiet=False):
             "on": bubble.body.name, "feet": list(bubble.body_relative(player.feet())),
             "heading": list(player.basis()[2]), "pitch": player.pitch},
         "car": {"position": list(car.position), "heading": list(car.heading), "target": car.target,
-                "driving": state["driving"]},
+                "driving": state["driving"], "fuel": car.fuel},
         "taken": [list(key) for key in sorted(world.taken_rocks.keys)],
         "props": foot.props.records(bubble) if bubble is not None else [],
         "seen": [state["seen"].get(id(p)) for p in foot.props.all],
@@ -1608,6 +1804,7 @@ def load_game(base=None):
     world.extra_probes = []
     world.time = data["time"]
     state["day_offset"] = data.get("day_offset")
+    state["fuel_call"] = None
     taken = world.taken_rocks
     taken.clear()
     for key in data["taken"]:
@@ -1631,7 +1828,8 @@ def load_game(base=None):
     restore_market()
     record = data.get("car")
     if record is not None:
-        state["car"] = hovercar.Car(tuple(record["position"]), tuple(record["heading"]), record["target"])
+        state["car"] = hovercar.Car(tuple(record["position"]), tuple(record["heading"]), record["target"],
+                                    fuel=record.get("fuel"))
         update_ship()
     else:
         position, _, _, north = ship_pose()
@@ -1774,6 +1972,7 @@ def frame(dt):
     foot.props.draw(foot.bubble, camera)
     place_ship(camera)
     place_viewmodel(dt, camera)
+    update_fuel_call()
     update_hud(dt)
     update_map(dt)
     update_game()

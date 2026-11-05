@@ -43,7 +43,8 @@ the HUD's scale (`set_scale`).
   the height of the feet above it.
 
 While driving the car (`update`'s `drive`) the crosshair, its status and
-the jet fuel are not drawn, the hints are the car's (`drive_hints`), and
+the jet fuel are not drawn (the car's fuel, FUEL, is in its place), the
+hints are the car's (`drive_hints`), and
 the readout gives the speed in km/h and always the height above the
 ground.
 """
@@ -368,8 +369,8 @@ class Hud:
                       [with_alpha(colour, fade)] * 4)
             layer.text(text, (x + 22.0, y), TOAST_SIZE, with_alpha(colour, fade))
 
-    def draw_fuel(self, fuel, dt, height):
-        if fuel < 0.999:
+    def draw_fuel(self, fuel, dt, height, label="JET", always=False):
+        if fuel < 0.999 or always:
             self.fuel_shown = FUEL_LINGER
         else:
             self.fuel_shown = max(0.0, self.fuel_shown - dt)
@@ -382,7 +383,7 @@ class Hud:
         scifi.panel(mesh, x, y, w, h, 8.0, with_alpha(scifi.GLASS, alpha), with_alpha(scifi.CYAN_SOFT, alpha),
                     ("tr", "bl"), scan=False)
         fill = WARNING if fuel < LOW_FUEL else scifi.CYAN
-        layer.text("JET", (x + 12.0, y + 16.0), 14, with_alpha(DIM, alpha), "title")
+        layer.text(label, (x + 12.0, y + 16.0), 14, with_alpha(DIM, alpha), "title")
         layer.text("%d %%" % round(100.0 * fuel), (x + w - 12.0, y + 16.0), 14, with_alpha(fill, alpha), "mono",
                    "right")
         scifi.segments(mesh, x + 12.0, y + 30.0, w - 24.0, 10.0, FUEL_SEGMENTS, fuel, with_alpha(fill, alpha),
@@ -417,7 +418,7 @@ class Hud:
         scifi.caps(self.layer, shown, x + 16.0, y + 0.5 * HINT_BAR_HEIGHT)
 
     def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0, height=None, extra_hints=(),
-               drive=None, hour=None):
+               drive=None, hour=None, car_fuel=None):
         """One frame: `view` (right, up, forward) of the camera, `eye` from
         the planet's centre, `body` the world body under it, `player` the
         character, `gun` its gravity gun, `targets` the compass markers
@@ -429,7 +430,8 @@ class Hud:
         or False), the HUD is the car's: no crosshair, status or jet fuel,
         the driving hints (`drive_hints`), and the readout in km/h with the
         height always. `hour`, a text, shows after the body's name on the
-        readout."""
+        readout; `car_fuel` (its tank's share) while driving, in the jet
+        fuel's place, labelled FUEL and always shown."""
         width, height_px = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height_px <= 0:
             return
@@ -467,6 +469,8 @@ class Hud:
         self.draw_card()
         if drive is None:
             self.draw_fuel(player.jet_fuel if player is not None else 1.0, dt, height_px)
+        elif car_fuel is not None:
+            self.draw_fuel(car_fuel, dt, height_px, label="FUEL", always=True)
         self.draw_readout(speed, body, height, width, height_px, driving=drive is not None, hour=hour)
         self.draw_toasts(dt, width)
         self.layer.end()

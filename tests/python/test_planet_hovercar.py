@@ -4,8 +4,10 @@ settling on the cushion over flat ground, rising before a hill and over
 it, climbing to a target and the height's limits, holding its height
 where the ground is not known, never below the floor, top speeds forward,
 with boost and backward, braking, turning (slower when still), grip on
-the ground and drift in the air, banking into a turn, and when it can be
-left. Plain Python: no engine needed.
+the ground and drift in the air, banking into a turn, when it can be
+left, and its fuel: none burnt on the cushion, the throttle's and the
+boost's and holding height's burn, and dry, settling onto the cushion
+without driving but steering. Plain Python: no engine needed.
 
     python -m unittest discover -s tests/python
 """
@@ -140,6 +142,30 @@ class DriveTest(unittest.TestCase):
         self.assertFalse(car.can_leave())
         high = run(hc.Car(START, NORTH, target=50.0), hc.CarControls(), 15.0)
         self.assertFalse(high.can_leave())
+
+    def test_burns_fuel_and_settles_when_dry(self):
+        p = hc.CarParams()
+        cushion = (0.0, 0.0, RADIUS + hc.HOVER_MIN)
+        parked = run(hc.Car(cushion, NORTH), hc.CarControls(), 5.0)
+        self.assertAlmostEqual(parked.fuel, p.fuel_capacity, places=6)  # none on the cushion
+        driven = run(hc.Car(cushion, NORTH), hc.CarControls(throttle=1.0), 10.0)
+        # (a little more: over the curving ground the car rises a few mm off its cushion)
+        self.assertAlmostEqual(p.fuel_capacity - driven.fuel, 10.0 * p.drive_burn, delta=0.001)
+        boosted = run(hc.Car(cushion, NORTH), hc.CarControls(throttle=1.0, boost=True), 10.0)
+        self.assertAlmostEqual(p.fuel_capacity - boosted.fuel, 10.0 * p.drive_burn * p.boost_burn, delta=0.002)
+        high = hc.Car((0.0, 0.0, RADIUS + 100.0), NORTH, target=100.0)
+        high.height = 100.0
+        run(high, hc.CarControls(), 10.0)
+        self.assertAlmostEqual(p.fuel_capacity - high.fuel, 10.0 * p.air_burn, delta=0.01)
+        # Dry: no drive, no climb, down onto the cushion, still steering.
+        dry = hc.Car((0.0, 0.0, RADIUS + 30.0), NORTH, target=30.0, fuel=0.0)
+        dry.height = 30.0
+        run(dry, hc.CarControls(throttle=1.0, climb=1.0, steer=1.0), 20.0)
+        self.assertTrue(dry.dry())
+        self.assertLess(abs(self.forward_speed(dry)), 0.5)
+        self.assertAlmostEqual(dry.height, hc.HOVER_MIN, delta=0.1)
+        turned = run(hc.Car(cushion, NORTH, fuel=0.0), hc.CarControls(steer=1.0), 1.0)
+        self.assertGreater(turned.heading[0], 0.0)                       # towards east
 
     def test_attitude_is_orthonormal(self):
         car = hc.Car(START, NORTH)
