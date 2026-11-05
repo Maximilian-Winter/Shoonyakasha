@@ -321,13 +321,14 @@ A save stores the owned keys (`"upgrades"`), and loading applies them before it 
 ## 6. Save and load
 
 Both programs already save:
-- **`planet.py`** (`save_game`, `SAVE_VERSION` 1, `planet_save.json`, written to a `.tmp` file and then `os.replace`d) stores:
+- **`planet.py`** (`save_game`, `SAVE_VERSION` 2, `planet_save.json`, written to a `.tmp` file and then `os.replace`d) stores:
   - the clock and the terrain parameters
   - the mode, the free camera and the player's feet
   - the ship (`ship_record`: fuel, cargo, crashed) and where it is parked
   - the taken rocks and the prop records
   - the scanner's contacts
   - the market (credits and the outposts' supplies)
+  - the upgrades owned
 - **`walker.py`** (`save.py`, `VERSION` 1, `walker_save.json` and `walker_save.npz`, each written through a temporary file, the grids first) stores:
   - the clock, the player, the crates and loose rocks, the taken rocks
   - the credits and supplies, the objectives and the game's numbers
@@ -336,12 +337,10 @@ Both programs already save:
 
   It autosaves every `AUTOSAVE_SECONDS` (120 s), on Quit and as the window closes. `--save-check` exists.
 
-Additions to the records, as each phase adds the state:
+Later phases add to the records as they add the state, each with a new version and its migration:
 
 ```json
 {
-  "version": 2,
-  "owned_upgrades": ["gun_force_1", "hold_1"],
   "parts": { "coil": 1 },
   "outposts": { "Halden": { "reputation": 2.5 } },
   "suit": { "reserve": 0.8, "health": 1.0 },
@@ -352,9 +351,21 @@ Additions to the records, as each phase adds the state:
 }
 ```
 
-- Cargo items and the market's supply records gain `"resource"`. The supply is keyed by resource id instead of body name (§3.2).
-- `read` raises `SaveError` for another version today. Raising the version to 2 needs a migration from 1: items without `"resource"` become resource 1 at their grade, and body-keyed supplies are dropped.
-- Autosave on landing at an outpost, beside the walker's timer.
+`planet.py`'s save is of version 2 (`SAVE_VERSION`). Since version 1 it has gained:
+- `"upgrades"`, the owned keys (§5);
+- `"resource"` on each cargo item (§1.3);
+- `"resource"` on each prop's record (`Props.record`).
+
+`load_game` migrates a version-1 save as it reads it (`migrate_save`):
+- cargo items without a resource become ferrite;
+- prop records without one become ferrite when their grade is above 0, else 0;
+- `"upgrades"` starts empty.
+
+Any other version is refused. The supply stays keyed by body name. Keying it by resource id (§3.2) is a later version's migration, which would drop the body-keyed supplies.
+
+With `--play`, `autosave_on_landing` saves to `planet_save.json` each time the ship lands on an outpost's pad after flying. It doesn't save in the sandbox, where the places and checks put the ship on pads. `--save-check` ends by loading its save as one of version 1.
+
+`walker.py`'s save (`save.py`, `VERSION` 1) is unchanged. Its loose rocks' records carry `"resource"` through `Props.record`, and records without one load as ferrite.
 
 ---
 

@@ -43,6 +43,9 @@ cargo, and where it is parked), the mode, the free camera and the
 player's feet. F9 loads it: the planet is built again when its parameters differ,
 the props come back out of the physics and return to it by shoonyakasha.planet.props'
 rules, and the view goes back to the free camera, the ship or the player.
+The save is of SAVE_VERSION; one of version 1 is migrated as it loads
+(migrate_save). With --play the game is also saved when the ship lands
+on an outpost's pad after flying (autosave_on_landing).
 
 Ore: the probes measure the ore richness and its resource (resources.glsl),
 shown on the free camera's and the on-foot cards; where it is above 0.3
@@ -183,7 +186,8 @@ Keys:
     python planet.py --trunk-check     walk into the trees nearest the blocks, check the feet stop at their trunks
     python planet.py --promotion-check   grab the rocks near the player one by one, check each is drawn once
     python planet.py --orbit-crate-check   a crate in a low orbit of the moon comes round to where it started
-    python planet.py --save-check      move rocks, throw a crate, save, build a new planet, load, check what came back
+    python planet.py --save-check      move rocks, throw a crate, save, build a new planet, load, check what came back,
+                                       then load it as a save of version 1
     python planet.py --scan-check      scan for ore from orbit of the planet and the moon, check the contacts' rocks
     python planet.py --break-check     throw a crate into an ore boulder on the planet and the moon, check it splits
     python planet.py --fuel-check      burn the tanks dry from orbit, check the burn's time and the speed gained,
@@ -233,7 +237,7 @@ from viewmodel import Viewmodel
 HERE = os.path.dirname(os.path.abspath(__file__))
 CAPTURES = os.path.join(HERE, "planet_captures")
 SAVE_PATH = os.path.join(HERE, "planet_save.json")   # F5 / F9
-SAVE_VERSION = 1
+SAVE_VERSION = 2
 
 DAY_SUN = (SUN_ELEVATION, SUN_AZIMUTH)
 PIXEL_ANGLE = math.radians(FOV) / 900.0   # radians across a pixel at the window's 900 rows
@@ -443,6 +447,7 @@ state = {
     "trade_note": "",            # the last sale, purchase or load, for the cards
     "net_posts": [],             # the cargo net's corner posts
     "was_landed": False,         # the ship was landed (ship_landed) in the last frame in ship mode
+    "airborne": False,           # the ship has flown since it last landed on an outpost's pad
     "trade_card": None,          # the outpost's card, or the fuel call's (toolkit.overlay.Card)
     "fuel_call": None,           # the fuel on its way (call_fuel), or None
     "owned": set(),              # the keys of the upgrades bought (upgrades.py)
@@ -1661,12 +1666,40 @@ def restore_market(record):
                                for name, supplies in record["supply"].items() if name not in found}
 
 
+def autosave_on_landing(landed):
+    """With --play, the game saved to SAVE_PATH when the ship, having flown
+    since the last such save, is landed on an outpost's pad."""
+    if not landed:
+        state["airborne"] = True
+    elif state["airborne"] and outpost_here() is not None:
+        state["airborne"] = False
+        if args.play:
+            save_game()
+            state["trade_note"] = "game saved"
+            print("[planet] saved on landing", SAVE_PATH, flush=True)
+
+
+def migrate_save(data):
+    """A save's data of version 1 made version 2, in place: each cargo item
+    and each ore rock's record (grade above 0) without a resource is
+    ferrite, any other prop's record resource 0, and no upgrades are
+    owned."""
+    ship = data.get("ship")
+    for item in (ship or {}).get("cargo", []):
+        item.setdefault("resource", resources.FERRITE)
+    for record in data.get("props", []):
+        record.setdefault("resource", resources.FERRITE if record.get("grade", 0.0) > 0.0 else resources.NONE)
+    data.setdefault("upgrades", [])
+    data["version"] = 2
+
+
 def load_game(path=None):
     """The world put back as `path` (SAVE_PATH when None) has it: the
     planet built again with its terrain's parameters when they differ, the
     clock, the taken rocks, the props (out of the physics), the ship, and
-    the free camera, the ship's view or a player where they were. Returns
-    the data read, or None when there is no save to read."""
+    the free camera, the ship's view or a player where they were; a save
+    of version 1 migrated first (migrate_save). Returns the data read, or
+    None when there is no save to read."""
     path = path or SAVE_PATH
     try:
         with open(path, encoding="utf-8") as f:
@@ -1674,6 +1707,9 @@ def load_game(path=None):
     except (OSError, ValueError) as error:
         print("[planet] no save loaded from %s: %s" % (path, error), flush=True)
         return None
+    if data.get("version") == 1:
+        migrate_save(data)
+        print("[planet] %s migrated from version 1" % path, flush=True)
     if data.get("version") != SAVE_VERSION:
         print("[planet] %s is not a save of version %d" % (path, SAVE_VERSION), flush=True)
         return None
@@ -1752,6 +1788,7 @@ def frame(dt):
         if state["was_landed"] and not landed:
             load_cargo()
         state["was_landed"] = landed
+        autosave_on_landing(landed)
     elif state["mode"] == "foot":
         if not state["scripted_controls"]:
             read_foot_controls()

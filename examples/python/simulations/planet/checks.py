@@ -6,6 +6,7 @@ Imported by planet.py run as the script: the names from __main__ are
 planet.py's.
 """
 
+import json
 import math
 import os
 import random
@@ -21,7 +22,7 @@ from shoonyakasha.planet.character import MASS as PLAYER_MASS, RADIUS as PLAYER_
 from shoonyakasha.planet.nearby_trees import listed_keys
 from shoonyakasha.planet.on_foot import COLLIDER_RADIUS
 from shoonyakasha.planet.props import yaw_rotation
-from shoonyakasha.planet.resources import ICE
+from shoonyakasha.planet.resources import FERRITE, ICE
 from shoonyakasha.planet.rocks import ORE_ROCKS, rock_colour
 from shoonyakasha.planet.vec import (add, cross, dot, length, local_frame, normalize, quat_from_basis, quat_rotate,
                                      rotate, scale, sub)
@@ -1987,7 +1988,8 @@ class SaveCheck(GunCheck):
     rocks must hold every kept cell within INNER that is not taken, none
     that is taken, and none within INNER that was not kept within OUTER; and
     the loose rocks back in the physics must lie within MOVED of their
-    records. Prints what it found and exits with status 0 when all of
+    records. Then the save is made one of version 1 and loaded
+    (version_1). Prints what it found and exits with status 0 when all of
     these held, 1 otherwise."""
 
     ROCKS = 10
@@ -2098,10 +2100,44 @@ class SaveCheck(GunCheck):
                  "match" if self.taken_match else "DIFFER", "match" if self.records_match else "DIFFER",
                  len(self.inner), self.INNER, len(missing), len(shown), len(extra), back, worst,
                  "passed" if ok else "FAILED"), flush=True)
+        ok = self.version_1() and ok
         if os.path.exists(self.PATH):
             os.remove(self.PATH)
         self.clear()
         self.next_body(ok)
+
+    def version_1(self):
+        """The save made version 1 (no resources on the props' records, a
+        ship ORBIT_HEIGHT over the site where it has none, its cargo one item
+        of ore without a resource, no upgrades) and loaded: the
+        records must come back as saved but with ferrite for each ore rock
+        and 0 for the rest, the cargo item ferrite, and no upgrades owned."""
+        old = json.loads(json.dumps(self.saved))
+        old["version"] = 1
+        old.pop("upgrades", None)
+        expected = []
+        for record in old["props"]:
+            record.pop("resource", None)
+            expected.append(dict(record, resource=FERRITE if record.get("grade", 0.0) > 0.0 else 0))
+        if old["ship"] is None:
+            old["ship"] = {"position": list(scale(world.site_frame()[1], RADIUS + ORBIT_HEIGHT)),
+                           "velocity": [0.0, 0.0, 0.0], "orientation": [1.0, 0.0, 0.0, 0.0],
+                           "angular_velocity": [0.0, 0.0, 0.0], "on_ground": False, "resting": False,
+                           "crashed": False, "fuel": 1_000.0}
+        old["ship"]["cargo"] = [{"body": "planet", "direction": [0.0, 0.0, 1.0], "mass": 100.0, "grade": 0.5}]
+        with open(self.PATH, "w", encoding="utf-8") as f:
+            json.dump(old, f)
+        state["owned"] = {"hold_1"}
+        loaded = load_game(self.PATH)
+        records_ok = loaded is not None and props.records(foot.bubble) == expected
+        ship = state["ship"]
+        cargo_ok = ship is not None and [c.get("resource") for c in ship.cargo] == [FERRITE]
+        owned_ok = state["owned"] == set()
+        ok = records_ok and cargo_ok and owned_ok
+        print("[planet]   a save of version 1 loaded: %d records %s, ore rocks ferrite; the cargo %s; upgrades %s: %s"
+              % (len(expected), "match" if records_ok else "DIFFER", "ferrite" if cargo_ok else "NOT ferrite",
+                 "none" if owned_ok else "STILL OWNED", "passed" if ok else "FAILED"), flush=True)
+        return ok
 
 
 class ProbeRounds:
