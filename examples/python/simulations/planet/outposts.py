@@ -20,7 +20,9 @@ outposts at the mean of their heights. Each outpost there is a flat site
 and two buildings beside it, placed each frame relative to the camera
 like the blocks. `Outpost.at(ship_position)` tells whether a point is over
 its pad: within PAD_REACH of its centre along the ground and REACH_UP
-above or below it.
+above or below it. The outpost named REFINERY has a refinery
+(`Outpost.refinery`): it turns ice into fuel, REFINE_ICE kg of ice to a
+kg of fuel (the walker's Outpost tab).
 """
 
 import math
@@ -32,6 +34,8 @@ from shoonyakasha.planet.vec import add, dot, euler_from_basis, length, local_fr
 from shoonyakasha.planet.world import Site
 
 COUNT = {"planet": 3, "moon": 2}
+REFINERY = "Selene Deep"         # the outpost with a refinery
+REFINE_ICE = 3.0                 # kg of ice to a kg of fuel
 NAMES = {"planet": ("Kestrel", "Halden", "Varga"), "moon": ("Lowrim", "Selene Deep")}
 HOME_NAME = "Base"
 CANDIDATES = {"planet": 64, "moon": 24}
@@ -63,6 +67,10 @@ class Outpost:
     blend_radius: float = 0.0
     supply: dict = field(default_factory=dict)   # body name: (kg of its ore bought, world time), trade.py
     reputation: float = 0.0      # the player's standing here (the walker's contracts); raises its prices
+
+    @property
+    def refinery(self):
+        return self.name == REFINERY
 
     def site(self):
         return Site(self.body.index, tuple(self.direction), self.height, self.flat_radius, self.blend_radius)

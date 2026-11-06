@@ -31,7 +31,10 @@ the main engine can still give, by the rocket equation.
 
 The planet, its moon and the orbits around them are
 `shoonyakasha.planet.orbits`'s (`Planet`, `Moon`, `reference`, `orbit`,
-`orbit_path`, `circular_speed`), imported here.
+`orbit_path`, `circular_speed`), imported here. `hohmann_plan` gives a
+Hohmann transfer's first burn, time and the target's lead at the burn,
+`phase_angle` how far a target leads round an orbit, and `point_controls`
+the stick settings that turn a ship's nose towards a direction.
 
 Flight assist: the stick asks for rotation rates, which the ship's
 torque holds (always). With translation assist on, the throttle asks for
@@ -425,3 +428,43 @@ def reentry_glow(planet, position, velocity):
     return smoothstep(0.6, 0.85, speed) * smoothstep(-5.0, -3.0, math.log10(density))
 
 
+# ── Transfers and pointing ─────────────────────────────────────────────────
+
+def hohmann_plan(gm, r1, r2, target_rate):
+    """(delta-v of the first burn, the transfer's time, the angle the target
+    must lead by at the burn) of a Hohmann transfer from a circular orbit
+    of radius `r1` to one of `r2` around a body of `gm`, for a target going
+    round at `target_rate` (rad/s)."""
+    a = 0.5 * (r1 + r2)
+    t_transfer = math.pi * math.sqrt(a ** 3 / gm)
+    dv1 = math.sqrt(gm / r1) * (math.sqrt(2.0 * r2 / (r1 + r2)) - 1.0)
+    return dv1, t_transfer, math.pi - target_rate * t_transfer
+
+
+def phase_angle(position, velocity, target):
+    """The angle (0 to 2 pi) by which `target` leads `position` round the
+    orbit of `position` and `velocity` (positions from the body's centre),
+    measured in that orbit's plane."""
+    normal = normalize(cross(position, velocity))
+    flat = sub(target, scale(normal, dot(target, normal)))
+    return math.atan2(dot(cross(position, flat), normal), dot(position, flat)) % (2.0 * math.pi)
+
+
+def point_controls(axes, direction, max_rates, gain):
+    """(pitch, yaw) stick settings, -1 to 1, that turn a ship whose axes are
+    `axes` (right, up, forward) towards the unit `direction` at `gain`
+    times the angle left (rad/s), at most its `max_rates`."""
+    right, up, forward = axes
+    a = cross(forward, direction)
+    s, c = length(a), dot(forward, direction)
+    if s < 1e-9:
+        if c > 0.0:
+            return 0.0, 0.0
+        a, s = right, 1.0                           # straight behind: pitch round
+    angle = math.atan2(s, c)
+    axis = scale(a, 1.0 / s)
+
+    def clamp(value):
+        return max(-1.0, min(1.0, value))
+    return (clamp(gain * angle * dot(axis, right) / max_rates[0]),
+            clamp(-gain * angle * dot(axis, up) / max_rates[1]))

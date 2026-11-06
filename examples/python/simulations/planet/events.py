@@ -3,9 +3,10 @@ Meteor showers and storms (walker.py): when the next shower comes, where
 its meteors strike, the paths they fly in, the craters kept and how hot a
 meteorite still is; and when the next storm comes and where it goes.
 
-`schedule(now, rng, player, radius, start=None)` plans a Shower on a body
-of `radius` (m). It starts at `start`, or after a gap drawn from an
-exponential of mean MEAN_GAP after `now`, at least MIN_GAP. Its centre
+`schedule(now, rng, player, radius, start=None, mean_gap=MEAN_GAP)` plans
+a Shower on a body of `radius` (m). It starts at `start`, or after a gap
+drawn from an exponential of mean `mean_gap` after `now` (MOON_MEAN_GAP
+on the moon), at least MIN_GAP. Its centre
 lies AREA_NEAR to AREA_FAR along the ground from the unit direction
 `player`, at a bearing drawn uniformly. Its impacts (Impact), sorted by
 time, are drawn over SPREAD_SECONDS from its start:
@@ -28,8 +29,8 @@ position `before` seconds before it strikes, between the steps' points.
 `keep(craters, crater, time, here, radius)` is the craters ((Crater,
 time) pairs) with a new one dug at `time`. When MAX_CRATERS are kept
 already, the oldest whose centre lies farther than DROP_FAR along the
-ground from the unit direction `here` goes, or the oldest of all when
-none does. `crater_record` and `crater_from_record` turn a crater and its
+ground from the unit direction `here` on the new crater's body (or on the
+other body) goes, or the oldest of all when none does. `crater_record` and `crater_from_record` turn a crater and its
 time into the save's record and back.
 
 `schedule_storm(now, rng, player, radius, wind, start=None)` plans a
@@ -57,6 +58,7 @@ from shoonyakasha.planet.vec import add, cross, dot, length, local_frame, normal
 from shoonyakasha.planet.wind import Storm
 
 MEAN_GAP = 25.0 * 60.0           # s of the world's clock between showers, on average
+MOON_MEAN_GAP = 12.0 * 60.0      # s on the moon, which has no air to burn its meteors up
 MIN_GAP = 5.0 * 60.0             # s, at least
 WARNING_SECONDS = 60.0           # s before a shower's start it is announced
 AREA_NEAR, AREA_FAR = 3_000.0, 10_000.0   # m along the ground from the player to a shower's centre
@@ -133,10 +135,10 @@ def crater_of(mass):
     return radius, DEPTH_SHARE * radius, RIM_SHARE * radius
 
 
-def schedule(now, rng, player, radius, start=None):
+def schedule(now, rng, player, radius, start=None, mean_gap=MEAN_GAP):
     """The next shower (see the module's docstring); `rng` a random.Random."""
     if start is None:
-        start = now + max(MIN_GAP, rng.expovariate(1.0 / MEAN_GAP))
+        start = now + max(MIN_GAP, rng.expovariate(1.0 / mean_gap))
     centre = along_ground(player, rng.uniform(0.0, 360.0), rng.uniform(AREA_NEAR, AREA_FAR), radius)
     radiant = rng.uniform(0.0, 360.0)
     spread = rng.uniform(*SPREAD)
@@ -193,7 +195,8 @@ def keep(craters, crater, time, here, radius):
     """`craters` ((Crater, time)) with `crater` dug at `time` (see the module's docstring)."""
     kept = list(craters)
     if len(kept) >= MAX_CRATERS:
-        far = [c for c in kept if ground_distance(normalize(c[0].direction), here, radius) > DROP_FAR]
+        far = [c for c in kept if c[0].body != crater.body
+               or ground_distance(normalize(c[0].direction), here, radius) > DROP_FAR]
         kept.remove(min(far or kept, key=lambda c: c[1]))
     return kept + [(crater, time)]
 

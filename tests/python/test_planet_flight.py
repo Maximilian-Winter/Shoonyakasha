@@ -698,5 +698,32 @@ class Fuel(unittest.TestCase):
         self.assertFalse(ship.can_take(ice + 1.0, ICE))
 
 
+
+class Transfers(unittest.TestCase):
+    def test_hohmann_plan_reaches_the_moon_from_a_low_orbit(self):
+        planet = flight.Planet()
+        moon = flight.Moon()
+        r1 = planet.radius + 40_000.0
+        dv, t, lead = flight.hohmann_plan(planet.gm, r1, moon.distance, moon.rate)
+        self.assertAlmostEqual(dv, 162.0, delta=1.0)
+        self.assertAlmostEqual(t / 60.0, 53.0, delta=1.0)
+        self.assertAlmostEqual(lead, math.pi - moon.rate * t)
+
+    def test_phase_angle(self):
+        position, velocity = (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)          # round +Z
+        self.assertAlmostEqual(flight.phase_angle(position, velocity, (0.0, 2.0, 0.0)), 0.5 * math.pi)
+        self.assertAlmostEqual(flight.phase_angle(position, velocity, (0.0, -3.0, 0.0)), 1.5 * math.pi)
+        self.assertAlmostEqual(flight.phase_angle(position, velocity, (5.0, 0.0, 4.0)), 0.0)
+
+    def test_point_controls_turn_the_nose_to_a_direction(self):
+        planet = flight.Planet(moon_pulls=False)
+        ship = level_ship(5_000.0, planet)
+        target = flight.normalize((0.3, 0.8, 0.5))
+        for _ in range(int(round(15.0 / DT))):
+            pitch, yaw = flight.point_controls(ship.axes(), target, ship.params.max_rates, 1.5)
+            ship.step(planet, flight.Controls(pitch=pitch, yaw=yaw, assist=True), DT)
+        self.assertGreater(flight.dot(ship.axes()[2], target), 0.999)
+        self.assertEqual(flight.point_controls(ship.axes(), ship.axes()[2], ship.params.max_rates, 1.5), (0.0, 0.0))
+
 if __name__ == "__main__":
     unittest.main()

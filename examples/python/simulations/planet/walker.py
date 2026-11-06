@@ -76,8 +76,9 @@ and the moon's gravity, stepped in FLIGHT_STEP steps (`step_space`) with
 carview.read_space_controls, translation assist on at first (T switches
 it). From WARP_HEIGHT up `,` and `.` change the time warp (WARPS); the
 HUD shows the body it is reckoned around, the assist, the throttle, the
-warp, the orbit's periapsis and apoapsis and the delta-v left
-(`space_lines`). G within HOVER_BACK of the ground, or touching down
+warp, the nose hold, the orbit's periapsis and apoapsis and the delta-v
+left, and around the planet the transfer planner (`space_lines`); H
+cycles the nose hold, prograde, retrograde or off (`hold_nose`). G within HOVER_BACK of the ground, or touching down
 slower than LANDED_SPEED, makes it the hover car again over the body
 under it (`leave_space`), the planet's or the moon's (`car_body`); on the
 moon it hovers, parks and is got out of as on the planet, and the player
@@ -99,7 +100,9 @@ contracts' crates, each that fits (hovercar.Car.can_take), a rock with
 where it was first seen; the rest stay in the net. The menu's Outpost
 tab shows the outpost whose pad the car is on, its price for each
 resource at grade 1, the car's cargo and what its ore would fetch, and
-sells the ore (`sell_car_cargo`, trade.sale). The save keeps the cargo.
+sells the ore (`sell_car_cargo`, trade.sale); at the refinery
+(outposts.REFINERY) it makes the ice in the hold fuel (`refine_ice`). The
+save keeps the cargo.
 
 Upgrades (upgrades.py, the "car" and "gun" groups): the menu's Upgrades
 tab has a button for each, bought with the car or the player's feet on
@@ -186,7 +189,8 @@ in it, the contracts' deadlines are held (contracts.Contract.paused). The
 compass marks its centre; the save keeps it ("events").
 
 Meteor showers (events.py, `update_showers`): the next shower is planned
-around the camera on the planet, its impacts' ground measured with the
+around the camera on the body it is over (`shower_body`; on the moon more
+often, its meteors dim and trailless), its impacts' ground measured with the
 extra probes (`probe_shower`) and, while its large impact falls in the sea,
 a lake or a river, planned again. WARNING_SECONDS before it starts, a toast
 gives its bearing and distance, and the compass marks its centre. Each
@@ -425,6 +429,7 @@ PLUME_NEAR = 3.0                # puff sizes from the camera within which a puff
 HOT_GLOW = (1.0, 0.42, 0.12)
 HOT_SIZE = 3.0                  # times a hot prop's radius its glow is across
 METEOR_DISCS, METEOR_STREAKS = 96, 48
+MOON_HEAD = 0.3                 # of a meteor's head's light on the moon, where it has no trail (no air)
 SHOWER_CHECK_LEAD = 12.0        # s from --check's shower being planned to its large impact
 SHOWER_CHECK_CENTRE = 400.0     # m east of the feet its large impact strikes
 SHOWER_CHECK_OFF_PAD = 4.0      # m beyond Base's pad's reach its small one strikes
@@ -455,11 +460,17 @@ MAX_FLIGHT_STEPS = 256          # a frame, at most
 WARPS = (1, 4, 16, 64)          # space mode's time warps
 WARP_HEIGHT = 5_000.0           # m above the ground below which the time warp is 1
 LANDED_SPEED = 2.0              # m/s: touching down slower, space mode ends
+HOLD_GAIN = 1.5                 # 1/s: the nose hold's turn rate per radian left
+HOLDS = (None, "prograde", "retrograde")
 SPACE_CHECK_SECONDS = 40.0      # s --check waits at most for the car to climb to SPACE_HEIGHT or come down
 SPACE_RISE_SECONDS = 5.0        # s it climbs on the assist in space mode
 SPACE_RISE_MIN = 100.0          # m it must rise in that time, at least
 SPACE_CHECK_DROP = 600.0        # m above a moon outpost's pad it puts the car in space mode
 SPACE_LAND_SECONDS = 60.0       # s it waits at most for the car to land there
+MOON_SHOWER_CHECK_AWAY = 300.0  # m east of the feet on the moon --check's meteorite strikes
+MOON_SHOWER_CHECK_LEAD = 10.0   # s from its planning to its impact
+REFINE_CHECK_ICE = 60.0         # kg of ice --check puts in the car's hold at the refinery
+REFINE_CHECK_ROOM = 10.0        # kg of room it leaves in the tank
 POI_MARKER, LOOTED_MARKER, SIGNAL_MARKER = (1.0, 0.85, 0.35, 1.0), (0.55, 0.58, 0.62, 1.0), (0.6, 0.75, 0.85, 0.6)
 WALKER_UPGRADES = upgrades.for_groups(("car", "gun", "suit"))   # the upgrades the outposts here offer
 
@@ -503,6 +514,7 @@ HELP_COLUMNS = [
         (("Arrows",), "Pitch and yaw"),
         (("Q", "E"), "Roll"),
         (("T",), "Translation assist on / off"),
+        (("H",), "Nose hold: prograde, retrograde, off"),
         ((",", "."), "Time warp down / up, %.0f km up" % (WARP_HEIGHT / 1000.0)),
     ])],
 ]
@@ -566,6 +578,7 @@ state = {
     "space_controls": flight.Controls(),
     "ship_time": 0.0,             # the world's clock the space mode's steps have reached
     "warp": 0,                    # index into WARPS
+    "hold": None,                 # the nose hold in space mode: None, "prograde" or "retrograde"
     "car_body": None,             # the world body the car is reckoned around; None: the planet
     "pad_x": False,               # the gamepad's X held last frame
     "viewmodel": None,
@@ -634,6 +647,7 @@ state = {
     "contract_note": "",          # the last contract accepted, ended or refused, for the Contracts tab
     "contracts_shown": None,      # what the Contracts tab was last built for
     "shower": None,               # the next or current meteor shower (events.Shower)
+    "shower_body": None,          # the world body it falls on; None: the planet
     "shower_rng": random.Random(),
     "shower_tries": 0,            # times it was planned again for a large impact in water
     "next_shower": None,          # a loaded save's world clock for the next shower's start
@@ -1291,9 +1305,9 @@ def markers(body):
     """(name, position from the planet's centre, colour) of the outposts
     on `body`, the ship on the planet, the waypoint on `body` and the
     points of interest (poi_markers), the pinned contract's target
-    (contract_target), an announced shower's centre, the last
-    meteorite while it lies whole, and a storm's centre from
-    STORM_WARNING before its start to its end, on the planet."""
+    (contract_target) on the planet, an announced shower's centre and the
+    last meteorite while it lies whole on `body`, and a storm's centre from
+    STORM_WARNING before its start to its end on the planet."""
     found = [(o.name, o.point(), OUTPOST_MARKER) for o in state["outposts"] if o.body is body]
     if state["ship"] is not None and body is planet:
         found.append(("Ship", state["ship"][0], SHIP_MARKER))
@@ -1303,10 +1317,10 @@ def markers(body):
     target = contract_target(pinned_contract())
     if target is not None and body is planet:
         found.append(("Contract", target, CONTRACT_MARKER))
-    if body is planet and state["shower"] is not None and state["shower_warned"]:
-        found.append(("Meteors", add(planet.centre(), scale(state["shower"].centre, planet.radius)), METEOR_MARKER))
+    if body is shower_body() and state["shower"] is not None and state["shower_warned"]:
+        found.append(("Meteors", add(body.centre(), scale(state["shower"].centre, body.radius)), METEOR_MARKER))
     meteorite = meteorite_point()
-    if body is planet and meteorite is not None:
+    if meteorite is not None and world.body_under(meteorite) is body:
         found.append(("Meteorite", meteorite, METEOR_MARKER))
     storm = world.storm
     if body is planet and storm is not None and storm.start - STORM_WARNING <= world.time < storm.end:
@@ -1466,13 +1480,21 @@ def run_check(dt):
     most full) and the credits less that; then space mode
     (run_space_check): the car climbed past SPACE_HEIGHT and into space
     mode, risen on the assist for SPACE_RISE_SECONDS (at least
-    SPACE_RISE_MIN, burning fuel), saved and loaded there (back within
+    SPACE_RISE_MIN, burning fuel), the space readout showing the transfer
+    planner's lines, saved and loaded there (back within
     1 cm), brought down within HOVER_BACK and back to hovering over the
     planet; then put in space mode SPACE_CHECK_DROP above a moon outpost's
     pad at the moon's velocity, coming down on the assist, passing when it
     lands within SPACE_LAND_SECONDS, the hover car again over the moon,
     within 50 m of the pad and not hard, and the player got out stands on
-    the moon at the moon's temperature; then the car put back at Base;
+    the moon at the moon's temperature; then a meteorite of
+    SHOWER_CHECK_MASS strikes the moon MOON_SHOWER_CHECK_AWAY east of the
+    feet MOON_SHOWER_CHECK_LEAD on, passing when its crater is dug on the
+    moon and the meteorite lies within 1 m of its floor; then the car on
+    the refinery's pad with REFINE_CHECK_ICE kg of ice in its hold and
+    REFINE_CHECK_ROOM kg of room in its tank, refining (refine_ice),
+    passing when the tank is full and the ice less outposts.REFINE_ICE
+    times that room is left; then the car put back at Base;
     then the day's hour set to NIGHT_CHECK_HOUR and
     NIGHT_SECONDS later passing with the night's exposure
     (clock.NIGHT_SCALE) and at least the car's two headlights drawn. The
@@ -1491,7 +1513,8 @@ def run_check(dt):
     _lake added), after climbing for LAKE_CLIMB_SECONDS and 2 s more,
     above it (with _lake_above added), over the river (with _river added)
     and, after climbing for RIVER_CLIMB_SECONDS and 2 s more, above it
-    (with _river_above added), on the moon (with _moon added) and at night (with _night added)."""
+    (with _river_above added), in space mode (with _space added), on the moon (with _moon added) and at
+    night (with _night added)."""
     player = foot.player
     check = state["check"]
     if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "space", "night", "net_out")):
@@ -2313,6 +2336,7 @@ def run_shower_check(check, t):
         large = events.Impact(now, centre, SHOWER_CHECK_MASS, 0.6, 4_000.0, 60.0, 0.0,
                               events.crater_of(SHOWER_CHECK_MASS))
         small = events.Impact(now + 1.0, ahead, SHOWER_CHECK_ROCK, 0.6, 4_000.0, 60.0, 0.0)
+        state["shower_body"] = None
         set_shower(events.Shower(now, centre, [large, small]))
         s.update(step="fly", craters=list(world.craters), large=large, small=small, heads=0, flash=0.0,
                  shake=0.0, plumes=0, natural=None, t0=t)
@@ -2562,6 +2586,12 @@ def run_space_check(check, t):
             rose, burnt = car.height - s["from"][0], s["from"][1] - car.fuel
             ok = rose > SPACE_RISE_MIN and burnt > 0.0 and car.fuel == ship.fuel
             done(ok, "rose %.0f m on the assist in %.0f s, burning %.2f kg" % (rose, SPACE_RISE_SECONDS, burnt), "saved")
+            lines = space_lines()
+            planner = len(lines) == 6 and lines[4].startswith("MOON LEAD") and lines[5].startswith("BURN IN")
+            done(planner, "the space readout with the transfer planner: %s" % " | ".join(lines[3:]), "saved")
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_space" + ext)
             save_game(CHECK_SAVE_BASE, quiet=True)
             s["saved_at"] = ship.position
             state["space"].position = add(ship.position, (100.0, 0.0, 0.0))
@@ -2632,7 +2662,59 @@ def run_space_check(check, t):
         if args.shot:
             base, ext = os.path.splitext(args.shot)
             screenshot(base + "_moon" + ext)
-        done(s["left"] and moon_ok, "out of the car on the moon, standing, %.0f C" % (temperature or 0.0), "home")
+        done(s["left"] and moon_ok, "out of the car on the moon, standing, %.0f C" % (temperature or 0.0),
+             "moon_shower")
+        return False
+    if step == "moon_shower":
+        moon = s["outpost"].body
+        feet = foot.bubble.to_world(foot.player.feet())
+        here = normalize(moon.relative(feet))
+        centre = events.along_ground(here, 90.0, MOON_SHOWER_CHECK_AWAY, moon.radius)
+        when = world.time + MOON_SHOWER_CHECK_LEAD
+        large = events.Impact(when, centre, SHOWER_CHECK_MASS, 0.6, 3_000.0, 60.0, 0.0,
+                              events.crater_of(SHOWER_CHECK_MASS))
+        state["shower_body"] = moon
+        set_shower(events.Shower(when, centre, [large]))
+        s["impact"], s["craters"] = large, list(world.craters)
+        s["step"], s["t0"] = "moon_strike", t
+        return False
+    if step == "moon_strike":
+        large = s["impact"]
+        if "natural" not in s and 0 in state["impact_heights"]:
+            s["natural"] = state["impact_heights"][0]
+        if state["shower"] is not None or world.time < large.time + SHOWER_LAND_SECONDS:
+            if since > MOON_SHOWER_CHECK_LEAD + 30.0:
+                done(False, "the moon's shower did not strike", "home")
+            return False
+        moon = s["outpost"].body
+        dug = [c for c in world.craters if c not in s["craters"]]
+        meteorite = state["meteorite"]
+        lies = None
+        if meteorite is not None:
+            body, position, _ = foot.prop_state(meteorite)
+            lies = length(position) - moon.radius - meteorite.rest if body is moon else None
+        floor = s.get("natural", 0.0) - large.crater[1]
+        ok = (len(dug) == 1 and dug[0].body == moon.index and lies is not None and abs(lies - floor) < 1.0
+              and state["shower_body"] is moon)
+        done(ok, "a meteorite struck the moon %.0f m away: its crater on the moon, the meteorite %s m from its floor"
+             % (MOON_SHOWER_CHECK_AWAY, "%.2f" % (lies - floor) if lies is not None else "-"), "refine")
+        return False
+    if step == "refine":
+        refinery = next(o for o in state["outposts"] if o.refinery)
+        up = refinery.direction
+        car.position = scale(up, refinery.body.radius + refinery.height + SHIP_CLEARANCE)
+        car.velocity = (0.0, 0.0, 0.0)
+        state["car_body"] = refinery.body
+        car.cargo.append({"body": refinery.body.name, "direction": up, "mass": REFINE_CHECK_ICE, "grade": 0.5,
+                          "resource": resources.ICE})
+        car.fuel = car.params.fuel_capacity - REFINE_CHECK_ROOM
+        refine_ice()
+        left = sum(i["mass"] for i in car.cargo if i.get("resource") == resources.ICE)
+        expected = REFINE_CHECK_ICE - REFINE_CHECK_ROOM * outposts.REFINE_ICE
+        ok = abs(car.fuel - car.params.fuel_capacity) < 1e-6 and abs(left - expected) < 1e-6
+        done(ok, "at %s's refinery %.0f kg of ice made %.0f kg of fuel, filling the tank, %.0f kg of ice left"
+             % (refinery.name, REFINE_CHECK_ICE - left, REFINE_CHECK_ROOM, left), "home")
+        car.cargo = [i for i in car.cargo if i.get("resource") != resources.ICE]
         return False
     if step == "home":
         enter_car(anywhere=True)
@@ -3457,6 +3539,9 @@ def outpost_items():
          {"stat": "Credits", "get": lambda: "%s cr" % format(int(round(state["market"].credits)), ",")},
          {"stat": "Car's cargo", "get": cargo_text},
          {"stat": "It would fetch", "get": value},
+         {"button": "Refine the car's ice into fuel", "do": refine_ice,
+          "hint": "At %s's refinery: the ice in the car's hold made fuel in its tank, %.0f kg of ice to a kg."
+                  % (outposts.REFINERY, outposts.REFINE_ICE)},
          {"button": "Sell the car's cargo", "do": sell_car_cargo,
           "hint": "With the car on an outpost's pad: the ore in its hold sold there, or delivered to a "
                   "contract that wants it."},
@@ -3468,6 +3553,40 @@ def outpost_items():
           "hint": "With the car or you on an outpost's pad: the survey data sold there, its price falling with "
                   "the data the outpost has bought."}],
     ])
+
+
+def refine_ice():
+    """At the refinery (outposts.REFINERY) whose pad the car is on, open:
+    the ice in the car's hold (not a contract's) made fuel in its tank,
+    outposts.REFINE_ICE kg of ice to a kg, as much as the tank takes."""
+    outpost, car = car_outpost(), state["car"]
+    note = None
+    if outpost is None or not outpost.refinery:
+        note = "the car is not on %s's pad, where the refinery is" % outposts.REFINERY
+    elif closed(outpost):
+        note = closed_note(outpost)
+    ice = [i for i in car.cargo if i.get("resource") == resources.ICE and "contract" not in i]
+    if note is None and not ice:
+        note = "no ice in the car's hold"
+    if note is None and car.fuel >= car.params.fuel_capacity - 0.05:
+        note = "the tank is full"
+    if note is not None:
+        state["trade_note"] = note
+        state["hud"].toast(note[0].upper() + note[1:], hud_module.WARNING)
+        return
+    wanted = (car.params.fuel_capacity - car.fuel) * outposts.REFINE_ICE
+    taken = 0.0
+    for item in ice:
+        take = min(item["mass"], wanted - taken)
+        item["mass"] -= take
+        taken += take
+        if item["mass"] <= 1e-6:
+            car.cargo.remove(item)
+        if taken >= wanted:
+            break
+    car.fuel = min(car.params.fuel_capacity, car.fuel + taken / outposts.REFINE_ICE)
+    state["trade_note"] = "refined %.0f kg of ice into %.1f kg of fuel" % (taken, taken / outposts.REFINE_ICE)
+    state["hud"].toast(state["trade_note"][0].upper() + state["trade_note"][1:], GOOD_TOAST)
 
 
 def sell_survey():
@@ -4011,6 +4130,25 @@ def shower_here():
     return normalize(planet.relative(state["position"]))
 
 
+def camera_on():
+    """(the world body under the camera, the unit direction to the camera from
+    its centre), or None at the start's menu or with neither a player nor
+    the car driven."""
+    if state["starting"] or (foot.player is None and not state["driving"]):
+        return None
+    body = world.body_under(state["position"])
+    return body, normalize(body.relative(state["position"]))
+
+
+def shower_body():
+    """The world body the shower falls on."""
+    return state["shower_body"] or planet
+
+
+def body_gm(body):
+    return world.physics.gm if body is planet else world.physics.moon.gm
+
+
 def set_shower(shower):
     """`shower` (events.Shower) the next or current one, nothing of it measured, warned of or struck yet."""
     if state["shower_asked"] is not None and world.extra_probes == state["shower_asked"]:
@@ -4037,7 +4175,7 @@ def probe_shower():
         world.extra_probes = []
     wanted = [k for k in range(state["struck"], len(shower.impacts)) if k not in state["impact_heights"]]
     if wanted:
-        asked = [(shower.impacts[k].direction, planet) for k in wanted[:EXTRA_PROBES]]
+        asked = [(shower.impacts[k].direction, shower_body()) for k in wanted[:EXTRA_PROBES]]
         world.extra_probes = asked
         state["shower_asked"], state["shower_asking"] = asked, wanted[:EXTRA_PROBES]
 
@@ -4049,61 +4187,72 @@ def shower_waiting():
                                       for k in range(state["struck"], len(shower.impacts)))
 
 
-def on_land(direction, height):
-    """Whether the ground `height` m up at the unit `direction` on the planet is above the sea and any lake or river."""
+def on_land(body, direction, height):
+    """Whether the ground `height` m up at the unit `direction` on `body` is
+    above the sea and any lake or river: always on the moon, which has none."""
+    if body is not planet:
+        return True
     level = world.water_level(direction)
     return height > 0.0 and (level is None or height > level)
 
 
 def update_showers():
     """The meteor showers (events.py): the next planned around the camera
+    on the body it is over (`shower_body`; on the moon every
+    events.MOON_MEAN_GAP on average)
     (at a loaded save's next_shower, at least WARNING_SECONDS on, when
     there is one), its impacts' ground measured (probe_shower) and,
     while its large impact falls in water, planned again with the same
     start up to SHOWER_TRIES times; announced WARNING_SECONDS before its
     start once that is known, with a toast and a marker on the compass;
     each meteor's path flown back from where it strikes; and each impact
-    struck at its time (`strike`), also while the camera is away from the
-    planet. Once all have struck, the next is planned. Under --check none is planned; the check gives its own. The
+    struck at its time (`strike`), also while the camera is away from its
+    body. Once all have struck, the next is planned. Under --check none is planned; the check gives its own. The
     props that have cooled or are gone leave `hot`."""
     present = {id(p) for p in foot.props.rocks}
     state["hot"] = {i: hot for i, hot in state["hot"].items()
                     if i in present and events.heat(world.time - hot[0], hot[1]) > 0.0}
-    here, shower = shower_here(), state["shower"]
+    on, shower = camera_on(), state["shower"]
     if args.check and shower is None:
         return
-    if here is None:
+    if on is None or (shower is not None and on[0] is not shower_body()):
         if shower is None or state["starting"]:
             return
-        here = shower.centre             # away from the planet: a shower planned goes on
+        here = shower.centre             # away from its body: a shower planned goes on
+    else:
+        here = on[1]
     if shower is None:
+        body = on[0]
         start, state["next_shower"] = state["next_shower"], None
         if start is not None:
             start = max(start, world.time + events.WARNING_SECONDS)
-        set_shower(events.schedule(world.time, state["shower_rng"], here, planet.radius, start))
+        state["shower_body"] = None if body is planet else body
+        gap = events.MEAN_GAP if body is planet else events.MOON_MEAN_GAP
+        set_shower(events.schedule(world.time, state["shower_rng"], here, body.radius, start, gap))
         state["shower_tries"] = 0
         shower = state["shower"]
+    body = shower_body()
     probe_shower()
     heights = state["impact_heights"]
     large = next(k for k, i in enumerate(shower.impacts) if i.large)
     known = large in heights or state["struck"] > large
     if (large in heights and not state["shower_warned"] and state["shower_tries"] < SHOWER_TRIES
-            and not on_land(shower.impacts[large].direction, heights[large])):
+            and not on_land(body, shower.impacts[large].direction, heights[large])):
         state["shower_tries"] += 1
-        set_shower(events.schedule(world.time, state["shower_rng"], here, planet.radius, shower.start))
+        set_shower(events.schedule(world.time, state["shower_rng"], here, body.radius, shower.start))
         return
     if known and not state["shower_warned"] and world.time >= shower.start - events.WARNING_SECONDS:
         state["shower_warned"] = True
-        centre = add(planet.centre(), scale(shower.centre, planet.radius))
+        centre = add(body.centre(), scale(shower.centre, body.radius))
         towards = bearing(here, sub(centre, state["position"]))
         state["hud"].toast("Meteor shower inbound: bearing %03.0f, %s"
                            % (towards or 0.0, distance_text(events.ground_distance(here, shower.centre,
-                                                                                   planet.radius))), METEOR_MARKER)
+                                                                                   body.radius))), METEOR_MARKER)
     for k, impact in enumerate(shower.impacts):
         if k in heights and k not in state["paths"]:
-            point = scale(impact.direction, planet.radius + heights[k])
-            state["paths"][k] = events.Path(point, events.velocity(impact, impact.direction), world.physics.gm,
-                                            planet.radius)
+            point = scale(impact.direction, body.radius + heights[k])
+            state["paths"][k] = events.Path(point, events.velocity(impact, impact.direction), body_gm(body),
+                                            body.radius)
     while state["struck"] < len(shower.impacts) and shower.impacts[state["struck"]].time <= world.time:
         strike(state["struck"])
         state["struck"] += 1
@@ -4111,10 +4260,10 @@ def update_showers():
         state["shower"] = None
 
 
-def meteor_rock(impact, ground):
-    """The meteorite (an ore boulder) or the rock of `impact`, of iridium at
+def meteor_rock(impact, ground, body):
+    """The meteorite (an ore boulder) or the rock of `impact` on `body`, of iridium at
     its grade and mass, flying down at FALL_SPEED from FALL_LIFT above the
-    ground at its point (`ground` m above the planet's radius, as measured
+    ground at its point (`ground` m above the body's radius, as measured
     before it struck) until its ground is measured; its prop, noted as
     first seen there."""
     kind = "boulder" if impact.large else "rock"
@@ -4123,21 +4272,21 @@ def meteor_rock(impact, ground):
     radius = float(np.linalg.norm(points * s, axis=1).max())
     up = impact.direction
     east, _ = local_frame(up)
-    record = {"kind": kind, "on": planet.name, "state": "flying",
-              "position": list(scale(up, planet.radius + ground + 0.5 * s + FALL_LIFT)),
+    record = {"kind": kind, "on": body.name, "state": "flying",
+              "position": list(scale(up, body.radius + ground + 0.5 * s + FALL_LIFT)),
               "rotation": list(quat_from_basis(east, up, cross(east, up))),
               "velocity": list(scale(up, -FALL_SPEED)), "spin": [0.0, 0.0, 0.0], "size": 2.0 * radius,
               "radius": radius, "rest": 0.5 * s, "mass": impact.mass, "extent": [s, s, s],
-              "colour": list(rock_colour(planet.index, impact.grade, resources.IRIDIUM)), "key": None,
+              "colour": list(rock_colour(body.index, impact.grade, resources.IRIDIUM)), "key": None,
               "ground": None, "grade": impact.grade, "resource": resources.IRIDIUM}
-    prop = foot.rocks.restore(foot.physics, record, {planet.name: planet})
-    state["seen"][id(prop)] = (planet.name, up)
+    prop = foot.rocks.restore(foot.physics, record, {body.name: body})
+    state["seen"][id(prop)] = (body.name, up)
     return prop
 
 
 def strike(k):
     """The shower's impact `k` strikes, at the ground measured there (the
-    top of the planet's terrain when it is not yet known): the large one digs its crater
+    top of its body's terrain when it is not yet known): the large one digs its crater
     (events.keep, PlanetWorld.set_craters) and leaves its meteorite, a small
     one its rock (meteor_rock), hot (events.LARGE_COOLING or
     SMALL_COOLING); the props in the bubble within PUSH_REACH times its
@@ -4147,16 +4296,18 @@ def strike(k):
     up to SHAKE_ANGLE, both SMALL_LIGHT as strong for a small impact; and a
     plume of dust (PLUME_PUFFS, or SMALL_PUFFS) at its point. The large
     one's meteorite is marked on the compass and announced by a toast."""
-    impact = state["shower"].impacts[k]
-    ground = state["impact_heights"].get(k, planet.heights[1])
+    impact, body = state["shower"].impacts[k], shower_body()
+    ground = state["impact_heights"].get(k, body.heights[1])
     up = impact.direction
-    point = add(planet.centre(), scale(up, planet.radius + ground))
+    point = add(body.centre(), scale(up, body.radius + ground))
+    on = camera_on()
+    here = on[1] if on is not None and on[0] is body else up
     if impact.large:
         radius, depth, rim = impact.crater
-        crater = planet_world.Crater(planet.index, up, radius, depth, rim)
-        state["craters"] = events.keep(state["craters"], crater, world.time, shower_here() or up, planet.radius)
+        crater = planet_world.Crater(body.index, up, radius, depth, rim)
+        state["craters"] = events.keep(state["craters"], crater, world.time, here, body.radius)
         world.set_craters([c for c, _ in state["craters"]])
-    prop = meteor_rock(impact, ground)
+    prop = meteor_rock(impact, ground, body)
     state["hot"][id(prop)] = (world.time, events.LARGE_COOLING if impact.large else events.SMALL_COOLING)
     blast = impact.crater[0] if impact.large else SMALL_BLAST
     push(point, PUSH_REACH * blast)
@@ -4173,10 +4324,9 @@ def strike(k):
         state["plumes"].append((add(point, offset), up, world.time, blast, light, 0.5 + 0.5 * n / puffs))
     if impact.large:
         state["meteorite"] = prop
-        here = shower_here() or up
         state["hud"].toast("Meteorite down: bearing %03.0f, %s"
                            % (bearing(here, sub(point, state["position"])) or 0.0,
-                              distance_text(events.ground_distance(here, up, planet.radius))), METEOR_MARKER)
+                              distance_text(events.ground_distance(here, up, body.radius))), METEOR_MARKER)
 
 
 def push(point, reach):
@@ -4252,7 +4402,8 @@ def draw_showers(camera, basis):
     - each meteor's head a disc HEAD_SIZE across (SMALL_HEAD of that for a
       small one), at least HEAD_PIXELS of the screen, HEAD_LIGHT times
       METEOR_GLOW (SMALL_LIGHT of it for a small one) brightening over
-      IGNITE_SECONDS from its entry; and its trail, TRAIL_SEGMENTS
+      IGNITE_SECONDS from its entry (MOON_HEAD of that on the moon); and
+      its trail (none on the moon, which has no air), TRAIL_SEGMENTS
       streaks along the last TRAIL_SECONDS of its path, TRAIL_WIDTH of the
       head wide, TRAIL_LIGHT times TRAIL_GLOW, narrowing and fading to its
       end;
@@ -4264,7 +4415,8 @@ def draw_showers(camera, basis):
       times its heat."""
     glows = state["meteor_glows"]
     glows.begin(basis)
-    now, centre = world.time, planet.centre()
+    body = shower_body()
+    now, centre, airless = world.time, body.centre(), body is not planet
     pixel = math.radians(settings["fov"]) / max(1, engine.framebuffer_size[1])
     heads = 0
     shower = state["shower"]
@@ -4274,12 +4426,14 @@ def draw_showers(camera, basis):
         if path is None or not 0.0 < before <= path.duration:
             continue
         light = (1.0 if impact.large else SMALL_LIGHT) * min(1.0, (path.duration - before) / IGNITE_SECONDS)
+        if airless:
+            light *= MOON_HEAD
         head = add(centre, path.at(before))
         size = max(HEAD_SIZE * (1.0 if impact.large else SMALL_HEAD), HEAD_PIXELS * pixel * length(sub(head, camera)))
         glows.disc(sub(head, camera), size, scale(METEOR_GLOW, HEAD_LIGHT * light))
         heads += 1
         last = head
-        for j in range(1, TRAIL_SEGMENTS + 1):
+        for j in range(1, TRAIL_SEGMENTS + 1 if not airless else 1):
             point = add(centre, path.at(before + TRAIL_SECONDS * j / TRAIL_SEGMENTS))
             fade = 1.0 - (j - 0.5) / TRAIL_SEGMENTS
             glows.streak(sub(last, camera), sub(point, camera), TRAIL_WIDTH * size * fade,
@@ -4491,7 +4645,7 @@ def leave_space(landed=False):
     car.velocity = sub(ship.velocity, body.velocity()) if not ship.crashed else (0.0, 0.0, 0.0)
     car.target = max(hovercar.HOVER_MIN, min(hovercar.MAX_HEIGHT, height if height is not None else 0.0))
     car.turn = car.bank = car.pitch = 0.0
-    state["space"], state["warp"] = None, 0
+    state["space"], state["warp"], state["hold"] = None, 0, None
     state["car_controls"] = hovercar.CarControls()
     print("[walker] hover car over the %s" % body.name, flush=True)
     return True
@@ -4524,6 +4678,7 @@ def step_space(dt):
     crashing, it is the hover car again; below WARP_HEIGHT the time warp
     goes back to 1."""
     ship = state["space"]
+    hold_nose()
     end, t = world.time, state["ship_time"]
     body = world.body_under(ship.position)
     ground = space_ground(body)
@@ -4550,6 +4705,21 @@ def step_space(dt):
         leave_space(landed=True)
 
 
+def hold_nose():
+    """With a nose hold (H), the space mode's pitch and yaw turning the nose
+    along the velocity relative to the body the orbit is reckoned around
+    (prograde) or against it (retrograde), at HOLD_GAIN (flight.point_controls)."""
+    ship, hold = state["space"], state["hold"]
+    if ship is None or hold is None:
+        return
+    _, _, velocity = flight.reference(world.physics, ship.position, ship.velocity)
+    if length(velocity) < 1.0:
+        return
+    direction = normalize(velocity) if hold == "prograde" else scale(normalize(velocity), -1.0)
+    controls = state["space_controls"]
+    controls.pitch, controls.yaw = flight.point_controls(ship.axes(), direction, ship.params.max_rates, HOLD_GAIN)
+
+
 def set_warp(step):
     """The time warp one step up or down WARPS, in space mode WARP_HEIGHT or more above the ground."""
     ship = state["space"]
@@ -4565,9 +4735,14 @@ def set_warp(step):
 
 
 def space_lines():
-    """The space readout's lines: the body and the mode, the throttle and the
-    warp, the orbit's periapsis and apoapsis (orbits.orbit around the body
-    it is reckoned around) and the space drive's delta-v left."""
+    """The space readout's lines: the body and the mode, the throttle, the
+    warp and the nose hold, the orbit's periapsis and apoapsis
+    (orbits.orbit around the body it is reckoned around) and the space
+    drive's delta-v left; around the planet, the transfer planner: the
+    angle the moon must lead by for a Hohmann transfer from this radius
+    (flight.hohmann_plan), the angle it leads by now (flight.phase_angle),
+    the time until the burn at the difference of their rates round, and
+    the burn's delta-v against the delta-v left."""
     ship, controls = state["space"], state["space_controls"]
     body, position, velocity = flight.reference(world.physics, ship.position, ship.velocity)
     peri, apo = flight.orbit(body, position, velocity)
@@ -4576,10 +4751,23 @@ def space_lines():
     def km(h):
         return "ESC" if math.isinf(h) else "%.1f km" % (h / 1000.0)
     car = state["car"]
-    return ["SPACE  %s  ASSIST %s" % (name, "ON" if controls.assist else "OFF"),
-            "THR %3d %%  WARP x%d" % (round(100.0 * controls.throttle), time_warp()),
-            "PE %s  AP %s" % (km(peri), km(apo)),
-            "DV %.0f m/s" % hovercar.delta_v(car.params, car.fuel, car.cargo_mass)]
+    left = hovercar.delta_v(car.params, car.fuel, car.cargo_mass)
+    lines = ["SPACE  %s  ASSIST %s" % (name, "ON" if controls.assist else "OFF"),
+             "THR %3d %%  WARP x%d  %s" % (round(100.0 * controls.throttle), time_warp(),
+                                           (state["hold"] or "no hold").upper()),
+             "PE %s  AP %s" % (km(peri), km(apo)),
+             "DV %.0f m/s" % left]
+    moon = world.physics.moon
+    if body is not moon and moon is not None:
+        r1 = length(position)
+        dv, _, lead = flight.hohmann_plan(body.gm, r1, moon.distance, moon.rate)
+        now = flight.phase_angle(position, velocity, moon.position(world.time))
+        rate = math.sqrt(body.gm / r1 ** 3) - moon.rate
+        wait = ((now - lead) % (2.0 * math.pi)) / rate if rate > 0.0 else math.inf
+        burn = "--:--" if math.isinf(wait) else "%02d:%02d" % divmod(int(wait), 60) if wait < 3600.0 else ">1 H"
+        lines += ["MOON LEAD %3.0f  NOW %3.0f" % (math.degrees(lead), math.degrees(now)),
+                  "BURN IN %s  DV %.0f / %.0f" % (burn, dv, left)]
+    return lines
 
 
 # ── Saving and loading ─────────────────────────────────────────────────────
@@ -4633,7 +4821,8 @@ def save_game(base=None, quiet=False):
         "pois": state["pois"].record(),
         "parts": dict(state["parts"]),
         "survey_data": state["survey_data"],
-        "modifiers": [events.crater_record(c, t, planet.name) for c, t in state["craters"]],
+        "modifiers": [events.crater_record(c, t, next(b.name for b in bodies if b.index == c.body))
+                      for c, t in state["craters"]],
         "events": {"next_shower": state["shower"].start if state["shower"] is not None else state["next_shower"],
                    "storm": events.storm_record(world.storm) if world.storm is not None else None},
         "hot": [list(state["hot"][id(p)]) if id(p) in state["hot"] else None for p in foot.props.all],
@@ -4701,10 +4890,11 @@ def load_game(base=None):
             state["couriers"][id(prop)] = courier
     meteorite = data.get("meteorite")
     state["meteorite"] = restored[meteorite] if meteorite is not None else None
-    state["craters"] = [events.crater_from_record(r, planet.index, planet_world.Crater)
-                        for r in data.get("modifiers", []) if r.get("type") == "crater" and r.get("body") == planet.name]
+    state["craters"] = [events.crater_from_record(r, by_name[r["body"]].index, planet_world.Crater)
+                        for r in data.get("modifiers", []) if r.get("type") == "crater" and r.get("body") in by_name]
     world.set_craters([c for c, _ in state["craters"]])
     set_shower(None)
+    state["shower_body"] = None
     state["next_shower"] = (data.get("events") or {}).get("next_shower")
     storm = (data.get("events") or {}).get("storm")
     world.storm = events.storm_from_record(storm) if storm is not None else None
@@ -5096,7 +5286,7 @@ def on_init():
 
 def on_key(key):
     """F1 the menu on the controls, M the map, Escape the menu, P a screenshot, F the car (in or out),
-    G its space mode (in or out), in space mode T the assist and , . the time warp, F5 a save, F9 a
+    G its space mode (in or out), in space mode T the assist, H the nose hold and , . the time warp, F5 a save, F9 a
     load; the start's menu waits for its buttons."""
     view, menu = state["map_view"], state["menu"]
     if state["starting"]:
@@ -5126,6 +5316,9 @@ def on_key(key):
         state["hud"].toast("Assist %s" % ("on" if controls.assist else "off"))
     elif key in (keys.COMMA, keys.PERIOD) and state["space"] is not None and not menu.visible:
         set_warp(1 if key == keys.PERIOD else -1)
+    elif key == keys.H and state["space"] is not None and not menu.visible:
+        state["hold"] = HOLDS[(HOLDS.index(state["hold"]) + 1) % len(HOLDS)]
+        state["hud"].toast("Nose hold: %s" % (state["hold"] or "off"))
     elif key == keys.ESCAPE and (foot.player is not None or state["driving"]):
         set_paused(not menu.visible)
     elif key == keys.F5:

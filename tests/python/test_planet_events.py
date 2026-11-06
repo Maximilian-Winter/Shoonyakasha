@@ -58,6 +58,13 @@ class Showers(unittest.TestCase):
                 - min((b - bearings[0] + 180.0) % 360.0 - 180.0 for b in bearings)
             self.assertLessEqual(spread, 2.0 * events.RADIANT_JITTER + 1e-9)
 
+    def test_the_moons_shorter_gap(self):
+        gaps = [events.schedule(0.0, random.Random(seed), PLAYER, 25_000.0, mean_gap=events.MOON_MEAN_GAP).start
+                for seed in range(200)]
+        planet = [events.schedule(0.0, random.Random(seed), PLAYER, RADIUS).start for seed in range(200)]
+        self.assertLess(sum(gaps), sum(planet))
+        self.assertTrue(all(g >= events.MIN_GAP for g in gaps))
+
     def test_a_given_start(self):
         shower = events.schedule(1_000.0, random.Random(1), PLAYER, RADIUS, start=1_100.0)
         self.assertEqual(shower.start, 1_100.0)
@@ -146,6 +153,13 @@ class Craters(unittest.TestCase):
         self.assertNotIn(far[0], kept)
         self.assertIn(far[1], kept)
         self.assertEqual(kept[-1], (new, 40.0))
+
+    def test_a_crater_on_the_other_body_counts_as_far(self):
+        near = [(self.crater(0.0, 100.0 * k), float(k)) for k in range(events.MAX_CRATERS - 1)]
+        other = (Crater(1, PLAYER, 30.0, 5.0, 2.0), 20.0)
+        kept = events.keep(near + [other], self.crater(45.0, 500.0), 40.0, PLAYER, RADIUS)
+        self.assertNotIn(other, kept)
+        self.assertIn(near[0], kept)
 
     def test_the_oldest_dropped_when_none_is_far(self):
         craters = [(self.crater(0.0, 100.0 * k), 10.0 - k) for k in range(events.MAX_CRATERS)]

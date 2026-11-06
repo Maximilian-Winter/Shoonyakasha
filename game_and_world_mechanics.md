@@ -70,7 +70,7 @@ Everything time-based (prices recovering, contracts expiring, day and night, eve
 | 4 | Amber | warm, wet ground (above about 10 °C, moisture above 0.5) | | dark brown | gold | 6 |
 | 5 | Evaporite (salts) | warm, dry ground (above about 12 °C, moisture below 0.4) | | off-white | pink | 1.67 |
 | 6 | Ice | | ore craters whose centre lies towards the poles | blue-grey | pale blue | 1.33 (fuel feedstock) |
-| 7 | Ilmenite | | the other ore craters | near black | silver | 10 |
+| 7 | Ilmenite | | the other ore craters | near black | silver | 30 |
 | 8 | Iridium | meteorites only (§11) | meteorites only | black, glassy | violet | 40 |
 
 §1.2 gives the exact rules for where each resource lies. Ids 0 to 7 are in `resources.glsl` and `python/shoonyakasha/planet/resources.py`. The scatter stores a rock's id in bits 16 and up of its `NearbyTrees` entry and in the whole-number part of its instance tint.
@@ -297,8 +297,12 @@ UPGRADES = [
     Upgrade("tank_1", "Auxiliary tank", 3_000.0, (), {"ship.fuel_capacity": 1.5, "ship.dry_mass": 1.05,
                                                       "car.fuel_capacity": 1.5}),
     Upgrade("engine_1", "Main engine tuning", 6_000.0, ("tank_1",), {"ship.isp_main": 1.15,
-                                                                      "car.drive_burn": 1.0 / 1.15},
+                                                                      "car.drive_burn": 1.0 / 1.15,
+                                                                      "car.space_isp": 1.15},
             {"injector": 2}),
+    Upgrade("longrange", "Long-range tank", 8_000.0, ("engine_1",), {"ship.fuel_capacity": 1.6,
+                                                                      "car.fuel_capacity": 1.6},
+            {"injector": 1, "coil": 1}),
     Upgrade("suit_1", "Thermal liner", 1_000.0, (), {"suit.cold_limit": ("add", -10.0), "suit.reserve": 1.5}),
     Upgrade("suit_2", "Heat exchanger", 3_500.0, ("suit_1",), {"suit.hot_limit": ("add", 10.0),
                                                                "suit.reserve": 1.5}, {"coil": 1}),
@@ -713,21 +717,23 @@ The walker (`update_storms`):
 
 ### 13.1 Why go
 
-- **Ilmenite** (30 cr/kg) and **ice** are found only on the moon. Meteor showers there are more frequent: with no atmosphere, small meteors don't burn up.
-- **Trade:** the moon's outposts (Lowrim, Selene Deep) already pay `OTHER_BODY` (1.8×) for planet ore. With demand (§3.1) they pay more for planet goods (amber, quartz).
-- **Refinery:** one of them offers the `"refinery"` service, turning ice into fuel at 3 kg of ice per kg of fuel. That undercuts its fuel price of 3.0 cr/kg (`FUEL_PRICE["moon"]`).
+- **Ilmenite** (30 cr/kg, `trade.VALUES`) and **ice** are found only on the moon.
+- **Meteor showers** fall on the body the camera is over (`walker.update_showers`, `shower_body`): on the moon every 12 minutes on average (`events.MOON_MEAN_GAP`), with no water test (it has none), and its meteors have a dim head (0.3 of the light) and no trail, with no air to glow in. Craters keep their body; when the list is full, a crater on the other body counts as far away. The save keeps each crater's body.
+- **Trade:** the moon's outposts (Lowrim, Selene Deep) pay `OTHER_BODY` (1.8×) for planet ore.
+- **Refinery:** Selene Deep (`outposts.REFINERY`, `Outpost.refinery`) turns the ice in the car's hold into fuel in its tank, 3 kg of ice per kg of fuel (`REFINE_ICE`), as much as the tank takes: the walker's Outpost tab's **Refine the car's ice into fuel** (`refine_ice`), with the car on its pad and the outpost open. That undercuts its fuel price of 3.0 cr/kg (`FUEL_PRICE["moon"]`).
 
 ### 13.2 What it takes
 
 **The walker's space car.** The walker has no ship; its hover car flies to the moon in space mode (G at least 250 m above the ground): a `flight.Ship` with `hovercar.space_params`, so it has the ship's gravity of both bodies, the moon's sphere of influence, translation assist (T) and ground contacts. Its space drive burns the car's tank at `CarParams.space_isp` (3,000 s) for every thruster:
 
-| | Stock | `tank_1` |
-|---|---|---|
-| dry mass | 1,800 kg | 1,800 kg |
-| tank | 100 kg | 150 kg |
-| Δv, empty hold (`hovercar.delta_v`) | ≈ 1,590 m/s | ≈ 2,355 m/s |
+| | Stock | `tank_1` | `tank_1`, `engine_1`, `longrange` |
+|---|---|---|---|
+| dry mass | 1,800 kg | 1,800 kg | 1,800 kg |
+| tank | 100 kg | 150 kg | 240 kg |
+| space drive | 3,000 s | 3,000 s | 3,450 s |
+| Δv, empty hold (`hovercar.delta_v`) | ≈ 1,590 m/s | ≈ 2,355 m/s | ≈ 4,235 m/s |
 
-That covers one way: to a low orbit, the transfer and landing on the moon. Space mode ends by G within 300 m of the ground, or on touching down slower than 2 m/s, over the body under the car. From 5 km up the time warp goes to 4, 16 or 64 times (`,` `.`). The HUD shows the body the orbit is reckoned around, the assist, the throttle, the warp, the periapsis and apoapsis, and the Δv left.
+The stock tank covers one way: to a low orbit, the transfer and landing on the moon. With the three upgrades it covers the trip back too. Space mode ends by G within 300 m of the ground, or on touching down slower than 2 m/s, over the body under the car. From 5 km up the time warp goes to 4, 16 or 64 times (`,` `.`). The HUD shows the body the orbit is reckoned around, the assist, the throttle, the warp, the nose hold, the periapsis and apoapsis, and the Δv left; around the planet, the transfer planner (below). H cycles a nose hold: prograde, retrograde (along or against the velocity relative to the body the orbit is reckoned around) and off; it sets the pitch and yaw to turn the nose there at 1.5 times the angle left a second (`flight.point_controls`).
 
 
 - **Δv:** with `tank_1`, `engine_1` and `longrange`:
@@ -741,13 +747,13 @@ That covers one way: to a low orbit, the transfer and landing on the moon. Space
 
   The stock ship's ≈ 1,570 m/s covers orbit (~600 m/s plus losses), the transfer (162 m/s) and a moon landing (≈ 200 m/s). It doesn't cover the trip back.
 - **The suit** (§8.2): moon walks in sunlight need the heat exchanger, and in shade the thermal liner.
-- **A transfer planner** on the ORBIT display:
-  - the Hohmann phase angle the moon must lead by, `π − n_moon · t_transfer`
-  - the current phase angle
+- **A transfer planner**, in the walker's space readout (`space_lines`) while the orbit is reckoned around the planet (`flight.hohmann_plan` from the car's radius, `flight.phase_angle`); planet.py's ORBIT display has none:
+  - the Hohmann phase angle the moon must lead by, `π − n_moon · t_transfer` (MOON LEAD)
+  - the current phase angle (NOW)
   - the time until the burn ("BURN IN 04:12")
-  - the Δv needed against `Ship.delta_v()`
+  - the Δv needed against the Δv left (`hovercar.delta_v`)
 
-  It also needs a prograde/retrograde marker hold in the assist (point the nose and hold).
+  The time until the burn is the angle left over the difference between the car's and the moon's rates round (the car's taken as circular at its radius). The nose hold (H) points it prograde for the burn.
 
 ```python
 def hohmann_plan(gm, r1, r2, moon_angular_rate):
@@ -812,7 +818,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
    11b. **Storms** (`walker.py`). `wind.Storm` and `PlanetWorld.storm` (the wind, the clouds' cover and the haze in it), planning (`events.schedule_storm`), outposts closing, deadlines held, rain, the car buffeted, light props scattered, the save. `--check`'s storm.
 12. **The moon expedition.**
    12a. **The space car** (`walker.py`). The hover car's space mode (G): a `flight.Ship` of `hovercar.space_params` with a space drive, the moon's pull, the time warp, the space readout, landing back into the hover car on the planet or the moon; the walker on the moon. `--check`'s space mode and moon landing.
-   12b. **The moon economy.** Moon resources, the refinery, long-range upgrades, the transfer planner.
+   12b. **The moon economy** (`walker.py`). Ilmenite at 30 cr/kg, Selene Deep's refinery, the space drive's tuning and the long-range tank, the transfer planner and the nose hold, meteor showers on the moon. `--check`'s moon shower, refinery and planner lines.
 
 ## 16. Pitfalls
 

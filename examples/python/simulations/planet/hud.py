@@ -217,7 +217,8 @@ def drive_hints(pad=False, can_leave=False, high=False, space=False):
         if pad:
             return [(("pad:RS",), "Throttle"), (("pad:RT", "pad:LT"), "Up / down"), (("pad:LS",), "Pitch, yaw")]
         return [(("W", "S"), "Throttle"), (("Space", "Ctrl"), "Up / down"), (("Arrows",), "Pitch, yaw"),
-                (("Q", "E"), "Roll"), (("T",), "Assist"), ((",", "."), "Time warp"), (("G",), "Hover")]
+                (("Q", "E"), "Roll"), (("T",), "Assist"), (("H",), "Hold"), ((",", "."), "Time warp"),
+                (("G",), "Hover")]
     if high and not pad:
         return [(("W", "S"), "Drive"), (("A", "D"), "Steer"), (("Space", "Ctrl"), "Up / down"),
                 (("G",), "Space mode")]

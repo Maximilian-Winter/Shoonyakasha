@@ -88,6 +88,16 @@ class Effective(unittest.TestCase):
         self.assertAlmostEqual(out["car"].cargo_capacity, 1.5 * car.cargo_capacity)
         self.assertAlmostEqual(out["car"].fuel_capacity, 1.5 * car.fuel_capacity)
         self.assertAlmostEqual(out["car"].drive_burn, car.drive_burn / 1.15)
+        self.assertAlmostEqual(out["car"].space_isp, 1.15 * car.space_isp)
+
+    def test_the_long_range_tank(self):
+        car, ship = hovercar.CarParams(), flight.ShipParams()
+        out = upgrades.effective({"car": car, "ship": ship}, {"tank_1", "engine_1", "longrange"})
+        self.assertAlmostEqual(out["car"].fuel_capacity, 1.5 * 1.6 * car.fuel_capacity)
+        self.assertAlmostEqual(out["ship"].fuel_capacity, 1.5 * 1.6 * ship.fuel_capacity)
+        self.assertEqual(upgrades.BY_KEY["longrange"].requires, ("engine_1",))
+        p = out["car"]
+        self.assertGreater(hovercar.delta_v(p, p.fuel_capacity), 2.0 * hovercar.delta_v(car, car.fuel_capacity))
         self.assertEqual(set(upgrades.effects_for(upgrades.BY_KEY["hold_1"], {"car"})),
                          {"car.cargo_capacity", "car.hold_m3"})
 

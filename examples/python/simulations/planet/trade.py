@@ -38,7 +38,7 @@ from shoonyakasha.planet.resources import AMBER, CUPRITE, EVAPORITE, FERRITE, IC
 from shoonyakasha.planet.vec import dot
 
 # Credits per kg at grade 1 by resource.
-VALUES = {FERRITE: 2.0, CUPRITE: 3.0, QUARTZ: 4.67, AMBER: 6.0, EVAPORITE: 1.67, ICE: 1.33, ILMENITE: 10.0,
+VALUES = {FERRITE: 2.0, CUPRITE: 3.0, QUARTZ: 4.67, AMBER: 6.0, EVAPORITE: 1.67, ICE: 1.33, ILMENITE: 30.0,
           IRIDIUM: 40.0}
 GRADE_POWER = 1.5
 REPUTATION_PRICE = 0.02          # added to 1 per point of the outpost's reputation, as a factor of its price
