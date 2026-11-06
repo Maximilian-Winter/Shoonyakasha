@@ -4,10 +4,11 @@ a cushion and climbs into the sky, flying like a car. Plain Python, no
 engine: positions and velocities are metres and m/s relative to the
 centre of the body it is over, its up the direction from that centre.
 
-`Car.step(dt, controls, ground)` moves it by `dt` seconds in steps of at
-most STEP, with `controls` (CarControls) and `ground(point)` the car's
-height above the ground at a point (a position relative to the body's
-centre), or None where it is not known:
+`Car.step(dt, controls, ground, wind=None)` moves it by `dt` seconds in
+steps of at most STEP, with `controls` (CarControls), `ground(point)` the
+car's height above the ground at a point (a position relative to the
+body's centre), or None where it is not known, and `wind(point)` the
+wind's velocity there (m/s), or None for still air:
 
 - **Height:** `target` is the height above the ground it keeps, moved by
   `climb` at CLIMB_RATE between HOVER_MIN and MAX_HEIGHT. A spring and
@@ -27,6 +28,13 @@ centre), or None where it is not known:
   TURN_SPEED), the turn rate easing to the wanted one over TURN_EASE.
 - **Grip:** the sideways speed dies away at GRIP_GROUND near the ground
   and GRIP_AIR from AIR_HEIGHT up, so it drifts more in the air.
+- **Wind:** the drive's drag stands for the still air's. The wind adds
+  the difference between the air's drag on its velocity along the ground
+  through the air (less the wind's) and on its velocity: AIR_DRAG times
+  (that speed times that velocity, less its speed times its velocity),
+  times the share of the way it is from its cushion to AIR_HEIGHT (the
+  same share as the grip's), so on its cushion the wind does not move
+  it, and in still air nothing changes.
 
 `attitude()` gives the (right, up, forward) to draw it with: banked into
 turns by BANK_GAIN of its turn rate times its speed, at most MAX_BANK, and
@@ -79,6 +87,7 @@ TURN_SPEED = 12.0                # m/s from which it turns at TURN_RATE
 TURN_EASE = 0.15                 # s
 GRIP_GROUND, GRIP_AIR = 6.0, 1.8   # 1/s
 AIR_HEIGHT = 20.0                # m above the ground from which the grip is GRIP_AIR
+AIR_DRAG = 0.0024                # 1/m: half the air's density times its drag area over its mass
 BANK_GAIN = 0.012                # rad per (rad/s times m/s)
 MAX_BANK = math.radians(25.0)
 PITCH_GAIN = 0.01                # rad per m/s^2 along the nose
@@ -180,7 +189,7 @@ class Car:
         air = min(1.0, max(0.0, (height - HOVER_MIN) / (AIR_HEIGHT - HOVER_MIN)))
         return drive + p.air_burn * air
 
-    def step(self, dt, controls, ground):
+    def step(self, dt, controls, ground, wind=None):
         """Moved by `dt` seconds; fuel burnt at burn_rate. Dry, it drives and
         climbs no more and settles onto its cushion; it still steers."""
         self.fuel_used = 0.0
@@ -194,10 +203,10 @@ class Car:
                 burnt = min(self.fuel, self.burn_rate(c) * h)
                 self.fuel -= burnt
                 self.fuel_used += burnt
-            self._step(h, c, ground)
+            self._step(h, c, ground, wind)
             dt -= h
 
-    def _step(self, dt, c, ground):
+    def _step(self, dt, c, ground, wind=None):
         up = self.up()
         right = self.right()
         v = self.velocity
@@ -231,6 +240,13 @@ class Car:
         air = min(1.0, max(0.0, (height - HOVER_MIN) / (AIR_HEIGHT - HOVER_MIN)))
         grip = GRIP_GROUND + (GRIP_AIR - GRIP_GROUND) * air
         side_speed *= math.exp(-grip * dt)
+        if wind is not None and air > 0.0:
+            w = wind(self.position)
+            ahead, aside = new_forward - dot(w, self.heading), side_speed - dot(w, right)
+            through, own = math.hypot(ahead, aside), math.hypot(new_forward, side_speed)
+            k = AIR_DRAG * air * dt
+            new_forward -= k * (through * ahead - own * new_forward)
+            side_speed -= k * (through * aside - own * side_speed)
 
         # Height.
         self.target = max(HOVER_MIN, min(MAX_HEIGHT, self.target + c.climb * CLIMB_RATE * dt))

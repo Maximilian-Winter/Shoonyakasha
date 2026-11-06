@@ -57,6 +57,9 @@ class World:
         self.extra_probes = []
         self.extra_heights = []
 
+    def wind_at(self, body, point, height=None):
+        return (0.0, 0.0, 0.0)
+
 
 class Collider:
     """Covers the points within `reach` metres of the bubble's origin, along the ground."""

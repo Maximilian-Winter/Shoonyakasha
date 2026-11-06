@@ -4,8 +4,9 @@ settling on the cushion over flat ground, rising before a hill and over
 it, climbing to a target and the height's limits, holding its height
 where the ground is not known, never below the floor, top speeds forward,
 with boost and backward, braking, turning (slower when still), grip on
-the ground and drift in the air, banking into a turn, when it can be
-left, and its fuel: none burnt on the cushion, the throttle's and the
+the ground and drift in the air, the wind moving it in the air but not
+on its cushion and slowing it into a headwind, banking into a turn, when
+it can be left, and its fuel: none burnt on the cushion, the throttle's and the
 boost's and holding height's burn, and dry, settling onto the cushion
 without driving but steering; and the hold, taking rocks within its
 mass and its volume. Plain Python: no engine needed.
@@ -136,6 +137,31 @@ class DriveTest(unittest.TestCase):
             run(car, hc.CarControls(), 0.5)
             return abs(dot(car.velocity, car.right()))
         self.assertLess(sideways_after(hc.HOVER_MIN), 0.5 * sideways_after(100.0))
+
+    def test_the_wind_moves_it_in_the_air_not_on_its_cushion(self):
+        east = (1.0, 0.0, 0.0)
+
+        def blown(point):
+            return (15.0, 0.0, 0.0)                         # towards east: across the nose
+
+        def east_after(height):
+            car = hc.Car((0.0, 0.0, RADIUS + height), NORTH, target=height)
+            car.height = height
+            car.step(10.0, hc.CarControls(), flat, wind=blown)
+            return dot(car.velocity, east)
+        self.assertEqual(east_after(hc.HOVER_MIN), 0.0)
+        self.assertGreater(east_after(100.0), 0.1)
+        self.assertLess(east_after(100.0), 15.0)
+
+    def test_a_headwind_lowers_its_top_speed(self):
+        def top(wind):
+            car = hc.Car((0.0, 0.0, RADIUS + 100.0), NORTH, target=100.0)
+            car.height = 100.0
+            car.step(30.0, hc.CarControls(throttle=1.0), flat, wind=wind)
+            return dot(car.velocity, NORTH)
+        still = top(None)
+        self.assertLess(top(lambda point: (0.0, -20.0, 0.0)), still - 0.5)
+        self.assertEqual(top(lambda point: (0.0, 0.0, 0.0)), still)
 
     def test_can_leave_only_slow_and_low(self):
         car = run(hc.Car(START, NORTH), hc.CarControls(), 5.0)

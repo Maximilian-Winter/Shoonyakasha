@@ -196,6 +196,8 @@ Keys:
     python planet.py --crack-check     measure the gaps between levels in steep terrain against the skirts, then exit
     python planet.py --crater-check    dig a crater by the blocks 500 m from the camera, check its chunks are built
                                        again without cracks and nothing grows in it, then exit
+    python planet.py --wind-check      hover the ship in a 15 m/s wind and drop a light and a heavy crate in it, check
+                                       the ship holds its place and only the light crate drifts, then exit
     python planet.py --morph-check     come down from 20 km, check every swap of chunks happens fully morphed, then exit
     python planet.py --prop-rest-check   drop crates on the planet and the moon, check they come to rest and stay there
     python planet.py --walk-check      walk 200 m circles on the planet and the moon, check the feet stay on the ground
@@ -360,6 +362,9 @@ parser.add_argument("--crack-check", action="store_true",
 parser.add_argument("--crater-check", action="store_true",
                     help="dig a crater by the blocks 500 m from the camera, check its chunks are built again "
                          "without cracks and nothing grows in it, and exit")
+parser.add_argument("--wind-check", action="store_true",
+                    help="hover the ship in a 15 m/s wind and drop a light and a heavy crate in it, check the ship "
+                         "holds its place and only the light crate drifts, and exit")
 parser.add_argument("--landing-check", action="store_true",
                     help="land the ship on the highest spot found around the site, print how it stands and exit")
 parser.add_argument("--moon-landing-check", action="store_true",
@@ -943,16 +948,23 @@ def ground_under_ship():
     return lambda point: patch.query(body.relative(point))
 
 
+def ship_wind(point):
+    """The wind (m/s) at a point from the planet's centre over the planet (PlanetWorld.wind_at), none elsewhere."""
+    if world.body_under(point) is not planet:
+        return (0.0, 0.0, 0.0)
+    return world.wind_at(planet, planet.relative(point))
+
+
 def fly_ship(dt):
     """Advance the ship by this frame's time (times the warp) in fixed
-    steps, against the ground patch under it."""
+    steps, against the ground patch under it, in the wind (ship_wind)."""
     ship = state["ship"]
     state["accumulator"] += dt * WARPS[state["warp"]]
     ground = ground_under_ship()
     state["impact_speed"] = 0.0
     steps = 0
     while state["accumulator"] >= FLIGHT_STEP and steps < MAX_STEPS_PER_FRAME:
-        ship.step(world.physics, state["controls"], FLIGHT_STEP, ground)
+        ship.step(world.physics, state["controls"], FLIGHT_STEP, ground, wind=ship_wind)
         state["impact_speed"] = max(state["impact_speed"], ship.impact_speed)
         state["accumulator"] -= FLIGHT_STEP
         world.time += FLIGHT_STEP
@@ -2419,6 +2431,8 @@ def on_init():
         engine.ecs.add_system("PlanetCrackCheck", checks.CrackCheck(), priority=-2)
     elif args.crater_check:
         engine.ecs.add_system("PlanetCraterCheck", checks.CraterCheck(), priority=-2)
+    elif args.wind_check:
+        engine.ecs.add_system("PlanetWindCheck", checks.WindCheck(), priority=-2)
     elif args.landing_check:
         engine.ecs.add_system("PlanetLandingCheck", checks.LandingCheck("planet"), priority=-2)
     elif args.moon_landing_check:

@@ -90,8 +90,8 @@ float cloudBaseDensity(vec3 p) {
 float cloudDensity(vec3 p, float footprint) {
     float base = cloudBaseDensity(p, footprint);
     if (base <= 0.0) return 0.0;
-    // The detail drifts with the coverage: the same wind, in metres.
-    vec3 drift = clouds.wind.xyz * (atmosphere.radii.x / clouds.shape.x / clouds.shape.y);
+    // The detail drifts with the coverage: the same wind turned back out of the coverage's rotation, in metres.
+    vec3 drift = transpose(CLOUD_ROTATION) * clouds.wind.xyz * (atmosphere.radii.x / clouds.shape.x / clouds.shape.y);
     float slope;
     float detail = cloudFbm(p / clouds.shape.y + drift, 3, 2.3, footprint / clouds.shape.y, slope) * 0.5 + 0.5;
     return max(base - clouds.shape.z * detail * (1.0 - base), 0.0);

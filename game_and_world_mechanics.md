@@ -42,7 +42,7 @@ python/shoonyakasha/planet/
   nearby_trees.py     # extend: NearbyTree.resource
   clock.py            # new: day phase, sun direction
   world.py            # extend: craters (Crater, set_craters), the chunks near them built again
-  wind.py             # new: wind field
+  wind.py             # new: wind field (§12.1)
 python/shoonyakasha/pipelines/planet/shaders/
   resources.glsl      # extend: a resource id beside the richness
   vegetation_scatter.comp  # extend: ore rocks carry the resource id
@@ -459,7 +459,7 @@ def local_temperature(temperature, moisture, hour, wind_speed):
     return temperature + diurnal - chill
 ```
 
-- **Inputs:** `walker.here_temperature` feeds it the climate under the camera (`PlanetWorld.ground_climate`, with the lapse rate for height), the local hour where the camera is (`clock.local_hour`) and the clouds' wind (`PlanetWorld.wind_speed`).
+- **Inputs:** `walker.here_temperature` feeds it the climate under the camera (`PlanetWorld.ground_climate`, with the lapse rate for height), the local hour where the camera is (`clock.local_hour`) and the wind's speed 10 m above the ground at the camera (`PlanetWorld.wind_at`, §12.1).
 - **The moon** (`moon_temperature`): no air, so −150 °C in the shade, rising to +90 °C as the sun's sine of elevation rises to 0.2.
 - **Display:** the objective card shows TEMP.
 
@@ -669,23 +669,25 @@ Other prospectors: an NPC ship flies from the nearest outpost to the crater and 
 
 ### 12.1 Wind field
 
+`shoonyakasha/planet/wind.py`, and `PlanetWorld.wind_at(body, point, height=None)` for `wind_speed` (m/s at 1 km) at the world's clock:
+
 ```python
-# wind.py
-def wind_at(body, position, t, base_dir, base_speed):
-    """Wind (m/s, planet space) at a point: a prevailing direction turning slowly,
-    stronger with height, plus gusts."""
-    up = normalize(body.relative(position))
-    h = max(1.0, length(body.relative(position)) - body.radius)
-    speed = base_speed * (math.log(h / 0.1) / math.log(1000.0 / 0.1))   # log profile, = base at 1 km
-    tangent = normalize(sub(base_dir, scale(up, dot(base_dir, up))))
-    gust = 0.25 * speed * noise3(scale(position, 1.0 / 200.0), t * 0.3)
-    return scale(tangent, speed + gust)
+def wind_at(point, up, time, speed, height):
+    direction = prevailing(time)                  # BASE_DIRECTION turned about TURN_AXIS once every 6 h
+    tangent = sub(direction, scale(up, dot(direction, up)))
+    share = length(tangent)                       # weaker towards where the direction is straight up or down
+    along = scale(tangent, 1.0 / share)
+    steady = speed * share * profile(height)      # ln(h / 0.1) / ln(1000 / 0.1), h at least 1 m
+    return scale(along, steady + gust(point, time, along, steady))
 ```
 
-- The clouds' wind uses the same base direction and speed at cloud height.
-- **Ship:** `Ship.aerodynamic_force` uses the air velocity `v − wind` instead of `v`.
-- **Hover car:** its grip and drag act on `v − wind`.
-- **Props:** light props (< 50 kg) get `F = −½ ρ C_d A |v_rel| v_rel` in the bubble step.
+- **Height:** `height` is above the ground. `PlanetWorld.wind_at` takes it as the height above the ground under the viewpoint when it isn't given (above the radius while that isn't known). The profile is 0.25 at 1 m, 0.5 at 10 m and 1 at 1 km.
+- **Gusts:** 0.25 of the steady speed times value noise (`noise3`) over 200 m, carried along with the wind.
+- **The clouds** (`PlanetWorld.blow_clouds`) drift along the same prevailing direction, at the profile's speed in the middle of the cloud layer. Their coverage noise's offset moves against that direction turned by `CLOUD_ROTATION` (clouds.glsl's), and their detail noise's drift is that offset turned back.
+- **Ship:** `Ship.step(..., wind=None)` and `Ship.aerodynamic_force(planet, wind)` drag and lift on the velocity less the wind (`planet.py`'s `ship_wind`). Translation assist holds the ship against them as it does against gravity.
+- **Hover car:** `Car.step(..., wind=None)`. Its drive's drag stands for the still air's, so the wind adds the difference between the air's drag on its velocity through the air and on its velocity: `AIR_DRAG` × (|v − w|(v − w) − |v| v), along the ground, times its share of the way from its cushion to 20 m up. On its cushion the wind doesn't move it; in the air it drifts and feels head- and tailwinds.
+- **Props:** `Props.drag` (in the physics) and `Props.fly` (out of it) drag them on their velocity less the wind, the same for every mass; friction and their weight decide whether they move. In the physics, props slower than 5 m/s through the air feel no drag.
+- **The suit:** the wind chill (§8.1) takes the wind's speed 10 m above the ground at the camera.
 - **The moon:** no wind (no air).
 
 ### 12.2 Storms
@@ -768,9 +770,9 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 - `--day-check` (new): run one day at 16× warp.
   - chunk rebuilds caused by the sun number a few per chunk per day
   - the frame time stays within budget
-- `--wind-check` (new):
-  - a hovering ship with assist holds position within 2 m in a 15 m/s wind
-  - a 5 kg prop drifts, and a 500 kg one doesn't
+- `--wind-check` (`planet.py`), with `wind_speed` set so the steady wind is 15 m/s where it is measured:
+  - the ship hovering 100 m above the site with assist and no controls stays within 2 m of where it was for 20 s, with the wind there averaging at least 12 m/s and the drag at least 100 N
+  - crates of 5 kg and 500 kg dropped from 20 m, 15 m upwind of the site, come down (their descent stopping after a fall of 10 m); the light one at least 3 m downwind of where it was dropped, the heavy one within 1.5 m
 
 ## 15. Milestones
 
@@ -787,7 +789,9 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 10. **Meteor showers.**
    10a. **Craters.** `craters.glsl` beside the flat sites, `world.Crater` / `set_craters`, the chunks near a crater built again (`PlanetLod.requeue_near`), the scatter kept out of it. `--crater-check`.
    10b. **Showers** (`walker.py`). Scheduling (`events.py`), meteor visuals, impacts, meteorites of iridium (id 8) too hot to grab at first, the craters kept and saved. `--check`'s shower.
-11. **Wind and storms.** Wind field, ship, car and prop drag, storms. `--wind-check`.
+11. **Wind and storms.**
+   11a. **Wind.** `wind.py` and `PlanetWorld.wind_at`, the clouds drifting with it, the ship's, the car's and the props' drag in it, the suit's chill. `--wind-check`.
+   11b. **Storms** (`walker.py`).
 12. **The moon expedition.** Moon resources, the refinery, long-range upgrades, transfer planner.
 
 ## 16. Pitfalls

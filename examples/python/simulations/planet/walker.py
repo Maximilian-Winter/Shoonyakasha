@@ -64,6 +64,11 @@ car parked on an outpost's pad, on Quit and as the window closes. The
 save is of save.VERSION; one of version 1 is migrated as it is read. When a save exists, the walker starts on a menu with
 Continue (the save loaded) and New game.
 
+The wind (PlanetWorld.wind_at): the car flies in it at its height above
+the ground (`step_car`; on its cushion it does not move it), the props are
+dragged through it, and the suit's chill takes its speed CHILL_HEIGHT
+above the ground at the camera.
+
 The car's fuel (hovercar.py's CarParams and fuel): the HUD shows its tank
 (FUEL) while driving; dry, it settles onto its cushion and only steers,
 and a toast says so. The menu's Car tab shows the fuel, where the car is
@@ -341,6 +346,7 @@ NIGHT_SECONDS = 1.0             # s --check waits at night
 CAR_HEADLIGHTS = ((-0.95, 0.0, -3.0), (0.95, 0.0, -3.0))   # m from the car's centre (right, up, back)
 CAR_HEADLIGHT_DIP = 4.0         # degrees below its nose
 RECOVERY_FEE = 250.0            # credits the outpost charges when the suit gave out (wake_at_outpost)
+CHILL_HEIGHT = 10.0             # m above the ground the wind's chill is reckoned at
 # Points of interest (pois.py), on the planet: candidates within POI_REACH measured (again once the player
 # has moved POI_WANT_MOVE); discovered within SCAN_RANGE, or within SEEN_RANGE in the view's cone
 # (SEEN_COS); undiscovered ones within POI_REACH shown as signals; drawn within DRAW_RANGE; a pod's and a
@@ -965,7 +971,8 @@ def read_car_controls():
 
 
 def step_car(dt):
-    """The car moved by `dt` (driven, or parked with no controls), stopped by
+    """The car moved by `dt` (driven, or parked with no controls) in the
+    wind at its height above the ground (PlanetWorld.wind_at), stopped by
     trunks and fixed rocks ahead (bump_car), a bump striking the fragile
     crates in its hold (strike_hold); its poses before and after kept for
     its body in the bubble."""
@@ -974,7 +981,7 @@ def step_car(dt):
         return
     before = (car_position(), car_rotation())
     controls = state["car_controls"] if state["driving"] else hovercar.CarControls()
-    car.step(dt, controls, car_ground)
+    car.step(dt, controls, car_ground, wind=lambda point: world.wind_at(planet, point, car.height))
     impact = bump_car(dt)
     if impact > 0.0:
         strike_hold(impact)
@@ -4266,7 +4273,8 @@ def hour_text():
 def here_temperature():
     """The air's temperature (degrees C) where the camera is: on the planet
     suit.local_temperature of the climate under it (with its height) at
-    the local hour and the clouds' wind; on the moon suit.moon_temperature
+    the local hour and the speed of the wind there CHILL_HEIGHT above the
+    ground (PlanetWorld.wind_at); on the moon suit.moon_temperature
     of the sun's elevation there; None while the ground is not known."""
     camera = state["position"]
     body = world.body_under(camera)
@@ -4278,7 +4286,8 @@ def here_temperature():
         return None
     _, up, east, north = world.site_frame()
     hour = clock.local_hour(radial, day_time(), up, east, north)
-    return suit.local_temperature(climate[0], climate[1], hour, world.wind_speed)
+    wind = length(world.wind_at(planet, body.relative(camera), CHILL_HEIGHT))
+    return suit.local_temperature(climate[0], climate[1], hour, wind)
 
 
 def update_suit(dt):

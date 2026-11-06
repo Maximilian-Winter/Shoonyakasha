@@ -351,6 +351,23 @@ class Assist(unittest.TestCase):
         self.assertAlmostEqual(flight.length(ship.position) - planet.radius, 500.0, delta=5.0)
         self.assertLess(flight.length(ship.velocity), 0.5)
 
+    def test_translation_assist_hovers_in_place_in_a_wind(self):
+        planet = flight.Planet()
+        ship = level_ship(500.0, planet)
+        start = ship.position
+        for _ in range(int(round(20.0 / DT))):
+            ship.step(planet, flight.Controls(assist=True), DT, wind=lambda point: (0.0, 15.0, 0.0))
+        self.assertLess(flight.length(flight.sub(ship.position, start)), 2.0)
+        self.assertLess(flight.length(ship.velocity), 0.5)
+
+    def test_the_wind_drags_a_still_ship_along(self):
+        planet = flight.Planet()
+        ship = level_ship(500.0, planet)
+        force = ship.aerodynamic_force(planet, (0.0, 15.0, 0.0))
+        self.assertGreater(force[1], 0.0)
+        self.assertAlmostEqual(force[1], 0.5 * planet.density(ship.position) * 225.0 * ship.params.drag_area)
+        self.assertEqual(ship.aerodynamic_force(planet), (0.0, 0.0, 0.0))
+
     def test_translation_assist_flies_at_the_throttles_speed(self):
         planet = flight.Planet()
         ship = level_ship(5_000.0, planet)

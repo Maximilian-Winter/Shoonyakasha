@@ -8,9 +8,10 @@ the body. Its body axes are those of a camera: forward is -Z, up +Y,
 right +X.
 
 Forces: gravity falling off with the square of the distance from the
-centre; drag against the velocity, and lift along the ship's up axis for
-air flowing along its forward axis, both with the air's density, which
-falls off exponentially with height; and the thrusters. `Ship.step`
+centre; drag against the velocity through the air (less the wind's, when
+`Ship.step` is given a wind), and lift along the ship's up axis for air
+flowing along its forward axis, both with the air's density, which falls
+off exponentially with height; and the thrusters. `Ship.step`
 advances it by one time step with semi-implicit Euler: the velocity
 first, then the position with the new velocity.
 
@@ -198,10 +199,10 @@ class Ship:
         q = self.orientation
         return quat_rotate(q, (1.0, 0.0, 0.0)), quat_rotate(q, (0.0, 1.0, 0.0)), quat_rotate(q, (0.0, 0.0, -1.0))
 
-    def aerodynamic_force(self, planet):
-        """Drag and lift (N, in the world)."""
+    def aerodynamic_force(self, planet, wind=(0.0, 0.0, 0.0)):
+        """Drag and lift (N, in the world) in air moving at `wind` (m/s)."""
         rho = planet.density(self.position)
-        v = self.velocity
+        v = sub(self.velocity, wind)
         speed = length(v)
         if speed < 1e-6 or rho == 0.0:
             return (0.0, 0.0, 0.0)
@@ -246,9 +247,11 @@ class Ship:
         return (controls.throttle == 0.0 and controls.vertical <= 0.0
                 and controls.pitch == 0.0 and controls.yaw == 0.0 and controls.roll == 0.0)
 
-    def step(self, planet, controls, dt, ground=None):
+    def step(self, planet, controls, dt, ground=None, wind=None):
         """Advance by `dt` seconds; `ground(point)` gives (depth, normal) of
-        the surface under a world point, or None where it is not known. The
+        the surface under a world point, or None where it is not known;
+        `wind(point)` the wind's velocity (m/s) at a world point, the air
+        still when None. The
         surface moves as planet.surface_motion gives it: the assist, the
         contacts and a crashed ship go by velocities relative to it, and
         the position moves by the velocity relative to the surface plus the
@@ -259,11 +262,11 @@ class Ship:
         self._frozen_mass = None
         self._frozen_mass = (self.mass(), self.inertia())
         try:
-            self._advance(planet, controls, dt, ground)
+            self._advance(planet, controls, dt, ground, wind)
         finally:
             self._frozen_mass = None
 
-    def _advance(self, planet, controls, dt, ground):
+    def _advance(self, planet, controls, dt, ground, wind):
         surface = planet.surface_motion(self.position, dt)
         self.fuel_used = 0.0
         if self.crashed:
@@ -286,7 +289,7 @@ class Ship:
             reach = max(length(arm) for arm in p.gear + p.hull)
             near = above <= reach + length(sub(self.velocity, surface[0])) * dt + CONTACT_SLOP
         gravity = planet.gravity(self.position)
-        aero = self.aerodynamic_force(planet)
+        aero = self.aerodynamic_force(planet, wind(self.position) if wind is not None else (0.0, 0.0, 0.0))
         self.thrust = ((0.0, 0.0, 0.0) if resting
                        else self._thrust(planet, controls, gravity, aero, gear_height, surface))
         used = self.fuel_flow(self.thrust) * dt

@@ -16,6 +16,7 @@ import numpy as np
 from shoonyakasha import keys
 from shoonyakasha.planet import cube_sphere
 from shoonyakasha.planet import gravity_gun as gun_module
+from shoonyakasha.planet import wind as wind_field
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.character import Controls as FootControls
 from shoonyakasha.planet.character import MASS as PLAYER_MASS, RADIUS as PLAYER_RADIUS, RUN as RUN_SPEED, WALK as WALK_SPEED
@@ -41,7 +42,7 @@ from __main__ import (
     moon_body, moon_spot, nearby_trees, net_frame, new_seed, new_ship, on_key, outpost_here, physics, planet,
     SHIP_UPGRADES, prop_state, props, save_game, scanner, scatter_rocks, set_colour_mode, set_hour, set_wireframe,
     ship_landed,
-    ship_velocity, state, teleport, trunks, viewpoint, world)
+    ship_velocity, ship_wind, state, teleport, trunks, viewpoint, world)
 
 
 def settled():
@@ -924,6 +925,184 @@ class CraterCheck:
         self.report(listed[0] > 0 and listed[1] == 0,
                     "after: %d plants and rocks listed within %.0f m, %d of them within its radius"
                     % (listed[0], COLLIDER_RADIUS, listed[1]))
+        os._exit(0 if self.ok else 1)
+
+
+class WindCheck:
+    """--wind-check: the wind (PlanetWorld.wind_at) on the ship and the props.
+
+    The ship parked at the site (preset 8) is put HOVER_HEIGHT above the
+    ground there, still, with translation assist on and no controls, and
+    `wind_speed` set so the steady wind there blows at WIND. After
+    SETTLE_SECONDS, over HOLD_SECONDS the ship must stay within
+    HOLD_TOLERANCE of where it was along the ground and in height, the
+    wind at it must average at least WIND_SHARE of WIND, its drag must
+    average at least MIN_DRAG, and its thrusters' push along the ground
+    must average within THRUST_MATCH of its drag's along the ground.
+
+    Then the free camera stands HEIGHT above the site, `wind_speed` set so
+    the steady wind DROP_HEIGHT / 2 above the ground blows at WIND. Once
+    the bubble's terrain mesh covers the site, crates of MASSES kg
+    (CRATE_SIZE) are dropped DROP_HEIGHT above the ground, UPWIND metres
+    upwind of the site and APART across the wind from each other (the
+    mesh waited for at most MESH_SECONDS). Each comes down the first frame
+    its speed downwards falls below LANDED_SPEED after it has fallen half
+    of DROP_HEIGHT; once both have (at most FALL_SECONDS), the light one
+    must have come down at least LIGHT_DRIFT downwind of where it was
+    dropped, the heavy one within HEAVY_DRIFT of it. Where they lie
+    FALL_SECONDS after the drop is printed too. Prints the figures and
+    exits with status 0 when all hold, 1 otherwise."""
+
+    WIND = 15.0                         # m/s
+    HOVER_HEIGHT = 100.0                # m
+    SETTLE_SECONDS = 3.0
+    HOLD_SECONDS = 20.0
+    HOLD_TOLERANCE = 2.0                # m
+    WIND_SHARE = 0.8
+    MIN_DRAG = 100.0                    # N
+    MIN_SHARE = 0.3                     # of the wind's speed the prevailing direction's part along the ground
+    THRUST_MATCH = 0.05                 # of the drag along the ground
+    HEIGHT = 6.0                        # m
+    DROP_HEIGHT = 20.0                  # m
+    MASSES = (5.0, 500.0)               # kg
+    UPWIND = 15.0                       # m
+    APART = 8.0                         # m
+    FALL_SECONDS = 20.0
+    LANDED_SPEED = 1.0                  # m/s downwards
+    LIGHT_DRIFT = 3.0                   # m
+    HEAVY_DRIFT = 1.5                   # m
+    MESH_REACH = 11.0                   # m around the camera the fine mesh must cover before the drop
+    MESH_SECONDS = 30.0                 # s to wait for it at most
+
+    def __init__(self):
+        self.stage, self.frames, self.clock = "start", 0, 0.0
+        self.ok = True
+
+    def __call__(self, dt):
+        if planet.tree is None or world.site_height is None:
+            return True
+        self.frames += 1
+        self.clock += dt
+        getattr(self, self.stage)()
+        return True
+
+    def next_stage(self, stage):
+        self.stage, self.frames, self.clock = stage, 0, 0.0
+
+    def report(self, passed, line):
+        self.ok = self.ok and passed
+        print("[planet] wind: %s: %s" % (line, "passed" if passed else "FAILED"), flush=True)
+
+    def set_wind(self, point, height):
+        """`wind_speed` such that the steady wind `height` m above the ground at `point` (planet space) is WIND."""
+        up = normalize(planet.relative(point))
+        direction = wind_field.prevailing(world.time)
+        share = length(sub(direction, scale(up, dot(direction, up))))
+        if share < self.MIN_SHARE:
+            self.report(False, "the prevailing wind's part along the ground here is %.2f of it" % share)
+            os._exit(1)
+        world.wind_speed = self.WIND / (share * wind_field.profile(height))
+
+    def start(self):
+        if self.frames == 1:
+            teleport(8)
+            return
+        ship = state["ship"]
+        if self.frames < 10 or ship is None:
+            return
+        _, up, _, _ = world.site_frame()
+        ship.position = add(ship.position, scale(up, self.HOVER_HEIGHT))
+        ship.velocity = (0.0, 0.0, 0.0)
+        ship.resting = ship.on_ground = False
+        state["scripted_controls"] = True
+        state["controls"] = flight.Controls(assist=True)
+        self.set_wind(ship.position, self.HOVER_HEIGHT)
+        self.next_stage("settle")
+
+    def settle(self):
+        if self.clock < self.SETTLE_SECONDS:
+            return
+        ship = state["ship"]
+        self.start_at = ship.position
+        self.worst = self.winds = self.drags = self.level_drags = self.pushes = 0.0
+        self.samples = 0
+        self.next_stage("hold")
+
+    def hold(self):
+        ship = state["ship"]
+        moved = sub(ship.position, self.start_at)
+        self.worst = max(self.worst, length(moved))
+        wind = ship_wind(ship.position)
+        self.winds += length(wind)
+        drag = ship.aerodynamic_force(world.physics, wind)
+        self.drags += length(drag)
+        up = normalize(ship.position)
+        right, ship_up, forward = ship.axes()
+        push = add(add(scale(right, ship.thrust[0]), scale(ship_up, ship.thrust[1])), scale(forward, -ship.thrust[2]))
+        self.level_drags += length(sub(drag, scale(up, dot(drag, up))))
+        self.pushes += length(sub(push, scale(up, dot(push, up))))
+        self.samples += 1
+        if self.clock < self.HOLD_SECONDS:
+            return
+        wind, drag = self.winds / self.samples, self.drags / self.samples
+        level, push = self.level_drags / self.samples, self.pushes / self.samples
+        self.report(self.worst <= self.HOLD_TOLERANCE and wind >= self.WIND_SHARE * self.WIND and drag >= self.MIN_DRAG
+                    and abs(push - level) <= self.THRUST_MATCH * level,
+                    "the ship hovering %.0f m up with assist in a wind of %.1f m/s on average (drag %.0f N, %.0f N "
+                    "along the ground against a push of %.0f N) moved %.2f m at most in %.0f s"
+                    % (self.HOVER_HEIGHT, wind, drag, level, push, self.worst, self.HOLD_SECONDS))
+        state["scripted_controls"] = False
+        teleport(1)
+        self.next_stage("camera")
+
+    def camera(self):
+        _, up, _, _ = world.site_frame()
+        self.site = world.site_ground()
+        state["mode"] = "camera"
+        state["position"] = add(self.site, scale(up, self.HEIGHT))
+        if self.frames < 10 or world.ground is None:
+            return
+        self.set_wind(self.site, 0.5 * self.DROP_HEIGHT)
+        bubble = ensure_bubble()
+        terrain = foot.fine
+        if terrain.patch is None or not terrain.covers(bubble.to_bubble(state["position"]), self.MESH_REACH):
+            if self.clock > self.MESH_SECONDS:
+                self.report(False, "the bubble's terrain mesh did not cover the site in %.0f s" % self.MESH_SECONDS)
+                os._exit(1)
+            return
+        here = planet.relative(self.site)
+        wind = world.wind_at(planet, here, 0.5 * self.DROP_HEIGHT)
+        up = normalize(here)
+        self.downwind = normalize(sub(wind, scale(up, dot(wind, up))))
+        across = normalize(cross(up, self.downwind))
+        rotation = quat_from_basis(across, up, scale(self.downwind, -1.0))
+        self.crates, self.dropped, self.landed = [], [], []
+        for k, mass in enumerate(self.MASSES):
+            spot = add(self.site, add(scale(self.downwind, -self.UPWIND),
+                                      add(scale(across, (k - 0.5) * self.APART), scale(up, self.DROP_HEIGHT))))
+            self.crates.append(props.spawn_crate(bubble, bubble.to_bubble(spot), rotation, CRATE_SIZE, mass=mass))
+            self.dropped.append(planet.relative(spot))
+            self.landed.append(None)
+        self.next_stage("fall")
+
+    def fall(self):
+        for k, (crate, dropped) in enumerate(zip(self.crates, self.dropped)):
+            _, position, velocity = prop_state(crate)
+            up = normalize(position)
+            fallen = dot(sub(dropped, position), up)
+            if self.landed[k] is None and fallen > 0.5 * self.DROP_HEIGHT and -dot(velocity, up) < self.LANDED_SPEED:
+                self.landed[k] = dot(sub(position, dropped), self.downwind)
+        if self.clock < self.FALL_SECONDS:
+            return
+        light, heavy = self.landed
+        later = [dot(sub(prop_state(c)[1], d), self.downwind) for c, d in zip(self.crates, self.dropped)]
+        self.report(light is not None and heavy is not None and light >= self.LIGHT_DRIFT
+                    and abs(heavy) <= self.HEAVY_DRIFT,
+                    "dropped from %.0f m in a wind of %.0f m/s at %.0f m, the %.0f kg crate came down %s m "
+                    "downwind, the %.0f kg one %s m (%.0f s on: %.2f m and %.2f m)"
+                    % (self.DROP_HEIGHT, self.WIND, 0.5 * self.DROP_HEIGHT, self.MASSES[0],
+                       "-" if light is None else "%.2f" % light, self.MASSES[1],
+                       "-" if heavy is None else "%.2f" % heavy, self.FALL_SECONDS, later[0], later[1]))
         os._exit(0 if self.ok else 1)
 
 
@@ -2695,10 +2874,10 @@ class FuelCheck:
             self.full, self.dry = ship.mass(), ship.params.dry_mass
             original = ship.step
 
-            def measured(physics_planet, controls, step, ground=None):
+            def measured(physics_planet, controls, step, ground=None, wind=None):
                 gravity = physics_planet.gravity(ship.position)
                 velocity, fuel = ship.velocity, ship.fuel
-                original(physics_planet, controls, step, ground)
+                original(physics_planet, controls, step, ground, wind)
                 gained = length(sub(sub(ship.velocity, velocity), scale(gravity, step)))
                 if fuel > 0.0:
                     self.gained += gained

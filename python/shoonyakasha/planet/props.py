@@ -8,7 +8,9 @@ three states:
 - "flying": out of the physics, coasting around the body it is reckoned
   around: its position and velocity from that body's centre in doubles,
   pulled towards the centre by the body's gravity and, on the planet,
-  slowed by the air (drag coefficient DRAG on its cross-section), turning
+  dragged by the air moving with the wind (PlanetWorld.wind_at, at its
+  height above its ground as last measured; drag coefficient DRAG on its
+  cross-section), turning
   at a constant angular velocity; it changes body at the moon's sphere of
   influence (orbits.reference);
 - "resting": out of the physics, lying where it came down.
@@ -33,9 +35,10 @@ body comes back within Bubble.RADIUS less REENTER of the origin: a resting
 one over the fine mesh, asleep, a flying one over either mesh or more
 than twice CLEARANCE above the ground. In the physics a prop faster than FAST_SPEED
 is not damped (it keeps its speed, as in flight), a slower one is by
-DAMPING, which helps it settle. `Props.drag` (each physics step) slows the
-props in the physics on the planet faster than DRAG_SPEED by the air as
-flying ones are. `Props.fly` moves the flying props on by
+DAMPING, which helps it settle. `Props.drag` (each physics step) drags the
+props in the physics on the planet moving faster than DRAG_SPEED through
+the air (their velocity less the wind's, PlanetWorld.wind_at) as flying
+ones are. `Props.fly` moves the flying props on by
 seconds of the world's clock, in steps of at most FLY_STEP; one whose
 height above the ground as last measured, less its speed downwards times
 the probes' latency, is below its rest height lands there and rests.
@@ -343,17 +346,18 @@ class Props:
 
     def drag(self, bubble):
         """For the next step, the air's drag on the props in the physics
-        moving faster than DRAG_SPEED, on the planet."""
+        moving faster than DRAG_SPEED through the air (their velocity less
+        the wind's), on the planet."""
         world = self.world
         if bubble.body is not world.planet:
             return
         physics = bubble.physics
         for prop in self.in_physics():
-            v = physics.get_velocity(prop.body)[0]
+            p = bubble.body_relative(physics.get_transform(prop.body)[0])
+            v = sub(physics.get_velocity(prop.body)[0], world.wind_at(bubble.body, p))
             speed = length(v)
             if speed < DRAG_SPEED:
                 continue
-            p = bubble.body_relative(physics.get_transform(prop.body)[0])
             area = 0.6 * math.pi * prop.radius * prop.radius
             physics.add_force(prop.body, scale(v, -0.5 * world.physics.density(p) * speed * DRAG * area))
 
@@ -392,8 +396,10 @@ class Props:
                 r = length(p)
                 a = scale(p, -gm / (r * r * r))
                 if on_planet:
-                    speed = length(v)
-                    a = add(a, scale(v, -0.5 * world.physics.density(p) * speed * DRAG * area / prop.mass))
+                    air = sub(v, world.wind_at(prop.on, p, None if prop.ground is None
+                                               else r - prop.on.radius - prop.ground))
+                    speed = length(air)
+                    a = add(a, scale(air, -0.5 * world.physics.density(p) * speed * DRAG * area / prop.mass))
                 v = add(v, scale(a, h))
                 p = add(p, scale(v, h))
                 if spin > 0.0:

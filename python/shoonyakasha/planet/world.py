@@ -83,6 +83,7 @@ import numpy as np
 
 from . import cube_sphere, ground_textures, orbits, shadows, vegetation, vegetation_impostors, vegetation_textures
 from . import rivers as river_tools
+from . import wind as wind_field
 from .rocks import TakenRocks
 from .vec import add, dot, euler_from_basis, length, local_frame, normalize, scale, sub
 
@@ -104,6 +105,8 @@ SHADOW_REACH = 5_000.0
 # direction (cells of about 2.5 km), the detail noise's scale (m) and how much it erodes.
 CLOUD_LAYER = (1_500.0, 3_500.0)
 CLOUD_SHAPE = (40.0, 900.0, 0.8)
+# clouds.glsl's CLOUD_ROTATION, by its columns: the coverage noise is sampled at it times the direction.
+CLOUD_ROTATION = ((0.0, 0.8, 0.6), (-0.8, 0.36, -0.48), (-0.6, -0.48, 0.64))
 CLOUD_COVERAGE = 0.45            # share of the sky the clouds cover at the start
 # The ground's textures (ground_textures.py, ground.glsl): metres per tile at the near and far scale.
 GROUND_SCALES = (5.0, 47.0)
@@ -536,8 +539,8 @@ class PlanetWorld:
     exposure used is their product) (upload_sky); `lights` (Light; the
     MAX_LIGHTS nearest the camera within their range plus LIGHT_VIEW_REACH
     drawn, each frame); `clouds`,
-    `cloud_coverage`, `cloud_density` (upload_clouds); `wind_speed` (m/s, the
-    clouds' drift); `shadows`; `texture_strength`, `texture_relief` (the
+    `cloud_coverage`, `cloud_density` (upload_clouds); `wind_speed` (m/s at
+    wind.REFERENCE_HEIGHT: `wind_at`, and the clouds' drift); `shadows`; `texture_strength`, `texture_relief` (the
     ground's textures); `temperature_offset` (degrees C), `moisture_offset`,
     `flora_hue`, `soil_hue` (degrees; the climate and its palette,
     biome.glsl); `colour_mode` (an index into COLOUR_MODES; "biome" shows
@@ -1538,10 +1541,26 @@ class PlanetWorld:
         self.engine.set_custom_vec4("planet.ground.settings", (strength, self.texture_relief) + GROUND_SCALES)
 
     def blow_clouds(self, seconds):
-        """Move the clouds' weather with the wind for `seconds`: `wind_speed`
-        metres a second along the coverage noise's x, in its units (a unit is
-        RADIUS / its frequency metres)."""
-        step = self.wind_speed * seconds * CLOUD_SHAPE[0] / RADIUS
-        wind = self.cloud_wind
-        self.cloud_wind = (wind[0] + step, wind[1], wind[2])
+        """Move the clouds' weather with the wind for `seconds`: along the
+        prevailing direction (wind.prevailing) at `wind_speed` times
+        wind.profile at the middle of the cloud layer, the coverage noise's
+        offset moved against that direction turned by CLOUD_ROTATION, in its
+        units (a unit is RADIUS / its frequency metres)."""
+        speed = self.wind_speed * wind_field.profile(0.5 * (CLOUD_LAYER[0] + CLOUD_LAYER[1]))
+        step = speed * seconds * CLOUD_SHAPE[0] / RADIUS
+        b = wind_field.prevailing(self.time)
+        turned = tuple(sum(CLOUD_ROTATION[c][r] * b[c] for c in range(3)) for r in range(3))
+        self.cloud_wind = tuple(o - t * step for o, t in zip(self.cloud_wind, turned))
         self.engine.set_custom_vec4("planet.clouds.wind", self.cloud_wind + (0.0,))
+
+    def wind_at(self, body, point, height=None):
+        """The wind's velocity (m/s) at `point` (from `body`'s centre),
+        `height` metres above the ground there (when None, its height above
+        the ground under the viewpoint, or above the radius while that is not
+        known): wind.wind_at for `wind_speed` at the world's clock on the
+        planet; none on the moon, which has no air."""
+        if body is not self.planet:
+            return (0.0, 0.0, 0.0)
+        if height is None:
+            height = length(point) - body.radius - (self.ground if self.ground is not None else 0.0)
+        return wind_field.wind_at(point, normalize(point), self.time, self.wind_speed, height)
