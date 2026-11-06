@@ -44,7 +44,8 @@ enough (LEAVE_HEIGHT) to get out of.
   cushion, and it still steers.
 - **Hold:** `cargo`, a list of items as trade.py's, within
   params.cargo_capacity kilograms and hold_m3 of volume, each item filling
-  flight.load_volume (`cargo_mass`, `cargo_volume`, `can_take`). The
+  its "volume" when it has one (a crate), else flight.load_volume
+  (`cargo_mass`, `cargo_volume`, `can_take`). The
   cargo does not change how the car flies.
 """
 
@@ -158,14 +159,16 @@ class Car:
 
     @property
     def cargo_volume(self):
-        return sum(load_volume(item["mass"], item.get("resource", FERRITE)) for item in self.cargo)
+        return sum(item["volume"] if "volume" in item else load_volume(item["mass"], item.get("resource", FERRITE))
+                   for item in self.cargo)
 
-    def can_take(self, mass, resource):
-        """Whether a rock of `mass` kg and `resource` fits in the hold:
-        within params.cargo_capacity and params.hold_m3."""
+    def can_take(self, mass, resource, volume=None):
+        """Whether a rock of `mass` kg and `resource` (or anything of
+        `volume` m^3) fits in the hold: within params.cargo_capacity and
+        params.hold_m3."""
         p = self.params
-        return (self.cargo_mass + mass <= p.cargo_capacity
-                and self.cargo_volume + load_volume(mass, resource) <= p.hold_m3)
+        volume = load_volume(mass, resource) if volume is None else volume
+        return self.cargo_mass + mass <= p.cargo_capacity and self.cargo_volume + volume <= p.hold_m3
 
     def burn_rate(self, controls):
         """kg/s the car burns with `controls`: drive_burn at full throttle

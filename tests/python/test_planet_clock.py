@@ -1,8 +1,9 @@
 """Tests for the planet example's day (examples/python/simulations/planet/
 clock.py), loaded from its file: the sun at noon 90 - AXIS_TILT degrees
 up in the south, at six in the east on the horizon, at eighteen in the
-west, at midnight as far below; a whole day brings it back; the hours and
-the time nearest another of the same hour; and the exposure's factor from
+west, at midnight as far below; a whole day brings it back; the hours,
+the time nearest another of the same hour and the day's index turning at
+dawn; and the exposure's factor from
 day to night. Also shoonyakasha.planet.world's horizon rule: the azimuth
 turn about the local up, and its tolerance from low to high sun.
 
@@ -55,6 +56,14 @@ class Sun(unittest.TestCase):
         later = clock.time_of(20.0, now)
         self.assertAlmostEqual(clock.hour(later), 20.0)
         self.assertLessEqual(abs(later - now), DAY / 2.0)
+
+    def test_the_day_turns_at_dawn(self):
+        dawn = -DAY / 4.0
+        self.assertEqual(clock.day(dawn), 0)
+        self.assertEqual(clock.day(dawn - 1.0), -1)
+        self.assertEqual(clock.day(0.0), 0)                     # noon of day 0
+        self.assertEqual(clock.day(dawn + DAY - 1.0), 0)
+        self.assertEqual(clock.day(dawn + DAY), 1)
 
     def test_local_hours(self):
         for time in (0.0, 0.1 * DAY, -0.3 * DAY, 0.45 * DAY):

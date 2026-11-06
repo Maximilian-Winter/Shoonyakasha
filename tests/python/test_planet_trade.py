@@ -72,6 +72,13 @@ class Prices(unittest.TestCase):
         other = trade.base_price(outpost, ore("moon", 1.0, 0.5, towards(2.0)))
         self.assertAlmostEqual(other, here * trade.OTHER_BODY)
 
+    def test_reputation_raises_the_price(self):
+        outpost = Outpost(PLANET)
+        plain = trade.base_price(outpost, ore("planet", 1.0, 0.64))
+        outpost.reputation = 5.0
+        self.assertAlmostEqual(trade.base_price(outpost, ore("planet", 1.0, 0.64)),
+                               plain * (1.0 + 5.0 * trade.REPUTATION_PRICE))
+
     def test_value_by_resource(self):
         outpost = Outpost(PLANET)
         for resource in (FERRITE, AMBER, ILMENITE):

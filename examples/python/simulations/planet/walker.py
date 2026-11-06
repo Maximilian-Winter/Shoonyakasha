@@ -74,12 +74,12 @@ is still within CALL_REACH (`update_fuel_call`); the save keeps the fuel.
 
 The car's hold (hovercar.Car.cargo): getting in loads the loose ore
 rocks lying in the cargo net behind the parked car (CAR_NET_CENTRE,
-CAR_NET_HALF, shown by four posts; `ore_in_net`, `load_cargo`), each that
-fits (hovercar.Car.can_take), with where it was first seen; the rest stay
-in the net. The menu's Outpost tab shows the outpost whose pad the car is
-on, its price for each resource at grade 1, the car's cargo and what it
-would fetch, and sells it (`sell_car_cargo`, trade.Market.sell). The save
-keeps the cargo.
+CAR_NET_HALF, shown by four posts; `in_net`, `load_cargo`), and the
+contracts' crates, each that fits (hovercar.Car.can_take), a rock with
+where it was first seen; the rest stay in the net. The menu's Outpost
+tab shows the outpost whose pad the car is on, its price for each
+resource at grade 1, the car's cargo and what its ore would fetch, and
+sells the ore (`sell_car_cargo`, trade.sale). The save keeps the cargo.
 
 Upgrades (upgrades.py, the "car" and "gun" groups): the menu's Upgrades
 tab has a button for each, bought with the car or the player's feet on
@@ -110,6 +110,31 @@ with the credits (the Upgrades tab offers WALKER_UPGRADES: the car's,
 the gun's and the suit's). The save keeps the points' states, the
 parts, the survey data and which crates are pods. Loose ore rocks and
 pods sell only once settled (`settled`).
+
+Contracts (contracts.py): the menu's Contracts tab shows the offers of
+the outpost whose pad the car or the player is on (contracts.offers for
+the day, which turns at dawn, clock.day), each with Accept, and the
+active contracts (contracts.MAX_ACTIVE at most), each with Pin, and
+Abandon for the pinned one. The pinned contract takes the objective's
+place on the card and marks its target on the compass and the map
+(`contract_target`). A delivery takes the ore of its resource and grade
+that comes to rest on its outpost's pad, or that the car's cargo brings
+there (`deliver`), in place of selling it. A courier's crate goes into
+the car's hold when the car is on the pad, else beside the player; it is
+struck by how much its velocity changes as its speed falls
+(`watch_couriers`), and in the hold by the car's bumps (`strike_hold`),
+and breaks at contracts.BREAK_DAMAGE, failing the contract. A recovery's
+pod is a point of interest of the pod's kind at its target (`place_pod`).
+A courier's crate or a pod is delivered settled on its destination's
+pad, or in the hold with the car slow on that pad; either goes into the
+hold through the net. A survey completes with contracts.SURVEY_SHARE of
+the map's cells around its target measured (ExploredMap.share). Done, a
+contract pays its reward and raises its outpost's reputation by one;
+failed, past its deadline or abandoned, it lowers it by one (no lower
+than MIN_REPUTATION). The reputation raises the outpost's offers' rewards
+(contracts.REWARD_PER_REPUTATION) and its prices (trade.REPUTATION_PRICE).
+The save keeps the active contracts, today's offers accepted, the pin,
+the reputations and which crates are couriers'.
 
 The suit (suit.py): `here_temperature` is the air's temperature where the
 camera is (on the planet the climate under it, with its height, swinging
@@ -157,7 +182,7 @@ grab, right trigger punt, the bumpers the hold distance.
                                              out in the cold, sell ore,
                                              load the car's net and sell its cargo, buy upgrades,
                                              use a point of interest of each kind, sell survey data,
-                                             pause, save, change the game and load it, drive and fly
+                                             take and end a contract of each kind, pause, save, change the game and load it, drive and fly
                                              the car, hover it on a lake and a river, run it dry and
                                              call fuel, then night; report and exit
 """
@@ -167,6 +192,7 @@ import math
 import os
 import tempfile
 import time
+import zlib
 
 import numpy as np
 
@@ -187,6 +213,7 @@ from shoonyakasha.planet.rocks import density as rock_density, rock_colour
 import carview
 import clock
 import config
+import contracts
 import hovercar
 import lamps
 import pois
@@ -302,6 +329,12 @@ DRAW_RANGE = 2_000.0            # m
 PROP_RANGE = 120.0              # m
 USE_LOOK = 60.0                 # m
 CELL_SURVEY = 0.5               # credits of survey data per map cell explored
+CONTRACT_MARKER = (1.0, 0.82, 0.3, 1.0)
+SURVEY_EVERY = 1.0              # s between measurements of a survey contract's share explored
+PICKED_UP = 20.0                # m a recovery's pod has moved from its point once picked up
+MIN_REPUTATION = -5.0           # an outpost's reputation goes no lower
+CONTRACT_CHECK_SECONDS = 30.0   # s --check waits at most for each contract to end
+CONTRACT_CHECK_DROP = 12.0      # m/s down --check throws the fragile crate at
 POI_MARKER, LOOTED_MARKER, SIGNAL_MARKER = (1.0, 0.85, 0.35, 1.0), (0.55, 0.58, 0.62, 1.0), (0.6, 0.75, 0.85, 0.6)
 WALKER_UPGRADES = upgrades.for_groups(("car", "gun", "suit"))   # the upgrades the outposts here offer
 
@@ -346,7 +379,7 @@ parser.add_argument("--check", action="store_true",
                     help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, run the suit out in the cold, "
                          "sell ore at Base, "
                          "load the car's net and sell its cargo, buy upgrades, use a point of interest of each kind "
-                         "and sell survey data, pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
+                         "and sell survey data, take and end a contract of each kind, pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
                          "run it dry and call fuel, then night; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
@@ -449,6 +482,17 @@ state = {
     "use_progress": 0.0,          # s the use key has been held on it
     "use_latch": False,           # the use key must be let go before the next use
     "check_use": False,           # --check: the use key held
+    "contracts": [],              # the active contracts (contracts.Contract)
+    "offers_taken": set(),        # the ids of the offers accepted
+    "pinned": None,               # the id of the contract on the card, the compass and the map
+    "reputation": {},             # outpost name: the player's reputation there
+    "contracts_done": 0,
+    "contracts_failed": 0,        # failed, expired or abandoned
+    "couriers": {},               # id of a courier's crate: its contract's id
+    "crate_velocity": {},         # id of a courier's crate: its velocity last frame
+    "survey_in": 0.0,             # s until the survey contracts' shares are measured again
+    "contract_note": "",          # the last contract accepted, ended or refused, for the Contracts tab
+    "contracts_shown": None,      # what the Contracts tab was last built for
 }
 
 
@@ -698,13 +742,14 @@ def net_frame():
     return add(car_position(), add(add(scale(right, r), scale(up, u)), scale(back, b))), right, up, back
 
 
-def ore_in_net():
-    """(prop, its position in planet space) of each loose ore rock, in the
-    physics or resting out of it, that lies in the car's net."""
+def in_net():
+    """(prop, its position in planet space) of each loose ore rock and each
+    contract's crate (`crate_contract`), in the physics or resting out of
+    it, that lies in the car's net."""
     bubble = foot.bubble
     if state["car"] is None or bubble is None:
         return []
-    ore = [p for p in foot.props.rocks if p.grade > 0.0]
+    ore = [p for p in foot.props.rocks if p.grade > 0.0] + [p for p in foot.props.crates if crate_contract(p)]
     placed = [(p, add(p.on.centre(), p.position)) for p in ore if p.state == "resting"]
     moving = [p for p in ore if p.state == "jolt"]
     if moving:
@@ -719,24 +764,32 @@ def ore_in_net():
 
 
 def load_cargo():
-    """The loose ore rocks in the car's net (ore_in_net) taken into its
-    hold, each that fits (hovercar.Car.can_take), with where it was first
-    seen (or where it lies); the rest stay in the net. A toast says what."""
+    """The loose ore rocks and the contracts' crates in the car's net
+    (in_net) taken into its hold, each that fits (hovercar.Car.can_take):
+    a rock with where it was first seen (or where it lies), a crate
+    (`crate_item`) with its size's volume; the rest stay in the net. A
+    toast says what."""
     car, bubble = state["car"], foot.bubble
     loaded, left = [], 0
-    for prop, point in ore_in_net():
-        if not car.can_take(prop.mass, prop.resource):
+    for prop, point in in_net():
+        c = crate_contract(prop)
+        volume = prop.size ** 3 if c is not None else None
+        if not car.can_take(prop.mass, prop.resource, volume):
             left += 1
             continue
-        seen = state["seen"].pop(id(prop), None) or (prop.on.name, normalize(prop.on.relative(point)))
-        car.cargo.append({"body": seen[0], "direction": tuple(seen[1]), "mass": prop.mass, "grade": prop.grade,
-                          "resource": prop.resource})
+        if c is not None:
+            car.cargo.append(crate_item(c, prop.mass, volume))
+            forget_crate(prop)
+        else:
+            seen = state["seen"].pop(id(prop), None) or (prop.on.name, normalize(prop.on.relative(point)))
+            car.cargo.append({"body": seen[0], "direction": tuple(seen[1]), "mass": prop.mass, "grade": prop.grade,
+                              "resource": prop.resource})
         if foot.gun is not None and prop.body is not None and foot.gun.held == prop.body:
             foot.gun.drop()
         foot.props.remove(bubble, prop, release=False)
         loaded.append(prop.mass)
     if loaded or left:
-        text = ("Loaded %d piece%s of ore, %.0f kg" % (len(loaded), "" if len(loaded) == 1 else "s", sum(loaded))
+        text = ("Loaded %d piece%s, %.0f kg" % (len(loaded), "" if len(loaded) == 1 else "s", sum(loaded))
                 + ("; %d left in the net, the hold is full" % left if left else ""))
         state["hud"].toast(text, GOOD_TOAST if not left else hud_module.WARNING)
 
@@ -831,15 +884,18 @@ def read_car_controls():
 
 def step_car(dt):
     """The car moved by `dt` (driven, or parked with no controls), stopped by
-    trunks and fixed rocks ahead (bump_car); its poses before and after kept
-    for its body in the bubble."""
+    trunks and fixed rocks ahead (bump_car), a bump striking the fragile
+    crates in its hold (strike_hold); its poses before and after kept for
+    its body in the bubble."""
     car = state["car"]
     if car is None:
         return
     before = (car_position(), car_rotation())
     controls = state["car_controls"] if state["driving"] else hovercar.CarControls()
     car.step(dt, controls, car_ground)
-    bump_car(dt)
+    impact = bump_car(dt)
+    if impact > 0.0:
+        strike_hold(impact)
     update_ship()
     state["car_poses"] = (before, (car_position(), car_rotation()))
 
@@ -854,29 +910,30 @@ def bump_car(dt):
     or a fixed rock within this step's travel (and BUMP_REACH more) turns
     the car's motion into it back by BUMP_BOUNCE times, and it keeps
     BUMP_KEEP of its speed. Props, the ground and the car's own body are
-    passed over."""
+    passed over. Returns the speed it struck with (m/s into the surface), or 0."""
     car, bubble = state["car"], foot.bubble
     if bubble is None or bubble.body is not planet:
-        return
+        return 0.0
     up = car.up()
     flat = sub(car.velocity, scale(up, dot(car.velocity, up)))
     speed = length(flat)
     if speed < 0.5:
-        return
+        return 0.0
     direction = scale(flat, 1.0 / speed)
     reach = SHIP_HALF[2] if abs(dot(direction, car.heading)) > 0.7 else SHIP_HALF[0]
     nose = add(car_position(), scale(direction, reach + 0.15))
     hit = foot.physics.cast_ray(bubble.to_bubble(nose), direction, speed * dt + BUMP_REACH)
     if hit is None:
-        return
+        return 0.0
     body, _, normal, _ = hit
     if body == state["ship_body"] or foot.props.find(body) is not None or dot(normal, bubble.up(hit[1])) > 0.7:
-        return
+        return 0.0
     n = normalize(sub(normal, scale(bubble.up(hit[1]), dot(normal, bubble.up(hit[1])))))
     into = dot(car.velocity, n)
     if into >= 0.0:
-        return
+        return 0.0
     car.velocity = scale(sub(car.velocity, scale(n, (1.0 + BUMP_BOUNCE) * into)), BUMP_KEEP)
+    return -into
 
 
 def move_car_body(bubble, fraction):
@@ -1053,13 +1110,17 @@ def place_viewmodel(dt, camera):
 def markers(body):
     """(name, position from the planet's centre, colour) of the outposts
     on `body`, the ship on the planet, the waypoint on `body` and the
-    points of interest (poi_markers)."""
+    points of interest (poi_markers) and the pinned contract's target
+    (contract_target) on the planet."""
     found = [(o.name, o.point(), OUTPOST_MARKER) for o in state["outposts"] if o.body is body]
     if state["ship"] is not None and body is planet:
         found.append(("Ship", state["ship"][0], SHIP_MARKER))
     waypoint = state["waypoint"]
     if waypoint is not None and waypoint[0] is body:
         found.append(("Waypoint", add(body.centre(), scale(waypoint[1], body.radius)), WAYPOINT_MARKER))
+    target = contract_target(pinned_contract())
+    if target is not None and body is planet:
+        found.append(("Contract", target, CONTRACT_MARKER))
     return found + poi_markers(body)
 
 
@@ -1142,6 +1203,16 @@ def run_check(dt):
     and sold once settled; the survey data sold for trade.survey_sale's
     credits; and Capacitor bank bought if a coil was found (else refused)
     and the Thermal liner lowering the suit's cold limit; then the
+    contracts (run_contract_check): Base's offers the same when asked
+    twice; a delivery taking an ore rock dropped on the pad in place of
+    selling it; a courier's crate put in the car's hold on the pad and
+    delivered there; with the car moved NET_CHECK_AWAY off, a courier's
+    crate beside the player thrown down at CONTRACT_CHECK_DROP, breaking
+    and failing; a recovery's pod made on the pad and delivered there; a
+    survey around the feet completed; a contract past its deadline
+    expired; a pinned one abandoned; and a survey 2 km off kept active and
+    pinned, on the card and the compass, the car put back; each paying its
+    reward or none and moving Base's reputation, +1 at the end; then the
     menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
@@ -1151,8 +1222,8 @@ def run_check(dt):
     at least MAP_CELLS cells are explored, the waypoint is set, the ore sold for credits, the car's cargo
     loaded and sold, the world's clock stood
     still while paused, and the load brought back the credits, the ore
-    sold, the cells, the props and the player within 2 m of where it was
-    saved; then into the car, driven flat out turning a little for
+    sold, the cells, the props, the contracts, the pin, the reputations
+    and the player within 2 m of where it was saved; then into the car, driven flat out turning a little for
     DRIVE_SECONDS, climbing for CLIMB_SECONDS and flying on 2 s more,
     saved and loaded there, braking and coming down until it can be left
     (at most LAND_SECONDS), and out of it, a second later passing when the
@@ -1177,7 +1248,7 @@ def run_check(dt):
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
     (with _punt added), of the map (with _map added), with the suit low (with _suit added), after the sale (with
-    _sell added), of the Upgrades tab after buying (with _upgrades added), of the menu (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Settings tab
+    _sell added), of the Upgrades tab after buying (with _upgrades added), of the menu (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Contracts tab (with _contracts added), of its Settings tab
     (with _settings added), of its Controls tab (with _controls added),
     after the load (with _load added), a second
     before the end of the drive (with _drive added), after the climb (with
@@ -1435,6 +1506,9 @@ def run_check(dt):
             check["stage"], check["time"] = "pois", 0.0
     elif stage == "pois":
         if run_poi_check(check, t):
+            check["stage"], check["time"] = "contracts", 0.0
+    elif stage == "contracts":
+        if run_contract_check(check, t):
             set_paused(True)
             check["stage"], check["time"] = "pause", 0.0
     elif stage == "pause":
@@ -1462,6 +1536,13 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_outpost" + ext)
+                state["menu"].show(True, state["menu"].tab_named("Contracts"))
+            check["stage"], check["time"] = "contracts_tab", 0.0
+    elif stage == "contracts_tab":
+        if t >= 0.5 or not args.shot:
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                screenshot(base + "_contracts" + ext)
                 state["menu"].show(True, state["menu"].tab_named("Settings"))
             check["stage"], check["time"] = "settings", 0.0
     elif stage == "settings":
@@ -1482,10 +1563,13 @@ def run_check(dt):
             saved = save_game(CHECK_SAVE_BASE)
             check["saved"] = {"credits": state["market"].credits, "cells": game_numbers()["cells"],
                               "props": len(foot.props.all), "sold_kg": state["sold_kg"],
-                              "feet": foot.bubble.to_world(player.feet()), "time": saved["time"]}
+                              "feet": foot.bubble.to_world(player.feet()), "time": saved["time"],
+                              "contracts": [(c.id, c.kind, c.state) for c in state["contracts"]],
+                              "pinned": state["pinned"], "reputation": dict(state["reputation"])}
             state["market"].credits += 999.0
             state["sold_kg"] += 99.0
             state["map"].grids = {}
+            state["contracts"], state["pinned"], state["reputation"] = [], None, {}
             check["loaded"] = load_game(CHECK_SAVE_BASE)
             check["stage"], check["time"] = "reload", 0.0
     elif stage == "reload":
@@ -1500,10 +1584,14 @@ def run_check(dt):
             moved = length(sub(foot.bubble.to_world(player.feet()), saved["feet"]))
             load_ok = (check["loaded"] and state["market"].credits == saved["credits"]
                        and state["sold_kg"] == saved["sold_kg"] and game_numbers()["cells"] == saved["cells"]
-                       and len(foot.props.all) == saved["props"] and moved < 2.0)
-            print("[walker] saved, changed and loaded: %.0f cr, %d cells, %d props, the player %.2f m from "
-                  "where it was saved: %s" % (state["market"].credits, game_numbers()["cells"], len(foot.props.all),
-                                              moved, "passed" if load_ok else "FAILED"), flush=True)
+                       and len(foot.props.all) == saved["props"] and moved < 2.0
+                       and [(c.id, c.kind, c.state) for c in state["contracts"]] == saved["contracts"]
+                       and state["pinned"] == saved["pinned"] and state["reputation"] == saved["reputation"])
+            print("[walker] saved, changed and loaded: %.0f cr, %d cells, %d props, %d contract%s, the player "
+                  "%.2f m from where it was saved: %s"
+                  % (state["market"].credits, game_numbers()["cells"], len(foot.props.all), len(state["contracts"]),
+                     "" if len(state["contracts"]) == 1 else "s", moved, "passed" if load_ok else "FAILED"),
+                  flush=True)
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_load" + ext)
@@ -1813,6 +1901,156 @@ def run_poi_check(check, t):
     return False
 
 
+def run_contract_check(check, t):
+    """--check's contracts, on Base's pad, a step at a time (see
+    run_check); True once done. Each but the offers is a contract of Base
+    made for the step (check_contract) and accepted there."""
+    steps = ["offers", "delivery", "courier", "fragile", "recovery", "survey", "expire", "abandon", "keep"]
+    c = check.setdefault("contracts", {"step": 0, "t0": t, "lines": [], "ok": True})
+    home, car = state["home"], state["car"]
+    if c["step"] >= len(steps):
+        rep = state["reputation"].get(home.name, 0.0)
+        ok = c["ok"] and rep == 1.0 and home.reputation == 1.0
+        print("[walker] contracts:\n" + "\n".join("[walker]   " + line for line in c["lines"])
+              + "\n[walker]   Base's reputation %+.0f, its prices x%.2f: %s"
+              % (rep, 1.0 + trade.REPUTATION_PRICE * home.reputation, "passed" if ok else "FAILED"), flush=True)
+        check["sell_ok"] = check["sell_ok"] and ok
+        return True
+    step, since = steps[c["step"]], t - c["t0"]
+
+    def done(ok, line):
+        c["ok"] = c["ok"] and ok
+        c["lines"].append("%s: %s" % (line, "ok" if ok else "FAILED"))
+        c["step"] += 1
+        c["t0"] = t
+        c.pop("contract", None)
+
+    def begin(contract):
+        c["contract"] = contract
+        c["before"] = (state["market"].credits, state["reputation"].get(home.name, 0.0), state["sold_kg"])
+        return accept_contract(contract)
+
+    def ended(contract, how):
+        credits, rep, _ = c["before"]
+        paid = state["market"].credits - credits
+        return (contract.state == how and contract not in state["contracts"]
+                and abs(paid - (contract.reward if how == "completed" else 0.0)) < 1e-6
+                and state["reputation"].get(home.name, 0.0) == rep + (1.0 if how == "completed" else -1.0))
+
+    feet = foot.bubble.to_world(foot.player.feet())
+    up = normalize(planet.relative(feet))
+    east, north = local_frame(up)
+    if step == "offers":
+        first, again = contract_offers(home), contract_offers(home)
+        ok = (at_outpost() is home and len(first) == contracts.OFFERS
+              and [contracts.record(o) for o in first] == [contracts.record(o) for o in again])
+        done(ok, "%d offers at %s on day %d, the same when asked again: %s"
+             % (len(first), home.name, contract_day(), ", ".join("%s %.0f cr" % (o.kind, o.reward) for o in first)))
+    elif step == "delivery":
+        if "contract" not in c:
+            rock = ore_rock(add(world.site_ground(), scale(up, 1.0)), CHECK_ORE_EXTENT, CHECK_ORE_GRADE)
+            c["rock"] = rock
+            begin(check_contract("delivery", c["step"], resource=resources.FERRITE, quantity=rock.mass,
+                                 min_grade=0.5))
+            return False
+        contract = c["contract"]
+        if contract.state == "active" and since < CONTRACT_CHECK_SECONDS:
+            return False
+        done(ended(contract, "completed") and c["rock"] not in foot.props.rocks and state["sold_kg"] == c["before"][2],
+             "delivery of %.0f kg of ferrite: the rock on the pad delivered, not sold, after %.1f s, +%.0f cr"
+             % (contract.quantity, since, contract.reward))
+    elif step == "courier":
+        if "contract" not in c:
+            contract = c["contract"] = check_contract("courier", c["step"])
+            c["accepted"] = car_outpost() is home and begin(contract)
+            c["in_hold"] = any(i.get("contract") == contract.id for i in car.cargo)
+            return False
+        contract = c["contract"]
+        if contract.state == "active" and since < CONTRACT_CHECK_SECONDS:
+            return False
+        done(c["accepted"] and c["in_hold"] and ended(contract, "completed")
+             and not any("contract" in i for i in car.cargo),
+             "courier accepted with the car on the pad: its crate into the hold, delivered there after %.1f s" % since)
+    elif step == "fragile":
+        if "contract" not in c:
+            c["parked_at"] = car.position
+            car.position = add(car.position, scale(car.heading, NET_CHECK_AWAY))
+            update_ship()
+            begin(check_contract("courier", c["step"], destination="Elsewhere"))
+            return False
+        contract = c["contract"]
+        crate = next((p for p in foot.props.crates if state["couriers"].get(id(p)) == contract.id), None)
+        if "thrown" not in c and crate is not None and crate.body is not None and since >= 0.5:
+            p, q = foot.physics.get_transform(crate.body)
+            lift = foot.bubble.up(p)
+            foot.physics.set_transform(crate.body, add(p, scale(lift, 3.0)), q)
+            foot.physics.set_velocity(crate.body, scale(lift, -CONTRACT_CHECK_DROP), (0.0, 0.0, 0.0))
+            c["thrown"] = True
+            return False
+        if contract.state == "active" and since < CONTRACT_CHECK_SECONDS:
+            return False
+        done("thrown" in c and ended(contract, "failed") and crate is None and contract.damage >= 1.0,
+             "courier's crate made beside the player and thrown down at %.0f m/s: damage %.2f, broken, failed"
+             % (CONTRACT_CHECK_DROP, contract.damage))
+    elif step == "recovery":
+        if "contract" not in c:
+            target = normalize(planet.relative(add(feet, scale(east, 6.0))))
+            begin(check_contract("recovery", c["step"], target=target))
+            return False
+        contract = c["contract"]
+        if contract.state == "active" and since < CONTRACT_CHECK_SECONDS:
+            return False
+        done(ended(contract, "completed") and pod_key(contract) not in state["pois"].pois,
+             "recovery: the pod made at its point on the pad and, settled, delivered after %.1f s" % since)
+    elif step == "survey":
+        if "contract" not in c:
+            begin(check_contract("survey", c["step"], target=up))
+            c["queued"] = state["map"].reveal(planet, up, contracts.SURVEY_RADIUS)
+            return False
+        contract = c["contract"]
+        if contract.state == "active" and since < CONTRACT_CHECK_SECONDS:
+            return False
+        done(ended(contract, "completed") and contract.explored >= contracts.SURVEY_SHARE,
+             "survey around the feet (%d cells queued): %d %% explored after %.1f s"
+             % (c["queued"], round(100.0 * contract.explored), since))
+    elif step == "expire":
+        if "contract" not in c:
+            begin(check_contract("survey", c["step"], target=up, deadline=contract_day() - 1))
+            return False
+        contract = c["contract"]
+        done(ended(contract, "expired"), "a contract past its deadline expired")
+    elif step == "abandon":
+        contract = check_contract("survey", c["step"], target=normalize(planet.relative(add(feet,
+                                                                                           scale(north, 2_000.0)))))
+        begin(contract)
+        pin_contract(contract)
+        abandon_pinned()
+        done(ended(contract, "abandoned"), "a pinned contract abandoned")
+    elif step == "keep":
+        if "contract" not in c:
+            begin(check_contract("survey", c["step"], target=normalize(planet.relative(add(feet,
+                                                                                          scale(east, 2_000.0))))))
+            car.position = c["parked_at"]
+            update_ship()
+            return False
+        contract = c["contract"]
+        if since < 0.5:
+            return False
+        card = state["hud"].card
+        marked = any(name == "Contract" for name, _, _ in markers(planet))
+        done(contract in state["contracts"] and state["pinned"] == contract.id and card[0].startswith("CONTRACT")
+             and card[1] == contract_title(contract) and marked,
+             "a survey 2 km off kept active and pinned: on the card (%s) and the compass" % card[0])
+    return False
+
+
+def check_contract(kind, n, **fields):
+    """--check: a contract of `kind` from Base to Base for 100 cr, due in contracts.DEADLINE_DAYS days."""
+    home = state["home"].name
+    values = dict({"deadline": contract_day() + contracts.DEADLINE_DAYS}, **fields)
+    return contracts.Contract("check/%d" % n, kind, home, values.pop("destination", home), 100.0, **values)
+
+
 def update_map(dt):
     """The ground around the player (or the car) measured, the waypoint
     cleared once reached, and the minimap and full map drawn on foot or in
@@ -1915,7 +2153,10 @@ def ore_seen_near(feet):
 
 
 def update_game():
-    """Ore sold where it rests on a pad, the objectives moved on, the objective card shown."""
+    """Ore sold where it rests on a pad (or delivered to a delivery
+    contract that wants it there), the pods sold and the contracts' crates
+    delivered, the objectives moved on, the objective card shown (the
+    pinned contract's in place of the objective)."""
     hud, player = state["hud"], foot.player
     if player is None:
         return
@@ -1926,6 +2167,9 @@ def update_game():
         state["ore_seen"] = 1
     held = foot.props.find(foot.gun.held) if foot.gun is not None and foot.gun.held is not None else None
     for outpost, prop, item in sale_items(ore, state["outposts"], held):
+        if deliver(outpost, item):
+            foot.props.remove(foot.bubble, prop, release=False)
+            continue
         credits, supplies = sale(outpost, [item], world.time)
         outpost.supply.update(supplies)
         state["market"].credits += credits
@@ -1936,6 +2180,7 @@ def update_game():
                   % (item["mass"], resources.name(item["resource"]).lower(), item["grade"], outpost.name,
                      format(int(round(credits)), ",")), GOOD_TOAST)
     sell_pods(held)
+    deliver_couriers(held)
     snapshot = game_numbers()
     objectives = state["objectives"]
     for goal in objectives.update(snapshot):
@@ -1949,7 +2194,13 @@ def update_game():
     header = "OBJECTIVE  %d / %d" % (min(objectives.index + 1, len(objectives.goals)), len(objectives.goals))
     rows = [("Credits", "%s cr" % format(int(round(state["market"].credits)), ",")),
             ("Ore sold", "%s kg" % format(int(round(state["sold_kg"])), ","))] + suit_rows()
-    if goal is not None:
+    c = pinned_contract()
+    if c is not None:
+        k = next(n for n, a in enumerate(state["contracts"]) if a is c)
+        fraction = contracts.progress(c) if c.kind in ("delivery", "survey") else None
+        hud.objective("CONTRACT  %d / %d" % (k + 1, len(state["contracts"])), contract_title(c), contracts.task(c),
+                      fraction, contract_progress_text(c).upper(), rows)
+    elif goal is not None:
         shown, target = objectives.progress(snapshot)
         fraction = None if target == 1 else shown / target
         hud.objective(header, goal.title, goal.hint, fraction, progress_text(goal, shown, target).upper(), rows)
@@ -2072,6 +2323,8 @@ def system_items():
          {"stat": "Ore sold", "get": lambda: "%s kg" % format(int(round(state["sold_kg"])), ",")},
          {"stat": "Cells explored", "get": lambda: format(game_numbers()["cells"], ",")},
          {"stat": "Waypoints reached", "get": lambda: str(state["waypoints"])},
+         {"stat": "Contracts done / failed", "get": lambda: "%d / %d" % (state["contracts_done"],
+                                                                         state["contracts_failed"])},
          {"stat": "Outposts found", "get": lambda: str(len(state["outposts"]))}],
     ])
 
@@ -2222,8 +2475,9 @@ def draw_poi_scenes(camera):
 
 
 def make_poi_props(here):
-    """A pod's crate, and a geode field's rocks, made once the player's
-    bubble is within PROP_RANGE of their point (each once: `done`)."""
+    """A pod's crate (a recovery's of its contract's size), and a geode
+    field's rocks, made once the player's bubble is within PROP_RANGE of
+    their point (each once: `done`)."""
     bubble = foot.bubble
     if bubble is None or bubble.body is not planet:
         return
@@ -2233,9 +2487,11 @@ def make_poi_props(here):
         up = poi.direction
         east, north = local_frame(up)
         if poi.kind == "pod":
-            spot = bubble.to_bubble(poi_at(poi, (0.0, 0.5 * pois.POD_SIZE + 0.3, 0.0)))
-            crate = foot.props.spawn_crate(bubble, spot, quat_from_basis(east, up, scale(north, -1.0)),
-                                           pois.POD_SIZE, colour=pois.POD_COLOUR, mass=pois.POD_MASS)
+            size, colour, mass = ((contracts.POD_SIZE, contracts.POD_COLOUR, contracts.POD_MASS) if poi.fixed_kind
+                                  else (pois.POD_SIZE, pois.POD_COLOUR, pois.POD_MASS))
+            spot = bubble.to_bubble(poi_at(poi, (0.0, 0.5 * size + 0.3, 0.0)))
+            crate = foot.props.spawn_crate(bubble, spot, quat_from_basis(east, up, scale(north, -1.0)), size,
+                                           colour=colour, mass=mass)
             state["pods"][id(crate)] = poi.key
         else:
             resource = poi.resource or resources.FERRITE
@@ -2319,19 +2575,34 @@ def use_spot(poi, k):
         poi.looted = True
 
 
+def pad_under(crate, held):
+    """The outpost on whose pad `crate` has settled (slower than
+    objectives.REST_SPEED), not `held`; or None."""
+    if crate is held:
+        return None
+    body, position, velocity = foot.prop_state(crate)
+    if not settled(crate) or length(velocity) >= REST_SPEED:
+        return None
+    return next((o for o in state["outposts"] if o.body is body and o.at(add(body.centre(), position))), None)
+
+
 def sell_pods(held):
-    """Each cargo pod's crate settled (and slower than
-    objectives.REST_SPEED) on an outpost's pad, not `held`, sold for
-    pois.POD_VALUE; its point looted."""
+    """Each cargo pod's crate settled on an outpost's pad (pad_under), not
+    `held`, sold for pois.POD_VALUE, its point looted; a recovery's pod
+    only on its contract's destination's pad, which completes it."""
     for crate in list(foot.props.crates):
         key = state["pods"].get(id(crate))
-        if key is None or crate is held:
+        if key is None:
             continue
-        body, position, velocity = foot.prop_state(crate)
-        if not settled(crate) or length(velocity) >= REST_SPEED:
-            continue
-        outpost = next((o for o in state["outposts"] if o.body is body and o.at(add(body.centre(), position))), None)
+        outpost = pad_under(crate, held)
         if outpost is None:
+            continue
+        c = crate_contract(crate)
+        if c is not None:
+            if outpost.name == c.destination:
+                forget_crate(crate)
+                foot.props.remove(foot.bubble, crate, release=False)
+                complete_contract(c)
             continue
         state["market"].credits += pois.POD_VALUE
         state["earned"] += pois.POD_VALUE
@@ -2498,17 +2769,30 @@ def cargo_text():
                                                      "" if n == 1 else "s")
 
 
+def hold_ore():
+    """The ore in the car's hold: its items but the contracts' crates."""
+    car = state["car"]
+    return [] if car is None else [item for item in car.cargo if "contract" not in item]
+
+
 def sell_car_cargo():
-    """The car's cargo sold at the outpost whose pad it is on (trade.Market.sell)."""
+    """The ore in the car's hold at the outpost whose pad it is on: each
+    item a delivery contract wants there delivered (`deliver`), the rest
+    sold (trade.sale); the contracts' crates stay."""
     outpost, car = car_outpost(), state["car"]
     if outpost is None:
         state["trade_note"] = "the car is not on an outpost's pad"
         state["hud"].toast("The car is not on an outpost's pad", hud_module.WARNING)
         return
-    kg, credits = state["market"].sell(car, outpost, world.time)
-    if kg <= 0.0:
-        state["trade_note"] = "no cargo to sell"
+    ore = [item for item in hold_ore() if not deliver(outpost, item)]
+    car.cargo = [item for item in car.cargo if "contract" in item]
+    if not ore:
+        state["trade_note"] = "no ore to sell"
         return
+    credits, supplies = sale(outpost, ore, world.time)
+    outpost.supply.update(supplies)
+    state["market"].credits += credits
+    kg = sum(item["mass"] for item in ore)
     state["sold_kg"] += kg
     state["earned"] += credits
     state["trade_note"] = "sold %.0f kg of ore at %s for %s cr" % (kg, outpost.name, format(int(round(credits)), ","))
@@ -2517,8 +2801,8 @@ def sell_car_cargo():
 
 def outpost_items():
     """The Outpost tab: the outpost whose pad the car is on, its price for
-    each resource at grade 1, the car's cargo, what it would fetch, and
-    selling it."""
+    each resource at grade 1, the car's cargo, what its ore would fetch,
+    and selling it."""
     def here():
         outpost = car_outpost()
         return "%s, the %s" % (outpost.name, outpost.body.name) if outpost is not None else "the car is not on a pad"
@@ -2534,10 +2818,10 @@ def outpost_items():
         return text
 
     def value():
-        outpost, car = car_outpost(), state["car"]
-        if outpost is None or car is None or not car.cargo:
+        outpost, ore = car_outpost(), hold_ore()
+        if outpost is None or not ore:
             return "-"
-        return "%s cr" % format(int(round(state["market"].value(outpost, car.cargo, world.time))), ",")
+        return "%s cr" % format(int(round(state["market"].value(outpost, ore, world.time))), ",")
 
     planet_resources = range(resources.FERRITE, resources.EVAPORITE + 1)
     moon = next(b for b in bodies if b is not planet)
@@ -2551,7 +2835,8 @@ def outpost_items():
          {"stat": "Car's cargo", "get": cargo_text},
          {"stat": "It would fetch", "get": value},
          {"button": "Sell the car's cargo", "do": sell_car_cargo,
-          "hint": "With the car on an outpost's pad: all the ore in its hold sold there."},
+          "hint": "With the car on an outpost's pad: the ore in its hold sold there, or delivered to a "
+                  "contract that wants it."},
          {"note": lambda: state["trade_note"]}],
         [{"heading": "Prices"}] + prices + [
          {"heading": "Survey data"},
@@ -2675,9 +2960,380 @@ def upgrade_items():
     return ("columns", [left, column("Gun and suit", ("gun", "suit")), column("Car", ("car",))])
 
 
+# ── Contracts ──────────────────────────────────────────────────────────────
+
+def contract_day():
+    """The contracts' day: clock.day of the day's time."""
+    return clock.day(day_time())
+
+
+def contract_offers(outpost):
+    """The offers of `outpost` on the planet today (contracts.offers, with
+    its reputation), less those accepted; none elsewhere."""
+    if outpost is None or outpost.body is not planet:
+        return []
+    found = contracts.offers((outpost.name, outpost.direction), contract_day(), poi_seed(),
+                             [(o.name, o.direction) for o in state["outposts"] if o.body is planet], planet.radius,
+                             state["reputation"].get(outpost.name, 0.0))
+    return [c for c in found if c.id not in state["offers_taken"]]
+
+
+def outpost_named(name):
+    return next((o for o in state["outposts"] if o.name == name), None)
+
+
+def active_contract(contract_id):
+    return next((c for c in state["contracts"] if c.id == contract_id), None)
+
+
+def pinned_contract():
+    return active_contract(state["pinned"])
+
+
+def pod_key(c):
+    """The key of a recovery's pod's point of interest (pois.Pois.place), off the cube's faces."""
+    return (planet.index, -2, zlib.crc32(c.id.encode()), 0)
+
+
+def place_pod(c, done=False):
+    """A recovery's pod as a point of interest at its target, of the pod's kind wherever it is."""
+    poi = pois.Poi(pod_key(c), tuple(c.target), 0.0, fixed_kind="pod", done=[0] if done else [])
+    state["pois"].place(poi)
+
+
+def crate_contract(crate):
+    """The active contract a crate prop belongs to (a courier's crate or a recovery's pod), or None."""
+    contract_id = state["couriers"].get(id(crate))
+    if contract_id is not None:
+        return active_contract(contract_id)
+    key = state["pods"].get(id(crate))
+    if key is None:
+        return None
+    return next((c for c in state["contracts"] if c.kind == "recovery" and pod_key(c) == key), None)
+
+
+def forget_crate(crate):
+    state["couriers"].pop(id(crate), None)
+    state["crate_velocity"].pop(id(crate), None)
+    state["pods"].pop(id(crate), None)
+
+
+def crate_item(c, mass, volume):
+    """A contract's crate as an item of the car's hold."""
+    origin = outpost_named(c.origin)
+    return {"body": planet.name, "direction": tuple(origin.direction) if origin is not None else (0.0, 1.0, 0.0),
+            "mass": mass, "grade": 0.0, "resource": resources.NONE, "volume": volume, "contract": c.id}
+
+
+def contract_title(c):
+    return "%s for %s" % (c.kind.capitalize(), c.origin)
+
+
+def hours_left(c):
+    """Game hours (clock.py) until the contract's deadline: the dawn after its last day."""
+    end = (c.deadline + 1) * clock.DAY_LENGTH - 0.25 * clock.DAY_LENGTH
+    return max(0.0, (end - day_time()) * 24.0 / clock.DAY_LENGTH)
+
+
+def contract_progress_text(c):
+    if c.kind == "delivery":
+        done = "%.0f / %.0f kg" % (min(c.delivered, c.quantity), c.quantity)
+    elif c.kind == "survey":
+        done = "%d / %d %%" % (round(100.0 * c.explored), round(100.0 * contracts.SURVEY_SHARE))
+    elif c.kind == "courier":
+        done = "damage %d %%" % round(100.0 * c.damage / contracts.BREAK_DAMAGE)
+    else:
+        done = "to %s" % c.destination
+    return "%s, %.0f h left" % (done, hours_left(c))
+
+
+def contract_target(c):
+    """Where the contract's marker stands (planet space): a delivery's and
+    a courier's destination; a recovery's pod's point until the pod is in
+    the hold or PICKED_UP from it, then its destination; a survey's
+    target. None without a contract."""
+    if c is None:
+        return None
+    if c.kind == "recovery":
+        crate = next((p for p in foot.props.crates if crate_contract(p) is c), None)
+        in_hold = state["car"] is not None and any(i.get("contract") == c.id for i in state["car"].cargo)
+        moved = False
+        if crate is not None:
+            body, position, _ = foot.prop_state(crate)
+            moved = body is planet and poi_distance_to(c.target, add(body.centre(), position)) > PICKED_UP
+        if not in_hold and not moved:
+            return add(planet.centre(), scale(c.target, planet.radius))
+    if c.kind == "survey":
+        return add(planet.centre(), scale(c.target, planet.radius))
+    outpost = outpost_named(c.destination)
+    return outpost.point() if outpost is not None else None
+
+
+def poi_distance_to(direction, point):
+    """Metres along the ground from `point` (planet space) to the unit `direction`."""
+    return planet.radius * math.acos(max(-1.0, min(1.0, dot(direction, normalize(planet.relative(point))))))
+
+
+def contract_note(text, colour=GOOD_TOAST):
+    state["contract_note"] = text
+    state["hud"].toast(text[0].upper() + text[1:], colour)
+
+
+def accept_contract(c):
+    """An offer accepted at its outpost (at_outpost), while fewer than
+    contracts.MAX_ACTIVE are active, and pinned when none is: a courier's
+    crate put in the car's hold when the car is on the pad and it fits,
+    else beside the player on foot (refused otherwise); a recovery's pod
+    placed at its target."""
+    outpost = at_outpost()
+    if outpost is None or outpost.name != c.origin:
+        contract_note("accept a contract on its outpost's pad", hud_module.WARNING)
+        return False
+    if len(state["contracts"]) >= contracts.MAX_ACTIVE:
+        contract_note("at most %d contracts at once" % contracts.MAX_ACTIVE, hud_module.WARNING)
+        return False
+    if c.kind == "courier" and not give_courier_crate(c, outpost):
+        contract_note("no room for the crate: bring the car onto the pad, or yourself", hud_module.WARNING)
+        return False
+    c.state = "active"
+    state["contracts"].append(c)
+    state["offers_taken"].add(c.id)
+    if state["pinned"] is None:
+        state["pinned"] = c.id
+    if c.kind == "recovery":
+        place_pod(c)
+    contract_note("accepted: %s" % contracts.task(c))
+    return True
+
+
+def give_courier_crate(c, outpost):
+    """A courier's crate into the car's hold when the car is on `outpost`'s
+    pad and it fits, else 2 m ahead of the player on foot. Whether it was."""
+    car = state["car"]
+    volume = contracts.COURIER_SIZE ** 3
+    if car_outpost() is outpost and car.can_take(contracts.COURIER_MASS, None, volume):
+        car.cargo.append(crate_item(c, contracts.COURIER_MASS, volume))
+        return True
+    player, bubble = foot.player, foot.bubble
+    if player is None or state["driving"] or bubble.body is not planet:
+        return False
+    up = player.up()
+    forward = player.level(player.heading, up)
+    right = normalize(cross(forward, up))
+    spot = add(player.feet(), add(scale(forward, 2.0), scale(up, 0.5 * contracts.COURIER_SIZE + 0.3)))
+    crate = foot.props.spawn_crate(bubble, spot, quat_from_basis(right, up, scale(forward, -1.0)),
+                                   contracts.COURIER_SIZE, colour=contracts.COURIER_COLOUR,
+                                   mass=contracts.COURIER_MASS)
+    state["couriers"][id(crate)] = c.id
+    return True
+
+
+def end_contract(c, how):
+    """`c` ended "completed", "failed", "expired" or "abandoned": its
+    outpost's reputation up one when completed, else down one (no lower
+    than MIN_REPUTATION); its crate, pod and point of interest gone; the
+    pin moved to the next active contract."""
+    crates = [p for p in foot.props.crates if crate_contract(p) is c]
+    c.state = how
+    state["contracts"] = [a for a in state["contracts"] if a is not c]
+    rep = state["reputation"].get(c.origin, 0.0) + (1.0 if how == "completed" else -1.0)
+    state["reputation"][c.origin] = max(MIN_REPUTATION, rep)
+    if how == "completed":
+        state["contracts_done"] += 1
+    else:
+        state["contracts_failed"] += 1
+    for crate in crates:
+        forget_crate(crate)
+        if foot.gun is not None and crate.body is not None and foot.gun.held == crate.body:
+            foot.gun.drop()
+        foot.props.remove(foot.bubble, crate, release=False)
+    if state["car"] is not None:
+        state["car"].cargo = [i for i in state["car"].cargo if i.get("contract") != c.id]
+    if c.kind == "recovery":
+        state["pois"].pois.pop(pod_key(c), None)
+    if state["pinned"] == c.id:
+        state["pinned"] = state["contracts"][0].id if state["contracts"] else None
+
+
+def complete_contract(c):
+    """`c` done: its reward paid, then ended (end_contract)."""
+    state["market"].credits += c.reward
+    state["earned"] += c.reward
+    end_contract(c, "completed")
+    contract_note("contract complete: %s, +%s cr" % (contract_title(c), format(int(round(c.reward)), ",")))
+
+
+def fail_contract(c, how, why):
+    end_contract(c, how)
+    contract_note("contract %s: %s (%s)" % (how, contract_title(c), why), hud_module.WARNING)
+
+
+def pin_contract(c):
+    state["pinned"] = c.id
+
+
+def abandon_pinned():
+    c = pinned_contract()
+    if c is None:
+        contract_note("no contract pinned", hud_module.WARNING)
+        return
+    fail_contract(c, "abandoned", "%s's reputation -1" % c.origin)
+
+
+def deliver(outpost, item):
+    """An ore item at `outpost` taken by the first active delivery that
+    wants it there (contracts.wants), completing it once it has its
+    quantity. Whether one took it."""
+    c = next((a for a in state["contracts"] if contracts.wants(a, item, outpost.name)), None)
+    if c is None:
+        return False
+    c.delivered += item["mass"]
+    if c.delivered >= c.quantity:
+        complete_contract(c)
+    else:
+        state["hud"].toast("Delivered %.0f kg of %s: %.0f / %.0f kg" % (item["mass"], resources.name(c.resource).lower(),
+                                                                     c.delivered, c.quantity), GOOD_TOAST)
+    return True
+
+
+def deliver_couriers(held):
+    """Each courier's crate settled on its destination's pad (pad_under) delivered."""
+    for crate in list(foot.props.crates):
+        if id(crate) not in state["couriers"]:
+            continue
+        c = crate_contract(crate)
+        outpost = pad_under(crate, held)
+        if c is not None and outpost is not None and outpost.name == c.destination:
+            forget_crate(crate)
+            foot.props.remove(foot.bubble, crate, release=False)
+            complete_contract(c)
+
+
+def strike_crate(c, speed):
+    """A courier's crate struck at `speed` (contracts.strike); broken, its contract fails. Whether it broke."""
+    if not contracts.strike(c, speed):
+        return False
+    fail_contract(c, "failed", "the crate broke")
+    return True
+
+
+def strike_hold(speed):
+    """The car's bump at `speed` striking each courier's crate in its hold."""
+    car = state["car"]
+    for contract_id in [i["contract"] for i in car.cargo if "contract" in i]:
+        c = active_contract(contract_id)
+        if c is not None and c.kind == "courier":
+            strike_crate(c, speed)
+
+
+def watch_couriers():
+    """Each courier's crate struck by how much its velocity changed from
+    last frame while its speed fell (a hit, not a throw)."""
+    seen = state["crate_velocity"]
+    for crate in list(foot.props.crates):
+        contract_id = state["couriers"].get(id(crate))
+        if contract_id is None:
+            continue
+        _, _, velocity = foot.prop_state(crate)
+        before = seen.get(id(crate))
+        seen[id(crate)] = velocity
+        c = active_contract(contract_id)
+        if c is None or before is None or length(velocity) >= length(before):
+            continue
+        strike_crate(c, length(sub(before, velocity)))
+
+
+def update_contracts(dt):
+    """The outposts' reputations put on them (trade's prices); each active
+    contract past its deadline expired; the survey contracts' shares
+    measured every SURVEY_EVERY (ExploredMap.share), completing at
+    contracts.SURVEY_SHARE; the couriers' crates watched; with the car on a
+    pad, the crates in its hold for there delivered; the Contracts tab
+    rebuilt when what it shows changes."""
+    for o in state["outposts"]:
+        o.reputation = state["reputation"].get(o.name, 0.0)
+    if foot.player is None and not state["driving"]:
+        return
+    day = contract_day()
+    for c in list(state["contracts"]):
+        if day > c.deadline:
+            fail_contract(c, "expired", "past its deadline")
+    state["survey_in"] -= dt
+    if state["survey_in"] <= 0.0:
+        state["survey_in"] = SURVEY_EVERY
+        for c in [a for a in state["contracts"] if a.kind == "survey"]:
+            c.explored = state["map"].share(planet, c.target, contracts.SURVEY_RADIUS)
+            if c.explored >= contracts.SURVEY_SHARE:
+                complete_contract(c)
+    if foot.bubble is not None and foot.bubble.body is planet:
+        watch_couriers()
+    car, outpost = state["car"], car_outpost()
+    if car is not None and outpost is not None and car.speed() < 1.0:
+        for item in [i for i in car.cargo if "contract" in i]:
+            c = active_contract(item["contract"])
+            if c is not None and c.kind in ("courier", "recovery") and c.destination == outpost.name:
+                car.cargo.remove(item)
+                complete_contract(c)
+    refresh_contracts_tab()
+
+
+def refresh_contracts_tab():
+    """The Contracts tab's items built again when the outpost here, its offers, the active contracts or the pin changed."""
+    menu = state["menu"]
+    if state["starting"] or not menu.visible:
+        return
+    here = at_outpost()
+    shown = (here.name if here is not None else None, tuple(c.id for c in contract_offers(here)),
+             tuple(c.id for c in state["contracts"]), state["pinned"])
+    if shown == state["contracts_shown"]:
+        return
+    state["contracts_shown"] = shown
+    k = menu.tab_named("Contracts")
+    menu.tabs[k] = ("Contracts", contract_items())
+
+
+def offer_line(c):
+    return "%s  //  %s cr  //  %.0f h" % (c.kind.upper(), format(int(round(c.reward)), ","), hours_left(c))
+
+
+def contract_items():
+    """The Contracts tab: the offers of the outpost whose pad the car or
+    the player is on, each with Accept; the active contracts, each with Pin;
+    and Abandon for the pinned one."""
+    here = at_outpost()
+    left = [{"heading": "Offers"},
+            {"stat": "Here", "get": lambda: at_outpost().name if at_outpost() is not None else "not on a pad"},
+            {"stat": "Reputation", "get": lambda: "%+.0f" % state["reputation"].get(
+                at_outpost().name if at_outpost() is not None else "", 0.0)}]
+    offers = contract_offers(here)
+    if here is None:
+        left.append({"note": lambda: "Bring the car or yourself onto a pad."})
+    elif not offers:
+        left.append({"note": lambda: "No more offers here today; new ones at dawn."})
+    for c in offers:
+        left += [{"note": lambda c=c: offer_line(c)}, {"note": lambda c=c: contracts.task(c)},
+                 {"button": "Accept", "do": lambda c=c: accept_contract(c),
+                  "hint": "Take this contract: %d at most at once; done, it raises %s's reputation and its prices, "
+                          "failed or abandoned it lowers them." % (contracts.MAX_ACTIVE, c.origin)}]
+    right = [{"heading": "Active  %d / %d" % (len(state["contracts"]), contracts.MAX_ACTIVE)}]
+    for c in state["contracts"]:
+        right += [{"note": lambda c=c: "%s  //  %s cr" % (contract_title(c).upper(),
+                                                          format(int(round(c.reward)), ","))},
+                  {"note": lambda c=c: contract_progress_text(c)},
+                  {"button": "Pinned" if c.id == state["pinned"] else "Pin",
+                   "do": lambda c=c: pin_contract(c),
+                   "hint": "Show this contract on the card, the compass and the map."}]
+    if state["contracts"]:
+        right.append({"button": "Abandon the pinned", "do": abandon_pinned,
+                      "hint": "Give up the pinned contract: its outpost's reputation falls by one."})
+    right.append({"note": lambda: state["contract_note"]})
+    return ("columns", [left, right])
+
+
 def menu_tabs():
     return [("System", system_items()), ("Car", car_items()), ("Outpost", outpost_items()),
-            ("Upgrades", upgrade_items()), ("Settings", settings_items()), ("Controls", ("controls", HELP_COLUMNS))]
+            ("Contracts", contract_items()), ("Upgrades", upgrade_items()), ("Settings", settings_items()),
+            ("Controls", ("controls", HELP_COLUMNS))]
 
 
 def menu_subtitle():
@@ -2714,8 +3370,10 @@ def save_game(base=None, quiet=False):
     """The game written to `base` (save_base when None): the clock, the
     player (None while driving), the car, the props and the taken rocks,
     the market, the game's numbers, the waypoint, the day's offset
-    (clock.py) and the explored map. Returns the data, or None without a
-    player or the car driven."""
+    (clock.py), the contracts (the active ones, today's offers accepted,
+    the pin, the reputations and the counts; which crates are couriers')
+    and the explored map. Returns the data, or None without a player or
+    the car driven."""
     player = foot.player
     if player is None and not state["driving"]:
         if not quiet:
@@ -2737,6 +3395,12 @@ def save_game(base=None, quiet=False):
         "props": foot.props.records(bubble) if bubble is not None else [],
         "seen": [state["seen"].get(id(p)) for p in foot.props.all],
         "pods": [list(state["pods"][id(p)]) if id(p) in state["pods"] else None for p in foot.props.all],
+        "couriers": [state["couriers"].get(id(p)) for p in foot.props.all],
+        "contracts": {"active": [contracts.record(c) for c in state["contracts"]],
+                      "taken": sorted(i for i in state["offers_taken"]
+                                      if i.rsplit("/", 2)[1] == str(contract_day())),
+                      "pinned": state["pinned"], "reputation": dict(state["reputation"]),
+                      "done": state["contracts_done"], "failed": state["contracts_failed"]},
         "market": state["market"].record(state["outposts"]),
         "game": {"sold_kg": state["sold_kg"], "earned": state["earned"], "ore_chunks": state["ore_chunks"],
                  "ore_seen": state["ore_seen"], "waypoints": state["waypoints"],
@@ -2791,7 +3455,10 @@ def load_game(base=None):
         taken.add(tuple(key))
     state["seen"] = {}
     state["pods"] = {}
-    for record, seen, pod in zip(data["props"], data["seen"], data.get("pods") or [None] * len(data["props"])):
+    state["couriers"], state["crate_velocity"] = {}, {}
+    none = [None] * len(data["props"])
+    for record, seen, pod, courier in zip(data["props"], data["seen"], data.get("pods") or none,
+                                          data.get("couriers") or none):
         if record["kind"] == "crate":
             prop = foot.props.restore(record, by_name)
         else:
@@ -2800,6 +3467,8 @@ def load_game(base=None):
             state["seen"][id(prop)] = (seen[0], tuple(seen[1]))
         if pod is not None:
             state["pods"][id(prop)] = tuple(pod)
+        if courier is not None:
+            state["couriers"][id(prop)] = courier
     state["pois"].restore(data.get("pois", []), poi_seed())
     state["poi_want_at"], state["poi_asked"], state["poi_asking"] = None, None, []
     state["parts"] = dict(data.get("parts", {}))
@@ -2825,6 +3494,17 @@ def load_game(base=None):
     else:
         position, _, _, north = ship_pose()
         make_car(position, north)
+    kept = data.get("contracts") or {}
+    state["contracts"] = [contracts.restore(r) for r in kept.get("active", [])]
+    state["offers_taken"] = set(kept.get("taken", []))
+    state["pinned"] = kept.get("pinned")
+    state["reputation"] = dict(kept.get("reputation", {}))
+    state["contracts_done"], state["contracts_failed"] = kept.get("done", 0), kept.get("failed", 0)
+    held = {i.get("contract") for i in state["car"].cargo}
+    for c in state["contracts"]:
+        if c.kind == "recovery":
+            place_pod(c, done=pod_key(c) in state["pods"].values() or c.id in held)
+    state["contracts_shown"] = None
     state["car_poses"] = None
     p = data["player"]
     if p is None or (record is not None and record["driving"]):
@@ -2972,6 +3652,7 @@ def frame(dt):
     update_fuel_call()
     update_suit(dt)
     update_pois(dt)
+    update_contracts(dt)
     update_hud(dt)
     update_map(dt)
     update_game()

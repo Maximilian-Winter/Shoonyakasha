@@ -351,7 +351,11 @@ Both programs already save:
   - the credits and supplies, the objectives and the game's numbers
   - the waypoint and the car (its fuel and cargo)
   - the upgrades owned and the day's offset
+  - the suit, the points of interest's states, the parts, the survey data and which crates are pods (§8, §9)
+  - the contracts, the offers accepted today, the pin, the reputations and which crates are couriers' (§10)
   - the explored map's measured cells
+
+  Those of §8–§10 are keys a version-2 save may lack; loading one without them starts them as a new game has them.
 
   It autosaves every `AUTOSAVE_SECONDS` (120 s), on getting out of the car parked on an outpost's pad, on Quit and as the window closes. `--check` saves and loads, on foot and driving.
 
@@ -359,11 +363,6 @@ Later phases add to the records as they add the state, each with a new version a
 
 ```json
 {
-  "parts": { "coil": 1 },
-  "outposts": { "Halden": { "reputation": 2.5 } },
-  "suit": { "reserve": 0.8, "health": 1.0 },
-  "pois": { "discovered": [], "looted": [] },
-  "contracts": { "active": [], "offers_day": 3 },
   "modifiers": [ { "type": "crater", "body": "planet", "direction": [0, 0, 1], "radius": 60, "depth": 9, "time": 15000 } ],
   "events": { "next_shower": 21000.0 }
 }
@@ -538,46 +537,35 @@ The points of interest are the walker's (`walker.py`), on the planet; their rule
 
 ## 10. Contracts
 
+Contracts are in `contracts.py` (generation, the task's text and progress, fragile damage, the record) and `walker.py` (the Contracts tab, the card, the mechanics, the save).
+
 ### 10.1 Kinds
 
-| Kind | Task | Reward basis |
+| Kind | Task | Reward |
 |---|---|---|
-| Delivery | bring `q` kg of resource R (min grade) to outpost B | market value × 1.4 + distance bonus |
-| Courier | carry a fragile crate from A to B by hand or in the cargo, without hard impacts | distance bonus × fragility |
-| Recovery | bring the cargo pod at a POI to outpost B | fixed + distance |
-| Survey | reveal 80 % of the cells within 1 km of a marker | per cell + fixed |
-| Supply run (moon) | deliver goods to a moon outpost | large; needs the long-range package |
+| Delivery | bring 200, 400 or 800 kg of a planet resource at grade 0.3, 0.5 or 0.7 or better to the offering outpost | its value at that grade (`trade.VALUES`, `GRADE_POWER`) × 1.4 + 100 |
+| Courier | carry a fragile crate (0.8 m, 60 kg) to another outpost on the planet | 150 + 4 per km along the ground |
+| Recovery | bring the cargo pod (0.9 m, 200 kg) 1–4 km out back to the outpost | 400 + 60 per km out |
+| Survey | explore 80 % of the map's cells within 300 m of a marker 1–3 km out | 300 |
+
+Each reward is times 1 + 0.1 × the outpost's reputation, rounded to 10 cr. A contract is due by the dawn after its last day, two days after the offer's. The moon's supply run waits for the moon (Phase 3).
 
 ### 10.2 Generation
 
-Offers per outpost are seeded by `(outpost, day index, seed)`, so they are the same all day, after a reload, and refresh at dawn. Python's `hash()` of a string changes from one run to the next, so the seed comes from `zlib.crc32`, as `outposts.py` and `rocks.py` already seed theirs:
+`offers(outpost, day, seed, outposts, radius, reputation)` gives three offers for an outpost (a name and a direction), drawn from a `random.Random` seeded with `zlib.crc32` of the outpost's name, the day and the world's seed, so they are the same all day and after a reload. Python's `hash()` of a string changes from one run to the next, so the seed comes from `zlib.crc32`, as `outposts.py` and `rocks.py` seed theirs. The kinds are weighted 3 : 2 : 2 : 2 (delivery, courier, recovery, survey); a courier with no other outpost becomes a delivery. The day is `clock.day`, which turns at 06:00 at the site. Only the planet's outposts offer contracts. Offers accepted are left out for the rest of the day.
 
-```python
-def offers(outpost, day, world_seed):
-    rng = random.Random(zlib.crc32(f"{outpost.name}:{day}:{world_seed}".encode()))
-    wanted = [k for k, d in outpost.demand.items() if d > 1.2]
-    kinds = ["delivery", "courier", "recovery", "survey"] if wanted else ["courier", "recovery", "survey"]
-    weights = [5, 2, 2, 2] if wanted else [2, 2, 2]
-    out = []
-    for _ in range(3):
-        kind = rng.choices(kinds, weights=weights)[0]
-        if kind == "delivery":
-            r = rng.choice(wanted)
-            q = rng.choice([200, 400, 800])
-            out.append(Contract(kind, outpost.name, resource=r, quantity=q,
-                                min_grade=rng.choice([0.3, 0.5, 0.7]),
-                                destination=outpost.name, deadline_days=2,
-                                reward=round(RESOURCES[r].value * q * 1.4 * 0.6, -1)))
-        ...
-    return out
-```
+### 10.3 State, the tab and the card
 
-### 10.3 State and the objective card
-
-- `Contract.state` goes `offered → active → (completed | failed | expired)`.
-- Up to 3 contracts are active at once. The objective card (`objectives.py`, `hud.py`) shows the pinned one, and the compass marks its target (destination outpost, POI or survey marker).
-- **Fragile crate:** strikes are watched with `sk.PlanetPhysics.watch_strikes`. Each strike adds `damage += max(0, v − 2)²·k`, and above a threshold the crate breaks: the contract fails and the crate splits into junk.
-- **Reputation:** completed contracts raise the outpost's `reputation`. Higher reputation unlocks better offers, better prices (`demand × (1 + 0.02 · rep)`) and the outpost's upgrades.
+- **State:** `Contract.state` goes `offered → active → (completed | failed | expired | abandoned)`. Up to 3 are active at once.
+- **Contracts tab:** with the car or the player on an outpost's pad, its offers, each with Accept; the active contracts, each with Pin; and Abandon the pinned. A contract accepted while none is pinned is pinned, and when the pinned one ends the pin moves to the first still active.
+- **Card, compass and map:** the pinned contract replaces the objective on the card (its task, a bar for a delivery's kilograms or a survey's share, and the hours left) and is marked "Contract" on the compass and the map: a delivery's and a courier's destination; a recovery's pod until it is in the hold or 20 m from its point, then the outpost; a survey's marker.
+- **Delivery:** ore that settles on the destination's pad, or that the car's cargo brings there (Sell the car's cargo), is taken in place of being sold.
+- **Courier:** the crate goes into the car's hold when the car is on the pad and it fits, else down 2 m ahead of the player. `PlanetPhysics.watch_strikes` reports only strikes by dynamic bodies, so the crate's hits are read from its velocity instead: each frame its speed falls, the change of its velocity is a strike. In the hold the car's bumps (`bump_car`) strike it at the speed into the obstacle. Each strike adds `damage += max(0, v − 2)² / 40`; at 1 the crate breaks, it is removed and the contract fails.
+- **Recovery:** the pod is a point of interest with a fixed kind (`Poi.fixed_kind`, `Pois.place`), measured and made like the others; the save's POI record leaves it out and it is placed again from the contract on load.
+- **Delivering a crate:** a courier's crate or a recovery's pod settled on its destination's pad, or in the hold with the car slower than 1 m/s on that pad. Either loads into the hold through the cargo net.
+- **Survey:** every second the share of the explored map's cells within 300 m of the marker that are measured (`ExploredMap.share`); at 80 % it completes.
+- **Reputation:** a completed contract pays its reward and raises its outpost's `reputation` by one; failed, expired or abandoned, it lowers it by one, to no lower than −5. Each point raises the outpost's offers' rewards by 10 % and its prices by 2 % (`trade.REPUTATION_PRICE`, in `base_price`).
+- **Saving:** the save keeps the active contracts (`record`, `restore`), today's offers accepted, the pin, the reputations by outpost name, the counts, and which crates are couriers' (which are pods, as before); a crate in the hold is a cargo item with its `"contract"` and `"volume"`.
 
 ---
 
@@ -797,7 +785,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
    6b. **Lights.** Headlights, a suit lamp and outpost lights, with a forward light loop in `terrain.frag`, `vegetation.frag` and `scene.frag`. Capture shots `lights_*`.
 7. **Suit and temperature** (`walker.py`). Local temperature, reserve, shelter, effects, recovery at an outpost. Milestones 1–6b's features came to `walker.py` first: day and night and the lights, the car's fuel and fuel call, its hold and cargo net with an Outpost tab, the upgrades, and save version 2.
 8. **Points of interest** (`walker.py`). Hash placement, kinds, discovery, salvage parts, survey data; parts in the upgrades' prices and the suit's upgrades.
-9. **Contracts.** Generation, states, objective card integration, fragile crates, reputation.
+9. **Contracts** (`walker.py`). Four kinds on the planet (no moon), the Contracts tab, the pinned contract on the card, the compass and the map, fragile crates, reputation in rewards and prices.
 10. **Meteor showers.** Modifier list, crater invalidation, meteor visuals, meteorites. `--crater-check`.
 11. **Wind and storms.** Wind field, ship, car and prop drag, storms. `--wind-check`.
 12. **The moon expedition.** Moon resources, the refinery, long-range upgrades, transfer planner.

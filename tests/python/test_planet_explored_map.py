@@ -2,7 +2,8 @@
 (examples/python/simulations/planet/explored_map.py), loaded from its file:
 a grid's cells and their directions, the cells around a point nearest
 first, measuring them with the extra probes as the props do (only while
-the probes are free, letting them go when asked), the image's pixels and
+the probes are free, letting them go when asked), the share measured
+within a radius, the image's pixels and
 cells both ways, and the rendered image (unexplored cells, the land and sea
 ramps, ore, north up or turned with the heading, the minimap's circle),
 contour lines and darkened rows, the full map's labels kept apart and
@@ -117,6 +118,21 @@ class ProbeTest(unittest.TestCase):
         explored.probe(planet, (0.0, 0.0, RADIUS), 4, yield_to=True)
         self.assertEqual(world.extra_probes, [])
         self.assertEqual(explored.grids["planet"].measured, 4)
+
+    def test_share_measured_within_a_radius(self):
+        world = World()
+        explored = em.ExploredMap(world, size=65)
+        planet = world.planet
+        self.assertEqual(explored.share(planet, UP, 100.0), 0.0)
+        grid = explored.grid(planet, UP)
+        mid = int(grid.half)
+        cells = [(mid + di, mid + dj) for di in range(-4, 5) for dj in range(-4, 5) if di * di + dj * dj <= 16]
+        for i, j in cells[: len(cells) // 2]:
+            grid.set(i, j, 10.0, 0.0)
+        self.assertAlmostEqual(explored.share(planet, UP, 100.0), (len(cells) // 2) / len(cells))
+        for i, j in cells:
+            grid.set(i, j, 10.0, 0.0)
+        self.assertEqual(explored.share(planet, UP, 100.0), 1.0)
 
 
 class ImageTest(unittest.TestCase):

@@ -19,6 +19,8 @@ the extra probes' number at a time (`walked` counts those measured around
 the player, not revealed), as
 the props do (props.Props.probe): only while nothing else uses the probes,
 and it lets them go while `yield_to` is true (a prop needs its ground).
+`ExploredMap.share` is the share of the cells within a radius of a place
+that are measured.
 
 `render` draws a grid around a cell into an RGBA image: heights coloured
 by the body's ramp (LAND, SEA, MOON, shades of cyan), shaded by their
@@ -213,6 +215,24 @@ class ExploredMap:
                 self.revealing.append((grid, i, j))
                 added += 1
         return added
+
+    def share(self, body, direction, radius):
+        """The share of `body`'s grid cells within `radius` metres of the
+        unit `direction` that are measured; 0 with none of them in the grid."""
+        grid = self.grid(body, direction)
+        at = grid.index(direction)
+        if at is None:
+            return 0.0
+        ci, cj = int(round(at[0])), int(round(at[1]))
+        n = int(radius / self.cell)
+        total = measured = 0
+        for dj in range(-n, n + 1):
+            for di in range(-n, n + 1):
+                i, j = ci + di, cj + dj
+                if di * di + dj * dj <= n * n and grid.inside(i, j):
+                    total += 1
+                    measured += grid.is_measured(i, j)
+        return measured / total if total else 0.0
 
     def probe(self, body, position, probes, yield_to=False):
         """The cells around `position` (from `body`'s centre) measured, with

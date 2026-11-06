@@ -27,12 +27,14 @@ A candidate is valid on land (above MIN_HEIGHT) and out of the water.
 
 `Poi` keeps a candidate's key (body index, face, cell x, cell y), its
 direction and roll, and once measured its height, climate, ore,
-resource, kind (or None) and whether it is valid; `discovered`, `looted`
+resource, kind (or None; its `fixed_kind` when it has one, wherever it
+is, as a contract's pod) and whether it is valid; `discovered`, `looted`
 and `done` (the spots of it used) are what the save keeps (`record`,
 `restore`). `Pois` holds them: `want(body, direction, reach, seed)` adds
 the candidates near a place to be measured; `to_measure(count)` gives
 those still to measure; `measured(key, height, climate, ore, resource,
-water)` sets one's ground and kind.
+water)` sets one's ground and kind; `place(poi)` adds one not from a
+cell, which the record leaves out.
 
 Rewards: `parts_for(poi, spot)` the part a wreck's or a rig's spot gives
 (PARTS, by a hash); `survey_value(poi)` the survey data (credits) a
@@ -158,6 +160,7 @@ class Poi:
     discovered: bool = False
     looted: bool = False
     done: list = field(default_factory=list)    # the spots used
+    fixed_kind: str = None       # the kind it takes once measured, whatever the roll (a contract's pod)
 
     @property
     def name(self):
@@ -191,7 +194,10 @@ class Pois:
         poi.measured = True
         poi.height, poi.climate, poi.ore, poi.resource = height, climate, ore, resource
         poi.valid = height > MIN_HEIGHT and water is None
-        poi.kind = kind_for(poi.roll, height, climate, ore) if poi.valid else None
+        if poi.fixed_kind is not None:
+            poi.kind = poi.fixed_kind
+        else:
+            poi.kind = kind_for(poi.roll, height, climate, ore) if poi.valid else None
         if key in self.queue:
             self.queue.remove(key)
 
@@ -199,9 +205,16 @@ class Pois:
         """The measured points of interest with a kind."""
         return [p for p in self.pois.values() if p.measured and p.kind is not None]
 
+    def place(self, poi):
+        """A point of interest not from a cell (a contract's), queued to be measured."""
+        self.pois[poi.key] = poi
+        if not poi.measured and poi.key not in self.queue:
+            self.queue.append(poi.key)
+
     def record(self):
+        """The states of the cells' points that changed; a placed point (with a fixed kind) is left out."""
         return [{"key": list(p.key), "discovered": p.discovered, "looted": p.looted, "done": list(p.done)}
-                for p in self.pois.values() if p.discovered or p.looted or p.done]
+                for p in self.pois.values() if p.fixed_kind is None and (p.discovered or p.looted or p.done)]
 
     def restore(self, records, seed):
         """The saved states put back on their candidates (made again from

@@ -4,7 +4,8 @@ cell's candidate lies inside it and is the same for the same seed and
 another for another; the cells near a place include its own and every
 candidate within the reach; the kinds by their chances and where they
 may lie; a candidate measured under the water or at sea level has no
-kind; and the saved states come back onto their candidates. Plain
+kind; the saved states come back onto their candidates; and a placed
+point keeps its fixed kind and is left out of the record. Plain
 Python: no engine needed.
 
     python -m unittest discover -s tests/python
@@ -96,6 +97,18 @@ class Saving(unittest.TestCase):
         back = q.pois[key]
         self.assertEqual((back.discovered, back.looted, back.done, back.direction), (True, False, [0, 2], poi.direction))
         self.assertIn(key, q.queue)                              # measured again when wanted
+
+    def test_a_placed_point_keeps_its_kind_and_stays_out_of_the_record(self):
+        p = pois.Pois()
+        here = cube_sphere.direction(4, 0.1, -0.2)
+        key = (0, -2, 12345, 0)
+        p.place(pois.Poi(key, here, 0.99, fixed_kind="pod"))
+        self.assertIn(key, p.queue)
+        p.measured(key, 300.0, (15.0, 0.5), 0.0, 0, 299.0)       # under a lake, a roll for no kind
+        self.assertEqual(p.pois[key].kind, "pod")
+        self.assertIn(p.pois[key], p.found())
+        p.pois[key].discovered = True
+        self.assertEqual(p.record(), [])
 
 
 if __name__ == "__main__":

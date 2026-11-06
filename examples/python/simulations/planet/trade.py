@@ -9,6 +9,7 @@ shoonyakasha.planet.resources; an item without one is ferrite).
 
 An outpost pays for a kilogram of ore its resource's VALUES (0 for a
 resource not there) times its grade to the power GRADE_POWER, times
+1 + REPUTATION_PRICE times its `reputation` (0 without one), times
 OTHER_BODY when the ore comes from the other body, or else 1 plus
 DISTANCE_PREMIUM for every 100 km along the ground from where it was
 mined, and divided by 1 + supply / SUPPLY_HALF, where `supply` is the
@@ -39,6 +40,7 @@ from shoonyakasha.planet.vec import dot
 # Credits per kg at grade 1 by resource.
 VALUES = {FERRITE: 2.0, CUPRITE: 3.0, QUARTZ: 4.67, AMBER: 6.0, EVAPORITE: 1.67, ICE: 1.33, ILMENITE: 10.0}
 GRADE_POWER = 1.5
+REPUTATION_PRICE = 0.02          # added to 1 per point of the outpost's reputation, as a factor of its price
 OTHER_BODY = 1.8                 # times the price for ore from the other body
 DISTANCE_PREMIUM = 0.5           # added to 1 per 100 km along the ground from where the ore was mined
 SUPPLY_HALF = 4_000.0            # kg of a body's ore bought that halves an outpost's price for it
@@ -64,7 +66,8 @@ def ground_distance(radius, a, b):
 
 def base_price(outpost, item):
     """Credits per kg the outpost pays for `item` with no supply."""
-    price = VALUES.get(item.get("resource", FERRITE), 0.0) * item["grade"] ** GRADE_POWER
+    price = (VALUES.get(item.get("resource", FERRITE), 0.0) * item["grade"] ** GRADE_POWER
+             * (1.0 + REPUTATION_PRICE * getattr(outpost, "reputation", 0.0)))
     if item["body"] != outpost.body.name:
         return price * OTHER_BODY
     distance = ground_distance(outpost.body.radius, outpost.direction, item["direction"])

@@ -181,6 +181,11 @@ class DriveTest(unittest.TestCase):
         self.assertLess(ice, p.cargo_capacity)
         self.assertTrue(car.can_take(ice - 1.0, ICE))
         self.assertFalse(car.can_take(ice + 1.0, ICE))
+        # A crate fills its own volume.
+        car.cargo = [{"mass": 60.0, "volume": 0.6 * p.hold_m3}]
+        self.assertAlmostEqual(car.cargo_volume, 0.6 * p.hold_m3)
+        self.assertTrue(car.can_take(60.0, None, 0.39 * p.hold_m3))
+        self.assertFalse(car.can_take(60.0, None, 0.41 * p.hold_m3))
 
     def test_attitude_is_orthonormal(self):
         car = hc.Car(START, NORTH)

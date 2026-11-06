@@ -62,6 +62,7 @@ class Outpost:
     flat_radius: float = 0.0     # m; 0 for the home outpost, which stands on the site's pad
     blend_radius: float = 0.0
     supply: dict = field(default_factory=dict)   # body name: (kg of its ore bought, world time), trade.py
+    reputation: float = 0.0      # the player's standing here (the walker's contracts); raises its prices
 
     def site(self):
         return Site(self.body.index, tuple(self.direction), self.height, self.flat_radius, self.blend_radius)

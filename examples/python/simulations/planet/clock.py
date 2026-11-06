@@ -11,8 +11,9 @@ west, at most 90 - AXIS_TILT degrees up at the site. `site_angles` gives a
 direction's elevation and azimuth seen from the site, as
 PlanetWorld.sun_elevation and sun_azimuth take them. `hour(time)` is the
 site's hour (0 to 24, noon at 12), `local_hour(direction, time, ...)` the
-hour anywhere on the planet, and `time_of(hour, now)` the time nearest
-`now` at which the site has that hour.
+hour anywhere on the planet, `day(time)` the day's index (turning at
+06:00 at the site), and `time_of(hour, now)` the time nearest `now` at
+which the site has that hour.
 
 `exposure_scale(elevation)` is the exposure's factor with the sun at
 `elevation` (degrees) seen from the camera: 1 at DAY_ELEVATION and above,
@@ -61,6 +62,11 @@ def local_hour(direction, time, up, east, north):
         return hour(time)
     angle = math.atan2(dot(cross(a, s), axis), dot(a, s))
     return (12.0 - 24.0 * angle / (2.0 * math.pi)) % 24.0
+
+
+def day(time):
+    """The day's index at `time`: it turns at dawn, 06:00 at the site (day 0 from -DAY_LENGTH / 4)."""
+    return math.floor((time + 0.25 * DAY_LENGTH) / DAY_LENGTH)
 
 
 def time_of(hour_wanted, now):
