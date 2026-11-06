@@ -8,8 +8,10 @@ the ground and drift in the air, the wind moving it in the air but not
 on its cushion and slowing it into a headwind, banking into a turn, when
 it can be left, and its fuel: none burnt on the cushion, the throttle's and the
 boost's and holding height's burn, and dry, settling onto the cushion
-without driving but steering; and the hold, taking rocks within its
-mass and its volume. Plain Python: no engine needed.
+without driving but steering; the hold, taking rocks within its mass
+and its volume; and space mode: its ship's parameters, the rocket
+equation's delta-v, enough for one way to the moon, and hovering on the
+assist in the planet's gravity. Plain Python: no engine needed.
 
     python -m unittest discover -s tests/python
 """
@@ -22,7 +24,9 @@ from pathlib import Path
 PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simulations" / "planet"
 sys.path.insert(0, str(PLANET_DIR))
 
+import flight  # noqa: E402
 import hovercar as hc  # noqa: E402
+from shoonyakasha.planet.vec import quat_from_basis  # noqa: E402
 from shoonyakasha.planet.resources import ICE  # noqa: E402
 from shoonyakasha.planet.vec import dot, length, normalize, sub  # noqa: E402
 
@@ -223,6 +227,51 @@ class DriveTest(unittest.TestCase):
         self.assertAlmostEqual(dot(up, forward), 0.0, places=9)
         self.assertLess(dot(right, normalize(START)), 0.0)  # the right side dipped
 
+
+
+class SpaceTest(unittest.TestCase):
+    HALF = (1.452, 0.756, 3.097)
+
+    def test_its_ships_parameters(self):
+        p = hc.CarParams()
+        s = hc.space_params(p, self.HALF)
+        self.assertEqual((s.dry_mass, s.fuel_capacity, s.isp_main, s.isp_rcs), (p.dry_mass, p.fuel_capacity,
+                                                                                p.space_isp, p.space_isp))
+        self.assertEqual((s.main_thrust, s.rcs_thrust), (p.main_thrust, p.rcs_thrust))
+        self.assertEqual(len(s.gear), 4)
+        self.assertTrue(all(g[1] == -self.HALF[1] for g in s.gear))
+        self.assertTrue(all(abs(g[0]) < self.HALF[0] and abs(g[2]) < self.HALF[2] for g in s.gear))
+        self.assertAlmostEqual(s.inertia[1], p.dry_mass / 3.0 * (self.HALF[0] ** 2 + self.HALF[2] ** 2))
+
+    def test_delta_v(self):
+        p = hc.CarParams()
+        self.assertAlmostEqual(hc.delta_v(p, 100.0), p.space_isp * flight.G0 * math.log(1.0 + 100.0 / p.dry_mass))
+        self.assertLess(hc.delta_v(p, 100.0, cargo=500.0), hc.delta_v(p, 100.0))
+        self.assertEqual(hc.delta_v(p, 0.0), 0.0)
+
+    def test_enough_for_one_way_to_the_moon(self):
+        """A full stock tank: to a 20 km orbit (its speed, a fifth more for gravity and turning), the
+        Hohmann transfer's first burn to the moon's distance, and the moon's circular speed at its surface
+        to land."""
+        planet = flight.Planet()
+        moon = flight.Moon()
+        r1 = planet.radius + 20_000.0
+        orbit = flight.circular_speed(planet, 20_000.0) * 1.2
+        transfer = math.sqrt(planet.gm / r1) * (math.sqrt(2.0 * moon.distance / (r1 + moon.distance)) - 1.0)
+        land = math.sqrt(moon.gm / moon.radius)
+        p = hc.CarParams()
+        self.assertGreater(hc.delta_v(p, p.fuel_capacity), orbit + transfer + land)
+
+    def test_hovers_on_the_assist_in_the_planets_gravity(self):
+        planet = flight.Planet()
+        position = (0.0, 0.0, planet.radius + 500.0)
+        right, up, back = (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0)
+        ship = flight.Ship(position, orientation=quat_from_basis(right, up, back),
+                           params=hc.space_params(hc.CarParams(), self.HALF))
+        for _ in range(int(round(10.0 * 120))):
+            ship.step(planet, flight.Controls(assist=True), 1.0 / 120.0)
+        self.assertAlmostEqual(length(ship.position) - planet.radius, 500.0, delta=2.0)
+        self.assertLess(ship.fuel, hc.CarParams().fuel_capacity)
 
 if __name__ == "__main__":
     unittest.main()

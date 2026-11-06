@@ -55,6 +55,17 @@ enough (LEAVE_HEIGHT) to get out of.
   its "volume" when it has one (a crate), else flight.load_volume
   (`cargo_mass`, `cargo_volume`, `can_take`). The
   cargo does not change how the car flies.
+
+Space mode (walker.py): `space_params(params, half)` is the
+flight.ShipParams the car flies with as a little space ship: its
+`dry_mass`, its tank's `fuel_capacity`, a space drive of `space_isp`
+seconds for every thruster, `main_thrust` forward and `rcs_thrust` along
+the other directions, its cargo's limits, and the inertia, drag and lift
+of a box of half extents `half` (right, up, back) of that mass, its gear
+at the corners of the box's underside (GEAR_IN of the way out) and its
+hull at the corners of its top and at its nose and tail. With
+`space_isp`, the rocket equation gives the car `delta_v(params, fuel,
+cargo)`.
 """
 
 import math
@@ -63,7 +74,8 @@ from dataclasses import dataclass
 from shoonyakasha.planet.resources import FERRITE
 from shoonyakasha.planet.vec import add, cross, dot, length, normalize, rotate, scale, sub
 
-from flight import load_volume
+import flight
+from flight import G0, load_volume
 
 STEP = 1.0 / 120.0               # s
 HOVER_MIN = 0.45                 # m above the ground, the cushion
@@ -96,6 +108,9 @@ MAX_PITCH = math.radians(12.0)
 ATTITUDE_EASE = 0.25             # s
 LEAVE_SPEED = 3.0                # m/s
 LEAVE_HEIGHT = 3.0               # m above the ground
+GEAR_IN = 0.85                   # of the half extents out the space mode's gear stands
+DRAG_SHARE = 0.9                 # the drag coefficient over the box's front
+LIFT_SHARE = 0.3                 # the lift coefficient over its underside
 
 
 @dataclass
@@ -106,6 +121,30 @@ class CarParams:
     air_burn: float = 0.03               # kg/s holding height from AIR_HEIGHT up (less below, none on the cushion)
     cargo_capacity: float = 1_500.0      # kg the hold takes
     hold_m3: float = 1.0                 # m^3 of loose rock the hold takes (flight.load_volume)
+    dry_mass: float = 1_800.0            # kg without fuel or cargo, in space mode
+    space_isp: float = 3_000.0           # s: the space drive's specific impulse
+    main_thrust: float = 30_000.0        # N forward in space mode
+    rcs_thrust: float = 25_000.0         # N along each other direction in space mode
+
+
+def space_params(params, half):
+    """flight.ShipParams for the car in space mode (see the module's docstring)."""
+    hx, hy, hz = half
+    m = params.dry_mass
+    inertia = (m / 3.0 * (hy * hy + hz * hz), m / 3.0 * (hx * hx + hz * hz), m / 3.0 * (hx * hx + hy * hy))
+    gear = tuple((sx * GEAR_IN * hx, -hy, sz * GEAR_IN * hz) for sx in (-1.0, 1.0) for sz in (-1.0, 1.0))
+    hull = tuple((sx * hx, hy, sz * hz) for sx in (-1.0, 1.0) for sz in (-1.0, 1.0)) + ((0.0, 0.0, -hz), (0.0, 0.0, hz))
+    return flight.ShipParams(dry_mass=m, fuel_capacity=params.fuel_capacity, isp_main=params.space_isp,
+                             isp_rcs=params.space_isp, cargo_capacity=params.cargo_capacity, hold_m3=params.hold_m3,
+                             inertia=inertia, main_thrust=params.main_thrust, rcs_thrust=params.rcs_thrust,
+                             max_torque=4.0 * max(inertia), drag_area=DRAG_SHARE * 4.0 * hx * hy,
+                             lift_area=LIFT_SHARE * 4.0 * hx * hz, gear=gear, hull=hull)
+
+
+def delta_v(params, fuel, cargo=0.0):
+    """m/s the car's space drive can give with `fuel` and `cargo` kg aboard (the rocket equation)."""
+    m = params.dry_mass + cargo
+    return params.space_isp * G0 * math.log((m + fuel) / m) if fuel > 0.0 else 0.0
 
 
 @dataclass

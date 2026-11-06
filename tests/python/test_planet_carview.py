@@ -3,8 +3,9 @@
 hints (hud.py): the chase camera behind and above the car looking at it,
 farther with speed, lagging a turn and catching up, turned by the mouse
 and easing back behind it, kept above the ground; the field of view
-widening with speed; the sticks' dead zone; and the hints while driving.
-Plain Python: no engine needed.
+widening with speed; the sticks' dead zone; the hints while driving,
+high enough for space mode and in it; and the space mode's controls from
+the keys. Plain Python: no engine needed.
 
     python -m unittest discover -s tests/python
 """
@@ -18,6 +19,7 @@ PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simu
 sys.path.insert(0, str(PLANET_DIR))
 
 import carview  # noqa: E402
+import flight  # noqa: E402
 import hovercar  # noqa: E402
 import hud  # noqa: E402
 from shoonyakasha.planet.vec import dot, length, normalize, sub  # noqa: E402
@@ -98,6 +100,33 @@ class ViewTest(unittest.TestCase):
         self.assertEqual(keys, [("W", "S"), ("A", "D"), ("Space", "Ctrl"), ("Shift",)])
         self.assertEqual(hud.drive_hints(can_leave=True)[-1], (("F",), "Get out"))
         self.assertEqual(hud.drive_hints(pad=True, can_leave=True)[-1], (("pad:X",), "Get out"))
+        self.assertEqual(hud.drive_hints(high=True)[-1], (("G",), "Space mode"))
+        space = [h[0] for h in hud.drive_hints(space=True)]
+        self.assertIn(("T",), space)
+        self.assertIn((",", "."), space)
+        self.assertEqual(space[-1], ("G",))
+
+    def test_space_controls(self):
+        class Input:
+            def __init__(self, held):
+                self.held = held
+
+            def is_key_down(self, key):
+                return key in self.held
+
+            def is_gamepad_connected(self):
+                return False
+
+        controls = flight.Controls()
+        carview.read_space_controls(Input({carview.keys.W, carview.keys.UP, carview.keys.SPACE, carview.keys.Q}),
+                                    controls, 1.0)
+        self.assertAlmostEqual(controls.throttle, carview.THROTTLE_RATE)
+        self.assertEqual((controls.pitch, controls.yaw, controls.roll, controls.vertical), (1.0, 0.0, -1.0, 1.0))
+        carview.read_space_controls(Input(set()), controls, 1.0)
+        self.assertAlmostEqual(controls.throttle, carview.THROTTLE_RATE)           # stays where it was left
+        self.assertEqual((controls.pitch, controls.vertical), (0.0, 0.0))
+        carview.read_space_controls(Input({carview.keys.S}), controls, 10.0)
+        self.assertEqual(controls.throttle, 0.0)
 
 
 if __name__ == "__main__":

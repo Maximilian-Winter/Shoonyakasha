@@ -69,6 +69,20 @@ the ground (`step_car`; on its cushion it does not move it), the props are
 dragged through it, and the suit's chill takes its speed CHILL_HEIGHT
 above the ground at the camera.
 
+Space mode (G, `enter_space`): at least SPACE_HEIGHT above the ground the
+car becomes a little space ship, a flight.Ship of hovercar.space_params
+(its tank burnt by its space drive, its cargo aboard) under the planet's
+and the moon's gravity, stepped in FLIGHT_STEP steps (`step_space`) with
+carview.read_space_controls, translation assist on at first (T switches
+it). From WARP_HEIGHT up `,` and `.` change the time warp (WARPS); the
+HUD shows the body it is reckoned around, the assist, the throttle, the
+warp, the orbit's periapsis and apoapsis and the delta-v left
+(`space_lines`). G within HOVER_BACK of the ground, or touching down
+slower than LANDED_SPEED, makes it the hover car again over the body
+under it (`leave_space`), the planet's or the moon's (`car_body`); on the
+moon it hovers, parks and is got out of as on the planet, and the player
+walks there. The save keeps the car's body and its space mode.
+
 The car's fuel (hovercar.py's CarParams and fuel): the HUD shows its tank
 (FUEL) while driving; dry, it settles onto its cushion and only steers,
 and a toast says so. The menu's Car tab shows the fuel, where the car is
@@ -220,7 +234,8 @@ grab, right trigger punt, the bumpers the hold distance.
                                              take and end a contract of each kind, bring down a meteor shower,
                                              stand in a storm, pause, save, change the game and load it, drive and fly
                                              the car, hover it on a lake and a river, run it dry and
-                                             call fuel, then night; report and exit
+                                             call fuel, fly it in space mode and land it on the moon,
+                                             then night; report and exit
 """
 
 import argparse
@@ -253,6 +268,7 @@ import clock
 import config
 import contracts
 import events
+import flight
 import hovercar
 import lamps
 import pois
@@ -432,6 +448,18 @@ RAIN_SPEED = 9.0                # m/s
 RAIN_STREAK = 0.06              # s
 RAIN_WIDTH = 0.012              # m
 RAIN_COLOUR = (0.32, 0.35, 0.4)  # LDR, added to the image
+SPACE_HEIGHT = 250.0            # m above the ground the car must be for space mode
+HOVER_BACK = 300.0              # m above the ground within which space mode goes back to the hover car
+FLIGHT_STEP = 1.0 / 120.0       # s: space mode's steps
+MAX_FLIGHT_STEPS = 256          # a frame, at most
+WARPS = (1, 4, 16, 64)          # space mode's time warps
+WARP_HEIGHT = 5_000.0           # m above the ground below which the time warp is 1
+LANDED_SPEED = 2.0              # m/s: touching down slower, space mode ends
+SPACE_CHECK_SECONDS = 40.0      # s --check waits at most for the car to climb to SPACE_HEIGHT or come down
+SPACE_RISE_SECONDS = 5.0        # s it climbs on the assist in space mode
+SPACE_RISE_MIN = 100.0          # m it must rise in that time, at least
+SPACE_CHECK_DROP = 600.0        # m above a moon outpost's pad it puts the car in space mode
+SPACE_LAND_SECONDS = 60.0       # s it waits at most for the car to land there
 POI_MARKER, LOOTED_MARKER, SIGNAL_MARKER = (1.0, 0.85, 0.35, 1.0), (0.55, 0.58, 0.62, 1.0), (0.6, 0.75, 0.85, 0.6)
 WALKER_UPGRADES = upgrades.for_groups(("car", "gun", "suit"))   # the upgrades the outposts here offer
 
@@ -468,6 +496,14 @@ HELP_COLUMNS = [
         (("Space", "Ctrl"), "Up / down"),
         (("Shift",), "Boost"),
         (("Mouse",), "Look around the car"),
+        (("G",), "Space mode, %.0f m up; back to hovering within %.0f m of the ground" % (SPACE_HEIGHT, HOVER_BACK)),
+    ]), ("Space mode", [
+        (("W", "S"), "Throttle up / down"),
+        (("Space", "Ctrl"), "Thrust up / down"),
+        (("Arrows",), "Pitch and yaw"),
+        (("Q", "E"), "Roll"),
+        (("T",), "Translation assist on / off"),
+        ((",", "."), "Time warp down / up, %.0f km up" % (WARP_HEIGHT / 1000.0)),
     ])],
 ]
 
@@ -476,8 +512,10 @@ parser.add_argument("--check", action="store_true",
                     help="walk 10 s north, grab a crate and throw it, set a waypoint on the map, run the suit out in the cold, "
                          "sell ore at Base, "
                          "load the car's net and sell its cargo, buy upgrades, use a point of interest of each kind "
-                         "and sell survey data, take and end a contract of each kind, pause, save, change the game and load it, drive and fly the car, hover it on a lake and a river, "
-                         "run it dry and call fuel, then night; report and exit")
+                         "and sell survey data, take and end a contract of each kind, bring down a meteor shower, "
+                         "stand in a storm, pause, save, change the game and load it, drive and fly the car, hover it "
+                         "on a lake and a river, run it dry and call fuel, fly it in space mode and land it on the "
+                         "moon, then night; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 
@@ -524,6 +562,11 @@ state = {
     "chase": carview.ChaseCamera(),
     "chase_basis": None,          # the chase camera's (right, up, forward) this frame
     "driving": False,
+    "space": None,                # the car in space mode (flight.Ship), or None
+    "space_controls": flight.Controls(),
+    "ship_time": 0.0,             # the world's clock the space mode's steps have reached
+    "warp": 0,                    # index into WARPS
+    "car_body": None,             # the world body the car is reckoned around; None: the planet
     "pad_x": False,               # the gamepad's X held last frame
     "viewmodel": None,
     "hud": None,                  # the head-up display (hud.Hud)
@@ -767,7 +810,7 @@ def place_ship(camera):
     if car is None:
         return
     centre = car_position()
-    right, up, forward = car.attitude()
+    right, up, forward = car_attitude()
     if state["ship_model"] is not None:
         root, meshes = state["ship_model"]
         for entity in meshes:
@@ -777,9 +820,11 @@ def place_ship(camera):
         engine.scene.set_position(root, sub(add(centre, scale(up, bob)), camera))
         engine.scene.set_rotation(root, euler_from_basis(scale(right, -1.0), up, scale(forward, -1.0)))
     controls = state["car_controls"]
-    state["car_glows"].update(view_basis(), sub(centre, camera), (right, up, forward),
-                              controls.throttle if state["driving"] else 0.0,
-                              controls.boost and state["driving"], car.speed())
+    throttle = controls.throttle if state["driving"] else 0.0
+    if state["space"] is not None:
+        throttle = state["space_controls"].throttle
+    state["car_glows"].update(view_basis(), sub(centre, camera), (right, up, forward), throttle,
+                              controls.boost and state["driving"] and state["space"] is None, car.speed())
 
 
 def remove_ship_body():
@@ -796,12 +841,13 @@ foot.on_drop = remove_ship_body
 
 def car_position():
     """The car's centre in planet space."""
-    return add(planet.centre(), state["car"].position)
+    return add(car_body().centre(), state["car"].position)
 
 
 def make_car(position, heading, target=hovercar.HOVER_MIN):
     """The car at `position` (planet space), its nose along `heading`, with the upgrades' parameters."""
     state["car"] = hovercar.Car(planet.relative(position), heading, target, params=state["params"]["car"])
+    state["car_body"], state["space"] = None, None
     update_ship()
 
 
@@ -814,10 +860,10 @@ def update_ship():
 
 def car_ground(point):
     """The height of the car's underside above the ground with its centre
-    at `point` (relative to the planet's centre), from the ground patch;
-    None where it is not known."""
+    at `point` (relative to the centre of the body it is over), from the
+    ground patch; None where it is not known."""
     patch = world.patch
-    if patch is None or patch[0] is not planet:
+    if patch is None or patch[0] is not car_body():
         return None
     answer = patch[1].query(point)
     if answer is None:
@@ -827,12 +873,12 @@ def car_ground(point):
 
 def camera_ground(point):
     """The height above the ground of `point` (planet space), from the ground patch, or None."""
-    h = car_ground(planet.relative(point))
+    h = car_ground(car_body().relative(point))
     return None if h is None else h + SHIP_HALF[1]
 
 
 def car_patch_request():
-    """(planet, patch): the ground patch to measure around where the car
+    """(body, patch): the ground patch to measure around where the car, on the body it is over,
     will be when its heights come back, ahead along its velocity by the
     probes' latency, reaching CAR_PATCH_MARGIN and its look-ahead beyond."""
     car = state["car"]
@@ -842,8 +888,9 @@ def car_patch_request():
     ahead = world.probe_latency * state["frame_ms"] / 1000.0
     half = CAR_PATCH_MARGIN + length(along) * (ahead + hovercar.LOOK_AHEAD)
     centre = add(car.position, scale(along, ahead))
-    return planet, GroundPatch(planet.radius, centre, 2.0 * half / (PATCH_SIZE - 1), sea=planet.ocean,
-                               water=world.water_level)
+    body = car_body()
+    return body, GroundPatch(body.radius, centre, 2.0 * half / (PATCH_SIZE - 1), sea=body.ocean,
+                             water=world.water_level if body is planet else None)
 
 
 def near_car():
@@ -965,6 +1012,9 @@ def leave_car():
     car = state["car"]
     if not state["driving"]:
         return False
+    if state["space"] is not None:
+        state["hud"].toast("Land first", hud_module.WARNING)
+        return False
     if not car.can_leave():
         state["hud"].toast("Slow down and come down first", hud_module.WARNING)
         return False
@@ -973,7 +1023,7 @@ def leave_car():
     h = car_ground(side)
     if h is None:
         return False
-    feet = add(planet.centre(), add(side, scale(up, -(h + SHIP_HALF[1]) + SPAWN_LIFT)))
+    feet = add(car_body().centre(), add(side, scale(up, -(h + SHIP_HALF[1]) + SPAWN_LIFT)))
     bubble = foot.ensure_bubble(feet)
     foot.spawn(feet, forward)
     place_eye()
@@ -1006,7 +1056,7 @@ def read_car_controls():
 def step_car(dt):
     """The car moved by `dt` (driven, or parked with no controls) in the
     wind at its height above the ground (PlanetWorld.wind_at) and buffeted
-    in a strong one (buffet_car), stopped by
+    in a strong one (buffet_car), or in space mode by step_space; stopped by
     trunks and fixed rocks ahead (bump_car), a bump striking the fragile
     crates in its hold (strike_hold); its poses before and after kept for
     its body in the bubble."""
@@ -1015,8 +1065,11 @@ def step_car(dt):
         return
     before = (car_position(), car_rotation())
     controls = state["car_controls"] if state["driving"] else hovercar.CarControls()
-    car.step(dt, controls, car_ground, wind=lambda point: world.wind_at(planet, point, car.height))
-    buffet_car(dt)
+    if state["space"] is not None:
+        step_space(dt)
+    else:
+        car.step(dt, controls, car_ground, wind=lambda point: world.wind_at(car_body(), point, car.height))
+        buffet_car(dt)
     impact = bump_car(dt)
     if impact > 0.0:
         strike_hold(impact)
@@ -1025,7 +1078,7 @@ def step_car(dt):
 
 
 def car_rotation():
-    right, up, forward = state["car"].attitude()
+    right, up, forward = car_attitude()
     return quat_from_basis(right, up, scale(forward, -1.0))
 
 
@@ -1065,7 +1118,7 @@ def move_car_body(bubble, fraction):
     along this frame's poses (OnFoot.step's before_step), made when the car
     comes within the bubble's reach and removed beyond it."""
     poses = state["car_poses"]
-    if poses is None or bubble.body is not planet:
+    if poses is None or bubble.body is not car_body():
         remove_ship_body()
         return
     (p0, q0), (p1, q1) = poses
@@ -1090,7 +1143,10 @@ def move_car_body(bubble, fraction):
 def place_chase(dt):
     """The camera behind the car while driving; the field of view widening with its speed."""
     car = state["car"]
-    eye, basis = state["chase"].update(dt, car_position(), car.heading, car.up(), car.speed(), camera_ground)
+    heading, up = car.heading, car.up()
+    if state["space"] is not None:
+        _, up, heading = state["space"].axes()
+    eye, basis = state["chase"].update(dt, car_position(), heading, up, car.speed(), camera_ground)
     state["position"], state["forward"] = eye, basis[2]
     state["chase_basis"] = basis
     set_fov(carview.fov(settings["fov"], car.speed()))
@@ -1276,9 +1332,15 @@ def update_hud(dt):
         car = state["car"]
         up = car.up()
         speed = length(sub(car.velocity, scale(up, dot(car.velocity, up))))
-        hud.update(view_basis(), state["position"], planet, None, None, markers(planet), speed, pad=pad, dt=dt,
+        body = car_body()
+        space = state["space"]
+        if space is not None:
+            speed = length(sub(space.velocity, body.velocity()))
+        hud.update(view_basis(), state["position"], body, None, None, markers(body), speed, pad=pad, dt=dt,
                    height=car.height, drive=car.can_leave(), hour=hour_text(),
-                   car_fuel=car.fuel / car.params.fuel_capacity, flash=flash_tint())
+                   car_fuel=car.fuel / car.params.fuel_capacity, flash=flash_tint(),
+                   space=space_lines() if space is not None else None,
+                   high=car.height is not None and car.height >= SPACE_HEIGHT)
         return
     body = foot.bubble.body
     targets = markers(body)
@@ -1401,7 +1463,17 @@ def run_check(dt):
     and DRY_SECONDS at full throttle, passing when it moved less than 1 m,
     fuel called (call_fuel) and, by FUEL_WAIT after it is due, delivered:
     the tank holding what the credits less the fee buy at its price (at
-    most full) and the credits less that; then the day's hour set to NIGHT_CHECK_HOUR and
+    most full) and the credits less that; then space mode
+    (run_space_check): the car climbed past SPACE_HEIGHT and into space
+    mode, risen on the assist for SPACE_RISE_SECONDS (at least
+    SPACE_RISE_MIN, burning fuel), saved and loaded there (back within
+    1 cm), brought down within HOVER_BACK and back to hovering over the
+    planet; then put in space mode SPACE_CHECK_DROP above a moon outpost's
+    pad at the moon's velocity, coming down on the assist, passing when it
+    lands within SPACE_LAND_SECONDS, the hover car again over the moon,
+    within 50 m of the pad and not hard, and the player got out stands on
+    the moon at the moon's temperature; then the car put back at Base;
+    then the day's hour set to NIGHT_CHECK_HOUR and
     NIGHT_SECONDS later passing with the night's exposure
     (clock.NIGHT_SCALE) and at least the car's two headlights drawn. The
     settings are the defaults and are not written. With --shot,
@@ -1419,10 +1491,10 @@ def run_check(dt):
     _lake added), after climbing for LAKE_CLIMB_SECONDS and 2 s more,
     above it (with _lake_above added), over the river (with _river added)
     and, after climbing for RIVER_CLIMB_SECONDS and 2 s more, above it
-    (with _river_above added), and at night (with _night added)."""
+    (with _river_above added), on the moon (with _moon added) and at night (with _night added)."""
     player = foot.player
     check = state["check"]
-    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "night", "net_out")):
+    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "space", "night", "net_out")):
         return
     if check is None:
         check = state["check"] = {"stage": "ship" if args.shot else "walk", "time": 0.0,
@@ -1929,6 +2001,10 @@ def run_check(dt):
                   % (check["dry_moved"], call["outpost"].name, call["price"], call["fee"], car.fuel, spent,
                      "passed" if fuel_ok else "FAILED"), flush=True)
             check["ok"] = check["ok"] and fuel_ok
+            check["stage"], check["time"] = "space", 0.0
+    elif stage == "space":
+        if run_space_check(check, t):
+            check["ok"] = check["ok"] and check["space_ok"]
             check["stage"], check["time"] = "night", 0.0
     elif stage == "night":
         state["car_controls"] = hovercar.CarControls()
@@ -2458,6 +2534,121 @@ def run_storm_check(check, t):
     return False
 
 
+def run_space_check(check, t):
+    """--check's space mode (see run_check); True once done."""
+    s = check.setdefault("space", {"step": "climb", "t0": t, "lines": [], "ok": True})
+    car, step, since = state["car"], s["step"], t - s["t0"]
+
+    def done(ok, line, next_step):
+        s["ok"] = s["ok"] and ok
+        s["lines"].append("%s: %s" % (line, "ok" if ok else "FAILED"))
+        s["step"], s["t0"] = next_step, t
+
+    if step == "climb":
+        state["car_controls"] = hovercar.CarControls(climb=1.0)
+        if car.height is not None and car.height >= SPACE_HEIGHT + 5.0:
+            state["car_controls"] = hovercar.CarControls()
+            entered = enter_space()
+            s["from"] = (car.height, car.fuel)
+            done(entered, "into space mode %.0f m up" % car.height, "rise")
+        elif since > SPACE_CHECK_SECONDS:
+            done(False, "the car did not climb to %.0f m" % SPACE_HEIGHT, "done")
+        return False
+    ship, controls = state["space"], state["space_controls"]
+    if step == "rise":
+        controls.vertical = 1.0
+        if since >= SPACE_RISE_SECONDS:
+            controls.vertical = 0.0
+            rose, burnt = car.height - s["from"][0], s["from"][1] - car.fuel
+            ok = rose > SPACE_RISE_MIN and burnt > 0.0 and car.fuel == ship.fuel
+            done(ok, "rose %.0f m on the assist in %.0f s, burning %.2f kg" % (rose, SPACE_RISE_SECONDS, burnt), "saved")
+            save_game(CHECK_SAVE_BASE, quiet=True)
+            s["saved_at"] = ship.position
+            state["space"].position = add(ship.position, (100.0, 0.0, 0.0))
+            loaded = load_game(CHECK_SAVE_BASE)
+            moved = length(sub(state["space"].position, s["saved_at"])) if state["space"] is not None else math.inf
+            done(loaded and moved < 0.01, "saved and loaded in space mode: %.3f m from where it was saved" % moved,
+                 "down")
+        return False
+    if step == "down":
+        if ship is None:
+            done(False, "space mode ended on its own", "done")
+            return False
+        controls.vertical = -1.0
+        if car.height is not None and car.height < HOVER_BACK - 20.0:
+            controls.vertical = 0.0
+            back = leave_space()
+            done(back and state["space"] is None and car_body() is planet,
+                 "back to the hover car %.0f m up over the planet" % car.height, "to_moon")
+        elif since > SPACE_CHECK_SECONDS:
+            done(False, "it did not come down within %.0f m" % HOVER_BACK, "done")
+        return False
+    if step == "to_moon":
+        outpost = next(o for o in state["outposts"] if o.body is not planet)
+        moon = outpost.body
+        up = outpost.direction
+        east, north = local_frame(up)
+        position = add(moon.centre(), scale(up, moon.radius + outpost.height + SPACE_CHECK_DROP))
+        state["space"] = flight.Ship(position, moon.velocity(), quat_from_basis(east, up, scale(north, -1.0)),
+                                     params=hovercar.space_params(state["params"]["car"], SHIP_HALF), fuel=car.fuel,
+                                     cargo=car.cargo)
+        state["space_controls"] = flight.Controls(vertical=-1.0, assist=True)
+        state["ship_time"], state["warp"] = world.time, 0
+        s["outpost"] = outpost
+        s["step"], s["t0"] = "land", t
+        return False
+    if step == "land":
+        outpost = s["outpost"]
+        if ship is not None:
+            if since > SPACE_LAND_SECONDS:
+                done(False, "the car did not land on the moon in %.0f s" % SPACE_LAND_SECONDS, "done")
+            return False
+        away = outposts.ground_distance(outpost.body.radius, outpost.direction, normalize(car.position))
+        hard = any(toast[0].startswith("Hard landing") for toast in state["hud"].toasts)
+        done(car_body() is outpost.body and not hard and away < 50.0,
+             "came down %.0f m on the assist and landed on the moon %.0f m from %s's pad, the hover car again"
+             % (SPACE_CHECK_DROP, away, outpost.name), "settle")
+        return False
+    if step == "settle":
+        state["car_controls"] = hovercar.CarControls()
+        if since >= 2.0:
+            left = leave_car()
+            s["left"] = left
+            s["step"], s["t0"] = "walk", t
+        return False
+    if step == "walk":
+        player = foot.player
+        if player is None:
+            if since > LOAD_SECONDS:
+                done(False, "no player on the moon", "done")
+            return False
+        if since < 1.0:
+            return False
+        temperature = here_temperature()
+        moon_ok = (foot.bubble.body is s["outpost"].body and temperature is not None
+                   and abs(temperature - suit.moon_temperature(dot(world.sun_direction(),
+                                                                   normalize(foot.bubble.body.relative(
+                                                                       state["position"]))))) < 1e-6)
+        if args.shot:
+            base, ext = os.path.splitext(args.shot)
+            screenshot(base + "_moon" + ext)
+        done(s["left"] and moon_ok, "out of the car on the moon, standing, %.0f C" % (temperature or 0.0), "home")
+        return False
+    if step == "home":
+        enter_car(anywhere=True)
+        position, _, _, north = ship_pose()
+        make_car(position, north)
+        update_ship()
+        state["chase"].reset()
+        print("[walker] space mode:\n" + "\n".join("[walker]   " + line for line in s["lines"])
+              + "\n[walker]   %s" % ("passed" if s["ok"] else "FAILED"), flush=True)
+        check["space_ok"] = s["ok"]
+        return True
+    print("[walker] space mode:\n" + "\n".join("[walker]   " + line for line in s["lines"])
+          + "\n[walker]   FAILED", flush=True)
+    os._exit(1)
+
+
 def check_contract(kind, n, **fields):
     """--check: a contract of `kind` from Base to Base for 100 cr, due in contracts.DEADLINE_DAYS days."""
     home = state["home"].name
@@ -2477,7 +2668,7 @@ def update_map(dt):
     if player is None and not state["driving"]:
         return
     if state["driving"]:
-        body, feet = planet, state["car"].position
+        body, feet = car_body(), state["car"].position
     else:
         body = foot.bubble.body
         feet = foot.bubble.body_relative(player.feet())
@@ -2776,7 +2967,7 @@ def poi_at(poi, offset):
 def player_here():
     """The player's feet (or the car), planet space, on the planet; None elsewhere or without either."""
     if state["driving"]:
-        return car_position()
+        return car_position() if car_body() is planet else None
     if foot.player is None or foot.bubble.body is not planet:
         return None
     return foot.bubble.to_world(foot.player.feet())
@@ -3061,15 +3252,15 @@ def car_outpost():
 
 
 def fuel_offer():
-    """(the nearest outpost on the planet, metres along the ground to it)
+    """(the nearest outpost on the body the car is over, metres along the ground to it)
     for a fuel call to the car, off every pad and on its cushion
     (hovercar.LEAVE_HEIGHT), or None."""
     car = state["car"]
     if car is None or car_outpost() is not None or car.height is None or car.height > hovercar.LEAVE_HEIGHT:
         return None
-    here = normalize(car.position)
-    found = [(o, outposts.ground_distance(planet.radius, o.direction, here))
-             for o in state["outposts"] if o.body is planet]
+    here, body = normalize(car.position), car_body()
+    found = [(o, outposts.ground_distance(body.radius, o.direction, here))
+             for o in state["outposts"] if o.body is body]
     return min(found, key=lambda f: f[1]) if found else None
 
 
@@ -3811,9 +4002,11 @@ def quit_game():
 # ── Meteor showers ─────────────────────────────────────────────────────────
 
 def shower_here():
-    """The unit direction under the camera on the planet, or None at the start's menu or with neither a player
-    nor the car driven."""
+    """The unit direction under the camera on the planet, or None at the start's menu, with neither a player
+    nor the car driven, or with the camera over the moon."""
     if state["starting"] or (foot.player is None and not state["driving"]):
+        return None
+    if world.body_under(state["position"]) is not planet:
         return None
     return normalize(planet.relative(state["position"]))
 
@@ -3870,15 +4063,19 @@ def update_showers():
     start up to SHOWER_TRIES times; announced WARNING_SECONDS before its
     start once that is known, with a toast and a marker on the compass;
     each meteor's path flown back from where it strikes; and each impact
-    struck at its time (`strike`). Once all have struck, the next is
-    planned. Under --check none is planned; the check gives its own. The
+    struck at its time (`strike`), also while the camera is away from the
+    planet. Once all have struck, the next is planned. Under --check none is planned; the check gives its own. The
     props that have cooled or are gone leave `hot`."""
     present = {id(p) for p in foot.props.rocks}
     state["hot"] = {i: hot for i, hot in state["hot"].items()
                     if i in present and events.heat(world.time - hot[0], hot[1]) > 0.0}
     here, shower = shower_here(), state["shower"]
-    if here is None or (args.check and shower is None):
+    if args.check and shower is None:
         return
+    if here is None:
+        if shower is None or state["starting"]:
+            return
+        here = shower.centre             # away from the planet: a shower planned goes on
     if shower is None:
         start, state["next_shower"] = state["next_shower"], None
         if start is not None:
@@ -4177,7 +4374,7 @@ def buffet_car(dt):
     car = state["car"]
     if car is None or car.height is None:
         return
-    speed = length(world.wind_at(planet, car.position, car.height))
+    speed = length(world.wind_at(car_body(), car.position, car.height))
     air = min(1.0, max(0.0, (car.height - hovercar.HOVER_MIN) / (hovercar.AIR_HEIGHT - hovercar.HOVER_MIN)))
     if speed <= BUFFET_WIND or air <= 0.0:
         return
@@ -4216,6 +4413,175 @@ def draw_rain(camera, basis):
     state["rain_drawn"] = count
 
 
+# ── Space mode ─────────────────────────────────────────────────────────────
+
+def car_body():
+    """The world body the car is reckoned around: the one it hovers over or flew nearest."""
+    return state["car_body"] or planet
+
+
+def car_attitude():
+    """(right, up, forward) of the car as drawn: the ship's axes in space mode, else hovercar.Car.attitude."""
+    space = state["space"]
+    return space.axes() if space is not None else state["car"].attitude()
+
+
+def time_warp():
+    """How many times faster the world's clock runs: WARPS' in space mode, else 1."""
+    return WARPS[state["warp"]] if state["space"] is not None else 1
+
+
+def space_ground(body):
+    """The ground patch's query, (depth, normal) for a point from the planet's centre, on `body`; or None."""
+    patch = world.patch
+    if patch is None or patch[0] is not body:
+        return None
+    return lambda point: patch[1].query(body.relative(point))
+
+
+def space_wind(point):
+    """The wind (m/s) at a point from the planet's centre over the planet, none elsewhere."""
+    body = world.body_under(point)
+    return world.wind_at(planet, planet.relative(point)) if body is planet else (0.0, 0.0, 0.0)
+
+
+def enter_space():
+    """The car into space mode (G), at least SPACE_HEIGHT above the ground:
+    a flight.Ship (hovercar.space_params) where it is, at its velocity,
+    turned as drawn, with its tank and cargo, translation assist on."""
+    car, hud = state["car"], state["hud"]
+    if not state["driving"] or state["space"] is not None:
+        return False
+    if car.height is None or car.height < SPACE_HEIGHT:
+        hud.toast("Climb to %.0f m for space mode" % SPACE_HEIGHT, hud_module.WARNING)
+        return False
+    body = car_body()
+    right, up, forward = car.attitude()
+    state["space"] = flight.Ship(add(body.centre(), car.position), add(body.velocity(), car.velocity),
+                                 quat_from_basis(right, up, scale(forward, -1.0)),
+                                 params=hovercar.space_params(state["params"]["car"], SHIP_HALF), fuel=car.fuel,
+                                 cargo=car.cargo)
+    state["space_controls"] = flight.Controls(assist=True)
+    state["ship_time"], state["warp"] = world.time, 0
+    hud.toast("Space mode: G back to the hover car within %.0f m of the ground" % HOVER_BACK)
+    print("[walker] space mode", flush=True)
+    return True
+
+
+def space_height(ship, body):
+    """m from the ship's centre down to the ground under it, from the ground patch; None where it is not known."""
+    ground = space_ground(body)
+    answer = ground(ship.position) if ground is not None else None
+    return -answer[0] if answer is not None else None
+
+
+def leave_space(landed=False):
+    """The car back to hovering (G), within HOVER_BACK of the ground, or
+    `landed`: over the body under it, at its velocity relative to that
+    body, its nose levelled, keeping its height; the time warp back to 1."""
+    ship, car = state["space"], state["car"]
+    if ship is None:
+        return False
+    body = world.body_under(ship.position)
+    height = space_height(ship, body)
+    if not landed and (height is None or height > HOVER_BACK):
+        state["hud"].toast("Come within %.0f m of the ground for the hover car" % HOVER_BACK, hud_module.WARNING)
+        return False
+    sync_car(ship, body, height)
+    car.velocity = sub(ship.velocity, body.velocity()) if not ship.crashed else (0.0, 0.0, 0.0)
+    car.target = max(hovercar.HOVER_MIN, min(hovercar.MAX_HEIGHT, height if height is not None else 0.0))
+    car.turn = car.bank = car.pitch = 0.0
+    state["space"], state["warp"] = None, 0
+    state["car_controls"] = hovercar.CarControls()
+    print("[walker] hover car over the %s" % body.name, flush=True)
+    return True
+
+
+def sync_car(ship, body, height):
+    """The hover car's state from the ship's, over `body`: its position and
+    velocity relative to it, its nose levelled, its height, its fuel."""
+    car = state["car"]
+    car.position = body.relative(ship.position)
+    car.velocity = sub(ship.velocity, body.velocity())
+    up = normalize(car.position)
+    _, ship_up, forward = ship.axes()
+    for along in (forward, scale(ship_up, -1.0)):
+        level = sub(along, scale(up, dot(along, up)))
+        if length(level) > 1e-3:
+            car.heading = normalize(level)
+            break
+    car.height = height
+    car.fuel = ship.fuel
+    state["car_body"] = None if body is planet else body
+
+
+def step_space(dt):
+    """The car in space mode moved on by `dt` seconds of the world's clock
+    (already moved on) in steps of FLIGHT_STEP, at most MAX_FLIGHT_STEPS a
+    frame, each at its own time on the clock, against the ground patch
+    under it and in the wind; the hover car's state kept with it
+    (`sync_car`). Touching the ground slower than LANDED_SPEED, or
+    crashing, it is the hover car again; below WARP_HEIGHT the time warp
+    goes back to 1."""
+    ship = state["space"]
+    end, t = world.time, state["ship_time"]
+    body = world.body_under(ship.position)
+    ground = space_ground(body)
+    steps = 0
+    while t + FLIGHT_STEP <= end and steps < MAX_FLIGHT_STEPS:
+        world.time = t
+        ship.step(world.physics, state["space_controls"], FLIGHT_STEP, ground, wind=space_wind)
+        t += FLIGHT_STEP
+        steps += 1
+    world.time = end
+    state["ship_time"] = t if steps < MAX_FLIGHT_STEPS else end
+    body = world.body_under(ship.position)
+    height = space_height(ship, body)
+    sync_car(ship, body, height)
+    above = height if height is not None else length(body.relative(ship.position)) - body.radius
+    if above < WARP_HEIGHT:
+        state["warp"] = 0
+    relative = length(sub(ship.velocity, body.velocity()))
+    if ship.crashed:
+        state["hud"].toast("Hard landing", hud_module.WARNING)
+        leave_space(landed=True)
+    elif ship.on_ground and relative < LANDED_SPEED:
+        state["hud"].toast("Landed on the %s" % body.name, GOOD_TOAST)
+        leave_space(landed=True)
+
+
+def set_warp(step):
+    """The time warp one step up or down WARPS, in space mode WARP_HEIGHT or more above the ground."""
+    ship = state["space"]
+    if ship is None:
+        return
+    body = world.body_under(ship.position)
+    height = space_height(ship, body)
+    above = height if height is not None else length(body.relative(ship.position)) - body.radius
+    if step > 0 and above < WARP_HEIGHT:
+        state["hud"].toast("Time warp from %.0f km up" % (WARP_HEIGHT / 1000.0), hud_module.WARNING)
+        return
+    state["warp"] = max(0, min(len(WARPS) - 1, state["warp"] + step))
+
+
+def space_lines():
+    """The space readout's lines: the body and the mode, the throttle and the
+    warp, the orbit's periapsis and apoapsis (orbits.orbit around the body
+    it is reckoned around) and the space drive's delta-v left."""
+    ship, controls = state["space"], state["space_controls"]
+    body, position, velocity = flight.reference(world.physics, ship.position, ship.velocity)
+    peri, apo = flight.orbit(body, position, velocity)
+    name = "MOON" if body is world.physics.moon else "PLANET"
+
+    def km(h):
+        return "ESC" if math.isinf(h) else "%.1f km" % (h / 1000.0)
+    car = state["car"]
+    return ["SPACE  %s  ASSIST %s" % (name, "ON" if controls.assist else "OFF"),
+            "THR %3d %%  WARP x%d" % (round(100.0 * controls.throttle), time_warp()),
+            "PE %s  AP %s" % (km(peri), km(apo)),
+            "DV %.0f m/s" % hovercar.delta_v(car.params, car.fuel, car.cargo_mass)]
+
+
 # ── Saving and loading ─────────────────────────────────────────────────────
 
 def save_game(base=None, quiet=False):
@@ -4243,7 +4609,8 @@ def save_game(base=None, quiet=False):
             "on": bubble.body.name, "feet": list(bubble.body_relative(player.feet())),
             "heading": list(player.basis()[2]), "pitch": player.pitch},
         "car": {"position": list(car.position), "heading": list(car.heading), "target": car.target,
-                "driving": state["driving"], "fuel": car.fuel,
+                "driving": state["driving"], "fuel": car.fuel, "body": car_body().name,
+                "space": space_record(),
                 "cargo": [dict(item, direction=list(item["direction"])) for item in car.cargo]},
         "taken": [list(key) for key in sorted(world.taken_rocks.keys)],
         "props": foot.props.records(bubble) if bubble is not None else [],
@@ -4364,6 +4731,9 @@ def load_game(base=None):
         state["car"] = hovercar.Car(tuple(record["position"]), tuple(record["heading"]), record["target"],
                                     params=state["params"]["car"], fuel=record.get("fuel"))
         state["car"].cargo = [dict(item, direction=tuple(item["direction"])) for item in record.get("cargo", [])]
+        body = by_name.get(record.get("body", planet.name), planet)
+        state["car_body"] = None if body is planet else body
+        restore_space(record.get("space"))
         update_ship()
     else:
         position, _, _, north = ship_pose()
@@ -4406,6 +4776,30 @@ def restore_market():
         return
     state["market"].restore(record, state["outposts"])
     state["market_record"] = None
+
+
+def space_record():
+    """The car's space mode for the save: the ship's position and velocity
+    (from the planet's centre), orientation and spin, and its controls; or None."""
+    ship = state["space"]
+    if ship is None:
+        return None
+    c = state["space_controls"]
+    return {"position": list(ship.position), "velocity": list(ship.velocity), "orientation": list(ship.orientation),
+            "spin": list(ship.angular_velocity), "assist": c.assist, "throttle": c.throttle}
+
+
+def restore_space(record):
+    """The car's space mode from a save's record (space_record), or none."""
+    state["space"], state["warp"] = None, 0
+    if record is None:
+        return
+    car = state["car"]
+    state["space"] = flight.Ship(tuple(record["position"]), tuple(record["velocity"]), tuple(record["orientation"]),
+                                 tuple(record["spin"]), params=hovercar.space_params(state["params"]["car"], SHIP_HALF),
+                                 fuel=car.fuel, cargo=car.cargo)
+    state["space_controls"] = flight.Controls(throttle=record["throttle"], assist=record["assist"])
+    state["ship_time"] = world.time
 
 
 def autosave(dt):
@@ -4478,6 +4872,8 @@ def frame(dt):
     elapsed = dt                 # the frame's real time; the world's stands still while paused
     if args.check:
         run_check(elapsed)
+    elif state["driving"] and state["space"] is not None and not paused and not state["map_view"].open:
+        carview.read_space_controls(engine.input, state["space_controls"], elapsed)
     elif state["driving"] and not paused and not state["map_view"].open:
         read_car_controls()
     elif foot.player is not None and not paused and not state["map_view"].open:
@@ -4490,6 +4886,7 @@ def frame(dt):
         state["car_controls"] = hovercar.CarControls()
     if paused:
         dt = 0.0
+    dt *= time_warp()
     world.time += dt
     latency = world.probe_latency * state["frame_ms"] / 1000.0
     foot.props.fly(world.time - clock, latency)
@@ -4652,7 +5049,7 @@ def update_lights(camera):
     if lamps.lights_on(world, camera):
         lights += lamps.outpost_lights(state["outposts"])
         if state["car"] is not None:
-            right, up, forward = state["car"].attitude()
+            right, up, forward = car_attitude()
             lights += lamps.headlights(car_position(), right, up, forward, CAR_HEADLIGHTS, CAR_HEADLIGHT_DIP)
         if not state["driving"] and foot.player is not None:
             lights.append(lamps.suit_lamp(camera, *view_basis()))
@@ -4699,7 +5096,8 @@ def on_init():
 
 def on_key(key):
     """F1 the menu on the controls, M the map, Escape the menu, P a screenshot, F the car (in or out),
-    F5 a save, F9 a load; the start's menu waits for its buttons."""
+    G its space mode (in or out), in space mode T the assist and , . the time warp, F5 a save, F9 a
+    load; the start's menu waits for its buttons."""
     view, menu = state["map_view"], state["menu"]
     if state["starting"]:
         return
@@ -4717,6 +5115,17 @@ def on_key(key):
             leave_car()
         else:
             enter_car()
+    elif key == keys.G and state["driving"] and not menu.visible:
+        if state["space"] is None:
+            enter_space()
+        else:
+            leave_space()
+    elif key == keys.T and state["space"] is not None and not menu.visible:
+        controls = state["space_controls"]
+        controls.assist = not controls.assist
+        state["hud"].toast("Assist %s" % ("on" if controls.assist else "off"))
+    elif key in (keys.COMMA, keys.PERIOD) and state["space"] is not None and not menu.visible:
+        set_warp(1 if key == keys.PERIOD else -1)
     elif key == keys.ESCAPE and (foot.player is not None or state["driving"]):
         set_paused(not menu.visible)
     elif key == keys.F5:

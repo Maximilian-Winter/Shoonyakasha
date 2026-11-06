@@ -356,6 +356,7 @@ Both programs already save:
   - the explored map's measured cells
   - the meteorites' craters, the next shower's start, which props are hot and since when, and which is the last meteorite (§11)
   - the storm under way or to come, and each contract's held-back time (§12.2)
+  - the body the car is reckoned around (`"body"`) and its space mode (`"space"`: the ship's position and velocity from the planet's centre, orientation, spin, assist and throttle; none when hovering) (§13.2)
 
   Those of §8–§11 are keys a version-2 save may lack; loading one without them starts them as a new game has them.
 
@@ -718,6 +719,17 @@ The walker (`update_storms`):
 
 ### 13.2 What it takes
 
+**The walker's space car.** The walker has no ship; its hover car flies to the moon in space mode (G at least 250 m above the ground): a `flight.Ship` with `hovercar.space_params`, so it has the ship's gravity of both bodies, the moon's sphere of influence, translation assist (T) and ground contacts. Its space drive burns the car's tank at `CarParams.space_isp` (3,000 s) for every thruster:
+
+| | Stock | `tank_1` |
+|---|---|---|
+| dry mass | 1,800 kg | 1,800 kg |
+| tank | 100 kg | 150 kg |
+| Δv, empty hold (`hovercar.delta_v`) | ≈ 1,590 m/s | ≈ 2,355 m/s |
+
+That covers one way: to a low orbit, the transfer and landing on the moon. Space mode ends by G within 300 m of the ground, or on touching down slower than 2 m/s, over the body under the car. From 5 km up the time warp goes to 4, 16 or 64 times (`,` `.`). The HUD shows the body the orbit is reckoned around, the assist, the throttle, the warp, the periapsis and apoapsis, and the Δv left.
+
+
 - **Δv:** with `tank_1`, `engine_1` and `longrange`:
 
   | | Value |
@@ -798,7 +810,9 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 11. **Wind and storms.**
    11a. **Wind.** `wind.py` and `PlanetWorld.wind_at`, the clouds drifting with it, the ship's, the car's and the props' drag in it, the suit's chill. `--wind-check`.
    11b. **Storms** (`walker.py`). `wind.Storm` and `PlanetWorld.storm` (the wind, the clouds' cover and the haze in it), planning (`events.schedule_storm`), outposts closing, deadlines held, rain, the car buffeted, light props scattered, the save. `--check`'s storm.
-12. **The moon expedition.** Moon resources, the refinery, long-range upgrades, transfer planner.
+12. **The moon expedition.**
+   12a. **The space car** (`walker.py`). The hover car's space mode (G): a `flight.Ship` of `hovercar.space_params` with a space drive, the moon's pull, the time warp, the space readout, landing back into the hover car on the planet or the moon; the walker on the moon. `--check`'s space mode and moon landing.
+   12b. **The moon economy.** Moon resources, the refinery, long-range upgrades, the transfer planner.
 
 ## 16. Pitfalls
 

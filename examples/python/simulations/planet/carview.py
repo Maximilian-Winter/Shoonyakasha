@@ -18,6 +18,14 @@ A and D the steering, Space up, left Ctrl down, left Shift the boost; on
 a gamepad the left stick drives and steers, the right trigger climbs, the
 left one descends and A boosts.
 
+`read_space_controls(input, controls, dt)` sets the car's flight.Controls
+in space mode: W and S move the throttle up and down at THROTTLE_RATE a
+second (it stays where it is left), Space and left Ctrl the thrust up
+and down, the arrow keys pitch and yaw, Q and E roll; on a gamepad the
+left stick pitches and yaws, the right stick rolls (across) and moves
+the throttle (up and down), the right trigger thrusts up and the left
+down.
+
 `EngineGlows` draws the engines' glow as glowing discs (viewmodel.Glows,
 the Glow pass) at NOZZLES, the car's engine nozzles in its model's
 metres from its centre (right, up, back): IDLE_GLOW strong when idle,
@@ -45,6 +53,7 @@ RETURN_EASE = 0.6                # s
 CLEARANCE = 1.0                  # m above the ground
 FOV_GAIN = 12.0                  # degrees at top speed
 DEAD_ZONE = 0.12                 # of a stick's travel
+THROTTLE_RATE = 0.5              # of the throttle a second while W or S is held, in space mode
 
 NOZZLES = ((-1.3, 0.38, 2.85), (1.3, 0.38, 2.85))   # m from the car's centre: right, up, back
 NOZZLE_GLOW = (0.35, 0.85, 1.0)  # LDR
@@ -138,6 +147,26 @@ def read_controls(input):
     c.steer = max(-1.0, min(1.0, c.steer))
     c.climb = max(-1.0, min(1.0, c.climb))
     return c
+
+
+def read_space_controls(input, controls, dt):
+    """`controls` (flight.Controls) from the keys and the gamepad in space mode (see the module's docstring)."""
+    down = input.is_key_down
+    pad = input.is_gamepad_connected()
+    axis = (lambda a: stick(input.get_gamepad_axis(a))) if pad else (lambda a: 0.0)
+    rate = float(down(keys.W)) - float(down(keys.S)) - axis(keys.GAMEPAD_RIGHT_Y)
+    controls.throttle = max(0.0, min(1.0, controls.throttle + THROTTLE_RATE * dt * rate))
+
+    def clamp(value):
+        return max(-1.0, min(1.0, value))
+    controls.pitch = clamp(float(down(keys.UP)) - float(down(keys.DOWN)) - axis(keys.GAMEPAD_LEFT_Y))
+    controls.yaw = clamp(float(down(keys.RIGHT)) - float(down(keys.LEFT)) + axis(keys.GAMEPAD_LEFT_X))
+    controls.roll = clamp(float(down(keys.E)) - float(down(keys.Q)) + axis(keys.GAMEPAD_RIGHT_X))
+    vertical = float(down(keys.SPACE)) - float(down(keys.LEFT_CONTROL))
+    if pad:
+        vertical += trigger(input, keys.GAMEPAD_RIGHT_TRIGGER) - trigger(input, keys.GAMEPAD_LEFT_TRIGGER)
+    controls.vertical = clamp(vertical)
+    return controls
 
 
 class EngineGlows:

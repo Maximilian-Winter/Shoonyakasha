@@ -51,7 +51,9 @@ While driving the car (`update`'s `drive`) the crosshair, its status and
 the jet fuel are not drawn (the car's fuel, FUEL, is in its place), the
 hints are the car's (`drive_hints`), and
 the readout gives the speed in km/h and always the height above the
-ground.
+ground. In the car's space mode (`update`'s `space`) the readout gives
+the speed in m/s, a panel above it lines of text about the flight
+(`draw_space`), and the hints are the space mode's.
 """
 
 import math
@@ -99,6 +101,8 @@ LOW_FUEL = 0.25
 TINT_CENTRE, TINT_EDGE = 0.35, 0.22   # the suit's tint: its share of alpha all over, its edge bands' width
 FUEL_LINGER, FUEL_FADE = 1.5, 0.5     # s
 READOUT_PANEL = (250.0, 66.0)
+SPACE_PANEL = 250.0              # wide; its lines SPACE_LINE apart, above the readout
+SPACE_LINE = 20.0
 MAX_TOASTS = 3
 TOAST_SECONDS = 5.0
 TOAST_FADE = 1.0
@@ -206,8 +210,17 @@ def hints(status, held, charge, pad=False):
     return []
 
 
-def drive_hints(pad=False, can_leave=False):
-    """The key hints while driving the car; getting out while it `can_leave`."""
+def drive_hints(pad=False, can_leave=False, high=False, space=False):
+    """The key hints while driving the car; getting out while it `can_leave`;
+    switching to space mode while `high`; in space mode (`space`) its own."""
+    if space:
+        if pad:
+            return [(("pad:RS",), "Throttle"), (("pad:RT", "pad:LT"), "Up / down"), (("pad:LS",), "Pitch, yaw")]
+        return [(("W", "S"), "Throttle"), (("Space", "Ctrl"), "Up / down"), (("Arrows",), "Pitch, yaw"),
+                (("Q", "E"), "Roll"), (("T",), "Assist"), ((",", "."), "Time warp"), (("G",), "Hover")]
+    if high and not pad:
+        return [(("W", "S"), "Drive"), (("A", "D"), "Steer"), (("Space", "Ctrl"), "Up / down"),
+                (("G",), "Space mode")]
     if pad:
         found = [(("pad:LS",), "Drive and steer"), (("pad:RT", "pad:LT"), "Up / down"), (("pad:A",), "Boost")]
         leave = (("pad:X",), "Get out")
@@ -433,6 +446,15 @@ class Hud:
             text = "%.1f m" % above if above < 10.0 else distance_text(above)
             layer.text("ALT " + text, (x + w - 12.0, y + h - 16.0), 14, TEXT, "mono", "right")
 
+    def draw_space(self, lines, width, height):
+        """`lines` of text on a panel SPACE_PANEL wide above the readout."""
+        layer = self.layer
+        h = SPACE_LINE * len(lines) + 16.0
+        x, y = width - MARGIN - SPACE_PANEL, height - MARGIN - READOUT_PANEL[1] - 10.0 - h
+        scifi.panel(layer.mesh, x, y, SPACE_PANEL, h, 8.0, scifi.GLASS, scifi.CYAN_SOFT, ("tl", "br"), scan=False)
+        for k, line in enumerate(lines):
+            layer.text(line, (x + 12.0, y + 18.0 + SPACE_LINE * k), 14, TEXT if k else scifi.CYAN, "mono")
+
     def draw_hints(self, shown, width, height):
         if not shown:
             return
@@ -443,7 +465,7 @@ class Hud:
         scifi.caps(self.layer, shown, x + 16.0, y + 0.5 * HINT_BAR_HEIGHT)
 
     def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0, height=None, extra_hints=(),
-               drive=None, hour=None, car_fuel=None, tint=None, flash=None):
+               drive=None, hour=None, car_fuel=None, tint=None, flash=None, space=None, high=False):
         """One frame: `view` (right, up, forward) of the camera, `eye` from
         the planet's centre, `body` the world body under it, `player` the
         character, `gun` its gravity gun, `targets` the compass markers
@@ -458,7 +480,10 @@ class Hud:
         readout; `car_fuel` (its tank's share) while driving, in the jet
         fuel's place, labelled FUEL and always shown; `tint` ((r, g, b),
         alpha) over the screen, under the rest (`draw_tint`); `flash`
-        ((r, g, b), alpha) evenly over the whole screen, over the tint."""
+        ((r, g, b), alpha) evenly over the whole screen, over the tint.
+        `space`, the car in space mode: lines of text on a panel above the
+        readout, the readout in m/s, and the space mode's key hints; `high`
+        while driving, the car high enough for space mode (its hint)."""
         width, height_px = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height_px <= 0:
             return
@@ -490,7 +515,7 @@ class Hud:
                 self.layer.text(text, (cx, cy + STATUS_BELOW), 15, text_colour, "mono", "center", shadow=False)
             self.draw_hints(list(extra_hints) + hints(status, held, charge, pad), width, height_px)
         else:
-            self.draw_hints(drive_hints(pad, drive), width, height_px)
+            self.draw_hints(drive_hints(pad, drive, high, space is not None), width, height_px)
 
         heading = bearing(up, forward)
         if heading is None:
@@ -502,6 +527,9 @@ class Hud:
             self.draw_fuel(player.jet_fuel if player is not None else 1.0, dt, height_px)
         elif car_fuel is not None:
             self.draw_fuel(car_fuel, dt, height_px, label="FUEL", always=True)
-        self.draw_readout(speed, body, height, width, height_px, driving=drive is not None, hour=hour)
+        self.draw_readout(speed, body, height, width, height_px, driving=drive is not None and space is None,
+                          hour=hour)
+        if space:
+            self.draw_space(space, width, height_px)
         self.draw_toasts(dt, width)
         self.layer.end()
