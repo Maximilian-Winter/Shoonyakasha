@@ -2,7 +2,9 @@
 The ores' resources (resources.glsl's RESOURCE_ ids), and in NumPy the
 shader's choice of a resource from its inputs.
 
-RESOURCES names each id. `planet_weights(temperature, moisture,
+RESOURCES names each id. Iridium (IRIDIUM) comes only from meteorites
+(the walker's meteor showers); the shaders never choose it.
+`planet_weights(temperature, moisture,
 mountains)` gives the planet's resources' weights, ferrite first (an
 array of PLANET_RESOURCES along the last axis), from the base temperature
 (degrees C), the moisture and the mountains' mask, as
@@ -24,8 +26,9 @@ AMBER = 4
 EVAPORITE = 5
 ICE = 6
 ILMENITE = 7
+IRIDIUM = 8
 RESOURCES = {NONE: "none", FERRITE: "Ferrite", CUPRITE: "Cuprite", QUARTZ: "Quartz", AMBER: "Amber",
-             EVAPORITE: "Evaporite", ICE: "Ice", ILMENITE: "Ilmenite"}
+             EVAPORITE: "Evaporite", ICE: "Ice", ILMENITE: "Ilmenite", IRIDIUM: "Iridium"}
 PLANET_RESOURCES = 5             # ferrite to evaporite
 RESOURCE_NOISE = 0.6
 MOON_ICE_LATITUDE = 0.55

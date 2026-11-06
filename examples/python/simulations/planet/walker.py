@@ -56,7 +56,8 @@ and walker_save.npz: the clock, the player, the crates and loose rocks,
 the rocks taken from the scatter, the credits and the outposts' supplies,
 the objectives and the game's numbers, the waypoint, the car (whether it
 is driven, its fuel and its cargo), the upgrades owned, the day's offset,
-the suit's reserve and health, and the explored map. F9 or Load game puts it back; the player comes back LOAD_LIFT above
+the suit's reserve and health, the explored map, the meteorites' craters,
+the next shower's start and which rocks are hot. F9 or Load game puts it back; the player comes back LOAD_LIFT above
 the ground where it stood once that ground is measured. With autosave on,
 the game is saved every AUTOSAVE_SECONDS of play, on getting out of the
 car parked on an outpost's pad, on Quit and as the window closes. The
@@ -155,6 +156,25 @@ lamps.LIGHTS_ON_ELEVATION the lights come on (`update_lights`): over each
 outpost's pad, the car's headlights (CAR_HEADLIGHTS, CAR_HEADLIGHT_DIP
 down) and on foot the suit lamp.
 
+Meteor showers (events.py, `update_showers`): the next shower is planned
+around the camera on the planet, its impacts' ground measured with the
+extra probes (`probe_shower`) and, while its large impact falls in the sea,
+a lake or a river, planned again. WARNING_SECONDS before it starts, a toast
+gives its bearing and distance, and the compass marks its centre. Each
+meteor flies its path in, drawn as glowing quads (`draw_showers`,
+viewmodel.Glows): a head at least HEAD_PIXELS across and a trail of its
+last TRAIL_SECONDS. As each strikes (`strike`), there is a flash over the
+screen (the HUD's flash), within SHAKE_REACH the view shakes (`shaken`),
+a plume of dust rises and fades, and the props in the bubble near it are
+pushed away (`push`). The large impact digs a crater
+(PlanetWorld.set_craters; events.keep keeps events.MAX_CRATERS) and
+leaves a meteorite, an ore boulder of iridium marked on the compass while
+it lies whole; each small one leaves a rock of iridium (`meteor_rock`).
+They glow while hot (events.heat), and while hot the gun will not grab
+them (TOO HOT, `too_hot`); a hot meteorite's chunks are as hot
+(`split_hot`). The save keeps the craters ("modifiers"), the next
+shower's start ("events") and which props are hot.
+
 The player is put down SPAWN_LIFT above the ground EAST_OF_SHIP east of
 the ship, facing north, once the terrain is built and the ground there is
 measured. Until then the camera waits 2 m above that spot.
@@ -182,7 +202,8 @@ grab, right trigger punt, the bumpers the hold distance.
                                              out in the cold, sell ore,
                                              load the car's net and sell its cargo, buy upgrades,
                                              use a point of interest of each kind, sell survey data,
-                                             take and end a contract of each kind, pause, save, change the game and load it, drive and fly
+                                             take and end a contract of each kind, bring down a meteor shower,
+                                             pause, save, change the game and load it, drive and fly
                                              the car, hover it on a lake and a river, run it dry and
                                              call fuel, then night; report and exit
 """
@@ -190,6 +211,7 @@ grab, right trigger punt, the bumpers the hold distance.
 import argparse
 import math
 import os
+import random
 import tempfile
 import time
 import zlib
@@ -204,7 +226,7 @@ from shoonyakasha.planet.gravity_gun import GunParams
 from shoonyakasha.planet.ground_patch import GroundPatch, SIZE as PATCH_SIZE
 from shoonyakasha.planet.on_foot import JUMP_DISTANCE, STEP, OnFoot
 from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, local_frame, normalize, quat_from_basis,
-                                     quat_normalize, scale, sub)
+                                     quat_normalize, rotate, scale, sub)
 from shoonyakasha.planet import resources, rivers
 from shoonyakasha.planet.lakes import LakeSurvey
 from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL, SITE_BLEND_RADIUS
@@ -214,6 +236,7 @@ import carview
 import clock
 import config
 import contracts
+import events
 import hovercar
 import lamps
 import pois
@@ -230,7 +253,7 @@ import hud as hud_module
 from hud import Hud, bearing, distance_text
 from objectives import REST_SPEED, Objectives, progress_text, sale_items
 from terminal import Terminal
-from viewmodel import Viewmodel
+from viewmodel import Glows, Viewmodel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "walker_config.json")
@@ -335,6 +358,47 @@ PICKED_UP = 20.0                # m a recovery's pod has moved from its point on
 MIN_REPUTATION = -5.0           # an outpost's reputation goes no lower
 CONTRACT_CHECK_SECONDS = 30.0   # s --check waits at most for each contract to end
 CONTRACT_CHECK_DROP = 12.0      # m/s down --check throws the fragile crate at
+METEOR_MARKER = (1.0, 0.6, 0.35, 1.0)
+SHOWER_TRIES = 4                # times a shower whose large impact falls in water is planned again
+FALL_SPEED = 5.0                # m/s down a meteorite or rock flies from its impact until its ground is measured
+FALL_LIFT = 2.0                 # m above the ground it starts at
+METEOR_GLOW = (1.0, 0.92, 0.75)  # LDR, a large meteor's head
+TRAIL_GLOW = (1.0, 0.62, 0.3)
+HEAD_LIGHT, TRAIL_LIGHT = 3.0, 2.0   # times those: the sum is clamped at white, so the bright core widens
+HEAD_SIZE = 25.0                # m across a large meteor's head
+SMALL_HEAD = 0.5                # of that a small one's
+HEAD_PIXELS = 24.0              # of the screen's height in pixels a head is across, at least
+IGNITE_SECONDS = 1.5            # s from its entry a meteor brightens over
+TRAIL_SECONDS = 2.0             # s of its path a trail shows
+TRAIL_SEGMENTS = 8
+TRAIL_WIDTH = 0.6               # of the head's size a trail is wide at the head
+SMALL_LIGHT = 0.6               # a small meteor's light and an impact's flash and shake, of a large one's
+FLASH_COLOUR = (1.0, 0.94, 0.82)
+FLASH_ALPHA = 0.6
+FLASH_REACH = 2_000.0           # m within which a large impact's flash is full
+FLASH_SECONDS = 0.6
+SHAKE_REACH = 3_000.0           # m within which an impact shakes the view
+SHAKE_ANGLE = math.radians(1.5)  # at the impact, falling to none at SHAKE_REACH
+SHAKE_SECONDS = 1.5
+SHAKE_HZ = 11.0
+PUSH_REACH = 3.0                # blast radii within which the props in the bubble are pushed
+PUSH_SPEED = 6.0                # m/s, at the impact
+SMALL_BLAST = 3.0               # m: a small impact's blast radius
+PLUME_PUFFS, SMALL_PUFFS = 6, 2
+PLUME_SECONDS = 20.0
+PLUME_RISE = 6.0                # m/s
+PLUME_COLOUR = (0.2, 0.17, 0.14)  # LDR, added to the image
+PLUME_NEAR = 3.0                # puff sizes from the camera within which a puff fades out
+HOT_GLOW = (1.0, 0.42, 0.12)
+HOT_SIZE = 3.0                  # times a hot prop's radius its glow is across
+METEOR_DISCS, METEOR_STREAKS = 96, 48
+SHOWER_CHECK_LEAD = 12.0        # s from --check's shower being planned to its large impact
+SHOWER_CHECK_CENTRE = 400.0     # m east of the feet its large impact strikes
+SHOWER_CHECK_OFF_PAD = 4.0      # m beyond Base's pad's reach its small one strikes
+SHOWER_CHECK_NEAR = 5.0         # m from its rock --check walks the player to
+SHOWER_CHECK_MASS = 3_000.0     # kg, its meteorite
+SHOWER_CHECK_ROCK = 40.0        # kg, its rock
+SHOWER_LAND_SECONDS = 6.0       # s after its last impact --check lets its meteorite and rock land
 POI_MARKER, LOOTED_MARKER, SIGNAL_MARKER = (1.0, 0.85, 0.35, 1.0), (0.55, 0.58, 0.62, 1.0), (0.6, 0.75, 0.85, 0.6)
 WALKER_UPGRADES = upgrades.for_groups(("car", "gun", "suit"))   # the upgrades the outposts here offer
 
@@ -493,6 +557,24 @@ state = {
     "survey_in": 0.0,             # s until the survey contracts' shares are measured again
     "contract_note": "",          # the last contract accepted, ended or refused, for the Contracts tab
     "contracts_shown": None,      # what the Contracts tab was last built for
+    "shower": None,               # the next or current meteor shower (events.Shower)
+    "shower_rng": random.Random(),
+    "shower_tries": 0,            # times it was planned again for a large impact in water
+    "next_shower": None,          # a loaded save's world clock for the next shower's start
+    "impact_heights": {},         # the shower's impact index: the ground's height measured there (m)
+    "shower_asked": None,         # the extra probes asked for its impacts, and their indices
+    "shower_asking": [],
+    "shower_warned": False,
+    "struck": 0,                  # its impacts struck so far (they are in time order)
+    "paths": {},                  # its impact index: the meteor's path (events.Path)
+    "craters": [],                # (world.Crater, world clock) of the meteorites' craters, oldest first
+    "hot": {},                    # id of a meteorite, its chunk or rock: (world clock it struck, cooling seconds)
+    "meteorite": None,            # the last meteorite's prop
+    "flash": None,                # (world clock, alpha) of the last impact's flash
+    "shake": None,                # (world clock, amplitude in radians) of the last shake
+    "plumes": [],                 # (point, up, world clock, blast radius, light, rise share) of each dust puff
+    "meteor_glows": None,         # the meteors', plumes' and hot props' quads (viewmodel.Glows)
+    "heads_drawn": 0,             # meteors' heads drawn last frame
 }
 
 
@@ -1110,8 +1192,9 @@ def place_viewmodel(dt, camera):
 def markers(body):
     """(name, position from the planet's centre, colour) of the outposts
     on `body`, the ship on the planet, the waypoint on `body` and the
-    points of interest (poi_markers) and the pinned contract's target
-    (contract_target) on the planet."""
+    points of interest (poi_markers), the pinned contract's target
+    (contract_target), an announced shower's centre and the last
+    meteorite while it lies whole on the planet."""
     found = [(o.name, o.point(), OUTPOST_MARKER) for o in state["outposts"] if o.body is body]
     if state["ship"] is not None and body is planet:
         found.append(("Ship", state["ship"][0], SHIP_MARKER))
@@ -1121,6 +1204,11 @@ def markers(body):
     target = contract_target(pinned_contract())
     if target is not None and body is planet:
         found.append(("Contract", target, CONTRACT_MARKER))
+    if body is planet and state["shower"] is not None and state["shower_warned"]:
+        found.append(("Meteors", add(planet.centre(), scale(state["shower"].centre, planet.radius)), METEOR_MARKER))
+    meteorite = meteorite_point()
+    if body is planet and meteorite is not None:
+        found.append(("Meteorite", meteorite, METEOR_MARKER))
     return found + poi_markers(body)
 
 
@@ -1144,7 +1232,7 @@ def update_hud(dt):
         speed = length(sub(car.velocity, scale(up, dot(car.velocity, up))))
         hud.update(view_basis(), state["position"], planet, None, None, markers(planet), speed, pad=pad, dt=dt,
                    height=car.height, drive=car.can_leave(), hour=hour_text(),
-                   car_fuel=car.fuel / car.params.fuel_capacity)
+                   car_fuel=car.fuel / car.params.fuel_capacity, flash=flash_tint())
         return
     body = foot.bubble.body
     targets = markers(body)
@@ -1162,7 +1250,7 @@ def update_hud(dt):
             word += " (hold, %.1f / %.0f s)" % (state["use_progress"], hold)
         extra.append((("E",), word))
     hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed, pad=pad, dt=dt,
-               height=height, extra_hints=extra, hour=hour_text(), tint=suit_effects()[0])
+               height=height, extra_hints=extra, hour=hour_text(), tint=suit_effects()[0], flash=flash_tint())
 
 
 def run_check(dt):
@@ -1212,7 +1300,22 @@ def run_check(dt):
     survey around the feet completed; a contract past its deadline
     expired; a pinned one abandoned; and a survey 2 km off kept active and
     pinned, on the card and the compass, the car put back; each paying its
-    reward or none and moving Base's reputation, +1 at the end; then the
+    reward or none and moving Base's reputation, +1 at the end; then a
+    meteor shower (run_shower_check): a large impact SHOWER_CHECK_CENTRE
+    east of the feet SHOWER_CHECK_LEAD on, with a meteorite of
+    SHOWER_CHECK_MASS, and a small one a second later SHOWER_CHECK_OFF_PAD
+    beyond Base's pad's reach (outposts.PAD_REACH) on the line from its
+    centre through the feet, with a rock of SHOWER_CHECK_ROCK, both at
+    4 km/s 60 degrees down travelling north; SHOWER_LAND_SECONDS after the
+    last, passing when one crater was dug of the large one's size where it
+    struck, its meteorite of iridium
+    and its mass lies hot and at rest within 1 m of the crater's floor (the
+    ground measured there before, less its depth), the rock of iridium and
+    its mass is hot, the shower was announced and the meteorite told of, a
+    meteor's head was drawn, and there was a flash, a shake and the large
+    impact's plume; then, walked to within SHOWER_CHECK_NEAR of the rock,
+    the view on it and the grab held, the gun refuses it as too hot, and
+    with it cooled grabs it; then the
     menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
@@ -1222,8 +1325,8 @@ def run_check(dt):
     at least MAP_CELLS cells are explored, the waypoint is set, the ore sold for credits, the car's cargo
     loaded and sold, the world's clock stood
     still while paused, and the load brought back the credits, the ore
-    sold, the cells, the props, the contracts, the pin, the reputations
-    and the player within 2 m of where it was saved; then into the car, driven flat out turning a little for
+    sold, the cells, the props, the contracts, the pin, the reputations,
+    the craters, the hot props and the player within 2 m of where it was saved; then into the car, driven flat out turning a little for
     DRIVE_SECONDS, climbing for CLIMB_SECONDS and flying on 2 s more,
     saved and loaded there, braking and coming down until it can be left
     (at most LAND_SECONDS), and out of it, a second later passing when the
@@ -1248,7 +1351,9 @@ def run_check(dt):
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
     (with _punt added), of the map (with _map added), with the suit low (with _suit added), after the sale (with
-    _sell added), of the Upgrades tab after buying (with _upgrades added), of the menu (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Contracts tab (with _contracts added), of its Settings tab
+    _sell added), of the Upgrades tab after buying (with _upgrades added), of the shower's large meteor (with
+    _meteor added), of its impact (with _impact added) and its plume 4 s on (with _plume added), of the menu
+    (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Contracts tab (with _contracts added), of its Settings tab
     (with _settings added), of its Controls tab (with _controls added),
     after the load (with _load added), a second
     before the end of the drive (with _drive added), after the climb (with
@@ -1509,6 +1614,9 @@ def run_check(dt):
             check["stage"], check["time"] = "contracts", 0.0
     elif stage == "contracts":
         if run_contract_check(check, t):
+            check["stage"], check["time"] = "showers", 0.0
+    elif stage == "showers":
+        if run_shower_check(check, t):
             set_paused(True)
             check["stage"], check["time"] = "pause", 0.0
     elif stage == "pause":
@@ -1565,11 +1673,14 @@ def run_check(dt):
                               "props": len(foot.props.all), "sold_kg": state["sold_kg"],
                               "feet": foot.bubble.to_world(player.feet()), "time": saved["time"],
                               "contracts": [(c.id, c.kind, c.state) for c in state["contracts"]],
-                              "pinned": state["pinned"], "reputation": dict(state["reputation"])}
+                              "pinned": state["pinned"], "reputation": dict(state["reputation"]),
+                              "craters": list(world.craters), "hot": sorted(state["hot"].values())}
             state["market"].credits += 999.0
             state["sold_kg"] += 99.0
             state["map"].grids = {}
             state["contracts"], state["pinned"], state["reputation"] = [], None, {}
+            state["craters"], state["hot"] = [], {}
+            world.set_craters([])
             check["loaded"] = load_game(CHECK_SAVE_BASE)
             check["stage"], check["time"] = "reload", 0.0
     elif stage == "reload":
@@ -1586,18 +1697,21 @@ def run_check(dt):
                        and state["sold_kg"] == saved["sold_kg"] and game_numbers()["cells"] == saved["cells"]
                        and len(foot.props.all) == saved["props"] and moved < 2.0
                        and [(c.id, c.kind, c.state) for c in state["contracts"]] == saved["contracts"]
-                       and state["pinned"] == saved["pinned"] and state["reputation"] == saved["reputation"])
-            print("[walker] saved, changed and loaded: %.0f cr, %d cells, %d props, %d contract%s, the player "
-                  "%.2f m from where it was saved: %s"
+                       and state["pinned"] == saved["pinned"] and state["reputation"] == saved["reputation"]
+                       and list(world.craters) == saved["craters"] and sorted(state["hot"].values()) == saved["hot"])
+            print("[walker] saved, changed and loaded: %.0f cr, %d cells, %d props, %d contract%s, %d crater%s, "
+                  "%d hot, the player %.2f m from where it was saved: %s"
                   % (state["market"].credits, game_numbers()["cells"], len(foot.props.all), len(state["contracts"]),
-                     "" if len(state["contracts"]) == 1 else "s", moved, "passed" if load_ok else "FAILED"),
+                     "" if len(state["contracts"]) == 1 else "s", len(world.craters),
+                     "" if len(world.craters) == 1 else "s", len(state["hot"]), moved,
+                     "passed" if load_ok else "FAILED"),
                   flush=True)
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 screenshot(base + "_load" + ext)
             check["ok"] = (check["walk_ok"] and check["capture_ok"] and check["held_ok"] and check["punt_ok"]
                            and check["map_ok"] and check["suit_ok"] and check["sell_ok"] and check["pause_ok"]
-                           and load_ok)
+                           and check["shower_ok"] and load_ok)
             check["in_car"] = enter_car(anywhere=True)
             check["top_speed"], check["top_height"] = 0.0, 0.0
             check["stage"], check["time"] = "drive", 0.0
@@ -2044,6 +2158,154 @@ def run_contract_check(check, t):
     return False
 
 
+def run_shower_check(check, t):
+    """--check's meteor shower by Base (see run_check); True once done."""
+    s = check.setdefault("shower", {"step": "plan"})
+    player = foot.player
+    step = s["step"]
+    if step == "plan":
+        feet = foot.bubble.to_world(player.feet())
+        here = normalize(planet.relative(feet))
+        centre = events.along_ground(here, 90.0, SHOWER_CHECK_CENTRE, planet.radius)
+        pad = state["home"].direction
+        out = bearing(pad, sub(here, pad))
+        if out is None or events.ground_distance(pad, here, planet.radius) < 1.0:
+            out = bearing(here, player.heading) or 0.0
+        ahead = events.along_ground(pad, out, outposts.PAD_REACH + SHOWER_CHECK_OFF_PAD, planet.radius)
+        now = world.time + SHOWER_CHECK_LEAD
+        large = events.Impact(now, centre, SHOWER_CHECK_MASS, 0.6, 4_000.0, 60.0, 0.0,
+                              events.crater_of(SHOWER_CHECK_MASS))
+        small = events.Impact(now + 1.0, ahead, SHOWER_CHECK_ROCK, 0.6, 4_000.0, 60.0, 0.0)
+        set_shower(events.Shower(now, centre, [large, small]))
+        s.update(step="fly", craters=list(world.craters), large=large, small=small, heads=0, flash=0.0,
+                 shake=0.0, plumes=0, natural=None, t0=t)
+        return False
+    large, small = s["large"], s["small"]
+    if step == "fly":
+        s["heads"] = max(s["heads"], state["heads_drawn"])
+        tint = flash_tint()
+        s["flash"] = max(s["flash"], tint[1] if tint is not None else 0.0)
+        if state["shake"] is not None:
+            s["shake"] = max(s["shake"], state["shake"][1])
+        s["plumes"] = max(s["plumes"], len(state["plumes"]))
+        for toast in state["hud"].toasts:
+            for key, start in (("warned", "Meteor shower inbound"), ("down", "Meteorite down")):
+                if toast[0].startswith(start):
+                    s[key] = True
+        if s["natural"] is None and 0 in state["impact_heights"]:
+            s["natural"] = state["impact_heights"][0]
+        up = player.up()
+        path, before = state["paths"].get(0), large.time - world.time
+        aim = None
+        if args.shot and path is not None and 2.0 < before <= min(5.0, path.duration):
+            aim = add(planet.centre(), path.at(before))
+        elif args.shot and -5.0 < before <= 2.0:
+            aim = add(planet.centre(), scale(large.direction, planet.radius + (s["natural"] or 0.0)))
+        if aim is not None:
+            to = sub(foot.bubble.to_bubble(aim), player.eye())
+            player.heading = player.level(to, up)
+            player.pitch = math.asin(max(-1.0, min(1.0, dot(normalize(to), up))))
+        if args.shot and before <= 3.0 and "meteor_shot" not in s and state["heads_drawn"] > 0:
+            s["meteor_shot"] = True
+            base, ext = os.path.splitext(args.shot)
+            screenshot(base + "_meteor" + ext)
+        if args.shot and before <= -0.2 and "impact_shot" not in s:
+            s["impact_shot"] = True
+            base, ext = os.path.splitext(args.shot)
+            screenshot(base + "_impact" + ext)
+        if args.shot and before <= -4.0 and "plume_shot" not in s:
+            s["plume_shot"] = True
+            base, ext = os.path.splitext(args.shot)
+            screenshot(base + "_plume" + ext)
+        if state["shower"] is None and world.time >= small.time + SHOWER_LAND_SECONDS:
+            s["step"], s["t0"] = "measure", t
+        elif t - s["t0"] > SHOWER_CHECK_LEAD + 30.0:
+            print("[walker] the shower did not strike in %.0f s: FAILED" % (t - s["t0"]), flush=True)
+            os._exit(1)
+        return False
+    if step == "measure":
+        meteorite = state["meteorite"]
+        rock = next((p for p in foot.props.rocks if p.resource == resources.IRIDIUM and p is not meteorite), None)
+        dug = [c for c in world.craters if c not in s["craters"]]
+        crater_ok = (len(dug) == 1 and abs(dug[0].radius - large.crater[0]) < 1e-9
+                     and length(sub(dug[0].direction, large.direction)) < 1e-9)
+        lies = None
+        if meteorite is not None:
+            body, position, _ = foot.prop_state(meteorite)
+            lies = length(position) - planet.radius - meteorite.rest
+        floor = (s["natural"] or 0.0) - large.crater[1]
+        meteorite_ok = (meteorite is not None and meteorite.resource == resources.IRIDIUM
+                        and abs(meteorite.mass - large.mass) < 1.0 and settled(meteorite)
+                        and lies is not None and abs(lies - floor) < 1.0 and id(meteorite) in state["hot"])
+        rock_ok = rock is not None and abs(rock.mass - small.mass) < 0.5 and id(rock) in state["hot"]
+        warned, down = s.get("warned", False), s.get("down", False)
+        seen_ok = (s["heads"] > 0 and s["flash"] > 0.0 and s["shake"] > 0.0 and s["plumes"] >= PLUME_PUFFS
+                   and warned and down)
+        s["lines"] = [
+            "the crater dug, %.0f m across: %s" % (2.0 * large.crater[0], "ok" if crater_ok else "FAILED"),
+            "the %.0f kg meteorite of iridium hot, at rest %s m from the crater's floor: %s"
+            % (meteorite.mass if meteorite is not None else 0.0,
+               "%.2f" % (lies - floor) if lies is not None else "-", "ok" if meteorite_ok else "FAILED"),
+            "a %.0f kg rock of iridium hot off the pad: %s" % (rock.mass if rock is not None else 0.0,
+                                                          "ok" if rock_ok else "FAILED"),
+            "warned and told, %d meteor%s drawn at once, a flash of %.2f, a shake of %.2f degrees, %d puffs: %s"
+            % (s["heads"], "" if s["heads"] == 1 else "s", s["flash"], math.degrees(s["shake"]), s["plumes"],
+               "ok" if seen_ok else "FAILED")]
+        s["ok"] = crater_ok and meteorite_ok and rock_ok and seen_ok
+        s["rock"] = rock
+        s["step"], s["t0"] = "approach", t
+        return False
+    rock = s["rock"]
+    if step == "approach":
+        if rock is None:
+            s["step"] = "done"
+            return False
+        body, position, _ = foot.prop_state(rock)
+        to = sub(add(body.centre(), position), foot.bubble.to_world(player.feet()))
+        up = player.up()
+        along = sub(to, scale(up, dot(to, up)))
+        if length(along) <= SHOWER_CHECK_NEAR or t - s["t0"] > 15.0:
+            foot.controls.forward = 0.0
+            s["step"], s["t0"] = "too_hot", t
+        else:
+            player.heading = player.level(along, up)
+            foot.controls.forward = 1.0
+        return False
+    if step == "too_hot":
+        if rock.body is None:
+            if t - s["t0"] > 3.0:
+                s["lines"].append("the rock came into the physics: FAILED")
+                s["ok"], s["step"] = False, "done"
+            return False
+        to = sub(foot.physics.get_transform(rock.body)[0], player.eye())
+        up = player.up()
+        player.heading = player.level(to, up)
+        player.pitch = math.asin(max(-1.0, min(1.0, dot(normalize(to), up))))
+        foot.gun_controls.grab = True
+        if t - s["t0"] >= 0.5:
+            status, held = foot.gun.status, foot.gun.held
+            ok = status == "too_hot" and held is None
+            s["lines"].append("the gun refuses the hot rock (%s): %s" % (status, "ok" if ok else "FAILED"))
+            s["ok"] = s["ok"] and ok
+            del state["hot"][id(rock)]
+            s["step"], s["t0"] = "cooled", t
+        return False
+    if step == "cooled":
+        foot.gun_controls.grab = True
+        if t - s["t0"] >= 1.0:
+            ok = foot.gun.held == rock.body
+            s["lines"].append("the gun grabs it cooled: %s" % ("ok" if ok else "FAILED"))
+            s["ok"] = s["ok"] and ok
+            foot.gun_controls.grab = False
+            foot.gun.drop()
+            s["step"] = "done"
+        return False
+    print("[walker] meteor shower:\n" + "\n".join("[walker]   " + line for line in s["lines"])
+          + "\n[walker]   %s" % ("passed" if s["ok"] else "FAILED"), flush=True)
+    check["shower_ok"] = s["ok"]
+    return True
+
+
 def check_contract(kind, n, **fields):
     """--check: a contract of `kind` from Base to Base for 100 cr, due in contracts.DEADLINE_DAYS days."""
     home = state["home"].name
@@ -2052,7 +2314,9 @@ def check_contract(kind, n, **fields):
 
 
 def update_map(dt):
-    """The ground around the player (or the car) measured, the waypoint
+    """The ground around the player (or the car) measured (yielding the
+    extra probes to the props, the points of interest and a meteor shower's
+    impacts waiting for their ground), the waypoint
     cleared once reached, and the minimap and full map drawn on foot or in
     the car while the menu is hidden."""
     view, player = state["map_view"], foot.player
@@ -2068,7 +2332,7 @@ def update_map(dt):
     explored = state["map"]
     explored.probe(body, feet, EXTRA_PROBES,
                    yield_to=(foot.bubble is not None and bool(foot.props.needs_ground(foot.bubble)))
-                   or bool(state["pois"].queue))
+                   or bool(state["pois"].queue) or shower_waiting())
     probe_pois()
     up = normalize(feet)
     waypoint = state["waypoint"]
@@ -2374,7 +2638,8 @@ def poi_distance(poi, here):
 def probe_pois():
     """The candidates waiting to be measured (pois.Pois.to_measure) measured
     with the world's extra probes, as the explored map does: only while
-    nothing else uses them; each with its water (PlanetWorld.water_level)."""
+    nothing else uses them and no meteor shower's impact waits for its
+    ground (shower_waiting); each with its water (PlanetWorld.water_level)."""
     p, asked = state["pois"], state["poi_asked"]
     if world.extra_probes and world.extra_probes != asked:
         return
@@ -2387,6 +2652,8 @@ def probe_pois():
             p.measured(poi.key, h, climate, ore, resource, world.water_level(poi.direction))
         state["poi_asked"], state["poi_asking"] = None, []
         world.extra_probes = []
+    if shower_waiting():
+        return
     batch = p.to_measure(EXTRA_PROBES)
     if batch:
         asked = [(poi.direction, planet) for poi in batch]
@@ -2801,8 +3068,8 @@ def sell_car_cargo():
 
 def outpost_items():
     """The Outpost tab: the outpost whose pad the car is on, its price for
-    each resource at grade 1, the car's cargo, what its ore would fetch,
-    and selling it."""
+    each resource at grade 1 (iridium from the planet's meteorites), the
+    car's cargo, what its ore would fetch, and selling it."""
     def here():
         outpost = car_outpost()
         return "%s, the %s" % (outpost.name, outpost.body.name) if outpost is not None else "the car is not on a pad"
@@ -2827,7 +3094,8 @@ def outpost_items():
     moon = next(b for b in bodies if b is not planet)
     prices = ([{"stat": resources.name(r) + ", grade 1", "get": price(planet, r)} for r in planet_resources]
               + [{"stat": resources.name(r) + " (moon), grade 1", "get": price(moon, r)}
-                 for r in (resources.ICE, resources.ILMENITE)])
+                 for r in (resources.ICE, resources.ILMENITE)]
+              + [{"stat": "Iridium (meteorites), grade 1", "get": price(planet, resources.IRIDIUM)}])
     return ("columns", [
         [{"heading": "Outpost"},
          {"stat": "Here", "get": here},
@@ -3364,6 +3632,305 @@ def quit_game():
     os._exit(0)
 
 
+# ── Meteor showers ─────────────────────────────────────────────────────────
+
+def shower_here():
+    """The unit direction under the camera on the planet, or None at the start's menu or with neither a player
+    nor the car driven."""
+    if state["starting"] or (foot.player is None and not state["driving"]):
+        return None
+    return normalize(planet.relative(state["position"]))
+
+
+def set_shower(shower):
+    """`shower` (events.Shower) the next or current one, nothing of it measured, warned of or struck yet."""
+    if state["shower_asked"] is not None and world.extra_probes == state["shower_asked"]:
+        world.extra_probes = []
+    state["shower"] = shower
+    state["impact_heights"], state["paths"] = {}, {}
+    state["shower_asked"], state["shower_asking"] = None, []
+    state["shower_warned"], state["struck"] = False, 0
+
+
+def probe_shower():
+    """The ground under the shower's impacts not yet struck measured with
+    the world's extra probes, as the points of interest are: only while
+    nothing else uses them."""
+    shower, asked = state["shower"], state["shower_asked"]
+    if shower is None or (world.extra_probes and world.extra_probes != asked):
+        return
+    if asked is not None:
+        if [probe for probe, _ in world.extra_heights] != asked:
+            return
+        for k, (_, h) in zip(state["shower_asking"], world.extra_heights):
+            state["impact_heights"][k] = h
+        state["shower_asked"], state["shower_asking"] = None, []
+        world.extra_probes = []
+    wanted = [k for k in range(state["struck"], len(shower.impacts)) if k not in state["impact_heights"]]
+    if wanted:
+        asked = [(shower.impacts[k].direction, planet) for k in wanted[:EXTRA_PROBES]]
+        world.extra_probes = asked
+        state["shower_asked"], state["shower_asking"] = asked, wanted[:EXTRA_PROBES]
+
+
+def shower_waiting():
+    """Whether the shower has impacts not yet struck whose ground is not yet measured."""
+    shower = state["shower"]
+    return shower is not None and any(k not in state["impact_heights"]
+                                      for k in range(state["struck"], len(shower.impacts)))
+
+
+def on_land(direction, height):
+    """Whether the ground `height` m up at the unit `direction` on the planet is above the sea and any lake or river."""
+    level = world.water_level(direction)
+    return height > 0.0 and (level is None or height > level)
+
+
+def update_showers():
+    """The meteor showers (events.py): the next planned around the camera
+    (at a loaded save's next_shower, at least WARNING_SECONDS on, when
+    there is one), its impacts' ground measured (probe_shower) and,
+    while its large impact falls in water, planned again with the same
+    start up to SHOWER_TRIES times; announced WARNING_SECONDS before its
+    start once that is known, with a toast and a marker on the compass;
+    each meteor's path flown back from where it strikes; and each impact
+    struck at its time (`strike`). Once all have struck, the next is
+    planned. Under --check none is planned; the check gives its own. The
+    props that have cooled or are gone leave `hot`."""
+    present = {id(p) for p in foot.props.rocks}
+    state["hot"] = {i: hot for i, hot in state["hot"].items()
+                    if i in present and events.heat(world.time - hot[0], hot[1]) > 0.0}
+    here, shower = shower_here(), state["shower"]
+    if here is None or (args.check and shower is None):
+        return
+    if shower is None:
+        start, state["next_shower"] = state["next_shower"], None
+        if start is not None:
+            start = max(start, world.time + events.WARNING_SECONDS)
+        set_shower(events.schedule(world.time, state["shower_rng"], here, planet.radius, start))
+        state["shower_tries"] = 0
+        shower = state["shower"]
+    probe_shower()
+    heights = state["impact_heights"]
+    large = next(k for k, i in enumerate(shower.impacts) if i.large)
+    known = large in heights or state["struck"] > large
+    if (large in heights and not state["shower_warned"] and state["shower_tries"] < SHOWER_TRIES
+            and not on_land(shower.impacts[large].direction, heights[large])):
+        state["shower_tries"] += 1
+        set_shower(events.schedule(world.time, state["shower_rng"], here, planet.radius, shower.start))
+        return
+    if known and not state["shower_warned"] and world.time >= shower.start - events.WARNING_SECONDS:
+        state["shower_warned"] = True
+        centre = add(planet.centre(), scale(shower.centre, planet.radius))
+        towards = bearing(here, sub(centre, state["position"]))
+        state["hud"].toast("Meteor shower inbound: bearing %03.0f, %s"
+                           % (towards or 0.0, distance_text(events.ground_distance(here, shower.centre,
+                                                                                   planet.radius))), METEOR_MARKER)
+    for k, impact in enumerate(shower.impacts):
+        if k in heights and k not in state["paths"]:
+            point = scale(impact.direction, planet.radius + heights[k])
+            state["paths"][k] = events.Path(point, events.velocity(impact, impact.direction), world.physics.gm,
+                                            planet.radius)
+    while state["struck"] < len(shower.impacts) and shower.impacts[state["struck"]].time <= world.time:
+        strike(state["struck"])
+        state["struck"] += 1
+    if state["struck"] == len(shower.impacts):
+        state["shower"] = None
+
+
+def meteor_rock(impact, ground):
+    """The meteorite (an ore boulder) or the rock of `impact`, of iridium at
+    its grade and mass, flying down at FALL_SPEED from FALL_LIFT above the
+    ground at its point (`ground` m above the planet's radius, as measured
+    before it struck) until its ground is measured; its prop, noted as
+    first seen there."""
+    kind = "boulder" if impact.large else "rock"
+    points, unit_volume = foot.rocks.kind_data(foot.physics, kind)
+    s = (impact.mass / (rock_density(resources.IRIDIUM) * unit_volume)) ** (1.0 / 3.0)
+    radius = float(np.linalg.norm(points * s, axis=1).max())
+    up = impact.direction
+    east, _ = local_frame(up)
+    record = {"kind": kind, "on": planet.name, "state": "flying",
+              "position": list(scale(up, planet.radius + ground + 0.5 * s + FALL_LIFT)),
+              "rotation": list(quat_from_basis(east, up, cross(east, up))),
+              "velocity": list(scale(up, -FALL_SPEED)), "spin": [0.0, 0.0, 0.0], "size": 2.0 * radius,
+              "radius": radius, "rest": 0.5 * s, "mass": impact.mass, "extent": [s, s, s],
+              "colour": list(rock_colour(planet.index, impact.grade, resources.IRIDIUM)), "key": None,
+              "ground": None, "grade": impact.grade, "resource": resources.IRIDIUM}
+    prop = foot.rocks.restore(foot.physics, record, {planet.name: planet})
+    state["seen"][id(prop)] = (planet.name, up)
+    return prop
+
+
+def strike(k):
+    """The shower's impact `k` strikes, at the ground measured there (the
+    top of the planet's terrain when it is not yet known): the large one digs its crater
+    (events.keep, PlanetWorld.set_craters) and leaves its meteorite, a small
+    one its rock (meteor_rock), hot (events.LARGE_COOLING or
+    SMALL_COOLING); the props in the bubble within PUSH_REACH times its
+    blast's radius (the crater's, or SMALL_BLAST) pushed away (`push`); a
+    flash of FLASH_ALPHA, full within FLASH_REACH and falling with the
+    square of the distance beyond, and within SHAKE_REACH the view shaken by
+    up to SHAKE_ANGLE, both SMALL_LIGHT as strong for a small impact; and a
+    plume of dust (PLUME_PUFFS, or SMALL_PUFFS) at its point. The large
+    one's meteorite is marked on the compass and announced by a toast."""
+    impact = state["shower"].impacts[k]
+    ground = state["impact_heights"].get(k, planet.heights[1])
+    up = impact.direction
+    point = add(planet.centre(), scale(up, planet.radius + ground))
+    if impact.large:
+        radius, depth, rim = impact.crater
+        crater = planet_world.Crater(planet.index, up, radius, depth, rim)
+        state["craters"] = events.keep(state["craters"], crater, world.time, shower_here() or up, planet.radius)
+        world.set_craters([c for c, _ in state["craters"]])
+    prop = meteor_rock(impact, ground)
+    state["hot"][id(prop)] = (world.time, events.LARGE_COOLING if impact.large else events.SMALL_COOLING)
+    blast = impact.crater[0] if impact.large else SMALL_BLAST
+    push(point, PUSH_REACH * blast)
+    light = 1.0 if impact.large else SMALL_LIGHT
+    distance = length(sub(point, state["position"]))
+    state["flash"] = (world.time, FLASH_ALPHA * light * min(1.0, (FLASH_REACH / max(distance, 1.0)) ** 2))
+    if distance < SHAKE_REACH:
+        state["shake"] = (world.time, SHAKE_ANGLE * light * (1.0 - distance / SHAKE_REACH))
+    east, north = local_frame(up)
+    puffs = PLUME_PUFFS if impact.large else SMALL_PUFFS
+    for n in range(puffs):
+        a = 2.0 * math.pi * n / puffs
+        offset = scale(add(scale(east, math.cos(a)), scale(north, math.sin(a))), 0.3 * blast)
+        state["plumes"].append((add(point, offset), up, world.time, blast, light, 0.5 + 0.5 * n / puffs))
+    if impact.large:
+        state["meteorite"] = prop
+        here = shower_here() or up
+        state["hud"].toast("Meteorite down: bearing %03.0f, %s"
+                           % (bearing(here, sub(point, state["position"])) or 0.0,
+                              distance_text(events.ground_distance(here, up, planet.radius))), METEOR_MARKER)
+
+
+def push(point, reach):
+    """The props in the bubble within `reach` m of `point` (planet space)
+    pushed away from it and up, at up to PUSH_SPEED at it and none at
+    `reach`."""
+    bubble = foot.bubble
+    if bubble is None:
+        return
+    for prop in foot.props.in_physics():
+        p = foot.physics.get_transform(prop.body)[0]
+        away = sub(bubble.to_world(p), point)
+        d = length(away)
+        if d >= reach:
+            continue
+        up = bubble.up(p)
+        out = normalize(add(scale(away, 1.0 / d) if d > 1e-6 else up, up))
+        foot.physics.add_impulse(prop.body, scale(out, prop.mass * PUSH_SPEED * (1.0 - d / reach)))
+
+
+def too_hot(body):
+    """Whether the physics body `body` is a prop still hot from its impact (the gun's TOO HOT)."""
+    prop = foot.props.find(body) if body is not None else None
+    hot = state["hot"].get(id(prop)) if prop is not None else None
+    return hot is not None and events.heat(world.time - hot[0], hot[1]) > 0.0
+
+
+def split_hot(boulder, chunks):
+    """The chunks of a hot meteorite as hot as it was (Rocks.on_split)."""
+    hot = state["hot"].get(id(boulder)) if boulder is not None else None
+    if hot is not None:
+        for chunk in chunks:
+            state["hot"][id(chunk)] = hot
+    if boulder is not None and boulder is state["meteorite"]:
+        state["meteorite"] = None
+
+
+def meteorite_point():
+    """The meteorite still lying whole, planet space, or None."""
+    meteorite = state["meteorite"]
+    if meteorite is None or not any(p is meteorite for p in foot.props.rocks):
+        return None
+    body, position, _ = foot.prop_state(meteorite)
+    return add(body.centre(), position)
+
+
+def flash_tint():
+    """The impact's flash over the screen ((r, g, b), alpha), fading over FLASH_SECONDS, or None."""
+    flash = state["flash"]
+    if flash is None or not 0.0 <= world.time - flash[0] < FLASH_SECONDS:
+        return None
+    return FLASH_COLOUR, flash[1] * (1.0 - (world.time - flash[0]) / FLASH_SECONDS)
+
+
+def shaken(basis):
+    """The view's `basis` (right, up, forward) turned by the impact's shake, fading over SHAKE_SECONDS."""
+    shake = state["shake"]
+    if shake is None or not 0.0 <= world.time - shake[0] < SHAKE_SECONDS:
+        return basis
+    age = world.time - shake[0]
+    amplitude = shake[1] * (1.0 - age / SHAKE_SECONDS)
+    yaw = amplitude * math.sin(2.0 * math.pi * SHAKE_HZ * age)
+    pitch = amplitude * math.sin(2.0 * math.pi * 1.3 * SHAKE_HZ * age + 1.0)
+    right, up, forward = basis
+    right, forward = rotate(right, up, yaw), rotate(forward, up, yaw)
+    return right, rotate(up, right, pitch), rotate(forward, right, pitch)
+
+
+def draw_showers(camera, basis):
+    """The meteors in flight, their dust plumes and the hot props, as
+    glowing quads (viewmodel.Glows) relative to `camera`, the view's
+    `basis`:
+    - each meteor's head a disc HEAD_SIZE across (SMALL_HEAD of that for a
+      small one), at least HEAD_PIXELS of the screen, HEAD_LIGHT times
+      METEOR_GLOW (SMALL_LIGHT of it for a small one) brightening over
+      IGNITE_SECONDS from its entry; and its trail, TRAIL_SEGMENTS
+      streaks along the last TRAIL_SECONDS of its path, TRAIL_WIDTH of the
+      head wide, TRAIL_LIGHT times TRAIL_GLOW, narrowing and fading to its
+      end;
+    - each plume's puffs discs rising at up to PLUME_RISE, growing from
+      the blast's radius to three times it and fading in PLUME_COLOUR
+      over PLUME_SECONDS, and fading out within PLUME_NEAR of their size
+      from the camera;
+    - each hot prop a disc HOT_SIZE times its radius across in HOT_GLOW
+      times its heat."""
+    glows = state["meteor_glows"]
+    glows.begin(basis)
+    now, centre = world.time, planet.centre()
+    pixel = math.radians(settings["fov"]) / max(1, engine.framebuffer_size[1])
+    heads = 0
+    shower = state["shower"]
+    for k in range(state["struck"], len(shower.impacts) if shower is not None else 0):
+        impact, path = shower.impacts[k], state["paths"].get(k)
+        before = impact.time - now
+        if path is None or not 0.0 < before <= path.duration:
+            continue
+        light = (1.0 if impact.large else SMALL_LIGHT) * min(1.0, (path.duration - before) / IGNITE_SECONDS)
+        head = add(centre, path.at(before))
+        size = max(HEAD_SIZE * (1.0 if impact.large else SMALL_HEAD), HEAD_PIXELS * pixel * length(sub(head, camera)))
+        glows.disc(sub(head, camera), size, scale(METEOR_GLOW, HEAD_LIGHT * light))
+        heads += 1
+        last = head
+        for j in range(1, TRAIL_SEGMENTS + 1):
+            point = add(centre, path.at(before + TRAIL_SECONDS * j / TRAIL_SEGMENTS))
+            fade = 1.0 - (j - 0.5) / TRAIL_SEGMENTS
+            glows.streak(sub(last, camera), sub(point, camera), TRAIL_WIDTH * size * fade,
+                         scale(TRAIL_GLOW, TRAIL_LIGHT * light * fade))
+            last = point
+    state["plumes"] = [p for p in state["plumes"] if now - p[2] < PLUME_SECONDS]
+    for point, up, since, blast, light, rise in state["plumes"]:
+        age = now - since
+        if age < 0.0:
+            continue
+        at = sub(add(point, scale(up, PLUME_RISE * rise * age + 0.5 * blast)), camera)
+        size = blast * (1.0 + 2.0 * age / PLUME_SECONDS)
+        fade = (1.0 - age / PLUME_SECONDS) * min(1.0, age / 0.3) * min(1.0, length(at) / (PLUME_NEAR * size))
+        glows.disc(at, size, scale(PLUME_COLOUR, light * fade))
+    for prop in foot.props.rocks:
+        hot = state["hot"].get(id(prop))
+        heat = events.heat(now - hot[0], hot[1]) if hot is not None else 0.0
+        if heat > 0.0:
+            body, position, _ = foot.prop_state(prop)
+            glows.disc(sub(add(body.centre(), position), camera), HOT_SIZE * prop.radius, scale(HOT_GLOW, heat))
+    glows.end()
+    state["heads_drawn"] = heads
+
+
 # ── Saving and loading ─────────────────────────────────────────────────────
 
 def save_game(base=None, quiet=False):
@@ -3371,9 +3938,11 @@ def save_game(base=None, quiet=False):
     player (None while driving), the car, the props and the taken rocks,
     the market, the game's numbers, the waypoint, the day's offset
     (clock.py), the contracts (the active ones, today's offers accepted,
-    the pin, the reputations and the counts; which crates are couriers')
-    and the explored map. Returns the data, or None without a player or
-    the car driven."""
+    the pin, the reputations and the counts; which crates are couriers'),
+    the explored map, the meteorites' craters ("modifiers"), the next
+    shower's start ("events"; a shower under way, its start) and which
+    props are hot and since when, and which is the last meteorite.
+    Returns the data, or None without a player or the car driven."""
     player = foot.player
     if player is None and not state["driving"]:
         if not quiet:
@@ -3412,6 +3981,10 @@ def save_game(base=None, quiet=False):
         "pois": state["pois"].record(),
         "parts": dict(state["parts"]),
         "survey_data": state["survey_data"],
+        "modifiers": [events.crater_record(c, t, planet.name) for c, t in state["craters"]],
+        "events": {"next_shower": state["shower"].start if state["shower"] is not None else state["next_shower"]},
+        "hot": [list(state["hot"][id(p)]) if id(p) in state["hot"] else None for p in foot.props.all],
+        "meteorite": next((n for n, p in enumerate(foot.props.all) if p is state["meteorite"]), None),
     }
     data = save.write(base or save_base, data, state["map"].grids)
     state["last_save"] = data
@@ -3456,19 +4029,31 @@ def load_game(base=None):
     state["seen"] = {}
     state["pods"] = {}
     state["couriers"], state["crate_velocity"] = {}, {}
+    state["hot"], restored = {}, []
     none = [None] * len(data["props"])
-    for record, seen, pod, courier in zip(data["props"], data["seen"], data.get("pods") or none,
-                                          data.get("couriers") or none):
+    for record, seen, pod, courier, hot in zip(data["props"], data["seen"], data.get("pods") or none,
+                                               data.get("couriers") or none, data.get("hot") or none):
         if record["kind"] == "crate":
             prop = foot.props.restore(record, by_name)
         else:
             prop = foot.rocks.restore(foot.physics, record, by_name)
+        restored.append(prop)
+        if hot is not None:
+            state["hot"][id(prop)] = tuple(hot)
         if seen is not None:
             state["seen"][id(prop)] = (seen[0], tuple(seen[1]))
         if pod is not None:
             state["pods"][id(prop)] = tuple(pod)
         if courier is not None:
             state["couriers"][id(prop)] = courier
+    meteorite = data.get("meteorite")
+    state["meteorite"] = restored[meteorite] if meteorite is not None else None
+    state["craters"] = [events.crater_from_record(r, planet.index, planet_world.Crater)
+                        for r in data.get("modifiers", []) if r.get("type") == "crater" and r.get("body") == planet.name]
+    world.set_craters([c for c, _ in state["craters"]])
+    set_shower(None)
+    state["next_shower"] = (data.get("events") or {}).get("next_shower")
+    state["flash"], state["shake"], state["plumes"] = None, None, []
     state["pois"].restore(data.get("pois", []), poi_seed())
     state["poi_want_at"], state["poi_asked"], state["poi_asking"] = None, None, []
     state["parts"] = dict(data.get("parts", {}))
@@ -3627,6 +4212,7 @@ def frame(dt):
         if foot.bubble is None and (state["car"].height or 0.0) < 0.5 * Bubble.RADIUS:
             foot.ensure_bubble(viewpoint)
     foot.step(dt, viewpoint, state["position"], latency, active=active, before_step=move_car_body)
+    update_showers()
     foot.props.probe(foot.bubble, EXTRA_PROBES)
     place_eye()
     if state["driving"]:
@@ -3635,7 +4221,7 @@ def frame(dt):
     set_max_levels()
 
     camera = state["position"]
-    basis = view_basis()
+    basis = shaken(view_basis())
     update_lights(camera)
     foot.request_nearby(camera, bodies)
     world.end_frame(camera, basis, dt, viewpoint=camera,
@@ -3646,6 +4232,7 @@ def frame(dt):
     pads.draw(camera)
     draw_net(camera)
     draw_poi_scenes(camera)
+    draw_showers(camera, basis)
     foot.props.draw(foot.bubble, camera)
     place_ship(camera)
     place_viewmodel(dt, camera)
@@ -3789,6 +4376,9 @@ def on_init():
     build_net()
     state["viewmodel"] = Viewmodel(engine, box())
     state["car_glows"] = carview.EngineGlows(engine)
+    state["meteor_glows"] = Glows(engine, METEOR_DISCS, METEOR_STREAKS)
+    foot.too_hot = too_hot
+    foot.rocks.on_split = split_hot
     state["hud"] = Hud(engine)
     state["hud"].show(False)
     state["map"] = ExploredMap(world)

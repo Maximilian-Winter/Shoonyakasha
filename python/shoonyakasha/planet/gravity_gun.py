@@ -17,7 +17,8 @@ towards it reaches.
   the eye at up to 12 m/s (2 m/s per metre away), by at most pull_force.
   While grab stays held, a body being pulled stays the target as long as
   it is within PULL_KEEP_DEG of the view. A body whose weight is more
-  than 0.9 hold_force is too heavy for either. Pressing grab while
+  than 0.9 hold_force is too heavy for either, and one `too_hot(body)`
+  says is too hot is not grabbed or pulled either. Pressing grab while
   holding drops the body; a body is not grabbed again until grab is let
   go.
 - **Hold:** the body is pulled towards the hold point, hold distance
@@ -124,11 +125,13 @@ def axis_rotation(axis, angle):
 
 
 class Gun:
-    def __init__(self, player, objects, params=None, promote=None):
+    def __init__(self, player, objects, params=None, promote=None, too_hot=None):
         """The gun of `player`; `objects()` gives (body, radius, mass) of
         each body it may grab; `promote(body)` turns one of those that is not
-        dynamic (a rock) dynamic before the gun acts on it."""
+        dynamic (a rock) dynamic before the gun acts on it; `too_hot(body)`
+        whether one of them is too hot to grab (none is when None)."""
         self.player = player
+        self.too_hot = too_hot
         self.physics = player.physics
         self.bubble = player.bubble
         self.objects = objects
@@ -154,17 +157,22 @@ class Gun:
 
     @property
     def status(self):
-        """"holding", "too_heavy", "can_grab" (a grabbable target), or "idle"."""
+        """"holding", "too_heavy", "too_hot", "can_grab" (a grabbable target), or "idle"."""
         if self.held is not None:
             return "holding"
         t = self.target
         if t is not None and t.grabbable:
-            return "too_heavy" if self.too_heavy(t) else "can_grab"
+            if self.too_heavy(t):
+                return "too_heavy"
+            return "too_hot" if self.hot(t) else "can_grab"
         return "idle"
 
     def too_heavy(self, target):
         g = length(self.bubble.gravity(target.point))
         return target.mass * g > TOO_HEAVY_SHARE * self.p.hold_force
+
+    def hot(self, target):
+        return self.too_hot is not None and self.too_hot(target.body)
 
     def aim(self, eye, forward):
         """What the view points at (see the module's docstring), or None."""
@@ -252,7 +260,8 @@ class Gun:
                     if t.grabbable:
                         self.loose(t.body)
                     self.punt(t.body if t.mass > 0.0 else None, forward)
-            elif controls.grab and not self.latch and t is not None and t.grabbable and not self.too_heavy(t):
+            elif (controls.grab and not self.latch and t is not None and t.grabbable and not self.too_heavy(t)
+                  and not self.hot(t)):
                 self.loose(t.body)
                 if t.distance <= self.p.grab_range:
                     self.grab(t.body, right, up, forward)

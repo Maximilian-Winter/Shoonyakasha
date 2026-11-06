@@ -96,6 +96,7 @@ const uint RESOURCE_AMBER = 4u;
 const uint RESOURCE_EVAPORITE = 5u;
 const uint RESOURCE_ICE = 6u;
 const uint RESOURCE_ILMENITE = 7u;
+const uint RESOURCE_IRIDIUM = 8u;            // meteorites only: never chosen here
 const int PLANET_RESOURCES = 5;              // ferrite to evaporite
 const float RESOURCE_WAVELENGTH = 0.11;      // of a unit of direction: about 11 km on the planet
 const float RESOURCE_NOISE = 0.6;

@@ -34,7 +34,7 @@ examples/python/simulations/planet/
   suit.py             # new: temperature, suit reserve, effects
   poi.py              # new: points of interest from the hash, discovery
   contracts.py        # new: generation, state, rewards
-  events.py           # new: scheduler, meteor showers, storms
+  events.py           # new: meteor showers: scheduling, paths, craters kept, heat (§11)
   save.py             # extend: walker's save; planet.py's save_game / load_game likewise
 python/shoonyakasha/planet/
   resources.py        # new: resource ids and a NumPy mirror of resources.glsl (for tests)
@@ -94,7 +94,7 @@ Each rock weighs by its resource's density: `rocks.DENSITIES`, indexed by id, an
 
 The example's fixed rocks get their static hull and their mass at that density. `Rocks.grabbable`, a promoted rock's mass, a boulder's chunks and the cargo all follow from it. Ilmenite boulders are about 1.8 times as heavy as plain ones of the same size, and amber and ice rocks less than half.
 
-Iridium (id 8) is not in the code. The tables above and in §1.1 give the values to use when §11 adds it: entries in `resources.glsl` and `resources.py`, in `ore_colours.glsl` and `rocks.ORE_TINTS` / `SPECK_COLOURS` (black, glassy; violet specks), in `rocks.DENSITIES` and in `trade.VALUES`. Until then the colour and density lookups clamp id 8 to ilmenite's entries.
+Iridium (id 8) comes only from meteorites (§11): `RESOURCE_IRIDIUM` in `resources.glsl`, which the shaders never choose, and `resources.IRIDIUM`, with its entries in `ore_colours.glsl` and `rocks.ORE_TINTS` / `SPECK_COLOURS` (black, glassy; violet specks), in `rocks.DENSITIES` and in `trade.VALUES`. The walker's Outpost tab shows its price.
 
 ### 1.2 The resource field on the GPU
 
@@ -354,19 +354,24 @@ Both programs already save:
   - the suit, the points of interest's states, the parts, the survey data and which crates are pods (§8, §9)
   - the contracts, the offers accepted today, the pin, the reputations and which crates are couriers' (§10)
   - the explored map's measured cells
+  - the meteorites' craters, the next shower's start, which props are hot and since when, and which is the last meteorite (§11)
 
-  Those of §8–§10 are keys a version-2 save may lack; loading one without them starts them as a new game has them.
+  Those of §8–§11 are keys a version-2 save may lack; loading one without them starts them as a new game has them.
 
   It autosaves every `AUTOSAVE_SECONDS` (120 s), on getting out of the car parked on an outpost's pad, on Quit and as the window closes. `--check` saves and loads, on foot and driving.
 
-Later phases add to the records as they add the state, each with a new version and its migration:
+The keys of §11:
 
 ```json
 {
-  "modifiers": [ { "type": "crater", "body": "planet", "direction": [0, 0, 1], "radius": 60, "depth": 9, "time": 15000 } ],
-  "events": { "next_shower": 21000.0 }
+  "modifiers": [ { "type": "crater", "body": "planet", "direction": [0, 0, 1], "radius": 30, "depth": 5.4, "rim": 1.8, "time": 15000.0 } ],
+  "events": { "next_shower": 21000.0 },
+  "hot": [null, [15000.0, 180.0]],
+  "meteorite": 1
 }
 ```
+
+`hot` and `meteorite` go with `props` (a prop's time of impact and cooling seconds, and the last meteorite's index). `next_shower` is the next shower's start, or the start of one under way; loaded, that shower is planned anew around the camera, starting at that time or 60 s after the load, whichever is later.
 
 `planet.py`'s save is of version 2 (`SAVE_VERSION`). Since version 1 it has gained:
 - `"upgrades"`, the owned keys (§5);
@@ -575,23 +580,37 @@ Each reward is times 1 + 0.1 × the outpost's reputation, rounded to 10 cr. A co
 
 ### 11.1 Scheduling
 
+`events.py` (the walker's) plans the showers; `walker.py` runs them on the planet (`update_showers`).
+
 ```python
 @dataclass
-class Shower:
-    start: float            # world.time
-    centre: tuple           # body-relative direction of the impact area
-    body: str
-    impacts: list           # [(time, direction, size)] sorted by time
+class Impact:
+    time: float                  # the world's clock when it strikes
+    direction: tuple             # unit, from the body's centre
+    mass: float                  # kg of its meteorite or rock
+    grade: float
+    speed: float                 # m/s as it strikes
+    angle: float                 # degrees below the horizon as it strikes
+    bearing: float               # degrees clockwise from north it travels towards
+    crater: tuple = None         # (radius, depth, rim) for the large one
 
-def schedule_next(now, rng, player_dir):
-    gap = rng.expovariate(1.0 / (25 * 60.0))             # mean 25 min of game time
-    start = now + max(5 * 60.0, gap)
-    # Impact area 3-10 km from where the player will probably be (on land)
+@dataclass
+class Shower:
+    start: float                 # the world's clock its impacts are drawn from
+    centre: tuple                # unit direction of its centre
+    impacts: list                # sorted by time
+
+def schedule(now, rng, player, radius, start=None):
+    if start is None:
+        start = now + max(MIN_GAP, rng.expovariate(1.0 / MEAN_GAP))   # 5 min at least, 25 min on average
+    centre = along_ground(player, rng.uniform(0.0, 360.0), rng.uniform(AREA_NEAR, AREA_FAR), radius)   # 3-10 km
     ...
 ```
 
-- **Warning** 60 s before: a toast and an audio cue ("Meteor shower inbound, bearing 040"), and a compass marker for the area.
-- **Composition:** 1 large impact (a meteorite of 2–6 t, crater 40–80 m) and 4–10 small ones (no crater, a glowing rock each), spread over ~40 s within 1–2 km of the centre.
+- **Composition:** 1 large impact at the centre (a meteorite of 2–6 t, a crater 40–80 m across, its radius growing with the mass, 0.18 of the radius deep with a rim 0.06 of it high) and 4–10 small ones (a rock of 15–60 kg each, no crater) within 1–2 km of the centre, all at times drawn over 40 s from the start. Every meteor of a shower comes from about the same bearing (within 10°), at 2–4 km/s and 25–60° below the horizon as it strikes, each with a grade of 0.4–0.8.
+- **On land:** the impacts' ground is measured with the extra probes. While the large impact's ground lies under the sea, a lake or a river, the shower is planned again with the same start, up to `SHOWER_TRIES` (4) times.
+- **Warning** 60 s before the start, once the large impact's ground is known: a toast ("Meteor shower inbound: bearing 040, 6.2 km") and a marker on the compass at the centre until the last impact. The next shower is planned once the last has struck.
+- Under `--check` no shower is planned; the check gives its own.
 
 ### 11.2 Terrain modifiers (craters)
 
@@ -618,27 +637,29 @@ float craterShape(float r, float depth, float rim) {
 - The horizon shadows of chunks beyond two radii are not measured again until the sun's next rebuild of every chunk.
 - **Vegetation and rocks:** the scatter (`scatterCandidate`, for the trees, the grass and the rocks) skips candidates within a crater's radius (`terrainInCrater`).
 
-Keep at most ~16 craters per body. When the list is full, drop the oldest crater farther than 20 km from the player, along with its record. Craters are saved in `modifiers`.
+The walker keeps the meteorites' craters with the time each was dug (`events.keep`), at most `MAX_CRATERS` (16). When that many are kept, the oldest whose centre lies farther than 20 km along the ground from the camera goes, or the oldest of all when none does. They are saved in `modifiers` (§6).
 
 ### 11.3 The meteor itself
 
-- **Trajectory:** entry at 30 km altitude, 2–4 km/s, 25–60° to the horizon. It is a straight line plus gravity, computed in doubles and drawn relative to the camera.
-- **Visuals:**
-  - a glowing head: a camera-facing quad with an additive radial gradient, sized from its distance so it stays at least a few pixels across
-  - a trail: a line strip of the last 2 s of positions with fading alpha, drawn like the orbit path (after the atmosphere, depth-tested, additive)
+- **Trajectory:** `events.Path` flies each meteor back from where it strikes, in doubles, under the body's gravity in 0.05 s steps, until it is 30 km above the radius; its flight lasts the steps taken (8–27 s on the planet). Its position at a time is between two steps' points.
+- **Visuals:** glowing quads (`viewmodel.Glows`, the Glow pass: additive, after the atmosphere, depth-tested), placed relative to the camera each frame (`draw_showers`):
+  - a head: a camera-facing disc 25 m across (half that for a small meteor), at least 24 pixels of the screen's height across, three times its colour (the sum is clamped at white, which widens its bright core), brightening over its first 1.5 s;
+  - a trail: 8 streaks along the last 2 s of its path, twice its colour, narrowing and fading towards its end.
 
-  Brightness scales with the meteor's size.
-- **Impact:**
-  - a flash: a short additive full-screen tint scaled by 1/distance²
-  - a shock sound delayed by distance / 340 m/s
-  - camera shake within 3 km
-  - a dust plume: a few large soft camera-facing quads rising and fading for 20 s
+  A meteor striking near the camera comes almost straight at it, so its trail shows little.
 
-  Bodies in the bubble within `3 × radius` get an outward impulse.
-- **The meteorite:** a Prop at the crater's centre, resource Iridium, glowing hot (emissive fading over 3 minutes).
-  - While hot, the gun refuses to grab it with "TOO HOT".
-  - It is an ore boulder, so it breaks into chunks (`Rocks.breaks`).
-- **Small impacts:** glowing iridium rocks lying on the ground, with no crater, cooling faster.
+  A small meteor is 0.6 as bright as the large one.
+- **Impact** (`strike`):
+  - a flash: the HUD covers the screen with a warm white of alpha 0.6, full within 2 km and falling with the square of the distance beyond, fading over 0.6 s
+  - the view shaken within 3 km, by up to 1.5° at the impact and none at 3 km, fading over 1.5 s
+  - a dust plume: 6 discs (2 for a small impact) rising and growing from the blast's radius to three times it, fading over 20 s, and fading out within three of their sizes from the camera
+
+  The small impacts' flash and shake are 0.6 as strong. The props in the bubble within 3 blast radii (the crater's radius, or 3 m for a small impact) are pushed away and up, at up to 6 m/s at the impact and none at that reach.
+- **The meteorite:** an ore boulder of Iridium (§1.1) at the large impact's grade and mass, starting 2 m above the ground measured there before the impact and flying down at 5 m/s into the crater until its ground is measured (props.py's flying props). It glows (a disc three times its radius across) while hot, fading evenly over 3 minutes (`events.heat`).
+  - While hot, the gun refuses to grab it with "TOO HOT" (`gravity_gun.Gun`'s `too_hot`, given by `OnFoot.too_hot`).
+  - It is an ore boulder, so it breaks into chunks (`Rocks.breaks`); the chunks of a hot meteorite are as hot (`Rocks.on_split`).
+  - The compass marks it while it lies whole.
+- **Small impacts:** glowing rocks of iridium at their mass, with no crater, cooling over 1 minute.
 
 ### 11.4 Racing for it (later)
 
@@ -765,7 +786,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 9. **Contracts** (`walker.py`). Four kinds on the planet (no moon), the Contracts tab, the pinned contract on the card, the compass and the map, fragile crates, reputation in rewards and prices.
 10. **Meteor showers.**
    10a. **Craters.** `craters.glsl` beside the flat sites, `world.Crater` / `set_craters`, the chunks near a crater built again (`PlanetLod.requeue_near`), the scatter kept out of it. `--crater-check`.
-   10b. **Showers.** Scheduling, meteor visuals, impacts, meteorites, craters in `walker.py` and its save.
+   10b. **Showers** (`walker.py`). Scheduling (`events.py`), meteor visuals, impacts, meteorites of iridium (id 8) too hot to grab at first, the craters kept and saved. `--check`'s shower.
 11. **Wind and storms.** Wind field, ship, car and prop drag, storms. `--wind-check`.
 12. **The moon expedition.** Moon resources, the refinery, long-range upgrades, transfer planner.
 

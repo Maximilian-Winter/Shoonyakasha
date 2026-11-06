@@ -34,7 +34,9 @@ of its share of the boulder's mass, with its grade and resource, its size the bo
 times the cube root of its share and SHRINK (across, also times the ratio
 of the two kinds' widths), placed around the boulder's centre OFFSET of
 its size out, at the boulder's velocity plus BURST outwards. Its cell stays
-taken; the chunks have none.
+taken; the chunks have none. `on_split(boulder, chunks)`, when set, is told
+of each split: the loose boulder's prop (None for a fixed one) and the
+chunks.
 """
 
 import math
@@ -120,6 +122,7 @@ class Rocks:
         self.unit_volume = {}        # kind: the hull's volume at unit scale
         self.triangles = {}          # kind: (positions, normals, shades) around the same origin
         self.speck_meshes = {}       # kind: (positions, normals) of its specks
+        self.on_split = None         # on_split(boulder's prop or None, chunks), told of each split
 
     def kind_data(self, physics, kind):
         if kind not in self.unit_points:
@@ -264,6 +267,7 @@ class Rocks:
         physics = bubble.physics
         p, q = physics.get_transform(body)
         key = self.bodies.get(body)
+        prop = None
         if key is not None:
             rock = self.rocks[key]
             if not (rock.kind == "boulder" and rock.grade > 0.0) or not self.world.taken_rocks.add(key):
@@ -306,4 +310,6 @@ class Rocks:
             chunks.append(self.props.add_rock(chunk, entity, 2.0 * radius, radius, None,
                                               ("hull", hull, physics.mass(chunk)), 0.5 * size[1], bubble.body,
                                               "rock", size, colour, grade, glow, resource))
+        if self.on_split is not None:
+            self.on_split(prop, chunks)
         return chunks

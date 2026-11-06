@@ -28,7 +28,7 @@ atmosphere (the Glow pass, render layer 4, glow.frag), each a disc or a
 streak:
 - **flare** FLARE_BACK from the tip's centre towards the gun (in front of
   the tip seen from the eye), FLARE_SIZE across and FLARE_LIGHT strong for
-  the gun's status, red and flickering when the target is too heavy,
+  the gun's status, red and flickering when the target is too heavy or too hot,
   growing by up to CHARGE_FLARE times with a charge;
 - while holding, a **beam** from the tip to the held body's centre: a thin
   bright core (CORE_WIDTH) inside a wide dim sheath (SHEATH_WIDTH); MOTES
@@ -72,7 +72,7 @@ TIP = (0.0, 0.0, -0.25)              # the tip's centre in the gun's space (the 
 TIP_SIZE = 0.018                     # m
 TIP_COLOUR = (1.0, 0.55, 0.18)       # HDR, times GLOW
 HEAVY_COLOUR = (1.0, 0.16, 0.1)
-GLOW = {"idle": 1.0, "can_grab": 1.8, "too_heavy": 1.5, "holding": 2.8}
+GLOW = {"idle": 1.0, "can_grab": 1.8, "too_heavy": 1.5, "too_hot": 1.5, "holding": 2.8}
 PULSE_HZ = 2.0
 CHARGE_GLOW = 3.0                    # the tip's glow at full charge, times more
 WHITE_PNG = "shoonyakasha_planet_white.png"
@@ -81,8 +81,8 @@ GLOW_LAYER = 4
 GLOW_COLOUR = (1.0, 0.52, 0.16)      # LDR, added to the image
 CORE_COLOUR = (1.0, 0.86, 0.62)
 HEAVY_GLOW = (1.0, 0.18, 0.1)
-FLARE_SIZE = {"idle": 0.05, "can_grab": 0.09, "too_heavy": 0.08, "holding": 0.11}   # m across
-FLARE_LIGHT = {"idle": 0.3, "can_grab": 0.8, "too_heavy": 0.8, "holding": 1.0}
+FLARE_SIZE = {"idle": 0.05, "can_grab": 0.09, "too_heavy": 0.08, "too_hot": 0.08, "holding": 0.11}   # m across
+FLARE_LIGHT = {"idle": 0.3, "can_grab": 0.8, "too_heavy": 0.8, "too_hot": 0.8, "holding": 1.0}
 FLARE_BACK = 0.02                    # m from the tip's centre back towards the gun
 CHARGE_FLARE = 1.5
 CORE_WIDTH = 0.012                   # m
@@ -302,7 +302,7 @@ class Viewmodel:
         strength = GLOW[status]
         if status == "holding":
             strength *= 1.0 + 0.25 * math.sin(2.0 * math.pi * PULSE_HZ * self.time)
-        colour = HEAVY_COLOUR if status == "too_heavy" else TIP_COLOUR
+        colour = HEAVY_COLOUR if status in ("too_heavy", "too_hot") else TIP_COLOUR
         charge = gun.charge
         if charge > 0.0:
             strength *= 1.0 + CHARGE_GLOW * charge
@@ -324,7 +324,7 @@ class Viewmodel:
         """The tip's flare, and the flash after a punt."""
         size, light = FLARE_SIZE[status], FLARE_LIGHT[status]
         colour = GLOW_COLOUR
-        if status == "too_heavy":
+        if status in ("too_heavy", "too_hot"):
             colour = HEAVY_GLOW
             light *= 0.7 + 0.3 * math.sin(31.0 * self.time) * math.sin(17.0 * self.time)
         elif status == "can_grab":

@@ -2,7 +2,8 @@
 sk.PlanetPhysics in a Bubble over a flat mesh at the top of a sphere,
 held by a character (shoonyakasha.planet.character): grabbing,
 holding and dropping a crate, pulling a far one in until it is grabbed, a
-crate too heavy on the planet but not on the moon, the punt's speeds and
+crate too heavy on the planet but not on the moon, a crate too hot not
+grabbed until it has cooled, the punt's speeds and
 recoil, the charged punt (full speed for a light crate, a plain punt after
 a click or within the cooldown), the ground punt lifting the player, turning the held crate, and
 the hold distance's range. Where this interpreter's shoonyakasha has no
@@ -142,6 +143,21 @@ class GunTest(unittest.TestCase):
             self.assertEqual(s.gun.status, "can_grab" if held else "too_heavy")
             s.click()
             self.assertEqual(s.gun.held == crate, held)
+
+    def test_too_hot_not_grabbed_until_cooled(self):
+        s = Scene()
+        crate = s.crate_at_hold_point(20.0)
+        hot = {crate}
+        s.gun.too_hot = lambda body: body in hot
+        s.run(0.05)
+        self.assertEqual(s.gun.status, "too_hot")
+        s.click()
+        self.assertIsNone(s.gun.held)
+        hot.clear()
+        s.run(0.05)
+        self.assertEqual(s.gun.status, "can_grab")
+        s.click()
+        self.assertEqual(s.gun.held, crate)
 
     def test_punt_speed_and_recoil(self):
         for mass, speed, recoil in ((5.0, 30.0, 0.6 * 150.0 / 80.0), (500.0, 3.2, 8.0)):

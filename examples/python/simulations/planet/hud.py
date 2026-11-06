@@ -10,8 +10,8 @@ the HUD's scale (`set_scale`).
   with corner brackets around it while something can be grabbed; while
   holding, a ring of RING_SEGMENTS segments around it, those of the
   charge lit while a punt charges.
-- **Status** on a small panel under the crosshair: "TOO HEAVY" when
-  the target is, the charge while a punt charges, or for HOLD_SECONDS
+- **Status** on a small panel under the crosshair: "TOO HEAVY" or "TOO
+  HOT" when the target is, the charge while a punt charges, or for HOLD_SECONDS
   after the hold distance changes, the distance (`status_text`).
 - **Hints** along the bottom: what the gun's controls do now, as key
   hints (`hints`, scifi.caps) on a panel; hidden when there are none.
@@ -41,6 +41,8 @@ the HUD's scale (`set_scale`).
 - **Tint** under everything else, when given: a colour over the whole
   screen at TINT_CENTRE of its alpha and bands TINT_EDGE of the height
   along the edges at its full alpha, fading inwards (the walker's suit).
+- **Flash** over the tint, when given: a colour evenly over the whole
+  screen at its alpha (the walker's meteor impacts).
 - **Readout** at the bottom right: a panel with the speed along the
   ground, the body's name and the hour when given, and, off the ground,
   the height of the feet above it.
@@ -66,7 +68,7 @@ DIM = scifi.MUTED
 ACCENT = scifi.AMBER
 WARNING = scifi.RED
 GOOD = scifi.GREEN
-CROSSHAIR = {"idle": scifi.CYAN, "can_grab": GOOD, "too_heavy": WARNING, "holding": ACCENT}
+CROSSHAIR = {"idle": scifi.CYAN, "can_grab": GOOD, "too_heavy": WARNING, "too_hot": WARNING, "holding": ACCENT}
 CROSSHAIR_GAP, CROSSHAIR_TICK = 5.0, 7.0
 GRAB_BRACKETS = 15.0             # canvas units from the centre to the brackets' corners while can_grab
 RING_RADIUS = 20.0
@@ -218,9 +220,11 @@ def drive_hints(pad=False, can_leave=False):
 
 def status_text(status, held, charge, hold_distance=None):
     """(text, colour) under the crosshair, or (None, None): "TOO HEAVY",
-    the charge, or `hold_distance` when given."""
+    "TOO HOT", the charge, or `hold_distance` when given."""
     if status == "too_heavy":
         return "TOO HEAVY", WARNING
+    if status == "too_hot":
+        return "TOO HOT", WARNING
     if held and charge > 0.0:
         return "CHARGE %d %%" % round(100.0 * charge), ACCENT
     if held and hold_distance is not None:
@@ -439,7 +443,7 @@ class Hud:
         scifi.caps(self.layer, shown, x + 16.0, y + 0.5 * HINT_BAR_HEIGHT)
 
     def update(self, view, eye, body, player, gun, targets, speed, pad=False, dt=0.0, height=None, extra_hints=(),
-               drive=None, hour=None, car_fuel=None, tint=None):
+               drive=None, hour=None, car_fuel=None, tint=None, flash=None):
         """One frame: `view` (right, up, forward) of the camera, `eye` from
         the planet's centre, `body` the world body under it, `player` the
         character, `gun` its gravity gun, `targets` the compass markers
@@ -453,12 +457,16 @@ class Hud:
         height always. `hour`, a text, shows after the body's name on the
         readout; `car_fuel` (its tank's share) while driving, in the jet
         fuel's place, labelled FUEL and always shown; `tint` ((r, g, b),
-        alpha) over the screen, under the rest (`draw_tint`)."""
+        alpha) over the screen, under the rest (`draw_tint`); `flash`
+        ((r, g, b), alpha) evenly over the whole screen, over the tint."""
         width, height_px = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height_px <= 0:
             return
         self.layer.begin()
         self.draw_tint(tint, width, height_px)
+        if flash is not None and flash[1] > 0.0:
+            self.layer.mesh.polygon([(0.0, 0.0), (width, 0.0), (width, height_px), (0.0, height_px)],
+                                    tuple(flash[0]) + (flash[1],))
         cx, cy = 0.5 * width, 0.5 * height_px
         right, up_view, forward = view
         centre = body.centre()

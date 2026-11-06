@@ -98,6 +98,7 @@ class TextTest(unittest.TestCase):
     def test_hints(self):
         self.assertEqual(hud.hints("idle", False, 0.0), [])
         self.assertEqual(hud.hints("too_heavy", False, 0.0), [])
+        self.assertEqual(hud.hints("too_hot", False, 0.0), [])
         self.assertEqual(hud.hints("can_grab", False, 0.0), [(("RMB",), "Grab")])
         self.assertEqual(hud.hints("can_grab", False, 0.0, pad=True), [(("pad:LT",), "Grab")])
         held = hud.hints("holding", True, 0.0)
@@ -109,6 +110,7 @@ class TextTest(unittest.TestCase):
     def test_status(self):
         self.assertEqual(hud.status_text("idle", False, 0.0), (None, None))
         self.assertEqual(hud.status_text("too_heavy", False, 0.0), ("TOO HEAVY", hud.WARNING))
+        self.assertEqual(hud.status_text("too_hot", False, 0.0), ("TOO HOT", hud.WARNING))
         self.assertEqual(hud.status_text("holding", True, 0.5, 3.0), ("CHARGE 50 %", hud.ACCENT))
         self.assertEqual(hud.status_text("holding", True, 0.0, 3.0), ("HOLD 3.0 M", hud.TEXT))
         self.assertEqual(hud.status_text("holding", True, 0.0), (None, None))

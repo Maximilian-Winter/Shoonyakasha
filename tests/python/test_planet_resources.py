@@ -161,7 +161,7 @@ class ResourcesShader(unittest.TestCase):
 
     def test_constants_are_the_shaders(self):
         shader = (world.PIPELINE.parent / "shaders" / "resources.glsl").read_text(encoding="utf-8")
-        for name in ("NONE", "FERRITE", "CUPRITE", "QUARTZ", "AMBER", "EVAPORITE", "ICE", "ILMENITE"):
+        for name in ("NONE", "FERRITE", "CUPRITE", "QUARTZ", "AMBER", "EVAPORITE", "ICE", "ILMENITE", "IRIDIUM"):
             self.assertIn("const uint RESOURCE_%s = %du;" % (name, getattr(resources, name)), shader)
         self.assertIn("const int PLANET_RESOURCES = %d;" % resources.PLANET_RESOURCES, shader)
         self.assertIn("const float RESOURCE_NOISE = %s;" % resources.RESOURCE_NOISE, shader)
