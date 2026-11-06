@@ -346,7 +346,11 @@
         { "name": "shape", "type": "vec4", "source": "scene.custom.planet.clouds.shape",
           "default": [ 40.0, 900.0, 0.8, 1.0 ] },
         { "name": "wind", "type": "vec4", "source": "scene.custom.planet.clouds.wind",
-          "default": [ 0.0, 0.0, 0.0, 0.0 ] }
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "storm", "type": "vec4", "source": "scene.custom.planet.clouds.storm",
+          "default": [ 0.0, 0.0, 1.0, 0.0 ] },
+        { "name": "stormShape", "type": "vec4", "source": "scene.custom.planet.clouds.stormShape",
+          "default": [ 0.0, 0.0, 0.0, 0.95 ] }
       ]
     },
     "ShadowParams": {

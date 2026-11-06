@@ -38,7 +38,8 @@ is not damped (it keeps its speed, as in flight), a slower one is by
 DAMPING, which helps it settle. `Props.drag` (each physics step) drags the
 props in the physics on the planet moving faster than DRAG_SPEED through
 the air (their velocity less the wind's, PlanetWorld.wind_at) as flying
-ones are. `Props.fly` moves the flying props on by
+ones are; an asleep one only when the drag is more than STICK of its
+weight, so the wind wakes only what it can move. `Props.fly` moves the flying props on by
 seconds of the world's clock, in steps of at most FLY_STEP; one whose
 height above the ground as last measured, less its speed downwards times
 the probes' latency, is below its rest height lands there and rests.
@@ -81,6 +82,7 @@ LANDED = 0.3                     # m above its rest height a prop counts as on t
 FLY_STEP = 1.0 / 120.0           # s
 DRAG = 1.0                       # drag coefficient
 DRAG_SPEED = 5.0                 # m/s: slower props in the physics feel no drag
+STICK = 0.7                      # of its weight the drag must beat to move an asleep prop
 FAST_SPEED = 5.0                 # m/s: faster props in the physics are not damped
 DAMPING = 0.05                   # the physics' linear damping (Jolt's default) of slower ones
 
@@ -347,7 +349,8 @@ class Props:
     def drag(self, bubble):
         """For the next step, the air's drag on the props in the physics
         moving faster than DRAG_SPEED through the air (their velocity less
-        the wind's), on the planet."""
+        the wind's), on the planet; on an asleep one only when it is more
+        than STICK of its weight."""
         world = self.world
         if bubble.body is not world.planet:
             return
@@ -359,7 +362,11 @@ class Props:
             if speed < DRAG_SPEED:
                 continue
             area = 0.6 * math.pi * prop.radius * prop.radius
-            physics.add_force(prop.body, scale(v, -0.5 * world.physics.density(p) * speed * DRAG * area))
+            k = 0.5 * world.physics.density(p) * speed * DRAG * area
+            if not physics.is_active(prop.body) and k * speed < STICK * prop.mass * length(bubble.gravity(
+                    physics.get_transform(prop.body)[0])):
+                continue
+            physics.add_force(prop.body, scale(v, -k))
 
     # ── Out of the physics ──
 

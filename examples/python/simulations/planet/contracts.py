@@ -24,8 +24,8 @@ reputation, rounded to 10 credits, due within DEADLINE_DAYS days.
 `Contract` holds its kind, `origin` (the outpost that offered it),
 `destination`, `reward`, `deadline` (the last day), its task's fields
 and its progress (`delivered` kg, `damage`, the survey's `explored`
-share), and `state`: "offered", "active", "completed", "failed" or
-"expired". `task(c)` is a line of what to do, `progress(c)` its share
+share), `state`: "offered", "active", "completed", "failed" or
+"expired", and `paused`, the seconds its deadline has been held back. `task(c)` is a line of what to do, `progress(c)` its share
 done. `wants(c, item, outpost)` whether a delivery takes an ore item sold
 at an outpost. `strike(c, speed)` adds a fragile crate's damage, of
 (speed - SAFE_SPEED)^2 times DAMAGE_PER, and says whether it broke
@@ -81,6 +81,7 @@ class Contract:
     damage: float = 0.0                # courier
     explored: float = 0.0              # survey: the share explored
     state: str = "offered"
+    paused: float = 0.0                # s its deadline has been held back (the walker's storms)
 
 
 def _away(direction, distance, bearing, radius):

@@ -34,7 +34,7 @@ examples/python/simulations/planet/
   suit.py             # new: temperature, suit reserve, effects
   poi.py              # new: points of interest from the hash, discovery
   contracts.py        # new: generation, state, rewards
-  events.py           # new: meteor showers: scheduling, paths, craters kept, heat (§11)
+  events.py           # new: meteor showers: scheduling, paths, craters kept, heat (§11); storms (§12.2)
   save.py             # extend: walker's save; planet.py's save_game / load_game likewise
 python/shoonyakasha/planet/
   resources.py        # new: resource ids and a NumPy mirror of resources.glsl (for tests)
@@ -355,17 +355,18 @@ Both programs already save:
   - the contracts, the offers accepted today, the pin, the reputations and which crates are couriers' (§10)
   - the explored map's measured cells
   - the meteorites' craters, the next shower's start, which props are hot and since when, and which is the last meteorite (§11)
+  - the storm under way or to come, and each contract's held-back time (§12.2)
 
   Those of §8–§11 are keys a version-2 save may lack; loading one without them starts them as a new game has them.
 
   It autosaves every `AUTOSAVE_SECONDS` (120 s), on getting out of the car parked on an outpost's pad, on Quit and as the window closes. `--check` saves and loads, on foot and driving.
 
-The keys of §11:
+The keys of §11 and §12.2:
 
 ```json
 {
   "modifiers": [ { "type": "crater", "body": "planet", "direction": [0, 0, 1], "radius": 30, "depth": 5.4, "rim": 1.8, "time": 15000.0 } ],
-  "events": { "next_shower": 21000.0 },
+  "events": { "next_shower": 21000.0, "storm": { "centre": [0, 0, 1], "axis": [1, 0, 0], "speed": 9.0, "radius": 12000.0, "start": 18000.0, "end": 21600.0, "body_radius": 100000.0 } },
   "hot": [null, [15000.0, 180.0]],
   "meteorite": 1
 }
@@ -692,15 +693,20 @@ def wind_at(point, up, time, speed, height):
 
 ### 12.2 Storms
 
-- A storm is a moving disk: a centre direction, a radius of 8–15 km, a speed and a lifetime. Inside it:
-  - cloud coverage rises towards 0.95
-  - the wind is ×2.5, with stronger gusts
-  - visibility drops: the haze density in the atmosphere pass rises locally around the camera
-- Effects:
-  - the hover car and the ship's assist get random lateral forces above a wind threshold
-  - outposts warn "storm approaching, landing pads closed", and contracts' deadlines pause
-  - rain (camera-space streak particles)
-- Storms scatter loose small props.
+`wind.Storm` is a moving disk: a centre (a unit direction at its start) moving along the ground at `speed` about an `axis`, a `radius`, a `start` and an `end` on the world's clock. Its strength rises from 0 over its first 10 minutes (`FADE`) and falls back over its last 10; `Storm.at(direction, time)` is that strength inside its radius less its edge (a quarter of the radius), falling to 0 across the edge. `PlanetWorld.storm` holds one (or None). Where it is:
+- **Wind:** the steady speed is up to 2.5 times higher (`STORM_WIND`), and the gusts' share up to 0.5 (`STORM_GUST`).
+- **Clouds:** `upload_storm` gives the cloud shader its centre, radius, edge and strength (CloudParams' `storm` and `stormShape`); the coverage rises towards 0.95 (`STORM_COVERAGE`) inside it (`cloudStorm`), so the storm is seen from outside it and its clouds shade the ground under it.
+- **Haze:** around a camera in it, the atmosphere pass covers the scene with a grey (the sun's illuminance times 0.05, by the sun's height) with an extinction of `STORM_HAZE` (1/1,500 per metre) times how much of the storm is at the camera, out to 50 km.
+
+The walker (`update_storms`):
+- **Planning** (`events.schedule_storm`): a gap of 40 minutes on average (10 at least) after the last ends; it lasts 40–80 minutes, has a radius of 8–15 km and starts 20–35 km upwind of the camera, give or take 30°, moving straight towards where the camera was at 6–14 m/s.
+- **Outposts:** each on the planet is announced ("Storm approaching Base: landing pads closed") 5 minutes before the storm covers it. While covered it is closed: it buys, sells, fuels (or sends fuel) and takes contracts no more, and nothing on its pad sells or is delivered. Once the storm has passed it or ended, another toast says its pads are open.
+- **Deadlines:** while the camera is in the storm, each active contract's deadline is held back (`Contract.paused`, the seconds it has been held).
+- **Rain:** up to 160 streaks (as many and as bright as how much of the storm is at the camera) fall at 9 m/s with the wind through a 16 m box around the camera (`viewmodel.Glows`).
+- **The car:** with the wind at it over 20 m/s it is pushed sideways by 1.5 m/s² per m/s beyond, times a noise of the clock, by its share of the way from its cushion to 20 m up (`buffet_car`).
+- **Props:** an asleep prop is dragged only when the drag beats 0.7 of its weight (`props.STICK`), so a storm scatters light loose props and leaves heavy ones asleep.
+- **Compass:** the storm's centre from 5 minutes before its start to its end.
+- **Save:** `events.storm` is the storm, under way or to come (`events.storm_record`); without it a new one is planned.
 
 ## 13. The moon expedition
 
@@ -791,7 +797,7 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
    10b. **Showers** (`walker.py`). Scheduling (`events.py`), meteor visuals, impacts, meteorites of iridium (id 8) too hot to grab at first, the craters kept and saved. `--check`'s shower.
 11. **Wind and storms.**
    11a. **Wind.** `wind.py` and `PlanetWorld.wind_at`, the clouds drifting with it, the ship's, the car's and the props' drag in it, the suit's chill. `--wind-check`.
-   11b. **Storms** (`walker.py`).
+   11b. **Storms** (`walker.py`). `wind.Storm` and `PlanetWorld.storm` (the wind, the clouds' cover and the haze in it), planning (`events.schedule_storm`), outposts closing, deadlines held, rain, the car buffeted, light props scattered, the save. `--check`'s storm.
 12. **The moon expedition.** Moon resources, the refinery, long-range upgrades, transfer planner.
 
 ## 16. Pitfalls

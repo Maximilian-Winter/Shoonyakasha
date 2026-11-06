@@ -5,7 +5,10 @@ still where the prevailing direction is straight up, its gusts within
 their share and carried with it; PlanetWorld.wind_at none on the moon and
 at the height above the ground under the viewpoint by default, the clouds
 drifting along the prevailing direction, and CLOUD_ROTATION the same as
-clouds.glsl's. Plain Python with a fake engine: no GPU needed.
+clouds.glsl's; a storm's centre moving along the ground, its strength
+rising and falling over FADE and falling over its edge, the wind in it
+STORM_WIND times stronger, and PlanetWorld's wind and storm uniforms with
+one. Plain Python with a fake engine: no GPU needed.
 
     python -m unittest discover -s tests/python
 """
@@ -84,6 +87,50 @@ class WindAt(unittest.TestCase):
         self.assertAlmostEqual(a, b)
 
 
+class Storms(unittest.TestCase):
+    def setUp(self):
+        self.centre = normalize((0.2, 0.9, 0.3))
+        self.axis = normalize(cross(self.centre, (1.0, 0.0, 0.0)))
+        self.storm = wind.Storm(self.centre, self.axis, 10.0, 10_000.0, 100.0, 100.0 + 3_600.0, RADIUS)
+
+    def test_its_centre_moves_along_the_ground(self):
+        later = self.storm.centre_at(100.0 + 1_000.0)
+        self.assertAlmostEqual(RADIUS * math.acos(dot(later, self.centre)), 10_000.0, places=3)
+        self.assertAlmostEqual(dot(later, self.axis), 0.0)
+
+    def test_its_strength_rises_and_falls(self):
+        s = self.storm
+        self.assertEqual(s.strength(50.0), 0.0)
+        self.assertAlmostEqual(s.strength(100.0 + 0.5 * wind.FADE), 0.5)
+        self.assertEqual(s.strength(100.0 + 1_800.0), 1.0)
+        self.assertAlmostEqual(s.strength(s.end - 0.25 * wind.FADE), 0.25)
+        self.assertEqual(s.strength(s.end + 1.0), 0.0)
+
+    def test_it_falls_over_its_edge(self):
+        s, t = self.storm, 100.0 + 1_800.0
+        centre = s.centre_at(t)
+        side = normalize(cross(centre, s.axis))
+
+        def at(distance):
+            return s.at(normalize(add(scale(centre, math.cos(distance / RADIUS)),
+                                      scale(side, math.sin(distance / RADIUS)))), t)
+        self.assertEqual(at(0.0), 1.0)
+        self.assertEqual(at((1.0 - wind.EDGE) * s.radius - 10.0), 1.0)
+        self.assertAlmostEqual(at((1.0 - 0.5 * wind.EDGE) * s.radius), 0.5, places=3)
+        self.assertEqual(at(s.radius + 10.0), 0.0)
+
+    def test_the_wind_in_it(self):
+        direction = wind.prevailing(0.0)
+        up = normalize(cross(direction, wind.TURN_AXIS))
+        point = scale(up, RADIUS)
+        calm = wind.wind_at(point, up, 0.0, 15.0, 10.0)
+        stormy = wind.wind_at(point, up, 0.0, 15.0, 10.0, storm=1.0)
+        steady = 15.0 * wind.profile(10.0)
+        n = wind.noise3(*(c / wind.GUST_SCALE for c in point))
+        self.assertAlmostEqual(length(calm), steady * (1.0 + wind.GUST_SHARE * n))
+        self.assertAlmostEqual(length(stormy), wind.STORM_WIND * steady * (1.0 + wind.STORM_GUST * n))
+
+
 class World(unittest.TestCase):
     def setUp(self):
         self.world = planet_world.PlanetWorld(FakeEngine())
@@ -117,6 +164,29 @@ class World(unittest.TestCase):
         for t, b, a in zip(turned, before, w.cloud_wind):
             self.assertAlmostEqual(t * f + (a - b), 0.0)
         self.assertEqual(w.engine.custom["planet.clouds.wind"][:3], w.cloud_wind)
+
+    def test_the_wind_and_the_uniforms_with_a_storm(self):
+        w = self.world
+        centre = normalize(self.point)
+        w.storm = wind.Storm(centre, normalize(cross(centre, (1.0, 0.0, 0.0))), 0.0, 10_000.0,
+                             w.time - wind.FADE, w.time + 3_600.0, RADIUS)
+        calm = wind.wind_at(self.point, self.up, w.time, w.wind_speed, 20.0)
+        stormy = wind.wind_at(self.point, self.up, w.time, w.wind_speed, 20.0, storm=1.0)
+        self.assertEqual(w.wind_at(w.planet, self.point, 20.0), stormy)
+        self.assertNotEqual(calm, stormy)
+        w.upload_storm(add(w.planet.centre(), self.point))
+        storm, shape = w.engine.custom["planet.clouds.storm"], w.engine.custom["planet.clouds.stormShape"]
+        for a, b in zip(storm[:3], centre):
+            self.assertAlmostEqual(a, b)
+        self.assertAlmostEqual(storm[3], 10_000.0 / RADIUS)
+        self.assertEqual(shape[0], 1.0)
+        self.assertAlmostEqual(shape[1], wind.EDGE * 10_000.0 / RADIUS)
+        self.assertAlmostEqual(shape[2], planet_world.STORM_HAZE)
+        self.assertEqual(shape[3], planet_world.STORM_COVERAGE)
+        w.storm = None
+        w.upload_storm(add(w.planet.centre(), self.point))
+        self.assertEqual(w.engine.custom["planet.clouds.stormShape"][0], 0.0)
+        self.assertEqual(w.engine.custom["planet.clouds.stormShape"][2], 0.0)
 
     def test_cloud_rotation_is_the_shaders(self):
         shader = (planet_world.PIPELINE.parent / "shaders" / "clouds.glsl").read_text(encoding="utf-8")

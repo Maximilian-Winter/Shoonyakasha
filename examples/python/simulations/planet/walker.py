@@ -161,6 +161,16 @@ lamps.LIGHTS_ON_ELEVATION the lights come on (`update_lights`): over each
 outpost's pad, the car's headlights (CAR_HEADLIGHTS, CAR_HEADLIGHT_DIP
 down) and on foot the suit lamp.
 
+Storms (events.schedule_storm, `update_storms`, PlanetWorld.storm): one at
+a time over the planet, planned upwind once the last has ended. In it the
+wind is stronger, the clouds close in, a haze closes around the camera
+(PlanetWorld.upload_storm) and rain falls (`draw_rain`); the car is
+buffeted in a strong wind (`buffet_car`). An outpost it covers is closed
+(`closed`): it buys, sells, fuels and offers nothing, announced
+STORM_WARNING before by a toast and again once open. While the camera is
+in it, the contracts' deadlines are held (contracts.Contract.paused). The
+compass marks its centre; the save keeps it ("events").
+
 Meteor showers (events.py, `update_showers`): the next shower is planned
 around the camera on the planet, its impacts' ground measured with the
 extra probes (`probe_shower`) and, while its large impact falls in the sea,
@@ -208,7 +218,7 @@ grab, right trigger punt, the bumpers the hold distance.
                                              load the car's net and sell its cargo, buy upgrades,
                                              use a point of interest of each kind, sell survey data,
                                              take and end a contract of each kind, bring down a meteor shower,
-                                             pause, save, change the game and load it, drive and fly
+                                             stand in a storm, pause, save, change the game and load it, drive and fly
                                              the car, hover it on a lake and a river, run it dry and
                                              call fuel, then night; report and exit
 """
@@ -233,6 +243,7 @@ from shoonyakasha.planet.on_foot import JUMP_DISTANCE, STEP, OnFoot
 from shoonyakasha.planet.vec import (add, cross, dot, euler_from_basis, length, local_frame, normalize, quat_from_basis,
                                      quat_normalize, rotate, scale, sub)
 from shoonyakasha.planet import resources, rivers
+from shoonyakasha.planet import wind as wind_field
 from shoonyakasha.planet.lakes import LakeSurvey
 from shoonyakasha.planet.world import EXTRA_PROBES, FOV, MAX_LEVEL, SITE_BLEND_RADIUS
 from shoonyakasha.planet.props import stack_offsets
@@ -405,6 +416,22 @@ SHOWER_CHECK_NEAR = 5.0         # m from its rock --check walks the player to
 SHOWER_CHECK_MASS = 3_000.0     # kg, its meteorite
 SHOWER_CHECK_ROCK = 40.0        # kg, its rock
 SHOWER_LAND_SECONDS = 6.0       # s after its last impact --check lets its meteorite and rock land
+STORM_CHECK_RADIUS = 10_000.0   # m: --check's storm, centred on the feet
+STORM_CHECK_SECONDS = 6.0       # s it lasts
+STORM_CHECK_LIGHT, STORM_CHECK_HEAVY = 2.0, 500.0   # kg: the crates beside the player
+STORM_CHECK_APART = 2.0         # m from the feet each side
+STORM_CHECK_MOVED = 1.0         # m the light crate must move, at least
+STORM_MARKER = (0.7, 0.75, 0.95, 1.0)
+STORM_WARNING = 300.0           # s before a storm covers an outpost it is announced
+BUFFET_WIND = 20.0              # m/s of wind at the car beyond which it is buffeted
+BUFFET = 1.5                    # m/s^2 per m/s of wind beyond BUFFET_WIND, at most
+BUFFET_RATE = 0.7               # of the noise's cells a second
+RAIN_DROPS = 160
+RAIN_BOX = 16.0                 # m
+RAIN_SPEED = 9.0                # m/s
+RAIN_STREAK = 0.06              # s
+RAIN_WIDTH = 0.012              # m
+RAIN_COLOUR = (0.32, 0.35, 0.4)  # LDR, added to the image
 POI_MARKER, LOOTED_MARKER, SIGNAL_MARKER = (1.0, 0.85, 0.35, 1.0), (0.55, 0.58, 0.62, 1.0), (0.6, 0.75, 0.85, 0.6)
 WALKER_UPGRADES = upgrades.for_groups(("car", "gun", "suit"))   # the upgrades the outposts here offer
 
@@ -581,6 +608,12 @@ state = {
     "plumes": [],                 # (point, up, world clock, blast radius, light, rise share) of each dust puff
     "meteor_glows": None,         # the meteors', plumes' and hot props' quads (viewmodel.Glows)
     "heads_drawn": 0,             # meteors' heads drawn last frame
+    "storm_rng": random.Random(),
+    "storm_warned": set(),        # names of the outposts the storm has been announced for
+    "storm_closed": set(),        # names of the outposts it covers
+    "in_storm": False,            # the camera was in it last frame
+    "rain_glows": None,           # the rain's streaks (viewmodel.Glows)
+    "rain_drawn": 0,              # rain streaks drawn last frame
 }
 
 
@@ -972,7 +1005,8 @@ def read_car_controls():
 
 def step_car(dt):
     """The car moved by `dt` (driven, or parked with no controls) in the
-    wind at its height above the ground (PlanetWorld.wind_at), stopped by
+    wind at its height above the ground (PlanetWorld.wind_at) and buffeted
+    in a strong one (buffet_car), stopped by
     trunks and fixed rocks ahead (bump_car), a bump striking the fragile
     crates in its hold (strike_hold); its poses before and after kept for
     its body in the bubble."""
@@ -982,6 +1016,7 @@ def step_car(dt):
     before = (car_position(), car_rotation())
     controls = state["car_controls"] if state["driving"] else hovercar.CarControls()
     car.step(dt, controls, car_ground, wind=lambda point: world.wind_at(planet, point, car.height))
+    buffet_car(dt)
     impact = bump_car(dt)
     if impact > 0.0:
         strike_hold(impact)
@@ -1200,8 +1235,9 @@ def markers(body):
     """(name, position from the planet's centre, colour) of the outposts
     on `body`, the ship on the planet, the waypoint on `body` and the
     points of interest (poi_markers), the pinned contract's target
-    (contract_target), an announced shower's centre and the last
-    meteorite while it lies whole on the planet."""
+    (contract_target), an announced shower's centre, the last
+    meteorite while it lies whole, and a storm's centre from
+    STORM_WARNING before its start to its end, on the planet."""
     found = [(o.name, o.point(), OUTPOST_MARKER) for o in state["outposts"] if o.body is body]
     if state["ship"] is not None and body is planet:
         found.append(("Ship", state["ship"][0], SHIP_MARKER))
@@ -1216,6 +1252,9 @@ def markers(body):
     meteorite = meteorite_point()
     if body is planet and meteorite is not None:
         found.append(("Meteorite", meteorite, METEOR_MARKER))
+    storm = world.storm
+    if body is planet and storm is not None and storm.start - STORM_WARNING <= world.time < storm.end:
+        found.append(("Storm", add(planet.centre(), scale(storm.centre_at(world.time), planet.radius)), STORM_MARKER))
     return found + poi_markers(body)
 
 
@@ -1322,7 +1361,18 @@ def run_check(dt):
     meteor's head was drawn, and there was a flash, a shake and the large
     impact's plume; then, walked to within SHOWER_CHECK_NEAR of the rock,
     the view on it and the grab held, the gun refuses it as too hot, and
-    with it cooled grabs it; then the
+    with it cooled grabs it; then a storm (run_storm_check): crates of
+    STORM_CHECK_LIGHT and STORM_CHECK_HEAVY kg put down STORM_CHECK_APART
+    either side of the feet and let settle, then a storm of
+    STORM_CHECK_RADIUS centred on the feet at its full strength for
+    STORM_CHECK_SECONDS, an ore rock dropped 1 m over Base's pad and the
+    tank filled there, passing when the wind 10 m up became 1.6 to 3.1
+    times what it was, the light crate moved more than STORM_CHECK_MOVED
+    and the heavy one less than 5 cm and asleep, Base was announced as
+    closed, the ore stayed unsold and the tank was refused, the pinned
+    contract's deadline was held back by the time passed, and rain was
+    drawn; then, the storm gone, Base announced open and the ore sold
+    within SELL_SECONDS; then the
     menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
@@ -1359,7 +1409,8 @@ def run_check(dt):
     _hold added), while charging (with _charge added), just after the punt
     (with _punt added), of the map (with _map added), with the suit low (with _suit added), after the sale (with
     _sell added), of the Upgrades tab after buying (with _upgrades added), of the shower's large meteor (with
-    _meteor added), of its impact (with _impact added) and its plume 4 s on (with _plume added), of the menu
+    _meteor added), of its impact (with _impact added) and its plume 4 s on (with _plume added), in the storm
+    (with _storm added), of the menu
     (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Contracts tab (with _contracts added), of its Settings tab
     (with _settings added), of its Controls tab (with _controls added),
     after the load (with _load added), a second
@@ -1624,6 +1675,9 @@ def run_check(dt):
             check["stage"], check["time"] = "showers", 0.0
     elif stage == "showers":
         if run_shower_check(check, t):
+            check["stage"], check["time"] = "storms", 0.0
+    elif stage == "storms":
+        if run_storm_check(check, t):
             set_paused(True)
             check["stage"], check["time"] = "pause", 0.0
     elif stage == "pause":
@@ -1718,7 +1772,7 @@ def run_check(dt):
                 screenshot(base + "_load" + ext)
             check["ok"] = (check["walk_ok"] and check["capture_ok"] and check["held_ok"] and check["punt_ok"]
                            and check["map_ok"] and check["suit_ok"] and check["sell_ok"] and check["pause_ok"]
-                           and check["shower_ok"] and load_ok)
+                           and check["shower_ok"] and check["storm_ok"] and load_ok)
             check["in_car"] = enter_car(anywhere=True)
             check["top_speed"], check["top_height"] = 0.0, 0.0
             check["stage"], check["time"] = "drive", 0.0
@@ -2313,6 +2367,97 @@ def run_shower_check(check, t):
     return True
 
 
+def run_storm_check(check, t):
+    """--check's storm over the player (see run_check); True once done."""
+    s = check.setdefault("storm", {"step": "crates", "t0": t})
+    player = foot.player
+    step, since = s["step"], t - s["t0"]
+    feet = foot.bubble.to_world(player.feet())
+    here = normalize(planet.relative(feet))
+    if step == "crates":
+        up = player.up()
+        right = normalize(cross(player.heading, up))
+        s["crates"] = [foot.props.spawn_crate(foot.bubble, add(player.feet(), add(scale(right, side), scale(up, 0.5))),
+                                              quat_from_basis(right, up, scale(player.heading, -1.0)),
+                                              CRATE_SIZE, mass=mass)
+                       for side, mass in ((STORM_CHECK_APART, STORM_CHECK_LIGHT),
+                                          (-STORM_CHECK_APART, STORM_CHECK_HEAVY))]
+        s["step"], s["t0"] = "settle", t
+        return False
+    crates = s["crates"]
+    if step == "settle":
+        if all(c.body is not None and not foot.physics.is_active(c.body) for c in crates) or since > 5.0:
+            s["before"] = [foot.prop_state(c)[1] for c in crates]
+            steady = length(world.wind_at(planet, planet.relative(feet), 10.0))
+            axis = normalize(cross(here, local_frame(here)[1]))
+            world.storm = wind_field.Storm(here, axis, 0.0, STORM_CHECK_RADIUS, world.time - wind_field.FADE,
+                                           world.time + 3600.0, planet.radius)
+            s["wind"] = (steady, length(world.wind_at(planet, planet.relative(feet), 10.0)))
+            home = state["home"]
+            s["ore"] = ore_rock(add(home.point(), scale(home.direction, 1.0)), CHECK_ORE_EXTENT, CHECK_ORE_GRADE)
+            fill_tank()
+            s["tank"] = state["car_note"]
+            c = pinned_contract()
+            s["contract"] = (c, c.paused if c is not None else 0.0, world.time)
+            s["rain"] = 0
+            s["step"], s["t0"] = "storm", t
+        return False
+    if step == "storm":
+        s["rain"] = max(s["rain"], state["rain_drawn"])
+        for toast in state["hud"].toasts:
+            if toast[0].startswith("Storm approaching " + state["home"].name):
+                s["warned"] = True
+        if since < STORM_CHECK_SECONDS:
+            return False
+        if args.shot:
+            base, ext = os.path.splitext(args.shot)
+            screenshot(base + "_storm" + ext)
+        moved = [length(sub(foot.prop_state(c)[1], b)) for c, b in zip(crates, s["before"])]
+        light_ok = moved[0] > STORM_CHECK_MOVED
+        heavy = crates[1]
+        heavy_ok = moved[1] < 0.05 and heavy.body is not None and not foot.physics.is_active(heavy.body)
+        unsold = any(p is s["ore"] for p in foot.props.rocks)
+        c, paused, clock_then = s["contract"]
+        held = c.paused - paused if c is not None else 0.0
+        held_ok = c is not None and abs(held - (world.time - clock_then)) < 0.1
+        steady, stormy = s["wind"]
+        ratio = stormy / steady if steady > 0.0 else 0.0
+        lines = [
+            "the wind 10 m up %.1f m/s, in the storm %.1f m/s (x%.2f): %s"
+            % (steady, stormy, ratio, "ok" if 1.6 <= ratio <= 3.1 else "FAILED"),
+            "the %.0f kg crate moved %.2f m, the %.0f kg one %.3f m and asleep: %s"
+            % (STORM_CHECK_LIGHT, moved[0], STORM_CHECK_HEAVY, moved[1], "ok" if light_ok and heavy_ok else "FAILED"),
+            "Base closed: announced %s, the ore on its pad unsold %s, the tank: \"%s\": %s"
+            % (s.get("warned", False), unsold, s["tank"],
+               "ok" if s.get("warned") and unsold and "closed" in s["tank"] else "FAILED"),
+            "the pinned contract's deadline held back %.1f s of %.1f: %s"
+            % (held, world.time - clock_then, "ok" if held_ok else "FAILED"),
+            "%d rain streaks drawn: %s" % (s["rain"], "ok" if s["rain"] > 0 else "FAILED")]
+        s["ok"] = (1.6 <= ratio <= 3.1 and light_ok and heavy_ok and s.get("warned", False) and unsold
+                   and "closed" in s["tank"] and held_ok and s["rain"] > 0)
+        s["lines"] = lines
+        world.storm = None
+        s["step"], s["t0"] = "passed", t
+        return False
+    if step == "passed":
+        sold = not any(p is s["ore"] for p in foot.props.rocks)
+        if not sold and since < SELL_SECONDS:
+            return False
+        reopened = any(toast[0].startswith("The storm has passed " + state["home"].name)
+                       for toast in state["hud"].toasts)
+        s["lines"].append("the storm gone: Base open again (%s), the ore sold after %.1f s: %s"
+                          % (reopened, since, "ok" if sold and reopened else "FAILED"))
+        s["ok"] = s["ok"] and sold and reopened
+        for crate in crates:
+            if any(p is crate for p in foot.props.crates):
+                foot.props.remove(foot.bubble, crate)
+        print("[walker] storm:\n" + "\n".join("[walker]   " + line for line in s["lines"])
+              + "\n[walker]   %s" % ("passed" if s["ok"] else "FAILED"), flush=True)
+        check["storm_ok"] = s["ok"]
+        return True
+    return False
+
+
 def check_contract(kind, n, **fields):
     """--check: a contract of `kind` from Base to Base for 100 cr, due in contracts.DEADLINE_DAYS days."""
     home = state["home"].name
@@ -2424,8 +2569,8 @@ def ore_seen_near(feet):
 
 
 def update_game():
-    """Ore sold where it rests on a pad (or delivered to a delivery
-    contract that wants it there), the pods sold and the contracts' crates
+    """Ore sold where it rests on an open outpost's pad (or delivered to a
+    delivery contract that wants it there), the pods sold and the contracts' crates
     delivered, the objectives moved on, the objective card shown (the
     pinned contract's in place of the objective)."""
     hud, player = state["hud"], foot.player
@@ -2437,7 +2582,7 @@ def update_game():
                                                                for p in ore)):
         state["ore_seen"] = 1
     held = foot.props.find(foot.gun.held) if foot.gun is not None and foot.gun.held is not None else None
-    for outpost, prop, item in sale_items(ore, state["outposts"], held):
+    for outpost, prop, item in sale_items(ore, [o for o in state["outposts"] if not closed(o)], held):
         if deliver(outpost, item):
             foot.props.remove(foot.bubble, prop, release=False)
             continue
@@ -2850,14 +2995,15 @@ def use_spot(poi, k):
 
 
 def pad_under(crate, held):
-    """The outpost on whose pad `crate` has settled (slower than
+    """The open outpost on whose pad `crate` has settled (slower than
     objectives.REST_SPEED), not `held`; or None."""
     if crate is held:
         return None
     body, position, velocity = foot.prop_state(crate)
     if not settled(crate) or length(velocity) >= REST_SPEED:
         return None
-    return next((o for o in state["outposts"] if o.body is body and o.at(add(body.centre(), position))), None)
+    return next((o for o in state["outposts"]
+                 if o.body is body and not closed(o) and o.at(add(body.centre(), position))), None)
 
 
 def sell_pods(held):
@@ -2933,10 +3079,13 @@ def car_note(text, colour=GOOD_TOAST):
 
 
 def fill_tank():
-    """The car's tank filled at the outpost whose pad it is on, as far as the credits go."""
+    """The car's tank filled at the outpost whose pad it is on, as far as the credits go; not while it is closed."""
     outpost, car = car_outpost(), state["car"]
     if outpost is None:
         car_note("the car is not on an outpost's pad", hud_module.WARNING)
+        return
+    if closed(outpost):
+        car_note(closed_note(outpost), hud_module.WARNING)
         return
     kg, cost = state["market"].buy_fuel(car, outpost)
     if kg > 0.5:
@@ -2949,7 +3098,8 @@ def fill_tank():
 
 def call_fuel():
     """Fuel called to the car from the nearest outpost (fuel_offer,
-    trade.fuel_call), arriving after its delay and paid then."""
+    trade.fuel_call), arriving after its delay and paid then; not while
+    that outpost is closed."""
     car = state["car"]
     if state["fuel_call"] is not None:
         car_note("fuel is on its way")
@@ -2962,6 +3112,9 @@ def call_fuel():
         car_note("the tank is full")
         return
     outpost, distance = offer
+    if closed(outpost):
+        car_note(closed_note(outpost), hud_module.WARNING)
+        return
     price, fee, delay = trade.fuel_call(outpost, distance, False)
     if state["market"].credits <= fee:
         car_note("no credits for a fuel call", hud_module.WARNING)
@@ -3052,11 +3205,15 @@ def hold_ore():
 def sell_car_cargo():
     """The ore in the car's hold at the outpost whose pad it is on: each
     item a delivery contract wants there delivered (`deliver`), the rest
-    sold (trade.sale); the contracts' crates stay."""
+    sold (trade.sale); the contracts' crates stay. Not while it is closed."""
     outpost, car = car_outpost(), state["car"]
     if outpost is None:
         state["trade_note"] = "the car is not on an outpost's pad"
         state["hud"].toast("The car is not on an outpost's pad", hud_module.WARNING)
+        return
+    if closed(outpost):
+        state["trade_note"] = closed_note(outpost)
+        state["hud"].toast(state["trade_note"], hud_module.WARNING)
         return
     ore = [item for item in hold_ore() if not deliver(outpost, item)]
     car.cargo = [item for item in car.cargo if "contract" in item]
@@ -3123,10 +3280,14 @@ def outpost_items():
 
 
 def sell_survey():
-    """The survey data held sold at the outpost whose pad the car or the player is on (trade.Market.sell_survey)."""
+    """The survey data held sold at the outpost whose pad the car or the player is on
+    (trade.Market.sell_survey), while it is open."""
     outpost = at_outpost()
     if outpost is None:
         state["trade_note"] = "not on an outpost's pad"
+        return
+    if closed(outpost):
+        state["trade_note"] = closed_note(outpost)
         return
     value = state["survey_data"]
     credits = state["market"].sell_survey(outpost, value, world.time)
@@ -3168,10 +3329,15 @@ def at_outpost():
 
 
 def buy_upgrade(upgrade):
-    """`upgrade` bought at an outpost (at_outpost) with the credits, when upgrades.refusal allows it."""
+    """`upgrade` bought at an outpost (at_outpost), open, with the credits, when upgrades.refusal allows it."""
     market = state["market"]
-    reason = "not at an outpost" if at_outpost() is None else upgrades.refusal(upgrade, state["owned"],
-                                                                              market.credits, state["parts"])
+    outpost = at_outpost()
+    if outpost is None:
+        reason = "not at an outpost"
+    elif closed(outpost):
+        reason = closed_note(outpost)
+    else:
+        reason = upgrades.refusal(upgrade, state["owned"], market.credits, state["parts"])
     if reason is not None:
         state["upgrade_note"] = "%s: %s" % (upgrade.name, reason)
         state["hud"].toast(state["upgrade_note"], hud_module.WARNING)
@@ -3305,9 +3471,9 @@ def contract_title(c):
 
 
 def hours_left(c):
-    """Game hours (clock.py) until the contract's deadline: the dawn after its last day."""
+    """Game hours (clock.py) until the contract's deadline: the dawn after its last day, held back by its pause."""
     end = (c.deadline + 1) * clock.DAY_LENGTH - 0.25 * clock.DAY_LENGTH
-    return max(0.0, (end - day_time()) * 24.0 / clock.DAY_LENGTH)
+    return max(0.0, (end - (day_time() - c.paused)) * 24.0 / clock.DAY_LENGTH)
 
 
 def contract_progress_text(c):
@@ -3355,7 +3521,7 @@ def contract_note(text, colour=GOOD_TOAST):
 
 
 def accept_contract(c):
-    """An offer accepted at its outpost (at_outpost), while fewer than
+    """An offer accepted at its outpost (at_outpost), open, while fewer than
     contracts.MAX_ACTIVE are active, and pinned when none is: a courier's
     crate put in the car's hold when the car is on the pad and it fits,
     else beside the player on foot (refused otherwise); a recovery's pod
@@ -3363,6 +3529,9 @@ def accept_contract(c):
     outpost = at_outpost()
     if outpost is None or outpost.name != c.origin:
         contract_note("accept a contract on its outpost's pad", hud_module.WARNING)
+        return False
+    if closed(outpost):
+        contract_note(closed_note(outpost), hud_module.WARNING)
         return False
     if len(state["contracts"]) >= contracts.MAX_ACTIVE:
         contract_note("at most %d contracts at once" % contracts.MAX_ACTIVE, hud_module.WARNING)
@@ -3520,18 +3689,18 @@ def watch_couriers():
 
 def update_contracts(dt):
     """The outposts' reputations put on them (trade's prices); each active
-    contract past its deadline expired; the survey contracts' shares
-    measured every SURVEY_EVERY (ExploredMap.share), completing at
-    contracts.SURVEY_SHARE; the couriers' crates watched; with the car on a
-    pad, the crates in its hold for there delivered; the Contracts tab
+    contract past its deadline (its day reckoned less the time it was
+    held back, contracts.Contract.paused) expired; the survey contracts'
+    shares measured every SURVEY_EVERY (ExploredMap.share), completing at
+    contracts.SURVEY_SHARE; the couriers' crates watched; with the car on
+    an open outpost's pad, the crates in its hold for there delivered; the Contracts tab
     rebuilt when what it shows changes."""
     for o in state["outposts"]:
         o.reputation = state["reputation"].get(o.name, 0.0)
     if foot.player is None and not state["driving"]:
         return
-    day = contract_day()
     for c in list(state["contracts"]):
-        if day > c.deadline:
+        if clock.day(day_time() - c.paused) > c.deadline:
             fail_contract(c, "expired", "past its deadline")
     state["survey_in"] -= dt
     if state["survey_in"] <= 0.0:
@@ -3543,7 +3712,7 @@ def update_contracts(dt):
     if foot.bubble is not None and foot.bubble.body is planet:
         watch_couriers()
     car, outpost = state["car"], car_outpost()
-    if car is not None and outpost is not None and car.speed() < 1.0:
+    if car is not None and outpost is not None and not closed(outpost) and car.speed() < 1.0:
         for item in [i for i in car.cargo if "contract" in i]:
             c = active_contract(item["contract"])
             if c is not None and c.kind in ("courier", "recovery") and c.destination == outpost.name:
@@ -3938,6 +4107,115 @@ def draw_showers(camera, basis):
     state["heads_drawn"] = heads
 
 
+# ── Storms ─────────────────────────────────────────────────────────────────
+
+def downwind(here):
+    """The wind's prevailing direction along the ground at the unit `here`, or None where it is straight up."""
+    d = wind_field.prevailing(world.time)
+    t = sub(d, scale(here, dot(d, here)))
+    return normalize(t) if length(t) > 1e-6 else None
+
+
+def closed(outpost):
+    """Whether a storm covers `outpost`: its pads closed, it buys, sells, fuels and offers nothing."""
+    storm = world.storm
+    return storm is not None and outpost.body is planet and storm.at(outpost.direction, world.time) > 0.0
+
+
+def closed_note(outpost):
+    return "%s is closed: a storm is over it" % outpost.name
+
+
+def update_storms(dt):
+    """The storms (events.schedule_storm, PlanetWorld.storm): the next
+    planned around the camera once the last has ended (at a loaded save's
+    storm when there is one), none under --check, which gives its own; a
+    toast for each outpost on the planet STORM_WARNING before the storm
+    covers it, and another once it has passed or the storm has ended; one
+    on going into and out of it; and while the camera is in it, each active contract's deadline
+    held back by `dt` (contracts.Contract.paused)."""
+    here = shower_here()
+    if here is None:
+        return
+    storm, hud = world.storm, state["hud"]
+    if storm is None or world.time >= storm.end:
+        for name in sorted(state["storm_closed"]):
+            hud.toast("The storm has passed %s: its pads are open" % name, GOOD_TOAST)
+        if state["in_storm"]:
+            hud.toast("Out of the storm", GOOD_TOAST)
+        state["storm_warned"], state["storm_closed"], state["in_storm"] = set(), set(), False
+        if args.check:
+            world.storm = None
+            return
+        world.storm = events.schedule_storm(world.time, state["storm_rng"], here, planet.radius, downwind(here))
+        storm = world.storm
+    for o in [o for o in state["outposts"] if o.body is planet]:
+        if o.name not in state["storm_warned"] and (closed(o) or storm.at(o.direction, world.time + STORM_WARNING) > 0.0):
+            state["storm_warned"].add(o.name)
+            hud.toast("Storm approaching %s: landing pads closed" % o.name, hud_module.WARNING)
+        if closed(o):
+            state["storm_closed"].add(o.name)
+        elif o.name in state["storm_closed"]:
+            state["storm_closed"].discard(o.name)
+            state["storm_warned"].discard(o.name)
+            hud.toast("The storm has passed %s: its pads are open" % o.name, GOOD_TOAST)
+    inside = storm.at(here, world.time) > 0.0
+    if inside != state["in_storm"]:
+        hud.toast("In a storm: contracts' deadlines held" if inside else "Out of the storm",
+                  hud_module.WARNING if inside else GOOD_TOAST)
+        state["in_storm"] = inside
+    if inside:
+        for c in state["contracts"]:
+            c.paused += dt
+
+
+def buffet_car(dt):
+    """The car pushed sideways while the wind at it is over BUFFET_WIND: by
+    BUFFET a second per m/s beyond, times noise of the world's clock
+    (wind.noise3 at BUFFET_RATE) and the share of the way it is from its
+    cushion to hovercar.AIR_HEIGHT, so not on its cushion."""
+    car = state["car"]
+    if car is None or car.height is None:
+        return
+    speed = length(world.wind_at(planet, car.position, car.height))
+    air = min(1.0, max(0.0, (car.height - hovercar.HOVER_MIN) / (hovercar.AIR_HEIGHT - hovercar.HOVER_MIN)))
+    if speed <= BUFFET_WIND or air <= 0.0:
+        return
+    push = BUFFET * (speed - BUFFET_WIND) * air * wind_field.noise3(world.time * BUFFET_RATE, 0.5, 0.5)
+    car.velocity = add(car.velocity, scale(car.right(), push * dt))
+
+
+def draw_rain(camera, basis):
+    """While the camera is in a storm, up to RAIN_DROPS streaks falling at
+    RAIN_SPEED with the wind at the camera through a box RAIN_BOX metres
+    across around it, each RAIN_STREAK seconds of its fall long, in
+    RAIN_COLOUR, as many and as bright as how much of the storm is there
+    (viewmodel.Glows)."""
+    glows = state["rain_glows"]
+    glows.begin(basis)
+    storm = world.storm
+    body = world.body_under(camera)
+    s = storm.at(normalize(planet.relative(camera)), world.time) if storm is not None and body is planet else 0.0
+    count = int(RAIN_DROPS * s)
+    if count > 0:
+        up = normalize(planet.relative(camera))
+        east, north = local_frame(up)
+        wind = world.wind_at(planet, planet.relative(camera), 10.0)
+        fall = sub(wind, scale(up, RAIN_SPEED))
+        t = world.time
+        for k in range(count):
+            h = zlib.crc32(b"rain%d" % k)
+            fx, fy, fz = (h & 1023) / 1024.0, ((h >> 10) & 1023) / 1024.0, ((h >> 20) & 1023) / 1024.0
+            # Each drop's place in the box, carried by its fall and wrapped.
+            x = ((fx * RAIN_BOX + dot(fall, east) * t) % RAIN_BOX) - 0.5 * RAIN_BOX
+            y = ((fy * RAIN_BOX + dot(fall, north) * t) % RAIN_BOX) - 0.5 * RAIN_BOX
+            z = ((fz * RAIN_BOX + dot(fall, up) * t) % RAIN_BOX) - 0.5 * RAIN_BOX
+            at = add(add(scale(east, x), scale(north, y)), scale(up, z))
+            glows.streak(at, add(at, scale(fall, -RAIN_STREAK)), RAIN_WIDTH, scale(RAIN_COLOUR, s))
+    glows.end()
+    state["rain_drawn"] = count
+
+
 # ── Saving and loading ─────────────────────────────────────────────────────
 
 def save_game(base=None, quiet=False):
@@ -3989,7 +4267,8 @@ def save_game(base=None, quiet=False):
         "parts": dict(state["parts"]),
         "survey_data": state["survey_data"],
         "modifiers": [events.crater_record(c, t, planet.name) for c, t in state["craters"]],
-        "events": {"next_shower": state["shower"].start if state["shower"] is not None else state["next_shower"]},
+        "events": {"next_shower": state["shower"].start if state["shower"] is not None else state["next_shower"],
+                   "storm": events.storm_record(world.storm) if world.storm is not None else None},
         "hot": [list(state["hot"][id(p)]) if id(p) in state["hot"] else None for p in foot.props.all],
         "meteorite": next((n for n, p in enumerate(foot.props.all) if p is state["meteorite"]), None),
     }
@@ -4060,6 +4339,9 @@ def load_game(base=None):
     world.set_craters([c for c, _ in state["craters"]])
     set_shower(None)
     state["next_shower"] = (data.get("events") or {}).get("next_shower")
+    storm = (data.get("events") or {}).get("storm")
+    world.storm = events.storm_from_record(storm) if storm is not None else None
+    state["storm_warned"], state["storm_closed"], state["in_storm"] = set(), set(), False
     state["flash"], state["shake"], state["plumes"] = None, None, []
     state["pois"].restore(data.get("pois", []), poi_seed())
     state["poi_want_at"], state["poi_asked"], state["poi_asking"] = None, None, []
@@ -4220,6 +4502,7 @@ def frame(dt):
             foot.ensure_bubble(viewpoint)
     foot.step(dt, viewpoint, state["position"], latency, active=active, before_step=move_car_body)
     update_showers()
+    update_storms(dt)
     foot.props.probe(foot.bubble, EXTRA_PROBES)
     place_eye()
     if state["driving"]:
@@ -4240,6 +4523,7 @@ def frame(dt):
     draw_net(camera)
     draw_poi_scenes(camera)
     draw_showers(camera, basis)
+    draw_rain(camera, basis)
     foot.props.draw(foot.bubble, camera)
     place_ship(camera)
     place_viewmodel(dt, camera)
@@ -4386,6 +4670,7 @@ def on_init():
     state["viewmodel"] = Viewmodel(engine, box())
     state["car_glows"] = carview.EngineGlows(engine)
     state["meteor_glows"] = Glows(engine, METEOR_DISCS, METEOR_STREAKS)
+    state["rain_glows"] = Glows(engine, 0, RAIN_DROPS)
     foot.too_hot = too_hot
     foot.rocks.on_split = split_hot
     state["hud"] = Hud(engine)

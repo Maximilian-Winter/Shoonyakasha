@@ -3,8 +3,9 @@ planet/events.py), loaded from its folder: a planned shower's start, centre
 and impacts within their ranges, one large impact at the centre with its
 crater; a meteor's velocity as it strikes; its path flown back from where it
 strikes to the entry altitude under gravity; the craters kept, the oldest
-far one dropped first; a crater's record; and the heat. Plain Python: no
-engine needed.
+far one dropped first; a crater's record; the heat; and a planned storm
+starting upwind of the player, coming over it, within its ranges, and
+its record. Plain Python: no engine needed.
 
     python -m unittest discover -s tests/python
 """
@@ -159,6 +160,31 @@ class Craters(unittest.TestCase):
         self.assertEqual(record["type"], "crater")
         self.assertEqual(record["body"], "planet")
         self.assertEqual(events.crater_from_record(record, 0, Crater), (crater, 123.0))
+
+
+class Storms(unittest.TestCase):
+    def test_planned_upwind_coming_over_the_player(self):
+        east, north = local_frame(PLAYER)
+        for seed in range(30):
+            storm = events.schedule_storm(500.0, random.Random(seed), PLAYER, RADIUS, east)
+            self.assertGreaterEqual(storm.start, 500.0 + events.STORM_MIN_GAP)
+            self.assertTrue(events.STORM_LIFETIME[0] <= storm.end - storm.start <= events.STORM_LIFETIME[1])
+            self.assertTrue(events.STORM_RADIUS[0] <= storm.radius <= events.STORM_RADIUS[1])
+            self.assertTrue(events.STORM_SPEED[0] <= storm.speed <= events.STORM_SPEED[1])
+            away = events.ground_distance(PLAYER, storm.centre, RADIUS)
+            self.assertTrue(events.STORM_AWAY[0] - 1e-6 <= away <= events.STORM_AWAY[1] + 1e-6)
+            self.assertLess(dot(storm.centre, east), dot(PLAYER, east))          # west of the player: upwind
+            closest = min(events.ground_distance(PLAYER, storm.centre_at(storm.start + s), RADIUS)
+                          for s in range(0, 8_000, 20))
+            self.assertLess(closest, 100.0)
+
+    def test_a_given_start_and_no_wind(self):
+        storm = events.schedule_storm(500.0, random.Random(2), PLAYER, RADIUS, None, start=600.0)
+        self.assertEqual(storm.start, 600.0)
+
+    def test_record(self):
+        storm = events.schedule_storm(500.0, random.Random(3), PLAYER, RADIUS, local_frame(PLAYER)[1])
+        self.assertEqual(events.storm_from_record(events.storm_record(storm)), storm)
 
 
 class Heat(unittest.TestCase):

@@ -108,6 +108,8 @@ CLOUD_SHAPE = (40.0, 900.0, 0.8)
 # clouds.glsl's CLOUD_ROTATION, by its columns: the coverage noise is sampled at it times the direction.
 CLOUD_ROTATION = ((0.0, 0.8, 0.6), (-0.8, 0.36, -0.48), (-0.6, -0.48, 0.64))
 CLOUD_COVERAGE = 0.45            # share of the sky the clouds cover at the start
+STORM_COVERAGE = 0.95            # the clouds' cover inside a storm at its full strength
+STORM_HAZE = 1.0 / 1_500.0       # per metre: the haze's extinction around a camera in a storm at its full strength
 # The ground's textures (ground_textures.py, ground.glsl): metres per tile at the near and far scale.
 GROUND_SCALES = (5.0, 47.0)
 # The vegetation (vegetation.py, vegetation_scatter.comp): candidate cells per cube face side (9.6 m on
@@ -540,7 +542,9 @@ class PlanetWorld:
     MAX_LIGHTS nearest the camera within their range plus LIGHT_VIEW_REACH
     drawn, each frame); `clouds`,
     `cloud_coverage`, `cloud_density` (upload_clouds); `wind_speed` (m/s at
-    wind.REFERENCE_HEIGHT: `wind_at`, and the clouds' drift); `shadows`; `texture_strength`, `texture_relief` (the
+    wind.REFERENCE_HEIGHT: `wind_at`, and the clouds' drift); `storm`
+    (wind.Storm or None: the wind, the clouds and the haze within it,
+    upload_storm); `shadows`; `texture_strength`, `texture_relief` (the
     ground's textures); `temperature_offset` (degrees C), `moisture_offset`,
     `flora_hue`, `soil_hue` (degrees; the climate and its palette,
     biome.glsl); `colour_mode` (an index into COLOUR_MODES; "biome" shows
@@ -589,6 +593,7 @@ class PlanetWorld:
         self.cloud_density = 0.04
         self.cloud_wind = (0.0, 0.0, 0.0)   # the coverage noise's offset, in its units (clouds.glsl)
         self.wind_speed = 15.0
+        self.storm = None                  # wind.Storm over the planet, or None
         self.ground_textures = False        # whether the ground's textures were loaded
         self.texture_strength = 1.0
         self.texture_relief = 1.0
@@ -974,6 +979,25 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.clouds.shape", CLOUD_SHAPE + (1.0 if self.clouds else 0.0,))
         engine.set_custom_vec4("planet.clouds.wind", self.cloud_wind + (0.0,))
 
+    def upload_storm(self, position):
+        """`storm` (wind.Storm, or None) for the clouds and the haze
+        (CloudParams' storm and stormShape, clouds.glsl): its centre, radius
+        and edge, its strength now, the clouds' cover inside it
+        (STORM_COVERAGE), and STORM_HAZE times how much of it there is at
+        the camera at `position` (planet space) on the planet."""
+        storm, engine = self.storm, self.engine
+        if storm is None or storm.strength(self.time) <= 0.0:
+            engine.set_custom_vec4("planet.clouds.storm", (0.0, 0.0, 1.0, 0.0))
+            engine.set_custom_vec4("planet.clouds.stormShape", (0.0, 0.0, 0.0, STORM_COVERAGE))
+            return
+        haze = 0.0
+        if self.body_under(position) is self.planet:
+            haze = STORM_HAZE * storm.at(normalize(self.planet.relative(position)), self.time)
+        engine.set_custom_vec4("planet.clouds.storm", storm.centre_at(self.time) + (storm.radius / RADIUS,))
+        engine.set_custom_vec4("planet.clouds.stormShape", (storm.strength(self.time),
+                                                             wind_field.EDGE * storm.radius / RADIUS, haze,
+                                                             STORM_COVERAGE))
+
     def set_ocean(self, on):
         """The sea's, the lakes' and the rivers' surfaces drawn or not."""
         self.ocean = on
@@ -1316,7 +1340,8 @@ class PlanetWorld:
         looking along `basis` (right, up, forward), the drawn chunks, the
         camera's turn, the shadow cascades and the ground textures' offsets
         for it, the climate settings, temporal anti-aliasing (upload_taa),
-        and the clouds blown on by `dt` seconds times `warp`.
+        and the clouds blown on by `dt` seconds times `warp`, and the storm
+        for the camera (upload_storm).
         `viewpoint` is where the ground is probed (the camera's position
         without one); `patch` is (body, patch) to probe, or None."""
         right, up, forward = basis
@@ -1336,6 +1361,7 @@ class PlanetWorld:
         self.upload_shadow_cascades(forward)
         self.upload_ground()
         self.blow_clouds(dt * warp)
+        self.upload_storm(position)
 
     def read_back_heights(self):
         """Chunk heights into the trees' nodes, and the probes' heights when
@@ -1557,10 +1583,13 @@ class PlanetWorld:
         """The wind's velocity (m/s) at `point` (from `body`'s centre),
         `height` metres above the ground there (when None, its height above
         the ground under the viewpoint, or above the radius while that is not
-        known): wind.wind_at for `wind_speed` at the world's clock on the
-        planet; none on the moon, which has no air."""
+        known): wind.wind_at for `wind_speed` at the world's clock, with
+        how much of `storm` is there, on the planet; none on the moon,
+        which has no air."""
         if body is not self.planet:
             return (0.0, 0.0, 0.0)
         if height is None:
             height = length(point) - body.radius - (self.ground if self.ground is not None else 0.0)
-        return wind_field.wind_at(point, normalize(point), self.time, self.wind_speed, height)
+        up = normalize(point)
+        storm = self.storm.at(up, self.time) if self.storm is not None else 0.0
+        return wind_field.wind_at(point, up, self.time, self.wind_speed, height, storm)

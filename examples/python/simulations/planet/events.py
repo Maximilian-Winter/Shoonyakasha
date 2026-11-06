@@ -1,6 +1,7 @@
 """
-Meteor showers (walker.py): when the next comes, where its meteors strike,
-the paths they fly in, the craters kept and how hot a meteorite still is.
+Meteor showers and storms (walker.py): when the next shower comes, where
+its meteors strike, the paths they fly in, the craters kept and how hot a
+meteorite still is; and when the next storm comes and where it goes.
 
 `schedule(now, rng, player, radius, start=None)` plans a Shower on a body
 of `radius` (m). It starts at `start`, or after a gap drawn from an
@@ -31,6 +32,18 @@ ground from the unit direction `here` goes, or the oldest of all when
 none does. `crater_record` and `crater_from_record` turn a crater and its
 time into the save's record and back.
 
+`schedule_storm(now, rng, player, radius, wind, start=None)` plans a
+storm (shoonyakasha.planet.wind.Storm) on a body of `radius`: it starts
+at `start`, or after a gap drawn from an exponential of mean
+STORM_MEAN_GAP after `now`, at least STORM_MIN_GAP, and lasts a time
+drawn from STORM_LIFETIME. Its centre starts STORM_AWAY along the ground
+from the unit direction `player`, against the unit `wind` (the wind's
+direction along the ground there; a bearing drawn at random when None)
+give or take STORM_SPREAD degrees, and moves straight towards where the
+player was at STORM_SPEED, so it comes over it; its radius is drawn
+from STORM_RADIUS. `storm_record` and `storm_from_record` turn it into
+the save's record and back.
+
 `heat(age, cooling)` is how hot a meteorite or a rock is `age` seconds
 after it struck: 1 then, falling evenly to 0 over `cooling` seconds
 (LARGE_COOLING for the meteorite, SMALL_COOLING for the rocks); one with
@@ -38,9 +51,10 @@ heat above 0 is hot.
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
-from shoonyakasha.planet.vec import add, dot, length, local_frame, normalize, scale
+from shoonyakasha.planet.vec import add, cross, dot, length, local_frame, normalize, scale
+from shoonyakasha.planet.wind import Storm
 
 MEAN_GAP = 25.0 * 60.0           # s of the world's clock between showers, on average
 MIN_GAP = 5.0 * 60.0             # s, at least
@@ -64,6 +78,13 @@ MAX_CRATERS = 16
 DROP_FAR = 20_000.0              # m along the ground from the player a crater must be to be dropped first
 LARGE_COOLING = 180.0            # s a meteorite takes to cool
 SMALL_COOLING = 60.0             # s a small rock takes
+STORM_MEAN_GAP = 40.0 * 60.0     # s of the world's clock between storms, on average
+STORM_MIN_GAP = 10.0 * 60.0      # s, at least
+STORM_LIFETIME = (40.0 * 60.0, 80.0 * 60.0)   # s
+STORM_AWAY = (20_000.0, 35_000.0)   # m upwind of the player its centre starts
+STORM_SPREAD = 30.0              # degrees off straight upwind, at most
+STORM_SPEED = (6.0, 14.0)        # m/s
+STORM_RADIUS = (8_000.0, 15_000.0)   # m
 
 
 @dataclass
@@ -187,6 +208,34 @@ def crater_from_record(record, body_index, make):
     """(crater, time) from a save's record; `make(body, direction, radius, depth, rim)` the crater."""
     return (make(body_index, tuple(record["direction"]), record["radius"], record["depth"], record["rim"]),
             record["time"])
+
+
+def bearing_of(up, direction):
+    """Degrees clockwise from north of `direction` along the ground at the unit `up`."""
+    east, north = local_frame(up)
+    return math.degrees(math.atan2(dot(direction, east), dot(direction, north))) % 360.0
+
+
+def schedule_storm(now, rng, player, radius, wind, start=None):
+    """The next storm (see the module's docstring); `rng` a random.Random."""
+    if start is None:
+        start = now + max(STORM_MIN_GAP, rng.expovariate(1.0 / STORM_MEAN_GAP))
+    downwind = bearing_of(player, wind) if wind is not None else rng.uniform(0.0, 360.0)
+    upwind = downwind + 180.0 + rng.uniform(-STORM_SPREAD, STORM_SPREAD)
+    centre = along_ground(player, upwind, rng.uniform(*STORM_AWAY), radius)
+    axis = normalize(cross(centre, player))
+    return Storm(centre, axis, rng.uniform(*STORM_SPEED), rng.uniform(*STORM_RADIUS), start,
+                 start + rng.uniform(*STORM_LIFETIME), radius)
+
+
+def storm_record(storm):
+    r = asdict(storm)
+    r["centre"], r["axis"] = list(storm.centre), list(storm.axis)
+    return r
+
+
+def storm_from_record(r):
+    return Storm(**dict(r, centre=tuple(r["centre"]), axis=tuple(r["axis"])))
 
 
 def heat(age, cooling):

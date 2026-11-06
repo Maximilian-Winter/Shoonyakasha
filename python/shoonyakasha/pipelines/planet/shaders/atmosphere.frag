@@ -5,7 +5,7 @@
 // buffer holds there (reverse-Z: 0 is the sky), the scene seen through the
 // atmosphere plus the light it scatters towards the camera
 // (atmosphere.glsl), and the sun's disk and the stars where the ray
-// reaches the sky; then the clouds over it.
+// reaches the sky; then the clouds over it, and a storm's haze.
 //
 
 #define CAMERA_SET 0
@@ -68,6 +68,12 @@ layout(location = 0) out vec4 outColor;
 const float SUN_COS_INNER = 0.99996;   // a disk about 1 degree across
 const float SUN_COS_OUTER = 0.99990;
 const float SUN_DISK = 40.0;           // the disk's brightness, times the sun's illuminance
+
+// A storm's haze (clouds.glsl's stormShape.z): its colour, its light as a
+// share of the sun's illuminance, and the distance (m) it reaches at most.
+const vec3 STORM_HAZE_COLOUR = vec3(0.55, 0.58, 0.62);
+const float STORM_HAZE_LIGHT = 0.05;
+const float STORM_HAZE_REACH = 50000.0;
 
 // The stars, fixed in planet space: the view direction on a cube's face
 // (its largest coordinate's), that face's coordinates cut into STAR_CELLS
@@ -160,6 +166,16 @@ void main() {
         vec3 inFront, throughFront;
         atmosphereAlong(ro, rd, cloudAt, inFront, throughFront);
         colour = inFront + throughFront * cloud.rgb + cloud.a * (colour - inFront);
+    }
+
+    // A storm's haze around the camera (clouds.stormShape.z per metre): a
+    // grey lit by the sun's illuminance times STORM_HAZE_LIGHT and by the
+    // sun's height, covering what lies behind it with the distance.
+    float haze = clouds.stormShape.z;
+    if (haze > 0.0) {
+        float lit = clamp(dot(normalize(ro), atmosphere.sun.xyz) + 0.1, 0.02, 1.0);
+        vec3 grey = STORM_HAZE_COLOUR * atmosphere.mie.z * STORM_HAZE_LIGHT * lit;
+        colour = mix(colour, grey, 1.0 - exp(-haze * min(sceneDistance, STORM_HAZE_REACH)));
     }
 
     // The swapchain is sRGB: writing to it encodes the linear colour.

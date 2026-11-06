@@ -82,4 +82,6 @@ layout(set = CAMERA_SET, binding = 7) uniform CloudParams {
     vec4 layer;
     vec4 shape;
     vec4 wind;
+    vec4 storm;
+    vec4 stormShape;
 } clouds;

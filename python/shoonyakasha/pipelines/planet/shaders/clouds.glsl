@@ -4,6 +4,12 @@
 //     vec4 layer;      // bottom, top (m), coverage (0 none .. 1 overcast), extinction per metre at full density
 //     vec4 shape;      // coverage noise frequency (per unit of direction), detail scale (m), detail erosion, 1 on / 0 off
 //     vec4 wind;       // xyz: offset of the coverage noise, in its units (moves with the wind)
+//     vec4 storm;      // xyz: unit direction of a storm's centre; w: its radius (radians of the sphere)
+//     vec4 stormShape; // x: its strength (0 none .. 1); y: the width of its edge (radians); z: the haze's
+//                      // extinction per metre at the camera (atmosphere.frag); w: its coverage
+//
+// Within a storm the coverage goes towards stormShape.w by its strength,
+// fading out over the edge's width inside its radius (cloudStorm).
 //
 // Density at a point: the coverage, a noise on the direction from the
 // planet's centre (the weather, the same at every height) raised so that
@@ -59,11 +65,19 @@ const float CLOUD_EDGE_WIDEN_MAX = 0.2;   // of the coverage noise, the most its
 // clouds.layer.z of the sky is above 0. The rise is widened by how much the
 // noise changes across the pixel (at most CLOUD_EDGE_WIDEN_MAX), so a
 // cloud's edge is never sharper than a pixel.
+// How much of the storm is at the unit direction `dir`: its strength
+// inside its radius less its edge's width, none beyond its radius.
+float cloudStorm(vec3 dir) {
+    if (clouds.stormShape.x <= 0.0) return 0.0;
+    float angle = acos(clamp(dot(dir, clouds.storm.xyz), -1.0, 1.0));
+    return clouds.stormShape.x * (1.0 - smoothstep(clouds.storm.w - clouds.stormShape.y, clouds.storm.w, angle));
+}
+
 float cloudCoverage(vec3 dir, float footprint) {
     float slope;
     float cell = footprint * clouds.shape.x / atmosphere.radii.x;
     float n = cloudFbm(CLOUD_ROTATION * dir * clouds.shape.x + clouds.wind.xyz, 4, 2.03, cell, slope) * 0.5 + 0.5;
-    float c = clouds.layer.z;
+    float c = mix(clouds.layer.z, clouds.stormShape.w, cloudStorm(dir));
     float widen = min(0.5 * slope * cell, CLOUD_EDGE_WIDEN_MAX);
     return smoothstep(1.0 - c - 0.05 - widen, 1.0 - c + 0.35 + widen, n);
 }

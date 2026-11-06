@@ -4,7 +4,8 @@ for the same day and seed and others on another day, each of a kind with
 its task's fields, its reward and its deadline; reputation raises the
 rewards; recovery and survey markers lie within their reach; a delivery
 takes only matching ore at its outpost; a fragile crate breaks from hard
-strikes, not soft ones; and a contract's record restores it. Plain
+strikes, not soft ones; and a contract's record, with the time its
+deadline was held back, restores it. Plain
 Python: no engine needed.
 
     python -m unittest discover -s tests/python
@@ -90,9 +91,12 @@ class Tasks(unittest.TestCase):
 
     def test_record_restores(self):
         c = [o for o in all_offers() if o.kind == "survey"][0]
-        c.state, c.explored = "active", 0.4
+        c.state, c.explored, c.paused = "active", 0.4, 123.0
         back = contracts.restore(contracts.record(c))
         self.assertEqual(back, c)
+        old = contracts.record(c)
+        del old["paused"]
+        self.assertEqual(contracts.restore(old).paused, 0.0)
 
 
 if __name__ == "__main__":
