@@ -6,7 +6,8 @@ probe measured it, and only for the current terrain version, with the
 ore richness there. A survey's heights come back by index, in batches
 of at most PATCH_PROBES from where the last ended, only for its own
 round, and hold the terrain back until it ends; the flat sites are
-uploaded and build again the bodies whose sites changed; the clearings
+uploaded and build again the bodies whose sites changed; the craters are
+uploaded and queue the chunks near those added or removed; the clearings
 are checked and uploaded without building anything again; the rivers
 are uploaded with their water's mesh and build the planet again when
 they change, their water and the lakes' make water_level, and the height
@@ -181,6 +182,30 @@ class SurveyTest(unittest.TestCase):
         self.assertEqual(world.lod.dropped, [0])
         with self.assertRaises(ValueError):
             world.set_sites([site] * (planet_world.MAX_SITES + 1))
+
+    def test_craters_uploaded_and_the_chunks_near_them_queued(self):
+        world = self.world
+        world.lod.trees = {0}
+        crater = planet_world.Crater(0, (0.0, 2.0, 0.0), 50.0, 8.0, 3.0)
+        version = world.terrain_version
+        self.assertEqual(world.set_craters([crater]), 7)
+        centres = self.engine.custom["planet.terrain.craters"]
+        shapes = self.engine.custom["planet.terrain.craterShapes"]
+        self.assertEqual(len(centres), planet_world.MAX_CRATERS)
+        self.assertEqual(centres[0], (0.0, 1.0, 0.0, 50.0))
+        self.assertEqual(shapes[0], (8.0, 3.0, 0.0, planet_world.RADIUS))
+        self.assertEqual(centres[1][3], 0.0)
+        self.assertEqual(world.lod.requeued, [(0, (0.0, 1.0, 0.0), 100.0)])
+        self.assertEqual(world.terrain_version, version + 1)
+        self.assertEqual(world.lod.dropped, [])
+        self.assertEqual(world.set_craters([crater]), 0)               # unchanged
+        moon = planet_world.Crater(1, (1.0, 0.0, 0.0), 20.0, 4.0, 1.0)   # no moon tree: nothing queued
+        self.assertEqual(world.set_craters([crater, moon]), 0)
+        self.assertEqual(world.terrain_version, version + 1)
+        world.set_craters([moon])                                        # removed: queued again
+        self.assertEqual(world.lod.requeued[-1], (0, (0.0, 1.0, 0.0), 100.0))
+        with self.assertRaises(ValueError):
+            world.set_craters([crater] * (planet_world.MAX_CRATERS + 1))
 
     def test_lakes_uploaded_and_the_planet_built_again(self):
         world = self.world
@@ -363,12 +388,14 @@ class SurveyTest(unittest.TestCase):
 
 
 class _NoLod:
-    """Stands in for sk.PlanetLod where no chunk is read back; records the trees made and dropped."""
+    """Stands in for sk.PlanetLod where no chunk is read back; records the trees made and dropped and
+    the chunks queued near a point (each call queueing 7)."""
 
     def __init__(self):
         self.trees = set()
         self.created = []
         self.dropped = []
+        self.requeued = []
 
     def take_heights(self, data):
         pass
@@ -383,6 +410,10 @@ class _NoLod:
     def drop_tree(self, index):
         self.trees.discard(index)
         self.dropped.append(index)
+
+    def requeue_near(self, index, direction, reach):
+        self.requeued.append((index, tuple(direction), reach))
+        return 7
 
 
 if __name__ == "__main__":

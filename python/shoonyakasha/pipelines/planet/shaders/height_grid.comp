@@ -2,7 +2,8 @@
 //
 // The HeightGrid pass: the planet's terrain (terrain.glsl) with its lakes'
 // water as its surface (lakes.glsl: the ground under a lake's water counts
-// as the water level) and its flat sites (sites.glsl), at each point of a
+// as the water level), its flat sites (sites.glsl) and its craters
+// (craters.glsl), at each point of a
 // square grid in the plane tangent to the planet at params.centre
 // (shoonyakasha.planet.rivers.GridFrame): params.grid.x points along each
 // side, params.grid.y metres apart along params.east and params.north,
@@ -36,6 +37,8 @@ layout(set = 0, binding = 1) uniform TerrainParams {
     vec4 lakeShapes[32];
     vec4 riverFrame[4];
     vec4 riverOrigin;
+    vec4 craters[16];
+    vec4 craterShapes[16];
 } terrain;
 
 layout(std430, set = 0, binding = 2) writeonly buffer HeightGrid {
@@ -44,6 +47,7 @@ layout(std430, set = 0, binding = 2) writeonly buffer HeightGrid {
 
 #include "terrain.glsl"
 #include "sites.glsl"
+#include "craters.glsl"
 #include "lakes.glsl"
 
 const int HEADER = 4;        // values before the first height
@@ -61,5 +65,5 @@ void main() {
     float h = terrainWithLakes(terrainHeight(dir), dir);
     float depth;
     if (lakeAt(dir, depth) >= 0) h += depth;
-    heights.values[uint(HEADER) + k] = terrainWithSites(h, dir, 0);
+    heights.values[uint(HEADER) + k] = terrainWithCraters(terrainWithSites(h, dir, 0), dir, 0, 0.0);
 }

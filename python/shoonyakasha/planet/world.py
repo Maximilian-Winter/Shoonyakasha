@@ -49,7 +49,11 @@ before the lakes, the Rivers pass draws their water's mesh
 their water, and `regenerate` drops them. Up to MAX_CLEARINGS clearings (`Clearing`, `set_clearings`),
 circles and rectangles on either body, leave out the plants, the grass or
 the rocks the scatter would place in them, without changing the ground
-(clearings.glsl).
+(clearings.glsl). Up to MAX_CRATERS craters on either body (`Crater`,
+`set_craters`) are dug into the ground after the flat sites, the scatter
+places nothing within their radius (craters.glsl), and adding or removing
+one builds again the chunks within CRATER_REACH radii of the line out
+along its direction.
 
 Probes: each frame BuildChunks also evaluates the terrain at PROBES
 directions: the ground under the viewpoint, the site, the directions of a
@@ -176,6 +180,8 @@ HEIGHT_GRID_POINTS = 512 * 512  # points the HeightGrid pass measures at most; m
 HEIGHT_GRID_HEADER = 4          # values before the first height in HeightGrid
 LAKE_WOBBLE_REACH = 1.2          # a lake's shore lies within its radius times 1 +- this times its wobble; lakes.glsl
 MAX_CLEARINGS = 32               # clearings (Clearing); matches VegetationParams' clearings
+MAX_CRATERS = 16                 # craters (Crater); matches TerrainParams' craters (craters.glsl)
+CRATER_REACH = 2.0               # radii from a crater's centre its shape reaches (craters.glsl)
 CLEAR_PLANTS, CLEAR_GRASS, CLEAR_ROCKS = 1, 2, 4   # what a clearing clears; matches clearings.glsl
 CLEAR_ALL = CLEAR_PLANTS | CLEAR_GRASS | CLEAR_ROCKS
 TERRAIN_COLOUR = (-1.0, 0.0, 0.0)  # tells terrain.frag to colour the ground by its biomes, height and slope
@@ -363,6 +369,20 @@ class River:
     levels: tuple
     widths: tuple
     depths: tuple
+
+
+@dataclass(frozen=True)
+class Crater:
+    """A crater on the body with index `body` (craters.glsl) centred at the
+    unit `direction` from the body's centre: a bowl `depth` metres deep at
+    the centre reaching the ground at `radius` metres, and a rim `rim`
+    metres high around it, fading out by CRATER_REACH radii; the scatter
+    places nothing within its radius."""
+    body: int
+    direction: tuple
+    radius: float
+    depth: float
+    rim: float
 
 
 @dataclass(frozen=True)
@@ -599,6 +619,7 @@ class PlanetWorld:
         self.site_height = None           # natural terrain height at the site, from the probes
         self.sites = []                    # flat sites (Site), set by set_sites
         self.clearings = []                # clearings (Clearing), set by set_clearings
+        self.craters = []                  # craters (Crater), set by set_craters
         self.lakes = []                    # the planet's lakes (Lake), set by set_lakes
         self.rivers = []                   # the planet's rivers (River), set by set_rivers
         self.river_frame = None            # the rivers.GridFrame they lie over
@@ -819,7 +840,7 @@ class PlanetWorld:
 
     def upload_terrain(self):
         """The terrain's parameters, the pad around the site once its height
-        is known, the flat sites and the lakes."""
+        is known, the flat sites, the lakes and the craters."""
         engine = self.engine
         for name, value in self.planet.terrain.items():
             engine.set_custom_vec4("planet.terrain." + name, tuple(value))
@@ -843,6 +864,13 @@ class PlanetWorld:
         engine.set_custom_vec4_array("planet.terrain.lakeShapes",
                                      [(float(lake.radius), float(lake.depth), float(lake.bank), float(lake.wobble))
                                       for lake in self.lakes] + unused)
+        unused = [(0.0, 0.0, 1.0, 0.0)] * (MAX_CRATERS - len(self.craters))
+        engine.set_custom_vec4_array("planet.terrain.craters",
+                                     [tuple(normalize(c.direction)) + (float(c.radius),) for c in self.craters]
+                                     + unused)
+        engine.set_custom_vec4_array("planet.terrain.craterShapes",
+                                     [(float(c.depth), float(c.rim), float(c.body), radii[c.body])
+                                      for c in self.craters] + [(0.0, 0.0, 0.0, 0.0)] * len(unused))
 
     def upload_taa(self, position):
         """Temporal anti-aliasing for the camera at `position`: this frame's
@@ -1008,6 +1036,29 @@ class PlanetWorld:
         for body in rebuilt:
             self.lod.drop_tree(body.index)
             self.create_tree(body)
+
+    def set_craters(self, craters):
+        """The craters (Crater, at most MAX_CRATERS). For each crater added
+        or removed on a body whose tree is made, the built chunks whose
+        bounding sphere comes within CRATER_REACH times its radius of the
+        line out along its direction are built again (sk.PlanetLod's
+        requeue_near), and the probes asked for before are dropped; returns
+        how many chunks were queued."""
+        craters = list(craters)
+        if len(craters) > MAX_CRATERS:
+            raise ValueError("at most %d craters, not %d" % (MAX_CRATERS, len(craters)))
+        changed = [c for c in set(craters) ^ set(self.craters) if self.lod.has_tree(c.body)]
+        self.craters = craters
+        self.upload_terrain()
+        if not changed:
+            return 0
+        queued = 0
+        for c in changed:
+            queued += self.lod.requeue_near(c.body, normalize(c.direction), CRATER_REACH * c.radius)
+        self.terrain_version += 1
+        self.ground = None
+        self.patch = None
+        return queued
 
     def lake_level(self, direction):
         """The water level (m) of the first lake whose water can reach the

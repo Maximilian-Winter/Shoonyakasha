@@ -15,7 +15,8 @@
 // body's terrain (bodyHeight): body 0, the planet, terrainHeight
 // (terrain.glsl) with its rivers (rivers.glsl) and lakes (lakes.glsl); body
 // 1, the moon, moonHeight
-// (moon.glsl); both with their flat sites (sites.glsl).
+// (moon.glsl); both with their flat sites (sites.glsl) and craters
+// (craters.glsl).
 //
 // Each vertex also holds the sine of the terrain's horizon towards the
 // sun's azimuth (horizonTowardsSun), for shadows beyond the shadow map, and
@@ -77,6 +78,8 @@ layout(set = 0, binding = 2) uniform TerrainParams {
     vec4 lakeShapes[32];
     vec4 riverFrame[4];
     vec4 riverOrigin;
+    vec4 craters[16];
+    vec4 craterShapes[16];
 } terrain;
 
 layout(std430, set = 0, binding = 5) readonly buffer RiverData {
@@ -101,6 +104,7 @@ layout(std430, set = 0, binding = 4) writeonly buffer ProbeHeights {
 #include "moon.glsl"
 #include "resources.glsl"
 #include "sites.glsl"
+#include "craters.glsl"
 #include "lakes.glsl"
 #include "rivers.glsl"
 
@@ -112,20 +116,22 @@ int body;
 float bodyRadius;
 
 // The terrain's height (m) at unit direction `d` from the centre of `body`,
-// on the planet with its rivers and its lakes, and with the body's flat sites.
+// on the planet with its rivers and its lakes, and with the body's flat
+// sites and craters.
 float bodyHeight(vec3 d) {
     float h = body == MOON ? moonHeight(d, bodyRadius, 0.0)
                            : terrainWithLakes(terrainWithRivers(terrainHeight(d), d), d);
-    return terrainWithSites(h, d, body);
+    return terrainWithCraters(terrainWithSites(h, d, body), d, body, 0.0);
 }
 
 // bodyHeight for the normals of a chunk whose vertices are `spacing`
 // metres apart: on the moon without the craters whose radius is less than
-// two spacings, whose slopes the vertices would sample out of step.
+// two spacings, whose slopes the vertices would sample out of step, and
+// on both bodies without the craters (craters.glsl) of such a radius.
 float bodyHeightForNormals(vec3 d, float spacing) {
     float h = body == MOON ? moonHeight(d, bodyRadius, 2.0 * spacing)
                            : terrainWithLakes(terrainWithRivers(terrainHeight(d), d), d);
-    return terrainWithSites(h, d, body);
+    return terrainWithCraters(terrainWithSites(h, d, body), d, body, 2.0 * spacing);
 }
 
 // A height as the surface's: on the planet, below sea level is the sea's surface.

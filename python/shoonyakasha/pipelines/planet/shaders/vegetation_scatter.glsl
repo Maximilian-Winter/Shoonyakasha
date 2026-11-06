@@ -4,9 +4,9 @@
 // whether water comes near it, the cells
 // of a cube face's grid that chunk holds, a cell's candidate (a point
 // jittered within the cell by a hash of it, kept when it lies in the chunk,
-// within range and off the flat sites), whether it lies under a lake's or
-// a river's water (candidateWet), whether the clearings leave it out
-// (clearings.glsl), the ground and climate under it from the chunk's grid
+// within range and off the flat sites and craters), whether it lies under
+// a lake's or a river's water (candidateWet), whether the clearings leave
+// it out (clearings.glsl), the ground and climate under it from the chunk's grid
 // unmorphed, its place on the surface as drawn (morphed), and claiming an
 // instance.
 
@@ -28,6 +28,8 @@ layout(set = 0, binding = 0) uniform TerrainParams {
     vec4 lakeShapes[32];
     vec4 riverFrame[4];
     vec4 riverOrigin;
+    vec4 craters[16];
+    vec4 craterShapes[16];
 } terrain;
 
 layout(std430, set = 0, binding = 7) readonly buffer RiverData {
@@ -64,6 +66,7 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkInstances {
 #include "biome.glsl"
 #include "morph.glsl"
 #include "sites.glsl"
+#include "craters.glsl"
 #include "lakes.glsl"
 #include "rivers.glsl"
 #include "clearings.glsl"
@@ -175,8 +178,8 @@ struct Candidate {
 };
 
 // The candidate of cell k (of scatterCells' count); false when it lies in
-// another chunk, beyond `range` or within a flat site's flat radius
-// (sites.glsl). `salt` tells grids apart in the hash.
+// another chunk, beyond `range`, within a flat site's flat radius
+// (sites.glsl) or within a crater's radius (craters.glsl). `salt` tells grids apart in the hash.
 bool scatterCandidate(ScatterChunk chunk, float cells, int cu0, int cv0, uint across, uint k, int salt,
                       float range, out Candidate x) {
     int cu = cu0 + int(k % across), cv = cv0 + int(k / across);
@@ -194,7 +197,8 @@ bool scatterCandidate(ScatterChunk chunk, float cells, int cu0, int cv0, uint ac
     x.distance = length(chunk.origin + x.position);
     if (x.distance > range) return false;
     vec3 radial = x.w.x * va.radialHeight.xyz + x.w.y * vb.radialHeight.xyz + x.w.z * vc.radialHeight.xyz;
-    return !terrainOnSite(normalize(radial), chunk.body);
+    vec3 d = normalize(radial);
+    return !terrainOnSite(d, chunk.body) && !terrainInCrater(d, chunk.body);
 }
 
 // Whether a candidate at unit direction `radial` lies under a lake's or a

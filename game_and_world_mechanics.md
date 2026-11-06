@@ -41,12 +41,12 @@ python/shoonyakasha/planet/
   rocks.py            # extend: rock_colour by resource
   nearby_trees.py     # extend: NearbyTree.resource
   clock.py            # new: day phase, sun direction
-  modifiers.py        # new: terrain modifiers (craters), invalidation
+  world.py            # extend: craters (Crater, set_craters), the chunks near them built again
   wind.py             # new: wind field
 python/shoonyakasha/pipelines/planet/shaders/
   resources.glsl      # extend: a resource id beside the richness
   vegetation_scatter.comp  # extend: ore rocks carry the resource id
-  sites.glsl          # extend into the modifier list (craters beside flat sites), §11.2
+  craters.glsl        # new: craters after the flat sites, §11.2
 ```
 
 ### The game clock
@@ -597,52 +597,26 @@ def schedule_next(now, rng, player_dir):
 
 `sites.glsl` holds `TERRAIN_SITES` (8) flat sites in the `terrain` block: `sites[i]` (direction, height) and `siteShapes[i]` (flat radius, blend radius, body index, the body's radius). `terrainWithSites` mixes the ground towards the site's height within the blend radius, and `world.Site` / `PlanetWorld.set_sites` fill them.
 
-Craters join them in one modifier list with a type:
+`craters.glsl` holds `TERRAIN_CRATERS` (16) craters after them in the `terrain` block: `craters[i]` (direction, radius) and `craterShapes[i]` (depth, rim height, body index, the body's radius); a radius of 0 leaves the entry unused. `world.Crater(body, direction, radius, depth, rim)` and `PlanetWorld.set_craters` (at most `MAX_CRATERS`) fill them. In units of the radius `r`, a crater's shape is the smooth minimum of its bowl and its rim, faded out by `CRATER_REACH` (2) radii:
 
 ```glsl
-// modifiers.glsl (generalising sites.glsl)
-struct Modifier {
-    vec4 dirRadius;     // xyz direction (body-relative unit), w = radius (m)
-    vec4 params;        // x: type | body << 8; y: height or depth; z: rim height or blend radius; w: the body's radius
-};
-layout(std140, set = 1, binding = 7) uniform Modifiers { uvec4 count; Modifier m[32]; } MOD;
-
-// Polynomial smooth minimum of a and b, blended over k
-float smin(float a, float b, float k) {
-    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-    return mix(b, a, h) - k * h * (1.0 - h);
-}
-
-float applyModifiers(vec3 dir, float h, uint body) {
-    for (uint i = 0u; i < MOD.count.x; ++i) {
-        Modifier md = MOD.m[i];
-        if ((uint(md.params.x) >> 8u) != body) continue;
-        float d = length(dir - md.dirRadius.xyz) * md.params.w;      // chord, as sites.glsl
-        uint type = uint(md.params.x) & 255u;
-        if (type == 1u) {                       // flat site
-            if (d < md.params.z) h = mix(md.params.y, h, smoothstep(md.dirRadius.w, md.params.z, d));
-        } else if (type == 2u) {                // crater
-            float r = d / md.dirRadius.w;
-            if (r >= 2.0) continue;
-            float bowl = md.params.y * (r * r - 1.0);                    // negative inside
-            float rim  = md.params.z * exp(-pow((r - 1.0) / 0.25, 2.0));
-            float shape = r < 1.0 ? smin(bowl, rim, 0.3 * md.params.y)
-                                  : rim * (1.0 - smoothstep(1.2, 2.0, r));
-            h += shape;
-        }
-    }
-    return h;
+float craterShape(float r, float depth, float rim) {
+    if (r >= CRATER_REACH) return 0.0;
+    float bowl = depth * (r * r - 1.0);                 // depth below the ground at the centre, 0 at the radius
+    float x = (r - 1.0) / CRATER_RIM_WIDTH;             // 0.25 radii
+    float ridge = rim * exp(-x * x);
+    return craterSmoothMin(bowl, ridge, max(CRATER_SMOOTHNESS * depth, 1e-3))   // 0.3 of the depth
+         * (1.0 - smoothstep(1.2, CRATER_REACH, r));
 }
 ```
 
-`moon.glsl` has a crater profile (`MOON_RIM_WIDTH`, `MOON_CRATER_SIZE`), which keeps new craters consistent with the moon's.
+`terrainWithCraters(h, dir, body, smallest)` adds the shapes of a body's craters to its ground after the flat sites, in the chunks (`chunk_build.comp`; for the normals, without the craters smaller than two vertex spacings, as the moon's own craters), the probes, the collider probes and the height grid. Distances are chords, as in `sites.glsl`.
 
-**Invalidation** when a crater is added:
-- Bump the terrain version, so probes asked for before it are ignored.
-- Queue a rebuild for every built chunk whose bounding sphere comes within `2 × radius` of the crater, nearest first. Keep the old vertices until the new ones arrive, as the horizon rebuild does.
-- Horizon shadows of chunks within a few km may change slightly; the next azimuth rebuild catches them.
-- Request new collider patches where the crater touches them.
-- **Vegetation and rocks:** the scatter skips candidates inside a crater's radius (reading the same modifier list), and static rocks and trunks there are removed from the bubble.
+**Invalidation** when `set_craters` adds or removes a crater on a body whose tree is made:
+- `PlanetLod.requeue_near(body, direction, 2 × radius)` queues every built chunk whose bounding sphere comes within two radii of the line out from the body's centre along the crater's direction, ahead of the queue, nearest first. Each chunk keeps its old vertices until its job builds it again, as with the sun's rebuild.
+- The terrain version goes up, so the probes asked for before are dropped. The ground patches are measured again, and the bubble's trunks and static rocks are cleared and made again from the next lists (`on_foot`).
+- The horizon shadows of chunks beyond two radii are not measured again until the sun's next rebuild of every chunk.
+- **Vegetation and rocks:** the scatter (`scatterCandidate`, for the trees, the grass and the rocks) skips candidates within a crater's radius (`terrainInCrater`).
 
 Keep at most ~16 craters per body. When the list is full, drop the oldest crater farther than 20 km from the player, along with its record. Craters are saved in `modifiers`.
 
@@ -763,10 +737,13 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
   - every listed state is equal
   - the crater's chunks are rebuilt
   - a version-1 save migrates
-- `--crater-check` (new): add a crater 500 m from the camera.
-  - within N frames, every chunk within 2 radii is rebuilt
-  - no chunk shows a crack against the crater's edge (`CrackCheck`'s measurement)
-  - no vegetation or static rock lies inside its radius
+- `--crater-check` (`planet.py`): a crater 70 m across and 6 m deep under the camera at preset 1, among the trees, dug with the camera 500 m back.
+  - before it, some of the trees and rocks listed around a player put down there lie within its radius
+  - within 300 frames, no chunk is queued or waiting for its heights
+  - the probe at its centre comes down by its depth
+  - every vertex of a chunk drawn before and after within half its radius lies at least half its depth lower, and every vertex beyond two radii is where it was
+  - no gap between chunks of different levels is wider than its skirt (`CrackCheck`'s measurement)
+  - after it, a player put down in it 20 m from its centre lists trees and rocks around, none within its radius
 - `--day-check` (new): run one day at 16× warp.
   - chunk rebuilds caused by the sun number a few per chunk per day
   - the frame time stays within budget
@@ -786,7 +763,9 @@ Existing flags in `planet.py`, among others: `--cargo-check`, `--fuel-check`, `-
 7. **Suit and temperature** (`walker.py`). Local temperature, reserve, shelter, effects, recovery at an outpost. Milestones 1–6b's features came to `walker.py` first: day and night and the lights, the car's fuel and fuel call, its hold and cargo net with an Outpost tab, the upgrades, and save version 2.
 8. **Points of interest** (`walker.py`). Hash placement, kinds, discovery, salvage parts, survey data; parts in the upgrades' prices and the suit's upgrades.
 9. **Contracts** (`walker.py`). Four kinds on the planet (no moon), the Contracts tab, the pinned contract on the card, the compass and the map, fragile crates, reputation in rewards and prices.
-10. **Meteor showers.** Modifier list, crater invalidation, meteor visuals, meteorites. `--crater-check`.
+10. **Meteor showers.**
+   10a. **Craters.** `craters.glsl` beside the flat sites, `world.Crater` / `set_craters`, the chunks near a crater built again (`PlanetLod.requeue_near`), the scatter kept out of it. `--crater-check`.
+   10b. **Showers.** Scheduling, meteor visuals, impacts, meteorites, craters in `walker.py` and its save.
 11. **Wind and storms.** Wind field, ship, car and prop drag, storms. `--wind-check`.
 12. **The moon expedition.** Moon resources, the refinery, long-range upgrades, transfer planner.
 

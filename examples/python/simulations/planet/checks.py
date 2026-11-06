@@ -691,6 +691,242 @@ class CrackCheck:
                   "%.3f, %.0f m from the camera" % drawn_where, flush=True)
 
 
+class CraterCheck:
+    """--crater-check: at preset 1, among the trees by the blocks, once
+    settled, the crater's centre is the point under the camera. With a
+    player put down there it counts the trees, cacti and rocks of the lists
+    that come back (nearby_trees) within the crater's radius; some must be
+    there. It drops the player, probes the ground there and DISTANCE back
+    along the view, moves the free camera LIFT above the ground back there,
+    and once settled reads
+    ChunkPool back with the level of detail frozen; digs the crater
+    (PlanetWorld.set_craters) and counts the frames until no chunk is queued
+    or waiting for its heights; probes its centre again and reads ChunkPool
+    back. Every vertex of a chunk drawn both times within half the crater's
+    radius must lie at least half its depth lower, and every vertex beyond
+    CRATER_REACH radii where it was; the probe must have come down by the
+    depth; and CrackCheck's measurement of the gaps against the skirts must
+    stay within them. Then a player is put down in the crater OFF_CENTRE
+    from its centre towards the camera; some of the lists' plants or rocks
+    must lie beyond the crater's radius, and none within it. Prints each measurement and exits with status 0 when all
+    passed, 1 otherwise."""
+
+    DISTANCE = 500.0
+    CRATER = (35.0, 6.0, 2.0)            # radius, depth, rim height (m)
+    MIN_FRAMES, MAX_FRAMES = 10, 1200
+    REBUILD_FRAMES = 300                 # at most, to build the chunks near the crater again
+    LIFT = 3.0
+    OFF_CENTRE = 20.0
+    LISTS = 3                            # lists to wait for over the crater
+
+    def __init__(self):
+        self.stage, self.frames = "start", 0
+        self.lists = NearbyLists()
+        self.ok = True
+        self.after = -1
+
+    def __call__(self, dt):
+        if planet.tree is None:
+            return True
+        self.frames += 1
+        getattr(self, self.stage)()
+        return True
+
+    def next_stage(self, stage):
+        self.stage, self.frames = stage, 0
+
+    def report(self, ok, text):
+        self.ok = self.ok and ok
+        print("[planet] crater: %s: %s" % (text, "passed" if ok else "FAILED"), flush=True)
+
+    def ready(self):
+        """Once MIN_FRAMES have passed and the world settled (or MAX_FRAMES)."""
+        return (self.frames >= self.MIN_FRAMES and settled()) or self.frames >= self.MAX_FRAMES
+
+    def start(self):
+        if self.frames == 1:
+            teleport(1)
+        elif self.ready():
+            self.target = state["position"]
+            self.centre = normalize(state["position"])
+            radial = self.centre
+            level = normalize(sub(state["forward"], scale(radial, dot(state["forward"], radial))))
+            angle = self.DISTANCE / RADIUS
+            self.back = normalize(sub(scale(radial, math.cos(angle)), scale(level, math.sin(angle))))
+            self.next_stage("spawn_before")
+
+    def spawned(self):
+        """A player put down under the camera (go_on_foot), held where
+        go_to put it until the ground measured under it lies between 0 and
+        four times LIFT below; True once there is one, the lists counted from
+        then."""
+        if foot.player is None:
+            state["position"] = self.target
+            if world.ground is not None and 0.0 < world.height_above_ground(self.target) < 4.0 * self.LIFT:
+                go_on_foot()
+            if foot.player is None:
+                if self.frames > self.MAX_FRAMES:
+                    self.report(False, "no player put down over the crater")
+                    os._exit(1)
+                return False
+            self.lists_seen = self.lists.count
+        return True
+
+    def spawn_before(self):
+        if self.spawned():
+            self.next_stage("plants_before")
+
+    def listed_within(self):
+        """Of the last list, once LISTS came back since the player was put
+        down and the world settled (None before): how many plants and rocks
+        were listed, and how many of them lie within the crater's radius."""
+        if self.lists.count < self.lists_seen + self.LISTS or not settled():
+            if self.frames > self.MAX_FRAMES:
+                self.report(False, "no list of plants came back over the crater")
+                os._exit(1)
+            return None
+        bases = [length(sub(normalize(t.base), self.centre)) * RADIUS for t in self.lists.trees if t.body == 0]
+        return len(bases), sum(1 for d in bases if d < self.CRATER[0])
+
+    def plants_before(self):
+        listed = self.listed_within()
+        if listed is None:
+            return
+        self.report(listed[1] > 0, "before: %d plants and rocks listed within %.0f m, %d of them within its radius"
+                    % (listed[0], COLLIDER_RADIUS, listed[1]))
+        foot.remove_player()
+        drop_bubble()
+        state["mode"] = "free"
+        world.extra_probes = [(self.centre, world.planet), (self.back, world.planet)]
+        self.next_stage("probe_before")
+
+    def probed(self):
+        """The heights probed at the extra probes, once they came back."""
+        if [probe for probe, _ in world.extra_heights] != world.extra_probes:
+            return None
+        return [h for _, h in world.extra_heights]
+
+    def go_to(self, direction, ground):
+        """The free camera LIFT above `ground` (m) at the unit `direction`."""
+        self.target = scale(direction, RADIUS + ground + self.LIFT)
+        state["position"] = self.target
+        world.ground = None
+        world.patch = None
+
+    def probe_before(self):
+        heights = self.probed()
+        if heights is not None:
+            self.natural = heights[0]
+            self.go_to(self.back, heights[1])
+            world.extra_probes = [(self.centre, world.planet)]
+            self.next_stage("pool_before")
+
+    def read_pool(self):
+        """ChunkPool read back with the level of detail frozen, once the
+        world settled: the whole pool, and the drawn chunks' grids by (face,
+        level, x, y) as (direction, height) per vertex; None until it came
+        back."""
+        if self.after is None:
+            if not self.ready():
+                return None
+            world.frozen = True
+            previous = engine.get_readback("ChunkPool")
+            self.after = previous["frame"] if previous is not None else -1
+            engine.request_readback("ChunkPool")
+            return None
+        readback = engine.get_readback("ChunkPool")
+        if readback is None or readback["frame"] <= self.after:
+            return None
+        gpu = np.frombuffer(readback["data"], dtype=np.float32).reshape(SLOTS, VERTICES_PER_CHUNK,
+                                                                        FLOATS_PER_VERTEX).copy()
+        grid = (QUADS + 1) ** 2
+        chunks = {(n.face, n.level, n.x, n.y): gpu[n.chunk, :grid, 8:12].astype(np.float64)
+                  for n in planet.tree.selected}
+        world.frozen = False
+        self.after = None
+        return gpu, chunks
+
+    def pool_before(self):
+        if self.frames == 1:
+            self.after = None
+        pool = self.read_pool()
+        if pool is None:
+            return
+        self.before = pool[1]
+        radius, depth, rim = self.CRATER
+        self.crater = planet_world.Crater(0, self.centre, radius, depth, rim)
+        self.queued = world.set_craters([self.crater])
+        print("[planet] crater: %.0f m across, %.0f m deep, %.0f m from the camera; ground there %.1f m; "
+              "%d chunks queued" % (2.0 * radius, depth, self.DISTANCE, self.natural, self.queued), flush=True)
+        self.next_stage("rebuild")
+
+    def rebuild(self):
+        lod = world.lod
+        if self.frames >= 2 and lod.rebuild_queued == 0 and lod.pending == 0:
+            self.report(self.frames <= self.REBUILD_FRAMES and self.queued > 0,
+                        "%d chunks built again within %d frames" % (self.queued, self.frames))
+            self.next_stage("probe_after")
+        elif self.frames > self.REBUILD_FRAMES:
+            self.report(False, "%d chunks still queued after %d frames" % (lod.rebuild_queued, self.frames))
+            self.next_stage("probe_after")
+
+    def probe_after(self):
+        heights = self.probed()
+        if heights is not None:
+            self.floor = heights[0]
+            self.report(abs(self.natural - self.floor - self.crater.depth) < 0.05,
+                        "the probe at its centre came down %.2f m" % (self.natural - self.floor))
+            self.after = None
+            self.next_stage("pool_after")
+
+    def pool_after(self):
+        pool = self.read_pool()
+        if pool is None:
+            return
+        gpu, after = pool
+        radius, depth = self.crater.radius, self.crater.depth
+        centre = np.array(self.centre)
+        compared, lowered, shallow, moved = 0, 0, 0, 0
+        for key, now in after.items():
+            then = self.before.get(key)
+            if then is None:
+                continue
+            compared += 1
+            distance = np.linalg.norm(now[:, :3] - centre, axis=1) * RADIUS
+            change = now[:, 3] - then[:, 3]
+            inside = distance < 0.5 * radius
+            if inside.any():
+                lowered += 1
+                shallow += int(np.count_nonzero(change[inside] > -0.5 * depth))
+            moved += int(np.count_nonzero(np.abs(change[distance > planet_world.CRATER_REACH * radius]) > 0.01))
+        self.report(lowered > 0 and shallow == 0,
+                    "%d chunks over its middle, %d vertices there not dug" % (lowered, shallow))
+        self.report(moved == 0, "%d of %d chunks drawn both times, %d vertices beyond %.0f radii moved"
+                    % (compared, len(after), moved, planet_world.CRATER_REACH))
+        cracks = CrackCheck()
+        cracks.VIEWS = [("the crater's chunks", None)]
+        cracks.measure(gpu)
+        self.report(cracks.worst <= 1.0, "largest gap / skirt %.3f" % cracks.worst)
+        angle = self.OFF_CENTRE / RADIUS
+        towards = normalize(sub(self.back, scale(self.centre, dot(self.back, self.centre))))
+        self.go_to(normalize(add(scale(self.centre, math.cos(angle)), scale(towards, math.sin(angle)))),
+                   self.natural)
+        self.next_stage("spawn_after")
+
+    def spawn_after(self):
+        if self.spawned():
+            self.next_stage("plants_after")
+
+    def plants_after(self):
+        listed = self.listed_within()
+        if listed is None:
+            return
+        self.report(listed[0] > 0 and listed[1] == 0,
+                    "after: %d plants and rocks listed within %.0f m, %d of them within its radius"
+                    % (listed[0], COLLIDER_RADIUS, listed[1]))
+        os._exit(0 if self.ok else 1)
+
+
 class LandingCheck:
     """--landing-check, on the planet, and --moon-landing-check, on the
     moon: measures the ground 9 km below spots on rings around a centre

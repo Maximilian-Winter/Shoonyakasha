@@ -512,6 +512,29 @@ void PlanetLod::update(const LodView& view, const std::vector<LodBody>& bodies, 
     }
 }
 
+size_t PlanetLod::requeueNear(int body, const Vec3& direction, double reach) {
+    const Tree* t = tree(body);
+    if (!t) return 0;
+    std::vector<uint32_t> order;
+    collectNodes(*t, order);
+    std::vector<std::pair<double, Ref>> near;
+    for (uint32_t index : order) {
+        const Node& node = m_nodes[index];
+        if (node.slot < 0) continue;
+        // From the bounding sphere's centre to the nearest point of the line out along `direction`.
+        const double along = std::max(0.0, dot(node.boundCentre, direction));
+        const Vec3 nearest{direction[0] * along, direction[1] * along, direction[2] * along};
+        const double distance = length(sub(node.boundCentre, nearest));
+        if (distance - node.boundRadius < reach) near.emplace_back(distance, Ref{index, node.generation});
+    }
+    std::erase_if(m_rebuild, [&](const Ref& ref) {
+        return std::any_of(near.begin(), near.end(), [&](const auto& n) { return n.second.index == ref.index; });
+    });
+    std::stable_sort(near.begin(), near.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    for (const auto& [distance, ref] : near) m_rebuild.push_back(ref);
+    return near.size();
+}
+
 void PlanetLod::writeDraws(const LodView& view, const std::vector<LodBody>& bodies, int colourMode,
                            double shadowReach, uint32_t indexCount, const LodScatter& scatter) {
     std::fill(m_instances.begin(), m_instances.end(), 0.0f);

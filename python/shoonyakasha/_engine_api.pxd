@@ -886,6 +886,7 @@ cdef extern from "Planet/PlanetLod.h" namespace "Shoonyakasha::Planet":
         int maxLevel(int body)
         void setMaxLevel(int body, int maxLevel)
         void update(const LodView& view, const vector[LodBody]& bodies, int64_t frame, cbool frozen, cbool requeue)
+        size_t requeueNear(int body, const LodVec3& direction, double reach)
         void takeHeights(const float* rows, size_t count)
         void writeDraws(const LodView& view, const vector[LodBody]& bodies, int colourMode, double shadowReach,
                         uint32_t indexCount, const LodScatter& scatter)

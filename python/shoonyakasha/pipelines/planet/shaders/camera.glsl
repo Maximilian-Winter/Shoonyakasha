@@ -39,6 +39,8 @@ layout(set = CAMERA_SET, binding = 1) uniform TerrainParams {
     vec4 lakeShapes[32];
     vec4 riverFrame[4];
     vec4 riverOrigin;
+    vec4 craters[16];
+    vec4 craterShapes[16];
 } terrain;
 
 layout(std430, set = CAMERA_SET, binding = 8) readonly buffer RiverData {

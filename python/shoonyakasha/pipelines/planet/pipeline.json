@@ -112,7 +112,10 @@
         { "name": "riverFrame", "type": "vec4", "arrayCount": 4,
           "source": "scene.custom.planet.terrain.riverFrame[i]" },
         { "name": "riverOrigin", "type": "vec4", "source": "scene.custom.planet.terrain.riverOrigin",
-          "default": [ 0.0, 0.0, 0.0, 0.0 ] }
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "craters", "type": "vec4", "arrayCount": 16, "source": "scene.custom.planet.terrain.craters[i]" },
+        { "name": "craterShapes", "type": "vec4", "arrayCount": 16,
+          "source": "scene.custom.planet.terrain.craterShapes[i]" }
       ]
     },
     "ChunkJobs": {

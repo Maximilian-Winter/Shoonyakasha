@@ -3994,6 +3994,14 @@ cdef class PlanetLod:
         queue worked through with the jobs left."""
         self._ptr.update(_lod_view(view), _lod_bodies(bodies), frame, frozen, requeue)
 
+    def requeue_near(self, int body, direction, double reach):
+        """Every built chunk of the body's tree whose bounding sphere comes
+        within `reach` metres of the line out from the body's centre along
+        the unit `direction` queued to be built again ahead of the queue,
+        those nearest the line first; returns how many. The updates work
+        through the queue."""
+        return self._ptr.requeueNear(body, _physics_vec3(direction), reach)
+
     def take_heights(self, data):
         """ChunkHeights read back: rows of (lowest, highest, stamp, unused) float32 per slot."""
         cdef const unsigned char[::1] view = memoryview(data).cast('B')

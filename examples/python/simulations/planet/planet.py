@@ -194,6 +194,8 @@ Keys:
     python planet.py --landing-check   land the ship on a mountain near the site, report how it stands, then exit
     python planet.py --moon-landing-check   the same on the moon
     python planet.py --crack-check     measure the gaps between levels in steep terrain against the skirts, then exit
+    python planet.py --crater-check    dig a crater by the blocks 500 m from the camera, check its chunks are built
+                                       again without cracks and nothing grows in it, then exit
     python planet.py --morph-check     come down from 20 km, check every swap of chunks happens fully morphed, then exit
     python planet.py --prop-rest-check   drop crates on the planet and the moon, check they come to rest and stay there
     python planet.py --walk-check      walk 200 m circles on the planet and the moon, check the feet stay on the ground
@@ -355,6 +357,9 @@ parser.add_argument("--morph-check", action="store_true",
                     help="come down from 20 km and check every swap of chunks happens fully morphed")
 parser.add_argument("--crack-check", action="store_true",
                     help="measure the gaps between chunks of different levels in steep terrain against the skirts")
+parser.add_argument("--crater-check", action="store_true",
+                    help="dig a crater by the blocks 500 m from the camera, check its chunks are built again "
+                         "without cracks and nothing grows in it, and exit")
 parser.add_argument("--landing-check", action="store_true",
                     help="land the ship on the highest spot found around the site, print how it stands and exit")
 parser.add_argument("--moon-landing-check", action="store_true",
@@ -2412,6 +2417,8 @@ def on_init():
         engine.ecs.add_system("PlanetMorphCheck", checks.MorphCheck(), priority=-2)
     elif args.crack_check:
         engine.ecs.add_system("PlanetCrackCheck", checks.CrackCheck(), priority=-2)
+    elif args.crater_check:
+        engine.ecs.add_system("PlanetCraterCheck", checks.CraterCheck(), priority=-2)
     elif args.landing_check:
         engine.ecs.add_system("PlanetLandingCheck", checks.LandingCheck("planet"), priority=-2)
     elif args.moon_landing_check:

@@ -7,7 +7,7 @@
 // camera once heights are back and drawing children only when all four are
 // built, merging and releasing unused subtrees, a full pool, the draw lists'
 // layout, culling behind the horizon, the sun's rebuild queue skipping slots
-// that have a job, and dropping a tree. The Python test
+// that have a job, queueing the chunks near a direction, and dropping a tree. The Python test
 // tests/python/test_planet_native_lod.py compares it with the Python version
 // frame by frame.
 //
@@ -247,6 +247,40 @@ TEST(PlanetLod, RebuildQueueSkipsSlotsWithAJobThisFrame) {
     lod.update(view, {planetBody()}, 2, false, true);
     EXPECT_EQ(lod.jobs().size(), 6u);        // each root built again once
     EXPECT_EQ(lod.pending(), 6u);
+}
+
+TEST(PlanetLod, RequeueNearQueuesTheBuiltChunksNearALineNearestFirst) {
+    PlanetLod lod(SLOTS, JOBS, VERTICES, 0.05);
+    lod.createTree(0, RADIUS, 0.0, 10.0, 12, 1.25, 0.05);
+    std::vector<float> rows(SLOTS * 4, 0.0f);
+    const Vec3 direction{0.0, 0.0, 1.0};
+    const LodView view = viewAt({0.0, 0.0, RADIUS + 5000.0}, {0.0, 0.0, -1.0});
+    for (int64_t frame = 1; frame <= 30; ++frame) {
+        answerJobs(lod, rows);
+        lod.update(view, {planetBody()}, frame, false, false);
+    }
+    answerJobs(lod, rows);
+    // The built chunks whose bounding sphere comes within the reach of the +z axis's upper half, by distance.
+    const double reach = 2000.0;
+    std::vector<std::pair<double, int>> expected;
+    for (const LodNodeInfo& node : lod.nodes(0)) {
+        const Vec3& c = node.boundCentre;
+        const double distance = c[2] > 0.0 ? std::hypot(c[0], c[1]) : std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+        if (node.slot >= 0 && distance - node.boundRadius < reach) expected.emplace_back(distance, node.slot);
+    }
+    std::stable_sort(expected.begin(), expected.end());
+    ASSERT_GT(expected.size(), 1u);
+    ASSERT_LT(expected.size(), static_cast<size_t>(lod.used()));
+    EXPECT_EQ(lod.requeueNear(0, direction, reach), expected.size());
+    EXPECT_EQ(lod.rebuildQueued(), expected.size());
+    EXPECT_EQ(lod.requeueNear(0, direction, reach), expected.size());   // queued again, not twice
+    EXPECT_EQ(lod.rebuildQueued(), expected.size());
+    EXPECT_EQ(lod.requeueNear(1, direction, reach), 0u);                 // no such tree
+    lod.update(view, {planetBody()}, 31, false, false);
+    const size_t built = std::min(expected.size(), static_cast<size_t>(JOBS));
+    ASSERT_EQ(lod.jobs().size(), built);
+    for (size_t k = 0; k < built; ++k) EXPECT_EQ(static_cast<int>(lod.jobs()[k].b[0]), expected[k].second);
+    EXPECT_EQ(lod.rebuildQueued(), expected.size() - built);
 }
 
 TEST(PlanetLod, DroppingATreeReleasesItsSlots) {

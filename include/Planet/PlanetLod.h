@@ -75,7 +75,8 @@ struct LodJob {
 ///    released, children before their parent;
 ///  - the chunks' slots, the jobs that build them (each with a stamp that
 ///    the heights read back carry) and the chunks waiting for their heights;
-///  - the chunks to build again (for a new sun), nearest first, in the jobs
+///  - the chunks to build again (for a new sun, or near a direction), nearest
+///    first, in the jobs
 ///    new chunks leave over, a slot that has a job this frame getting none;
 ///  - the draw lists: every selected chunk in view and not behind its
 ///    body's horizon, those of them reaching below sea level on a body with
@@ -106,6 +107,12 @@ public:
     /// through with the jobs left.
     void update(const LodView& view, const std::vector<LodBody>& bodies, int64_t frame, bool frozen,
                 bool requeue);
+    /// Every built chunk of the body's tree whose bounding sphere comes
+    /// within `reach` of the line out from the body's centre along the unit
+    /// `direction` queued to be built again ahead of the queue, those
+    /// nearest the line first; returns how many. The updates work through
+    /// the queue.
+    size_t requeueNear(int body, const Vec3& direction, double reach);
     /// Heights read back: `count` rows of (lowest, highest, stamp, unused),
     /// one per slot. Each chunk waiting for its job's stamp takes its range.
     void takeHeights(const float* rows, size_t count);
