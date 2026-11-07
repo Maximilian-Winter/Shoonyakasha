@@ -7,7 +7,9 @@ screenshots on the way.
 
 import math
 import os
+import random
 import tempfile
+import time
 from collections import Counter
 
 from shoonyakasha.planet.gravity_gun import GunParams
@@ -58,6 +60,10 @@ SELL_SECONDS = 6.0              # s --check waits for the ore it drops on the pa
 CHECK_ORE_GRADE = 0.6
 PAUSE_SECONDS = 1.0             # s --check keeps the pause menu open
 MIX_SECONDS = 0.5               # s --check keeps the slate open before measuring the mix
+VOICE_HITS = 40                 # hits --check plays in one frame on a ring around the camera
+VOICE_RING = 13.0               # m, the ring's radius
+VOICE_SAME = 20                 # hits it plays at one point in the same frame
+VOICE_BUDGET_MS = 10.0          # ms all of them may take
 NET_SETTLE = 3.0                # s --check lets the ore it drops into the net settle
 NET_CHECK_AWAY = 60.0           # m along its nose --check moves the car off Base's pad for the net
 SUIT_CHECK_TEMPERATURE = -60.0  # degrees C --check stands in for the air's while the suit drains
@@ -177,8 +183,8 @@ def run_check(dt):
     closed, the ore stayed unsold and the tank was refused, the pinned
     contract's deadline was held back by the time passed, and rain was
     drawn; then, the storm gone, Base announced open and the ore sold
-    within SELL_SECONDS; then the
-    menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
+    within SELL_SECONDS; then, with sound, the voices (run_voice_check);
+    then the menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
     second more. Passes when the player covered 80 % of walking speed's
@@ -518,6 +524,9 @@ def run_check(dt):
             check["stage"], check["time"] = "storms", 0.0
     elif stage == "storms":
         if run_storm_check(check, t):
+            check["stage"], check["time"] = "voices", 0.0
+    elif stage == "voices":
+        if run_voice_check(check, t):
             menus.set_paused(True)
             check["stage"], check["time"] = "pause", 0.0
     elif stage == "pause":
@@ -646,7 +655,7 @@ def run_check(dt):
                 walking.screenshot(base + "_load" + ext)
             check["ok"] = (check["walk_ok"] and check["capture_ok"] and check["held_ok"] and check["punt_ok"]
                            and check["map_ok"] and check["suit_ok"] and check["sell_ok"] and check["pause_ok"]
-                           and check["shower_ok"] and check["storm_ok"] and load_ok)
+                           and check["shower_ok"] and check["storm_ok"] and check["voice_ok"] and load_ok)
             check["in_car"] = vehicle.enter_car(anywhere=True)
             check["top_speed"], check["top_height"] = 0.0, 0.0
             check["stage"], check["time"] = "drive", 0.0
@@ -1295,6 +1304,52 @@ def run_shower_check(check, t):
     print("[walker] meteor shower:\n" + "\n".join("[walker]   " + line for line in s["lines"])
           + "\n[walker]   %s" % ("passed" if s["ok"] else "FAILED"), flush=True)
     check["shower_ok"] = s["ok"]
+    return True
+
+
+def run_voice_check(check, t):
+    """--check's voice management (see run_check): VOICE_HITS hits of
+    shuffled volumes on a ring of VOICE_RING around the camera and
+    VOICE_SAME at the camera, rising to full, in one frame; 0.1 s on,
+    passing when at most the rocks' category of voices play, the ring's
+    playing are louder than all it dropped, the hits at the camera are one
+    voice, and all took less than VOICE_BUDGET_MS. True once done."""
+    audio = state.sound.audio
+    if audio is None:
+        check["voice_ok"] = True
+        return True
+    v = check.get("voices")
+    if v is None:
+        right, _, forward = walking.view_basis()
+        camera = state.view.position
+        volumes = [0.05 + 0.95 * k / (VOICE_HITS - 1) for k in range(VOICE_HITS)]
+        random.Random(7).shuffle(volumes)
+        ring = [add(camera, add(scale(right, VOICE_RING * math.cos(2.0 * math.pi * k / VOICE_HITS)),
+                                scale(forward, VOICE_RING * math.sin(2.0 * math.pi * k / VOICE_HITS))))
+                for k in range(VOICE_HITS)]
+        start = time.perf_counter()
+        voices = [sounds.hit(point, volume) for point, volume in zip(ring, volumes)]
+        same = [sounds.hit(camera, 0.9 + 0.1 * k / (VOICE_SAME - 1)) for k in range(VOICE_SAME)]
+        check["voices"] = {"t0": t, "voices": voices, "volumes": volumes, "same": same,
+                           "ms": 1000.0 * (time.perf_counter() - start)}
+        return False
+    if t - v["t0"] < 0.1:
+        return False
+    playing = [voice != 0 and audio.active(voice) for voice in v["voices"]]
+    kept = [volume for volume, on in zip(v["volumes"], playing) if on]
+    dropped = [volume for volume, on in zip(v["volumes"], playing) if not on]
+    count, cap = audio.voices_of("rocks"), sounds.CATEGORIES["rocks"]
+    one = len(set(v["same"])) == 1 and v["same"][0] != 0 and audio.active(v["same"][0])
+    loudest = bool(kept) and (not dropped or min(kept) > max(dropped))
+    ok = count <= cap and loudest and one and v["ms"] < VOICE_BUDGET_MS
+    print("[walker] %d hits in a frame: %d of the rocks' %d voices playing, the ring's %d the loudest (%s), "
+          "%d at one point one voice (%s), in %.1f ms: %s" % (VOICE_HITS + VOICE_SAME, count, cap, len(kept), loudest,
+                                                             VOICE_SAME, one, v["ms"], "passed" if ok else "FAILED"),
+          flush=True)
+    for voice in set(v["voices"] + v["same"]):
+        if voice:
+            audio.stop(voice)
+    check["voice_ok"] = ok
     return True
 
 

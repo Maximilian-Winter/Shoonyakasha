@@ -318,6 +318,89 @@ TEST(AudioEngineTest, SlotOfAFilteredVoiceServesAnUnfilteredOne) {
     EXPECT_GT(rms(pull(audio, 4800)), 10.0 * filtered);
 }
 
+TEST(AudioEngineTest, CategoryLimitDropsAQuieterVoice) {
+    AudioEngine audio(headless());
+    audio.setCategoryLimit(1, 2);
+    EXPECT_EQ(audio.categoryLimit(1), 2);
+    const ClipId clip = loadTone(audio, 1000.0f);
+    PlayParams params = plain();
+    params.category = 1;
+    EXPECT_NE(audio.play(clip, params), 0u);
+    EXPECT_NE(audio.play(clip, params), 0u);
+    params.volume = 0.5f;
+    EXPECT_EQ(audio.play(clip, params), 0u);
+    EXPECT_EQ(audio.activeVoices(1), 2);
+    params.category = 0;
+    EXPECT_NE(audio.play(clip, params), 0u);
+    EXPECT_EQ(audio.activeVoices(), 3);
+}
+
+TEST(AudioEngineTest, CategoryLimitTakesOverTheQuietest) {
+    AudioEngine audio(headless());
+    audio.setCategoryLimit(2, 2);
+    const ClipId clip = loadTone(audio, 1000.0f);
+    PlayParams params = plain();
+    params.category = 2;
+    params.volume = 0.2f;
+    const VoiceId quiet = audio.play(clip, params);
+    params.volume = 0.5f;
+    const VoiceId middle = audio.play(clip, params);
+    params.volume = 1.0f;
+    const VoiceId loud = audio.play(clip, params);
+    ASSERT_NE(loud, 0u);
+    pull(audio, 480);
+    EXPECT_FALSE(audio.active(quiet));
+    EXPECT_TRUE(audio.active(middle));
+    EXPECT_TRUE(audio.active(loud));
+    EXPECT_EQ(audio.activeVoices(2), 2);
+}
+
+TEST(AudioEngineTest, LoudnessCountsTheDistance) {
+    AudioEngine audio(headless());
+    audio.setCategoryLimit(3, 1);
+    const ClipId clip = loadTone(audio, 1000.0f);
+    PlayParams params;
+    params.loop = true;
+    params.category = 3;
+    params.position = {0.0f, 0.0f, -100.0f};
+    const VoiceId far = audio.play(clip, params);
+    params.volume = 0.5f;
+    params.position = {0.0f, 0.0f, -2.0f};
+    const VoiceId near = audio.play(clip, params);
+    ASSERT_NE(near, 0u);
+    pull(audio, 480);
+    EXPECT_FALSE(audio.active(far));
+    audio.setVoicePosition(near, {0.0f, 0.0f, -400.0f});
+    params.volume = 1.0f;
+    params.position = {0.0f, 0.0f, -50.0f};
+    EXPECT_NE(audio.play(clip, params), 0u);
+}
+
+TEST(AudioEngineTest, FullPoolGivesUpALowerPriority) {
+    AudioEngine audio(headless(2));
+    const ClipId clip = loadTone(audio, 1000.0f);
+    PlayParams params = plain();
+    params.priority = 100;
+    const VoiceId a = audio.play(clip, params);
+    params.volume = 0.5f;
+    const VoiceId b = audio.play(clip, params);
+    params.priority = 50;
+    params.volume = 1.0f;
+    EXPECT_EQ(audio.play(clip, params), 0u);
+    params.priority = 200;
+    const VoiceId c = audio.play(clip, params);
+    ASSERT_NE(c, 0u);
+    EXPECT_TRUE(audio.active(a));
+    EXPECT_FALSE(audio.active(b));
+    params.priority = 100;
+    params.volume = 0.2f;
+    EXPECT_EQ(audio.play(clip, params), 0u);
+    audio.stop(a, 0.05f);
+    const VoiceId d = audio.play(clip, params);
+    EXPECT_NE(d, 0u);
+    EXPECT_FALSE(audio.active(a));
+}
+
 TEST(AudioEngineTest, ListenerRightIsForwardCrossUp) {
     AudioEngine audio(headless());
     PlayParams params;

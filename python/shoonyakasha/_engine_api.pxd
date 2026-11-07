@@ -718,6 +718,8 @@ cdef extern from "Audio/AudioEngine.h" namespace "Shoonyakasha::Audio":
         cbool filtered
         float lowpass
         float highpass
+        uint8_t category
+        uint8_t priority
 
     cdef cppclass CppAudioEngine "Shoonyakasha::Audio::AudioEngine":
         CppAudioEngine(const AudioConfig& config) except +
@@ -736,7 +738,9 @@ cdef extern from "Audio/AudioEngine.h" namespace "Shoonyakasha::Audio":
         void setVoiceFilter(uint64_t voice, float lowpass, float highpass, float fade)
         void setVoiceVolume(uint64_t voice, float volume)
         void setVoicePitch(uint64_t voice, float pitch)
-        int activeVoices()
+        int activeVoices(int category)
+        void setCategoryLimit(uint8_t category, int limit)
+        int categoryLimit(uint8_t category)
         void setBusVolume(AudioBus bus, float volume, float fade)
         float busVolume(AudioBus bus)
         void pauseBus(AudioBus bus)

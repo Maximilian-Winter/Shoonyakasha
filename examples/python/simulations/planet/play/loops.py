@@ -113,16 +113,17 @@ def placeholder(name):
     return (0.8 * x / peak).astype(np.float32)
 
 
+LOOP = {"category": "ambience", "priority": 200, "make": placeholder}
 LOOPS = {
-    "wind":         {"bus": "world", "volume": 0.6, "make": placeholder},
-    "wind_whistle": {"bus": "world", "volume": 0.35, "make": placeholder},
-    "rain":         {"bus": "world", "volume": 0.6, "make": placeholder},
-    "car_hum":      {"bus": "world", "volume": 0.5, "near": 3.0, "far": 250.0, "make": placeholder},
-    "car_cushion":  {"bus": "world", "volume": 0.4, "near": 3.0, "far": 120.0, "make": placeholder},
-    "gun_hum":      {"bus": "suit", "volume": 0.3, "make": placeholder},
-    "reentry":      {"bus": "suit", "volume": 0.9, "make": placeholder},
-    "breath":       {"bus": "suit", "volume": 0.35, "make": placeholder},
-    "heartbeat":    {"bus": "suit", "volume": 0.6, "make": placeholder},
+    "wind":         {"bus": "world", "volume": 0.6, **LOOP},
+    "wind_whistle": {"bus": "world", "volume": 0.35, **LOOP},
+    "rain":         {"bus": "world", "volume": 0.6, **LOOP},
+    "car_hum":      {"bus": "world", "volume": 0.5, "near": 3.0, "far": 250.0, **LOOP},
+    "car_cushion":  {"bus": "world", "volume": 0.4, "near": 3.0, "far": 120.0, **LOOP},
+    "gun_hum":      {"bus": "suit", "volume": 0.3, **LOOP},
+    "reentry":      {"bus": "suit", "volume": 0.9, **LOOP},
+    "breath":       {"bus": "suit", "volume": 0.35, **LOOP},
+    "heartbeat":    {"bus": "suit", "volume": 0.6, **LOOP},
 }
 
 

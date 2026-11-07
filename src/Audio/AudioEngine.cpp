@@ -16,6 +16,7 @@ constexpr float FILTER_Q = 0.70710678f;         // Butterworth
 constexpr float FILTER_MIN_HZ = 10.0f;
 constexpr float NYQUIST_SHARE = 0.45f;         // the highest cutoff, as a share of the sample rate
 constexpr float BUS_MIN_FADE = 0.005f;         // s
+constexpr float TAKEN_FADE = 0.005f;           // s a voice taken over by a louder one fades out over
 
 ma_uint64 milliseconds(float seconds) {
     return static_cast<ma_uint64>(std::lround(std::max(seconds, 0.0f) * 1000.0f));
@@ -196,7 +197,33 @@ struct Voice {
     bool used = false;
     bool stopping = false;
     bool filtered = false;
+    // What its loudness is reckoned from (`loudness`).
+    uint8_t category = 0;
+    uint8_t priority = 128;
+    bool spatial = false;
+    float volume = 1.0f;
+    AudioVec3 position{0.0f, 0.0f, 0.0f};
+    float minDistance = 1.0f;
+    float maxDistance = 500.0f;
+    float rolloff = 1.0f;
 };
+
+/// The gain of the inverse falloff at `position` from the listener.
+float falloff(const AudioVec3& position, float minDistance, float maxDistance, float rolloff) {
+    if (minDistance >= maxDistance) return 1.0f;
+    const float d = std::sqrt(position[0] * position[0] + position[1] * position[1] + position[2] * position[2]);
+    const float held = std::clamp(d, minDistance, maxDistance);
+    return minDistance / (minDistance + rolloff * (held - minDistance));
+}
+
+/// How loud a voice is heard: its volume times its falloff.
+float loudness(const Voice& v) {
+    return v.volume * (v.spatial ? falloff(v.position, v.minDistance, v.maxDistance, v.rolloff) : 1.0f);
+}
+
+float loudness(const PlayParams& p) {
+    return p.volume * (p.spatial ? falloff(p.position, p.minDistance, p.maxDistance, p.rolloff) : 1.0f);
+}
 
 }  // namespace
 
@@ -211,6 +238,7 @@ struct AudioEngine::Impl {
     bool busPausedFlags[BusCount] = {};
     FilterNode world;             // the World bus's, its low-pass only
     float lowpassHz = 0.0f;
+    int categoryLimits[CategoryCount] = {};   // 0: no limit
     std::vector<Clip> clips;      // ClipId is the index + 1
     std::unique_ptr<Voice[]> voices;
     uint32_t voiceCount = 0;
@@ -419,6 +447,23 @@ VoiceId AudioEngine::play(ClipId id, const PlayParams& params) {
     Clip* clip = s.clip(id);
     if (clip == nullptr) return 0;
     s.reclaim();
+    const float loud = loudness(params);
+    const int limit = params.category < CategoryCount ? s.categoryLimits[params.category] : 0;
+    if (params.category > 0 && limit > 0) {
+        int count = 0;
+        Voice* quietest = nullptr;
+        for (uint32_t i = 0; i < s.voiceCount; ++i) {
+            Voice& v = s.voices[i];
+            if (!v.used || v.stopping || v.category != params.category || Impl::finished(v)) continue;
+            ++count;
+            if (quietest == nullptr || loudness(v) < loudness(*quietest)) quietest = &v;
+        }
+        if (count >= limit) {
+            if (quietest == nullptr || loudness(*quietest) >= loud) return 0;
+            ma_sound_stop_with_fade_in_milliseconds(&quietest->sound, milliseconds(TAKEN_FADE));
+            quietest->stopping = true;
+        }
+    }
     uint32_t slot = s.voiceCount;
     for (uint32_t i = 0; i < s.voiceCount; ++i) {
         if (!s.voices[i].used) {
@@ -426,7 +471,26 @@ VoiceId AudioEngine::play(ClipId id, const PlayParams& params) {
             break;
         }
     }
-    if (slot == s.voiceCount) return 0;
+    if (slot == s.voiceCount) {
+        // Every slot taken: a voice fading out gives its slot up first; else
+        // the voice of the lowest priority, the quietest of those, if it is
+        // below the new one's priority, or of it and quieter.
+        auto rank = [](const Voice& v) { return v.stopping ? -1 : static_cast<int>(v.priority); };
+        uint32_t victim = s.voiceCount;
+        for (uint32_t i = 0; i < s.voiceCount; ++i) {
+            const Voice& v = s.voices[i];
+            if (victim == s.voiceCount || rank(v) < rank(s.voices[victim])
+                || (rank(v) == rank(s.voices[victim]) && loudness(v) < loudness(s.voices[victim]))) {
+                victim = i;
+            }
+        }
+        const Voice& v = s.voices[victim];
+        if (!v.stopping && (v.priority > params.priority || (v.priority == params.priority && loudness(v) >= loud))) {
+            return 0;
+        }
+        s.release(s.voices[victim]);
+        slot = victim;
+    }
 
     Voice& v = s.voices[slot];
     ma_uint32 flags = clip->stream ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
@@ -442,6 +506,14 @@ VoiceId AudioEngine::play(ClipId id, const PlayParams& params) {
         ma_node_attach_output_bus(&v.sound, 0, &v.filter, 0);
     }
     v.filtered = params.filtered;
+    v.category = params.category;
+    v.priority = params.priority;
+    v.spatial = params.spatial;
+    v.volume = params.volume;
+    v.position = params.position;
+    v.minDistance = params.minDistance;
+    v.maxDistance = params.maxDistance;
+    v.rolloff = params.rolloff;
     v.used = true;
     v.stopping = false;
     v.clip = id;
@@ -491,6 +563,7 @@ bool AudioEngine::active(VoiceId id) const {
 void AudioEngine::setVoicePosition(VoiceId id, const AudioVec3& position, const AudioVec3& velocity) {
     Voice* v = m_impl->voice(id);
     if (v == nullptr) return;
+    v->position = position;
     ma_sound_set_position(&v->sound, position[0], position[1], position[2]);
     ma_sound_set_velocity(&v->sound, velocity[0], velocity[1], velocity[2]);
 }
@@ -503,20 +576,31 @@ void AudioEngine::setVoiceFilter(VoiceId id, float lowpass, float highpass, floa
 }
 
 void AudioEngine::setVoiceVolume(VoiceId id, float volume) {
-    if (Voice* v = m_impl->voice(id)) ma_sound_set_volume(&v->sound, volume);
+    if (Voice* v = m_impl->voice(id)) {
+        v->volume = volume;
+        ma_sound_set_volume(&v->sound, volume);
+    }
 }
 
 void AudioEngine::setVoicePitch(VoiceId id, float pitch) {
     if (Voice* v = m_impl->voice(id)) ma_sound_set_pitch(&v->sound, pitch);
 }
 
-int AudioEngine::activeVoices() const {
+int AudioEngine::activeVoices(int category) const {
     int count = 0;
     for (uint32_t i = 0; i < m_impl->voiceCount; ++i) {
         Voice& v = m_impl->voices[i];
-        if (v.used && !Impl::finished(v)) ++count;
+        if (v.used && !Impl::finished(v) && (category < 0 || v.category == category)) ++count;
     }
     return count;
+}
+
+void AudioEngine::setCategoryLimit(uint8_t category, int limit) {
+    if (category > 0 && category < CategoryCount) m_impl->categoryLimits[category] = std::max(limit, 0);
+}
+
+int AudioEngine::categoryLimit(uint8_t category) const {
+    return category < CategoryCount ? m_impl->categoryLimits[category] : 0;
 }
 
 void AudioEngine::setBusVolume(Bus bus, float volume, float fade) {

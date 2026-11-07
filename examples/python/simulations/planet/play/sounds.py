@@ -3,8 +3,11 @@ The walker's sound (sk.Audio, engine.audio): the sound table, its clips,
 and what plays them.
 
 Each entry of SOUNDS gives its bus, its volume, how far its voices' pitch
-is spread at random, and, for a spatial one, its distances (`near`, full
-volume within; `far`, where its falloff stops). An entry's clips are the
+is spread at random, for a spatial one its distances (`near`, full
+volume within; `far`, where its falloff stops), and its category of
+CATEGORIES and priority (PRIORITY when it has none) for sk.Audio's
+voice management: at most a category's number of its voices at once,
+the quietest giving way to a louder one. An entry's clips are the
 files sounds/<name>.wav, .flac or .mp3 and sounds/<name>_<anything> with
 those endings, beside walker.py; one of them is picked at random for each
 voice, streamed from disk when the entry has "stream". An entry without
@@ -15,7 +18,9 @@ more tables beside SOUNDS (play/loops.py's and play/music.py's).
 Each frame (`update`) the listener follows the camera, and the sounds of
 what happened since the last frame play: the gravity gun's grab, drop,
 punt and charged punt, a prop's hit (its speed falling sharply, louder
-the more it fell and the heavier the prop), the player's footsteps (one a
+the more it fell and the heavier the prop; hits within COLLAPSE_SECONDS
+and COLLAPSE_DISTANCE of one another are one voice, as loud as the
+loudest, `hit`), the player's footsteps (one a
 BOB_STRIDE, when the head bob is lowest) and landings, and the slate and
 the System screen opening and closing. A toast plays as it shows
 (`toast`), a boulder's split as it splits (`split`).
@@ -44,6 +49,7 @@ sound for the toast that follows it in place of the toast's own.
 
 import math
 import os
+from collections import Counter
 
 import numpy as np
 
@@ -59,24 +65,29 @@ RATE = 48000
 SOUND_DIR = os.path.join(HERE, "sounds")
 ENDINGS = (".wav", ".flac", ".mp3")
 
+CATEGORIES = {"rocks": 12, "impacts": 8, "footsteps": 4, "ui": 8, "ambience": 10}   # a category: its voices at most
+PRIORITY = 128
+
 SOUNDS = {
-    "grab":          {"bus": "suit", "volume": 0.45},
-    "drop":          {"bus": "suit", "volume": 0.35},
-    "punt":          {"bus": "suit", "volume": 0.8, "spread": 0.05},
-    "punt_charged":  {"bus": "suit", "volume": 1.0},
-    "hit":           {"bus": "world", "volume": 1.0, "spread": 0.08, "near": 1.0, "far": 60.0},
-    "split":         {"bus": "world", "volume": 1.0, "spread": 0.05, "near": 4.0, "far": 300.0},
-    "contact":       {"bus": "suit", "volume": 0.6, "spread": 0.1},
-    "meteor_boom":   {"bus": "world", "volume": 0.9, "spread": 0.1, "near": 60.0, "far": 6_000.0},
-    "meteor_boom_large": {"bus": "world", "volume": 1.0, "spread": 0.05, "near": 300.0, "far": 15_000.0},
-    "footstep":      {"bus": "suit", "volume": 0.3, "spread": 0.1},
-    "land":          {"bus": "suit", "volume": 0.5, "spread": 0.05},
-    "slate_open":    {"bus": "ui", "volume": 0.4},
-    "slate_close":   {"bus": "ui", "volume": 0.35},
-    "toast":         {"bus": "ui", "volume": 0.3},
-    "toast_good":    {"bus": "ui", "volume": 0.45},
-    "toast_warning": {"bus": "ui", "volume": 0.45},
-    "pads_closed":   {"bus": "ui", "volume": 0.5},
+    "grab":          {"bus": "suit", "volume": 0.45, "priority": 150},
+    "drop":          {"bus": "suit", "volume": 0.35, "priority": 150},
+    "punt":          {"bus": "suit", "volume": 0.8, "spread": 0.05, "priority": 150},
+    "punt_charged":  {"bus": "suit", "volume": 1.0, "priority": 150},
+    "hit":           {"bus": "world", "volume": 1.0, "spread": 0.08, "near": 1.0, "far": 60.0, "category": "rocks"},
+    "split":         {"bus": "world", "volume": 1.0, "spread": 0.05, "near": 4.0, "far": 300.0, "category": "impacts"},
+    "contact":       {"bus": "suit", "volume": 0.6, "spread": 0.1, "category": "rocks"},
+    "meteor_boom":   {"bus": "world", "volume": 0.9, "spread": 0.1, "near": 60.0, "far": 6_000.0,
+                      "category": "impacts"},
+    "meteor_boom_large": {"bus": "world", "volume": 1.0, "spread": 0.05, "near": 300.0, "far": 15_000.0,
+                          "category": "impacts", "priority": 180},
+    "footstep":      {"bus": "suit", "volume": 0.3, "spread": 0.1, "category": "footsteps"},
+    "land":          {"bus": "suit", "volume": 0.5, "spread": 0.05, "category": "footsteps"},
+    "slate_open":    {"bus": "ui", "volume": 0.4, "category": "ui", "priority": 160},
+    "slate_close":   {"bus": "ui", "volume": 0.35, "category": "ui", "priority": 160},
+    "toast":         {"bus": "ui", "volume": 0.3, "category": "ui", "priority": 160},
+    "toast_good":    {"bus": "ui", "volume": 0.45, "category": "ui", "priority": 160},
+    "toast_warning": {"bus": "ui", "volume": 0.45, "category": "ui", "priority": 160},
+    "pads_closed":   {"bus": "ui", "volume": 0.5, "category": "ui", "priority": 170},
 }
 
 HIT_SPEED = 1.5          # m/s a prop's speed must fall by in a frame to be heard hitting something
@@ -86,6 +97,8 @@ HIT_GAP = 0.15           # s between one prop's hits
 LAND_AIR = 0.35          # s in the air before touching down is a landing
 AIR_FADE = 0.3           # s the world bus takes to follow the air
 WARP_SILENT = 2.0        # time warp above which world sounds at a point are not played
+COLLAPSE_SECONDS = 0.05  # s within which hits near one another are one voice
+COLLAPSE_DISTANCE = 1.5  # m within which they are
 
 MIX = {                  # a state: (world, suit, music, the world's low-pass cap Hz, fade s); world None: paused
     "playing": (1.0, 1.0, 0.6, None, 0.3),
@@ -212,6 +225,8 @@ def setup(*tables):
             except RuntimeError as error:
                 print("[walker] %s" % error, flush=True)
         s.clips[name] = clips or [s.audio.load_samples(make(name), sample_rate=entry.get("rate", RATE))]
+    for category, limit in CATEGORIES.items():
+        s.audio.set_category_limit(category, limit)
     apply_volume()
     shown = state.ui.hud.on_toast
     state.ui.hud.on_toast = lambda text, colour, detail, kind: (toast(colour), shown and shown(text, colour, detail,
@@ -239,7 +254,8 @@ def play(name, position=None, volume=1.0, pitch=1.0, bus=None, **options):
     spatial = "near" in entry and position is not None
     voice = s.audio.play(s.rng.choice(s.clips[name]), position=position if spatial else None,
                          bus=bus or entry["bus"], volume=entry["volume"] * volume, pitch=pitch,
-                         min_distance=entry.get("near", 1.0), max_distance=entry.get("far", 500.0), **options)
+                         min_distance=entry.get("near", 1.0), max_distance=entry.get("far", 500.0),
+                         category=entry.get("category"), priority=entry.get("priority", PRIORITY), **options)
     s.played[name] += 1
     return voice
 
@@ -274,6 +290,26 @@ def strike(name, position, volume=1.0, pitch=1.0):
                     lowpass=acoustics.distance_cutoff(distance))
     near = acoustics.contact_volume(distance)
     return play("contact", volume=volume * near, pitch=pitch) if near > 0.0 else 0
+
+
+def hit(position, volume=1.0, pitch=1.0):
+    """A hit at `position` (planet space) (`strike`), or, within
+    COLLAPSE_SECONDS and COLLAPSE_DISTANCE of an earlier one, that one's
+    voice, raised to this one's volume when this one is louder. Returns
+    the voice."""
+    s = state.sound
+    s.recent_hits = [h for h in s.recent_hits if s.clock - h[0] <= COLLAPSE_SECONDS]
+    for k, (at, where, voice, name, loud) in enumerate(s.recent_hits):
+        if length(sub(where, position)) <= COLLAPSE_DISTANCE:
+            if volume > loud and voice:
+                s.audio.set_voice(voice, volume=s.entries[name]["volume"] * volume)
+                s.recent_hits[k] = (at, where, voice, name, volume)
+            return voice
+    before = Counter(s.played)
+    voice = strike("hit", position, volume, pitch)
+    name = "contact" if s.played["contact"] > before["contact"] else "hit"
+    s.recent_hits.append((s.clock, position, voice, name, volume))
+    return voice
 
 
 def boom(point, large):
@@ -405,8 +441,8 @@ def update_hits(dt):
             continue
         s.hit_at[key] = s.clock
         weight = (prop.mass / HIT_MASS) ** 0.25
-        strike("hit", add(body.centre(), position), volume=min(1.0, fall / HIT_FULL) * min(1.5, weight),
-               pitch=max(0.6, min(1.6, 1.0 / weight)))
+        hit(add(body.centre(), position), volume=min(1.0, fall / HIT_FULL) * min(1.5, weight),
+            pitch=max(0.6, min(1.6, 1.0 / weight)))
     s.velocities = seen
     s.hit_at = {key: at for key, at in s.hit_at.items() if key in seen}
 

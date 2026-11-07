@@ -47,7 +47,7 @@ audio.stop(loop, fade=0.3)
 audio.active(loop)                                        # still holds its slot
 ```
 
-`play` returns a voice, or 0 when the clip does not exist or every voice is taken. A voice with a `position` is spatial:
+`play` returns a voice, or 0 when the clip does not exist or its category or the full pool keeps it from playing (see Categories and priority). A voice with a `position` is spatial:
 
 - **Falloff:** its gain is `min_distance / (min_distance + rolloff * (d - min_distance))` beyond `min_distance`, with `d` held at `max_distance` beyond that.
 - **Panning:** it is panned around the listener.
@@ -64,6 +64,21 @@ audio.set_voice(wind, lowpass=2500.0, highpass=120.0, filter_fade=0.1)
 ```
 
 `set_voice` sets both cutoffs together when either is given (the other open; 0 is open too), reached over `filter_fade` seconds and moving evenly in octaves, held between 10 Hz and 0.45 of the sample rate. A voice played unfiltered cannot be filtered later; `set_voice`'s cutoffs do nothing to it. In C++ these are `PlayParams::filtered`, `lowpass` and `highpass`, and `AudioEngine::setVoiceFilter`.
+
+## Categories and priority
+
+```python
+audio.set_category_limit("rocks", 12)
+audio.play(clack, position=point, category="rocks")
+audio.play(hum, loop=True, priority=200)
+audio.voices_of("rocks")
+```
+
+A voice's loudness is its volume times its falloff where it is (1 when it is not spatial).
+
+- **Categories:** with a category's limit reached, a new voice of it takes over the quietest of the category's voices if the new one is louder. That voice fades out over 5 ms. If the new voice is not louder, it is not played and `play` returns 0. A limit of 0 is no limit, and a voice with no category has none.
+- **Priority:** priority runs from 0 to 255, 128 by default. With every voice taken, a voice that is fading out gives its slot up first. Otherwise the voice of the lowest priority (the quietest of those) gives its slot up to a new voice of higher priority, or of the same priority and louder. If none qualifies, the new voice is not played.
+- **Names:** categories are named by strings, at most 15 of them. In C++ they are numbers 1 to 15 (`PlayParams::category`, `AudioEngine::setCategoryLimit`), and 0 is none.
 
 A voice that ends, or has stopped and faded out, gives its slot back; its int then names nothing, so calls with it do nothing and `active` is false. `active` is true while a voice waits for its delay, plays or fades out. `active_voices` counts those voices.
 

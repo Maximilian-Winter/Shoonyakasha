@@ -2884,6 +2884,13 @@ cdef class Audio:
     voice; load_samples makes one from samples in memory. Clips and voices
     are ints, 0 for none; a voice's int names nothing once it has ended.
 
+    A voice may be of a category, named by a string, with at most
+    set_category_limit voices of it at once: a new one takes over the
+    quietest (its volume times its falloff) when it is louder, else it is
+    not played. With every voice taken, a fading voice gives its slot up
+    first, else the lowest `priority`'s quietest to a voice of higher
+    priority, or of the same and louder. At most 15 categories are named.
+
     Positions are in the caller's frame, in double precision: set_listener
     gives the listener's position there, and play and set_voice subtract it
     from a voice's position before miniaudio sees it. A voice keeps the
@@ -2893,10 +2900,12 @@ cdef class Audio:
     cdef cbool _owned
     cdef object _owner
     cdef double _listener[3]
+    cdef dict _categories
 
     def __cinit__(self, *args, **kwargs):
         self._ptr = NULL
         self._owned = False
+        self._categories = {}
         self._listener[0] = self._listener[1] = self._listener[2] = 0.0
 
     def __init__(self, bint device=True, uint32_t sample_rate=48000, uint32_t channels=2, uint32_t voices=64):
@@ -2912,6 +2921,17 @@ cdef class Audio:
         if self._owned and self._ptr != NULL:
             del self._ptr
         self._ptr = NULL
+
+    cdef uint8_t _category(self, name) except *:
+        if name is None:
+            return 0
+        found = self._categories.get(name)
+        if found is None:
+            if len(self._categories) >= 15:
+                raise ValueError("at most 15 audio categories; %r would be the 16th" % (name,))
+            found = len(self._categories) + 1
+            self._categories[name] = found
+        return found
 
     cdef AudioVec3 _relative(self, position) except *:
         cdef AudioVec3 out
@@ -2962,7 +2982,7 @@ cdef class Audio:
     def play(self, uint32_t clip, position=None, str bus="world", float volume=1.0, float pitch=1.0,
              bint loop=False, velocity=(0.0, 0.0, 0.0), float min_distance=1.0, float max_distance=500.0,
              float rolloff=1.0, float doppler=1.0, float delay=0.0, float fade_in=0.0, bint filtered=False,
-             lowpass=None, highpass=None):
+             lowpass=None, highpass=None, category=None, int priority=128):
         """A voice of the clip; 0 for no clip or no free voice. With a
         `position` it is spatial: its gain falls off as min_distance /
         (min_distance + rolloff * (d - min_distance)) beyond min_distance, d
@@ -2972,7 +2992,8 @@ cdef class Audio:
         time from now and fades in over `fade_in` seconds. A filtered voice
         (`filtered`, or a `lowpass` or `highpass` given, in Hz) goes through
         its own low-pass and high-pass, which set_voice moves; unfiltered,
-        it cannot be filtered later."""
+        it cannot be filtered later. `category` and `priority` (0 to 255)
+        as the class's docstring has them."""
         cdef AudioPlayParams params
         params.bus = _audio_bus(bus)
         params.volume = volume
@@ -2991,6 +3012,8 @@ cdef class Audio:
         params.filtered = filtered or lowpass is not None or highpass is not None
         params.lowpass = 0.0 if lowpass is None else lowpass
         params.highpass = 0.0 if highpass is None else highpass
+        params.category = self._category(category)
+        params.priority = max(0, min(255, priority))
         return self._ptr.play(clip, params)
 
     def stop(self, uint64_t voice, float fade=0.0):
@@ -3019,7 +3042,18 @@ cdef class Audio:
 
     @property
     def active_voices(self):
-        return self._ptr.activeVoices()
+        return self._ptr.activeVoices(-1)
+
+    def voices_of(self, category):
+        """Voices of `category` holding a slot."""
+        return self._ptr.activeVoices(self._category(category))
+
+    def set_category_limit(self, category, int limit):
+        """At most `limit` voices of `category` at once; 0 is no limit."""
+        self._ptr.setCategoryLimit(self._category(category), limit)
+
+    def category_limit(self, category):
+        return self._ptr.categoryLimit(self._category(category))
 
     def set_bus_volume(self, str bus, float volume, float fade=0.0):
         """The bus's volume, reached linearly over `fade` seconds (at least 5 ms)."""

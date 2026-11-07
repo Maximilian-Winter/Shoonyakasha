@@ -157,6 +157,28 @@ class AudioTest(unittest.TestCase):
         self.audio.read(960)
         self.assertAlmostEqual(rms(self.audio.read(4800)) / open_level, 1.0, delta=0.05)
 
+    def test_categories_and_priority(self):
+        self.audio.set_category_limit("rocks", 2)
+        self.assertEqual(self.audio.category_limit("rocks"), 2)
+        quiet = self.audio.play(self.clip, bus="ui", loop=True, volume=0.2, category="rocks")
+        self.audio.play(self.clip, bus="ui", loop=True, volume=0.5, category="rocks")
+        self.assertEqual(self.audio.play(self.clip, bus="ui", loop=True, volume=0.1, category="rocks"), 0)
+        self.assertNotEqual(self.audio.play(self.clip, bus="ui", loop=True, volume=1.0, category="rocks"), 0)
+        self.audio.read(480)
+        self.assertFalse(self.audio.active(quiet))
+        self.assertEqual(self.audio.voices_of("rocks"), 2)
+        self.assertEqual(self.audio.voices_of("ui"), 0)
+        audio = sk.Audio(device=False, voices=1)
+        clip = audio.load_samples(tone(1000.0, 1.0))
+        low = audio.play(clip, loop=True, priority=10)
+        self.assertEqual(audio.play(clip, loop=True, priority=5), 0)
+        self.assertNotEqual(audio.play(clip, loop=True, priority=200), 0)
+        self.assertFalse(audio.active(low))
+        for k in range(15):
+            audio.set_category_limit("c%d" % k, 1)
+        with self.assertRaises(ValueError):
+            audio.set_category_limit("one too many", 1)
+
     def test_stop_with_a_fade_and_a_stale_voice(self):
         audio = sk.Audio(device=False, voices=1)
         clip = audio.load_samples(tone(1000.0, 1.0))

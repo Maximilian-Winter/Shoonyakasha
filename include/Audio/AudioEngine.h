@@ -23,6 +23,10 @@ using VoiceId = uint64_t;
 enum class Bus : uint8_t { Master = 0, World = 1, Suit = 2, UI = 3, Music = 4 };
 constexpr int BusCount = 5;
 
+/// Voices are of a category, 1 to CategoryCount - 1, each with a limit of
+/// voices (setCategoryLimit), or of none (0), which has no limit.
+constexpr int CategoryCount = 16;
+
 struct AudioConfig {
     uint32_t sampleRate = 48000;
     uint32_t channels = 2;
@@ -40,6 +44,14 @@ struct AudioConfig {
 /// starts that many seconds of the mix's time after play. A filtered voice
 /// goes through its own low-pass then high-pass, at `lowpass` and
 /// `highpass` Hz (0: open), which setVoiceFilter moves.
+///
+/// A voice's loudness is its volume times its falloff where it is (1 when
+/// not spatial). With its category's limit reached, a new voice takes over
+/// the quietest of the category's (which fades out over 5 ms) when it is
+/// louder, else it is not played. With every slot taken, a voice fading
+/// out gives its slot up first; else the voice of the lowest priority, the
+/// quietest of those, gives it up to a new voice of higher priority, or of
+/// the same and louder; else the new voice is not played.
 struct PlayParams {
     Bus bus = Bus::World;
     float volume = 1.0f;
@@ -57,6 +69,8 @@ struct PlayParams {
     bool filtered = false;
     float lowpass = 0.0f;                    // Hz; 0: open
     float highpass = 0.0f;                   // Hz; 0: open
+    uint8_t category = 0;                    ///< 0: none
+    uint8_t priority = 128;
 };
 
 /// Sound on miniaudio: clips, a pool of voices, the buses and one listener.
@@ -65,7 +79,7 @@ struct PlayParams {
 /// Clips are files (WAV, FLAC or MP3), decoded at load and shared between
 /// their voices, or streamed from disk by each voice, or samples given in
 /// memory (loadSamples). A voice that ends, or is stopped and has faded out,
-/// gives its slot back; play returns 0 when every slot is taken.
+/// gives its slot back; play returns 0 when no slot can be had (PlayParams).
 class AudioEngine {
 public:
     /// Throws std::runtime_error when miniaudio cannot start.
@@ -89,7 +103,8 @@ public:
     /// The clip's length in seconds, 0 for no clip.
     double clipLength(ClipId clip) const;
 
-    /// Returns 0 for no clip or no free voice.
+    /// Returns 0 for no clip, or when its category's limit or every slot
+    /// keeps it from playing (PlayParams).
     VoiceId play(ClipId clip, const PlayParams& params = {});
     /// The voice stopped, fading out over `fade` seconds.
     void stop(VoiceId voice, float fade = 0.0f);
@@ -103,7 +118,12 @@ public:
     void setVoiceFilter(VoiceId voice, float lowpass, float highpass, float fade = 0.0f);
     void setVoiceVolume(VoiceId voice, float volume);
     void setVoicePitch(VoiceId voice, float pitch);
-    int activeVoices() const;
+    /// Voices holding a slot, of `category` (-1: all).
+    int activeVoices(int category = -1) const;
+    /// At most `limit` voices of `category` (1 to CategoryCount - 1) play
+    /// at once; 0 is no limit.
+    void setCategoryLimit(uint8_t category, int limit);
+    int categoryLimit(uint8_t category) const;
 
     /// The bus's volume, reached linearly over `fade` seconds (at least 5 ms).
     void setBusVolume(Bus bus, float volume, float fade = 0.0f);

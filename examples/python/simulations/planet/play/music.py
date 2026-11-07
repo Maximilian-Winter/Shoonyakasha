@@ -45,7 +45,8 @@ def placeholder(name):
     return (0.6 * x / peak).astype(np.float32)
 
 
-MUSIC = {name: {"bus": "music", "volume": 0.7, "stream": True, "make": placeholder, "rate": RATE} for name in CHORDS}
+MUSIC = {name: {"bus": "music", "volume": 0.7, "stream": True, "make": placeholder, "rate": RATE, "priority": 250}
+         for name in CHORDS}
 
 
 def track():
