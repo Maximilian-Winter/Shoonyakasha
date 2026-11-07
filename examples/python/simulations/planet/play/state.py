@@ -196,6 +196,8 @@ class Sound:
     stride: int = None                 # the player's footsteps counted
     air: float = 0.0                   # s the player has been off the ground
     shown: dict = field(default_factory=dict)        # "slate", "system": whether it was shown last frame
+    density: float = 1.0               # the air's density at the camera, a share of the surface's
+    air_set: tuple = None              # (gain, cutoff Hz) the world bus was last set to
 
 
 @dataclass

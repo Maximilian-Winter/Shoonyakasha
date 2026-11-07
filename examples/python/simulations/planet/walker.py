@@ -78,7 +78,9 @@ game's.
 Sound (play/sounds.py): the gun, props hitting things, splits, footsteps
 and landings, the slate and the System screen, and the toasts, each from
 the files in sounds/ named after its entry of sounds.SOUNDS or else a
-placeholder made in code.
+placeholder made in code. The world's sounds fade and dull as the air
+thins (acoustics.py); in vacuum only the suit's are heard, and through
+it a strike within 3 m.
 
 Saving (save.py): F5 or Save game writes the game to walker_save.json
 and walker_save.npz: the clock, the player, the crates and loose rocks,

@@ -17,6 +17,12 @@ the more it fell and the heavier the prop), the player's footsteps (one a
 BOB_STRIDE, when the head bob is lowest) and landings, and the slate and
 the System screen opening and closing. A toast plays as it shows
 (`toast`), a boulder's split as it splits (`split`).
+
+The air carries the world bus (acoustics.air_audio): its gain and
+low-pass follow the air's density at the camera, reached over AIR_FADE,
+silent in vacuum (on the moon, in orbit). There a hit or a split within
+acoustics.CONTACT_DISTANCE of the camera plays "contact" through the suit
+instead (`strike`), and one farther off plays nothing.
 """
 
 import math
@@ -27,8 +33,9 @@ import numpy as np
 from shoonyakasha.planet.character import BOB_STRIDE
 from shoonyakasha.planet.vec import add, length, sub
 
+import acoustics
 import hud as hud_module
-from play.core import GOOD_TOAST, HERE, engine, foot, settings, state
+from play.core import GOOD_TOAST, HERE, engine, foot, settings, state, world
 from play import walking
 
 RATE = 48000
@@ -42,6 +49,7 @@ SOUNDS = {
     "punt_charged":  {"bus": "suit", "volume": 1.0},
     "hit":           {"bus": "world", "volume": 1.0, "spread": 0.08, "near": 1.0, "far": 60.0},
     "split":         {"bus": "world", "volume": 1.0, "spread": 0.05, "near": 4.0, "far": 300.0},
+    "contact":       {"bus": "suit", "volume": 0.6, "spread": 0.1},
     "footstep":      {"bus": "suit", "volume": 0.3, "spread": 0.1},
     "land":          {"bus": "suit", "volume": 0.5, "spread": 0.05},
     "slate_open":    {"bus": "ui", "volume": 0.4},
@@ -56,6 +64,7 @@ HIT_FULL = 12.0          # m/s of fall at which a hit is at full volume
 HIT_MASS = 50.0          # kg at which a hit is neither quieter nor lower
 HIT_GAP = 0.15           # s between one prop's hits
 LAND_AIR = 0.35          # s in the air before touching down is a landing
+AIR_FADE = 0.3           # s the world bus takes to follow the air
 
 
 def placeholder(name):
@@ -104,6 +113,8 @@ def placeholder(name):
         crackle = noise(0.6, 2) * (rng.random(int(0.6 * RATE)) < 0.02)
         x = pad(thump(60.0, 0.6, 0.15), 0.5 * noise(0.6, 8) * decay(t(0.6), 0.12),
                 2.0 * crackle * decay(t(0.6), 0.2))
+    elif name == "contact":
+        x = pad(thump(55.0, 0.18, 0.05), 0.5 * noise(0.12, 60) * decay(t(0.12), 0.03))
     elif name == "footstep":
         x = 0.8 * noise(0.07, 24) * decay(t(0.07), 0.02) + 0.3 * thump(110.0, 0.07, 0.02)
     elif name == "land":
@@ -200,7 +211,37 @@ def toast(colour):
 def split(chunks):
     if chunks:
         body, position, _ = foot.prop_state(chunks[0])
-        play("split", add(body.centre(), position))
+        strike("split", add(body.centre(), position))
+
+
+def strike(name, position, volume=1.0, pitch=1.0):
+    """The world sound `name` at `position` (planet space); in vacuum,
+    "contact" through the suit when within acoustics.CONTACT_DISTANCE of
+    the camera, else none."""
+    if state.sound.density > acoustics.VACUUM:
+        return play(name, position, volume, pitch)
+    near = acoustics.contact_volume(length(sub(position, state.view.position)))
+    return play("contact", volume=volume * near, pitch=pitch) if near > 0.0 else 0
+
+
+def air_share(point):
+    """The air's density at `point` (planet space) as a share of the
+    density at the planet's surface; 0 where the moon is the body under it."""
+    if world.body_under(point) is not world.planet:
+        return 0.0
+    planet = world.physics
+    return planet.density(point) / (planet.air_density * planet.density_factor)
+
+
+def update_air():
+    """The world bus's gain and cutoff set for the air at the camera when they changed."""
+    s = state.sound
+    s.density = air_share(state.view.position)
+    gain, cutoff = acoustics.air_audio(s.density)
+    if s.air_set is None or abs(gain - s.air_set[0]) > 0.01 or abs(math.log(cutoff / s.air_set[1])) > 0.02:
+        s.audio.set_bus_volume("world", gain, fade=AIR_FADE)
+        s.audio.set_world_lowpass(cutoff, fade=AIR_FADE)
+        s.air_set = (gain, cutoff)
 
 
 def update(dt):
@@ -211,6 +252,7 @@ def update(dt):
         return
     right, up, forward = walking.view_basis()
     s.audio.set_listener(state.view.position, forward, up)
+    update_air()
     update_gun()
     update_hits(dt)
     update_steps(dt)
@@ -257,8 +299,8 @@ def update_hits(dt):
             continue
         s.hit_at[key] = s.clock
         weight = (prop.mass / HIT_MASS) ** 0.25
-        play("hit", add(body.centre(), position), volume=min(1.0, fall / HIT_FULL) * min(1.5, weight),
-             pitch=max(0.6, min(1.6, 1.0 / weight)))
+        strike("hit", add(body.centre(), position), volume=min(1.0, fall / HIT_FULL) * min(1.5, weight),
+               pitch=max(0.6, min(1.6, 1.0 / weight)))
     s.velocities = seen
     s.hit_at = {key: at for key, at in s.hit_at.items() if key in seen}
 

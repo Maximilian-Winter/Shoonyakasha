@@ -8,12 +8,14 @@ screenshots on the way.
 import math
 import os
 import tempfile
+from collections import Counter
 
 from shoonyakasha.planet.gravity_gun import GunParams
 from shoonyakasha.planet.vec import add, cross, dot, length, local_frame, normalize, quat_from_basis, scale, sub
 from shoonyakasha.planet import resources
 from shoonyakasha.planet import wind as wind_field
 
+import acoustics
 import clock
 import contracts
 import events
@@ -72,6 +74,7 @@ FUEL_WAIT = 2.0                 # s past the call's delay --check waits for the 
 NIGHT_CHECK_HOUR = 0.5          # the hour --check sets at its end
 NIGHT_SECONDS = 1.0             # s --check waits at night
 NEW_GAME_NEAR = 3.0             # m from site.spawn_point a new game's player must stand, at most
+VACUUM_NEAR, VACUUM_FAR = 2.0, 20.0   # m from the camera --check strikes something on the moon
 SOUNDS_HEARD = ("grab", "punt_charged", "hit", "footstep", "land", "slate_open", "toast")   # sounds.SOUNDS entries the check must have played
 CONTRACT_CHECK_SECONDS = 30.0   # s --check waits at most for each contract to end
 CONTRACT_CHECK_DROP = 12.0      # m/s down --check throws the fragile crate at
@@ -210,7 +213,9 @@ def run_check(dt):
     pad at the moon's velocity, coming down on the assist, passing when it
     lands within SPACE_LAND_SECONDS, the hover car again over the moon,
     within 50 m of the pad and not hard, and the player got out stands on
-    the moon at the moon's temperature; then a meteorite of
+    the moon at the moon's temperature; with sound, the world bus is
+    silent there and of a strike VACUUM_NEAR and one VACUUM_FAR from the
+    camera only the near one is heard, through the suit; then a meteorite of
     SHOWER_CHECK_MASS strikes the moon MOON_SHOWER_CHECK_AWAY east of the
     feet MOON_SHOWER_CHECK_LEAD on, passing when its crater is dug on the
     moon and the meteorite lies within 1 m of its floor; then the car on
@@ -227,7 +232,8 @@ def run_check(dt):
     trade.START_CREDITS, the first objective, no contracts or upgrades, the
     six crates, no craters or storm, less than half the explored ground and
     the player within NEW_GAME_NEAR of site.spawn_point; and each sound of
-    SOUNDS_HEARD played during the check (with sound). The settings are
+    SOUNDS_HEARD played during the check and the world bus at Base at the
+    gain its air gives, above 0.5 (with sound). The settings are
     the defaults and are not written. With --shot,
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
@@ -829,10 +835,13 @@ def run_check(dt):
                  len(foot.props.crates), cells, check["cells_before"], near, "passed" if new_ok else "FAILED"),
               flush=True)
         check["ok"] = check["ok"] and new_ok
-        played = state.sound.played
-        sound_ok = state.sound.audio is None or all(played[name] > 0 for name in SOUNDS_HEARD)
-        print("[walker] sounds played: %s: %s"
-              % (", ".join("%s %d" % (name, played[name]) for name in sounds.SOUNDS),
+        played, audio = state.sound.played, state.sound.audio
+        air = audio.bus_volume("world") if audio is not None else 1.0
+        expected = acoustics.air_audio(sounds.air_share(state.view.position))[0]
+        sound_ok = audio is None or (all(played[name] > 0 for name in SOUNDS_HEARD) and air > 0.5
+                                     and abs(air - expected) < 0.02)
+        print("[walker] sounds played: %s; at Base the world bus at %.2f for its air's %.2f: %s"
+              % (", ".join("%s %d" % (name, played[name]) for name in sounds.SOUNDS), air, expected,
                  "passed" if sound_ok else "FAILED"), flush=True)
         check["ok"] = check["ok"] and sound_ok
         if args.shot:
@@ -1457,7 +1466,24 @@ def run_space_check(check, t):
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_moon" + ext)
         done(s["left"] and moon_ok, "out of the car on the moon, standing, %.0f C" % (temperature or 0.0),
-             "moon_shower")
+             "vacuum")
+        return False
+    if step == "vacuum":
+        audio = state.sound.audio
+        if audio is None:
+            done(True, "no sound to check in vacuum", "moon_shower")
+            return False
+        right, _, forward = walking.view_basis()
+        camera, before = state.view.position, Counter(state.sound.played)
+        sounds.strike("hit", add(camera, scale(forward, VACUUM_NEAR)))
+        sounds.strike("hit", add(camera, scale(right, VACUUM_FAR)))
+        played = state.sound.played
+        contacts, hits = played["contact"] - before["contact"], played["hit"] - before["hit"]
+        silent = audio.bus_volume("world") == 0.0 and audio.world_lowpass <= acoustics.VACUUM_CUTOFF
+        done(silent and contacts == 1 and hits == 0,
+             "in vacuum the world bus silent (%.2f, %.0f Hz), a strike %.0f m off heard through the suit (%d), "
+             "one %.0f m off not at all (%d)" % (audio.bus_volume("world"), audio.world_lowpass, VACUUM_NEAR,
+                                                 contacts, VACUUM_FAR, hits), "moon_shower")
         return False
     if step == "moon_shower":
         moon = s["outpost"].body
