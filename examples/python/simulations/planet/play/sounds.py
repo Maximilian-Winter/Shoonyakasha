@@ -7,9 +7,10 @@ is spread at random, and, for a spatial one, its distances (`near`, full
 volume within; `far`, where its falloff stops). An entry's clips are the
 files sounds/<name>.wav, .flac or .mp3 and sounds/<name>_<anything> with
 those endings, beside walker.py; one of them is picked at random for each
-voice. An entry without a file plays its placeholder: made by its
-"make" function when it has one, else here (`placeholder`). `setup`
-takes more tables beside SOUNDS (play/loops.py's).
+voice, streamed from disk when the entry has "stream". An entry without
+a file plays its placeholder: made by its "make" function when it has
+one, at its "rate" (else RATE), else here (`placeholder`). `setup` takes
+more tables beside SOUNDS (play/loops.py's and play/music.py's).
 
 Each frame (`update`) the listener follows the camera, and the sounds of
 what happened since the last frame play: the gravity gun's grab, drop,
@@ -19,9 +20,16 @@ BOB_STRIDE, when the head bob is lowest) and landings, and the slate and
 the System screen opening and closing. A toast plays as it shows
 (`toast`), a boulder's split as it splits (`split`).
 
-The air carries the world bus (acoustics.air_audio): its gain and
-low-pass follow the air's density at the camera, reached over AIR_FADE,
-silent in vacuum (on the moon, in orbit). There a hit or a split within
+The mix (`update_mix`) follows the game's state (`mix_state`, MIX):
+playing; the slate open, the world and the suit softer and the world's
+low-pass no higher than the slate's cap; the System screen or the start's
+screen up, the world and the suit paused (their voices holding their
+place); the time warp above WARP_SILENT, the world faded out and the
+suit softer. The music bus's level is the state's, times the Music
+setting. A change of state is reached over its fade. The air carries the
+world bus (acoustics.air_audio): its gain and low-pass follow the air's
+density at the camera, reached over AIR_FADE, the gain times the state's
+and silent in vacuum (on the moon, in orbit). There a hit or a split within
 acoustics.CONTACT_DISTANCE of the camera plays "contact" through the suit
 instead (`strike`), and one farther off plays nothing.
 
@@ -78,6 +86,14 @@ HIT_GAP = 0.15           # s between one prop's hits
 LAND_AIR = 0.35          # s in the air before touching down is a landing
 AIR_FADE = 0.3           # s the world bus takes to follow the air
 WARP_SILENT = 2.0        # time warp above which world sounds at a point are not played
+
+MIX = {                  # a state: (world, suit, music, the world's low-pass cap Hz, fade s); world None: paused
+    "playing": (1.0, 1.0, 0.6, None, 0.3),
+    "slate":   (0.6, 0.9, 0.5, 2_500.0, 0.22),
+    "system":  (None, None, 0.4, None, 0.22),
+    "menu":    (None, None, 0.8, None, 0.5),
+    "warp":    (0.0, 0.6, 0.6, None, 0.5),
+}
 
 
 def placeholder(name):
@@ -192,10 +208,10 @@ def setup(*tables):
         clips = []
         for path in sound_files(name):
             try:
-                clips.append(s.audio.load(path))
+                clips.append(s.audio.load(path, stream=entry.get("stream", False)))
             except RuntimeError as error:
                 print("[walker] %s" % error, flush=True)
-        s.clips[name] = clips or [s.audio.load_samples(make(name), sample_rate=RATE)]
+        s.clips[name] = clips or [s.audio.load_samples(make(name), sample_rate=entry.get("rate", RATE))]
     apply_volume()
     shown = state.ui.hud.on_toast
     state.ui.hud.on_toast = lambda text, colour, detail, kind: (toast(colour), shown and shown(text, colour, detail,
@@ -287,15 +303,50 @@ def air_share(point):
     return planet.density(point) / (planet.air_density * planet.density_factor)
 
 
-def update_air():
-    """The world bus's gain and cutoff set for the air at the camera when they changed."""
+def mix_state():
+    """The game's state for the mix: "menu", "system", "warp", "slate" or "playing"."""
+    if state.session.starting:
+        return "menu"
+    if state.ui.system is not None and state.ui.system.visible:
+        return "system"
+    if spaceflight.time_warp() > WARP_SILENT:
+        return "warp"
+    if state.ui.slate is not None and state.ui.slate.visible:
+        return "slate"
+    return "playing"
+
+
+def update_mix():
+    """The buses set for the state and the air at the camera (the
+    module's docstring), each when it changed."""
     s = state.sound
     s.density = air_share(state.view.position)
     gain, cutoff = acoustics.air_audio(s.density)
-    if s.air_set is None or abs(gain - s.air_set[0]) > 0.01 or abs(math.log(cutoff / s.air_set[1])) > 0.02:
-        s.audio.set_bus_volume("world", gain, fade=AIR_FADE)
-        s.audio.set_world_lowpass(cutoff, fade=AIR_FADE)
-        s.air_set = (gain, cutoff)
+    mix = mix_state()
+    world_level, suit_level, music_level, cap, state_fade = MIX[mix]
+    fade = state_fade if mix != s.mix else AIR_FADE
+    paused = world_level is None
+    if paused != s.paused:
+        for bus in ("world", "suit"):
+            (s.audio.pause_bus if paused else s.audio.resume_bus)(bus)
+        s.paused = paused
+    if not paused:
+        world_gain = gain * world_level
+        if cap is not None:
+            cutoff = min(cutoff, cap)
+        if s.air_set is None or abs(world_gain - s.air_set[0]) > 0.01 or abs(math.log(cutoff / s.air_set[1])) > 0.02:
+            s.audio.set_bus_volume("world", world_gain, fade=fade)
+            s.audio.set_world_lowpass(cutoff, fade=fade)
+            s.air_set = (world_gain, cutoff)
+        set_bus("suit", suit_level, fade)
+    set_bus("music", music_level * settings["music_volume"], fade)
+    s.mix = mix
+    s.mix_seen.add(mix)
+
+
+def set_bus(bus, volume, fade):
+    if abs(state.sound.audio.bus_volume(bus) - volume) > 0.005:
+        state.sound.audio.set_bus_volume(bus, volume, fade=fade)
 
 
 def update(dt):
@@ -307,7 +358,7 @@ def update(dt):
     right, up, forward = walking.view_basis()
     s.audio.set_listener(state.view.position, forward, up)
     s.hush = False
-    update_air()
+    update_mix()
     update_gun()
     update_hits(dt)
     update_steps(dt)

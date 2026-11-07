@@ -139,6 +139,7 @@ def settings_items():
          toggle("Autosave", "autosave", "Save every two minutes of play and on quitting."),
          {"heading": "Sound"},
          slider("Volume", "volume", lambda v: "%d %%" % round(100.0 * v), "The loudness of every sound.", 0.05),
+         slider("Music", "music_volume", lambda v: "%d %%" % round(100.0 * v), "The loudness of the music.", 0.05),
          ],
         [{"heading": "View"},
          slider("Field of view", "fov", lambda v: "%.0f deg" % v, "The view's height in degrees.", 1.0),

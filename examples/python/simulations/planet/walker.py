@@ -67,7 +67,7 @@ still behind it, the only pause. Resume, Save and Load (the last save),
 Settings (config.py, kept in walker_config.json: the mouse's
 sensitivity, inverted look, the head bob, the field of view, the HUD's
 scale, the window's size (taken at the next start), the render scale,
-anti-aliasing, the clouds, autosave and the volume), Controls, Quit to main menu (the
+anti-aliasing, the clouds, autosave, the volume and the music's), Controls, Quit to main menu (the
 game saved when autosave is on, then the start's screen) and Quit to
 desktop; with Resume chosen, how the game stands. A new game from the
 start's screen (saving.new_game) starts again beside the ship in the
@@ -80,7 +80,10 @@ and landings, the slate and the System screen, and the toasts, each from
 the files in sounds/ named after its entry of sounds.SOUNDS or else a
 placeholder made in code; and the loops (play/loops.py) of the wind, the
 car's engines and cushion, the gun's hum, reentry, the breath and the
-heart, and a storm's rain, set every frame from the game. A meteor's
+heart, and a storm's rain, set every frame from the game; and music by
+where the game is (play/music.py). The System screen and the start's
+screen pause the world's and the suit's sounds, the slate softens them,
+and the time warp above 2x silences the world. A meteor's
 impact booms, late by the sound's travel and duller the farther off; on
 the moon it rumbles through the feet nearby. The world's sounds fade and dull as the air
 thins (acoustics.py); in vacuum only the suit's are heard, and through
@@ -294,8 +297,8 @@ from explored_map import ExploredMap, MapView
 from hud import Hud
 from viewmodel import Glows, Viewmodel
 from play.core import RAIN_DROPS, args, blocks, bodies, box, engine, foot, pads, save_base, settings, state, world
-from play import (apps, apps_trade, checks, contracting, economy, exploring, loops, menus, saving, showers, site,
-                  sounds, spaceflight, storms, survival, vehicle, walking)
+from play import (apps, apps_trade, checks, contracting, economy, exploring, loops, menus, music, saving, showers,
+                  site, sounds, spaceflight, storms, survival, vehicle, walking)
 import slate
 
 METEOR_DISCS, METEOR_STREAKS = 96, 48
@@ -377,6 +380,7 @@ def frame(dt):
     walking.capture_toast()
     sounds.update(elapsed)
     loops.update(elapsed)
+    music.update(elapsed)
     foot.end_frame()
     state.view.frame_ms = 0.9 * state.view.frame_ms + 0.1 * elapsed * 1000.0
     return True
@@ -405,7 +409,7 @@ def on_init():
     state.ui.slate = slate.Slate(engine, apps_trade.apps_list(), system=lambda: menus.set_paused(True))
     state.ui.system = menus.system_screen()
     state.ui.start = menus.start_screen()
-    sounds.setup(loops.LOOPS)
+    sounds.setup(loops.LOOPS, music.MUSIC)
     menus.apply_settings()
     if not args.check and save.exists(save_base):
         try:

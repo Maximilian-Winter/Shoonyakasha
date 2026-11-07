@@ -57,6 +57,7 @@ MAP_CELLS = 200                 # cells --check wants explored by then
 SELL_SECONDS = 6.0              # s --check waits for the ore it drops on the pad to sell
 CHECK_ORE_GRADE = 0.6
 PAUSE_SECONDS = 1.0             # s --check keeps the pause menu open
+MIX_SECONDS = 0.5               # s --check keeps the slate open before measuring the mix
 NET_SETTLE = 3.0                # s --check lets the ore it drops into the net settle
 NET_CHECK_AWAY = 60.0           # m along its nose --check moves the car off Base's pad for the net
 SUIT_CHECK_TEMPERATURE = -60.0  # degrees C --check stands in for the air's while the suit drains
@@ -76,7 +77,8 @@ NIGHT_SECONDS = 1.0             # s --check waits at night
 NEW_GAME_NEAR = 3.0             # m from site.spawn_point a new game's player must stand, at most
 VACUUM_NEAR, VACUUM_FAR = 2.0, 20.0   # m from the camera --check strikes something on the moon
 SOUNDS_HEARD = ("grab", "punt_charged", "hit", "footstep", "land", "slate_open", "toast", "wind", "car_hum",
-                "gun_hum", "breath", "meteor_boom_large", "contact", "rain", "pads_closed")   # sounds.SOUNDS entries the check must have played
+                "gun_hum", "breath", "meteor_boom_large", "contact", "rain", "pads_closed", "music_explore",
+                "music_orbit", "music_menu")   # sounds.SOUNDS entries the check must have played
 CONTRACT_CHECK_SECONDS = 30.0   # s --check waits at most for each contract to end
 CONTRACT_CHECK_DROP = 12.0      # m/s down --check throws the fragile crate at
 SHOWER_CHECK_LEAD = 12.0        # s from --check's shower being planned to its large impact
@@ -233,8 +235,11 @@ def run_check(dt):
     trade.START_CREDITS, the first objective, no contracts or upgrades, the
     six crates, no craters or storm, less than half the explored ground and
     the player within NEW_GAME_NEAR of site.spawn_point; and each sound of
-    SOUNDS_HEARD played during the check and the world bus at Base at the
-    gain its air gives, above 0.5 (with sound). The settings are
+    SOUNDS_HEARD played during the check and the world bus at Base playing at the
+    gain its air gives, above 0.5 (with sound). With sound, the pause has
+    the world's and the suit's sounds paused, the slate opened after it for
+    MIX_SECONDS the mix of sounds.MIX["slate"], and the start's screen
+    the world paused and its music. The settings are
     the defaults and are not written. With --shot,
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
@@ -519,15 +524,34 @@ def run_check(dt):
         if "clock" not in check:
             check["clock"] = world.time      # this frame is the first that stands still
         if t >= PAUSE_SECONDS:
-            pause_ok = world.time == check["clock"] and not walking.hud_shown()
-            print("[walker] paused for %.0f s, the world's clock still: %s"
-                  % (PAUSE_SECONDS, "passed" if pause_ok else "FAILED"), flush=True)
+            audio = state.sound.audio
+            held = audio is None or (audio.bus_paused("world") and audio.bus_paused("suit"))
+            pause_ok = world.time == check["clock"] and not walking.hud_shown() and held
+            print("[walker] paused for %.0f s, the world's clock still, the world's and the suit's sounds paused "
+                  "(%s): %s" % (PAUSE_SECONDS, held, "passed" if pause_ok else "FAILED"), flush=True)
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_pause" + ext)
-                menus.set_paused(False)
-                state.ui.slate.open("Vehicle")
+            menus.set_paused(False)
+            state.ui.slate.open("Vehicle")
             check["pause_ok"] = pause_ok
+            check["stage"], check["time"] = "slate mix", 0.0
+    elif stage == "slate mix":
+        if t >= MIX_SECONDS:
+            audio = state.sound.audio
+            mix_ok, line = True, "no sound"
+            if audio is not None:
+                world_level, suit_level, _, cap, _ = sounds.MIX["slate"]
+                gain = acoustics.air_audio(sounds.air_share(state.view.position))[0] * world_level
+                mix_ok = (not audio.bus_paused("world") and abs(audio.bus_volume("world") - gain) < 0.02
+                          and audio.world_lowpass <= cap + 1.0 and abs(audio.bus_volume("suit") - suit_level) < 0.01)
+                line = "the world at %.2f (%.2f wanted), its low-pass %.0f Hz, the suit at %.2f" % (
+                    audio.bus_volume("world"), gain, audio.world_lowpass, audio.bus_volume("suit"))
+            print("[walker] the slate open: %s: %s" % (line, "passed" if mix_ok else "FAILED"), flush=True)
+            check["pause_ok"] = check["pause_ok"] and mix_ok
+            if not args.shot:
+                state.ui.slate.close(at_once=True)
+                menus.set_paused(True)
             check["stage"], check["time"] = "car_tab", 0.0
     elif stage == "car_tab":
         if t >= 0.5 or not args.shot:
@@ -805,8 +829,10 @@ def run_check(dt):
     elif stage == "menu":
         if t >= 0.5:
             clock_before = check.setdefault("menu_clock", world.time)
+            audio = state.sound.audio
             check["menu_ok"] = (state.session.starting and state.ui.start.visible and not walking.hud_shown()
-                                and world.time == clock_before)
+                                and world.time == clock_before
+                                and (audio is None or (audio.bus_paused("world") and state.sound.track == "music_menu")))
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_menu" + ext)
@@ -840,7 +866,8 @@ def run_check(dt):
         air = audio.bus_volume("world") if audio is not None else 1.0
         expected = acoustics.air_audio(sounds.air_share(state.view.position))[0]
         sound_ok = audio is None or (all(played[name] > 0 for name in SOUNDS_HEARD) and air > 0.5
-                                     and abs(air - expected) < 0.02)
+                                     and abs(air - expected) < 0.02 and not audio.bus_paused("world")
+                                     and state.sound.mix == "playing")
         print("[walker] sounds played: %s; at Base the world bus at %.2f for its air's %.2f: %s"
               % (", ".join("%s %d" % (name, played[name]) for name in state.sound.entries), air, expected,
                  "passed" if sound_ok else "FAILED"), flush=True)

@@ -202,6 +202,13 @@ class Sound:
     density: float = 1.0               # the air's density at the camera, a share of the surface's
     air_set: tuple = None              # (gain, cutoff Hz) the world bus was last set to
     hush: bool = False                 # the next toast silent (sounds.alert)
+    mix: str = None                    # the state the mix was last set for (sounds.mix_state)
+    mix_seen: set = field(default_factory=set)   # the states the mix has been set for
+    paused: bool = False               # the world and suit buses paused
+    track: str = None                  # the music playing (music.track)
+    track_wanted: str = None           # the track wanted, and for how long
+    track_since: float = 0.0
+    music_voice: int = 0
 
 
 @dataclass
