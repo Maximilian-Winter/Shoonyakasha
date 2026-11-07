@@ -135,6 +135,28 @@ class AudioTest(unittest.TestCase):
         self.audio.read(960)
         self.assertLess(rms(self.audio.read(4800)), 0.05 * open_level)
 
+    def test_voice_filter(self):
+        high = self.audio.load_samples(tone(8000.0, 1.0))
+        voice = self.audio.play(high, bus="ui", loop=True, filtered=True)
+        self.audio.read(480)
+        open_level = rms(self.audio.read(4800))
+        self.audio.set_voice(voice, lowpass=500.0)
+        self.audio.read(960)
+        self.assertLess(rms(self.audio.read(4800)), 0.05 * open_level)
+        self.audio.set_voice(voice, highpass=2000.0)
+        self.audio.read(960)
+        self.assertAlmostEqual(rms(self.audio.read(4800)) / open_level, 1.0, delta=0.05)
+        self.audio.stop(voice)
+        low = self.audio.load_samples(tone(200.0, 1.0))
+        voice = self.audio.play(low, bus="ui", loop=True, highpass=3000.0)
+        self.audio.read(480)
+        self.assertLess(rms(self.audio.read(4800)), 0.05 * open_level)
+        self.audio.stop(voice)
+        plain = self.audio.play(high, bus="ui", loop=True)
+        self.audio.set_voice(plain, lowpass=500.0)
+        self.audio.read(960)
+        self.assertAlmostEqual(rms(self.audio.read(4800)) / open_level, 1.0, delta=0.05)
+
     def test_stop_with_a_fade_and_a_stale_voice(self):
         audio = sk.Audio(device=False, voices=1)
         clip = audio.load_samples(tone(1000.0, 1.0))

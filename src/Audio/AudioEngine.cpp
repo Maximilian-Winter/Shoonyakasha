@@ -12,8 +12,8 @@ namespace Shoonyakasha::Audio {
 
 namespace {
 
-constexpr float LOWPASS_Q = 0.70710678f;       // Butterworth
-constexpr float LOWPASS_MIN_HZ = 10.0f;
+constexpr float FILTER_Q = 0.70710678f;         // Butterworth
+constexpr float FILTER_MIN_HZ = 10.0f;
 constexpr float NYQUIST_SHARE = 0.45f;         // the highest cutoff, as a share of the sample rate
 constexpr float BUS_MIN_FADE = 0.005f;         // s
 
@@ -33,62 +33,152 @@ float bitsFloat(uint32_t bits) {
     return value;
 }
 
-/// A two-pole low-pass whose cutoff moves to its target evenly in octaves
-/// over the fade it was given, the coefficients set once per block. The
-/// target and the fade arrive together in one atomic; a command equal to
-/// the last one changes nothing.
-struct LowpassNode {
-    ma_node_base base;
-    ma_lpf2 lpf;
+/// One cutoff of a FilterNode. Its target and fade arrive together in one
+/// atomic, and a command equal to the last one changes nothing; the cutoff
+/// moves to its target evenly in octaves over the fade.
+struct Cutoff {
     std::atomic<uint64_t> command{0};
     uint64_t lastCommand = 0;
     float octaves = 0.0f;         // log2 of the cutoff, audio thread only
     float targetOctaves = 0.0f;
     float step = 0.0f;            // octaves per frame
-    uint32_t sampleRate = 0;
-    uint32_t channels = 0;
-    float maxHz = 0.0f;
+
+    void send(float hz, float fade) {
+        command.store((static_cast<uint64_t>(floatBits(std::max(fade, 0.0f))) << 32) | floatBits(hz),
+                      std::memory_order_release);
+    }
+
+    /// At `hz` at once; only while its node is not attached.
+    void reset(float hz) {
+        send(hz, 0.0f);
+        lastCommand = command.load(std::memory_order_relaxed);
+        octaves = targetOctaves = std::log2(hz);
+        step = 0.0f;
+    }
+
+    /// Moved on by `frames`, the target held within [minHz, maxHz]; whether it moved.
+    bool advance(ma_uint32 frames, uint32_t sampleRate, float minHz, float maxHz) {
+        const uint64_t now = command.load(std::memory_order_acquire);
+        if (now != lastCommand) {
+            lastCommand = now;
+            const float hz = bitsFloat(static_cast<uint32_t>(now));
+            const float fade = bitsFloat(static_cast<uint32_t>(now >> 32));
+            targetOctaves = std::log2(std::clamp(hz, minHz, maxHz));
+            const float fadeFrames = fade * static_cast<float>(sampleRate);
+            step = fadeFrames >= 1.0f ? std::fabs(targetOctaves - octaves) / fadeFrames : 0.0f;
+        }
+        if (octaves == targetOctaves) return false;
+        const float move = step * static_cast<float>(frames);
+        if (move <= 0.0f || std::fabs(targetOctaves - octaves) <= move) {
+            octaves = targetOctaves;
+        } else {
+            octaves += targetOctaves > octaves ? move : -move;
+        }
+        return true;
+    }
 };
 
-void setLowpassCutoff(LowpassNode& node, float hz) {
-    ma_lpf2_config config = ma_lpf2_config_init(ma_format_f32, node.channels, node.sampleRate, hz, LOWPASS_Q);
-    ma_lpf2_reinit(&config, &node.lpf);
-}
+/// A two-pole low-pass then a two-pole high-pass, each cutoff a Cutoff,
+/// the coefficients set once per block. Open, the low-pass is at maxHz and
+/// the high-pass at minHz.
+struct FilterNode {
+    ma_node_base base;
+    ma_lpf2 lpf;
+    ma_hpf2 hpf;
+    Cutoff low;
+    Cutoff high;
+    uint32_t sampleRate = 0;
+    uint32_t channels = 0;
+    float minHz = FILTER_MIN_HZ;
+    float maxHz = 0.0f;
+    bool ready = false;
+};
 
-void processLowpass(ma_node* pNode, const float** ppFramesIn, ma_uint32* pFrameCountIn,
-                    float** ppFramesOut, ma_uint32* pFrameCountOut) {
+void processFilter(ma_node* pNode, const float** ppFramesIn, ma_uint32* pFrameCountIn,
+                   float** ppFramesOut, ma_uint32* pFrameCountOut) {
     (void)pFrameCountIn;
-    auto* node = reinterpret_cast<LowpassNode*>(pNode);
+    auto* node = reinterpret_cast<FilterNode*>(pNode);
     const ma_uint32 frames = *pFrameCountOut;
-
-    const uint64_t command = node->command.load(std::memory_order_acquire);
-    if (command != node->lastCommand) {
-        node->lastCommand = command;
-        const float hz = bitsFloat(static_cast<uint32_t>(command));
-        const float fade = bitsFloat(static_cast<uint32_t>(command >> 32));
-        node->targetOctaves = std::log2(std::clamp(hz, LOWPASS_MIN_HZ, node->maxHz));
-        const float fadeFrames = fade * static_cast<float>(node->sampleRate);
-        node->step = fadeFrames >= 1.0f ? std::fabs(node->targetOctaves - node->octaves) / fadeFrames : 0.0f;
+    if (node->low.advance(frames, node->sampleRate, node->minHz, node->maxHz)) {
+        ma_lpf2_config config = ma_lpf2_config_init(ma_format_f32, node->channels, node->sampleRate,
+                                                    std::exp2(node->low.octaves), FILTER_Q);
+        ma_lpf2_reinit(&config, &node->lpf);
     }
-    if (node->octaves != node->targetOctaves) {
-        const float move = node->step * static_cast<float>(frames);
-        if (move <= 0.0f || std::fabs(node->targetOctaves - node->octaves) <= move) {
-            node->octaves = node->targetOctaves;
-        } else {
-            node->octaves += node->targetOctaves > node->octaves ? move : -move;
-        }
-        setLowpassCutoff(*node, std::exp2(node->octaves));
+    if (node->high.advance(frames, node->sampleRate, node->minHz, node->maxHz)) {
+        ma_hpf2_config config = ma_hpf2_config_init(ma_format_f32, node->channels, node->sampleRate,
+                                                    std::exp2(node->high.octaves), FILTER_Q);
+        ma_hpf2_reinit(&config, &node->hpf);
     }
     ma_lpf2_process_pcm_frames(&node->lpf, ppFramesOut[0], ppFramesIn[0], frames);
+    ma_hpf2_process_pcm_frames(&node->hpf, ppFramesOut[0], ppFramesOut[0], frames);
 }
 
-ma_node_vtable g_lowpassVtable = {
-    processLowpass,
+ma_node_vtable g_filterVtable = {
+    processFilter,
     nullptr,    // onGetRequiredInputFrameCount
     1,          // input buses
     1,          // output buses
     0           // flags
 };
+
+/// The node made in `graph`, open, not attached; false when miniaudio could not.
+bool initFilter(FilterNode& node, ma_node_graph* graph, uint32_t sampleRate, uint32_t channels) {
+    node.sampleRate = sampleRate;
+    node.channels = channels;
+    node.maxHz = NYQUIST_SHARE * static_cast<float>(sampleRate);
+    node.low.reset(node.maxHz);
+    node.high.reset(node.minHz);
+    ma_lpf2_config lpfConfig = ma_lpf2_config_init(ma_format_f32, channels, sampleRate, node.maxHz, FILTER_Q);
+    if (ma_lpf2_init(&lpfConfig, nullptr, &node.lpf) != MA_SUCCESS) return false;
+    ma_hpf2_config hpfConfig = ma_hpf2_config_init(ma_format_f32, channels, sampleRate, node.minHz, FILTER_Q);
+    if (ma_hpf2_init(&hpfConfig, nullptr, &node.hpf) != MA_SUCCESS) {
+        ma_lpf2_uninit(&node.lpf, nullptr);
+        return false;
+    }
+    ma_node_config nodeConfig = ma_node_config_init();
+    nodeConfig.vtable = &g_filterVtable;
+    nodeConfig.pInputChannels = &node.channels;
+    nodeConfig.pOutputChannels = &node.channels;
+    if (ma_node_init(graph, &nodeConfig, nullptr, &node) != MA_SUCCESS) {
+        ma_hpf2_uninit(&node.hpf, nullptr);
+        ma_lpf2_uninit(&node.lpf, nullptr);
+        return false;
+    }
+    node.ready = true;
+    return true;
+}
+
+void uninitFilter(FilterNode& node) {
+    if (!node.ready) return;
+    ma_node_uninit(&node, nullptr);
+    ma_hpf2_uninit(&node.hpf, nullptr);
+    ma_lpf2_uninit(&node.lpf, nullptr);
+    node.ready = false;
+}
+
+/// The biquad's past samples zeroed on every channel (ma_biquad_clear_cache
+/// zeroes the first channel's only).
+void clearBiquad(ma_biquad& bq) {
+    for (ma_uint32 c = 0; c < bq.channels; ++c) {
+        bq.pR1[c].f32 = 0.0f;
+        bq.pR2[c].f32 = 0.0f;
+    }
+}
+
+/// A filter, not attached, set to `lowpass` and `highpass` at once (0: open)
+/// with its filters' past samples cleared.
+void resetFilter(FilterNode& node, float lowpass, float highpass) {
+    const float low = lowpass > 0.0f ? std::clamp(lowpass, node.minHz, node.maxHz) : node.maxHz;
+    const float high = highpass > 0.0f ? std::clamp(highpass, node.minHz, node.maxHz) : node.minHz;
+    node.low.reset(low);
+    node.high.reset(high);
+    ma_lpf2_config lpfConfig = ma_lpf2_config_init(ma_format_f32, node.channels, node.sampleRate, low, FILTER_Q);
+    ma_lpf2_reinit(&lpfConfig, &node.lpf);
+    ma_hpf2_config hpfConfig = ma_hpf2_config_init(ma_format_f32, node.channels, node.sampleRate, high, FILTER_Q);
+    ma_hpf2_reinit(&hpfConfig, &node.hpf);
+    clearBiquad(node.lpf.bq);
+    clearBiquad(node.hpf.bq);
+}
 
 struct Clip {
     std::string name;             // the file's path, or the samples' registered name
@@ -100,10 +190,12 @@ struct Clip {
 
 struct Voice {
     ma_sound sound;
+    FilterNode filter;            // between the sound and its bus while `filtered`
     ClipId clip = 0;
     uint32_t generation = 0;
     bool used = false;
     bool stopping = false;
+    bool filtered = false;
 };
 
 }  // namespace
@@ -117,8 +209,7 @@ struct AudioEngine::Impl {
     bool busReady[BusCount] = {};
     float busVolumes[BusCount] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     bool busPausedFlags[BusCount] = {};
-    LowpassNode lowpass;
-    bool lowpassReady = false;
+    FilterNode world;             // the World bus's, its low-pass only
     float lowpassHz = 0.0f;
     std::vector<Clip> clips;      // ClipId is the index + 1
     std::unique_ptr<Voice[]> voices;
@@ -147,6 +238,8 @@ struct AudioEngine::Impl {
 
     void release(Voice& v) {
         ma_sound_uninit(&v.sound);
+        if (v.filtered) ma_node_detach_output_bus(&v.filter, 0);
+        v.filtered = false;
         v.used = false;
         v.stopping = false;
         v.clip = 0;
@@ -177,10 +270,8 @@ struct AudioEngine::Impl {
         for (int b = BusCount - 1; b >= 0; --b) {
             if (busReady[b]) ma_sound_group_uninit(&buses[b]);
         }
-        if (lowpassReady) {
-            ma_node_uninit(&lowpass, nullptr);
-            ma_lpf2_uninit(&lowpass.lpf, nullptr);
-        }
+        for (uint32_t i = 0; i < voiceCount; ++i) uninitFilter(voices[i].filter);
+        uninitFilter(world);
         ma_engine_uninit(&engine);
         engineReady = false;
     }
@@ -218,30 +309,22 @@ AudioEngine::AudioEngine(const AudioConfig& config) : m_impl(std::make_unique<Im
             s.busReady[b] = true;
         }
 
-        LowpassNode& lp = s.lowpass;
-        lp.sampleRate = ma_engine_get_sample_rate(&s.engine);
-        lp.channels = s.channels;
-        lp.maxHz = NYQUIST_SHARE * static_cast<float>(lp.sampleRate);
-        lp.octaves = lp.targetOctaves = std::log2(lp.maxHz);
-        s.lowpassHz = lp.maxHz;
-        ma_lpf2_config lpfConfig = ma_lpf2_config_init(ma_format_f32, lp.channels, lp.sampleRate, lp.maxHz, LOWPASS_Q);
-        if (ma_lpf2_init(&lpfConfig, nullptr, &lp.lpf) != MA_SUCCESS) {
-            throw std::runtime_error("miniaudio could not make the low-pass filter");
+        ma_node_graph* graph = ma_engine_get_node_graph(&s.engine);
+        const uint32_t rate = ma_engine_get_sample_rate(&s.engine);
+        if (!initFilter(s.world, graph, rate, s.channels)) {
+            throw std::runtime_error("miniaudio could not make the World bus's low-pass");
         }
-        ma_node_config nodeConfig = ma_node_config_init();
-        nodeConfig.vtable = &g_lowpassVtable;
-        nodeConfig.pInputChannels = &lp.channels;
-        nodeConfig.pOutputChannels = &lp.channels;
-        if (ma_node_init(ma_engine_get_node_graph(&s.engine), &nodeConfig, nullptr, &lp) != MA_SUCCESS) {
-            ma_lpf2_uninit(&lp.lpf, nullptr);
-            throw std::runtime_error("miniaudio could not make the low-pass node");
-        }
-        s.lowpassReady = true;
-        ma_node_attach_output_bus(&s.lowpass, 0, &s.buses[0], 0);
-        ma_node_attach_output_bus(&s.buses[static_cast<int>(Bus::World)], 0, &s.lowpass, 0);
+        s.lowpassHz = s.world.maxHz;
+        ma_node_attach_output_bus(&s.world, 0, &s.buses[0], 0);
+        ma_node_attach_output_bus(&s.buses[static_cast<int>(Bus::World)], 0, &s.world, 0);
 
         s.voiceCount = std::max<uint32_t>(config.voices, 1);
         s.voices = std::make_unique<Voice[]>(s.voiceCount);
+        for (uint32_t i = 0; i < s.voiceCount; ++i) {
+            if (!initFilter(s.voices[i].filter, graph, rate, s.channels)) {
+                throw std::runtime_error("miniaudio could not make a voice's filter");
+            }
+        }
     } catch (...) {
         s.shutdown();
         throw;
@@ -348,10 +431,17 @@ VoiceId AudioEngine::play(ClipId id, const PlayParams& params) {
     Voice& v = s.voices[slot];
     ma_uint32 flags = clip->stream ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
     if (!params.spatial) flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
+    if (params.filtered) flags |= MA_SOUND_FLAG_NO_DEFAULT_ATTACHMENT;
     ma_sound_group* group = &s.buses[static_cast<int>(params.bus)];
     if (ma_sound_init_from_file(&s.engine, clip->name.c_str(), flags, group, nullptr, &v.sound) != MA_SUCCESS) {
         return 0;
     }
+    if (params.filtered) {
+        resetFilter(v.filter, params.lowpass, params.highpass);
+        ma_node_attach_output_bus(&v.filter, 0, group, 0);
+        ma_node_attach_output_bus(&v.sound, 0, &v.filter, 0);
+    }
+    v.filtered = params.filtered;
     v.used = true;
     v.stopping = false;
     v.clip = id;
@@ -405,6 +495,13 @@ void AudioEngine::setVoicePosition(VoiceId id, const AudioVec3& position, const 
     ma_sound_set_velocity(&v->sound, velocity[0], velocity[1], velocity[2]);
 }
 
+void AudioEngine::setVoiceFilter(VoiceId id, float lowpass, float highpass, float fade) {
+    Voice* v = m_impl->voice(id);
+    if (v == nullptr || !v->filtered) return;
+    v->filter.low.send(lowpass > 0.0f ? lowpass : v->filter.maxHz, fade);
+    v->filter.high.send(highpass > 0.0f ? highpass : v->filter.minHz, fade);
+}
+
 void AudioEngine::setVoiceVolume(VoiceId id, float volume) {
     if (Voice* v = m_impl->voice(id)) ma_sound_set_volume(&v->sound, volume);
 }
@@ -446,10 +543,9 @@ void AudioEngine::resumeBus(Bus bus) {
 bool AudioEngine::busPaused(Bus bus) const { return m_impl->busPausedFlags[static_cast<int>(bus)]; }
 
 void AudioEngine::setWorldLowpass(float cutoffHz, float fade) {
-    LowpassNode& lp = m_impl->lowpass;
-    m_impl->lowpassHz = std::clamp(cutoffHz, LOWPASS_MIN_HZ, lp.maxHz);
-    const uint64_t command = (static_cast<uint64_t>(floatBits(std::max(fade, 0.0f))) << 32) | floatBits(cutoffHz);
-    lp.command.store(command, std::memory_order_release);
+    FilterNode& world = m_impl->world;
+    m_impl->lowpassHz = std::clamp(cutoffHz, world.minHz, world.maxHz);
+    world.low.send(cutoffHz, fade);
 }
 
 float AudioEngine::worldLowpass() const { return m_impl->lowpassHz; }

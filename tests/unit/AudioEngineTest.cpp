@@ -243,6 +243,81 @@ TEST(AudioEngineTest, WorldLowpassMovesOverItsFade) {
     EXPECT_LT(late, 0.05 * open);
 }
 
+TEST(AudioEngineTest, FilteredVoiceLowpassAndHighpass) {
+    AudioEngine audio(headless());
+    const ClipId high = loadTone(audio, 8000.0f);
+    const ClipId low = loadTone(audio, 200.0f);
+    VoiceId voice = audio.play(high, plain());
+    pull(audio, 480);
+    const double open = rms(pull(audio, 4800));
+    audio.stop(voice);
+
+    PlayParams params = plain();
+    params.filtered = true;
+    params.lowpass = 500.0f;
+    voice = audio.play(high, params);
+    pull(audio, 480);
+    EXPECT_LT(rms(pull(audio, 4800)), 0.05 * open);
+    audio.stop(voice);
+
+    params.lowpass = 0.0f;
+    params.highpass = 3000.0f;
+    voice = audio.play(low, params);
+    pull(audio, 480);
+    EXPECT_LT(rms(pull(audio, 4800)), 0.05 * open);
+    audio.stop(voice);
+
+    params.highpass = 0.0f;
+    voice = audio.play(high, params);
+    pull(audio, 480);
+    EXPECT_NEAR(rms(pull(audio, 4800)) / open, 1.0, 0.05);
+}
+
+TEST(AudioEngineTest, VoiceFilterMovesOverItsFade) {
+    AudioEngine audio(headless());
+    PlayParams params = plain();
+    params.filtered = true;
+    const VoiceId voice = audio.play(loadTone(audio, 8000.0f), params);
+    pull(audio, 480);
+    const double open = rms(pull(audio, 4800));
+    audio.setVoiceFilter(voice, 500.0f, 0.0f, 0.5f);
+    pull(audio, RATE / 10);
+    const double early = rms(pull(audio, 2400));
+    pull(audio, RATE / 2);
+    const double late = rms(pull(audio, 2400));
+    EXPECT_GT(early, 0.2 * open);
+    EXPECT_LT(late, 0.05 * open);
+    audio.setVoiceFilter(voice, 0.0f, 0.0f);
+    pull(audio, 960);
+    EXPECT_NEAR(rms(pull(audio, 4800)) / open, 1.0, 0.05);
+}
+
+TEST(AudioEngineTest, UnfilteredVoiceIgnoresAFilter) {
+    AudioEngine audio(headless());
+    const VoiceId voice = audio.play(loadTone(audio, 8000.0f), plain());
+    pull(audio, 480);
+    const double open = rms(pull(audio, 4800));
+    audio.setVoiceFilter(voice, 500.0f, 0.0f);
+    pull(audio, 960);
+    EXPECT_NEAR(rms(pull(audio, 4800)) / open, 1.0, 0.02);
+}
+
+TEST(AudioEngineTest, SlotOfAFilteredVoiceServesAnUnfilteredOne) {
+    AudioEngine audio(headless(1));
+    const ClipId high = loadTone(audio, 8000.0f);
+    PlayParams params = plain();
+    params.filtered = true;
+    params.lowpass = 500.0f;
+    VoiceId voice = audio.play(high, params);
+    pull(audio, 480);
+    const double filtered = rms(pull(audio, 4800));
+    audio.stop(voice);
+    voice = audio.play(high, plain());
+    ASSERT_NE(voice, 0u);
+    pull(audio, 480);
+    EXPECT_GT(rms(pull(audio, 4800)), 10.0 * filtered);
+}
+
 TEST(AudioEngineTest, ListenerRightIsForwardCrossUp) {
     AudioEngine audio(headless());
     PlayParams params;

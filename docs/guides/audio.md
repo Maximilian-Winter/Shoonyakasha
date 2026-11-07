@@ -55,6 +55,16 @@ audio.active(loop)                                        # still holds its slot
 
 A voice without a position plays as recorded. `delay` starts the voice that many seconds of mix time after the call. `fade_in` fades it in over that many seconds. `stop` fades a voice out over `fade` seconds.
 
+A filtered voice goes through its own two-pole low-pass and high-pass:
+
+```python
+wind = audio.play(noise, loop=True, filtered=True)          # both open
+audio.play(rumble, loop=True, lowpass=400.0)                # a lowpass or highpass given: filtered
+audio.set_voice(wind, lowpass=2500.0, highpass=120.0, filter_fade=0.1)
+```
+
+`set_voice` sets both cutoffs together when either is given (the other open; 0 is open too), reached over `filter_fade` seconds and moving evenly in octaves, held between 10 Hz and 0.45 of the sample rate. A voice played unfiltered cannot be filtered later; `set_voice`'s cutoffs do nothing to it. In C++ these are `PlayParams::filtered`, `lowpass` and `highpass`, and `AudioEngine::setVoiceFilter`.
+
 A voice that ends, or has stopped and faded out, gives its slot back; its int then names nothing, so calls with it do nothing and `active` is false. `active` is true while a voice waits for its delay, plays or fades out. `active_voices` counts those voices.
 
 ## The listener and positions

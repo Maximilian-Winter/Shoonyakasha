@@ -715,6 +715,9 @@ cdef extern from "Audio/AudioEngine.h" namespace "Shoonyakasha::Audio":
         float doppler
         float delay
         float fadeIn
+        cbool filtered
+        float lowpass
+        float highpass
 
     cdef cppclass CppAudioEngine "Shoonyakasha::Audio::AudioEngine":
         CppAudioEngine(const AudioConfig& config) except +
@@ -730,6 +733,7 @@ cdef extern from "Audio/AudioEngine.h" namespace "Shoonyakasha::Audio":
         void stop(uint64_t voice, float fade)
         cbool active(uint64_t voice)
         void setVoicePosition(uint64_t voice, const AudioVec3& position, const AudioVec3& velocity)
+        void setVoiceFilter(uint64_t voice, float lowpass, float highpass, float fade)
         void setVoiceVolume(uint64_t voice, float volume)
         void setVoicePitch(uint64_t voice, float pitch)
         int activeVoices()

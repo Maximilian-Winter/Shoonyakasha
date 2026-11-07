@@ -78,7 +78,9 @@ game's.
 Sound (play/sounds.py): the gun, props hitting things, splits, footsteps
 and landings, the slate and the System screen, and the toasts, each from
 the files in sounds/ named after its entry of sounds.SOUNDS or else a
-placeholder made in code. The world's sounds fade and dull as the air
+placeholder made in code; and the loops (play/loops.py) of the wind, the
+car's engines and cushion, the gun's hum, reentry, the breath and the
+heart, set every frame from the game. The world's sounds fade and dull as the air
 thins (acoustics.py); in vacuum only the suit's are heard, and through
 it a strike within 3 m.
 
@@ -290,8 +292,8 @@ from explored_map import ExploredMap, MapView
 from hud import Hud
 from viewmodel import Glows, Viewmodel
 from play.core import RAIN_DROPS, args, blocks, bodies, box, engine, foot, pads, save_base, settings, state, world
-from play import (apps, apps_trade, checks, contracting, economy, exploring, menus, saving, showers, site, sounds,
-                  spaceflight, storms, survival, vehicle, walking)
+from play import (apps, apps_trade, checks, contracting, economy, exploring, loops, menus, saving, showers, site,
+                  sounds, spaceflight, storms, survival, vehicle, walking)
 import slate
 
 METEOR_DISCS, METEOR_STREAKS = 96, 48
@@ -372,6 +374,7 @@ def frame(dt):
     saving.autosave(elapsed)
     walking.capture_toast()
     sounds.update(elapsed)
+    loops.update(elapsed)
     foot.end_frame()
     state.view.frame_ms = 0.9 * state.view.frame_ms + 0.1 * elapsed * 1000.0
     return True
@@ -400,7 +403,7 @@ def on_init():
     state.ui.slate = slate.Slate(engine, apps_trade.apps_list(), system=lambda: menus.set_paused(True))
     state.ui.system = menus.system_screen()
     state.ui.start = menus.start_screen()
-    sounds.setup()
+    sounds.setup(loops.LOOPS)
     menus.apply_settings()
     if not args.check and save.exists(save_base):
         try:

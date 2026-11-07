@@ -2961,14 +2961,18 @@ cdef class Audio:
 
     def play(self, uint32_t clip, position=None, str bus="world", float volume=1.0, float pitch=1.0,
              bint loop=False, velocity=(0.0, 0.0, 0.0), float min_distance=1.0, float max_distance=500.0,
-             float rolloff=1.0, float doppler=1.0, float delay=0.0, float fade_in=0.0):
+             float rolloff=1.0, float doppler=1.0, float delay=0.0, float fade_in=0.0, bint filtered=False,
+             lowpass=None, highpass=None):
         """A voice of the clip; 0 for no clip or no free voice. With a
         `position` it is spatial: its gain falls off as min_distance /
         (min_distance + rolloff * (d - min_distance)) beyond min_distance, d
         held at max_distance beyond it, and it is panned and Doppler shifted
         (by `velocity` relative to the listener's, scaled by `doppler`).
         Without one it plays as recorded. It starts `delay` seconds of mix
-        time from now and fades in over `fade_in` seconds."""
+        time from now and fades in over `fade_in` seconds. A filtered voice
+        (`filtered`, or a `lowpass` or `highpass` given, in Hz) goes through
+        its own low-pass and high-pass, which set_voice moves; unfiltered,
+        it cannot be filtered later."""
         cdef AudioPlayParams params
         params.bus = _audio_bus(bus)
         params.volume = volume
@@ -2984,6 +2988,9 @@ cdef class Audio:
         params.doppler = doppler
         params.delay = delay
         params.fadeIn = fade_in
+        params.filtered = filtered or lowpass is not None or highpass is not None
+        params.lowpass = 0.0 if lowpass is None else lowpass
+        params.highpass = 0.0 if highpass is None else highpass
         return self._ptr.play(clip, params)
 
     def stop(self, uint64_t voice, float fade=0.0):
@@ -2995,8 +3002,14 @@ cdef class Audio:
         playing, or fading out."""
         return self._ptr.active(voice)
 
-    def set_voice(self, uint64_t voice, position=None, velocity=(0.0, 0.0, 0.0), volume=None, pitch=None):
-        """A playing voice's position (with its velocity), volume or pitch."""
+    def set_voice(self, uint64_t voice, position=None, velocity=(0.0, 0.0, 0.0), volume=None, pitch=None,
+                  lowpass=None, highpass=None, float filter_fade=0.0):
+        """A playing voice's position (with its velocity), volume or pitch;
+        and a filtered voice's `lowpass` and `highpass` (Hz; 0 open), both
+        set together when either is given (the other open), reached over
+        `filter_fade` seconds, moving evenly in octaves."""
+        if lowpass is not None or highpass is not None:
+            self._ptr.setVoiceFilter(voice, lowpass or 0.0, highpass or 0.0, filter_fade)
         if position is not None:
             self._ptr.setVoicePosition(voice, self._relative(position), _audio_vec3(velocity))
         if volume is not None:

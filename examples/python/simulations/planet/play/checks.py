@@ -75,7 +75,8 @@ NIGHT_CHECK_HOUR = 0.5          # the hour --check sets at its end
 NIGHT_SECONDS = 1.0             # s --check waits at night
 NEW_GAME_NEAR = 3.0             # m from site.spawn_point a new game's player must stand, at most
 VACUUM_NEAR, VACUUM_FAR = 2.0, 20.0   # m from the camera --check strikes something on the moon
-SOUNDS_HEARD = ("grab", "punt_charged", "hit", "footstep", "land", "slate_open", "toast")   # sounds.SOUNDS entries the check must have played
+SOUNDS_HEARD = ("grab", "punt_charged", "hit", "footstep", "land", "slate_open", "toast", "wind", "car_hum",
+                "gun_hum", "breath")   # sounds.SOUNDS entries the check must have played
 CONTRACT_CHECK_SECONDS = 30.0   # s --check waits at most for each contract to end
 CONTRACT_CHECK_DROP = 12.0      # m/s down --check throws the fragile crate at
 SHOWER_CHECK_LEAD = 12.0        # s from --check's shower being planned to its large impact
@@ -841,7 +842,7 @@ def run_check(dt):
         sound_ok = audio is None or (all(played[name] > 0 for name in SOUNDS_HEARD) and air > 0.5
                                      and abs(air - expected) < 0.02)
         print("[walker] sounds played: %s; at Base the world bus at %.2f for its air's %.2f: %s"
-              % (", ".join("%s %d" % (name, played[name]) for name in sounds.SOUNDS), air, expected,
+              % (", ".join("%s %d" % (name, played[name]) for name in state.sound.entries), air, expected,
                  "passed" if sound_ok else "FAILED"), flush=True)
         check["ok"] = check["ok"] and sound_ok
         if args.shot:

@@ -37,7 +37,9 @@ struct AudioConfig {
 /// to the listener, which is at the origin; its gain falls off as
 /// minDistance / (minDistance + rolloff * (d - minDistance)) beyond
 /// minDistance, with d held at maxDistance beyond it. A voice with a delay
-/// starts that many seconds of the mix's time after play.
+/// starts that many seconds of the mix's time after play. A filtered voice
+/// goes through its own low-pass then high-pass, at `lowpass` and
+/// `highpass` Hz (0: open), which setVoiceFilter moves.
 struct PlayParams {
     Bus bus = Bus::World;
     float volume = 1.0f;
@@ -52,6 +54,9 @@ struct PlayParams {
     float doppler = 1.0f;                    ///< 0 turns the Doppler shift off
     float delay = 0.0f;                      // s
     float fadeIn = 0.0f;                     // s
+    bool filtered = false;
+    float lowpass = 0.0f;                    // Hz; 0: open
+    float highpass = 0.0f;                   // Hz; 0: open
 };
 
 /// Sound on miniaudio: clips, a pool of voices, the buses and one listener.
@@ -92,6 +97,10 @@ public:
     /// playing, or fading out.
     bool active(VoiceId voice) const;
     void setVoicePosition(VoiceId voice, const AudioVec3& position, const AudioVec3& velocity = {0.0f, 0.0f, 0.0f});
+    /// A filtered voice's cutoffs (Hz; 0: open), reached over `fade`
+    /// seconds, moving evenly in octaves, held between 10 Hz and 0.45 of
+    /// the sample rate; nothing for a voice played unfiltered.
+    void setVoiceFilter(VoiceId voice, float lowpass, float highpass, float fade = 0.0f);
     void setVoiceVolume(VoiceId voice, float volume);
     void setVoicePitch(VoiceId voice, float pitch);
     int activeVoices() const;

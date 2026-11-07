@@ -185,6 +185,9 @@ class UI:
 @dataclass
 class Sound:
     audio: object = None               # engine.audio (sk.Audio), or None without sound
+    entries: dict = field(default_factory=dict)   # name: its entry of sounds.SOUNDS or loops.LOOPS
+    loops: dict = field(default_factory=dict)     # a loop's name: (voice, bus, spatial) while it plays
+    exertion: float = 0.0              # 0 to 1, how hard the player works, eased (loops.update_breath)
     clips: dict = field(default_factory=dict)   # an entry of sounds.SOUNDS: its clips
     rng: object = field(default_factory=random.Random)
     played: Counter = field(default_factory=Counter)   # an entry: voices played of it

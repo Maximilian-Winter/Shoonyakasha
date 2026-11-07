@@ -7,8 +7,9 @@ is spread at random, and, for a spatial one, its distances (`near`, full
 volume within; `far`, where its falloff stops). An entry's clips are the
 files sounds/<name>.wav, .flac or .mp3 and sounds/<name>_<anything> with
 those endings, beside walker.py; one of them is picked at random for each
-voice. An entry without a file plays a placeholder made here
-(`placeholder`).
+voice. An entry without a file plays its placeholder: made by its
+"make" function when it has one, else here (`placeholder`). `setup`
+takes more tables beside SOUNDS (play/loops.py's).
 
 Each frame (`update`) the listener follows the camera, and the sounds of
 what happened since the last frame play: the gravity gun's grab, drop,
@@ -150,25 +151,29 @@ def sound_files(name):
     return sorted(found)
 
 
-def setup():
-    """The engine's audio, each entry's clips (its files, or its
-    placeholder), the master volume from the settings, and the toasts and
-    splits told to play. Without audio (miniaudio could not start) the
-    walker is silent."""
+def setup(*tables):
+    """The engine's audio, the entries of SOUNDS and of `tables` with
+    their clips (their files, or their placeholders), the master volume
+    from the settings, and the toasts and splits told to play. Without
+    audio (miniaudio could not start) the walker is silent."""
     s = state.sound
+    s.entries = dict(SOUNDS)
+    for table in tables:
+        s.entries.update(table)
     try:
         s.audio = engine.audio
     except RuntimeError as error:
         print("[walker] no sound: %s" % error, flush=True)
         return
-    for name in SOUNDS:
+    for name, entry in s.entries.items():
+        make = entry.get("make", placeholder)
         clips = []
         for path in sound_files(name):
             try:
                 clips.append(s.audio.load(path))
             except RuntimeError as error:
                 print("[walker] %s" % error, flush=True)
-        s.clips[name] = clips or [s.audio.load_samples(placeholder(name), sample_rate=RATE)]
+        s.clips[name] = clips or [s.audio.load_samples(make(name), sample_rate=RATE)]
     apply_volume()
     shown = state.ui.hud.on_toast
     state.ui.hud.on_toast = lambda text, colour, detail, kind: (toast(colour), shown and shown(text, colour, detail,
@@ -182,19 +187,21 @@ def apply_volume():
         state.sound.audio.set_bus_volume("master", settings["volume"], fade=0.1)
 
 
-def play(name, position=None, volume=1.0, pitch=1.0):
-    """A voice of the entry `name`, at `position` (planet space) when the
-    entry is spatial; counted in state.sound.played."""
+def play(name, position=None, volume=1.0, pitch=1.0, bus=None, **options):
+    """A voice of the entry `name` on its bus (or `bus`), at `position`
+    (planet space) when the entry is spatial; `options` go on to
+    sk.Audio.play (loop, fade_in, the filter's). Counted in
+    state.sound.played."""
     s = state.sound
     if s.audio is None:
         return 0
-    entry = SOUNDS[name]
+    entry = s.entries[name]
     spread = entry.get("spread", 0.0)
     pitch *= 1.0 + s.rng.uniform(-spread, spread)
     spatial = "near" in entry and position is not None
-    voice = s.audio.play(s.rng.choice(s.clips[name]), position=position if spatial else None, bus=entry["bus"],
-                         volume=entry["volume"] * volume, pitch=pitch, min_distance=entry.get("near", 1.0),
-                         max_distance=entry.get("far", 500.0))
+    voice = s.audio.play(s.rng.choice(s.clips[name]), position=position if spatial else None,
+                         bus=bus or entry["bus"], volume=entry["volume"] * volume, pitch=pitch,
+                         min_distance=entry.get("near", 1.0), max_distance=entry.get("far", 500.0), **options)
     s.played[name] += 1
     return voice
 
