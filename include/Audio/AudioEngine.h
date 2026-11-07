@@ -143,6 +143,25 @@ public:
     void setListener(const AudioVec3& forward, const AudioVec3& up,
                      const AudioVec3& velocity = {0.0f, 0.0f, 0.0f});
 
+    /// Binaural sound on Steam Audio (its default HRTF), with two channels:
+    /// while on, a spatial voice played goes mono through the HRTF for its
+    /// direction from the listener in place of miniaudio's panning, with the
+    /// same falloff and Doppler shift, and through its own filter (as a
+    /// filtered voice); it is 256 frames late. A voice keeps how it was
+    /// played. binaural() is whether it is on and available.
+    bool binauralAvailable() const;
+    void setBinaural(bool on);
+    bool binaural() const;
+
+    /// The World bus's reverb on Steam Audio: each channel through a
+    /// parametric reverb of RT60 `low`, `mid` and `high` seconds (three
+    /// bands), its wet signal at `wet` (0 to 1, eased over about 0.3 s)
+    /// beside the dry, 256 frames late. Off (wet 0) at first.
+    bool reverbAvailable() const;
+    void setReverb(float low, float mid, float high, float wet);
+    std::array<float, 3> reverbTimes() const;
+    float reverbWet() const;
+
     /// Without a device: the next `frames` frames of the mix, interleaved,
     /// into `out` (frames * channels floats). Returns the frames written.
     uint64_t read(float* out, uint64_t frames);

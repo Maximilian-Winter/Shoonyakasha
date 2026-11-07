@@ -749,6 +749,13 @@ cdef extern from "Audio/AudioEngine.h" namespace "Shoonyakasha::Audio":
         void setWorldLowpass(float cutoffHz, float fade)
         float worldLowpass()
         void setListener(const AudioVec3& forward, const AudioVec3& up, const AudioVec3& velocity)
+        cbool binauralAvailable()
+        void setBinaural(cbool on)
+        cbool binaural()
+        cbool reverbAvailable()
+        void setReverb(float low, float mid, float high, float wet)
+        AudioVec3 reverbTimes()
+        float reverbWet()
         uint64_t read(float* out, uint64_t frames) nogil
 
     AudioBus busFromName(const string& name) except +

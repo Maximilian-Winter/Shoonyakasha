@@ -47,6 +47,12 @@ find_package(Ktx CONFIG REQUIRED)
 # miniaudio is a single header with no CMake package; Audio/AudioEngine.cpp
 # includes it and ThirdParty/miniaudio_impl.cpp compiles it.
 find_path(MINIAUDIO_INCLUDE_DIR miniaudio.h REQUIRED)
+# steam-audio's static targets link flatbuffers, pffft and mysofa without
+# finding them, so they are found here first.
+find_package(flatbuffers CONFIG REQUIRED)
+find_package(pffft CONFIG REQUIRED)
+find_package(mysofa CONFIG REQUIRED)
+find_package(steam-audio CONFIG REQUIRED)
 
 # CONFIGURE_DEPENDS makes the build system re-glob when files appear or vanish.
 # A glob without it goes stale the moment you add a source file.
@@ -133,6 +139,8 @@ target_link_libraries(Shoonyakasha
         KTX::ktx
         # Rigid bodies (ECS/PhysicsSystem.cpp, Planet/PlanetPhysics.cpp).
         Jolt::Jolt
+        # Binaural sound and reverb (Audio/SteamNodes.cpp).
+        unofficial::steam-audio::phonon
 )
 
 # Input method composition (Platform/NativeWindowWin32.cpp) and UI Automation

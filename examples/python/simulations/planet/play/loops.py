@@ -33,6 +33,7 @@ import numpy as np
 from shoonyakasha.planet.character import RUN
 from shoonyakasha.planet.vec import length, normalize, sub
 
+import acoustics
 import flight
 from play.core import foot, planet, state, world
 from play import sounds, spaceflight, vehicle
@@ -44,6 +45,8 @@ WHISTLE_FROM = 15.0      # m/s of air past the listener at which the whistle sta
 CUSHION_FROM = 2.0       # m above the ground below which the car's cushion is heard
 STRAIN_RESERVE = 0.2     # the suit's reserve below which the breath strains and the heart is heard
 EXERTION_EASE = 2.0      # s exertion takes to follow the effort
+OCCLUSION_EVERY = 0.25   # s between a spatial loop's occlusion rays
+CAR_CLEARANCE = 3.5      # m short of the car an occlusion ray stops, so as not to hit the car
 
 
 def placeholder(name):
@@ -131,14 +134,26 @@ def hold(name, level, pitch=1.0, position=None, bus=None, lowpass=0.0, highpass=
     """The loop `name` playing at `level` (times its volume; 0 or less
     stops it, fading out), `pitch`, at `position` (planet space) when given
     and the entry is spatial, on `bus` (its own when None), through its
-    filter at `lowpass` and `highpass` Hz (0 open). A loop whose bus or
-    being spatial changes starts again."""
+    filter at `lowpass` and `highpass` Hz (0 open). A spatial loop with
+    something between it and the camera (sounds.occluded, looked for every
+    OCCLUSION_EVERY seconds, CAR_CLEARANCE short of it) is quieter and
+    duller (acoustics.occluded_audio). A loop whose bus or being spatial
+    changes starts again."""
     s = state.sound
     if s.audio is None:
         return
     entry = s.entries[name]
     bus = bus or entry["bus"]
     spatial = position is not None and "near" in entry
+    if spatial and level > 0.0:
+        due, blocked = s.occlusion.get(name, (0.0, False))
+        if s.clock >= due:
+            blocked = sounds.occluded(position, CAR_CLEARANCE)
+            s.occlusion[name] = (s.clock + OCCLUSION_EVERY, blocked)
+        gain, cutoff = acoustics.occluded_audio(blocked)
+        level *= gain
+        if cutoff:
+            lowpass = min(lowpass, cutoff) if lowpass > 0.0 else cutoff
     running = s.loops.get(name)
     if running is not None and (level <= 0.0 or running[1] != bus or running[2] != spatial
                                 or not s.audio.active(running[0])):

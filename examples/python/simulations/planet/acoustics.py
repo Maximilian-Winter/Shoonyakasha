@@ -17,6 +17,16 @@ FAR_DISTANCE, and on no lower than LOWEST_CUTOFF.
 `rumble_volume(distance, large)`: in vacuum, how loud a meteor's impact
 `distance` metres away is through the ground and the feet, from 1 at the
 impact to 0 at RUMBLE_REACH (a large meteor's) or SMALL_RUMBLE_REACH.
+
+`reverb_from(distances)`: the reverb of the space around the listener,
+from how far rays cast from it in every direction went before they hit
+something (None for a ray that hit nothing within REVERB_REACH): (RT60 of
+the low, mid and high bands in seconds, wet level). Its enclosure is the
+share of rays that hit; the RT60 grows from OPEN_RT60 with the enclosure
+and the square root of the mean distance hit (to REVERB_ROOM), and the
+wet level from OPEN_WET with the enclosure. `occluded_audio(blocked)`:
+(gain, cutoff Hz) for a sound with something between it and the
+listener (OCCLUDED_GAIN, OCCLUDED_CUTOFF), or (1, None) without.
 """
 
 import math
@@ -30,6 +40,13 @@ FAR_DISTANCE, FAR_CUTOFF = 5_000.0, 2_000.0     # m, Hz
 LOWEST_CUTOFF = 300.0        # Hz
 RUMBLE_REACH = 1_500.0       # m a large meteor's impact is felt through the ground in vacuum
 SMALL_RUMBLE_REACH = 300.0   # m a small one's is
+REVERB_REACH = 150.0         # m a reverb ray reaches
+REVERB_ROOM = 50.0           # m of mean distance hit at which the RT60 stops growing with it
+OPEN_RT60, ENCLOSED_RT60 = 0.2, 1.8          # s, nothing around; added fully enclosed
+OPEN_WET, ENCLOSED_WET = 0.05, 0.4           # wet level, nothing around; added fully enclosed
+BANDS = (1.2, 1.0, 0.6)      # the low, mid and high bands' RT60 as shares of the mid's
+OCCLUDED_GAIN = 0.5
+OCCLUDED_CUTOFF = 700.0      # Hz
 
 
 def air_audio(d):
@@ -57,3 +74,15 @@ def distance_cutoff(distance):
 
 def rumble_volume(distance, large):
     return max(0.0, 1.0 - distance / (RUMBLE_REACH if large else SMALL_RUMBLE_REACH))
+
+
+def reverb_from(distances):
+    hits = [d for d in distances if d is not None]
+    enclosure = len(hits) / len(distances) if distances else 0.0
+    size = math.sqrt(min(1.0, (sum(hits) / len(hits)) / REVERB_ROOM)) if hits else 0.0
+    rt60 = OPEN_RT60 + ENCLOSED_RT60 * enclosure * size
+    return tuple(rt60 * share for share in BANDS), OPEN_WET + ENCLOSED_WET * enclosure
+
+
+def occluded_audio(blocked):
+    return (OCCLUDED_GAIN, OCCLUDED_CUTOFF) if blocked else (1.0, None)

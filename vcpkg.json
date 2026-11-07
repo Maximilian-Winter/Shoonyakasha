@@ -25,6 +25,7 @@
     "draco",
     "ktx",
     "miniaudio",
+    "steam-audio",
     {
       "$comment": "Only because harfbuzz's CMake config requires it; the engine renders glyphs with stb_truetype.",
       "name": "freetype",

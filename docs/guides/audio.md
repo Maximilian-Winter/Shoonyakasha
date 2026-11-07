@@ -107,6 +107,22 @@ audio.set_world_lowpass(2500.0, fade=0.2)       # moves evenly in octaves
 
 The cutoff starts at, and is held below, 0.45 of the sample rate, and it is never under 10 Hz. A bus name other than these five raises `ValueError`.
 
+## Binaural sound and reverb
+
+Both run on [Steam Audio](https://valvesoftware.github.io/steam-audio/) and need two channels. `binaural_available` and `reverb_available` say whether they can be had.
+
+```python
+audio.binaural = True                      # spatial voices played from now on: through the HRTF
+audio.set_reverb((1.5, 1.0, 0.6), 0.3)     # RT60 s of the low, mid and high bands, and the wet level
+audio.set_reverb(0.8, 0.2)                 # one RT60 for every band
+audio.set_reverb(0.5, 0.0)                 # off
+```
+
+- **Binaural:** while `binaural` is on, a spatial voice that is played goes mono through Steam Audio's default HRTF for its direction from the listener, in place of stereo panning. It keeps the same falloff and Doppler shift. It also goes through its own filter, like a filtered voice, so `set_voice`'s `lowpass` and `highpass` work on it. A voice keeps the way it was played, so turning `binaural` on or off affects only voices played after the change. It is off at first.
+- **Reverb:** the reverb takes the world bus. Each of its channels goes through a parametric reverb with the three bands' RT60. The wet signal, eased to its level over about 0.3 s, is added beside the dry one. The suit, UI and music buses have no reverb.
+
+Both work on blocks of 256 frames, so a binaural voice and the reverb are 256 frames late (5.3 ms at 48 kHz). In C++ these are `AudioEngine::setBinaural`, `binaural`, `binauralAvailable`, `setReverb`, `reverbTimes`, `reverbWet` and `reverbAvailable`.
+
 ## Without a device
 
 ```python

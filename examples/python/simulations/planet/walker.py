@@ -67,7 +67,7 @@ still behind it, the only pause. Resume, Save and Load (the last save),
 Settings (config.py, kept in walker_config.json: the mouse's
 sensitivity, inverted look, the head bob, the field of view, the HUD's
 scale, the window's size (taken at the next start), the render scale,
-anti-aliasing, the clouds, autosave, the volume and the music's), Controls, Quit to main menu (the
+anti-aliasing, the clouds, autosave, the volume and the music's, and headphones), Controls, Quit to main menu (the
 game saved when autosave is on, then the start's screen) and Quit to
 desktop; with Resume chosen, how the game stands. A new game from the
 start's screen (saving.new_game) starts again beside the ship in the
@@ -83,7 +83,9 @@ car's engines and cushion, the gun's hum, reentry, the breath and the
 heart, and a storm's rain, set every frame from the game; and music by
 where the game is (play/music.py). The System screen and the start's
 screen pause the world's and the suit's sounds, the slate softens them,
-and the time warp above 2x silences the world. A meteor's
+and the time warp above 2x silences the world. With Headphones the sound
+is binaural; the world reverberates by what rays around the camera hit,
+and a sound behind the ground or a rock is muffled. A meteor's
 impact booms, late by the sound's travel and duller the farther off; on
 the moon it rumbles through the feet nearby. The world's sounds fade and dull as the air
 thins (acoustics.py); in vacuum only the suit's are heard, and through

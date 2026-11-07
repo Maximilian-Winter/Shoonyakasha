@@ -1,4 +1,5 @@
 #include "Audio/AudioEngine.h"
+#include "Audio/SteamNodes.h"
 
 #include <miniaudio.h>
 
@@ -17,6 +18,7 @@ constexpr float FILTER_MIN_HZ = 10.0f;
 constexpr float NYQUIST_SHARE = 0.45f;         // the highest cutoff, as a share of the sample rate
 constexpr float BUS_MIN_FADE = 0.005f;         // s
 constexpr float TAKEN_FADE = 0.005f;           // s a voice taken over by a louder one fades out over
+constexpr float SPEED_OF_SOUND = 343.3f;       // m/s, as miniaudio's Doppler shift has it
 
 ma_uint64 milliseconds(float seconds) {
     return static_cast<ma_uint64>(std::lround(std::max(seconds, 0.0f) * 1000.0f));
@@ -206,7 +208,24 @@ struct Voice {
     float minDistance = 1.0f;
     float maxDistance = 500.0f;
     float rolloff = 1.0f;
+    // A binaural voice: its sound mono through `binaural`, then its filter.
+    Steam::BinauralNode binaural;
+    bool binauralOn = false;
+    AudioVec3 velocity{0.0f, 0.0f, 0.0f};
+    float basePitch = 1.0f;
+    float doppler = 1.0f;
 };
+
+float dot3(const AudioVec3& a, const AudioVec3& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+AudioVec3 cross3(const AudioVec3& a, const AudioVec3& b) {
+    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+}
+
+AudioVec3 unit3(const AudioVec3& a, const AudioVec3& otherwise) {
+    const float d = std::sqrt(dot3(a, a));
+    return d > 1e-6f ? AudioVec3{a[0] / d, a[1] / d, a[2] / d} : otherwise;
+}
 
 /// The gain of the inverse falloff at `position` from the listener.
 float falloff(const AudioVec3& position, float minDistance, float maxDistance, float rolloff) {
@@ -238,6 +257,19 @@ struct AudioEngine::Impl {
     bool busPausedFlags[BusCount] = {};
     FilterNode world;             // the World bus's, its low-pass only
     float lowpassHz = 0.0f;
+    ma_node_graph* graph = nullptr;
+    Steam::Context steam;
+    bool binauralWanted = false;
+    Steam::ReverbNode reverb;     // fed from the World bus by `splitter`
+    ma_splitter_node splitter;
+    bool splitterReady = false;
+    float reverbTimes[3] = {0.0f, 0.0f, 0.0f};
+    float reverbWet = 0.0f;
+    // The listener's frame: right, up and forward, and its velocity.
+    AudioVec3 right{1.0f, 0.0f, 0.0f};
+    AudioVec3 up{0.0f, 1.0f, 0.0f};
+    AudioVec3 forward{0.0f, 0.0f, -1.0f};
+    AudioVec3 listenerVelocity{0.0f, 0.0f, 0.0f};
     int categoryLimits[CategoryCount] = {};   // 0: no limit
     std::vector<Clip> clips;      // ClipId is the index + 1
     std::unique_ptr<Voice[]> voices;
@@ -266,7 +298,9 @@ struct AudioEngine::Impl {
 
     void release(Voice& v) {
         ma_sound_uninit(&v.sound);
+        if (v.binauralOn) ma_node_detach_output_bus(&v.binaural, 0);
         if (v.filtered) ma_node_detach_output_bus(&v.filter, 0);
+        v.binauralOn = false;
         v.filtered = false;
         v.used = false;
         v.stopping = false;
@@ -298,10 +332,48 @@ struct AudioEngine::Impl {
         for (int b = BusCount - 1; b >= 0; --b) {
             if (busReady[b]) ma_sound_group_uninit(&buses[b]);
         }
-        for (uint32_t i = 0; i < voiceCount; ++i) uninitFilter(voices[i].filter);
+        for (uint32_t i = 0; i < voiceCount; ++i) {
+            uninitFilter(voices[i].filter);
+            Steam::uninitBinaural(voices[i].binaural);
+        }
+        if (splitterReady) ma_splitter_node_uninit(&splitter, nullptr);
+        splitterReady = false;
+        Steam::uninitReverb(reverb);
         uninitFilter(world);
         ma_engine_uninit(&engine);
+        Steam::release(steam);
         engineReady = false;
+    }
+
+    /// A binaural voice's direction in the listener's frame, its falloff
+    /// and its Doppler shift (as miniaudio's: c - doppler times each
+    /// velocity along the line from the source to the listener) set from
+    /// its position and velocity.
+    void updateBinaural(Voice& v) {
+        const AudioVec3& p = v.position;
+        const float d = std::sqrt(dot3(p, p));
+        float direction[3] = {0.0f, 0.0f, -1.0f};
+        float shift = 1.0f;
+        if (d > 1e-4f) {
+            const AudioVec3 local = unit3({dot3(p, right), dot3(p, up), -dot3(p, forward)}, {0.0f, 0.0f, -1.0f});
+            direction[0] = local[0];
+            direction[1] = local[1];
+            direction[2] = local[2];
+            if (v.doppler > 0.0f) {
+                const AudioVec3 toListener{-p[0] / d, -p[1] / d, -p[2] / d};
+                const float most = SPEED_OF_SOUND / v.doppler;
+                const float vl = std::min(dot3(toListener, listenerVelocity), most);
+                const float vs = std::min(dot3(toListener, v.velocity), most * 0.99f);
+                shift = (SPEED_OF_SOUND - v.doppler * vl) / (SPEED_OF_SOUND - v.doppler * vs);
+            }
+        }
+        Steam::setBinaural(v.binaural, direction, falloff(p, v.minDistance, v.maxDistance, v.rolloff));
+        ma_sound_set_pitch(&v.sound, v.basePitch * shift);
+    }
+
+    /// The slot's binaural node made on first use; false when it cannot be.
+    bool ensureBinaural(Voice& v) {
+        return v.binaural.ready || Steam::initBinaural(v.binaural, steam, graph);
     }
 };
 
@@ -343,7 +415,21 @@ AudioEngine::AudioEngine(const AudioConfig& config) : m_impl(std::make_unique<Im
             throw std::runtime_error("miniaudio could not make the World bus's low-pass");
         }
         s.lowpassHz = s.world.maxHz;
-        ma_node_attach_output_bus(&s.world, 0, &s.buses[0], 0);
+        s.graph = graph;
+        if (s.channels == 2) Steam::init(s.steam, rate);
+        if (s.steam.ready && Steam::initReverb(s.reverb, s.steam, graph)) {
+            ma_splitter_node_config splitterConfig = ma_splitter_node_config_init(s.channels);
+            if (ma_splitter_node_init(graph, &splitterConfig, nullptr, &s.splitter) == MA_SUCCESS) {
+                s.splitterReady = true;
+                ma_node_attach_output_bus(&s.splitter, 0, &s.buses[0], 0);
+                ma_node_attach_output_bus(&s.reverb, 0, &s.buses[0], 0);
+                ma_node_attach_output_bus(&s.splitter, 1, &s.reverb, 0);
+                ma_node_attach_output_bus(&s.world, 0, &s.splitter, 0);
+            } else {
+                Steam::uninitReverb(s.reverb);
+            }
+        }
+        if (!s.splitterReady) ma_node_attach_output_bus(&s.world, 0, &s.buses[0], 0);
         ma_node_attach_output_bus(&s.buses[static_cast<int>(Bus::World)], 0, &s.world, 0);
 
         s.voiceCount = std::max<uint32_t>(config.voices, 1);
@@ -493,19 +579,36 @@ VoiceId AudioEngine::play(ClipId id, const PlayParams& params) {
     }
 
     Voice& v = s.voices[slot];
+    const bool binaural = params.spatial && binauralAvailable() && s.binauralWanted && s.ensureBinaural(v);
+    const bool filtered = params.filtered || binaural;
     ma_uint32 flags = clip->stream ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
-    if (!params.spatial) flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
-    if (params.filtered) flags |= MA_SOUND_FLAG_NO_DEFAULT_ATTACHMENT;
+    if (!params.spatial || binaural) flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
+    if (filtered) flags |= MA_SOUND_FLAG_NO_DEFAULT_ATTACHMENT;
     ma_sound_group* group = &s.buses[static_cast<int>(params.bus)];
-    if (ma_sound_init_from_file(&s.engine, clip->name.c_str(), flags, group, nullptr, &v.sound) != MA_SUCCESS) {
+    ma_sound_config soundConfig = ma_sound_config_init_2(&s.engine);
+    soundConfig.pFilePath = clip->name.c_str();
+    soundConfig.flags = flags;
+    soundConfig.pInitialAttachment = filtered ? nullptr : group;
+    if (binaural) soundConfig.channelsOut = 1;
+    if (ma_sound_init_ex(&s.engine, &soundConfig, &v.sound) != MA_SUCCESS) {
         return 0;
     }
-    if (params.filtered) {
+    if (filtered) {
         resetFilter(v.filter, params.lowpass, params.highpass);
         ma_node_attach_output_bus(&v.filter, 0, group, 0);
-        ma_node_attach_output_bus(&v.sound, 0, &v.filter, 0);
+        if (binaural) {
+            Steam::resetBinaural(v.binaural);
+            ma_node_attach_output_bus(&v.binaural, 0, &v.filter, 0);
+            ma_node_attach_output_bus(&v.sound, 0, &v.binaural, 0);
+        } else {
+            ma_node_attach_output_bus(&v.sound, 0, &v.filter, 0);
+        }
     }
-    v.filtered = params.filtered;
+    v.filtered = filtered;
+    v.binauralOn = binaural;
+    v.velocity = params.velocity;
+    v.basePitch = params.pitch;
+    v.doppler = params.doppler;
     v.category = params.category;
     v.priority = params.priority;
     v.spatial = params.spatial;
@@ -523,7 +626,9 @@ VoiceId AudioEngine::play(ClipId id, const PlayParams& params) {
     ma_sound_set_volume(&v.sound, params.volume);
     ma_sound_set_pitch(&v.sound, params.pitch);
     ma_sound_set_looping(&v.sound, params.loop ? MA_TRUE : MA_FALSE);
-    if (params.spatial) {
+    if (binaural) {
+        s.updateBinaural(v);
+    } else if (params.spatial) {
         ma_sound_set_positioning(&v.sound, ma_positioning_absolute);
         ma_sound_set_attenuation_model(&v.sound, ma_attenuation_model_inverse);
         ma_sound_set_position(&v.sound, params.position[0], params.position[1], params.position[2]);
@@ -564,6 +669,11 @@ void AudioEngine::setVoicePosition(VoiceId id, const AudioVec3& position, const 
     Voice* v = m_impl->voice(id);
     if (v == nullptr) return;
     v->position = position;
+    v->velocity = velocity;
+    if (v->binauralOn) {
+        m_impl->updateBinaural(*v);
+        return;
+    }
     ma_sound_set_position(&v->sound, position[0], position[1], position[2]);
     ma_sound_set_velocity(&v->sound, velocity[0], velocity[1], velocity[2]);
 }
@@ -583,8 +693,41 @@ void AudioEngine::setVoiceVolume(VoiceId id, float volume) {
 }
 
 void AudioEngine::setVoicePitch(VoiceId id, float pitch) {
-    if (Voice* v = m_impl->voice(id)) ma_sound_set_pitch(&v->sound, pitch);
+    Voice* v = m_impl->voice(id);
+    if (v == nullptr) return;
+    v->basePitch = pitch;
+    if (v->binauralOn) {
+        m_impl->updateBinaural(*v);
+    } else {
+        ma_sound_set_pitch(&v->sound, pitch);
+    }
 }
+
+bool AudioEngine::binauralAvailable() const { return m_impl->steam.ready && m_impl->channels == 2; }
+
+void AudioEngine::setBinaural(bool on) { m_impl->binauralWanted = on; }
+
+bool AudioEngine::binaural() const { return m_impl->binauralWanted && binauralAvailable(); }
+
+bool AudioEngine::reverbAvailable() const { return m_impl->splitterReady; }
+
+void AudioEngine::setReverb(float low, float mid, float high, float wet) {
+    Impl& s = *m_impl;
+    s.reverbTimes[0] = std::max(low, 0.0f);
+    s.reverbTimes[1] = std::max(mid, 0.0f);
+    s.reverbTimes[2] = std::max(high, 0.0f);
+    s.reverbWet = std::clamp(wet, 0.0f, 1.0f);
+    s.reverb.low.store(s.reverbTimes[0], std::memory_order_relaxed);
+    s.reverb.mid.store(s.reverbTimes[1], std::memory_order_relaxed);
+    s.reverb.high.store(s.reverbTimes[2], std::memory_order_relaxed);
+    s.reverb.wet.store(s.reverbWet, std::memory_order_relaxed);
+}
+
+std::array<float, 3> AudioEngine::reverbTimes() const {
+    return {m_impl->reverbTimes[0], m_impl->reverbTimes[1], m_impl->reverbTimes[2]};
+}
+
+float AudioEngine::reverbWet() const { return m_impl->reverbWet; }
 
 int AudioEngine::activeVoices(int category) const {
     int count = 0;
@@ -639,6 +782,15 @@ void AudioEngine::setListener(const AudioVec3& forward, const AudioVec3& up, con
     ma_engine_listener_set_direction(&e, 0, forward[0], forward[1], forward[2]);
     ma_engine_listener_set_world_up(&e, 0, up[0], up[1], up[2]);
     ma_engine_listener_set_velocity(&e, 0, velocity[0], velocity[1], velocity[2]);
+    Impl& s = *m_impl;
+    s.forward = unit3(forward, {0.0f, 0.0f, -1.0f});
+    s.right = unit3(cross3(s.forward, up), {1.0f, 0.0f, 0.0f});
+    s.up = cross3(s.right, s.forward);
+    s.listenerVelocity = velocity;
+    for (uint32_t i = 0; i < s.voiceCount; ++i) {
+        Voice& v = s.voices[i];
+        if (v.used && v.binauralOn) s.updateBinaural(v);
+    }
 }
 
 uint64_t AudioEngine::read(float* out, uint64_t frames) {

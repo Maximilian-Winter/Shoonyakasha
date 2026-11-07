@@ -401,6 +401,143 @@ TEST(AudioEngineTest, FullPoolGivesUpALowerPriority) {
     EXPECT_FALSE(audio.active(a));
 }
 
+/// One channel of `seconds` of white noise, amplitude 0.5.
+std::vector<float> whiteNoise(float seconds) {
+    std::vector<float> samples(static_cast<size_t>(seconds * RATE));
+    uint32_t state = 12345u;
+    for (float& s : samples) {
+        state = state * 1664525u + 1013904223u;
+        s = 0.5f * (static_cast<float>(state >> 8) / 8388608.0f - 1.0f);
+    }
+    return samples;
+}
+
+ClipId loadNoise(AudioEngine& audio, float seconds = 1.0f) {
+    const std::vector<float> samples = whiteNoise(seconds);
+    return audio.loadSamples(samples.data(), samples.size(), 1, RATE);
+}
+
+TEST(AudioEngineTest, BinauralAndReverbAreAvailableAndOffAtFirst) {
+    AudioEngine audio(headless());
+    EXPECT_TRUE(audio.binauralAvailable());
+    EXPECT_FALSE(audio.binaural());
+    audio.setBinaural(true);
+    EXPECT_TRUE(audio.binaural());
+    EXPECT_TRUE(audio.reverbAvailable());
+    EXPECT_EQ(audio.reverbWet(), 0.0f);
+}
+
+TEST(AudioEngineTest, BinauralVoiceIsLouderInTheNearEar) {
+    AudioEngine audio(headless());
+    audio.setBinaural(true);
+    audio.setListener({0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f});
+    PlayParams params;
+    params.loop = true;
+    params.position = {5.0f, 0.0f, 0.0f};
+    audio.play(loadNoise(audio), params);
+    pull(audio, 4800);
+    std::vector<float> out = pull(audio, 9600);
+    EXPECT_GT(rms(out, 1), 1.5 * rms(out, 0));
+    audio.setListener({0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f});
+    pull(audio, 4800);
+    out = pull(audio, 9600);
+    EXPECT_GT(rms(out, 0), 1.5 * rms(out, 1));
+}
+
+TEST(AudioEngineTest, BinauralVoiceAheadIsBalanced) {
+    AudioEngine audio(headless());
+    audio.setBinaural(true);
+    PlayParams params;
+    params.loop = true;
+    params.position = {0.0f, 0.0f, -5.0f};
+    audio.play(loadNoise(audio), params);
+    pull(audio, 4800);
+    const std::vector<float> out = pull(audio, 9600);
+    // The default HRTF is measured, so ahead is near, not exactly, equal: within 3 dB.
+    const double ratio = rms(out, 0) / rms(out, 1);
+    EXPECT_GT(ratio, 0.7);
+    EXPECT_LT(ratio, 1.0 / 0.7);
+}
+
+TEST(AudioEngineTest, BinauralLevelFallsOffInversely) {
+    auto level = [](float distance) {
+        AudioEngine audio(headless());
+        audio.setBinaural(true);
+        PlayParams params;
+        params.loop = true;
+        params.position = {0.0f, 0.0f, -distance};
+        params.maxDistance = 1000.0f;
+        audio.play(loadNoise(audio), params);
+        pull(audio, 4800);
+        return rms(pull(audio, 9600));
+    };
+    EXPECT_NEAR(20.0 * std::log10(level(10.0f) / level(100.0f)), 20.0, 1.5);
+}
+
+TEST(AudioEngineTest, BinauralVoiceIsABlockLate) {
+    AudioEngine audio(headless());
+    audio.setBinaural(true);
+    PlayParams params;
+    params.position = {0.0f, 0.0f, -1.0f};
+    params.delay = 0.5f;
+    audio.play(loadNoise(audio), params);
+    const std::vector<float> out = pull(audio, RATE);
+    size_t first = out.size();
+    for (size_t i = 0; i < out.size(); ++i) {
+        if (std::fabs(out[i]) > 1e-6f) {
+            first = i / 2;
+            break;
+        }
+    }
+    EXPECT_GE(static_cast<double>(first), RATE * 0.5);
+    EXPECT_NEAR(static_cast<double>(first), RATE * 0.5 + 256.0, RATE * 0.002);
+}
+
+TEST(AudioEngineTest, SlotOfABinauralVoiceServesAPlainOne) {
+    AudioEngine audio(headless(1));
+    const ClipId clip = loadTone(audio, 1000.0f);
+    VoiceId voice = audio.play(clip, plain());
+    pull(audio, 480);
+    const double reference = rms(pull(audio, 4800));
+    audio.stop(voice);
+    audio.setBinaural(true);
+    PlayParams params;
+    params.loop = true;
+    params.position = {3.0f, 0.0f, 0.0f};
+    voice = audio.play(clip, params);
+    pull(audio, 4800);
+    audio.stop(voice);
+    audio.setBinaural(false);
+    voice = audio.play(clip, plain());
+    ASSERT_NE(voice, 0u);
+    pull(audio, 480);
+    EXPECT_NEAR(rms(pull(audio, 4800)) / reference, 1.0, 0.02);
+}
+
+TEST(AudioEngineTest, ReverbAddsATailToTheWorldBusOnly) {
+    AudioEngine audio(headless());
+    const ClipId click = loadNoise(audio, 0.01f);
+    auto tail = [&](Bus bus) {
+        PlayParams params = plain(bus);
+        params.loop = false;
+        audio.play(click, params);
+        pull(audio, RATE / 5);
+        const double after = rms(pull(audio, RATE / 5));
+        pull(audio, RATE);           // the tail gone before the next
+        return after;
+    };
+    EXPECT_LT(tail(Bus::World), 1e-5);
+    audio.setReverb(1.5f, 1.5f, 1.0f, 0.8f);
+    EXPECT_FLOAT_EQ(audio.reverbWet(), 0.8f);
+    EXPECT_FLOAT_EQ(audio.reverbTimes()[1], 1.5f);
+    pull(audio, RATE / 2);
+    EXPECT_GT(tail(Bus::World), 1e-4);
+    EXPECT_LT(tail(Bus::Suit), 1e-5);
+    audio.setReverb(1.5f, 1.5f, 1.0f, 0.0f);
+    pull(audio, 2 * RATE);
+    EXPECT_LT(tail(Bus::World), 1e-5);
+}
+
 TEST(AudioEngineTest, ListenerRightIsForwardCrossUp) {
     AudioEngine audio(headless());
     PlayParams params;

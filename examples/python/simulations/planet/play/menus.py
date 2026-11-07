@@ -82,7 +82,7 @@ def set_paused(on, section="Resume"):
 def apply_settings():
     """The settings (config.py) put into the walker: the look, the head bob,
     the field of view, the HUD's scale, the render scale, anti-aliasing,
-    the clouds and the volume."""
+    the clouds, the volume and headphones."""
     foot.mouse_sensitivity = settings["mouse_sensitivity"]
     foot.invert_y = settings["invert_y"]
     foot.head_bob = settings["head_bob"]
@@ -100,6 +100,7 @@ def apply_settings():
         world.clouds = settings["clouds"]
         world.upload_clouds()
     sounds.apply_volume()
+    sounds.apply_binaural()
 
 
 def setting(name):
@@ -140,6 +141,8 @@ def settings_items():
          {"heading": "Sound"},
          slider("Volume", "volume", lambda v: "%d %%" % round(100.0 * v), "The loudness of every sound.", 0.05),
          slider("Music", "music_volume", lambda v: "%d %%" % round(100.0 * v), "The loudness of the music.", 0.05),
+         toggle("Headphones", "headphones",
+                "Binaural sound: where each sound is, above and behind too. Off for speakers."),
          ],
         [{"heading": "View"},
          slider("Field of view", "fov", lambda v: "%.0f deg" % v, "The view's height in degrees.", 1.0),

@@ -45,6 +45,14 @@ WARP_SILENT it is not played. A meteor's impact (`boom`) is such a
 sound, and in vacuum, standing on the ground within its reach
 (acoustics.rumble_volume), a low rumble through the feet. `alert` plays a
 sound for the toast that follows it in place of the toast's own.
+
+With the Headphones setting the audio is binaural (sk.Audio.binaural), the
+loops starting again to take it. Every REVERB_EVERY seconds rays from the
+camera (REVERB_RAYS, through the physics bubble's ground, rocks, trunks
+and props) give the world bus its reverb (acoustics.reverb_from; open
+air without a bubble). A world sound at a point with something between
+it and the camera (`occluded`) is quieter and duller
+(acoustics.occluded_audio).
 """
 
 import math
@@ -54,7 +62,7 @@ from collections import Counter
 import numpy as np
 
 from shoonyakasha.planet.character import BOB_STRIDE
-from shoonyakasha.planet.vec import add, length, sub
+from shoonyakasha.planet.vec import add, length, local_frame, normalize, scale, sub
 
 import acoustics
 import hud as hud_module
@@ -98,6 +106,9 @@ LAND_AIR = 0.35          # s in the air before touching down is a landing
 AIR_FADE = 0.3           # s the world bus takes to follow the air
 WARP_SILENT = 2.0        # time warp above which world sounds at a point are not played
 COLLAPSE_SECONDS = 0.05  # s within which hits near one another are one voice
+REVERB_EVERY = 0.5       # s between the reverb's rays
+REVERB_TILT = 30.0       # degrees above the horizon of the reverb's raised rays
+CLEARANCE = 1.0          # m short of a sound's point an occlusion ray stops, so as not to hit what makes it
 COLLAPSE_DISTANCE = 1.5  # m within which they are
 
 MIX = {                  # a state: (world, suit, music, the world's low-pass cap Hz, fade s); world None: paused
@@ -228,6 +239,7 @@ def setup(*tables):
     for category, limit in CATEGORIES.items():
         s.audio.set_category_limit(category, limit)
     apply_volume()
+    apply_binaural()
     shown = state.ui.hud.on_toast
     state.ui.hud.on_toast = lambda text, colour, detail, kind: (toast(colour), shown and shown(text, colour, detail,
                                                                                                kind))
@@ -238,6 +250,67 @@ def setup(*tables):
 def apply_volume():
     if state.sound.audio is not None:
         state.sound.audio.set_bus_volume("master", settings["volume"], fade=0.1)
+
+
+def apply_binaural():
+    """The audio binaural as the Headphones setting has it; the loops started
+    again when that changes, to take it."""
+    s = state.sound
+    if s.audio is None or s.audio.binaural == bool(settings["headphones"]):
+        return
+    s.audio.binaural = settings["headphones"]
+    for voice, _, _ in s.loops.values():
+        s.audio.stop(voice, fade=0.1)
+    s.loops.clear()
+
+
+def occluded(point, clearance=CLEARANCE):
+    """Whether something in the physics bubble lies between the camera and
+    `point` (planet space), the ray stopping `clearance` metres short of it;
+    False without a bubble."""
+    bubble = foot.bubble
+    if bubble is None:
+        return False
+    camera = state.view.position
+    distance = length(sub(point, camera)) - clearance
+    if distance <= 0.0:
+        return False
+    skip = foot.player.character if foot.player is not None else None
+    hit = foot.physics.cast_ray(bubble.to_bubble(camera), normalize(sub(point, camera)), distance, skip_character=skip)
+    return hit is not None
+
+
+def reverb_rays():
+    """Unit directions of the reverb's rays: eight about the horizon, four
+    raised REVERB_TILT, and straight up."""
+    up = world.radial_up(state.view.position)
+    east, north = local_frame(up)
+    rays = []
+    for k, tilt in [(k, 0.0) for k in range(8)] + [(k, REVERB_TILT) for k in range(0, 8, 2)]:
+        a, t = 2.0 * math.pi * k / 8, math.radians(tilt)
+        flat = add(scale(east, math.cos(a)), scale(north, math.sin(a)))
+        rays.append(normalize(add(scale(flat, math.cos(t)), scale(up, math.sin(t)))))
+    return rays + [up]
+
+
+def update_reverb(dt):
+    """The world bus's reverb from rays around the camera, every REVERB_EVERY seconds."""
+    s = state.sound
+    s.reverb_in -= dt
+    if s.reverb_in > 0.0 or not s.audio.reverb_available:
+        return
+    s.reverb_in = REVERB_EVERY
+    bubble = foot.bubble
+    distances = []
+    if bubble is not None:
+        origin = bubble.to_bubble(state.view.position)
+        skip = foot.player.character if foot.player is not None else None
+        for ray in reverb_rays():
+            hit = foot.physics.cast_ray(origin, ray, acoustics.REVERB_REACH, skip_character=skip)
+            distances.append(None if hit is None else hit[3] * acoustics.REVERB_REACH)
+    times, wet = acoustics.reverb_from(distances or [None])
+    s.audio.set_reverb(times, wet)
+    s.reverb = (times, wet)
 
 
 def play(name, position=None, volume=1.0, pitch=1.0, bus=None, **options):
@@ -286,8 +359,10 @@ def strike(name, position, volume=1.0, pitch=1.0):
         return 0
     distance = length(sub(position, state.view.position))
     if state.sound.density > acoustics.VACUUM:
-        return play(name, position, volume, pitch, delay=acoustics.sound_delay(distance),
-                    lowpass=acoustics.distance_cutoff(distance))
+        gain, cutoff = acoustics.occluded_audio(occluded(position))
+        lowpass = acoustics.distance_cutoff(distance)
+        return play(name, position, volume * gain, pitch, delay=acoustics.sound_delay(distance),
+                    lowpass=min(lowpass, cutoff) if cutoff else lowpass)
     near = acoustics.contact_volume(distance)
     return play("contact", volume=volume * near, pitch=pitch) if near > 0.0 else 0
 
@@ -395,6 +470,7 @@ def update(dt):
     s.audio.set_listener(state.view.position, forward, up)
     s.hush = False
     update_mix()
+    update_reverb(dt)
     update_gun()
     update_hits(dt)
     update_steps(dt)

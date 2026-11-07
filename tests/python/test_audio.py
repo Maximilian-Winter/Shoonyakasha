@@ -179,6 +179,33 @@ class AudioTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             audio.set_category_limit("one too many", 1)
 
+    def test_binaural(self):
+        self.assertTrue(self.audio.binaural_available)
+        self.assertFalse(self.audio.binaural)
+        self.audio.binaural = True
+        self.assertTrue(self.audio.binaural)
+        noise = self.audio.load_samples([0.5 * math.sin(i * i * 0.37) for i in range(RATE)])
+        self.audio.set_listener((0.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, 1.0, 0.0))
+        self.audio.play(noise, position=(5.0, 0.0, 0.0), loop=True)
+        self.audio.read(4800)
+        out = self.audio.read(9600)
+        self.assertGreater(rms(out, 1), 1.5 * rms(out, 0))
+
+    def test_reverb(self):
+        self.assertTrue(self.audio.reverb_available)
+        self.assertEqual(self.audio.reverb_wet, 0.0)
+        self.audio.set_reverb(1.2, 0.5)
+        for t in self.audio.reverb_times:
+            self.assertAlmostEqual(t, 1.2, places=5)
+        self.audio.set_reverb((1.5, 1.0, 0.5), 0.6)
+        self.assertAlmostEqual(self.audio.reverb_times[2], 0.5)
+        self.assertAlmostEqual(self.audio.reverb_wet, 0.6)
+        self.audio.read(RATE // 2)
+        click = self.audio.load_samples([0.5 * math.sin(i * i * 0.37) for i in range(480)])
+        self.audio.play(click, bus="world")
+        self.audio.read(RATE // 5)
+        self.assertGreater(rms(self.audio.read(RATE // 5)), 1e-4)
+
     def test_stop_with_a_fade_and_a_stale_voice(self):
         audio = sk.Audio(device=False, voices=1)
         clip = audio.load_samples(tone(1000.0, 1.0))

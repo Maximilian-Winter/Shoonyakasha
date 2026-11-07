@@ -30,6 +30,7 @@ DEFAULTS = {
     "autosave": True,
     "volume": 0.8,
     "music_volume": 0.5,
+    "headphones": False,
 }
 RANGES = {
     "mouse_sensitivity": (0.25, 3.0),

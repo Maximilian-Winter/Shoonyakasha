@@ -67,6 +67,26 @@ class AirAudioTest(unittest.TestCase):
         self.assertEqual(acoustics.rumble_volume(300.0, False), 0.0)
         self.assertEqual(acoustics.rumble_volume(2_000.0, True), 0.0)
 
+    def test_reverb_in_the_open_and_enclosed(self):
+        times, wet = acoustics.reverb_from([None] * 13)
+        self.assertAlmostEqual(times[1], acoustics.OPEN_RT60)
+        self.assertAlmostEqual(wet, acoustics.OPEN_WET)
+        self.assertEqual(times, tuple(acoustics.OPEN_RT60 * b for b in acoustics.BANDS))
+        times, wet = acoustics.reverb_from([acoustics.REVERB_ROOM] * 13)
+        self.assertAlmostEqual(times[1], acoustics.OPEN_RT60 + acoustics.ENCLOSED_RT60)
+        self.assertAlmostEqual(wet, acoustics.OPEN_WET + acoustics.ENCLOSED_WET)
+        small, _ = acoustics.reverb_from([5.0] * 13)
+        self.assertLess(small[1], times[1])
+        half, half_wet = acoustics.reverb_from([acoustics.REVERB_ROOM] * 6 + [None] * 6)
+        self.assertAlmostEqual(half_wet, acoustics.OPEN_WET + 0.5 * acoustics.ENCLOSED_WET)
+        self.assertLess(half[1], times[1])
+        self.assertGreater(times[0], times[1])
+        self.assertLess(times[2], times[1])
+
+    def test_occluded_audio(self):
+        self.assertEqual(acoustics.occluded_audio(False), (1.0, None))
+        self.assertEqual(acoustics.occluded_audio(True), (acoustics.OCCLUDED_GAIN, acoustics.OCCLUDED_CUTOFF))
+
     def test_contact_volume(self):
         self.assertEqual(acoustics.contact_volume(0.0), 1.0)
         self.assertAlmostEqual(acoustics.contact_volume(0.5 * acoustics.CONTACT_DISTANCE), 0.5)

@@ -2895,7 +2895,11 @@ cdef class Audio:
     gives the listener's position there, and play and set_voice subtract it
     from a voice's position before miniaudio sees it. A voice keeps the
     position it was last given relative to the listener, so a moving
-    listener calls set_voice for its spatial voices each frame."""
+    listener calls set_voice for its spatial voices each frame.
+
+    On Steam Audio: binaural sound (`binaural`, off at first), a spatial
+    voice played while it is on going through the HRTF for its direction in
+    place of stereo panning; and the world bus's reverb (set_reverb)."""
     cdef CppAudioEngine* _ptr
     cdef cbool _owned
     cdef object _owner
@@ -3088,6 +3092,43 @@ cdef class Audio:
         for k in range(3):
             self._listener[k] = position[k]
         self._ptr.setListener(_audio_vec3(forward), _audio_vec3(up), _audio_vec3(velocity))
+
+    @property
+    def binaural_available(self):
+        """Whether Steam Audio's HRTF can be had (it needs two channels)."""
+        return self._ptr.binauralAvailable()
+
+    @property
+    def binaural(self):
+        """While on (and available), a spatial voice played goes mono
+        through the HRTF for its direction from the listener, with the same
+        falloff and Doppler shift, 256 frames late; a voice keeps how it was
+        played."""
+        return self._ptr.binaural()
+
+    @binaural.setter
+    def binaural(self, bint on):
+        self._ptr.setBinaural(on)
+
+    @property
+    def reverb_available(self):
+        return self._ptr.reverbAvailable()
+
+    def set_reverb(self, times, float wet):
+        """The world bus's reverb: RT60 `times` in seconds, one for every
+        band or (low, mid, high), and the wet signal at `wet` (0 to 1, eased
+        over about 0.3 s) beside the dry; wet 0 is off."""
+        low, mid, high = (times, times, times) if isinstance(times, (int, float)) else times
+        self._ptr.setReverb(low, mid, high, wet)
+
+    @property
+    def reverb_times(self):
+        cdef AudioVec3 t = self._ptr.reverbTimes()
+        return (t[0], t[1], t[2])
+
+    @property
+    def reverb_wet(self):
+        return self._ptr.reverbWet()
 
     def read(self, uint64_t frames):
         """Without a device: the next `frames` frames of the mix, as an

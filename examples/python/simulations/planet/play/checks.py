@@ -32,7 +32,7 @@ import upgrades
 from hud import bearing, distance_text
 from play.core import (CHECK_ORE_EXTENT, CHECK_SAVE_BASE, CRATE_SIZE, HOVER_BACK, PLUME_PUFFS, POI_REACH, RECOVERY_FEE,
                        RIVER_CHECK_WIDTH, SHIP_CLEARANCE, SHIP_HALF, SPACE_HEIGHT, args, engine, foot, planet, state,
-                       world)
+                       settings, world)
 from play import (apps_map, contracting, economy, menus, saving, showers, site, sounds, spaceflight, survival,
                   vehicle, walking)
 
@@ -62,6 +62,7 @@ PAUSE_SECONDS = 1.0             # s --check keeps the pause menu open
 MIX_SECONDS = 0.5               # s --check keeps the slate open before measuring the mix
 VOICE_HITS = 40                 # hits --check plays in one frame on a ring around the camera
 VOICE_RING = 13.0               # m, the ring's radius
+VOICE_LIFT = 8.0                # m above the camera the ring is
 VOICE_SAME = 20                 # hits it plays at one point in the same frame
 VOICE_BUDGET_MS = 10.0          # ms all of them may take
 NET_SETTLE = 3.0                # s --check lets the ore it drops into the net settle
@@ -1309,31 +1310,39 @@ def run_shower_check(check, t):
 
 def run_voice_check(check, t):
     """--check's voice management (see run_check): VOICE_HITS hits of
-    shuffled volumes on a ring of VOICE_RING around the camera and
-    VOICE_SAME at the camera, rising to full, in one frame; 0.1 s on,
-    passing when at most the rocks' category of voices play, the ring's
-    playing are louder than all it dropped, the hits at the camera are one
-    voice, and all took less than VOICE_BUDGET_MS. True once done."""
+    shuffled volumes on a level ring of VOICE_RING around the camera,
+    VOICE_LIFT above it, and VOICE_SAME at the camera, rising to full, in
+    one frame; the next frame, passing when at most the rocks' category of
+    voices play, the ring's playing are louder as heard (their volume times
+    their occlusion's gain) than all it dropped, the hits at the camera are one
+    voice, and all took less than VOICE_BUDGET_MS; and a point 30 m into
+    the ground is occluded and one 30 m up not, the reverb was set (with a
+    wet level within acoustics' range), and the Headphones setting made
+    the audio binaural (when it can be), a hit heard through it, and off
+    again. True once done."""
     audio = state.sound.audio
     if audio is None:
         check["voice_ok"] = True
         return True
     v = check.get("voices")
     if v is None:
-        right, _, forward = walking.view_basis()
         camera = state.view.position
+        up = world.radial_up(camera)
+        east, north = local_frame(up)
+        middle = add(camera, scale(up, VOICE_LIFT))
         volumes = [0.05 + 0.95 * k / (VOICE_HITS - 1) for k in range(VOICE_HITS)]
         random.Random(7).shuffle(volumes)
-        ring = [add(camera, add(scale(right, VOICE_RING * math.cos(2.0 * math.pi * k / VOICE_HITS)),
-                                scale(forward, VOICE_RING * math.sin(2.0 * math.pi * k / VOICE_HITS))))
+        ring = [add(middle, add(scale(east, VOICE_RING * math.cos(2.0 * math.pi * k / VOICE_HITS)),
+                                scale(north, VOICE_RING * math.sin(2.0 * math.pi * k / VOICE_HITS))))
                 for k in range(VOICE_HITS)]
         start = time.perf_counter()
         voices = [sounds.hit(point, volume) for point, volume in zip(ring, volumes)]
         same = [sounds.hit(camera, 0.9 + 0.1 * k / (VOICE_SAME - 1)) for k in range(VOICE_SAME)]
-        check["voices"] = {"t0": t, "voices": voices, "volumes": volumes, "same": same,
-                           "ms": 1000.0 * (time.perf_counter() - start)}
+        ms = 1000.0 * (time.perf_counter() - start)
+        heard = [volume * acoustics.occluded_audio(sounds.occluded(point))[0] for point, volume in zip(ring, volumes)]
+        check["voices"] = {"t0": t, "voices": voices, "volumes": heard, "same": same, "ms": ms}
         return False
-    if t - v["t0"] < 0.1:
+    if t <= v["t0"]:
         return False
     playing = [voice != 0 and audio.active(voice) for voice in v["voices"]]
     kept = [volume for volume, on in zip(v["volumes"], playing) if on]
@@ -1349,7 +1358,26 @@ def run_voice_check(check, t):
     for voice in set(v["voices"] + v["same"]):
         if voice:
             audio.stop(voice)
-    check["voice_ok"] = ok
+
+    camera, up = state.view.position, world.radial_up(state.view.position)
+    below, above = sounds.occluded(add(camera, scale(up, -30.0))), sounds.occluded(add(camera, scale(up, 30.0)))
+    reverb = state.sound.reverb
+    most = acoustics.OPEN_WET + acoustics.ENCLOSED_WET
+    reverb_ok = not audio.reverb_available or (reverb is not None and acoustics.OPEN_WET <= reverb[1] <= most + 1e-6)
+    headphones = settings["headphones"]
+    settings.set("headphones", True)
+    sounds.apply_binaural()
+    binaural = audio.binaural == audio.binaural_available and not state.sound.loops
+    heard = sounds.play("hit", add(camera, scale(up, 2.0)))
+    audio.stop(heard)
+    settings.set("headphones", headphones)
+    sounds.apply_binaural()
+    steam_ok = below and not above and reverb_ok and binaural and heard != 0 and not audio.binaural
+    print("[walker] 30 m into the ground occluded (%s), 30 m up not (%s); the reverb %s; with headphones binaural "
+          "(%s) and heard (%s): %s" % (below, above, "unset" if reverb is None else
+                                       "%.2f s, wet %.2f" % (reverb[0][1], reverb[1]), binaural, heard != 0,
+                                       "passed" if steam_ok else "FAILED"), flush=True)
+    check["voice_ok"] = ok and steam_ok
     return True
 
 

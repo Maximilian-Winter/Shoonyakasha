@@ -77,6 +77,9 @@ __pycache__/
 /python/shoonyakasha/draco.dll
 /python/shoonyakasha/ktx.dll
 /python/shoonyakasha/zstd.dll
+/python/shoonyakasha/phonon.dll
+/python/shoonyakasha/mysofa.dll
+/python/shoonyakasha/z.dll
 /examples/python/games_2d/pong_game/assets
 
 # The Python examples compile their shaders at startup, so the .spv under them
