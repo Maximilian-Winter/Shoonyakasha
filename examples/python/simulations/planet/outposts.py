@@ -16,9 +16,23 @@ there and those taken before it; and makes COUNT of them per body into
 outposts at the mean of their heights. Each outpost there is a flat site
 (world.Site) of FLAT_RADIUS and BLEND_RADIUS.
 
-`Pads` draws each outpost but the home one: a pad PAD_SIZE across, a mast
-and two buildings beside it, placed each frame relative to the camera
-like the blocks. `Outpost.at(ship_position)` tells whether a point is over
+`Pads` builds and draws each outpost but the home one from the outposts'
+kit (shoonyakasha.planet.outpost_kit, outpost_layout): `build(outposts,
+seed)` gives each its purpose (`Outpost.purpose`, seeded by `seed`;
+REFINERY's always the fuel depot) and lays its parts out round its pad
+(PAD_SIZE across), the same each time for the same seed; an ore line's
+heaps take the tint of a resource of its body (seeded). Each outpost is
+drawn by a few mesh entities placed each frame relative to the camera
+like the blocks: its static parts, its loose parts (containers and
+barriers, merged; `Pads.loose_shown` hides them), its lamps and its
+screens, all within HIDE_DISTANCE, and its beacons. The lamps' glow
+(LAMP_GLOW) is drawn while the sun at the site is below LAMPS_ON degrees. A
+beacon blinks (on BEACON_ON s of every BEACON_PERIOD, its phase per
+outpost; lit throughout with `Pads.steady`) within BEACON_RANGE, or from
+anywhere while its site's lamps are on, at least BEACON_ANGLE radians
+across. `Built.to_frame` turns
+the site frame's points (x east, y up, z north) into the planet's axes,
+and `Built.point` a site point into planet space. `Outpost.at(ship_position)` tells whether a point is over
 its pad: within PAD_REACH of its centre along the ground and REACH_UP
 above or below it. The outpost named REFINERY has a refinery
 (`Outpost.refinery`): it turns ice into fuel, REFINE_ICE kg of ice to a
@@ -30,7 +44,12 @@ import random
 import zlib
 from dataclasses import dataclass, field
 
-from shoonyakasha.planet.vec import add, dot, euler_from_basis, length, local_frame, normalize, scale, sub
+import numpy as np
+
+from shoonyakasha.planet import outpost_kit, outpost_layout
+from shoonyakasha.planet.resources import AMBER, CUPRITE, EVAPORITE, FERRITE, ICE, ILMENITE, QUARTZ
+from shoonyakasha.planet.rocks import ORE_TINTS
+from shoonyakasha.planet.vec import add, dot, length, local_frame, normalize, scale, sub
 from shoonyakasha.planet.world import Site
 
 COUNT = {"planet": 3, "moon": 2}
@@ -50,6 +69,13 @@ PAD_SIZE = 30.0                                      # m
 PAD_REACH = 25.0                                     # m along the ground from a pad's centre
 REACH_UP = 15.0                                      # m above or below it
 PAD_COLOUR = {"planet": (0.33, 0.34, 0.37), "moon": (0.46, 0.46, 0.49)}
+HEAP_RESOURCES = {"planet": (FERRITE, CUPRITE, QUARTZ, AMBER, EVAPORITE), "moon": (ICE, ILMENITE)}
+HIDE_DISTANCE = 8_000.0                              # m: an outpost's parts are drawn within this
+LAMPS_ON = 3.0                                       # degrees: the sun's elevation at a site below which its lamps glow
+LAMP_GLOW, SCREEN_GLOW, BEACON_GLOW = 2.0, 1.2, 24.0  # emissive strengths
+BEACON_RANGE = 30_000.0                              # m
+BEACON_PERIOD, BEACON_ON = 2.0, 0.3                  # s
+BEACON_SIZE, BEACON_ANGLE = 0.6, 0.006               # m across at least; radians across at least
 
 
 def ground_distance(radius, a, b):
@@ -67,6 +93,7 @@ class Outpost:
     blend_radius: float = 0.0
     supply: dict = field(default_factory=dict)   # body name: (kg of its ore bought, world time), trade.py
     reputation: float = 0.0      # the player's standing here (the walker's contracts); raises its prices
+    purpose: str = ""            # one of outpost_layout.PURPOSES, from Pads.build
 
     @property
     def refinery(self):
@@ -153,53 +180,140 @@ class Survey:
         return new
 
 
-class Pads:
-    """The outposts' pads, masts and buildings."""
+class Built:
+    """An outpost's site model (outpost_layout.SiteModel) and its entities."""
 
-    # (east, up, north) centre, (east, up, north) size, colour; None for the pad's own colour
-    PIECES = (
-        ((0.0, 0.1, 0.0), (PAD_SIZE, 0.1, PAD_SIZE), None),
-        ((13.5, 10.15, -13.5), (0.4, 20.0, 0.4), (0.92, 0.32, 0.15)),
-        ((-26.0, 2.05, 0.0), (6.0, 4.0, 9.0), (0.78, 0.76, 0.70)),
-        ((-26.0, 1.55, 9.0), (3.0, 3.0, 3.0), (0.85, 0.62, 0.20)),
-    ) + tuple(((x * 14.5, 0.25, z * 14.5), (0.5, 0.3, 0.5), (1.0, 0.75, 0.25)) for x in (-1, 1) for z in (-1, 1))
+    def __init__(self, outpost, model):
+        self.outpost = outpost
+        self.model = model
+        east, north = local_frame(outpost.direction)
+        self.axes = np.array([east, outpost.direction, north])
+        self.centre = scale(outpost.direction, outpost.body.radius + outpost.height)   # from the body's centre
+        self.phase = (zlib.crc32(outpost.name.encode()) % 1000) / 1000.0 * BEACON_PERIOD
+        self.entities = {}           # "solid", "loose", "lamps", "screens": entity
+        self.beacons = []            # entity per beacon
+        self.shown = {}              # entity: visible
+
+    def to_frame(self, points):
+        """Site-frame points (x east, y up, z north) along the planet's axes."""
+        return np.asarray(points, np.float64) @ self.axes
+
+    def point(self, local):
+        """A site-frame point in planet space."""
+        return tuple(np.asarray(add(self.outpost.body.centre(), self.centre)) + self.to_frame(local))
+
+    def triangles(self, arrays):
+        """(positions, normals, colours) of the site frame along the planet's axes, each triangle's
+        corners reversed, since the site frame's axes are mirrored."""
+        positions, normals, colours = arrays
+        flip = lambda a: np.asarray(a).reshape(-1, 3, 3)[:, ::-1].reshape(-1, 3)
+        return (flip(self.to_frame(positions)).astype(np.float32), flip(self.to_frame(normals)).astype(np.float32),
+                flip(colours).astype(np.float32))
+
+
+class Pads:
+    """The outposts but the home one, built from the kit."""
 
     def __init__(self, engine, mesh):
-        """`mesh`: (positions, normals) of a unit cube centred on the origin."""
+        """`mesh`: (positions, normals) of a unit cube centred on the origin, the beacons'."""
         self.engine = engine
         self.mesh = mesh
-        self.placed = []             # (entity, body, offset from the body's centre)
+        self.built = []              # Built
+        self.loose_shown = {}        # outpost name: whether its loose parts' merged mesh is drawn (True when absent)
+        self.steady = False          # the beacons lit throughout instead of blinking
 
-    def build(self, outposts):
-        """Pads for `outposts` (all but those with no flat radius), replacing any there were."""
+    def build(self, outposts, seed):
+        """`outposts` (all but those with no flat radius) laid out and given entities, replacing any there were."""
         self.clear()
-        positions, normals = self.mesh
-        for outpost in outposts:
-            if outpost.flat_radius <= 0.0:
+        sites = [o for o in outposts if o.flat_radius > 0.0]
+        names = {}
+        for o in sites:
+            names.setdefault(o.body.name, []).append(o.name)
+        purposes = outpost_layout.purposes(seed, names, {REFINERY: "fuel"})
+        for o in sites:
+            o.purpose = purposes[o.name]
+            rng = random.Random(zlib.crc32(repr(("heap", seed, o.name)).encode()))
+            resources = HEAP_RESOURCES.get(o.body.name, (FERRITE,))
+            tint = ORE_TINTS[resources[rng.randrange(len(resources))]]
+            equator = math.pi if o.direction[1] >= 0.0 else 0.0
+            placed = outpost_layout.layout(seed, o.name, o.purpose, PAD_SIZE, PAD_COLOUR.get(o.body.name, (0.4, 0.4, 0.4)),
+                                           equator, tint)
+            built = Built(o, outpost_layout.site_model(placed, o.body.radius, seed))
+            self.make_entities(built)
+            self.built.append(built)
+
+    def make_entities(self, built):
+        from viewmodel import white_texture
+        scene = self.engine.scene
+        m = built.model
+        for key, arrays, glow in (("solid", m.solid, None), ("loose", outpost_layout.merged(m.loose), None),
+                                  ("lamps", m.lamps, tuple(c * LAMP_GLOW for c in outpost_kit.LAMP)),
+                                  ("screens", m.screens, tuple(c * SCREEN_GLOW for c in outpost_kit.SCREEN))):
+            if len(arrays[0]) == 0:
                 continue
-            up = outpost.direction
-            east, north = local_frame(up)
-            rotation = euler_from_basis(east, up, scale(north, -1.0))
-            centre = scale(up, outpost.body.radius + outpost.height)
-            for (e, u, n), size, colour in self.PIECES:
-                entity = self.engine.create_mesh(positions, normals=normals, name="Pad")
-                self.engine.scene.set_rotation(entity, rotation)
-                self.engine.scene.set_scale(entity, size)
-                colour = colour or PAD_COLOUR[outpost.body.name]
-                self.engine.scene.set_material_vec4(entity, "baseColorFactor", colour + (1.0,))
-                self.engine.scene.set_material_float(entity, "gridStrength", 0.0)
-                self.engine.scene.set_render_layer_mask(entity, 1)
-                offset = add(centre, add(scale(east, e), add(scale(up, u), scale(north, n))))
-                self.placed.append((entity, outpost.body, offset))
+            positions, normals, colours = built.triangles(arrays)
+            entity = self.engine.create_mesh(positions, normals=normals, colors=colours, name="Outpost")
+            scene.set_material_float(entity, "gridStrength", 0.0)
+            if glow is None:
+                scene.set_material_vec4(entity, "baseColorFactor", (1.0, 1.0, 1.0, 1.0))
+                scene.set_render_layer_mask(entity, 1)
+            else:
+                scene.set_material_vec4(entity, "baseColorFactor", (0.05, 0.05, 0.05, 1.0))
+                scene.set_material_texture(entity, "emissiveMap", white_texture())
+                scene.set_material_vec4(entity, "emissiveFactor", glow + (0.0,))
+                scene.set_render_layer_mask(entity, 2)
+            built.entities[key] = entity
+        cube = self.mesh
+        for _ in m.beacons:
+            entity = self.engine.create_mesh(cube[0], normals=cube[1], name="Beacon")
+            scene.set_material_float(entity, "gridStrength", 0.0)
+            scene.set_material_vec4(entity, "baseColorFactor", (0.05, 0.05, 0.05, 1.0))
+            scene.set_material_texture(entity, "emissiveMap", white_texture())
+            scene.set_material_vec4(entity, "emissiveFactor", tuple(c * BEACON_GLOW for c in outpost_kit.BEACON) + (0.0,))
+            scene.set_render_layer_mask(entity, 2)
+            built.beacons.append(entity)
 
     def clear(self):
-        for entity, _, _ in self.placed:
-            self.engine.scene.destroy_entity(entity)
-        self.placed = []
+        for built in self.built:
+            for entity in list(built.entities.values()) + built.beacons:
+                self.engine.scene.destroy_entity(entity)
+        self.built = []
 
-    def draw(self, camera):
-        for entity, body, offset in self.placed:
-            self.engine.scene.set_position(entity, sub(add(body.centre(), offset), camera))
+    def find(self, outpost):
+        return next((b for b in self.built if b.outpost is outpost), None)
+
+    def show(self, built, entity, on):
+        if built.shown.get(entity) != on:
+            self.engine.scene.set_visible(entity, on)
+            built.shown[entity] = on
+
+    def draw(self, camera, sun, time):
+        """Each outpost placed relative to `camera` (planet space); `sun` the
+        direction towards the sun, `time` the world's clock (s)."""
+        scene = self.engine.scene
+        for built in self.built:
+            o = built.outpost
+            at = add(o.body.centre(), built.centre)
+            relative = sub(at, camera)
+            distance = length(relative)
+            near = distance < HIDE_DISTANCE
+            dark = dot(sun, o.direction) < math.sin(math.radians(LAMPS_ON))
+            for key, entity in built.entities.items():
+                on = near and (key != "loose" or self.loose_shown.get(o.name, True)) and (key != "lamps" or dark)
+                self.show(built, entity, on)
+                if on:
+                    scene.set_position(entity, relative)
+            blink = self.steady or (time + built.phase) % BEACON_PERIOD < BEACON_ON
+            for entity, local in zip(built.beacons, built.model.beacons):
+                point = built.point(local)
+                d = length(sub(point, camera))
+                on = blink and (d < BEACON_RANGE or dark)
+                self.show(built, entity, on)
+                if on:
+                    scene.set_position(entity, sub(point, camera))
+                    size = max(BEACON_SIZE, d * BEACON_ANGLE)
+                    scene.set_scale(entity, (size, size, size))
+
 
 
 def nearest(outposts, position):

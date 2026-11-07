@@ -12,6 +12,8 @@ import tempfile
 import time
 from collections import Counter
 
+import numpy as np
+
 from shoonyakasha.planet.gravity_gun import GunParams
 from shoonyakasha.planet.vec import add, cross, dot, length, local_frame, normalize, quat_from_basis, scale, sub
 from shoonyakasha.planet import resources
@@ -32,8 +34,8 @@ import trade
 import upgrades
 from hud import bearing, distance_text
 from play.core import (CHECK_ORE_EXTENT, CHECK_SAVE_BASE, CRATE_SIZE, HOVER_BACK, PLUME_PUFFS, POI_REACH, RECOVERY_FEE,
-                       RIVER_CHECK_WIDTH, SHIP_CLEARANCE, SHIP_HALF, SPACE_HEIGHT, args, engine, foot, planet, state,
-                       settings, world)
+                       RIVER_CHECK_WIDTH, SHIP_CLEARANCE, SHIP_HALF, SPACE_HEIGHT, args, engine, foot, outpost_bodies,
+                       pads, planet, state, settings, world)
 from play import (apps_map, contracting, economy, menus, saving, showers, site, sounds, spaceflight, survival,
                   vehicle, walking)
 
@@ -68,6 +70,13 @@ VOICE_SAME = 20                 # hits it plays at one point in the same frame
 VOICE_BUDGET_MS = 10.0          # ms all of them may take
 SCAN_ROCK_MOISTURE = -0.8       # the climate's moisture offset --check turns the ground around the player desert with
 SCAN_ROCK_SECONDS = 10.0        # s it waits at most for a scanned rock's collider
+OUTPOST_SECONDS = 15.0          # s --check waits at most for an outpost's bodies with the car on its pad
+OUTPOST_REST_SECONDS = 5.0      # s its loose parts have, woken, to come to rest
+OUTPOST_REST_MOVE = 0.15        # m a loose part may move coming to rest
+OUTPOST_PAD_LEVEL = 0.02        # m the ground over the pad may differ from the outpost's height
+OUTPOST_PAD_POINTS = ((0.0, 0.0), (6.0, 0.0), (-6.0, 0.0), (0.0, 6.0), (0.0, -6.0))   # (east, north) m from its centre
+OUTPOST_BIN_SECONDS = 10.0      # s it waits at most for ore dropped in the ore bin to sell
+OUTPOST_BIN_DROP = 1.5          # m above the ore bin's floor the ore is dropped
 NET_SETTLE = 3.0                # s --check lets the ore it drops into the net settle
 NET_CHECK_AWAY = 60.0           # m along its nose --check moves the car off Base's pad for the net
 SUIT_CHECK_TEMPERATURE = -60.0  # degrees C --check stands in for the air's while the suit drains
@@ -191,6 +200,7 @@ def run_check(dt):
     drawn; then, the storm gone, Base announced open and the ore sold
     within SELL_SECONDS; then, with sound, the voices (run_voice_check);
     then a scanned rock's collider, lifted loose (run_scan_rock_check);
+    after the river, an outpost's bodies and ore bin (run_outpost_check);
     then the menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
@@ -277,7 +287,7 @@ def run_check(dt):
     new game (with _new_game added)."""
     player = foot.player
     check = state.session.check
-    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "space", "night", "net_out",
+    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "outpost", "fuel", "space", "night", "net_out",
                                                                   "menu", "new game")):
         return
     if check is None:
@@ -778,7 +788,7 @@ def run_check(dt):
                      "passed" if river_ok else "FAILED"), flush=True)
             check["ok"] = check["ok"] and river_ok
             if not args.shot:
-                check["stage"], check["time"] = "fuel", 0.0
+                check["stage"], check["time"] = "outpost", 0.0
                 return
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_river" + ext)
@@ -788,6 +798,10 @@ def run_check(dt):
         if t >= RIVER_CLIMB_SECONDS + 2.0:
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_river_above" + ext)
+            check["stage"], check["time"] = "outpost", 0.0
+    elif stage == "outpost":
+        if run_outpost_check(check, t):
+            check["ok"] = check["ok"] and check["outpost_ok"]
             check["stage"], check["time"] = "fuel", 0.0
     elif stage == "fuel":
         car = state.vehicle.car
@@ -1393,6 +1407,89 @@ def run_voice_check(check, t):
           % (below, above, "unset" if reverb is None else "%.2f s, wet %.2f" % (reverb[0][1], reverb[1]), binaural,
              heard != 0, culled, length(sounds.listener_velocity()), "passed" if steam_ok else "FAILED"), flush=True)
     check["voice_ok"] = ok and steam_ok
+    return True
+
+
+def run_outpost_check(check, t):
+    """--check's outpost (see run_check): the car put on the pad of the
+    planet's first outpost, until the outpost has its bodies
+    (outpost_bodies, within OUTPOST_SECONDS); its loose parts woken, each
+    to be asleep again within OUTPOST_REST_MOVE of where it was after
+    OUTPOST_REST_SECONDS, the ground over the pad (at OUTPOST_PAD_POINTS,
+    from the car's ground patch) within OUTPOST_PAD_LEVEL of the outpost's
+    height; then a piece of ore dropped in its ore bin, to be sold there
+    within OUTPOST_BIN_SECONDS. The car is put back where it was. True once
+    done, with check["outpost_ok"]."""
+    s = check.get("outpost")
+    car = state.vehicle.car
+    if s is None:
+        o = next(o for o in state.site.outposts[1:] if o.body is planet)
+        s = check["outpost"] = {"outpost": o, "from": (car.position, car.heading), "step": "bodies", "t0": t}
+        car.position = scale(o.direction, planet.radius + o.height + hovercar.HOVER_MIN + SHIP_HALF[1])
+        car.velocity = (0.0, 0.0, 0.0)
+        car.target = hovercar.HOVER_MIN
+    state.vehicle.controls = hovercar.CarControls()
+    o = s["outpost"]
+    if s["step"] == "bodies":
+        if outpost_bodies.outpost is not o:
+            if t - s["t0"] < OUTPOST_SECONDS:
+                return False
+            return outpost_done(check, s, False, "%s's bodies not made with the car on its pad in %.0f s"
+                                % (o.name, OUTPOST_SECONDS))
+        handles = [h for h, _ in outpost_bodies.loose_bodies()]
+        for h in handles:
+            foot.physics.activate(h)
+        s["handles"] = handles
+        s["at"] = transforms(handles)
+        s["step"], s["t0"] = "rest", t
+        return False
+    if s["step"] == "rest":
+        if t - s["t0"] < OUTPOST_REST_SECONDS:
+            return False
+        moved = [length(sub(a, b)) for a, b in zip(transforms(s["handles"]), s["at"])]
+        awake = sum(1 for h in s["handles"] if foot.physics.is_active(h))
+        built = pads.find(o)
+        east, north = local_frame(o.direction)
+        levels = []
+        for e, n in OUTPOST_PAD_POINTS:
+            point = add(o.point(), add(add(scale(east, e), scale(north, n)), scale(o.direction, 1.0)))
+            above = vehicle.camera_ground(point)
+            levels.append(None if above is None else 1.0 - above)
+        level_ok = all(h is not None and abs(h) <= OUTPOST_PAD_LEVEL for h in levels)
+        s["rest_ok"] = (awake == 0 and max(moved, default=0.0) <= OUTPOST_REST_MOVE and level_ok
+                        and outpost_bodies.static_count() > 0 and len(s["handles"]) == len(built.model.loose))
+        s["line"] = ("%s (%s): %d static hulls, %d loose parts at rest %.0f s after waking (%d awake, moved %.2f m "
+                     "at most), the pad level within %s m"
+                     % (o.name, o.purpose, outpost_bodies.static_count(), len(s["handles"]), OUTPOST_REST_SECONDS,
+                        awake, max(moved, default=0.0),
+                        "?" if None in levels else "%.3f" % max(abs(h) for h in levels)))
+        centre, heading = built.model.bins[0]
+        spot = built.point((centre[0], centre[1] + OUTPOST_BIN_DROP, centre[2]))
+        s["credits"] = state.economy.market.credits
+        s["ore"] = walking.ore_rock(spot, CHECK_ORE_EXTENT, CHECK_ORE_GRADE)
+        s["step"], s["t0"] = "bin", t
+        return False
+    sold = s["ore"] not in foot.props.rocks
+    if not sold and t - s["t0"] < OUTPOST_BIN_SECONDS:
+        return False
+    gained = state.economy.market.credits - s["credits"]
+    return outpost_done(check, s, s["rest_ok"] and sold and gained > 0.0,
+                        "%s; ore dropped in its ore bin sold (%s) for %.0f cr" % (s["line"], sold, gained))
+
+
+def transforms(handles):
+    if not handles:
+        return []
+    data = np.frombuffer(foot.physics.get_transforms(handles), dtype=np.float64).reshape(-1, 7)
+    return [tuple(row[:3]) for row in data]
+
+
+def outpost_done(check, s, ok, line):
+    car = state.vehicle.car
+    car.position, car.heading = s["from"]
+    car.velocity = (0.0, 0.0, 0.0)
+    print("[walker] %s: %s" % (line, "passed" if ok else "FAILED"), flush=True)
+    check["outpost_ok"] = ok
     return True
 
 

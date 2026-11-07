@@ -1,12 +1,15 @@
 """
 Buying and selling at the outposts: the car's fuel (filled on a pad,
-called off the pads), selling the car's cargo and survey data, the
-refinery, the upgrades and the parameters they give, and the items of the
+called off the pads), selling the car's cargo, the ore dropped in an
+outpost's ore bin and survey data, the refinery, the upgrades and the parameters they give, and the items of the
 slate's Vehicle, Market and Workshop apps.
 """
 
+import numpy as np
+
 from shoonyakasha.planet.gravity_gun import GunParams
-from shoonyakasha.planet.vec import length, normalize, sub
+from shoonyakasha.planet.outpost_kit import BIN_INSIDE, yaw
+from shoonyakasha.planet.vec import add, length, normalize, sub
 from shoonyakasha.planet import resources
 
 import hovercar
@@ -16,7 +19,7 @@ import trade
 import upgrades
 from trade import sale
 import hud as hud_module
-from play.core import GOOD_TOAST, foot, state, world
+from play.core import GOOD_TOAST, foot, outpost_bodies, state, world
 from play import contracting, spaceflight, storms, vehicle
 
 CALL_REACH = 50.0               # m the car may move from where fuel was called to and still get it
@@ -143,6 +146,13 @@ def sell_car_cargo():
     if not ore:
         state.economy.trade_note = "no ore to sell"
         return
+    sell_ore(outpost, ore, "")
+
+
+def sell_ore(outpost, ore, where):
+    """Ore items sold at `outpost` (trade.sale): the credits, the supply,
+    the ledger and the trade note, with a toast saying what; `where` is
+    put after the outpost's name in it."""
     credits, supplies = sale(outpost, ore, world.time)
     outpost.supply.update(supplies)
     state.economy.market.credits += credits
@@ -151,8 +161,59 @@ def sell_car_cargo():
     state.economy.earned += credits
     for item in ore:
         state.economy.ledger.sold(item["resource"], item["mass"])
-    state.economy.trade_note = "sold %.0f kg of ore at %s for %s cr" % (kg, outpost.name, format(int(round(credits)), ","))
+    state.economy.trade_note = "sold %.0f kg of ore at %s%s for %s cr" % (kg, outpost.name, where,
+                                                                          format(int(round(credits)), ","))
     state.ui.hud.toast(state.economy.trade_note[0].upper() + state.economy.trade_note[1:], GOOD_TOAST, kind="money")
+
+
+def in_bins():
+    """(prop, item) of each loose ore rock lying settled (resting, or asleep
+    in the physics) in the ore bin of the outpost with bodies
+    (outpost_bodies), within BIN_INSIDE of the bin's frame: the item as
+    the car's hold would have it."""
+    built, bubble = outpost_bodies.built, foot.bubble
+    if built is None or bubble is None:
+        return []
+    found = []
+    for prop in foot.props.rocks:
+        if prop.grade <= 0.0:
+            continue
+        if prop.state == "resting":
+            point = add(prop.on.centre(), prop.position)
+        elif prop.body is not None and not foot.physics.is_active(prop.body):
+            point = bubble.to_world(foot.physics.get_transform(prop.body)[0])
+        else:
+            continue
+        for centre, heading in built.model.bins:
+            d = np.asarray(sub(point, built.point(centre)))
+            x, y, z = yaw(heading).T @ (built.axes @ d)
+            hx, hz, low, high = BIN_INSIDE
+            if abs(x) <= hx and abs(z) <= hz and low - 0.5 <= y <= high:
+                seen = state.economy.seen.get(id(prop)) or (prop.on.name, normalize(prop.on.relative(point)))
+                found.append((prop, {"body": seen[0], "direction": tuple(seen[1]), "mass": prop.mass,
+                                     "grade": prop.grade, "resource": prop.resource}))
+                break
+    return found
+
+
+def update_ore_bins():
+    """The ore in the outpost's ore bin (in_bins) delivered to a contract
+    that wants it there or sold (sell_ore), and taken out of the world;
+    not while the outpost is closed."""
+    found = in_bins()
+    if not found:
+        return
+    outpost = outpost_bodies.outpost
+    if storms.closed(outpost):
+        return
+    for prop, _ in found:
+        if foot.gun is not None and prop.body is not None and foot.gun.held == prop.body:
+            foot.gun.drop()
+        state.economy.seen.pop(id(prop), None)
+        foot.props.remove(foot.bubble, prop, release=False)
+    ore = [item for _, item in found if not contracting.deliver(outpost, item)]
+    if ore:
+        sell_ore(outpost, ore, "'s ore bin")
 
 
 def refine_ice():

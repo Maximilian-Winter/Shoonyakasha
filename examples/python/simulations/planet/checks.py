@@ -39,7 +39,7 @@ from __main__ import (
     CAPTURES, CRATE_DENSITY, CRATE_SIZE, DAY_SUN, FLIGHT_STEP, NET_HALF, ORBIT_HEIGHT, PIXEL_ANGLE,
     SET_DOWN_DEPTH, SHIP_CLEARANCE, SHIP_REACH, WARPS, bodies, change_terrain, contact_text, credits_text,
     distance_text, drop_bubble, engine, ensure_bubble, foot, get_in, get_out, go_on_foot, in_net_now, load_game,
-    moon_body, moon_spot, nearby_trees, net_frame, new_seed, new_ship, on_key, outpost_here, physics, planet,
+    moon_body, moon_spot, nearby_trees, net_frame, new_seed, new_ship, on_key, outpost_here, pads, physics, planet,
     SHIP_UPGRADES, prop_state, props, save_game, scanner, scatter_rocks, set_colour_mode, set_hour, set_wireframe,
     ship_landed,
     ship_velocity, ship_wind, state, teleport, trunks, viewpoint, world)
@@ -193,6 +193,41 @@ def near_mountain(sun_elevation, sun_azimuth, top=False):
 SCAN_SUN = (35.0, 0.0)          # the scans' shots: the sun 35 degrees up in the east, behind the camera looking west
 
 
+def at_outpost(purpose, distance, azimuth, height, down, sun_elevation):
+    """The free camera `height` metres above the outpost of `purpose` (the
+    first such; else, or with None, the first outpost: one on the planet when there is one), `distance` metres from its pad's
+    centre at `azimuth` degrees from east towards north, looking back at it
+    and `down` degrees below level; the sun `sun_elevation` degrees up there,
+    behind the camera."""
+    found = [o for o in state["outposts"][1:] if o.purpose == purpose] or state["outposts"][1:]
+    o = found[0]
+    up = o.direction
+    east, north = local_frame(up)
+    a = math.radians(azimuth)
+    level = add(scale(east, math.cos(a)), scale(north, math.sin(a)))
+    state["mode"] = "camera"
+    state["position"] = add(o.point(), add(scale(level, distance), scale(up, height)))
+    tilt = math.radians(down)
+    state["forward"] = normalize(add(scale(level, -math.cos(tilt)), scale(up, -math.sin(tilt))))
+    e = math.radians(sun_elevation)
+    sun = add(scale(up, math.sin(e)), scale(level, math.cos(e)))
+    _, site_up, site_east, site_north = world.site_frame()
+    world.sun_elevation = math.degrees(math.asin(max(-1.0, min(1.0, dot(sun, site_up)))))
+    world.sun_azimuth = math.degrees(math.atan2(dot(sun, site_north), dot(sun, site_east)))
+    world.upload_sky()
+
+
+OUTPOST_SHOTS = [("outpost_%s_%s" % (purpose, when), 1, False, 0, None, DAY_SUN,
+                  lambda purpose=purpose, sun=sun: at_outpost(purpose, 95.0, 30.0, 28.0, 14.0, sun))
+                 for purpose in ("mining", "fuel", "research", "trade") for when, sun in (("day", 35.0), ("dusk", 1.0))] + [
+    ("outpost_on_foot", 1, False, 0, None, DAY_SUN, lambda: at_outpost("mining", 26.0, 200.0, 1.7, 3.0, 25.0)),
+    ("outpost_beacon_night", 1, False, 0, None, DAY_SUN, lambda: setattr(pads, "steady", True),
+     lambda: at_outpost(None, 3_000.0, 60.0, 1_200.0, 20.0, -25.0)),
+    ("outpost_beacon_from_orbit", 1, False, 0, None, DAY_SUN, lambda: setattr(pads, "steady", True),
+     lambda: at_outpost(None, 40_000.0, 60.0, 60_000.0, 50.0, -30.0)),
+]
+
+
 class CaptureTour:
     """--capture: each shot in turn, a screenshot once settled (or after
     MAX_FRAMES), then exit. Waits for the site's height first."""
@@ -266,7 +301,7 @@ class CaptureTour:
         ("chase_in_orbit", 9, False, 0, None, DAY_SUN, lambda: state.update(chase=True)),
         ("chase_on_the_moon", 1, False, 0, None, DAY_SUN, lambda: teleport(8, moon=True),
          lambda: state.update(chase=True)),
-    ]
+    ] + OUTPOST_SHOTS
 
     def __init__(self, directory, names=None):
         """`names`: only the shots whose names contain one of these."""
@@ -282,6 +317,8 @@ class CaptureTour:
         if world.site_height is None:
             return True
         name, preset, wireframe, colour_mode, change, sun, *setup = self.SHOTS[self.shot]
+        if name.startswith("outpost_") and len(state["outposts"]) < 2:
+            return True
         self.frames += 1
         if self.frames == 1:
             if change is not None:
@@ -302,6 +339,7 @@ class CaptureTour:
             state["input"] = "keys"
             world.set_clearings([])
             world.moisture_offset = world.temperature_offset = 0.0
+            pads.steady = False
             for action in setup:
                 action()
         elif self.captured is None:

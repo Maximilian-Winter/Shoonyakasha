@@ -1,7 +1,8 @@
 """
 What every part of the walker (walker.py, the play package) shares: the
 command line (`args`), the settings, the engine, the planet's world and
-its bodies, the player on foot (`foot`), the outposts' pads, the Base
+its bodies, the player on foot (`foot`), the outposts' pads and their
+parts in the physics (`outpost_bodies`), the Base
 blocks, the game's `state` (play.state.State: a part for each system,
 each field's comment saying what it holds), and the constants more than one module uses. Importing it parses
 the command line and makes the engine and the world.
@@ -20,6 +21,7 @@ from shoonyakasha.planet.world import FOV
 import config
 import fieldslate as fs
 import hovercar
+from outpost_bodies import OutpostBodies
 from outposts import Pads
 from rocks import Rocks
 from play.state import State
@@ -80,5 +82,6 @@ def box():
 
 foot = OnFoot(engine, world, box(), make_rocks=lambda props: Rocks(engine, world, props))
 pads = Pads(engine, box())
+outpost_bodies = OutpostBodies(engine, pads)
 blocks = []                      # (entity, offset in planet space from the site's point on the ground)
 state = State()

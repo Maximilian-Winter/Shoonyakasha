@@ -1294,7 +1294,7 @@ def update_outposts():
     world.set_sites([o.site() for o in state["outposts"] if o.flat_radius > 0.0])
     world.end_survey()
     state["survey"] = None
-    pads.build(state["outposts"])
+    pads.build(state["outposts"], tuple(planet.terrain["seed"]))
     print("[planet] outposts: %s" % ", ".join(
         "%s on the %s (%.0f m)" % (o.name, o.body.name, o.height) for o in state["outposts"][1:]), flush=True)
 
@@ -1938,7 +1938,7 @@ def frame(dt):
     ground = world.site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
-    pads.draw(camera)
+    pads.draw(camera, world.sun_direction(), world.time)
     draw_net(camera)
     props.draw(foot.bubble, camera)
     place_viewmodel(dt, camera)
