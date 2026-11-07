@@ -32,13 +32,15 @@ image turns so that the heading is up; `circle` leaves the corners
 outside the inscribed circle transparent. `to_pixel` and `from_pixel`
 convert between cells and the image's pixels the same way.
 
-`MapView` draws in the interface style of scifi.py, on a screen canvas
-laid out for its reference size divided by the HUD's scale
-(`set_scale`). The minimap at the top right is a round scope that turns
-with the view: the image in a ring, range rings, bearing ticks every 30
-degrees with N in amber, a sweep turning once every SWEEP_SECONDS, the
-markers (name, cell coordinates, colour; one beyond the rim held on it)
-and the player's arrow, and its range under it. While open, the full map
+`MapView` draws on a screen canvas laid out for its reference size
+divided by the HUD's scale (`set_scale`). The minimap, in the Field
+Slate style (fieldslate.py) at the bottom right and only when `update`
+is asked for it, is a round scope that turns with the view: the image on
+a glass disc in a thin ring, a range ring and cross lines, bearing ticks
+every 30 degrees with N named, a sweep turning once every SWEEP_SECONDS,
+the markers (name, cell coordinates, colour; one beyond the rim held on
+it) and the player's arrow. While open, the full map, in the interface
+style of scifi.py,
 stands in the middle, north up, over a backdrop that dims the view: a
 panel with a title tab naming the body, the map with faint lines every
 scale bar's length (`scale_bar`) east and north of the grid's middle,
@@ -63,6 +65,7 @@ import shoonyakasha as sk
 from shoonyakasha.planet.rocks import ORE_ROCKS
 from shoonyakasha.planet.vec import add, dot, local_frame, normalize, scale, sub
 
+import fieldslate as fs
 import scifi
 from scifi import measure, with_alpha
 
@@ -82,11 +85,10 @@ LIGHT = normalize((-1.0, 1.0, 1.4))  # east, north, up: from the north-west, abo
 SHADE_RELIEF = 3.0               # the slopes exaggerated this much for the shading
 CONTOUR_LIGHT = np.array([0.1, 0.22, 0.24], dtype=np.float32)   # added along a contour line
 SCAN_DARK = 0.88                 # the darkened rows' share of their colour
-MINIMAP = 220                    # canvas units across
+MINIMAP = 160                    # canvas units across
 MINIMAP_PIXELS = 110             # the minimap image's pixels across, stretched to MINIMAP
 MINIMAP_RANGE = 400.0            # m from the centre to the minimap's rim
-MINIMAP_TOP = 40.0               # canvas units from the top
-MINIMAP_MARGIN = 24.0            # canvas units from the right
+MINIMAP_MARGIN = 40.0            # canvas units from the right and the bottom
 MINIMAP_CONTOUR = 50.0           # m between the minimap's contour lines
 MINIMAP_INTERVAL = 0.1           # s between the minimap's redraws
 SWEEP_SECONDS = 4.0
@@ -471,9 +473,9 @@ class MapView:
 
     # ── The minimap ──
 
-    def draw_minimap(self, dt, grid, at, heading, markers, width):
+    def draw_minimap(self, dt, grid, at, heading, markers, width, height):
         back, front = self.back.mesh, self.front.mesh
-        left, top = width - MINIMAP_MARGIN - MINIMAP, MINIMAP_TOP
+        left, top = width - MINIMAP_MARGIN - MINIMAP, height - MINIMAP_MARGIN - MINIMAP
         self.since["mini"] += dt
         if self.since["mini"] >= MINIMAP_INTERVAL:
             self.since["mini"] = 0.0
@@ -483,44 +485,44 @@ class MapView:
                                                              circle=True, contour=MINIMAP_CONTOUR))
         r = 0.5 * MINIMAP
         cx, cy = left + r, top + r
-        disc = [(cx + (r + 8.0) * math.sin(a), cy - (r + 8.0) * math.cos(a))
+        line = fs.tint(fs.ICE, 0.18, fs.ON_SLATE)
+        disc = [(cx + (r + 4.0) * math.cos(a), cy + (r + 4.0) * math.sin(a))
                 for a in np.linspace(0.0, 2.0 * math.pi, 64, endpoint=False)]
-        back.polygon(disc, scifi.GLASS_DEEP)
-        scifi.arc(front, cx, cy, r, scifi.CYAN, 1.6)
-        scifi.arc(front, cx, cy, r + 8.0, scifi.CYAN_SOFT, 1.0)
-        scifi.arc(front, cx, cy, 0.5 * r, RING_LINE, 1.0)
-        front.segment((cx - r, cy), (cx + r, cy), GRID_LINE, 1.0)
-        front.segment((cx, cy - r), (cx, cy + r), GRID_LINE, 1.0)
+        fs.fill(back, disc, with_alpha(fs.SLATE, 0.6))
+        fs.dot(front, cx, cy, r + 4.0, fs.tint(fs.ICE, 0.45, fs.ON_WORLD), hollow=True, width=1.2)
+        fs.dot(front, cx, cy, 0.5 * r, line, hollow=True, width=1.0)
+        front.segment((cx - r, cy), (cx + r, cy), line, 1.0)
+        front.segment((cx, cy - r), (cx, cy + r), line, 1.0)
         # The sweep: a fan behind its leading edge, fading to nothing.
         lead = 2.0 * math.pi * (self.clock / SWEEP_SECONDS % 1.0)
         steps = 16
         for k in range(steps):
             a0, a1 = lead - SWEEP_WIDTH * (k + 1) / steps, lead - SWEEP_WIDTH * k / steps
-            c0, c1 = with_alpha(scifi.CYAN, 0.16 * (1.0 - (k + 1) / steps)), with_alpha(scifi.CYAN, 0.16 * (1.0 - k / steps))
+            c0 = fs.tint(fs.HOLO, 0.14 * (1.0 - (k + 1) / steps), fs.ON_SLATE)
+            c1 = fs.tint(fs.HOLO, 0.14 * (1.0 - k / steps), fs.ON_SLATE)
             front.face([(cx, cy), (cx + r * math.sin(a0), cy - r * math.cos(a0)),
                         (cx + r * math.sin(a1), cy - r * math.cos(a1))], [c1, c0, c1])
-        front.segment((cx, cy), (cx + r * math.sin(lead), cy - r * math.cos(lead)), with_alpha(scifi.CYAN, 0.5), 1.2)
         for b in range(0, 360, 30):
             a = math.radians(b - heading)
-            inner, outer = r + 2.0, r + (8.0 if b % 90 == 0 else 5.0)
+            inner, outer = r + 4.0, r + (9.0 if b % 90 == 0 else 7.0)
             front.segment((cx + inner * math.sin(a), cy - inner * math.cos(a)),
-                          (cx + outer * math.sin(a), cy - outer * math.cos(a)), scifi.CYAN, 1.4)
+                          (cx + outer * math.sin(a), cy - outer * math.cos(a)), fs.tint(fs.ICE, 0.6, fs.ON_WORLD),
+                          1.2)
         a = math.radians(-heading)
-        self.front.text("N", (cx + (r + 18.0) * math.sin(a), cy - (r + 18.0) * math.cos(a)), 16, scifi.AMBER,
-                        "title", "center")
+        fs.write(self.front, "N", (cx + (r + 18.0) * math.sin(a), cy - (r + 18.0) * math.cos(a)), 12, fs.ICE,
+                 "text_medium", "center")
         for name, where, colour in markers:
             px, py = to_pixel(where, at, MINIMAP_RANGE, MINIMAP, heading)
             dx, dy = px - r, py - r
             d = math.hypot(dx, dy)
             if d > r - 6.0:
                 dx, dy = dx * (r - 6.0) / d, dy * (r - 6.0) / d
-            scifi.diamond(front, cx + dx, cy + dy, 4.0, colour)
-        self._arrow(front, cx, cy, 0.0, 8.0, PLAYER)
-        tab_w = 120.0
-        scifi.panel(back, cx - 0.5 * tab_w, top + MINIMAP + 14.0, tab_w, 20.0, 6.0, scifi.GLASS, scifi.CYAN_SOFT,
-                    ("bl", "br"), scan=False)
-        self.front.text("RANGE  " + distance_label(MINIMAP_RANGE).upper(), (cx, top + MINIMAP + 24.0), 13, MUTED,
-                        "mono", "center")
+            x, y, s = cx + dx, cy + dy, 4.0
+            if name == "Waypoint":
+                front.face([(x - s, y - s), (x + s, y - s), (x, y + 0.6 * s)], [colour] * 3)
+            else:
+                front.face([(x - s, y), (x, y - s), (x + s, y), (x, y + s)], [colour] * 4)
+        self._arrow(front, cx, cy, 0.0, 8.0, fs.ICE)
 
     # ── The full map ──
 
@@ -656,20 +658,21 @@ class MapView:
             mesh.segment((x, y - 5.0), (x, y + 1.0), colour, w)
             mesh.segment((x + length_, y - 5.0), (x + length_, y + 1.0), colour, w)
 
-    def update(self, dt, grid, at, heading, markers):
+    def update(self, dt, grid, at, heading, markers, mini=True):
         """One frame: `grid` the body's, `at` the player's cell coordinates,
         `heading` its view's in degrees, `markers` (name, cell coordinates,
-        colour)."""
+        colour); the minimap only with `mini`."""
         width, height = self.ui.get_canvas_size(self.canvas)
         if width <= 0 or height <= 0 or grid is None or at is None:
             return
         self.clock += dt
         self.back.begin()
         self.front.begin()
+        self.ui.set_visible(self.mini_image, mini and not self.open)
         if self.open:
             self.draw_full(dt, grid, at, heading, markers, width, height)
-        else:
-            self.draw_minimap(dt, grid, at, heading, markers, width)
+        elif mini:
+            self.draw_minimap(dt, grid, at, heading, markers, width, height)
         self.back.end()
         self.front.end()
 

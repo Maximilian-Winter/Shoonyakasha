@@ -86,8 +86,45 @@ class CompassTest(unittest.TestCase):
 
     def test_label_rows_keep_their_gap(self):
         gap = hud.LABEL_GAP
-        self.assertEqual(hud.label_rows([800.0, 800.0 + gap * 0.5, 800.0 + gap * 0.2, None, 800.0 + gap]),
-                         [0, 1, None, None, 0])
+        xs = [800.0, 800.0 + gap * 0.5, 800.0 + gap * 0.2, None, 800.0 + gap]
+        self.assertEqual(hud.label_rows(xs, rows=2), [0, 1, None, None, 0])
+        self.assertEqual(hud.label_rows(xs), [0, None, None, None, 0])      # the HUD's one row
+
+
+class LayoutTest(unittest.TestCase):
+    def test_due(self):
+        self.assertEqual(hud.due_text(38.4), "1 d 14 h")
+        self.assertEqual(hud.due_text(6.9), "6 h")
+        self.assertEqual(hud.due_text(0.5), "30 min")
+
+    def test_ladder_steps_evenly_between_its_marks(self):
+        top, bottom = 100.0, 400.0
+        step = (bottom - top) / (len(hud.LADDER) - 1)
+        for k, mark in enumerate(hud.LADDER):
+            self.assertAlmostEqual(hud.ladder_y(mark, top, bottom), bottom - k * step)
+        self.assertAlmostEqual(hud.ladder_y(65.0, top, bottom), bottom - 1.5 * step)
+        self.assertEqual(hud.ladder_y(0.0, top, bottom), bottom)
+        self.assertEqual(hud.ladder_y(5_000.0, top, bottom), top)
+
+    def test_project(self):
+        view = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+        self.assertEqual(hud.project((0.0, 0.0, 5.0), view, 90.0, 1600.0, 900.0), (800.0, 450.0))
+        x, y = hud.project((1.0, 1.0, 1.0), view, 90.0, 1600.0, 900.0)      # 45 degrees up: the top edge
+        self.assertAlmostEqual(y, 0.0)
+        self.assertAlmostEqual(x, 800.0 + 450.0)
+        self.assertIsNone(hud.project((0.0, 0.0, -1.0), view, 90.0, 1600.0, 900.0))
+
+    def test_wait(self):
+        self.assertEqual(hud.wait_text(252.0), "04:12")
+        self.assertEqual(hud.wait_text(4_000.0), ">1 h")
+        self.assertEqual(hud.wait_text(math.inf), "--:--")
+
+    def test_fit(self):
+        self.assertEqual(hud.fit("Short", 500.0), "Short")
+        long = "A very long line of text that cannot fit in a small width at all"
+        cut = hud.fit(long, 120.0)
+        self.assertTrue(cut.endswith("…"))
+        self.assertLessEqual(hud.fs.text_width(cut, "body"), 120.0)
 
 
 class TextTest(unittest.TestCase):

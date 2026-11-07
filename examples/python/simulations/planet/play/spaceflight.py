@@ -185,37 +185,57 @@ def set_warp(step):
     state["warp"] = max(0, min(len(WARPS) - 1, state["warp"] + step))
 
 
-def space_lines():
-    """The space readout's lines: the body and the mode, the throttle, the
-    warp and the nose hold, the orbit's periapsis and apoapsis
-    (orbits.orbit around the body it is reckoned around) and the space
-    drive's delta-v left; around the planet, the transfer planner: the
-    angle the moon must lead by for a Hohmann transfer from this radius
-    (flight.hohmann_plan), the angle it leads by now (flight.phase_angle),
-    the time until the burn at the difference of their rates round, and
-    the burn's delta-v against the delta-v left."""
+def space_readout():
+    """How the flight stands, for the HUD: a dict of "body" ("planet" or
+    "moon", the one the orbit is reckoned around), "assist", "throttle" (0
+    to 1), "warp", "hold" (None, "prograde" or "retrograde"), "periapsis"
+    and "apoapsis" (m above its radius, orbits.orbit; inf escaping), "dv"
+    (the space drive's delta-v left, m/s), "speed" (m/s relative to the
+    body), "prograde" (the unit velocity relative to it, or None below 1
+    m/s), "moon" (its centre, planet space, and its radius; None without a
+    moon), and "transfer": around the planet, the transfer planner, a dict
+    of "lead" (the angle the moon must lead by for a Hohmann transfer from
+    this radius, flight.hohmann_plan), "now" (the angle it leads by now,
+    flight.phase_angle), "wait" (s until the burn, at the difference of
+    their rates round; inf when it never comes), "burn" (its delta-v) and
+    "from" (the radius's height above the planet); else None."""
     ship, controls = state["space"], state["space_controls"]
     body, position, velocity = flight.reference(world.physics, ship.position, ship.velocity)
     peri, apo = flight.orbit(body, position, velocity)
-    name = "MOON" if body is world.physics.moon else "PLANET"
-
-    def km(h):
-        return "ESC" if math.isinf(h) else "%.1f km" % (h / 1000.0)
-    car = state["car"]
-    left = hovercar.delta_v(car.params, car.fuel, car.cargo_mass)
-    lines = ["SPACE  %s  ASSIST %s" % (name, "ON" if controls.assist else "OFF"),
-             "THR %3d %%  WARP x%d  %s" % (round(100.0 * controls.throttle), time_warp(),
-                                           (state["hold"] or "no hold").upper()),
-             "PE %s  AP %s" % (km(peri), km(apo)),
-             "DV %.0f m/s" % left]
     moon = world.physics.moon
+    car = state["car"]
+    speed = length(velocity)
+    readout = {"body": "moon" if body is moon else "planet", "assist": controls.assist,
+               "throttle": controls.throttle, "warp": time_warp(), "hold": state["hold"], "periapsis": peri,
+               "apoapsis": apo, "dv": hovercar.delta_v(car.params, car.fuel, car.cargo_mass), "speed": speed,
+               "prograde": normalize(velocity) if speed >= 1.0 else None,
+               "moon": (moon.position(world.time), moon.radius) if moon is not None else None, "transfer": None}
     if body is not moon and moon is not None:
         r1 = length(position)
         dv, _, lead = flight.hohmann_plan(body.gm, r1, moon.distance, moon.rate)
         now = flight.phase_angle(position, velocity, moon.position(world.time))
         rate = math.sqrt(body.gm / r1 ** 3) - moon.rate
         wait = ((now - lead) % (2.0 * math.pi)) / rate if rate > 0.0 else math.inf
-        burn = "--:--" if math.isinf(wait) else "%02d:%02d" % divmod(int(wait), 60) if wait < 3600.0 else ">1 H"
-        lines += ["MOON LEAD %3.0f  NOW %3.0f" % (math.degrees(lead), math.degrees(now)),
-                  "BURN IN %s  DV %.0f / %.0f" % (burn, dv, left)]
+        readout["transfer"] = {"lead": lead, "now": now, "wait": wait, "burn": dv, "from": r1 - body.radius}
+    return readout
+
+
+def space_lines():
+    """The space readout (`space_readout`) as lines of text: the body and
+    the assist, the throttle, the warp and the nose hold, the periapsis and
+    apoapsis, the delta-v left, and around the planet the transfer planner's
+    lead, the moon's angle now, the time until the burn and its delta-v
+    against the delta-v left."""
+    r = space_readout()
+
+    def km(h):
+        return "ESC" if math.isinf(h) else "%.1f km" % (h / 1000.0)
+    lines = ["SPACE  %s  ASSIST %s" % (r["body"].upper(), "ON" if r["assist"] else "OFF"),
+             "THR %3d %%  WARP x%d  %s" % (round(100.0 * r["throttle"]), r["warp"], (r["hold"] or "no hold").upper()),
+             "PE %s  AP %s" % (km(r["periapsis"]), km(r["apoapsis"])),
+             "DV %.0f m/s" % r["dv"]]
+    t = r["transfer"]
+    if t is not None:
+        lines += ["MOON LEAD %3.0f  NOW %3.0f" % (math.degrees(t["lead"]), math.degrees(t["now"])),
+                  "BURN IN %s  DV %.0f / %.0f" % (hud_module.wait_text(t["wait"]), t["burn"], r["dv"])]
     return lines

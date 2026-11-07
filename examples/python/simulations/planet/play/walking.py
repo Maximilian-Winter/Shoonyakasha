@@ -20,27 +20,30 @@ from shoonyakasha.planet.world import EXTRA_PROBES, MAX_LEVEL
 from shoonyakasha.planet.props import stack_offsets
 
 import contracts
+import fieldslate as fs
 import pois
-from trade import sale
+import hovercar
+from trade import price, sale
 import hud as hud_module
 from hud import bearing
 from objectives import progress_text, sale_items
-from play.core import (CRATE_SIZE, GOOD_TOAST, HERE, METEOR_MARKER, SPACE_HEIGHT, SPAWN_LIFT, STORM_WARNING, bodies,
-                       engine, foot, planet, state, world)
+from play.core import (CRATE_SIZE, GOOD_TOAST, HERE, HOVER_BACK, METEOR_MARKER, SPACE_HEIGHT, SPAWN_LIFT,
+                       STORM_WARNING, bodies, engine, foot, planet, state, world)
 from play import contracting, exploring, showers, site, spaceflight, storms, survival, vehicle
 
 CAPTURES = os.path.join(HERE, "walker_captures")      # P
 LOAD_LIFT = 0.3                  # m above the ground a loaded player is put down
 CAPTURE_TOAST_FRAMES = 3         # frames after a screenshot before its toast
-OUTPOST_MARKER = (0.55, 1.0, 0.62, 1.0)
-WAYPOINT_MARKER = (1.0, 0.45, 0.85, 1.0)
+HOME_MARKER = fs.HOLO
+OUTPOST_MARKER = fs.ICE
+WAYPOINT_MARKER = fs.AMBER
 WAYPOINT_REACH = 15.0           # m along the ground from the waypoint it counts as reached
 CRATE_MASS = 40.0               # kg: a plain punt throws one at 30 m/s, hard enough to break ore
 CRATE_STACKS = ((-9.0, -6.0, 3), (-10.5, -4.0, 3))   # (east, north of the site, crates)
 ORE_SEEN_RANGE = 8.0            # m from the feet an ore rock counts as found
-SHIP_MARKER = (0.55, 0.8, 1.0, 1.0)
-CONTRACT_MARKER = (1.0, 0.82, 0.3, 1.0)
-STORM_MARKER = (0.7, 0.75, 0.95, 1.0)
+SHIP_MARKER = fs.HOLO
+CONTRACT_MARKER = fs.AMBER
+STORM_MARKER = fs.CORAL
 
 
 def maybe_spawn():
@@ -176,7 +179,8 @@ def markers(body):
     (contract_target) on the planet, an announced shower's centre and the
     last meteorite while it lies whole on `body`, and a storm's centre from
     STORM_WARNING before its start to its end on the planet."""
-    found = [(o.name, o.point(), OUTPOST_MARKER) for o in state["outposts"] if o.body is body]
+    found = [(o.name, o.point(), HOME_MARKER if o is state["home"] else OUTPOST_MARKER)
+             for o in state["outposts"] if o.body is body]
     if state["ship"] is not None and body is planet:
         found.append(("Ship", state["ship"][0], SHIP_MARKER))
     waypoint = state["waypoint"]
@@ -203,44 +207,136 @@ def hud_shown():
 
 
 def update_hud(dt):
-    """The HUD while `hud_shown`, with `markers` on the compass."""
+    """The HUD while `hud_shown`, with `markers` on the compass: on foot,
+    in the car or in its space mode (hud.Frame's modes)."""
     hud, player = state["hud"], foot.player
     shown = hud_shown()
     hud.show(shown)
     if not shown:
         return
     pad = engine.input.is_gamepad_connected()
+    common = {"view": view_basis(), "eye": state["position"], "dt": dt, "hour": survival.hour_text(),
+              "flash": showers.flash_tint(), "fov": world.fov}
     if state["driving"]:
-        car = state["car"]
+        car, body = state["car"], spaceflight.car_body()
+        if state["space"] is not None:
+            readout = spaceflight.space_readout()
+            readout["dv_full"] = hovercar.delta_v(car.params, car.params.fuel_capacity, car.cargo_mass)
+            hints = hud_module.drive_hints(pad, space=True, hover_back=HOVER_BACK)
+            hud.update(hud_module.Frame("space", body=body, space=readout, speed=readout["speed"], hints=hints,
+                                        **common))
+            return
         up = car.up()
         speed = length(sub(car.velocity, scale(up, dot(car.velocity, up))))
-        body = spaceflight.car_body()
-        space = state["space"]
-        if space is not None:
-            speed = length(sub(space.velocity, body.velocity()))
-        hud.update(view_basis(), state["position"], body, None, None, markers(body), speed, pad=pad, dt=dt,
-                   height=car.height, drive=car.can_leave(), hour=survival.hour_text(),
-                   car_fuel=car.fuel / car.params.fuel_capacity, flash=showers.flash_tint(),
-                   space=spaceflight.space_lines() if space is not None else None,
-                   high=car.height is not None and car.height >= SPACE_HEIGHT)
+        burn = car.burn_rate(state["car_controls"])
+        hints = hud_module.drive_hints(pad, car.can_leave(), car.height is not None and car.height >= SPACE_HEIGHT,
+                                       space_height=SPACE_HEIGHT)
+        hud.update(hud_module.Frame(
+            "car", body=body, targets=markers(body), speed=speed, hints=hints, fuel=car.fuel,
+            fuel_capacity=car.params.fuel_capacity,
+            fuel_range=car.fuel / burn * speed if burn > 1e-6 and speed > 1.0 else None, cargo=car.cargo_mass,
+            cargo_capacity=car.params.cargo_capacity, height=car.height, keep=car.target,
+            altitude=length(car.position) - body.radius, **common))
         return
     body = foot.bubble.body
-    targets = markers(body)
     up = foot.bubble.up(player.feet())
     v = foot.physics.character_velocity(player.character)
-    speed = length(sub(v, scale(up, dot(v, up))))
-    height = world.height_above_ground(state["position"]) - player.eye_height
-    extra = [((("pad:X",) if pad else ("F",)), "Get in")] if vehicle.near_car() else []
+    gun = foot.gun
+    held = gun is not None and gun.held is not None
+    prompt, more = reach_prompt(pad)
+    suit_state, params, temperature = "ok", state["suit_params"], state["temperature"]
+    if temperature is not None and temperature < params.cold_limit:
+        suit_state = "cold"
+    elif temperature is not None and temperature > params.hot_limit:
+        suit_state = "hot"
+    hud.update(hud_module.Frame(
+        "foot", body=body, targets=markers(body), speed=length(sub(v, scale(up, dot(v, up)))),
+        hints=[(("Esc",), "Menu"), (("M",), "Map")], status=gun.status if gun is not None else "idle", held=held,
+        charge=gun.charge if held else 0.0, hold_distance=gun.hold_distance if held else None, prompt=prompt,
+        prompt_hints=more, height=world.height_above_ground(state["position"]) - player.eye_height,
+        jet=player.jet_fuel, reserve=state["suit"].reserve / params.reserve, health=state["suit"].health,
+        temperature=temperature, suit_state=suit_state, tint=survival.suit_effects()[0], **common))
+
+
+def reach_prompt(pad):
+    """(the HUD's reach prompt, the hints under it) on foot: what the gun
+    aims at that it could grab (its name and what it is worth, or why it
+    cannot), else the point of interest's spot in reach (E, with a held
+    use's progress), else the car within reach; whichever of these is not
+    the prompt among the hints. While the gun holds something, no prompt
+    and the gun's hints."""
+    gun = foot.gun
+    grab, punt = ("pad:LT", "pad:RT") if pad else ("RMB", "LMB")
+    if gun is not None and gun.held is not None:
+        return None, hud_module.hints("holding", True, gun.charge, pad)
+    prompt, more = None, []
+    target = gun.target if gun is not None else None
+    if target is not None and target.grabbable:
+        name, detail, colour = target_text(target)
+        status = gun.status
+        if status in ("too_heavy", "too_hot"):
+            prompt = hud_module.Prompt(grab, "Grab", name, "too heavy" if status == "too_heavy" else "too hot",
+                                       hud_module.WARNING)
+        else:
+            prompt = hud_module.Prompt(grab, "Grab", name, detail, colour)
+        more.append(((punt,), "Punt"))
     spot = state["use_spot"]
     if spot is not None:
         poi, k, _ = spot
         hold = pois.SPOTS[poi.kind][k][2]
-        word = "%s %s" % (pois.USE_WORDS[poi.kind], poi.name.lower())
-        if hold > 0.0:
-            word += " (hold, %.1f / %.0f s)" % (state["use_progress"], hold)
-        extra.append((("E",), word))
-    hud.update(view_basis(), state["position"], body, player, foot.gun, targets, speed, pad=pad, dt=dt,
-               height=height, extra_hints=extra, hour=survival.hour_text(), tint=survival.suit_effects()[0], flash=showers.flash_tint())
+        word = pois.USE_WORDS[poi.kind]
+        if prompt is None:
+            progress = state["use_progress"] / hold if hold > 0.0 and state["use_progress"] > 0.0 else None
+            prompt = hud_module.Prompt("E", word, poi.name, "hold %.0f s" % hold if hold > 0.0 else "",
+                                       hud_module.DIM, progress)
+        else:
+            more.append((("E",), word))
+    if vehicle.near_car():
+        key = "pad:X" if pad else "F"
+        if prompt is None:
+            prompt = hud_module.Prompt(key, "Get in", "Hover car")
+        else:
+            more.append(((key,), "Get in"))
+    return prompt, more
+
+
+def target_text(target):
+    """(name, what it is worth, its colour) of what the gun aims at, a prop or a rock
+    of the scatter not yet loose: an ore rock's resource, its mass, grade
+    and its price at the nearest open outpost on its body (trade.price for
+    its first kilogram), in ACCENT; a plain rock's, a pod's, a courier's or
+    another crate's mass, in DIM."""
+    mass = "%.0f kg" % target.mass
+    prop = foot.props.find(target.body)
+    if prop is not None:
+        if id(prop) in state["pods"]:
+            return "Cargo pod", mass, hud_module.DIM
+        if id(prop) in state["couriers"]:
+            return "Courier crate", mass, hud_module.DIM
+        if prop.kind == "crate":
+            return "Crate", mass, hud_module.DIM
+        body, position, _ = foot.prop_state(prop)
+        seen = state["seen"].get(id(prop), (body.name, normalize(position)))
+        kind, grade, resource = prop.kind, prop.grade, prop.resource
+    else:
+        key = foot.rocks.bodies.get(target.body) if foot.rocks is not None else None
+        if key is None:
+            return "Rock", mass, hud_module.DIM
+        rock, body = foot.rocks.rocks[key], foot.bubble.body
+        position = rock.base
+        seen = (body.name, normalize(position))
+        kind, grade, resource = rock.kind, rock.grade, rock.resource
+    if grade <= 0.0:
+        return ("Boulder" if kind == "boulder" else "Rock"), mass, hud_module.DIM
+    name = resources.name(resource) + (" boulder" if kind == "boulder" else " ore")
+    detail = "%s · %.2f" % (mass, grade)
+    item = {"body": seen[0], "direction": seen[1], "mass": target.mass, "grade": grade, "resource": resource}
+    point = add(body.centre(), position)
+    open_ = [o for o in state["outposts"] if o.body is body and not storms.closed(o)]
+    if open_:
+        outpost = min(open_, key=lambda o: length(sub(o.point(), point)))
+        detail += " · ~%s cr" % format(int(round(price(outpost, item, world.time) * target.mass)), ",")
+    return name, detail, hud_module.ACCENT
 
 
 def update_map(dt):
@@ -281,7 +377,7 @@ def update_map(dt):
         where = grid.index(normalize(sub(position, body.centre())))
         if where is not None:
             cells.append((name, where, colour))
-    view.update(dt, grid, at, heading, cells)
+    view.update(dt, grid, at, heading, cells, mini=not state["driving"])
 
 
 def set_waypoint(canvas_point):
@@ -407,21 +503,18 @@ def update_game():
         else:
             hud.toast("Every objective done. The planet is yours to explore.")
     goal = objectives.current()
-    header = "OBJECTIVE  %d / %d" % (min(objectives.index + 1, len(objectives.goals)), len(objectives.goals))
-    rows = [("Credits", "%s cr" % format(int(round(state["market"].credits)), ",")),
-            ("Ore sold", "%s kg" % format(int(round(state["sold_kg"])), ","))] + survival.suit_rows()
     c = contracting.pinned_contract()
     if c is not None:
-        k = next(n for n, a in enumerate(state["contracts"]) if a is c)
         fraction = contracts.progress(c) if c.kind in ("delivery", "survey") else None
-        hud.objective("CONTRACT  %d / %d" % (k + 1, len(state["contracts"])), contracting.contract_title(c), contracts.task(c),
-                      fraction, contracting.contract_progress_text(c).upper(), rows)
+        hud.pinned("Pinned · " + c.kind, contracts.short_task(c), fraction, contracting.contract_done_text(c),
+                   hud_module.due_text(contracting.hours_left(c)))
     elif goal is not None:
         shown, target = objectives.progress(snapshot)
         fraction = None if target == 1 else shown / target
-        hud.objective(header, goal.title, goal.hint, fraction, progress_text(goal, shown, target).upper(), rows)
+        hud.pinned("Objective %d / %d" % (min(objectives.index + 1, len(objectives.goals)), len(objectives.goals)),
+                   goal.title, fraction, progress_text(goal, shown, target))
     else:
-        hud.objective(header, "All objectives done", "The planet is yours to explore.", None, None, rows)
+        hud.pinned("", None)
 
 
 def game_numbers():

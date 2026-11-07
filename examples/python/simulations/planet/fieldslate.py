@@ -28,7 +28,8 @@ same.
 Shapes, in canvas units with y down, into a toolkit.drawing.Mesh:
 `rounded_rect` (the points of a rounded rectangle), `fill` (a convex
 shape), `stroke`, `glow` (a band fading out from a convex shape's edge),
-`pane`, `bar`, `ring`, `dot`. Parts, onto a scifi.Layer: `write` (a text
+`pane`, `scrim` (a soft dark ground behind parts over the world), `bar`,
+`ring`, `dot`. Parts, onto a scifi.Layer: `write` (a text
 without a shadow), `label` (an upper-case label in MIST), `pill`,
 `button`, `keycap`, `hints` (a row of key hints) and `prompt_width`.
 Each part returns its width.
@@ -227,6 +228,16 @@ def pane(mesh, left, top, width, height, radius=RADIUS, fill_colour=PANE, edge=P
     if edge is not None:
         stroke(mesh, points, edge, edge_width)
     return points
+
+
+def scrim(mesh, left, top, width, height, alpha=0.45, reach=40.0, ground=None):
+    """A soft dark ground behind a group of parts over the world: SLATE at
+    `alpha` (as over `ground`, ON_WORLD by default) over the rectangle,
+    fading to nothing `reach` beyond it."""
+    points = rounded_rect(left, top, width, height, min(24.0, 0.5 * min(width, height)))
+    colour = tint(SLATE, alpha, ON_WORLD if ground is None else ground)
+    mesh.face(points, [colour] * len(points))
+    band(mesh, points, colour, with_alpha(colour, 0.0), reach)
 
 
 def bar(mesh, left, top, width, value, colour=HOLO, height=3.0, track=TRACK):

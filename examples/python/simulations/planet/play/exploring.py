@@ -15,6 +15,7 @@ from shoonyakasha.planet import resources
 from shoonyakasha.planet.world import EXTRA_PROBES
 
 import contracts
+import fieldslate as fs
 import pois
 from hud import distance_text
 from objectives import REST_SPEED
@@ -31,7 +32,7 @@ DRAW_RANGE = 2_000.0            # m
 PROP_RANGE = 120.0              # m
 USE_LOOK = 60.0                 # m
 CELL_SURVEY = 0.5               # credits of survey data per map cell explored
-POI_MARKER, LOOTED_MARKER, SIGNAL_MARKER = (1.0, 0.85, 0.35, 1.0), (0.55, 0.58, 0.62, 1.0), (0.6, 0.75, 0.85, 0.6)
+POI_MARKER, LOOTED_MARKER, SIGNAL_MARKER = fs.AMBER, fs.with_alpha(fs.MIST, 0.7), fs.with_alpha(fs.MIST, 0.6)
 
 
 def poi_seed():

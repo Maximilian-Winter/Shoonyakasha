@@ -139,6 +139,18 @@ def task(c):
     return "Explore %d %% of the ground within %.0f m of the marker" % (round(100 * SURVEY_SHARE), SURVEY_RADIUS)
 
 
+def short_task(c):
+    """`task` in a few words, for the HUD's pinned goal."""
+    if c.kind == "delivery":
+        return "%.0f kg %s, grade %.1f+, to %s" % (c.quantity, resources.name(c.resource).lower(), c.min_grade,
+                                                   c.destination)
+    if c.kind == "courier":
+        return "Fragile crate to %s" % c.destination
+    if c.kind == "recovery":
+        return "Cargo pod back to %s" % c.destination
+    return "Survey %d %% within %.0f m" % (round(100 * SURVEY_SHARE), SURVEY_RADIUS)
+
+
 def progress(c):
     if c.kind == "delivery":
         return min(1.0, c.delivered / c.quantity)

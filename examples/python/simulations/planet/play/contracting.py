@@ -96,16 +96,19 @@ def hours_left(c):
     return max(0.0, (end - (survival.day_time() - c.paused)) * 24.0 / clock.DAY_LENGTH)
 
 
-def contract_progress_text(c):
+def contract_done_text(c):
+    """How far the contract has come: the kg delivered, the share surveyed, the crate's damage, or where to."""
     if c.kind == "delivery":
-        done = "%.0f / %.0f kg" % (min(c.delivered, c.quantity), c.quantity)
-    elif c.kind == "survey":
-        done = "%d / %d %%" % (round(100.0 * c.explored), round(100.0 * contracts.SURVEY_SHARE))
-    elif c.kind == "courier":
-        done = "damage %d %%" % round(100.0 * c.damage / contracts.BREAK_DAMAGE)
-    else:
-        done = "to %s" % c.destination
-    return "%s, %.0f h left" % (done, hours_left(c))
+        return "%.0f / %.0f kg" % (min(c.delivered, c.quantity), c.quantity)
+    if c.kind == "survey":
+        return "%d / %d %%" % (round(100.0 * c.explored), round(100.0 * contracts.SURVEY_SHARE))
+    if c.kind == "courier":
+        return "damage %d %%" % round(100.0 * c.damage / contracts.BREAK_DAMAGE)
+    return "to %s" % c.destination
+
+
+def contract_progress_text(c):
+    return "%s, %.0f h left" % (contract_done_text(c), hours_left(c))
 
 
 def contract_target(c):

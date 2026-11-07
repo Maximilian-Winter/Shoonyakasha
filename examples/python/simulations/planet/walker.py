@@ -25,14 +25,20 @@ physics bubble it is a kinematic box that pushes the props, and a ray
 ahead of it bumps it off trunks and fixed rocks (bump_car). The bubble
 follows it while it is driven.
 
-The interface is in the style of scifi.py. The HUD (hud.py) shows the
-gun's crosshair and key hints, a compass with the outposts, the ship and
-the waypoint, the objective with the credits and the ore sold, the jet
-fuel and a readout. The ground around the player is measured as it
-explores (explored_map.py) and shown on a round scope at the top right;
-M opens the full map, which frees the mouse and stops the player while
-open, and on which a left click sets the waypoint (cleared within
-WAYPOINT_REACH of it, or by a right click).
+The HUD (hud.py) is in the Field Slate style (fieldslate.py). On foot
+it shows the pinned contract or the objective, a compass with the
+outposts, the ship, the waypoint and the rest of the markers, toasts,
+the gun's reticle, a prompt for what is in reach (what the gun aims at
+and what it is worth, a point of interest's spot, the car), the suit's
+reserve with the temperature and the jet's fuel, and the speed, the body
+and the hour; in the car its fuel and hold, a height ladder and the
+speed and heights; in space mode the transfer planner, the orbit, the
+prograde marker and the throttle. The ground around the player is
+measured as it explores (explored_map.py) and shown on foot on a round
+scope at the bottom right; M opens the full map, in the style of
+scifi.py, which frees the mouse and stops the player while open, and on
+which a left click sets the waypoint (cleared within WAYPOINT_REACH of
+it, or by a right click).
 
 Ore: a loose ore rock (a small one from the scatter, or a chunk of an ore
 boulder broken by a strike at rocks.BREAK_SPEED) that comes to rest on an

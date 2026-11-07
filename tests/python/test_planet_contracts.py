@@ -70,6 +70,14 @@ class Offers(unittest.TestCase):
 
 
 class Tasks(unittest.TestCase):
+    def test_short_task_names_each_kind(self):
+        c = contracts.Contract("x", "delivery", "Base", "Halden", 500.0, 5, resource=resources.AMBER, quantity=400.0,
+                               min_grade=0.5)
+        self.assertEqual(contracts.short_task(c), "400 kg amber, grade 0.5+, to Halden")
+        for c in all_offers(10):
+            self.assertTrue(contracts.short_task(c))
+            self.assertLess(len(contracts.short_task(c)), len(contracts.task(c)))
+
     def test_delivery_takes_matching_ore_at_its_outpost(self):
         c = contracts.Contract("x", "delivery", "Base", "Base", 500.0, 5, resource=resources.AMBER, quantity=400.0,
                                min_grade=0.5, state="active")

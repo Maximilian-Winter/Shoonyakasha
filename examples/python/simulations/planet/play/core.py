@@ -21,6 +21,7 @@ from shoonyakasha.planet.world import FOV
 
 import carview
 import config
+import fieldslate as fs
 import flight
 import hovercar
 import pois
@@ -45,7 +46,7 @@ GOOD_TOAST = (0.55, 1.0, 0.62, 1.0)
 CHECK_ORE_EXTENT = (0.4, 0.3, 0.4)   # m: the ore rock --check drops on the pad
 RECOVERY_FEE = 250.0            # credits the outpost charges when the suit gave out (wake_at_outpost)
 POI_REACH = 3_000.0             # m: points of interest within it are measured and shown (exploring.py)
-METEOR_MARKER = (1.0, 0.6, 0.35, 1.0)
+METEOR_MARKER = fs.AMBER
 PLUME_PUFFS, SMALL_PUFFS = 6, 2
 STORM_WARNING = 300.0           # s before a storm covers an outpost it is announced
 RAIN_DROPS = 160

@@ -265,6 +265,8 @@ def run_check(dt):
             walking.screenshot(args.shot)
         if t >= 0.5 * CHECK_SECONDS and "capture" not in check:
             check["capture"] = walking.take_capture(CHECK_CAPTURES)
+        if any(toast[0].startswith("Screenshot saved") for toast in state["hud"].toasts):
+            check["capture_toast"] = True
         if t >= CHECK_SECONDS:
             foot.controls.forward = 0.0
             moved = length(sub(foot.bubble.to_world(player.feet()), check["start"]))
@@ -273,7 +275,7 @@ def run_check(dt):
                   % (moved, t, player.on_ground, "passed" if check["walk_ok"] else "FAILED"), flush=True)
             capture = check["capture"]
             check["capture_ok"] = (capture is not None and os.path.exists(capture) and state["capture_toast"] is None
-                                   and any(toast[0].startswith("Screenshot saved") for toast in state["hud"].toasts))
+                                   and check.get("capture_toast", False))
             print("[walker] a screenshot taken as P takes one, and its toast shown: %s"
                   % ("passed" if check["capture_ok"] else "FAILED"), flush=True)
             right, up, forward = player.basis()
@@ -1030,8 +1032,8 @@ def run_contract_check(check, t):
             return False
         card = state["hud"].card
         marked = any(name == "Contract" for name, _, _ in walking.markers(planet))
-        done(contract in state["contracts"] and state["pinned"] == contract.id and card[0].startswith("CONTRACT")
-             and card[1] == contracting.contract_title(contract) and marked,
+        done(contract in state["contracts"] and state["pinned"] == contract.id and card[0].startswith("Pinned")
+             and card[1] == contracts.short_task(contract) and marked,
              "a survey 2 km off kept active and pinned: on the card (%s) and the compass" % card[0])
     return False
 

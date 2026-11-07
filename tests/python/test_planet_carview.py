@@ -96,10 +96,9 @@ class ViewTest(unittest.TestCase):
         self.assertAlmostEqual(carview.stick(0.56), (0.56 - carview.DEAD_ZONE) / (1.0 - carview.DEAD_ZONE))
 
     def test_drive_hints(self):
-        keys = [h[0] for h in hud.drive_hints()]
-        self.assertEqual(keys, [("W", "S"), ("A", "D"), ("Space", "Ctrl"), ("Shift",)])
-        self.assertEqual(hud.drive_hints(can_leave=True)[-1], (("F",), "Get out"))
-        self.assertEqual(hud.drive_hints(pad=True, can_leave=True)[-1], (("pad:X",), "Get out"))
+        self.assertEqual(hud.drive_hints(), [(("G",), "Space mode above 250 m")])
+        self.assertEqual(hud.drive_hints(can_leave=True)[0], (("F",), "Get out"))
+        self.assertEqual(hud.drive_hints(pad=True, can_leave=True)[0], (("pad:X",), "Get out"))
         self.assertEqual(hud.drive_hints(high=True)[-1], (("G",), "Space mode"))
         space = [h[0] for h in hud.drive_hints(space=True)]
         self.assertIn(("T",), space)
