@@ -548,7 +548,7 @@ The points of interest are the walker's (`walker.py`), on the planet; their rule
 
 ## 10. Contracts
 
-Contracts are in `contracts.py` (generation, the task's text and progress, fragile damage, the record) and `walker.py` (the Contracts tab, the card, the mechanics, the save).
+Contracts are in `contracts.py` (generation, the task's text and progress, fragile damage, the record) and the walker's `play/contracting.py` (the Contracts tab, the card, the mechanics) and `play/saving.py` (the save).
 
 ### 10.1 Kinds
 
@@ -586,7 +586,7 @@ Each reward is times 1 + 0.1 × the outpost's reputation, rounded to 10 cr. A co
 
 ### 11.1 Scheduling
 
-`events.py` (the walker's) plans the showers; `walker.py` runs them on the planet (`update_showers`).
+`events.py` (the walker's) plans the showers; the walker's `play/showers.py` runs them on the planet (`update_showers`).
 
 ```python
 @dataclass
