@@ -57,7 +57,9 @@
 // by SCAN_WEIGHTS (the kinds and their heights as
 // shoonyakasha.planet.scans.SCANS). Its size shrinks over the last 15 % of
 // the grid's range; its colour is white (its texture's own), tinted as any
-// plant.
+// plant. A scanned rock (SCAN_ROCK) is listed in NearbyTrees as the rocks
+// are, and left out when its cell is taken: grid 2 for the large scans', 3
+// for the small scans'.
 //
 // Nothing is placed under a lake's or a river's water (candidateWet).
 // The clearings (clearings.glsl, candidateCleared) leave out the plants and
@@ -125,6 +127,8 @@ const vec2 SCAN_HEIGHTS[VEGETATION_SCANS] = vec2[VEGETATION_SCANS](
     vec2(0.25, 0.45), vec2(2.5, 4.5), vec2(2.5, 4.5));
 const float SCAN_WEIGHTS[VEGETATION_SCANS] = float[VEGETATION_SCANS](
     1.0, 1.0, 1.0, 3.0, 3.0, 0.6, 2.0, 2.0, 2.5, 3.0, 3.0, 1.0, 1.5, 0.8, 0.6);
+const bool SCAN_ROCK[VEGETATION_SCANS] = bool[VEGETATION_SCANS](
+    true, true, true, true, true, false, false, false, false, false, false, false, false, true, true);
 const bool SCAN_SMALL[VEGETATION_SCANS] = bool[VEGETATION_SCANS](
     false, false, false, true, true, false, false, false, true, true, true, false, true, false, false);
 const vec3 PLANET_ROCK = vec3(0.39, 0.35, 0.33);
@@ -261,7 +265,8 @@ void place(ScatterChunk chunk, Candidate x, int kind, float size, float turn, fl
            uint resourceId) {
     vec3 drawn = candidateDrawn(chunk, x);
     bool trunk = kind < VEGETATION_TREE_KINDS || kind == KIND_CACTUS;
-    bool rock = kind == KIND_ROCK || kind == KIND_BOULDER;
+    bool rock = kind == KIND_ROCK || kind == KIND_BOULDER
+                || (kind >= VEGETATION_SCAN_FIRST && SCAN_ROCK[kind - VEGETATION_SCAN_FIRST]);
     if ((trunk || rock) && x.distance <= vegetation.nearby.x) {
         listNearby(drawn, size, tint, kind, grade, resourceId, chunk.face, x.cell, chunk.body, turn);
     }
@@ -343,6 +348,7 @@ void scatterScans(ScatterChunk chunk, bool small, float density) {
         else continue;
         int scan = scanKind(family, small, which);
         if (scan < 0) continue;
+        if (SCAN_ROCK[scan] && rockTaken(chunk.body, chunk.face, small ? 3 : 2, x.cell)) continue;
         float size = mix(SCAN_HEIGHTS[scan].x, SCAN_HEIGHTS[scan].y, grow)
                      * smoothstep(range, range * FADE_START, x.distance);
         if (size < 0.02) continue;

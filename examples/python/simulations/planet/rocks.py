@@ -3,12 +3,15 @@ The scatter's rocks in the physics bubble (shoonyakasha.planet.bubble).
 
 `Rocks.update` gives each rock that shoonyakasha.planet.nearby_trees lists
 on the bubble's body, whose cell is not taken, a static convex hull: its
-kind's points (vegetation.rock_points) below its base raised to the base,
+kind's points (vegetation.rock_points, or a scanned rock's prepared hull,
+shoonyakasha.planet.scans, as its mesh is drawn: over its height, less its
+sink) below its base raised to the base,
 scaled as the scatter draws it (across by its width factor times its
 height, up by its height) and turned by its turn about the body's up; the
 body's origin is half its height above its base. It keeps the rock's ore
 grade (0 for a plain rock), its resource (0 for a plain rock) and colour
-(rocks.rock_colour, tinted). Strikes
+(rocks.rock_colour, tinted; white tinted for a scanned rock, whose texture
+gives its colour). Strikes
 on it are watched (sk.PlanetPhysics.watch_strikes). As with the trunks
 (shoonyakasha.planet.trunks), a list adds rocks and does not remove them; a rock more than
 KEEP beyond the list's radius from the camera is removed, and one listed
@@ -19,8 +22,8 @@ pulls or punts it or a dynamic body strikes it: its body turns dynamic
 where it is, strikes on it stay watched only for an ore boulder, its cell
 goes into the world's taken rocks (the scatter leaves it out from this
 frame on), and it becomes a loose rock in Props, drawn by a mesh entity of
-its kind (vegetation.rock_triangles, with the same origin and scale) in
-its colour, with an ore rock's glowing specks (`specks`) in its resource's
+its kind (vegetation.rock_triangles, with the same origin and scale; a
+scanned rock's own mesh with its albedo texture) in its colour, with an ore rock's glowing specks (`specks`) in its resource's
 colour (rocks.speck_colour) times SPECK_GLOW. `restore` makes
 a loose rock out of the physics from a record (props.py's Props.record).
 `released` puts a loose rock's cell back when Props removes it.
@@ -46,7 +49,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from shoonyakasha.planet import vegetation
+from shoonyakasha.planet import scans, vegetation
 from shoonyakasha.planet.resources import FERRITE
 from shoonyakasha.planet.rocks import density, rock_colour, speck_colour, tinted
 from shoonyakasha.planet.vec import add, cross, length, normalize, quat_from_basis, quat_rotate, scale, sub
@@ -121,22 +124,39 @@ class Rocks:
         self.unit_points = {}        # kind: the hull's points, unit height, origin at half height
         self.unit_volume = {}        # kind: the hull's volume at unit scale
         self.triangles = {}          # kind: (positions, normals, shades) around the same origin
+        self.scan_meshes = {}        # a scanned rock's kind: (positions, normals, uvs, tangents, indices, albedo path)
         self.speck_meshes = {}       # kind: (positions, normals) of its specks
         self.on_split = None         # on_split(boulder's prop or None, chunks), told of each split
 
     def kind_data(self, physics, kind):
         if kind not in self.unit_points:
-            points = vegetation.rock_points(kind).astype(np.float64)
+            scan = scans.prepared(kind) if kind in scans.NAMES else None
+            if scan is not None:
+                points = scan.hull.astype(np.float64) / scan.height
+                points[:, 1] -= scan.kind.sink
+                self.scan_meshes[kind] = self.scan_mesh(scan)
+            else:
+                points = vegetation.rock_points(kind).astype(np.float64)
             points[:, 1] = np.maximum(points[:, 1], 0.0) - 0.5
             self.unit_points[kind] = points
             probe = physics.create_convex_hull(points.astype(np.float32), (0.0, 0.0, 0.0), motion="dynamic",
                                                density=1.0)
             self.unit_volume[kind] = physics.mass(probe)
             physics.remove(probe)
-            positions, normals, shades = vegetation.rock_triangles(kind)
-            self.triangles[kind] = (positions - (0.0, 0.5, 0.0), normals, shades)
-            self.speck_meshes[kind] = specks(*self.triangles[kind][:2])
+            if scan is None:
+                positions, normals, shades = vegetation.rock_triangles(kind)
+                self.triangles[kind] = (positions - (0.0, 0.5, 0.0), normals, shades)
+                self.speck_meshes[kind] = specks(*self.triangles[kind][:2])
         return self.unit_points[kind], self.unit_volume[kind]
+
+    @staticmethod
+    def scan_mesh(scan):
+        """A scanned rock's mesh as drawn, around the hull's origin: (positions, normals, uvs, tangents, indices,
+        its first material's albedo)."""
+        positions = scan.positions.astype(np.float64) / scan.height
+        positions[:, 1] -= scan.kind.sink + 0.5
+        return (positions.astype(np.float32), scan.normals, scan.uvs, scan.tangents, scan.indices,
+                scan.textures[0]["albedo"])
 
     def update(self, bubble, trees, camera, radius):
         """The static rocks of `trees` (nearby_trees.NearbyTree; those on
@@ -164,9 +184,10 @@ class Rocks:
                                               quat_from_basis(right, up, ahead), motion="static", density=kg_per_m3,
                                               friction=0.8, restitution=0.05)
             physics.watch_strikes(hull)
+            colour = (1.0, 1.0, 1.0) if tree.kind in self.scan_meshes else rock_colour(body.index, tree.grade,
+                                                                                          tree.resource)
             rock = StaticRock(hull, tree.kind, base, tuple(sizes), float(np.linalg.norm(points * sizes, axis=1).max()),
-                              kg_per_m3 * volume * across * across * tree.height,
-                              tinted(rock_colour(body.index, tree.grade, tree.resource), tree.tint), tree.grade,
+                              kg_per_m3 * volume * across * across * tree.height, tinted(colour, tree.tint), tree.grade,
                               tree.resource)
             self.rocks[tree.key] = rock
             self.bodies[hull] = tree.key
@@ -212,11 +233,21 @@ class Rocks:
         """A mesh entity of a rock of `kind`, scaled by `extent`, in
         `colour`, and for an ore rock (`grade` above 0) an entity of its
         glowing specks in its `resource`'s colour, drawn unlit (the Screens
-        pass); else None."""
+        pass); else None. A scanned rock's is its own mesh with its albedo."""
+        scene = self.engine.scene
+        if kind in self.scan_meshes:
+            positions, normals, uvs, tangents, indices, albedo = self.scan_meshes[kind]
+            entity = self.engine.create_mesh(positions, indices=indices, normals=normals, uvs=uvs, tangents=tangents,
+                                             name="ScanRock")
+            scene.set_scale(entity, tuple(extent))
+            scene.set_material_texture(entity, "albedoMap", albedo)
+            scene.set_material_vec4(entity, "baseColorFactor", tuple(colour) + (1.0,))
+            scene.set_material_float(entity, "gridStrength", 0.0)
+            scene.set_render_layer_mask(entity, 1)
+            return entity, None
         positions, normals, shades = self.triangles[kind]
         entity = self.engine.create_mesh([tuple(p) for p in positions], normals=[tuple(n) for n in normals],
                                          colors=[tuple(s) for s in shades], name="Rock")
-        scene = self.engine.scene
         scene.set_scale(entity, tuple(extent))
         scene.set_material_vec4(entity, "baseColorFactor", tuple(colour) + (1.0,))
         scene.set_material_float(entity, "gridStrength", 0.0)

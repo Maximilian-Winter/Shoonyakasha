@@ -89,6 +89,22 @@ class ScansTest(unittest.TestCase):
         os.remove(os.path.join(scans.directory(), "prepared", "CREDITS.md"))
         self.assertFalse(scan_export.check()[1])
 
+    def test_scanned_rocks_are_rocks_on_their_own_grids(self):
+        from shoonyakasha.planet import nearby_trees, rocks, vegetation
+        for kind in scans.SCANS:
+            self.assertEqual(rocks.is_rock(kind.name), kind.rock)
+            if kind.rock:
+                self.assertEqual(rocks.rock_grid(kind.name), 3 if kind.small else 2)
+        self.assertTrue(rocks.is_rock("boulder"))
+        self.assertEqual(rocks.rock_grid("rock"), 1)
+        self.assertFalse(rocks.is_rock("fern_b"))
+        large = next(k for k in scans.SCANS if k.rock and not k.small)
+        row = np.zeros(nearby_trees.WORDS, np.uint32)
+        row[5], row[6], row[7], row[8], row[9] = vegetation.KINDS.index(large.name), 4, 1234, 5678, 0
+        self.assertEqual(nearby_trees.key_of(row), (0, 2, 4, 1234, 5678))
+        words = rocks.taken_words((0, 3, 4, 32767, 5678))
+        self.assertEqual((words[0] >> 4) & 0xF, 3)
+
     def test_archive_with_an_entry_outside_is_refused(self):
         with tempfile.TemporaryDirectory() as source:
             archive, blend = scans.SCENES["namaqualand"]

@@ -180,6 +180,7 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertEqual(heights, [s.heights for s in scans.SCANS])
         self.assertEqual(len(body("SCAN_WEIGHTS").split(",")), len(scans.SCANS))
         self.assertEqual([x.strip() == "true" for x in body("SCAN_SMALL").split(",")], [s.small for s in scans.SCANS])
+        self.assertEqual([x.strip() == "true" for x in body("SCAN_ROCK").split(",")], [s.rock for s in scans.SCANS])
 
     def test_scan_mesh_from_a_prepared_scan(self):
         kind = next(s for s in scans.SCANS if not s.rock)

@@ -16,6 +16,7 @@ from shoonyakasha.planet.gravity_gun import GunParams
 from shoonyakasha.planet.vec import add, cross, dot, length, local_frame, normalize, quat_from_basis, scale, sub
 from shoonyakasha.planet import resources
 from shoonyakasha.planet import wind as wind_field
+from shoonyakasha.planet.rocks import SCAN_ROCKS
 
 import acoustics
 import clock
@@ -65,6 +66,8 @@ VOICE_RING = 13.0               # m, the ring's radius
 VOICE_LIFT = 8.0                # m above the camera the ring is
 VOICE_SAME = 20                 # hits it plays at one point in the same frame
 VOICE_BUDGET_MS = 10.0          # ms all of them may take
+SCAN_ROCK_MOISTURE = -0.8       # the climate's moisture offset --check turns the ground around the player desert with
+SCAN_ROCK_SECONDS = 10.0        # s it waits at most for a scanned rock's collider
 NET_SETTLE = 3.0                # s --check lets the ore it drops into the net settle
 NET_CHECK_AWAY = 60.0           # m along its nose --check moves the car off Base's pad for the net
 SUIT_CHECK_TEMPERATURE = -60.0  # degrees C --check stands in for the air's while the suit drains
@@ -187,6 +190,7 @@ def run_check(dt):
     contract's deadline was held back by the time passed, and rain was
     drawn; then, the storm gone, Base announced open and the ore sold
     within SELL_SECONDS; then, with sound, the voices (run_voice_check);
+    then a scanned rock's collider, lifted loose (run_scan_rock_check);
     then the menu shown for PAUSE_SECONDS; then the game saved to CHECK_SAVE_BASE,
     the credits, the ore sold and the explored map changed, and the save
     loaded, waiting up to LOAD_SECONDS for the player to come back and a
@@ -533,6 +537,9 @@ def run_check(dt):
             check["stage"], check["time"] = "voices", 0.0
     elif stage == "voices":
         if run_voice_check(check, t):
+            check["stage"], check["time"] = "scan rocks", 0.0
+    elif stage == "scan rocks":
+        if run_scan_rock_check(check, t):
             menus.set_paused(True)
             check["stage"], check["time"] = "pause", 0.0
     elif stage == "pause":
@@ -661,7 +668,8 @@ def run_check(dt):
                 walking.screenshot(base + "_load" + ext)
             check["ok"] = (check["walk_ok"] and check["capture_ok"] and check["held_ok"] and check["punt_ok"]
                            and check["map_ok"] and check["suit_ok"] and check["sell_ok"] and check["pause_ok"]
-                           and check["shower_ok"] and check["storm_ok"] and check["voice_ok"] and load_ok)
+                           and check["shower_ok"] and check["storm_ok"] and check["voice_ok"]
+                           and check["scan_rock_ok"] and load_ok)
             check["in_car"] = vehicle.enter_car(anywhere=True)
             check["top_speed"], check["top_height"] = 0.0, 0.0
             check["stage"], check["time"] = "drive", 0.0
@@ -1385,6 +1393,39 @@ def run_voice_check(check, t):
           % (below, above, "unset" if reverb is None else "%.2f s, wet %.2f" % (reverb[0][1], reverb[1]), binaural,
              heard != 0, culled, length(sounds.listener_velocity()), "passed" if steam_ok else "FAILED"), flush=True)
     check["voice_ok"] = ok and steam_ok
+    return True
+
+
+def run_scan_rock_check(check, t):
+    """--check's scanned rocks (see run_check): the ground made desert by
+    SCAN_ROCK_MOISTURE, until a scanned rock (rocks.SCAN_ROCKS) has a
+    static hull near the player (within SCAN_ROCK_SECONDS); it is let
+    loose as the gun's grab does (Rocks.promote), passing when it is a
+    loose rock with a mass, its cell (of the scans' grids, 2 or 3) taken
+    and its entity textured; the rock is then taken away (its cell back)
+    and the moisture put back. True once done."""
+    s = check.setdefault("scan rocks", {"t0": t, "moisture": world.moisture_offset})
+    world.moisture_offset = SCAN_ROCK_MOISTURE
+    found = next(((key, rock) for key, rock in foot.rocks.rocks.items() if rock.kind in SCAN_ROCKS), None)
+    if found is None and t - s["t0"] < SCAN_ROCK_SECONDS:
+        return False
+    ok, line = False, "no scanned rock near the player in %.0f s" % SCAN_ROCK_SECONDS
+    if found is not None:
+        key, rock = found
+        body = rock.body
+        promoted = foot.rocks.promote(foot.bubble, body)
+        prop = foot.props.find(body) if promoted else None
+        taken = key in world.taken_rocks
+        ok = (promoted and prop is not None and prop.mass > 0.0 and taken and key[1] in (2, 3)
+              and rock.kind in foot.rocks.scan_meshes)
+        line = ("a %s (%.2f m) with its hull, let loose: a loose rock of %.0f kg (%s), its cell on grid %d taken (%s)"
+                % (rock.kind, rock.scale[1], prop.mass if prop is not None else 0.0, prop is not None, key[1], taken))
+        if prop is not None:
+            foot.props.remove(foot.bubble, prop)
+            ok = ok and key not in world.taken_rocks
+    world.moisture_offset = s["moisture"]
+    print("[walker] %s: %s" % (line, "passed" if ok else "FAILED"), flush=True)
+    check["scan_rock_ok"] = ok
     return True
 
 

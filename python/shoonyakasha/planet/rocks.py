@@ -3,8 +3,9 @@ The rocks the VegetationScatter pass places (vegetation_scatter.comp) and
 the cells whose rock it leaves out.
 
 A rock is named by its cell: (body, grid, face, cell u, cell v), `grid` 0
-for the boulders (on the trees' grid) and 1 for the small rocks (on their
-own finer grid). `TakenRocks` is the set of those whose rocks were taken
+for the boulders (on the trees' grid), 1 for the small rocks (on their
+own finer grid), 2 for a large scanned rock (on the large scans' grid) and
+3 for a small one (on the small scans' grid). `TakenRocks` is the set of those whose rocks were taken
 out of the scatter (their rocks moved into the physics), kept on the GPU
 in the TakenRocks buffer: an open-addressing table of SLOTS entries, each
 two words, (body | face << 1 | grid << 4 | cell u << 8, cell v), placed
@@ -15,8 +16,9 @@ at most MAX_TAKEN.
 
 `clear_body(index)` puts back the rocks of one body.
 
-`rock_grid(kind)` is the grid of a rock kind (vegetation.KINDS' "rock" or
-"boulder"); ROCK_COLOURS the rocks' colour on each body, `rock_colour` a
+`is_rock(kind)` tells a rock kind: "rock", "boulder" or a scan of
+scans.SCANS that is a rock (SCAN_ROCKS); `rock_grid(kind)` is a rock
+kind's grid; ROCK_COLOURS the rocks' colour on each body, `rock_colour` a
 rock's colour with an ore rock's tint (ORE_ROCKS, its resource's
 ORE_TINTS, ORE_TINT_SHARE) and `tinted` a colour tinted by a rock's tint,
 as drawn; SPECK_COLOURS an ore rock's specks' colour by resource; DENSITY
@@ -26,12 +28,15 @@ a plain rock's density and `density(resource)` a rock's by its resource
 
 import numpy as np
 
+from shoonyakasha.planet import scans
 from shoonyakasha.planet.resources import FERRITE
 
 SLOTS = 8192                     # entries in TakenRocks (two words each)
 EMPTY = 0xFFFFFFFF
 MAX_TAKEN = SLOTS // 2           # rocks taken at most, so probes stay short
 ROCK_KINDS = ("rock", "boulder")
+SCAN_ROCKS = tuple(s.name for s in scans.SCANS if s.rock)
+SMALL_SCAN_ROCKS = tuple(s.name for s in scans.SCANS if s.rock and s.small)
 DENSITY = 2600.0                 # kg/m^3
 # kg/m^3 by resource id (shoonyakasha.planet.resources): none, ferrite, cuprite, quartz, amber, evaporite, ice,
 # ilmenite, iridium.
@@ -77,7 +82,13 @@ def rock_colour(body, grade=0.0, resource=FERRITE):
     return tuple(c + (t - c) * share for c, t in zip(colour, tint))
 
 
+def is_rock(kind):
+    return kind in ROCK_KINDS or kind in SCAN_ROCKS
+
+
 def rock_grid(kind):
+    if kind in SCAN_ROCKS:
+        return 3 if kind in SMALL_SCAN_ROCKS else 2
     return 1 if kind == "rock" else 0
 
 
