@@ -724,6 +724,8 @@ cdef extern from "Audio/AudioEngine.h" namespace "Shoonyakasha::Audio":
     cdef cppclass CppAudioEngine "Shoonyakasha::Audio::AudioEngine":
         CppAudioEngine(const AudioConfig& config) except +
         cbool hasDevice()
+        cbool keepDevice()
+        cbool deviceLost()
         uint32_t sampleRate()
         uint32_t channels()
         uint64_t timeFrames()

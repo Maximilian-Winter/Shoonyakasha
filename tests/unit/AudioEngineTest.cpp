@@ -12,7 +12,9 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 using namespace Shoonyakasha::Audio;
@@ -536,6 +538,69 @@ TEST(AudioEngineTest, ReverbAddsATailToTheWorldBusOnly) {
     audio.setReverb(1.5f, 1.5f, 1.0f, 0.0f);
     pull(audio, 2 * RATE);
     EXPECT_LT(tail(Bus::World), 1e-5);
+}
+
+TEST(AudioEngineTest, VoiceFarBeyondItsMaxDistanceIsNotPlayed) {
+    AudioEngine audio(headless());
+    const ClipId clip = loadTone(audio, 1000.0f);
+    PlayParams params;
+    params.maxDistance = 60.0f;
+    params.position = {0.0f, 0.0f, -65.0f};
+    EXPECT_NE(audio.play(clip, params), 0u);
+    params.position = {0.0f, 0.0f, -67.0f};
+    EXPECT_EQ(audio.play(clip, params), 0u);
+    params.spatial = false;
+    EXPECT_NE(audio.play(clip, params), 0u);
+}
+
+/// Sign changes a second in the left channel.
+double crossingRate(const std::vector<float>& stereo) {
+    int crossings = 0;
+    for (size_t i = 2; i < stereo.size(); i += 2) {
+        if ((stereo[i] >= 0.0f) != (stereo[i - 2] >= 0.0f)) ++crossings;
+    }
+    return crossings / (static_cast<double>(stereo.size() / 2) / RATE);
+}
+
+TEST(AudioEngineTest, ApproachingVoiceIsHigher) {
+    for (bool binaural : {false, true}) {
+        AudioEngine audio(headless());
+        audio.setBinaural(binaural);
+        PlayParams params;
+        params.loop = true;
+        params.position = {0.0f, 0.0f, -20.0f};
+        params.velocity = {0.0f, 0.0f, 50.0f};     // towards the listener at 50 m/s
+        params.doppler = 1.0f;
+        audio.play(loadTone(audio, 1000.0f), params);
+        pull(audio, 4800);
+        const double rate = crossingRate(pull(audio, RATE / 2)) / 2.0;   // Hz
+        EXPECT_NEAR(rate, 1000.0 * 343.3 / (343.3 - 50.0), 15.0) << (binaural ? "binaural" : "panned");
+    }
+}
+
+TEST(AudioEngineTest, LostDeviceIsOpenedAgain) {
+    AudioConfig config;
+    config.nullDevice = true;
+    AudioEngine audio(config);
+    ASSERT_TRUE(audio.hasDevice());
+    auto waitFor = [&](uint64_t frames) {
+        const uint64_t from = audio.timeFrames();
+        for (int k = 0; k < 200 && audio.timeFrames() - from < frames; ++k) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return audio.timeFrames() - from >= frames;
+    };
+    EXPECT_TRUE(waitFor(2400));
+    EXPECT_TRUE(audio.keepDevice());
+    audio.loseDeviceForTesting();
+    for (int k = 0; k < 100 && !audio.deviceLost(); ++k) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    ASSERT_TRUE(audio.deviceLost());
+    const uint64_t stopped = audio.timeFrames();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_EQ(audio.timeFrames(), stopped);
+    EXPECT_TRUE(audio.keepDevice());
+    EXPECT_FALSE(audio.deviceLost());
+    EXPECT_TRUE(waitFor(2400));
 }
 
 TEST(AudioEngineTest, ListenerRightIsForwardCrossUp) {

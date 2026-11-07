@@ -35,12 +35,16 @@ struct AudioConfig {
     /// when true and no device can be opened, the engine runs as if false
     /// (hasDevice is then false).
     bool device = true;
+    /// With `device`: a device on miniaudio's null backend, which takes the
+    /// mix in real time and plays it nowhere.
+    bool nullDevice = false;
 };
 
 /// How a voice starts. A spatial voice's position and velocity are relative
 /// to the listener, which is at the origin; its gain falls off as
 /// minDistance / (minDistance + rolloff * (d - minDistance)) beyond
-/// minDistance, with d held at maxDistance beyond it. A voice with a delay
+/// minDistance, with d held at maxDistance beyond it; one farther than 1.1
+/// times maxDistance is not played (play returns 0). A voice with a delay
 /// starts that many seconds of the mix's time after play. A filtered voice
 /// goes through its own low-pass then high-pass, at `lowpass` and
 /// `highpass` Hz (0: open), which setVoiceFilter moves.
@@ -89,6 +93,17 @@ public:
     AudioEngine& operator=(const AudioEngine&) = delete;
 
     bool hasDevice() const;
+    /// With a device: when it has stopped on its own (unplugged, say), the
+    /// default device opened in its place, at most once a second, the mix
+    /// going on where it was. Returns whether the device plays. Call it
+    /// once a frame.
+    bool keepDevice();
+    /// Whether the device stopped on its own and has not been opened again.
+    bool deviceLost() const;
+#ifdef SHOONYAKASHA_TESTING
+    /// The device stopped as if it had stopped on its own.
+    void loseDeviceForTesting();
+#endif
     uint32_t sampleRate() const;
     uint32_t channels() const;
     /// Frames the mix has produced since the engine started.

@@ -204,6 +204,7 @@ class Sound:
     hush: bool = False                 # the next toast silent (sounds.alert)
     recent_hits: list = field(default_factory=list)   # (clock, point, voice, entry, volume) of the hits just played
     reverb_in: float = 0.0             # s until the reverb's rays are cast again
+    device_playing: bool = True        # the audio device played last frame (sounds.keep_device)
     reverb: tuple = None               # ((low, mid, high RT60 s), wet) the world bus's reverb was last set to
     occlusion: dict = field(default_factory=dict)   # a spatial loop: (clock when looked for again, blocked)
     mix: str = None                    # the state the mix was last set for (sounds.mix_state)

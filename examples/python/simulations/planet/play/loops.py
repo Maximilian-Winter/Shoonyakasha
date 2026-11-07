@@ -46,6 +46,7 @@ CUSHION_FROM = 2.0       # m above the ground below which the car's cushion is h
 STRAIN_RESERVE = 0.2     # the suit's reserve below which the breath strains and the heart is heard
 EXERTION_EASE = 2.0      # s exertion takes to follow the effort
 OCCLUSION_EVERY = 0.25   # s between a spatial loop's occlusion rays
+CULL_SHARE = 1.1         # of its far distance beyond which a spatial loop stops
 CAR_CLEARANCE = 3.5      # m short of the car an occlusion ray stops, so as not to hit the car
 
 
@@ -130,11 +131,13 @@ LOOPS = {
 }
 
 
-def hold(name, level, pitch=1.0, position=None, bus=None, lowpass=0.0, highpass=0.0):
+def hold(name, level, pitch=1.0, position=None, bus=None, lowpass=0.0, highpass=0.0, velocity=(0.0, 0.0, 0.0)):
     """The loop `name` playing at `level` (times its volume; 0 or less
     stops it, fading out), `pitch`, at `position` (planet space) when given
-    and the entry is spatial, on `bus` (its own when None), through its
-    filter at `lowpass` and `highpass` Hz (0 open). A spatial loop with
+    and the entry is spatial, moving at `velocity` (for the Doppler shift),
+    on `bus` (its own when None), through its filter at `lowpass` and
+    `highpass` Hz (0 open). A spatial loop stops beyond CULL_SHARE times
+    its entry's far distance and starts again within it. A spatial loop with
     something between it and the camera (sounds.occluded, looked for every
     OCCLUSION_EVERY seconds, CAR_CLEARANCE short of it) is quieter and
     duller (acoustics.occluded_audio). A loop whose bus or being spatial
@@ -145,6 +148,11 @@ def hold(name, level, pitch=1.0, position=None, bus=None, lowpass=0.0, highpass=
     entry = s.entries[name]
     bus = bus or entry["bus"]
     spatial = position is not None and "near" in entry
+    if spatial:
+        distance = length(sub(position, state.view.position))
+        far = entry.get("far", 500.0)
+        if distance > CULL_SHARE * far or (name not in s.loops and distance > far):
+            level = 0.0
     if spatial and level > 0.0:
         due, blocked = s.occlusion.get(name, (0.0, False))
         if s.clock >= due:
@@ -164,11 +172,12 @@ def hold(name, level, pitch=1.0, position=None, bus=None, lowpass=0.0, highpass=
         return
     if running is None:
         voice = sounds.play(name, position, volume=level, pitch=pitch, bus=bus, loop=True, fade_in=LOOP_FADE,
-                            filtered=True, lowpass=lowpass, highpass=highpass)
+                            filtered=True, lowpass=lowpass, highpass=highpass, velocity=velocity)
         if voice:
             s.loops[name] = (voice, bus, spatial)
         return
-    s.audio.set_voice(running[0], position=position if spatial else None, volume=entry["volume"] * level,
+    s.audio.set_voice(running[0], position=position if spatial else None, velocity=velocity,
+                      volume=entry["volume"] * level,
                       pitch=pitch, lowpass=lowpass, highpass=highpass, filter_fade=FILTER_EASE)
 
 
@@ -252,12 +261,13 @@ def update_car():
     position = None if driving else vehicle.car_position()
     bus = "suit" if driving else None
     hold("car_hum", level * (0.8 if driving else 1.0), pitch=pitch, position=position, bus=bus,
-         lowpass=700.0 + 3_000.0 * throttle + (1_500.0 if boost else 0.0))
+         lowpass=700.0 + 3_000.0 * throttle + (1_500.0 if boost else 0.0), velocity=tuple(car.velocity))
     height = car.height
     cushion = 0.0
     if state.space.ship is None and height is not None and height < CUSHION_FROM:
         cushion = (1.0 - height / CUSHION_FROM) ** 2 * (0.5 + 0.5 * min(1.0, car.speed() / 20.0))
-    hold("car_cushion", cushion, position=position, bus=bus, lowpass=900.0 + 40.0 * car.speed())
+    hold("car_cushion", cushion, position=position, bus=bus, lowpass=900.0 + 40.0 * car.speed(),
+         velocity=tuple(car.velocity))
 
 
 def update_gun():

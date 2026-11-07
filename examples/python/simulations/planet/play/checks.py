@@ -83,6 +83,8 @@ NIGHT_CHECK_HOUR = 0.5          # the hour --check sets at its end
 NIGHT_SECONDS = 1.0             # s --check waits at night
 NEW_GAME_NEAR = 3.0             # m from site.spawn_point a new game's player must stand, at most
 VACUUM_NEAR, VACUUM_FAR = 2.0, 20.0   # m from the camera --check strikes something on the moon
+VACUUM_GROUND = 10.0            # m, a strike there heard through the ground
+VACUUM_STAND = 2.0              # s it waits at most for the player to stand on the moon before striking
 SOUNDS_HEARD = ("grab", "punt_charged", "hit", "footstep", "land", "slate_open", "toast", "wind", "car_hum",
                 "gun_hum", "breath", "meteor_boom_large", "contact", "rain", "pads_closed", "music_explore",
                 "music_orbit", "music_menu")   # sounds.SOUNDS entries the check must have played
@@ -225,7 +227,10 @@ def run_check(dt):
     within 50 m of the pad and not hard, and the player got out stands on
     the moon at the moon's temperature; with sound, the world bus is
     silent there and of a strike VACUUM_NEAR and one VACUUM_FAR from the
-    camera only the near one is heard, through the suit; then a meteorite of
+    camera only the near one is heard, through the suit, the far one when
+    the gun holds what struck, and (once the player stands, waiting up to
+    VACUUM_STAND) one VACUUM_GROUND off through the
+    ground standing on it; then a meteorite of
     SHOWER_CHECK_MASS strikes the moon MOON_SHOWER_CHECK_AWAY east of the
     feet MOON_SHOWER_CHECK_LEAD on, passing when its crater is dug on the
     moon and the meteorite lies within 1 m of its floor; then the car on
@@ -1319,7 +1324,8 @@ def run_voice_check(check, t):
     the ground is occluded and one 30 m up not, the reverb was set (with a
     wet level within acoustics' range), and the Headphones setting made
     the audio binaural (when it can be), a hit heard through it, and off
-    again. True once done."""
+    again, and a hit 1.2 times its far distance off is not played. True
+    once done."""
     audio = state.sound.audio
     if audio is None:
         check["voice_ok"] = True
@@ -1370,13 +1376,14 @@ def run_voice_check(check, t):
     binaural = audio.binaural == audio.binaural_available and not state.sound.loops
     heard = sounds.play("hit", add(camera, scale(up, 2.0)))
     audio.stop(heard)
+    culled = sounds.play("hit", add(camera, scale(up, 1.2 * sounds.SOUNDS["hit"]["far"]))) == 0
     settings.set("headphones", headphones)
     sounds.apply_binaural()
-    steam_ok = below and not above and reverb_ok and binaural and heard != 0 and not audio.binaural
+    steam_ok = below and not above and reverb_ok and binaural and heard != 0 and not audio.binaural and culled
     print("[walker] 30 m into the ground occluded (%s), 30 m up not (%s); the reverb %s; with headphones binaural "
-          "(%s) and heard (%s): %s" % (below, above, "unset" if reverb is None else
-                                       "%.2f s, wet %.2f" % (reverb[0][1], reverb[1]), binaural, heard != 0,
-                                       "passed" if steam_ok else "FAILED"), flush=True)
+          "(%s) and heard (%s); a hit beyond its far distance not played (%s); the listener at %.1f m/s: %s"
+          % (below, above, "unset" if reverb is None else "%.2f s, wet %.2f" % (reverb[0][1], reverb[1]), binaural,
+             heard != 0, culled, length(sounds.listener_velocity()), "passed" if steam_ok else "FAILED"), flush=True)
     check["voice_ok"] = ok and steam_ok
     return True
 
@@ -1584,17 +1591,25 @@ def run_space_check(check, t):
         if audio is None:
             done(True, "no sound to check in vacuum", "moon_shower")
             return False
+        if foot.player is not None and not foot.player.on_ground and since < VACUUM_STAND:
+            return False
         right, _, forward = walking.view_basis()
         camera, before = state.view.position, Counter(state.sound.played)
         sounds.strike("hit", add(camera, scale(forward, VACUUM_NEAR)))
         sounds.strike("hit", add(camera, scale(right, VACUUM_FAR)))
         played = state.sound.played
         contacts, hits = played["contact"] - before["contact"], played["hit"] - before["hit"]
+        sounds.strike("hit", add(camera, scale(right, VACUUM_FAR)), held=True)
+        held = played["contact"] - before["contact"] - contacts
+        grounded = foot.player is not None and foot.player.on_ground
+        sounds.strike("hit", add(camera, scale(forward, VACUUM_GROUND)))
+        ground = played["contact"] - before["contact"] - contacts - held
         silent = audio.bus_volume("world") == 0.0 and audio.world_lowpass <= acoustics.VACUUM_CUTOFF
-        done(silent and contacts == 1 and hits == 0,
+        done(silent and contacts == 1 and hits == 0 and held == 1 and ground == (1 if grounded else 0),
              "in vacuum the world bus silent (%.2f, %.0f Hz), a strike %.0f m off heard through the suit (%d), "
-             "one %.0f m off not at all (%d)" % (audio.bus_volume("world"), audio.world_lowpass, VACUUM_NEAR,
-                                                 contacts, VACUUM_FAR, hits), "moon_shower")
+             "one %.0f m off not at all (%d) unless the gun holds it (%d), one %.0f m off through the ground (%d)"
+             % (audio.bus_volume("world"), audio.world_lowpass, VACUUM_NEAR, contacts, VACUUM_FAR, hits, held,
+                VACUUM_GROUND, ground), "moon_shower")
         return False
     if step == "moon_shower":
         moon = s["outpost"].body

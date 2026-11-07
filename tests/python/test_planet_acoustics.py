@@ -87,6 +87,15 @@ class AirAudioTest(unittest.TestCase):
         self.assertEqual(acoustics.occluded_audio(False), (1.0, None))
         self.assertEqual(acoustics.occluded_audio(True), (acoustics.OCCLUDED_GAIN, acoustics.OCCLUDED_CUTOFF))
 
+    def test_contact_through_the_gun_and_the_ground(self):
+        self.assertEqual(acoustics.contact_volume(30.0, held=True), 1.0)
+        self.assertEqual(acoustics.contact_volume(10.0), 0.0)
+        self.assertAlmostEqual(acoustics.contact_volume(0.0, grounded=True), 1.0)
+        self.assertAlmostEqual(acoustics.contact_volume(0.5 * acoustics.GROUND_REACH, grounded=True),
+                               0.5 * acoustics.GROUND_SHARE)
+        self.assertEqual(acoustics.contact_volume(acoustics.GROUND_REACH, grounded=True), 0.0)
+        self.assertEqual(acoustics.contact_volume(30.0, grounded=True), 0.0)
+
     def test_contact_volume(self):
         self.assertEqual(acoustics.contact_volume(0.0), 1.0)
         self.assertAlmostEqual(acoustics.contact_volume(0.5 * acoustics.CONTACT_DISTANCE), 0.5)

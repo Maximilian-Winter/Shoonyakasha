@@ -21,6 +21,13 @@ Shoonyakasha::Audio::AudioEngine headless(config);
 
 `engine.audio` / `getAudio()` can be used before `run()`. When no playback device can be opened, the engine runs as with `device=False` (`has_device` is then false), so nothing is heard and voices only end when `read` pulls the mix. `sk.Audio` takes `device`, `sample_rate` (48000), `channels` (2) and `voices` (64). Construction raises `RuntimeError` when miniaudio cannot start at all.
 
+```python
+audio.keep_device()      # once a frame: whether the device plays
+audio.device_lost        # it stopped on its own and is not open again yet
+```
+
+A device that stops on its own, unplugged say, stops the mix where it is. `keep_device` opens the default device in its place, at most once a second, and the mix goes on from where it stopped. In C++ these are `keepDevice` and `deviceLost`. `AudioConfig::nullDevice` opens a device on miniaudio's null backend, which takes the mix in real time and plays it nowhere.
+
 Call an `Audio` from one thread.
 
 ## Clips
@@ -49,7 +56,7 @@ audio.active(loop)                                        # still holds its slot
 
 `play` returns a voice, or 0 when the clip does not exist or its category or the full pool keeps it from playing (see Categories and priority). A voice with a `position` is spatial:
 
-- **Falloff:** its gain is `min_distance / (min_distance + rolloff * (d - min_distance))` beyond `min_distance`, with `d` held at `max_distance` beyond that.
+- **Falloff:** its gain is `min_distance / (min_distance + rolloff * (d - min_distance))` beyond `min_distance`, with `d` held at `max_distance` beyond that. A voice farther than 1.1 times `max_distance` is not played, and `play` returns 0.
 - **Panning:** it is panned around the listener.
 - **Doppler:** it is shifted by its `velocity` relative to the listener's, scaled by `doppler` (1 by default, 0 for none).
 

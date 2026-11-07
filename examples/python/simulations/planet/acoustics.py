@@ -5,9 +5,11 @@ How the air carries sound to the listener (play/sounds.py).
 density at the listener, `d` (a share of the density at the planet's
 surface): silent at or below VACUUM, else from 0.25 rising with the
 square root of the density to 1 at the surface, the cutoff from 400 Hz
-to 20 kHz. `contact_volume(distance)`: in vacuum, how loud something
-struck `distance` metres away is through the suit, from 1 touching to 0
-at CONTACT_DISTANCE.
+to 20 kHz. `contact_volume(distance, held, grounded)`: in vacuum, how
+loud something struck `distance` metres away is through the suit: 1 for
+what the gun holds; else from 1 touching to 0 at CONTACT_DISTANCE, or,
+standing on the ground (`grounded`), at least GROUND_SHARE falling to 0
+at GROUND_REACH, through the ground and the feet.
 
 `sound_delay(distance)`: seconds sound takes to travel `distance` metres
 of air, at SOUND_SPEED. `distance_cutoff(distance)`: the low-pass cutoff
@@ -34,6 +36,8 @@ import math
 VACUUM = 1e-4                # density share at or below which there is no air to carry sound
 VACUUM_CUTOFF = 200.0        # Hz, the world bus's cutoff in vacuum
 CONTACT_DISTANCE = 3.0       # m within which a strike is heard through the suit in vacuum
+GROUND_REACH = 15.0          # m within which a strike is heard through the ground standing on it
+GROUND_SHARE = 0.5           # of a strike's volume heard through the ground at the feet
 SOUND_SPEED = 343.0          # m/s
 NEAR_DISTANCE, NEAR_CUTOFF = 10.0, 18_000.0     # m, Hz
 FAR_DISTANCE, FAR_CUTOFF = 5_000.0, 2_000.0     # m, Hz
@@ -57,8 +61,11 @@ def air_audio(d):
     return min(1.0, 0.25 + 0.75 * share ** 0.5), 400.0 + 19_600.0 * share ** 0.7
 
 
-def contact_volume(distance):
-    return max(0.0, 1.0 - distance / CONTACT_DISTANCE)
+def contact_volume(distance, held=False, grounded=False):
+    if held:
+        return 1.0
+    through_ground = GROUND_SHARE * max(0.0, 1.0 - distance / GROUND_REACH) if grounded else 0.0
+    return max(max(0.0, 1.0 - distance / CONTACT_DISTANCE), through_ground)
 
 
 def sound_delay(distance):

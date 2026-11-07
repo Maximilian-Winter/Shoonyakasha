@@ -206,6 +206,12 @@ class AudioTest(unittest.TestCase):
         self.audio.read(RATE // 5)
         self.assertGreater(rms(self.audio.read(RATE // 5)), 1e-4)
 
+    def test_far_voice_is_not_played_and_no_device_is_kept(self):
+        self.assertNotEqual(self.audio.play(self.clip, position=(0.0, 0.0, -50.0), max_distance=50.0), 0)
+        self.assertEqual(self.audio.play(self.clip, position=(0.0, 0.0, -60.0), max_distance=50.0), 0)
+        self.assertFalse(self.audio.keep_device())
+        self.assertFalse(self.audio.device_lost)
+
     def test_stop_with_a_fade_and_a_stale_voice(self):
         audio = sk.Audio(device=False, voices=1)
         clip = audio.load_samples(tone(1000.0, 1.0))

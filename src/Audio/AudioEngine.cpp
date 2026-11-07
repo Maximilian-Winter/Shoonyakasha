@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -19,6 +20,8 @@ constexpr float NYQUIST_SHARE = 0.45f;         // the highest cutoff, as a share
 constexpr float BUS_MIN_FADE = 0.005f;         // s
 constexpr float TAKEN_FADE = 0.005f;           // s a voice taken over by a louder one fades out over
 constexpr float SPEED_OF_SOUND = 343.3f;       // m/s, as miniaudio's Doppler shift has it
+constexpr float CULL_SHARE = 1.1f;             // of its maxDistance beyond which a spatial voice is not played
+constexpr auto DEVICE_RETRY = std::chrono::seconds(1);   // between tries to open a lost device again
 
 ma_uint64 milliseconds(float seconds) {
     return static_cast<ma_uint64>(std::lround(std::max(seconds, 0.0f) * 1000.0f));
@@ -249,7 +252,16 @@ float loudness(const PlayParams& p) {
 struct AudioEngine::Impl {
     ma_engine engine;
     bool engineReady = false;
-    bool device = false;
+    bool device = false;          // the engine plays on `playback`, which this opens
+    ma_context context;
+    bool contextReady = false;
+    ma_device playback;
+    bool playbackReady = false;
+    std::atomic<bool> lost{false};        // the device stopped when it was not stopped here
+    std::atomic<bool> expectStop{false};  // a stop of the device here
+    std::chrono::steady_clock::time_point retryAt{};
+    uint32_t deviceRate = 0;
+    uint32_t deviceChannels = 0;
     uint32_t channels = 0;
     ma_sound_group buses[BusCount];
     bool busReady[BusCount] = {};
@@ -313,9 +325,44 @@ struct AudioEngine::Impl {
         }
     }
 
+    static void deviceData(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
+        (void)pInput;
+        auto* s = static_cast<Impl*>(pDevice->pUserData);
+        ma_engine_read_pcm_frames(&s->engine, pOutput, frameCount, nullptr);
+    }
+
+    static void deviceNotification(const ma_device_notification* pNotification) {
+        auto* s = static_cast<Impl*>(pNotification->pDevice->pUserData);
+        if (pNotification->type == ma_device_notification_type_stopped && !s->expectStop.load()) s->lost.store(true);
+    }
+
+    /// The default playback device opened (not started) into `playback`.
+    bool openDevice() {
+        ma_device_config config = ma_device_config_init(ma_device_type_playback);
+        config.playback.format = ma_format_f32;
+        config.playback.channels = deviceChannels;
+        config.sampleRate = deviceRate;
+        config.dataCallback = deviceData;
+        config.notificationCallback = deviceNotification;
+        config.pUserData = this;
+        playbackReady = ma_device_init(&context, &config, &playback) == MA_SUCCESS;
+        return playbackReady;
+    }
+
+    void closeDevice() {
+        if (!playbackReady) return;
+        expectStop.store(true);
+        ma_device_uninit(&playback);
+        expectStop.store(false);
+        playbackReady = false;
+    }
+
     void shutdown() {
         if (!engineReady) return;
-        if (device) ma_engine_stop(&engine);
+        if (device) {
+            expectStop.store(true);
+            ma_engine_stop(&engine);
+        }
         for (uint32_t i = 0; i < voiceCount; ++i) {
             if (voices[i].used) release(voices[i]);
         }
@@ -341,6 +388,9 @@ struct AudioEngine::Impl {
         Steam::uninitReverb(reverb);
         uninitFilter(world);
         ma_engine_uninit(&engine);
+        closeDevice();
+        if (contextReady) ma_context_uninit(&context);
+        contextReady = false;
         Steam::release(steam);
         engineReady = false;
     }
@@ -384,17 +434,26 @@ AudioEngine::AudioEngine(const AudioConfig& config) : m_impl(std::make_unique<Im
     engineConfig.channels = config.channels;
     engineConfig.listenerCount = 1;
     engineConfig.defaultVolumeSmoothTimeInPCMFrames = config.sampleRate / 200;    // 5 ms
-    engineConfig.noDevice = config.device ? MA_FALSE : MA_TRUE;
-    ma_result result = ma_engine_init(&engineConfig, &s.engine);
-    if (result != MA_SUCCESS && config.device) {
-        engineConfig.noDevice = MA_TRUE;
-        result = ma_engine_init(&engineConfig, &s.engine);
+    s.deviceRate = config.sampleRate;
+    s.deviceChannels = config.channels;
+    if (config.device) {
+        const ma_backend nullOnly[1] = {ma_backend_null};
+        if (ma_context_init(config.nullDevice ? nullOnly : nullptr, config.nullDevice ? 1 : 0, nullptr, &s.context)
+            == MA_SUCCESS) {
+            s.contextReady = true;
+            if (s.openDevice()) engineConfig.pDevice = &s.playback;
+        }
     }
+    engineConfig.noDevice = engineConfig.pDevice == nullptr ? MA_TRUE : MA_FALSE;
+    ma_result result = ma_engine_init(&engineConfig, &s.engine);
     if (result != MA_SUCCESS) {
+        s.closeDevice();
+        if (s.contextReady) ma_context_uninit(&s.context);
+        s.contextReady = false;
         throw std::runtime_error(std::string("miniaudio could not start: ") + ma_result_description(result));
     }
     s.engineReady = true;
-    s.device = engineConfig.noDevice == MA_FALSE;
+    s.device = engineConfig.pDevice != nullptr;
     s.channels = ma_engine_get_channels(&s.engine);
 
     try {
@@ -450,6 +509,25 @@ AudioEngine::~AudioEngine() {
 }
 
 bool AudioEngine::hasDevice() const { return m_impl->device; }
+
+bool AudioEngine::keepDevice() {
+    Impl& s = *m_impl;
+    if (!s.device) return false;
+    if (!s.lost.load()) return true;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s.retryAt) return false;
+    s.retryAt = now + DEVICE_RETRY;
+    s.closeDevice();
+    if (!s.openDevice() || ma_device_start(&s.playback) != MA_SUCCESS) return false;
+    s.lost.store(false);
+    return true;
+}
+
+bool AudioEngine::deviceLost() const { return m_impl->lost.load(); }
+
+#ifdef SHOONYAKASHA_TESTING
+void AudioEngine::loseDeviceForTesting() { ma_device_stop(&m_impl->playback); }
+#endif
 
 uint32_t AudioEngine::sampleRate() const { return ma_engine_get_sample_rate(&m_impl->engine); }
 
@@ -532,6 +610,10 @@ VoiceId AudioEngine::play(ClipId id, const PlayParams& params) {
     Impl& s = *m_impl;
     Clip* clip = s.clip(id);
     if (clip == nullptr) return 0;
+    if (params.spatial && params.minDistance < params.maxDistance) {
+        const float d = std::sqrt(dot3(params.position, params.position));
+        if (d > CULL_SHARE * params.maxDistance) return 0;
+    }
     s.reclaim();
     const float loud = loudness(params);
     const int limit = params.category < CategoryCount ? s.categoryLimits[params.category] : 0;

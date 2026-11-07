@@ -2948,6 +2948,18 @@ cdef class Audio:
         """Whether the mix plays on a device; without one, read() pulls it."""
         return self._ptr.hasDevice()
 
+    def keep_device(self):
+        """With a device: when it has stopped on its own (unplugged, say),
+        the default device opened in its place, at most once a second, the
+        mix going on where it was. Returns whether the device plays. Call it
+        once a frame."""
+        return self._ptr.keepDevice()
+
+    @property
+    def device_lost(self):
+        """Whether the device stopped on its own and has not been opened again."""
+        return self._ptr.deviceLost()
+
     @property
     def sample_rate(self):
         return self._ptr.sampleRate()
@@ -2991,7 +3003,8 @@ cdef class Audio:
         `position` it is spatial: its gain falls off as min_distance /
         (min_distance + rolloff * (d - min_distance)) beyond min_distance, d
         held at max_distance beyond it, and it is panned and Doppler shifted
-        (by `velocity` relative to the listener's, scaled by `doppler`).
+        (by `velocity` relative to the listener's, scaled by `doppler`); one
+        farther than 1.1 times max_distance is not played (0 is returned).
         Without one it plays as recorded. It starts `delay` seconds of mix
         time from now and fades in over `fade_in` seconds. A filtered voice
         (`filtered`, or a `lowpass` or `highpass` given, in Hz) goes through

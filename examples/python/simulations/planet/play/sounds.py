@@ -35,8 +35,10 @@ setting. A change of state is reached over its fade. The air carries the
 world bus (acoustics.air_audio): its gain and low-pass follow the air's
 density at the camera, reached over AIR_FADE, the gain times the state's
 and silent in vacuum (on the moon, in orbit). There a hit or a split within
-acoustics.CONTACT_DISTANCE of the camera plays "contact" through the suit
-instead (`strike`), and one farther off plays nothing.
+acoustics.CONTACT_DISTANCE of the camera, of what the gun holds, or,
+standing on the ground, within acoustics.GROUND_REACH, plays "contact"
+through the suit instead (`strike`, acoustics.contact_volume), and one
+farther off plays nothing.
 
 In air a world sound at a point (`strike`) starts late by the time sound
 takes to come from there (acoustics.sound_delay) and is dulled by the
@@ -46,7 +48,10 @@ sound, and in vacuum, standing on the ground within its reach
 (acoustics.rumble_volume), a low rumble through the feet. `alert` plays a
 sound for the toast that follows it in place of the toast's own.
 
-With the Headphones setting the audio is binaural (sk.Audio.binaural), the
+The listener moves with the player or the car, relative to the body
+under it (`listener_velocity`), and spatial voices are Doppler shifted
+by DOPPLER of it. The audio device is kept: one that stops on its own is
+opened again (sk.Audio.keep_device). With the Headphones setting the audio is binaural (sk.Audio.binaural), the
 loops starting again to take it. Every REVERB_EVERY seconds rays from the
 camera (REVERB_RAYS, through the physics bubble's ground, rocks, trunks
 and props) give the world bus its reverb (acoustics.reverb_from; open
@@ -105,6 +110,8 @@ HIT_GAP = 0.15           # s between one prop's hits
 LAND_AIR = 0.35          # s in the air before touching down is a landing
 AIR_FADE = 0.3           # s the world bus takes to follow the air
 WARP_SILENT = 2.0        # time warp above which world sounds at a point are not played
+DOPPLER = 0.5            # of the Doppler shift spatial voices are given
+HELD_HIT_SPEED = 3.0     # m/s the held body's speed must fall by in a frame to be heard hitting something
 COLLAPSE_SECONDS = 0.05  # s within which hits near one another are one voice
 REVERB_EVERY = 0.5       # s between the reverb's rays
 REVERB_TILT = 30.0       # degrees above the horizon of the reverb's raised rays
@@ -328,7 +335,8 @@ def play(name, position=None, volume=1.0, pitch=1.0, bus=None, **options):
     voice = s.audio.play(s.rng.choice(s.clips[name]), position=position if spatial else None,
                          bus=bus or entry["bus"], volume=entry["volume"] * volume, pitch=pitch,
                          min_distance=entry.get("near", 1.0), max_distance=entry.get("far", 500.0),
-                         category=entry.get("category"), priority=entry.get("priority", PRIORITY), **options)
+                         category=entry.get("category"), priority=entry.get("priority", PRIORITY),
+                         doppler=entry.get("doppler", DOPPLER), **options)
     s.played[name] += 1
     return voice
 
@@ -350,11 +358,11 @@ def split(chunks):
         strike("split", add(body.centre(), position))
 
 
-def strike(name, position, volume=1.0, pitch=1.0):
+def strike(name, position, volume=1.0, pitch=1.0, held=False):
     """The world sound `name` at `position` (planet space), late by the
     sound's travel and dulled by the distance; in vacuum, "contact" through
-    the suit when within acoustics.CONTACT_DISTANCE of the camera, else
-    none; none with the time warp above WARP_SILENT."""
+    the suit as acoustics.contact_volume has it (`held`: what the gun
+    holds), else none; none with the time warp above WARP_SILENT."""
     if spaceflight.time_warp() > WARP_SILENT:
         return 0
     distance = length(sub(position, state.view.position))
@@ -363,11 +371,12 @@ def strike(name, position, volume=1.0, pitch=1.0):
         lowpass = acoustics.distance_cutoff(distance)
         return play(name, position, volume * gain, pitch, delay=acoustics.sound_delay(distance),
                     lowpass=min(lowpass, cutoff) if cutoff else lowpass)
-    near = acoustics.contact_volume(distance)
+    grounded = foot.player is not None and foot.player.on_ground
+    near = acoustics.contact_volume(distance, held, grounded)
     return play("contact", volume=volume * near, pitch=pitch) if near > 0.0 else 0
 
 
-def hit(position, volume=1.0, pitch=1.0):
+def hit(position, volume=1.0, pitch=1.0, held=False):
     """A hit at `position` (planet space) (`strike`), or, within
     COLLAPSE_SECONDS and COLLAPSE_DISTANCE of an earlier one, that one's
     voice, raised to this one's volume when this one is louder. Returns
@@ -381,7 +390,7 @@ def hit(position, volume=1.0, pitch=1.0):
                 s.recent_hits[k] = (at, where, voice, name, volume)
             return voice
     before = Counter(s.played)
-    voice = strike("hit", position, volume, pitch)
+    voice = strike("hit", position, volume, pitch, held)
     name = "contact" if s.played["contact"] > before["contact"] else "hit"
     s.recent_hits.append((s.clock, position, voice, name, volume))
     return voice
@@ -466,8 +475,9 @@ def update(dt):
     s = state.sound
     if s.audio is None:
         return
+    keep_device()
     right, up, forward = walking.view_basis()
-    s.audio.set_listener(state.view.position, forward, up)
+    s.audio.set_listener(state.view.position, forward, up, listener_velocity())
     s.hush = False
     update_mix()
     update_reverb(dt)
@@ -479,6 +489,27 @@ def update(dt):
         if shown != s.shown.get(name, shown):
             play("slate_open" if shown else "slate_close")
         s.shown[name] = shown
+
+
+def listener_velocity():
+    """The listener's velocity relative to the body under it: the car's
+    while driving, else the player's; none in space mode or without either."""
+    if state.space.ship is not None:
+        return (0.0, 0.0, 0.0)
+    if state.vehicle.driving and state.vehicle.car is not None:
+        return tuple(state.vehicle.car.velocity)
+    if foot.player is not None:
+        return tuple(foot.physics.character_velocity(foot.player.character))
+    return (0.0, 0.0, 0.0)
+
+
+def keep_device():
+    """The audio device kept (sk.Audio.keep_device), a line printed when it is lost and when it is back."""
+    s = state.sound
+    playing = s.audio.keep_device()
+    if s.audio.has_device and playing != s.device_playing:
+        print("[walker] the sound device %s" % ("is back" if playing else "stopped; opening it again"), flush=True)
+        s.device_playing = playing
 
 
 def update_gun():
@@ -498,14 +529,16 @@ def update_gun():
 
 
 def update_hits(dt):
-    """A hit for each prop whose speed fell by HIT_SPEED or more since the last frame."""
+    """A hit for each prop whose speed fell by HIT_SPEED or more since the
+    last frame, HELD_HIT_SPEED for the one the gun holds."""
     s = state.sound
     s.clock += dt
     seen = {}
     held = foot.gun.held if foot.gun is not None else None
     for prop in foot.props.all:
-        if prop.body is None or prop.body == held:
+        if prop.body is None:
             continue
+        holding = prop.body == held
         body, position, velocity = foot.prop_state(prop)
         key = id(prop)
         seen[key] = velocity
@@ -513,12 +546,12 @@ def update_hits(dt):
         if before is None or length(velocity) >= length(before):
             continue
         fall = length(sub(before, velocity))
-        if fall < HIT_SPEED or s.clock - s.hit_at.get(key, -math.inf) < HIT_GAP:
+        if fall < (HELD_HIT_SPEED if holding else HIT_SPEED) or s.clock - s.hit_at.get(key, -math.inf) < HIT_GAP:
             continue
         s.hit_at[key] = s.clock
         weight = (prop.mass / HIT_MASS) ** 0.25
         hit(add(body.centre(), position), volume=min(1.0, fall / HIT_FULL) * min(1.5, weight),
-            pitch=max(0.6, min(1.6, 1.0 / weight)))
+            pitch=max(0.6, min(1.6, 1.0 / weight)), held=holding)
     s.velocities = seen
     s.hit_at = {key: at for key, at in s.hit_at.items() if key in seen}
 
