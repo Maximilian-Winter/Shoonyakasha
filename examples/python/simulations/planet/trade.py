@@ -14,8 +14,9 @@ OTHER_BODY when the ore comes from the other body, or else 1 plus
 DISTANCE_PREMIUM for every 100 km along the ground from where it was
 mined, and divided by 1 + supply / SUPPLY_HALF, where `supply` is the
 kilograms of that body's ore the outpost has bought, falling back towards
-0 with the time constant SUPPLY_RECOVERY (seconds of the world's clock).
-Selling m kilograms from supply s pays the price integrated over the
+0 with the time constant SUPPLY_RECOVERY (seconds of the world's clock);
+`demand` says how far it has fallen: "High" from DEMAND_HIGH of the price
+with no supply, "Normal" from DEMAND_LOW, else "Low". Selling m kilograms from supply s pays the price integrated over the
 supply as it rises: base SUPPLY_HALF ln((1 + (s + m) / SUPPLY_HALF) /
 (1 + s / SUPPLY_HALF)), so a load sold at once fetches what its pieces
 sold one after another do.
@@ -46,6 +47,7 @@ OTHER_BODY = 1.8                 # times the price for ore from the other body
 DISTANCE_PREMIUM = 0.5           # added to 1 per 100 km along the ground from where the ore was mined
 SUPPLY_HALF = 4_000.0            # kg of a body's ore bought that halves an outpost's price for it
 SUPPLY_RECOVERY = 900.0          # s: the supply's time constant falling back to 0
+DEMAND_HIGH, DEMAND_LOW = 0.9, 0.6   # shares of the price with no supply from which demand is high, normal
 START_CREDITS = 2_000.0
 # Fuel called away from an outpost: the nearest outpost's fuel price times CALL_FACTOR on the ground
 # (CALL_ORBIT_FACTOR in orbit), a fee of CALL_FEE plus CALL_FEE_PER_KM per km along the ground from it,
@@ -109,6 +111,17 @@ def survey_sale(outpost, value, time):
     s = supply(outpost, SURVEY, time)
     credits = SURVEY_HALF * math.log((1.0 + (s + value) / SURVEY_HALF) / (1.0 + s / SURVEY_HALF))
     return credits, {SURVEY: (s + value, time)}
+
+
+def demand(outpost, item, time):
+    """"High", "Normal" or "Low": how the outpost's price for `item` now
+    stands against its price with no supply, from DEMAND_HIGH and
+    DEMAND_LOW of it."""
+    base = base_price(outpost, item)
+    factor = price(outpost, item, time) / base if base > 0.0 else 1.0
+    if factor >= DEMAND_HIGH:
+        return "High"
+    return "Normal" if factor >= DEMAND_LOW else "Low"
 
 
 def fuel_call(outpost, distance, in_orbit):

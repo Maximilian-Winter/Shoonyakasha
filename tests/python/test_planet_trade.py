@@ -194,5 +194,17 @@ class MarketTest(unittest.TestCase):
         self.assertEqual(fresh_b.supply, {})
 
 
+class Demand(unittest.TestCase):
+    def test_falls_with_the_supply(self):
+        outpost = Outpost(PLANET)
+        item = ore("planet", 1.0)
+        self.assertEqual(trade.demand(outpost, item, 0.0), "High")
+        outpost.supply["planet"] = (trade.SUPPLY_HALF, 0.0)        # the price halved: below DEMAND_LOW
+        self.assertEqual(trade.demand(outpost, item, 0.0), "Low")
+        outpost.supply["planet"] = (0.4 * trade.SUPPLY_HALF, 0.0)  # 1 / 1.4 of it: between the two
+        self.assertEqual(trade.demand(outpost, item, 0.0), "Normal")
+        self.assertEqual(trade.demand(outpost, ore("moon", 1.0), 0.0), "High")   # another body's ore
+
+
 if __name__ == "__main__":
     unittest.main()

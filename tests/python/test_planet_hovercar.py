@@ -273,5 +273,16 @@ class SpaceTest(unittest.TestCase):
         self.assertAlmostEqual(length(ship.position) - planet.radius, 500.0, delta=2.0)
         self.assertLess(ship.fuel, hc.CarParams().fuel_capacity)
 
+class OreByResourceTest(unittest.TestCase):
+    def test_summed_by_resource_heaviest_first(self):
+        cargo = [{"mass": 10.0, "grade": 0.5, "resource": ICE}, {"mass": 30.0, "grade": 1.0, "resource": ICE},
+                 {"mass": 25.0, "grade": 0.8}, {"mass": 60.0, "grade": 1.0, "contract": "c1"}]
+        rows = hc.ore_by_resource(cargo)
+        self.assertEqual([(r, kg) for r, kg, _, _ in rows], [(ICE, 40.0), (hc.FERRITE, 25.0)])
+        self.assertAlmostEqual(rows[0][2], (10.0 * 0.5 + 30.0 * 1.0) / 40.0)
+        self.assertEqual(len(rows[0][3]), 2)
+        self.assertEqual(hc.ore_by_resource([]), [])
+
+
 if __name__ == "__main__":
     unittest.main()

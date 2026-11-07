@@ -128,5 +128,12 @@ class Refusal(unittest.TestCase):
         self.assertEqual(upgrades.refusal(engine, {"tank_1", "engine_1"}, 1e6), "owned")
 
 
+class Tier(unittest.TestCase):
+    def test_depth_of_what_it_needs(self):
+        self.assertEqual(upgrades.tier(upgrades.BY_KEY["gun_force_1"]), 1)
+        self.assertEqual(upgrades.tier(upgrades.BY_KEY["gun_charge_1"]), 2)
+        self.assertEqual(upgrades.tier(upgrades.BY_KEY["longrange"]), 3)    # after engine_1, after tank_1
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,10 +35,9 @@ and the hour; in the car its fuel and hold, a height ladder and the
 speed and heights; in space mode the transfer planner, the orbit, the
 prograde marker and the throttle. The ground around the player is
 measured as it explores (explored_map.py) and shown on foot on a round
-scope at the bottom right; M opens the full map, in the style of
-scifi.py, which frees the mouse and stops the player while open, and on
-which a left click sets the waypoint (cleared within WAYPOINT_REACH of
-it, or by a right click).
+scope at the bottom right; M opens the slate's Map, on which a click sets
+the waypoint (cleared within WAYPOINT_REACH of it, or by Clear
+waypoint).
 
 Ore: a loose ore rock (a small one from the scatter, or a chunk of an ore
 boulder broken by a strike at rocks.BREAK_SPEED) that comes to rest on an
@@ -52,11 +51,15 @@ The slate (slate.py, play/apps.py): Tab opens it and closes it; the
 world runs on behind it while the player and the car wait. Its apps,
 switched by Q and E or a click on the rail: Overview (where the player
 is, the pinned contract or the objective, the suit, the car, the points
-of interest near and the storm and meteor shower coming), Market,
-Contracts, Workshop and Vehicle (the outpost's, the contracts', the
-upgrades' and the car's items), Map (the full map, M) and Log (the
-toasts as they came, gamelog.Log, filtered by kind, with the credits
-earned and spent and the ore sold by kind, gamelog.Ledger).
+of interest near and the storm and meteor shower coming), Market (the
+outpost's prices and demand, the car's hold and Sell the hold, the fuel,
+the survey data), Map (the explored ground with the markers and the
+contracts beside it, M; play/apps_map.py), Contracts (the active ones and
+the outpost's offers), Workshop (the upgrades' tree and the one chosen),
+Vehicle (the car and its net, the fuel, the hold and what is fitted;
+play/apps_trade.py) and Log (the toasts as they came, gamelog.Log,
+filtered by kind, with the credits earned and spent and the ore sold by
+kind, gamelog.Ledger).
 
 The System screen (slate.SystemScreen, play/menus.py): Escape opens it,
 and F1 opens it on the controls; the world's clock and the player stand
@@ -240,8 +243,8 @@ Keys:
   right mouse            gravity gun: grab, or pull from farther; again: drop
   left mouse             punt what is held or in front; hold while holding to charge
   R + mouse              turn the held body
-  mouse wheel            the hold distance; on the full map, the zoom
-  M                      the full map (Escape closes it); left click a waypoint, right click clears it
+  mouse wheel            the hold distance; on the slate's Map, the zoom
+  M                      the slate's Map: a click sets the waypoint
   F                      into the car near it; out of it when slow and low
   F5, F9                 save, load
   F1                     the System screen on the controls
@@ -274,7 +277,7 @@ from explored_map import ExploredMap, MapView
 from hud import Hud
 from viewmodel import Glows, Viewmodel
 from play.core import RAIN_DROPS, args, blocks, bodies, box, engine, foot, pads, save_base, settings, state, world
-from play import (apps, checks, contracting, economy, exploring, menus, saving, showers, site, spaceflight, storms,
+from play import (apps, apps_trade, checks, contracting, economy, exploring, menus, saving, showers, site, spaceflight, storms,
                   survival, vehicle, walking)
 import slate
 
@@ -291,7 +294,7 @@ def frame(dt):
     elapsed = dt                 # the frame's real time; the world's stands still while paused
     for screen in (state["start"], state["system"], state["slate"]):
         screen.update(engine.input, elapsed)
-    covered = state["map_view"].open or state["slate"].visible   # the world runs, the player waits
+    covered = state["slate"].visible   # the world runs, the player waits
     if args.check:
         checks.run_check(elapsed)
     elif state["driving"] and state["space"] is not None and not paused and not covered:
@@ -380,7 +383,7 @@ def on_init():
     state["map_view"] = MapView(engine)
     state["map_view"].show(False)
     state["hud"].on_toast = apps.log_toast
-    state["slate"] = slate.Slate(engine, apps.slate_apps(), system=lambda: menus.set_paused(True))
+    state["slate"] = slate.Slate(engine, apps_trade.apps_list(), system=lambda: menus.set_paused(True))
     state["system"] = menus.system_screen()
     state["start"] = menus.start_screen()
     menus.apply_settings()
@@ -402,12 +405,13 @@ def on_key(key):
     """The start's screen takes its keys (Up, Down, Enter). On the System
     screen: Escape resumes, F1 shows the controls, F5 and F9 save and load,
     the rest move its choice. With the slate open: Tab closes it, Escape
-    opens the System screen, M the full map, Q and E switch its apps. Else:
-    Tab the slate, F1 the controls, M the map, Escape the System screen (or
-    closes the map), P a screenshot, F the car (in or out), G its space mode
+    opens the System screen, M its Map app, Q and E switch its apps, the
+    rest go to the open app. Else: Tab the slate, F1 the controls, M the
+    slate's Map, Escape the System screen, P a screenshot, F the car (in or
+    out), G its space mode
     (in or out), in space mode T the assist, H the nose hold and , . the
     time warp, F5 a save, F9 a load."""
-    view, system, tablet = state["map_view"], state["system"], state["slate"]
+    system, tablet = state["system"], state["slate"]
     playing = foot.player is not None or state["driving"]
     if state["starting"]:
         state["start"].key(key)
@@ -431,18 +435,16 @@ def on_key(key):
         elif key == keys.ESCAPE:
             menus.set_paused(True)
         elif key == keys.M:
-            apps.show_map()
+            tablet.app = tablet.app_named("Map")
         else:
             tablet.key(key)
-    elif key == keys.TAB and playing and not view.open:
+    elif key == keys.TAB and playing:
         tablet.open()
     elif key == keys.F1 and playing:
         menus.set_paused(True, "Controls")
     elif key == keys.M and playing:
-        view.set_open(not view.open)
-    elif key == keys.ESCAPE and view.open:
-        view.set_open(False)
-    elif key == keys.F and not view.open:
+        tablet.open("Map")
+    elif key == keys.F:
         if state["driving"]:
             vehicle.leave_car()
         else:
@@ -465,24 +467,9 @@ def on_key(key):
         menus.set_paused(True)
 
 
-def on_mouse_button(button, pressed):
-    """On the open full map: a left click sets the waypoint, a right click clears it."""
-    view = state["map_view"]
-    if not pressed or not view.open:
-        return
-    if button == keys.MOUSE_RIGHT:
-        state["waypoint"] = None
-    elif button == keys.MOUSE_LEFT:
-        x, y = engine.input.get_mouse_position()
-        width, height = view.ui.get_canvas_size(view.canvas)
-        fb = engine.framebuffer_size
-        if fb[0] > 0 and fb[1] > 0:
-            walking.set_waypoint((x * width / fb[0], y * height / fb[1]))
-
-
 def on_scroll(x_offset, y_offset):
-    if state["map_view"].open:
-        state["map_view"].zoom_by(y_offset)
+    if state["slate"].opened:
+        state["slate"].scroll(y_offset)
     elif foot.player is not None and not state["driving"]:
         foot.gun_controls.distance += y_offset
 
@@ -503,5 +490,4 @@ engine.set_on_init(on_init)
 engine.set_on_cleanup(on_cleanup)
 engine.set_on_key_pressed(on_key)
 engine.input.set_on_mouse_scroll(on_scroll)
-engine.input.set_on_mouse_button(on_mouse_button)
 engine.run()

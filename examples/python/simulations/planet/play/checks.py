@@ -28,7 +28,8 @@ from hud import bearing, distance_text
 from play.core import (CHECK_ORE_EXTENT, CHECK_SAVE_BASE, CRATE_SIZE, HOVER_BACK, PLUME_PUFFS, POI_REACH, RECOVERY_FEE,
                        RIVER_CHECK_WIDTH, SHIP_CLEARANCE, SHIP_HALF, SPACE_HEIGHT, args, engine, foot, planet, state,
                        world)
-from play import contracting, economy, menus, saving, showers, site, spaceflight, survival, vehicle, walking
+from play import (apps_map, contracting, economy, menus, saving, showers, site, spaceflight, survival, vehicle,
+                  walking)
 
 CHECK_CAPTURES = os.path.join(tempfile.gettempdir(), "walker_check_captures")
 LOAD_SECONDS = 15.0              # s --check waits for the loaded player
@@ -48,6 +49,7 @@ GRAB_SECONDS = 1.5               # s the check holds the grab
 CHARGE_SECONDS = 1.0             # s --check charges a punt of the held crate
 PUNT_SHOT_SECONDS = 0.05         # s after the punt --shot's screenshot of it
 MAP_SECONDS = 2.0               # s --check keeps the full map open
+MAP_WAYPOINT = (170.0, 220.0)    # m east and north of the player --check sets the waypoint
 MAP_CELLS = 200                 # cells --check wants explored by then
 SELL_SECONDS = 6.0              # s --check waits for the ore it drops on the pad to sell
 CHECK_ORE_GRADE = 0.6
@@ -325,13 +327,11 @@ def run_check(dt):
                   % (100.0 * check["charge"], last[1] if last is not None and last[1] else 0.0,
                      "passed" if punt_ok else "FAILED"), flush=True)
             check["punt_ok"] = punt_ok
-            state["map_view"].set_open(True)
+            state["slate"].open("Map")
             check["stage"], check["time"] = "map", 0.0
     elif stage == "map":
         if t >= MAP_SECONDS:
-            view = state["map_view"]
-            width, height = view.ui.get_canvas_size(view.canvas)
-            walking.set_waypoint((0.5 * width + 120.0, 0.5 * height - 160.0))
+            apps_map.waypoint_offset(MAP_WAYPOINT[0], MAP_WAYPOINT[1])
             body = foot.bubble.body
             cells = state["map"].grids[body.name].measured
             waypoint = state["waypoint"]
@@ -345,7 +345,7 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_map" + ext)
-            state["map_view"].set_open(False)
+            state["slate"].close(at_once=True)
             check["stage"], check["time"] = "suit", 0.0
     elif stage == "suit":
         if "suit" not in check:

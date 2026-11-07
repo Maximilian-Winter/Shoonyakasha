@@ -343,39 +343,3 @@ def update_contracts(dt):
                 complete_contract(c)
 
 
-def offer_line(c):
-    return "%s  //  %s cr  //  %.0f h" % (c.kind.upper(), format(int(round(c.reward)), ","), hours_left(c))
-
-
-def contract_items():
-    """The Contracts app's items: the offers of the outpost whose pad the car or
-    the player is on, each with Accept; the active contracts, each with Pin;
-    and Abandon for the pinned one."""
-    here = economy.at_outpost()
-    left = [{"heading": "Offers"},
-            {"stat": "Here", "get": lambda: economy.at_outpost().name if economy.at_outpost() is not None else "not on a pad"},
-            {"stat": "Reputation", "get": lambda: "%+.0f" % state["reputation"].get(
-                economy.at_outpost().name if economy.at_outpost() is not None else "", 0.0)}]
-    offers = contract_offers(here)
-    if here is None:
-        left.append({"note": lambda: "Bring the car or yourself onto a pad."})
-    elif not offers:
-        left.append({"note": lambda: "No more offers here today; new ones at dawn."})
-    for c in offers:
-        left += [{"note": lambda c=c: offer_line(c)}, {"note": lambda c=c: contracts.task(c)},
-                 {"button": "Accept", "do": lambda c=c: accept_contract(c),
-                  "hint": "Take this contract: %d at most at once; done, it raises %s's reputation and its prices, "
-                          "failed or abandoned it lowers them." % (contracts.MAX_ACTIVE, c.origin)}]
-    right = [{"heading": "Active  %d / %d" % (len(state["contracts"]), contracts.MAX_ACTIVE)}]
-    for c in state["contracts"]:
-        right += [{"note": lambda c=c: "%s  //  %s cr" % (contract_title(c).upper(),
-                                                          format(int(round(c.reward)), ","))},
-                  {"note": lambda c=c: contract_progress_text(c)},
-                  {"button": "Pinned" if c.id == state["pinned"] else "Pin",
-                   "do": lambda c=c: pin_contract(c),
-                   "hint": "Show this contract on the card, the compass and the map."}]
-    if state["contracts"]:
-        right.append({"button": "Abandon the pinned", "do": abandon_pinned,
-                      "hint": "Give up the pinned contract: its outpost's reputation falls by one."})
-    right.append({"note": lambda: state["contract_note"]})
-    return ("columns", [left, right])

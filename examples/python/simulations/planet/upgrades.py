@@ -12,7 +12,8 @@ offers those with any (`for_groups`).
 `effective(base, owned)` gives copies of the base parameters (group:
 parameters) with the effects of every owned upgrade on those groups
 applied, the base left as it was. `effects_for(upgrade, groups)` are the
-upgrade's effects on `groups`. `refusal(upgrade, owned, credits, parts)`
+upgrade's effects on `groups`; `tier(upgrade)` how deep in what it needs
+it stands. `refusal(upgrade, owned, credits, parts)`
 says why an upgrade cannot be bought, or None when it can; a game
 without parts (planet.py) passes none and its upgrades need none.
 `EFFECTS` names each parameter an effect changes and how its value is
@@ -102,6 +103,11 @@ def effective(base, owned):
 def parts_text(parts):
     """"1 coil, 2 injectors"."""
     return ", ".join("%d %s%s" % (n, part.replace("_", " "), "" if n == 1 else "s") for part, n in parts.items())
+
+
+def tier(upgrade):
+    """1 for an upgrade that needs none, else one more than the highest tier of those it needs."""
+    return 1 + max((tier(BY_KEY[k]) for k in upgrade.requires), default=0)
 
 
 def refusal(upgrade, owned, credits, parts=None):

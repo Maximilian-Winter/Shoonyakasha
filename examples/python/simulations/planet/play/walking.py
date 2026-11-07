@@ -201,9 +201,9 @@ def markers(body):
 
 
 def hud_shown():
-    """On foot or in the car, with the full map, the slate and the System screen hidden."""
-    return ((foot.player is not None or state["driving"]) and not state["map_view"].open
-            and not state["slate"].visible and not state["system"].visible)
+    """On foot or in the car, with the slate and the System screen hidden."""
+    return ((foot.player is not None or state["driving"]) and not state["slate"].visible
+            and not state["system"].visible)
 
 
 def update_hud(dt):
@@ -378,20 +378,6 @@ def update_map(dt):
         if where is not None:
             cells.append((name, where, colour))
     view.update(dt, grid, at, heading, cells, mini=not state["driving"])
-
-
-def set_waypoint(canvas_point):
-    """The waypoint at the cell under a point of the open full map's canvas."""
-    view = state["map_view"]
-    if foot.player is None or not view.open:
-        return False
-    where = view.click(canvas_point)
-    if where is None:
-        return False
-    body = foot.bubble.body
-    grid = state["map"].grid(body, normalize(foot.bubble.body_relative(foot.player.feet())))
-    state["waypoint"] = (body, grid.direction(where[0], where[1]))
-    return True
 
 
 def place_crates():

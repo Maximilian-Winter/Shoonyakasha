@@ -31,7 +31,10 @@ from play import contracting, economy, exploring, spaceflight, survival, vehicle
 GAP = 17.0                       # canvas units between the panes
 LOG_FILTERS = (("All", None), ("Money", "money"), ("Contracts", "contracts"), ("World", "world"),
                ("Finds", "finds"))
-RESOURCE_COLOURS = {resources.FERRITE: AMBER, resources.ICE: fs.hex_colour("#9FD8F0")}
+RESOURCE_COLOURS = {resources.FERRITE: fs.hex_colour("#F2994A"), resources.CUPRITE: fs.hex_colour("#6FCF97"),
+                    resources.QUARTZ: fs.hex_colour("#E8F1F5"), resources.AMBER: fs.hex_colour("#F2C94C"),
+                    resources.EVAPORITE: fs.hex_colour("#F2A7C3"), resources.ICE: fs.hex_colour("#9FD8F0"),
+                    resources.ILMENITE: fs.hex_colour("#A7B4BC"), resources.IRIDIUM: fs.hex_colour("#B79CF2")}
 
 
 def where():
@@ -250,6 +253,16 @@ class Overview:
             y += 66.0
 
 
+def resource_colour(resource):
+    """The colour a resource is shown in on the slate."""
+    return RESOURCE_COLOURS.get(int(resource), ICE)
+
+
+def sentence(text):
+    """`text` with a capital letter first."""
+    return text[:1].upper() + text[1:]
+
+
 def minutes(seconds):
     return "%d min" % max(1, round(seconds / 60.0))
 
@@ -279,8 +292,7 @@ def coming():
 
 
 def show_map():
-    state["slate"].close(at_once=True)
-    state["map_view"].set_open(True)
+    state["slate"].open("Map")
 
 
 def set_waypoint(point):
@@ -370,7 +382,7 @@ class Log:
         for k, (resource, kg) in enumerate(sold[:5]):
             y = top2 + 60.0 + 50.0 * k
             row(surface, x, right, y, resources.name(resource), fs.mass(kg))
-            fs.bar(mesh, x, y + 15.0, right - x, kg / most, RESOURCE_COLOURS.get(resource, ICE), 3.0)
+            fs.bar(mesh, x, y + 15.0, right - x, kg / most, resource_colour(resource), 3.0)
 
 
 def survival_day():
@@ -380,30 +392,6 @@ def survival_day():
 def log_toast(text, colour, detail, kind):
     """A toast written into the log, at the day's time."""
     state["log"].add(survival_day(), survival.hour_text(), text, detail or "", colour, kind)
-
-
-# ── The lists of items ─────────────────────────────────────────────────────
-
-def items_apps():
-    """Market, Map, Contracts, Workshop and Vehicle, each a list of items."""
-    def outpost_title():
-        outpost = economy.car_outpost() or economy.at_outpost()
-        return outpost.name if outpost is not None else "No outpost here"
-
-    map_items = [{"note": lambda: "M opens the full map; a left click on it sets the waypoint."},
-                 {"button": "Open the map", "keys": "M", "do": show_map, "hint": "The explored ground, north up."}]
-    return [slate.ItemsApp("Market", "market", "Market", outpost_title, lambda: economy.outpost_items(),
-                           "Ore settled on a pad sells by itself."),
-            slate.ItemsApp("Map", "map", "Map · " + planet.name, "Around you", lambda: map_items),
-            slate.ItemsApp("Contracts", "contracts", "Contracts", "Contracts", lambda: contracting.contract_items(),
-                           "Storms hold your deadlines while you're inside them."),
-            slate.ItemsApp("Workshop", "workshop", "Workshop", "Upgrades", lambda: economy.upgrade_items()),
-            slate.ItemsApp("Vehicle", "vehicle", "Vehicle", "Hover car", lambda: economy.car_items())]
-
-
-def slate_apps():
-    found = items_apps()
-    return [Overview(), found[0], found[1], found[2], found[3], found[4], Log()]
 
 
 # ── Saves ──────────────────────────────────────────────────────────────────

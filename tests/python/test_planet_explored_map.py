@@ -7,8 +7,7 @@ within a radius, the image's pixels and
 cells both ways, and the rendered image (unexplored cells, the land and sea
 ramps, ore, north up or turned with the heading, the minimap's circle),
 contour lines and darkened rows, the full map's labels kept apart and
-merged when close, its scale bar, its size on small canvases, and the
-contacts' distances and bearings.
+merged when close, its scale bar, and the contacts' distances and bearings.
 
     python -m unittest discover -s tests/python
 """
@@ -207,12 +206,6 @@ class ImageTest(unittest.TestCase):
         self.assertEqual(step, 2_500.0)
         self.assertLessEqual(length, 0.25 * 720.0)
 
-
-    def test_full_size_fits_the_canvas(self):
-        self.assertEqual(em.full_size(1600, 900), em.FULL_MAP)
-        small = em.full_size(1280, 720)
-        self.assertLess(small, em.FULL_MAP)
-        self.assertLessEqual(small + 2 * em.FULL_PAD + em.FULL_HEADER + em.FULL_FOOTER, 720)
 
     def test_contacts_nearest_first_with_bearings(self):
         found = em.contacts([("Far", (10.0, 0.0), "a"), ("East", (2.0, 0.0), "b"), ("South", (0.0, -1.0), "c")],

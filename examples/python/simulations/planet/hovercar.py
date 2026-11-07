@@ -53,7 +53,8 @@ enough (LEAVE_HEIGHT) to get out of.
 - **Hold:** `cargo`, a list of items as trade.py's, within
   params.cargo_capacity kilograms and hold_m3 of volume, each item filling
   its "volume" when it has one (a crate), else flight.load_volume
-  (`cargo_mass`, `cargo_volume`, `can_take`). The
+  (`cargo_mass`, `cargo_volume`, `can_take`); `ore_by_resource` sums the
+  ore in it by resource. The
   cargo does not change how the car flies.
 
 Space mode (walker.py): `space_params(params, half)` is the
@@ -139,6 +140,20 @@ def space_params(params, half):
                              inertia=inertia, main_thrust=params.main_thrust, rcs_thrust=params.rcs_thrust,
                              max_torque=4.0 * max(inertia), drag_area=DRAG_SHARE * 4.0 * hx * hy,
                              lift_area=LIFT_SHARE * 4.0 * hx * hz, gear=gear, hull=hull)
+
+
+def ore_by_resource(cargo):
+    """(resource, kg, mean grade, items) of the ore in `cargo` (the
+    contracts' crates left out), the heaviest first."""
+    found = {}
+    for item in cargo:
+        if "contract" in item:
+            continue
+        r = item.get("resource", FERRITE)
+        kg, graded, items = found.get(r, (0.0, 0.0, []))
+        found[r] = (kg + item["mass"], graded + item["mass"] * item["grade"], items + [item])
+    rows = [(r, kg, graded / kg if kg else 0.0, items) for r, (kg, graded, items) in found.items()]
+    return sorted(rows, key=lambda row: -row[1])
 
 
 def delta_v(params, fuel, cargo=0.0):

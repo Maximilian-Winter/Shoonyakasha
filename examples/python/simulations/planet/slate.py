@@ -45,8 +45,10 @@ on an icon opens its app. An app is an object with `name`, `icon` (a key
 of ICONS), `label()`, `title()`, `corner(surface, right, top)` (what
 stands at the header's right, or nothing), `draw(surface, left, top,
 width, height)`, `hints()` (its key hints, before the Slate's own) and
-`note()` (the footer's line at the right). `ItemsApp` is one that draws a
-list of items.
+`note()` (the footer's line at the right); and when it has them,
+`key(key)` (the keys the Slate does not take; True when taken),
+`scroll(steps)` (the mouse wheel) and `hide()` (called each frame it is
+not the open app).
 """
 
 import math
@@ -550,32 +552,6 @@ def items_section(title, content, right_label=None):
 
 # ── The Slate ──────────────────────────────────────────────────────────────
 
-class ItemsApp:
-    """An app that draws a list of items (`items`, a function giving them)."""
-
-    def __init__(self, name, icon_name, label, title, items, note=""):
-        self.name, self.icon = name, icon_name
-        self._label, self._title, self.items, self._note = label, title, items, note
-
-    def label(self):
-        return self._label() if callable(self._label) else self._label
-
-    def title(self):
-        return self._title() if callable(self._title) else self._title
-
-    def corner(self, surface, right, top):
-        pass
-
-    def draw(self, surface, left, top, width, height):
-        draw_items(surface, self.items(), left, top, width)
-
-    def hints(self):
-        return []
-
-    def note(self):
-        return self._note() if callable(self._note) else self._note
-
-
 class Slate(Surface):
     def __init__(self, engine, apps, system=None, sort_order=2):
         super().__init__(engine, sort_order)
@@ -584,6 +560,7 @@ class Slate(Surface):
         self.system = system          # a function opening the System screen, from the rail's foot
         self.opened = False           # open, or opening
         self.clock = 0.0              # s since it began opening or closing
+        self.clock_dt = 0.0           # s since the last frame
 
     def app_named(self, name):
         return next(k for k, a in enumerate(self.apps) if a.name == name)
@@ -604,18 +581,26 @@ class Slate(Surface):
             self.ui.set_visible(self.canvas, False)
 
     def key(self, key):
-        """Q and E; True when it took the key."""
+        """Q and E, else the open app's `key(key)` when it has one; True when it was taken."""
         if not self.opened:
             return False
         if key in (sk.keys.Q, sk.keys.E):
             self.app = (self.app + (-1 if key == sk.keys.Q else 1)) % len(self.apps)
             return True
-        return False
+        app = self.apps[self.app]
+        return bool(getattr(app, "key", None) and app.key(key))
+
+    def scroll(self, steps):
+        """The mouse wheel, to the open app's `scroll(steps)` when it has one."""
+        app = self.apps[self.app]
+        if self.opened and getattr(app, "scroll", None):
+            app.scroll(steps)
 
     def update(self, input, dt=0.0):
         if not self.visible:
             return
         self.clock += dt
+        self.clock_dt = dt
         if not self.opened and self.clock >= fs.SLATE_OUT:
             self.visible = False
             self.ui.set_visible(self.canvas, False)
@@ -669,6 +654,9 @@ class Slate(Surface):
             mesh.face([(left + 4.0, y - 18.0), (left + pw - 4.0, y - 18.0), (left + pw - 4.0, y), (left + 4.0, y)],
                       [with_alpha(glow, 0.0), with_alpha(glow, 0.0), glow, glow])
         self.draw_rail(left, top, ph)
+        for k, other in enumerate(self.apps):
+            if k != self.app and getattr(other, "hide", None):
+                other.hide()
         app = self.apps[self.app]
         x = left + CONTENT[0]
         right = left + pw - CONTENT[2]
