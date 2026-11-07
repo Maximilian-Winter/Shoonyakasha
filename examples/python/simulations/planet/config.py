@@ -28,12 +28,14 @@ DEFAULTS = {
     "anti_aliasing": True,
     "clouds": True,
     "autosave": True,
+    "volume": 0.8,
 }
 RANGES = {
     "mouse_sensitivity": (0.25, 3.0),
     "fov": (55.0, 100.0),
     "hud_scale": (0.75, 1.5),
     "render_scale": (0.5, 1.0),
+    "volume": (0.0, 1.0),
 }
 CHOICES = {"window": [list(w) for w in WINDOWS]}
 

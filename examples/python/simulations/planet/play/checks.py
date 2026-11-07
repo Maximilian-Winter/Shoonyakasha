@@ -29,8 +29,8 @@ from hud import bearing, distance_text
 from play.core import (CHECK_ORE_EXTENT, CHECK_SAVE_BASE, CRATE_SIZE, HOVER_BACK, PLUME_PUFFS, POI_REACH, RECOVERY_FEE,
                        RIVER_CHECK_WIDTH, SHIP_CLEARANCE, SHIP_HALF, SPACE_HEIGHT, args, engine, foot, planet, state,
                        world)
-from play import (apps_map, contracting, economy, menus, saving, showers, site, spaceflight, survival, vehicle,
-                  walking)
+from play import (apps_map, contracting, economy, menus, saving, showers, site, sounds, spaceflight, survival,
+                  vehicle, walking)
 
 CHECK_CAPTURES = os.path.join(tempfile.gettempdir(), "walker_check_captures")
 LOAD_SECONDS = 15.0              # s --check waits for the loaded player
@@ -72,6 +72,7 @@ FUEL_WAIT = 2.0                 # s past the call's delay --check waits for the 
 NIGHT_CHECK_HOUR = 0.5          # the hour --check sets at its end
 NIGHT_SECONDS = 1.0             # s --check waits at night
 NEW_GAME_NEAR = 3.0             # m from site.spawn_point a new game's player must stand, at most
+SOUNDS_HEARD = ("grab", "punt_charged", "hit", "footstep", "land", "slate_open", "toast")   # sounds.SOUNDS entries the check must have played
 CONTRACT_CHECK_SECONDS = 30.0   # s --check waits at most for each contract to end
 CONTRACT_CHECK_DROP = 12.0      # m/s down --check throws the fragile crate at
 SHOWER_CHECK_LEAD = 12.0        # s from --check's shower being planned to its large impact
@@ -225,7 +226,8 @@ def run_check(dt):
     SHOT_SECONDS after the player comes back with the credits at
     trade.START_CREDITS, the first objective, no contracts or upgrades, the
     six crates, no craters or storm, less than half the explored ground and
-    the player within NEW_GAME_NEAR of site.spawn_point. The settings are
+    the player within NEW_GAME_NEAR of site.spawn_point; and each sound of
+    SOUNDS_HEARD played during the check (with sound). The settings are
     the defaults and are not written. With --shot,
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
@@ -827,6 +829,12 @@ def run_check(dt):
                  len(foot.props.crates), cells, check["cells_before"], near, "passed" if new_ok else "FAILED"),
               flush=True)
         check["ok"] = check["ok"] and new_ok
+        played = state.sound.played
+        sound_ok = state.sound.audio is None or all(played[name] > 0 for name in SOUNDS_HEARD)
+        print("[walker] sounds played: %s: %s"
+              % (", ".join("%s %d" % (name, played[name]) for name in sounds.SOUNDS),
+                 "passed" if sound_ok else "FAILED"), flush=True)
+        check["ok"] = check["ok"] and sound_ok
         if args.shot:
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_new_game" + ext)

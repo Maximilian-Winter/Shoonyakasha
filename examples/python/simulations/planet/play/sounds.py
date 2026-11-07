@@ -1,0 +1,282 @@
+"""
+The walker's sound (sk.Audio, engine.audio): the sound table, its clips,
+and what plays them.
+
+Each entry of SOUNDS gives its bus, its volume, how far its voices' pitch
+is spread at random, and, for a spatial one, its distances (`near`, full
+volume within; `far`, where its falloff stops). An entry's clips are the
+files sounds/<name>.wav, .flac or .mp3 and sounds/<name>_<anything> with
+those endings, beside walker.py; one of them is picked at random for each
+voice. An entry without a file plays a placeholder made here
+(`placeholder`).
+
+Each frame (`update`) the listener follows the camera, and the sounds of
+what happened since the last frame play: the gravity gun's grab, drop,
+punt and charged punt, a prop's hit (its speed falling sharply, louder
+the more it fell and the heavier the prop), the player's footsteps (one a
+BOB_STRIDE, when the head bob is lowest) and landings, and the slate and
+the System screen opening and closing. A toast plays as it shows
+(`toast`), a boulder's split as it splits (`split`).
+"""
+
+import math
+import os
+
+import numpy as np
+
+from shoonyakasha.planet.character import BOB_STRIDE
+from shoonyakasha.planet.vec import add, length, sub
+
+import hud as hud_module
+from play.core import GOOD_TOAST, HERE, engine, foot, settings, state
+from play import walking
+
+RATE = 48000
+SOUND_DIR = os.path.join(HERE, "sounds")
+ENDINGS = (".wav", ".flac", ".mp3")
+
+SOUNDS = {
+    "grab":          {"bus": "suit", "volume": 0.45},
+    "drop":          {"bus": "suit", "volume": 0.35},
+    "punt":          {"bus": "suit", "volume": 0.8, "spread": 0.05},
+    "punt_charged":  {"bus": "suit", "volume": 1.0},
+    "hit":           {"bus": "world", "volume": 1.0, "spread": 0.08, "near": 1.0, "far": 60.0},
+    "split":         {"bus": "world", "volume": 1.0, "spread": 0.05, "near": 4.0, "far": 300.0},
+    "footstep":      {"bus": "suit", "volume": 0.3, "spread": 0.1},
+    "land":          {"bus": "suit", "volume": 0.5, "spread": 0.05},
+    "slate_open":    {"bus": "ui", "volume": 0.4},
+    "slate_close":   {"bus": "ui", "volume": 0.35},
+    "toast":         {"bus": "ui", "volume": 0.3},
+    "toast_good":    {"bus": "ui", "volume": 0.45},
+    "toast_warning": {"bus": "ui", "volume": 0.45},
+}
+
+HIT_SPEED = 1.5          # m/s a prop's speed must fall by in a frame to be heard hitting something
+HIT_FULL = 12.0          # m/s of fall at which a hit is at full volume
+HIT_MASS = 50.0          # kg at which a hit is neither quieter nor lower
+HIT_GAP = 0.15           # s between one prop's hits
+LAND_AIR = 0.35          # s in the air before touching down is a landing
+
+
+def placeholder(name):
+    """Mono samples at RATE standing in for the sound `name`: chirps,
+    thumps and filtered noise."""
+    rng = np.random.default_rng(sum(map(ord, name)))
+
+    def t(seconds):
+        return np.arange(int(seconds * RATE)) / RATE
+
+    def chirp(f0, f1, seconds):
+        x = t(seconds)
+        phase = 2.0 * np.pi * (f0 * x + 0.5 * (f1 - f0) / seconds * x * x)
+        return np.sin(phase)
+
+    def decay(x, seconds):
+        return np.exp(-t(len(x) / RATE) / seconds)
+
+    def attack(x, seconds=0.004):
+        ramp = np.minimum(1.0, t(len(x) / RATE) / seconds)
+        return x * ramp
+
+    def noise(seconds, smooth):
+        n = rng.standard_normal(int(seconds * RATE))
+        return np.convolve(n, np.ones(smooth) / smooth, mode="same") if smooth > 1 else n
+
+    def thump(hz, seconds, fall):
+        return chirp(hz * 1.6, hz, seconds) * decay(t(seconds), fall)
+
+    def pad(*parts):
+        n = max(len(p) for p in parts)
+        return sum(np.pad(p, (0, n - len(p))) for p in parts)
+
+    if name == "grab":
+        x = chirp(320.0, 640.0, 0.14) * decay(t(0.14), 0.08)
+    elif name == "drop":
+        x = chirp(520.0, 260.0, 0.12) * decay(t(0.12), 0.06)
+    elif name == "punt":
+        x = pad(thump(90.0, 0.25, 0.06), 0.5 * noise(0.12, 6) * decay(t(0.12), 0.03))
+    elif name == "punt_charged":
+        x = pad(thump(70.0, 0.45, 0.12), 0.6 * noise(0.3, 4) * decay(t(0.3), 0.08),
+                0.3 * chirp(900.0, 200.0, 0.3) * decay(t(0.3), 0.1))
+    elif name == "hit":
+        x = pad(thump(140.0, 0.12, 0.03), 0.6 * noise(0.08, 3) * decay(t(0.08), 0.015))
+    elif name == "split":
+        crackle = noise(0.6, 2) * (rng.random(int(0.6 * RATE)) < 0.02)
+        x = pad(thump(60.0, 0.6, 0.15), 0.5 * noise(0.6, 8) * decay(t(0.6), 0.12),
+                2.0 * crackle * decay(t(0.6), 0.2))
+    elif name == "footstep":
+        x = 0.8 * noise(0.07, 24) * decay(t(0.07), 0.02) + 0.3 * thump(110.0, 0.07, 0.02)
+    elif name == "land":
+        x = pad(thump(80.0, 0.2, 0.05), 0.6 * noise(0.12, 16) * decay(t(0.12), 0.03))
+    elif name == "slate_open":
+        x = pad(np.sin(2 * np.pi * 660.0 * t(0.07)) * decay(t(0.07), 0.03),
+                np.pad(np.sin(2 * np.pi * 990.0 * t(0.09)) * decay(t(0.09), 0.04), (int(0.05 * RATE), 0)))
+    elif name == "slate_close":
+        x = pad(np.sin(2 * np.pi * 880.0 * t(0.07)) * decay(t(0.07), 0.03),
+                np.pad(np.sin(2 * np.pi * 587.0 * t(0.09)) * decay(t(0.09), 0.04), (int(0.05 * RATE), 0)))
+    elif name == "toast_good":
+        x = pad(np.sin(2 * np.pi * 880.0 * t(0.35)) * decay(t(0.35), 0.12),
+                0.6 * np.pad(np.sin(2 * np.pi * 1320.0 * t(0.3)) * decay(t(0.3), 0.1), (int(0.06 * RATE), 0)))
+    elif name == "toast_warning":
+        beep = np.sin(2 * np.pi * 330.0 * t(0.1)) * decay(t(0.1), 0.06)
+        x = pad(beep, np.pad(beep, (int(0.14 * RATE), 0)))
+    else:                                       # "toast" and any entry without a placeholder of its own
+        x = np.sin(2 * np.pi * 1200.0 * t(0.05)) * decay(t(0.05), 0.015)
+    x = attack(np.asarray(x, dtype=np.float64))
+    peak = float(np.max(np.abs(x))) or 1.0
+    return (0.8 * x / peak).astype(np.float32)
+
+
+def sound_files(name):
+    """The files in SOUND_DIR that are clips of `name`, sorted."""
+    if not os.path.isdir(SOUND_DIR):
+        return []
+    found = []
+    for file in os.listdir(SOUND_DIR):
+        stem, ending = os.path.splitext(file)
+        if ending.lower() in ENDINGS and (stem == name or stem.startswith(name + "_")):
+            found.append(os.path.join(SOUND_DIR, file))
+    return sorted(found)
+
+
+def setup():
+    """The engine's audio, each entry's clips (its files, or its
+    placeholder), the master volume from the settings, and the toasts and
+    splits told to play. Without audio (miniaudio could not start) the
+    walker is silent."""
+    s = state.sound
+    try:
+        s.audio = engine.audio
+    except RuntimeError as error:
+        print("[walker] no sound: %s" % error, flush=True)
+        return
+    for name in SOUNDS:
+        clips = []
+        for path in sound_files(name):
+            try:
+                clips.append(s.audio.load(path))
+            except RuntimeError as error:
+                print("[walker] %s" % error, flush=True)
+        s.clips[name] = clips or [s.audio.load_samples(placeholder(name), sample_rate=RATE)]
+    apply_volume()
+    shown = state.ui.hud.on_toast
+    state.ui.hud.on_toast = lambda text, colour, detail, kind: (toast(colour), shown and shown(text, colour, detail,
+                                                                                               kind))
+    split_was = foot.rocks.on_split
+    foot.rocks.on_split = lambda prop, chunks: (split(chunks), split_was and split_was(prop, chunks))
+
+
+def apply_volume():
+    if state.sound.audio is not None:
+        state.sound.audio.set_bus_volume("master", settings["volume"], fade=0.1)
+
+
+def play(name, position=None, volume=1.0, pitch=1.0):
+    """A voice of the entry `name`, at `position` (planet space) when the
+    entry is spatial; counted in state.sound.played."""
+    s = state.sound
+    if s.audio is None:
+        return 0
+    entry = SOUNDS[name]
+    spread = entry.get("spread", 0.0)
+    pitch *= 1.0 + s.rng.uniform(-spread, spread)
+    spatial = "near" in entry and position is not None
+    voice = s.audio.play(s.rng.choice(s.clips[name]), position=position if spatial else None, bus=entry["bus"],
+                         volume=entry["volume"] * volume, pitch=pitch, min_distance=entry.get("near", 1.0),
+                         max_distance=entry.get("far", 500.0))
+    s.played[name] += 1
+    return voice
+
+
+def toast(colour):
+    if colour == GOOD_TOAST:
+        play("toast_good")
+    elif colour == hud_module.WARNING:
+        play("toast_warning")
+    else:
+        play("toast")
+
+
+def split(chunks):
+    if chunks:
+        body, position, _ = foot.prop_state(chunks[0])
+        play("split", add(body.centre(), position))
+
+
+def update(dt):
+    """The listener at the camera, and the sounds of this frame (the
+    module's docstring)."""
+    s = state.sound
+    if s.audio is None:
+        return
+    right, up, forward = walking.view_basis()
+    s.audio.set_listener(state.view.position, forward, up)
+    update_gun()
+    update_hits(dt)
+    update_steps(dt)
+    for name, screen in (("slate", state.ui.slate), ("system", state.ui.system)):
+        shown = bool(screen is not None and screen.visible)
+        if shown != s.shown.get(name, shown):
+            play("slate_open" if shown else "slate_close")
+        s.shown[name] = shown
+
+
+def update_gun():
+    s = state.sound
+    gun = foot.gun
+    if gun is None:
+        s.held, s.last_punt = None, None
+        return
+    if gun.last_punt is not None and gun.last_punt is not s.last_punt:
+        charged = gun.since_charged <= gun.since_punt
+        play("punt_charged" if charged else "punt")
+    elif gun.held is not None and s.held is None:
+        play("grab")
+    elif gun.held is None and s.held is not None:
+        play("drop")
+    s.held, s.last_punt = gun.held, gun.last_punt
+
+
+def update_hits(dt):
+    """A hit for each prop whose speed fell by HIT_SPEED or more since the last frame."""
+    s = state.sound
+    s.clock += dt
+    seen = {}
+    held = foot.gun.held if foot.gun is not None else None
+    for prop in foot.props.all:
+        if prop.body is None or prop.body == held:
+            continue
+        body, position, velocity = foot.prop_state(prop)
+        key = id(prop)
+        seen[key] = velocity
+        before = s.velocities.get(key)
+        if before is None or length(velocity) >= length(before):
+            continue
+        fall = length(sub(before, velocity))
+        if fall < HIT_SPEED or s.clock - s.hit_at.get(key, -math.inf) < HIT_GAP:
+            continue
+        s.hit_at[key] = s.clock
+        weight = (prop.mass / HIT_MASS) ** 0.25
+        play("hit", add(body.centre(), position), volume=min(1.0, fall / HIT_FULL) * min(1.5, weight),
+             pitch=max(0.6, min(1.6, 1.0 / weight)))
+    s.velocities = seen
+    s.hit_at = {key: at for key, at in s.hit_at.items() if key in seen}
+
+
+def update_steps(dt):
+    """A footstep each BOB_STRIDE walked, when the head bob is lowest; a landing after LAND_AIR in the air."""
+    s = state.sound
+    player = foot.player
+    if player is None:
+        s.stride, s.air = None, 0.0
+        return
+    stride = math.floor(player.bob_distance / BOB_STRIDE + 0.25)
+    if s.stride is not None and stride > s.stride and player.on_ground:
+        play("footstep")
+    s.stride = stride
+    if player.on_ground:
+        if s.air >= LAND_AIR:
+            play("land")
+        s.air = 0.0
+    else:
+        s.air += dt

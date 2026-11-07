@@ -18,7 +18,7 @@ import config
 import fieldslate as fs
 import slate
 from play.core import HOVER_BACK, SPACE_HEIGHT, WARP_HEIGHT, args, engine, foot, settings, state, world
-from play import apps, saving, walking
+from play import apps, saving, sounds, walking
 
 HELP_COLUMNS = [
     [("On foot", [
@@ -81,8 +81,8 @@ def set_paused(on, section="Resume"):
 
 def apply_settings():
     """The settings (config.py) put into the walker: the look, the head bob,
-    the field of view, the HUD's scale, the render scale, anti-aliasing and
-    the clouds."""
+    the field of view, the HUD's scale, the render scale, anti-aliasing,
+    the clouds and the volume."""
     foot.mouse_sensitivity = settings["mouse_sensitivity"]
     foot.invert_y = settings["invert_y"]
     foot.head_bob = settings["head_bob"]
@@ -99,6 +99,7 @@ def apply_settings():
     if world.clouds != settings["clouds"]:
         world.clouds = settings["clouds"]
         world.upload_clouds()
+    sounds.apply_volume()
 
 
 def setting(name):
@@ -136,6 +137,8 @@ def settings_items():
          toggle("Head bob", "head_bob", "The view rises and falls a little with each step."),
          {"heading": "Game"},
          toggle("Autosave", "autosave", "Save every two minutes of play and on quitting."),
+         {"heading": "Sound"},
+         slider("Volume", "volume", lambda v: "%d %%" % round(100.0 * v), "The loudness of every sound.", 0.05),
          ],
         [{"heading": "View"},
          slider("Field of view", "fov", lambda v: "%.0f deg" % v, "The view's height in degrees.", 1.0),

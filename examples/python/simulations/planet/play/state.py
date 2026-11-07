@@ -3,11 +3,13 @@ The walker's state, one part per system, each a dataclass whose defaults
 are a new game's: `State` holds them as `view`, `site`, `vehicle`,
 `space`, `economy`, `progress`, `suit`, `exploring`, `contracts`,
 `showers`, `storms`, `ui` (the objects made in on_init that draw or
-hold the screens) and `session` (the start, loading, saving and
+hold the screens), `sound` (the audio, its clips and what the sounds
+watch from frame to frame) and `session` (the start, loading, saving and
 --check). play.core makes the one `state`.
 """
 
 import random
+from collections import Counter
 from dataclasses import dataclass, field
 
 from shoonyakasha.planet.gravity_gun import GunParams
@@ -181,6 +183,22 @@ class UI:
 
 
 @dataclass
+class Sound:
+    audio: object = None               # engine.audio (sk.Audio), or None without sound
+    clips: dict = field(default_factory=dict)   # an entry of sounds.SOUNDS: its clips
+    rng: object = field(default_factory=random.Random)
+    played: Counter = field(default_factory=Counter)   # an entry: voices played of it
+    held: int = None                   # the body the gun held last frame
+    last_punt: tuple = None            # the gun's last_punt last frame
+    velocities: dict = field(default_factory=dict)   # id of a prop: its velocity last frame
+    hit_at: dict = field(default_factory=dict)       # id of a prop: `clock` at its last hit
+    clock: float = 0.0                 # s of frames since the start
+    stride: int = None                 # the player's footsteps counted
+    air: float = 0.0                   # s the player has been off the ground
+    shown: dict = field(default_factory=dict)        # "slate", "system": whether it was shown last frame
+
+
+@dataclass
 class Session:
     starting: bool = False             # the start's screen is up: no player until Continue or New game
     loading: dict = None               # a save's player record waiting for the ground under it
@@ -207,5 +225,6 @@ class State:
     showers: Showers = field(default_factory=Showers)
     storms: Storms = field(default_factory=Storms)
     ui: UI = field(default_factory=UI)
+    sound: Sound = field(default_factory=Sound)
     session: Session = field(default_factory=Session)
 

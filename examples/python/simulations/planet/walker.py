@@ -67,13 +67,18 @@ still behind it, the only pause. Resume, Save and Load (the last save),
 Settings (config.py, kept in walker_config.json: the mouse's
 sensitivity, inverted look, the head bob, the field of view, the HUD's
 scale, the window's size (taken at the next start), the render scale,
-anti-aliasing, the clouds and autosave), Controls, Quit to main menu (the
+anti-aliasing, the clouds, autosave and the volume), Controls, Quit to main menu (the
 game saved when autosave is on, then the start's screen) and Quit to
 desktop; with Resume chosen, how the game stands. A new game from the
 start's screen (saving.new_game) starts again beside the ship in the
 world as it is: no props but the crates, no craters, storm or explored
 ground, the outposts' supplies empty, and every system's state a new
 game's.
+
+Sound (play/sounds.py): the gun, props hitting things, splits, footsteps
+and landings, the slate and the System screen, and the toasts, each from
+the files in sounds/ named after its entry of sounds.SOUNDS or else a
+placeholder made in code.
 
 Saving (save.py): F5 or Save game writes the game to walker_save.json
 and walker_save.npz: the clock, the player, the crates and loose rocks,
@@ -283,8 +288,8 @@ from explored_map import ExploredMap, MapView
 from hud import Hud
 from viewmodel import Glows, Viewmodel
 from play.core import RAIN_DROPS, args, blocks, bodies, box, engine, foot, pads, save_base, settings, state, world
-from play import (apps, apps_trade, checks, contracting, economy, exploring, menus, saving, showers, site, spaceflight, storms,
-                  survival, vehicle, walking)
+from play import (apps, apps_trade, checks, contracting, economy, exploring, menus, saving, showers, site, sounds,
+                  spaceflight, storms, survival, vehicle, walking)
 import slate
 
 METEOR_DISCS, METEOR_STREAKS = 96, 48
@@ -364,6 +369,7 @@ def frame(dt):
     walking.update_game()
     saving.autosave(elapsed)
     walking.capture_toast()
+    sounds.update(elapsed)
     foot.end_frame()
     state.view.frame_ms = 0.9 * state.view.frame_ms + 0.1 * elapsed * 1000.0
     return True
@@ -392,6 +398,7 @@ def on_init():
     state.ui.slate = slate.Slate(engine, apps_trade.apps_list(), system=lambda: menus.set_paused(True))
     state.ui.system = menus.system_screen()
     state.ui.start = menus.start_screen()
+    sounds.setup()
     menus.apply_settings()
     if not args.check and save.exists(save_base):
         try:
