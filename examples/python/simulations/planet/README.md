@@ -7,6 +7,7 @@ The planet, its moon and everything the pipeline draws of them are `PlanetWorld`
 ```
 python -m shoonyakasha.planet.ground_textures       # download the ground's textures (once)
 python -m shoonyakasha.planet.vegetation_textures   # download the leaf and bark scans (once)
+python -m shoonyakasha.planet.scan_export           # prepare the scanned rocks and plants with Blender (once)
 python planet.py
 python planet.py --capture DIR     # screenshots at the presets, then exit
 python planet.py --capture DIR --shots NAME...   # only the shots whose names contain one of these

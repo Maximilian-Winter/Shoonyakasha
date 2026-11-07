@@ -21,7 +21,7 @@ import unittest
 
 import numpy as np
 
-from shoonyakasha.planet import vegetation, vegetation_textures, world
+from shoonyakasha.planet import scans, vegetation, vegetation_textures, world
 
 
 class VegetationMeshTest(unittest.TestCase):
@@ -44,6 +44,8 @@ class VegetationMeshTest(unittest.TestCase):
             self.assertEqual(first, total)
             self.assertEqual(count % 3, 0)
             used = self.indices[first:first + count]
+            if count == 0:              # a scan not prepared
+                continue
             self.assertGreater(used.min(), last_vertex)
             last_vertex = used.max()
             total += count
@@ -51,7 +53,7 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertEqual(last_vertex, len(self.vertices) - 1)
 
     def test_kinds_are_one_unit_tall_from_their_base(self):
-        for name in vegetation.KINDS:
+        for name in vegetation.KINDS[:vegetation.SCAN_FIRST]:     # the scans: test_scan_mesh_from_a_prepared_scan
             part = self.kind(name)
             self.assertAlmostEqual(float(part[:, 1].max()), 1.0, places=5, msg=name)
             if name in vegetation.ROCKS:
@@ -136,23 +138,66 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertLessEqual(len(self.vertices), layouts["VegetationMesh"]["elementCount"])
         self.assertLessEqual(len(self.indices), layouts["VegetationIndices"]["elementCount"])
         others = len(vegetation.KINDS) - 1
-        self.assertEqual(vegetation.GRASS, len(vegetation.KINDS) - 1)
+        self.assertEqual(vegetation.SCAN_FIRST, vegetation.GRASS + 1)
+        self.assertEqual(vegetation.KINDS[vegetation.SCAN_FIRST:], scans.NAMES)
         self.assertEqual(layouts["VegetationInstances"]["elementCount"],
                          (others * world.VEGETATION_CAPACITY + world.GRASS_CAPACITY) * 2)
+        firsts = vegetation.instance_firsts(world.VEGETATION_CAPACITY, world.GRASS_CAPACITY)
+        self.assertEqual(firsts[vegetation.SCAN_FIRST], vegetation.GRASS * world.VEGETATION_CAPACITY
+                         + world.GRASS_CAPACITY)
+        self.assertEqual(firsts[-1] + world.VEGETATION_CAPACITY,
+                         layouts["VegetationInstances"]["elementCount"] // 2)
         self.assertGreaterEqual(layouts["VegetationDraws"]["elementCount"], len(vegetation.KINDS) * 5)
         passes = {p["name"]: p for p in pipeline["passes"]}
         self.assertEqual(passes["Vegetation"]["execution"]["arguments"]["drawCount"], len(vegetation.KINDS))
         self.assertEqual(passes["ShadowVegetation{cascade}"]["execution"]["arguments"]["drawCount"],
                          vegetation.GRASS)
+        scan_shadows = passes["ShadowScans{cascade}"]["execution"]["arguments"]
+        self.assertEqual(scan_shadows["offset"], vegetation.SCAN_FIRST * 20)
+        self.assertEqual(scan_shadows["drawCount"], len(scans.SCANS))
         glsl = (world.PIPELINE.parent / "shaders" / "vegetation.glsl").read_text(encoding="utf-8")
         constant = lambda name: int(re.search(r"const int %s = (\d+);" % name, glsl).group(1))
         self.assertEqual(constant("VEGETATION_KINDS"), len(vegetation.KINDS))
         self.assertEqual(constant("VEGETATION_GRASS"), vegetation.GRASS)
         self.assertEqual(constant("VEGETATION_TREE_KINDS"), 2 * len(vegetation.TREES))
+        self.assertEqual(constant("VEGETATION_SCAN_FIRST"), vegetation.SCAN_FIRST)
+        self.assertEqual(constant("VEGETATION_SCANS"), len(scans.SCANS))
+        self.assertEqual(constant("VEGETATION_PART_SCAN"), vegetation.PART_SCAN)
         for name, value in (("BARK", vegetation.PART_BARK), ("CARD", vegetation.PART_CARD),
                             ("GRASS", vegetation.PART_GRASS), ("IMPOSTOR", vegetation.PART_IMPOSTOR),
                             ("PLAIN", vegetation.PART_PLAIN)):
             self.assertEqual(constant("VEGETATION_PART_" + name), value)
+
+    def test_the_scatters_scan_table_matches_scans(self):
+        comp = (world.PIPELINE.parent / "shaders" / "vegetation_scatter.comp").read_text(encoding="utf-8")
+        body = lambda name: re.search(r"%s\[VEGETATION_SCANS\] = \w+\[VEGETATION_SCANS\]\((.*?)\);" % name, comp,
+                                      re.S).group(1)
+        families = [int(x) for x in body("SCAN_FAMILY").split(",")]
+        order = {"desert": 0, "forest": 1, "rock": 2}
+        self.assertEqual(families, [order[s.family] for s in scans.SCANS])
+        heights = [tuple(float(v) for v in pair.split(","))
+                   for pair in re.findall(r"vec2\(([^)]*)\)", body("SCAN_HEIGHTS"))]
+        self.assertEqual(heights, [s.heights for s in scans.SCANS])
+        self.assertEqual(len(body("SCAN_WEIGHTS").split(",")), len(scans.SCANS))
+        self.assertEqual([x.strip() == "true" for x in body("SCAN_SMALL").split(",")], [s.small for s in scans.SCANS])
+
+    def test_scan_mesh_from_a_prepared_scan(self):
+        kind = next(s for s in scans.SCANS if not s.rock)
+        positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 2.0, 1.0]], np.float32)
+        scan = scans.Scan(kind, positions, np.tile([0.0, 0.0, 1.0], (4, 1)),
+                          np.array([[1, 0, 0, 1], [1, 0, 0, 1], [1, 0, 0, -1], [1, 0, 0, -1]], np.float32),
+                          np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8]], np.float32),
+                          np.array([0, 0, 1, 1], np.uint8), np.array([0, 1, 2, 1, 2, 3], np.uint32),
+                          np.zeros((0, 3), np.float32),
+                          [{"albedo": "a.png", "cutout": False}, {"albedo": "b.png", "cutout": True}])
+        vertices, indices = vegetation.scan_mesh(scan, {(kind.name, 0): 3, (kind.name, 1): 5})
+        self.assertAlmostEqual(vertices[:, 1].max(), 1.0 - kind.sink, places=6)
+        self.assertEqual(list(vertices[:, 7]), [vegetation.scan_part(3, False, False)] * 2
+                         + [vegetation.scan_part(5, True, True)] * 2)
+        self.assertEqual(list(vertices[:, 3]), [0.1, 0.3, 0.5, 0.7])
+        self.assertEqual(list(indices), [0, 1, 2, 1, 2, 3])
+        _, kept = vegetation.scan_mesh(scan, {(kind.name, 0): 3})
+        self.assertEqual(len(kept), 0)
 
     def test_thinned_trees_fit_their_kinds_instances(self):
         cell = (np.pi / 2.0 * world.RADIUS / world.VEGETATION_CELLS) ** 2

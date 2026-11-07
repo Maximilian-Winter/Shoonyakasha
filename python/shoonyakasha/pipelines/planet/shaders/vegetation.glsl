@@ -13,13 +13,16 @@
 //     rocks      x: 1 on, 0 off; y: the small rocks' range (m); z: their grid's cells per cube
 //                face side; w: the entries in TakenRocks
 //     moon       xyz: the moon's centre less the camera's position (m)
+//     scans      x: 1 on, 0 off; y: their range (m); z, w: the scans' atlas's columns and rows of cells
 //     clearings, clearingShapes, clearingAxes   the clearings (clearings.glsl)
 //
 // Kinds (one indirect draw each, their instances from kind * instances per
 // kind, as shoonyakasha.planet.vegetation.KINDS): each tree near and far
 // (its impostor) in turn, conifer a and b, broadleaf a and b, acacia (0 to
-// 9); then bush, shrub, cactus (10 to 12); rock and boulder (13, 14); and
-// grass (15), its tufts after the other kinds' instances. An instance is
+// 9); then bush, shrub, cactus (10 to 12); rock and boulder (13, 14);
+// grass (15), its tufts after the kinds before it; then the scans
+// (VEGETATION_SCAN_FIRST on, shoonyakasha.planet.scans.SCANS), their
+// instances after the grass's (vegetationFirstInstance). An instance is
 // two vec4: (position relative to the camera, height in metres) and (cosine
 // and sine of its turn about its up, its tint 0 .. 1 plus an ore rock's
 // resource id (resources.glsl) as its whole part, and its colour packed by
@@ -28,10 +31,16 @@
 // Its up is away from the centre of the body it stands on.
 //
 // A mesh vertex's normal.w is its part (VEGETATION_PART_*), position.w and
-// colour.w its texture's (u, v), colour.rgb its shade.
+// colour.w its texture's (u, v), colour.rgb its shade. A scan's part is
+// VEGETATION_PART_SCAN + 4 x its material's cell in the scans' atlas + 2
+// when it is cut out by its alpha + 1 when its bitangent is the tangent's
+// cross the normal turned round (vegetationScanPart); its colour.rgb is its
+// tangent, and its (u, v) its material's own (vegetationScanUv).
 
-const int VEGETATION_KINDS = 16;
+const int VEGETATION_KINDS = 31;
 const int VEGETATION_GRASS = 15;
+const int VEGETATION_SCAN_FIRST = 16;
+const int VEGETATION_SCANS = 15;
 const int VEGETATION_ROCK = 13;
 const int VEGETATION_BOULDER = 14;
 const float VEGETATION_ON_MOON = 4194304.0;   // 2^22, above every packed colour
@@ -43,6 +52,7 @@ const int VEGETATION_PART_CARD = 1;
 const int VEGETATION_PART_GRASS = 2;
 const int VEGETATION_PART_IMPOSTOR = 3;
 const int VEGETATION_PART_PLAIN = 4;
+const int VEGETATION_PART_SCAN = 5;
 
 layout(set = VEGETATION_SET, binding = VEGETATION_PARAMS) uniform VegetationParams {
     vec4 settings;
@@ -53,10 +63,33 @@ layout(set = VEGETATION_SET, binding = VEGETATION_PARAMS) uniform VegetationPara
     vec4 nearby;
     vec4 rocks;
     vec4 moon;
+    vec4 scans;
     vec4 clearings[32];
     vec4 clearingShapes[32];
     vec4 clearingAxes[32];
 } vegetation;
+
+// A scan part's atlas cell, whether it is cut out and its bitangent's sign.
+void vegetationScanPart(int part, out int cell, out bool cutout, out float sign) {
+    int code = part - VEGETATION_PART_SCAN;
+    cell = code / 4;
+    cutout = (code & 2) != 0;
+    sign = (code & 1) != 0 ? -1.0 : 1.0;
+}
+
+// A scan cell's rectangle in the scans' atlas: (u0, v0, width, height).
+vec4 vegetationScanCell(int cell) {
+    vec2 grid = max(vegetation.scans.zw, vec2(1.0));
+    vec2 size = 1.0 / grid;
+    return vec4(vec2(float(cell % int(grid.x)), float(cell / int(grid.x))) * size, size);
+}
+
+// The first instance of `kind`: `capacity` per kind, grass's `grassCapacity`
+// after its own first, the scans after the grass's.
+uint vegetationFirstInstance(int kind, uint capacity, uint grassCapacity) {
+    if (kind <= VEGETATION_GRASS) return uint(kind) * capacity;
+    return uint(VEGETATION_GRASS) * capacity + grassCapacity + uint(kind - VEGETATION_SCAN_FIRST) * capacity;
+}
 
 // Whether an instance's packed colour marks it as standing on the moon.
 bool vegetationOnMoon(float packed) {

@@ -11,6 +11,11 @@
 //               its normal's alpha marks foliage; its normal from the
 //               impostor's normals in the quad's frame
 //     plain     the plant's colour times the shade
+//     scan      its material's texel in the scans' atlas (foliage.glsl's
+//               scanTexel) times the plant's colour, not drawn where a
+//               cut-out material's coverage is below 1/2; its normal from
+//               its normal map in its tangent frame. A cut-out material is
+//               lit as foliage, any other as a diffuse surface.
 //
 // Bark and plain parts are lit as diffuse surfaces (atmosphere.glsl's
 // lightSurface), a back face with its normal turned round; a rock on the
@@ -48,6 +53,8 @@ layout(location = 8) flat in vec3 fragFacing;
 layout(location = 9) flat in int fragOnMoon;
 layout(location = 10) in vec3 fragLocal;
 layout(location = 11) flat in int fragResource;
+layout(location = 12) in vec3 fragTangent;
+layout(location = 13) flat in vec4 fragCell;
 
 layout(location = 0) out vec4 outColor;
 
@@ -55,6 +62,7 @@ const int PART_BARK = 0;
 const int PART_CARD = 1;
 const int PART_GRASS = 2;
 const int PART_IMPOSTOR = 3;
+const int PART_SCAN = 5;
 const float FOLIAGE_WRAP = 0.5;
 const float FOLIAGE_THROUGH = 0.45;
 const float FOLIAGE_GLOW = 0.6;
@@ -98,6 +106,21 @@ void main() {
         normal = normalize(fragRight * n.x + fragUp * n.y + fragFacing * n.z);
         foliage = bumps.a > 0.5;
         albedo = foliage ? 2.0 * texel.rgb * fragColour : texel.rgb;
+    } else if (fragPart >= PART_SCAN) {
+        int code = fragPart - PART_SCAN;
+        bool cutout = (code & 2) != 0;
+        float sign = (code & 1) != 0 ? -1.0 : 1.0;
+        vec4 texel = scanTexel(scanAlbedo, fragCell, fragUv);
+        drawn = !cutout || texel.a >= FOLIAGE_CUTOFF;
+        vec3 n = scanTexel(scanNormal, fragCell, fragUv).xyz * 2.0 - 1.0;
+        if (!gl_FrontFacing) normal = -normal;
+        vec3 t = fragTangent - normal * dot(fragTangent, normal);
+        if (dot(t, t) > 1e-8) {
+            t = normalize(t);
+            normal = normalize(t * n.x + sign * cross(normal, t) * n.y + normal * n.z);
+        }
+        albedo = texel.rgb * fragColour;
+        foliage = cutout;
     } else {
         albedo = fragColour * fragShade;
         foliage = false;
@@ -106,7 +129,7 @@ void main() {
 
     float sunShare = sunShadow(fragRelativePos, normal) * cloudShadow(p);
     if (!foliage) {
-        if (!gl_FrontFacing && fragPart != PART_IMPOSTOR) normal = -normal;
+        if (!gl_FrontFacing && fragPart != PART_IMPOSTOR && fragPart < PART_SCAN) normal = -normal;
         vec3 glow = fragResource > 0
                   ? oreSpeckColour(uint(fragResource)) * (ORE_SPECK_GLOW * atmosphere.mie.z / ATMOSPHERE_PI
                                                           * oreSpeck(fragLocal))

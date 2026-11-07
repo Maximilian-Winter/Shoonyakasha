@@ -13,7 +13,9 @@
 // plant's place on the planet. The fragment shader gets the part, the
 // texture's (u, v), the shade, the plant's colour (tinted from 80 % to
 // 115 %; white for bark) and the plant's frame (an impostor's facing the
-// camera), the mesh's own position and an ore rock's resource.
+// camera), the mesh's own position and an ore rock's resource; for a
+// scan, its tangent turned with the plant and its material's cell in the
+// scans' atlas (vegetationScanCell), its shade 1.
 // Positions are jittered for the TAA pass (camera.glsl's jittered).
 //
 
@@ -43,6 +45,8 @@ layout(location = 8) flat out vec3 fragFacing;
 layout(location = 9) flat out int fragOnMoon;
 layout(location = 10) out vec3 fragLocal;
 layout(location = 11) flat out int fragResource;   // an ore rock's resource id, 0 for anything else
+layout(location = 12) out vec3 fragTangent;          // a scan's; zero for anything else
+layout(location = 13) flat out vec4 fragCell;        // a scan's cell in the scans' atlas
 
 const float SWAY = 0.015;
 const float GRASS_SWAY = 0.12;
@@ -78,6 +82,17 @@ void main() {
     fragPart = part;
     fragUv = vec2(inPosition.w, inColour.w);
     fragShade = inColour.r;
+    fragTangent = vec3(0.0);
+    fragCell = vec4(0.0);
+    if (part >= VEGETATION_PART_SCAN) {
+        int cell;
+        bool cutout;
+        float sign;
+        vegetationScanPart(part, cell, cutout, sign);
+        fragTangent = normalize(right * inColour.x * width + up * inColour.y + ahead * inColour.z * width);
+        fragCell = vegetationScanCell(cell);
+        fragShade = 1.0;
+    }
     fragRight = right;
     fragUp = up;
     fragFacing = ahead;

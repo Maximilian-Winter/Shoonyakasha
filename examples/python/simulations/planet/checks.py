@@ -190,6 +190,9 @@ def near_mountain(sun_elevation, sun_azimuth, top=False):
     world.upload_sky()
 
 
+SCAN_SUN = (35.0, 0.0)          # the scans' shots: the sun 35 degrees up in the east, behind the camera looking west
+
+
 class CaptureTour:
     """--capture: each shot in turn, a screenshot once settled (or after
     MAX_FRAMES), then exit. Waits for the site's height first."""
@@ -228,6 +231,11 @@ class CaptureTour:
         ("vegetation_conifers", 1, False, 0, None, DAY_SUN, lambda: over_ground(6_000.0, 270.0, 1_800.0, 12.0)),
         ("vegetation_mixed_wood", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 260.0, 10.0)),
         ("grass_meadow", 1, False, 0, None, DAY_SUN, lambda: over_ground(3_000.0, 180.0, 2.5, 6.0)),
+        ("scans_forest_floor", 1, False, 0, None, SCAN_SUN, lambda: over_ground(8_000.0, 180.0, 1.6, 18.0)),
+        ("scans_desert", 1, False, 0, None, SCAN_SUN, lambda: setattr(world, "moisture_offset", -0.8),
+         lambda: over_ground(3_000.0, 180.0, 1.6, 10.0)),
+        ("scans_desert_down", 1, False, 0, None, SCAN_SUN, lambda: setattr(world, "moisture_offset", -0.8),
+         lambda: over_ground(3_050.0, 180.0, 1.6, 35.0)),
         ("grass_wood_edge", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 3.0, 4.0)),
         ("vegetation_wood_low", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 0.0, 0.0),
          lambda: lift_camera(700.0), lambda: look_up(-20.0)),
@@ -293,6 +301,7 @@ class CaptureTour:
             state["help"].show(False)
             state["input"] = "keys"
             world.set_clearings([])
+            world.moisture_offset = world.temperature_offset = 0.0
             for action in setup:
                 action()
         elif self.captured is None:
