@@ -52,7 +52,7 @@ parser.add_argument("--check", action="store_true",
                          "and sell survey data, take and end a contract of each kind, bring down a meteor shower, "
                          "stand in a storm, pause, save, change the game and load it, drive and fly the car, hover it "
                          "on a lake and a river, run it dry and call fuel, fly it in space mode and land it on the "
-                         "moon, then night; report and exit")
+                         "moon, then night, then quit to the main menu and start a new game; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
 args = parser.parse_args()
 settings = config.Config(CONFIG_PATH) if args.check else config.load(CONFIG_PATH)

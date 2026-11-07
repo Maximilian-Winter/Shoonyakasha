@@ -201,9 +201,9 @@ def markers(body):
 
 
 def hud_shown():
-    """On foot or in the car, with the slate and the System screen hidden."""
+    """On foot or in the car, with the slate, the System screen and the start's screen hidden."""
     return ((foot.player is not None or state.vehicle.driving) and not state.ui.slate.visible
-            and not state.ui.system.visible)
+            and not state.ui.system.visible and not state.session.starting)
 
 
 def update_hud(dt):
@@ -346,7 +346,8 @@ def update_map(dt):
     cleared once reached, and the minimap and full map drawn on foot or in
     the car while the menu is hidden."""
     view, player = state.ui.map_view, foot.player
-    shown = (player is not None or state.vehicle.driving) and not state.ui.system.visible and not state.ui.slate.visible
+    shown = ((player is not None or state.vehicle.driving) and not state.ui.system.visible
+             and not state.ui.slate.visible and not state.session.starting)
     view.show(shown)
     if player is None and not state.vehicle.driving:
         return

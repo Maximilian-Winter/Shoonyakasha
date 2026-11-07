@@ -22,6 +22,7 @@ import hovercar
 import pois
 import suit
 import outposts
+import fieldslate as fs
 import trade
 import upgrades
 from hud import bearing, distance_text
@@ -70,6 +71,7 @@ DRY_SECONDS = 1.0               # s --check drives the dry car at full throttle
 FUEL_WAIT = 2.0                 # s past the call's delay --check waits for the fuel at most
 NIGHT_CHECK_HOUR = 0.5          # the hour --check sets at its end
 NIGHT_SECONDS = 1.0             # s --check waits at night
+NEW_GAME_NEAR = 3.0             # m from site.spawn_point a new game's player must stand, at most
 CONTRACT_CHECK_SECONDS = 30.0   # s --check waits at most for each contract to end
 CONTRACT_CHECK_DROP = 12.0      # m/s down --check throws the fragile crate at
 SHOWER_CHECK_LEAD = 12.0        # s from --check's shower being planned to its large impact
@@ -217,27 +219,36 @@ def run_check(dt):
     times that room is left; then the car put back at Base;
     then the day's hour set to NIGHT_CHECK_HOUR and
     NIGHT_SECONDS later passing with the night's exposure
-    (clock.NIGHT_SCALE) and at least the car's two headlights drawn. The
-    settings are the defaults and are not written. With --shot,
+    (clock.NIGHT_SCALE) and at least the car's two headlights drawn; then
+    Quit to main menu, passing half a second on with the start's screen up,
+    the HUD hidden and the world's clock still, and New game, passing
+    SHOT_SECONDS after the player comes back with the credits at
+    trade.START_CREDITS, the first objective, no contracts or upgrades, the
+    six crates, no craters or storm, less than half the explored ground and
+    the player within NEW_GAME_NEAR of site.spawn_point. The settings are
+    the defaults and are not written. With --shot,
     screenshots while walking (SHOT_SECONDS in), while holding (FILE with
     _hold added), while charging (with _charge added), just after the punt
     (with _punt added), of the map (with _map added), with the suit low (with _suit added), after the sale (with
-    _sell added), of the Upgrades tab after buying (with _upgrades added), of the shower's large meteor (with
-    _meteor added), of its impact (with _impact added) and its plume 4 s on (with _plume added), in the storm
-    (with _storm added), of the menu
-    (with _pause added), of its Car tab (with _car added), of its Outpost tab (with _outpost added), of its Contracts tab (with _contracts added), of its Settings tab
-    (with _settings added), of its Controls tab (with _controls added),
+    _sell added), of the slate's Workshop after buying (with _upgrades added), of the shower's large meteor
+    (with _meteor added), of its impact (with _impact added) and its plume 4 s on (with _plume added), in the
+    storm (with _storm added), of the System screen (with _pause added), of the slate's Vehicle (with _car
+    added), Market (with _outpost added), Contracts (with _contracts added), Overview (with _overview added)
+    and Log (with _log added), of the System screen's Settings (with _settings added) and Controls (with
+    _controls added),
     after the load (with _load added), a second
     before the end of the drive (with _drive added), after the climb (with
     _fly added), out of the car (with _out added), over the lake (with
     _lake added), after climbing for LAKE_CLIMB_SECONDS and 2 s more,
     above it (with _lake_above added), over the river (with _river added)
     and, after climbing for RIVER_CLIMB_SECONDS and 2 s more, above it
-    (with _river_above added), in space mode (with _space added), on the moon (with _moon added) and at
-    night (with _night added)."""
+    (with _river_above added), in space mode (with _space added), on the moon (with _moon added), at
+    night (with _night added), of the start's screen after Quit to main menu (with _menu added) and of the
+    new game (with _new_game added)."""
     player = foot.player
     check = state.session.check
-    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "space", "night", "net_out")):
+    if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "space", "night", "net_out",
+                                                                  "menu", "new game")):
         return
     if check is None:
         check = state.session.check = {"stage": "ship" if args.shot else "walk", "time": 0.0,
@@ -779,7 +790,47 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_night" + ext)
-            os._exit(0 if check["ok"] else 1)
+            check["cells_before"] = walking.game_numbers()["cells"]
+            menus.quit_to_menu()
+            check["stage"], check["time"] = "menu", 0.0
+    elif stage == "menu":
+        if t >= 0.5:
+            clock_before = check.setdefault("menu_clock", world.time)
+            check["menu_ok"] = (state.session.starting and state.ui.start.visible and not walking.hud_shown()
+                                and world.time == clock_before)
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                walking.screenshot(base + "_menu" + ext)
+            menus.start(False)
+            check["stage"], check["time"] = "new game", 0.0
+        else:
+            check.setdefault("menu_clock", world.time)
+    elif stage == "new game":
+        if foot.player is None:
+            if t > LOAD_SECONDS:
+                print("[walker] the player did not come back for a new game: FAILED", flush=True)
+                os._exit(1)
+            return
+        if t - check.setdefault("spawned_at", t) < SHOT_SECONDS:
+            return
+        feet = foot.bubble.to_world(foot.player.feet())
+        near = length(sub(feet, site.spawn_point()))
+        cells = walking.game_numbers()["cells"]
+        fresh = (state.economy.market.credits == trade.START_CREDITS and state.progress.objectives.index == 0
+                 and not state.contracts.active and not state.economy.owned and len(foot.props.crates) == 6
+                 and not world.craters and world.storm is None and not state.vehicle.driving
+                 and cells < 0.5 * check["cells_before"])
+        new_ok = check["menu_ok"] and fresh and near < NEW_GAME_NEAR
+        print("[walker] quit to the main menu (the world still: %s), then a new game: %s cr, objective %d, "
+              "%d crates, %d cells explored of %d before, the player %.1f m from the start: %s"
+              % (check["menu_ok"], fs.grouped(state.economy.market.credits), state.progress.objectives.index + 1,
+                 len(foot.props.crates), cells, check["cells_before"], near, "passed" if new_ok else "FAILED"),
+              flush=True)
+        check["ok"] = check["ok"] and new_ok
+        if args.shot:
+            base, ext = os.path.splitext(args.shot)
+            walking.screenshot(base + "_new_game" + ext)
+        os._exit(0 if check["ok"] else 1)
 
 
 def check_poi(kind, n, from_feet=None):

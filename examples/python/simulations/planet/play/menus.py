@@ -4,10 +4,12 @@ The System screen (Esc, the only pause) and the start's screen
 quitting the game.
 
 The System screen's entries: Resume, Save (its section: the last save,
-and Save now), Load (the last save, and Load), Settings, Controls and
-Quit to desktop; while Resume is chosen, its pane gives how the game
-stands. The start's screen, when a save exists: a card of the save, then
-Continue, New game, Settings and Quit.
+and Save now), Load (the last save, and Load), Settings, Controls, Quit
+to main menu and Quit to desktop; while Resume is chosen, its pane gives
+how the game stands. The start's screen (`show_start`), at the start when
+a save exists and after Quit to main menu: a card of the save and
+Continue when there is one, New game, Settings and Quit; the world stands
+still behind it.
 """
 
 import os
@@ -177,31 +179,53 @@ def system_screen():
                ("Settings", None, slate.items_section("Settings", settings_items())),
                ("Controls", None, slate.items_section("Controls", ("controls", HELP_COLUMNS))),
                "divider",
+               ("Quit to main menu", None, quit_to_menu),
                ("Quit to desktop", None, quit_game)]
     return slate.SystemScreen(engine, "Paused · the world is stopped", "System", entries, note=apps.autosave_note,
                               idle=status)
 
 
 def start_screen():
-    entries = [("Continue", "Enter", lambda: start(True)),
-               ("New game", None, lambda: start(False)),
-               ("Settings", None, slate.items_section("Settings", settings_items())),
-               "divider",
-               ("Quit", None, lambda: os._exit(0))]
-
     def card(surface, left, top, width):
         data = state.session.last_save
         return apps.save_card(surface, left, top, width, data) if data is not None else 0.0
-    return slate.SystemScreen(engine, "A planet, a moon, a hover car", "Shoonyakasha", entries, card=card,
+    return slate.SystemScreen(engine, "A planet, a moon, a hover car", "Shoonyakasha", start_entries(), card=card,
                               sort_order=4)
 
 
+def start_entries():
+    """Continue when a save exists, New game, Settings and Quit."""
+    found = [("Continue", "Enter", lambda: start(True))] if state.session.last_save is not None else []
+    return found + [("New game", None if found else "Enter", lambda: start(False)),
+                    ("Settings", None, slate.items_section("Settings", settings_items())),
+                    "divider",
+                    ("Quit", None, lambda: os._exit(0))]
+
+
+def show_start():
+    """The start's screen shown, its entries as the save stands, the first chosen; no player until it is left."""
+    screen = state.ui.start
+    screen.entries, screen.choice = start_entries(), 0
+    state.session.starting = True
+    screen.show(True)
+
+
 def start(continue_):
-    """From the start's screen: the save loaded, or a new game."""
+    """From the start's screen: the save loaded, or a new game (saving.new_game)."""
     state.session.starting = False
     state.ui.start.show(False)
     if continue_:
         saving.load_game()
+    else:
+        saving.new_game()
+
+
+def quit_to_menu():
+    """The game saved when autosave is on (as `quit_game`), then the start's screen over the world."""
+    if settings["autosave"] and (foot.player is not None or state.vehicle.driving) and not args.check:
+        saving.save_game(quiet=True)
+    set_paused(False)
+    show_start()
 
 
 def quit_game():

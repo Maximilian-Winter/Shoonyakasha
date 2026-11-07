@@ -1,5 +1,6 @@
 """
-Saving and loading the game (save.py), and autosave.
+Saving and loading the game (save.py), a new game (`new_game`), and
+autosave.
 
 A save's data has a section for each system, each recorded and restored
 by its module: "survival" (survival.record), "progress" (walking.record),
@@ -18,7 +19,8 @@ from shoonyakasha.planet.vec import add, normalize, scale
 import save
 from explored_map import Grid
 import hud as hud_module
-from play.state import AUTOSAVE_SECONDS
+from play.state import (AUTOSAVE_SECONDS, Contracts, Economy, Exploring, Progress, Session, Showers, Space, Storms, Suit,
+                        Vehicle)
 from play.core import GOOD_TOAST, args, bodies, foot, planet, save_base, settings, state, world
 from play import contracting, economy, exploring, menus, showers, storms, survival, vehicle, walking
 
@@ -148,6 +150,41 @@ def load_game(base=None):
     state.session.autosave_in = AUTOSAVE_SECONDS
     print("[walker] loaded %s" % (base or save_base), flush=True)
     return True
+
+
+def new_game():
+    """A new game in the world as it is: the player, the car and the props
+    gone, the rocks taken from the scatter back, no craters, storm or
+    explored ground, the outposts' supplies empty, no toasts, and every
+    part of the state but the site, the view and the screens a new game's
+    (the session keeping the last save and --check's own); then the car and
+    the player are put down beside Base as at the start (walking.maybe_spawn).
+    The points of interest's scenes and clearings are kept for
+    exploring.update_poi_scenes to take away."""
+    menus.set_paused(False)
+    vehicle.set_fov(settings["fov"])
+    showers.set_shower(None)
+    foot.drop_bubble()
+    foot.remove_player()
+    foot.props.clear(None)
+    world.extra_probes = []
+    world.taken_rocks.clear()
+    world.set_craters([])
+    world.storm = None
+    world.ground = None
+    for outpost in state.site.outposts:
+        outpost.supply = {}
+    save.restore_grids(state.ui.map, {}, {}, Grid)
+    state.ui.hud.toasts = []
+    posts, scenes, cleared = state.vehicle.net_posts, state.exploring.scenes, state.exploring.cleared
+    session = state.session
+    state.vehicle, state.space, state.economy = Vehicle(net_posts=posts), Space(), Economy()
+    state.progress, state.suit, state.exploring = Progress(), Suit(), Exploring(scenes=scenes, cleared=cleared)
+    state.contracts, state.showers, state.storms = Contracts(), Showers(), Storms()
+    state.session = Session(last_save=session.last_save, check=session.check, shot=session.shot)
+    economy.apply_upgrades(set())
+    state.site.ship = None
+    print("[walker] new game", flush=True)
 
 
 def autosave(dt):

@@ -67,8 +67,13 @@ still behind it, the only pause. Resume, Save and Load (the last save),
 Settings (config.py, kept in walker_config.json: the mouse's
 sensitivity, inverted look, the head bob, the field of view, the HUD's
 scale, the window's size (taken at the next start), the render scale,
-anti-aliasing, the clouds and autosave), Controls and Quit to desktop;
-with Resume chosen, how the game stands.
+anti-aliasing, the clouds and autosave), Controls, Quit to main menu (the
+game saved when autosave is on, then the start's screen) and Quit to
+desktop; with Resume chosen, how the game stands. A new game from the
+start's screen (saving.new_game) starts again beside the ship in the
+world as it is: no props but the crates, no craters, storm or explored
+ground, the outposts' supplies empty, and every system's state a new
+game's.
 
 Saving (save.py): F5 or Save game writes the game to walker_save.json
 and walker_save.npz: the clock, the player, the crates and loose rocks,
@@ -261,7 +266,8 @@ grab, right trigger punt, the bumpers the hold distance.
                                              stand in a storm, pause, save, change the game and load it, drive and fly
                                              the car, hover it on a lake and a river, run it dry and
                                              call fuel, fly it in space mode and land it on the moon,
-                                             then night; report and exit
+                                             then night, then quit to the main menu and start a
+                                             new game; report and exit
 """
 
 from shoonyakasha import keys
@@ -393,8 +399,7 @@ def on_init():
         except save.SaveError as error:
             print("[walker] %s" % error, flush=True)
     if state.session.last_save is not None:
-        state.session.starting = True
-        state.ui.start.show(True)
+        menus.show_start()
     _, up, _, north = world.site_frame()
     state.view.position = add(world.site_ground(), scale(up, 5.0))
     state.view.forward = north
